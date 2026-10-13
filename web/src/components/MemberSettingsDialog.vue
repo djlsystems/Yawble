@@ -283,6 +283,8 @@ const nameTaken = computed(
 );
 
 const form = ref<QForm | null>(null);
+/** The plugin's settings form: Save writes the key values typed there first (`saveKeys`). */
+const settingsForm = ref<{ saveKeys: () => Promise<void> } | null>(null);
 const onEnter = submitOnEnter(() => form.value, () => valid.value && !busy.value);
 
 async function submit() {
@@ -297,7 +299,10 @@ async function submit() {
   const renamedTo = name.value.trim() !== props.snapshot.name ? name.value.trim() : null;
 
   try {
-    // THE SETTINGS FIRST, and only when they moved: the Host validates them as it does a hire, and
+    // THE KEY VALUES TYPED ON THE FORM FIRST: a refusal names the key and nothing else is saved.
+    if (pluginShape.value) await settingsForm.value?.saveKeys();
+
+    // THE SETTINGS NEXT, and only when they moved: the Host validates them as it does a hire, and
     // a refusal naming a field should leave the rest of the dialog unsaved too.
     if (pluginShape.value && pluginChanged.value && pluginBody.value) {
       const answer = await savePluginSettings(props.snapshot.team, props.snapshot.id, pluginBody.value);
@@ -450,6 +455,7 @@ async function submit() {
           <div class="text-subtitle2">Settings</div>
           <PluginSettingsForm
             v-if="pluginShape"
+            ref="settingsForm"
             v-model:config="pluginConfig"
             v-model:secrets="pluginSecrets"
             v-model:connections="pluginConnections"

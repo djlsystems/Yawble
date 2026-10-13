@@ -227,6 +227,8 @@ const nameTaken = computed(
 );
 
 const form = ref<QForm | null>(null);
+/** The plugin's settings form: Add member writes the key values typed there first (`saveKeys`). */
+const settingsForm = ref<{ saveKeys: () => Promise<void> } | null>(null);
 const onEnter = submitOnEnter(() => form.value, () => valid.value && !busy.value);
 
 async function submit() {
@@ -238,6 +240,9 @@ async function submit() {
   refusedName.value = name.value.trim();
 
   try {
+    // THE KEY VALUES TYPED ON THE FORM FIRST: a refusal names the key and nothing is hired.
+    if (plugin.value) await settingsForm.value?.saveKeys();
+
     const created = plugin.value
       ? await addMember(
           props.team,
@@ -348,12 +353,14 @@ async function submit() {
           <div class="text-caption os-text-muted">{{ plugin.description }}</div>
 
           <PluginSettingsForm
+            ref="settingsForm"
             v-model:config="pluginConfig"
             v-model:secrets="pluginSecrets"
             v-model:connections="pluginConnections"
             :shape="plugin"
             :plugin="plugin.id"
             :check-key="getSecretKey"
+            save-label="Add member"
           />
         </div>
 

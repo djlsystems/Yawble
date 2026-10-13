@@ -9,7 +9,6 @@ import type {
 import { bindingsBody } from './connections';
 import { boundsHint, boundsProblem } from './numberBounds';
 import { localTime, wireInstant } from './localTime';
-import { secretSetWith } from './solutions';
 
 /**
  * A PLUGIN MEMBER'S SETTINGS, AS A FORM: what each manifest field starts as, whether it is still at
@@ -100,11 +99,11 @@ export function initialSecrets(
  * What the Host says of a secret's key, in the solution wizard's words: set, not set with the exact
  * commands that set it, or why no plugin may be bound to it.
  */
-export function secretKeySentence(state: SecretKeyState, required: boolean): string {
+export function secretKeySentence(state: SecretKeyState, required: boolean, button = 'Save'): string {
   if (state.refusal) return state.refusal;
   if (state.set) return secretKeySetWords(state);
   const meaning = required ? 'the hire is refused until it is' : 'the plugin runs without it until it is';
-  return `Not set on this Host: ${meaning}. To set it, ${secretSetWith(state.key)}.`;
+  return `Not set on this Host: ${meaning}. Type its value above and press ${button}.`;
 }
 
 /**

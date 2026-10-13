@@ -20,6 +20,8 @@ import {
 import ChipListInput from './ChipListInput.vue';
 import ConnectionPicker from './ConnectionPicker.vue';
 import SecretKeyField from './SecretKeyField.vue';
+import { isClear, writeKeyValues, type PendingKeyValues } from '../lib/secretKeyValues';
+import { productCli } from '../presentation/product';
 
 /**
  * A PLUGIN MEMBER'S SETTINGS, GENERATED FROM ITS MANIFEST. The one editor Add member (a hire) and
@@ -35,8 +37,9 @@ import SecretKeyField from './SecretKeyField.vue';
  * hold Save until it is fixed, as they do for a missing required field (`outOfRange`). Secrets are KEY NAMES, the logical key a
  * member is bound to, never a value: the settings carry none. Given `checkKey`, each key typed says
  * whether the Host has it set - by whom and when, or from its environment - and offers the key's
- * write-only value field (`SecretKeyField`: Set, Replace, Clear) before the CLI's `secret set`; a
- * write there refreshes what is said. Connection slots are one picker each
+ * write-only value field (`SecretKeyField`), and Clear for a key set from the screen. What is typed
+ * there is written by the dialog's own button, through `saveKeys`, before the settings are saved;
+ * the Host's answer is then what is said. Connection slots are one picker each
  * (`ConnectionPicker`), storing a connection's id, never a token.
  *
  * The "as JSON" view is read-only, and it is exactly `settingsBody` - what will be stored - for
@@ -50,6 +53,8 @@ const props = defineProps<{
   bindSlot?: ((slot: string, connectionId: string) => Promise<void>) | undefined;
   /** Asks the Host whether a key is set, by name. Absent: no state is shown under a secret. */
   checkKey?: ((key: string) => Promise<SecretKeyState>) | undefined;
+  /** The dialog's button that saves the form, named in what a key not set says. */
+  saveLabel?: string | undefined;
 }>();
 
 const config = defineModel<PluginFieldValues>('config', { required: true });
@@ -109,9 +114,49 @@ function checkKeys() {
   }, 250);
 }
 
-/** A write from a key's value field: the Host's answer is the key's state now. */
-function keyChanged(state: SecretKeyState) {
-  keyStates.value = { ...keyStates.value, [state.key]: state };
+/** Values typed, and clears asked for, by key name: written by the dialog's button (`saveKeys`). */
+const pending = ref<PendingKeyValues>({});
+
+function typedValue(key: string): string {
+  const entry = pending.value[key];
+  return entry && !isClear(entry) ? entry.value : '';
+}
+
+function typeValue(key: string, value: string) {
+  pending.value = { ...pending.value, [key]: { value } };
+}
+
+function toggleClear(key: string) {
+  const { [key]: entry, ...rest } = pending.value;
+  pending.value = isClear(entry) ? rest : { ...rest, [key]: { clear: true } };
+}
+
+/**
+ * Writes what was typed into the key fields, each answered by the Host's state of the key; the
+ * dialog calls it on its button before it saves the settings, and a refusal (a sentence naming the
+ * key, never the value) stops the save.
+ */
+async function saveKeys(): Promise<void> {
+  await writeKeyValues(pending.value, (state) => {
+    const { [state.key]: _, ...rest } = pending.value;
+    pending.value = rest;
+    keyStates.value = { ...keyStates.value, [state.key]: state };
+  });
+}
+
+defineExpose({ saveKeys });
+
+/** What is said under a key: what waits for the button, else the Host's state of it. */
+function keySaying(state: SecretKeyState, required: boolean): string {
+  const entry = pending.value[state.key];
+  const button = props.saveLabel ?? 'Save';
+  if (isClear(entry)) return `Cleared when you press ${button}.`;
+  if (entry && entry.value !== '') return `Saved when you press ${button}.`;
+  return secretKeySentence(state, required, button);
+}
+
+function valueHelp(key: string): string {
+  return `The value is sent to the Host when you press ${props.saveLabel ?? 'Save'} and is never shown again. It can also be set with ${productCli} secret set ${key}, then ${productCli} up.`;
 }
 
 function keyState(field: string | number): SecretKeyState | null {
@@ -122,16 +167,11 @@ function keyState(field: string | number): SecretKeyState | null {
 watch(secrets, checkKeys, { immediate: true });
 onBeforeUnmount(() => clearTimeout(keyTimer));
 
-/** The essential settings first, then the advanced ones, each in the manifest's order. */
-const fieldOrder = computed(() => {
-  const names = Object.keys(props.shape.config);
-  return [
-    ...names.filter((name) => !props.shape.config[name]!.advanced),
-    ...names.filter((name) => props.shape.config[name]!.advanced),
-  ];
-});
-const firstAdvanced = computed(() => fieldOrder.value.find((name) => props.shape.config[name]!.advanced) ?? null);
-const advancedCount = computed(() => fieldOrder.value.filter((name) => props.shape.config[name]!.advanced).length);
+/** The essential settings, then (after the secrets and slots) the advanced ones, each in the manifest's order. */
+const essential = computed(() => Object.keys(props.shape.config).filter((name) => !props.shape.config[name]!.advanced));
+const advancedNames = computed(() => Object.keys(props.shape.config).filter((name) => props.shape.config[name]!.advanced));
+const fieldOrder = computed(() => [...essential.value, ...advancedNames.value]);
+const advancedCount = computed(() => advancedNames.value.length);
 const advancedShown = ref(false);
 /** Open when a person opened it, or when an advanced setting needs fixing. */
 const advancedOpen = computed(
@@ -144,6 +184,27 @@ const advancedOpen = computed(
 function helpFor(field: PluginConfigField): string {
   return [field.description, fieldBoundsHint(field)].filter((part) => part).join(' ');
 }
+
+/**
+ * THE FORM'S ROWS, IN THE ORDER A PERSON READS THEM: the everyday settings, the secrets, the
+ * connection slots, then the advanced settings behind their one toggle - so nothing an everyday
+ * person must fill (a key) sits under Advanced.
+ */
+type Row =
+  | { kind: 'config'; name: string }
+  | { kind: 'secret'; name: string }
+  | { kind: 'slots' }
+  | { kind: 'advanced' };
+
+const rows = computed<Row[]>(() => [
+  ...essential.value.map((name): Row => ({ kind: 'config', name })),
+  ...Object.keys(props.shape.secrets).map((name): Row => ({ kind: 'secret', name })),
+  ...(hasSlots(props.shape) ? [{ kind: 'slots' } as Row] : []),
+  ...(advancedCount.value > 0 ? [{ kind: 'advanced' } as Row] : []),
+  ...(advancedOpen.value ? advancedNames.value.map((name): Row => ({ kind: 'config', name })) : []),
+]);
+
+const rowKey = (row: Row) => ('name' in row ? `${row.kind}-${row.name}` : row.kind);
 
 const showJson = ref(false);
 const json = computed(() => JSON.stringify(body.value, null, 2));
@@ -177,79 +238,81 @@ function secretHint(description: string | null | undefined, required: boolean) {
 
 <template>
   <div class="plugin-settings q-gutter-sm" data-plugin-settings>
-    <template v-for="key in fieldOrder" :key="`config-${key}`">
+    <template v-for="row in rows" :key="rowKey(row)">
       <!-- ADVANCED SETTINGS, the ones most people never change (`"advanced": true` in the
-           manifest), behind one toggle before the first of them. It opens by itself when one of
-           them needs fixing, so a problem is never hidden. -->
-      <q-btn
-        v-if="key === firstAdvanced"
-        flat
-        dense
-        no-caps
-        align="left"
-        class="plugin-settings-advanced"
-        :icon="advancedOpen ? 'keyboard_arrow_up' : 'keyboard_arrow_down'"
-        :label="`Advanced settings (${advancedCount})`"
-        data-advanced-toggle
-        @click="advancedShown = !advancedShown"
-      />
+           manifest), behind one toggle after everything else. It opens by itself when one of them
+           needs fixing, so a problem is never hidden. -->
+      <div v-if="row.kind === 'advanced'">
+        <q-btn
+          flat
+          dense
+          no-caps
+          align="left"
+          class="plugin-settings-advanced"
+          :icon="advancedOpen ? 'keyboard_arrow_up' : 'keyboard_arrow_down'"
+          :label="`Advanced settings (${advancedCount})`"
+          data-advanced-toggle
+          @click="advancedShown = !advancedShown"
+        />
+      </div>
+
       <div
-        v-if="!shape.config[key]!.advanced || advancedOpen"
+        v-else-if="row.kind === 'config'"
         class="plugin-setting"
-        :data-setting="key"
-        :data-advanced="shape.config[key]!.advanced ? '' : undefined"
+        :data-setting="row.name"
+        :data-advanced="shape.config[row.name]!.advanced ? '' : undefined"
       >
-        <div v-if="shape.config[key]!.type === 'bool'" class="row items-center no-wrap q-gutter-x-xs">
+        <div v-if="shape.config[row.name]!.type === 'bool'" class="row items-center no-wrap q-gutter-x-xs">
           <q-toggle
-            :model-value="config[key] === true"
+            :model-value="config[row.name] === true"
             dense
-            :label="key"
-            @update:model-value="(value: boolean) => set(key, value)"
+            :label="row.name"
+            @update:model-value="(value: boolean) => set(row.name, value)"
           />
-          <FieldHelp :text="helpFor(shape.config[key]!)" />
+          <FieldHelp :text="helpFor(shape.config[row.name]!)" />
         </div>
 
         <ChipListInput
-          v-else-if="shape.config[key]!.type === 'list'"
-          :model-value="listOf(key)"
-          :label="key"
-          :hint="helpFor(shape.config[key]!)"
-          :options="shape.config[key]!.enum && shape.config[key]!.enum!.length > 0 ? shape.config[key]!.enum : null"
-          @update:model-value="(value: string[]) => set(key, value)"
+          v-else-if="shape.config[row.name]!.type === 'list'"
+          :model-value="listOf(row.name)"
+          :label="row.name"
+          :hint="helpFor(shape.config[row.name]!)"
+          :options="shape.config[row.name]!.enum && shape.config[row.name]!.enum!.length > 0 ? shape.config[row.name]!.enum : null"
+          @update:model-value="(value: string[]) => set(row.name, value)"
         />
 
         <q-select
-          v-else-if="shape.config[key]!.enum && shape.config[key]!.enum!.length > 0"
-          :model-value="text(key)"
-          :options="shape.config[key]!.enum!"
+          v-else-if="shape.config[row.name]!.enum && shape.config[row.name]!.enum!.length > 0"
+          :model-value="text(row.name)"
+          :options="shape.config[row.name]!.enum!"
           outlined
           dense
-          :label="key"
-          :error="missing.includes(key) ? true : undefined"
-          @update:model-value="(value: string) => set(key, value)"
+          :label="row.name"
+          :error="missing.includes(row.name) ? true : undefined"
+          @update:model-value="(value: string) => set(row.name, value)"
         >
-          <template #append><FieldHelp :text="helpFor(shape.config[key]!)" /></template>
+          <template #append><FieldHelp :text="helpFor(shape.config[row.name]!)" /></template>
         </q-select>
 
         <q-input
           v-else
-          :model-value="text(key)"
+          :model-value="text(row.name)"
           outlined
           dense
-          :type="shape.config[key]!.type === 'number' ? 'number' : 'text'"
-          :label="key"
-          :error="missing.includes(key) || bounds[key] ? true : undefined"
-          :error-message="bounds[key] ?? ''"
-          :data-out-of-range="bounds[key] ? '' : undefined"
-          @update:model-value="(value) => set(key, value === null ? '' : String(value))"
+          :type="shape.config[row.name]!.type === 'number' ? 'number' : 'text'"
+          :label="row.name"
+          :error="missing.includes(row.name) || bounds[row.name] ? true : undefined"
+          :error-message="bounds[row.name] ?? ''"
+          :data-out-of-range="bounds[row.name] ? '' : undefined"
+          @update:model-value="(value) => set(row.name, value === null ? '' : String(value))"
         >
-          <template #append><FieldHelp :text="helpFor(shape.config[key]!)" /></template>
+          <template #append><FieldHelp :text="helpFor(shape.config[row.name]!)" /></template>
         </q-input>
 
         <div class="plugin-setting-marks text-caption os-text-muted row items-center q-gutter-x-sm">
-          <span v-if="defaultLabel(shape.config[key]!)" data-default>{{ defaultLabel(shape.config[key]!) }}</span>
-          <span v-if="shape.config[key]!.required" class="text-weight-medium" data-required>Required</span>
-          <span v-if="setByPerson(shape.config[key]!)" class="text-weight-medium" data-person-only>Set by a person only</span>
+          <span v-if="defaultLabel(shape.config[row.name]!)" data-default>{{ defaultLabel(shape.config[row.name]!) }}</span>
+          <span v-if="shape.config[row.name]!.required" class="text-weight-medium" data-required>Required</span>
+          <span v-if="setByPerson(shape.config[row.name]!)" class="text-weight-medium" data-person-only>Set by a person only</span>
           <q-space />
           <q-btn
             flat
@@ -257,57 +320,81 @@ function secretHint(description: string | null | undefined, required: boolean) {
             no-caps
             size="sm"
             label="Reset to default"
-            :aria-label="`Reset ${key} to default`"
-            :disable="isDefault(shape.config[key]!, config[key])"
-            @click="reset(key)"
+            :aria-label="`Reset ${row.name} to default`"
+            :disable="isDefault(shape.config[row.name]!, config[row.name])"
+            @click="reset(row.name)"
           />
         </div>
       </div>
-    </template>
 
-    <template v-for="(secret, key) in shape.secrets" :key="`secret-${key}`">
-      <q-input
-        :model-value="secrets[key] ?? ''"
-        outlined
-        dense
-        :label="`Secret ${key}: key name`"
-        :error="missing.includes(String(key)) ? true : undefined"
-        autocomplete="off"
-        spellcheck="false"
-        @update:model-value="(value) => (secrets = { ...secrets, [key]: value === null ? '' : String(value) })"
-      >
-        <template #append><FieldHelp :text="secretHint(secret.description, secret.required)" /></template>
-      </q-input>
-      <div
-        v-if="keyState(key)"
-        class="text-caption q-mt-xs"
-        :class="keyState(key)!.set ? 'os-text-muted' : 'text-warning'"
-        :data-secret-key-state="keyState(key)!.set ? 'set' : 'unset'"
-        :data-secret-field="key"
-      >
-        {{ secretKeySentence(keyState(key)!, secret.required) }}
+      <!-- A SECRET: the key name it is bound to, then (once the Host has said what it holds) the
+           key's write-only value field, then one line saying where the key stands, as every
+           setting has its line - with Clear for a key set from the screen, where Reset is. -->
+      <div v-else-if="row.kind === 'secret'" class="plugin-setting" :data-secret-setting="row.name">
+        <q-input
+          :model-value="secrets[row.name] ?? ''"
+          outlined
+          dense
+          :label="`Secret ${row.name}: key name`"
+          :error="missing.includes(row.name) ? true : undefined"
+          autocomplete="off"
+          spellcheck="false"
+          @update:model-value="(value) => (secrets = { ...secrets, [row.name]: value === null ? '' : String(value) })"
+        >
+          <template #append>
+            <FieldHelp :text="secretHint(shape.secrets[row.name]!.description, shape.secrets[row.name]!.required)" />
+          </template>
+        </q-input>
+        <template v-if="keyState(row.name)">
+          <SecretKeyField
+            class="q-mt-sm"
+            :state="keyState(row.name)!"
+            :help="valueHelp(keyState(row.name)!.key)"
+            :clearing="isClear(pending[keyState(row.name)!.key])"
+            :model-value="typedValue(keyState(row.name)!.key)"
+            @update:model-value="(value: string) => typeValue(keyState(row.name)!.key, value)"
+          />
+          <div class="plugin-setting-marks text-caption row items-center no-wrap q-gutter-x-sm">
+            <span
+              :class="keyState(row.name)!.set || pending[keyState(row.name)!.key] ? 'os-text-muted' : 'text-warning'"
+              :data-secret-key-state="keyState(row.name)!.set ? 'set' : 'unset'"
+              :data-secret-field="row.name"
+            >{{ keySaying(keyState(row.name)!, shape.secrets[row.name]!.required) }}</span>
+            <q-space />
+            <q-btn
+              v-if="keyState(row.name)!.source === 'stored'"
+              flat
+              dense
+              no-caps
+              size="sm"
+              :label="isClear(pending[keyState(row.name)!.key]) ? 'Keep' : 'Clear'"
+              :aria-label="`${isClear(pending[keyState(row.name)!.key]) ? 'Keep' : 'Clear'} ${keyState(row.name)!.key}`"
+              data-secret-value-clear
+              @click="toggleClear(keyState(row.name)!.key)"
+            />
+          </div>
+        </template>
       </div>
-      <SecretKeyField v-if="keyState(key)" :state="keyState(key)!" @changed="keyChanged" />
-    </template>
 
-    <!-- CONNECTION SLOTS: one picker each, listing connections of an allowed provider. The member
-         stores the connection's id, never a token. -->
-    <template v-if="hasSlots(shape)">
-      <ConnectionPicker
-        v-for="(declared, key) in shape.connections"
-        :key="`connection-${key}`"
-        :model-value="connections[key] ?? ''"
-        :slot-name="String(key)"
-        :spec="declared"
-        :connections="available"
-        :providers="providers"
-        :plugin="plugin"
-        :bind="bindSlot ? (id: string) => bindSlot!(String(key), id) : undefined"
-        @update:model-value="(value: string) => (connections = { ...connections, [key]: value })"
-        @connected="loadConnections"
-      />
-      <div v-if="connectionsProblem" class="text-caption text-negative" data-connections-problem>
-        {{ connectionsProblem }}
+      <!-- CONNECTION SLOTS: one picker each, listing connections of an allowed provider. The member
+           stores the connection's id, never a token. -->
+      <div v-else-if="row.kind === 'slots'" class="plugin-settings-slots">
+        <ConnectionPicker
+          v-for="(declared, key) in shape.connections"
+          :key="`connection-${key}`"
+          :model-value="connections[key] ?? ''"
+          :slot-name="String(key)"
+          :spec="declared"
+          :connections="available"
+          :providers="providers"
+          :plugin="plugin"
+          :bind="bindSlot ? (id: string) => bindSlot!(String(key), id) : undefined"
+          @update:model-value="(value: string) => (connections = { ...connections, [key]: value })"
+          @connected="loadConnections"
+        />
+        <div v-if="connectionsProblem" class="text-caption text-negative" data-connections-problem>
+          {{ connectionsProblem }}
+        </div>
       </div>
     </template>
 

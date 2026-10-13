@@ -6,6 +6,7 @@ import SetupSteps from './SetupSteps.vue';
 import SolutionPlanReview from './SolutionPlanReview.vue';
 import SlotReconnect from './SlotReconnect.vue';
 import SecretKeyField from './SecretKeyField.vue';
+import { hasPendingKeys, writeKeyValues, type PendingKeyValues } from '../lib/secretKeyValues';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import {
   checkSolution,
@@ -95,7 +96,8 @@ import { useConsoleStore } from '../stores/console';
  *    and the secrets the package binds, by key name: set on the Host, not set (its source fails
  *    until it is, and how to set it), or not needed for a source left off. Each needed key offers
  *    its write-only value field (`SecretKeyField`) first and the CLI's `secret set` second, as the
- *    result's list of keys still unset does. Never a value.
+ *    result's list of keys still unset does. What is typed is written when Install (or Update) is
+ *    pressed, before the install; in the result's list, by its Save keys. Never a value.
  *    Skipping a required one is allowed; the team then shows as blocked, naming it, until provided.
  * 4. **Install**: nothing is written before the person presses Install. A failed step is named by
  *    its number and title, and the Host undid everything. After a success the chosen documents are
@@ -604,6 +606,36 @@ const writtenKeys = ref<Record<string, SecretKeyState>>({});
 
 function keyWritten(state: SecretKeyState) {
   writtenKeys.value = { ...writtenKeys.value, [state.key]: state };
+  const { [state.key]: _, ...rest } = pendingKeys.value;
+  pendingKeys.value = rest;
+}
+
+/** Values typed into the key fields, by key: written by Install (or Update), or by Save keys after. */
+const pendingKeys = ref<PendingKeyValues>({});
+const keysProblem = ref('');
+const savingKeys = ref(false);
+
+function typedKey(key: string): string {
+  const entry = pendingKeys.value[key];
+  return entry && 'value' in entry ? entry.value : '';
+}
+
+function typeKey(key: string, value: string) {
+  pendingKeys.value = { ...pendingKeys.value, [key]: { value } };
+}
+
+/** The result's list of keys still unset: what was typed there, written by its own Save keys. */
+async function saveKeys() {
+  if (savingKeys.value || !hasPendingKeys(pendingKeys.value)) return;
+  savingKeys.value = true;
+  keysProblem.value = '';
+  try {
+    await writeKeyValues(pendingKeys.value, keyWritten);
+  } catch (cause) {
+    keysProblem.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    savingKeys.value = false;
+  }
 }
 
 /** What a key's field starts from: the Host's answer to a write here, else the preview's word. */
@@ -616,7 +648,9 @@ const secretRows = computed(() =>
     const written = writtenKeys.value[secret.key];
     const current = written ? { ...secret, set: written.set } : secret;
     const state = secretState(current, secretNeeded(current, secretSettingValue(current)));
-    const sentence = state === 'set' && written ? secretKeySetWords(written) : secretSentence(current, state);
+    const sentence = state === 'set' && written
+      ? secretKeySetWords(written)
+      : secretSentence(current, state, updatePreview.value ? 'Update' : 'Install');
     return { secret: current, state, sentence };
   }),
 );
@@ -725,7 +759,7 @@ const unsetSecrets = computed(() => {
   const unset = done.unset ?? [];
   return unset.map((key) => {
     const written = writtenKeys.value[key];
-    return { key, setWith: secretSetWith(key), now: written?.set ? secretKeySetWords(written) : null };
+    return { key, setWith: secretSetWith(key, 'Save keys'), now: written?.set ? secretKeySetWords(written) : null };
   });
 });
 /** Each schedule's first run, as the result names it: ran now, or when it first runs. */
@@ -781,6 +815,9 @@ async function install() {
   const connections = connectionsBody();
 
   try {
+    // THE KEYS TYPED IN YOUR PART FIRST, so the install's list of keys still unset is true. A
+    // refusal names the key, never its value, and nothing is installed.
+    await writeKeyValues(pendingKeys.value, keyWritten);
     result.value =
       updatePreview.value
         ? await updateSolution({ folder: props.folder, team: updatePreview.value.team, settings, connections })
@@ -1197,8 +1234,10 @@ function next() {
                 <div class="text-caption" data-secret-sentence>{{ row.sentence }}</div>
                 <SecretKeyField
                   v-if="row.state !== 'not-needed'"
+                  class="q-mt-xs"
                   :state="keyFieldState(row.secret.key, row.secret.set)"
-                  @changed="keyWritten"
+                  :model-value="typedKey(row.secret.key)"
+                  @update:model-value="(value: string) => typeKey(row.secret.key, value)"
                 />
               </div>
             </section>
@@ -1286,7 +1325,27 @@ function next() {
                   :data-unset-secret-now="secret.now ? 'set' : undefined"
                 >
                   <span class="mono">{{ secret.key }}</span> - {{ secret.now ?? `To set it, ${secret.setWith}.` }}
-                  <SecretKeyField :state="keyFieldState(secret.key, false)" @changed="keyWritten" />
+                  <SecretKeyField
+                    v-if="!secret.now"
+                    class="q-mt-xs"
+                    :state="keyFieldState(secret.key, false)"
+                    :model-value="typedKey(secret.key)"
+                    @update:model-value="(value: string) => typeKey(secret.key, value)"
+                  />
+                </div>
+                <div class="row items-center q-gutter-sm q-mt-xs">
+                  <q-btn
+                    unelevated
+                    dense
+                    no-caps
+                    color="primary"
+                    label="Save keys"
+                    :disable="!hasPendingKeys(pendingKeys)"
+                    :loading="savingKeys"
+                    data-save-keys
+                    @click="saveKeys"
+                  />
+                  <span v-if="keysProblem" class="text-caption text-negative" data-secret-value-problem>{{ keysProblem }}</span>
                 </div>
               </div>
             </template>

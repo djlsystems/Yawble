@@ -29,7 +29,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
 
 import AddMemberDialog from '../AddMemberDialog.vue';
 import type { Agent, InstalledPlugin, SecretKeyState, TeamId } from '../../api/types';
-import { bodyFind, bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
+import { bodyFind, bodyText, helpTexts, mountDialog, resetBody } from '../../test/mountQuasar';
 import { hostList, hostPlugin, hostProvider, hostSecret, hostSlot } from '../../test/pluginFixtures';
 import { button, settle, type } from '../../test/formProbe';
 import { productCli } from '../../presentation/product';
@@ -142,10 +142,14 @@ describe('Add member, hiring a plugin: what each line says', () => {
     const unset = bodyFind('[data-secret-field="token"]');
     expect(unset?.getAttribute('data-secret-key-state')).toBe('unset');
     expect(unset?.textContent).toContain('Not set on this Host');
-    // The screen first, the CLI second.
-    expect(unset?.textContent).toContain('To set it, type its value in the field here and press Set, or run');
-    expect(unset?.textContent).toContain(`${productCli} secret set ECHO_OTHER`);
-    expect(unset?.textContent).toContain(`${productCli} up`);
+    // The screen first - the value field above, saved by the dialog's own button - and the CLI
+    // second, behind the value field's info icon.
+    expect(unset?.textContent?.trim()).toBe(
+      'Not set on this Host: the plugin runs without it until it is. Type its value above and press Add member.',
+    );
+    const valueHelp = helpTexts(bodyFind('[data-secret-value="ECHO_OTHER"]')!).join(' ');
+    expect(valueHelp).toContain(`${productCli} secret set ECHO_OTHER`);
+    expect(valueHelp).toContain(`${productCli} up`);
     // Asked by name only: the form sends the key and nothing else.
     expect(getSecretKey.mock.calls.map((call) => call.length)).toEqual([1, 1]);
 

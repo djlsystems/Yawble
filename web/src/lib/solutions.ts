@@ -279,13 +279,13 @@ export function secretState(secret: SolutionSecret, needed: boolean): SecretStat
 }
 
 /** One plain sentence per secret: set, not set (and what that means), or not needed. */
-export function secretSentence(secret: SolutionSecret, state: SecretState): string {
+export function secretSentence(secret: SolutionSecret, state: SecretState, button = 'Install'): string {
   if (state === 'not-needed') {
     const why = secret.when ? `${secret.member}'s ${secret.when.setting} leaves ${secret.when.value} off` : 'nothing uses it';
     return `Not needed: ${why}.`;
   }
   if (state === 'set') return 'Set on this Host.';
-  return `Not set on this Host. That is not a problem for the install, but its source fails until it is set. To set it, ${secretSetWith(secret.key)}.`;
+  return `Not set on this Host. That is not a problem for the install, but its source fails until it is set. To set it, ${secretSetWith(secret.key, button)}.`;
 }
 
 /**
@@ -293,8 +293,8 @@ export function secretSentence(secret: SolutionSecret, state: SecretState): stri
  * no restart; or the operator CLI under its own name, which prompts for the value and the Host reads
  * when it restarts.
  */
-export function secretSetWith(key: string): string {
-  return `type its value in the field here and press Set, or run ${productCli} secret set ${key} (it prompts for the value), then ${productCli} up to restart the Host`;
+export function secretSetWith(key: string, button = 'Install'): string {
+  return `type its value in the field here and press ${button}, or run ${productCli} secret set ${key} (it prompts for the value), then ${productCli} up to restart the Host`;
 }
 
 /** A first run's time as a person reads it: "8:51 PM" today, "Thu 8:00 AM" on another day. */

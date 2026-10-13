@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
 //
 // A PLUGIN KEY'S VALUE, SET FROM THE SCREEN. Under each secret's key name, Add member (a hire) and
-// Member settings (after hire) offer the key's write-only value field: a password box, Set while the
-// key is not set, Replace once it is, and Clear for a key set here. The box never shows or reads back
-// a value - it starts empty and is emptied when a write is sent - and what is said of the key is the
-// Host's answer: set by whom and when, or from the Host's environment. After a write that answer is
-// what the form says, with no further ask.
+// Member settings (after hire) offer the key's write-only value field: a password box with no
+// button of its own. What is typed is written when the person presses the dialog's own button (Add
+// member, Save), before the hire or the settings; Clear, for a key set here, is held the same way.
+// The box never shows or reads back a value, and what is said of the key is the Host's answer: set
+// by whom and when, or from the Host's environment.
 //
 // THE MOCK IS OF `api/client`: no route is reached.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -55,7 +55,7 @@ import { ActionRefused } from '../../api/client';
 import { useConsoleStore } from '../../stores/console';
 import { asMemberId, asTeamId, type ContainerSnapshot, type SecretKeyState, type Team, type TeamId } from '../../api/types';
 import { bodyFind, bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
-import { hostList, hostPlugin, hostSecret, hostSettings } from '../../test/pluginFixtures';
+import { hostField, hostList, hostPlugin, hostSecret, hostSettings } from '../../test/pluginFixtures';
 import { button, field, isDisabled, settle, type } from '../../test/formProbe';
 import { localTime } from '../../lib/localTime';
 
@@ -67,6 +67,8 @@ const sampleEcho = hostPlugin({
   id: 'sample-echo',
   name: 'Sample Echo',
   secrets: { token: hostSecret({ description: 'A demo credential.' }) },
+  // An advanced setting, so the form has an Advanced toggle for the secret to come before.
+  config: { region: hostField({ type: 'string', default: 'eu', advanced: true, description: 'Where it runs.' }) },
 });
 
 const state = (key: string, over: Partial<SecretKeyState> = {}): SecretKeyState => ({
@@ -125,107 +127,99 @@ const said = () => bodyFind('[data-secret-field="token"]')!;
 const valueBox = (key: string) => field(`Value for ${key}`) as HTMLInputElement;
 
 describe('A plugin key set from Add member', () => {
-  it('is write-only: a password box that starts empty, is emptied by Set, and never shows the value', async () => {
+  it('is write-only: a password box with no button of its own, written by Add member before the hire', async () => {
     const wrapper = await hireForm('ECHO_TOKEN');
 
-    expect(said().textContent).toContain('Not set on this Host');
+    expect(said().textContent?.trim()).toBe(
+      'Not set on this Host: the plugin runs without it until it is. Type its value above and press Add member.',
+    );
     expect(valueBox('ECHO_TOKEN').getAttribute('type')).toBe('password');
     expect(valueBox('ECHO_TOKEN').getAttribute('autocomplete')).toBe('new-password');
     expect(valueBox('ECHO_TOKEN').value).toBe('');
-    expect(isDisabled('Set')).toBe(true);
+    expect(() => button('Set')).toThrow();
+    expect(() => button('Replace')).toThrow();
     expect(bodyFind('[data-secret-value-clear]')).toBeNull();
 
     await type('Value for ECHO_TOKEN', Value);
-    expect(isDisabled('Set')).toBe(false);
-    button('Set').click();
-    await settle();
+    expect(said().textContent?.trim()).toBe('Saved when you press Add member.');
+    expect(setSecretKey).not.toHaveBeenCalled();
 
-    expect(setSecretKey).toHaveBeenCalledWith('ECHO_TOKEN', Value);
-    expect(valueBox('ECHO_TOKEN').value).toBe('');
-    expect(bodyText()).not.toContain(Value);
-
-    // The hire binds the key by its name: the value is in nothing it sends.
     await type('Member name', 'Echo');
     button('Add member').click();
     await settle();
+
+    expect(setSecretKey).toHaveBeenCalledWith('ECHO_TOKEN', Value);
+    expect(setSecretKey.mock.invocationCallOrder[0]!).toBeLessThan(addMember.mock.invocationCallOrder[0]!);
+    // The hire binds the key by its name: the value is in nothing it sends.
     expect(addMember).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(addMember.mock.calls[0])).not.toContain(Value);
     expect(JSON.stringify(addMember.mock.calls[0])).toContain('ECHO_TOKEN');
+    expect(bodyText()).not.toContain(Value);
 
     wrapper.unmount();
   });
 
-  it('after Set, says who set the key and when, and offers Replace and Clear', async () => {
-    const wrapper = await hireForm('ECHO_TOKEN');
-
-    await type('Value for ECHO_TOKEN', Value);
-    button('Set').click();
-    await settle();
-
-    expect(said().getAttribute('data-secret-key-state')).toBe('set');
-    expect(said().textContent?.trim()).toBe(`Set by dana@example.com on ${SetAtWords}.`);
-    // The Host's answer to the write is the state: nothing asked again.
-    expect(getSecretKey).toHaveBeenCalledTimes(1);
-    expect(button('Replace')).toBeDefined();
-    expect(button('Clear')).toBeDefined();
-    expect(() => button('Set')).toThrow();
-
-    wrapper.unmount();
-  });
-
-  it('Replace sends the new value and Clear clears the stored key, each refreshing what is said', async () => {
+  it('says who set a stored key and when, and offers Clear where Reset sits on a setting', async () => {
     host.ECHO_TOKEN = stored('ECHO_TOKEN');
     const wrapper = await hireForm('ECHO_TOKEN');
 
+    expect(said().getAttribute('data-secret-key-state')).toBe('set');
     expect(said().textContent?.trim()).toBe(`Set by dana@example.com on ${SetAtWords}.`);
     expect(valueBox('ECHO_TOKEN').value).toBe('');
-
-    await type('Value for ECHO_TOKEN', 'a-new-value-9876');
-    button('Replace').click();
-    await settle();
-    expect(setSecretKey).toHaveBeenCalledWith('ECHO_TOKEN', 'a-new-value-9876');
-    expect(valueBox('ECHO_TOKEN').value).toBe('');
-
-    button('Clear').click();
-    await settle();
-    expect(clearSecretKey).toHaveBeenCalledWith('ECHO_TOKEN');
-    expect(said().getAttribute('data-secret-key-state')).toBe('unset');
-    expect(said().textContent).toContain('Not set on this Host');
-    expect(button('Set')).toBeDefined();
-    expect(bodyFind('[data-secret-value-clear]')).toBeNull();
+    expect(valueBox('ECHO_TOKEN').getAttribute('placeholder')).toBe('Type a new value to replace it');
+    expect(button('Clear')).toBeDefined();
 
     wrapper.unmount();
   });
 
-  it("says a key comes from the Host's environment, offers Replace and no Clear, and a cleared key falls back to it", async () => {
+  it('Clear is held until Add member, Keep takes it back, and the cleared key is cleared before the hire', async () => {
+    host.ECHO_TOKEN = stored('ECHO_TOKEN');
+    const wrapper = await hireForm('ECHO_TOKEN');
+
+    button('Clear').click();
+    await settle();
+    expect(clearSecretKey).not.toHaveBeenCalled();
+    expect(said().textContent?.trim()).toBe('Cleared when you press Add member.');
+    expect(valueBox('ECHO_TOKEN').disabled).toBe(true);
+
+    button('Keep').click();
+    await settle();
+    expect(said().textContent?.trim()).toBe(`Set by dana@example.com on ${SetAtWords}.`);
+
+    button('Clear').click();
+    await settle();
+    await type('Member name', 'Echo');
+    button('Add member').click();
+    await settle();
+    expect(clearSecretKey).toHaveBeenCalledWith('ECHO_TOKEN');
+    expect(clearSecretKey.mock.invocationCallOrder[0]!).toBeLessThan(addMember.mock.invocationCallOrder[0]!);
+
+    wrapper.unmount();
+  });
+
+  it("says a key comes from the Host's environment and offers no Clear", async () => {
     const wrapper = await hireForm('ENV_TOKEN');
 
     expect(said().textContent?.trim()).toBe("Set in this Host's environment.");
-    expect(button('Replace')).toBeDefined();
+    expect(valueBox('ENV_TOKEN')).toBeDefined();
     expect(bodyFind('[data-secret-value-clear]')).toBeNull();
-    wrapper.unmount();
-    resetBody();
 
-    host.BOTH_TOKEN = stored('BOTH_TOKEN');
-    const both = await hireForm('BOTH_TOKEN');
-    button('Clear').click();
-    await settle();
-    expect(said().textContent?.trim()).toBe("Set in this Host's environment.");
-    expect(bodyFind('[data-secret-value-clear]')).toBeNull();
-    both.unmount();
+    wrapper.unmount();
   });
 
-  it("shows the Host's refusal of a write and keeps the value out of it", async () => {
+  it("shows the Host's refusal of a write in the dialog, hires nothing, and keeps the value out of it", async () => {
     setSecretKey.mockRejectedValueOnce(
       new ActionRefused('refused', { refusal: 'ECHO_TOKEN is kept for the platform.' }),
     );
     const wrapper = await hireForm('ECHO_TOKEN');
 
     await type('Value for ECHO_TOKEN', Value);
-    button('Set').click();
+    await type('Member name', 'Echo');
+    button('Add member').click();
     await settle();
 
-    expect(bodyFind('[data-secret-value-problem]')?.textContent).toBe('ECHO_TOKEN was not set: ECHO_TOKEN is kept for the platform.');
+    expect(bodyText()).toContain('ECHO_TOKEN was not saved: ECHO_TOKEN is kept for the platform.');
+    expect(addMember).not.toHaveBeenCalled();
     expect(said().getAttribute('data-secret-key-state')).toBe('unset');
     expect(bodyText()).not.toContain(Value);
 
@@ -238,6 +232,16 @@ describe('A plugin key set from Add member', () => {
 
     expect(said().textContent?.trim()).toBe('HARNESS_TOKEN is kept for the platform.');
     expect(bodyFind('[data-secret-value]')).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it('puts the secrets before the advanced settings, never under them', async () => {
+    const wrapper = await hireForm('ECHO_TOKEN');
+
+    const order = [...document.body.querySelectorAll('[data-setting], [data-secret-setting], [data-advanced-toggle]')]
+      .map((element) => element.getAttribute('data-secret-setting') ? 'secret' : element.hasAttribute('data-advanced-toggle') ? 'advanced' : 'setting');
+    expect(order).toEqual(['secret', 'advanced']);
 
     wrapper.unmount();
   });
@@ -270,34 +274,41 @@ describe("A plugin key set from a plugin member's settings", () => {
     return wrapper;
   }
 
-  it('asks of the bound key, and Set, Replace and Clear each refresh it, never reading a value back', async () => {
+  it('asks of the bound key, and Save writes the typed value, never reading a value back', async () => {
     const wrapper = await mountSettings();
 
     expect(getSecretKey).toHaveBeenCalledWith('ECHO_TOKEN');
-    expect(said().textContent).toContain('Not set on this Host');
+    expect(said().textContent?.trim()).toBe(
+      'Not set on this Host: the plugin runs without it until it is. Type its value above and press Save.',
+    );
     expect(valueBox('ECHO_TOKEN').value).toBe('');
+    expect(() => button('Set')).toThrow();
 
     await type('Value for ECHO_TOKEN', Value);
-    button('Set').click();
+    expect(setSecretKey).not.toHaveBeenCalled();
+    button('Save').click();
     await settle();
+
     expect(setSecretKey).toHaveBeenCalledWith('ECHO_TOKEN', Value);
-    expect(said().textContent?.trim()).toBe(`Set by dana@example.com on ${SetAtWords}.`);
-    expect(valueBox('ECHO_TOKEN').value).toBe('');
-
-    await type('Value for ECHO_TOKEN', 'a-new-value-9876');
-    button('Replace').click();
-    await settle();
-    expect(setSecretKey).toHaveBeenLastCalledWith('ECHO_TOKEN', 'a-new-value-9876');
-
-    button('Clear').click();
-    await settle();
-    expect(clearSecretKey).toHaveBeenCalledWith('ECHO_TOKEN');
-    expect(said().getAttribute('data-secret-key-state')).toBe('unset');
-
     expect(bodyText()).not.toContain(Value);
-    expect(bodyText()).not.toContain('a-new-value-9876');
-    // Setting a key is not a settings change: nothing was saved.
+    // Setting a key is not a settings change: no settings were saved.
     expect(savePluginSettings).not.toHaveBeenCalled();
+
+    wrapper.unmount();
+  });
+
+  it('a refused write keeps the dialog open with the sentence and saves nothing else', async () => {
+    setSecretKey.mockRejectedValueOnce(new ActionRefused('refused', { refusal: 'ECHO_TOKEN is kept for the platform.' }));
+    const wrapper = await mountSettings();
+
+    await type('Value for ECHO_TOKEN', Value);
+    button('Save').click();
+    await settle();
+
+    expect(bodyText()).toContain('ECHO_TOKEN was not saved: ECHO_TOKEN is kept for the platform.');
+    expect(savePluginSettings).not.toHaveBeenCalled();
+    expect(updateMember).not.toHaveBeenCalled();
+    expect(bodyText()).not.toContain(Value);
 
     wrapper.unmount();
   });

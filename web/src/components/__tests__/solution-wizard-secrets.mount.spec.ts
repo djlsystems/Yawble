@@ -12,7 +12,7 @@ import { QSelect } from 'quasar';
 
 import SolutionWizard from '../SolutionWizard.vue';
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
-import { button, field, settle, type } from '../../test/formProbe';
+import { button, field, isDisabled, settle, type } from '../../test/formProbe';
 import { localTime } from '../../lib/localTime';
 import { productCli } from '../../presentation/product';
 import { Folder, fakeHost, hostSecrets, reply, steps, wizardRoutes, type Call } from '../../test/solutionFixtures';
@@ -132,35 +132,44 @@ describe('Solution wizard - secrets', () => {
     expect(bodyFind('[data-unset-secret="THEMUSE_API_KEY"]')).toBeNull();
   });
 
-  it("offers each needed key's write-only field before the CLI, and a key set there reads as set by whom and when", async () => {
+  it("offers each needed key's write-only field before the CLI, written by Install before the install", async () => {
     await yourPart();
 
     const unset = secret('USAJOBS_API_KEY');
     const words = unset.querySelector('[data-secret-sentence]')!.textContent!;
-    expect(words.indexOf('type its value in the field here and press Set')).toBeGreaterThan(-1);
-    expect(words.indexOf('type its value in the field here and press Set')).toBeLessThan(words.indexOf(`${productCli} secret set USAJOBS_API_KEY`));
+    expect(words.indexOf('type its value in the field here and press Install')).toBeGreaterThan(-1);
+    expect(words.indexOf('type its value in the field here and press Install')).toBeLessThan(words.indexOf(`${productCli} secret set USAJOBS_API_KEY`));
     expect(unset.querySelector('[data-secret-value="USAJOBS_API_KEY"]')).not.toBeNull();
     expect(secret('ADZUNA_APP_ID').querySelector('[data-secret-value="ADZUNA_APP_ID"]')).not.toBeNull();
     expect(secret('THEMUSE_API_KEY').querySelector('[data-secret-value]')).toBeNull();
+    // The field has no button of its own: Install writes it.
+    expect(() => button('Set')).toThrow();
 
     const box = field('Value for USAJOBS_API_KEY') as HTMLInputElement;
     expect(box.getAttribute('type')).toBe('password');
     expect(box.value).toBe('');
 
     await type('Value for USAJOBS_API_KEY', Value);
-    button('Set').click();
+    expect(calls.filter((call) => call.url.startsWith('/api/secrets/') && call.method === 'PUT')).toHaveLength(0);
+
+    button('Next').click();
+    await settle();
+    button('Install').click();
+    await settle();
     await settle();
 
-    expect(calls.filter((call) => call.method === 'PUT' && call.url === '/api/secrets/USAJOBS_API_KEY').map((call) => call.body)).toEqual([{ value: Value }]);
-    expect(secret('USAJOBS_API_KEY').dataset.secretState).toBe('set');
-    expect(secret('USAJOBS_API_KEY').querySelector('[data-secret-sentence]')!.textContent).toBe(
-      `Set by dana@example.com on ${localTime(Date.parse(SetAt), { date: true })}.`,
-    );
-    expect((field('Value for USAJOBS_API_KEY') as HTMLInputElement).value).toBe('');
+    const writes = calls.filter((call) => call.method === 'PUT' && call.url === '/api/secrets/USAJOBS_API_KEY');
+    expect(writes.map((call) => call.body)).toEqual([{ value: Value }]);
+    // Written before the install, so the install's list of keys still unset is true.
+    expect(calls.indexOf(writes[0]!)).toBeLessThan(calls.findIndex((call) => call.url === '/api/solutions/install'));
+    // The install binds the key by name only.
+    expect(JSON.stringify(calls.find((call) => call.url === '/api/solutions/install')?.body)).not.toContain(Value);
+    // Set from the screen now, by whom and when, in the result's list too.
+    expect(bodyFind('[data-unset-secret="USAJOBS_API_KEY"]')!.dataset.unsetSecretNow).toBe('set');
     expect(document.body.textContent).not.toContain(Value);
   });
 
-  it("the result's unset list offers each key's field, and a key set there says so", async () => {
+  it("the result's unset list offers each key's field, written by its Save keys", async () => {
     await yourPart();
     button('Next').click();
     await settle();
@@ -170,10 +179,12 @@ describe('Solution wizard - secrets', () => {
 
     const row = () => bodyFind('[data-unset-secret="USAJOBS_API_KEY"]')!;
     expect(row().querySelector('[data-secret-value="USAJOBS_API_KEY"]')).not.toBeNull();
-    expect(row().textContent).toContain('To set it, type its value in the field here and press Set, or run');
+    expect(row().textContent).toContain('To set it, type its value in the field here and press Save keys, or run');
+    expect(isDisabled('Save keys')).toBe(true);
 
     await type('Value for USAJOBS_API_KEY', Value);
-    button('Set').click();
+    expect(calls.filter((call) => call.method === 'PUT' && call.url === '/api/secrets/USAJOBS_API_KEY')).toHaveLength(0);
+    button('Save keys').click();
     await settle();
 
     expect(calls.filter((call) => call.method === 'PUT' && call.url === '/api/secrets/USAJOBS_API_KEY')).toHaveLength(1);
