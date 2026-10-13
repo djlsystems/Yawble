@@ -266,7 +266,7 @@ public sealed class WorkerArchitectureTests
     [Fact]
     public void The_worker_reads_neither_the_database_nor_the_key_ring()
     {
-        var reachable = new[] { Worker, typeof(Harness.Contracts.RunCredential).Assembly };
+        var reachable = new[] { Worker, typeof(Harness.Contracts.CredentialScope).Assembly };
         var loads = reachable
             .SelectMany(a => a.GetReferencedAssemblies())
             .Select(a => a.Name!)
@@ -300,8 +300,8 @@ public sealed class WorkerArchitectureTests
     }
 
     /// <summary>
-    /// The worker writes no entry the ownership map keeps for harness: the doctor's records, the
-    /// credential exchange, control's record of its workers. In a worker container its Host user is
+    /// The worker writes no entry the ownership map keeps for harness: the doctor's records and
+    /// control's record of its workers. In a worker container its Host user is
     /// not harness and cannot, so a writer moved into the worker would only show as a doctor that never
     /// reads signed in. Neither the writers' types nor their file names are in the worker.
     /// </summary>
@@ -311,12 +311,12 @@ public sealed class WorkerArchitectureTests
         var writers = new[]
         {
             typeof(AgentAuthRecord), typeof(AgentToolsRecord), typeof(AgentLaunchChecksRecord), typeof(WipRecord),
-            typeof(WorkersRecord), typeof(AgentCredentialRequests),
+            typeof(WorkersRecord),
         };
         string[] names =
         [
             AgentAuthRecord.FileName, AgentToolsRecord.FileName, AgentLaunchChecksRecord.FileName, WipRecord.FileName,
-            WorkersRecord.FileName, AgentCredentialRequests.Folder,
+            WorkersRecord.FileName,
         ];
 
         Assert.All(writers, type => Assert.NotEqual(Worker, type.Assembly));

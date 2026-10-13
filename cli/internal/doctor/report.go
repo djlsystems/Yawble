@@ -81,11 +81,6 @@ type Agent struct {
 	// Launch is the Host's check that the CLI starts the way a member run launches it. Nil: an
 	// older Host that does not check, which reads "not known" and never ok.
 	Launch *Launch `json:"launch"`
-	// CredentialSource is how the preset signs in: "home" (the shared home) or "issued" (the
-	// credential stored for its command). Nil: an older Host, and no source is shown.
-	CredentialSource *string `json:"credentialSource"`
-	// IssuedSet is whether its command's issued credential is set; nil under home.
-	IssuedSet *bool `json:"issuedSet"`
 	// MeasuredAt is when the Host's sign-in probe that Installed and Authenticated come from ran,
 	// and MeasuredOn the worker that answered it; nil when nothing was measured, or an older Host.
 	MeasuredAt *string `json:"measuredAt"`
@@ -114,10 +109,10 @@ func (a Agent) MeasuredText() string {
 }
 
 // CanRun is whether a member run of this agent can start now, as the Host measured it: installed,
-// signed in, its launch checked ok, and not waiting for an issued credential.
+// signed in, and its launch checked ok.
 func (a Agent) CanRun() bool {
 	return a.Updating == nil && a.IsInstalled() && a.Authenticated != nil && *a.Authenticated &&
-		a.Launch != nil && a.Launch.Result == "ok" && !(a.Issued() && a.IssuedSet != nil && !*a.IssuedSet)
+		a.Launch != nil && a.Launch.Result == "ok"
 }
 
 // LaunchFailed is whether the Host started the CLI the way a member run does and it failed.
@@ -133,8 +128,8 @@ func AnyCanRun(agents []Agent) bool {
 	return false
 }
 
-// NotInUse is an agent nobody has set up: measured and not updating, and not installed, not
-// signed in, or waiting for an issued credential. One that is signed in is never "not in use": its
+// NotInUse is an agent nobody has set up: measured and not updating, and not installed or not
+// signed in. One that is signed in is never "not in use": its
 // launch is shown beside its sign-in, and a failed one is a fault whoever else can run.
 func (a Agent) NotInUse() bool {
 	switch {
@@ -142,41 +137,16 @@ func (a Agent) NotInUse() bool {
 		return false
 	case !*a.Installed:
 		return true
-	case a.Issued() && a.IssuedSet != nil && !*a.IssuedSet:
-		return true
 	}
 	return a.Authenticated != nil && !*a.Authenticated
 }
 
 // whyNotInUse is the reason an agent is not in use, in a few words.
 func (a Agent) whyNotInUse() string {
-	switch {
-	case a.NotInstalled():
+	if a.NotInstalled() {
 		return "not installed"
-	case a.Issued() && a.IssuedSet != nil && !*a.IssuedSet:
-		return "no credential set"
 	}
 	return "not signed in"
-}
-
-// Issued says whether the agent signs in through its command's issued credential.
-func (a Agent) Issued() bool { return a.CredentialSource != nil && *a.CredentialSource == "issued" }
-
-// SourceText is the source in one phrase: "home", "issued (set)", "issued (NOT set)" or "issued";
-// "" when the Host did not say.
-func (a Agent) SourceText() string {
-	switch {
-	case a.CredentialSource == nil || *a.CredentialSource == "":
-		return ""
-	case !a.Issued():
-		return *a.CredentialSource
-	case a.IssuedSet == nil:
-		return "issued"
-	case *a.IssuedSet:
-		return "issued (set)"
-	default:
-		return "issued (NOT set)"
-	}
 }
 
 // Launch is one CLI's launch check. Result is the Host's word: "ok", "failed" or "not checked".

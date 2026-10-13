@@ -540,11 +540,8 @@ public static class AuthSchema
             ALTER TABLE triggers ADD COLUMN configured_by_email TEXT NULL;
             """),
 
-        // A CREDENTIAL ISSUED TO AN AGENT CLI in Admin > Agents, one row per command (`claude`,
-        // `codex`, ...), used by every preset launching that command whose source is `issued`.
-        // `value_protected` is Data Protection ciphertext under the instance's `<dataRoot>/keys`;
-        // no column holds the value or any part of it. Beside `tenant_events`, so every set,
-        // replace and clear lands with its row in one transaction or not at all.
+        // `agent_credentials`, a table auth-026 drops. The step stays, as every shipped step does,
+        // so a volume that applied it still migrates.
         new MigrationStep(
             "auth-019",
             """
@@ -622,8 +619,8 @@ public static class AuthSchema
             """),
 
         // A PLUGIN KEY A PERSON SET FROM THE SCREEN, one row per logical key (`ACME_STORAGE_KEY`).
-        // `value_protected` is Data Protection ciphertext under the instance's `<dataRoot>/keys`, as
-        // `agent_credentials` holds a credential; no column holds the value or any part of it.
+        // `value_protected` is Data Protection ciphertext under the instance's `<dataRoot>/keys`; no
+        // column holds the value or any part of it.
         // Beside `tenant_events`, so every set, replace and clear lands with its row in one
         // transaction or not at all.
         new MigrationStep(
@@ -635,6 +632,15 @@ public static class AuthSchema
                 set_by          TEXT NOT NULL,
                 set_at          TEXT NOT NULL
             );
+            """),
+
+        // EVERY AGENT SIGNS IN THROUGH THE SHARED AGENT HOME: the per-command credential table and the
+        // per-preset `agents.credentialSource` setting row go, with every value stored in them.
+        new MigrationStep(
+            "auth-026",
+            """
+            DROP TABLE IF EXISTS agent_credentials;
+            DELETE FROM tenant_settings WHERE name = 'agents.credentialSource';
             """),
     ];
 }

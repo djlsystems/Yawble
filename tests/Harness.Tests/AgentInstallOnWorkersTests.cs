@@ -277,21 +277,20 @@ public sealed class AgentInstallOnWorkersTests
     // ---------------------------------------------------------------------------------------------
 
     [Fact]
-    public async Task A_worker_that_joins_is_asked_about_every_command_the_catalog_launches_including_issued_ones()
+    public async Task A_worker_that_joins_is_asked_about_every_command_the_catalog_launches()
     {
-        // `issued-cli` is launched only by a preset that signs in with an issued credential: the
-        // sign-in probe never asks about it, so only the join measures it.
+        // Every command the catalog launches is asked about, once each.
         var catalog = new AgentCatalog(
         [
             Preset("home-headless", OnPath),
             new AgentDefinition("home", AgentMode.Interactive, new AgentLaunch(OnPath, [])),
-            Preset("issued-headless", "issued-cli"),
+            Preset("second-headless", "second-cli"),
         ]);
         var commands = MeasureInstallsWhenAWorkerJoins.Commands(catalog);
-        Assert.Equal([OnPath, "issued-cli"], commands);
+        Assert.Equal([OnPath, "second-cli"], commands);
 
         var worker = new ScriptedCliWorker("worker-2", message => message is ProbeSignIn probe
-            ? new SignInProbed(probe.Request, [.. probe.Commands.Select(c => new SignInProbeResult(c.Command, c.Command == "issued-cli", null, "from worker-2"))])
+            ? new SignInProbed(probe.Request, [.. probe.Commands.Select(c => new SignInProbeResult(c.Command, c.Command == "second-cli", null, "from worker-2"))])
             : null);
         var asks = new WorkerAsks(() => worker);
         worker.Asks = asks;
@@ -302,12 +301,12 @@ public sealed class AgentInstallOnWorkersTests
             control: true, onJoined: j => joined += j, id => id == W2 ? worker : null, () => commands, asks, installs));
         joined!(W2);
 
-        await Until(() => installs.For("issued-cli").Count > 0);
-        Assert.Equal([("worker-2", true)], installs.For("issued-cli").Select(m => (m.Worker, m.Installed)));
+        await Until(() => installs.For("second-cli").Count > 0);
+        Assert.Equal([("worker-2", true)], installs.For("second-cli").Select(m => (m.Worker, m.Installed)));
         Assert.Equal([("worker-2", false)], installs.For(OnPath).Select(m => (m.Worker, m.Installed)));
 
         var asked = Assert.IsType<ProbeSignIn>(Assert.Single(worker.Sent));
-        Assert.Equal([OnPath, "issued-cli"], asked.Commands.Select(c => c.Command));
+        Assert.Equal([OnPath, "second-cli"], asked.Commands.Select(c => c.Command));
     }
 
     [Fact]

@@ -4,10 +4,10 @@ using Harness.Host;
 namespace Harness.Tests;
 
 /// <summary>
-/// WHAT A MEMBER RUN'S OWN CREDENTIAL IS: its issued value and every credential variable the
-/// environment its child is given carries, nothing else; kept per member until its next run; and,
-/// for a finished transcript, joined with the set a run would get now. Names come from the catalog
-/// and the probe file, never from a literal.
+/// WHAT A MEMBER RUN'S CREDENTIALS ARE: every credential variable the environment its child is given
+/// carries, nothing else; kept per member until its next run; and, for a finished transcript, joined
+/// with what the member's environment and the Host's carry now. Names come from the catalog and the
+/// probe file, never from a literal.
 /// </summary>
 [Collection(ProcessEnvironmentCollection.Name)]
 public sealed class RunSecretsTests
@@ -21,25 +21,20 @@ public sealed class RunSecretsTests
     private static AgentCatalog Catalog() => new(AgentCatalogFile.BuiltIns());
 
     /// <summary>A probe-file provider variable, and a declared one that is not a probe-file variable when there is one.</summary>
-    private static (string Provider, string Declared, string Issued) Names(AgentCatalog catalog)
+    private static (string Provider, string Declared) Names(AgentCatalog catalog)
     {
         var provider = AgentEnvironment.ProviderVariables.Order(StringComparer.Ordinal).First();
         var declared = catalog.Definitions.SelectMany(HomeLaunchBed.Declared).Order(StringComparer.Ordinal).ToList();
-        var issued = catalog.Definitions.First(d => d.IssuedCredential is not null).IssuedCredential!.Kinds[0].Variable;
-        var other = declared.FirstOrDefault(n => !AgentEnvironment.ProviderVariables.Contains(n) && n != issued)
-            ?? declared.First(n => n != provider && n != issued);
-        return (provider, other, issued);
+        var other = declared.FirstOrDefault(n => !AgentEnvironment.ProviderVariables.Contains(n))
+            ?? declared.First(n => n != provider);
+        return (provider, other);
     }
 
     [Fact]
-    public void The_set_is_the_issued_value_and_every_credential_variable_the_environment_carries()
+    public void The_set_is_every_credential_variable_the_environment_carries()
     {
         var catalog = Catalog();
-        var (provider, declared, issued) = Names(catalog);
-        var homeVariable = catalog.Definitions.SelectMany(d => d.IssuedCredential?.HomeVariables ?? []).FirstOrDefault();
-
-        var credential = new RunCredential(
-            CredentialSource.Issued, new Dictionary<string, string> { [issued] = "fake-issued-value-Rb5kM2" }, [], [], true, null);
+        var (provider, declared) = Names(catalog);
 
         var environment = new Dictionary<string, string?>(StringComparer.Ordinal)
         {
@@ -49,27 +44,26 @@ public sealed class RunSecretsTests
             ["PATH"] = "/fake/bin:/fake/usr/bin-long-enough",
             ["HARNESS_URL"] = "http://127.0.0.1:5391/long-enough",
             ["TMPDIR"] = "/fake/member/tmp-long-enough",
+            ["CLAUDE_CONFIG_DIR"] = "/fake/config/folder-long-enough",
         };
-        if (homeVariable is not null) environment[homeVariable] = "/fake/config/folder-long-enough";
 
-        var redactor = RunSecrets.Of(environment, credential, catalog);
-        var text = string.Join(" ", environment.Values.Append("fake-issued-value-Rb5kM2"));
-        var redacted = redactor.Apply(text);
+        var redactor = RunSecrets.Of(environment, catalog);
+        var redacted = redactor.Apply(string.Join(" ", environment.Values));
 
-        foreach (var value in new[] { "fake-issued-value-Rb5kM2", "fake-provider-value-Lw8dT4", "fake-declared-value-Qy1nZ6" })
+        foreach (var value in new[] { "fake-provider-value-Lw8dT4", "fake-declared-value-Qy1nZ6" })
         {
             Assert.DoesNotContain(value, redacted, StringComparison.Ordinal);
         }
 
-        foreach (var name in new[] { "HOME", "PATH", "HARNESS_URL", "TMPDIR" }.Concat(homeVariable is null ? [] : [homeVariable]))
+        foreach (var name in new[] { "HOME", "PATH", "HARNESS_URL", "TMPDIR", "CLAUDE_CONFIG_DIR" })
         {
             Assert.Contains(environment[name]!, redacted, StringComparison.Ordinal);
         }
 
-        Assert.Equal(3, redacted.Split(Marker).Length - 1);
+        Assert.Equal(2, redacted.Split(Marker).Length - 1);
 
         // A run given no credential variable has nothing to redact.
-        Assert.Same(ValueRedactor.Empty, RunSecrets.Of(new Dictionary<string, string?>(), RunCredential.Home, catalog));
+        Assert.Same(ValueRedactor.Empty, RunSecrets.Of(new Dictionary<string, string?>(), catalog));
     }
 
     [Fact]
@@ -89,33 +83,25 @@ public sealed class RunSecretsTests
     }
 
     [Fact]
-    public async Task A_finished_transcript_is_read_with_the_runs_set_and_the_set_a_run_would_get_now()
+    public async Task A_finished_transcript_is_read_with_the_runs_set_and_what_the_environments_carry_now()
     {
         var catalog = Catalog();
-        var (provider, declared, issued) = Names(catalog);
-        var preset = catalog.Definitions.First(d => d.IssuedCredential is not null).Name;
+        var (provider, declared) = Names(catalog);
+        var preset = catalog.Definitions.First(d => d.CredentialVariables is not null).Name;
 
         using var host = new EnvironmentScope([new(provider, "fake-host-key-Vn2xB9")]);
-        var resolver = new FixedCredentials(new RunCredential(
-            CredentialSource.Issued, new Dictionary<string, string> { [issued] = "fake-issued-now-Ps6gH1" }, [], [], true, null));
         var member = new Dictionary<string, string> { [declared] = "fake-member-env-Td4jW8" };
 
         // An empty registry: a Host that restarted since the run.
-        var secrets = new RunSecrets(catalog, resolver);
+        var secrets = new RunSecrets(catalog);
         var redactor = await secrets.ForReadAsync(Dev, preset, member, Ct);
 
-        var text = "fake-host-key-Vn2xB9 fake-issued-now-Ps6gH1 fake-member-env-Td4jW8 fake-run-only-Ue5rQ3";
-        Assert.Equal($"{Marker} {Marker} {Marker} fake-run-only-Ue5rQ3", redactor.Apply(text));
+        var text = "fake-host-key-Vn2xB9 fake-member-env-Td4jW8 fake-run-only-Ue5rQ3";
+        Assert.Equal($"{Marker} {Marker} fake-run-only-Ue5rQ3", redactor.Apply(text));
 
         // With the run's own set still held, that is redacted too.
         secrets.Remember(Dev, ValueRedactor.For(["fake-run-only-Ue5rQ3"]));
         redactor = await secrets.ForReadAsync(Dev, preset, member, Ct);
-        Assert.Equal($"{Marker} {Marker} {Marker} {Marker}", redactor.Apply(text));
-    }
-
-    private sealed class FixedCredentials(RunCredential credential) : IRunCredentials
-    {
-        public Task<RunCredential> ResolveAsync(string agent, AgentDefinition? definition, CancellationToken ct) =>
-            Task.FromResult(credential);
+        Assert.Equal($"{Marker} {Marker} {Marker}", redactor.Apply(text));
     }
 }

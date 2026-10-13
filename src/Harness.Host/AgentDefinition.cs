@@ -187,13 +187,11 @@ public sealed record AgentDefinition(
     IReadOnlyList<string>? LaunchCheck = null,
 
     [property: Description(
-        "How this CLI takes a credential issued in Admin > Agents instead of the shared home's "
-        + "login: the kinds a person may set and the variable each goes in, every variable it reads "
-        + "for authentication (removed from an issued run), which wins when a home login also "
-        + "exists, and the CLI version that was measured. One value is stored per command, so "
-        + "presets launching the same command declare the same kinds. Null means this preset "
-        + "signs in only through the shared home, and its source cannot be `issued`.")]
-    IssuedCredential? IssuedCredential = null,
+        "Every environment variable this CLI reads for authentication, and the CLI version that was "
+        + "measured. A member run of another command's preset has each of them removed unless its "
+        + "preset's or its team's env hands it in by name, and a run's output is redacted of the "
+        + "value of each one its environment carries. Null means the preset declares none.")]
+    CredentialVariables? CredentialVariables = null,
 
     [property: Description(
         "What this Interactive preset's CLI prints at an idle prompt, measured, and so how many bytes a "

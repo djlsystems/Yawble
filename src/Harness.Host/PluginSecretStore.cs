@@ -17,11 +17,13 @@ public sealed record SecretStatus(bool Set, string? SetBy, DateTimeOffset? SetAt
     public static SecretStatus NotSet { get; } = new(false, null, null, null);
 }
 
+/// <summary>Who set or cleared a stored key: a person, named by email.</summary>
+public sealed record CredentialActor(string? Id, string Email);
+
 /// <summary>
 /// <c>plugin_secrets</c> (schema step auth-025): the plugin keys a person sets from the screen, by
 /// logical key. The value is Data Protection ciphertext under its own purpose and the instance's
-/// <c>&lt;dataRoot&gt;/keys</c>, as <see cref="AgentCredentialStore"/> keeps a credential, and every
-/// set, replace and clear lands with its <c>tenant_events</c> row in the same transaction, or not at
+/// <c>&lt;dataRoot&gt;/keys</c>, and every set, replace and clear lands with its <c>tenant_events</c> row in the same transaction, or not at
 /// all.
 ///
 /// RESOLVES A KEY AT EACH RUN: the stored value first, then <paramref name="environment"/> (the

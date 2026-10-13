@@ -12,9 +12,8 @@ namespace Harness.Host;
 /// into the <see cref="AgentResult"/> its callers have always been given. The launch itself is the
 /// worker's <see cref="RunLauncher"/>.
 ///
-/// THE RUN'S CREDENTIAL IS RESOLVED HERE (<see cref="IRunCredentials"/>, which alone reads the store
-/// and the key ring) and travels with the start, with the values the run's text is redacted of; the
-/// worker applies both, and makes and removes an issued run's home of its own.
+/// THE RUN'S CREDENTIAL SCOPE IS DECIDED HERE (<see cref="CredentialScopes"/>, from the catalog) and
+/// travels with the start, with the values the run's text is redacted of; the worker applies both.
 /// </summary>
 /// <remarks>
 /// <paramref name="diagnostics"/> is OPTIONAL and null means a runner that records nothing, which
@@ -36,7 +35,6 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
     private readonly Func<ContainerId, RunMemoryAllowance?>? _memoryFor;
     private readonly string? _tempRoot;
     private readonly Func<ContainerId, IRunWorker>? _placedOn;
-    private readonly IRunCredentials? _credentials;
     private readonly AgentUpdateGate? _gateHere;
     private readonly Func<IMemberReports?>? _reports;
 
@@ -54,11 +52,10 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
         MemberTempRoot? temp = null,
         RunAllowances? allowances = null,
         TimeSpan? oomPoll = null,
-        IRunCredentials? credentials = null,
         RunSecrets? secrets = null)
     {
         var launcher = new RunLauncher(
-            heartbeat, log, runAs, reports is not null, lookup, updates, memory, allowances, oomPoll, RunHome.Homes(runAs));
+            heartbeat, log, runAs, reports is not null, lookup, updates, memory, allowances, oomPoll);
         _directory = new RunDirectory(reports, diagnostics, live, secrets: secrets);
         var worker = InProcessWorker.Connect(
             WorkerId.Local,
@@ -69,7 +66,6 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
         _worker = worker.Worker;
         _memory = () => memory is null ? null : Allowance(memory.Settings());
         _tempRoot = temp?.Path;
-        _credentials = credentials;
     }
 
     /// <summary>
@@ -77,7 +73,6 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
     /// <paramref name="memory"/> is the settings' memory figures, read when each run's start is built;
     /// <paramref name="tempRoot"/> is where members' temporary folders go. <paramref name="placedOn"/> is
     /// the worker admission placed a member's run on; without it, every run goes to <paramref name="worker"/>.
-    /// <paramref name="credentials"/> resolves a run's credential when its invocation carries none.
     /// <paramref name="launcher"/> is not called: the launch check goes to a worker over the transport
     /// in every role; it stays a parameter so the runner's callers compose it as before.
     /// <paramref name="gateHere"/> is control's one update gate, which a run's share is taken from
@@ -92,7 +87,6 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
         Func<RunMemoryAllowance?> memory,
         string? tempRoot,
         Func<ContainerId, IRunWorker>? placedOn = null,
-        IRunCredentials? credentials = null,
         Func<ContainerId, RunMemoryAllowance?>? memoryFor = null,
         AgentUpdateGate? gateHere = null,
         Func<IMemberReports?>? reports = null)
@@ -106,7 +100,6 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
         _directory = directory;
         _memory = memory;
         _tempRoot = tempRoot;
-        _credentials = credentials;
     }
 
     /// <summary>The worker this runner starts its runs on.</summary>
@@ -195,18 +188,18 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
                 + "might send a prompt or spend is never run to check it.");
         }
 
-        // THE CREDENTIAL A MEMBER RUN OF THIS PRESET WOULD START WITH, from the same resolver.
+        // THE CREDENTIAL SCOPE A MEMBER RUN OF THIS PRESET WOULD START WITH, from the same catalog.
         var environment = AgentToolPreflight.LaunchShape(definition).Environment;
-        var credential = _credentials is null ? RunCredential.Home : await _credentials.ResolveAsync(agent, definition, ct);
-        var launch = Launch(command, definition.TimeoutSeconds, environment, credential);
+        var scope = CredentialScopes.For(_catalog, definition);
+        var launch = Launch(command, definition.TimeoutSeconds, environment);
 
         // Under control's one update gate: updating while an update waits or runs, and a check in
         // flight holds the update off as a run does.
-        if (_gateHere is null) return await CheckOnAWorkerAsync(launch, check, definition, environment, credential, timeout, ct);
+        if (_gateHere is null) return await CheckOnAWorkerAsync(launch, check, definition, environment, scope, timeout, ct);
         if (_gateHere.Holding(launch.FileName) is { } hold) return AgentLaunchReport.Held(hold);
 
         using var share = await _gateHere.EnterRunAsync(launch.FileName, null, ct);
-        return await CheckOnAWorkerAsync(launch, check, definition, environment, credential, timeout, ct);
+        return await CheckOnAWorkerAsync(launch, check, definition, environment, scope, timeout, ct);
     }
 
     /// <summary>
@@ -216,7 +209,7 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
     /// </summary>
     private async Task<AgentLaunchReport> CheckOnAWorkerAsync(
         RunLaunch launch, IReadOnlyList<string> check, AgentDefinition definition, IReadOnlyDictionary<string, string> environment,
-        RunCredential credential, TimeSpan? timeout, CancellationToken ct)
+        CredentialScope scope, TimeSpan? timeout, CancellationToken ct)
     {
         IRunWorker worker;
         try
@@ -233,7 +226,7 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
             worker,
             new CheckLaunch(
                 Guid.NewGuid().ToString("N"), launch, check, definition.Updates?.Arguments ?? [], environment, _memory(),
-                (int)Math.Ceiling(bound.TotalSeconds), _tempRoot, credential, Redaction(launch, environment, credential)),
+                (int)Math.Ceiling(bound.TotalSeconds), _tempRoot, scope, Redaction(launch, environment, scope)),
             bound + TimeSpan.FromSeconds(30),
             ct);
 
@@ -243,21 +236,19 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
     }
 
     /// <summary>Everything the worker needs for this invocation, resolved now.</summary>
-    private async Task<StartRun> StartAsync(AgentInvocation invocation, CancellationToken ct)
+    private Task<StartRun> StartAsync(AgentInvocation invocation, CancellationToken ct)
     {
         var definition = _catalog.Definition(invocation.Agent);
 
-        // THE RUN'S CREDENTIAL, as resolved at run start; asked here only for an invocation built
-        // without one, so no caller can reach the shared home for a preset that signs in with an
-        // issued credential.
-        var credential = invocation.Credential
-            ?? (_credentials is null ? RunCredential.Home : await _credentials.ResolveAsync(invocation.Agent, null, ct));
+        // THE RUN'S CREDENTIAL SCOPE, as decided at run start; decided here only for an invocation
+        // built without one.
+        var scope = invocation.Scope ?? CredentialScopes.For(_catalog, invocation.Agent, definition);
 
         var launch = _catalog.For(invocation.Agent) is { } command
-            ? Launch(command, definition?.TimeoutSeconds, invocation.Environment, credential)
+            ? Launch(command, definition?.TimeoutSeconds, invocation.Environment)
             : null;
 
-        return new StartRun(
+        return Task.FromResult(new StartRun(
             RunId.For(invocation.Container),
             invocation.Agent,
             invocation.SystemPrompt,
@@ -270,23 +261,23 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
             _memoryFor is { } memoryFor ? memoryFor(invocation.Container) : _memory(),
             _tempRoot,
             definition?.LiveView is { } view ? LiveView.ToRun(view) : null,
-            Credential: credential,
-            Redaction: launch is null || credential.Missing is not null
+            Scope: scope,
+            Redaction: launch is null
                 ? ValueRedactor.Empty
-                : Redaction(launch, invocation.Environment, credential),
-            CredentialNames: launch is null || credential.Missing is not null
+                : Redaction(launch, invocation.Environment, scope),
+            CredentialNames: launch is null
                 ? null
-                : [.. RunSecrets.CredentialNames(_catalog).Order(StringComparer.Ordinal)]);
+                : [.. RunSecrets.CredentialNames(_catalog).Order(StringComparer.Ordinal)]));
     }
 
     /// <summary>
-    /// WHAT THE RUN'S TEXT IS REDACTED OF: its credential and every credential variable its child's
+    /// WHAT THE RUN'S TEXT IS REDACTED OF: every credential variable its child's
     /// environment carries (<see cref="RunSecrets.Of"/>), read from that environment as the worker
     /// builds it (<see cref="RunLauncher.MemberEnvironment"/>, over this process's own, which a worker
     /// in this process inherits) - so a key the child never had is not in it, and a change to the
     /// scoping cannot drift from what is redacted.
     /// </summary>
-    private ValueRedactor Redaction(RunLaunch launch, IReadOnlyDictionary<string, string> environment, RunCredential credential)
+    private ValueRedactor Redaction(RunLaunch launch, IReadOnlyDictionary<string, string> environment, CredentialScope scope)
     {
         var child = new Dictionary<string, string?>(StringComparer.Ordinal);
         foreach (DictionaryEntry variable in Environment.GetEnvironmentVariables())
@@ -294,17 +285,17 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
             child[(string)variable.Key] = (string?)variable.Value;
         }
 
-        RunLauncher.MemberEnvironment(child, launch, environment, credential);
-        return RunSecrets.Of(child, credential, _catalog);
+        RunLauncher.MemberEnvironment(child, launch, environment, scope);
+        return RunSecrets.Of(child, _catalog);
     }
 
     /// <summary>
     /// The preset's launch as the protocol carries it, with what the child must not inherit: the
     /// names that must be absent, and every provider key that is not this command's own and was not
-    /// handed in with <paramref name="environment"/> or set by the run's <paramref name="credential"/>.
+    /// handed in with <paramref name="environment"/>.
     /// </summary>
     private static RunLaunch Launch(
-        AgentCommand command, int? timeoutSeconds, IReadOnlyDictionary<string, string> environment, RunCredential credential) =>
+        AgentCommand command, int? timeoutSeconds, IReadOnlyDictionary<string, string> environment) =>
         new(
             command.FileName,
             command.Arguments,
@@ -315,11 +306,7 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
             command.IsolationEnvironment,
             command.UpdateEnvironment,
             timeoutSeconds,
-            [.. AgentEnvironment.MustBeAbsent, .. AgentEnvironment.ProviderKeysToRemove(command.FileName, HandedIn(environment, credential))]);
-
-    /// <summary>What the run hands its child: the preset's and the team's env, then the credential's own variables.</summary>
-    private static IReadOnlyDictionary<string, string> HandedIn(IReadOnlyDictionary<string, string> environment, RunCredential credential) =>
-        credential.ApplyTo(new Dictionary<string, string?>(), environment);
+            [.. AgentEnvironment.MustBeAbsent, .. AgentEnvironment.ProviderKeysToRemove(command.FileName, environment)]);
 
     /// <summary>The settings' memory figures for a run's start.</summary>
     public static RunMemoryAllowance Allowance((RunMemoryLimit Limit, RunMemoryLimit Ceiling) settings) =>

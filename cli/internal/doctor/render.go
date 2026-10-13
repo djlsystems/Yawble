@@ -36,8 +36,8 @@ func Short(checks []Check) ([]Check, int) {
 
 // RenderAgents prints, first, whether any agent can run, then one block per agent from the
 // Host's report with what to do. With one agent able to run, the others are not in use: their
-// sign-in is "no", not a fault, and their hint is how to use them, not a fix. The source, when
-// the sign-in was measured and the launch's and probe's own words are developer detail, printed
+// sign-in is "no", not a fault, and their hint is how to use them, not a fix. When the
+// sign-in was measured and the launch's and probe's own words are developer detail, printed
 // only with details.
 func RenderAgents(w io.Writer, agents []Agent, details bool) {
 	anyRuns := AnyCanRun(agents)
@@ -76,9 +76,6 @@ func RenderAgents(w io.Writer, agents []Agent, details bool) {
 			fmt.Fprintln(w, "  signed in   no")
 		default:
 			fmt.Fprintln(w, "  signed in   NO")
-		}
-		if source := a.SourceText(); source != "" && details {
-			fmt.Fprintf(w, "  source      %s\n", source)
 		}
 		if measured := a.MeasuredText(); measured != "" && details {
 			fmt.Fprintf(w, "  measured    %s\n", measured)

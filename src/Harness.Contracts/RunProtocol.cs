@@ -72,11 +72,11 @@ public abstract record MemberCommand(ContainerId Member) : ControlMessage;
 /// <see cref="Process"/> is set instead for a member that is a program rather than an agent (a
 /// plugin): the worker starts it as given and streams what it prints.
 ///
-/// <see cref="Credential"/> is the run's credential as control resolved it - the worker applies it
-/// and never reads a store or a key ring - and <see cref="Redaction"/> the values the run's text is
-/// redacted of before it leaves the worker: the credential's and every credential variable the
-/// child's environment carries. Both hold secrets and refuse to be written as JSON; null on a run
-/// that has none. <see cref="CredentialNames"/> names every variable that holds a credential - names
+/// <see cref="Scope"/> is the other commands' credential variables the run is scoped away from, as
+/// control decided them - names only - and <see cref="Redaction"/> the values the run's text is
+/// redacted of before it leaves the worker: every credential variable the child's environment
+/// carries. The redaction set holds secrets and refuses to be written as JSON; null on a run that
+/// has none. <see cref="CredentialNames"/> names every variable that holds a credential - names
 /// only, no values - so the worker redacts the values its own child's environment carries too.
 /// </summary>
 public sealed record StartRun(
@@ -93,7 +93,7 @@ public sealed record StartRun(
     string? TempRoot,
     RunLiveView? LiveView,
     RunProcess? Process = null,
-    RunCredential? Credential = null,
+    CredentialScope? Scope = null,
     ValueRedactor? Redaction = null,
     IReadOnlyList<string>? CredentialNames = null) : RunCommand(Run);
 
@@ -170,7 +170,7 @@ public sealed record SampleCapacity : ControlMessage;
 /// THE LAUNCH CHECK OF ONE PRESET, on a worker: its declared free invocation (<see cref="Check"/>,
 /// after <see cref="UpdateArguments"/>) started as a member run of it would start the CLI, with what
 /// control resolved for it. The worker answers with <see cref="LaunchChecked"/> under the same
-/// <see cref="Request"/>. <see cref="Credential"/> and <see cref="Redaction"/> hold secrets, as a start's do.
+/// <see cref="Request"/>. <see cref="Redaction"/> holds secrets, as a start's does.
 /// </summary>
 public sealed record CheckLaunch(
     string Request,
@@ -181,7 +181,7 @@ public sealed record CheckLaunch(
     RunMemoryAllowance? Memory,
     int? TimeoutSeconds,
     string? TempRoot,
-    RunCredential? Credential = null,
+    CredentialScope? Scope = null,
     ValueRedactor? Redaction = null) : ControlMessage;
 
 // ---------------------------------------------------------------------------------------------

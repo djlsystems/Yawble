@@ -17,7 +17,7 @@ public abstract record TerminalCommand : ControlMessage;
 /// its environment and the inherited variables it clears, the system prompt a CLI reads from a file
 /// (with the arguments that name that file), and where its MCP config points. The worker writes the
 /// MCP config and the prompt file, wraps the arguments to run as the agent, and spawns it.
-/// <see cref="Environment"/> holds the session's credential and an issued one, and crosses a
+/// <see cref="Environment"/> holds the session's credential, and crosses a
 /// connection only sealed.
 /// </summary>
 public sealed record TerminalLaunch(

@@ -465,14 +465,6 @@ func instanceChecks(r *HostReport, err error, now time.Time, details bool) []Che
 			part = a.Agent + " NOT signed in"
 			verdict = Warn
 		}
-		// The source is developer detail, except when it is why the row warns.
-		unset := a.Issued() && a.IssuedSet != nil && !*a.IssuedSet
-		if source := a.SourceText(); source != "" && (details || unset) {
-			part += ", source " + source
-		}
-		if unset {
-			verdict = Warn
-		}
 		// Beside the sign-in: whether the CLI starts the way a member run launches it.
 		part += ", launch " + a.LaunchText()
 		if a.LaunchFailed() {
@@ -530,15 +522,10 @@ func SignInHint(a Agent) string {
 		return ""
 	case !*a.Installed:
 		return "not installed in the instance; a worker installs it when it starts: yawble down, then yawble up"
-	case a.Issued() && a.IssuedSet != nil && !*a.IssuedSet:
-		return "its source is issued and no credential is set: yawble agents credential set " + a.Agent +
-			" (or yawble agents source " + a.Agent + " home)"
 	case a.Authenticated != nil && *a.Authenticated && a.LaunchFailed():
 		return "it is signed in but did not start: yawble agents --details shows why; yawble down, then yawble up starts it again"
 	case a.Authenticated != nil && *a.Authenticated:
 		return ""
-	case a.Issued():
-		return "its source is issued: replace its credential with yawble agents credential set " + a.Agent
 	}
 	concierge := "open a Concierge on " + a.Agent + " in the board and sign in there"
 	if a.CredentialVariable != nil && *a.CredentialVariable != "" {

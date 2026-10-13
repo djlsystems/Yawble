@@ -739,11 +739,11 @@ public sealed record AgentInvocation(
     string? UnreachableRoot = null,
 
     /// <summary>
-    /// The credential this run starts with, resolved at run start (<c>RunCredentials.ResolveAsync</c>).
-    /// Null when the caller resolved none: the runner then asks the same resolver itself, so an
-    /// invocation built without one never falls back to the shared home for an issued preset.
+    /// The other commands' credential variables this run is scoped away from, decided at run start
+    /// (<c>CredentialScopes.For</c>). Null when the caller decided none: the runner then decides it
+    /// from the same catalog itself.
     /// </summary>
-    RunCredential? Credential = null);
+    CredentialScope? Scope = null);
 
 /// <param name="ReachedThePlatform">
 /// Whether this run's agent authenticated ANY request with the member's own credential.

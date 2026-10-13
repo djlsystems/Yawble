@@ -8,14 +8,14 @@ namespace Harness.Host;
 /// <summary>
 /// RUNS ONE AGENT CLI COMMAND ON THIS WORKER and says what it printed: a tool listing, a version, a
 /// platform update. As the agent (the launch prefix), with this worker's environment plus the
-/// command's overlay and the run's credential, every provider key that is not the CLI's own taken
+/// command's overlay and the run's credential scope, every provider key that is not the CLI's own taken
 /// out, as at a member's spawn. Never runs an agent-installed program as the worker: when the agent
 /// user exists and cannot be reached, it does not run at all.
 /// </summary>
-public sealed class AgentCommands(AgentLaunchUser? runAs, RunHomes homes)
+public sealed class AgentCommands(AgentLaunchUser? runAs)
 {
     /// <summary>One command, never throwing but for cancellation.</summary>
-    public async Task<AgentCliRunResult> RunAsync(AgentCliRun command, RunCredential? credential, CancellationToken ct)
+    public async Task<AgentCliRunResult> RunAsync(AgentCliRun command, CredentialScope? scope, CancellationToken ct)
     {
         if (PathSearch.Find(command.FileName) is not { } resolved)
         {
@@ -28,7 +28,6 @@ public sealed class AgentCommands(AgentLaunchUser? runAs, RunHomes homes)
         }
 
         string? scratch = null;
-        string? home = null;
 
         try
         {
@@ -36,13 +35,6 @@ public sealed class AgentCommands(AgentLaunchUser? runAs, RunHomes homes)
             {
                 scratch = Directory.CreateTempSubdirectory("harness-tool-listing-").FullName;
                 runAs?.Share(scratch);
-            }
-
-            // A home of the command's own, as an issued member run gets, with its cache beside it.
-            if (command.HomesIn is { } parent && (home = await homes.CreateAsync(parent, null, ct, memberFolder: false)) is null)
-            {
-                return new AgentCliRunResult(true, null, false, "", "", false,
-                    "This command runs in a home of its own, which could not be made.");
             }
 
             var prefix = runAs?.Prefix ?? [];
@@ -69,15 +61,10 @@ public sealed class AgentCommands(AgentLaunchUser? runAs, RunHomes homes)
 
             var environment = process.StartInfo.Environment;
             foreach (var (name, value) in command.Environment) environment[name] = value;
-            if (home is not null)
-            {
-                environment["HOME"] = home;
-                environment["XDG_CACHE_HOME"] = RunHomes.CacheBeside(home);
-            }
 
-            // The credential as a member run gets it, then every provider key but this CLI's own
+            // The credential scope as a member run gets it, then every provider key but this CLI's own
             // taken out, as at a member's spawn.
-            credential?.ApplyTo(environment, command.Environment);
+            scope?.ApplyTo(environment, command.Environment);
             foreach (var name in command.RemovedEnvironment) environment.Remove(name);
 
             if (!process.Start()) return new AgentCliRunResult(true, null, false, "", "", false, "It could not be started.");
@@ -110,8 +97,6 @@ public sealed class AgentCommands(AgentLaunchUser? runAs, RunHomes homes)
         }
         finally
         {
-            if (home is not null) await homes.RemoveAsync(home);
-
             // The worker made the scratch folder owner-only and AgentLaunchUser.Share gives the agent's
             // group read and traverse, never write; the CLI runs in it but cannot create anything in it.
             if (scratch is not null)

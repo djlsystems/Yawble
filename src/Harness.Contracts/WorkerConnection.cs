@@ -12,7 +12,7 @@ namespace Harness.Contracts;
 // needs: who the worker is and whether control takes it, which command was applied, which events
 // control has handled, and a keep-alive.
 //
-// A run's secrets - the credential and the redaction set on its start, and the set the worker applied -
+// A run's secrets - the redaction set on its start, the set the worker applied, and a terminal's environment -
 // are never in a frame in the clear. They travel SEALED: AES-256-GCM under a key made for this one
 // connection from the worker key and both sides' nonces (WorkerFrameCodec.Key), so only a holder of
 // the worker key on this connection can open them.
@@ -178,7 +178,7 @@ public sealed class WorkerFrameCodec
                 frame = command with
                 {
                     Message = terminal with { Launch = terminal.Launch with { Environment = new Dictionary<string, string>() } },
-                    Sealed = Seal(new Secrets(null, null, terminal.Launch.Environment)),
+                    Sealed = Seal(new Secrets(null, terminal.Launch.Environment)),
                 };
                 break;
 
@@ -186,23 +186,23 @@ public sealed class WorkerFrameCodec
                 frame = command with
                 {
                     Message = read with { Redaction = null },
-                    Sealed = Seal(new Secrets(null, read.Redaction)),
+                    Sealed = Seal(new Secrets(read.Redaction)),
                 };
                 break;
 
-            case CommandFrame { Message: StartRun start } command when start.Credential is not null || start.Redaction is not null:
+            case CommandFrame { Message: StartRun { Redaction: not null } start } command:
                 frame = command with
                 {
-                    Message = start with { Credential = null, Redaction = null },
-                    Sealed = Seal(new Secrets(start.Credential, start.Redaction)),
+                    Message = start with { Redaction = null },
+                    Sealed = Seal(new Secrets(start.Redaction)),
                 };
                 break;
 
-            case CommandFrame { Message: CheckLaunch check } command when check.Credential is not null || check.Redaction is not null:
+            case CommandFrame { Message: CheckLaunch { Redaction: not null } check } command:
                 frame = command with
                 {
-                    Message = check with { Credential = null, Redaction = null },
-                    Sealed = Seal(new Secrets(check.Credential, check.Redaction)),
+                    Message = check with { Redaction = null },
+                    Sealed = Seal(new Secrets(check.Redaction)),
                 };
                 break;
 
@@ -210,15 +210,7 @@ public sealed class WorkerFrameCodec
                 frame = @event with
                 {
                     Envelope = @event.Envelope with { Event = applied with { Redaction = null } },
-                    Sealed = Seal(new Secrets(null, applied.Redaction)),
-                };
-                break;
-
-            case CommandFrame { Message: RunAgentCommands { Credential: not null } commands } command:
-                frame = command with
-                {
-                    Message = commands with { Credential = null },
-                    Sealed = Seal(new Secrets(commands.Credential, null)),
+                    Sealed = Seal(new Secrets(applied.Redaction)),
                 };
                 break;
         }
@@ -260,18 +252,15 @@ public sealed class WorkerFrameCodec
 
             case CommandFrame { Sealed: { } blob, Message: StartRun start } command:
                 var forStart = Open(blob);
-                return command with { Message = start with { Credential = forStart.Credential, Redaction = forStart.Redaction }, Sealed = null };
+                return command with { Message = start with { Redaction = forStart.Redaction }, Sealed = null };
 
             case CommandFrame { Sealed: { } blob, Message: CheckLaunch check } command:
                 var forCheck = Open(blob);
-                return command with { Message = check with { Credential = forCheck.Credential, Redaction = forCheck.Redaction }, Sealed = null };
+                return command with { Message = check with { Redaction = forCheck.Redaction }, Sealed = null };
 
             case EventFrame { Sealed: { } blob, Envelope.Event: RunCredentialApplied applied } @event:
                 var forEvent = Open(blob);
                 return @event with { Envelope = @event.Envelope with { Event = applied with { Redaction = forEvent.Redaction } }, Sealed = null };
-
-            case CommandFrame { Sealed: { } blob, Message: RunAgentCommands commands } command:
-                return command with { Message = commands with { Credential = Open(blob).Credential }, Sealed = null };
 
             case CommandFrame { Sealed: not null } or EventFrame { Sealed: not null }:
                 throw new InvalidDataException(UnsealableText);
@@ -328,10 +317,10 @@ public sealed class WorkerFrameCodec
     }
 
     /// <summary>
-    /// A run's secrets, written by hand: neither record may ever be written as JSON by a serializer.
+    /// A run's secrets, written by hand: a redaction set may never be written as JSON by a serializer.
     /// <see cref="Environment"/> is a terminal's whole environment, which holds its session's key.
     /// </summary>
-    private sealed record Secrets(RunCredential? Credential, ValueRedactor? Redaction, IReadOnlyDictionary<string, string>? Environment = null)
+    private sealed record Secrets(ValueRedactor? Redaction, IReadOnlyDictionary<string, string>? Environment = null)
     {
         public byte[] ToJson()
         {
@@ -339,20 +328,6 @@ public sealed class WorkerFrameCodec
             using (var writer = new Utf8JsonWriter(buffer))
             {
                 writer.WriteStartObject();
-                if (Credential is { } credential)
-                {
-                    writer.WriteStartObject("credential");
-                    writer.WriteString("source", credential.Source.ToString());
-                    writer.WriteStartObject("environment");
-                    foreach (var (name, value) in credential.Environment) writer.WriteString(name, value);
-                    writer.WriteEndObject();
-                    Strings(writer, "displace", credential.Displace);
-                    Strings(writer, "otherProviders", credential.OtherProviders);
-                    writer.WriteBoolean("perRunHome", credential.PerRunHome);
-                    if (credential.Missing is { } missing) writer.WriteString("missing", missing);
-                    writer.WriteEndObject();
-                }
-
                 if (Redaction is { } redaction) Strings(writer, "redaction", redaction.Forms);
                 if (Environment is { } environment)
                 {
@@ -372,18 +347,6 @@ public sealed class WorkerFrameCodec
             using var document = JsonDocument.Parse(json);
             var root = document.RootElement;
 
-            RunCredential? credential = null;
-            if (root.TryGetProperty("credential", out var c))
-            {
-                credential = new RunCredential(
-                    Enum.Parse<CredentialSource>(c.GetProperty("source").GetString()!),
-                    c.GetProperty("environment").EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString()!, StringComparer.Ordinal),
-                    [.. c.GetProperty("displace").EnumerateArray().Select(e => e.GetString()!)],
-                    [.. c.GetProperty("otherProviders").EnumerateArray().Select(e => e.GetString()!)],
-                    c.GetProperty("perRunHome").GetBoolean(),
-                    c.TryGetProperty("missing", out var m) ? m.GetString() : null);
-            }
-
             var redaction = root.TryGetProperty("redaction", out var r)
                 ? ValueRedactor.FromForms(r.EnumerateArray().Select(e => e.GetString()!))
                 : null;
@@ -392,7 +355,7 @@ public sealed class WorkerFrameCodec
                 ? t.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString()!, StringComparer.Ordinal)
                 : null;
 
-            return new Secrets(credential, redaction, environment);
+            return new Secrets(redaction, environment);
         }
 
         private static void Strings(Utf8JsonWriter writer, string name, IEnumerable<string> values)

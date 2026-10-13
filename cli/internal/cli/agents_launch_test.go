@@ -83,7 +83,7 @@ func TestOneAgentRunningKeepsAgentsOkWhileAnotherFailsToStart(t *testing.T) {
 	if v != "ok" || fix != "" {
 		t.Errorf("claude runs, so agents is ok: %s %q fix %q", v, detail, fix)
 	}
-	if !strings.Contains(detail, "codex signed in, source home, launch FAILED, exit 1, see yawble agents") {
+	if !strings.Contains(detail, "codex signed in, launch FAILED, exit 1, see yawble agents") {
 		t.Errorf("the row should name codex's failed launch and where to look: %q", detail)
 	}
 	_, out, _ = run(t, deps, "agents")
@@ -105,13 +105,13 @@ func TestOneAgentRunningKeepsAgentsOkWhileAnotherFailsToStart(t *testing.T) {
 	}
 }
 
-// The default `yawble agents` is what a person acts on; the source, the probe's time and the
+// The default `yawble agents` is what a person acts on; the probe's time and the
 // launch's own words are developer detail, shown with --details.
 func TestAgentsDefaultLeavesDeveloperLinesForDetails(t *testing.T) {
 	s, dir := agentsDeps(t, codexSignedInFailing())
 	deps := stubbed(s)
 	deps.ConfigDir = dir
-	developer := []string{"  source  ", "  measured  ", "  launch why  ", "  stderr  ", "  detail  "}
+	developer := []string{"  measured  ", "  launch why  ", "  stderr  ", "  detail  "}
 	_, out, _ := run(t, deps, "agents")
 	for _, line := range developer {
 		if strings.Contains(out, line) {
@@ -122,7 +122,7 @@ func TestAgentsDefaultLeavesDeveloperLinesForDetails(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("--details: exit %d: %s %s", code, out, errOut)
 	}
-	for _, line := range []string{"  source      home", "  launch why  The launch exited 1.", "  stderr      boom", "  detail      The status command exited 1."} {
+	for _, line := range []string{"  launch why  The launch exited 1.", "  stderr      boom", "  detail      The status command exited 1."} {
 		if !strings.Contains(out, line) {
 			t.Errorf("--details lacks %q:\n%s", line, out)
 		}
@@ -142,21 +142,21 @@ func TestAgentsTopLineSaysTheirFixLinesForSeveral(t *testing.T) {
 	}
 }
 
-// Doctor's default agents row leaves the source and when the sign-ins were measured to --details.
-func TestDoctorShowsTheAgentsSourceOnlyWithDetails(t *testing.T) {
+// Doctor's default agents row leaves when the sign-ins were measured to --details.
+func TestDoctorShowsWhenTheSignInsWereMeasuredOnlyWithDetails(t *testing.T) {
 	s, dir := agentsDeps(t, codexSignedInFailing())
 	deps := stubbed(s)
 	deps.ConfigDir = dir
 	_, out, _ := run(t, deps, "doctor")
 	row := lineOf(out, "agents")
-	if row == "" || strings.Contains(row, "source") || strings.Contains(row, "sign-ins measured") {
+	if row == "" || strings.Contains(row, "sign-ins measured") {
 		t.Errorf("default agents row: %q\n%s", row, out)
 	}
 	if !strings.Contains(row, "codex signed in, launch FAILED, exit 1, see yawble agents") {
 		t.Errorf("default agents row should still name codex's failed launch: %q", row)
 	}
 	_, out, _ = run(t, deps, "doctor", "--details")
-	if row := lineOf(out, "agents"); !strings.Contains(row, "source home") || !strings.Contains(row, "sign-ins measured") {
+	if row := lineOf(out, "agents"); !strings.Contains(row, "sign-ins measured") {
 		t.Errorf("--details agents row: %q", row)
 	}
 }

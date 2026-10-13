@@ -67,40 +67,27 @@ public interface IListingRunner
     /// <summary>Whether <paramref name="command"/> resolves, the way a launch resolves it.</summary>
     bool Installed(string command);
 
-    /// <param name="credential">A member run's credential, applied as the run applies it
-    /// (<see cref="AgentEnvironment.ApplyCredential"/>); null for the Concierge on the shared home.</param>
+    /// <param name="scope">A member run's credential scope, applied as the run applies it
+    /// (<see cref="AgentEnvironment.ApplyScope"/>); null for the Concierge.</param>
     Task<ListingRun> RunAsync(
         string command, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment,
-        CancellationToken ct, RunCredential? credential = null);
-
-    /// <summary>A home of one listing's own, as an issued member run gets (<see cref="RunHome"/>);
-    /// null when it could not be made.</summary>
-    Task<string?> MakeHomeAsync(CancellationToken ct);
-
-    /// <summary>Removes a home <see cref="MakeHomeAsync"/> made, and everything the CLI wrote in it.</summary>
-    Task RemoveHomeAsync(string home);
+        CancellationToken ct, CredentialScope? scope = null);
 }
 
 /// <summary>
 /// A listing run on a worker of this process's own (<see cref="WorkerAsks.InProcess"/>): the
 /// one-process composition of <see cref="WorkerListingRunner"/>, for a caller with no connected worker.
 /// </summary>
-/// <param name="homes">Where a listing's own home is made: the member temporary folders' root,
-/// which the agent can write; <see cref="MemberTemp.Root"/> when null.</param>
-public sealed class CliListingRunner(AgentLaunchUser? runAs = null, string? homes = null) : IListingRunner
+public sealed class CliListingRunner(AgentLaunchUser? runAs = null) : IListingRunner
 {
-    private readonly WorkerListingRunner _runner = new(WorkerAsks.InProcess(runAs), homes ?? MemberTemp.Root, pathIsTheWorkers: true);
+    private readonly WorkerListingRunner _runner = new(WorkerAsks.InProcess(runAs), pathIsTheWorkers: true);
 
     public bool Installed(string command) => _runner.Installed(command);
 
     public Task<ListingRun> RunAsync(
         string command, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment,
-        CancellationToken ct, RunCredential? credential = null) =>
-        _runner.RunAsync(command, arguments, environment, ct, credential);
-
-    public Task<string?> MakeHomeAsync(CancellationToken ct) => _runner.MakeHomeAsync(ct);
-
-    public Task RemoveHomeAsync(string home) => _runner.RemoveHomeAsync(home);
+        CancellationToken ct, CredentialScope? scope = null) =>
+        _runner.RunAsync(command, arguments, environment, ct, scope);
 }
 
 /// <summary>
@@ -134,11 +121,11 @@ public static class AgentToolListers
     /// <summary>
     /// What <paramref name="command"/> would load, run with <paramref name="environment"/> and, where
     /// its listing takes them, the launch's <paramref name="isolationArguments"/>; with
-    /// <paramref name="credential"/> applied as a member run applies it, when one is issued.
+    /// <paramref name="scope"/> applied as a member run applies it.
     /// </summary>
     public static async Task<CliListing> ListAsync(
         string command, IReadOnlyList<string> isolationArguments, IReadOnlyDictionary<string, string> environment,
-        IListingRunner runner, CancellationToken ct, RunCredential? credential = null)
+        IListingRunner runner, CancellationToken ct, CredentialScope? scope = null)
     {
         var cli = Path.GetFileName(command);
 
@@ -160,7 +147,7 @@ public static class AgentToolListers
             ran.Add(shown);
             if (failed is not null) return;
 
-            var run = await runner.RunAsync(command, arguments, environment, ct, credential);
+            var run = await runner.RunAsync(command, arguments, environment, ct, scope);
             if (!run.Succeeded)
             {
                 failed = $"`{shown}` did not answer: {run.Failure ?? $"it exited {run.ExitCode}."}";

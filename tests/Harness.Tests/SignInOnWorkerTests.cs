@@ -5,7 +5,7 @@ namespace Harness.Tests;
 
 /// <summary>
 /// THE SIGN-IN PROBE IS ASKED OF A WORKER. Every command on the shared home goes to one worker in one
-/// request; an issued preset is answered in control from the resolver and asks nobody; no worker, or
+/// request; no worker, or
 /// none that answers, is not measured and never signed out; the answer is cached for thirty seconds;
 /// the doctor reads the probe control recorded and asks nothing. The probe itself, on the worker,
 /// runs the status command with the CLI's update-off.
@@ -48,22 +48,6 @@ public sealed class SignInOnWorkerTests : IDisposable
         var record = AgentAuthRecord.Read(_root)!;
         Assert.Equal("w1", record.Worker);
         Assert.Equal(new CommandSignIn("codex", true, false, "codex from w1"), record.For("codex"));
-    }
-
-    [Fact]
-    public async Task An_issued_preset_is_answered_in_control_and_asks_no_worker()
-    {
-        var worker = Answering("w1", (command, _) => new SignInProbeResult(command, true, true, "from w1"));
-        var issued = new RunCredential(
-            CredentialSource.Issued, new Dictionary<string, string> { ["ANTHROPIC_API_KEY"] = "fake-issued-value" }, [], [], true, null);
-        var catalog = new AgentCatalog([Catalog.Definitions[0]]);
-
-        var reports = await new AgentAuthProbe(catalog, credentials: new OneCredential(issued), asks: AsksOf(worker)).ReportsAsync(Ct);
-
-        var report = Assert.Single(reports);
-        Assert.Equal("issued", report.Source);
-        Assert.True(report.Authenticated);
-        Assert.Empty(worker.Sent);
     }
 
     [Fact]
@@ -185,7 +169,7 @@ public sealed class SignInOnWorkerTests : IDisposable
         var cli = Path.Combine(_root, "fake-cli");
         await TestExecutable.WriteAsync(cli, $"#!/bin/sh\necho \"$* UPDATER=$FAKE_UPDATER\" > '{said}'\nexit 0\n");
 
-        var worker = new WorkerAgentCli(new WorkerId("w1"), null, new RunHomes(null, RunHomeRemoval.For(null)));
+        var worker = new WorkerAgentCli(new WorkerId("w1"), null);
         var answer = Assert.IsType<SignInProbed>(await worker.AnswerAsync(new ProbeSignIn("r1",
         [
             new SignInProbeSpec(cli, null, null, ["auth", "status"], new Dictionary<string, string> { ["FAKE_UPDATER"] = "off" }, ["--no-update"]),
@@ -240,63 +224,6 @@ public sealed class SignInOnWorkerTests : IDisposable
         Assert.Empty(installs.For("codex"));
     }
 
-    /// <summary>
-    /// IN CONTROL AN ISSUED PRESET'S INSTALL IS THE WORKERS' MEASUREMENT, never control's own PATH:
-    /// `sh` is on every PATH and a worker measured it missing; the other command is on none and a worker
-    /// measured it installed; a third nobody measured is null.
-    /// </summary>
-    [Fact]
-    public async Task In_control_an_issued_presets_install_reads_the_workers_measurement()
-    {
-        Assert.NotNull(Harness.Pty.PathSearch.Find("sh"));
-        Assert.Null(Harness.Pty.PathSearch.Find(AbsentCli));
-        Assert.Null(Harness.Pty.PathSearch.Find(UnmeasuredCli));
-        var catalog = new AgentCatalog(
-        [
-            new AgentDefinition("sh-headless", AgentMode.Headless, new AgentLaunch("sh", [])),
-            new AgentDefinition("absent-headless", AgentMode.Headless, new AgentLaunch(AbsentCli, [])),
-            new AgentDefinition("unmeasured-headless", AgentMode.Headless, new AgentLaunch(UnmeasuredCli, [])),
-        ]);
-        var installs = new WorkerInstalls(() => [new WorkerId("w1")]);
-        installs.Record(new WorkerId("w1"), [("sh", false), (AbsentCli, true)]);
-        var worker = Answering("w1", (command, _) => new SignInProbeResult(command, true, true, "from w1"));
-
-        var reports = await new AgentAuthProbe(
-            catalog, credentials: new OneCredential(Issued), asks: AsksOf(worker),
-            installs: new AgentInstallProbe(workers: installs), measured: installs).ReportsAsync(Ct);
-
-        Assert.Equal(
-            [("sh-headless", (bool?)false), ("absent-headless", true), ("unmeasured-headless", null)],
-            reports.Select(r => (r.Agent, r.Installed)));
-        Assert.All(reports, r => Assert.Equal("issued", r.Source));
-        Assert.Empty(worker.Sent);
-    }
-
-    [Fact]
-    public async Task In_all_an_issued_presets_install_is_this_machines_path_as_before()
-    {
-        Assert.NotNull(Harness.Pty.PathSearch.Find("sh"));
-        Assert.Null(Harness.Pty.PathSearch.Find(AbsentCli));
-        var catalog = new AgentCatalog(
-        [
-            new AgentDefinition("sh-headless", AgentMode.Headless, new AgentLaunch("sh", [])),
-            new AgentDefinition("absent-headless", AgentMode.Headless, new AgentLaunch(AbsentCli, [])),
-        ]);
-        var worker = Answering("w1", (command, _) => new SignInProbeResult(command, true, true, "from w1"));
-
-        var reports = await new AgentAuthProbe(catalog, credentials: new OneCredential(Issued), asks: AsksOf(worker)).ReportsAsync(Ct);
-
-        Assert.Equal([("sh-headless", (bool?)true), ("absent-headless", false)], reports.Select(r => (r.Agent, r.Installed)));
-        Assert.Empty(worker.Sent);
-    }
-
-    private const string AbsentCli = "no-such-cli-7f3a9c";
-
-    private const string UnmeasuredCli = "no-such-cli-unmeasured-41d2";
-
-    private static readonly RunCredential Issued = new(
-        CredentialSource.Issued, new Dictionary<string, string> { ["SOME_API_KEY"] = "fake-issued-value" }, [], [], true, null);
-
     private static ScriptedCliWorker Answering(string id, Func<string, int, SignInProbeResult> result) =>
         new(id, message => message is ProbeSignIn probe
             ? new SignInProbed(probe.Request, [.. probe.Commands.Select((c, i) => result(c.Command, i))])
@@ -307,10 +234,5 @@ public sealed class SignInOnWorkerTests : IDisposable
         var asks = new WorkerAsks(() => worker);
         worker.Asks = asks;
         return asks;
-    }
-
-    private sealed class OneCredential(RunCredential credential) : IRunCredentials
-    {
-        public Task<RunCredential> ResolveAsync(string preset, AgentDefinition? definition, CancellationToken ct) => Task.FromResult(credential);
     }
 }

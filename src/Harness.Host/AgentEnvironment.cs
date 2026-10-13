@@ -112,17 +112,14 @@ public sealed class AgentEnvironment(
         Providers.Value.ByCommand.GetValueOrDefault(Path.GetFileName(command));
 
     /// <summary>
-    /// A RUN'S CREDENTIAL APPLIED AS A MEMBER RUN APPLIES IT, after the preset's and the team's env
-    /// (<paramref name="handedIn"/>) so neither can outrank it. Under either source, another
-    /// command's declared variables are REMOVED unless <paramref name="handedIn"/> holds them - the
-    /// rule <see cref="ScopeProviderKeys"/> holds for every provider key. An issued credential also
-    /// removes every variable the CLI would read for authentication, or that points it at a home
-    /// (whoever set it), then sets the issued one. Returns what <see cref="ScopeProviderKeys"/> is
-    /// then to keep: <paramref name="handedIn"/> with the issued variables, if any.
+    /// A RUN'S CREDENTIAL SCOPE APPLIED AS A MEMBER RUN APPLIES IT, after the preset's and the team's
+    /// env (<paramref name="handedIn"/>): another command's declared variables are REMOVED unless
+    /// <paramref name="handedIn"/> holds them - the rule <see cref="ScopeProviderKeys"/> holds for
+    /// every provider key.
     /// </summary>
-    public static IReadOnlyDictionary<string, string> ApplyCredential(
-        IDictionary<string, string?> environment, RunCredential? credential, IReadOnlyDictionary<string, string> handedIn) =>
-        credential is null ? handedIn : credential.ApplyTo(environment, handedIn);
+    public static void ApplyScope(
+        IDictionary<string, string?> environment, CredentialScope? scope, IReadOnlyDictionary<string, string> handedIn) =>
+        scope?.ApplyTo(environment, handedIn);
 
     /// <summary>
     /// Takes every provider key that is not <paramref name="command"/>'s own out of

@@ -21,12 +21,9 @@ func newAgentsCommand(deps Deps) *cobra.Command {
 			"`yawble secret set <KEY>` (ANTHROPIC_API_KEY, OPENAI_API_KEY, ...), then `yawble up` hands it to the container.\n" +
 			"With one agent able to run, the others are listed as not in use, with how to use them; only " +
 			"when no agent can run is there something to fix.\n\n" +
-			"Each agent also shows its source: home signs in through the shared home, issued uses the one " +
-			"credential stored for its command (`yawble agents credential set`), chosen per preset with " +
-			"`yawble agents source`.\n\n" +
-			"--details adds what a developer reads: each agent's source, when its sign-in was measured, and " +
+			"--details adds what a developer reads: when each agent's sign-in was measured, and " +
 			"the launch's and sign-in check's own words.",
-		Example: "  yawble agents\n  yawble agents --details\n  yawble agents --json\n  yawble agents source claude-headless issued\n  yawble agents credential set claude",
+		Example: "  yawble agents\n  yawble agents --details\n  yawble agents --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			e, _, _, err := prepare(deps)
@@ -62,7 +59,6 @@ func newAgentsCommand(deps Deps) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
-	cmd.Flags().BoolVar(&details, "details", false, "also print each agent's source, when it was measured, and the launch's own words")
-	cmd.AddCommand(newAgentsCredentialCommand(deps), newAgentsSourceCommand(deps))
+	cmd.Flags().BoolVar(&details, "details", false, "also print when each agent was measured, and the launch's own words")
 	return cmd
 }

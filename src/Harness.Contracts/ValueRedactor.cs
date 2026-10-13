@@ -56,15 +56,14 @@ public sealed class ValueRedactor
     }
 
     /// <summary>
-    /// The set of a run whose child is given <paramref name="environment"/>: the run's credential
-    /// values and the value of every variable in <paramref name="names"/> that environment carries.
-    /// Read where the child's environment is, so a key the child never had is not in it.
+    /// The set of a run whose child is given <paramref name="environment"/>: the value of every
+    /// variable in <paramref name="names"/> that environment carries. Read where the child's
+    /// environment is, so a key the child never had is not in it.
     /// </summary>
-    public static ValueRedactor OfEnvironment(
-        IDictionary<string, string?> environment, IEnumerable<string> names, IEnumerable<string?> credential) =>
-        For(credential.Concat(names
+    public static ValueRedactor OfEnvironment(IDictionary<string, string?> environment, IEnumerable<string> names) =>
+        For(names
             .Select(name => environment.TryGetValue(name, out var value) ? value : null)
-            .Where(value => !string.IsNullOrEmpty(value))));
+            .Where(value => !string.IsNullOrEmpty(value)));
 
     /// <summary>A set of exactly these spellings, as <see cref="Forms"/> listed them: how a set crosses a connection, sealed.</summary>
     internal static ValueRedactor FromForms(IEnumerable<string> forms) => Ordered(forms);

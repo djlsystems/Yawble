@@ -6,7 +6,7 @@ namespace Harness.Tests;
 /// <summary>
 /// A HOME RUN LOSES WHAT OTHER COMMANDS DECLARE. Each built-in headless preset, on the shared home,
 /// through the real launch path (<see cref="HomeLaunchBed"/>) while the Host holds every variable
-/// any preset's issued-credential declaration names: its child receives none of another command's,
+/// any preset's credential-variables declaration names: its child receives none of another command's,
 /// keeps its own, and keeps whatever the team or the catalog entry handed in by name.
 /// </summary>
 [Collection(ProcessEnvironmentCollection.Name)]
@@ -35,7 +35,7 @@ public sealed class HomeCredentialLaunchTests
         Assert.Empty(seen.Keys.Intersect(others));
 
         var own = HomeLaunchBed.Declared(definition).ToList();
-        if (AgentEnvironment.ProviderVariableFor(RunCredentials.CommandOf(definition)) is { } variable) own.Add(variable);
+        if (AgentEnvironment.ProviderVariableFor(CredentialScopes.CommandOf(definition)) is { } variable) own.Add(variable);
         Assert.All(own, name => Assert.Equal(HomeLaunchBed.HostValue(name), seen.GetValueOrDefault(name)));
 
         // The team's git token, as for any member of a team with a GitHub remote, and the team's own env.
@@ -47,9 +47,6 @@ public sealed class HomeCredentialLaunchTests
             .Intersect(AgentEnvironment.ProviderVariables)
             .Except(own)
             .Except([AgentEnvironment.GitHubVariable, "GITHUB_TOKEN"]));
-
-        // Home never opens the store.
-        Assert.False(File.Exists(bed.Database));
     }
 
     [Fact]

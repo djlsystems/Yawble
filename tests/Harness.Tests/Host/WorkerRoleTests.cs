@@ -216,60 +216,6 @@ public sealed class WorkerRoleTests
         }
     }
 
-    /// <summary>
-    /// ALL'S OWN WORKER REMOVES ITS RUN HOMES WITH THE WORKER'S RULE: every run home the composed Host's
-    /// worker holds - its launcher's and its agent CLIs' - is removed by <see cref="RunHomeRemoval"/>,
-    /// never looped back through control's <see cref="FolderRemoval"/>.
-    /// </summary>
-    [Fact]
-    public async Task All_removes_its_run_homes_with_the_workers_run_home_removal()
-    {
-        var root = Directory.CreateTempSubdirectory("harness-all-run-homes-").FullName;
-        try
-        {
-            await using var all = Host(root, null);
-            var worker = all.Services.GetRequiredService<InProcessWorker>();
-
-            var homes = Reachable<RunHomes>(worker.Host);
-            // The Host hands its launcher and its agent CLIs one set of homes; every one reachable is judged.
-            Assert.NotEmpty(homes);
-            Assert.All(homes, h =>
-            {
-                var remove = typeof(RunHomes).GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
-                    .Select(f => f.GetValue(h)).OfType<Func<string, string, Task>>().Single();
-                Assert.Equal(typeof(RunHomeRemoval), remove.Method.DeclaringType!.DeclaringType ?? remove.Method.DeclaringType);
-            });
-        }
-        finally
-        {
-            Clean(root);
-        }
-    }
-
-    /// <summary>Every <typeparamref name="T"/> reachable from <paramref name="from"/> through the instance fields of the Harness's own types.</summary>
-    private static List<T> Reachable<T>(object from) where T : class
-    {
-        var seen = new HashSet<object>(ReferenceEqualityComparer.Instance);
-        var found = new List<T>();
-        var next = new Queue<object>([from]);
-        while (next.TryDequeue(out var item))
-        {
-            if (!seen.Add(item)) continue;
-            if (item is T t) found.Add(t);
-
-            for (var type = item.GetType(); type is not null && type.Namespace?.StartsWith("Harness", StringComparison.Ordinal) == true; type = type.BaseType)
-            {
-                foreach (var field in type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
-                {
-                    if (field.FieldType.IsValueType) continue;
-                    if (field.GetValue(item) is { } value && value.GetType().Namespace?.StartsWith("Harness", StringComparison.Ordinal) == true) next.Enqueue(value);
-                }
-            }
-        }
-
-        return found;
-    }
-
     /// <summary>What the Host logs, at Information and above, whatever its configured level.</summary>
     private sealed class Captured : ILoggerProvider
     {

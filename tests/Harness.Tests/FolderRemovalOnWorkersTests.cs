@@ -97,7 +97,7 @@ public sealed class FolderRemovalOnWorkersTests : IDisposable
         File.WriteAllText(Path.Combine(outside, "keep"), "x");
         var escaping = Path.Combine(boundary, "..", "outside");
 
-        var worker = new WorkerAgentCli(new WorkerId("w1"), Switching, new RunHomes(null, RunHomeRemoval.For(null)));
+        var worker = new WorkerAgentCli(new WorkerId("w1"), Switching);
         var answer = Assert.IsType<RemovedAsAgent>(await worker.AnswerAsync(new RemoveAsAgent("r1", boundary, [outside, escaping, boundary]), Ct));
 
         Assert.Equal("r1", answer.Request);
@@ -164,27 +164,6 @@ public sealed class FolderRemovalOnWorkersTests : IDisposable
 
         bed.Stop();
         await running.WaitAsync(Bound, Ct);
-    }
-
-    [Fact]
-    public async Task In_all_a_run_home_is_removed_by_the_workers_run_home_removal()
-    {
-        var homes = RunHome.Homes(null);
-
-        // Composed with the worker's own rule, never control's FolderRemoval.
-        var remove = typeof(RunHomes).GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
-            .Select(f => f.GetValue(homes)).OfType<Func<string, string, Task>>().Single();
-        Assert.Equal(typeof(RunHomeRemoval), remove.Method.DeclaringType!.DeclaringType ?? remove.Method.DeclaringType);
-
-        // And it removes the home, with everything written in it and nothing beside it.
-        var parent = Directory.CreateDirectory(Path.Combine(_root, "member-temp")).FullName;
-        var home = (await homes.CreateAsync(parent, null, Ct))!;
-        Directory.CreateDirectory(Path.Combine(home, ".claude", "projects"));
-        File.WriteAllText(Path.Combine(home, ".claude", "projects", "s.jsonl"), "{}");
-        await homes.RemoveAsync(home);
-
-        Assert.False(Directory.Exists(home));
-        Assert.True(Directory.Exists(RunHome.CacheBeside(home)));
     }
 
     private static void AssertLeftWithReason(FolderRemovalReport report, string left)

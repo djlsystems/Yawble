@@ -23,11 +23,9 @@ namespace Harness.Host;
 /// byte-identical to what the runtime produced when it did this itself.
 /// </summary>
 /// <remarks>
-/// THE RUN'S CREDENTIAL IS DECIDED HERE, at run start, through <see cref="IRunCredentials"/>, and
-/// travels on <see cref="AgentInvocation.Credential"/>: the runner below only applies it. Null
-/// <paramref name="credentials"/> leaves it to the runner, which asks the same resolver.
+/// THE RUN'S CREDENTIAL SCOPE is decided by the runner below, from the catalog it owns.
 /// </remarks>
-public sealed class AgentMemberRunner(IAgentRunner agent, IContextBuilder? context = null, IRunCredentials? credentials = null)
+public sealed class AgentMemberRunner(IAgentRunner agent, IContextBuilder? context = null)
     : IMemberRunner
 {
     /// <summary>The agent stack below this adapter.</summary>
@@ -50,10 +48,6 @@ public sealed class AgentMemberRunner(IAgentRunner agent, IContextBuilder? conte
             ? MessageText.Of(invocation.Work)
             : MessageText.Of(invocation.Work) + "\n" + WorktreeText(run.BranchHint, run.Worktrees);
 
-        var credential = credentials is null
-            ? null
-            : await credentials.ResolveAsync(invocation.Implementation, null, ct);
-
         var result = await agent.RunAsync(
             new AgentInvocation(
                 invocation.Member,
@@ -63,8 +57,7 @@ public sealed class AgentMemberRunner(IAgentRunner agent, IContextBuilder? conte
                 invocation.Environment,
                 history,
                 invocation.Implementation,
-                run.UnreachableRoot,
-                credential),
+                run.UnreachableRoot),
             ct);
 
         return ToMemberResult(result);

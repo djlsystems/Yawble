@@ -819,20 +819,19 @@ func TestTheRunningLimitFixNamesTheCommandAndNoSettingKey(t *testing.T) {
 	}
 }
 
-// Doctor's default agents row says what each agent can do and leaves where its sign-in comes from
-// and when it was measured to --details, as `yawble agents` does.
-func TestDoctorDefaultAgentsRowLeavesSourceAndMeasuredForDetails(t *testing.T) {
+// Doctor's default agents row says what each agent can do and leaves when its sign-in was
+// measured to --details, as `yawble agents` does.
+func TestDoctorDefaultAgentsRowLeavesMeasuredForDetails(t *testing.T) {
 	r := sampleReport()
 	for i := range r.Agents {
 		r.Agents[i].MeasuredAt, r.Agents[i].MeasuredOn = strp("2026-10-02T12:00:00+00:00"), strp("w1")
-		r.Agents[i].CredentialSource = strp("home")
 	}
 	row := find(t, doctor.InstanceChecks(r, nil, now), "agents")
-	if strings.Contains(row.Detail, "source") || strings.Contains(row.Detail, "sign-ins measured") {
+	if strings.Contains(row.Detail, "sign-ins measured") {
 		t.Errorf("the default agents row has developer detail: %q", row.Detail)
 	}
 	full := find(t, doctor.InstanceChecksDetails(r, nil, now), "agents")
-	if !strings.Contains(full.Detail, ", source home") || !strings.Contains(full.Detail, "(sign-ins measured 2026-10-02 12:00 UTC on worker w1)") {
-		t.Errorf("--details should keep the source and when it was measured: %q", full.Detail)
+	if !strings.Contains(full.Detail, "(sign-ins measured 2026-10-02 12:00 UTC on worker w1)") {
+		t.Errorf("--details should keep when it was measured: %q", full.Detail)
 	}
 }

@@ -15,7 +15,7 @@ namespace Harness.Tests;
 /// </summary>
 public sealed class WorkerFrameTests
 {
-    private const string Value = "fake-issued-value-Qz8p/+x";
+    private const string Value = "fake-provider-value-Qz8p/+x";
 
     private static readonly RunId Run = new(new ContainerId("alpha", "worker"), "n1");
 
@@ -39,24 +39,17 @@ public sealed class WorkerFrameTests
     ];
 
     [Fact]
-    public void A_command_list_never_holds_its_credential_in_clear_and_it_opens_on_the_other_end()
+    public void A_command_list_carries_its_credential_scope_by_name_and_needs_no_key()
     {
-        var codec = new WorkerFrameCodec(Key);
         var commands = new RunAgentCommands(
-            "r1", [new AgentCliRun("claude", ["mcp", "list"], new Dictionary<string, string>(), [], 45, Scratch: true)], Start().Credential);
+            "r1", [new AgentCliRun("claude", ["mcp", "list"], new Dictionary<string, string>(), [], 45, Scratch: true)], Start().Scope);
 
-        var text = codec.Write(new CommandFrame(3, commands));
+        // Names only: nothing to seal, so the frame is plain and no key is needed.
+        var text = new WorkerFrameCodec(null).Write(new CommandFrame(3, commands));
 
-        foreach (var form in ValueRedactor.For([Value]).Forms) Assert.DoesNotContain(form, text, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Qz8p", text, StringComparison.Ordinal);
-
-        var back = (RunAgentCommands)((CommandFrame)codec.Read(text)).Message;
-        Assert.Equal(Value, back.Credential!.Environment["ISSUED_KEY"]);
+        var back = (RunAgentCommands)((CommandFrame)new WorkerFrameCodec(Key).Read(text)).Message;
+        Assert.Equal(["THIRD"], back.Scope!.OtherCommands);
         Assert.Equal(["mcp", "list"], back.Commands.Single().Arguments);
-
-        // None to seal: the frame is plain, and no key is needed.
-        var plain = new WorkerFrameCodec(null).Write(new CommandFrame(4, commands with { Credential = null }));
-        Assert.Null(((RunAgentCommands)((CommandFrame)codec.Read(plain)).Message).Credential);
     }
 
     [Fact]
@@ -89,16 +82,11 @@ public sealed class WorkerFrameTests
         // The other end of the same connection opens them.
         var back = (StartRun)((CommandFrame)new WorkerFrameCodec(
             WorkerFrameCodec.Key("the-worker-key", "control-nonce", "worker-nonce")).Read(text)).Message;
-        Assert.Equal(CredentialSource.Issued, back.Credential!.Source);
-        Assert.Equal(Value, back.Credential.Environment["ISSUED_KEY"]);
-        Assert.Equal(["OTHER"], back.Credential.Displace);
-        Assert.Equal(["THIRD"], back.Credential.OtherProviders);
-        Assert.True(back.Credential.PerRunHome);
-        Assert.Null(back.Credential.Missing);
+        Assert.Equal(["THIRD"], back.Scope!.OtherCommands);
         Assert.Equal(start.Redaction!.Forms, back.Redaction!.Forms);
         Assert.Equal(
-            System.Text.Json.JsonSerializer.Serialize<ControlMessage>(start with { Credential = null, Redaction = null }, WorkerFrameCodec.Json),
-            System.Text.Json.JsonSerializer.Serialize<ControlMessage>(back with { Credential = null, Redaction = null }, WorkerFrameCodec.Json));
+            System.Text.Json.JsonSerializer.Serialize<ControlMessage>(start with { Redaction = null }, WorkerFrameCodec.Json),
+            System.Text.Json.JsonSerializer.Serialize<ControlMessage>(back with { Redaction = null }, WorkerFrameCodec.Json));
 
         // Another connection's nonces, or another worker key, do not.
         foreach (var other in new[]
@@ -145,12 +133,12 @@ public sealed class WorkerFrameTests
             codec.Write(new CommandFrame(1, Start())),
             codec.Write(new EventFrame(new WorkerEnvelope(new WorkerId("w1"), 5, new RunCredentialApplied(Run, ValueRedactor.For([Value]))))),
             codec.Write(new CommandFrame(2, new CheckLaunch(
-                "r1", Start().Launch!, ["--version"], [], new Dictionary<string, string>(), null, 60, null, Start().Credential, Start().Redaction))),
+                "r1", Start().Launch!, ["--version"], [], new Dictionary<string, string>(), null, 60, null, Start().Scope, Start().Redaction))),
         };
 
         // A launch check's secrets open again on the other end.
         var check = (CheckLaunch)((CommandFrame)codec.Read(texts[2])).Message;
-        Assert.Equal(Value, check.Credential!.Environment["ISSUED_KEY"]);
+        Assert.Equal(ValueRedactor.For([Value]).Forms, check.Redaction!.Forms);
 
         foreach (var text in texts)
         {
@@ -185,19 +173,19 @@ public sealed class WorkerFrameTests
     {
         var codec = new WorkerFrameCodec(Key);
         var launch = new TerminalLaunch(
-            ["claude"], "/work", new Dictionary<string, string> { ["HARNESS_KEY"] = Value, ["ISSUED_KEY"] = Value + "-2" },
+            ["claude"], "/work", new Dictionary<string, string> { ["HARNESS_KEY"] = Value, ["PROVIDER_KEY"] = Value + "-2" },
             [], null, null, new TerminalMcp("http://127.0.0.1:5000", "concierge-u1"));
         var texts = new[]
         {
             codec.Write(new CommandFrame(1, new StartTerminal("terminal:t1", launch, 100, 30))),
-            codec.Write(new CommandFrame(2, new ReadAgentFile("r1", "/t.jsonl", ["ISSUED_KEY"], true, ValueRedactor.For([Value])))),
+            codec.Write(new CommandFrame(2, new ReadAgentFile("r1", "/t.jsonl", ["PROVIDER_KEY"], true, ValueRedactor.For([Value])))),
         };
 
         foreach (var text in texts) Assert.DoesNotContain("Qz8p", text, StringComparison.Ordinal);
 
         var start = (StartTerminal)((CommandFrame)codec.Read(texts[0])).Message;
         Assert.Equal(Value, start.Launch.Environment["HARNESS_KEY"]);
-        Assert.Equal(Value + "-2", start.Launch.Environment["ISSUED_KEY"]);
+        Assert.Equal(Value + "-2", start.Launch.Environment["PROVIDER_KEY"]);
         Assert.Equal("http://127.0.0.1:5000", start.Launch.Mcp!.BaseUrl);
 
         var read = (ReadAgentFile)((CommandFrame)codec.Read(texts[1])).Message;
@@ -210,10 +198,9 @@ public sealed class WorkerFrameTests
     private static StartRun Start() =>
         new(Run, "agent", "system", "prompt", "context", "/work", new Dictionary<string, string> { ["A"] = "1" }, null,
             new RunLaunch("cli", ["-p"], null, null, null, true, null, null, 600, []), null, "/tmp", null,
-            Credential: new RunCredential(
-                CredentialSource.Issued, new Dictionary<string, string> { ["ISSUED_KEY"] = Value }, ["OTHER"], ["THIRD"], true, null),
+            Scope: new CredentialScope(["THIRD"]),
             Redaction: ValueRedactor.For([Value]),
-            CredentialNames: ["ISSUED_KEY"]);
+            CredentialNames: ["PROVIDER_KEY"]);
 
     // ---- a plugin run's site data, inside the StartRun frame ----------------------------------------
 

@@ -729,7 +729,7 @@ slot like any member's.
 - **Setting a secret.** A person sets a key's value from the screen: the Add member dialog and the
   member's settings show a write-only field per secret, with Set, Replace and Clear. The value is
   stored in `plugin_secrets` (schema step `auth-025`) only as Data Protection ciphertext under
-  `<dataRoot>/keys`, as an issued agent credential is, and the member's next run reads it, with no
+  `<dataRoot>/keys`, and the member's next run reads it, with no
   restart. The operator CLI is the second way: `yawble secret set NAME`, then `yawble up`, puts it in
   the Host's environment.
   - **Which value a run gets.** At each run the key is resolved from the stored value first, then

@@ -16,9 +16,6 @@ public sealed record AgentAuthProbeSpec(
 /// of teams.</param>
 /// <param name="Launch">Whether the preset's CLI starts through a member's launch (<see cref="AgentLaunchChecks"/>).
 /// Set by the route, never by this probe: the probe runs the CLI directly and answers only "signed in".</param>
-/// <param name="Source">Where the preset signs in from: <c>home</c> (the shared agent home) or
-/// <c>issued</c> (the credential issued for its command in Admin > Agents), from
-/// <c>agents.credentialSource</c>.</param>
 /// <param name="Updating">While the platform's update holds the preset's command: the gate's sentence
 /// (<see cref="UpdatingOn.Text"/>), with <c>installed</c> and <c>authenticated</c> null - not asked, and
 /// never "not installed" or signed out. Null otherwise.</param>
@@ -30,7 +27,6 @@ public sealed record AgentAuthReport(
     string Detail,
     bool Referenced = false,
     AgentLaunchReport? Launch = null,
-    string Source = TenantSettings.HomeSource,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     string? Updating = null)
 {
@@ -69,17 +65,9 @@ public sealed record AgentAuthReport(
 /// cache never show what was measured before the hold, nor the hold after it ended. An answer for a
 /// command whose hold began or ended while it was asked is dropped, never recorded.
 /// </para>
-/// <para>
-/// A PRESET THAT SIGNS IN WITH AN ISSUED CREDENTIAL is answered from the run credential resolver
-/// alone, and whether its CLI is installed from <see cref="AgentInstallProbe.Measured"/>: signed in when the credential its command was issued is set and decrypts, not signed in
-/// otherwise. The shared home is not looked at - no credential file, no status command, no Host
-/// variable - because an issued run never reads it. Whether the value is ACCEPTED is not known
-/// until a run: no CLI here has a status command that checks a key.
-/// </para>
 public sealed class AgentAuthProbe(
     AgentCatalog catalog,
     AgentLaunchUser? runAs = null,
-    IRunCredentials? credentials = null,
     WorkerAsks? asks = null,
     string? dataRoot = null,
     ILogger<AgentAuthProbe>? log = null,
@@ -109,8 +97,8 @@ public sealed class AgentAuthProbe(
     /// <summary>How long one probe of <paramref name="commands"/> commands may take on a worker: each its status command's bound, and a margin.</summary>
     public static TimeSpan Bound(int commands) => Timeout * Math.Max(1, commands) + TimeSpan.FromSeconds(5);
 
-    /// <summary>Drops the cached answer, so the next read probes again: after an issued credential
-    /// or a preset's source changes, which the next read must show.</summary>
+    /// <summary>Drops the cached answer, so the next read probes again: after the workers change,
+    /// which the next read must show.</summary>
     public void Forget()
     {
         lock (_gate)
@@ -143,30 +131,9 @@ public sealed class AgentAuthProbe(
         {
             var command = definition.Launch.FileName;
 
-            var credential = credentials is null
-                ? RunCredential.Home
-                : await credentials.ResolveAsync(definition.Name, definition, ct);
-
             if (Holding(command) is { } hold)
             {
-                reports.Add((definition, command, Held(definition.Name, command, hold, credential.Source == CredentialSource.Issued
-                    ? TenantSettings.IssuedSource : TenantSettings.HomeSource)));
-                continue;
-            }
-
-            if (credential.Source == CredentialSource.Issued)
-            {
-                // Installed where its runs go: this machine's PATH in `all`, the workers' measurement in
-                // control - null when no worker has answered, never control's own PATH.
-                var installed = _installs.Measured(definition);
-                var detail = credential.Missing is null
-                    ? $"Signs in with the credential issued for `{RunCredentials.CommandOf(definition)}`, in "
-                      + $"{string.Join(", ", credential.Environment.Keys)}. Whether it is accepted shows at the first run."
-                    : $"Signs in with an issued credential, and the one for `{RunCredentials.CommandOf(definition)}` is not set.";
-
-                reports.Add((definition, command, new AgentAuthReport(
-                    definition.Name, command, installed, credential.Missing is null, detail,
-                    Source: TenantSettings.IssuedSource)));
+                reports.Add((definition, command, Held(definition.Name, command, hold)));
                 continue;
             }
 
@@ -203,7 +170,7 @@ public sealed class AgentAuthProbe(
         }
 
         // Every command on the shared home as it reads now: asked, or held by its update and not asked.
-        var recorded = answered.Where(report => report.Source == TenantSettings.HomeSource)
+        var recorded = answered
             .DistinctBy(report => report.Command, StringComparer.OrdinalIgnoreCase)
             .Select(report => new CommandSignIn(report.Command, report.Installed, report.Authenticated, report.Detail, report.Updating))
             .ToList();
@@ -222,16 +189,16 @@ public sealed class AgentAuthProbe(
     private string Text(AgentUpdateHold hold) => UpdatingOn.Text(hold, onThisMachine: _measured is null);
 
     /// <summary>A preset whose command the update holds: not asked, and neither installed nor signed in is claimed.</summary>
-    private AgentAuthReport Held(string agent, string command, AgentUpdateHold hold, string source)
+    private AgentAuthReport Held(string agent, string command, AgentUpdateHold hold)
     {
         var text = Text(hold);
-        return new AgentAuthReport(agent, command, null, null, text, Source: source, Updating: text);
+        return new AgentAuthReport(agent, command, null, null, text, Updating: text);
     }
 
     /// <summary>The gate's word on each report now: a command it holds reads updating, whatever was measured before.</summary>
     private IReadOnlyList<AgentAuthReport> Overlay(IReadOnlyList<AgentAuthReport> reports) =>
         gate is null ? reports : [.. reports.Select(report => Holding(report.Command) is { } hold
-            ? Held(report.Agent, report.Command, hold, report.Source) with { Referenced = report.Referenced, Launch = report.Launch }
+            ? Held(report.Agent, report.Command, hold) with { Referenced = report.Referenced, Launch = report.Launch }
             : report)];
 
     private static AgentAuthReport Answer(

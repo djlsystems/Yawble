@@ -9,8 +9,8 @@ namespace Harness.Host;
 /// <summary>
 /// THE HOST RUN AS A WORKER (<c>--Role worker</c>): one connection out to control, and the run
 /// worker behind it. It opens no store, takes no data-root lock, sets up no key ring and needs no
-/// data root at all: every path a run uses - its working directory, its temp root, its home - and
-/// its credential arrive with its start.
+/// data root at all: every path a run uses - its working directory, its temp root - and its
+/// credential scope arrive with its start.
 /// </summary>
 /// <remarks>
 /// Configured by environment or command line: <c>HARNESS_CONTROL_URL</c> (<c>--Worker:ControlUrl</c>),
@@ -121,9 +121,8 @@ public static class WorkerProcess
             procRoot: proc,
             runAs: runAs);
 
-        var homes = new RunHomes(runAs, RunHomeRemoval.For(runAs));
         var launcher = new RunLauncher(
-            heartbeat, log, runAs, reports: true, updates: updates, memory: memory, allowances: allowances, homes: homes);
+            heartbeat, log, runAs, reports: true, updates: updates, memory: memory, allowances: allowances);
 
         var connection = new ControlConnection(
             id, version, key.Trim(), ControlConnection.Connector(Http(control), key.Trim()),
@@ -138,7 +137,7 @@ public static class WorkerProcess
 
         host = new WorkerHost(
             id, connection, launcher, heartbeat, allowances, cgroup, new ProcessGroupReader(proc), RunProcessGroups.Shared,
-            cli: new WorkerAgentCli(id, runAs, homes, log), log: log,
+            cli: new WorkerAgentCli(id, runAs, log), log: log,
             streaming: new WorkerStreaming(connection, new Harness.Pty.PortaPtyEngine(), runAs));
         connection.Apply = host.ApplyAsync;
         connection.Input = host.Input;

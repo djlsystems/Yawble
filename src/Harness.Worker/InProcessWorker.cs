@@ -52,8 +52,7 @@ public sealed class InProcessWorker
     /// agent children run as, the shared update gate, the memory figures the settings give and the
     /// heavy allowance's rule, and where to read the cgroup and <c>/proc</c> (a test Host points
     /// these at fixtures). Every path is passed explicitly from <see cref="WorkerPaths"/> here, so no
-    /// default path is compiled into a control caller. <paramref name="homes"/> makes and removes the
-    /// home of a run that signs in with an issued credential. <paramref name="streams"/> takes what the
+    /// default path is compiled into a control caller. <paramref name="streams"/> takes what the
     /// worker streams to control; <paramref name="pty"/> spawns a person's terminal (Porta.Pty by default).
     /// </summary>
     public static InProcessWorker Create(
@@ -69,7 +68,6 @@ public sealed class InProcessWorker
         ILogger<RunAllowances>? allowancesLog = null,
         string? cgroupRoot = null,
         string? procRoot = null,
-        RunHomes? homes = null,
         Action<WorkerId, StreamChunk>? streams = null,
         Harness.Pty.IPtyEngine? pty = null)
     {
@@ -88,14 +86,14 @@ public sealed class InProcessWorker
             log: allowancesLog);
 
         var launcher = new RunLauncher(
-            heartbeat, launchLog, runAs, reports: true, updates: updates, memory: memory, allowances: allowances, homes: homes);
+            heartbeat, launchLog, runAs, reports: true, updates: updates, memory: memory, allowances: allowances);
 
         var worker = Connect(
             id,
             events => host = new WorkerHost(
                 id, events, launcher, heartbeat, allowances,
                 new CgroupReader(cgroupRoot ?? WorkerPaths.CgroupRoot), new ProcessGroupReader(proc), RunProcessGroups.Shared,
-                cli: new WorkerAgentCli(id, runAs, homes ?? new RunHomes(runAs, RunHomeRemoval.For(runAs)), launchLog),
+                cli: new WorkerAgentCli(id, runAs, launchLog),
                 log: launchLog,
                 streaming: new WorkerStreaming((IRunStreamSink)events, pty ?? new Harness.Pty.PortaPtyEngine(), runAs)),
             control,
@@ -112,22 +110,16 @@ public sealed class InProcessWorker
     /// worker - a test's - asks, over the same transport and the same worker code.
     /// </summary>
     public static InProcessWorker ForAgentClis(
-        WorkerId id, AgentLaunchUser? runAs, Func<WorkerEnvelope, CancellationToken, Task> control, RunHomes? homes = null)
+        WorkerId id, AgentLaunchUser? runAs, Func<WorkerEnvelope, CancellationToken, Task> control)
     {
         var heartbeat = new RunHeartbeat();
         return Connect(
             id,
             events => new WorkerHost(
                 id, events, new RunLauncher(heartbeat, runAs: runAs), heartbeat,
-                cli: new WorkerAgentCli(id, runAs, homes ?? new RunHomes(runAs, RunHomeRemoval.For(runAs)))),
+                cli: new WorkerAgentCli(id, runAs)),
             control);
     }
-
-    /// <summary>
-    /// The run homes of the Host's own worker, removed by the worker's own <see cref="RunHomeRemoval"/>,
-    /// the rule a worker process uses.
-    /// </summary>
-    public static RunHomes Homes(AgentLaunchUser? runAs) => new(runAs, RunHomeRemoval.For(runAs));
 
     /// <summary>Who agent children run as on this worker, decided once (<see cref="AgentLaunchUser.Resolve"/>).</summary>
     public static AgentLaunchUser LaunchUser(string? configured) => AgentLaunchUser.Resolve(configured);

@@ -276,7 +276,7 @@ public sealed class WorkerHost
         {
             report = await _launcher.CheckLaunchAsync(
                 check.Launch, check.Check, check.UpdateArguments, check.Environment, check.Memory, CancellationToken.None,
-                check.TimeoutSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : null, check.Credential, check.Redaction, check.TempRoot);
+                check.TimeoutSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : null, check.Scope, check.Redaction);
         }
         catch (Exception exception)
         {

@@ -19,8 +19,8 @@
 # for directories and 600 for everything else, all the way down:
 #   messages.db*  keys  agents.json*  agent-launch.json*  logs  backups  host.lock*  system-packages*  .healthz-*  connections
 #   agent-credentials  agent-auth.json*  agent-tools.json*  agent-launch-checks.json*  wip.json*  workers.json*
-# agent-credentials is the operator CLI's credential exchange: a request there can carry a credential
-# value, and the host refuses the folder unless it is its own and 0700. agent-auth.json, agent-tools.json,
+# agent-credentials is a folder no Host reads or writes; one on a volume may hold a request that
+# carries a credential value, so it is the host's and never agent's. agent-auth.json, agent-tools.json,
 # agent-launch-checks.json and wip.json are what --doctor reports as sign-ins, tools, launch checks and
 # run limits, and workers.json what it reports of each worker: an agent that could write one could make
 # the doctor lie. Only control writes any of them.

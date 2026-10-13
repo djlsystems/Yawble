@@ -5,9 +5,8 @@ namespace Harness.Host;
 
 /// <summary>
 /// EACH WORKER IS MEASURED AS IT JOINS, in control: one sign-in probe (<see cref="ProbeSignIn"/>, no
-/// new message) asking about every command the catalog launches - those only issued-credential
-/// presets launch included, which the sign-in probe itself never asks about - and each command's
-/// <c>installed</c> recorded against that worker (<see cref="WorkerInstalls"/>). Only that: an issued
+/// new message) asking about every command the catalog launches, and each command's
+/// <c>installed</c> recorded against that worker (<see cref="WorkerInstalls"/>). Only that: a
 /// preset's sign-in is never taken from it. Without this a second worker would never be measured,
 /// since the sign-in probe asks one worker, and two that disagree could not be seen. A worker that
 /// does not answer records nothing, and whatever it said before stands.

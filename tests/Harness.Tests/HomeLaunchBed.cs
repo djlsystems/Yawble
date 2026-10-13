@@ -1,18 +1,17 @@
 using Harness.Contracts;
 using Harness.Host;
-using Microsoft.AspNetCore.DataProtection;
 
 namespace Harness.Tests;
 
 /// <summary>
 /// A HOME-SOURCE RUN OF A BUILT-IN PRESET, THROUGH THE REAL LAUNCH PATH: the built-in catalog, the
 /// environment <see cref="AgentEnvironment.ForContainerAsync"/> builds for a team with a GitHub
-/// remote, and the real <see cref="ProcessAgentRunner"/> with the real <see cref="RunCredentials"/>.
-/// Each preset's command is a fake on PATH that writes its environment to a file outside the run.
+/// remote, and the real <see cref="ProcessAgentRunner"/>, which decides the run's credential scope
+/// (<see cref="CredentialScopes"/>). Each preset's command is a fake on PATH that writes its
+/// environment to a file outside the run.
 ///
 /// The Host holds every credential variable any preset declares, every provider key and the git
-/// token, each with a value naming it. The resolver's store is a database that does not exist, so a
-/// home run that opened it would create it.
+/// token, each with a value naming it.
 /// </summary>
 internal sealed class HomeLaunchBed : IDisposable
 {
@@ -26,7 +25,7 @@ internal sealed class HomeLaunchBed : IDisposable
         Catalog = new AgentCatalog([.. AgentCatalogFile.BuiltIns().Select(d => change?.Invoke(d) ?? d)]);
 
         var bin = Directory.CreateDirectory(Path.Combine(_root, "bin")).FullName;
-        foreach (var command in Catalog.Definitions.Select(RunCredentials.CommandOf).Distinct(StringComparer.Ordinal))
+        foreach (var command in Catalog.Definitions.Select(CredentialScopes.CommandOf).Distinct(StringComparer.Ordinal))
         {
             File.WriteAllText(
                 Path.Combine(bin, command),
@@ -38,10 +37,8 @@ internal sealed class HomeLaunchBed : IDisposable
         }
 
         // A launch may write its harness entry into the Host's config directory for its CLI: each
-        // one a declaration names points into this bed, never at the real one.
-        var homes = Catalog.Definitions
-            .SelectMany(d => d.IssuedCredential?.HomeVariables ?? [])
-            .Distinct(StringComparer.Ordinal)
+        // CLI's own config-directory variable points into this bed, never at the real one.
+        var homes = new[] { "CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME", "GROK_HOME" }
             .Select(n => new KeyValuePair<string, string>(
                 n, Directory.CreateDirectory(Path.Combine(_root, "homes", n)).FullName));
 
@@ -50,9 +47,7 @@ internal sealed class HomeLaunchBed : IDisposable
                 .Concat(homes)
                 .Append(new("PATH", bin + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH"))));
 
-        Credentials = new RunCredentials(
-            Catalog, _ => CredentialSource.Home, new AgentCredentialStore(Database, new EphemeralDataProtectionProvider()));
-        Runner = new ProcessAgentRunner(Catalog, new RunHeartbeat(), credentials: Credentials);
+        Runner = new ProcessAgentRunner(Catalog, new RunHeartbeat());
         Containers = new AgentEnvironment(
             new MintingPrincipals(), Catalog, "http://127.0.0.1:5391",
             new TeamDocuments(new TeamPaths(Directory.CreateDirectory(Path.Combine(_root, "teams")).FullName)));
@@ -60,33 +55,27 @@ internal sealed class HomeLaunchBed : IDisposable
 
     public AgentCatalog Catalog { get; }
 
-    public RunCredentials Credentials { get; }
-
     public ProcessAgentRunner Runner { get; }
 
     private AgentEnvironment Containers { get; }
 
-    public string Database => Path.Combine(_root, "never-created.db");
-
     private string Outside => Directory.CreateDirectory(Path.Combine(_root, "outside")).FullName;
 
-    /// <summary>Every built-in headless preset that declares an issued credential.</summary>
+    /// <summary>Every built-in headless preset that declares credential variables.</summary>
     public static TheoryData<string> HeadlessPresets()
     {
         var data = new TheoryData<string>();
         foreach (var definition in AgentCatalogFile.BuiltIns())
         {
-            if (definition is { Mode: AgentMode.Headless, IssuedCredential: not null }) data.Add(definition.Name);
+            if (definition is { Mode: AgentMode.Headless, CredentialVariables: not null }) data.Add(definition.Name);
         }
 
         return data;
     }
 
-    /// <summary>The variables <paramref name="definition"/>'s issued-credential declaration names.</summary>
+    /// <summary>The variables <paramref name="definition"/>'s credential-variables declaration names.</summary>
     public static IEnumerable<string> Declared(AgentDefinition definition) =>
-        definition.IssuedCredential is { } declaration
-            ? declaration.Displaces.Concat(declaration.Kinds.Select(k => k.Variable))
-            : [];
+        definition.CredentialVariables?.Variables ?? [];
 
     /// <summary>Every credential the Host holds in this bed.</summary>
     public static IReadOnlySet<string> HostCredentials { get; } = new SortedSet<string>(
@@ -102,10 +91,10 @@ internal sealed class HomeLaunchBed : IDisposable
     /// <summary>Every variable a command other than <paramref name="preset"/>'s declares.</summary>
     public IReadOnlySet<string> OtherCommandsDeclare(string preset)
     {
-        var command = RunCredentials.CommandOf(Definition(preset));
+        var command = CredentialScopes.CommandOf(Definition(preset));
         return new SortedSet<string>(
             Catalog.Definitions
-                .Where(d => !string.Equals(RunCredentials.CommandOf(d), command, StringComparison.OrdinalIgnoreCase))
+                .Where(d => !string.Equals(CredentialScopes.CommandOf(d), command, StringComparison.OrdinalIgnoreCase))
                 .SelectMany(Declared),
             StringComparer.Ordinal);
     }
@@ -135,7 +124,7 @@ internal sealed class HomeLaunchBed : IDisposable
 
     /// <summary>What the last child of <paramref name="preset"/>'s command was handed.</summary>
     public IReadOnlyDictionary<string, string> Seen(string preset) =>
-        File.ReadAllLines(Path.Combine(Outside, RunCredentials.CommandOf(Definition(preset)) + ".env"))
+        File.ReadAllLines(Path.Combine(Outside, CredentialScopes.CommandOf(Definition(preset)) + ".env"))
             .Where(l => l.Contains('='))
             .Select(l => l.Split('=', 2))
             .GroupBy(p => p[0])

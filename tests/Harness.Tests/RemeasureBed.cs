@@ -41,7 +41,7 @@ internal sealed class RemeasureBed : IDisposable
         Auth = new AgentAuthProbe(Catalog, asks: Asks, dataRoot: Root, installs: Probe, measured: Installs, gate: Gate);
         Runner = new ProcessAgentRunner(Catalog, new RunWorkers(Pool, _ => null), Directory, null, () => null, null, gateHere: Gate);
         Launch = new AgentLaunchChecks(Catalog, Runner, Root, gate: Gate);
-        Tools = new AgentToolPreflight(Catalog, new WorkerListingRunner(Asks, Root, pathIsTheWorkers: false), Root, gate: Gate);
+        Tools = new AgentToolPreflight(Catalog, new WorkerListingRunner(Asks, pathIsTheWorkers: false), Root, gate: Gate);
         Pass = new RemeasureWhenWorkersChange(
             [
                 ("the sign-in probe", ct => Auth.ReportsAsync(ct)),

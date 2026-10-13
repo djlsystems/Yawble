@@ -34,11 +34,9 @@ public sealed record ProbeSignIn(string Request, IReadOnlyList<SignInProbeSpec> 
 
 /// <summary>
 /// One CLI run on a worker, as the agent: the program and its arguments, what is set on the worker's
-/// environment (<see cref="Environment"/>, then the request's credential) and taken out of it after
+/// environment (<see cref="Environment"/>, then the request's credential scope) and taken out of it after
 /// (<see cref="RemovedEnvironment"/>: every provider key that is not this CLI's own), how long it may take, and whether it runs from a scratch folder
-/// of its own (a listing, so no repository's configuration is read). <see cref="HomesIn"/> set: the
-/// run gets a home of its own made in that folder (and its cache beside it), removed after, as an
-/// issued member run's. <see cref="WithUpdatesOn"/>: a platform update, which must not carry the
+/// of its own (a listing, so no repository's configuration is read). <see cref="WithUpdatesOn"/>: a platform update, which must not carry the
 /// CLI's update-off; every other run's arguments already carry it.
 /// </summary>
 public sealed record AgentCliRun(
@@ -48,7 +46,6 @@ public sealed record AgentCliRun(
     IReadOnlyList<string> RemovedEnvironment,
     int TimeoutSeconds,
     bool Scratch = false,
-    string? HomesIn = null,
     bool WithUpdatesOn = false);
 
 /// <summary>
@@ -60,10 +57,10 @@ public sealed record AgentCliRunResult(
     bool Installed, int? ExitCode, bool TimedOut, string Stdout, string Stderr, bool Truncated, string? Error);
 
 /// <summary>
-/// Run each command in order on this worker. <see cref="Credential"/> is a member run's credential,
-/// applied to every one of them as the run applies it; it holds a secret and is sealed on a connection.
+/// Run each command in order on this worker. <see cref="Scope"/> is a member run's credential scope,
+/// applied to every one of them as the run applies it.
 /// </summary>
-public sealed record RunAgentCommands(string Request, IReadOnlyList<AgentCliRun> Commands, RunCredential? Credential = null)
+public sealed record RunAgentCommands(string Request, IReadOnlyList<AgentCliRun> Commands, CredentialScope? Scope = null)
     : AgentCliCommand(Request);
 
 /// <summary>

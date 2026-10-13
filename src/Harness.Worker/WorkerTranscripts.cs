@@ -176,7 +176,7 @@ public sealed class WorkerTranscripts(
     /// <summary>Control's set, together with what this worker's own environment holds under each credential name.</summary>
     private ValueRedactor Redaction(ReadAgentFile read)
     {
-        var own = ValueRedactor.OfEnvironment((environment ?? OwnEnvironment)(), read.CredentialNames, []);
+        var own = ValueRedactor.OfEnvironment((environment ?? OwnEnvironment)(), read.CredentialNames);
         return (read.Redaction ?? ValueRedactor.Empty).With(own);
     }
 

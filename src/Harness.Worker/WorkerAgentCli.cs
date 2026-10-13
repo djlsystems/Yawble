@@ -8,9 +8,9 @@ namespace Harness.Host;
 /// the agent. Each request is applied on its own task, as a launch check is, so the worker's ordered
 /// command queue is never held by a CLI, and answered by one event under the request's id.
 /// </summary>
-public sealed class WorkerAgentCli(WorkerId id, AgentLaunchUser? runAs, RunHomes homes, ILogger? log = null)
+public sealed class WorkerAgentCli(WorkerId id, AgentLaunchUser? runAs, ILogger? log = null)
 {
-    private readonly AgentCommands _commands = new(runAs, homes);
+    private readonly AgentCommands _commands = new(runAs);
 
     /// <summary>What a path outside the removal's boundary is refused with.</summary>
     public static string NotConfined(string path, string boundary) => $"Refused: {path} is not inside {boundary}.";
@@ -42,7 +42,7 @@ public sealed class WorkerAgentCli(WorkerId id, AgentLaunchUser? runAs, RunHomes
 
             case RunAgentCommands run:
                 var ran = new List<AgentCliRunResult>(run.Commands.Count);
-                foreach (var command in run.Commands) ran.Add(await _commands.RunAsync(command, run.Credential, ct));
+                foreach (var command in run.Commands) ran.Add(await _commands.RunAsync(command, run.Scope, ct));
                 return new AgentCommandsRan(run.Request, ran);
 
             case RemoveAsAgent remove:
@@ -73,7 +73,7 @@ public sealed class WorkerAgentCli(WorkerId id, AgentLaunchUser? runAs, RunHomes
     /// </summary>
     private async Task<string?> RemoveAsync(RemoveAsAgent remove, CancellationToken ct)
     {
-        var refused = remove.Paths.Where(path => !RunHomeRemoval.Confined(remove.Boundary, path)).ToList();
+        var refused = remove.Paths.Where(path => !AgentPassRemoval.Confined(remove.Boundary, path)).ToList();
         var targets = remove.Paths.Except(refused, StringComparer.Ordinal).Distinct(StringComparer.Ordinal).ToList();
 
         if (targets.Count > 0)
@@ -86,7 +86,7 @@ public sealed class WorkerAgentCli(WorkerId id, AgentLaunchUser? runAs, RunHomes
 
             foreach (var chunk in targets.Chunk(100))
             {
-                await RunHomeRemoval.RunAsync([.. agent.Prefix, rm, "-rf", "--one-file-system", "--", .. chunk], ct);
+                await AgentPassRemoval.RunAsync([.. agent.Prefix, rm, "-rf", "--one-file-system", "--", .. chunk], ct);
             }
         }
 

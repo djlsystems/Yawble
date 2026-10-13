@@ -162,7 +162,7 @@ public sealed class WorkerTranscriptTests : IDisposable
     [Fact]
     public async Task In_one_process_the_text_is_what_it_was()
     {
-        const string Secret = "issued-value-Hq2m8Wt";
+        const string Secret = "provider-value-Hq2m8Wt";
         var streams = new WorkerStreams();
         var runAs = AgentLaunchUser.Same("tester", "the test runs everything as itself");
         var heartbeat = new RunHeartbeat();

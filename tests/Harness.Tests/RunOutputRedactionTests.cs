@@ -12,15 +12,15 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Harness.Tests;
 
 /// <summary>
-/// A MEMBER RUN'S OWN CREDENTIAL NEVER REACHES WHAT THE HOST STORES OR SERVES, on either source. A
+/// A MEMBER RUN'S OWN CREDENTIAL NEVER REACHES WHAT THE HOST STORES OR SERVES. A
 /// real Host pumps a member whose CLI is a fake named as a built-in preset's command: it prints the
 /// key it was given - plain, JSON-escaped and upper-cased - on stdout and stderr, in its transcript
 /// and in its launch check, and a second run crashes with it on stderr. The test, acting as the
 /// agent, posts it in progress, blocked and hand-back reports and watches the live view. Then every
 /// row, every response and every file the Host writes under the data root is searched for it, in
-/// any case, and the marker is found where the key was. The CLI's own kept transcript is not the
-/// Host's and is not searched. A run whose environment carries no credential is returned byte for
-/// byte. Presets and variables are read from the catalog; none is named here.
+/// any case, and the marker is found where the key was. A run whose environment carries no
+/// credential is returned byte for byte. Presets and variables are read from the catalog; none is
+/// named here.
 /// </summary>
 [Collection(ProcessEnvironmentCollection.Name)]
 public sealed class RunOutputRedactionTests : IAsyncLifetime
@@ -57,12 +57,8 @@ public sealed class RunOutputRedactionTests : IAsyncLifetime
     }
 
     [Fact]
-    public Task An_issued_credential_a_cli_prints_reaches_no_row_route_transcript_read_or_file_under_the_data_root() =>
-        ScanAsync(issued: true);
-
-    [Fact]
     public Task A_host_provider_key_a_home_run_prints_reaches_no_row_route_transcript_read_or_file_under_the_data_root() =>
-        ScanAsync(issued: false);
+        ScanAsync();
 
     [Fact]
     public async Task A_run_whose_environment_carries_no_credential_returns_its_output_byte_for_byte()
@@ -100,37 +96,33 @@ public sealed class RunOutputRedactionTests : IAsyncLifetime
 
     // ---- the scan ---------------------------------------------------------------------------------
 
-    private async Task ScanAsync(bool issued)
+    private async Task ScanAsync()
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "The fake CLI is a shell script.");
 
-        // The first built-in headless preset with a declaration, and the variable a run of it reads
-        // its key from: issued, its first kind; home, the first kind the run keeps from the Host.
+        // The first built-in headless preset with a declaration, and the first variable a run of it
+        // keeps from the Host.
         var builtIns = new AgentCatalog(AgentCatalogFile.BuiltIns());
         var preset = builtIns.Definition(HomeLaunchBed.HeadlessPresets().First().Data)!;
-        var command = RunCredentials.CommandOf(preset);
-        var declaration = preset.IssuedCredential!;
+        var command = CredentialScopes.CommandOf(preset);
+        var declaration = preset.CredentialVariables!;
         var own = AgentEnvironment.ProviderVariableFor(command);
-        var variable = issued
-            ? declaration.Kinds[0].Variable
-            : declaration.Kinds.Select(k => k.Variable).First(v => v == own || !AgentEnvironment.ProviderVariables.Contains(v));
+        var variable = declaration.Variables.First(v => v == own || !AgentEnvironment.ProviderVariables.Contains(v));
 
-        // Home: another command's declared variable, handed in by the team's env and so kept.
-        var other = issued
-            ? null
-            : builtIns.Definitions
-                .Where(d => !string.Equals(RunCredentials.CommandOf(d), command, StringComparison.OrdinalIgnoreCase))
-                .SelectMany(HomeLaunchBed.Declared)
-                .Except(HomeLaunchBed.Declared(preset))
-                .Order(StringComparer.Ordinal)
-                .First();
+        // Another command's declared variable, handed in by the team's env and so kept.
+        var other = builtIns.Definitions
+            .Where(d => !string.Equals(CredentialScopes.CommandOf(d), command, StringComparison.OrdinalIgnoreCase))
+            .SelectMany(HomeLaunchBed.Declared)
+            .Except(HomeLaunchBed.Declared(preset))
+            .Order(StringComparer.Ordinal)
+            .First();
 
         // The Host's own HOME and the CLI's config folders point into this test, never at real ones.
         var home = Directory.CreateDirectory(Path.Combine(_root, "host-home")).FullName;
         var hostEnvironment = new List<KeyValuePair<string, string>> { new("HOME", home) };
-        hostEnvironment.AddRange(builtIns.Definitions.SelectMany(d => d.IssuedCredential?.HomeVariables ?? []).Distinct()
+        hostEnvironment.AddRange(new[] { "CLAUDE_CONFIG_DIR", "CODEX_HOME", "COPILOT_HOME", "GROK_HOME" }
             .Select(n => new KeyValuePair<string, string>(n, Directory.CreateDirectory(Path.Combine(_root, "config", n)).FullName)));
-        if (!issued) hostEnvironment.Add(new(variable, Value));
+        hostEnvironment.Add(new(variable, Value));
         using var scope = new EnvironmentScope(hostEnvironment);
 
         var program = await FakeCliAsync(command, variable, other);
@@ -147,7 +139,7 @@ public sealed class RunOutputRedactionTests : IAsyncLifetime
             new AgentDefinition("fake-run", AgentMode.Headless,
                 new AgentLaunch(program, ["-p", "{userPrompt}", "--session-id", "{sessionId}"]),
                 LaunchCheck: ["--version"],
-                IssuedCredential: declaration,
+                CredentialVariables: declaration,
                 LiveView: new AgentLiveView("~/t/{sessionId}.jsonl", LiveView.ClaudeJsonl)),
             new AgentDefinition("fake-manager", AgentMode.Headless, new AgentLaunch(manager, ["-p", "{userPrompt}"]))]);
 
@@ -158,16 +150,9 @@ public sealed class RunOutputRedactionTests : IAsyncLifetime
         _person = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         (await _person.PostAsJsonAsync("/api/auth/login", new { email = Email, password = Password }, Ct)).EnsureSuccessStatusCode();
 
-        if (issued)
+        // Not captured: a team's env is the person's own record of what they handed in.
+        using (var put = await _person.PutAsJsonAsync($"/api/teams/{team}/env", new Dictionary<string, string> { [other] = Other }, Ct))
         {
-            await OkAsync(HttpMethod.Put, "/api/agents/fake-run/credential", new { kind = declaration.Kinds[0].Kind, value = Value });
-            await OkAsync(HttpMethod.Put, "/api/tenant/settings",
-                new Dictionary<string, object> { [TenantSettings.AgentCredentialSourceName] = new Dictionary<string, string> { ["fake-run"] = "issued" } });
-        }
-        else
-        {
-            // Not captured: a team's env is the person's own record of what they handed in.
-            using var put = await _person.PutAsJsonAsync($"/api/teams/{team}/env", new Dictionary<string, string> { [other!] = Other }, Ct);
             Assert.Equal(HttpStatusCode.OK, put.StatusCode);
         }
 
@@ -250,17 +235,11 @@ public sealed class RunOutputRedactionTests : IAsyncLifetime
         }
 
         // EVERY FILE the Host writes under the data root, as Latin-1 and as UTF-16 at both
-        // alignments. Not the CLI's own kept transcripts in the member's temporary folder, which hold
-        // what the CLI wrote; and not the team's env value, which the person stored there.
+        // alignments. Not the team's env value, which the person stored there.
         SqliteConnection.ClearAllPools();
         var scanned = 0;
         foreach (var file in Directory.EnumerateFiles(DataRoot, "*", SearchOption.AllDirectories))
         {
-            if (file.Contains(Path.DirectorySeparatorChar + RunHome.TranscriptsFolder + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
             byte[] bytes;
             try { bytes = await File.ReadAllBytesAsync(file, Ct); }
             catch (IOException) { continue; }

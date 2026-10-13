@@ -364,51 +364,25 @@ public static class AgentCatalogFile
         // never launches an interactive one.
         IReadOnlyList<string> versionCheck = ["--version"];
 
-        // HOW EACH CLI TAKES A CREDENTIAL ISSUED IN ADMIN > AGENTS instead of the shared home's
-        // login. Measured with real launches under `env -i` (claude 2.1.287, codex-cli 0.160.0,
-        // copilot 1.0.91, grok 1.0.46): fake keys, once in an empty HOME and once in the shared
-        // home, with a local listener recording which fake each CLI sent.
+        // THE VARIABLES EACH CLI READS FOR AUTHENTICATION, measured with real launches under `env -i`
+        // (claude 2.1.287, codex-cli 0.160.0, copilot 1.0.91, grok 1.0.46): fake keys in an empty
+        // HOME, with a local listener recording which fake each CLI sent.
         //
-        // - claude: ANTHROPIC_API_KEY (x-api-key) and CLAUDE_CODE_OAUTH_TOKEN (bearer) both beat the
-        //   home login; the key beats the token. ANTHROPIC_AUTH_TOKEN is a gateway bearer sent
-        //   beside the key, so it is displaced too.
-        // - codex: CODEX_API_KEY beats the ChatGPT login and OPENAI_API_KEY; OPENAI_API_KEY LOSES to
-        //   the login, so it is displaced and never issued. CODEX_ACCESS_TOKEN (an identity JWT)
-        //   also beats the login. The interactive TUI could not be driven from a plain pty, so the
-        //   Concierge's precedence is unmeasured.
-        // - copilot: COPILOT_GITHUB_TOKEN, first of the three the CLI reads. GH_TOKEN is the team's
-        //   git token and is never displaced. No copilot login exists on the measuring instance, so
-        //   precedence is the CLI's own help ("takes precedence over previously stored
-        //   credentials"). A classic `ghp_` token in any of the three stops copilot starting.
-        // - grok: XAI_API_KEY beats GROK_CODE_XAI_API_KEY, and the home LOGIN beats both - even a
-        //   key the API accepted.
-        //
-        // HomeVariables are each CLI's own config-directory variable: removed from an issued run so
-        // its own HOME is the only one it reads.
-        var claudeCredential = new IssuedCredential(
-            [new(IssuedCredential.ApiKey, "ANTHROPIC_API_KEY"), new(IssuedCredential.Token, "CLAUDE_CODE_OAUTH_TOKEN")],
-            ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN"],
-            IssuedCredential.CredentialWins,
-            "2.1.287",
-            HomeVariables: ["CLAUDE_CONFIG_DIR"]);
+        // - claude: ANTHROPIC_API_KEY (x-api-key) and CLAUDE_CODE_OAUTH_TOKEN (bearer);
+        //   ANTHROPIC_AUTH_TOKEN is a gateway bearer sent beside the key.
+        // - codex: CODEX_API_KEY, OPENAI_API_KEY and CODEX_ACCESS_TOKEN (an identity JWT).
+        // - copilot: COPILOT_GITHUB_TOKEN. GH_TOKEN is the team's git token and is never scoped
+        //   away.
+        // - grok: XAI_API_KEY and GROK_CODE_XAI_API_KEY.
+        var claudeCredential = new CredentialVariables(
+            ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN"], "2.1.287");
 
-        IReadOnlyList<IssuedCredentialKind> codexKinds = [new(IssuedCredential.ApiKey, "CODEX_API_KEY")];
-        IReadOnlyList<string> codexDisplaces = ["CODEX_API_KEY", "OPENAI_API_KEY", "CODEX_ACCESS_TOKEN"];
-        IReadOnlyList<string> codexHome = ["CODEX_HOME"];
+        var codexCredential = new CredentialVariables(
+            ["CODEX_API_KEY", "OPENAI_API_KEY", "CODEX_ACCESS_TOKEN"], "0.160.0");
 
-        var copilotCredential = new IssuedCredential(
-            [new(IssuedCredential.Token, "COPILOT_GITHUB_TOKEN", RefusedPrefixes: ["ghp_"])],
-            ["COPILOT_GITHUB_TOKEN"],
-            IssuedCredential.CredentialWins,
-            "1.0.91",
-            HomeVariables: ["COPILOT_HOME"]);
+        var copilotCredential = new CredentialVariables(["COPILOT_GITHUB_TOKEN"], "1.0.91");
 
-        var grokCredential = new IssuedCredential(
-            [new(IssuedCredential.ApiKey, "XAI_API_KEY")],
-            ["XAI_API_KEY", "GROK_CODE_XAI_API_KEY"],
-            IssuedCredential.LoginWins,
-            "1.0.46",
-            HomeVariables: ["GROK_HOME"]);
+        var grokCredential = new CredentialVariables(["XAI_API_KEY", "GROK_CODE_XAI_API_KEY"], "1.0.46");
 
         return
         [
@@ -422,7 +396,7 @@ public static class AgentCatalogFile
                 Install: claudeInstall,
                 Updates: claudeUpdates,
                 SessionFolders: claudeSessionFolders,
-                IssuedCredential: claudeCredential),
+                CredentialVariables: claudeCredential),
 
             new AgentDefinition(
                 "claude-headless",
@@ -474,7 +448,7 @@ public static class AgentCatalogFile
                 Updates: claudeUpdates,
                 SessionFolders: claudeSessionFolders,
                 LaunchCheck: versionCheck,
-                IssuedCredential: claudeCredential,
+                CredentialVariables: claudeCredential,
                 Attribution: claudeAttribution),
 
             // The three other coding CLIs, verified against their own --help rather than from
@@ -499,7 +473,7 @@ public static class AgentCatalogFile
                     InstructionsFile: AgentsFile),
                 Install: codexInstall,
                 Updates: codexUpdates,
-                IssuedCredential: new IssuedCredential(codexKinds, codexDisplaces, IssuedCredential.Unmeasured, "0.160.0", codexHome)),
+                CredentialVariables: codexCredential),
 
             new AgentDefinition(
                 "codex-headless",
@@ -545,7 +519,7 @@ public static class AgentCatalogFile
                 Isolation: codexIsolation,
                 Updates: codexUpdates,
                 LaunchCheck: versionCheck,
-                IssuedCredential: new IssuedCredential(codexKinds, codexDisplaces, IssuedCredential.CredentialWins, "0.160.0", codexHome),
+                CredentialVariables: codexCredential,
                 Attribution: codexAttribution),
 
             new AgentDefinition(
@@ -586,7 +560,7 @@ public static class AgentCatalogFile
                     InstructionsFile: AgentsFile),
                 Install: copilotInstall,
                 Updates: copilotUpdates,
-                IssuedCredential: copilotCredential),
+                CredentialVariables: copilotCredential),
 
             new AgentDefinition(
                 "copilot-headless",
@@ -691,7 +665,7 @@ public static class AgentCatalogFile
                 Isolation: copilotIsolation,
                 Updates: copilotUpdates,
                 LaunchCheck: versionCheck,
-                IssuedCredential: copilotCredential,
+                CredentialVariables: copilotCredential,
                 Attribution: copilotAttribution),
 
             new AgentDefinition(
@@ -704,7 +678,7 @@ public static class AgentCatalogFile
                 Install: grokInstall,
                 Updates: grokUpdates,
                 SessionFolders: grokSessionFolders,
-                IssuedCredential: grokCredential),
+                CredentialVariables: grokCredential),
 
             new AgentDefinition(
                 "grok-headless",
@@ -758,7 +732,7 @@ public static class AgentCatalogFile
                 Updates: grokUpdates,
                 SessionFolders: grokSessionFolders,
                 LaunchCheck: versionCheck,
-                IssuedCredential: grokCredential,
+                CredentialVariables: grokCredential,
                 Attribution: grokAttribution),
 
             new AgentDefinition(
