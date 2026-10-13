@@ -845,7 +845,7 @@ const stepLabels = computed(() => [
                 flat
                 dense
                 no-caps
-                size="sm"
+                color="primary"
                 label="Advanced…"
                 :loading="guideLoading"
                 data-connect-own-app-service
