@@ -117,8 +117,14 @@ async function loadCredentials() {
 /** The options of a row's source toggle: issued only where the preset declares a credential. */
 const sourceOptions = (agent: Agent) => [
   { label: 'Shared home', value: 'home' },
-  { label: 'Issued', value: 'issued', disable: !declared(agent) },
+  { label: 'Issued credential', value: 'issued', disable: !declared(agent) },
 ];
+
+/** What the two halves of Signs in through mean, behind its info icon. */
+const sourceHelp =
+  'How this preset signs in. Shared home: the logins a person made for this command in the shared ' +
+  'agent home. Issued credential: the one credential set here for this command, used by every ' +
+  'preset that runs it. The highlighted half is the one in use; choose the other to switch.';
 
 /** The preset whose source is on its way to the Host, or null. */
 const sourceBusy = ref<string | null>(null);
@@ -810,7 +816,10 @@ const rowBusy = computed(
             >
               <div class="agent-source">
                 <span class="os-text-muted">Signs in through</span>
+                <!-- A CHOICE OF TWO, drawn as one: a border round both halves, so the half that is
+                     not chosen reads as the other option rather than as text beside a button. -->
                 <q-btn-toggle
+                  class="agent-source-toggle"
                   :model-value="credentialOf(agent)!.source"
                   :options="sourceOptions(agent)"
                   dense
@@ -823,6 +832,7 @@ const rowBusy = computed(
                   data-credential-source
                   @update:model-value="(source: AgentCredentialSource) => saveSource(agent, source)"
                 />
+                <FieldHelp :text="sourceHelp" />
               </div>
               <div v-if="!declared(agent)" class="os-text-muted" data-no-declaration>
                 This preset declares no issued credential: it signs in through the shared home only.
@@ -1172,6 +1182,10 @@ const rowBusy = computed(
   flex-wrap: wrap;
   align-items: center;
   gap: 0 0.5rem;
+}
+
+.agent-source-toggle {
+  border: 1px solid var(--os-rule-strong);
 }
 
 /* The sign-in caption wraps for the same reason: the probe's sentence is the part worth reading

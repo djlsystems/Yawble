@@ -44,7 +44,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
 
 import AgentsDialog from '../AgentsDialog.vue';
 import type { Agent, AgentCredential, IssuedCredentialDeclaration } from '../../api/types';
-import { bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
+import { bodyText, helpTexts, mountDialog, resetBody } from '../../test/mountQuasar';
 import { button, field, settle, type } from '../../test/formProbe';
 import { ProviderTermsSentence } from '../../lib/agentCredentials';
 
@@ -375,7 +375,7 @@ describe('AgentsDialog credentials, mounted', () => {
   it('switches a preset to issued through the tenant settings', async () => {
     const wrapper = await mountDialog(AgentsDialog);
 
-    sourceButton('claude-headless', 'Issued').click();
+    sourceButton('claude-headless', 'Issued credential').click();
     await settle();
 
     expect(saveTenantSettings).toHaveBeenCalledTimes(1);
@@ -384,7 +384,7 @@ describe('AgentsDialog credentials, mounted', () => {
       { 'agents.credentialSource': { grok: 'issued', gone: 'issued', 'claude-headless': 'issued' } },
     ]);
     // Only this preset's source moved: the sibling stays on the shared home.
-    expect(sourceButton('claude-headless', 'Issued').getAttribute('aria-pressed')).toBe('true');
+    expect(sourceButton('claude-headless', 'Issued credential').getAttribute('aria-pressed')).toBe('true');
     expect(sourceButton('claude', 'Shared home').getAttribute('aria-pressed')).toBe('true');
     // Issued with nothing set says what that means.
     expect(block('claude-headless').querySelector('[data-credential-missing]')?.textContent).toContain('do not start');
@@ -393,6 +393,22 @@ describe('AgentsDialog credentials, mounted', () => {
     sourceButton('claude-headless', 'Shared home').click();
     await settle();
     expect(saveTenantSettings.mock.calls[1]).toEqual([{ 'agents.credentialSource': { grok: 'issued', gone: 'issued' } }]);
+
+    wrapper.unmount();
+  });
+
+  it('draws Signs in through as a choice of two and says what each half means', async () => {
+    const wrapper = await mountDialog(AgentsDialog);
+
+    const source = block('claude-headless').querySelector<HTMLElement>('[data-credential-source]');
+    expect(source?.classList.contains('agent-source-toggle')).toBe(true);
+    expect(sourceButton('claude-headless', 'Shared home')).toBeTruthy();
+    expect(sourceButton('claude-headless', 'Issued credential')).toBeTruthy();
+
+    const help = helpTexts(block('claude-headless').querySelector('.agent-source')!).join(' ');
+    expect(help).toContain('Shared home: the logins');
+    expect(help).toContain('Issued credential: the one credential');
+    expect(help).toContain('choose the other to switch');
 
     wrapper.unmount();
   });
@@ -455,7 +471,7 @@ describe('AgentsDialog credentials, mounted', () => {
   it('refuses issued for a preset with no declaration', async () => {
     const wrapper = await mountDialog(AgentsDialog);
 
-    const issued = sourceButton('my-model', 'Issued');
+    const issued = sourceButton('my-model', 'Issued credential');
     expect(issued.hasAttribute('disabled') || issued.getAttribute('aria-disabled') === 'true').toBe(true);
     issued.click();
     await settle();
