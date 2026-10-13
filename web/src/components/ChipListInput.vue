@@ -205,7 +205,6 @@ function onDraftKey(event: KeyboardEvent) {
       @input-value="onTyped"
       @keydown="onFieldKey"
     >
-      <template #append><FieldHelp :text="hint" /></template>
       <template #selected>
         <div class="chip-list-chips">
           <q-chip
@@ -222,8 +221,11 @@ function onDraftKey(event: KeyboardEvent) {
         </div>
       </template>
 
-      <template v-if="canType && !readonly" #append>
+      <!-- ONE append slot: two templates for it and the second wins, hiding the help. -->
+      <template #append>
+        <FieldHelp :text="hint" />
         <q-btn
+          v-if="canType && !readonly"
           flat
           dense
           round

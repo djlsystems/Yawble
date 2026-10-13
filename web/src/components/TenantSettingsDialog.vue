@@ -421,19 +421,17 @@ function holdText(hold: { team: string; member: string }) {
         </q-tab-panel>
 
         <q-tab-panel name="sweeps">
-          <div class="q-gutter-md">
-            <TenantSettingField
-              v-for="field in fieldsOn('sweeps')"
-              :key="field.name"
-              :field="field"
-              :setting="settingFor(field.name)"
-              :error="errorFor(field.name)"
-              :disable="busy"
-              :model-value="drafts[field.name] ?? ''"
-              @update:model-value="(value: string) => setDraft(field.name, value)"
-              @reset="askReset(field.name)"
-            />
-          </div>
+          <TenantSettingField
+            v-for="field in fieldsOn('sweeps')"
+            :key="field.name"
+            :field="field"
+            :setting="settingFor(field.name)"
+            :error="errorFor(field.name)"
+            :disable="busy"
+            :model-value="drafts[field.name] ?? ''"
+            @update:model-value="(value: string) => setDraft(field.name, value)"
+            @reset="askReset(field.name)"
+          />
         </q-tab-panel>
 
         <q-tab-panel name="kanban">

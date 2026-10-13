@@ -176,6 +176,24 @@ describe('the tabs', () => {
 
     expect(tabLabels()).toEqual(['Admission', 'Spend', 'Concierge', 'Sweeps', 'Kanban', 'System', 'Catalog health', 'Roots']);
   });
+
+  it("puts each setting's info icon inside its own box, or beside its own toggle, never on the line under it", async () => {
+    const wrapper = await openDialog();
+    const setting = (name: string) => document.body.querySelector(`[data-setting="${name}"]`)!;
+
+    // A box: the icon is in the box's own append slot.
+    expect(setting('wip.maxRunning').querySelector('.q-field__append [data-help]')).not.toBeNull();
+
+    // A toggle: the icon is on the toggle's own row.
+    await showTab(wrapper, 'system');
+    const toggleRow = setting('updates.check').querySelector('.q-toggle')!.parentElement!;
+    expect(toggleRow.querySelector('[data-help]')).not.toBeNull();
+
+    // The line under each setting says only where its value comes from.
+    for (const meta of document.body.querySelectorAll('.tenant-setting-meta')) {
+      expect(meta.querySelector('[data-help]')).toBeNull();
+    }
+  });
 });
 
 describe('Admission', () => {
