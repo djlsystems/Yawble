@@ -175,14 +175,17 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         var manifest = plugin.Manifest;
         var bound = settings is null ? PluginMemberSettings.None : await settings.ForAsync(invocation.Member, ct);
 
+        // WHAT ONLY A PERSON CAN FIX - a setting, a key, a connection - fails the run NEEDS-PERSON:
+        // nothing ran, nothing is wrong with the plugin, and a person's save tells the Manager when
+        // it is ready (PluginReadyNotice). Never agent-fault, which would say re-running is wasted.
         var (config, configRefusal) = EffectiveConfig(manifest, bound);
-        if (configRefusal is not null) return MemberResult.NotRun(configRefusal);
+        if (configRefusal is not null) return MemberResult.NotRun(configRefusal, FailureClasses.NeedsPerson);
 
         var (resolvedSecrets, secretKeys, secretRefusal) = ResolveSecrets(manifest, bound);
-        if (secretRefusal is not null) return MemberResult.NotRun(secretRefusal);
+        if (secretRefusal is not null) return MemberResult.NotRun(secretRefusal, FailureClasses.NeedsPerson);
 
         var (grants, connectionRefusal) = await GrantConnectionsAsync(manifest, bound, ct);
-        if (connectionRefusal is not null) return MemberResult.NotRun(connectionRefusal);
+        if (connectionRefusal is not null) return MemberResult.NotRun(connectionRefusal, FailureClasses.NeedsPerson);
 
         // THE REDACTION SET: every bound secret AND every access token and app password this run is handed.
         IReadOnlyList<string> redacted = [.. resolvedSecrets.Values, .. grants.Values.SelectMany(g => g.Secrets)];
@@ -674,7 +677,8 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
     /// not a refusal: the member fails its runs, naming the key, until it is set.
     /// </summary>
     public static string? SettingsRefusal(
-        PluginManifest manifest, PluginMemberSettings settings, ISecretStore? secrets, bool requireSet = true, PluginMemberSettings? stored = null)
+        PluginManifest manifest, PluginMemberSettings settings, ISecretStore? secrets, bool requireSet = true, PluginMemberSettings? stored = null,
+        bool requireBound = true)
     {
         foreach (var (name, value) in settings.Config)
         {
@@ -721,8 +725,11 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
 
         foreach (var (name, secret) in manifest.Secrets.Where(s => s.Value.Required))
         {
+            // An agent's hire may leave a required secret unbound (requireBound false): the member
+            // is made and waits for a person to bind it (PluginReadyNotice.Missing).
             if (!settings.Secrets.TryGetValue(name, out var key))
             {
+                if (!requireBound) continue;
                 return $"Plugin '{manifest.Id}' requires the secret `{name}`: bind it to a logical key, as in \"secrets\": {{\"{name}\": \"MY_KEY\"}}.";
             }
 

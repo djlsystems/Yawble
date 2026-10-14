@@ -5362,6 +5362,14 @@ app.MapPost("/api/teams/{team}/containers", async (
         // route is a WORKER: it gets no credential and no HARNESS_* environment, so its agent
         // cannot call the platform at all. A manager is created with the team and is the only container
         // that gets any, which is what stops "add a member" being a way to mint authority.
+        // AN AGENT'S PLUGIN HIRE MAY WAIT FOR A PERSON. A Manager or a Concierge may hire a plugin it
+        // cannot finish setting up - a key no person bound on this team, a connection only a person
+        // chooses: the member is made, its answer names what a person must set, and its runs fail
+        // needs-person until a person's save leaves nothing missing (PluginReadyNotice). The keys
+        // and connections it DOES name are still checked above; nothing here lets it bind more.
+        var agentPluginHire = hirer is { Kind: PrincipalKind.Container or PrincipalKind.Concierge or PrincipalKind.TenantConcierge }
+            && request.Agent is { } agentPlugin && MemberRef.IsPlugin(agentPlugin.Trim(), out _);
+
         var snapshot = await teams.HireMemberAsync(
             // THE TEAM, never a name in code - the Agent half of the same rule its Prompt follows,
             // and refused rather than defaulted when the team has chosen none.
@@ -5390,7 +5398,8 @@ app.MapPost("/api/teams/{team}/containers", async (
 
             // THE HIRER wrote the member's own instructions: a Manager through the `member` tool,
             // or a person.
-            promptSetBy: await SystemPromptSetters.ForAsync(context, users, ct));
+            promptSetBy: await SystemPromptSetters.ForAsync(context, users, ct),
+            waitForPerson: agentPluginHire);
 
         // Said in the BODY as well as the header: the body is what the `member` tool hands the
         // Manager, and a substitution said only in a header is never seen by anyone who hired.
@@ -5423,6 +5432,30 @@ app.MapPost("/api/teams/{team}/containers", async (
         {
             obj["unresolvedAgents"] = JsonSerializer.SerializeToNode(unresolvedList, new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } });
             if (hiringNotice is not null) obj["hiringNotice"] = hiringNotice;
+
+            // WHAT A PERSON MUST STILL SET, said to whoever hired: the `member` tool hands it to the
+            // Manager, which reports it to the person once rather than running the member to find out.
+            if (MemberRef.IsPlugin(snapshot.Agent, out var waitingPluginId) && plugins.For(waitingPluginId) is { } waitingPlugin)
+            {
+                var missing = PluginReadyNotice.Missing(
+                    waitingPlugin.Manifest,
+                    new PluginMemberSettings(
+                        request.Config ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal),
+                        request.Secrets ?? new Dictionary<string, string>(StringComparer.Ordinal))
+                    {
+                        Connections = request.Connections ?? new Dictionary<string, string>(StringComparer.Ordinal),
+                    },
+                    secretStore);
+                if (missing.Count > 0)
+                {
+                    obj["waitingForPerson"] = new JsonArray([.. missing.Select(m => (JsonNode)JsonValue.Create(m)!)]);
+                    obj["waitingNotice"] =
+                        $"{snapshot.Name} is hired but waits for a person to {string.Join("; and to ", missing)}. "
+                        + "Send it its work as planned and tell the person what to set, once: until then each run "
+                        + "fails needs-person without running or spending, and when a person has set it you are "
+                        + "told in that workflow to send the instruction again.";
+                }
+            }
         }
         return Results.Json(node, statusCode: 200);
     }

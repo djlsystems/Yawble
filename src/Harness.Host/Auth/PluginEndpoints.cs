@@ -164,7 +164,7 @@ public static class PluginEndpoints
             [Description(Describe.Team)] string team,
             [Description("The member, as addressed in its route.")] string member,
             PluginSettingsChange request, TeamRegistry teams, PluginCatalog plugins,
-            IPluginMemberSettingsStore settings, ISecretStore secrets, Connections connections, HttpContext context,
+            IPluginMemberSettingsStore settings, ISecretStore secrets, Connections connections, IMessageLog log, HttpContext context,
             CancellationToken ct) =>
         {
             var (found, plugin, refusal) = await PluginMemberAsync(teams, plugins, team, member, ct);
@@ -212,6 +212,10 @@ public static class PluginEndpoints
                     statusCode: StatusCodes.Status500InternalServerError);
             }
 
+            // A PERSON'S SAVE THAT LEAVES NOTHING MISSING tells the Manager in every workflow whose run
+            // of this member failed needs-person. Best effort: the save stands whatever the notice does.
+            await NoticeIfReadyAsync(log, id, found.Label ?? found.Name, plugin.Manifest, changed, secrets, ct);
+
             return Results.Ok(Settings(id, plugin, changed));
         })
             .WithTags("Members")
@@ -257,7 +261,8 @@ public static class PluginEndpoints
         // tenant row in the same transaction, read by the next run of every member binding it.
         app.MapPut("/api/secrets/{key}", async (
             [Description("The logical key, as in ACME_STORAGE_KEY.")] string key,
-            SecretSubmission body, PluginSecretStore secrets, HttpContext context, CancellationToken ct) =>
+            SecretSubmission body, PluginSecretStore secrets, TeamRegistry teams, PluginCatalog plugins,
+            IPluginMemberSettingsStore settings, IMessageLog log, HttpContext context, CancellationToken ct) =>
             {
                 if (EnvironmentSecretStore.Refusal(key) is { } refusal)
                 {
@@ -276,6 +281,16 @@ public static class PluginEndpoints
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
                     return Results.Json(SecretAnswer(key, secrets, Unrecorded(key, exception)), statusCode: StatusCodes.Status500InternalServerError);
+                }
+
+                // EVERY PLUGIN MEMBER BOUND TO THIS KEY that is ready now tells its Manager, as a save does.
+                foreach (var member in teams.All().SelectMany(t => t.Containers))
+                {
+                    if (!MemberRef.IsPlugin(member.Agent, out var pluginId) || plugins.For(pluginId) is not { } plugin) continue;
+                    var id = new ContainerId(member.Team, member.Id);
+                    var bound = await settings.ForAsync(id, ct);
+                    if (!bound.Secrets.Values.Contains(key, StringComparer.Ordinal)) continue;
+                    await NoticeIfReadyAsync(log, id, member.Name, plugin.Manifest, bound, secrets, ct);
                 }
 
                 return Results.Ok(SecretAnswer(key, secrets));
@@ -424,6 +439,27 @@ public static class PluginEndpoints
     };
 
     /// <summary>The member, its active plugin, or the answer saying why there is none.</summary>
+    /// <summary>
+    /// Tells the Manager the member is ready (<see cref="PluginReadyNotice"/>) when nothing a person
+    /// sets is missing any more. A notice that cannot be written is logged by the log and never
+    /// undoes the person's save.
+    /// </summary>
+    private static async Task NoticeIfReadyAsync(
+        IMessageLog log, ContainerId id, string name, PluginManifest manifest, PluginMemberSettings bound, ISecretStore secrets,
+        CancellationToken ct)
+    {
+        if (PluginReadyNotice.Missing(manifest, bound, secrets).Count > 0) return;
+
+        try
+        {
+            await PluginReadyNotice.SendAsync(log, id, name, ct);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // The save is the person's act and stands; the Manager can still be told by a person.
+        }
+    }
+
     private static async Task<(PersistedMember? Member, InstalledPlugin? Plugin, IResult? Refusal)> PluginMemberAsync(
         TeamRegistry teams, PluginCatalog plugins, string team, string member, CancellationToken ct)
     {

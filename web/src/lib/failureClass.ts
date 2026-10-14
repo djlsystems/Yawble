@@ -29,6 +29,7 @@ export const FailureClasses = {
   Timeout: 'timeout',
   Interrupted: 'interrupted',
   WorkerLost: 'worker-lost',
+  NeedsPerson: 'needs-person',
   Unknown: 'unknown',
 } as const
 
@@ -78,6 +79,8 @@ export function failureClassWords(
       return 'the run was cut off before it finished'
     case FailureClasses.WorkerLost:
       return 'the worker running this run stopped, so how far it got is not known; re-sending the instruction runs it on a worker that is there'
+    case FailureClasses.NeedsPerson:
+      return 'it waits for a person to set what its error names, in its settings; nothing ran and nothing was spent'
     case FailureClasses.Unknown:
       return 'nothing could say why, so this is treated as an agent fault and is not resumed'
     default:
@@ -112,6 +115,8 @@ function pluginFailureWords(failureClass: string | null | undefined): string | n
       return 'the run was cut off before it finished'
     case FailureClasses.WorkerLost:
       return 'the worker running this run stopped; re-sending the instruction runs it on a worker that is there'
+    case FailureClasses.NeedsPerson:
+      return 'it waits for a person to set what its error names, in its settings; the Manager is told when it is ready'
     case FailureClasses.Unknown:
       return 'nothing could say why, so this is not resumed'
     default:

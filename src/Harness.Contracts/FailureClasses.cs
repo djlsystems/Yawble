@@ -116,6 +116,16 @@ public static class FailureClasses
     public const string WorkerLost = "worker-lost";
 
     /// <summary>
+    /// A PLUGIN MEMBER WAITS FOR A PERSON: its run did not start because something only a person
+    /// sets is missing - a required key not bound or not set, a required connection not bound, a
+    /// connection to reconnect - and the run's error names it. Nothing ran and nothing was spent;
+    /// nothing is wrong with the plugin or the instruction. Never resumed automatically: when a
+    /// person's save leaves nothing missing, the platform tells the Manager in the workflow
+    /// (<c>PluginReadyNotice</c>), and the Manager sends the instruction again.
+    /// </summary>
+    public const string NeedsPerson = "needs-person";
+
+    /// <summary>
     /// NOBODY COULD CLASSIFY IT - the default, and a real class rather than an absence. Treated
     /// exactly as <see cref="AgentFault"/>: never resumed.
     /// </summary>
@@ -124,7 +134,7 @@ public static class FailureClasses
     /// <summary>Every class, for a test or a renderer that wants to enumerate them.</summary>
     public static readonly IReadOnlyList<string> All =
     [
-        Quota, Rate, Transport, AgentFault, LaunchMissing, OutOfMemory, Crashed, Timeout, Interrupted, WorkerLost, Unknown,
+        Quota, Rate, Transport, AgentFault, LaunchMissing, OutOfMemory, Crashed, Timeout, Interrupted, WorkerLost, NeedsPerson, Unknown,
     ];
 
     /// <summary>
@@ -173,6 +183,8 @@ public static class FailureClasses
         Interrupted => "The run was cut off before it finished.",
         WorkerLost => "The worker running this run stopped, so how far it got is not known; "
             + "re-sending the instruction runs it on a worker that is there.",
+        NeedsPerson => "The member waits for a person to set what its error names - a key, a connection or a setting - "
+            + "so nothing ran and nothing was spent. The Manager is told when it is ready.",
         Unknown => "Nothing here could say why, so this is treated exactly as an agent fault and "
             + "will not be resumed automatically.",
         _ => null,

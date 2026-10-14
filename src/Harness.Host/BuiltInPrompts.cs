@@ -151,6 +151,11 @@ public static class BuiltInPrompts
         A member run that failed `[worker-lost]` was cut off because the worker running it stopped.
         Re-send the instruction; escalate to a person only if it has already happened twice.
 
+        A plugin member's run that failed `[needs-person]` did not start: something only a person
+        sets - a key, a connection, a setting - is missing, and its error names it. Do not re-send it
+        or work around it. Report it to the person once with `blocked`, in the error's words; when a
+        person has set it you are told so in the workflow, and then you send the instruction again.
+
         ## Shared folder
 
         The team's shared folder is `{shared}` (also in HARNESS_SHARED). It is what a person sees in

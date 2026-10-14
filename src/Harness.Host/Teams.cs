@@ -2711,10 +2711,12 @@ public sealed class TeamRegistry(
         PluginMemberSettings? settings = null,
         SystemPromptSetter? promptSetBy = null,
         Func<ContainerId, TriggerAudit>? connectionsAudit = null,
-        bool secretsSetLater = false) =>
+        bool secretsSetLater = false,
+        bool waitForPerson = false) =>
         AddContainerAsync(
             team, label, agent, systemPrompt, subscribes, hiredFor: hiredFor, ct: ct, settings: settings,
-            promptSetBy: promptSetBy, connectionsAudit: connectionsAudit, secretsSetLater: secretsSetLater);
+            promptSetBy: promptSetBy, connectionsAudit: connectionsAudit, secretsSetLater: secretsSetLater,
+            waitForPerson: waitForPerson);
 
     /// <summary>
     /// Adds a container called <paramref name="label"/>, deriving its identifier the same way a
@@ -2733,7 +2735,8 @@ public sealed class TeamRegistry(
         PluginMemberSettings? settings = null,
         SystemPromptSetter? promptSetBy = null,
         Func<ContainerId, TriggerAudit>? connectionsAudit = null,
-        bool secretsSetLater = false)
+        bool secretsSetLater = false,
+        bool waitForPerson = false)
     {
         if (!_teams.TryGetValue(team, out var members)) throw new InvalidOperationException($"No team '{team}'.");
 
@@ -2757,7 +2760,9 @@ public sealed class TeamRegistry(
         }
 
         if (isPlugin && plugins?.For(pluginId!) is { } installed
-            && PluginMemberRunner.SettingsRefusal(installed.Manifest, settings ?? PluginMemberSettings.None, secrets, requireSet: !secretsSetLater) is { } settingsRefusal)
+            && PluginMemberRunner.SettingsRefusal(
+                installed.Manifest, settings ?? PluginMemberSettings.None, secrets,
+                requireSet: !secretsSetLater && !waitForPerson, requireBound: !waitForPerson) is { } settingsRefusal)
         {
             throw new PluginSettingsException(settingsRefusal);
         }

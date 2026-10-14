@@ -225,6 +225,16 @@ public static class BuiltInSkills
             Only when the same member's run has already been lost this way twice in this workflow,
             report it to the person and stop.
 
+            ## A plugin member waiting for a person is reported once, then re-sent when ready
+
+            A plugin member's run that failed with `[needs-person]` did not start: something only a
+            person sets - a key, a connection, a setting - is missing, and the run's error names it.
+            Nothing ran and nothing was spent. Do not re-send it, and do not try another member or
+            another way: report it to the person once with `blocked`, in the error's words (which
+            setting of which member). When a person's save leaves nothing missing, the platform tells
+            you in this workflow that the member is ready; then send the same instruction again, with
+            the same `card`.
+
             If the team stopped part-way - a failed run, a spend limit, a restart - load the
             `recovery` skill before dispatching anything. If you are asked to finalise, finish, wrap
             up or clean up a round, load the `wrap-up` skill first. Before you sign in to anything,
@@ -1399,7 +1409,11 @@ public static class BuiltInSkills
             its path, or from Admin, Plugins, "Install from a folder", with no copy out of the
             container. It is then hired from the Add member dialog, or by a Manager with `member` naming the plugin id
             that `hiring` lists. A Manager may bind only secret keys a person has already bound on its
-            team, so the first member to use a new key is hired by a person.
+            team. A hire that leaves a required key or a required connection unbound is still made and
+            waits for a person: its answer lists what a person must set (`waitingForPerson`, said in
+            `waitingNotice`), each run of it fails `[needs-person]` without running until then, and
+            you are told in the workflow when it is ready. Send it its work as planned, tell the
+            person once what to set, and send the instruction again when you are told.
 
             ## 10. What goes in a plugin spec
 

@@ -247,3 +247,11 @@ describe('summarise of a failed row', () => {
     )
   })
 })
+
+describe('needs-person', () => {
+  it('says the member waits for a person, for an agent and a plugin alike, and is never resumed', () => {
+    expect(failureClassWords('needs-person')).toContain('waits for a person to set what its error names')
+    expect(failureClassWords('needs-person', 'plugin')).toContain('the Manager is told when it is ready')
+    expect(resumesAutomatically('needs-person')).toBe(false)
+  })
+})
