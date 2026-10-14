@@ -170,7 +170,21 @@ public sealed class ConciergeOnWorkerProcessTests
 
             await browser.TypeAsync("bye\r");
 
-            await bed.UntilAsync("the browser was told the CLI exited", () => Task.FromResult(browser.CloseReason == "exit 0"));
+            // UNDER FULL-SUITE LOAD THIS WAIT HAS TIMED OUT ONCE (13 October 2026) with nothing to say
+            // why; the browser's own view goes in the message, so the next one says whether the socket
+            // closed, with what reason, and what the terminal printed last.
+            try
+            {
+                await bed.UntilAsync("the browser was told the CLI exited", () => Task.FromResult(browser.CloseReason == "exit 0"));
+            }
+            catch (TimeoutException timeout)
+            {
+                var seen = browser.Seen;
+                throw new TimeoutException(
+                    $"{timeout.Message}\nThe browser: closed {browser.Closed}, close reason '{browser.CloseReason ?? "(none)"}', "
+                    + $"the CLI {(ProcessBed.Alive(cli) ? "still running" : "gone")}, last printed: {seen[Math.Max(0, seen.Length - 400)..]}",
+                    timeout);
+            }
             await bed.UntilAsync("nobody holds heavy", async () => (await bed.HeavyAsync()).Holding.Count == 0);
             await bed.UntilAsync("the Concierge's CLI is gone", () => Task.FromResult(!ProcessBed.Alive(cli)));
             Assert.Equal(0, await bed.ConciergePrincipalsAsync());
