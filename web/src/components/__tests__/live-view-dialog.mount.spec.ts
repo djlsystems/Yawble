@@ -474,6 +474,59 @@ describe('the watch dialog: live run and earlier runs', () => {
     expect(document.body.querySelectorAll('.run-transcript-line')).toHaveLength(0);
   });
 
+  it('steps from an open run to the newer and older ones across workflows, loading the next older page when it reaches the end', async () => {
+    const fetch = stubApi({
+      pages: {
+        '': { runs: [run(30, { workflow: 12 }), run(29, { workflow: 11 })], nextBefore: 29 },
+        '29': { runs: [run(5, { workflow: 4 })], nextBefore: null },
+      },
+      transcripts: { 30: text('thirty'), 29: text('twenty-nine'), 5: text('five') },
+    });
+    await mountDialog(LiveViewDialog, { ...props, running: false });
+
+    runRows()[0]!.click();
+    await flushPromises();
+    const newer = () => bodyFind('.earlier-run-newer') as HTMLButtonElement;
+    const older = () => bodyFind('.earlier-run-older') as HTMLButtonElement;
+    const heading = () => bodyFind('.earlier-run-heading')!.textContent!;
+    expect(heading()).toContain('workflow #12');
+    expect(newer().disabled).toBe(true);
+    expect(bodyFind('.earlier-run-position')!.textContent!.trim()).toBe('1 of 2+');
+
+    older().click();
+    await flushPromises();
+    expect(heading()).toContain('workflow #11');
+    expect(bodyFind('.run-transcript-lines')!.textContent).toContain('twenty-nine');
+
+    older().click();
+    await flushPromises();
+    expect(fetch).toHaveBeenCalledWith('/api/teams/alpha/members/Builder/runs?before=29', undefined);
+    expect(heading()).toContain('workflow #4');
+    expect(bodyFind('.run-transcript-lines')!.textContent).toContain('five');
+    expect(older().disabled).toBe(true);
+    expect(bodyFind('.earlier-run-position')!.textContent!.trim()).toBe('3 of 3');
+
+    newer().click();
+    await flushPromises();
+    expect(heading()).toContain('workflow #11');
+  });
+
+  it("steps a plugin member's runs one by one, each showing what it reported", async () => {
+    stubApi({
+      pages: { '': { runs: [run(9, { output: 'nine' }), run(8, { output: 'eight' })], nextBefore: null } },
+    });
+    await mountDialog(LiveViewDialog, { ...props, running: false, plugin: true });
+
+    runRows()[0]!.click();
+    await flushPromises();
+    expect(bodyFind('.run-output')!.textContent).toBe('nine');
+
+    (bodyFind('.earlier-run-older') as HTMLElement).click();
+    await flushPromises();
+    expect(bodyFind('.run-output')!.textContent).toBe('eight');
+    expect((bodyFind('.earlier-run-older') as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('follows the member when it starts running while the dialog is open', async () => {
     const live = liveStream();
     stubApi({ live: live.response });

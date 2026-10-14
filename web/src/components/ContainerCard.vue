@@ -228,7 +228,8 @@ async function stop() {
              invites the click. -->
         <!-- THE EYE FOLLOWS `watchable`, NOT `running`: an idle member's earlier runs are
              still there to read. A member whose agent has no live view shows none, rather than an
-             eye that opens onto "no live view". -->
+             eye that opens onto "no live view". A PLUGIN HAS NO LIVE VIEW, but the same eye opens
+             its earlier runs, each with what it reported: seeing a member's runs is one idea. -->
         <q-btn
           v-if="snapshot.watchable && !isPlugin"
           flat
@@ -241,14 +242,13 @@ async function stop() {
         >
           <q-tooltip>{{ running ? 'Watch this run and earlier ones' : 'Earlier runs' }}</q-tooltip>
         </q-btn>
-        <!-- A PLUGIN HAS NO LIVE VIEW, but it has earlier runs, each with what it reported. -->
         <q-btn
           v-if="isPlugin"
           flat
           dense
           round
           size="sm"
-          icon="history"
+          icon="visibility"
           aria-label="Earlier runs"
           @click="watchOpen = true"
         >

@@ -10,7 +10,8 @@ import { workflowNumberTitle } from '../lib/workflowNumber';
 /**
  * WATCHING ONE MEMBER. Two parts: at the top, the run in progress, streaming as it
  * happens, or "Not running" when the member is idle; below it, **Earlier runs**, this member's
- * finished runs newest first, any of which opens its whole transcript.
+ * finished runs newest first, any of which opens its whole transcript, with Newer and Older to step
+ * to the run beside it without going back to the list.
  *
  * The server sends display lines that are already readable, and each is appended as it arrives with
  * its words untouched. What changes is how it is SHOWN: one row per step, striped, with the tool's
@@ -196,6 +197,32 @@ function closeRun() {
   transcriptReason.value = '';
 }
 
+/**
+ * NEWER AND OLDER STEP RUN BY RUN through this member's runs, across workflows, as the feed's own
+ * dialog steps message by message. Older past the last run loaded loads the next older page first,
+ * so a person reading a run never has to go back to the list to reach the one before it.
+ */
+const selectedIndex = computed(() => (selected.value ? runs.value.findIndex((r) => r.seq === selected.value!.seq) : -1));
+const hasNewer = computed(() => selectedIndex.value > 0);
+const hasOlder = computed(
+  () => selectedIndex.value >= 0 && (selectedIndex.value < runs.value.length - 1 || nextBefore.value !== null),
+);
+
+function showNewer() {
+  if (hasNewer.value) void openRun(runs.value[selectedIndex.value - 1]!);
+}
+
+async function showOlder() {
+  const index = selectedIndex.value;
+  if (index < 0) return;
+  if (index === runs.value.length - 1) {
+    if (nextBefore.value === null || runsLoading.value) return;
+    await loadRuns(true);
+  }
+  const older = runs.value[index + 1];
+  if (older) void openRun(older);
+}
+
 /** The notes toggle covers both views: the live lines and, when one is open, an earlier run's. */
 const hasLines = computed(
   () => phase.value === 'streaming' || phase.value === 'ended' || (selected.value !== null && transcript.value.length > 0),
@@ -314,6 +341,37 @@ onBeforeUnmount(end);
               · <span :title="workflowNumberTitle(selected.workflow)" data-workflow-number>workflow #{{ selected.workflow }}</span></template> · {{ runDuration(selected.durationMs) }} ·
             {{ runOutcomeLabel(selected.outcome) }}
           </div>
+          <template v-if="selected">
+            <q-space />
+            <q-btn
+              flat
+              dense
+              no-caps
+              size="sm"
+              icon="chevron_left"
+              label="Newer"
+              :disable="!hasNewer"
+              aria-label="Newer: the run after this one"
+              class="earlier-run-newer"
+              @click="showNewer"
+            />
+            <span class="text-caption os-text-muted q-mx-xs earlier-run-position">
+              {{ selectedIndex + 1 }} of {{ runs.length }}<template v-if="nextBefore !== null">+</template>
+            </span>
+            <q-btn
+              flat
+              dense
+              no-caps
+              size="sm"
+              icon-right="chevron_right"
+              label="Older"
+              :disable="!hasOlder"
+              :loading="runsLoading"
+              aria-label="Older: the run before this one"
+              class="earlier-run-older"
+              @click="showOlder"
+            />
+          </template>
         </div>
 
         <!-- A RUN OF SEVERAL ITEMS says what became of each, a deferral included: never one

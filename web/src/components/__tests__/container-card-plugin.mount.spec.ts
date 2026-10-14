@@ -2,7 +2,7 @@
 //
 // A PLUGIN MEMBER'S CARD. A plugin runs no model: no tokens, no spend, no live view. Its card shows
 // no eye, names the plugin rather than an Agent, says a failure without provider or spend words, and
-// opens its earlier runs - each with what it reported - from a history button (E5).
+// opens its earlier runs - each with what it reported - from the same eye icon an agent's card uses (E5).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount } from '@vue/test-utils';
@@ -182,7 +182,13 @@ describe('the member card for a plugin', () => {
     expect(bodyText()).not.toContain('This run reported no output.');
   });
 
-  it('offers no history button on an agent member', async () => {
+  it('opens its runs with the eye icon an agent member uses', async () => {
+    const wrapper = await mountCard(plugin());
+
+    expect(wrapper.find(history).find('.q-icon').text()).toBe('visibility');
+  });
+
+  it('offers no plugin runs button on an agent member', async () => {
     const wrapper = await mountCard(plugin({ kind: 'agent', agent: 'claude-headless', watchable: true }));
 
     expect(wrapper.find(history).exists()).toBe(false);
