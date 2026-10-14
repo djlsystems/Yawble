@@ -26,8 +26,10 @@ const props = withDefaults(
     /** Whether the button shows: nothing suitable is bound. */
     offered?: boolean;
     busy?: boolean;
+    /** An optional slot's Connect: an outlined button, never the primary one, so it does not read as a step. */
+    quiet?: boolean;
   }>(),
-  { offered: true, busy: false },
+  { offered: true, busy: false, quiet: false },
 );
 
 const emit = defineEmits<{
@@ -57,7 +59,18 @@ watch(open, (showing, was) => {
 <template>
   <div v-if="connectable.length > 0">
     <div v-if="offered" data-slot-connect>
-      <q-btn unelevated dense no-caps color="primary" icon="add" :label="label" :loading="busy" @click="open = true" />
+      <q-btn
+        :unelevated="!quiet"
+        :outline="quiet"
+        dense
+        no-caps
+        color="primary"
+        icon="add"
+        :label="label"
+        :loading="busy"
+        :data-slot-connect-button="quiet ? 'optional' : 'required'"
+        @click="open = true"
+      />
       <slot />
     </div>
     <ConnectDialog

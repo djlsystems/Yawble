@@ -166,6 +166,11 @@ async function connected(connection: Connection) {
 
 <template>
   <div class="connection-picker" :data-connection-slot="slotName">
+    <!-- AN OPTIONAL SLOT SAYS SO, and what it is for in the manifest's own words, so its Connect
+         does not read as a step every person must take; its button is the quiet one. -->
+    <div v-if="!spec.required" class="text-caption os-text-muted q-mb-xs" data-slot-optional>
+      <span class="text-weight-medium">{{ slotName }} (optional)</span><template v-if="spec.description">: {{ spec.description }}</template>
+    </div>
     <SlotConnect
       v-if="plugin"
       class="q-mb-xs"
@@ -176,6 +181,7 @@ async function connected(connection: Connection) {
       :providers="providers"
       :connections="connections"
       :offered="offerConnect"
+      :quiet="!spec.required"
       :busy="binding"
       @connected="connected"
       @closed="emit('closed')"

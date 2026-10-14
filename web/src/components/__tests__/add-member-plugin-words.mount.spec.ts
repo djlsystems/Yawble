@@ -47,6 +47,7 @@ const sampleWhoami: InstalledPlugin = hostPlugin({
   name: 'Sample Whoami (Go)',
   connections: {
     account: hostSlot({ description: 'The Google account to report on.', providers: ['google'], required: true, summary: 'needs a Google connection' }),
+    backup: hostSlot({ description: 'A second Google account, used only to copy reports to.', providers: ['google'], required: false, summary: 'can use a Google connection' }),
   },
 });
 
@@ -152,6 +153,27 @@ describe('Add member, hiring a plugin: what each line says', () => {
     expect(valueHelp).toContain(`${productCli} up`);
     // Asked by name only: the form sends the key and nothing else.
     expect(getSecretKey.mock.calls.map((call) => call.length)).toEqual([1, 1]);
+
+    wrapper.unmount();
+  });
+
+  it('says an optional slot is optional and what it is for, with a quiet Connect, and keeps the required one as it was', async () => {
+    const wrapper = await mountDialog(AddMemberDialog, props);
+    await choose(wrapper, 'plugin:sample-whoami-go');
+    await settle();
+
+    const optional = bodyFind('[data-connection-slot="backup"]')!;
+    expect(optional.querySelector('[data-slot-optional]')?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      'backup (optional): A second Google account, used only to copy reports to.',
+    );
+    expect(optional.querySelector('[data-slot-connect-button]')?.getAttribute('data-slot-connect-button')).toBe('optional');
+    expect(optional.querySelector('[data-slot-connect-button]')?.classList.contains('q-btn--outline')).toBe(true);
+    expect(optional.querySelector('[data-slot-unbound]')).toBeNull();
+
+    const required = bodyFind('[data-connection-slot="account"]')!;
+    expect(required.querySelector('[data-slot-optional]')).toBeNull();
+    expect(required.querySelector('[data-slot-connect-button]')?.getAttribute('data-slot-connect-button')).toBe('required');
+    expect(required.querySelector('[data-slot-connect-button]')?.classList.contains('q-btn--outline')).toBe(false);
 
     wrapper.unmount();
   });
