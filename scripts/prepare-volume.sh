@@ -40,6 +40,12 @@
 # so a directory git adds later is still the group's), files lose group write, other and
 # setuid/setgid and gain group read; the owner's bits git chose (objects are 0444) are kept. Agents
 # never push: the host publishes into these as itself. It is created when missing.
+# reference holds what a person puts on the instance for agents to read and never change, such as
+# a copy of an earlier product's source for a team to learn from. It is owned as repos is:
+# harness:agent all the way down, directories 2750, files lose group write, other and
+# setuid/setgid and gain group read, so every start puts back a hand-made change. Only a person
+# writes it, by copying into the container as root; nothing an agent runs can. It is created when
+# missing.
 # tmp holds each member's TMPDIR (MemberTemp), on the volume so an engine's tmpfs /tmp never holds
 # a member's temporary files in memory. It is created when missing and is agent's like the rest.
 # Every other top-level entry - teams, documents, agent-home, npm-global, bin, the tool caches, the
@@ -176,6 +182,7 @@ ownership() {
 
       [ -e "$root/plugins" ] || [ -L "$root/plugins" ] || { mkdir "$root/plugins"; echo "$root/plugins"; }
       [ -e "$root/repos" ] || [ -L "$root/repos" ] || { mkdir "$root/repos"; echo "$root/repos"; }
+      [ -e "$root/reference" ] || [ -L "$root/reference" ] || { mkdir "$root/reference"; echo "$root/reference"; }
       [ -e "$root/tmp" ] || [ -L "$root/tmp" ] || { mkdir "$root/tmp"; echo "$root/tmp"; }
 
       for path in "$root"/* "$root"/.[!.]* "$root"/..?*; do
@@ -183,7 +190,7 @@ ownership() {
         name=$(basename "$path")
         if is_host_entry "$name"; then own_host "$path"
         elif [ "$name" = plugins ]; then own_plugins "$path"
-        elif [ "$name" = repos ]; then own_repos "$path"
+        elif [ "$name" = repos ] || [ "$name" = reference ]; then own_repos "$path"
         else own_agent "$path"; fi
       done
 

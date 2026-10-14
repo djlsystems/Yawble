@@ -85,8 +85,11 @@ The product name, Yawble, lives in the web app's presentation layer
 - **Who reads what.** Control prepares the volume on every start; a worker changes no ownership on
   it and waits until control has. The database, the key ring and every record the doctor reads are
   `harness`'s alone; teams, documents, the agent home and the tool folders are group `agent`'s, which
-  both Host users and the agent are in. Each worker's own state is in its container, not on the
-  volume.
+  both Host users and the agent are in. `plugins`, `repos` and `reference` are the Host's and
+  readable by agents, never writable by them: `reference` is where a person puts material for
+  agents to read and never change (a copy of other source to learn from, say), copied in as root,
+  and every start puts its owner and modes back. Each worker's own state is in its container, not
+  on the volume.
 
 ## Security model
 

@@ -277,6 +277,64 @@ public sealed class PrepareVolumeTests : IDisposable
         }));
     }
 
+    /// <summary>
+    /// What a person puts in <c>reference</c> for agents to read stays read-only to them across
+    /// restarts: a tree the pass once gave to agent, group-writable as every unknown entry is, is
+    /// harness:agent again, directories 2750 and files without group write, after one start.
+    /// </summary>
+    [Fact]
+    public void A_reference_folder_is_harness_agent_readable_by_agent_and_nothing_in_it_writable_by_agent()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "A POSIX shell script.");
+        var reference = Path.Combine(_data, "reference");
+        var source = Path.Combine(reference, "label-designer-source", "src");
+        Directory.CreateDirectory(source);
+        File.WriteAllText(Path.Combine(source, "Program.cs"), "// reference\n");
+        File.WriteAllText(Path.Combine(reference, "label-designer-source", "build.sh"), "#!/bin/sh\n");
+        // As the pass leaves an unknown entry today: directories g+rwxs, files g+rw, and worse by hand.
+        File.SetUnixFileMode(Path.Combine(reference, "label-designer-source"), (UnixFileMode)Convert.ToInt32("2770", 8));
+        File.SetUnixFileMode(source, (UnixFileMode)Convert.ToInt32("2777", 8));
+        File.SetUnixFileMode(Path.Combine(source, "Program.cs"), (UnixFileMode)Convert.ToInt32("4666", 8));
+        File.SetUnixFileMode(Path.Combine(reference, "label-designer-source", "build.sh"), (UnixFileMode)Convert.ToInt32("770", 8));
+
+        var output = Run("ownership");
+
+        var chowned = ChownedPaths();
+        foreach (var path in new[] { "reference", "reference/label-designer-source", "reference/label-designer-source/src/Program.cs" })
+        {
+            Assert.True(chowned.TryGetValue(Path.Combine(_data, path), out var owner), $"{path} was not handed over. {output}");
+            Assert.Equal("10001:10002", owner);
+        }
+
+        Assert.Equal("2750", Mode("reference"));
+        Assert.Equal("2750", Mode("reference/label-designer-source"));
+        Assert.Equal("2750", Mode("reference/label-designer-source/src"));
+        Assert.Equal("640", Mode("reference/label-designer-source/src/Program.cs"));
+        // A script keeps its owner's execute bit and the group's, and loses group write.
+        Assert.Equal("750", Mode("reference/label-designer-source/build.sh"));
+
+        var writable = Exec("find", [reference, "(", "-perm", "/022", "-o", "-perm", "/6000", "!", "-type", "d", ")", "-print"]).Output.Trim();
+        Assert.True(writable.Length == 0, $"writable by agent or others: {writable}");
+
+        Assert.Contains("ownership set: 0 change(s)", Run("ownership", new Dictionary<string, string>
+        {
+            ["HARNESS_HOST_UID"] = Id("-u"), ["HARNESS_HOST_GID"] = Id("-g"),
+            ["HARNESS_AGENT_UID"] = Id("-u"), ["HARNESS_AGENT_GID"] = Id("-g"), ["HARNESS_CHOWN"] = "chown",
+        }));
+    }
+
+    [Fact]
+    public void A_missing_reference_directory_is_created_for_harness_and_readable_by_agent()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "A POSIX shell script.");
+
+        var output = Run("ownership");
+
+        Assert.True(Directory.Exists(Path.Combine(_data, "reference")), output);
+        Assert.Equal("10001:10002", ChownedPaths()[Path.Combine(_data, "reference")]);
+        Assert.Equal("2750", Mode("reference"));
+    }
+
     [Fact]
     public void A_missing_repos_directory_is_created_for_harness_and_readable_by_agent()
     {
