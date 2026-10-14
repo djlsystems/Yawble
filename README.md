@@ -7,146 +7,40 @@
 
 <p align="center"><strong>Yawble — A fleet of agents, moving with you.</strong></p>
 
-**Run teams of AI agents on your own machine.** Yawble gives every person a Concierge to
-talk to and hands the work to teams — a Manager and headless members built on the agent CLIs you
-already use (Claude Code, Codex, GitHub Copilot CLI, Grok). Everything runs in containers you
-control, with a web board to watch, steer and review the work.
+Yawble runs teams of AI agents on your own machine - Claude, Codex, Copilot and Grok, on the
+subscriptions you already pay for or with an API key - with a Concierge to talk to and a board to
+watch, steer and review the work. It runs in Podman or Docker on Windows, macOS and Linux.
 
-[Website](https://yawble.ai) · [YouTube](https://www.youtube.com/@Yawble) · [X](https://x.com/_Yawble)
+**[yawble.ai](https://yawble.ai)** has what it does, the [Marketplace](https://yawble.ai/marketplace)
+of packages and plugins, and the full setup: **[Get started](https://yawble.ai/get-started)**.
 
-## Key features
+[YouTube](https://www.youtube.com/@Yawble) · [X](https://x.com/_Yawble)
 
-- **A Concierge per person.** An interactive agent in a browser terminal that plans the job and
-  dispatches it to teams.
-- **Agent teams.** A Manager and members per team, each on the agent CLI and model you choose,
-  woken by a message log rather than left running.
-- **A board you can trust.** Kanban swimlanes, a backlog, live output from every running agent and
-  the transcript of every past run.
-- **Git-native.** Teams clone your repositories, and every card gets its own worktree and branch.
-  Agents commit and the platform publishes each team's branch; merging to your default branch and
-  opening pull requests are a person's decision. Contributor mode works from a fork, and a team
-  with no hosted repository gets a local one kept on the instance.
-- **Bounded and measured.** An instance-wide limit on running agents with a visible queue,
-  per-workflow budgets, and token usage reported as measured, never estimated.
-- **Triggers.** Wake a member on a schedule, on an event, or when files change in a folder, with a
-  daily token cap per trigger.
-- **Marketplace.** Install ready-made packages - a whole working team, or a plugin that connects to
-  an outside system - from the Marketplace on yawble.ai, and connect the accounts they act on.
-- **Sites.** A team can publish a small web page the platform serves and backs with data and
-  actions.
-- **Your machine, your keys.** Runs in Podman or Docker; each agent receives only its own
-  provider's key. Data lives on one volume with automatic daily backups.
-- **One operator CLI.** `yawble` installs, starts, updates, diagnoses and (optionally) exposes an
-  instance through Cloudflare, Tailscale or ngrok.
+## Install
 
-## Required prerequisites
+Install Podman or Docker first ([prerequisites](https://yawble.ai/get-started)), then the `yawble`
+CLI, then start it.
 
-### Windows
-
-- Windows 11, 64-bit.
-- **Windows Subsystem for Linux (WSL).** Both container engines run in it. Sitting at the
-  computer (not over a remote session), right-click Start, open **Terminal (Admin)**, run the
-  command below, then restart Windows:
-
-  ```powershell
-  wsl --install --no-distribution
-  ```
-
-  `--no-distribution` skips the Ubuntu download, which Yawble does not need. `wsl --status`
-  answers once WSL is installed.
-- **Docker or Podman.** Install [Podman Desktop](https://podman-desktop.io) (recommended) or
-  [Docker Desktop](https://www.docker.com/products/docker-desktop/) and take the defaults.
-
-### macOS
-
-- Apple silicon (M1 or later). Intel Macs are not tested.
-- **Docker or Podman.** Install [Podman Desktop](https://podman-desktop.io) (recommended) or
-  [Docker Desktop](https://www.docker.com/products/docker-desktop/) and take the defaults.
-
-On either, the more memory the better: the container that runs the agents takes half of it, up
-to 12 GB. Linux works too, with Podman or Docker Engine, and installs the way macOS does.
-
-## Install and start Yawble
-
-The install commands put the `yawble` operator CLI on your computer, from the newest release.
-
-### Windows
-
-In PowerShell:
+Windows, in PowerShell:
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.ps1)))
 ```
 
-Open a new PowerShell window so `yawble` is on your path, then start it:
-
-```powershell
-yawble up
-```
-
-### macOS
-
-In Terminal:
+macOS or Linux, in a terminal, as your own user:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/djlsystems/Yawble/main/cli/scripts/install.sh | sh
 ```
 
-Open a new Terminal window so `yawble` is on your path, then start it:
+Open a new terminal so `yawble` is on your path, then run `yawble up`. It opens the board at
+<http://localhost:8080>, where the first account you create is the owner. `yawble update` updates
+the CLI and the instance; `yawble doctor` checks the setup. Every command: [cli/README.md](cli/README.md).
 
-```sh
-yawble up
-```
+## Documentation
 
-### Then, on either
-
-`yawble up` finds your container engine (and asks which one if you have both), pulls the images,
-starts the containers and opens the board at <http://localhost:8080>. The first `up` shows what
-the engine has (memory and CPUs), proposes a share for the agents (half the memory up to 12 GB,
-the CPUs up to 8), says how many agent runs that lets work at once, and asks for each value,
-Enter accepting; `--yes` takes the proposal. The answer is saved; `yawble config set memory|cpus`
-changes it later. The first start installs the agent CLIs, which takes a few minutes. If something
-is not right, `yawble doctor` checks the setup and `yawble doctor --fix` repairs what it can.
-
-The first visit creates the admin account. Then give agents their credentials, either by
-signing in to an agent CLI from the Concierge terminal or with API keys:
-
-```sh
-yawble github                           # only if your teams use GitHub: clone, push, pull requests
-yawble secret set ANTHROPIC_API_KEY     # or OPENAI_API_KEY, XAI_API_KEY; the value is prompted for
-yawble up                               # applies the change
-```
-
-Every agent run - a team member's and the Concierge's - signs in the same way: through the shared
-agent home, with the CLI's own login or the provider key handed to the container.
-
-Other everyday commands: `yawble status`, `yawble doctor`, `yawble agents`, `yawble logs -f`,
-`yawble down`. The full reference is in [cli/README.md](cli/README.md).
-
-## Update
-
-`yawble update` updates the CLI and the instance together (`--cli` or `--instance` does one). The
-web app shows **Update available** beside the version when a newer release is out.
-
-## Where to go next
-
-- [yawble.ai](https://yawble.ai): Get started, and the Marketplace of packages and plugins.
-- In the web app, **Marketplace** on the ribbon browses the packages and installs one.
-- [docs/README.md](docs/README.md): every document in this repository.
-
-## Configure
-
-- **Instance limits:** `yawble config set memory 12g`, `yawble config set cpus 8`,
-  `yawble config set maxRunning 6` (memory and CPUs are each worker container's). Unset, the running limit is the Host's default: CPUs - 1,
-  bounded by the memory limit at 2 GB a run; `yawble doctor` warns when a set one is above that.
-- **Instance settings** (running limit, budgets, agent tags and more) are edited in the web app's
-  Settings and apply without a restart. System packages are the exception: they are installed at
-  the next start.
-- **Host settings** are standard ASP.NET configuration (`src/Harness.Host/appsettings.json`,
-  overridable with environment variables such as `Backups__Keep=14`).
-- **Watching a folder or share:** [docs/ops/folder-change-triggers.md](docs/ops/folder-change-triggers.md).
-- **Repositories with no hosting service:** [docs/local-repositories.md](docs/local-repositories.md).
-- **Backups and restores:** [docs/ops/backups-logs-and-versions.md](docs/ops/backups-logs-and-versions.md).
+[docs/README.md](docs/README.md) lists every document in this repository; how the pieces fit
+together is [docs/architecture.md](docs/architecture.md).
 
 ## Build from source
 
@@ -160,37 +54,20 @@ Requirements: .NET 10 SDK, Node 22 with npm, Go, and Podman or Docker for the im
 | Operator CLI | `cd cli && go build ./cmd/yawble && go test ./...` |
 | Local image and instance (Windows) | `scripts\dev-up.ps1` |
 
-`scripts\dev-up.ps1` builds the CLI and an image from the working tree, tagged
-`localhost/yawble:dev-<commit>`, points `yawble` at it and runs `yawble up`. To run the Host
-directly, set `HARNESS_DATA_ROOT` to a folder you want to keep and run
-`dotnet run --project src/Harness.Host`; it listens on whatever `ASPNETCORE_URLS` says.
-
-How the pieces fit together: [docs/architecture.md](docs/architecture.md). All docs:
-[docs/README.md](docs/README.md).
-
 ## Contributing
 
-Contributions are welcome. Every contributor signs the [Contributor License Agreement](CLA.md);
-the CLA Assistant check asks for it on your first pull request. How to build, test and open a
-pull request: [CONTRIBUTING.md](CONTRIBUTING.md).
+Contributions are welcome. Every contributor signs the [Contributor License Agreement](CLA.md); the
+CLA Assistant check asks for it on your first pull request. How to build, test and open a pull
+request: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
 **Free to use, self-host and modify, including at work. The only thing you can't do is sell Yawble
 as a hosted service. Every version becomes Apache 2.0 after two years.**
 
-In detail: Yawble is source-available under the Functional Source License, Version 1.1, Apache-2.0
-future license (SPDX: FSL-1.1-ALv2). You may use, copy, modify and share it for any purpose except
-offering Yawble, or a product with substantially similar functionality, to others as a commercial
-product or service that substitutes for it. Running it yourself, using it inside your company,
-education and research, and professional services for someone who runs it themselves are all
-permitted. Two years after a version is published, that version is also available under the
-Apache License 2.0. This is fair source, not an OSI-approved open source license. Full terms:
-[LICENSE](LICENSE).
+Yawble is source-available under the Functional Source License, Version 1.1, Apache-2.0 future
+license (SPDX: FSL-1.1-ALv2); full terms in [LICENSE](LICENSE). The packages in the Marketplace
+([djlsystems/Yawble-packages](https://github.com/djlsystems/Yawble-packages)) are open source under
+the Apache License 2.0.
 
-The packages in the Marketplace ([djlsystems/Yawble-packages](https://github.com/djlsystems/Yawble-packages))
-are licensed separately, as open source under the Apache License 2.0.
-
-Yawble and the Yawble logo are trademarks of DJL Systems, Inc.
-
-Copyright (c) 2026 DJL Systems, Inc.
+Yawble and the Yawble logo are trademarks of DJL Systems, Inc. Copyright (c) 2026 DJL Systems, Inc.
