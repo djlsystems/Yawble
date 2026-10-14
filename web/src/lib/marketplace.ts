@@ -26,6 +26,29 @@ export function installedWords(pkg: MarketplacePackage): string {
 }
 
 /**
+ * BROWSE'S BUTTON FOR A PACKAGE: Get, Update, or none. A plugin is installed once for the whole
+ * instance, so one already installed at the catalog's version (or newer) has nothing to get - its
+ * card says Installed and offers no button - and one the catalog lists newer offers Update. A
+ * solution is installed per team, so Get always stays: it installs another team.
+ */
+export function getLabel(pkg: Pick<MarketplacePackage, 'kind' | 'installed' | 'updateAvailable'>): 'Get' | 'Update' | null {
+  if (pkg.kind !== 'plugin' || !pkg.installed) return 'Get';
+  return pkg.updateAvailable ? 'Update' : null;
+}
+
+/** The catalog's entry for an installed plugin when it lists a NEWER version than the one installed. */
+export function pluginUpdateFor(id: string, catalog: MarketplaceCatalog | null): MarketplacePackage | null {
+  const pkg = catalog?.packages.find((candidate) => candidate.kind === 'plugin' && candidate.id === id);
+  return pkg && pkg.updateAvailable ? pkg : null;
+}
+
+/** Who runs an installed plugin, as a person reads it: "Used by Team / member, ..." or not yet. */
+export function pluginUsedByWords(members: { team: string; member: string }[]): string {
+  if (members.length === 0) return 'No member uses it yet';
+  return `Used by ${members.map((m) => `${m.team} / ${m.member}`).join(', ')}`;
+}
+
+/**
  * BROWSE'S FILTER: every word of `text` found, case-insensitively, in the package's name, summary,
  * description, or the words for what it needs - the card's short lines and the Host's full
  * sentences under Details. No words keeps every card.

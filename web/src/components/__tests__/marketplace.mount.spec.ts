@@ -23,6 +23,7 @@ import InstallFromFolderDialog from '../InstallFromFolderDialog.vue';
 import { Ribbon, SolutionsAction } from '../../lib/ribbon';
 import type { InstalledSolution, MarketplaceCatalog, MarketplacePackage } from '../../api/types';
 import { resetFirstOpenRefresh } from '../../lib/marketplaceRefresh';
+import { hostPlugin } from '../../test/pluginFixtures';
 import { bodyFind, bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
 import { button, settle } from '../../test/formProbe';
 import { fakeHost, installedRow, reply, sent, updatePreview, wizardRoutes, type Call, type Route } from '../../test/solutionFixtures';
@@ -86,7 +87,7 @@ const updateOfJobTracker: Route = (call) =>
     ? reply(200, updatePreview('job-tracker'))
     : undefined;
 
-function serve(installed: InstalledSolution[], packages: MarketplacePackage[] = [JobTracker, Mail, WhoAmI]) {
+function serve(installed: InstalledSolution[], packages: MarketplacePackage[] = [JobTracker, Mail, WhoAmI], plugins: unknown[] = []) {
   calls = [];
   vi.stubGlobal(
     'fetch',
@@ -95,12 +96,16 @@ function serve(installed: InstalledSolution[], packages: MarketplacePackage[] = 
         [
           (call) => (call.method === 'GET' && call.url === '/api/marketplace' ? reply(200, read(packages)) : undefined),
           (call) =>
+            call.method === 'POST' && call.url === '/api/marketplace/whoami/fetch'
+              ? reply(200, { id: 'whoami', version: '0.4.0', kind: 'plugin', folder: 'Marketplace/whoami-0.4.0' })
+              : undefined,
+          (call) =>
             call.method === 'POST' && call.url === '/api/marketplace/job-tracker/fetch'
               ? reply(200, { id: 'job-tracker', version: '1.1.0', kind: 'solution', folder: 'Marketplace/job-tracker-1.1.0' })
               : undefined,
           (call) => (call.method === 'GET' && call.url === '/api/documents' ? reply(200, { folders: [], root: Root }) : undefined),
           updateOfJobTracker,
-          ...wizardRoutes({ installed }),
+          ...wizardRoutes({ installed, plugins }),
         ],
         calls,
       ),
@@ -119,8 +124,8 @@ afterEach(() => {
   resetBody();
 });
 
-async function marketplace(installed: InstalledSolution[] = [], packages?: MarketplacePackage[]) {
-  serve(installed, packages);
+async function marketplace(installed: InstalledSolution[] = [], packages?: MarketplacePackage[], plugins: unknown[] = []) {
+  serve(installed, packages, plugins);
   const wrapper = await mountDialog(SolutionsLauncher);
   await settle();
   return wrapper;
@@ -220,6 +225,38 @@ describe('Marketplace', () => {
       const news = bodyFind('[data-solution-tile="news"]')!;
       expect(news.querySelector('[data-tile-update-available]')).toBeNull();
       expect(news.querySelector('[data-tile-update]')).toBeNull();
+    });
+
+    it('lists the installed plugins under their own heading, with who uses each and Update where the catalog is newer', async () => {
+      const newer = pkg({ ...WhoAmI, version: '0.4.0', installed: true, installedVersion: '0.3.0', updateAvailable: true });
+      const wrapper = await marketplace([], [JobTracker, newer], [
+        hostPlugin({ id: 'whoami', name: 'WhoAmI', version: '0.3.0', members: [{ team: 'Alpha', member: 'Who' }] }),
+        hostPlugin({ id: 'echo', name: 'Echo', version: '1.0.0' }),
+      ]);
+      await openTab('installed');
+
+      expect([...document.body.querySelectorAll('[data-installed-heading]')].map((h) => h.textContent?.trim())).toEqual(['Solution packages', 'Plugins']);
+      const who = bodyFind('[data-plugin-tile="whoami"]')!;
+      expect(who.querySelector('[data-tile-version]')?.textContent?.trim()).toBe('0.3.0');
+      expect(who.querySelector('[data-plugin-used-by]')?.textContent?.trim()).toBe('Used by Alpha / Who');
+      expect(who.querySelector('[data-tile-update-available]')?.textContent?.trim()).toBe('Update available: 0.4.0');
+      const echo = bodyFind('[data-plugin-tile="echo"]')!;
+      expect(echo.querySelector('[data-plugin-used-by]')?.textContent?.trim()).toBe('No member uses it yet');
+      expect(echo.querySelector('[data-plugin-update]')).toBeNull();
+
+      (who.querySelector('[data-plugin-update]') as HTMLElement).click();
+      await settle();
+      await settle();
+      expect(sent(calls, 'POST', '/api/marketplace/whoami/fetch')).toHaveLength(1);
+      expect(bodyFind('[data-install-dialog]')).not.toBeNull();
+      expect(sent(calls, 'POST', '/api/plugins/install')).toHaveLength(0);
+      wrapper.unmount();
+    });
+
+    it('says when no plugin is installed', async () => {
+      await marketplace();
+      await openTab('installed');
+      expect(bodyFind('[data-plugins-empty]')?.textContent).toContain('No plugins are installed yet');
     });
 
     it('offers no Update when the installed version is already the catalog one', async () => {

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { solutionsInstalled } from '../api/client';
-import type { InstalledSolution, MarketplaceCatalog, MarketplacePackage, SolutionCheck, SolutionStateKind } from '../api/types';
-import { updateFor } from '../lib/marketplace';
+import { listPlugins, solutionsInstalled } from '../api/client';
+import type { InstalledPlugin, InstalledSolution, MarketplaceCatalog, MarketplacePackage, SolutionCheck, SolutionStateKind } from '../api/types';
+import { pluginUpdateFor, pluginUsedByWords, updateFor } from '../lib/marketplace';
 import { fetchIntoDocuments } from '../lib/marketplaceFetch';
 import { solutionMatches, stateBadge, stateChoices, teamChoices, whenWords } from '../lib/solutionPanel';
 import { localInstants } from '../lib/localTime';
@@ -32,7 +32,12 @@ import SolutionWizard from './SolutionWizard.vue';
  * it for that team - "Update an existing team", the wizard's own update path. Nothing is installed
  * until the person presses Install there.
  *
- * With nothing installed it says how solutions arrive: a package a team built, whose Review and
+ * BELOW THE SOLUTIONS, THE PLUGINS installed on the instance (`GET /api/plugins`), one tile each -
+ * its name, version and who uses it - with Update when the catalog lists a newer version, which
+ * fetches it and opens the plugin install dialog as Browse's Get does. Members are hired on a plugin
+ * from Add member; Admin -> Plugins holds the rest.
+ *
+ * With no solution installed it says how solutions arrive: a package a team built, whose Review and
  * install link appears in that team's Activity feed and on its backlog item - or Browse, the
  * published packages - or Advanced, Install from a folder.
  *
@@ -54,16 +59,25 @@ const rows = ref<InstalledSolution[]>([]);
 const loading = ref(false);
 const error = ref('');
 
+const plugins = ref<InstalledPlugin[]>([]);
+const pluginsError = ref('');
+
 async function load() {
   loading.value = true;
   error.value = '';
-  try {
-    rows.value = await solutionsInstalled();
-  } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : String(cause);
-  } finally {
-    loading.value = false;
-  }
+  pluginsError.value = '';
+  // THE TWO LISTS ARE READ APART: a failure of one says so under its own heading, the other shows.
+  await Promise.all([
+    solutionsInstalled().then(
+      (read) => (rows.value = read),
+      (cause) => (error.value = cause instanceof Error ? cause.message : String(cause)),
+    ),
+    listPlugins().then(
+      (read) => (plugins.value = read.plugins),
+      (cause) => (pluginsError.value = cause instanceof Error ? cause.message : String(cause)),
+    ),
+  ]);
+  loading.value = false;
 }
 
 watch(open, (showing) => {
@@ -114,6 +128,25 @@ async function update(row: InstalledSolution, pkg: MarketplacePackage) {
   }
 }
 
+// --- Installed plugins: an Update where the catalog lists a newer version --------------------------
+
+const pluginUpdating = ref('');
+const pluginUpdateRefused = ref<{ id: string; text: string } | null>(null);
+
+async function updatePlugin(pkg: MarketplacePackage) {
+  if (pluginUpdating.value) return;
+
+  pluginUpdating.value = pkg.id;
+  pluginUpdateRefused.value = null;
+  try {
+    const fetched = await fetchIntoDocuments(pkg);
+    if (fetched.ok) pluginInstall.value = { open: true, folder: fetched.folder };
+    else pluginUpdateRefused.value = { id: pkg.id, text: fetched.text };
+  } finally {
+    pluginUpdating.value = '';
+  }
+}
+
 // --- Browse: a fetched package opens what Install from a folder opens ------------------------------
 
 const pluginInstall = ref<{ open: boolean; folder: string }>({ open: false, folder: '' });
@@ -128,8 +161,11 @@ function pluginWasASolution(folder: string, check: SolutionCheck) {
   wizard.value = { open: true, folder, check, team: '' };
 }
 
-// A finished install adds a tile: read the list again when the wizard closes.
+// A finished install adds a tile: read the lists again when the wizard or plugin install closes.
 watch(() => wizard.value.open, (showing, was) => {
+  if (was && !showing && open.value) void load();
+});
+watch(() => pluginInstall.value.open, (showing, was) => {
   if (was && !showing && open.value) void load();
 });
 </script>
@@ -171,6 +207,7 @@ watch(() => wizard.value.open, (showing, was) => {
       </q-card-section>
 
       <q-card-section v-if="tab === 'installed'">
+        <div class="solutions-heading" data-installed-heading="solutions">Solution packages</div>
         <div v-if="error" class="os-body text-negative" data-launcher-problem>
           Could not list the solutions: {{ error }}
         </div>
@@ -192,7 +229,7 @@ watch(() => wizard.value.open, (showing, was) => {
           </ul>
         </div>
 
-        <template v-else>
+        <template v-else-if="rows.length > 0">
           <!-- THE FILTER: words over name, package id, version, team and status line; one team; one
                state. It narrows what is SHOWN only: nothing is fetched or sent again. -->
           <div class="solutions-filters q-mb-md" data-solutions-filters>
@@ -326,6 +363,46 @@ watch(() => wizard.value.open, (showing, was) => {
             </div>
           </div>
         </template>
+
+        <!-- THE PLUGINS installed on the instance: name, version, who uses it, and Update. -->
+        <div class="solutions-heading q-mt-lg" data-installed-heading="plugins">Plugins</div>
+        <div v-if="pluginsError" class="os-body text-negative" data-plugins-problem>Could not list the plugins: {{ pluginsError }}</div>
+        <div v-else-if="!loading && plugins.length === 0" class="os-body os-text-muted" data-plugins-empty>
+          No plugins are installed yet. Browse, the tab above, lists the published ones.
+        </div>
+        <div v-else class="os-tiles solutions-tiles">
+          <div v-for="plugin in plugins" :key="plugin.id" class="os-tile solution-tile" :data-plugin-tile="plugin.id">
+            <div class="os-tile-head">
+              <q-icon name="extension" size="18px" class="solution-tile-icon" aria-hidden="true" />
+              <div class="row items-baseline no-wrap q-gutter-x-sm solution-tile-title">
+                <div class="text-subtitle1 text-weight-medium ellipsis solution-tile-name" :title="plugin.name" data-tile-name>{{ plugin.name }}</div>
+                <div class="text-caption os-text-muted solution-tile-version" data-tile-version>{{ plugin.version }}</div>
+              </div>
+            </div>
+            <div class="os-tile-line os-text-muted" data-plugin-used-by>{{ pluginUsedByWords(plugin.members) }}</div>
+            <div v-if="pluginUpdateFor(plugin.id, catalog)" class="os-tile-line text-warning" data-tile-update-available>
+              Update available: {{ pluginUpdateFor(plugin.id, catalog)?.version }}
+            </div>
+            <div v-if="pluginUpdateRefused?.id === plugin.id" class="os-tile-line text-negative solution-tile-status" role="alert">
+              {{ pluginUpdateRefused.text }}
+            </div>
+            <div v-if="pluginUpdateFor(plugin.id, catalog)" class="solution-tile-actions">
+              <q-btn
+                unelevated
+                dense
+                no-caps
+                color="primary"
+                icon="upgrade"
+                label="Update"
+                :aria-label="`Update ${plugin.name} to ${pluginUpdateFor(plugin.id, catalog)?.version}`"
+                :loading="pluginUpdating === plugin.id"
+                :disable="pluginUpdating !== '' && pluginUpdating !== plugin.id"
+                data-plugin-update
+                @click="updatePlugin(pluginUpdateFor(plugin.id, catalog)!)"
+              />
+            </div>
+          </div>
+        </div>
       </q-card-section>
     </q-card>
   </q-dialog>
@@ -450,6 +527,15 @@ watch(() => wizard.value.open, (showing, was) => {
 
 .solution-badge-text {
   overflow-wrap: anywhere;
+}
+
+.solutions-heading {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--os-ink-faint);
+  margin: 0 0 8px;
 }
 
 .solutions-filters {

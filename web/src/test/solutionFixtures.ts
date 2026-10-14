@@ -324,11 +324,12 @@ export function fakeHost(routes: Route[], calls: Call[]) {
 }
 
 /** The routes an ordinary wizard run needs, each overridable by a route listed before it. */
-export function wizardRoutes(options: { installed?: InstalledSolution[]; plan?: SolutionPlan; secrets?: SolutionSecret[] } = {}): Route[] {
+export function wizardRoutes(options: { installed?: InstalledSolution[]; plan?: SolutionPlan; secrets?: SolutionSecret[]; plugins?: unknown[] } = {}): Route[] {
   const plan = options.plan ?? hostPlan();
   return [
     (call) => (call.method === 'POST' && call.url === '/api/solutions/check' ? reply(200, okCheck(plan)) : undefined),
     (call) => (call.method === 'GET' && call.url === '/api/solutions/installed' ? reply(200, options.installed ?? []) : undefined),
+    (call) => (call.method === 'GET' && call.url === '/api/plugins' ? reply(200, { plugins: options.plugins ?? [], refused: [], versions: [] }) : undefined),
     (call) => {
       if (call.method !== 'POST' || call.url !== '/api/solutions/preview') return undefined;
       const team = (call.body as { team?: string }).team;

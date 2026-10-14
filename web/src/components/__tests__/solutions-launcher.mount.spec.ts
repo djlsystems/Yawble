@@ -295,9 +295,9 @@ describe('the solutions launcher', () => {
       await pick(wrapper, 'data-solutions-filter-team', null);
       await pick(wrapper, 'data-solutions-filter-state', null);
 
-      // The two reads the dialog makes when it opens: the installed list, and the catalog Browse
-      // reads (which also says where an update is listed). The filter adds none.
-      expect(calls.map((call) => `${call.method} ${call.url}`).sort()).toEqual(['GET /api/marketplace', 'GET /api/solutions/installed']);
+      // The three reads the dialog makes when it opens: the installed solutions and plugins, and the
+      // catalog Browse reads (which also says where an update is listed). The filter adds none.
+      expect(calls.map((call) => `${call.method} ${call.url}`).sort()).toEqual(['GET /api/marketplace', 'GET /api/plugins', 'GET /api/solutions/installed']);
       expect(wrapper.emitted('manage')).toEqual([['news']]);
     });
 

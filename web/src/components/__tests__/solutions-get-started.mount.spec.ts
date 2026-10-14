@@ -59,6 +59,8 @@ const JobTracker = pkg({
   updateAvailable: true,
 });
 const WhoAmI = pkg({ id: 'whoami', name: 'WhoAmI', kind: 'plugin', version: '0.3.0', installed: true, installedVersion: '0.3.0' });
+const NewPlugin = pkg({ id: 'whoami', name: 'WhoAmI', kind: 'plugin', version: '0.3.0' });
+const NewerPlugin = pkg({ id: 'whoami', name: 'WhoAmI', kind: 'plugin', version: '0.4.0', installed: true, installedVersion: '0.3.0', updateAvailable: true });
 
 const read = (packages: MarketplacePackage[]): MarketplaceCatalog => ({
   checked: true,
@@ -180,8 +182,25 @@ describe('Marketplace > Browse', () => {
     expect(sent(calls, 'POST', '/api/solutions/install')).toHaveLength(0);
   });
 
+  it('offers no Get for a plugin installed at the catalog version, and Update for one the catalog lists newer', async () => {
+    serve(catalogRoute(read([WhoAmI])));
+    await getStarted();
+    expect(tile('whoami').querySelector('[data-package-get]')).toBeNull();
+    expect(part('whoami', 'installed')).toBe('Installed 0.3.0');
+    resetBody();
+
+    serve(catalogRoute(read([NewerPlugin])));
+    await getStarted();
+    expect(tile('whoami').querySelector('[data-package-get]')!.textContent).toContain('Update');
+    // A solution installed on a team still offers Get: each install makes another team.
+    resetBody();
+    serve(catalogRoute(read([JobTracker])));
+    await getStarted();
+    expect(tile('job-tracker').querySelector('[data-package-get]')!.textContent).toContain('Get');
+  });
+
   it('Get on a plugin fetches it and opens the plugin install dialog on the folder, installing nothing yet', async () => {
-    serve(catalogRoute(read([WhoAmI])), fetchRoute('whoami', 200, { id: 'whoami', version: '0.3.0', kind: 'plugin', folder: 'Marketplace/whoami-0.3.0' }));
+    serve(catalogRoute(read([NewPlugin])), fetchRoute('whoami', 200, { id: 'whoami', version: '0.3.0', kind: 'plugin', folder: 'Marketplace/whoami-0.3.0' }));
     await getStarted();
 
     tile('whoami').querySelector<HTMLElement>('[data-package-get]')!.click();

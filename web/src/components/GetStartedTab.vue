@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { getMarketplace, refreshMarketplace } from '../api/client';
 import type { MarketplaceCatalog, MarketplacePackage } from '../api/types';
-import { installedWords, kindWords, noneMatchWords, notCheckedWords, packageMatches, plainNeeds, unreachableWords } from '../lib/marketplace';
+import { getLabel, installedWords, kindWords, noneMatchWords, notCheckedWords, packageMatches, plainNeeds, unreachableWords } from '../lib/marketplace';
 import { fetchIntoDocuments } from '../lib/marketplaceFetch';
 import { claimFirstOpenRefresh } from '../lib/marketplaceRefresh';
 import { whenWords } from '../lib/solutionPanel';
@@ -18,6 +18,10 @@ import FilterText from './FilterText.vue';
  * the words for what a package needs (`packageMatches`); it reads nothing again, and a filter that
  * keeps no card says so in a sentence. Each read is handed to the caller (`read`), which is how
  * Installed knows which teams the catalog lists a newer version for.
+ *
+ * A PLUGIN ALREADY INSTALLED offers no Get (it is installed once for the instance): its card says
+ * Installed, and Update when the catalog lists a newer version (`getLabel`). A solution keeps Get,
+ * since each install makes another team.
  *
  * GET FETCHES, IT NEVER INSTALLS: the Host downloads and checks the package and unpacks it into the
  * documents; `get` hands the folder to the caller, which opens the install wizard (a solution) or the
@@ -152,13 +156,14 @@ async function get(pkg: MarketplacePackage) {
 
           <div class="get-started-actions">
             <q-btn
+              v-if="getLabel(pkg)"
               unelevated
               dense
               no-caps
               color="primary"
-              icon="download"
-              label="Get"
-              :aria-label="`Get ${pkg.name}`"
+              :icon="getLabel(pkg) === 'Update' ? 'upgrade' : 'download'"
+              :label="getLabel(pkg)!"
+              :aria-label="`${getLabel(pkg)} ${pkg.name}`"
               :loading="getting === pkg.id"
               :disable="getting !== '' && getting !== pkg.id"
               data-package-get
