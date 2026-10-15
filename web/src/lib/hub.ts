@@ -25,15 +25,6 @@ export interface HubHandlers {
    */
   onJoinFailed: () => void;
 
-  /**
-   * This PERSON's current team moved - from another device, or from
-   * `harness team switch` inside the Concierge.
-   *
-   * `team` is null for none. Delivered to the person's own group rather than a team's, because the
-   * teams it moves between are exactly the groups this connection may not be in.
-   */
-  onCurrentTeamChanged: (change: { team: string | null; name: string | null }) => void;
-
   /** A team summary changed - pause/resume and any other team-scoped update that must repaint live. */
   onTeamChanged: (team: Team) => void;
 
@@ -107,7 +98,6 @@ export async function connectHub(
   // Registered BEFORE start(). A handler added afterwards can miss messages that
   // arrive during the handshake.
   connection.on('containerChanged', handlers.onContainerChanged);
-  connection.on('currentTeamChanged', handlers.onCurrentTeamChanged);
   connection.on('teamChanged', handlers.onTeamChanged);
   connection.on('teamCreated', handlers.onTeamCreated);
   connection.on('teamDeleted', handlers.onTeamDeleted);
@@ -148,8 +138,8 @@ export async function connectHub(
  * Joins the group this PERSON's own pushes go to. Rejoined after a reconnect for the same reason
  * team groups are: group membership lives on the connection id, which automatic reconnect replaces.
  *
- * SWALLOWED rather than reported. This carries a convenience - the tab strip following a switch
- * made somewhere else - and a person whose socket cannot join it still has a working board, where
+ * SWALLOWED rather than reported. This carries a convenience - the team list hearing of a team
+ * created or deleted somewhere else - and a person whose socket cannot join it still has a working board, where
  * a failed TEAM join means the board silently stops updating. Different failures, different noise.
  */
 async function joinMe(connection: signalR.HubConnection): Promise<void> {

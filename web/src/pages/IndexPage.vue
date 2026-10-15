@@ -383,13 +383,6 @@ onMounted(async () => {
       },
       onConnectedChanged: (value) => board.setConnected(value),
       onJoinFailed: () => board.reportJoinFailure(board.activeTeamId || 'this team'),
-
-      // The current team moved somewhere else - another device, or `harness team switch` typed
-      // into the Concierge. Applied through the store's own setter so a switch that arrives this
-      // way is indistinguishable from a click, and IGNORED when it names what is already active:
-      // every click PUTs, and every PUT echoes back, so acting on the echo would write twice per
-      // click and let two devices ping-pong.
-      onCurrentTeamChanged: (change) => board.applyCurrentTeam(change.team),
     },
     () => board.activeTeamId,
   );

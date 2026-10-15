@@ -334,26 +334,11 @@ export const useConsoleStore = defineStore('console', {
       view: remembered.view,
 
     /**
-     * A current-team announcement that arrived before the team list loaded.
-     *
-     * The guard at `applyCurrentTeam` cannot distinguish "not loaded" from "not present", so when
-     * teams is empty we cannot know if the announced team exists: dropping it would be wrong if
-     * we have just not heard the list yet. Instead, hold it here and apply it when the list
-     * arrives.
-     *
-     * A second announcement replaces a held one rather than queuing - the current team is a fact,
-     * not a stream, and the newest one is the only true one.
-     *
-     * Null when there is no pending announcement.
-     */
-    pendingCurrentTeam: null as string | null,
-
-    /**
      * Tracks whether we are currently refreshing the teams list.
      *
      * Set to true when `refresh()` starts fetching new teams, and false when the new teams
-     * arrive. Used to distinguish the reconnect window from the loaded-but-lacking case:
-     * announcements arriving while refreshing are held instead of dropped against the stale list.
+     * arrive. A team created or deleted elsewhere is announced; one that arrives while the list
+     * is being re-read changes nothing, because the re-read already carries it.
      */
     isRefreshing: false,
     };
@@ -525,8 +510,8 @@ export const useConsoleStore = defineStore('console', {
 
     async refresh() {
       try {
-        // MARK THAT WE'RE REFRESHING SO ANNOUNCEMENTS THAT ARRIVE WHILE THIS IS IN FLIGHT
-        // ARE HELD INSTEAD OF JUDGED AGAINST THE STALE TEAM LIST.
+        // MARK THAT WE'RE REFRESHING SO A TEAM CREATED OR DELETED WHILE THIS IS IN FLIGHT
+        // FETCHES NOTHING TWICE.
         this.isRefreshing = true;
 
         const [overview, messages] = await Promise.all([
@@ -542,9 +527,6 @@ export const useConsoleStore = defineStore('console', {
         // BEFORE `reconcileActiveTeam` BELOW, and that order is the whole of the legitimate empty
         // case: a restart that really did empty the server must still clear the strip.
         this.overviewLanded = true;
-
-        // Apply any announcement that arrived while the team list was loading.
-        this.applyPendingCurrentTeam();
 
         this.managerName = overview.managerName;
         this.workflowSpendLimit = overview.workflowSpendLimit ?? null;
@@ -591,6 +573,10 @@ export const useConsoleStore = defineStore('console', {
         //
         // '' is sent as null: no team is active, which is what the Teams overview means and a state
         // the server stores rather than an absence it ignores.
+        //
+        // THE WRITE GOES ONE WAY. No window follows the server's current team, so two windows on
+        // one instance - a duplicated tab, another device - never move each other; the newest click
+        // is what the Concierge reads.
         void this.pushCurrentTeam(id || null);
 
         void this.pullTokenUsage();
@@ -653,69 +639,6 @@ export const useConsoleStore = defineStore('console', {
     openTeam(id: TeamId) {
       this.showBoard();
       this.setActiveTeam(id);
-    },
-
-    /**
-     * A current team that moved somewhere else - another device, or `harness team switch` inside
-     * the Concierge.
-     *
-     * IGNORES THE ECHO OF THIS BROWSER'S OWN WRITE. Every tab click PUTs and every PUT is announced
-     * back - so without that check a click would write, hear its own echo, and write again, and two
-     * devices could ping-pong a team between them. THIS METHOD DOES NOT RE-CHECK IT: one fact, one
-     * place, and a second copy of the same condition here is the shape that goes stale. It is
-     * pinned from this side too, so moving it out of `setActiveTeam` fails a test that names the
-     * echo rather than only tests about tab switching.
-     *
-     * A team this browser cannot see IS checked here, because nothing else asks: `setActiveTeam`
-     * would put an id in the tab strip with no row behind it, which renders as a tab that cannot be
-     * opened. The person's other device is welcome to be somewhere this one is not.
-     *
-     * HOLDS ANNOUNCEMENTS WHEN THE LIST HAS NOT LOADED YET. Before the list arrives, the
-     * guard cannot distinguish "not loaded" from "not present", so announcements are HELD rather
-     * than DROPPED. When the list arrives, `applyPendingCurrentTeam` is called to apply held ones.
-     * A second announcement replaces a held one rather than queuing.
-     */
-    applyCurrentTeam(team: string | null) {
-      const id = team ? asTeamId(team) : '';
-
-      // HOLD announcements in two cases:
-      // 1. List has not loaded yet (!overviewLanded)
-      // 2. We're refreshing the list (isRefreshing) - reconnect window
-      //
-      // In both cases, we cannot distinguish "announced team not loaded" from 
-      // "announced team not present", so we hold and apply when new teams arrive.
-      if (id && (!this.overviewLanded || this.isRefreshing)) {
-        this.pendingCurrentTeam = team;
-        return;
-      }
-
-      // If we have a team id and it's not in the loaded list, drop it (not on this browser).
-      if (id && !this.teams.some((candidate) => candidate.id === id)) return;
-
-      this.setActiveTeam(id);
-      // Clear any pending announcement once we apply one.
-      this.pendingCurrentTeam = null;
-    },
-
-    /**
-     * Apply a pending current-team announcement that was held while the list was loading.
-     *
-     * Called after `/api/overview` lands (when overviewLanded becomes true) to apply any
-     * announcement that arrived while teams was still loading. If the announced team is now in the
-     * loaded list, apply it; otherwise drop it (the team doesn't exist on this browser).
-     */
-    applyPendingCurrentTeam() {
-      if (!this.pendingCurrentTeam) return;
-
-      const pending = this.pendingCurrentTeam;
-      this.pendingCurrentTeam = null;
-
-      const id = asTeamId(pending);
-      // If the team exists in the loaded list, apply it through the normal path.
-      if (this.teams.some((candidate) => candidate.id === id)) {
-        this.setActiveTeam(id);
-      }
-      // Otherwise drop it - the team doesn't exist on this browser.
     },
 
     /**
