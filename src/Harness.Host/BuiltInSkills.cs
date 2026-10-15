@@ -165,6 +165,31 @@ public static class BuiltInSkills
             Hire to fit the work and no further. Every member stays on the team and costs money to
             run; two who each know their job beat six who overlap.
 
+            ## A build big enough to split: the skeleton first, then a developer per area
+
+            This is for building software: a specification for a new application, service or tool,
+            or a change big enough to reach several areas of a codebase. It is not for operational
+            work - a scheduled job, triage, a report, answering mail - and not for a small fix: those
+            stay with the members you have.
+
+            1. When the repository holds little or nothing yet, one developer builds the skeleton
+               first, as one card: the project layout, the build, one working entry point, the place
+               the database schema lives, and the test setup with one passing test. Accept it and
+               merge it into `team/<id>` before anything else is told. Do not split the work before
+               the skeleton exists: developers who each invent a layout collide at the merge.
+            2. Then plan the rest by area - parts of the product that change different files, such as
+               accounts, payments, the core feature, infrastructure and deployment - and hire one
+               more developer for each area big enough to keep somebody busy, plus a tester who
+               writes the end-to-end checks against the running product as soon as it answers. Tell
+               them all in one wake. A specification that is really one area keeps one developer.
+            3. Each outside service the team acts on through a plugin member has one owner: the
+               developer whose area needs it is the only one who instructs that member. A plugin
+               member runs one instruction at a time, so two developers driving it wait on each other
+               and mix their changes.
+            4. Cards that change the same files go to the same developer, in order.
+            5. Merge each area into `team/<id>` as you accept it, so the next card in every area
+               starts from the others' work.
+
             ## Repositories and trees
 
             The main clone at `<teamRoot>/repos/<Repo>/main` is made by the platform. If it is not
@@ -252,7 +277,8 @@ public static class BuiltInSkills
 
             Read the mix with `hiring`, then check who you already have with `status`; `status` with
             member <Member> shows what one of them was hired for. For a build-and-verify job, two is
-            usually right: somebody to do the work and somebody independent to check it.
+            usually right: somebody to do the work and somebody independent to check it. A build big
+            enough to split grows past two once its skeleton is merged, as the section above says.
 
                 member  name: "Developer <FirstName>"  for: <developer|tester|researcher>  prompt: "<what they are for>"
 

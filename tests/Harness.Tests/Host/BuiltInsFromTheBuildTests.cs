@@ -168,6 +168,23 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
     }
 
     [Fact]
+    public async Task The_manager_skill_builds_the_skeleton_first_then_staffs_a_developer_per_area_for_software_only()
+    {
+        var key = await host.Services.GetRequiredService<IPrincipalStore>().MintAsync(
+            new ContainerId(host.Alpha, TeamRegistry.DefaultManagerName).ToString(),
+            PrincipalKind.Container, host.Alpha, Permits.All, ct: Ct);
+        using var manager = host.Container(key);
+        var skill = McpContractTests.Flat(await manager.GetStringAsync("/api/me/skills/manager", Ct));
+
+        Assert.Contains("the skeleton first, then a developer per area", skill, StringComparison.Ordinal);
+        Assert.Contains("It is not for operational work", skill, StringComparison.Ordinal);
+        Assert.Contains("Do not split the work before the skeleton exists", skill, StringComparison.Ordinal);
+        Assert.Contains("hire one more developer for each area big enough to keep somebody busy", skill, StringComparison.Ordinal);
+        Assert.Contains("the developer whose area needs it is the only one who instructs that member", skill, StringComparison.Ordinal);
+        Assert.Contains("Cards that change the same files go to the same developer", skill, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task A_managers_list_has_no_worktrees_and_it_is_refused_the_member_skill()
     {
         var key = await host.Services.GetRequiredService<IPrincipalStore>().MintAsync(
