@@ -247,6 +247,7 @@ public sealed record PluginManifest(
             }
 
             var publishes = new List<PluginPublishedEvent>();
+            var ignoredInEvents = new List<string>();
 
             if (root.TryGetProperty("events", out var events))
             {
@@ -296,10 +297,22 @@ public sealed record PluginManifest(
                             }
                         }
 
+                        EventMonitorHint? monitor = null;
+
+                        if (item.TryGetProperty("monitor", out var monitorElement) && monitorElement.ValueKind != JsonValueKind.Null)
+                        {
+                            var (hint, refusal) = PluginMonitorHint.Parse(type, monitorElement, fields, ignoredInEvents);
+                            if (refusal is not null) return (null, refusal);
+                            monitor = hint;
+                        }
+
                         publishes.Add(new PluginPublishedEvent(
                             type, Text(item, "summary") ?? "",
                             item.TryGetProperty("highVolume", out var highVolume) && highVolume.ValueKind == JsonValueKind.True,
-                            fields));
+                            fields)
+                        {
+                            Monitor = monitor,
+                        });
                     }
                 }
             }
@@ -393,6 +406,8 @@ public sealed record PluginManifest(
                     ignored.Add(property.Name);
                 }
             }
+
+            ignored.AddRange(ignoredInEvents);
 
             return (new PluginManifest(
                 id, name, description, version, protocol, path, arguments, timeout, config, secrets,
@@ -680,12 +695,164 @@ public sealed record PluginSecretWhen(string Setting, string Value)
 public sealed record PluginPublishedEvent(
     string Type, string Summary, bool HighVolume = false, IReadOnlyList<EventField>? Fields = null)
 {
+    /// <summary>How the Monitor draws it, as the manifest's <c>monitor</c> declares it; null without one.</summary>
+    public EventMonitorHint? Monitor { get; init; }
+
     /// <summary>Its definition as <see cref="EventCatalog"/> answers it for plugin <paramref name="id"/>.
-    /// Always in the ledger: a manifest's <c>inLedger</c> is not read in v1.</summary>
+    /// In the ledger unless it is high volume: a firehose stays out of a member's context exactly as
+    /// `agentContainer.progress` does, and stays on the log. A manifest's <c>inLedger</c> is not read
+    /// in v1.</summary>
     public EventDefinition Definition(string id) => new(
-        EventCatalog.PluginType(id, Type), EventPublisher.Plugin, HighVolume, InLedger: true,
+        EventCatalog.PluginType(id, Type), EventPublisher.Plugin, HighVolume, InLedger: !HighVolume,
         [EventCatalog.SourceField, .. Fields ?? []],
-        Summary);
+        Summary)
+    {
+        Monitor = Monitor,
+    };
+}
+
+/// <summary>
+/// An <c>events.publishes</c> entry's <c>monitor</c> hint: how the Monitor draws the event. Every
+/// refusal names the event type and the field, in the same order and the same words as the operator
+/// CLI's (cli/internal/plugin). A key it does not know is named in the manifest's ignored list as
+/// <c>events.publishes.&lt;type&gt;.monitor.&lt;key&gt;</c>, never refused.
+/// </summary>
+public static partial class PluginMonitorHint
+{
+    /// <summary>The longest a label may be as written, placeholders included, in characters.</summary>
+    public const int MaxLabel = 120;
+
+    public static readonly IReadOnlyList<string> Actions = ["created", "changed", "deleted"];
+
+    private static readonly IReadOnlySet<string> KnownKeys = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "icon", "iconBy", "action", "actionField", "label",
+    };
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\{([^{}]*)\}")]
+    private static partial System.Text.RegularExpressions.Regex Placeholder();
+
+    public static (EventMonitorHint? Hint, string? Refusal) Parse(
+        string type, JsonElement monitor, IReadOnlyList<EventField> fields, List<string> ignored)
+    {
+        var at = $"`events.publishes` `{type}`:";
+
+        if (monitor.ValueKind != JsonValueKind.Object) return (null, $"{at} `monitor` must be an object.");
+
+        bool IsKind(string name, params EventFieldKind[] kinds) =>
+            fields.Any(f => f.Name == name && kinds.Contains(f.Kind));
+
+        static string? Given(JsonElement parent, string key) =>
+            parent.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+        static bool Present(JsonElement parent, string key) =>
+            parent.TryGetProperty(key, out var value) && value.ValueKind != JsonValueKind.Null;
+
+        if (Given(monitor, "icon") is not { Length: > 0 } icon || string.IsNullOrWhiteSpace(icon))
+        {
+            return (null, $"{at} `monitor.icon` is required: a Material Symbols name, such as inbox.");
+        }
+
+        if (!MaterialSymbols.IsName(icon)) return (null, $"{at} `monitor.icon` '{icon}' is not a Material Symbols name.");
+
+        EventMonitorIconBy? iconBy = null;
+
+        if (Present(monitor, "iconBy"))
+        {
+            var element = monitor.GetProperty("iconBy");
+
+            if (element.ValueKind != JsonValueKind.Object || Given(element, "field") is not { } field
+                || !element.TryGetProperty("map", out var map) || map.ValueKind != JsonValueKind.Object)
+            {
+                return (null, $"{at} `monitor.iconBy` must be an object with a `field` and a `map` of value to icon.");
+            }
+
+            if (!IsKind(field, EventFieldKind.String))
+            {
+                return (null, $"{at} `monitor.iconBy.field` names '{field}', which is not a declared string field.");
+            }
+
+            var icons = new Dictionary<string, string>(StringComparer.Ordinal);
+
+            // IN KEY ORDER, as the CLI reads a JSON object, so both name the same entry first.
+            foreach (var entry in map.EnumerateObject().OrderBy(e => e.Name, StringComparer.Ordinal))
+            {
+                if (entry.Value.ValueKind != JsonValueKind.String)
+                {
+                    return (null, $"{at} `monitor.iconBy.map` '{entry.Name}' must be a Material Symbols name.");
+                }
+
+                if (!MaterialSymbols.IsName(entry.Value.GetString()!))
+                {
+                    return (null, $"{at} `monitor.iconBy.map` '{entry.Name}': '{entry.Value.GetString()}' is not a Material Symbols name.");
+                }
+
+                icons[entry.Name] = entry.Value.GetString()!;
+            }
+
+            iconBy = new EventMonitorIconBy(field, icons);
+        }
+
+        var hasAction = Present(monitor, "action");
+        var hasActionField = Present(monitor, "actionField");
+
+        if (hasAction && hasActionField) return (null, $"{at} `monitor` has both `action` and `actionField`; give exactly one.");
+
+        if (!hasAction && !hasActionField)
+        {
+            return (null, $"{at} `monitor` needs `action` (created, changed or deleted) or `actionField` (a declared string field).");
+        }
+
+        string? action = null, actionField = null;
+
+        if (hasAction)
+        {
+            action = Given(monitor, "action");
+            if (action is null || !Actions.Contains(action, StringComparer.Ordinal))
+            {
+                return (null, $"{at} `monitor.action` must be created, changed or deleted.");
+            }
+        }
+        else
+        {
+            actionField = Given(monitor, "actionField");
+            if (actionField is null) return (null, $"{at} `monitor.actionField` must name a declared string field.");
+
+            if (!IsKind(actionField, EventFieldKind.String))
+            {
+                return (null, $"{at} `monitor.actionField` names '{actionField}', which is not a declared string field.");
+            }
+        }
+
+        string? label = null;
+
+        if (Present(monitor, "label"))
+        {
+            label = Given(monitor, "label");
+            if (string.IsNullOrWhiteSpace(label)) return (null, $"{at} `monitor.label` must be text.");
+
+            // AS WRITTEN, in characters a person counts: an emoji is one, not two UTF-16 units.
+            var length = label.EnumerateRunes().Count();
+            if (length > MaxLabel) return (null, $"{at} `monitor.label` is {length} characters; a label is at most {MaxLabel}.");
+
+            foreach (System.Text.RegularExpressions.Match placeholder in Placeholder().Matches(label))
+            {
+                var name = placeholder.Groups[1].Value;
+
+                if (!IsKind(name, EventFieldKind.String, EventFieldKind.Integer))
+                {
+                    return (null, $"{at} `monitor.label` names {{{name}}}, which is not a declared string or number field.");
+                }
+            }
+        }
+
+        foreach (var property in monitor.EnumerateObject())
+        {
+            if (!KnownKeys.Contains(property.Name)) ignored.Add($"events.publishes.{type}.monitor.{property.Name}");
+        }
+
+        return (new EventMonitorHint(icon, iconBy, action, actionField, label), null);
+    }
 }
 
 /// <summary>
