@@ -1,7 +1,8 @@
 import type { Message, MonitorHint, Team } from '../../api/types'
 import { summarise } from '../summarise'
-import { wireInstant } from '../localTime'
+import { crossesDays, localMinute, wireInstant } from '../localTime'
 import { DefaultSettings, drawsResource, resolveHint, type Resource, type ResourceSettings } from './hints'
+import { DefaultFileSettings, pushTime, pushWords, type FileSettings, type WorkspacePush } from './workspace'
 
 /**
  * THE MONITOR'S MODEL: every team, member and workflow the log has shown, and what each row does
@@ -61,7 +62,7 @@ export interface MonitorMember {
   status: string
   /** The workflow its last row was in. */
   workflow: number | null
-  /** Measured tokens of its finished runs in this window: never estimated. */
+  /** Billable tokens of its finished runs in this window: never estimated. */
   tokens: number
   runs: number
   /** Model time of its last row, ms. */
@@ -94,6 +95,8 @@ export type MonitorEffect =
   | { kind: 'shake'; at: NodeRef }
   /** What a plugin's row did to a thing it manages, shown beside the member for `ttlMs` of display time. */
   | { kind: 'resource'; at: NodeRef; resource: Resource; ttlMs: number }
+  /** A member's file changes (`workspace.ts`): the files under their projects and repository, for `ttlMs` of display time. */
+  | { kind: 'workspace'; at: NodeRef; push: WorkspacePush; ttlMs: number }
 
 export interface TickerEntry {
   seq: number
@@ -107,6 +110,8 @@ export interface TickerEntry {
   workflow: number
   /** A hinted plugin row: its icon, what happened and its label, said in words beside the graph. */
   resource?: Resource
+  /** A file-changes push, not a row of the log: kept only while the page is open. */
+  workspace?: true
 }
 
 const GoldenAngle = 137.508
@@ -188,12 +193,53 @@ function short(value: string, max = 48): string {
   return one.length > max ? `${one.slice(0, max - 1)}…` : one
 }
 
-/** The measured tokens of a finished run, or 0 when it reported none. */
-export function runTokens(payload: Record<string, unknown>): number {
-  const total = num(payload.tokensTotal)
-  if (total > 0) return total
-  return num(payload.tokensIn) + num(payload.tokensOut)
+/** A whole token count as the wire sent it, or null when the row did not report one. */
+function count(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null
 }
+
+/**
+ * A finished run's billable tokens, counted as `InvocationUsage.BillableTokens` counts them, in
+ * whole numbers: uncached input and output in full, cache reads at 1/10, cache writes at 5/4, and a
+ * combined `tokensTotal` as reported; a part of the split it did not report is 0. `'counted'` for a row whose usage another row carries
+ * (`usageCountedOn`); null for a run that reported none, which is unmeasured and never a zero.
+ */
+export function runBillable(payload: Record<string, unknown>): number | 'counted' | null {
+  if (payload.usageCountedOn !== undefined && payload.usageCountedOn !== null) return 'counted'
+  if (payload.tokensSource === 'excludedEstimate') return null
+  if (payload.tokensSource === 'noModel') return 0
+  const total = count(payload.tokensTotal)
+  if (total !== null) return total
+  const split = [payload.tokensIn, payload.tokensOut, payload.tokensCachedIn, payload.tokensCacheCreation].map(count)
+  if (split.every((part) => part === null)) return null
+  const [tokensIn, tokensOut, cached, created] = split.map((part) => part ?? 0) as [number, number, number, number]
+  return tokensIn + tokensOut + Math.floor(cached / 10) + Math.floor((created * 5) / 4)
+}
+
+/** The billable tokens a finished run adds to the figure: 0 when it is unmeasured or counted elsewhere. */
+export function runTokens(payload: Record<string, unknown>): number {
+  const billable = runBillable(payload)
+  return typeof billable === 'number' ? billable : 0
+}
+
+/** The token figure's own float on a finished run: the same billable figure the stat adds. */
+export function tokensFloat(spent: number): string {
+  return `+${compact(spent)} tokens`
+}
+
+/**
+ * The words under the token figure: "billable tokens · since 10:42", the stretch it covers from the
+ * oldest row this Monitor holds (or the replay's start) to `now`, in the reader's own time, and how
+ * many runs in it were not measured, when any were.
+ */
+export function tokensWords(since: number, now: number, unmeasured: number): string {
+  const words = since > 0 ? `billable tokens · since ${localMinute(since, { date: crossesDays(since, now) })}` : 'billable tokens'
+  return unmeasured > 0 ? `${words} · ${unmeasured} ${unmeasured === 1 ? 'run' : 'runs'} not measured` : words
+}
+
+/** The token figure's tooltip: what it counts, and that it is this window's, in one sentence. */
+export const TokensTooltip =
+  "Billable tokens of the runs in this Monitor's window, from its oldest row to now, with cache reads at a tenth and cache writes at five quarters - not the team strip's all-time total."
 
 /** Is this the Manager, by the name every team gives it. */
 function isManager(id: string, managerName: string): boolean {
@@ -208,14 +254,24 @@ export class MonitorModel {
 
   /** The model's clock: the time of the last row applied, ms. */
   now = 0
-  /** Measured tokens of every finished run applied. */
+  /** Billable tokens of every finished run applied (`runBillable`). */
   tokens = 0
+  /** Finished runs applied that reported no usage: said beside the figure, never counted as zero. */
+  unmeasured = 0
+  /** The time of the oldest row applied, ms: where the token figure's stretch begins. */
+  since = 0
   /** Times of recent rows, for the events-per-minute figure. */
   private recent: number[] = []
   /** Plugin event types' monitor hints, by type, from `GET /api/events`. */
   hints: ReadonlyMap<string, MonitorHint> = new Map()
-  /** Whether and how long hinted rows are drawn as themselves. */
+  /** Whether and how long hinted rows are drawn as themselves; file changes share the time to live. */
   settings: ResourceSettings = DefaultSettings
+  /** Whether file changes are drawn and listed, and how far down. */
+  fileSettings: FileSettings = DefaultFileSettings
+  /** A replay plays the log, and file changes are not in it. */
+  replay = false
+  /** Keys for the activity list's push lines, which have no seq: below every row's. */
+  private pushSeq = 0
 
   /**
    * @param managerName What every team calls its Manager (`/api/overview`'s `managerName`).
@@ -351,6 +407,7 @@ export class MonitorModel {
   apply(message: Message): MonitorEffect[] {
     const at = timeOf(message)
     if (at > this.now) this.now = at
+    if (at > 0 && (this.since === 0 || at < this.since)) this.since = at
 
     const address = addressOf(message) ?? this.byWorkflow(message.correlationId)
     if (!address) return []
@@ -415,12 +472,10 @@ export class MonitorModel {
       tone = 'done'
       verb = 'finished'
       member.runs++
-      const spent = runTokens(payload)
-      member.tokens += spent
-      this.tokens += spent
+      const spent = this.spend(member, payload)
       member.state = member.queued > 0 ? 'waiting' : 'idle'
       effects.push({ kind: 'burst', at: self, tone })
-      if (spent > 0) effects.push({ kind: 'float', at: self, text: `+${compact(spent)} tokens`, tone: 'done' })
+      if (spent > 0) effects.push({ kind: 'float', at: self, text: tokensFloat(spent), tone: 'done' })
       if (workflow && payload.handedBack !== true) effects.push({ kind: 'comet', from: self, to: flow, tone })
     } else if (type === 'agentContainer.handback' && member) {
       tone = 'handback'
@@ -434,9 +489,7 @@ export class MonitorModel {
       tone = 'fail'
       verb = 'failed'
       member.runs++
-      const spent = runTokens(payload)
-      member.tokens += spent
-      this.tokens += spent
+      this.spend(member, payload)
       member.state = 'failed'
       member.status = summarise(message)
       effects.push({ kind: 'burst', at: self, tone, big: true }, { kind: 'shake', at: self })
@@ -553,6 +606,55 @@ export class MonitorModel {
     }
 
     return effects
+  }
+
+  /** A finished run's billable tokens, added to its member and the figure; an unmeasured run is counted apart. */
+  private spend(member: MonitorMember, payload: Record<string, unknown>): number {
+    const billable = runBillable(payload)
+    if (billable === null) this.unmeasured++
+    const spent = typeof billable === 'number' ? billable : 0
+    member.tokens += spent
+    this.tokens += spent
+    return spent
+  }
+
+  /**
+   * One file-changes push. Returns what to draw for it and appends its line to the activity list;
+   * nothing in a replay, with the setting off, or for a team this model does not show.
+   */
+  applyWorkspace(push: WorkspacePush): MonitorEffect[] {
+    if (this.replay || !this.fileSettings.show) return []
+    if (this.only && !this.only.has(push.team)) return []
+    this.team(push.team)
+    const member = this.members.get(`${push.team}/${push.member}`) ?? null
+    const at = pushTime(push) ?? this.now
+    this.ticker.unshift({
+      seq: --this.pushSeq,
+      at,
+      team: push.team,
+      member: member?.name ?? push.member,
+      tone: 'file',
+      verb: push.commits.length > 0 ? 'committed' : 'changed files',
+      text: pushWords(push, member?.name ?? push.member),
+      workflow: 0,
+      workspace: true,
+    })
+    if (this.ticker.length > this.tickerDepth) this.ticker.length = this.tickerDepth
+    const self: NodeRef = member ? { kind: 'member', key: member.key } : { kind: 'team', id: push.team }
+    return [{ kind: 'workspace', at: self, push, ttlMs: this.settings.seconds * 1000 }]
+  }
+
+  /**
+   * The push lines of an earlier model of this view, kept when it starts again from the rows held:
+   * they are in no row, so feeding the log again would lose them.
+   */
+  keepPushLines(lines: readonly TickerEntry[]) {
+    const kept = lines.filter((line) => line.workspace === true && (!this.only || this.only.has(line.team)))
+    if (kept.length === 0) return
+    this.pushSeq = Math.min(this.pushSeq, ...kept.map((line) => line.seq))
+    this.ticker.push(...kept)
+    this.ticker.sort((a, b) => b.at - a.at)
+    if (this.ticker.length > this.tickerDepth) this.ticker.length = this.tickerDepth
   }
 
   private byWorkflow(correlation: number): { team: string; member: null } | null {

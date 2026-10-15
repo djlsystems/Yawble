@@ -9,9 +9,11 @@ import { localTime } from '../lib/localTime'
 import {
   MonitorModel,
   ReplayClock,
+  TokensTooltip,
   compact,
   timeOf,
   timeline,
+  tokensWords,
   type MonitorEffect,
   type NodeRef,
   type TickerEntry,
@@ -30,6 +32,14 @@ import {
   type ResourceSettings,
 } from '../lib/monitor/hints'
 import { MonitorSymbolsFamily, glyphOf, loadMonitorSymbols, type Codepoints } from '../lib/monitor/font'
+import {
+  fileWatch,
+  readFileSettings,
+  writeFileSettings,
+  type FileDepth,
+  type FileSettings,
+  type WorkspacePush,
+} from '../lib/monitor/workspace'
 
 /**
  * THE MONITOR: every team at once, as a living graph.
@@ -44,6 +54,10 @@ import { MonitorSymbolsFamily, glyphOf, loadMonitorSymbols, type Codepoints } fr
  * A plugin event whose type carries a monitor hint (`GET /api/events`, read each time it opens)
  * draws the thing the plugin acted on beside the plugin member, with its icon from the full
  * Material Symbols font that only this view loads (`lib/monitor/font.ts`).
+ *
+ * While it is open it joins the hub's file watch, and each `workspaceChanged` push draws the
+ * member's file changes as repository, project and file nodes off its team (`lib/monitor/workspace.ts`).
+ * They are in no row of the log, so a replay draws none of them.
  */
 
 const board = useConsoleStore()
@@ -68,6 +82,9 @@ const ticker = shallowRef<TickerEntry[]>([])
 const counts = ref({ running: 0, waiting: 0, blocked: 0, queued: 0, open: 0, teams: 0, members: 0 })
 const rate = ref(0)
 const tokensShown = ref(0)
+/** Where the token figure's stretch begins, and how many runs in it reported no usage. */
+const tokensSince = ref(0)
+const unmeasured = ref(0)
 const clockAt = ref(0)
 const hover = ref<HoverInfo | null>(null)
 const picked = ref<NodeRef | null>(null)
@@ -127,12 +144,55 @@ function setPlugin(plugin: string, on: boolean) {
   applyChanges({ ...changes.value, off: on ? off : [...off, plugin] })
 }
 
+/** Show file changes, and how far down: remembered per browser like the plugin changes. */
+const fileChanges = ref<FileSettings>(readFileSettings())
+const depthOptions: { label: string; value: FileDepth }[] = [
+  { label: 'Repository', value: 'repository' },
+  { label: 'Project', value: 'project' },
+  { label: 'File', value: 'file' },
+]
+
+function applyFileChanges(next: FileSettings) {
+  fileChanges.value = next
+  model.fileSettings = { ...next }
+  scene?.setFileChanges(next)
+  writeFileSettings(next)
+  dirty = true
+}
+function setFilesShow(show: boolean) {
+  applyFileChanges({ ...fileChanges.value, show })
+}
+function setFilesDepth(depth: FileDepth) {
+  applyFileChanges({ ...fileChanges.value, depth })
+}
+
 /** A model with this view's hints and settings: every one the view makes goes through here. */
-function newModel(only: Set<string> | null): MonitorModel {
+function newModel(only: Set<string> | null, replaying = false): MonitorModel {
   const made = new MonitorModel(board.managerName || 'Manager', 80, only)
   made.hints = hints.value
   made.settings = { ...changes.value, off: [...changes.value.off] }
+  made.fileSettings = { ...fileChanges.value }
+  made.replay = replaying
   return made
+}
+
+/** The activity list's push lines: in no row, so kept here for a live model that starts again. */
+let pushLines: TickerEntry[] = []
+/** Pushes heard before the log is read, applied once it is. */
+let pendingPushes: WorkspacePush[] = []
+let stopWatching: (() => void) | null = null
+
+/** One file-changes push: drawn and listed live, and nothing at all in a replay. */
+function onPush(push: WorkspacePush) {
+  if (loading.value) {
+    pendingPushes.push(push)
+    return
+  }
+  if (mode.value !== 'live') return
+  const effects = model.applyWorkspace(push)
+  pushLines = model.ticker.filter((entry) => entry.workspace === true)
+  dirty = true
+  if (effects.length > 0) scene?.play(effects)
 }
 
 let model = new MonitorModel()
@@ -264,6 +324,8 @@ function publish(now: number) {
   counts.value = model.counts()
   rate.value = model.rate()
   tokensTarget = model.tokens
+  tokensSince.value = model.since
+  unmeasured.value = model.unmeasured
   clockAt.value = replay ? replay.at : Date.now()
 }
 
@@ -297,6 +359,7 @@ function startLive() {
   model = newModel(new Set(liveTeams.value))
   feed(history.value, true)
   model.reconcile(board.choosableTeams)
+  model.keepPushLines(pushLines)
   tokensShown.value = model.tokens
   dirty = true
   publish(performance.now())
@@ -308,7 +371,9 @@ function startReplay(from?: number) {
   if (rows.length === 0) return
   mode.value = 'replay'
   finished.value = false
-  model = newModel(null)
+  model = newModel(null, true)
+  // File changes are not in the log: the replay draws none, and says nothing of them.
+  scene?.clearFileChanges()
   const start = from ?? timeOf(rows[0]!)
   feed(rows.filter((row) => timeOf(row) < start), true)
   replay = new ReplayClock(rows, speed.value, 20_000, start)
@@ -426,6 +491,7 @@ onMounted(async () => {
       onPick: (picked_) => (picked.value = picked_),
     })
     scene.setAutoFit(!keepView.value)
+    scene.setFileChanges(fileChanges.value)
     measure()
     scene.start()
   }
@@ -437,6 +503,8 @@ onMounted(async () => {
   document.addEventListener('fullscreenchange', onFullscreenChange)
 
   followBoard()
+  // Joined while the Monitor is open, left when it closes.
+  stopWatching = fileWatch.listen(onPush)
   void loadMonitorSymbols().then((codepoints) => {
     // A font that does not load leaves the dots; nothing is wrong with the events.
     if (!codepoints || unmounted) return
@@ -455,12 +523,17 @@ onMounted(async () => {
   if (events.status === 'fulfilled') hints.value = hintsFrom(events.value)
   loading.value = false
   startLive()
+  const heard = pendingPushes
+  pendingPushes = []
+  for (const push of heard) onPush(push)
   scene?.fit()
   frame = requestAnimationFrame(tick)
 })
 
 onUnmounted(() => {
   unmounted = true
+  stopWatching?.()
+  stopWatching = null
   if (frame !== 0) cancelAnimationFrame(frame)
   unsubscribe?.()
   resizeObserver?.disconnect()
@@ -515,9 +588,10 @@ onUnmounted(() => {
               <span class="monitor-stat-value" :style="{ color: toneColour('tell') }">{{ rate }}</span>
               <span class="monitor-stat-words">events / min</span>
             </div>
-            <div class="monitor-stat" data-stat="tokens">
+            <div class="monitor-stat monitor-stat--tip" data-stat="tokens">
               <span class="monitor-stat-value" :style="{ color: toneColour('done') }">{{ compact(tokensShown) }}</span>
-              <span class="monitor-stat-words">tokens measured</span>
+              <span class="monitor-stat-words">{{ tokensWords(tokensSince, clockAt, unmeasured) }}</span>
+              <q-tooltip>{{ TokensTooltip }}</q-tooltip>
             </div>
           </div>
           <div class="monitor-sub">
@@ -585,7 +659,7 @@ onUnmounted(() => {
               data-monitor-settings
               @click="settingsOpen = !settingsOpen"
             >
-              <q-tooltip v-if="!settingsOpen">Settings: what plugins' changes show, and for how long</q-tooltip>
+              <q-tooltip v-if="!settingsOpen">Settings: what plugins' changes and file changes show, and for how long</q-tooltip>
             </q-btn>
             <div
               v-if="settingsOpen"
@@ -635,6 +709,31 @@ onUnmounted(() => {
               <div v-if="hintPlugins.length === 0" class="monitor-settings-none">
                 No installed plugin says how to draw its changes.
               </div>
+              <div class="monitor-settings-head">Files</div>
+              <q-toggle
+                :model-value="fileChanges.show"
+                dense
+                dark
+                label="Show file changes"
+                data-monitor-setting="files"
+                @update:model-value="setFilesShow"
+              />
+              <div class="monitor-settings-row">
+                <span id="monitor-setting-depth">Draw down to</span>
+                <q-btn-toggle
+                  :model-value="fileChanges.depth"
+                  :options="depthOptions"
+                  :disable="!fileChanges.show"
+                  dense
+                  no-caps
+                  unelevated
+                  toggle-color="primary"
+                  aria-labelledby="monitor-setting-depth"
+                  data-monitor-setting="depth"
+                  @update:model-value="setFilesDepth"
+                />
+              </div>
+              <div class="monitor-settings-none">Each shows for the time above.</div>
             </div>
           </span>
           <q-btn
@@ -754,7 +853,7 @@ onUnmounted(() => {
               <span v-else class="monitor-row-dot" aria-hidden="true" :style="{ background: actionColour(entry.resource.action) }"></span>
               <span class="monitor-row-words">{{ resourceWords(entry) }}</span>
             </div>
-            <div v-else class="monitor-row-text">{{ entry.text }}</div>
+            <div v-else class="monitor-row-text" :data-monitor-push="entry.workspace ? '' : undefined">{{ entry.text }}</div>
           </div>
         </li>
       </ol>
@@ -884,6 +983,10 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   line-height: 1.05;
+}
+
+.monitor-stat--tip {
+  pointer-events: auto;
 }
 
 .monitor-stat-value {

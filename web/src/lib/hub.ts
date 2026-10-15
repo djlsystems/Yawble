@@ -53,6 +53,13 @@ export interface HubHandlers {
    * which a machine principal never joins). OPTIONAL by the same seam as `onKanbanChanged`.
    */
   onCapacityChanged?: (sample: CapacitySample) => void;
+
+  /**
+   * A member's file changes, pushed only to connections that joined the file watch
+   * (`JoinFileWatch`, which the Monitor asks for while it is open - `lib/monitor/workspace.ts`).
+   * OPTIONAL by the same seam as `onKanbanChanged`. The shape is read there, never trusted here.
+   */
+  onWorkspaceChanged?: (push: unknown) => void;
 }
 
 /**
@@ -106,6 +113,7 @@ export async function connectHub(
   // nothing extra and a Host without the event raises nothing this listens for.
   if (handlers.onKanbanChanged) connection.on('kanbanChanged', handlers.onKanbanChanged);
   if (handlers.onCapacityChanged) connection.on('capacityChanged', handlers.onCapacityChanged);
+  if (handlers.onWorkspaceChanged) connection.on('workspaceChanged', handlers.onWorkspaceChanged);
 
   connection.onreconnecting(() => handlers.onConnectedChanged(false));
 
