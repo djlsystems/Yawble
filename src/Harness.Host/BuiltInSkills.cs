@@ -1309,6 +1309,38 @@ public static class BuiltInSkills
             (`site.put`), and the page links to it. Never write a secret or a token into a site's
             files or data: everything there is downloadable by whoever opens the site.
 
+            ### Monitor hints
+
+            An event may carry a `monitor` hint, so the Monitor draws what the plugin did to the
+            outside system as a resource on the team's map.
+
+            - Declare a monitor hint for each event that reports something the plugin created, changed
+              or deleted outside the platform. Never for a read, a list, a check or a refusal.
+            - Choose an icon for the resource (a database, a mail, a DNS record, a container). Use
+              `iconBy` when one event covers several kinds.
+            - Publish one event per resource when a command touches several. Declare
+              `highVolume: true` when the event exists to be shown rather than to be acted on.
+            - Keep the label short. Never put a secret, a body, or a message's text in it.
+
+            The `monitor` object: `icon` is required, a Material Symbols Outlined name; `iconBy`
+            (optional) names a declared string field whose value picks the icon; exactly one of
+            `action` (`created`, `changed` or `deleted`) and `actionField` (a declared string field
+            holding one of those); `label` (optional) is text with `{field}` placeholders over declared
+            string or number fields, at most 120 characters as written. An unknown key inside `monitor`
+            is ignored and named `events.publishes.<type>.monitor.<key>`. The platform refuses a bad
+            icon, both or neither of `action` and `actionField`, a bad action, a field that is not a
+            declared string, a placeholder that is not a declared string or number, and a label over
+            the limit, each sentence naming the event type and the field.
+
+            ```json
+            { "type": "record.created", "summary": "A record was created.", "highVolume": true,
+              "fields": [ { "name": "table", "kind": "string", "summary": "The table." } ],
+              "monitor": { "icon": "database", "action": "created", "label": "Row in {table}" } }
+            ```
+
+            A plugin event declared `highVolume` stays out of the member ledger and is still an
+            ordinary log row; any other plugin event stays in the ledger.
+
             ## 3. Settings and secrets
 
             Settings are per member, chosen when the member is hired, and checked against the manifest
@@ -1449,7 +1481,8 @@ public static class BuiltInSkills
             - The settings (type, default, required) and the secrets by key name.
             - Each OAuth account it acts on, as a connection slot: its providers and the scopes it
               needs from each. Never a token setting or an authorize command.
-            - The events it publishes, and the fields of each payload.
+            - The events it publishes, the fields of each payload, and for each its monitor hint (or
+              why none: a read, a list, a check or a refusal) and whether it is `highVolume`.
             - For anything outward: the default mode, the real mode, the allowlist setting and the
               scope settings.
             - The polling interval, what counts as new, and the quiet case.

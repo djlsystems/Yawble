@@ -34,6 +34,15 @@
         "fields": [
           { "name": "length", "kind": "number", "summary": "The length of the transformed output." }
         ]
+      },
+      {
+        "type": "file.written",
+        "summary": "A file was written outside the platform. Shown on the Monitor; the sample publishes it only when told publish:file.written.",
+        "highVolume": true,
+        "fields": [
+          { "name": "name", "kind": "string", "summary": "The file's name." }
+        ],
+        "monitor": { "icon": "draft", "action": "created", "label": "Wrote {name}" }
       }
     ]
   },

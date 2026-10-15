@@ -29,3 +29,7 @@ The instruction text is the input. Each instruction in one batch is handled in o
 `token` secret bound. Each run that completes also publishes `plugin.sample-echo-go.done`, carrying
 `length` (the output's length), in the same workflow: a trigger on that type can wake another
 member with `{event.length}`.
+
+It also declares `plugin.sample-echo-go.file.written`, with a monitor hint (a file icon, `created`,
+`Wrote {name}`) and `highVolume: true`, as the example of an event that reports something done
+outside the platform. It publishes it only when told `publish:file.written`.
