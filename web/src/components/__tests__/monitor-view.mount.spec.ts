@@ -8,11 +8,18 @@ import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import type { Message } from '../../api/types'
 
-const { getMessages } = vi.hoisted(() => ({ getMessages: vi.fn() }))
+const { getMessages, listEvents } = vi.hoisted(() => ({ getMessages: vi.fn(), listEvents: vi.fn() }))
 
 vi.mock('../../api/client', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getMessages,
+  listEvents,
+}))
+
+// The full icon font is `monitorFont.spec.ts`; here it never arrives, and the dots stand.
+vi.mock('../../lib/monitor/font', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  loadMonitorSymbols: () => Promise.resolve(null),
 }))
 
 import MonitorView from '../MonitorView.vue'
@@ -48,6 +55,7 @@ async function mountMonitor(rows: Message[]) {
 beforeEach(() => {
   setActivePinia(createPinia())
   seq = 0
+  listEvents.mockResolvedValue([])
 })
 
 afterEach(() => {
@@ -136,5 +144,16 @@ describe('the Monitor', () => {
     await flushPromises()
 
     expect(wrapper.find('.monitor-overlay--error').text()).toBe('The log could not be read: 503 Service Unavailable')
+  })
+
+  it('draws plugin rows as before when the event catalog cannot be read', async () => {
+    listEvents.mockRejectedValueOnce(new Error('503 Service Unavailable'))
+    const { wrapper } = await mountMonitor([
+      row('plugin.azure.sqlCreated', 'Alpha/Developer', { name: 'sql-db' }, '2026-10-15T10:00:01Z'),
+    ])
+
+    expect(wrapper.find('.monitor-row-verb').text()).toBe('sqlCreated')
+    expect(wrapper.find('[data-monitor-resource]').exists()).toBe(false)
+    expect(wrapper.find('.monitor-overlay--error').exists()).toBe(false)
   })
 })

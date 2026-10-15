@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 import vue from '@vitejs/plugin-vue';
 import { quasar, transformAssetUrls } from '@quasar/vite-plugin';
+import { monitorSymbols } from './scripts/monitor-symbols.mjs';
 
 /**
  * THE WEB SUITE'S TRANSFORM PIPELINE, AND THE ONE DECISION IN IT IS `environment`.
@@ -26,6 +27,8 @@ export default defineConfig({
     quasar({
       sassVariables: fileURLToPath(new URL('./src/css/quasar.variables.scss', import.meta.url)),
     }),
+    // `virtual:monitor-symbols`, as the app's build serves it; made only when a spec imports it.
+    monitorSymbols(),
   ],
   // `@/` as the app's tsconfig paths and Quasar's build resolve it, so a spec can load the real
   // `router/routes.ts` rather than a hand-copied route table.

@@ -789,6 +789,21 @@ export interface EventDefinition {
   inLedger: boolean
   fields: EventFieldDefinition[]
   summary: string
+  /** A plugin event's monitor hint, from its manifest: what the Monitor draws for a row of it. */
+  monitor?: MonitorHint | null
+}
+
+/**
+ * How the Monitor draws a plugin event's row: an icon (a Material Symbols name, or one a payload
+ * field picks), what happened - fixed, or read from a string field - and a `{field}` label.
+ * Resolved against each row by `lib/monitor/hints.ts`.
+ */
+export interface MonitorHint {
+  icon: string
+  iconBy?: { field: string; icons: Record<string, string> } | null
+  action?: 'created' | 'changed' | 'deleted' | null
+  actionField?: string | null
+  label?: string | null
 }
 
 /**

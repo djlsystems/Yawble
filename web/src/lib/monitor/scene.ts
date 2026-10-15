@@ -11,6 +11,8 @@ import {
 } from 'd3-force'
 import type { MemberState, MonitorEffect, MonitorModel, NodeRef, Origin, Tone } from './model'
 import { compact } from './model'
+import type { Resource, ResourceAction } from './hints'
+import { MonitorSymbolsFamily, glyphOf, type Codepoints } from './font'
 
 /**
  * THE MONITOR'S STAGE: a force-directed graph on a canvas, and the effects the model's rows make.
@@ -29,6 +31,7 @@ const ToneNames: Tone[] = ['tell', 'start', 'progress', 'done', 'handback', 'fai
 export const RefitAfterMs = 12_000
 
 const StateNames: MemberState[] =['idle', 'running', 'waiting', 'blocked', 'decision', 'failed']
+const ActionNames: ResourceAction[] = ['created', 'changed', 'deleted']
 
 /**
  * THE STAGE'S COLOURS, read from the `--os-monitor-*` tokens in `app.scss` by `readPalette`. One
@@ -37,6 +40,8 @@ const StateNames: MemberState[] =['idle', 'running', 'waiting', 'blocked', 'deci
  */
 export const Tones = Object.fromEntries(ToneNames.map((tone) => [tone, ''])) as Record<Tone, string>
 export const StateColours = Object.fromEntries(StateNames.map((state) => [state, ''])) as Record<MemberState, string>
+/** What a plugin's row did to a thing: green, amber, red. Never the only signal - see `drawResources`. */
+export const ActionColours = Object.fromEntries(ActionNames.map((action) => [action, ''])) as Record<ResourceAction, string>
 const Screen = { ground: '', ink: '', inkDim: '' }
 
 /** Read the monitor's tokens off an element inside the page. */
@@ -45,6 +50,7 @@ export function readPalette(element: Element) {
   const token = (name: string) => css.getPropertyValue(`--os-monitor-${name}`).trim()
   for (const tone of ToneNames) Tones[tone] = token(tone)
   for (const state of StateNames) StateColours[state] = token(`state-${state}`)
+  for (const action of ActionNames) ActionColours[action] = token(action)
   Screen.ground = token('ground')
   Screen.ink = token('ink')
   Screen.inkDim = token('ink-dim')
@@ -101,6 +107,25 @@ interface Floater {
   lane: number
 }
 
+interface ResourceMark {
+  at: NodeRef
+  resource: Resource
+  start: number
+  /** Display time it stays for, ms: the settings' seconds, not log time. */
+  ttl: number
+}
+
+/** A resource mark as the scene would draw it now. Exposed for tests. */
+export interface ShownResource {
+  at: NodeRef
+  resource: Resource
+  x: number
+  y: number
+  alpha: number
+  /** The icon's character, or null while the font is not loaded: a plain dot is drawn instead. */
+  glyph: string | null
+}
+
 export interface HoverInfo {
   kind: NodeKind | 'origin'
   title: string
@@ -128,6 +153,12 @@ const BornMs = 900
 const DyingMs = 1200
 const OriginMs = 5500
 const MaxEffects = 260
+/** A resource mark's radius, and how long it fades out over at the end of its time. */
+const ResourceR = 11
+const ResourceFadeMs = 4000
+const ResourceInMs = 300
+/** Past this many at once beside one member, the oldest goes early. */
+const MaxResourcesEach = 8
 
 /** "DeveloperHelene" -> "DH", "Namecheap DNS" -> "ND", "Manager" -> "M". */
 export function initials(name: string): string {
@@ -164,6 +195,8 @@ export class MonitorScene {
   private bursts: Burst[] = []
   private ripples: Ripple[] = []
   private floaters: Floater[] = []
+  private resources: ResourceMark[] = []
+  private symbols: Codepoints | null = null
   private readonly originUsed = new Map<string, number>()
 
   private width = 800
@@ -219,6 +252,11 @@ export class MonitorScene {
 
   setOptions(options: Partial<SceneOptions>) {
     this.options = { ...this.options, ...options }
+  }
+
+  /** The full icon font arrived: from the next frame, icons draw instead of plain dots. */
+  setSymbols(codepoints: Codepoints | null) {
+    this.symbols = codepoints
   }
 
   resize(width: number, height: number, dpr = globalThis.devicePixelRatio || 1) {
@@ -371,6 +409,16 @@ export class MonitorScene {
         case 'shake': {
           const node = this.nodeOf(effect.at)
           if (node && !this.options.reducedMotion) node.shakeUntil = now + 500
+          break
+        }
+        case 'resource': {
+          this.resources.push({ at: effect.at, resource: effect.resource, start: now, ttl: effect.ttlMs })
+          const mine = this.resources.filter((mark) => sameRef(mark.at, effect.at))
+          if (mine.length > MaxResourcesEach) {
+            const gone = new Set(mine.slice(0, mine.length - MaxResourcesEach))
+            this.resources = this.resources.filter((mark) => !gone.has(mark))
+          }
+          this.touch(effect.at)
           break
         }
       }
@@ -562,6 +610,7 @@ export class MonitorScene {
     this.bursts = this.bursts.filter((b) => now - b.start < BurstMs)
     this.ripples = this.ripples.filter((r) => now - r.start < RippleMs)
     this.floaters = this.floaters.filter((f) => now - f.start < FloatMs)
+    this.resources = this.resources.filter((mark) => now - mark.start < mark.ttl)
     let removed = false
     for (const [id, node] of this.nodes) {
       if (node.dying !== null && now - node.dying > DyingMs) {
@@ -795,6 +844,7 @@ export class MonitorScene {
     this.drawBursts(ctx, now)
     ctx.globalCompositeOperation = 'source-over'
     this.drawNodes(ctx, now, focus)
+    this.drawResources(ctx)
     this.drawTeamNames(ctx, now, focus)
     this.drawFloaters(ctx, now)
     ctx.restore()
@@ -1353,6 +1403,114 @@ export class MonitorScene {
       ctx.fillStyle = open ? alphaHex(Screen.ink, 0.75) : alphaHex(Screen.inkDim, 0.45)
       const title = workflow.title.length > 30 ? `${workflow.title.slice(0, 29)}…` : workflow.title
       ctx.fillText(title, x, y + r + 4)
+    }
+  }
+
+  /**
+   * Where each resource mark sits now and how strongly it shows. They fan out beside their member:
+   * the first at its right, the next at its left, then a row higher on each side, so no two ever
+   * share a place and none reaches below the member, where its name is.
+   */
+  shownResources(): ShownResource[] {
+    const now = this.clock
+    const placed = new Map<string, number>()
+    const row = Math.max(ResourceR * 2 + 6, this.options.fontPx * 1.5)
+    const shown: ShownResource[] = []
+    for (const mark of this.resources) {
+      const node = this.nodeOf(mark.at)
+      const pos = this.posOf(mark.at)
+      if (!pos) continue
+      const key = JSON.stringify(mark.at)
+      const slot = placed.get(key) ?? 0
+      placed.set(key, slot + 1)
+      const side = slot % 2 === 0 ? 1 : -1
+      const up = Math.floor(slot / 2)
+      const reach = (node?.r ?? 10) + 36 + up * 8
+      const age = now - mark.start
+      const left = mark.ttl - age
+      const alpha = this.options.reducedMotion
+        ? 1
+        : Math.max(0, Math.min(1, age / ResourceInMs, left / Math.min(ResourceFadeMs, mark.ttl * 0.4)))
+      shown.push({
+        at: mark.at,
+        resource: mark.resource,
+        x: pos.x + side * reach,
+        y: pos.y - up * row,
+        alpha,
+        glyph: glyphOf(this.symbols, mark.resource.icon),
+      })
+    }
+    return shown
+  }
+
+  /**
+   * A plugin's rows, as the things they acted on: the icon in a ring of its action's colour, joined
+   * to the member by a short line, its label beside it. Colour is never the only signal: a deleted
+   * thing's icon is struck through, and the activity list says each in words.
+   */
+  private drawResources(ctx: CanvasRenderingContext2D) {
+    for (const mark of this.shownResources()) {
+      if (mark.alpha <= 0.01) continue
+      const member = this.posOf(mark.at)
+      if (!member) continue
+      const colour = ActionColours[mark.resource.action]
+      const side = mark.x >= member.x ? 1 : -1
+      const { x, y } = mark
+      ctx.save()
+      ctx.globalAlpha = mark.alpha
+
+      // The line from the member's edge to the mark's.
+      const node = this.nodeOf(mark.at)
+      const angle = Math.atan2(y - member.y, x - member.x)
+      const from = (node?.r ?? 10) + 6
+      ctx.strokeStyle = alphaHex(colour, 0.55)
+      ctx.lineWidth = 1.2
+      ctx.beginPath()
+      ctx.moveTo(member.x + Math.cos(angle) * from, member.y + Math.sin(angle) * from)
+      ctx.lineTo(x - Math.cos(angle) * (ResourceR + 2), y - Math.sin(angle) * (ResourceR + 2))
+      ctx.stroke()
+
+      // The mark: a tinted disc with a ring, the icon in it, or a plain dot until the font is here.
+      ctx.fillStyle = Screen.ground
+      ctx.beginPath()
+      ctx.arc(x, y, ResourceR, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = alphaHex(colour, 0.2)
+      ctx.fill()
+      ctx.strokeStyle = colour
+      ctx.lineWidth = 2
+      ctx.stroke()
+      ctx.fillStyle = colour
+      if (mark.glyph !== null) {
+        ctx.font = `${Math.round(ResourceR * 1.45)}px "${MonitorSymbolsFamily}"`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(mark.glyph, x, y + 0.5)
+      } else {
+        ctx.beginPath()
+        ctx.arc(x, y, 3, 0, Math.PI * 2)
+        ctx.fill()
+      }
+      if (mark.resource.action === 'deleted') {
+        ctx.strokeStyle = colour
+        ctx.lineWidth = 2
+        ctx.lineCap = 'round'
+        ctx.beginPath()
+        ctx.moveTo(x - ResourceR * 0.75, y - ResourceR * 0.75)
+        ctx.lineTo(x + ResourceR * 0.75, y + ResourceR * 0.75)
+        ctx.stroke()
+      }
+
+      // The label, outward of the mark, in the Monitor's text size.
+      ctx.font = this.font(0.66, 500)
+      ctx.textAlign = side > 0 ? 'left' : 'right'
+      ctx.textBaseline = 'middle'
+      ctx.fillStyle = Screen.ink
+      ctx.shadowColor = alphaHex(Screen.ground, 0.9)
+      ctx.shadowBlur = 4
+      const label = mark.resource.label.length > 40 ? `${mark.resource.label.slice(0, 39)}…` : mark.resource.label
+      ctx.fillText(label, x + side * (ResourceR + 6), y + 0.5)
+      ctx.restore()
     }
   }
 
