@@ -25,9 +25,10 @@ describe('the page title', () => {
 });
 
 describe("the Console's page name", () => {
-  it('names the Teams table, the Kanban and the team whose board is open', () => {
+  it('names the Teams table, the Kanban, the Monitor and the team whose board is open', () => {
     expect(consolePageName('teams', 'Alpha')).toBe('Teams');
     expect(consolePageName('kanban', 'Alpha')).toBe('Kanban');
+    expect(consolePageName('monitor', 'Alpha')).toBe('Monitor');
     expect(consolePageName('board', 'Alpha')).toBe('Alpha');
     expect(consolePageName('board', null)).toBe('Console');
     expect(titleFor('Kanban')).toBe(`${productTitle} - Kanban`);

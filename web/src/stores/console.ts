@@ -57,7 +57,7 @@ const ActiveTeamKey = 'harness.activeTeam';
  * union, a value named `teams` that means "one team's board" says the opposite of its contents -
  * which is the `activeTeamId` / `activeTeamName` trap this codebase has a branded type to prevent.
  */
-export type ConsoleView = 'board' | 'kanban' | 'teams';
+export type ConsoleView = 'board' | 'kanban' | 'teams' | 'monitor';
 
 /**
  * This viewer's chosen feed depth, or the default when the display store is not up yet.
@@ -110,7 +110,7 @@ function readRememberedTabs(): RememberedTabs {
         : [];
       const active = typeof parsed.active === 'string' ? asTeamId(parsed.active) : '';
       const view: ConsoleView =
-        parsed.view === 'kanban' || parsed.view === 'teams' || parsed.view === 'board'
+        parsed.view === 'kanban' || parsed.view === 'teams' || parsed.view === 'board' || parsed.view === 'monitor'
           ? parsed.view
           // An older blob, or a value from a build that spelled these differently. The board is the
           // safe landing: it is what every reader saw before this field existed.
@@ -383,6 +383,10 @@ export const useConsoleStore = defineStore('console', {
     liveTeamIds(state): string[] {
       if (state.view === 'teams') return state.teams.map((team) => team.id);
 
+      // THE MONITOR WATCHES EVERY TEAM, so it hears every team's snapshots: a member starting on a
+      // team with no open tab is a node lighting up there.
+      if (state.view === 'monitor') return this.choosableTeams.map((team) => team.id);
+
       return this.openTeams.map((team) => team.id);
     },
     /**
@@ -624,6 +628,15 @@ export const useConsoleStore = defineStore('console', {
       // the shape `currentTeamChanged` uses - and is tracked separately.
       void this.refresh();
       void this.pullRollup();
+    },
+
+    /**
+     * The Monitor: every team's activity as one live graph. A view change and never a team switch,
+     * as the Kanban is: the team you were working in stays active.
+     */
+    showMonitor() {
+      this.view = 'monitor';
+      this.rememberTabs();
     },
 
     /** Back to a team's board. Takes no team: the caller decides what is active. */

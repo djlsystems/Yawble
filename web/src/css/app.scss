@@ -127,6 +127,36 @@
   // different kind of member at a glance: a tinted ground and a stronger edge, in both themes.
   --os-plugin-surface: #f3f0fc;
   --os-plugin-accent: #6a5acd;
+
+  // THE MONITOR'S SCREEN. Dark in every theme on purpose, as the Concierge's terminal is: it is a
+  // screen to watch, and the glow its graph draws reads only on a dark ground. So these are set
+  // once, here, and no theme block repeats them. The canvas reads them (`lib/monitor/scene.ts`,
+  // `readPalette`) and so does the view's stylesheet, so the legend and the graph agree.
+  --os-monitor-ground: #070b14;
+  --os-monitor-panel: #0c1322;
+  --os-monitor-rule: #94a3b829;
+  --os-monitor-ink: #e2e8f0;
+  --os-monitor-ink-dim: #94a3b8;
+  --os-monitor-ink-soft: #cbd5e1;
+  --os-monitor-tell: #38bdf8;
+  --os-monitor-start: #22d3ee;
+  --os-monitor-progress: #a5b4fc;
+  --os-monitor-done: #34d399;
+  --os-monitor-handback: #fbbf24;
+  --os-monitor-fail: #f43f5e;
+  --os-monitor-blocked: #fb7185;
+  --os-monitor-workflow: #c084fc;
+  --os-monitor-card: #60a5fa;
+  --os-monitor-push: #2dd4bf;
+  --os-monitor-plugin: #e879f9;
+  --os-monitor-file: #94a3b8;
+  --os-monitor-quiet: #64748b;
+  --os-monitor-state-idle: #475569;
+  --os-monitor-state-running: #34d399;
+  --os-monitor-state-waiting: #fbbf24;
+  --os-monitor-state-blocked: #fb7185;
+  --os-monitor-state-decision: #f59e0b;
+  --os-monitor-state-failed: #f43f5e;
 }
 
 // The dark theme. Only what differs from light is here.

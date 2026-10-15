@@ -1304,6 +1304,19 @@ describe('board store', () => {
 
       expect(JSON.parse(localStorage.getItem('harness.activeTeam')!).view).toBe('teams');
     });
+
+    /** The Monitor watches every team, so it hears every team's pushes, tab or no tab. */
+    it('remembers the Monitor and joins every team while it shows', () => {
+      const board = useConsoleStore();
+      board.teams = [team(asTeamId('Alpha')), team(asTeamId('Beta'))];
+      board.openTeamTabs = [asTeamId('Alpha')];
+      board.activeTeamId = asTeamId('Alpha');
+      board.showMonitor();
+
+      expect(JSON.parse(localStorage.getItem('harness.activeTeam')!).view).toBe('monitor');
+      expect(board.liveTeamIds).toEqual(['Alpha', 'Beta']);
+      expect(board.activeTeamId).toBe('Alpha');
+    });
   });
 
   describe('the rollup', () => {

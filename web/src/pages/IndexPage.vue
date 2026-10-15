@@ -11,6 +11,7 @@ import { pauseTeam, resumeTeam } from '../api/client';
 import ContainerCard from '../components/ContainerCard.vue';
 import TeamKpiStrip from '../components/TeamKpiStrip.vue';
 import KanbanBoard from '../components/KanbanBoard.vue';
+import MonitorView from '../components/MonitorView.vue';
 import TeamsView from '../components/TeamsView.vue';
 import SolutionBlockedBanner from '../components/SolutionBlockedBanner.vue';
 import TellManagerBox from '../components/TellManagerBox.vue';
@@ -463,7 +464,7 @@ onUnmounted(() => {
         unelevated
         no-caps
         class="console-tab"
-        :class="{ active: !kanban.active && team.id === activeTeam?.id }"
+        :class="{ active: board.view === 'board' && team.id === activeTeam?.id }"
         @click="selectTeamTab(team.id)"
       >
         <span class="console-tab-label">{{ team.name }}</span>
@@ -501,6 +502,22 @@ onUnmounted(() => {
       >
         <span class="console-tab-label">Kanban</span>
       </q-btn>
+
+      <!-- THE MONITOR TAB, beside the Kanban and of the same kind: one view of every team, not a
+           team. It shows the work moving - who is told what, who runs, what finishes - as a live
+           graph, and can play the newest stretch of the log back at speed. -->
+      <q-btn
+        unelevated
+        no-caps
+        class="console-tab console-tab--monitor"
+        :class="{ active: board.view === 'monitor' }"
+        icon="hub"
+        :aria-pressed="board.view === 'monitor' ? 'true' : 'false'"
+        data-monitor-tab
+        @click="board.showMonitor()"
+      >
+        <span class="console-tab-label">Monitor</span>
+      </q-btn>
     </div>
 
     <!-- THE FIRST BRANCH, because the Teams table is the one view that is reachable with no active
@@ -514,6 +531,9 @@ onUnmounted(() => {
     <!-- The Kanban tab REPLACES the container cards rather than sitting above them. Two boards on
          one page is two things claiming to be what the team is doing. -->
     <KanbanBoard v-else-if="kanban.active" />
+
+    <!-- The Monitor replaces the cards as the Kanban does: every team at once. -->
+    <MonitorView v-else-if="board.view === 'monitor'" />
 
     <div v-else-if="!hasTeams" class="column items-center q-pa-xl text-center">
       <div class="text-h6 q-mb-sm">No teams yet</div>

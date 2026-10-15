@@ -1,13 +1,14 @@
 import type { LocationQuery, LocationQueryRaw } from 'vue-router';
 
 /**
- * WHERE A PERSON IS IN THE CONSOLE, as the address says it: the Teams table, one team's board, or
- * the Kanban. The address carries it so the browser's Back and Forward move between them, and a
+ * WHERE A PERSON IS IN THE CONSOLE, as the address says it: the Teams table, one team's board, the
+ * Kanban or the Monitor. The address carries it so the browser's Back and Forward move between them, and a
  * copied address opens the same view. Nothing else about the Console is in it.
  */
 export type ConsolePlace =
   | { kind: 'teams' }
   | { kind: 'kanban' }
+  | { kind: 'monitor' }
   | { kind: 'team'; team: string };
 
 /** The two keys this module owns. Every other key in the query (a connection's callback) is left. */
@@ -17,6 +18,7 @@ const keys = ['view', 'team'] as const;
 export function placeOf(view: string, activeTeamId: string): ConsolePlace | null {
   if (view === 'teams') return { kind: 'teams' };
   if (view === 'kanban') return { kind: 'kanban' };
+  if (view === 'monitor') return { kind: 'monitor' };
   return activeTeamId ? { kind: 'team', team: activeTeamId } : null;
 }
 
@@ -28,6 +30,7 @@ export function placeFromQuery(query: LocationQuery): ConsolePlace | null {
   const view = one(query.view);
   if (view === 'teams') return { kind: 'teams' };
   if (view === 'kanban') return { kind: 'kanban' };
+  if (view === 'monitor') return { kind: 'monitor' };
   return null;
 }
 

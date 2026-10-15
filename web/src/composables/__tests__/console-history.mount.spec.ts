@@ -116,6 +116,24 @@ describe('the browser back button in the Console', () => {
     expect(board.activeTeamId).toBe('beta');
   });
 
+  it('goes from the Monitor back to the team it was opened from, and an address opens the Monitor', async () => {
+    const router = await open('/console');
+    await openTeam('beta');
+    const board = useConsoleStore();
+    board.showMonitor();
+    await settle();
+    expect(router.currentRoute.value.query).toEqual({ view: 'monitor' });
+
+    await back(router);
+    expect(board.view).toBe('board');
+    expect(board.activeTeamId).toBe('beta');
+
+    router.forward();
+    await settle();
+    expect(board.view).toBe('monitor');
+    expect(board.activeTeamId).toBe('beta');
+  });
+
   it('opens the place an address names, and the load adds no step to go back through', async () => {
     const router = await open('/console?team=beta');
     const board = useConsoleStore();

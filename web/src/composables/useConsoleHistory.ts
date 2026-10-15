@@ -58,6 +58,11 @@ export function useConsoleHistory() {
       return;
     }
 
+    if (place.kind === 'monitor') {
+      board.showMonitor();
+      return;
+    }
+
     if (place.kind === 'kanban') {
       board.view = 'kanban';
       board.rememberTabs();

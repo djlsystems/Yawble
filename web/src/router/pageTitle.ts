@@ -19,6 +19,7 @@ export function pageTitle(route: Pick<RouteLocationNormalized, 'matched'>): stri
 export function consolePageName(view: string, teamName: string | null | undefined): string {
   if (view === 'teams') return 'Teams';
   if (view === 'kanban') return 'Kanban';
+  if (view === 'monitor') return 'Monitor';
   return teamName || 'Console';
 }
 

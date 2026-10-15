@@ -20,6 +20,7 @@
     "@quasar/extras": "^2.0.3",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
+    "d3-force": "^3.0.0",
     "echarts": "^6.1.0",
     "pinia": "^4.0.2",
     "quasar": "^2.24.0",
@@ -30,6 +31,7 @@
   "devDependencies": {
     "@quasar/app-vite": "^3.5.0",
     "@quasar/quasar-app-extension-testing-unit-vitest": "^3.0.0",
+    "@types/d3-force": "^3.0.10",
     "@types/node": "^22.19.11",
     "@vue/test-utils": "^2.5.1",
     "autoprefixer": "^10.4.27",

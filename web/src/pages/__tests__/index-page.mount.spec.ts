@@ -51,7 +51,7 @@ function team(id: string, over: Record<string, unknown> = {}) {
 }
 
 /** Children are stubbed: this page is about WHICH of them is on screen and in what order. */
-const stubs = { TeamsView: true, KanbanBoard: true, TeamKpiStrip: true, ContainerCard: true, TellManagerBox: true };
+const stubs = { TeamsView: true, KanbanBoard: true, MonitorView: true, TeamKpiStrip: true, ContainerCard: true, TellManagerBox: true };
 
 let wrapper: VueWrapper | undefined;
 let board: ReturnType<typeof useConsoleStore>;
@@ -77,7 +77,7 @@ afterEach(() => {
 
 async function mountPage(
   teams: ReturnType<typeof team>[],
-  { active = teams[0]?.id ?? '', view = 'board' as 'board' | 'teams' | 'kanban' } = {},
+  { active = teams[0]?.id ?? '', view = 'board' as 'board' | 'teams' | 'kanban' | 'monitor' } = {},
 ) {
   setActivePinia(createPinia());
 
@@ -113,15 +113,15 @@ function tabs(page: VueWrapper) {
 
 /** The top-level views and blocks in document order, as the tag or class a reader would name. */
 function blocks(page: VueWrapper): string[] {
-  return page.findAll('teams-view-stub, kanban-board-stub, team-kpi-strip-stub, container-card-stub')
+  return page.findAll('teams-view-stub, kanban-board-stub, monitor-view-stub, team-kpi-strip-stub, container-card-stub')
     .map((found) => found.element.tagName.toLowerCase());
 }
 
 describe('the tab strip', () => {
-  it('puts the Teams tab first, then the open teams, then the Kanban tab', async () => {
+  it('puts the Teams tab first, then the open teams, then the Kanban and Monitor tabs', async () => {
     const page = await mountPage([team('alpha'), team('beta')]);
 
-    expect(tabs(page).map((tab) => tab.find('.console-tab-label').text())).toEqual(['Teams', 'Alpha', 'Beta', 'Kanban']);
+    expect(tabs(page).map((tab) => tab.find('.console-tab-label').text())).toEqual(['Teams', 'Alpha', 'Beta', 'Kanban', 'Monitor']);
   });
 
   /** Only the teams a person has open get a tab. */
@@ -130,7 +130,7 @@ describe('the tab strip', () => {
     board.openTeamTabs = ['alpha' as never];
     await flushPromises();
 
-    expect(tabs(page).map((tab) => tab.find('.console-tab-label').text())).toEqual(['Teams', 'Alpha', 'Kanban']);
+    expect(tabs(page).map((tab) => tab.find('.console-tab-label').text())).toEqual(['Teams', 'Alpha', 'Kanban', 'Monitor']);
   });
 
   /** Neither the Teams tab nor the Kanban tab is a team: no status chip, no close icon. */
@@ -184,6 +184,19 @@ describe('the tab strip', () => {
     expect(page.find('.console-tab--kanban').classes()).toContain('active');
   });
 
+  /** The Monitor is a view change, as the Kanban is: the active team stays active. */
+  it('selects the Monitor through the store, keeping the active team', async () => {
+    const page = await mountPage([team('alpha')]);
+    const setActiveTeam = vi.spyOn(board, 'setActiveTeam');
+
+    await page.find('[data-monitor-tab]').trigger('click');
+
+    expect(board.view).toBe('monitor');
+    expect(setActiveTeam).not.toHaveBeenCalled();
+    expect(page.find('[data-monitor-tab]').classes()).toContain('active');
+    expect(tabs(page)[1]!.classes()).not.toContain('active');
+  });
+
   it('keeps the strip on screen while the board is showing', async () => {
     const page = await mountPage([team('alpha')], { view: 'kanban' });
 
@@ -209,6 +222,12 @@ describe('which view replaces the cards', () => {
     const page = await mountPage([team('alpha')], { view: 'kanban' });
 
     expect(blocks(page)).toEqual(['kanban-board-stub']);
+  });
+
+  it('shows the Monitor INSTEAD of the cards', async () => {
+    const page = await mountPage([team('alpha')], { view: 'monitor' });
+
+    expect(blocks(page)).toEqual(['monitor-view-stub']);
   });
 });
 
