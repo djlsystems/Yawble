@@ -1,0 +1,414 @@
+// @vitest-environment happy-dom
+//
+// FILE CHANGES: a `workspaceChanged` push draws the member's files as a repository node off the
+// team, a project node off the repository and a file node off the project, a line from the member
+// to each file, tinted by what happened, for the plugin changes' time to live in display time. The
+// push is built here as the Host sends it; nothing of it is in the log, so a replay draws none.
+import { describe, expect, it, vi } from 'vitest'
+import { MonitorModel, type MonitorEffect } from '../monitor/model'
+import { MonitorScene, type Box } from '../monitor/scene'
+import { DefaultSettings } from '../monitor/hints'
+import {
+  DefaultFileSettings,
+  FileWatch,
+  JoinFileWatch,
+  LeaveFileWatch,
+  WorkspaceChanged,
+  fileId,
+  projectId,
+  pushWords,
+  readPush,
+  repoId,
+  type FileSettings,
+  type WorkspacePush,
+} from '../monitor/workspace'
+
+/** A push as the Host sends it on `workspaceChanged`. */
+function push(overrides: Partial<WorkspacePush> = {}): WorkspacePush {
+  return {
+    team: 'Alpha',
+    member: 'DeveloperMaren',
+    repo: 'web',
+    at: '2026-10-15T10:42:00Z',
+    files: [
+      { path: 'src/lib/parser.ts', project: 'harness-web', action: 'changed' },
+      { path: 'src/lib/lexer.ts', project: 'harness-web', action: 'created' },
+      { path: 'src/lib/old.ts', project: 'harness-web', action: 'deleted' },
+    ],
+    commits: [],
+    more: false,
+    ...overrides,
+  }
+}
+
+const commitPush = () =>
+  push({
+    files: [],
+    commits: [
+      {
+        sha: '1a2b3c4d5e6f7a8b9c0d',
+        subject: 'Fix the parser',
+        files: [
+          { path: 'src/lib/parser.ts', project: 'harness-web', action: 'changed' },
+          { path: 'src/lib/lexer.ts', project: 'harness-web', action: 'created' },
+          { path: 'cli/main.go', project: 'cli', action: 'changed' },
+          { path: 'README.md', project: '', action: 'changed' },
+        ],
+      },
+    ],
+  })
+
+const repo = repoId('Alpha', 'web')
+const project = projectId('Alpha', 'web', 'harness-web')
+const parser = fileId('Alpha', 'web', 'harness-web', 'src/lib/parser.ts')
+
+function setup(options: { reducedMotion?: boolean; seconds?: number; files?: FileSettings } = {}) {
+  const canvas = document.createElement('canvas')
+  document.body.appendChild(canvas)
+  const scene = new MonitorScene(canvas, { fontPx: 12, fontFamily: 'sans-serif', reducedMotion: options.reducedMotion === true })
+  const model = new MonitorModel()
+  model.settings = { ...DefaultSettings, seconds: options.seconds ?? 10 }
+  model.fileSettings = options.files ?? DefaultFileSettings
+  model.member('Alpha', 'Manager', 'Manager')
+  model.member('Alpha', 'DeveloperMaren', 'Developer')
+  model.member('Alpha', 'TesterIvo', 'Tester')
+  scene.setFileChanges(model.fileSettings)
+  scene.sync(model)
+  let now = 0
+  scene.step(now)
+  const at = (ms: number) => {
+    while (now < ms) scene.step((now = Math.min(ms, now + 50)))
+  }
+  const play = (made: MonitorEffect[]) => {
+    scene.play(made)
+    scene.sync(model)
+  }
+  return { scene, model, at, play }
+}
+
+const ids = (scene: MonitorScene) => scene.shownWorkspace().nodes.map((node) => node.id).sort()
+const node = (scene: MonitorScene, id: string) => scene.shownWorkspace().nodes.find((found) => found.id === id)
+
+function overlaps(a: Box, b: Box): boolean {
+  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
+}
+
+describe('a workspaceChanged push', () => {
+  it('draws a repository off the team, a project off it and each file off the project, the member linked to each file', () => {
+    const { scene, model, at, play } = setup()
+    play(model.applyWorkspace(push()))
+    at(500)
+
+    const shown = scene.shownWorkspace()
+    expect(shown.nodes.map((found) => [found.kind, found.label, found.parent])).toEqual([
+      ['repository', 'web', 't:Alpha'],
+      ['project', 'harness-web', repo],
+      ['file', 'parser.ts', project],
+      ['file', 'lexer.ts', project],
+      ['file', 'old.ts', project],
+    ])
+    expect(shown.touches.map((touch) => [touch.member, touch.node])).toEqual(
+      ['parser.ts', 'lexer.ts', 'old.ts'].map((name) => ['Alpha/DeveloperMaren', fileId('Alpha', 'web', 'harness-web', `src/lib/${name}`)]),
+    )
+  })
+
+  it('tints each file by its action, as plugin changes are, and puts its path in the tooltip', () => {
+    const { scene, model, at, play } = setup()
+    play(model.applyWorkspace(push()))
+    at(500)
+
+    expect(scene.shownWorkspace().nodes.filter((found) => found.kind === 'file').map((found) => [found.label, found.action])).toEqual([
+      ['parser.ts', 'changed'],
+      ['lexer.ts', 'created'],
+      ['old.ts', 'deleted'],
+    ])
+    expect(scene.describeNode(parser)).toMatchObject({
+      kind: 'file',
+      title: 'parser.ts',
+      subtitle: 'src/lib/parser.ts',
+      lines: ['changed · harness-web in web', 'by Developer'],
+    })
+    expect(scene.describeNode(project)).toMatchObject({ title: 'harness-web', subtitle: 'project in web', lines: ['3 files changed', 'by Developer'] })
+  })
+
+  it('refreshes a file touched again in place, never drawing it twice', () => {
+    const { scene, model, at, play } = setup()
+    play(model.applyWorkspace(push()))
+    at(8000)
+    const fading = node(scene, parser)!.alpha
+    expect(fading).toBeLessThan(1)
+
+    play(model.applyWorkspace(push({ files: [{ path: 'src/lib/parser.ts', project: 'harness-web', action: 'deleted' }] })))
+    at(8500)
+
+    expect(ids(scene).filter((id) => id === parser)).toHaveLength(1)
+    expect(node(scene, parser)).toMatchObject({ action: 'deleted', alpha: 1 })
+    // Its time runs from its latest change: still there after the first push's ten seconds.
+    at(12_000)
+    expect(ids(scene)).toEqual([parser, project, repo].sort())
+  })
+
+  it('is gone at the time to live, faded over its last seconds', () => {
+    const { scene, model, at, play } = setup()
+    play(model.applyWorkspace(push()))
+
+    at(1000)
+    expect(scene.shownWorkspace().nodes.every((found) => found.alpha === 1)).toBe(true)
+    at(8000)
+    const alpha = node(scene, parser)!.alpha
+    expect(alpha).toBeGreaterThan(0)
+    expect(alpha).toBeLessThan(1)
+    at(9950)
+    expect(ids(scene)).toHaveLength(5)
+    at(10_050)
+    expect(scene.shownWorkspace()).toEqual({ nodes: [], touches: [], flashes: [] })
+  })
+
+  it('draws with no fade under reduced motion', () => {
+    const { scene, model, at, play } = setup({ reducedMotion: true })
+    play(model.applyWorkspace(push()))
+
+    at(50)
+    expect(node(scene, parser)!.alpha).toBe(1)
+    at(9950)
+    expect(scene.shownWorkspace().nodes.map((found) => found.alpha)).toEqual([1, 1, 1, 1, 1])
+    at(10_050)
+    expect(scene.shownWorkspace().nodes).toEqual([])
+  })
+
+  it('keeps a project and its repository while any of their files is there', () => {
+    const { scene, model, at, play } = setup()
+    play(model.applyWorkspace(push()))
+    at(6000)
+    play(model.applyWorkspace(push({ member: 'TesterIvo', files: [{ path: 'src/lib/tests.ts', project: 'harness-web', action: 'created' }] })))
+
+    at(10_500)
+    const tests = fileId('Alpha', 'web', 'harness-web', 'src/lib/tests.ts')
+    expect(ids(scene)).toEqual([tests, project, repo].sort())
+    expect(scene.shownWorkspace().touches.map((touch) => touch.member)).toEqual(['Alpha/TesterIvo'])
+    at(16_050)
+    expect(ids(scene)).toEqual([])
+  })
+
+  it('flashes a commit on its repository with its short sha and subject, and adds its files under their projects', () => {
+    const { scene, model, at, play } = setup()
+    play(model.applyWorkspace(push({ files: [{ path: 'src/lib/parser.ts', project: 'harness-web', action: 'changed' }] })))
+    at(500)
+    play(model.applyWorkspace(commitPush()))
+    at(1000)
+
+    const shown = scene.shownWorkspace()
+    expect(shown.flashes).toEqual([{ node: repo, sha: '1a2b3c4', subject: 'Fix the parser' }])
+    expect(shown.nodes.map((found) => [found.kind, found.label, found.parent])).toEqual([
+      ['repository', 'web', 't:Alpha'],
+      ['project', 'harness-web', repo],
+      ['file', 'parser.ts', project],
+      ['file', 'lexer.ts', project],
+      ['project', 'cli', repo],
+      ['file', 'main.go', projectId('Alpha', 'web', 'cli')],
+      // A file outside any project hangs off its repository.
+      ['file', 'README.md', repo],
+    ])
+    expect(shown.nodes.filter((found) => found.label === 'parser.ts')).toHaveLength(1)
+    at(6500)
+    expect(scene.shownWorkspace().flashes).toEqual([])
+  })
+
+  it('fans several out so none covers another or any member or its name', () => {
+    const { scene, model, at, play } = setup()
+    play(model.applyWorkspace(push()))
+    play(model.applyWorkspace(commitPush()))
+    play(
+      model.applyWorkspace(
+        push({
+          member: 'TesterIvo',
+          files: Array.from({ length: 6 }, (_, i) => ({ path: `tests/case-${i}.spec.ts`, project: 'harness-web', action: 'created' as const })),
+        }),
+      ),
+    )
+
+    for (const moment of [300, 1500, 4000]) {
+      at(moment)
+      const nodes = scene.shownWorkspace().nodes
+      expect(nodes).toHaveLength(14)
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) expect(overlaps(nodes[i]!.box, nodes[j]!.box), `${nodes[i]!.label} / ${nodes[j]!.label}`).toBe(false)
+        for (const box of scene.memberBoxes()) expect(overlaps(nodes[i]!.box, box), nodes[i]!.label).toBe(false)
+      }
+    }
+  })
+})
+
+describe('Draw down to', () => {
+  function drawn(files: FileSettings) {
+    const { scene, model, at, play } = setup({ files })
+    play(model.applyWorkspace(commitPush()))
+    at(500)
+    const shown = scene.shownWorkspace()
+    return { kinds: shown.nodes.map((found) => found.kind), touches: shown.touches.map((touch) => touch.node), flashes: shown.flashes.length }
+  }
+
+  it('repository draws the repository node only, the member linked to it', () => {
+    expect(drawn({ show: true, depth: 'repository' })).toEqual({ kinds: ['repository'], touches: [repo], flashes: 1 })
+  })
+
+  it('project draws the repository and its projects, the member linked to each project', () => {
+    expect(drawn({ show: true, depth: 'project' })).toEqual({
+      kinds: ['repository', 'project', 'project'],
+      touches: [project, projectId('Alpha', 'web', 'cli'), repo],
+      flashes: 1,
+    })
+  })
+
+  it('file draws all three', () => {
+    expect(drawn({ show: true, depth: 'file' }).kinds).toEqual(['repository', 'project', 'file', 'file', 'project', 'file', 'file'])
+  })
+
+  it('applies to what is already shown', () => {
+    const { scene, model, at, play } = setup()
+    play(model.applyWorkspace(push()))
+    at(500)
+    expect(ids(scene)).toHaveLength(5)
+
+    scene.setFileChanges({ show: true, depth: 'project' })
+    at(600)
+    expect(ids(scene)).toEqual([project, repo].sort())
+
+    scene.setFileChanges({ show: true, depth: 'file' })
+    at(700)
+    expect(ids(scene)).toHaveLength(5)
+  })
+})
+
+describe('Show file changes off', () => {
+  it('draws none of these nodes and none of their lines, and lists nothing', () => {
+    const { scene, model, at, play } = setup({ files: { show: false, depth: 'file' } })
+    const lines = model.ticker.length
+
+    expect(model.applyWorkspace(push())).toEqual([])
+    expect(model.ticker).toHaveLength(lines)
+    at(500)
+    expect(scene.shownWorkspace()).toEqual({ nodes: [], touches: [], flashes: [] })
+
+    // Switched off with some shown: they go at once.
+    model.fileSettings = DefaultFileSettings
+    scene.setFileChanges(DefaultFileSettings)
+    play(model.applyWorkspace(push()))
+    at(1000)
+    expect(ids(scene)).toHaveLength(5)
+    scene.setFileChanges({ show: false, depth: 'file' })
+    at(1100)
+    expect(scene.shownWorkspace()).toEqual({ nodes: [], touches: [], flashes: [] })
+  })
+})
+
+describe('a replay', () => {
+  it('draws none of it and lists none of it', () => {
+    const { scene, model, at, play } = setup()
+    model.replay = true
+
+    expect(model.applyWorkspace(push())).toEqual([])
+    expect(model.ticker).toEqual([])
+    at(500)
+    expect(scene.shownWorkspace().nodes).toEqual([])
+  })
+
+  it('clears what live drew when it starts', () => {
+    const { scene, model, at, play } = setup()
+    play(model.applyWorkspace(push()))
+    at(500)
+
+    scene.clearFileChanges()
+    at(600)
+    expect(scene.shownWorkspace()).toEqual({ nodes: [], touches: [], flashes: [] })
+  })
+})
+
+describe('the activity list', () => {
+  it('says a push of files in one line with the member display name', () => {
+    const model = new MonitorModel()
+    model.member('Alpha', 'DeveloperMaren', 'Developer')
+    model.applyWorkspace(push())
+
+    expect(model.ticker).toHaveLength(1)
+    expect(model.ticker[0]).toMatchObject({ member: 'Developer', tone: 'file', text: 'Developer changed 3 files in web', workspace: true })
+  })
+
+  it('says a push with a commit by its short sha, subject and file count', () => {
+    const model = new MonitorModel()
+    model.member('Alpha', 'DeveloperMaren', 'Developer')
+    model.applyWorkspace(commitPush())
+
+    expect(model.ticker[0]).toMatchObject({ verb: 'committed', text: 'Developer committed 1a2b3c4 Fix the parser (4 files)' })
+  })
+
+  it('counts files the push says there were more of', () => {
+    expect(pushWords(push({ more: 4 }), 'Developer')).toBe('Developer changed 7 files in web')
+    expect(pushWords(push({ more: true }), 'Developer')).toBe('Developer changed more than 3 files in web')
+    expect(pushWords(push({ files: [push().files[0]!] }), 'Developer')).toBe('Developer changed 1 file in web')
+  })
+
+  it('keeps its lines when a live model starts again from the rows held', () => {
+    const first = new MonitorModel(undefined, 80, new Set(['Alpha']))
+    first.applyWorkspace(push())
+    const again = new MonitorModel(undefined, 80, new Set(['Alpha']))
+    again.keepPushLines(first.ticker)
+
+    expect(again.ticker.map((line) => line.text)).toEqual(['DeveloperMaren changed 3 files in web'])
+  })
+
+  it('passes over a team the live Monitor does not show', () => {
+    const model = new MonitorModel(undefined, 80, new Set(['Beta']))
+    expect(model.applyWorkspace(push())).toEqual([])
+    expect(model.ticker).toEqual([])
+  })
+})
+
+describe('the file watch', () => {
+  function hub() {
+    return { invoke: vi.fn((..._args: unknown[]) => Promise.resolve()) }
+  }
+
+  it('joins with JoinFileWatch while the Monitor listens and leaves with LeaveFileWatch, no team argument', async () => {
+    const watch = new FileWatch()
+    const connection = hub()
+    watch.attach(connection)
+    expect(connection.invoke).not.toHaveBeenCalled()
+
+    const stop = watch.listen(() => {})
+    await Promise.resolve()
+    expect(connection.invoke.mock.calls).toEqual([[JoinFileWatch]])
+
+    stop()
+    await Promise.resolve()
+    expect(connection.invoke.mock.calls).toEqual([[JoinFileWatch], [LeaveFileWatch]])
+    expect([JoinFileWatch, LeaveFileWatch, WorkspaceChanged]).toEqual(['JoinFileWatch', 'LeaveFileWatch', 'workspaceChanged'])
+  })
+
+  it('joins when the connection arrives after the Monitor opened, and again after a reconnect', async () => {
+    const watch = new FileWatch()
+    watch.listen(() => {})
+    const connection = hub()
+    watch.attach(connection)
+    await Promise.resolve()
+    watch.rejoin()
+    await Promise.resolve()
+
+    expect(connection.invoke.mock.calls).toEqual([[JoinFileWatch], [JoinFileWatch]])
+  })
+
+  it('hands each push to the Monitor, and passes over what is not one', () => {
+    const watch = new FileWatch()
+    const heard: WorkspacePush[] = []
+    watch.listen((made) => heard.push(made))
+
+    watch.deliver(push())
+    watch.deliver({ team: 'Alpha' })
+    watch.deliver('nonsense')
+    watch.deliver({ ...push(), files: [{ path: 'a.ts', project: 'p', action: 'renamed' }, { path: 'b.ts', project: 'p', action: 'created' }] })
+
+    expect(heard).toHaveLength(2)
+    expect(heard[1]!.files).toEqual([{ path: 'b.ts', project: 'p', action: 'created' }])
+    expect(readPush(push())).toEqual(push())
+  })
+})

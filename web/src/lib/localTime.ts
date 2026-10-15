@@ -32,6 +32,16 @@ export function localTime(ms: number, options: LocalTimeOptions = {}): string {
     : at.toLocaleTimeString(undefined, zoned(options.timeZone))
 }
 
+/** An instant's time of day to the minute ("10:42 AM", "10:42"), or with its date: a stretch's start in words. */
+export function localMinute(ms: number, options: LocalTimeOptions = {}): string {
+  const minute: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit', ...zoned(options.timeZone) }
+  const at = new Date(ms)
+
+  return options.date
+    ? at.toLocaleString(undefined, { ...minute, year: 'numeric', month: 'short', day: 'numeric' })
+    : at.toLocaleTimeString(undefined, minute)
+}
+
 /** An instant's date alone, as `toLocaleDateString()` gives it. */
 export function localDate(ms: number, timeZone?: string): string {
   return new Date(ms).toLocaleDateString(undefined, zoned(timeZone))

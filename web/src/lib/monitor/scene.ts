@@ -13,6 +13,15 @@ import type { MemberState, MonitorEffect, MonitorModel, NodeRef, Origin, Tone } 
 import { compact } from './model'
 import type { Resource, ResourceAction } from './hints'
 import { MonitorSymbolsFamily, glyphOf, type Codepoints } from './font'
+import {
+  DefaultFileSettings,
+  WorkspaceGraph,
+  markAlpha,
+  type FileSettings,
+  type WorkspaceKind,
+  type WorkspaceNode,
+  type WorkspaceView,
+} from './workspace'
 
 /**
  * THE MONITOR'S STAGE: a force-directed graph on a canvas, and the effects the model's rows make.
@@ -24,6 +33,10 @@ import { MonitorSymbolsFamily, glyphOf, type Codepoints } from './font'
  * The stage is dark in every theme on purpose: it is a screen to watch, like the Concierge's
  * terminal, and glow reads only on a dark ground. Its colours live here, in one map, and the
  * view's legend reads the same map.
+ *
+ * A member's file changes hang off its team as a small tree - repository, project, file - held in
+ * display time by `WorkspaceGraph` and drawn here as nodes of the same simulation. They are kept
+ * clear of each other and of every member's name by a pass after each tick (`separate`).
  */
 
 const ToneNames: Tone[] = ['tell', 'start', 'progress', 'done', 'handback', 'fail', 'blocked', 'workflow', 'card', 'push', 'plugin', 'file', 'quiet']
@@ -56,7 +69,9 @@ export function readPalette(element: Element) {
   Screen.inkDim = token('ink-dim')
 }
 
-type NodeKind = 'member' | 'team' | 'workflow'
+type NodeKind = 'member' | 'team' | 'workflow' | WorkspaceKind
+
+const WorkspaceKinds: ReadonlySet<NodeKind> = new Set<NodeKind>(['repository', 'project', 'file'])
 
 interface SceneNode extends SimulationNodeDatum {
   id: string
@@ -71,7 +86,33 @@ interface SceneNode extends SimulationNodeDatum {
 
 interface SceneLink extends SimulationLinkDatum<SceneNode> {
   id: string
-  kind: 'spoke' | 'work'
+  /** `tree` ties a file change to what it hangs off; `touch` is drawn from a member to it and pulls nothing. */
+  kind: 'spoke' | 'work' | 'tree' | 'touch'
+}
+
+/** A screen-space box, in world units. */
+export interface Box {
+  left: number
+  top: number
+  right: number
+  bottom: number
+}
+
+/** A repository, project or file node as the scene draws it now. Exposed for tests. */
+export interface ShownWorkspaceNode extends WorkspaceNode {
+  x: number
+  y: number
+  /** What it covers: its mark and its label. */
+  box: Box
+}
+
+/** What the file changes draw now. Exposed for tests. */
+export interface ShownWorkspace {
+  nodes: ShownWorkspaceNode[]
+  /** A line from a member to what it touched: the member's key and the node's id. */
+  touches: { member: string; node: string; alpha: number }[]
+  /** A commit flashing on its repository: its short sha and subject. */
+  flashes: { node: string; sha: string; subject: string }[]
 }
 
 interface Comet {
@@ -153,10 +194,13 @@ const BornMs = 900
 const DyingMs = 1200
 const OriginMs = 5500
 const MaxEffects = 260
-/** A resource mark's radius, and how long it fades out over at the end of its time. */
+/** A resource mark's radius; it fades as a file change does (`markAlpha`). */
 const ResourceR = 11
-const ResourceFadeMs = 4000
-const ResourceInMs = 300
+/** A file change's marks: a repository's, a project's and a file's radius, and the room between them. */
+const WorkspaceR: Record<WorkspaceKind, number> = { repository: 10, project: 8, file: 6 }
+const WorkspaceGap = 4
+/** At most this many sweeps a frame to take every file change clear of the rest. */
+const SeparatePasses = 60
 /** Past this many at once beside one member, the oldest goes early. */
 const MaxResourcesEach = 8
 
@@ -196,6 +240,11 @@ export class MonitorScene {
   private ripples: Ripple[] = []
   private floaters: Floater[] = []
   private resources: ResourceMark[] = []
+  private readonly workspace = new WorkspaceGraph()
+  private fileSettings: FileSettings = DefaultFileSettings
+  /** The file changes as last laid out, by node id. */
+  private workspaceView: WorkspaceView = { nodes: [], touches: [], flashes: [] }
+  private readonly workspaceNodes = new Map<string, WorkspaceNode>()
   private symbols: Codepoints | null = null
   private readonly originUsed = new Map<string, number>()
 
@@ -230,12 +279,12 @@ export class MonitorScene {
         forceLink<SceneNode, SceneLink>([])
           .id((node) => node.id)
           .distance((link) => this.linkDistance(link))
-          .strength((link) => (link.kind === 'spoke' ? 0.55 : 0.32)),
+          .strength((link) => (link.kind === 'spoke' ? 0.55 : link.kind === 'tree' ? 0.7 : 0.32)),
       )
       .force(
         'charge',
         forceManyBody<SceneNode>()
-          .strength((node) => (node.kind === 'team' ? -600 : node.kind === 'workflow' ? -60 : -280))
+          .strength((node) => (node.kind === 'team' ? -600 : node.kind === 'workflow' ? -60 : WorkspaceKinds.has(node.kind) ? -90 : -280))
           .distanceMax(420),
       )
       .force('collide', forceCollide<SceneNode>().radius((node) => node.r + (node.kind === 'team' ? 30 : node.kind === 'member' ? 24 : 6)))
@@ -252,6 +301,17 @@ export class MonitorScene {
 
   setOptions(options: Partial<SceneOptions>) {
     this.options = { ...this.options, ...options }
+  }
+
+  /** Whether file changes draw, and how far down: from the next frame, for every one shown. */
+  setFileChanges(settings: FileSettings) {
+    this.fileSettings = { ...settings }
+  }
+
+  /** Forget every file change drawn: a replay has none. */
+  clearFileChanges() {
+    this.workspace.clear()
+    this.syncWorkspace()
   }
 
   /** The full icon font arrived: from the next frame, icons draw instead of plain dots. */
@@ -340,6 +400,7 @@ export class MonitorScene {
 
     const now = this.clock
     for (const node of this.nodes.values()) {
+      if (WorkspaceKinds.has(node.kind)) continue
       if (!wanted.has(node.id) && node.dying === null) {
         node.dying = now
         changed = true
@@ -348,6 +409,7 @@ export class MonitorScene {
       }
     }
     for (const [id, link] of this.links) {
+      if (link.kind === 'tree' || link.kind === 'touch') continue
       if (!wantedLinks.has(id)) {
         this.links.delete(id)
         changed = true
@@ -411,6 +473,10 @@ export class MonitorScene {
           if (node && !this.options.reducedMotion) node.shakeUntil = now + 500
           break
         }
+        case 'workspace':
+          this.workspace.apply(effect.push, now, effect.ttlMs, effect.at.kind === 'member' ? effect.at.key : null)
+          this.touch(effect.at)
+          break
         case 'resource': {
           this.resources.push({ at: effect.at, resource: effect.resource, start: now, ttl: effect.ttlMs })
           const mine = this.resources.filter((mark) => sameRef(mark.at, effect.at))
@@ -458,6 +524,7 @@ export class MonitorScene {
     const dt = Math.min(64, Math.max(0, now - this.last))
     this.last = now
     this.clock += dt
+    this.syncWorkspace()
     this.sim.tick()
     for (const node of this.nodes.values()) {
       const speed = Math.hypot(node.vx ?? 0, node.vy ?? 0)
@@ -466,6 +533,7 @@ export class MonitorScene {
         node.vy = ((node.vy ?? 0) / speed) * 24
       }
     }
+    this.separate()
     this.tidy()
 
     if (this.following) this.frameAll(false)
@@ -484,6 +552,10 @@ export class MonitorScene {
       const team = this.model?.teams.get(this.nodeTeam(link.target))
       const members = team ? [...(this.model?.members.values() ?? [])].filter((m) => m.team === team.id).length : 4
       return 100 + Math.min(90, members * 9)
+    }
+    if (link.kind === 'tree') {
+      const target = typeof link.target === 'object' ? link.target : this.nodes.get(String(link.target))
+      return target?.kind === 'repository' ? 150 : 40
     }
     return 48
   }
@@ -504,7 +576,7 @@ export class MonitorScene {
     const anchor = near ?? this.nodes.get(`t:${team}`) ?? null
     const centre = anchor && anchor.x !== undefined ? { x: anchor.x, y: anchor.y ?? 0 } : this.teamTarget(team)
     const angle = Math.random() * Math.PI * 2
-    const reach = kind === 'team' ? 0 : kind === 'workflow' ? 30 : 70
+    const reach = kind === 'team' ? 0 : kind === 'workflow' ? 30 : WorkspaceKinds.has(kind) ? 40 : 70
     const spot = { x: centre.x + Math.cos(angle) * reach, y: centre.y + Math.sin(angle) * reach }
     const spread = kind === 'team' ? 0 : 10
     this.nodes.set(id, {
@@ -526,8 +598,166 @@ export class MonitorScene {
     const live = [...this.nodes.values()]
     this.sim.nodes(live)
     const link = this.sim.force('link') as ReturnType<typeof forceLink<SceneNode, SceneLink>>
-    link.links([...this.links.values()].filter((l) => this.nodes.has(String(idOf(l.source))) && this.nodes.has(String(idOf(l.target)))))
+    link.links(
+      [...this.links.values()].filter(
+        (l) => l.kind !== 'touch' && this.nodes.has(String(idOf(l.source))) && this.nodes.has(String(idOf(l.target))),
+      ),
+    )
     this.sim.alpha(Math.max(this.sim.alpha(), 0.45))
+  }
+
+  /** The file changes as the graph holds them now, made nodes and lines of the simulation. */
+  private syncWorkspace() {
+    const view = this.workspace.view(this.clock, this.fileSettings, this.options.reducedMotion)
+    this.workspaceView = view
+    this.workspaceNodes.clear()
+    const wanted = new Set<string>()
+    const wantedLinks = new Set<string>()
+    let changed = false
+
+    // Parents come before their children, so each is born beside what it hangs off.
+    for (const node of view.nodes) {
+      this.workspaceNodes.set(node.id, node)
+      wanted.add(node.id)
+      changed = this.ensure(node.id, node.kind, node.team, WorkspaceR[node.kind], this.nodes.get(node.parent) ?? null) || changed
+      if (!this.nodes.has(node.parent)) continue
+      const id = `${node.id}|${node.parent}`
+      wantedLinks.add(id)
+      if (!this.links.has(id)) {
+        this.links.set(id, { id, kind: 'tree', source: node.id, target: node.parent })
+        changed = true
+      }
+    }
+    for (const touch of view.touches) {
+      const member = `m:${touch.member}`
+      if (!this.nodes.has(member) || !wanted.has(touch.node)) continue
+      const id = `${member}|${touch.node}`
+      wantedLinks.add(id)
+      if (!this.links.has(id)) {
+        this.links.set(id, { id, kind: 'touch', source: member, target: touch.node })
+        changed = true
+      }
+    }
+
+    // Gone at its time to live, having already faded: no second fade on the way out.
+    for (const [id, link] of this.links) {
+      if ((link.kind === 'tree' || link.kind === 'touch') && !wantedLinks.has(id)) {
+        this.links.delete(id)
+        changed = true
+      }
+    }
+    for (const [id, node] of this.nodes) {
+      if (WorkspaceKinds.has(node.kind) && !wanted.has(id)) {
+        this.nodes.delete(id)
+        changed = true
+      }
+    }
+    if (changed) this.restartSim()
+  }
+
+  /** A label's width in world units at `scale` of the Monitor's text size. */
+  private textWidth(text: string, scale: number, weight = 500): number {
+    const ctx = this.ctx
+    if (ctx) {
+      ctx.font = this.font(scale, weight)
+      return ctx.measureText(text).width
+    }
+    return text.length * this.options.fontPx * scale * 0.6
+  }
+
+  /** What a file change's node covers: its mark, and its label to the right of it. */
+  private workspaceBox(node: SceneNode): Box | null {
+    const ws = this.workspaceNodes.get(node.id)
+    if (!ws || node.x === undefined || node.y === undefined) return null
+    const r = node.r + 2
+    const half = Math.max(r, (this.options.fontPx * 0.62 * 1.3) / 2)
+    return { left: node.x - r, right: node.x + r + 5 + this.textWidth(workspaceLabel(ws), 0.62, labelWeight(ws)), top: node.y - half, bottom: node.y + half }
+  }
+
+  /**
+   * What every member covers: its body with its rings, and its name under it (and the word under
+   * that when it is blocked). A file change is never drawn over either. Exposed for tests.
+   */
+  memberBoxes(): Box[] {
+    const boxes: Box[] = []
+    for (const node of this.nodes.values()) {
+      if (node.dying !== null || node.x === undefined || node.y === undefined) continue
+      if (node.kind === 'team') {
+        const reach = node.r + 10
+        boxes.push({ left: node.x - reach, right: node.x + reach, top: node.y - reach, bottom: node.y + reach })
+        continue
+      }
+      if (node.kind !== 'member') continue
+      const member = this.model?.members.get(node.id.slice(2))
+      if (!member) continue
+      const ring = node.r + 5
+      const body = member.manager ? ring + 11 : member.kind === 'plugin' ? node.r * 1.15 + 6 : ring + 3
+      boxes.push({ left: node.x - body, right: node.x + body, top: node.y - body, bottom: node.y + body })
+      const name = member.name.length > 22 ? `${member.name.slice(0, 21)}…` : member.name
+      const width = this.textWidth(name, 0.66)
+      const top = node.y + ring + (member.manager ? 9 : 5)
+      const lines = member.state === 'blocked' || member.state === 'decision' ? 2.1 : 1.25
+      boxes.push({ left: node.x - width / 2, right: node.x + width / 2, top, bottom: top + this.options.fontPx * 0.66 * lines })
+    }
+    return boxes
+  }
+
+  /**
+   * Keep every file change clear of every other and of every member and its name. The simulation
+   * spreads them; this makes it certain, moving each the least way out of what it overlaps.
+   */
+  private separate() {
+    const items: { node: SceneNode; box: Box; free: boolean }[] = []
+    for (const node of this.nodes.values()) {
+      if (!WorkspaceKinds.has(node.kind)) continue
+      const box = this.workspaceBox(node)
+      if (box) items.push({ node, box, free: node.fx == null })
+    }
+    if (items.length === 0) return
+    const fixed = this.memberBoxes()
+    const move = (item: (typeof items)[number], dx: number, dy: number) => {
+      item.node.x! += dx
+      item.node.y! += dy
+      item.box = { left: item.box.left + dx, right: item.box.right + dx, top: item.box.top + dy, bottom: item.box.bottom + dy }
+    }
+    for (let pass = 0; pass < SeparatePasses; pass++) {
+      let moved = false
+      for (let i = 0; i < items.length; i++) {
+        const a = items[i]!
+        for (const box of fixed) {
+          const away = a.free ? clearOf(a.box, box) : null
+          if (!away) continue
+          move(a, away.dx, away.dy)
+          moved = true
+        }
+        for (let j = i + 1; j < items.length; j++) {
+          const b = items[j]!
+          const away = a.free || b.free ? clearOf(a.box, b.box) : null
+          if (!away) continue
+          const share = a.free && b.free ? 0.5 : a.free ? 1 : 0
+          if (share > 0) move(a, away.dx * share, away.dy * share)
+          if (share < 1) move(b, -away.dx * (1 - share), -away.dy * (1 - share))
+          moved = true
+        }
+      }
+      if (!moved) break
+    }
+  }
+
+  /** The file changes as drawn now: where each node is, what it covers, its lines and its commit. Exposed for tests. */
+  shownWorkspace(): ShownWorkspace {
+    const nodes: ShownWorkspaceNode[] = []
+    for (const ws of this.workspaceView.nodes) {
+      const node = this.nodes.get(ws.id)
+      const box = node ? this.workspaceBox(node) : null
+      if (!node || !box) continue
+      nodes.push({ ...ws, x: node.x!, y: node.y!, box })
+    }
+    const touches = this.workspaceView.touches
+      .filter((touch) => this.links.has(`m:${touch.member}|${touch.node}`))
+      .map((touch) => ({ member: touch.member, node: touch.node, alpha: touch.alpha }))
+    const flashes = this.workspaceView.flashes.map((flash) => ({ node: flash.node, sha: flash.sha, subject: flash.subject }))
+    return { nodes, touches, flashes }
   }
 
   /** Each team's home on the stage: one in the middle, more around an ellipse. */
@@ -761,16 +991,50 @@ export class MonitorScene {
 
   private readonly onDoubleClick = () => this.fit()
 
+  /** What hovering a node by its id would show, at its own place. Exposed for tests. */
+  describeNode(id: string): HoverInfo | null {
+    const node = this.nodes.get(id)
+    return node ? this.describe(node, node.x ?? 0, node.y ?? 0) : null
+  }
+
   private describe(node: SceneNode, sx: number, sy: number): HoverInfo | null {
     const model = this.model
     if (!model) return null
+    if (WorkspaceKinds.has(node.kind)) {
+      const ws = this.workspaceNodes.get(node.id)
+      if (!ws) return null
+      const names = ws.members.map((key) => model.members.get(key)?.name ?? key.slice(key.indexOf('/') + 1)).join(', ')
+      const by = names !== '' ? `by ${names}` : ''
+      const hue = model.teams.get(ws.team)?.hue ?? 200
+      const files = `${ws.files} ${ws.files === 1 ? 'file' : 'files'} changed`
+      if (ws.kind === 'file') {
+        return {
+          kind: 'file',
+          title: ws.label,
+          subtitle: ws.path,
+          lines: [`${ws.action} · ${ws.project !== '' ? `${ws.project} in ` : ''}${ws.repo}`, by].filter((line) => line !== ''),
+          colour: ws.action ? ActionColours[ws.action] : Tones.file,
+          x: sx,
+          y: sy,
+        }
+      }
+      return {
+        kind: ws.kind,
+        title: ws.label,
+        subtitle: ws.kind === 'project' ? `project in ${ws.repo}` : 'repository',
+        lines: [files, by].filter((line) => line !== ''),
+        colour: hsl(hue, 80, 70),
+        x: sx,
+        y: sy,
+      }
+    }
     if (node.kind === 'member') {
       const member = model.members.get(node.id.slice(2))
       if (!member) return null
       const team = model.teams.get(member.team)
       const lines = [
         `${stateWords(member.state)}${member.queued > 0 ? ` · ${member.queued} queued` : ''}`,
-        member.runs > 0 ? `${member.runs} run${member.runs === 1 ? '' : 's'} · ${compact(member.tokens)} tokens measured` : '',
+        member.runs > 0 ? `${member.runs} run${member.runs === 1 ? '' : 's'} · ${compact(member.tokens)} billable tokens` : '',
         member.workflow !== null ? `workflow ${member.workflow}` : '',
         member.status !== '' ? `“${member.status.slice(0, 140)}”` : '',
       ].filter((line) => line !== '')
@@ -844,6 +1108,7 @@ export class MonitorScene {
     this.drawBursts(ctx, now)
     ctx.globalCompositeOperation = 'source-over'
     this.drawNodes(ctx, now, focus)
+    this.drawCommits(ctx)
     this.drawResources(ctx)
     this.drawTeamNames(ctx, now, focus)
     this.drawFloaters(ctx, now)
@@ -954,6 +1219,18 @@ export class MonitorScene {
         ctx.strokeStyle = hsl(hue, 60, 65, 0.2 * a * dim)
         ctx.lineWidth = 1
         ctx.setLineDash([])
+      } else if (link.kind === 'tree') {
+        const shown = this.workspaceNodes.get(s.id)?.alpha ?? 0
+        ctx.strokeStyle = hsl(hue, 50, 65, 0.4 * a * dim * shown)
+        ctx.lineWidth = 1
+        ctx.setLineDash([])
+      } else if (link.kind === 'touch') {
+        const ws = this.workspaceNodes.get(t.id)
+        const colour = ws?.action ? ActionColours[ws.action] : Tones.file
+        ctx.strokeStyle = alphaHex(colour, 0.5 * a * dim * (ws?.alpha ?? 0))
+        ctx.lineWidth = 1
+        ctx.setLineDash([3, 4])
+        ctx.lineDashOffset = 0
       } else {
         const workflow = model.workflows.get(Number(t.id.slice(2)))
         const open = workflow?.ending === 'open'
@@ -1144,11 +1421,12 @@ export class MonitorScene {
   private drawNodes(ctx: CanvasRenderingContext2D, now: number, focus: Set<string> | null) {
     const model = this.model
     if (!model) return
-    const order: NodeKind[] = ['workflow', 'team', 'member']
+    const order: NodeKind[] = ['workflow', 'team', 'member', 'repository', 'project', 'file']
     for (const kind of order) {
       for (const node of this.nodes.values()) {
         if (node.kind !== kind || node.x === undefined || node.y === undefined) continue
-        const a = this.appear(node, now) * (focus && !focus.has(node.id) ? 0.3 : 1)
+        const ws = this.workspaceNodes.get(node.id)
+        const a = this.appear(node, now) * (focus && !focus.has(node.id) ? 0.3 : 1) * (ws ? ws.alpha : 1)
         if (a <= 0.01) continue
         let x = node.x
         let y = node.y
@@ -1161,6 +1439,7 @@ export class MonitorScene {
         ctx.globalAlpha = a
         if (kind === 'team') this.drawTeam(ctx, node, x, y, now)
         else if (kind === 'member') this.drawMember(ctx, node, x, y, now)
+        else if (ws) this.drawWorkspaceNode(ctx, node, ws, x, y)
         else this.drawWorkflow(ctx, node, x, y, now)
         ctx.restore()
       }
@@ -1407,6 +1686,97 @@ export class MonitorScene {
   }
 
   /**
+   * A repository, a project or a file: a rounded square in the team's colour for the first two, a
+   * disc in its action's colour for a file, and its name to the right. Colour is never the only
+   * signal: a deleted file is struck through, and the activity list says each push in words.
+   */
+  private drawWorkspaceNode(ctx: CanvasRenderingContext2D, node: SceneNode, ws: WorkspaceNode, x: number, y: number) {
+    const hue = this.model?.teams.get(ws.team)?.hue ?? 200
+    const r = node.r
+    const colour = ws.action ? ActionColours[ws.action] : hsl(hue, 75, 70)
+    ctx.fillStyle = Screen.ground
+    ctx.beginPath()
+    if (ws.kind === 'file') ctx.arc(x, y, r, 0, Math.PI * 2)
+    else ctx.roundRect(x - r, y - r, r * 2, r * 2, ws.kind === 'repository' ? 3 : 2)
+    ctx.fill()
+    ctx.fillStyle = ws.action ? alphaHex(colour, 0.3) : hsl(hue, 70, 45, 0.45)
+    ctx.fill()
+    ctx.strokeStyle = colour
+    ctx.lineWidth = ws.kind === 'repository' ? 2 : 1.5
+    ctx.stroke()
+    if (ws.kind === 'repository') {
+      // Two branches meeting: a repository.
+      ctx.beginPath()
+      ctx.moveTo(x - r * 0.35, y - r * 0.5)
+      ctx.lineTo(x - r * 0.35, y + r * 0.5)
+      ctx.moveTo(x - r * 0.35, y + r * 0.1)
+      ctx.quadraticCurveTo(x + r * 0.4, y + r * 0.1, x + r * 0.4, y - r * 0.5)
+      ctx.lineWidth = 1.4
+      ctx.stroke()
+    }
+
+    const label = workspaceLabel(ws)
+    const lx = x + r + 5
+    ctx.font = this.font(0.62, labelWeight(ws))
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
+    ctx.fillStyle = ws.action === 'deleted' ? Screen.inkDim : Screen.ink
+    ctx.shadowColor = alphaHex(Screen.ground, 0.9)
+    ctx.shadowBlur = 4
+    ctx.fillText(label, lx, y + 0.5)
+    ctx.shadowBlur = 0
+    if (ws.action === 'deleted') {
+      const width = this.textWidth(label, 0.62, labelWeight(ws))
+      ctx.strokeStyle = colour
+      ctx.lineWidth = 1.4
+      ctx.beginPath()
+      ctx.moveTo(lx - 1, y + 0.5)
+      ctx.lineTo(lx + width + 1, y + 0.5)
+      ctx.moveTo(x - r * 0.7, y - r * 0.7)
+      ctx.lineTo(x + r * 0.7, y + r * 0.7)
+      ctx.stroke()
+    }
+  }
+
+  /** A commit flashing on its repository: a ring, and its short sha and subject above it. */
+  private drawCommits(ctx: CanvasRenderingContext2D) {
+    for (const flash of this.workspaceView.flashes) {
+      const node = this.nodes.get(flash.node)
+      if (!node || node.x === undefined || node.y === undefined) continue
+      const t = Math.min(1, Math.max(0, flash.t))
+      const a = this.options.reducedMotion ? 1 : t < 0.08 ? t / 0.08 : t > 0.7 ? (1 - t) / 0.3 : 1
+      const colour = Tones.push
+      ctx.save()
+      ctx.globalAlpha = a
+      if (!this.options.reducedMotion) {
+        ctx.strokeStyle = alphaHex(colour, 1 - t)
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        ctx.arc(node.x, node.y, node.r + 4 + ease(Math.min(1, t * 3)) * 22, 0, Math.PI * 2)
+        ctx.stroke()
+      }
+      const subject = flash.subject.length > 44 ? `${flash.subject.slice(0, 43)}…` : flash.subject
+      const words = subject === '' ? flash.sha : `${flash.sha} ${subject}`
+      ctx.font = this.font(0.62, 600)
+      const width = ctx.measureText(words).width
+      const height = this.options.fontPx * 1.2
+      const y = node.y - node.r - 10 - height / 2
+      ctx.fillStyle = alphaHex(Screen.ground, 0.85)
+      ctx.strokeStyle = alphaHex(colour, 0.7)
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.roundRect(node.x - width / 2 - 7, y - height / 2, width + 14, height, height / 2)
+      ctx.fill()
+      ctx.stroke()
+      ctx.fillStyle = colour
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(words, node.x, y + 0.5)
+      ctx.restore()
+    }
+  }
+
+  /**
    * Where each resource mark sits now and how strongly it shows. They fan out beside their member:
    * the first at its right, the next at its left, then a row higher on each side, so no two ever
    * share a place and none reaches below the member, where its name is.
@@ -1428,9 +1798,7 @@ export class MonitorScene {
       const reach = (node?.r ?? 10) + 36 + up * 8
       const age = now - mark.start
       const left = mark.ttl - age
-      const alpha = this.options.reducedMotion
-        ? 1
-        : Math.max(0, Math.min(1, age / ResourceInMs, left / Math.min(ResourceFadeMs, mark.ttl * 0.4)))
+      const alpha = markAlpha(age, left, mark.ttl, this.options.reducedMotion)
       shown.push({
         at: mark.at,
         resource: mark.resource,
@@ -1538,6 +1906,28 @@ export class MonitorScene {
 
 function idOf(end: string | number | SceneNode): string | number {
   return typeof end === 'object' ? end.id : end
+}
+
+/** The least move that takes box `a` clear of box `b`, or null when they do not overlap. */
+function clearOf(a: Box, b: Box): { dx: number; dy: number } | null {
+  const ox = Math.min(a.right - b.left, b.right - a.left)
+  const oy = Math.min(a.bottom - b.top, b.bottom - a.top)
+  if (ox <= 0 || oy <= 0) return null
+  const gap = WorkspaceGap
+  if (ox <= oy) {
+    const right = (a.left + a.right) / 2 >= (b.left + b.right) / 2
+    return { dx: right ? b.right - a.left + gap : -(a.right - b.left + gap), dy: 0 }
+  }
+  const below = (a.top + a.bottom) / 2 >= (b.top + b.bottom) / 2
+  return { dx: 0, dy: below ? b.bottom - a.top + gap : -(a.bottom - b.top + gap) }
+}
+
+function workspaceLabel(ws: WorkspaceNode): string {
+  return ws.label.length > 32 ? `${ws.label.slice(0, 31)}…` : ws.label
+}
+
+function labelWeight(ws: WorkspaceNode): number {
+  return ws.kind === 'file' ? 500 : 600
 }
 
 function refOf(node: SceneNode): NodeRef | null {
