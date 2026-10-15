@@ -289,6 +289,9 @@ function actionColour(action: ResourceAction): string {
   return `var(--os-monitor-${action})`
 }
 
+/** The mark before a listed file: what happened to it, beside its colour, so colour is never the only signal. */
+const FileMarks: Record<ResourceAction, string> = { created: '+', changed: '~', deleted: '−' }
+
 /** "Azure (Infra) created sql-db-maketags": who, on which team, did what to which thing. */
 function resourceWords(entry: TickerEntry): string {
   const resource = entry.resource
@@ -853,7 +856,19 @@ onUnmounted(() => {
               <span v-else class="monitor-row-dot" aria-hidden="true" :style="{ background: actionColour(entry.resource.action) }"></span>
               <span class="monitor-row-words">{{ resourceWords(entry) }}</span>
             </div>
-            <div v-else class="monitor-row-text" :data-monitor-push="entry.workspace ? '' : undefined">{{ entry.text }}</div>
+            <div v-else-if="entry.files" class="monitor-row-text monitor-row-text--files" data-monitor-push>
+              <div v-if="entry.text" class="monitor-row-commit">{{ entry.text }}</div>
+              <ul class="monitor-row-files">
+                <li v-for="file in entry.files" :key="file.path" :data-action="file.action">
+                  <span class="monitor-row-mark" :style="{ color: actionColour(file.action) }" :aria-label="file.action">{{
+                    FileMarks[file.action]
+                  }}</span>
+                  {{ file.path }}
+                </li>
+              </ul>
+              <div v-if="entry.more" class="monitor-row-more">{{ entry.more }}</div>
+            </div>
+            <div v-else class="monitor-row-text">{{ entry.text }}</div>
           </div>
         </li>
       </ol>
@@ -1336,6 +1351,39 @@ onUnmounted(() => {
   -webkit-box-orient: vertical;
   overflow: hidden;
   overflow-wrap: anywhere;
+}
+
+/* A push lists every file it named, one a line: never clamped like a row's words. */
+.monitor-row-text--files {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+
+.monitor-row-files {
+  list-style: none;
+  margin: 0.15rem 0 0;
+  padding: 0;
+}
+
+.monitor-row-files li {
+  font-family: var(--os-mono);
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
+}
+
+.monitor-row-mark {
+  display: inline-block;
+  width: 0.9em;
+  font-weight: 700;
+}
+
+.monitor-row-commit {
+  color: var(--os-monitor-ink);
+}
+
+.monitor-row-more {
+  font-style: italic;
 }
 
 .monitor-row-resource {

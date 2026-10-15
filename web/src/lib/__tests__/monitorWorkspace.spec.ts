@@ -17,7 +17,8 @@ import {
   WorkspaceChanged,
   fileId,
   projectId,
-  pushWords,
+  pushHeadline,
+  pushMoreWords,
   readPush,
   repoId,
   type FileSettings,
@@ -378,27 +379,40 @@ describe('a replay', () => {
 })
 
 describe('the activity list', () => {
-  it('says a push of files in one line with the member display name', () => {
+  it('lists every file of a push by its path and what happened to it, under the member display name', () => {
     const model = new MonitorModel()
     model.member('Alpha', 'DeveloperMaren', 'Developer')
     model.applyWorkspace(push())
 
     expect(model.ticker).toHaveLength(1)
-    expect(model.ticker[0]).toMatchObject({ member: 'Developer', tone: 'file', text: 'Developer changed 3 files in web', workspace: true })
+    expect(model.ticker[0]).toMatchObject({
+      member: 'Developer',
+      tone: 'file',
+      text: '',
+      workspace: true,
+      files: [
+        { path: 'src/lib/parser.ts', action: 'changed' },
+        { path: 'src/lib/lexer.ts', action: 'created' },
+        { path: 'src/lib/old.ts', action: 'deleted' },
+      ],
+      more: '',
+    })
   })
 
-  it('says a push with a commit by its short sha, subject and file count', () => {
+  it('heads a push with a commit by its short sha and subject, and lists its files under it', () => {
     const model = new MonitorModel()
     model.member('Alpha', 'DeveloperMaren', 'Developer')
     model.applyWorkspace(commitPush())
 
-    expect(model.ticker[0]).toMatchObject({ verb: 'committed', text: 'Developer committed 1a2b3c4 Fix the parser (4 files)' })
+    expect(model.ticker[0]).toMatchObject({ verb: 'committed', text: '1a2b3c4 Fix the parser' })
+    expect(model.ticker[0]!.files).toHaveLength(4)
   })
 
-  it('counts files the push says there were more of', () => {
-    expect(pushWords(push({ more: 4 }), 'Developer')).toBe('Developer changed 7 files in web')
-    expect(pushWords(push({ more: true }), 'Developer')).toBe('Developer changed more than 3 files in web')
-    expect(pushWords(push({ files: [push().files[0]!] }), 'Developer')).toBe('Developer changed 1 file in web')
+  it('says what a push left off its list', () => {
+    expect(pushMoreWords(push({ more: 4 }))).toBe('and 4 more')
+    expect(pushMoreWords(push({ more: true }))).toBe('and more')
+    expect(pushMoreWords(push())).toBe('')
+    expect(pushHeadline(push())).toBe('')
   })
 
   it('keeps its lines when a live model starts again from the rows held', () => {
@@ -407,7 +421,7 @@ describe('the activity list', () => {
     const again = new MonitorModel(undefined, 80, new Set(['Alpha']))
     again.keepPushLines(first.ticker)
 
-    expect(again.ticker.map((line) => line.text)).toEqual(['DeveloperMaren changed 3 files in web'])
+    expect(again.ticker.map((line) => line.files?.map((file) => file.path))).toEqual([['src/lib/parser.ts', 'src/lib/lexer.ts', 'src/lib/old.ts']])
   })
 
   it('passes over a team the live Monitor does not show', () => {

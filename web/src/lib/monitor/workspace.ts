@@ -114,20 +114,21 @@ export function fileName(path: string): string {
   return parts.at(-1) ?? path
 }
 
-/**
- * The push's one line in the activity list: "Developer changed 3 files in web", or with a commit
- * "Developer committed 1a2b3c4 Fix the parser (4 files)".
- */
-export function pushWords(push: WorkspacePush, who: string): string {
-  const listed = filesOf(push).length
-  const count = typeof push.more === 'number' ? listed + push.more : listed
-  const files = `${push.more === true ? 'more than ' : ''}${count} ${count === 1 && push.more !== true ? 'file' : 'files'}`
+/** A push's commit line for the activity list: the first commit's short sha and subject, and how
+ * many more; '' for a push of uncommitted changes, whose files are its whole line. */
+export function pushHeadline(push: WorkspacePush): string {
   const first = push.commits[0]
-  if (!first) return `${who} changed ${files} in ${push.repo}`
+  if (!first) return ''
   const others = push.commits.length - 1
   const subject = first.subject.trim() === '' ? '' : ` ${first.subject.trim()}`
   const also = others > 0 ? ` and ${others} more ${others === 1 ? 'commit' : 'commits'}` : ''
-  return `${who} committed ${shortSha(first.sha)}${subject}${also} (${files})`
+  return `${shortSha(first.sha)}${subject}${also}`
+}
+
+/** What a push left off its list: "and 4 more", "and more", or '' when it listed every file. */
+export function pushMoreWords(push: WorkspacePush): string {
+  if (push.more === true) return 'and more'
+  return typeof push.more === 'number' && push.more > 0 ? `and ${push.more} more` : ''
 }
 
 // --- settings ------------------------------------------------------------------------------------

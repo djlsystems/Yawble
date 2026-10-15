@@ -327,7 +327,7 @@ const pressed = (panel: ReturnType<VueWrapper['find']>) =>
 async function listLines(w: VueWrapper): Promise<string[]> {
   await new Promise((resolve) => setTimeout(resolve, 250))
   await flushPromises()
-  return w.findAll('[data-monitor-push]').map((found) => found.text())
+  return w.findAll('[data-monitor-push] li').map((found) => found.text().replace(/\s+/g, ' ').trim())
 }
 
 describe('the Monitor settings for file changes', () => {
@@ -343,7 +343,7 @@ describe('the Monitor settings for file changes', () => {
     const effects = await pushed()
     expect(effects).toMatchObject([{ kind: 'workspace', at: { kind: 'member', key: 'Infra/Azure' }, ttlMs: 30_000 }])
     expect(await drawnKinds(effects)).toEqual(['repository', 'project', 'file', 'file', 'project', 'file'])
-    expect(await listLines(wrapper)).toEqual(['Azure changed 3 files in web'])
+    expect(await listLines(wrapper)).toEqual(['~ src/lib/parser.ts', '+ src/lib/lexer.ts', '− cli/main.go'])
   })
 
   it('draws the repository alone, then its projects, then every file, as Draw down to says', async () => {

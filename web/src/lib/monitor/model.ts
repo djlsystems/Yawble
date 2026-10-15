@@ -2,7 +2,7 @@ import type { Message, MonitorHint, Team } from '../../api/types'
 import { summarise } from '../summarise'
 import { crossesDays, localMinute, wireInstant } from '../localTime'
 import { DefaultSettings, drawsResource, resolveHint, type Resource, type ResourceSettings } from './hints'
-import { DefaultFileSettings, pushTime, pushWords, type FileSettings, type WorkspacePush } from './workspace'
+import { DefaultFileSettings, filesOf, pushHeadline, pushMoreWords, pushTime, type FileAction, type FileSettings, type WorkspacePush } from './workspace'
 
 /**
  * THE MONITOR'S MODEL: every team, member and workflow the log has shown, and what each row does
@@ -112,6 +112,9 @@ export interface TickerEntry {
   resource?: Resource
   /** A file-changes push, not a row of the log: kept only while the page is open. */
   workspace?: true
+  /** That push's files, each listed by path with what happened to it, and what it left off. */
+  files?: { path: string; action: FileAction }[]
+  more?: string
 }
 
 const GoldenAngle = 137.508
@@ -635,9 +638,11 @@ export class MonitorModel {
       member: member?.name ?? push.member,
       tone: 'file',
       verb: push.commits.length > 0 ? 'committed' : 'changed files',
-      text: pushWords(push, member?.name ?? push.member),
+      text: pushHeadline(push),
       workflow: 0,
       workspace: true,
+      files: filesOf(push).map((file) => ({ path: file.path, action: file.action })),
+      more: pushMoreWords(push),
     })
     if (this.ticker.length > this.tickerDepth) this.ticker.length = this.tickerDepth
     const self: NodeRef = member ? { kind: 'member', key: member.key } : { kind: 'team', id: push.team }
