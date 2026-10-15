@@ -788,6 +788,7 @@ public static class BacklogEndpoints
             TenantLogging audit,
             TeamRepoSetup repoSetup,
             DetachedWork detached,
+            TeamListPush listPush,
             CancellationToken ct) =>
         {
             if (PrincipalClaims.From(context.User) is not { } principal) return Results.Unauthorized();
@@ -936,6 +937,11 @@ public static class BacklogEndpoints
                                 addRepo: newRepos.AddRepoAsync);
                             teamCreated = true;
                             await newRepos.LogAsync(audit, creatorId, creatorEmail, made.Id, work);
+
+                            // EVERY OPEN WINDOW HEARS OF IT, as `POST /api/teams` announces its team: a
+                            // board, Teams tab or Monitor already open otherwise shows the team only
+                            // after a reload.
+                            await listPush.AnnounceCreatedAsync(made.Id, work);
                         }
                         finally
                         {

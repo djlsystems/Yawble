@@ -14,10 +14,10 @@
          makes possible and a plain HttpClient cannot do against TestServer. -->
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.0" />
 
-    <!-- A real SignalR client, for HubGroupTests against KestrelHost. TestServer's in-memory
-         sockets cannot verify a socket-level HubException refusal - see KestrelHost's own doc
-         comment - so this has to speak the actual protocol over the actual loopback port. -->
-    <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.0" />
+    <!-- A real SignalR client, so a test listens to the hub as a browser does
+         (TeamCreatedAnnouncementTests). 10.0.13: 10.0.0's SignalR.Common has a known
+         high-severity advisory, which the build treats as an error. -->
+    <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.13" />
 
     <!-- A REAL BROWSER, for Harness.Ui.Tests. It drives the BUILT bundle served by a real Host
          on a real socket - never `npm run dev`, and not as a preference:

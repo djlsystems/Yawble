@@ -3317,7 +3317,7 @@ app.MapPost("/api/teams", async (
 // make a team at all.
 app.MapPost("/api/teams/{team}/clone", async (
     [Description(Describe.Team)] string team, CloneTeam request, TeamRegistry teams,
-    TenantLogging audit, HttpContext context, CancellationToken ct) =>
+    TenantLogging audit, TeamListPush listPush, HttpContext context, CancellationToken ct) =>
 {
     if (teams.ExistingName(team) is not { } stored)
     {
@@ -3394,6 +3394,9 @@ app.MapPost("/api/teams/{team}/clone", async (
                 },
             },
             ct);
+
+        // EVERY OPEN WINDOW HEARS OF THE CLONE, as of any other new team.
+        await listPush.AnnounceCreatedAsync(done.Team.Id, ct);
 
         return Results.Created($"/api/teams/{done.Team.Id}", new
         {
