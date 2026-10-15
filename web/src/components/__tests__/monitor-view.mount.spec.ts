@@ -111,6 +111,23 @@ describe('the Monitor', () => {
     expect(wrapper.find('[data-monitor-mode="live"]').exists()).toBe(true)
   })
 
+  it('offers Keep my view, off by default, and remembers it in this browser', async () => {
+    localStorage.removeItem('harness.monitor.keepView')
+    const { wrapper } = await mountMonitor([])
+    const button = () => wrapper.find('[data-monitor-keep-view]')
+
+    expect(button().attributes('aria-pressed')).toBe('false')
+    await button().trigger('click')
+    expect(button().attributes('aria-pressed')).toBe('true')
+
+    wrapper.unmount()
+    const again = await mountMonitor([])
+    expect(again.wrapper.find('[data-monitor-keep-view]').attributes('aria-pressed')).toBe('true')
+
+    await again.wrapper.find('[data-monitor-keep-view]').trigger('click')
+    expect(localStorage.getItem('harness.monitor.keepView')).toBeNull()
+  })
+
   it('says so when the log cannot be read', async () => {
     getMessages.mockRejectedValueOnce(new Error('503 Service Unavailable'))
     const board = useConsoleStore()

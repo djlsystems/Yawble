@@ -25,7 +25,10 @@ import { compact } from './model'
  */
 
 const ToneNames: Tone[] = ['tell', 'start', 'progress', 'done', 'handback', 'fail', 'blocked', 'workflow', 'card', 'push', 'plugin', 'file', 'quiet']
-const StateNames: MemberState[] = ['idle', 'running', 'waiting', 'blocked', 'decision', 'failed']
+/** How long a view the person moved is left alone before it fits everything again. */
+export const RefitAfterMs = 12_000
+
+const StateNames: MemberState[] =['idle', 'running', 'waiting', 'blocked', 'decision', 'failed']
 
 /**
  * THE STAGE'S COLOURS, read from the `--os-monitor-*` tokens in `app.scss` by `readPalette`. One
@@ -169,6 +172,8 @@ export class MonitorScene {
   private camera = { x: 0, y: 0, k: 1 }
   private target = { x: 0, y: 0, k: 1 }
   private userMovedAt = -Infinity
+  /** Off: a view the person moved stays where they put it, instead of fitting again after a while. */
+  private autoFit = true
   private frame = 0
   private last = 0
   private clock = 0
@@ -379,6 +384,19 @@ export class MonitorScene {
     this.frameAll(true)
   }
 
+  /**
+   * Whether a view the person moved fits everything again after `RefitAfterMs` of leaving it.
+   * Off, it stays put until Fit is pressed; a view nobody has moved still follows the graph.
+   */
+  setAutoFit(on: boolean) {
+    this.autoFit = on
+  }
+
+  /** Whether the camera is framing the whole graph at this moment. Exposed for tests. */
+  get following() {
+    return this.userMovedAt === -Infinity || (this.autoFit && this.clock - this.userMovedAt > RefitAfterMs)
+  }
+
   /** Centre on one node. */
   focus(ref: NodeRef) {
     const node = this.nodeOf(ref)
@@ -402,7 +420,7 @@ export class MonitorScene {
     }
     this.tidy()
 
-    if (this.clock - this.userMovedAt > 12_000) this.frameAll(false)
+    if (this.following) this.frameAll(false)
     const follow = 1 - Math.pow(0.0025, dt / 1000)
     this.camera.x += (this.target.x - this.camera.x) * follow
     this.camera.y += (this.target.y - this.camera.y) * follow

@@ -57,6 +57,28 @@ const hover = ref<HoverInfo | null>(null)
 const picked = ref<NodeRef | null>(null)
 const fullscreen = ref(false)
 
+/** Remembered per browser, a convenience only: storage may be missing or refuse, and the default stands. */
+const KeepViewKey = 'harness.monitor.keepView'
+function readKeepView(): boolean {
+  try {
+    return localStorage.getItem(KeepViewKey) === '1'
+  } catch {
+    return false
+  }
+}
+/** On: a view the person moved stays where they put it instead of fitting everything again. */
+const keepView = ref(readKeepView())
+function toggleKeepView() {
+  keepView.value = !keepView.value
+  scene?.setAutoFit(!keepView.value)
+  try {
+    if (keepView.value) localStorage.setItem(KeepViewKey, '1')
+    else localStorage.removeItem(KeepViewKey)
+  } catch {
+    // Remembered only while this page is open.
+  }
+}
+
 let model = new MonitorModel()
 let scene: MonitorScene | null = null
 let replay: ReplayClock | null = null
@@ -329,6 +351,7 @@ onMounted(async () => {
       onHover: (info) => (hover.value = info),
       onPick: (picked_) => (picked.value = picked_),
     })
+    scene.setAutoFit(!keepView.value)
     measure()
     scene.start()
   }
@@ -449,6 +472,23 @@ onUnmounted(() => {
           />
           <q-btn flat dense round icon="center_focus_strong" aria-label="Fit everything in view" @click="fitAll">
             <q-tooltip>Fit everything in view (or double-click the graph)</q-tooltip>
+          </q-btn>
+          <q-btn
+            flat
+            dense
+            round
+            icon="keep"
+            :class="{ 'monitor-tool-on': keepView }"
+            :aria-pressed="keepView ? 'true' : 'false'"
+            aria-label="Keep my view"
+            data-monitor-keep-view
+            @click="toggleKeepView"
+          >
+            <q-tooltip>{{
+              keepView
+                ? 'Keeping your view: it stays where you put it until you press Fit'
+                : 'Keep my view: stop fitting everything again a few seconds after you move it'
+            }}</q-tooltip>
           </q-btn>
           <q-btn
             flat
@@ -717,6 +757,12 @@ onUnmounted(() => {
 
 .monitor-mode :deep(.q-btn) {
   color: var(--monitor-ink);
+}
+
+/* A pressed toggle: lit, and filled so it does not depend on hue alone. */
+.monitor-tool-on {
+  color: var(--os-monitor-tell);
+  background: var(--os-monitor-rule);
 }
 
 .monitor-speed {
