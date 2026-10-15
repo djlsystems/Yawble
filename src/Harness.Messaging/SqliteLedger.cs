@@ -15,6 +15,8 @@ public sealed class SqliteLedger : ILedger
 {
     private readonly string _connectionString;
 
+    private readonly IPluginEventRegistry? _plugins;
+
     // THE EXCLUSION LIST COMES FROM `EventCatalog`, which is its ONE store.
     //
     // Hand-written `type <>` clauses here would make "which types stay out of an agent's context"
@@ -44,13 +46,19 @@ public sealed class SqliteLedger : ILedger
     /// </summary>
     public static string ExclusionClauseForTests => ExclusionClause;
 
-    public SqliteLedger(string databasePath) =>
+    /// <param name="plugins">The installed plugins, whose events declared out of the ledger (a
+    /// <c>highVolume</c> one) stay out of it as the platform's do. Read on every query, so a plugin
+    /// installed or upgraded while the Host runs is seen on the next run. Null: the platform's alone.</param>
+    public SqliteLedger(string databasePath, IPluginEventRegistry? plugins = null)
+    {
         _connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = databasePath,
             Mode = SqliteOpenMode.ReadWriteCreate,
             Cache = SqliteCacheMode.Shared,
         }.ToString();
+        _plugins = plugins;
+    }
 
     public async Task<IReadOnlyList<Message>> ReadAsync(
         ContainerId container, long sinceSeq, long? correlation, long beforeSeq, int max,
@@ -63,6 +71,15 @@ public sealed class SqliteLedger : ILedger
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(ct);
         await using var command = connection.CreateCommand();
+
+        // THE INSTALLED PLUGINS' EXCLUSIONS, parameterised the same way under their own ordinals. A
+        // plugin type is never a platform type, so the two lists cannot overlap.
+        string[] pluginExcluded = _plugins is null
+            ? []
+            : [.. _plugins.Events.Where(e => !e.InLedger).Select(e => e.Type).Distinct(StringComparer.Ordinal)];
+        var pluginClause = pluginExcluded.Length == 0
+            ? string.Empty
+            : $"AND type NOT IN ({string.Join(", ", pluginExcluded.Select((_, i) => $"$pexcl{i}"))})";
 
         // Newest-first inside, oldest-first outside. The bound has to apply to the RECENT end -- a
         // LIMIT on an ascending scan would keep the oldest entries and drop everything that just
@@ -80,6 +97,7 @@ public sealed class SqliteLedger : ILedger
                  SELECT {MessageRows.Columns} FROM messages
                  WHERE seq > $since AND seq < $before AND (source = $container OR type = $instruction)
                    {ExclusionClause}
+                   {pluginClause}
                    AND ($correlation IS NULL OR correlation_id = $correlation)
                  ORDER BY seq DESC
                  LIMIT $max
@@ -96,6 +114,11 @@ public sealed class SqliteLedger : ILedger
         for (var i = 0; i < ExcludedTypes.Length; i++)
         {
             command.Parameters.AddWithValue(ExclusionParameterNames[i], ExcludedTypes[i]);
+        }
+
+        for (var i = 0; i < pluginExcluded.Length; i++)
+        {
+            command.Parameters.AddWithValue($"$pexcl{i}", pluginExcluded[i]);
         }
 
         // INSIDE THE SUBQUERY, ABOVE THE LIMIT, AND THAT PLACEMENT IS THE WHOLE FIX. A predicate

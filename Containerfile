@@ -42,6 +42,8 @@ ARG TARGETARCH
 WORKDIR /src
 COPY Directory.Build.props Directory.Packages.props global.json ./
 COPY src/ src/
+# The Material Symbols names the Host embeds; the operator CLI embeds the same file.
+COPY cli/internal/plugin/material-symbols.txt cli/internal/plugin/
 COPY --from=web /src/web/dist/spa/ src/Harness.Host/wwwroot/
 # HARNESS_VERSION and HARNESS_COMMIT reach MSBuild as properties from the environment.
 RUN dotnet publish src/Harness.Host/Harness.Host.csproj -c Release -o /out --no-self-contained -a "$TARGETARCH"

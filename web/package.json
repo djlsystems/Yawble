@@ -10,7 +10,8 @@
     "typecheck": "vue-tsc --noEmit",
     "postinstall": "quasar prepare --silent",
     "test": "vitest run",
-    "icons:subset": "node scripts/subset-icons.mjs"
+    "icons:subset": "node scripts/subset-icons.mjs",
+    "symbols:names": "node scripts/material-symbol-names.mjs"
   },
   "dependencies": {
     "@fontsource/atkinson-hyperlegible": "^5.3.0",

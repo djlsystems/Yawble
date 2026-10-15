@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Harness.Contracts;
 
 /// <summary>Who puts a row of this type on the log.</summary>
@@ -63,7 +65,32 @@ public sealed record EventDefinition(
     bool HighVolume,
     bool InLedger,
     IReadOnlyList<EventField> Fields,
-    string Summary);
+    string Summary)
+{
+    /// <summary>How the Monitor draws this event: a plugin's <c>monitor</c> hint as its manifest
+    /// declares it. Null for every platform type and for a plugin event declared without one, and
+    /// then left out of `GET /api/events` altogether.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EventMonitorHint? Monitor { get; init; }
+}
+
+/// <summary>
+/// A plugin event's <c>monitor</c> hint, checked by <c>PluginManifest</c>: the Material Symbols
+/// <paramref name="Icon"/>, optionally chosen by a field's value (<paramref name="IconBy"/>); exactly one
+/// of a fixed <paramref name="Action"/> (created, changed or deleted) or the string field that carries
+/// it (<paramref name="ActionField"/>); and an optional <paramref name="Label"/> template of
+/// <c>{field}</c> placeholders.
+/// </summary>
+public sealed record EventMonitorHint(
+    string Icon,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EventMonitorIconBy? IconBy,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Action,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ActionField,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Label);
+
+/// <summary>The icon by a declared string <paramref name="Field"/>'s value; a value not in
+/// <paramref name="Icons"/> uses the hint's own icon.</summary>
+public sealed record EventMonitorIconBy(string Field, IReadOnlyDictionary<string, string> Icons);
 
 /// <summary>
 /// EVERY EVENT TYPE THIS PLATFORM CAN APPEND, AND WHAT IS TRUE OF EACH.

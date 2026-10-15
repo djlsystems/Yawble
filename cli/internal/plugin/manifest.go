@@ -26,6 +26,9 @@ const (
 // executable. Everything else is the Host's to read.
 type Manifest struct {
 	ID, Name, Version string
+	// Ignored is what the Host would ignore and name rather than refuse: for now, a key inside an
+	// event's monitor hint that it does not know, as events.publishes.<type>.monitor.<key>.
+	Ignored []string
 	// Executables are executable.path and every platforms entry, relative to the folder. The Host
 	// runs one of them, chosen by the container's processor, so the install marks them all.
 	Executables []string
@@ -221,6 +224,7 @@ func parse(root map[string]any) (Manifest, []string, string) {
 			}
 		}
 	}
+	var ignored []string
 	if e, present := root["events"]; present {
 		events, ok := e.(map[string]any)
 		if !ok {
@@ -231,11 +235,19 @@ func parse(root map[string]any) (Manifest, []string, string) {
 			if !ok {
 				return m, nil, "`events.publishes` must be an array."
 			}
+			seen := map[string]bool{}
 			for _, item := range list {
 				obj, _ := item.(map[string]any)
 				t, ok := text(obj, "type")
 				if obj == nil || !ok || !eventSuffix.MatchString(t) {
 					return m, nil, "Each of `events.publishes` needs a `type`: lowercase letters, digits, hyphens and dots."
+				}
+				if seen[t] {
+					return m, nil, fmt.Sprintf("`events.publishes` declares `%s` twice.", t)
+				}
+				seen[t] = true
+				if r := publishedEvent(t, obj, &ignored); r != "" {
+					return m, nil, r
 				}
 			}
 		}
@@ -285,7 +297,7 @@ func parse(root map[string]any) (Manifest, []string, string) {
 			return m, nil, reason
 		}
 	}
-	return Manifest{ID: id, Name: name, Version: version, Executables: executables}, skills, ""
+	return Manifest{ID: id, Name: name, Version: version, Ignored: ignored, Executables: executables}, skills, ""
 }
 
 func validSlug(name string) bool { return len(name) <= 63 && slug.MatchString(name) }

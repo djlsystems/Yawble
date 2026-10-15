@@ -12,3 +12,5 @@ TestResults
 src/Harness.Host/appsettings.Production.json
 .claude
 cli
+# ...but the Material Symbols names the Host embeds (Harness.Host.csproj).
+!cli/internal/plugin/material-symbols.txt
