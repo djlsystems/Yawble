@@ -205,7 +205,8 @@ public sealed class TenantSettings
                 + "before leaving it to a person. 0 turns automatic resumes off. Applies at the next "
                 + "sweep.",
                 Min: 0, Max: 100),
-            new(CausationDepthLimitName, TenantSettingKind.Integer, "25", "CausationDepthLimit",
+            new(CausationDepthLimitName, TenantSettingKind.Integer,
+                DefaultCausationDepthLimit.ToString(CultureInfo.InvariantCulture), "CausationDepthLimit",
                 "How deep one chain of tells may go before the next tell is refused - a backstop "
                 + "against agents answering each other in a loop. 0 means no limit. Applies to the "
                 + "next tell.",
@@ -302,6 +303,14 @@ public sealed class TenantSettings
 
     /// <summary>The built-in per-run memory allowance, in MB.</summary>
     public const int DefaultMemoryPerRunMb = 2048;
+
+    /// <summary>
+    /// The built-in <c>causation.depthLimit</c>. Every hop of a workflow counts - a Manager's tell to
+    /// a plugin member, its completion, the Manager's next tell - so a build that drives Azure, DNS
+    /// and Stripe through plugin members reaches 25 steps without going round in circles. 100 still
+    /// stops two agents instructing each other forever.
+    /// </summary>
+    public const int DefaultCausationDepthLimit = 100;
 
     /// <summary>Megabytes of the container's limit the computed per-run limit leaves to the Host.</summary>
     public const int HostReserveMb = 1024;

@@ -210,7 +210,7 @@ public sealed class TenantSettingsTests(HostFixture host) : IClassFixture<HostFi
             Assert.Equal(7, settings.WipMaxRunning);
             // A deployment's value outside the dialog's range still stands.
             Assert.Equal(TimeSpan.FromSeconds(30), settings.QuietWindow);
-            Assert.Equal(25, settings.CausationDepthLimit);
+            Assert.Equal(100, settings.CausationDepthLimit);
             Assert.Equal(TimeSpan.FromHours(1), settings.ConciergeIdleTimeout);
 
             using var value = JsonDocument.Parse("9");
