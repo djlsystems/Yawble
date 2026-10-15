@@ -1,0 +1,290 @@
+{
+  "_": "Monitor hints the Host (PluginMonitorHintTests) and the CLI (cli/internal/plugin/monitor_test.go) both read: each is the `monitor` of an event `saved` declaring `fields`. `accepted` must parse; each of `refused` must be refused with exactly `events.publishes` `saved`: followed by `says`.",
+  "fields": [
+    {
+      "name": "title",
+      "kind": "string"
+    },
+    {
+      "name": "status"
+    },
+    {
+      "name": "count",
+      "kind": "number"
+    },
+    {
+      "name": "tags",
+      "kind": "list"
+    },
+    {
+      "name": "done",
+      "kind": "boolean"
+    }
+  ],
+  "accepted": [
+    {
+      "icon": "inbox",
+      "iconBy": {
+        "field": "status",
+        "icons": {
+          "open": "drafts",
+          "closed": "archive"
+        }
+      },
+      "action": "created",
+      "label": "{title} saved with {count} items"
+    },
+    {
+      "icon": "swap_horiz",
+      "actionField": "status"
+    },
+    {
+      "icon": "inbox",
+      "action": "changed"
+    },
+    {
+      "icon": "delete",
+      "action": "deleted",
+      "label": "{title} gone, {source"
+    },
+    {
+      "icon": "inbox",
+      "action": "created",
+      "label": "{title}xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    {
+      "icon": "rocket_launch",
+      "action": "created",
+      "label": "{title}xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx🚀"
+    }
+  ],
+  "refused": [
+    {
+      "monitor": "inbox",
+      "says": "`monitor` must be an object."
+    },
+    {
+      "monitor": {
+        "action": "created"
+      },
+      "says": "`monitor.icon` is required: a Material Symbols name, such as inbox."
+    },
+    {
+      "monitor": {
+        "icon": 42,
+        "action": "created"
+      },
+      "says": "`monitor.icon` is required: a Material Symbols name, such as inbox."
+    },
+    {
+      "monitor": {
+        "icon": "not_a_symbol_at_all",
+        "action": "created"
+      },
+      "says": "`monitor.icon` 'not_a_symbol_at_all' is not a Material Symbols name."
+    },
+    {
+      "monitor": {
+        "icon": "Inbox",
+        "action": "created"
+      },
+      "says": "`monitor.icon` 'Inbox' is not a Material Symbols name."
+    },
+    {
+      "monitor": {
+        "icon": "inbox",
+        "action": "created",
+        "iconBy": "status"
+      },
+      "says": "`monitor.iconBy` must be an object with a `field` and `icons`, a map of value to icon."
+    },
+    {
+      "monitor": {
+        "icon": "inbox",
+        "action": "created",
+        "iconBy": {
+          "field": "status"
+        }
+      },
+      "says": "`monitor.iconBy` must be an object with a `field` and `icons`, a map of value to icon."
+    },
+    {
+      "monitor": {
+        "icon": "inbox",
+        "action": "created",
+        "iconBy": {
+          "field": "status",
+          "map": {
+            "open": "drafts"
+          }
+        }
+      },
+      "says": "`monitor.iconBy` must be an object with a `field` and `icons`, a map of value to icon."
+    },
+    {
+      "monitor": {
+        "icon": "inbox",
+        "action": "created",
+        "iconBy": {
+          "field": "count",
+          "icons": {}
+        }
+      },
+      "says": "`monitor.iconBy.field` names 'count', which is not a declared string field."
+    },
+    {
+      "monitor": {
+        "icon": "inbox",
+        "action": "created",
+        "iconBy": {
+          "field": "nope",
+          "icons": {}
+        }
+      },
+      "says": "`monitor.iconBy.field` names 'nope', which is not a declared string field."
+    },
+    {
+      "monitor": {
+        "icon": "inbox",
+        "action": "created",
+        "iconBy": {
+          "field": "status",
+          "icons": {
+            "open": "drafts",
+            "closed": "no_such_glyph"
+          }
+        }
+      },
+      "says": "`monitor.iconBy.icons` 'closed': 'no_such_glyph' is not a Material Symbols name."
+    },
+    {
+      "monitor": {
+        "icon": "inbox",
+        "action": "created",
+        "iconBy": {
+          "field": "status",
+          "icons": {
+            "open": 7
+          }
+        }
+      },
+      "says": "`monitor.iconBy.icons` 'open' must be a Material Symbols name."
+    },
+    {
+      "monitor": {
+        "icon": "inbox",
+        "action": "created",
+        "actionField": "status"
+      },
+      "says": "`monitor` has both `action` and `actionField`; give exactly one."
+    },
+    {
+      "monitor": {
+        "icon": "inbox"
+      },
+      "says": "`monitor` needs `action` (created, changed or deleted) or `actionField` (a declared string field)."
+    },
+    {
+      "monitor": {
+        "icon": "inbox",
+        "action": "updated"
+      },
+      "says": "`monitor.action` must be created, changed or deleted."
+    },
+    {
+      "monitor": {
+        "icon": "inbox",
+        "action": true
+      },
+      "says": "`monitor.action` must be created, changed or deleted."
+    },
+    {
+      "monitor": {
+        "icon": "inbox",
+        "actionField": "count"
+      },
+      "says": "`monitor.actionField` names 'count', which is not a declared string field."
+    },
+    {
+      "monitor": {
+        "icon": "inbox",
+        "actionField": "tags"
+      },
+      "says": "`monitor.actionField` names 'tags', which is not a declared string field."
+    },
+    {
+      "monitor": {
+        "icon": "inbox",
+        "actionField": "nope"
+      },
+      "says": "`monitor.actionField` names 'nope', which is not a declared string field."
+    },
+    {
+      "monitor": {
+        "icon": "inbox",
+        "actionField": [
+          "status"
+        ]
+      },
+      "says": "`monitor.actionField` must name a declared string field."
+    },
+    {
+      "monitor": {
+        "icon": "inbox",
+        "action": "created",
+        "label": ""
+      },
+      "says": "`monitor.label` must be text."
+    },
+    {
+      "monitor": {
+        "icon": "inbox",
+        "action": "created",
+        "label": {
+          "text": "x"
+        }
+      },
+      "says": "`monitor.label` must be text."
+    },
+    {
+      "monitor": {
+        "icon": "inbox",
+        "action": "created",
+        "label": "{title} tagged {tags}"
+      },
+      "says": "`monitor.label` names {tags}, which is not a declared string or number field."
+    },
+    {
+      "monitor": {
+        "icon": "inbox",
+        "action": "created",
+        "label": "done: {done}"
+      },
+      "says": "`monitor.label` names {done}, which is not a declared string or number field."
+    },
+    {
+      "monitor": {
+        "icon": "inbox",
+        "action": "created",
+        "label": "{nope}"
+      },
+      "says": "`monitor.label` names {nope}, which is not a declared string or number field."
+    },
+    {
+      "monitor": {
+        "icon": "inbox",
+        "action": "created",
+        "label": "from {source}"
+      },
+      "says": "`monitor.label` names {source}, which is not a declared string or number field."
+    },
+    {
+      "monitor": {
+        "icon": "inbox",
+        "action": "created",
+        "label": "{title}xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "says": "`monitor.label` is 121 characters; a label is at most 120."
+    }
+  ]
+}

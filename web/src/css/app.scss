@@ -130,7 +130,8 @@
 
   // THE MONITOR'S SCREEN. Dark in every theme on purpose, as the Concierge's terminal is: it is a
   // screen to watch, and the glow its graph draws reads only on a dark ground. So these are set
-  // once, here, and no theme block repeats them. The canvas reads them (`lib/monitor/scene.ts`,
+  // once, here, and no theme block repeats them but for the three action colours below, which
+  // `body.body--dark` says again with the same values. The canvas reads them (`lib/monitor/scene.ts`,
   // `readPalette`) and so does the view's stylesheet, so the legend and the graph agree.
   --os-monitor-ground: #070b14;
   --os-monitor-panel: #0c1322;
@@ -157,6 +158,10 @@
   --os-monitor-state-blocked: #fb7185;
   --os-monitor-state-decision: #f59e0b;
   --os-monitor-state-failed: #f43f5e;
+  // What a plugin's row did to a thing it manages (monitor hints): created, changed, deleted.
+  --os-monitor-created: #4ade80;
+  --os-monitor-changed: #fbbf24;
+  --os-monitor-deleted: #f87171;
 }
 
 // The dark theme. Only what differs from light is here.
@@ -164,6 +169,12 @@
 // Paper and surface are the front door's own ground and card; the front door reads these tokens
 // rather than keeping a copy.
 body.body--dark {
+  // The Monitor's three action colours, said again with the same values so both themes resolve
+  // them; the Monitor's screen stays dark either way.
+  --os-monitor-created: #4ade80;
+  --os-monitor-changed: #fbbf24;
+  --os-monitor-deleted: #f87171;
+
   --os-plugin-surface: #221c33;
   --os-plugin-accent: #9d8fef;
   --os-ink: #ece7e3;

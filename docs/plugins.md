@@ -293,7 +293,7 @@ Content-Type: application/json
 | `secrets` | optional | Name → `{description, required, when?}`. A `value` key is refused. `when` - `{"<config field>": "<value>"}`, one pair - says the secret is needed only while that list or choice setting holds that value (`{"sources": "adzuna"}`); the field must be declared and the value one of its `enum`. A solution install uses it to say a secret for a setting the person left off is not needed. |
 | `connections` | optional | Slot name → `{description, providers, scopes, required}`: an OAuth account the plugin acts on, which the Host holds and refreshes. See [Connections](#connections-oauth-accounts). |
 | `reads` | optional | A list of `{site, collection}`, at most 32: the collections of the plugin's OWN team's sites it reads, delivered on stdin at each run. See [Reading site data](#reading-site-data-reads). |
-| `events.publishes` | optional | `type` is a suffix: lowercase letters, digits, `-` and `.`. The full type is `plugin.<id>.<type>`. `highVolume` (default false) and `fields` (`name`, `kind`: `string`, `number`, `boolean` or `list`, `summary`) are optional; `source` cannot be declared. `inLedger` is not read in v1: a plugin event always reaches the ledger. See [Events](#events). |
+| `events.publishes` | optional | `type` is a suffix: lowercase letters, digits, `-` and `.`. The full type is `plugin.<id>.<type>`. `highVolume` (default false) and `fields` (`name`, `kind`: `string`, `number`, `boolean` or `list`, `summary`) are optional; `source` cannot be declared. `monitor` (optional) tells the Monitor what the event did outside the platform; see [Monitor hints](#monitor-hints). `inLedger` is not read in v1: a plugin event declared `highVolume` stays out of the member ledger and is still an ordinary log row, and any other plugin event stays in the ledger. See [Events](#events). |
 | `skills` | optional | Files inside the plugin, in the same front-matter format as a skill. Indexed at load and on every rescan. See [Skills](#skills). |
 | `requires` | optional | The runtimes the plugin needs from the image: `dotnet`, `node`, `python3`. See [Runtimes](#runtimes-requires). |
 | `platforms` | optional | `{"linux-x64": "bin/x64/p", "linux-arm64": "bin/arm64/p"}`, each a relative path inside the version directory. The entry for this machine's processor, when there is one, is run instead of `executable.path`. |
@@ -911,6 +911,48 @@ A plugin publishes with a `publish` record:
   `PluginMemberEndToEndTests.C_A_plugins_publish_reaches_a_trigger_on_its_team_in_the_same_workflow`.
 - **sample-echo** declares `done` (field `length`) and publishes it on every run that completes.
   `publish:<type>` in an instruction makes it publish that type too, for trying the refusals.
+
+### Monitor hints
+
+An event in `events.publishes` may carry a `monitor` object, so the Monitor draws what the plugin
+did to the outside system as a resource on the team's map.
+
+```json
+{ "type": "file.written", "summary": "A file was written outside the platform.", "highVolume": true,
+  "fields": [ { "name": "name", "kind": "string", "summary": "The file's name." } ],
+  "monitor": { "icon": "draft", "action": "created", "label": "Wrote {name}" } }
+```
+
+When to declare one:
+
+- Declare a monitor hint for each event that reports something the plugin created, changed or
+  deleted outside the platform. Never for a read, a list, a check or a refusal.
+- Choose an icon for the resource (a database, a mail, a DNS record, a container). Use `iconBy`
+  when one event covers several kinds.
+- Publish one event per resource when a command touches several. Declare `highVolume: true` when
+  the event exists to be shown rather than to be acted on.
+- Keep the label short. Never put a secret, a body, or a message's text in it.
+
+| Key | Status | Rule |
+|---|---|---|
+| `icon` | required | A Material Symbols Outlined name (`database`, `mail`, `dns`, `deployed_code`), as the `@quasar/extras` list spells it. |
+| `iconBy` | optional | A declared `string` field of the event; its value picks the icon for each publish. |
+| `action` | one of these two | `created`, `changed` or `deleted`: what every publish of the event did. |
+| `actionField` | one of these two | A declared `string` field of the event holding `created`, `changed` or `deleted`. |
+| `label` | optional | Text with `{field}` placeholders over declared `string` or `number` fields, at most 120 characters as written. |
+
+An unknown key inside `monitor` is ignored and named `events.publishes.<type>.monitor.<key>`. The
+Host refuses a bad icon, both or neither of `action` and `actionField`, a bad action, a field that is
+not a declared string, a placeholder that is not a declared string or number, and a label over the
+limit, each sentence naming the event type and the field. A Host that does not read `monitor`
+ignores the key, so a manifest that carries one still loads there.
+
+A plugin event declared `highVolume` stays out of the member ledger and is still an ordinary log
+row. Any other plugin event stays in the ledger. Pinned by `PluginMonitorHintTests`, `MaterialSymbolNamesTests`,
+`PluginHighVolumeLedgerTests` and the CLI manifest tests in `cli/internal/plugin`.
+
+**sample-echo-go** declares `file.written` with a hint (icon `draft`, action `created`, label
+`Wrote {name}`) and `highVolume: true`; `publish:file.written` in an instruction publishes it.
 
 ## Hiring
 

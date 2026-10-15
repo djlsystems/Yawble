@@ -308,6 +308,24 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
     }
 
     /// <summary>
+    /// The plugin skill says when an event declares a monitor hint - something the plugin created,
+    /// changed or deleted outside the platform - and that a read, a list, a check or a refusal never
+    /// does, with the icon, one event per resource, highVolume and the label's limits beside it.
+    /// </summary>
+    [Fact]
+    public void The_plugin_skill_says_when_to_declare_a_monitor_hint_and_never_for_a_read_a_list_a_check_or_a_refusal()
+    {
+        var plugins = Flat(BuiltInSkills.Find("authoring-plugins")!.Body);
+
+        Assert.Contains("Declare a monitor hint for each event that reports something the plugin created, changed or deleted outside the platform.", plugins, StringComparison.Ordinal);
+        Assert.Contains("Never for a read, a list, a check or a refusal.", plugins, StringComparison.Ordinal);
+        Assert.Contains("Use `iconBy` when one event covers several kinds.", plugins, StringComparison.Ordinal);
+        Assert.Contains("Publish one event per resource when a command touches several.", plugins, StringComparison.Ordinal);
+        Assert.Contains("Declare `highVolume: true` when the event exists to be shown rather than to be acted on.", plugins, StringComparison.Ordinal);
+        Assert.Contains("Never put a secret, a body, or a message's text in it.", plugins, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A site's files folder is taught where an agent writes a site's files and where a plugin learns
     /// it: the folder, the relative path in the data, the helper's link, and never a secret there.
     /// </summary>
