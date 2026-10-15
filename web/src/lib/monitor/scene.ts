@@ -82,6 +82,10 @@ interface SceneNode extends SimulationNodeDatum {
   dying: number | null
   pulse: number
   shakeUntil: number
+  /** Where a file change is DRAWN: eased toward its simulated x and y, so the small corrections
+   * that keep labels apart never show as shaking. Unset for every other kind. */
+  shownX?: number
+  shownY?: number
 }
 
 interface SceneLink extends SimulationLinkDatum<SceneNode> {
@@ -102,6 +106,9 @@ export interface Box {
 export interface ShownWorkspaceNode extends WorkspaceNode {
   x: number
   y: number
+  /** Where it is drawn: x and y eased, so it never shakes. */
+  shownX: number
+  shownY: number
   /** What it covers: its mark and its label. */
   box: Box
 }
@@ -288,6 +295,10 @@ export class MonitorScene {
           .distanceMax(420),
       )
       .force('collide', forceCollide<SceneNode>().radius((node) => node.r + (node.kind === 'team' ? 30 : node.kind === 'member' ? 24 : 6)))
+      // FILE CHANGES KEEP THEIR LABELS APART AS A FORCE, so they glide clear and come to rest.
+      // `separate` after each tick still makes it certain; with this it has almost nothing to do,
+      // where alone it fought the simulation every frame and the nodes shook.
+      .force('boxes', () => this.pushBoxesApart())
       .force('x', forceX<SceneNode>((node) => this.teamTarget(node.team).x).strength((node) => (node.kind === 'team' ? 0.12 : 0.02)))
       .force('y', forceY<SceneNode>((node) => this.teamTarget(node.team).y).strength((node) => (node.kind === 'team' ? 0.12 : 0.02)))
 
@@ -542,7 +553,8 @@ export class MonitorScene {
     this.camera.y += (this.target.y - this.camera.y) * follow
     this.camera.k += (this.target.k - this.camera.k) * follow
 
-    this.draw()
+    this.easeShown()
+    this.drawShown()
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -555,7 +567,15 @@ export class MonitorScene {
     }
     if (link.kind === 'tree') {
       const target = typeof link.target === 'object' ? link.target : this.nodes.get(String(link.target))
-      return target?.kind === 'repository' ? 150 : 40
+      if (target?.kind === 'repository') return 150
+      // ROOM FOR EVERY LABEL ON THE RING. Eight file names cannot sit 40 px from their project
+      // without covering each other; held there, they were pushed apart and pulled back every
+      // frame and shook. The ring grows with the number of siblings on it.
+      // A tree link runs from the child (source) to its parent (target).
+      const parent = idOf(link.target)
+      let siblings = 0
+      for (const other of this.links.values()) if (other.kind === 'tree' && idOf(other.target) === parent) siblings++
+      return 40 + Math.max(0, siblings - 1) * 14
     }
     return 48
   }
@@ -702,6 +722,36 @@ export class MonitorScene {
     return boxes
   }
 
+  /** The simulation's force for `boxes`: each overlap of file-change labels, with each other or a
+   * member and its name, turns into velocity apart, half of the overlap a tick, shared when both move. */
+  private pushBoxesApart() {
+    const items: { node: SceneNode; box: Box }[] = []
+    for (const node of this.nodes.values()) {
+      if (!WorkspaceKinds.has(node.kind) || node.fx != null) continue
+      const box = this.workspaceBox(node)
+      if (box) items.push({ node, box })
+    }
+    if (items.length === 0) return
+    const push = (node: SceneNode, dx: number, dy: number) => {
+      node.vx = (node.vx ?? 0) + dx
+      node.vy = (node.vy ?? 0) + dy
+    }
+    for (const box of this.memberBoxes()) {
+      for (const item of items) {
+        const away = clearOf(item.box, box)
+        if (away) push(item.node, away.dx * BoxPush, away.dy * BoxPush)
+      }
+    }
+    for (let i = 0; i < items.length; i++) {
+      for (let j = i + 1; j < items.length; j++) {
+        const away = clearOf(items[i]!.box, items[j]!.box)
+        if (!away) continue
+        push(items[i]!.node, (away.dx * BoxPush) / 2, (away.dy * BoxPush) / 2)
+        push(items[j]!.node, (-away.dx * BoxPush) / 2, (-away.dy * BoxPush) / 2)
+      }
+    }
+  }
+
   /**
    * Keep every file change clear of every other and of every member and its name. The simulation
    * spreads them; this makes it certain, moving each the least way out of what it overlaps.
@@ -715,9 +765,13 @@ export class MonitorScene {
     }
     if (items.length === 0) return
     const fixed = this.memberBoxes()
+    // A node moved out of an overlap also loses its speed: left with it, the simulation carries it
+    // straight back on the next tick, this moves it out again, and the node shakes.
     const move = (item: (typeof items)[number], dx: number, dy: number) => {
       item.node.x! += dx
       item.node.y! += dy
+      item.node.vx = 0
+      item.node.vy = 0
       item.box = { left: item.box.left + dx, right: item.box.right + dx, top: item.box.top + dy, bottom: item.box.bottom + dy }
     }
     for (let pass = 0; pass < SeparatePasses; pass++) {
@@ -763,6 +817,38 @@ export class MonitorScene {
     }
   }
 
+  private easeShown() {
+    for (const node of this.nodes.values()) {
+      if (!WorkspaceKinds.has(node.kind) || node.x === undefined || node.y === undefined) continue
+      if (node.shownX === undefined || node.shownY === undefined || this.options.reducedMotion) {
+        node.shownX = node.x
+        node.shownY = node.y
+        continue
+      }
+      node.shownX += (node.x - node.shownX) * ShownEase
+      node.shownY += (node.y - node.shownY) * ShownEase
+    }
+  }
+
+  /** Draws with each file change at its shown position, then puts its simulated one back. */
+  private drawShown() {
+    const held: [SceneNode, number, number][] = []
+    for (const node of this.nodes.values()) {
+      if (node.shownX === undefined || node.shownY === undefined || node.x === undefined || node.y === undefined) continue
+      held.push([node, node.x, node.y])
+      node.x = node.shownX
+      node.y = node.shownY
+    }
+    try {
+      this.draw()
+    } finally {
+      for (const [node, x, y] of held) {
+        node.x = x
+        node.y = y
+      }
+    }
+  }
+
   /** The file changes as drawn now: where each node is, what it covers, its lines and its commit. Exposed for tests. */
   shownWorkspace(): ShownWorkspace {
     const nodes: ShownWorkspaceNode[] = []
@@ -770,7 +856,7 @@ export class MonitorScene {
       const node = this.nodes.get(ws.id)
       const box = node ? this.workspaceBox(node) : null
       if (!node || !box) continue
-      nodes.push({ ...ws, x: node.x!, y: node.y!, box })
+      nodes.push({ ...ws, x: node.x!, y: node.y!, shownX: node.shownX ?? node.x!, shownY: node.shownY ?? node.y!, box })
     }
     const touches = this.workspaceView.touches
       .filter((touch) => this.links.has(`m:${touch.member}|${touch.node}`))
@@ -1980,3 +2066,9 @@ export function stateWords(state: MemberState): string {
 /** The spiral `separate` searches when its passes stall: twelve directions a ring, out to this many rings. */
 const SpiralRings = 40
 const SpiralTurns = Array.from({ length: 12 }, (_, i) => (i * Math.PI) / 6)
+
+/** How much of a label overlap the `boxes` force turns into velocity apart each tick. */
+const BoxPush = 0.35
+
+/** How far a file change's drawn position moves toward its simulated one each frame. */
+const ShownEase = 0.1

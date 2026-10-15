@@ -252,6 +252,9 @@ export const MarkFadeMs = 4000
 /** How long a commit's sha and subject show on its repository. */
 export const CommitFlashMs = 5000
 
+/** How many of a project's changed files are drawn as nodes at once: the newest. */
+export const MaxFileNodesPerProject = 8
+
 /**
  * How strongly a mark shows `age` ms after its latest change with `left` ms of its time still to
  * go: in quickly, out over its last seconds. The plugin changes' marks fade by the same rule.
@@ -433,6 +436,23 @@ export class WorkspaceGraph {
       return found
     }
 
+    // ONLY THE NEWEST FILES OF EACH PROJECT ARE NODES. A first commit or a package install touches
+    // hundreds of files at once; drawn one each they crowd the graph and shake against each other.
+    // The rest count on their project's node (its `files`) until they too go.
+    const shownFiles = new Set<string>()
+    if (settings.depth === 'file') {
+      const byParent = new Map<string, [string, FileRecord][]>()
+      for (const entry of this.files) {
+        const file = entry[1]
+        const parent = file.project === '' ? repoId(file.team, file.repo) : projectId(file.team, file.repo, file.project)
+        byParent.set(parent, [...(byParent.get(parent) ?? []), entry])
+      }
+      for (const entries of byParent.values()) {
+        entries.sort((a, b) => b[1].latest - a[1].latest)
+        for (const [id] of entries.slice(0, MaxFileNodesPerProject)) shownFiles.add(id)
+      }
+    }
+
     const touches = new Map<string, WorkspaceTouch & { latest: number; until: number; ttl: number }>()
     for (const [id, file] of this.files) {
       const repo = repoId(file.team, file.repo)
@@ -442,10 +462,11 @@ export class WorkspaceGraph {
       if (project && settings.depth !== 'repository') {
         group(project, { id: project, kind: 'project', team: file.team, parent: repo, repo: file.repo, project: file.project, label: file.project, path: '', action: null }, file)
       }
-      if (settings.depth === 'file') {
+      const asFile = settings.depth === 'file' && shownFiles.has(id)
+      if (asFile) {
         group(id, { id, kind: 'file', team: file.team, parent: project ?? repo, repo: file.repo, project: file.project, label: fileName(file.path), path: file.path, action: file.action }, file)
       }
-      const drawn = settings.depth === 'file' ? id : settings.depth === 'project' ? (project ?? repo) : repo
+      const drawn = asFile ? id : settings.depth !== 'repository' ? (project ?? repo) : repo
       for (const member of file.members) {
         const key = `${member}|${drawn}`
         const known = touches.get(key)
@@ -453,7 +474,7 @@ export class WorkspaceGraph {
           touches.set(key, {
             member,
             node: drawn,
-            action: settings.depth === 'file' ? file.action : null,
+            action: asFile ? file.action : null,
             alpha: 0,
             latest: Math.max(file.latest, known?.latest ?? 0),
             until: Math.max(file.until, known?.until ?? 0),

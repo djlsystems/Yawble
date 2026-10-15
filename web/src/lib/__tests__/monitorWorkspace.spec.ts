@@ -4,13 +4,14 @@
 // team, a project node off the repository and a file node off the project, a line from the member
 // to each file, tinted by what happened, for the plugin changes' time to live in display time. The
 // push is built here as the Host sends it; nothing of it is in the log, so a replay draws none.
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MonitorModel, type MonitorEffect } from '../monitor/model'
 import { MonitorScene, type Box } from '../monitor/scene'
 import { DefaultSettings } from '../monitor/hints'
 import {
   DefaultFileSettings,
   FileWatch,
+  MaxFileNodesPerProject,
   JoinFileWatch,
   LeaveFileWatch,
   WorkspaceChanged,
@@ -57,6 +58,10 @@ const commitPush = () =>
       },
     ],
   })
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 const repo = repoId('Alpha', 'web')
 const project = projectId('Alpha', 'web', 'harness-web')
@@ -230,12 +235,60 @@ describe('a workspaceChanged push', () => {
     for (const moment of [300, 1500, 4000]) {
       at(moment)
       const nodes = scene.shownWorkspace().nodes
-      expect(nodes).toHaveLength(14)
+      // The repository, two projects and the newest MaxFileNodesPerProject files of the busy one.
+      expect(nodes).toHaveLength(13)
       for (let i = 0; i < nodes.length; i++) {
         for (let j = i + 1; j < nodes.length; j++) expect(overlaps(nodes[i]!.box, nodes[j]!.box), `${nodes[i]!.label} / ${nodes[j]!.label}`).toBe(false)
         for (const box of scene.memberBoxes()) expect(overlaps(nodes[i]!.box, box), nodes[i]!.label).toBe(false)
       }
     }
+  })
+})
+
+describe('a burst of files', () => {
+  const burst = (count: number, at: string) =>
+    push({ at, files: Array.from({ length: count }, (_, i) => ({ path: `src/gen/file-${i}.ts`, project: 'harness-web', action: 'created' as const })) })
+
+  it("draws only each project's newest files as nodes and counts the rest on the project", () => {
+    const { scene, model, at, play } = setup()
+    play(model.applyWorkspace(burst(40, '2026-10-15T10:42:00Z')))
+    at(500)
+
+    const shown = scene.shownWorkspace().nodes
+    expect(shown.filter((found) => found.kind === 'file')).toHaveLength(MaxFileNodesPerProject)
+    expect(node(scene, project)!.files).toBe(40)
+  })
+
+  it('settles instead of shaking', () => {
+    // The layout places a new node at a random angle: seeded here, so this is the same graph every run.
+    let seed = 7
+    vi.spyOn(Math, 'random').mockImplementation(() => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646)
+    const { scene, model, at, play } = setup()
+    play(model.applyWorkspace(burst(60, '2026-10-15T10:42:00Z')))
+    play(model.applyWorkspace(push({ member: 'TesterIvo', files: Array.from({ length: 30 }, (_, i) => ({ path: `tests/t-${i}.spec.ts`, project: 'harness-tests', action: 'changed' as const })) })))
+    at(4000)
+
+    // SHAKING IS GOING BACK AND FORTH: a node's path over these frames much longer than the
+    // distance it ends up from where it started. Drifting with the graph is a straight path.
+    const path = new Map<string, number>()
+    const start = new Map(scene.shownWorkspace().nodes.map((found) => [found.id, { x: found.shownX, y: found.shownY }]))
+    let last = new Map(start)
+    for (let frame = 1; frame <= 20; frame++) {
+      at(4000 + frame * 50)
+      const now = new Map(scene.shownWorkspace().nodes.map((found) => [found.id, { x: found.shownX, y: found.shownY }]))
+      for (const [id, p] of now) {
+        const was = last.get(id)
+        if (was) path.set(id, (path.get(id) ?? 0) + Math.hypot(p.x - was.x, p.y - was.y))
+      }
+      last = now
+    }
+    let shake = 0
+    for (const [id, length] of path) {
+      const a = start.get(id)!
+      const b = last.get(id)
+      if (b) shake = Math.max(shake, length - Math.hypot(b.x - a.x, b.y - a.y))
+    }
+    expect(shake).toBeLessThan(3)
   })
 })
 
