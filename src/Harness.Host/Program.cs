@@ -1811,6 +1811,17 @@ builder.Services.AddSingleton<LoginThrottle>();
 builder.Services.AddHostedService<PumpService>();
 builder.Services.AddHostedService<KanbanChangePush>();
 
+// THE MONITOR'S LIVE VIEW OF A RUNNING MEMBER'S FILES: read only while a person watches, pushed
+// only to the people watching. See WorkspaceFileWatch.
+builder.Services.AddSingleton<WorkspaceFileWatchTiming>();
+builder.Services.AddSingleton<IWorkspaceRuns>(sp => new HostWorkspaceRuns(sp.GetRequiredService<ContainerHost>()));
+builder.Services.AddSingleton(sp => new WorkspaceFileWatch(
+    sp.GetRequiredService<GitRunner>(),
+    sp.GetRequiredService<TeamPaths>(),
+    (change, ct) => sp.GetRequiredService<IHubContext<ContainerHub>>()
+        .Clients.Group(WorkspaceFileWatch.Group).SendAsync(WorkspaceFileWatch.Message, change, ct)));
+builder.Services.AddHostedService<WorkspaceFileWatchService>();
+
 // THE PER-RUN FOREIGN TOOLS CHECK, called by every member at the end of its run (`onTerminal`
 // above). What a preset allows is the catalog's isolation model (AgentCatalog.Allowance); a preset
 // that declares no allowed tools is not verified, and its runs are never reported clean. See
@@ -10339,7 +10350,8 @@ internal sealed record NewFolder(
 internal sealed class ContainerHub(
     TeamAccess access,
     DiagnosticsRecorder? diagnostics = null,
-    TransportWatch? watch = null) : Hub
+    TransportWatch? watch = null,
+    WorkspaceFileWatch? fileWatch = null) : Hub
 {
     /// <summary>
     /// A CONNECTION ARRIVING, recorded only when it is a RECONNECT.
@@ -10398,6 +10410,8 @@ internal sealed class ContainerHub(
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         await base.OnDisconnectedAsync(exception);
+
+        fileWatch?.Leave(Context.ConnectionId);
 
         if (diagnostics is null) return;
         if (Context.User is null || PrincipalClaims.From(Context.User) is not { } principal) return;
@@ -10485,6 +10499,31 @@ internal sealed class ContainerHub(
 
         await Groups.AddToGroupAsync(
             Context.ConnectionId, PersonGroup(principal.Id), Context.ConnectionAborted);
+    }
+
+    /// <summary>
+    /// Start hearing <c>workspaceChanged</c>: what a running member's worktrees did, read only while
+    /// somebody is in this group. A PERSON ONLY. The group is its own rather than a team's, because a
+    /// member's key can join its team's group, and a machine principal is refused outright.
+    /// </summary>
+    public async Task JoinFileWatch()
+    {
+        if (fileWatch is null
+            || Context.User is null
+            || PrincipalClaims.From(Context.User) is not { Kind: PrincipalKind.User })
+        {
+            throw new HubException("Only a person can watch a member's files.");
+        }
+
+        await Groups.AddToGroupAsync(Context.ConnectionId, WorkspaceFileWatch.Group, Context.ConnectionAborted);
+        fileWatch.Join(Context.ConnectionId);
+    }
+
+    /// <summary>Stop hearing <c>workspaceChanged</c>. With nobody left, nothing is read.</summary>
+    public async Task LeaveFileWatch()
+    {
+        fileWatch?.Leave(Context.ConnectionId);
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, WorkspaceFileWatch.Group, Context.ConnectionAborted);
     }
 }
 

@@ -7,6 +7,7 @@ import type { HubConnection } from '@microsoft/signalr';
 import { useConsoleStore } from '../stores/console';
 import { useSessionStore } from '../stores/session';
 import { connectHub } from '../lib/hub';
+import { fileWatch } from '../lib/monitor/workspace';
 import { pauseTeam, resumeTeam } from '../api/client';
 import ContainerCard from '../components/ContainerCard.vue';
 import TeamKpiStrip from '../components/TeamKpiStrip.vue';
@@ -355,6 +356,9 @@ onMounted(async () => {
       // The activity monitor's figures: each sample appended to the one copy the app bar reads.
       onCapacityChanged: (sample) => capacity.apply(sample),
 
+      // A member's file changes, heard while the Monitor has joined the file watch.
+      onWorkspaceChanged: (push) => fileWatch.deliver(push),
+
       onTeamChanged: () => {
         void board.refresh();
         board.refreshRollupIfShowing();
@@ -380,6 +384,9 @@ onMounted(async () => {
         board.refreshRollupIfShowing();
 
         await syncHubTeams();
+
+        // The file watch lived on the old connection id too.
+        fileWatch.rejoin();
       },
       onConnectedChanged: (value) => board.setConnected(value),
       onJoinFailed: () => board.reportJoinFailure(board.activeTeamId || 'this team'),
@@ -387,6 +394,8 @@ onMounted(async () => {
     () => board.activeTeamId,
   );
 
+  // The Monitor may already be open and waiting to hear file changes.
+  fileWatch.attach(connection);
   await syncHubTeams();
 });
 
@@ -411,6 +420,7 @@ onUnmounted(() => {
   if (badgeClock !== null) clearInterval(badgeClock);
   badgeClock = null;
 
+  fileWatch.detach();
   void connection?.stop();
   connection = null;
   joinedTeams.clear();
