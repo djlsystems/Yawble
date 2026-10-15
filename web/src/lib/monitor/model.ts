@@ -1,6 +1,7 @@
-import type { Message, Team } from '../../api/types'
+import type { Message, MonitorHint, Team } from '../../api/types'
 import { summarise } from '../summarise'
 import { wireInstant } from '../localTime'
+import { DefaultSettings, drawsResource, resolveHint, type Resource, type ResourceSettings } from './hints'
 
 /**
  * THE MONITOR'S MODEL: every team, member and workflow the log has shown, and what each row does
@@ -10,7 +11,8 @@ import { wireInstant } from '../localTime'
  * board holds, and DECIDES NOTHING THE SERVER DECIDES: a member's state is the snapshot's whenever
  * one is held (`reconcile`), and the rows only move it between snapshots - which is all a replay
  * has. Each row also yields the EFFECTS the scene draws (a comet for an instruction, a burst for a
- * finished workflow), so what moves on screen is always a row that is in the log.
+ * finished workflow), so what moves on screen is always a row that is in the log. A plugin row whose
+ * type carries a monitor hint (`hints.ts`) draws the thing it acted on beside the plugin member.
  */
 
 export const InstructionPrefix = 'agentContainer.instruction.'
@@ -90,6 +92,8 @@ export type MonitorEffect =
   | { kind: 'ripple'; at: NodeRef; tone: Tone }
   | { kind: 'float'; at: NodeRef; text: string; tone: Tone }
   | { kind: 'shake'; at: NodeRef }
+  /** What a plugin's row did to a thing it manages, shown beside the member for `ttlMs` of display time. */
+  | { kind: 'resource'; at: NodeRef; resource: Resource; ttlMs: number }
 
 export interface TickerEntry {
   seq: number
@@ -101,6 +105,8 @@ export interface TickerEntry {
   verb: string
   text: string
   workflow: number
+  /** A hinted plugin row: its icon, what happened and its label, said in words beside the graph. */
+  resource?: Resource
 }
 
 const GoldenAngle = 137.508
@@ -206,6 +212,10 @@ export class MonitorModel {
   tokens = 0
   /** Times of recent rows, for the events-per-minute figure. */
   private recent: number[] = []
+  /** Plugin event types' monitor hints, by type, from `GET /api/events`. */
+  hints: ReadonlyMap<string, MonitorHint> = new Map()
+  /** Whether and how long hinted rows are drawn as themselves. */
+  settings: ResourceSettings = DefaultSettings
 
   /**
    * @param managerName What every team calls its Manager (`/api/overview`'s `managerName`).
@@ -357,6 +367,7 @@ export class MonitorModel {
     const type = message.type
     let tone: Tone = 'quiet'
     let verb = type.replace('agentContainer.', '')
+    let resource: Resource | undefined
 
     if (member) member.lastAt = at
 
@@ -493,7 +504,17 @@ export class MonitorModel {
     } else if (type.startsWith('plugin.')) {
       tone = 'plugin'
       verb = type.slice(type.lastIndexOf('.') + 1)
-      effects.push({ kind: 'burst', at: self, tone })
+      const hint = this.hints.get(type)
+      if (hint) {
+        resource = resolveHint(hint, type, payload)
+        verb = resource.action
+      }
+      // Settings off, or this plugin switched off: the plain burst, and the list still says it.
+      if (resource && drawsResource(this.settings, resource.plugin)) {
+        effects.push({ kind: 'resource', at: self, resource, ttlMs: this.settings.seconds * 1000 })
+      } else {
+        effects.push({ kind: 'burst', at: self, tone })
+      }
     } else if (type === 'file.changed') {
       tone = 'file'
       verb = 'files changed'
@@ -526,6 +547,7 @@ export class MonitorModel {
         verb,
         text: short(summarise(message), 140),
         workflow: message.correlationId,
+        ...(resource ? { resource } : {}),
       })
       if (this.ticker.length > this.tickerDepth) this.ticker.length = this.tickerDepth
     }

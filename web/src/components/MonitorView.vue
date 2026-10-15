@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
-import { getMessages } from '../api/client'
-import type { Message } from '../api/types'
+import { getMessages, listEvents } from '../api/client'
+import type { Message, MonitorHint } from '../api/types'
 import { useConsoleStore } from '../stores/console'
 import { useAppearanceStore } from '../stores/appearance'
 import { textPx } from '../lib/appearance'
@@ -18,6 +18,18 @@ import {
   type Tone,
 } from '../lib/monitor/model'
 import { MonitorScene, readPalette, type HoverInfo } from '../lib/monitor/scene'
+import {
+  SecondsMax,
+  SecondsMin,
+  clampSeconds,
+  hintedPlugins,
+  hintsFrom,
+  readSettings,
+  writeSettings,
+  type ResourceAction,
+  type ResourceSettings,
+} from '../lib/monitor/hints'
+import { MonitorSymbolsFamily, glyphOf, loadMonitorSymbols, type Codepoints } from '../lib/monitor/font'
 
 /**
  * THE MONITOR: every team at once, as a living graph.
@@ -28,6 +40,10 @@ import { MonitorScene, readPalette, type HoverInfo } from '../lib/monitor/scene'
  * firework. It reads what the board already reads - the overview's snapshots and the message feed
  * (`GET /api/messages`) - and adds no route: LIVE follows the rows the board pulls, REPLAY plays the
  * newest window of the log back at speed, skipping the quiet.
+ *
+ * A plugin event whose type carries a monitor hint (`GET /api/events`, read each time it opens)
+ * draws the thing the plugin acted on beside the plugin member, with its icon from the full
+ * Material Symbols font that only this view loads (`lib/monitor/font.ts`).
  */
 
 const board = useConsoleStore()
@@ -79,6 +95,46 @@ function toggleKeepView() {
   }
 }
 
+/** Plugin event types' monitor hints, from `GET /api/events`; none until it answers, or if it fails. */
+const hints = shallowRef<ReadonlyMap<string, MonitorHint>>(new Map())
+const hintPlugins = computed(() => hintedPlugins(hints.value))
+/** The full icon font's codepoints once it has loaded; until then a plain dot stands for each icon. */
+const symbols = shallowRef<Codepoints | null>(null)
+
+/** Show changes plugins make: remembered per browser like Keep my view, and fine without storage. */
+const changes = ref<ResourceSettings>(readSettings())
+const settingsOpen = ref(false)
+const secondsDraft = ref<number | string>(changes.value.seconds)
+
+function applyChanges(next: ResourceSettings) {
+  changes.value = next
+  model.settings = { ...next, off: [...next.off] }
+  writeSettings(next)
+}
+function setShow(show: boolean) {
+  applyChanges({ ...changes.value, show })
+}
+function commitSeconds() {
+  const seconds = clampSeconds(secondsDraft.value)
+  secondsDraft.value = seconds
+  applyChanges({ ...changes.value, seconds })
+}
+function pluginOn(plugin: string): boolean {
+  return !changes.value.off.includes(plugin)
+}
+function setPlugin(plugin: string, on: boolean) {
+  const off = changes.value.off.filter((id) => id !== plugin)
+  applyChanges({ ...changes.value, off: on ? off : [...off, plugin] })
+}
+
+/** A model with this view's hints and settings: every one the view makes goes through here. */
+function newModel(only: Set<string> | null): MonitorModel {
+  const made = new MonitorModel(board.managerName || 'Manager', 80, only)
+  made.hints = hints.value
+  made.settings = { ...changes.value, off: [...changes.value.off] }
+  return made
+}
+
 let model = new MonitorModel()
 let scene: MonitorScene | null = null
 let replay: ReplayClock | null = null
@@ -90,6 +146,7 @@ let dirty = true
 let tokensTarget = 0
 let unsubscribe: (() => void) | null = null
 let resizeObserver: ResizeObserver | null = null
+let unmounted = false
 
 const reducedMotion = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
 
@@ -164,6 +221,23 @@ function toneColour(tone: Tone): string {
   return `var(--os-monitor-${tone})`
 }
 
+function entryColour(entry: TickerEntry): string {
+  return entry.resource ? actionColour(entry.resource.action) : toneColour(entry.tone)
+}
+
+function actionColour(action: ResourceAction): string {
+  return `var(--os-monitor-${action})`
+}
+
+/** "Azure (Infra) created sql-db-maketags": who, on which team, did what to which thing. */
+function resourceWords(entry: TickerEntry): string {
+  const resource = entry.resource
+  if (!resource) return entry.text
+  const team = model.teams.get(entry.team)?.name ?? entry.team
+  const who = entry.member !== null ? `${entry.member} (${team})` : team
+  return `${who} ${resource.action} ${resource.label}`
+}
+
 function timeWords(ms: number): string {
   return ms > 0 ? localTime(ms) : ''
 }
@@ -220,7 +294,7 @@ function startLive() {
   replay = null
   finished.value = false
   mode.value = 'live'
-  model = new MonitorModel(board.managerName || 'Manager', 80, new Set(liveTeams.value))
+  model = newModel(new Set(liveTeams.value))
   feed(history.value, true)
   model.reconcile(board.choosableTeams)
   tokensShown.value = model.tokens
@@ -234,7 +308,7 @@ function startReplay(from?: number) {
   if (rows.length === 0) return
   mode.value = 'replay'
   finished.value = false
-  model = new MonitorModel(board.managerName || 'Manager', 80, null)
+  model = newModel(null)
   const start = from ?? timeOf(rows[0]!)
   feed(rows.filter((row) => timeOf(row) < start), true)
   replay = new ReplayClock(rows, speed.value, 20_000, start)
@@ -363,21 +437,30 @@ onMounted(async () => {
   document.addEventListener('fullscreenchange', onFullscreenChange)
 
   followBoard()
-  try {
-    const rows = await getMessages(0, HistoryRows)
+  void loadMonitorSymbols().then((codepoints) => {
+    // A font that does not load leaves the dots; nothing is wrong with the events.
+    if (!codepoints || unmounted) return
+    symbols.value = codepoints
+    scene?.setSymbols(codepoints)
+  })
+  const [read, events] = await Promise.allSettled([getMessages(0, HistoryRows), listEvents()])
+  if (read.status === 'fulfilled') {
     const known = history.value.at(0)?.seq ?? Number.POSITIVE_INFINITY
-    history.value = [...rows.filter((row) => row.seq < known), ...history.value].sort((a, b) => a.seq - b.seq)
-  } catch (cause) {
+    history.value = [...read.value.filter((row) => row.seq < known), ...history.value].sort((a, b) => a.seq - b.seq)
+  } else {
+    const cause: unknown = read.reason
     loadError.value = cause instanceof Error ? cause.message : String(cause)
-  } finally {
-    loading.value = false
   }
+  // Without the catalog every plugin row draws as the plain burst, as before hints.
+  if (events.status === 'fulfilled') hints.value = hintsFrom(events.value)
+  loading.value = false
   startLive()
   scene?.fit()
   frame = requestAnimationFrame(tick)
 })
 
 onUnmounted(() => {
+  unmounted = true
   if (frame !== 0) cancelAnimationFrame(frame)
   unsubscribe?.()
   resizeObserver?.disconnect()
@@ -490,6 +573,70 @@ onUnmounted(() => {
                 : 'Keep my view: stop fitting everything again a few seconds after you move it'
             }}</q-tooltip>
           </q-btn>
+          <span class="monitor-settings-anchor">
+            <q-btn
+              flat
+              dense
+              round
+              icon="settings"
+              :class="{ 'monitor-tool-on': settingsOpen }"
+              :aria-expanded="settingsOpen ? 'true' : 'false'"
+              aria-label="Monitor settings"
+              data-monitor-settings
+              @click="settingsOpen = !settingsOpen"
+            >
+              <q-tooltip v-if="!settingsOpen">Settings: what plugins' changes show, and for how long</q-tooltip>
+            </q-btn>
+            <div
+              v-if="settingsOpen"
+              class="monitor-settings"
+              role="dialog"
+              aria-label="Monitor settings"
+              data-monitor-settings-panel
+              @keydown.esc="settingsOpen = false"
+            >
+              <q-toggle
+                :model-value="changes.show"
+                dense
+                dark
+                label="Show changes plugins make"
+                data-monitor-setting="show"
+                @update:model-value="setShow"
+              />
+              <div class="monitor-settings-row">
+                <label for="monitor-setting-seconds">Show each for</label>
+                <q-input
+                  v-model="secondsDraft"
+                  for="monitor-setting-seconds"
+                  type="number"
+                  dense
+                  outlined
+                  dark
+                  :min="SecondsMin"
+                  :max="SecondsMax"
+                  suffix="seconds"
+                  class="monitor-settings-seconds"
+                  data-monitor-setting="seconds"
+                  @change="commitSeconds"
+                  @keydown.enter="commitSeconds"
+                />
+              </div>
+              <div class="monitor-settings-head">Plugins</div>
+              <q-toggle
+                v-for="plugin in hintPlugins"
+                :key="plugin"
+                :model-value="pluginOn(plugin)"
+                dense
+                dark
+                :label="plugin"
+                :data-monitor-plugin="plugin"
+                @update:model-value="(on: boolean) => setPlugin(plugin, on)"
+              />
+              <div v-if="hintPlugins.length === 0" class="monitor-settings-none">
+                No installed plugin says how to draw its changes.
+              </div>
+            </div>
+          </span>
           <q-btn
             flat
             dense
@@ -583,15 +730,31 @@ onUnmounted(() => {
       </div>
       <ol class="monitor-rows">
         <li v-for="entry in shownTicker" :key="entry.seq" class="monitor-row" :data-tone="entry.tone">
-          <span class="monitor-row-mark" :style="{ background: toneColour(entry.tone) }"></span>
+          <span class="monitor-row-mark" :style="{ background: entryColour(entry) }"></span>
           <div class="monitor-row-body">
             <div class="monitor-row-head">
-              <span class="monitor-row-verb" :style="{ color: toneColour(entry.tone) }">{{ entry.verb }}</span>
+              <span class="monitor-row-verb" :style="{ color: entryColour(entry) }">{{ entry.verb }}</span>
               <span class="monitor-row-who">{{ entry.member ?? entry.team }}</span>
               <span class="monitor-row-time">{{ timeWords(entry.at) }}</span>
             </div>
             <div class="monitor-row-team">{{ model.teams.get(entry.team)?.name ?? entry.team }}</div>
-            <div class="monitor-row-text">{{ entry.text }}</div>
+            <div
+              v-if="entry.resource"
+              class="monitor-row-resource"
+              :data-action="entry.resource.action"
+              data-monitor-resource
+            >
+              <span
+                v-if="glyphOf(symbols, entry.resource.icon) !== null"
+                class="monitor-row-icon"
+                aria-hidden="true"
+                :style="{ color: actionColour(entry.resource.action), fontFamily: `'${MonitorSymbolsFamily}'` }"
+                >{{ glyphOf(symbols, entry.resource.icon) }}</span
+              >
+              <span v-else class="monitor-row-dot" aria-hidden="true" :style="{ background: actionColour(entry.resource.action) }"></span>
+              <span class="monitor-row-words">{{ resourceWords(entry) }}</span>
+            </div>
+            <div v-else class="monitor-row-text">{{ entry.text }}</div>
           </div>
         </li>
       </ol>
@@ -767,6 +930,52 @@ onUnmounted(() => {
 
 .monitor-speed {
   width: 5.5rem;
+}
+
+.monitor-settings-anchor {
+  position: relative;
+}
+
+.monitor-settings {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 3;
+  width: 18rem;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--monitor-panel);
+  border: 1px solid var(--monitor-rule);
+  border-radius: 8px;
+  box-shadow: 0 8px 30px color-mix(in srgb, var(--monitor-ground) 70%, transparent);
+  font-size: 0.8125rem;
+  color: var(--monitor-ink);
+}
+
+.monitor-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.monitor-settings-seconds {
+  width: 8rem;
+}
+
+.monitor-settings-head {
+  margin-top: 4px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--monitor-ink-dim);
+}
+
+.monitor-settings-none {
+  color: var(--monitor-ink-dim);
 }
 
 .monitor-legend {
@@ -1023,6 +1232,37 @@ onUnmounted(() => {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.monitor-row-resource {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--os-monitor-ink-soft);
+  line-height: 1.35;
+  min-width: 0;
+}
+
+.monitor-row-icon {
+  flex: 0 0 auto;
+  font-size: 1.125rem;
+  line-height: 1;
+  font-weight: normal;
+  font-style: normal;
+}
+
+.monitor-row-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  margin: 0 6px;
+  border-radius: 50%;
+}
+
+.monitor-row-words {
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 

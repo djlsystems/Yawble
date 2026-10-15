@@ -4,6 +4,7 @@
 import { defineConfig } from '#q-app';
 import { describeDevProxyTarget, resolveDevProxyTarget } from './src/lib/devProxyTarget';
 import { buildInfo } from '../scripts/version.mjs';
+import { monitorSymbols } from './scripts/monitor-symbols.mjs';
 
 // Which Host this dev server proxies to.
 //
@@ -139,9 +140,9 @@ export default defineConfig((ctx) => {
       // extendViteConf (viteConf) {},
       // viteVuePluginOptions: {},
 
-      // vitePlugins: [
-      //   [ 'package-name', { ..pluginOptions.. }, { server: true, client: true } ]
-      // ]
+      // THE MONITOR'S FULL ICON FONT and its name -> codepoint map, as `virtual:monitor-symbols`:
+      // its own asset, fetched only when the Monitor first opens. See the file.
+      vitePlugins: [monitorSymbols()],
     },
 
     // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#devserver
