@@ -98,32 +98,33 @@ public sealed class PluginMonitorHintTests : IDisposable
             ParseMonitor($$"""{"icon":"inbox","action":"created","label":"{{limit}}y"}""").Refusal);
     }
 
+    /// <summary>The cases the CLI's tests read too: tests/Fixtures/PluginMonitorHints/cases.json.</summary>
+    private static readonly JsonNode Cases = JsonNode.Parse(File.ReadAllText(
+        Path.Combine(SolutionSamples.RepoRoot(), "tests", "Fixtures", "PluginMonitorHints", "cases.json")))!;
+
+    public static TheoryData<string> Accepted() => [.. Cases["accepted"]!.AsArray().Select(c => c!.ToJsonString())];
+
+    public static TheoryData<string, string> Refused() =>
+        [.. Cases["refused"]!.AsArray().Select(c => (c!["monitor"]!.ToJsonString(), c["says"]!.GetValue<string>()))];
+
+    [Fact]
+    public void The_shared_cases_declare_the_fields_these_tests_use()
+    {
+        Assert.Equal(JsonNode.Parse(Fields)!.ToJsonString(), Cases["fields"]!.ToJsonString());
+    }
+
     [Theory]
-    [InlineData("\"inbox\"", "`monitor` must be an object.")]
-    [InlineData("""{"action":"created"}""", "`monitor.icon` is required: a Material Symbols name, such as inbox.")]
-    [InlineData("""{"icon":42,"action":"created"}""", "`monitor.icon` is required: a Material Symbols name, such as inbox.")]
-    [InlineData("""{"icon":"not_a_symbol_at_all","action":"created"}""", "`monitor.icon` 'not_a_symbol_at_all' is not a Material Symbols name.")]
-    [InlineData("""{"icon":"Inbox","action":"created"}""", "`monitor.icon` 'Inbox' is not a Material Symbols name.")]
-    [InlineData("""{"icon":"inbox","action":"created","iconBy":"status"}""", "`monitor.iconBy` must be an object with a `field` and a `map` of value to icon.")]
-    [InlineData("""{"icon":"inbox","action":"created","iconBy":{"field":"status"}}""", "`monitor.iconBy` must be an object with a `field` and a `map` of value to icon.")]
-    [InlineData("""{"icon":"inbox","action":"created","iconBy":{"field":"count","map":{}}}""", "`monitor.iconBy.field` names 'count', which is not a declared string field.")]
-    [InlineData("""{"icon":"inbox","action":"created","iconBy":{"field":"nope","map":{}}}""", "`monitor.iconBy.field` names 'nope', which is not a declared string field.")]
-    [InlineData("""{"icon":"inbox","action":"created","iconBy":{"field":"status","map":{"open":"drafts","closed":"no_such_glyph"}}}""", "`monitor.iconBy.map` 'closed': 'no_such_glyph' is not a Material Symbols name.")]
-    [InlineData("""{"icon":"inbox","action":"created","iconBy":{"field":"status","map":{"open":7}}}""", "`monitor.iconBy.map` 'open' must be a Material Symbols name.")]
-    [InlineData("""{"icon":"inbox","action":"created","actionField":"status"}""", "`monitor` has both `action` and `actionField`; give exactly one.")]
-    [InlineData("""{"icon":"inbox"}""", "`monitor` needs `action` (created, changed or deleted) or `actionField` (a declared string field).")]
-    [InlineData("""{"icon":"inbox","action":"updated"}""", "`monitor.action` must be created, changed or deleted.")]
-    [InlineData("""{"icon":"inbox","action":true}""", "`monitor.action` must be created, changed or deleted.")]
-    [InlineData("""{"icon":"inbox","actionField":"count"}""", "`monitor.actionField` names 'count', which is not a declared string field.")]
-    [InlineData("""{"icon":"inbox","actionField":"tags"}""", "`monitor.actionField` names 'tags', which is not a declared string field.")]
-    [InlineData("""{"icon":"inbox","actionField":"nope"}""", "`monitor.actionField` names 'nope', which is not a declared string field.")]
-    [InlineData("""{"icon":"inbox","actionField":["status"]}""", "`monitor.actionField` must name a declared string field.")]
-    [InlineData("""{"icon":"inbox","action":"created","label":""}""", "`monitor.label` must be text.")]
-    [InlineData("""{"icon":"inbox","action":"created","label":{"text":"x"}}""", "`monitor.label` must be text.")]
-    [InlineData("""{"icon":"inbox","action":"created","label":"{title} tagged {tags}"}""", "`monitor.label` names {tags}, which is not a declared string or number field.")]
-    [InlineData("""{"icon":"inbox","action":"created","label":"done: {done}"}""", "`monitor.label` names {done}, which is not a declared string or number field.")]
-    [InlineData("""{"icon":"inbox","action":"created","label":"{nope}"}""", "`monitor.label` names {nope}, which is not a declared string or number field.")]
-    [InlineData("""{"icon":"inbox","action":"created","label":"from {source}"}""", "`monitor.label` names {source}, which is not a declared string or number field.")]
+    [MemberData(nameof(Accepted))]
+    public void Each_shared_valid_hint_is_accepted(string monitor)
+    {
+        var (manifest, refusal) = ParseMonitor(monitor);
+
+        Assert.Null(refusal);
+        Assert.NotNull(manifest!.Publishes.Single().Monitor);
+    }
+
+    [Theory]
+    [MemberData(nameof(Refused))]
     public void Each_fault_is_refused_naming_the_event_type_and_the_field(string monitor, string says)
     {
         var (manifest, refusal) = ParseMonitor(monitor);

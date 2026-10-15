@@ -846,7 +846,8 @@ public static partial class PluginMonitorHint
             }
         }
 
-        foreach (var property in monitor.EnumerateObject())
+        // BY NAME, as the CLI lists them.
+        foreach (var property in monitor.EnumerateObject().OrderBy(p => p.Name, StringComparer.Ordinal))
         {
             if (!KnownKeys.Contains(property.Name)) ignored.Add($"events.publishes.{type}.monitor.{property.Name}");
         }
