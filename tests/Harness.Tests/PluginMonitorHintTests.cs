@@ -41,7 +41,7 @@ public sealed class PluginMonitorHintTests : IDisposable
     private static readonly string Valid = $$$"""
         [
           {"type":"saved","fields":{{{Fields}}},
-           "monitor":{"icon":"inbox","iconBy":{"field":"status","map":{"open":"drafts","closed":"archive"}},
+           "monitor":{"icon":"inbox","iconBy":{"field":"status","icons":{"open":"drafts","closed":"archive"}},
                       "action":"created","label":"{title} saved with {count} items"}},
           {"type":"moved","fields":{{{Fields}}},"monitor":{"icon":"swap_horiz","actionField":"status"}},
           {"type":"plain","fields":{{{Fields}}}}
@@ -57,8 +57,8 @@ public sealed class PluginMonitorHintTests : IDisposable
         var saved = manifest!.Publishes.Single(e => e.Type == "saved").Monitor!;
         Assert.Equal("inbox", saved.Icon);
         Assert.Equal("status", saved.IconBy!.Field);
-        Assert.Equal("drafts", saved.IconBy.Map["open"]);
-        Assert.Equal("archive", saved.IconBy.Map["closed"]);
+        Assert.Equal("drafts", saved.IconBy.Icons["open"]);
+        Assert.Equal("archive", saved.IconBy.Icons["closed"]);
         Assert.Equal("created", saved.Action);
         Assert.Null(saved.ActionField);
         Assert.Equal("{title} saved with {count} items", saved.Label);
@@ -193,8 +193,8 @@ public sealed class PluginMonitorHintTests : IDisposable
         var saved = byType["plugin.fx.saved"].GetProperty("monitor");
         Assert.Equal("inbox", saved.GetProperty("icon").GetString());
         Assert.Equal("status", saved.GetProperty("iconBy").GetProperty("field").GetString());
-        Assert.Equal("drafts", saved.GetProperty("iconBy").GetProperty("map").GetProperty("open").GetString());
-        Assert.Equal("archive", saved.GetProperty("iconBy").GetProperty("map").GetProperty("closed").GetString());
+        Assert.Equal("drafts", saved.GetProperty("iconBy").GetProperty("icons").GetProperty("open").GetString());
+        Assert.Equal("archive", saved.GetProperty("iconBy").GetProperty("icons").GetProperty("closed").GetString());
         Assert.Equal("created", saved.GetProperty("action").GetString());
         Assert.Equal("{title} saved with {count} items", saved.GetProperty("label").GetString());
         Assert.False(saved.TryGetProperty("actionField", out _));

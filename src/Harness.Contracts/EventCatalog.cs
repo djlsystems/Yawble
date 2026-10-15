@@ -89,8 +89,8 @@ public sealed record EventMonitorHint(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Label);
 
 /// <summary>The icon by a declared string <paramref name="Field"/>'s value; a value not in
-/// <paramref name="Map"/> uses the hint's own icon.</summary>
-public sealed record EventMonitorIconBy(string Field, IReadOnlyDictionary<string, string> Map);
+/// <paramref name="Icons"/> uses the hint's own icon.</summary>
+public sealed record EventMonitorIconBy(string Field, IReadOnlyDictionary<string, string> Icons);
 
 /// <summary>
 /// EVERY EVENT TYPE THIS PLATFORM CAN APPEND, AND WHAT IS TRUE OF EACH.

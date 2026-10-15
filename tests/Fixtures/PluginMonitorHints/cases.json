@@ -26,7 +26,7 @@
       "icon": "inbox",
       "iconBy": {
         "field": "status",
-        "map": {
+        "icons": {
           "open": "drafts",
           "closed": "archive"
         }
@@ -96,7 +96,7 @@
         "action": "created",
         "iconBy": "status"
       },
-      "says": "`monitor.iconBy` must be an object with a `field` and a `map` of value to icon."
+      "says": "`monitor.iconBy` must be an object with a `field` and `icons`, a map of value to icon."
     },
     {
       "monitor": {
@@ -106,7 +106,20 @@
           "field": "status"
         }
       },
-      "says": "`monitor.iconBy` must be an object with a `field` and a `map` of value to icon."
+      "says": "`monitor.iconBy` must be an object with a `field` and `icons`, a map of value to icon."
+    },
+    {
+      "monitor": {
+        "icon": "inbox",
+        "action": "created",
+        "iconBy": {
+          "field": "status",
+          "map": {
+            "open": "drafts"
+          }
+        }
+      },
+      "says": "`monitor.iconBy` must be an object with a `field` and `icons`, a map of value to icon."
     },
     {
       "monitor": {
@@ -114,7 +127,7 @@
         "action": "created",
         "iconBy": {
           "field": "count",
-          "map": {}
+          "icons": {}
         }
       },
       "says": "`monitor.iconBy.field` names 'count', which is not a declared string field."
@@ -125,7 +138,7 @@
         "action": "created",
         "iconBy": {
           "field": "nope",
-          "map": {}
+          "icons": {}
         }
       },
       "says": "`monitor.iconBy.field` names 'nope', which is not a declared string field."
@@ -136,13 +149,13 @@
         "action": "created",
         "iconBy": {
           "field": "status",
-          "map": {
+          "icons": {
             "open": "drafts",
             "closed": "no_such_glyph"
           }
         }
       },
-      "says": "`monitor.iconBy.map` 'closed': 'no_such_glyph' is not a Material Symbols name."
+      "says": "`monitor.iconBy.icons` 'closed': 'no_such_glyph' is not a Material Symbols name."
     },
     {
       "monitor": {
@@ -150,12 +163,12 @@
         "action": "created",
         "iconBy": {
           "field": "status",
-          "map": {
+          "icons": {
             "open": 7
           }
         }
       },
-      "says": "`monitor.iconBy.map` 'open' must be a Material Symbols name."
+      "says": "`monitor.iconBy.icons` 'open' must be a Material Symbols name."
     },
     {
       "monitor": {

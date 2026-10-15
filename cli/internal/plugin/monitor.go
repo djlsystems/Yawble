@@ -133,9 +133,9 @@ func monitorHint(typ string, value any, kinds map[string][]string, ignored *[]st
 	if present(monitor, "iconBy") {
 		iconBy, ok := monitor["iconBy"].(map[string]any)
 		field, fieldOK := iconBy["field"].(string)
-		icons, mapOK := iconBy["map"].(map[string]any)
+		icons, mapOK := iconBy["icons"].(map[string]any)
 		if !ok || !fieldOK || !mapOK {
-			return at + " `monitor.iconBy` must be an object with a `field` and a `map` of value to icon."
+			return at + " `monitor.iconBy` must be an object with a `field` and `icons`, a map of value to icon."
 		}
 		if !isKind(field, "string") {
 			return fmt.Sprintf("%s `monitor.iconBy.field` names '%s', which is not a declared string field.", at, field)
@@ -143,10 +143,10 @@ func monitorHint(typ string, value any, kinds map[string][]string, ignored *[]st
 		for _, key := range orderedKeys(icons) {
 			name, ok := icons[key].(string)
 			if !ok {
-				return fmt.Sprintf("%s `monitor.iconBy.map` '%s' must be a Material Symbols name.", at, key)
+				return fmt.Sprintf("%s `monitor.iconBy.icons` '%s' must be a Material Symbols name.", at, key)
 			}
 			if !IsMaterialSymbol(name) {
-				return fmt.Sprintf("%s `monitor.iconBy.map` '%s': '%s' is not a Material Symbols name.", at, key, name)
+				return fmt.Sprintf("%s `monitor.iconBy.icons` '%s': '%s' is not a Material Symbols name.", at, key, name)
 			}
 		}
 	}

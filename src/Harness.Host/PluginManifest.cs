@@ -762,9 +762,9 @@ public static partial class PluginMonitorHint
             var element = monitor.GetProperty("iconBy");
 
             if (element.ValueKind != JsonValueKind.Object || Given(element, "field") is not { } field
-                || !element.TryGetProperty("map", out var map) || map.ValueKind != JsonValueKind.Object)
+                || !element.TryGetProperty("icons", out var given) || given.ValueKind != JsonValueKind.Object)
             {
-                return (null, $"{at} `monitor.iconBy` must be an object with a `field` and a `map` of value to icon.");
+                return (null, $"{at} `monitor.iconBy` must be an object with a `field` and `icons`, a map of value to icon.");
             }
 
             if (!IsKind(field, EventFieldKind.String))
@@ -775,16 +775,16 @@ public static partial class PluginMonitorHint
             var icons = new Dictionary<string, string>(StringComparer.Ordinal);
 
             // IN KEY ORDER, as the CLI reads a JSON object, so both name the same entry first.
-            foreach (var entry in map.EnumerateObject().OrderBy(e => e.Name, StringComparer.Ordinal))
+            foreach (var entry in given.EnumerateObject().OrderBy(e => e.Name, StringComparer.Ordinal))
             {
                 if (entry.Value.ValueKind != JsonValueKind.String)
                 {
-                    return (null, $"{at} `monitor.iconBy.map` '{entry.Name}' must be a Material Symbols name.");
+                    return (null, $"{at} `monitor.iconBy.icons` '{entry.Name}' must be a Material Symbols name.");
                 }
 
                 if (!MaterialSymbols.IsName(entry.Value.GetString()!))
                 {
-                    return (null, $"{at} `monitor.iconBy.map` '{entry.Name}': '{entry.Value.GetString()}' is not a Material Symbols name.");
+                    return (null, $"{at} `monitor.iconBy.icons` '{entry.Name}': '{entry.Value.GetString()}' is not a Material Symbols name.");
                 }
 
                 icons[entry.Name] = entry.Value.GetString()!;
