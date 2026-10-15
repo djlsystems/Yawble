@@ -742,6 +742,25 @@ export class MonitorScene {
       }
       if (!moved) break
     }
+
+    // THE PASSES CAN STALL in a tight cluster, each move pushing one box into another. Whatever
+    // still overlaps is then placed at the nearest clear spot, searched outward in a spiral, so
+    // "never covers another" holds every frame rather than most of them.
+    const clear = (box: Box, self: (typeof items)[number]) =>
+      fixed.every((other) => !clearOf(box, other)) && items.every((other) => other === self || !clearOf(box, other.box))
+    for (const item of items) {
+      if (!item.free || clear(item.box, item)) continue
+      const step = WorkspaceGap + (item.box.bottom - item.box.top) / 2
+      for (let ring = 1; ring <= SpiralRings; ring++) {
+        const spot = SpiralTurns.map((turn) => ({ dx: Math.cos(turn) * step * ring, dy: Math.sin(turn) * step * ring }))
+          .map(({ dx, dy }) => ({ dx, dy, box: { left: item.box.left + dx, right: item.box.right + dx, top: item.box.top + dy, bottom: item.box.bottom + dy } }))
+          .find((candidate) => clear(candidate.box, item))
+        if (spot) {
+          move(item, spot.dx, spot.dy)
+          break
+        }
+      }
+    }
   }
 
   /** The file changes as drawn now: where each node is, what it covers, its lines and its commit. Exposed for tests. */
@@ -1957,3 +1976,7 @@ export function stateWords(state: MemberState): string {
       return 'Idle'
   }
 }
+
+/** The spiral `separate` searches when its passes stall: twelve directions a ring, out to this many rings. */
+const SpiralRings = 40
+const SpiralTurns = Array.from({ length: 12 }, (_, i) => (i * Math.PI) / 6)
