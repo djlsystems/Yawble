@@ -55,7 +55,7 @@ function row(type: string, source: string, payload: Record<string, unknown>): Me
   return { seq, type, source, payload: JSON.stringify(payload), correlationId: 0, causationSeq: null, depth: 0, occurredAt: '2026-10-15T10:00:00Z' }
 }
 
-function event(type: string, monitor?: EventDefinition['monitor']): EventDefinition {
+function event(type: string, monitor: EventDefinition['monitor'] = null): EventDefinition {
   return { type, publisher: 'Agent', highVolume: false, inLedger: false, fields: [], summary: '', monitor }
 }
 
