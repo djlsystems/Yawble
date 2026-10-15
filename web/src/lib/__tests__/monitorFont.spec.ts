@@ -19,7 +19,7 @@ function appSources(): { path: string; text: string }[] {
       if (statSync(path).isDirectory()) return entry === '__tests__' || entry === 'test' ? [] : walk(path)
       return /\.(vue|ts|scss|css|html)$/.test(entry) ? [path] : []
     })
-  return [...walk(join(web, 'src')), join(web, 'index.html')].map((path) => ({ path: path.slice(web.length + 1), text: readFileSync(path, 'utf8') }))
+  return [...walk(join(web, 'src')), join(web, 'index.html')].map((path) => ({ path: path.slice(web.length + 1).replaceAll('\\', '/'), text: readFileSync(path, 'utf8') }))
 }
 
 function stubFonts(load: () => Promise<unknown>) {
