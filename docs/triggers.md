@@ -13,6 +13,8 @@ A plugin watches for free and publishes an event when it finds something; an age
 
 An agent member on a 1-minute schedule is 1,440 model runs a day, and under **Always** (below) as many Manager runs again, nearly all of them to learn that nothing happened. The plugin-plus-event shape spends a model run only on the items that exist.
 
+A member that needs to look again once, later, in the work it is already doing does not need a trigger: it asks to be woken with the `wake_me` tool and ends its run. A wake fires once and is gone; see [architecture.md](architecture.md#how-work-flows). Work that repeats is a trigger, which a person creates.
+
 ## The measured cost line
 
 When you add or edit a trigger, the dialog shows what this member's recent runs actually cost:

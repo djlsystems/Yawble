@@ -25,8 +25,9 @@ credential ever leaves the Host.
 | `custom` | Anything else that speaks OAuth 2.0 authorization code with PKCE: you give the authorization URL, token URL, an optional userinfo URL and default scopes. | whatever the service needs, in its scopes | userinfo, when given |
 
 Microsoft needs no client of your own when the instance has a **default Microsoft client**: the
-public, multi-tenant app the operator CLI names on the control container (`HARNESS_MICROSOFT_CLIENT_ID`,
-from `yawble config get microsoftClientId`; the Host names no ID of its own). While no Microsoft client
+public, multi-tenant app the operator CLI names on the control container (`HARNESS_MICROSOFT_CLIENT_ID`;
+the Host names no ID of its own). `yawble up` passes the published app's ID; `yawble config set
+microsoftClientId <id>` names another, and an empty value passes none. While no Microsoft client
 is saved, Microsoft is that app: audience `common`, a sign-in with a code, and no secret on any
 request. A client a person saves wins over it. With no variable (or an empty one), Microsoft is not set
 up until a person saves a client. `GET /api/connections/providers` answers `clientSource`: `default`
@@ -43,17 +44,19 @@ means typing a new one.
 ## Connecting an account: the guided path
 
 Start here. Admin → **Connections** → **Add connection** - and a plugin slot's **Connect** - opens
-one screen of provider tiles, each saying its way in: **Gmail** (app password), **Outlook or
-Microsoft 365** (sign in with a code), **iCloud** (app-specific password), **Yahoo** (app password)
-and **Other** (server settings). A mailbox tile opens the mailbox form with that provider's hints -
-for Gmail, links to 2-Step Verification and App passwords and "paste the 16 characters"; for iCloud,
-account.apple.com, a password shown once and a user name that is often the part before the @; for
-Yahoo, Account security → Generate app password - see
+one screen of provider tiles, each saying its way in: **Gmail** (app password), **Microsoft
+(Outlook, Microsoft 365, Azure)** (sign in with a code), **iCloud** (app-specific password),
+**Yahoo** (app password), **Namecheap Private Email** (app password) and **Other** (server
+settings). A mailbox tile opens the mailbox form with that provider's hints - for Gmail, links to
+2-Step Verification and App passwords and "paste the 16 characters"; for iCloud, account.apple.com,
+a password shown once and a user name that is often the part before the @; for Yahoo, Account
+security → Generate app password; for Namecheap Private Email, webmail → Settings → Security Center
+→ App passwords, a password shown once and the full address as the user name - see
 [A mailbox with an app password](#a-mailbox-with-an-app-password-imap). Gmail through a Google app of
 your own sits behind **Advanced…** (and in Gmail's hints, for an account that cannot make an app
 password). A slot's Connect shows only the kinds the slot takes, a mailbox (`imap`) included.
 
-Google (through Advanced…) and Microsoft (the Outlook tile) then go in three steps:
+Google (through Advanced…) and Microsoft (the Microsoft tile) then go in three steps:
 
 1. **Service** - Google or Microsoft. The dialog shows what will be asked, in words, each line naming
    the plugin that wants it ("Read, change and send your Gmail - mailer"); the raw scope is behind
@@ -65,7 +68,8 @@ Google (through Advanced…) and Microsoft (the Outlook tile) then go in three s
    from the read's `microsoftApis`; one sign-in asks for every ticked line.
 2. **Set up the app** - only when the provider's client is not set up yet (for Microsoft with the
    default client in use, the dialog goes straight to **Sign in**, and **Set up the app** is under
-   **Advanced…** on that step, for an app of your own): the provider's setup
+   **Advanced…**, below the Microsoft tile and on the Sign in step, for an app of your own or to sign
+   in to one organisation's directory only): the provider's setup
    guide as a checklist, with links into the provider's console and buttons to copy each value (the
    redirect URI, the scopes, the APIs). It says first that this is a one-time setup and roughly how
    long it takes (Google about 20 to 30 minutes, Microsoft about 10), that the tick boxes only mark
@@ -124,7 +128,11 @@ or a tunnel.
    and every refresh send no `client_secret`. A `clientSecret` with `audience` is refused.
 
 The **Sign in** step then shows a code and a link: open the link, enter the code, approve. The dialog
-moves on by itself. When the account's organisation lets only an admin approve the app, Microsoft's
+moves on by itself. When the ticked permissions span more than one Microsoft API, the sign-in takes
+**two codes**, and the dialog says so before it starts and numbers them ("Code 1 of 2"): Microsoft
+redeems a code for one API only, so the first code approves every permission and the second, which
+asks no new questions, finishes the sign-in. Microsoft's page may say it can be closed after the
+first code; come back to the dialog for the second. When the account's organisation lets only an admin approve the app, Microsoft's
 refusal is shown as one sentence - an admin of that organisation approves the app, then you sign in
 again - never as an error code alone (`ConnectionProviders.MicrosoftAdminApproval`; the Host words the
 refusals carrying `AADSTS65001`, `AADSTS90094`, `AADSTS90095`, `AADSTS900941`, `AADSTS90099`,
@@ -148,8 +156,16 @@ which with `deviceFlow`.
   (`access_denied`), or the code expires (`expired_token`, or its `expiresAt` passes).
 - `GET /api/connections/flows/{flowId}` (people only, the starter only: anyone else gets exactly what
   a missing flow gets) answers `{ state: "waiting" | "done" | "refused" | "expired", sentence,
-  connection? }`, the connection only when `done`. Closing the dialog cancels nothing; reading again
-  gives the same state. A flow is kept an hour past its expiry, and not across a Host restart.
+  userCode, verificationUri, expiresAt, connection? }`, the code being the one to enter now and the
+  connection only when `done`. Closing the dialog cancels nothing; reading again gives the same
+  state. A flow is kept an hour past its expiry, and not across a Host restart.
+- **A second code.** When Microsoft takes the first code but will not redeem it for a sign-in naming
+  more than one API (`AADSTS28000`), the Host asks at once for a second code naming the first API's
+  scopes and the sign-in scopes. The same flow stays `waiting` with the new `userCode`,
+  `verificationUri` and `expiresAt`, and its sentence says Microsoft needs a second code to finish
+  the sign-in and asks no new questions. A refused or expired second code ends the flow with nothing
+  stored; there is never a third. The Host then redeems its one refresh token for each API (see
+  [Several Microsoft APIs](plugins.md#several-microsoft-apis-from-one-connection)).
 - `GET /api/connections/flows/open` (people only) lists the caller's own sign-ins with a code still
   waiting and not past their expiry, soonest to expire first, so a reopened dialog picks one back up:
   `[{ flowId, provider, userCode, verificationUri, expiresAt, state: "waiting" }]`. Another person's
@@ -229,7 +245,8 @@ yawble connect microsoft --device --scopes https://graph.microsoft.com/Mail.Read
 ```
 
 `--device` prints the code and the link and waits for the sign-in to finish: no port, no loopback
-listener, nothing to register. It is refused with a sentence for a provider with no device endpoint.
+listener, nothing to register. When Microsoft asks for a second code, it prints the new code and the
+sentence and keeps waiting. It is refused with a sentence for a provider with no device endpoint.
 Through the request file below it sends `{ op: "start", flow: "device", ... }`, answered
 `start: { flowId, userCode, verificationUri, expiresAt }`, then `{ op: "flow", flowId }`, answered
 `flow: { state, sentence, connection? }` (404 for a flow that is not the operator's, exactly as for a
@@ -251,7 +268,8 @@ The same way the other commands that talk to a running instance do (`yawble plug
 - Nothing is signed in and no port of the instance is used: whoever can run the engine on that
   computer already controls the instance. The Host records what was done in the tenant log.
 - A request the Host does not answer within 20 seconds is withdrawn, and the command says so. An
-  instance on an older image may not answer at all; `yawble update` brings it current.
+  instance whose image is older than the CLI may not answer at all; `yawble update` brings both to
+  one version.
 
 ## Registering a Google client
 
@@ -314,7 +332,7 @@ access token, and serialises the refreshes of one connection so two members shar
 
 ## A mailbox with an app password (IMAP)
 
-The simplest way to connect a mailbox. Gmail, iCloud and Yahoo each issue an **app password**: a
+The simplest way to connect a mailbox. Gmail, iCloud, Yahoo and Namecheap Private Email each issue an **app password**: a
 password for one program, made in a minute in the account's security settings, that you can revoke at
 any time without changing your own. No OAuth client, Google review or client secret is involved.
 Microsoft (Outlook, Microsoft 365) does not accept password access; connect it as above.
@@ -326,9 +344,12 @@ Microsoft (Outlook, Microsoft 365) does not accept password access; connect it a
 - **iCloud** - it needs two-factor authentication on the Apple Account; then account.apple.com →
   Sign-In and Security → App-Specific Passwords (https://support.apple.com/en-us/102654).
 - **Yahoo** - Account security → Generate app password (https://help.yahoo.com/kb/SLN15241.html).
+- **Namecheap Private Email** - Private Email webmail → Settings → Security Center → App passwords
+  (https://www.namecheap.com/support/knowledgebase/article.aspx/10816/2306/new-how-to-use-app-passwords-for-private-email/).
+  The username is the full address.
 
 **Then add it:** Admin → **Connections** → **Add connection**, choose the mailbox's provider - Gmail,
-iCloud, Yahoo or Other - and fill in:
+iCloud, Yahoo, Namecheap Private Email or Other - and fill in:
 
 | Field | What goes in |
 |---|---|
@@ -344,12 +365,13 @@ iCloud, Yahoo or Other - and fill in:
 | Gmail | imap.gmail.com:993 TLS | smtp.gmail.com:465 TLS | https://developers.google.com/workspace/gmail/imap/imap-smtp |
 | iCloud | imap.mail.me.com:993 TLS | smtp.mail.me.com:587 STARTTLS | https://support.apple.com/en-us/102525 |
 | Yahoo | imap.mail.yahoo.com:993 TLS | smtp.mail.yahoo.com:465 TLS | https://help.yahoo.com/kb/SLN4075.html |
+| Namecheap Private Email | mail.privateemail.com:993 TLS | mail.privateemail.com:465 TLS | https://www.namecheap.com/support/knowledgebase/article.aspx/1179/2175/general-private-email-configuration-for-mail-clients-and-mobile-devices |
 | Other | typed | typed | your provider's help |
 
 **The login test.** When you save, the Host logs in to the IMAP server and authenticates to the SMTP
 server with exactly these settings, over a socket from the Host (no program is started), and answers
-in one sentence: "Connected: 1,240 messages in Inbox", or what to fix - "The server refused the
-password. For Gmail, make an app password: it needs 2-Step Verification.", "Could not reach
+in one sentence: "Connected: 1,240 messages in Inbox", or what to fix - "The incoming (IMAP) server
+refused the password. For Gmail, make an app password: it needs 2-Step Verification.", "Could not reach
 imap.example.com on port 993." A mailbox whose first login is refused, or whose server cannot be
 reached, **is not saved**. Save shows the sentence under the form; fix what it names and Save again.
 

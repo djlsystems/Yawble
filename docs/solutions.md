@@ -322,7 +322,12 @@ records the fetch (the `marketplace.fetched` row, written before anything is unp
 it into `Marketplace/<id>-<version>` of the instance's documents - and nowhere else - by the same
 checks as **Upload a package (.zip)**; then the install wizard (a solution) or the plugin install dialog (a
 plugin) opens on that folder, so you review and install as below. Get never installs: nothing is
-installed until you press **Install** there. The catalog is read about every 12 hours and on
+installed until you press **Install** there. A plugin is installed once for the instance, so a
+plugin already installed at the catalog's version offers no Get, and one the catalog lists newer
+offers **Update**; a solution always offers Get, since each install makes another team. Getting a
+version already fetched opens the same folder again when it still holds exactly the downloaded
+files; a folder of that name holding anything else is yours and is never written over, and Get
+refuses, naming it. The catalog is read about every 12 hours and on
 **Refresh**; until a read has answered, after one that failed, with no address set, or with
 **Settings → Read the package catalog** off, the tab says so in a sentence rather than showing an
 empty list, and a refused Get names its reason. The operator CLI gives the Host the catalog address
@@ -339,7 +344,10 @@ installs by itself.
 **An update where it is installed.** On **Marketplace → Installed**, a package the catalog lists at
 a newer version than a team has says so (**Update available: 1.1.0**) and offers **Update**, which
 fetches that version as Get does and opens the install wizard on **Update an existing team** for
-that team. Nothing is updated until you press **Update** in the wizard.
+that team. Nothing is updated until you press **Update** in the wizard. Below the solutions, under
+**Plugins**, the tab lists each plugin installed on the instance with its version and the members
+that use it, and **Update** when the catalog lists it newer, which fetches it and opens the plugin
+install dialog.
 
 Otherwise a package is installed from a folder inside the instance, so it goes into Documents first:
 
@@ -404,10 +412,12 @@ wizard's steps:
    only, never the value), what the manifest says it is for, and either "set on this Host", "not
    set: its source fails until it is set" with the ways to set it - its value field here first,
    then `yawble secret set <KEY>` and `yawble up` - or "not needed" when it belongs to a setting the
-   person left off. Each needed key has its write-only value field (Set, or Replace once set, as in
-   [Add member](plugins.md#changing-a-plugin-members-settings-after-hire)); a key set there says who set it and when. Unset is not a refusal. The
-   preview's `secrets` carries these (in an update, as the update will leave them). The result's
-   list of keys still unset offers the same field beside each key.
+   person left off. Each needed key has its write-only value field, as in
+   [Add member](plugins.md#changing-a-plugin-members-settings-after-hire): it has no button of its
+   own, and what is typed is written when you press **Install** (or **Update**); a key set there
+   says who set it and when, and its value is never shown. Unset is not a refusal. The preview's
+   `secrets` carries these (in an update, as the update will leave them). The result's list of keys
+   still unset offers the same field beside each key, written by its **Save keys** button.
 4. **Install**: the steps below; on failure the wizard names the step and the reason. The result
    names each schedule's first run ("Scan for postings ran now", "Morning summary first runs at
    8:00 AM"), and lists the keys still unset, each with the way to set it. The answer's `firstRuns`
