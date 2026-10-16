@@ -435,6 +435,10 @@ public interface IMessageLog
     /// matters here specifically, because this log's store sets no such pragma at all, so
     /// enforcement rests on the native library's compile default rather than on anything this
     /// codebase does.
+    ///
+    /// In the same transaction it removes every recorded file change (<c>file_changes</c>) older
+    /// than the oldest message it keeps, so a replay never shows a file change without the run it
+    /// belonged to. Nothing else prunes them.
     /// </summary>
     Task<PurgeReport> DeleteAsync(
         IReadOnlyCollection<long> seqs, CancellationToken ct = default);

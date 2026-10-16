@@ -30,7 +30,8 @@ public sealed record TeamResetOptions(
     /// <summary>Permanently delete the targeted members' messages. IRREVERSIBLE, and the only option
     /// here that destroys anything an audit could have used.</summary>
     [property: Description(
-        "Permanently delete the named members' messages. **Irreversible**, and the only option here "
+        "Permanently delete the named members' messages, and their recorded file changes (the "
+        + "Monitor's replay of their worktrees). **Irreversible**, and the only option here "
         + "that destroys something an audit could have used. A row still cited by a message that is "
         + "NOT being deleted is retained and counted - nulling its causation would destroy the one "
         + "field that records what caused what. That citing message is often another member of this "
@@ -95,7 +96,11 @@ public sealed record TeamWasReset(
     IReadOnlyList<string> Remaining,
 
     /// <summary>What resetting the repositories removed and kept; null when it was not asked.</summary>
-    RepositoriesReset? Repositories = null);
+    RepositoriesReset? Repositories = null)
+{
+    /// <summary>How many of the targeted members' recorded file changes Delete memory removed.</summary>
+    public int FileChanges { get; init; }
+}
 
 /// <summary>
 /// A targeted member is running, holds queued work, or has accepted a delivery it has not finished.
@@ -161,7 +166,8 @@ public sealed class TeamReset(
     IMessageLog log,
     TeamPaths paths,
     FolderRemoval? removal = null,
-    RepositoryReset? repositories = null)
+    RepositoryReset? repositories = null,
+    WorkspaceFileChangeStore? fileChanges = null)
 {
     private readonly FolderRemoval _removal = removal ?? new FolderRemoval();
 
@@ -286,6 +292,20 @@ public sealed class TeamReset(
             ? await PurgeAsync(targeted, head, ct)
             : new PurgeReport(0, 0);
 
+        // Delete memory takes the targeted members' recorded file changes too, and only theirs.
+        var removedFileChanges = 0;
+        if (options.Purge && fileChanges is not null)
+        {
+            try
+            {
+                removedFileChanges = await fileChanges.DeleteForMembersAsync(stored, [.. targeted.Select(id => id.Name)], ct);
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"file changes: {ex.Message}");
+            }
+        }
+
         // 5. The directories.
         var cleared = new List<string>();
 
@@ -320,7 +340,10 @@ public sealed class TeamReset(
         var reposReset = plan is null ? null : await repositories!.ResetAsync(stored, repos, plan, ct);
 
         return new TeamWasReset(
-            stored, head, floored, report.Purged, report.Retained, cleared, failures, remaining, reposReset);
+            stored, head, floored, report.Purged, report.Retained, cleared, failures, remaining, reposReset)
+        {
+            FileChanges = removedFileChanges,
+        };
     }
 
     /// <summary>

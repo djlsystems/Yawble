@@ -70,6 +70,10 @@ public sealed record TeamDeleted(
     /// <summary>Every path of those session folders still on disk, one by one; each is also named in
     /// <see cref="Failures"/>. Not retried: a team of the same name may own that workspace path next.</summary>
     public IReadOnlyList<string> SessionFoldersRemaining { get; init; } = [];
+
+    /// <summary>How many of the team's recorded file changes (<see cref="WorkspaceFileChangeStore"/>)
+    /// went with it.</summary>
+    public int FileChanges { get; init; }
 }
 
 /// <summary>What a team deletion is about to remove, for the <c>team.deleting</c> row written before
@@ -167,7 +171,8 @@ public sealed class TeamDeletion(
     ITeamSolutionStore? solutions = null,
     IWakeStore? wakes = null,
     string? agentHome = null,
-    IReadOnlyList<string>? sessionFolders = null)
+    IReadOnlyList<string>? sessionFolders = null,
+    WorkspaceFileChangeStore? fileChanges = null)
 {
     private readonly FolderRemoval _removal = removal ?? new FolderRemoval();
 
@@ -295,6 +300,21 @@ public sealed class TeamDeletion(
         // and a successor of the same name must not be woken by its predecessor's.
         if (wakes is not null) await wakes.DeleteForTeamAsync(stored, ct);
 
+        // ITS RECORDED FILE CHANGES GO WITH IT, counted on the team.deleted row. Its log rows stay;
+        // these are a replay's drawing of its worktrees, which belong to the team.
+        var removedFileChanges = 0;
+        if (fileChanges is not null)
+        {
+            try
+            {
+                removedFileChanges = await fileChanges.DeleteForTeamAsync(stored, ct);
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"file changes: {ex.Message}");
+            }
+        }
+
         // The team's sites, their files and their data, one tenant row per site, in one
         // transaction. Keyed by the stored spelling, so a same-name successor starts with none.
         if (sites is not null)
@@ -421,6 +441,7 @@ public sealed class TeamDeletion(
         {
             SessionFolders = sessionFoldersRemoved,
             SessionFoldersRemaining = sessionFoldersLeft,
+            FileChanges = removedFileChanges,
         };
     }
 
