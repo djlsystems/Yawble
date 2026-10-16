@@ -6,6 +6,7 @@ using Harness.Containers;
 using Harness.Contracts;
 using Harness.Host;
 using Harness.Host.Auth;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
@@ -32,6 +33,7 @@ public sealed class WakeMeTests : IAsyncLifetime
     private WebApplicationFactory<Program> _factory = null!;
     private HttpClient _person = null!;
     private string _team = "";
+    private string _personId = "";
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -52,12 +54,13 @@ public sealed class WakeMeTests : IAsyncLifetime
     public async ValueTask InitializeAsync()
     {
         Directory.CreateDirectory(_dataRoot);
+        PluginMemberEndToEndTests.InstallSampleEcho(_dataRoot);
         _factory = Start();
 
         _team = (await Services.GetRequiredService<TeamRegistry>()
             .CreateAsync("Waking", "claude-headless", memberAgent: "claude-headless", ct: Ct)).Id;
 
-        await Services.GetRequiredService<IUserStore>().CreateAsync(Email, Password);
+        _personId = (await Services.GetRequiredService<IUserStore>().CreateAsync(Email, Password)).Id;
         _person = await PersonAsync();
 
         foreach (var name in new[] { "Dev", "Dev2" })
@@ -407,6 +410,57 @@ public sealed class WakeMeTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_pending_wake_keeps_the_platforms_declaration_waiting_until_it_has_fired_and_its_run_is_over()
+    {
+        // A QUIET TRIGGER'S WORKFLOW: its run simply finishing is the end of it, so the platform
+        // declares it at the first run end that leaves nothing working it.
+        var marker = $"a quiet trigger's look: {Guid.NewGuid():N}";
+        _agents.Behaviour = async invocation =>
+        {
+            if (await CommonAsync(invocation) is { } common) return common;
+
+            if (invocation.Container == Dev && invocation.Prompt.Contains(marker, StringComparison.Ordinal))
+            {
+                var (status, body) = await AskAsync(invocation, "1m", "has the mailbox caught up");
+                Assert.True(status == HttpStatusCode.OK, body.ToString());
+            }
+
+            return new AgentResult(0, "done");
+        };
+
+        var fire = await Log.AppendAsync(new NewMessage(
+            MessageTypes.InstructionFor(Dev),
+            WakeManagerPolicy.InstructionPayload(marker, WakeManagerPolicy.OnHandbackOrFailure),
+            "schedule:wake-me-test"), Ct);
+        var root = fire.CorrelationId;
+        Assert.True(await UndeclarableWorkflows.RootedByQuietTriggerAsync(Log, root, Ct));
+
+        await UntilAsync(() => Wakes.AllAsync(Ct).Result.Any(w => w.Workflow == root), "the wake stored");
+        await UntilAsync(() => RowsAsync(root, MessageTypes.Completed).Result.Count == 1, "the asking run ended");
+        await SettleAsync();
+
+        // WAITING: the run ended, succeeded and left nobody working it; only the wake is pending.
+        Assert.Equal(1, _agents.RunsFor(Dev));
+        Assert.Empty(await RowsAsync(root, MessageTypes.WorkflowCompleted));
+        Assert.Contains(root, await Log.OpenWorkflowsAmongAsync([root], Ct));
+        Assert.Single(await Wakes.ForWorkflowAsync(root, Ct));
+
+        // ONCE IT HAS FIRED AND ITS RUN IS OVER, without the member declaring, the platform does.
+        _wokenDeclares = false;
+        await MoveClockAsync(TimeSpan.FromMinutes(1));
+        await UntilAsync(() => RowsAsync(root, MessageTypes.WorkflowCompleted).Result.Count == 1, "the platform's declaration");
+        await SettleAsync();
+
+        Assert.Equal(2, _agents.RunsFor(Dev));
+        var declared = Assert.Single(await RowsAsync(root, MessageTypes.WorkflowCompleted));
+        Assert.True(Field(declared, UndeclarableWorkflows.DeclaredByPlatformField).GetBoolean());
+        var wokenRun = Assert.Single(await RowsAsync(root, MessageTypes.InstructionFor(Dev)), m => m.Source.StartsWith("wake:", StringComparison.Ordinal));
+        Assert.True(declared.Seq > wokenRun.Seq);
+        Assert.Single(await RowsAsync(root, MessageTypes.WakeFired));
+        Assert.Empty(await RowsAsync(root, MessageTypes.WakeCancelled));
+    }
+
+    [Fact]
     public async Task A_persons_close_cancels_the_workflows_wake_with_a_row()
     {
         var root = await DevAsksAsync("1m", "is the queue drained");
@@ -525,6 +579,115 @@ public sealed class WakeMeTests : IAsyncLifetime
 
         Assert.Equal(dev2s, Assert.Single(await Wakes.AllAsync(Ct)));
         Assert.Equal(Dev.ToString(), Field(Assert.Single(await RowsAsync(root, MessageTypes.WakeCancelled)), PayloadFields.By).GetString());
+    }
+
+    // --- the MCP tool ------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task The_wake_me_tool_asks_with_in_and_note_and_cancels_with_an_id_answering_the_wake_and_its_time_on_both_clocks()
+    {
+        var asked = new TaskCompletionSource<(string Answer, int Stored)>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancelled = new TaskCompletionSource<(string Answer, int Stored)>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        _agents.Behaviour = async invocation =>
+        {
+            if (await CommonAsync(invocation) is { } common) return common;
+
+            if (invocation.Container == Dev && invocation.Prompt.Contains("through the tool", StringComparison.Ordinal))
+            {
+                var tools = ToolsFor(invocation, Host.Find(Dev)!.Permits);
+                var answer = await tools.WakeMe(@in: "2m", note: "look at the TLS certificate again", cancellationToken: Ct);
+                asked.TrySetResult((answer, (await Wakes.AllAsync(Ct)).Count));
+
+                var id = Body(answer).GetProperty("wake").GetInt64();
+                var gone = await tools.WakeMe(cancel: id, cancellationToken: Ct);
+                cancelled.TrySetResult((gone, (await Wakes.AllAsync(Ct)).Count));
+            }
+
+            return new AgentResult(0, "done");
+        };
+
+        var root = await PersonTellsAsync(Dev, "set a wake through the tool");
+        var (askAnswer, storedAfterAsk) = await asked.Task.WaitAsync(Patience, Ct);
+        var (cancelAnswer, storedAfterCancel) = await cancelled.Task.WaitAsync(Patience, Ct);
+        await SettleAsync();
+
+        // THE ASK: the wake's id, its time in UTC and on the reader's clock, and how to cancel it.
+        Assert.StartsWith("HTTP 200", askAnswer);
+        var body = Body(askAnswer);
+        var id = body.GetProperty("wake").GetInt64();
+        var due = _time.Now.AddMinutes(2);
+        Assert.Equal(root.CorrelationId, body.GetProperty("workflow").GetInt64());
+        Assert.Equal(due, body.GetProperty("dueAt").GetDateTimeOffset());
+        Assert.Equal(TimeSpan.Zero, body.GetProperty("dueAt").GetDateTimeOffset().Offset);
+        Assert.Equal(WakeMe.Both(due), body.GetProperty("dueLocal").GetString());
+        Assert.Contains($"{due:yyyy-MM-dd HH:mm:ss} UTC", body.GetProperty("dueLocal").GetString());
+        Assert.Equal("look at the TLS certificate again", body.GetProperty("note").GetString());
+        Assert.Contains($"cancel {id}", body.GetProperty("notice").GetString());
+        Assert.Equal(1, storedAfterAsk);
+
+        var askedRow = Assert.Single(await RowsAsync(root.CorrelationId, MessageTypes.WakeAsked));
+        Assert.Equal((Dev.ToString(), id), (askedRow.Source, Field(askedRow, PayloadFields.Wake).GetInt64()));
+
+        // THE CANCEL: that wake, gone from the store, with its row.
+        Assert.StartsWith("HTTP 200", cancelAnswer);
+        Assert.Equal(id, Body(cancelAnswer).GetProperty("wake").GetInt64());
+        Assert.True(Body(cancelAnswer).GetProperty("cancelled").GetBoolean());
+        Assert.Equal(0, storedAfterCancel);
+        var cancelledRow = Assert.Single(await RowsAsync(root.CorrelationId, MessageTypes.WakeCancelled));
+        Assert.Equal(Dev.ToString(), Field(cancelledRow, PayloadFields.By).GetString());
+
+        await MoveClockAsync(TimeSpan.FromMinutes(5));
+        await Task.Delay(500, Ct);
+        Assert.Empty(await RowsAsync(root.CorrelationId, MessageTypes.WakeFired));
+        Assert.DoesNotContain(await RowsAsync(root.CorrelationId, MessageTypes.InstructionFor(Dev)), m => m.Source.StartsWith("wake:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task The_concierge_and_a_plugin_member_are_refused_wake_me_with_their_sentences_and_nothing_is_stored()
+    {
+        // THE CONCIERGE, under its own session credential: the tool refuses it, as it is no member,
+        // and the member's route refuses it the permit a wake needs.
+        var conciergeId = ConciergeLaunchFactory.PrincipalId(_personId);
+        var conciergeKey = await Services.GetRequiredService<IPrincipalStore>().MintAsync(
+            conciergeId, PrincipalKind.TenantConcierge, null, ConciergeLaunchFactory.ConciergePermits, ownerUserId: _personId, ct: Ct);
+        var concierge = new Principal(conciergeId, PrincipalKind.TenantConcierge, ConciergeLaunchFactory.ConciergePermits, _personId);
+
+        var toolAnswer = await ToolsFor(concierge, conciergeKey).WakeMe(@in: "10m", note: "tell the person to look", cancellationToken: Ct);
+        Assert.Equal(
+            "Refused: wake_me is for a team's members and Managers, about their own run. This credential is not a member.",
+            toolAnswer);
+
+        using (var client = KeyClient(conciergeKey))
+        {
+            var routed = await client.PostAsJsonAsync($"/api/teams/{_team}/containers/Dev/wake", new { @in = "10m", note = "for Dev" }, Ct);
+            Assert.Equal(HttpStatusCode.Forbidden, routed.StatusCode);
+            Assert.Equal(PermitGate.Missing(Permits.Progress), Error((routed.StatusCode, await routed.Content.ReadFromJsonAsync<JsonElement>(Ct))).Item2);
+        }
+
+        // A PLUGIN MEMBER holds no credential and no permits. Were it handed one in its own name
+        // with what it holds, the tool and the route refuse it the permit a wake needs.
+        var hired = await _person.PostAsJsonAsync($"/api/teams/{_team}/containers", new
+        {
+            name = "Echo",
+            agent = "plugin:sample-echo",
+            config = new { mode = "upper" },
+        }, Ct);
+        Assert.Equal(HttpStatusCode.OK, hired.StatusCode);
+        var echo = new ContainerId(_team, "Echo");
+        var echoPermits = Host.Find(echo)!.Permits;
+        Assert.DoesNotContain(Permits.Progress, echoPermits);
+
+        var echoKey = await Services.GetRequiredService<IPrincipalStore>().MintAsync(
+            echo.ToString(), PrincipalKind.Container, _team, echoPermits, ct: Ct);
+        var pluginAnswer = await ToolsFor(new Principal(echo.ToString(), PrincipalKind.Container, echoPermits), echoKey)
+            .WakeMe(@in: "10m", note: "poll the mailbox again", cancellationToken: Ct);
+        Assert.StartsWith("HTTP 403", pluginAnswer);
+        Assert.Equal(PermitGate.Missing(Permits.Progress), Body(pluginAnswer).GetProperty("error").GetString());
+
+        // NOTHING STORED, and no row.
+        Assert.Empty(await Wakes.AllAsync(Ct));
+        Assert.Empty(await Log.ReadAfterAsync(0, [MessageTypes.WakeAsked], int.MaxValue, Ct));
     }
 
     // --- the workflow's bounds ----------------------------------------------------------------------
@@ -741,6 +904,35 @@ public sealed class WakeMeTests : IAsyncLifetime
         return client;
     }
 
+    private HttpClient KeyClient(string key)
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add(ApiKeyAuthenticationHandler.Header, key);
+        return client;
+    }
+
+    /// <summary>The harness MCP server's tools as <paramref name="invocation"/>'s run calls them:
+    /// its own credential on the request, and every call it makes going to this Host.</summary>
+    private PlatformMcpTools ToolsFor(AgentInvocation invocation, IReadOnlySet<string> permits) =>
+        ToolsFor(new Principal(invocation.Container.ToString(), PrincipalKind.Container, permits), invocation.Environment["HARNESS_KEY"]);
+
+    private PlatformMcpTools ToolsFor(Principal principal, string key)
+    {
+        var context = new DefaultHttpContext { RequestServices = Services };
+        context.Request.Headers[ApiKeyAuthenticationHandler.Header] = key;
+        context.User = PrincipalClaims.ToClaimsPrincipal(principal, "test");
+
+        return new PlatformMcpTools(
+            new HttpContextAccessor { HttpContext = context },
+            Services.GetRequiredService<IPrincipalStore>(),
+            Services.GetRequiredService<AgentCatalog>(),
+            new ServerClients(_factory.Server.CreateHandler()));
+    }
+
+    /// <summary>A tool's answer is `HTTP &lt;status&gt;` and the route's body on the next line.</summary>
+    private static JsonElement Body(string answer) =>
+        JsonDocument.Parse(answer[(answer.IndexOf('\n', StringComparison.Ordinal) + 1)..]).RootElement.Clone();
+
     private async Task SetAsync(string setting, long value)
     {
         var put = await _person.PutAsJsonAsync("/api/tenant/settings", new Dictionary<string, object> { [setting] = value }, Ct);
@@ -784,6 +976,12 @@ public sealed class WakeMeTests : IAsyncLifetime
             quietPasses = read && idle ? quietPasses + 1 : 0;
             await Task.Delay(100, Ct);
         }
+    }
+
+    private sealed class ServerClients(HttpMessageHandler handler) : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) =>
+            new(handler, disposeHandler: false) { BaseAddress = new Uri("http://localhost") };
     }
 
     private sealed class ManualTime(DateTimeOffset start) : TimeProvider
