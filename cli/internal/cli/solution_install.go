@@ -112,7 +112,7 @@ func newSolutionInstallCommand(deps Deps) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&team, "team", "", "the team's name: an existing team from this package is updated, any other name is the new team's")
 	cmd.Flags().BoolVar(&fromInstance, "from-instance", false, "<folder> is a path inside the instance; nothing is copied")
-	cmd.Flags().BoolVar(&yes, "yes", false, "install without asking for a yes")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "install without asking for a yes")
 	return cmd
 }
 
