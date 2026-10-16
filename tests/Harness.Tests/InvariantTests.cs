@@ -174,6 +174,50 @@ public sealed class McpContractTests
         Assert.All(BuiltInSkills.Bodies(), body => Assert.Contains("`lease`", body, StringComparison.Ordinal));
     }
 
+    /// <summary>How an agent waits for something outside the platform, word for word, in the Manager and Member skills.</summary>
+    public static readonly string[] WakeRules =
+    [
+        "A process you start ends with your run. Never say you are watching or waiting for something unless a wake is set.",
+        "write down what you are waiting for, set `wake_me` with a note, and end your run. "
+        + "Prefer one wake at a sensible interval over many short ones.",
+        "A wake is not a schedule: for work that repeats, ask the person for a trigger.",
+    ];
+
+    /// <summary>
+    /// The Manager and Member skills say an agent waits through a wake - never a held run or a
+    /// background process - in words for any project: the section names no language, framework,
+    /// tool chain or product. No skill the Concierge is offered names `wake_me`: it has a person in
+    /// front of it and no wake to set.
+    /// </summary>
+    [Fact]
+    public void The_manager_and_member_skills_wait_through_a_wake_in_project_neutral_words()
+    {
+        var manager = Flat(BuiltInSkills.Find("manager")!.Body);
+        var member = Flat(BuiltInSkills.Find("member")!.Body);
+
+        foreach (var rule in WakeRules)
+        {
+            Assert.Contains(rule, manager, StringComparison.Ordinal);
+            Assert.Contains(rule, member, StringComparison.Ordinal);
+        }
+
+        foreach (var section in new[] { Section(manager, "## Waiting for something outside the platform"), Section(member, "## Waiting for something outside the platform") })
+        {
+            foreach (var word in new[]
+                     {
+                         "dotnet", "npm", "pytest", "go test", "cargo", "docker", "podman", "kubectl", "dns", "nxdomain",
+                         "cron", "C#", "Python", "TypeScript", "GitHub", "Azure", "AWS",
+                     })
+            {
+                Assert.DoesNotContain(word, section, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        var offeredToTheConcierge = BuiltInSkills.All
+            .Where(skill => skill.Roles.Contains(SkillRoles.Concierge) || skill.Roles.Contains(SkillRoles.Any));
+        Assert.All(offeredToTheConcierge, skill => Assert.DoesNotContain("`wake_me`", skill.Body, StringComparison.Ordinal));
+    }
+
     private static string Section(string flat, string heading)
     {
         var start = flat.IndexOf(heading, StringComparison.Ordinal);

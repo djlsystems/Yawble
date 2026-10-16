@@ -167,6 +167,30 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
         Assert.Contains(McpContractTests.HeavyLeaseRule, McpContractTests.Flat(managerSkill), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The Member and Manager skills an agent loads say, word for word, that a process it starts
+    /// ends with its run, that it waits for something outside the platform through `wake_me` and
+    /// ends its run, and that a wake is not a schedule.
+    /// </summary>
+    [Fact]
+    public async Task The_member_and_manager_skills_served_to_agents_wait_through_a_wake()
+    {
+        using var member = host.Container(host.AlphaContainerKey);
+        var memberSkill = McpContractTests.Flat(await member.GetStringAsync("/api/me/skills/member", Ct));
+
+        var key = await host.Services.GetRequiredService<IPrincipalStore>().MintAsync(
+            new ContainerId(host.Alpha, TeamRegistry.DefaultManagerName).ToString(),
+            PrincipalKind.Container, host.Alpha, Permits.All, ct: Ct);
+        using var manager = host.Container(key);
+        var managerSkill = McpContractTests.Flat(await manager.GetStringAsync("/api/me/skills/manager", Ct));
+
+        foreach (var rule in McpContractTests.WakeRules)
+        {
+            Assert.Contains(rule, memberSkill, StringComparison.Ordinal);
+            Assert.Contains(rule, managerSkill, StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public async Task The_manager_skill_builds_the_skeleton_first_then_staffs_a_developer_per_area_for_software_only()
     {
