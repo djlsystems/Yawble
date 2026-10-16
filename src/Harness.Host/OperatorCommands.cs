@@ -86,7 +86,8 @@ public static class OperatorCommands
         BackupSettings? backups = null)
     {
         // The backups folder and retention Program.cs read from configuration, so a migration run
-        // from here writes and prunes where the daily backup does. Defaults when none is handed in.
+        // from here writes and prunes where the daily backup does, and --backup's manual copy and
+        // --restore's before-restore copy land in that same folder. Defaults when none is handed in.
         backups ??= BackupSettings.Defaults(dataRoot);
 
         // ANYWHERE in the arguments, not only first. "--DataRoot=X --backup" is exactly the shape an
@@ -106,12 +107,12 @@ public static class OperatorCommands
         switch (key)
         {
             case "--backup":
-                return await BackUpAsync(Path.Combine(dataRoot, "messages.db"), dataRoot, value, output, ct)
+                return await BackUpAsync(Path.Combine(dataRoot, "messages.db"), backups.Directory, value, output, ct)
                     ? OperatorOutcome.Completed
                     : OperatorOutcome.Refused;
 
             case "--restore":
-                return await RestoreAsync(Path.Combine(dataRoot, "messages.db"), dataRoot, value, output, ct)
+                return await RestoreAsync(Path.Combine(dataRoot, "messages.db"), dataRoot, backups.Directory, value, output, ct)
                     ? OperatorOutcome.Completed
                     : OperatorOutcome.Refused;
 
@@ -181,13 +182,13 @@ public static class OperatorCommands
     }
 
     private static async Task<bool> BackUpAsync(
-        string database, string dataRoot, string? destination, TextWriter output,
+        string database, string backupsDirectory, string? destination, TextWriter output,
         CancellationToken ct)
     {
         var stamp = DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss");
 
         var path = destination
-            ?? Path.Combine(dataRoot, "backups", $"messages-{stamp}-manual.db");
+            ?? Path.Combine(backupsDirectory, $"messages-{stamp}-manual.db");
 
         // Safe while a host is running: WAL permits a concurrent reader and VACUUM INTO takes a
         // consistent snapshot. A Copy-Item here would produce a file missing everything still in
@@ -204,7 +205,8 @@ public static class OperatorCommands
     /// anyway looks like success.
     /// </summary>
     private static async Task<bool> RestoreAsync(
-        string database, string dataRoot, string? source, TextWriter output, CancellationToken ct)
+        string database, string dataRoot, string backupsDirectory, string? source, TextWriter output,
+        CancellationToken ct)
     {
         if (source is null)
         {
@@ -263,7 +265,7 @@ public static class OperatorCommands
             // never race a handle this same process is still holding.
             var taken = await SchemaMigrator.BackUpAsync(
                 database,
-                Path.Combine(dataRoot, "backups", $"messages-{stamp}-before-restore.db"),
+                Path.Combine(backupsDirectory, $"messages-{stamp}-before-restore.db"),
                 ct);
 
             // SAID, not merely done. The whole justification for this copy is that the database

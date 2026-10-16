@@ -11,7 +11,8 @@ namespace Harness.Host;
 /// <b>ONE FOLDER FOR THE MIGRATOR AND THE DAILY BACKUP.</b> The before-step copies a migration takes
 /// are pruned by every daily run, which only works when both are handed the same directory. Program.cs
 /// and the operator commands build their <see cref="SchemaMigrator"/> and <see cref="DailyBackup"/>
-/// from here rather than reading the keys a second time.
+/// from here rather than reading the keys a second time. <c>--backup</c>'s manual copy and the copy
+/// <c>--restore</c> takes first go to <see cref="Directory"/> too.
 /// </para>
 ///
 /// <para>Configuration, not tenant settings: no person acts on these.</para>

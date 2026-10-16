@@ -301,6 +301,62 @@ public sealed class BeforeStepBackupsTests : IDisposable
         Assert.False(Directory.Exists(BackupSettings.DefaultDirectory(dataRoot)));
     }
 
+    [Fact]
+    public void A_before_restore_copy_is_kept_forever_and_not_counted_toward_the_newest_ten()
+    {
+        var ordinary = Enumerable.Range(0, 15).Select(i => BeforeStep(Now.AddDays(-31 - i), "auth-001")).ToArray();
+
+        // Newer than every ordinary copy, so counting it would push the tenth out; and one far older,
+        // with a same-second suffix, that the rule would delete if it were a before-step copy.
+        var restored = BeforeStep(Now.AddDays(-30.5), "restore");
+        var restoredAgain = Write(
+            $"messages-{Now.AddDays(-60).UtcDateTime.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture)}-before-restore-2.db");
+
+        var pruned = BeforeStepBackups.Prune(Backups, Now);
+
+        Assert.True(File.Exists(restored));
+        Assert.True(File.Exists(restoredAgain));
+        Assert.Equal(ordinary.Take(10), BeforeStepBackups.Existing(Backups).Select(c => c.Path));
+        Assert.Equal(ordinary.Skip(10).Order(), pruned.Deleted.Order());
+        Assert.Equal(10, pruned.Kept);
+    }
+
+    [Fact]
+    public async Task With_a_configured_backups_directory_the_manual_and_before_restore_copies_land_there()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dataRoot = Path.Combine(_directory, "data");
+        var elsewhere = Path.Combine(_directory, "elsewhere");
+        Directory.CreateDirectory(dataRoot);
+
+        await using (var connection = new SqliteConnection($"Data Source={Path.Combine(dataRoot, "messages.db")};Pooling=False"))
+        {
+            await connection.OpenAsync(ct);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "CREATE TABLE notes (body TEXT);";
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        var settings = BackupSettings.From(Configuration(elsewhere), dataRoot);
+
+        using var backup = new StringWriter();
+        Assert.Equal(
+            OperatorOutcome.Completed,
+            await OperatorCommands.TryRunAsync(["--backup"], dataRoot, backup, ct, settings));
+
+        var manual = Assert.Single(Directory.GetFiles(elsewhere, "messages-*-manual.db"));
+        Assert.Contains($"Wrote {manual}", backup.ToString());
+
+        using var restore = new StringWriter();
+        Assert.Equal(
+            OperatorOutcome.Completed,
+            await OperatorCommands.TryRunAsync(["--restore", manual], dataRoot, restore, ct, settings));
+
+        var beforeRestore = Assert.Single(Directory.GetFiles(elsewhere, "messages-*-before-restore.db"));
+        Assert.Contains($"Backed up the current database to {beforeRestore}", restore.ToString());
+        Assert.False(Directory.Exists(BackupSettings.DefaultDirectory(dataRoot)));
+    }
+
     private static IConfiguration Configuration(string directory) =>
         new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
