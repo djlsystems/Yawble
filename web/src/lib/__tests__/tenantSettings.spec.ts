@@ -58,6 +58,7 @@ describe('the Admission field', () => {
       'concierge.mayArchive',
       'concierge.mayMerge',
       'kanban.wipLimits',
+      'log.retentionDays',
       'marketplace.check',
       'quiet.window',
       'resume.maxAutomatic',
@@ -128,6 +129,13 @@ describe('validation', () => {
     expect(validateDraft('count', '-1')).not.toBeNull();
     expect(validateDraft('count', '2.5')).not.toBeNull();
     expect(validateDraft('count', '')).not.toBeNull();
+  });
+
+  it('takes 0 or at least the floor for a count that 0 turns off', () => {
+    expect(validateDraft('count', '0', 36500, 7)).toBeNull();
+    expect(validateDraft('count', '7', 36500, 7)).toBeNull();
+    expect(validateDraft('count', '6', 36500, 7)).toBe('0 turns it off; otherwise at least 7.');
+    expect(validateDraft('count', '1', 36500, 7)).not.toBeNull();
   });
 
   it('reads durations in both spellings and bounds them', () => {

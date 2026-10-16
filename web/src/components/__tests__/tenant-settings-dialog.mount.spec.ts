@@ -45,7 +45,7 @@ import { TenantSettingRejected } from '../../api/client';
 import { useConsoleStore } from '../../stores/console';
 import { useTerminalDisplayStore } from '../../stores/terminalDisplay';
 import type { TenantSetting } from '../../api/types';
-import { normaliseTenantSettings } from '../../lib/tenantSettings';
+import { LogRetentionSentence, normaliseTenantSettings } from '../../lib/tenantSettings';
 import { mountDialog, resetBody, textAndHelp } from '../../test/mountQuasar';
 import { addButtonIn, addChips, addDialogProblem, chipsIn } from '../../test/chipList';
 
@@ -89,6 +89,7 @@ function settings() {
       setting('kanban.wipLimits', { blocked: 3 }),
       setting('theme.default', 'auto'),
       setting('system.packages', ['htop']),
+      setting('log.retentionDays', 90, { default: 90, defaultSource: 'builtIn' }),
       // THE ROOTS RIDE THE LIST READ-ONLY, as `b000c-api.md` fixes it.
       { ...setting('fileBrowser.roots.Data', '/data'), readOnly: true, note: 'Always included.' },
       {
@@ -685,6 +686,39 @@ describe('System packages', () => {
     await flushPromises();
 
     expect(document.body.querySelector('.concierge-settings [data-chip-add-dialog]')).not.toBeNull();
+  });
+});
+
+describe('Keep the message log', () => {
+  const retention = () => document.body.querySelector('[data-setting="log.retentionDays"]')!;
+  const help = () => retention().querySelector('[data-help]')?.getAttribute('aria-label') ?? '';
+
+  it('shows the setting on System with its sentence, its value and its default, never the key', async () => {
+    const wrapper = await openDialog();
+    await showTab(wrapper, 'system');
+
+    expect(input(wrapper, 'Keep the message log for (days)')!.props('modelValue')).toBe('90');
+    expect(help()).toBe(LogRetentionSentence);
+    expect(LogRetentionSentence).toContain('removes message-log rows');
+    expect(LogRetentionSentence).toContain('it never removes an open workflow');
+    expect(LogRetentionSentence).toContain('0 turns it off');
+    expect(retention().querySelector('.tenant-setting-source')?.textContent).toContain('The built-in default (90)');
+    expect(textAndHelp()).not.toContain('log.retentionDays');
+  });
+
+  it('refuses a value under 7 other than 0 before Save, and saves 0', async () => {
+    const wrapper = await openDialog();
+    await showTab(wrapper, 'system');
+
+    await type(wrapper, 'Keep the message log for (days)', '3');
+    expect(retention().textContent).toContain('0 turns it off; otherwise at least 7.');
+    expect(saveButton().disabled).toBe(true);
+
+    await type(wrapper, 'Keep the message log for (days)', '0');
+    await saveButton().click();
+    await flushPromises();
+
+    expect(api.saveTenantSettings).toHaveBeenCalledWith({ 'log.retentionDays': 0 });
   });
 });
 

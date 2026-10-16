@@ -41,7 +41,8 @@ public sealed record TenantSettingDefinition(
     long Max = long.MaxValue,
     TimeSpan? MinDuration = null,
     TimeSpan? MaxDuration = null,
-    IReadOnlyList<string>? Choices = null);
+    IReadOnlyList<string>? Choices = null,
+    long? AtLeastUnlessZero = null);
 
 /// <summary>A value a PUT refused, naming the field.</summary>
 public sealed class TenantSettingRejected(string field, string message) : Exception(message)
@@ -105,6 +106,17 @@ public sealed class TenantSettings
     public const string LeasesHeavyHoldersName = "leases.heavy.holders";
     public const string UpdatesCheckName = "updates.check";
     public const string MarketplaceCheckName = "marketplace.check";
+    public const string LogRetentionDaysName = LogRetention.SettingName;
+
+    /// <summary>
+    /// <c>log.retentionDays</c>'s sentence, as the dialog shows it: what the pass removes, what it
+    /// never removes, and that 0 turns it off.
+    /// </summary>
+    public const string LogRetentionSentence =
+        "Once a day, removes message-log rows, and the file changes recorded before the oldest row kept, "
+        + "of workflows finished more than this many days ago; it never removes an open workflow, a row "
+        + "still queued or cited, the ledgers, spend, outcome figures, the tenant log, admission holds, "
+        + "landed or backlog stats, and 0 turns it off.";
 
     private readonly SqliteTenantSettingsStore _store;
     private readonly IConfiguration _configuration;
@@ -295,6 +307,10 @@ public sealed class TenantSettings
                 + "an update. It reads the catalog only; nothing is fetched or installed by itself. "
                 + "Applies at the next read.",
                 Choices: ["off", "on"]),
+            new(LogRetentionDaysName, TenantSettingKind.Integer,
+                LogRetention.DefaultDays.ToString(CultureInfo.InvariantCulture), "Log:RetentionDays",
+                LogRetentionSentence + " Applies at the next daily pass.",
+                Min: 0, Max: 36500, AtLeastUnlessZero: LogRetention.MinimumDays),
         ];
 
         _definitions = Definitions.ToDictionary(d => d.Name, StringComparer.Ordinal);
@@ -606,6 +622,10 @@ public sealed class TenantSettings
     /// delegate by <see cref="Marketplace"/>, never captured.</summary>
     public bool MarketplaceCheck => Current(MarketplaceCheckName) == "on";
 
+    /// <summary><c>log.retentionDays</c>: days of finished work the message log keeps; 0 keeps
+    /// everything. Read through a delegate by <see cref="LogRetention"/> at every pass, never captured.</summary>
+    public int LogRetentionDays => (int)Integer(LogRetentionDaysName);
+
     /// <summary><c>system.packages</c>: what the entrypoint installs at the next start.</summary>
     public IReadOnlyList<string> SystemPackages =>
         JsonSerializer.Deserialize<string[]>(Current(SystemPackagesName)) ?? [];
@@ -757,6 +777,11 @@ public sealed class TenantSettings
                     throw new TenantSettingRejected(name, definition.Max == long.MaxValue
                         ? $"{name} must be at least {definition.Min}."
                         : $"{name} must be between {definition.Min} and {definition.Max}.");
+                }
+
+                if (definition.AtLeastUnlessZero is { } least && number != 0 && number < least)
+                {
+                    throw new TenantSettingRejected(name, $"{name} must be 0, which turns it off, or at least {least}.");
                 }
 
                 return number.ToString(CultureInfo.InvariantCulture);

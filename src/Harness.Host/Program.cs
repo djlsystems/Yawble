@@ -1686,6 +1686,17 @@ if (backupsEnabled)
         TimeSpan.FromHours(1),
         sp.GetRequiredService<ILogger<DailyBackupRunner>>()));
 }
+// THE MESSAGE LOG KEEPS `log.retentionDays` OF FINISHED WORK: a pass shortly after start and then
+// daily removes the rest through the log's one delete, never on a request's path. See LogRetention.
+builder.Services.AddSingleton(sp => new LogRetention(
+    new SqliteLogRetention(database),
+    sp.GetRequiredService<IMessageLog>(),
+    sp.GetRequiredService<ITenantLog>(),
+    () => tenantSettings.LogRetentionDays,
+    sp.GetRequiredService<ILogger<LogRetention>>()));
+builder.Services.AddHostedService(sp => new LogRetentionLoop(
+    sp.GetRequiredService<LogRetention>(),
+    sp.GetRequiredService<ILogger<LogRetentionLoop>>()));
 builder.Services.AddSingleton(sp => new ResumeSweep(
     sp.GetRequiredService<TeamRegistry>(),
     sp.GetRequiredService<ContainerHost>(),

@@ -2071,6 +2071,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         // text. A parameter per row would be thousands of them on a real log.
         var ids = string.Join(',', seqs);
         var purged = 0;
+        var fileChanges = 0;
 
         // ONE STATEMENT, REPEATED TO A FIXPOINT. Each pass removes the candidates NOTHING currently
         // cites; removing those un-pins whatever they cited, so the next pass reaches one link
@@ -2123,12 +2124,12 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
 
             prune.CommandText = oldest is null ? "DELETE FROM file_changes" : "DELETE FROM file_changes WHERE at < $oldest";
             if (oldest is { } at) prune.Parameters.AddWithValue("$oldest", MessageSchema.FileChangeInstant(at));
-            await prune.ExecuteNonQueryAsync(ct);
+            fileChanges = await prune.ExecuteNonQueryAsync(ct);
         }
 
         await transaction.CommitAsync(ct);
 
-        return new PurgeReport(purged, seqs.Count - purged);
+        return new PurgeReport(purged, seqs.Count - purged, fileChanges);
     }
 
     public async Task<long> PositionAsync(ContainerId subscriber, CancellationToken ct = default)

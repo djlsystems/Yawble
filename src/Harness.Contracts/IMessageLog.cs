@@ -456,8 +456,11 @@ public interface IMessageLog
 /// handed a set of sequence numbers and nothing else; "cited by a survivor" is the whole of what it
 /// can report. "Cited by other teams" would be a guess, and a wrong one: the citers can be a
 /// DELETED MEMBER of the same team, or the Concierge, on a tenant holding one team.
+///
+/// <paramref name="FileChanges"/> is how many recorded file changes went with the rows: every one
+/// older than the oldest message kept.
 /// </summary>
-public readonly record struct PurgeReport(int Purged, int Retained);
+public readonly record struct PurgeReport(int Purged, int Retained, int FileChanges = 0);
 
 /// <summary>
 /// Where each subscriber has read up to.
