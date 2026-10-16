@@ -119,6 +119,26 @@ public sealed class WorkspaceFileReadFailureTests : IDisposable
         Assert.DoesNotContain(rows, r => r.Files.Any(f => f.Path == "broken.txt"));
     }
 
+    [Fact]
+    public async Task A_credential_git_quotes_in_a_failed_read_is_redacted_from_the_warning()
+    {
+        var logger = new Captured();
+        var watch = new WorkspaceFileWatch(new GitRunner(), _paths, (_, _) => Task.CompletedTask, record: _record, logger: logger);
+        var secret = "s" + Guid.NewGuid().ToString("N");
+
+        await watch.PassAsync([Run], readAll: false, Ct);
+        File.Move(Path.Combine(_tree, ".git"), Path.Combine(_tree, ".git.moved"));
+        File.WriteAllText(Path.Combine(_tree, ".git"), $"gitdir: https://user:{secret}@example.test/x\n");
+
+        Assert.Equal(0, await watch.PassAsync([Run], readAll: true, Ct));
+
+        var warning = Assert.Single(logger.Entries);
+        Assert.Contains("git exited 128", warning.Message);
+        Assert.Contains("example.test", warning.Message);
+        Assert.DoesNotContain(secret, warning.Message);
+        Assert.DoesNotContain("\n", warning.Message);
+    }
+
     public void Dispose()
     {
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
