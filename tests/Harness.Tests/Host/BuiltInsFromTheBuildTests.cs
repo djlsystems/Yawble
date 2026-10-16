@@ -185,6 +185,20 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
     }
 
     [Fact]
+    public async Task The_manager_skill_moves_a_card_of_several_steps_once_to_in_progress_and_once_to_done()
+    {
+        var key = await host.Services.GetRequiredService<IPrincipalStore>().MintAsync(
+            new ContainerId(host.Alpha, TeamRegistry.DefaultManagerName).ToString(),
+            PrincipalKind.Container, host.Alpha, Permits.All, ct: Ct);
+        using var manager = host.Container(key);
+        var skill = McpContractTests.Flat(await manager.GetStringAsync("/api/me/skills/manager", Ct));
+
+        Assert.Contains(
+            "A card that takes several steps (several plugin commands, or several members in turn) is moved to In progress once when the first step is sent and to Done once when its Done-when is met; a step's completion does not move it, so there is no need to move it back.",
+            skill, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task A_managers_list_has_no_worktrees_and_it_is_refused_the_member_skill()
     {
         var key = await host.Services.GetRequiredService<IPrincipalStore>().MintAsync(
