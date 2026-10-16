@@ -87,7 +87,8 @@ public static class OperatorCommands
     {
         // The backups folder and retention Program.cs read from configuration, so a migration run
         // from here writes and prunes where the daily backup does, and --backup's manual copy and
-        // --restore's before-restore copy land in that same folder. Defaults when none is handed in.
+        // --restore's before-restore copy land in that same folder, and --doctor reports on it.
+        // Defaults when none is handed in.
         backups ??= BackupSettings.Defaults(dataRoot);
 
         // ANYWHERE in the arguments, not only first. "--DataRoot=X --backup" is exactly the shape an
@@ -127,7 +128,7 @@ public static class OperatorCommands
                     : OperatorOutcome.Refused;
 
             case "--doctor":
-                return await DoctorAsync(dataRoot, output, ct)
+                return await DoctorAsync(dataRoot, backups, output, ct)
                     ? OperatorOutcome.Completed
                     : OperatorOutcome.Refused;
 
@@ -405,9 +406,10 @@ public static class OperatorCommands
         return true;
     }
 
-    private static async Task<bool> DoctorAsync(string dataRoot, TextWriter output, CancellationToken ct)
+    private static async Task<bool> DoctorAsync(
+        string dataRoot, BackupSettings backups, TextWriter output, CancellationToken ct)
     {
-        var report = await HostDoctor.ReportAsync(dataRoot, ct);
+        var report = await HostDoctor.ReportAsync(dataRoot, ct, backups);
 
         output.WriteLine(HostDoctor.ToJson(report));
 
