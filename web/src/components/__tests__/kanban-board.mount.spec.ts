@@ -124,6 +124,22 @@ describe('the board', () => {
     expect(board.findAll('.k-lane-count').map((c) => c.text())).toEqual(['1', '1']);
   });
 
+  /**
+   * A CARD THE MANAGER OR A PERSON PLACED KEEPS ITS LANE when a run on it ends: the server sends
+   * its lane and the run's outcome separately, and the board draws each where it belongs.
+   */
+  it('shows a placed card\'s run outcome on the card without moving its lane', async () => {
+    const board = await mountBoard([
+      card({ id: '1', laneId: 'doing', status: 'completed', color: 'green' }),
+      card({ id: '2', laneId: 'doing', status: 'handback' }),
+    ]);
+
+    expect(cardsIn(board, 1)).toEqual(['1', '2']);
+    expect(cardsIn(board, 2)).toEqual([]);
+    const statuses = board.findAll('.k-lane')[1]!.findAll('.k-card-status').map((s) => s.text());
+    expect(statuses).toEqual(['Completed', 'Handed back']);
+  });
+
   it('says there is no board yet, and where it comes from', async () => {
     const board = await mountBoard(null);
 

@@ -221,6 +221,8 @@ public static class BuiltInSkills
             card is `tell` with the same `card`. Plan the pieces you can name, not every piece that
             could exist - three cards a person can read beat nine that restate the spec's headings.
 
+            A card that takes several steps (several plugin commands, or several members in turn) is moved to In progress once when the first step is sent and to Done once when its Done-when is met; a step's completion does not move it, so there is no need to move it back. A card you have moved keeps its lane when a run on it ends; a card you never moved goes to Done when its member finishes, and a blocked or failed run still moves any card to Blocked or Failed.
+
             If you were woken by a `kanban.card.*` message, load the `kanban` skill first. That wake
             is a person editing, moving or commenting on a card - not a completion and not an
             instruction.

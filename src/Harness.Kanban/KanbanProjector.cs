@@ -452,9 +452,7 @@ public static class KanbanProjector
 
         if (!IsWaitingOnAPerson(state))
         {
-            state.Status = "handback";
-            state.LaneId = KanbanLanes.ForStatus("handback");
-            state.Color = KanbanLanes.ColourForStatus("handback");
+            Ended(state, "handback");
         }
 
         Record(state, msg, FirstStringField(msg, PayloadFields.Delivered, PayloadFields.Output));
@@ -499,13 +497,36 @@ public static class KanbanProjector
         // skips its Record - see there.
         if (!IsWaitingOnAPerson(state))
         {
-            state.Status = "completed";
-            state.LaneId = KanbanLanes.ForStatus("completed");
-            state.Color = KanbanLanes.ColourForStatus("completed");
+            Ended(state, "completed");
         }
 
         Record(state, msg, FirstStringField(msg, PayloadFields.Output));
         state.UpdatedAt = msg.OccurredAt.UtcDateTime;
+    }
+
+    /// <summary>
+    /// A run on the card ended well: `completed` or `handback`.
+    ///
+    /// <para>
+    /// A PLACED CARD KEEPS ITS LANE. Once the Manager or a person has moved a card, the card is a
+    /// sequence of steps somebody is driving - each plugin command, or each member in turn, is a
+    /// run on it - and one step ending is not the card being done. Moving it to Done on every step
+    /// had the Manager moving it back after each one and a board nobody could trust. So the status
+    /// and colour show the run's outcome and the lane stays where it was put; only a later move, or
+    /// the workflow's completion, puts it in Done. A card nobody placed was given whole to one
+    /// member, and its member's ending is the card's: it goes to Done as it always did.
+    /// </para>
+    ///
+    /// <para>
+    /// The give-ups are not routed through here: `blocked`, `needs-decision` and `failed` move a
+    /// placed card too, so a person is never hidden from.
+    /// </para>
+    /// </summary>
+    private static void Ended(CardState state, string status)
+    {
+        state.Status = status;
+        state.Color = KanbanLanes.ColourForStatus(status);
+        if (!state.Placed) state.LaneId = KanbanLanes.ForStatus(status);
     }
 
     /// <summary>
@@ -687,7 +708,11 @@ public static class KanbanProjector
             {
                 // A row naming a lane the board does not have is still said on the trail but moves nothing: the card stays in the lane
                 // its status gives it rather than vanishing from every column.
-                if (KanbanLanes.Find(laneId) is { } lane) state.LaneId = lane;
+                if (KanbanLanes.Find(laneId) is { } lane)
+                {
+                    state.LaneId = lane;
+                    state.Placed = true;
+                }
                 said.Add($"Moved to {laneId}");
             }
         }
@@ -1096,6 +1121,10 @@ public static class KanbanProjector
         public bool Paused { get; set; }
 
         public bool Created { get; set; }
+
+        /// <summary>Whether a `kanban move` has put this card in a lane. A run that ends well on a
+        /// placed card shows its outcome without moving it - see <c>Ended</c>.</summary>
+        public bool Placed { get; set; }
 
         /// <summary>The card's foreign tools mark, or null. See <see cref="KanbanCard.ForeignTools"/>.</summary>
         public string? ForeignTools { get; set; }
