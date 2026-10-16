@@ -125,7 +125,7 @@ The console is also copied into the size-limited host log under `/data/logs`. Th
 
 ## Agent CLI versions per start
 
-At every worker start, `scripts/ensure-agent-clis.sh` appends one line to `/data/cli-versions.jsonl`. The line records the start time and the version reported by `claude`, `codex`, `copilot`, `grok`, `agy`, `gh`, `git`, `node`, and the headless Chromium build. A CLI that was not installed is recorded as `null`. The file keeps the newest 200 starts and lives on the volume, so the history survives image rebuilds. Control also measures the versions on the workers whenever the workers change, and adds a `measured` line naming the worker only when a version differs from the last line.
+At every worker start, `scripts/ensure-agent-clis.sh` appends one line to `/data/cli-versions.jsonl`. The line records the start time and the version reported by `claude`, `codex`, `copilot`, `grok`, `gh`, `git`, `node`, and the headless Chromium build. A CLI that was not installed is recorded as `null`. The file keeps the newest 200 starts and lives on the volume, so the history survives image rebuilds. Control also measures the versions on the workers whenever the workers change, and adds a `measured` line naming the worker only when a version differs from the last line.
 
 To see it, open **Admin › Diagnostics › Agent CLI versions**. The newest start is first. A version in bold differs from the start before it. The same data is available from `GET /api/diagnostics/cli-versions` (people only). A host started outside the container has no such file and shows an empty history.
 

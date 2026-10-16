@@ -158,7 +158,7 @@ record_versions() {
   file="${CLI_VERSIONS_FILE:-/data/cli-versions.jsonl}"
   line="{\"at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"versions\":{"
   sep=""
-  for name in claude codex copilot grok agy gh git node; do
+  for name in claude codex copilot grok gh git node; do
     if command -v "$name" >/dev/null 2>&1; then
       # First line only, quotes and backslashes and control characters dropped, so the value is a
       # JSON string without an encoder.
