@@ -107,6 +107,37 @@ public sealed class HostDoctorTests : IDisposable
     }
 
     [Fact]
+    public async Task With_a_configured_backups_directory_the_doctor_reports_the_copies_there()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var configured = Path.Combine(_root, "elsewhere", "copies");
+        var settings = BackupSettings.From(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["Backups:Directory"] = configured })
+                .Build(),
+            _root);
+        await new SchemaMigrator(Database).ApplyAsync(SchemaModules.All, ct);
+        var there = settings.DailyBackupFor(Database);
+        await there.TakeAsync(new DateTimeOffset(2026, 9, 20, 3, 0, 0, TimeSpan.Zero), ct);
+        await there.TakeAsync(new DateTimeOffset(2026, 9, 21, 3, 0, 0, TimeSpan.Zero), ct);
+        // A newer copy left in the default folder must not be counted or reported as the newest.
+        await new DailyBackup(Database, BackupSettings.DefaultDirectory(_root))
+            .TakeAsync(new DateTimeOffset(2026, 9, 25, 3, 0, 0, TimeSpan.Zero), ct);
+
+        var output = new StringWriter();
+        var outcome = await OperatorCommands.TryRunAsync(["--doctor"], _root, output, ct, settings);
+
+        Assert.Equal(OperatorOutcome.Completed, outcome);
+        using var json = JsonDocument.Parse(output.ToString());
+        var backups = json.RootElement.GetProperty("backups");
+        Assert.Equal(configured, backups.GetProperty("directory").GetString());
+        Assert.Equal(2, backups.GetProperty("dailyCount").GetInt32());
+        Assert.Equal(
+            new DateTimeOffset(2026, 9, 21, 3, 0, 0, TimeSpan.Zero),
+            backups.GetProperty("newestDailyAt").GetDateTimeOffset());
+    }
+
+    [Fact]
     public async Task Every_command_in_the_probe_file_is_reported_and_a_missing_one_is_not_measured()
     {
         var report = await HostDoctor.ReportAsync(_root, TestContext.Current.CancellationToken);

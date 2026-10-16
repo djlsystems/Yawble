@@ -12,7 +12,8 @@ namespace Harness.Host;
 /// are pruned by every daily run, which only works when both are handed the same directory. Program.cs
 /// and the operator commands build their <see cref="SchemaMigrator"/> and <see cref="DailyBackup"/>
 /// from here rather than reading the keys a second time. <c>--backup</c>'s manual copy and the copy
-/// <c>--restore</c> takes first go to <see cref="Directory"/> too.
+/// <c>--restore</c> takes first go to <see cref="Directory"/> too, and <c>--doctor</c>'s backups
+/// section reports on it.
 /// </para>
 ///
 /// <para>Configuration, not tenant settings: no person acts on these.</para>
