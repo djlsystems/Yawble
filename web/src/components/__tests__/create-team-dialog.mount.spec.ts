@@ -292,22 +292,22 @@ describe('CreateTeamDialog validation', () => {
     expect(createTeam.mock.calls[0]![4]).toEqual(['local:widget']);
   });
 
-  // ONE WAY TO MAKE A LOCAL REPOSITORY: the box, which says what it does. A named Create beside it
-  // was a second way to do the same thing, and made one even if the team was then cancelled.
-  it('offers one way to make a local repository: the ticked box, which says what it makes', async () => {
+  // NO WAY TO MAKE A LOCAL REPOSITORY HERE: no named Create and no checkbox. The dialog says the
+  // team gets its own when its work first needs one.
+  it('offers no way to make a local repository, and says the team gets one on first need', async () => {
     const wrapper = await open();
     await showTab('Code');
 
     expect(() => field(wrapper, 'Create a local repository')).toThrow();
     expect([...document.body.querySelectorAll('button')].some((candidate) => candidate.textContent?.trim() === 'Create')).toBe(false);
-    expect(document.body.querySelectorAll('[data-local-repository-checkbox]')).toHaveLength(1);
-    expect(document.body.querySelector('[data-local-repository-hint]')?.getAttribute('aria-label')).toBe(
-      'With no repository listed, the team gets a git repository of its own, named after it and kept on this instance only. Untick it for a team with no code.',
+    expect(document.body.querySelectorAll('[data-local-repository-checkbox]')).toHaveLength(0);
+    expect(document.body.querySelector('[data-local-repository-on-need]')?.textContent?.trim()).toBe(
+      'With no repository listed, the team gets its own local repository when its work first needs one.',
     );
     expect(createLocalRepo).not.toHaveBeenCalled();
   });
 
-  it('puts the repositories on a Code tab after General, with the local repository ticked by default', async () => {
+  it('puts the repositories on a Code tab after General, with no local-repository checkbox', async () => {
     const wrapper = await open();
 
     expect([...document.body.querySelectorAll('.q-tab')].map((tab) => tab.textContent?.trim())).toEqual(['General', 'Code', 'Advanced']);
@@ -317,7 +317,8 @@ describe('CreateTeamDialog validation', () => {
     await showTab('Code');
 
     expect(field(wrapper, 'GitHub Repos')).toBeTruthy();
-    expect(document.body.querySelector('[data-local-repository-checkbox] [aria-checked="true"], [data-local-repository-checkbox][aria-checked="true"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-local-repository-checkbox]')).toBeNull();
+    expect(document.body.querySelector('[data-local-repository-on-need]')).not.toBeNull();
   });
 
   it('brings General forward when a taken name is answered while Code shows', async () => {

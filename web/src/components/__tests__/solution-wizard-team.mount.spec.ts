@@ -129,7 +129,7 @@ describe('Solution wizard - Team', () => {
     expect(bodyFind('[data-step="team"]')).not.toBeNull();
   });
 
-  it('ticks "Create a local repository" by default and sends it; unticked it sends false', async () => {
+  it('offers no "Create a local repository" checkbox and sends no localRepository', async () => {
     serve([
       (call) =>
         call.url === '/api/solutions/install'
@@ -139,11 +139,8 @@ describe('Solution wizard - Team', () => {
     ]);
     await open();
 
-    const box = bodyFind('[data-local-repository]')!;
-    expect(box.getAttribute('aria-checked')).toBe('true');
-    box.click();
-    await settle();
-    expect(box.getAttribute('aria-checked')).toBe('false');
+    expect(bodyFind('[data-local-repository]')).toBeNull();
+    expect(bodyText()).not.toContain('Create a local repository for this team');
 
     for (let index = 0; index < 3; index++) {
       button('Next').click();
@@ -152,7 +149,9 @@ describe('Solution wizard - Team', () => {
     button('Install').click();
     await settle();
 
-    expect(sent(calls, 'POST', '/api/solutions/install')[0]!.body).toMatchObject({ teamName: 'Job Tracker', localRepository: false });
+    const install = sent(calls, 'POST', '/api/solutions/install')[0]!.body as Record<string, unknown>;
+    expect(install).toMatchObject({ teamName: 'Job Tracker' });
+    expect(install).not.toHaveProperty('localRepository');
   });
 
   it('offers to update only a team on an older version; the same or a newer one is shown disabled, saying why', async () => {

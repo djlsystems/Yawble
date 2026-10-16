@@ -146,7 +146,6 @@ describe('Solution wizard - Your part', () => {
     expect(sent(calls, 'POST', '/api/solutions/install')[0]!.body).toEqual({
       folder: Folder,
       teamName: 'Job Tracker',
-      localRepository: true,
       // `limit` stayed at its default, so it is not sent.
       settings: { Scout: { region: 'Europe', sources: ['sample'] } },
       connections: { Scout: { mail: 'conn-1' } },

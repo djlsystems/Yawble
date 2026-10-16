@@ -591,9 +591,9 @@ export const createTeam = (
   upstreams?: Record<string, string>,
 
   /**
-   * With no `repos`, whether the team gets a local repository named after it (`local:<team id>`).
-   * The server's default is true; `false` makes none. Omitted when `repos` is non-empty, where the
-   * server ignores it.
+   * With no `repos`, `true` asks for a local repository named after it (`local:<team id>`) at once.
+   * Omitted or `false`, the team gets none until its work first needs one. The New Team dialog
+   * never sends it.
    */
   localRepository?: boolean,
 
@@ -939,7 +939,7 @@ export const dispatchBacklogItemToNewTeam = (
     root: string | null
     repos: string[]
 
-    /** As on `createTeam`: with no `repos`, false makes no local repository. Omitted otherwise. */
+    /** As on `createTeam`: with no `repos`, true asks for a local repository at once. Never sent by the dialog. */
     localRepository?: boolean | undefined
 
     /** As on `createTeam`: the answer to a refused repository check. Omitted when empty. */

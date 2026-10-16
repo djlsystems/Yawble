@@ -170,7 +170,6 @@ describe('Guided setup wizard - the five screens', () => {
     expect(install[0]!.body).toEqual({
       folder: Folder,
       teamName: 'Job Tracker',
-      localRepository: true,
       settings: { Scout: { region: 'Lisbon', limit: 10, folder: 'INBOX' } },
       connections: { Scout: { mail: 'conn-mail' } },
     });

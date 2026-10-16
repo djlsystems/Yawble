@@ -208,13 +208,6 @@ const newTeamSource = ref<{
 const canChooseNewTeam = computed(() => newTeamSettings.value !== null);
 
 /**
- * "Create a local repository for this team", as on New Team: with no repository listed the Host
- * makes `local:<team>` unless this is unticked, which sends `localRepository: false`. Ticked by
- * default and shown only while the new team's list is empty - with a URL listed the Host ignores it.
- */
-const newTeamLocalRepository = ref(true);
-
-/**
  * A REFUSED REPOSITORY CHECK on dispatch-to-new: a listed URL `git ls-remote` could not read, so no
  * team was made and nothing was dispatched. Shown with the same component New Team uses; picking the
  * offered choices sends the same dispatch again with `repoChoices`.
@@ -796,7 +789,6 @@ function openDispatch(row: BacklogItemView) {
   newTeamCarriesOn.value = '';
   dispatchConfirm.value = false;
   dispatchToNew.value = false;
-  newTeamLocalRepository.value = true;
   clearNewTeamRefusal();
   newTeamName.value = newTeamNameFor(row);
   void loadNewTeamSettings();
@@ -928,9 +920,6 @@ async function dispatchIntoNewTeam() {
     const result = await dispatchBacklogItemToNewTeam(
       dispatchTarget.value.id, newTeamName.value.trim(), {
         ...settings,
-
-        // Only with no repository listed: the Host ignores it otherwise.
-        localRepository: settings.repos.length === 0 ? newTeamLocalRepository.value : undefined,
 
         // The answer to a refused check, when there was one.
         repoChoices: newTeamRepoChoices.value,
@@ -1606,15 +1595,6 @@ function down(index: number) {
             <div v-if="newTeamReposProblem" class="os-body text-negative q-mt-sm">
               {{ newTeamReposProblem }} Fix it in Team settings.
             </div>
-            <q-checkbox
-              v-if="newTeamSettings !== null && newTeamSettings.repos.length === 0"
-              v-model="newTeamLocalRepository"
-              dense
-              class="q-mt-sm"
-              label="Create a local repository for this team"
-              :disable="busy"
-              data-local-repository-checkbox
-            />
             <!-- WHAT IT WILL ACTUALLY MAKE, named rather than implied. A screen about to create a
                  team has to say what kind. The source matters too: remembered from this browser,
                  chosen on this screen, or a visible fallback when this browser remembered nothing. -->
