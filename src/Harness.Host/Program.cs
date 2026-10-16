@@ -1526,6 +1526,7 @@ builder.Services.AddSingleton(sp => new WorkerPtyEngine(
     log: sp.GetRequiredService<ILogger<WorkerPtyEngine>>()));
 builder.Services.AddSingleton<IPtyEngine>(sp => sp.GetRequiredService<WorkerPtyEngine>());
 builder.Services.AddSingleton<SteeringWorkflows>();
+builder.Services.AddSingleton<ConciergeLaunches>();
 builder.Services.AddSingleton(sp => new ConciergeLaunchFactory(
     sp.GetRequiredService<TeamPaths>(),
     memberBaseAddress,
@@ -1542,80 +1543,19 @@ builder.Services.AddSingleton(sp =>
     // provider is already disposed, so a `sp.GetRequiredService` in there throws
     // ObjectDisposedException out of disposal and takes every live session's cleanup with it.
     var launcher = sp.GetRequiredService<ConciergeLaunchFactory>();
-    var terminals = sp.GetRequiredService<WorkerPtyEngine>();
-    var teams = sp.GetRequiredService<TeamRegistry>();
     var leaseActions = sp.GetRequiredService<LeaseActions>();
-
-    // The steering, judged at every launch: a workflow that is over, or whose team is gone or
-    // archived, is dropped rather than handed on.
-    var steering = sp.GetRequiredService<SteeringWorkflows>();
-
-    // The LOGIN, for the workspace's directory name. Resolved here rather than inside the
-    // factory for teamLabel's stated reason - the factory has no store of its own - and captured
-    // once for this whole block's stated reason: a GetRequiredService inside the delegate throws
-    // out of shutdown.
-    var accounts = sp.GetRequiredService<IUserStore>();
-
-    // For the agent the Concierge runs when nobody has chosen one - see ConciergeAgentDefault.
-    var catalog = sp.GetRequiredService<AgentCatalog>();
-    var probe = sp.GetRequiredService<AgentAuthProbe>();
-
-    // The output floor each session must pass, from the preset it launched with: recorded against
-    // the staged spec's environment, which the store's own `with` for the size keeps.
-    var floors = new System.Runtime.CompilerServices.ConditionalWeakTable<IReadOnlyDictionary<string, string>, OutputFloor>();
+    var launches = sp.GetRequiredService<ConciergeLaunches>();
 
     return new ConciergeSessionStore(
         sp.GetRequiredService<IPtyEngine>(),
-        // Console config belongs to the TEAM, not a global setting: an embedded console for one
-        // app needs its own CLI and key, and another app's needs something else. The PERSON comes
-        // from the key rather than from config, because it is whoever opened this one.
-        // The LABEL, resolved here rather than inside the factory - it has no TeamRegistry of
-        // its own, and this delegate already holds one. LabelFor falls back to the identifier for
-        // a team nobody has relabelled, so a never-relabelled team's console reads its identifier.
-        async (key, team, browser, ct) =>
-        {
-            // THE CONCIERGE, ASKED WITHOUT NAMING A TEAM. ConciergeFor(team) throws when the
-            // registry holds nothing, which is the empty instance GET /api/concierge/ws exists
-            // to serve. Concierge() is already the tenant-wide reader.
-            var settings = teams.Concierge();
-            var stored = string.IsNullOrWhiteSpace(team) ? null : teams.ExistingName(team);
-
-            // BY ID, because that is what the session key carries and an email can change under a
-            // live session - a rename is a case to survive rather than an edge.
-            //
-            // NOT FALLING BACK TO THE ID when the account cannot be read, which it never should
-            // be: the route has already refused anything but an authenticated User, and the mint
-            // below would fail its owner foreign key anyway. An empty login lands on the
-            // `user-<suffix>` fallback instead, and that choice is deliberate - a name is claimed
-            // by its marker for good, so falling back to the id would let one unreadable lookup
-            // pin this person to the id-named folder the migration exists to retire.
-            var account = await accounts.FindByIdAsync(key.User, ct);
-
-            var agent = await ConciergeAgentDefault.ResolveAsync(settings.Agent, catalog, probe, ct);
-
-            // Resolved here, made into a terminal by the worker that runs it.
-            var staged = terminals.Stage(await launcher.ResolveAsync(
-                stored ?? "",
-                stored is null ? "this instance" : teams.LabelFor(stored),
-                key.User,
-                account?.Email ?? string.Empty,
-                agent,
-                teams.EnvFor(stored ?? ""),
-                steeringCausation: null,
-                publicUrl: browser?.PublicUrl,
-                timeZone: browser?.TimeZone,
-                ct: ct,
-                steered: await steering.ReadAsync(key.User, ct)));
-            if (staged.Env is { } environment) floors.AddOrUpdate(environment, OutputFloor.Of(catalog.Definition(agent)));
-            return staged;
-        },
+        launches.LaunchAsync,
         // A Concierge's run is its session: a lease it took ends with it, through the same path
         // as a run's end, so a member the queue hands it to is un-paused and its card told.
         // And the images the person attached go with it, however it ended.
         sp.GetRequiredService<ConciergeAttachments>().RemovingOnEnd(
             leaseActions.Releasing((key, ct) => launcher.RevokeAsync(key.User, ct))),
         sp.GetRequiredService<TimeProvider>(),
-        spec => spec.Env is { } environment && floors.TryGetValue(environment, out var floor) ? floor : OutputFloor.PlatformDefault);
+        launches.FloorOf);
 });
 
 // HOW DEEP ONE CHAIN OF CAUSATION MAY GO before the platform stops it.

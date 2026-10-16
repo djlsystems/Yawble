@@ -90,6 +90,10 @@ public static class SurfaceEndpoints
                 var (judged, over) = await steering.JudgeAsync(workflow, ct);
                 if (judged is null)
                 {
+                    // Nor does anything keep naming it: a stored steering of this same workflow
+                    // goes, as it would at the next launch.
+                    steering.Refused(principal.Id, workflow, over!);
+
                     return Results.Conflict(new
                     {
                         error = $"{over}, so the Concierge cannot follow it. Follow an open workflow of an active team, or none.",

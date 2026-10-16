@@ -194,6 +194,46 @@ public sealed class SteeringOverTests(HostFixture host) : IClassFixture<HostFixt
         Assert.Single(lines.Lines);
     }
 
+    [Fact]
+    public async Task A_refusal_of_the_stored_workflow_drops_it_and_rewrites_the_running_workspaces_note()
+    {
+        using var client = await host.PersonAsync();
+        var user = await UserAsync();
+        var workflow = await SteeringBed.OpenWorkflowAsync(host, "Refused Now", Ct);
+
+        (await client.PutAsJsonAsync("/api/me/steering", new { correlationId = workflow.Seq }, Ct)).EnsureSuccessStatusCode();
+        var spec = await HostLaunchAsync(user);
+        var note = Path.Combine(spec.StartingFolder, "STEERING.md");
+        Assert.Contains($"looking at workflow {workflow.Seq}", await File.ReadAllTextAsync(note, Ct));
+
+        await EndAsync(client, workflow, "completed");
+        var refused = await client.PutAsJsonAsync("/api/me/steering", new { correlationId = workflow.Seq }, Ct);
+
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        Assert.False(File.Exists(SteeringFile.PathFor(host.DataRoot, user)));
+        Assert.Contains("No workflow is selected.", await File.ReadAllTextAsync(note, Ct));
+        var line = Assert.Single(host.SteeringLog, l => l.Contains($"dropped workflow {workflow.Seq}:", StringComparison.Ordinal));
+        Assert.Contains("is completed", line);
+    }
+
+    [Fact]
+    public async Task The_hosts_own_concierge_launch_drops_a_stored_workflow_that_is_over()
+    {
+        using var client = await host.PersonAsync();
+        var user = await UserAsync();
+        var workflow = await SteeringBed.OpenWorkflowAsync(host, "Host Launch", Ct);
+
+        (await client.PutAsJsonAsync("/api/me/steering", new { correlationId = workflow.Seq }, Ct)).EnsureSuccessStatusCode();
+        await EndAsync(client, workflow, "completed");
+
+        var spec = await HostLaunchAsync(user);
+
+        Assert.False(spec.Env!.ContainsKey("HARNESS_CAUSATION"));
+        Assert.Contains("No workflow is selected.", await File.ReadAllTextAsync(Path.Combine(spec.StartingFolder, "STEERING.md"), Ct));
+        Assert.False(File.Exists(SteeringFile.PathFor(host.DataRoot, user)));
+        Assert.Single(host.SteeringLog, l => l.Contains($"dropped workflow {workflow.Seq}:", StringComparison.Ordinal));
+    }
+
     private async Task EndAsync(HttpClient client, (string Team, string Label, long Seq) workflow, string how)
     {
         var log = host.Services.GetRequiredService<IMessageLog>();
@@ -236,6 +276,23 @@ public sealed class SteeringOverTests(HostFixture host) : IClassFixture<HostFixt
             team: "", teamLabel: "this instance", user: user, login: "person@example.test",
             agent, teamEnv: new Dictionary<string, string>(),
             ct: Ct, steered: await Steering(lines).ReadAsync(user, Ct));
+    }
+
+    /// <summary>The launch the Host hands its Concierge session store, as the Host built it.</summary>
+    private async Task<PtySpec> HostLaunchAsync(string user)
+    {
+        var agent = host.Services.GetRequiredService<AgentCatalog>().Definitions
+            .First(d => d.Mode == AgentMode.Interactive && !d.Hidden && d.Launch.LanguageModel).Name;
+        await host.Services.GetRequiredService<TeamRegistry>().SetInteractiveAsync(agent, Ct);
+
+        // The launch writes MCP files under HOME; keep them out of the real one.
+        Directory.CreateDirectory(_home);
+        using var restore = new EnvironmentScope([new("HOME", _home)]);
+
+        var spec = await host.Services.GetRequiredService<ConciergeLaunches>()
+            .LaunchAsync(new ConciergeSessionKey(user), "", null, Ct);
+        await host.Services.GetRequiredService<ConciergeLaunchFactory>().RevokeAsync(user, Ct);
+        return spec;
     }
 
     private SteeringWorkflows Steering(LineCapture lines) => new(

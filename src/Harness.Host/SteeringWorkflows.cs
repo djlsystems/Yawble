@@ -19,7 +19,8 @@ public sealed record SteeredWorkflow(long Workflow, string Team, string TeamLabe
 /// no longer exists (deleted, or deleted and made again under the same name: its root is at or below
 /// the new team's creation) or is archived, or that is not a workflow on the log at all, is treated as
 /// none: the stored file is removed, the person's existing Concierge workspace is told "No workflow is
-/// selected", and one log line says which workflow and why. Otherwise a workflow followed once stayed
+/// selected", and one log line says which workflow and why; the route's refusal of the stored workflow
+/// drops it the same way. Otherwise a workflow followed once stayed
 /// "what the person is looking at" for good, and a Concierge that trusted it joined new work to a
 /// finished workflow of another team.
 /// </para>
@@ -89,11 +90,32 @@ public sealed class SteeringWorkflows(
         var (open, over) = await JudgeAsync(workflow, ct);
         if (open is not null) return open;
 
+        Drop(userId, workflow, over!);
+        return null;
+    }
+
+    /// <summary>
+    /// A workflow the route refused: when the person's stored steering names that same workflow it
+    /// is dropped as a launch would drop it, so nothing keeps naming it. A stored steering naming
+    /// another workflow is left alone.
+    /// </summary>
+    public void Refused(string userId, long workflow, string over)
+    {
+        if (SteeringFile.Read(paths.DataRoot, userId) is { } text
+            && long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var stored)
+            && stored == workflow)
+        {
+            Drop(userId, workflow, over);
+        }
+    }
+
+    // The stored file removed, the existing workspace told "No workflow is selected", one line logged.
+    private void Drop(string userId, long workflow, string over)
+    {
         SteeringFile.Write(paths.DataRoot, userId, null);
         WriteNote(userId, null);
         logger.LogInformation(
             "Steering of {User} dropped workflow {Workflow}: {Reason}.", userId, workflow, over);
-        return null;
     }
 
     /// <summary>

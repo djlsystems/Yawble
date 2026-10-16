@@ -5,6 +5,7 @@ using Harness.Host.Auth;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Harness.Tests.Host;
 
@@ -23,6 +24,8 @@ public sealed class HostFixture : IAsyncLifetime
 
     private WebApplicationFactory<Program> _factory = null!;
 
+    private readonly SteeringLines _steering = new();
+
     public string Alpha { get; private set; } = "";
 
     public string Beta { get; private set; } = "";
@@ -31,6 +34,10 @@ public sealed class HostFixture : IAsyncLifetime
     public string AlphaContainerKey { get; private set; } = "";
 
     public IServiceProvider Services => _factory.Services;
+
+    /// <summary>Every line <see cref="SteeringWorkflows"/> has logged in this Host, Information
+    /// included, which the Warning floor would otherwise hide.</summary>
+    public IEnumerable<string> SteeringLog => _steering.Lines;
 
     /// <summary>The temp data root this Host runs over.</summary>
     public string DataRoot => _dataRoot;
@@ -42,7 +49,10 @@ public sealed class HostFixture : IAsyncLifetime
         _factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(host => host
                 .UseSetting("DataRoot", _dataRoot)
-                .UseSetting("Logging:LogLevel:Default", "Warning"));
+                .UseSetting("Logging:LogLevel:Default", "Warning")
+                .ConfigureLogging(logging => logging
+                    .AddProvider(_steering)
+                    .AddFilter<SteeringLines>(typeof(SteeringWorkflows).FullName, LogLevel.Information)));
 
         var registry = Services.GetRequiredService<TeamRegistry>();
         var agent = Services.GetRequiredService<AgentCatalog>().Definitions
@@ -93,5 +103,30 @@ public sealed class HostFixture : IAsyncLifetime
         try { Directory.Delete(_dataRoot, recursive: true); }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
+    }
+
+    private sealed class SteeringLines : ILoggerProvider
+    {
+        private readonly System.Collections.Concurrent.ConcurrentQueue<string> _lines = new();
+
+        public IEnumerable<string> Lines => _lines;
+
+        public ILogger CreateLogger(string categoryName) =>
+            categoryName == typeof(SteeringWorkflows).FullName
+                ? new Logger(this)
+                : Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
+
+        public void Dispose() { }
+
+        private sealed class Logger(SteeringLines owner) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(
+                LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+                owner._lines.Enqueue(formatter(state, exception));
+        }
     }
 }
