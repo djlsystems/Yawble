@@ -21,7 +21,7 @@ import { useCapacityStore } from '../../stores/capacity';
 import { useConsoleStore } from '../../stores/console';
 import type { CapacitySample, WorkerSample } from '../../api/types';
 import { memoryAt, pressure, sample, unmeasured } from '../../test/capacityFixtures';
-import { resetBody } from '../../test/mountQuasar';
+import { helpTexts, resetBody } from '../../test/mountQuasar';
 
 const At = '2026-10-01T10:00:00Z';
 
@@ -149,7 +149,7 @@ const section = (wrapper: Awaited<ReturnType<typeof mountPanel>>, name: string) 
   wrapper.get(`[data-test="capacity-${name}"]`).text();
 
 describe('the dropdown', () => {
-  it('shows memory, CPU, pressure and processes against their limits', async () => {
+  it('shows memory, CPU, pressure and tasks against their limits', async () => {
     const s = memoryAt(87);
     s.memory.pressure = pressure(14);
 
@@ -158,8 +158,34 @@ describe('the dropdown', () => {
     expect(section(wrapper, 'memory')).toContain('11.2 of 12.9 GB in use (87%)');
     expect(section(wrapper, 'memory')).toContain('work waited for memory 14% of the last 10 s');
     expect(section(wrapper, 'cpu')).toContain('1.0 of 4 CPUs in use (25%)');
-    expect(section(wrapper, 'pids')).toContain('312 of 4096 processes');
+    expect(section(wrapper, 'pids')).toContain('312 of 4096 tasks');
     expect(wrapper.findAll('svg.capacity-spark')).toHaveLength(2);
+  });
+
+  // pids.current and pids.max count every process AND every thread: one .NET or Node process is
+  // dozens of them, so the cgroup figure is tasks, and a run's own line counts both apart.
+  it('calls the cgroup figure tasks, says what it counts, and gives each run its processes and threads', async () => {
+    const s = sample({
+      topByMemory: [
+        { team: 'alpha', member: 'DeveloperA', processes: 3, threads: 41, residentBytes: 3.4e9, cpuPercent: 180 },
+        { team: 'beta', member: 'DeveloperB', processes: 1, threads: null, residentBytes: 2e8, cpuPercent: 20 },
+      ],
+    });
+
+    const wrapper = await mountPanel(s);
+    const pids = wrapper.get('[data-test="capacity-pids"]');
+
+    expect(pids.get('.text-subtitle2 > span').text()).toBe('Tasks (processes and threads)');
+    expect(pids.text()).toContain('312 of 4096 tasks');
+    expect(pids.text()).not.toMatch(/\bprocesses\b(?! and threads)/);
+    expect(helpTexts(pids.element)).toEqual([
+      "Every process and every thread in this worker's container, against the container's limit on tasks (pids.max). A run's own processes and threads are under Top runs by memory.",
+    ]);
+
+    const runs = section(wrapper, 'top-memory');
+    expect(runs).toContain('alpha DeveloperA: 3.4 GB, 3 processes, 41 threads');
+    // Threads the Host did not read are not measured, never 0.
+    expect(runs).toContain('beta DeveloperB: 200 MB, 1 process, threads not measured');
   });
 
   // The engine's total (the size screen, doctor) is another figure: this one is the container's
@@ -211,7 +237,7 @@ describe('the dropdown', () => {
 
     const wrapper = await mountPanel(s);
 
-    expect(section(wrapper, 'top-memory')).toContain('alpha DeveloperA: 3.4 GB, 14 processes');
+    expect(section(wrapper, 'top-memory')).toContain('alpha DeveloperA: 3.4 GB, 14 processes, threads not measured');
     expect(section(wrapper, 'top-cpu')).toContain('beta DeveloperB: 250% of a CPU');
 
     await wrapper.get('[data-test="capacity-top-cpu"] a').trigger('click');
@@ -223,7 +249,7 @@ describe('the dropdown', () => {
 
     for (const name of ['memory', 'cpu', 'pids']) {
       expect(section(wrapper, name), name).toContain('not measured');
-      expect(section(wrapper, name), name).not.toMatch(/\b0(\.0)? (GB|of|CPUs|processes)\b/);
+      expect(section(wrapper, name), name).not.toMatch(/\b0(\.0)? (GB|of|CPUs|processes|tasks)\b/);
     }
     expect(section(wrapper, 'memory')).toContain('Pressure: not measured');
     expect(section(wrapper, 'cpu')).toContain('Pressure: not measured');

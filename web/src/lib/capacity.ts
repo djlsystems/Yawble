@@ -1,4 +1,4 @@
-import type { CapacitySample, Pressure, WorkerSample } from '../api/types'
+import type { CapacitySample, Pressure, RunFigures, WorkerSample } from '../api/types'
 
 /**
  * WHAT THE ACTIVITY MONITOR SAYS ABOUT ONE CAPACITY SAMPLE, as plain functions so the gauge's colour,
@@ -93,14 +93,34 @@ export function cpuWords(sample: CapacitySample): string {
   return `${inUse} of ${limitCpus} CPUs in use (${percent(percentOfLimit)})`
 }
 
-/** "312 of 4096 processes", "312 processes, no limit", or "not measured". */
+/**
+ * WHAT THE CGROUP'S FIGURE COUNTS. `pids.current` and `pids.max` count tasks - every process and
+ * every thread - so one .NET or Node process alone is dozens of them. The heading, its tooltip and
+ * the figure all say so; a run's own processes and threads are {@link runCountsWords}.
+ */
+export const TasksHeading = 'Tasks (processes and threads)'
+export const TasksWhat =
+  "Every process and every thread in this worker's container, against the container's limit on tasks (pids.max). A run's own processes and threads are under Top runs by memory."
+
+/** "312 of 4096 tasks", "312 tasks, no limit", or "not measured". */
 export function pidsWords(sample: CapacitySample): string {
   const { current, limit, unlimited } = sample.pids
   if (current === null) return NotMeasured
-  if (unlimited) return `${current} processes, no limit`
-  if (limit === null) return `${current} processes, limit ${NotMeasured}`
+  if (unlimited) return `${current} tasks, no limit`
+  if (limit === null) return `${current} tasks, limit ${NotMeasured}`
 
-  return `${current} of ${limit} processes`
+  return `${current} of ${limit} tasks`
+}
+
+/** A run's own counts: "3 processes, 41 threads", with "threads not measured" when the Host did not read them. */
+export function runCountsWords(run: RunFigures): string {
+  const processes = `${run.processes} process${run.processes === 1 ? '' : 'es'}`
+  const threads =
+    run.threads === null || run.threads === undefined
+      ? `threads ${NotMeasured}`
+      : `${run.threads} thread${run.threads === 1 ? '' : 's'}`
+
+  return `${processes}, ${threads}`
 }
 
 /**

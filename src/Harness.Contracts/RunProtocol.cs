@@ -264,10 +264,12 @@ public sealed record UsageFigures(
 }
 
 /// <summary>
-/// One process group of a run as <c>/proc</c> read it: processes, resident memory, CPU ticks. A
-/// group the worker measures that no open run of its owns carries an empty nonce.
+/// One process group of a run as <c>/proc</c> read it: processes, resident memory, CPU ticks, and
+/// threads (null when not measured). A group the worker measures that no open run of its owns
+/// carries an empty nonce.
 /// </summary>
-public sealed record RunMeasured(RunId Run, int Group, int Processes, long ResidentBytes, long CpuTicks, DateTimeOffset At)
+public sealed record RunMeasured(
+    RunId Run, int Group, int Processes, long ResidentBytes, long CpuTicks, DateTimeOffset At, int? Threads = null)
     : RunEvent(Run);
 
 /// <summary>A process of the run was stopped by its memory limit while the agent carried on.</summary>

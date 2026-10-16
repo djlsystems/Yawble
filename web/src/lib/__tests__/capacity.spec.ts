@@ -85,7 +85,7 @@ describe('staleness', () => {
 })
 
 describe('every figure that is not measured reads "not measured", never 0', () => {
-  it('in memory, CPU, processes and pressure', () => {
+  it('in memory, CPU, tasks and pressure', () => {
     const s = unmeasured()
 
     expect(memoryWords(s)).toBe(NotMeasured)
@@ -106,7 +106,7 @@ describe('every figure that is not measured reads "not measured", never 0', () =
     const s = sample()
     s.pids = { current: 12, limit: null, unlimited: true }
 
-    expect(pidsWords(s)).toBe('12 processes, no limit')
+    expect(pidsWords(s)).toBe('12 tasks, no limit')
   })
 
   it('breaks a sparkline at a sample that is not measured rather than drawing 0', () => {
