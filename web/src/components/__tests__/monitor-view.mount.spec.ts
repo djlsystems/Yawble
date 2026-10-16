@@ -8,11 +8,12 @@ import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import type { Message } from '../../api/types'
 
-const { getMessages, listEvents } = vi.hoisted(() => ({ getMessages: vi.fn(), listEvents: vi.fn() }))
+const { getMessages, getFileChanges, listEvents } = vi.hoisted(() => ({ getMessages: vi.fn(), getFileChanges: vi.fn(), listEvents: vi.fn() }))
 
 vi.mock('../../api/client', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getMessages,
+  getFileChanges,
   listEvents,
 }))
 
@@ -56,6 +57,7 @@ beforeEach(() => {
   setActivePinia(createPinia())
   seq = 0
   listEvents.mockResolvedValue([])
+  getFileChanges.mockResolvedValue({ changes: [], next: null })
 })
 
 afterEach(() => {

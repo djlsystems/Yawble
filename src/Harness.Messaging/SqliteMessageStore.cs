@@ -2111,6 +2111,21 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             purged += removed;
         }
 
+        // THE FILE CHANGES GO WITH THE LOG ROWS THEY BELONG WITH: every one older than the oldest
+        // row kept, in the same transaction, so a replay never draws a file change without the run
+        // it was part of. Nothing else prunes them. The oldest row is the lowest seq: rows are
+        // appended in time order.
+        await using (var prune = connection.CreateCommand())
+        {
+            prune.Transaction = transaction;
+            prune.CommandText = "SELECT occurred_at FROM messages ORDER BY seq LIMIT 1";
+            var oldest = await prune.ExecuteScalarAsync(ct) is string stamp ? MessageRows.ReadStamp(stamp) : (DateTimeOffset?)null;
+
+            prune.CommandText = oldest is null ? "DELETE FROM file_changes" : "DELETE FROM file_changes WHERE at < $oldest";
+            if (oldest is { } at) prune.Parameters.AddWithValue("$oldest", MessageSchema.FileChangeInstant(at));
+            await prune.ExecuteNonQueryAsync(ct);
+        }
+
         await transaction.CommitAsync(ct);
 
         return new PurgeReport(purged, seqs.Count - purged);

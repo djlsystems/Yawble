@@ -3,6 +3,8 @@ using System.Diagnostics;
 using System.Globalization;
 using Harness.Containers;
 using Harness.Contracts;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Harness.Host;
 
@@ -236,7 +238,8 @@ public static class WorkspaceFileChanges
 }
 
 /// <summary>
-/// READS A RUNNING MEMBER'S OWN WORKTREES WHILE A PERSON WATCHES, and pushes what moved.
+/// READS A RUNNING MEMBER'S OWN WORKTREES DURING EVERY RUN, records what moved, and pushes it to
+/// the people watching.
 ///
 /// <para>
 /// Only that member's per-card trees (<see cref="Worktrees.MemberOf"/>), never the main clone or
@@ -246,18 +249,25 @@ public static class WorkspaceFileChanges
 /// </para>
 ///
 /// <para>
-/// THE FIRST READ OF A RUN IS THE BASELINE, so what was already dirty is not news. While nobody
-/// watches nothing is read and every baseline is dropped, so the next person to watch starts from
-/// a fresh one. A run that ends gets one last read, which catches a final commit.
+/// THE FIRST READ OF A RUN IS THE BASELINE, so what was already dirty is not news. Every running
+/// member is read whether or not anybody watches; the push goes only to the people watching. A run
+/// that ends gets one last read, which catches a final commit.
 /// </para>
 ///
 /// <para>
-/// IT WRITES NOTHING: no log row, no ledger entry, no tenant event. A failed read is skipped and
-/// the next one compares against the last good read.
+/// EACH CHANGE A READ FINDS IS RECORDED (<see cref="WorkspaceFileChangeStore"/>) with the run's
+/// workflow, for the Monitor's replay - the push's own shape, paths only. No log row, ledger entry
+/// or tenant event. A failed read or a record that cannot be written is logged and skipped, never a
+/// run's failure; the next read compares against the last good one.
 /// </para>
 /// </summary>
 public sealed class WorkspaceFileWatch(
-    GitRunner git, TeamPaths paths, Func<WorkspaceChange, CancellationToken, Task> send, TimeProvider? clock = null)
+    GitRunner git,
+    TeamPaths paths,
+    Func<WorkspaceChange, CancellationToken, Task> send,
+    TimeProvider? clock = null,
+    WorkspaceFileChangeStore? record = null,
+    ILogger<WorkspaceFileWatch>? logger = null)
 {
     /// <summary>The hub group of people watching. Never a team group: a member's key can join those.</summary>
     public const string Group = "workspace-file-watch";
@@ -268,44 +278,25 @@ public sealed class WorkspaceFileWatch(
     private readonly Dictionary<string, RunState> _runs = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
-    private long _watchEpoch;
-    private long _seenEpoch;
+    private readonly ILogger _logger = logger ?? NullLogger<WorkspaceFileWatch>.Instance;
 
     public bool Watched => !_watchers.IsEmpty;
 
-    /// <summary>A person's connection started watching. Onto an empty group, every baseline is
-    /// dropped so the reads start fresh.</summary>
-    public void Join(string connectionId)
-    {
-        if (_watchers.IsEmpty) Interlocked.Increment(ref _watchEpoch);
-        _watchers[connectionId] = 0;
-    }
+    /// <summary>A person's connection started watching: the next change found is pushed to it too.</summary>
+    public void Join(string connectionId) => _watchers[connectionId] = 0;
 
     public void Leave(string connectionId) => _watchers.TryRemove(connectionId, out _);
 
     /// <summary>
     /// One pass. A run that ended (or became another run) gets its last read; a run not yet known
     /// gets its baseline; with <paramref name="readAll"/>, every other known run is read. Returns how
-    /// many pushes were sent.
+    /// many changes were found: each is recorded, and pushed when somebody watches.
     /// </summary>
     public async Task<int> PassAsync(IReadOnlyCollection<WorkspaceRun> running, bool readAll, CancellationToken ct)
     {
         await _gate.WaitAsync(ct);
         try
         {
-            if (!Watched)
-            {
-                _runs.Clear();
-                return 0;
-            }
-
-            var epoch = Interlocked.Read(ref _watchEpoch);
-            if (epoch != _seenEpoch)
-            {
-                _runs.Clear();
-                _seenEpoch = epoch;
-            }
-
             var current = new Dictionary<string, WorkspaceRun>(StringComparer.OrdinalIgnoreCase);
             foreach (var run in running) current[KeyOf(run.Team, run.Member)] = run;
 
@@ -315,7 +306,7 @@ public sealed class WorkspaceFileWatch(
             {
                 if (current.TryGetValue(key, out var run) && run.Correlation == state.Run.Correlation) continue;
 
-                sent += await ReadAsync(state, ct);
+                sent += await SkippingFailureAsync(state.Run, () => ReadAsync(state, ct));
                 _runs.Remove(key);
             }
 
@@ -323,12 +314,12 @@ public sealed class WorkspaceFileWatch(
             {
                 if (_runs.TryGetValue(key, out var state))
                 {
-                    if (readAll) sent += await ReadAsync(state, ct);
+                    if (readAll) sent += await SkippingFailureAsync(state.Run, () => ReadAsync(state, ct));
                     continue;
                 }
 
                 state = new RunState(run);
-                await BaselineAsync(state, ct);
+                await SkippingFailureAsync(state.Run, async () => { await BaselineAsync(state, ct); return 0; });
                 _runs[key] = state;
             }
 
@@ -340,11 +331,26 @@ public sealed class WorkspaceFileWatch(
         }
     }
 
+    /// <summary>One member's read: a failure is logged and skipped, so one member's tree never
+    /// costs another's read, and nothing reaches the run.</summary>
+    private async Task<int> SkippingFailureAsync(WorkspaceRun run, Func<Task<int>> read)
+    {
+        try
+        {
+            return await read();
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _logger.LogWarning(exception, "A read of {Team}/{Member}'s worktrees failed and was skipped", run.Team, run.Member);
+            return 0;
+        }
+    }
+
     private async Task BaselineAsync(RunState state, CancellationToken ct)
     {
         foreach (var (repo, path) in TreesOf(state.Run))
         {
-            if (await ReadTreeAsync(path, ct) is not { } read) continue;
+            if (await ReadTreeAsync(state, repo, path, ct) is not { } read) continue;
 
             state.Trees[path] = new TreeState(repo, read.Status, read.Head, await ProjectFoldersAsync(path, ct));
         }
@@ -368,7 +374,7 @@ public sealed class WorkspaceFileWatch(
                 state.Trees[path] = tree;
             }
 
-            if (await ReadTreeAsync(path, ct) is not { } read) continue;
+            if (await ReadTreeAsync(state, repo, path, ct) is not { } read) continue;
 
             var commits = new List<(string Sha, string Subject, List<(string Path, string Action)> Files)>();
             var commitsLeftOut = 0;
@@ -395,7 +401,8 @@ public sealed class WorkspaceFileWatch(
 
             if (Shape(state.Run, tree, changes, commits, commitsLeftOut) is { } change)
             {
-                await send(change, ct);
+                await RecordAsync(change, state.Run.Correlation, ct);
+                if (Watched) await send(change, ct);
                 sent++;
             }
         }
@@ -403,6 +410,23 @@ public sealed class WorkspaceFileWatch(
         foreach (var gone in state.Trees.Keys.Where(path => !present.Contains(path)).ToList()) state.Trees.Remove(gone);
 
         return sent;
+    }
+
+    /// <summary>Records a change for the replay. One that cannot be written is logged and skipped:
+    /// the run it describes is never failed by it, and the push still goes.</summary>
+    private async Task RecordAsync(WorkspaceChange change, long? correlation, CancellationToken ct)
+    {
+        if (record is null) return;
+
+        try
+        {
+            await record.AppendAsync(change, correlation, ct);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                exception, "A file change of {Team}/{Member} in {Repo} was not recorded", change.Team, change.Member, change.Repo);
+        }
     }
 
     /// <summary>The caps: at most <see cref="WorkspaceFileChanges.MaxFiles"/> files across the
@@ -485,10 +509,23 @@ public sealed class WorkspaceFileWatch(
         return (commits, leftOut);
     }
 
-    private async Task<TreeRead?> ReadTreeAsync(string path, CancellationToken ct)
+    /// <summary>A tree's status and HEAD, or null when git cannot read it. That is logged once per
+    /// tree per run, so a broken tree does not flood the log, and the tree is skipped while it fails.</summary>
+    private async Task<TreeRead?> ReadTreeAsync(RunState state, string repo, string path, CancellationToken ct)
     {
         var status = await git.RunGitAsync(path, ["status", "--porcelain=v2", "-z", "--untracked-files=all"], ct);
-        if (status.ExitCode != 0) return null;
+        if (status.ExitCode != 0)
+        {
+            if (state.Unreadable.Add(path))
+            {
+                var said = GitOutputRedaction.Redact(Lines(status.Stderr).FirstOrDefault()) ?? "";
+                _logger.LogWarning(
+                    "A read of {Team}/{Member}'s worktree in {Repo} was skipped: git exited {ExitCode}: {Stderr}. It is skipped while it fails and not logged again this run",
+                    state.Run.Team, state.Run.Member, repo, status.ExitCode, said);
+            }
+
+            return null;
+        }
 
         var head = await git.RunGitAsync(path, ["rev-parse", "--verify", "-q", "HEAD"], ct);
 
@@ -541,6 +578,9 @@ public sealed class WorkspaceFileWatch(
         public WorkspaceRun Run { get; } = run;
 
         public Dictionary<string, TreeState> Trees { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>The trees whose failed read this run has already logged.</summary>
+        public HashSet<string> Unreadable { get; } = new(StringComparer.Ordinal);
     }
 
     private sealed class TreeState(string repo, Dictionary<string, string> status, string? head, HashSet<string> projectFolders)
@@ -557,11 +597,12 @@ public sealed class WorkspaceFileWatch(
 
 /// <summary>
 /// Drives <see cref="WorkspaceFileWatch"/>: every tick it looks for a run starting or ending, and
-/// every <see cref="WorkspaceFileWatchTiming.Read"/> it reads every running member. While nobody
-/// watches it asks for nothing.
+/// every <see cref="WorkspaceFileWatchTiming.Read"/> it reads every running member, watched or not.
+/// Its own loop, off every run's path: a run never waits for a read.
 /// </summary>
 internal sealed class WorkspaceFileWatchService(
-    WorkspaceFileWatch watch, IWorkspaceRuns runs, WorkspaceFileWatchTiming timing) : BackgroundService
+    WorkspaceFileWatch watch, IWorkspaceRuns runs, WorkspaceFileWatchTiming timing,
+    ILogger<WorkspaceFileWatchService>? logger = null) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -576,16 +617,17 @@ internal sealed class WorkspaceFileWatchService(
                 var due = sinceRead.Elapsed >= timing.Read;
                 if (due) sinceRead.Restart();
 
-                await watch.PassAsync(watch.Watched ? runs.Running() : [], due, stoppingToken);
+                await watch.PassAsync(runs.Running(), due, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 return;
             }
-            catch (Exception)
+            catch (Exception exception)
             {
-                // A pass that failed costs that pass's push; the next one compares against the last
-                // good read. Nothing is written about it, by design: this feature writes nothing.
+                // A pass that failed costs that pass's changes; the next one compares against the
+                // last good read. Logged, never a run's failure.
+                logger?.LogWarning(exception, "A read of the running members' worktrees failed and was skipped");
             }
         }
     }

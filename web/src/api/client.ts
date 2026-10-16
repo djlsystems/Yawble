@@ -1,4 +1,5 @@
 import { diagnosticsQuery } from '../lib/diagnostics'
+import type { FileChangesPage } from '../lib/monitor/workspace'
 import type { BuildInfo } from '../lib/buildInfo'
 import type { UpdateStatus } from '../lib/releaseUpdates'
 import { normaliseTenantSettings, rejectedField } from '../lib/tenantSettings'
@@ -335,6 +336,16 @@ export async function* readLines(response: Response): AsyncGenerator<string> {
 export const getMessages = (after: number, take?: number) =>
   json<Message[]>(
     `/api/messages?after=${after}` + (take ? `&take=${take}` : ''),
+  )
+
+/**
+ * The file changes members' runs made, recorded during every run, for the Monitor's replay: the
+ * period `from`..`to` (instants, `to` inclusive), oldest first, a page of `take` after the id
+ * `after`. `next` is the next page's `after`, null on the last. People only.
+ */
+export const getFileChanges = (period: { from: string; to: string }, after = 0, take = 500) =>
+  json<FileChangesPage>(
+    `/api/file-changes?from=${encodeURIComponent(period.from)}&to=${encodeURIComponent(period.to)}&after=${after}&take=${take}`,
   )
 
 /**

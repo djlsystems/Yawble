@@ -377,6 +377,9 @@ builder.Services.AddSingleton<PendingDeliveriesAtStart>();
 // THE WAKES MEMBERS ASKED FOR (`wake_me`), stored so a restart keeps them. See `WakeMe`.
 builder.Services.AddSingleton<IWakeStore>(new SqliteWakeStore(database));
 
+// WHAT RUNNING MEMBERS' WORKTREES DID, recorded for the Monitor's replay. See WorkspaceFileChangeStore.
+builder.Services.AddSingleton(new WorkspaceFileChangeStore(database));
+
 // Order carries no schema obligation - SchemaMigrator above has already applied every step
 // and set journal_mode on the file. These are readers and writers over a database that exists.
 var users = new SqliteUserStore(database);
@@ -1411,7 +1414,8 @@ builder.Services.AddSingleton(sp => new TeamDeletion(
     sp.GetRequiredService<SiteService>(),
     sp.GetRequiredService<TeamSkills>(),
     sp.GetRequiredService<ITeamSolutionStore>(),
-    wakes: sp.GetRequiredService<IWakeStore>()));
+    wakes: sp.GetRequiredService<IWakeStore>(),
+    fileChanges: sp.GetRequiredService<WorkspaceFileChangeStore>()));
 
 // By hand for the reason TeamDeletion is: every dependency here is one a reset would silently skip
 // if it were optional. A TeamReset missing its pending-delivery store cannot tell a member that has
@@ -1425,7 +1429,8 @@ builder.Services.AddSingleton(sp => new TeamReset(
     sp.GetRequiredService<IMessageLog>(),
     sp.GetRequiredService<TeamPaths>(),
     sp.GetRequiredService<FolderRemoval>(),
-    sp.GetRequiredService<RepositoryReset>()));
+    sp.GetRequiredService<RepositoryReset>(),
+    sp.GetRequiredService<WorkspaceFileChangeStore>()));
 
 // Reset repositories: trees through the one WorktreeRemoval, git through the one GitRunner (as the
 // agent, and into a local origin as the Host), kept branches named on the log.
@@ -1780,15 +1785,17 @@ builder.Services.AddSingleton<LoginThrottle>();
 builder.Services.AddHostedService<PumpService>();
 builder.Services.AddHostedService<KanbanChangePush>();
 
-// THE MONITOR'S LIVE VIEW OF A RUNNING MEMBER'S FILES: read only while a person watches, pushed
-// only to the people watching. See WorkspaceFileWatch.
+// THE MONITOR'S VIEW OF A RUNNING MEMBER'S FILES: read during every run, recorded for the replay,
+// pushed only to the people watching. See WorkspaceFileWatch.
 builder.Services.AddSingleton<WorkspaceFileWatchTiming>();
 builder.Services.AddSingleton<IWorkspaceRuns>(sp => new HostWorkspaceRuns(sp.GetRequiredService<ContainerHost>()));
 builder.Services.AddSingleton(sp => new WorkspaceFileWatch(
     sp.GetRequiredService<GitRunner>(),
     sp.GetRequiredService<TeamPaths>(),
     (change, ct) => sp.GetRequiredService<IHubContext<ContainerHub>>()
-        .Clients.Group(WorkspaceFileWatch.Group).SendAsync(WorkspaceFileWatch.Message, change, ct)));
+        .Clients.Group(WorkspaceFileWatch.Group).SendAsync(WorkspaceFileWatch.Message, change, ct),
+    record: sp.GetRequiredService<WorkspaceFileChangeStore>(),
+    logger: sp.GetRequiredService<ILogger<WorkspaceFileWatch>>()));
 builder.Services.AddHostedService<WorkspaceFileWatchService>();
 
 // THE PER-RUN FOREIGN TOOLS CHECK, called by every member at the end of its run (`onTerminal`
@@ -2442,6 +2449,7 @@ LedgerEndpoints.Map(app);
 TeamActivity.Map(app);
 TeamTokenRuns.Map(app);
 TeamActivityFrom.Map(app);
+WorkspaceFileChangeEndpoints.Map(app);
 OutcomeEndpoints.Map(app);
 HealthEndpoints.Map(app, database, dataRoot);
 VersionEndpoints.Map(app);
@@ -3647,6 +3655,9 @@ app.MapDelete("/api/teams/{team}", async (
             // The agent CLIs' session folders for its workspaces, and any still there.
             sessionFolders = removed.SessionFolders,
             sessionFoldersRemaining = removed.SessionFoldersRemaining,
+
+            // Its recorded file changes, which went with it.
+            fileChanges = removed.FileChanges,
         },
         ct);
 
@@ -3695,7 +3706,9 @@ app.MapDelete("/api/teams/{team}", async (
         + "`sessionFoldersRemaining` and `failures`. Nothing else in the home, and nothing of a live team's.\n\n"
         + "**The message log is not touched.** It is append-only, and a team's messages are the "
         + "history of what happened rather than a property of the team; deleting them would take "
-        + "other teams' causally-linked messages with them.\n\n"
+        + "other teams' causally-linked messages with them. Its recorded file changes (the Monitor's "
+        + "replay of its worktrees) are removed, counted in `fileChanges` on the response and the "
+        + "`team.deleted` row.\n\n"
         + "**A `team.deleting` row is written to the tenant log BEFORE anything is removed** (after the "
         + "confirmation refusal), naming the containers and root. When it cannot be written the delete "
         + "answers 500 with a sentence saying so and removes nothing. The `team.deleted` row after the "
@@ -3791,6 +3804,9 @@ app.MapPost("/api/teams/{team}/reset", async (
             floored = done.Floored,
             purged = done.Purged,
             retained = done.Retained,
+
+            // The ticked members' recorded file changes Delete memory removed.
+            fileChanges = done.FileChanges,
             cleared = done.Cleared,
             failures = done.Failures,
             remaining = done.Remaining,

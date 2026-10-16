@@ -6,6 +6,7 @@ using Harness.Containers;
 using Harness.Contracts;
 using Harness.Host;
 using Harness.Host.Auth;
+using Harness.Messaging;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.Http.Connections.Client;
@@ -18,12 +19,12 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Harness.Tests;
 
 /// <summary>
-/// WHAT A RUNNING MEMBER'S WORKTREES DID, PUSHED TO THE PEOPLE WATCHING. Each test builds a real
-/// clone and a real per-card worktree under a team's repos folder, changes files in it, and reads
-/// what <see cref="WorkspaceFileWatch"/> reports: one change per path that appeared, changed or
-/// left the status, each new commit with its files, the caps, the project rule, and nothing read
-/// while nobody watches or after the run's last read. The last tests listen on the real hub, as the
-/// Monitor does.
+/// WHAT A RUNNING MEMBER'S WORKTREES DID, RECORDED DURING EVERY RUN AND PUSHED TO THE PEOPLE
+/// WATCHING. Each test builds a real clone and a real per-card worktree under a team's repos folder,
+/// changes files in it, and reads what <see cref="WorkspaceFileWatch"/> reports: one change per path
+/// that appeared, changed or left the status, each new commit with its files, the caps, the project
+/// rule, every change recorded with nobody watching and pushed only to a watcher, paths only, and
+/// nothing read after the run's last read. The last tests listen on the real hub, as the Monitor does.
 /// </summary>
 public sealed class WorkspaceFileChangeTests : IAsyncDisposable
 {
@@ -38,6 +39,7 @@ public sealed class WorkspaceFileChangeTests : IAsyncDisposable
     private readonly List<WorkspaceChange> _pushed = [];
     private readonly GitRunner _git = new();
     private readonly WorkspaceFileWatch _watch;
+    private readonly WorkspaceFileChangeStore _record;
     private readonly string _clone;
     private readonly string _tree;
     private WebApplicationFactory<Program>? _factory;
@@ -51,12 +53,19 @@ public sealed class WorkspaceFileChangeTests : IAsyncDisposable
         paths.Register(Team, null);
         (_clone, _tree) = MakeRepository(paths.ReposFor(Team), Member);
 
-        _watch = new WorkspaceFileWatch(_git, paths, (change, _) =>
+        var database = Path.Combine(_root, "messages.db");
+        new SchemaMigrator(database).ApplyAsync(SchemaModules.All).GetAwaiter().GetResult();
+        _record = new WorkspaceFileChangeStore(database);
+
+        _watch = Watch(paths, _record);
+    }
+
+    private WorkspaceFileWatch Watch(TeamPaths paths, WorkspaceFileChangeStore record) =>
+        new(_git, paths, (change, _) =>
         {
             _pushed.Add(change);
             return Task.CompletedTask;
-        });
-    }
+        }, record: record);
 
     [Fact]
     public async Task A_created_changed_renamed_and_deleted_file_each_make_one_change_with_its_action_and_project()
@@ -233,28 +242,99 @@ public sealed class WorkspaceFileChangeTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task Nothing_is_read_while_nobody_watches_and_a_join_starts_from_a_fresh_baseline()
+    public async Task A_run_nobody_watches_records_each_path_action_and_commit_with_no_contents_and_pushes_nothing()
     {
-        var before = _git.Activity;
+        await _watch.PassAsync([Run], readAll: false, Ct);
+        Assert.False(_watch.Watched);
+
+        Write("src/App/New.cs", Content);
+        Write("README.md", Content);
+        File.Delete(Path.Combine(_tree, "src/App/Program.cs"));
         await _watch.PassAsync([Run], readAll: true, Ct);
-        Write("unwatched.txt");
+
+        Commit("Record the commit", "committed.txt");
+        var sha = Git(_tree, "rev-parse", "HEAD").Trim();
         await _watch.PassAsync([Run], readAll: true, Ct);
-        Assert.Equal(before, _git.Activity);
+
         Assert.Empty(_pushed);
 
-        await StartAsync();
+        var rows = await RecordedAsync();
+        Assert.Equal(2, rows.Count);
+        Assert.All(rows, row => Assert.Equal((Team, Member, Repo, 1L), (row.Team, row.Member, row.Repo, row.Correlation!.Value)));
+
+        Assert.Equal(
+            [
+                new WorkspaceFile("README.md", Repo, WorkspaceFileChanges.Changed),
+                new WorkspaceFile("src/App/New.cs", "App", WorkspaceFileChanges.Created),
+                new WorkspaceFile("src/App/Program.cs", "App", WorkspaceFileChanges.Deleted),
+            ],
+            rows[0].Files);
+        Assert.Empty(rows[0].Commits);
+
+        Assert.Empty(rows[1].Files);
+        var commit = Assert.Single(rows[1].Commits);
+        Assert.Equal(sha[..7], commit.Sha);
+        Assert.Equal("Record the commit", commit.Subject);
+        Assert.Equal(
+            [
+                new WorkspaceFile("README.md", Repo, WorkspaceFileChanges.Changed),
+                new WorkspaceFile("committed.txt", Repo, WorkspaceFileChanges.Created),
+                new WorkspaceFile("src/App/New.cs", "App", WorkspaceFileChanges.Created),
+                new WorkspaceFile("src/App/Program.cs", "App", WorkspaceFileChanges.Deleted),
+            ],
+            commit.Files);
+
+        // No row holds a file's contents or a diff: not the rows as read, and not the database's
+        // files on disk.
+        var json = JsonSerializer.Serialize(rows);
+        Assert.DoesNotContain(Content, json);
+        Assert.DoesNotContain("@@", json);
+        Assert.DoesNotContain("+++", json);
+        foreach (var file in Directory.EnumerateFiles(_root, "messages.db*"))
+        {
+            using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream);
+            Assert.DoesNotContain(Content, await reader.ReadToEndAsync(Ct));
+        }
+    }
+
+    [Fact]
+    public async Task A_person_who_joins_mid_run_is_pushed_what_is_found_next_and_it_is_recorded_too()
+    {
+        await _watch.PassAsync([Run], readAll: false, Ct);
+        Write("unwatched.txt");
+        await _watch.PassAsync([Run], readAll: true, Ct);
+        Assert.Empty(_pushed);
+
+        _watch.Join("person");
         Write("watched.txt");
-        Assert.Single(await ReadAsync());
+        var pushed = Assert.Single(await ReadAsync());
+        Assert.Equal([new WorkspaceFile("watched.txt", Repo, WorkspaceFileChanges.Created)], pushed.Files);
 
         _watch.Leave("person");
-        await _watch.PassAsync([Run], readAll: true, Ct);
         Write("while.away.txt");
-        before = _git.Activity;
-        await _watch.PassAsync([Run], readAll: true, Ct);
-        Assert.Equal(before, _git.Activity);
-
-        await StartAsync();
         Assert.Empty(await ReadAsync());
+
+        Assert.Equal(
+            ["unwatched.txt", "watched.txt", "while.away.txt"],
+            (await RecordedAsync()).SelectMany(row => row.Files).Select(file => file.Path));
+    }
+
+    [Fact]
+    public async Task A_change_that_cannot_be_recorded_is_skipped_and_the_push_still_goes()
+    {
+        // A database with no file_changes table: every record throws.
+        var broken = new WorkspaceFileChangeStore(Path.Combine(_root, "unmigrated.db"));
+        var paths = new TeamPaths(Path.Combine(_root, "data"));
+        paths.Register(Team, null);
+        var watch = Watch(paths, broken);
+
+        watch.Join("person");
+        await watch.PassAsync([Run], readAll: false, Ct);
+        Write("still.pushed.txt");
+
+        Assert.Equal(1, await watch.PassAsync([Run], readAll: true, Ct));
+        Assert.Equal("still.pushed.txt", Assert.Single(Assert.Single(_pushed).Files).Path);
     }
 
     [Fact]
@@ -302,7 +382,7 @@ public sealed class WorkspaceFileChangeTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task The_push_reaches_a_watching_persons_window_on_the_real_hub_and_writes_no_log_ledger_or_tenant_row()
+    public async Task The_push_reaches_a_watching_persons_window_on_the_real_hub_and_is_recorded_with_no_log_ledger_or_tenant_row()
     {
         var runs = new Runs();
         var factory = Factory(runs);
@@ -345,6 +425,12 @@ public sealed class WorkspaceFileChangeTests : IAsyncDisposable
 
         Assert.Equal(seq, await log.HighestSeqAsync(Ct));
         Assert.Equal(tenantRows, (await tenant.ReadAsync(ct: Ct)).Total);
+
+        var recorded = Assert.Single(await factory.Services.GetRequiredService<WorkspaceFileChangeStore>().ReadAsync(
+            DateTimeOffset.MinValue, DateTimeOffset.MaxValue, 0, 10,
+            new Dictionary<string, DateTimeOffset> { [teamId] = DateTimeOffset.MinValue }, Ct));
+        Assert.Equal((Member, Repo, 7L), (recorded.Member, recorded.Repo, recorded.Correlation!.Value));
+        Assert.Equal("src/App/Seen.cs", Assert.Single(recorded.Files).Path);
     }
 
     [Fact]
@@ -367,6 +453,11 @@ public sealed class WorkspaceFileChangeTests : IAsyncDisposable
         _watch.Join("person");
         await _watch.PassAsync([Run], readAll: false, Ct);
     }
+
+    private async Task<IReadOnlyList<RecordedWorkspaceChange>> RecordedAsync() =>
+        await _record.ReadAsync(
+            DateTimeOffset.MinValue, DateTimeOffset.MaxValue, 0, 100,
+            new Dictionary<string, DateTimeOffset> { [Team] = DateTimeOffset.MinValue }, Ct);
 
     private async Task<List<WorkspaceChange>> ReadAsync()
     {

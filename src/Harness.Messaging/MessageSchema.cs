@@ -96,5 +96,33 @@ public static class MessageSchema
             CREATE INDEX ix_wakes_member ON wakes(team, member);
             CREATE INDEX ix_wakes_workflow ON wakes(workflow);
             """),
+
+        // WHAT A RUNNING MEMBER'S WORKTREES DID, one row per read that found something, for the
+        // Monitor's replay. Paths, actions, shas and subjects only: never a file's contents or a
+        // diff. `at` is round-trip UTC text of one width, so ordering by it is ordering by time.
+        // Pruned with the log (IMessageLog.DeleteAsync), removed with the team and by Delete memory.
+        new MigrationStep(
+            "messages-004",
+            """
+            CREATE TABLE file_changes (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                team         TEXT    NOT NULL COLLATE NOCASE,
+                member       TEXT    NOT NULL COLLATE NOCASE,
+                repo         TEXT    NOT NULL,
+                at           TEXT    NOT NULL,
+                correlation  INTEGER NULL,
+                files_json   TEXT    NOT NULL,
+                commits_json TEXT    NOT NULL,
+                more         INTEGER NOT NULL
+            );
+
+            CREATE INDEX ix_file_changes_at ON file_changes(at, id);
+            CREATE INDEX ix_file_changes_member ON file_changes(team, member);
+            """),
     ];
+
+    /// <summary>How <c>file_changes.at</c> spells an instant: round-trip UTC text of one width, so
+    /// comparing the text compares the time.</summary>
+    public static string FileChangeInstant(DateTimeOffset at) =>
+        at.UtcDateTime.ToString("o", System.Globalization.CultureInfo.InvariantCulture);
 }
