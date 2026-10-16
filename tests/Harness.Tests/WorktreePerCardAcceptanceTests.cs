@@ -351,6 +351,19 @@ public sealed class WorktreePerCardAcceptanceTests : IAsyncDisposable
         await StartAsync();
         var person = await PersonAsync();
 
+        // Attaching the repository at start tells the Manager whether it cloned; that run ending
+        // publishes the team branch, so it must be over before the branch is moved below, or its
+        // push is the one the wait for repo.pushed finds.
+        var deadline = DateTime.UtcNow + Patience;
+        while (!(await RowsAsync(MessageTypes.Completed)).Concat(await RowsAsync(MessageTypes.Failed))
+            .Any(r => r.Source == $"{_team}/Manager"))
+        {
+            Assert.True(DateTime.UtcNow < deadline, "The Manager's run on the repository notice never ended.");
+            await Task.Delay(100, Ct);
+        }
+
+        await NothingRunningAsync();
+
         var teamBranch = $"team/{_team}";
         Assert.Equal(0, Git(_clone, "branch", teamBranch, "main").ExitCode);
         Assert.Equal(0, Git(_clone, "push", "origin", teamBranch).ExitCode);
