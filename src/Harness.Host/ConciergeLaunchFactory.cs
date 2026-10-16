@@ -1,3 +1,4 @@
+using System.Globalization;
 using Harness.Contracts;
 using Harness.Pty;
 
@@ -144,12 +145,13 @@ public sealed class ConciergeLaunchFactory(
         string? steeringCausation = null,
         string? publicUrl = null,
         string? timeZone = null,
-        CancellationToken ct = default) =>
+        CancellationToken ct = default,
+        SteeredWorkflow? steered = null) =>
         // THE ONE-PROCESS COMPOSITION of the two halves: what control resolves, made into a terminal
         // as a worker makes it. Production resolves here and hands the launch to a worker
         // (WorkerPtyEngine); this composition is kept so the launch's tests read one finished spec.
         ConciergeTerminal.Materialize(
-            await ResolveAsync(team, teamLabel, user, login, agent, teamEnv, steeringCausation, publicUrl, timeZone, ct), runAs).Spec;
+            await ResolveAsync(team, teamLabel, user, login, agent, teamEnv, steeringCausation, publicUrl, timeZone, ct, steered), runAs).Spec;
 
     /// <summary>
     /// Everything about one person's Concierge launch that control decides: the refusal when agents
@@ -170,8 +172,16 @@ public sealed class ConciergeLaunchFactory(
         string? steeringCausation = null,
         string? publicUrl = null,
         string? timeZone = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        // THE STEERING AS JUDGED (SteeringWorkflows): an open workflow of a live, active team, whose
+        // note names the team and the state. It wins over a bare steeringCausation.
+        SteeredWorkflow? steered = null)
     {
+        if (steered is not null)
+        {
+            steeringCausation = steered.Workflow.ToString(CultureInfo.InvariantCulture);
+        }
+
         // FAIL CLOSED, before a credential is minted: see AgentLaunchUser.Refuses.
         if (runAs is { Refuses: true })
         {
@@ -300,7 +310,7 @@ public sealed class ConciergeLaunchFactory(
         {
             File.WriteAllText(
                 Path.Combine(workspace, "STEERING.md"),
-                SteeringFile.Note(steeringCausation));
+                steered is not null ? SteeringFile.NoteFor(steered) : SteeringFile.Note(steeringCausation));
         }
         catch (IOException)
         {
