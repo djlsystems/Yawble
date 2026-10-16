@@ -1567,7 +1567,7 @@ export class MonitorScene {
   private drawNodes(ctx: CanvasRenderingContext2D, now: number, focus: Set<string> | null) {
     const model = this.model
     if (!model) return
-    const order: NodeKind[] = ['workflow', 'team', 'member', 'repository', 'project', 'file']
+    const order: NodeKind[] = ['workflow', 'member', 'repository', 'project', 'file']
     for (const kind of order) {
       for (const node of this.nodes.values()) {
         if (node.kind !== kind || node.x === undefined || node.y === undefined) continue
@@ -1583,8 +1583,7 @@ export class MonitorScene {
         }
         ctx.save()
         ctx.globalAlpha = a
-        if (kind === 'team') this.drawTeam(ctx, node, x, y, now)
-        else if (kind === 'member') this.drawMember(ctx, node, x, y, now)
+        if (kind === 'member') this.drawMember(ctx, node, x, y, now)
         else if (ws) this.drawWorkspaceNode(ctx, node, ws, x, y)
         else this.drawWorkflow(ctx, node, x, y, now)
         ctx.restore()
@@ -1592,7 +1591,10 @@ export class MonitorScene {
     }
   }
 
-  /** Team names last, on a dark pill above the team, so no member is ever drawn over one. */
+  /**
+   * Each team is its name on an oval at the team's place, drawn last so no member is ever drawn over
+   * one: the oval is the team's own shape, the root its members orbit.
+   */
   private drawTeamNames(ctx: CanvasRenderingContext2D, now: number, focus: Set<string> | null) {
     const model = this.model
     if (!model) return
@@ -1604,63 +1606,34 @@ export class MonitorScene {
       const team = model.teams.get(node.team)
       if (!team) continue
       const a = this.appear(node, now) * (focus && !focus.has(node.id) ? 0.4 : 1)
+      const grow = 0.6 + 0.4 * ease(Math.min(1, (now - node.born) / BornMs))
       const label = team.name.length > 34 ? `${team.name.slice(0, 33)}…` : team.name
-      const width = ctx.measureText(label).width
-      const height = this.options.fontPx * 1.4
-      const y = node.y + node.r + 18 + height / 2
+      const width = (ctx.measureText(label).width + 28) * grow
+      const height = this.options.fontPx * 2 * grow
+      let { x, y } = node
+      if (node.shakeUntil > now) {
+        const s = (node.shakeUntil - now) / 500
+        x += Math.sin(now / 18) * 5 * s
+        y += Math.cos(now / 23) * 3 * s
+      }
       ctx.globalAlpha = a
-      ctx.fillStyle = alphaHex(Screen.ground, 0.82)
-      ctx.strokeStyle = hsl(team.hue, 80, 60, 0.6)
-      ctx.lineWidth = 1
+      ctx.shadowColor = hsl(team.hue, 90, 60, 0.9)
+      ctx.shadowBlur = 24
+      const g = ctx.createLinearGradient(x, y - height / 2, x, y + height / 2)
+      g.addColorStop(0, hsl(team.hue, 75, 34, 0.96))
+      g.addColorStop(1, hsl(team.hue, 80, 18, 0.96))
+      ctx.fillStyle = g
       ctx.beginPath()
-      ctx.roundRect(node.x - width / 2 - 10, y - height / 2, width + 20, height, height / 2)
+      ctx.roundRect(x - width / 2, y - height / 2, width, height, height / 2)
       ctx.fill()
+      ctx.shadowBlur = 0
+      ctx.strokeStyle = hsl(team.hue, 90, 70, 0.85)
+      ctx.lineWidth = 1.5
       ctx.stroke()
-      ctx.fillStyle = hsl(team.hue, 90, 82)
-      ctx.fillText(label, node.x, y + 0.5)
+      ctx.fillStyle = hsl(team.hue, 90, 88)
+      ctx.fillText(label, x, y + 0.5)
     }
     ctx.globalAlpha = 1
-  }
-
-  private drawTeam(ctx: CanvasRenderingContext2D, node: SceneNode, x: number, y: number, now: number) {
-    const team = this.model?.teams.get(node.team)
-    if (!team) return
-    const r = node.r * (0.6 + 0.4 * ease(Math.min(1, (now - node.born) / BornMs)))
-    const spin = this.options.reducedMotion ? 0 : now / 6000
-
-    ctx.shadowColor = hsl(team.hue, 90, 60, 0.9)
-    ctx.shadowBlur = 24
-    const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.1, x, y, r)
-    g.addColorStop(0, hsl(team.hue, 90, 72, 0.95))
-    g.addColorStop(1, hsl(team.hue, 80, 32, 0.95))
-    ctx.fillStyle = g
-    ctx.beginPath()
-    for (let i = 0; i < 6; i++) {
-      const ang = spin + (i / 6) * Math.PI * 2
-      const px = x + Math.cos(ang) * r
-      const py = y + Math.sin(ang) * r
-      if (i === 0) ctx.moveTo(px, py)
-      else ctx.lineTo(px, py)
-    }
-    ctx.closePath()
-    ctx.fill()
-    ctx.shadowBlur = 0
-
-    ctx.strokeStyle = hsl(team.hue, 90, 75, 0.5)
-    ctx.lineWidth = 1
-    ctx.setLineDash([2, 5])
-    ctx.lineDashOffset = -spin * 60
-    ctx.beginPath()
-    ctx.arc(x, y, r + 9, 0, Math.PI * 2)
-    ctx.stroke()
-    ctx.setLineDash([])
-
-    const members = [...(this.model?.members.values() ?? [])].filter((m) => m.team === team.id)
-    const running = members.filter((m) => m.state === 'running').length
-    ctx.fillStyle = Screen.ground
-    ctx.font = this.font(0.7, 700)
-    ctx.textBaseline = 'middle'
-    ctx.fillText(String(running > 0 ? running : members.length), x, y + 0.5)
   }
 
   private drawMember(ctx: CanvasRenderingContext2D, node: SceneNode, x: number, y: number, now: number) {
