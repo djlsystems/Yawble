@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FieldHelp from './FieldHelp.vue'
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { getMessages, listEvents } from '../api/client'
 import type { Message, MonitorHint } from '../api/types'
@@ -40,6 +41,19 @@ import {
   type FileSettings,
   type WorkspacePush,
 } from '../lib/monitor/workspace'
+import {
+  LayoutDefaults,
+  LayoutFields,
+  LayoutMax,
+  LayoutMin,
+  LayoutStep,
+  clampLayout,
+  isDefaultLayout,
+  readLayout,
+  writeLayout,
+  type LayoutKey,
+  type LayoutSettings,
+} from '../lib/monitor/layout'
 
 /**
  * THE MONITOR: every team at once, as a living graph.
@@ -164,6 +178,22 @@ function setFilesShow(show: boolean) {
 }
 function setFilesDepth(depth: FileDepth) {
   applyFileChanges({ ...fileChanges.value, depth })
+}
+
+/** The layout forces: multipliers a person tunes in the settings, remembered per browser. */
+const layout = ref<LayoutSettings>(readLayout())
+function setLayoutValue(key: LayoutKey, value: number | null) {
+  if (value === null) return
+  applyLayout({ ...layout.value, [key]: clampLayout(value, LayoutDefaults[key]) })
+}
+function resetLayout() {
+  applyLayout({ ...LayoutDefaults })
+}
+function applyLayout(next: LayoutSettings) {
+  layout.value = next
+  scene?.setLayout(next)
+  writeLayout(next)
+  dirty = true
 }
 
 /** A model with this view's hints and settings: every one the view makes goes through here. */
@@ -495,6 +525,7 @@ onMounted(async () => {
     })
     scene.setAutoFit(!keepView.value)
     scene.setFileChanges(fileChanges.value)
+    scene.setLayout(layout.value)
     measure()
     scene.start()
   }
@@ -737,6 +768,37 @@ onUnmounted(() => {
                 />
               </div>
               <div class="monitor-settings-none">Each shows for the time above.</div>
+              <div class="monitor-settings-head">Layout</div>
+              <div
+                v-for="field in LayoutFields"
+                :key="field.key"
+                class="monitor-settings-slider"
+                :data-monitor-layout="field.key"
+              >
+                <div class="monitor-settings-row">
+                  <span :id="`monitor-layout-${field.key}`">{{ field.label }} <FieldHelp :text="field.help" /></span>
+                  <span class="monitor-settings-value">×{{ layout[field.key].toFixed(2) }}</span>
+                </div>
+                <q-slider
+                  :model-value="layout[field.key]"
+                  :min="LayoutMin"
+                  :max="LayoutMax"
+                  :step="LayoutStep"
+                  dense
+                  dark
+                  :aria-labelledby="`monitor-layout-${field.key}`"
+                  @update:model-value="(value: number | null) => setLayoutValue(field.key, value)"
+                />
+              </div>
+              <q-btn
+                flat
+                dense
+                no-caps
+                label="Reset layout"
+                :disable="isDefaultLayout(layout)"
+                data-monitor-layout-reset
+                @click="resetLayout"
+              />
             </div>
           </span>
           <q-btn
@@ -1070,6 +1132,8 @@ onUnmounted(() => {
   box-shadow: 0 8px 30px color-mix(in srgb, var(--monitor-ground) 70%, transparent);
   font-size: 0.8125rem;
   color: var(--monitor-ink);
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
 }
 
 .monitor-settings-row {
@@ -1090,6 +1154,16 @@ onUnmounted(() => {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--monitor-ink-dim);
+}
+
+.monitor-settings-slider {
+  padding: 0 0.25rem;
+}
+
+.monitor-settings-value {
+  font-family: var(--os-mono);
+  font-size: 0.75rem;
+  color: var(--os-monitor-ink-soft);
 }
 
 .monitor-settings-none {

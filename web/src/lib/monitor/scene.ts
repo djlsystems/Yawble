@@ -13,6 +13,7 @@ import type { MemberState, MonitorEffect, MonitorModel, NodeRef, Origin, Tone } 
 import { compact } from './model'
 import type { Resource, ResourceAction } from './hints'
 import { MonitorSymbolsFamily, glyphOf, type Codepoints } from './font'
+import { LayoutDefaults, type LayoutSettings } from './layout'
 import {
   DefaultFileSettings,
   WorkspaceGraph,
@@ -270,6 +271,7 @@ export class MonitorScene {
   private dragging: SceneNode | null = null
   private panning: { x: number; y: number; cx: number; cy: number } | null = null
   private teamTargets = new Map<string, { x: number; y: number }>()
+  private layout: LayoutSettings = { ...LayoutDefaults }
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -278,29 +280,13 @@ export class MonitorScene {
     this.ctx = canvas.getContext('2d')
     this.sim = forceSimulation<SceneNode, SceneLink>([])
       .stop()
-      .velocityDecay(0.32)
       .alphaDecay(0.02)
       .alphaTarget(options.reducedMotion ? 0 : 0.012)
-      .force(
-        'link',
-        forceLink<SceneNode, SceneLink>([])
-          .id((node) => node.id)
-          .distance((link) => this.linkDistance(link))
-          .strength((link) => (link.kind === 'spoke' ? 0.55 : link.kind === 'tree' ? 0.7 : 0.32)),
-      )
-      .force(
-        'charge',
-        forceManyBody<SceneNode>()
-          .strength((node) => (node.kind === 'team' ? -600 : node.kind === 'workflow' ? -60 : WorkspaceKinds.has(node.kind) ? -90 : -280))
-          .distanceMax(420),
-      )
-      .force('collide', forceCollide<SceneNode>().radius((node) => node.r + (node.kind === 'team' ? 30 : node.kind === 'member' ? 24 : 6)))
       // FILE CHANGES KEEP THEIR LABELS APART AS A FORCE, so they glide clear and come to rest.
       // `separate` after each tick still makes it certain; with this it has almost nothing to do,
       // where alone it fought the simulation every frame and the nodes shook.
       .force('boxes', () => this.pushBoxesApart())
-      .force('x', forceX<SceneNode>((node) => this.teamTarget(node.team).x).strength((node) => (node.kind === 'team' ? 0.12 : 0.02)))
-      .force('y', forceY<SceneNode>((node) => this.teamTarget(node.team).y).strength((node) => (node.kind === 'team' ? 0.12 : 0.02)))
+    this.applyLayout()
 
     canvas.addEventListener('pointermove', this.onPointerMove)
     canvas.addEventListener('pointerdown', this.onPointerDown)
@@ -308,6 +294,40 @@ export class MonitorScene {
     canvas.addEventListener('pointerleave', this.onPointerLeave)
     canvas.addEventListener('wheel', this.onWheel, { passive: false })
     canvas.addEventListener('dblclick', this.onDoubleClick)
+  }
+
+  /**
+   * The person's layout multipliers (the Monitor's settings): from now on, and the graph is woken so
+   * it moves to them rather than waiting for the next change.
+   */
+  setLayout(layout: LayoutSettings) {
+    this.layout = { ...layout }
+    this.applyLayout()
+    this.sim.alpha(Math.max(this.sim.alpha(), 0.5))
+  }
+
+  /** The forces, at the scene's own values times the person's layout multipliers. Setting an
+   * accessor again is what makes d3 read it again. */
+  private applyLayout() {
+    const { distance, strength, repulsion, gravity, friction } = this.layout
+    this.sim
+      .velocityDecay(Math.min(0.9, Math.max(0.05, 0.32 * friction)))
+      .force(
+        'link',
+        ((this.sim.force('link') as ReturnType<typeof forceLink<SceneNode, SceneLink>> | undefined) ?? forceLink<SceneNode, SceneLink>([]))
+          .id((node) => node.id)
+          .distance((link) => this.linkDistance(link) * distance)
+          .strength((link) => Math.min(1, (link.kind === 'spoke' ? 0.55 : link.kind === 'tree' ? 0.7 : 0.32) * strength)),
+      )
+      .force(
+        'charge',
+        forceManyBody<SceneNode>()
+          .strength((node) => (node.kind === 'team' ? -600 : node.kind === 'workflow' ? -60 : WorkspaceKinds.has(node.kind) ? -90 : -280) * repulsion)
+          .distanceMax(420 * Math.max(1, distance)),
+      )
+      .force('collide', forceCollide<SceneNode>().radius((node) => node.r + (node.kind === 'team' ? 30 : node.kind === 'member' ? 24 : 6)))
+      .force('x', forceX<SceneNode>((node) => this.teamTarget(node.team).x).strength((node) => (node.kind === 'team' ? 0.12 : 0.02) * gravity))
+      .force('y', forceY<SceneNode>((node) => this.teamTarget(node.team).y).strength((node) => (node.kind === 'team' ? 0.12 : 0.02) * gravity))
   }
 
   setOptions(options: Partial<SceneOptions>) {

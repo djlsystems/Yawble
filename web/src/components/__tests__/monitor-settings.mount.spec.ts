@@ -12,12 +12,14 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import type { EventDefinition, Message } from '../../api/types'
 import { MonitorModel, type MonitorEffect } from '../../lib/monitor/model'
 import type { FileSettings, WorkspacePush } from '../../lib/monitor/workspace'
+import { LayoutDefaults, LayoutKeyName, type LayoutSettings } from '../../lib/monitor/layout'
 
-const { getMessages, listEvents, played, fileSettings } = vi.hoisted(() => ({
+const { getMessages, listEvents, played, fileSettings, layouts } = vi.hoisted(() => ({
   getMessages: vi.fn(),
   listEvents: vi.fn(),
   played: [] as MonitorEffect[],
   fileSettings: [] as FileSettings[],
+  layouts: [] as LayoutSettings[],
 }))
 
 vi.mock('../../api/client', async (importOriginal) => ({
@@ -48,6 +50,9 @@ vi.mock('../../lib/monitor/scene', async (importOriginal) => {
       fileSettings.push({ ...settings })
     }
     clearFileChanges() {}
+    setLayout(layout: LayoutSettings) {
+      layouts.push({ ...layout })
+    }
   }
   return { ...(await importOriginal<Record<string, unknown>>()), MonitorScene: RecordingScene, readPalette: () => {} }
 })
@@ -131,6 +136,8 @@ beforeEach(() => {
   seq = 0
   played.length = 0
   fileSettings.length = 0
+  layouts.length = 0
+  localStorage.removeItem(LayoutKeyName)
   localStorage.removeItem(SettingsKey)
   localStorage.removeItem(FileSettingsKey)
 })
@@ -435,5 +442,61 @@ describe('the Monitor settings for file changes', () => {
     fileWatch.deliver(workspace())
     await flushPromises()
     expect(played).toEqual([])
+  })
+})
+
+describe('the Monitor layout settings', () => {
+  const slider = (panel: ReturnType<VueWrapper['find']>, key: string) =>
+    panel.find(`[data-monitor-layout="${key}"]`).findComponent({ name: 'QSlider' })
+
+  it('lists link distance, link strength, repulsion, gravity and friction at the defaults, and hands them to the scene', async () => {
+    const { wrapper } = await mountMonitor()
+    const panel = await openPanel(wrapper)
+
+    expect(panel.findAll('[data-monitor-layout]').map((found) => found.attributes('data-monitor-layout'))).toEqual([
+      'distance', 'strength', 'repulsion', 'gravity', 'friction',
+    ])
+    expect(layouts.at(-1)).toEqual(LayoutDefaults)
+    expect(panel.find('[data-monitor-layout-reset]').attributes('disabled')).toBeDefined()
+  })
+
+  it('moves the scene and remembers a change in this browser, and Reset puts the defaults back', async () => {
+    const { wrapper } = await mountMonitor()
+    let panel = await openPanel(wrapper)
+
+    slider(panel, 'distance').vm.$emit('update:modelValue', 2)
+    slider(panel, 'repulsion').vm.$emit('update:modelValue', 0.5)
+    await flushPromises()
+    expect(layouts.at(-1)).toEqual({ ...LayoutDefaults, distance: 2, repulsion: 0.5 })
+    expect(JSON.parse(localStorage.getItem(LayoutKeyName)!)).toEqual({ ...LayoutDefaults, distance: 2, repulsion: 0.5 })
+    expect(panel.find('[data-monitor-layout="distance"]').text()).toContain('×2.00')
+
+    wrapper.unmount()
+    const again = await mountMonitor()
+    expect(layouts.at(-1)).toEqual({ ...LayoutDefaults, distance: 2, repulsion: 0.5 })
+
+    panel = await openPanel(again.wrapper)
+    await panel.find('[data-monitor-layout-reset]').trigger('click')
+    expect(layouts.at(-1)).toEqual(LayoutDefaults)
+    expect(JSON.parse(localStorage.getItem(LayoutKeyName)!)).toEqual(LayoutDefaults)
+  })
+
+  it('works with storage refusing', async () => {
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('denied')
+    })
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('denied')
+    })
+    try {
+      const { wrapper } = await mountMonitor()
+      const panel = await openPanel(wrapper)
+      slider(panel, 'gravity').vm.$emit('update:modelValue', 1.5)
+      await flushPromises()
+      expect(layouts.at(-1)).toEqual({ ...LayoutDefaults, gravity: 1.5 })
+    } finally {
+      getItem.mockRestore()
+      setItem.mockRestore()
+    }
   })
 })
