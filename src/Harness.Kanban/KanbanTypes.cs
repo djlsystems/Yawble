@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Harness.Kanban;
 
 /// <summary>
@@ -124,7 +126,15 @@ public record KanbanCard(
     /// <see cref="Workflows"/>. SET BY THE HOST AT THE FETCH, beside <see cref="OpenWorkflow"/>, in
     /// one query per board read (<c>CardOutcomes</c>); a pure walk of rows cannot see a link.
     /// </summary>
-    Harness.Contracts.WorkflowOutcome? Outcome = null)
+    Harness.Contracts.WorkflowOutcome? Outcome = null,
+
+    /// <summary>
+    /// The pending wakes asked in the workflow this card is open in (<see cref="OpenWorkflow"/>),
+    /// this card's member's first, then by due time - or null, and absent from the JSON, when there
+    /// are none. SET BY THE HOST AT THE FETCH (<c>CardWakes</c>), beside <see cref="OpenWorkflow"/>.
+    /// </summary>
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<Harness.Contracts.WakeView>? Wakes = null)
 {
     /// <summary>Whether this card is work of the workflow <paramref name="correlation"/>: born in it,
     /// or claimed or told in it since. See <see cref="Workflows"/>.</summary>

@@ -165,6 +165,7 @@ public sealed class TeamDeletion(
     SiteService? sites = null,
     TeamSkills? skills = null,
     ITeamSolutionStore? solutions = null,
+    IWakeStore? wakes = null,
     string? agentHome = null,
     IReadOnlyList<string>? sessionFolders = null)
 {
@@ -289,6 +290,10 @@ public sealed class TeamDeletion(
         await principals.RevokeForTeamAsync(stored, ct);
 
         var removedSchedules = await schedules.DeleteForTeamAsync(stored, ct);
+
+        // A DELETED TEAM'S WAKES GO WITH IT, with no row: there is no team left to write one for,
+        // and a successor of the same name must not be woken by its predecessor's.
+        if (wakes is not null) await wakes.DeleteForTeamAsync(stored, ct);
 
         // The team's sites, their files and their data, one tenant row per site, in one
         // transaction. Keyed by the stored spelling, so a same-name successor starts with none.

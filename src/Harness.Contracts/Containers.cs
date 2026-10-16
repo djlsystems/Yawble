@@ -391,6 +391,30 @@ public static class MessageTypes
     public const string AgentForeignTools = "agent.foreignTools";
 
     /// <summary>
+    /// A MEMBER ASKED TO BE WOKEN ONCE, LATER, in the workflow it is working (`wake_me`). Source is
+    /// the member and causation the row its run was handling, so the row is in that workflow; the
+    /// firing instruction is caused by THIS row. Out of the ledger, like progress: the member that
+    /// asked knows, and the instruction it is woken with says it again. Nothing subscribes to the
+    /// four `wake.*` types, and no route lets a caller choose one.
+    /// </summary>
+    public const string WakeAsked = "wake.asked";
+
+    /// <summary>A pending wake was cancelled - by the member, a person, a person's close of its
+    /// workflow or the owner's declaration. Source the member it was for, `by` who cancelled it.</summary>
+    public const string WakeCancelled = "wake.cancelled";
+
+    /// <summary>A wake fired: its instruction (source `wake:&lt;id&gt;`) was appended.</summary>
+    public const string WakeFired = "wake.fired";
+
+    /// <summary>A wake came due and did NOT fire - its team archived, its workflow over its
+    /// budget or ended, its member gone - with the reason. It is gone either way.</summary>
+    public const string WakeSkipped = "wake.skipped";
+
+    /// <summary>The source of the instruction a wake fires: <c>wake:&lt;id&gt;</c>. Neither a person
+    /// nor a container, as a schedule's <c>schedule:&lt;id&gt;</c> is not.</summary>
+    public static string WakeSource(long id) => $"wake:{id}";
+
+    /// <summary>
     /// The exact skip reason published in <see cref="ScheduleSkipped"/> rows for idle-only schedules.
     /// Kept as one constant so every producer and assertion says the same sentence.
     /// </summary>
@@ -680,7 +704,15 @@ public sealed record ContainerSnapshot(
     /// STRING rather than an enum for the reason every mark here is one: the SPA compares it as a
     /// string.
     /// </summary>
-    string Kind = MemberRef.AgentKind);
+    string Kind = MemberRef.AgentKind,
+
+    /// <summary>
+    /// THE WAKES THIS MEMBER ASKED FOR AND THAT ARE STILL PENDING, earliest due first, or null - and
+    /// then absent from the JSON - when there are none, so a member with no wake reads byte for byte
+    /// as before. Written by the wake runner (<c>MemberRuntime.MarkWakes</c>), never by a run.
+    /// </summary>
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<WakeView>? Wakes = null);
 
 /// <summary>
 /// A chosen Agent that did not resolve on this machine's PATH.

@@ -47,7 +47,8 @@ public sealed class UndeclarableWorkflows(
     KanbanStore kanban,
     WorktreeRemoval worktrees,
     TeamPaths paths,
-    ILogger<UndeclarableWorkflows>? diagnostics = null)
+    ILogger<UndeclarableWorkflows>? diagnostics = null,
+    IWakeStore? wakes = null)
 {
     /// <summary>On the <c>workflow.completed</c> payload the platform wrote for an owner that
     /// cannot declare. Absent on a member's own declaration.</summary>
@@ -109,6 +110,10 @@ public sealed class UndeclarableWorkflows(
 
         if (await IdleWorkflowOffer.UndeliveredAsync(
                 host, subscriptions, cursors, diagnostics, stored, thread, member, waking, ct)) return false;
+
+        // A PENDING WAKE IS WORK COMING: the declaration waits for it, and is asked again when the
+        // run it starts ends.
+        if (wakes is not null && (await wakes.ForWorkflowAsync(correlation, ct)).Count != 0) return false;
 
         // AN UNFINISHED CARD IS LEFT FOR A PERSON: the declaration moves every card to Done, and
         // only a member's own `dropped` may say why one is being left. The owner's and the ending

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text.Json.Serialization;
 
 namespace Harness.Contracts;
 
@@ -286,7 +287,14 @@ public sealed record TeamWorkflowTiming(
     [property: Description(
         "The outcome this workflow serves now: its newest link, followed through `mergedInto` "
         + "(id, name, status). Null for none. Set by the team workflows route, not the projection.")]
-    WorkflowOutcome? Outcome = null);
+    WorkflowOutcome? Outcome = null,
+
+    [property: Description(
+        "The wakes members asked for in this workflow that are still pending, earliest due first "
+        + "(id, member, workflow, dueAt, askedAt, note; instants UTC). Absent when there are none. "
+        + "Set by the team workflows route, not the projection.")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<WakeView>? Wakes = null);
 
 /// <summary>
 /// One member's run time inside a workflow.

@@ -333,6 +333,19 @@ public static class PayloadFields
     /// <summary>`site.action`: when the Host received it, ISO-8601 UTC.</summary>
     public const string At = "at";
 
+    /// <summary>`wake.*` and a wake's instruction: the wake's id.</summary>
+    public const string Wake = "wake";
+
+    /// <summary>`wake.*` and a wake's instruction: when it is or was due, ISO-8601 UTC.</summary>
+    public const string DueAt = "dueAt";
+
+    /// <summary>A wake's instruction and `wake.fired`: when it was asked, ISO-8601 UTC.</summary>
+    public const string AskedAt = "askedAt";
+
+    /// <summary>A wake's instruction and `wake.fired`: how many whole seconds after its time it
+    /// fired, present only when it fired late - the Host was down when it came due.</summary>
+    public const string LateSeconds = "lateSeconds";
+
     /// <summary>`solution.checked`: whether the package passed its check.</summary>
     public const string Ok = "ok";
 

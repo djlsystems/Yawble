@@ -74,6 +74,7 @@ public sealed class TenantSettings
     public const string WorkflowSpendLimitName = "workflow.spendLimit";
     public const string ConciergeIdleTimeoutName = "concierge.idleTimeout";
     public const string QuietWindowName = "quiet.window";
+    public const string WakeMaxDelayName = "wake.maxDelay";
     public const string ResumeMaxAutomaticName = "resume.maxAutomatic";
     public const string CausationDepthLimitName = "causation.depthLimit";
     public const string KanbanWipLimitsName = "kanban.wipLimits";
@@ -194,6 +195,11 @@ public sealed class TenantSettings
                 + "platform call under its own credential (a call still in flight counts). A session "
                 + "someone has open is never ended. Applies at the next sweep.",
                 MinDuration: TimeSpan.FromMinutes(1), MaxDuration: TimeSpan.FromDays(30)),
+            new(WakeMaxDelayName, TenantSettingKind.Duration, "1.00:00:00", "Wake:MaxDelay",
+                "The furthest ahead a member or Manager may ask to be woken with wake_me. A wake is "
+                + "once, never a schedule: work that repeats needs a trigger, which a person creates. "
+                + "Applies to the next wake asked for; a wake already pending keeps its time.",
+                MinDuration: TimeSpan.FromMinutes(1), MaxDuration: TimeSpan.FromDays(7)),
             new(QuietWindowName, TenantSettingKind.Duration, "00:30:00", "QuietSweepWindow",
                 "How long a team may be quiet with work open before the quiet-team sweep acts on it. "
                 + "Applies at the next sweep.",
@@ -545,6 +551,9 @@ public sealed class TenantSettings
     public long WorkflowSpendLimit => Integer(WorkflowSpendLimitName);
 
     public TimeSpan ConciergeIdleTimeout => Duration(ConciergeIdleTimeoutName);
+
+    /// <summary>The furthest ahead `wake_me` may set a wake. Read through a delegate at every ask.</summary>
+    public TimeSpan WakeMaxDelay => Duration(WakeMaxDelayName);
 
     public TimeSpan QuietWindow => Duration(QuietWindowName);
 

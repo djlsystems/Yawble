@@ -374,6 +374,9 @@ builder.Services.AddSingleton(new KanbanStore(store));
 builder.Services.AddSingleton<IPendingDeliveries>(new SqlitePendingDeliveries(database));
 builder.Services.AddSingleton<PendingDeliveriesAtStart>();
 
+// THE WAKES MEMBERS ASKED FOR (`wake_me`), stored so a restart keeps them. See `WakeMe`.
+builder.Services.AddSingleton<IWakeStore>(new SqliteWakeStore(database));
+
 // Order carries no schema obligation - SchemaMigrator above has already applied every step
 // and set journal_mode on the file. These are readers and writers over a database that exists.
 var users = new SqliteUserStore(database);
@@ -1407,7 +1410,8 @@ builder.Services.AddSingleton(sp => new TeamDeletion(
     sp.GetRequiredService<FolderRemoval>(),
     sp.GetRequiredService<SiteService>(),
     sp.GetRequiredService<TeamSkills>(),
-    sp.GetRequiredService<ITeamSolutionStore>()));
+    sp.GetRequiredService<ITeamSolutionStore>(),
+    wakes: sp.GetRequiredService<IWakeStore>()));
 
 // By hand for the reason TeamDeletion is: every dependency here is one a reset would silently skip
 // if it were optional. A TeamReset missing its pending-delivery store cannot tell a member that has
@@ -1760,8 +1764,27 @@ builder.Services.AddSingleton(sp => new IdleWorkflowOffer(
     // NO `workflowSpendLimit` HERE. A raw configuration value would disagree with `ContainerHost`
     // about a configured 0 and could not see a team's own per-workflow figure, so both ask
     // `TeamRegistry.EffectiveWorkflowBudgetFor`, which is the one place that resolves it.
-    sp.GetRequiredService<ILogger<IdleWorkflowOffer>>()));
+    sp.GetRequiredService<ILogger<IdleWorkflowOffer>>(),
+
+    // A PENDING WAKE IS WORK IN THE WORKFLOW: nothing is offered while one waits to fire.
+    sp.GetRequiredService<IWakeStore>()));
 builder.Services.AddSingleton<UndeclarableWorkflows>();
+
+// `wake_me`: A MEMBER WOKEN ONCE, LATER, IN THE WORKFLOW IT IS WORKING. Its own clock, so a test
+// moves the wakes' time and nothing else's; the limits read through delegates at every ask.
+builder.Services.AddSingleton(sp => new WakeClock(sp.GetRequiredService<TimeProvider>()));
+builder.Services.AddSingleton<WakeSignal>();
+builder.Services.AddSingleton(sp => new WakeMe(
+    sp.GetRequiredService<IWakeStore>(),
+    sp.GetRequiredService<IMessageLog>(),
+    sp.GetRequiredService<TeamRegistry>(),
+    sp.GetRequiredService<ContainerHost>(),
+    sp.GetRequiredService<WakeClock>(),
+    sp.GetRequiredService<WakeSignal>(),
+    () => tenantSettings.WakeMaxDelay,
+    () => tenantSettings.CausationDepthLimit,
+    sp.GetRequiredService<ILogger<WakeMe>>()));
+builder.Services.AddHostedService<WakeRunner>();
 if (resumeSweepEnabled)
 {
     builder.Services.AddSingleton<IHostedService>(sp => new ResumeRunner(
@@ -2821,6 +2844,33 @@ static TriggerAudit ArchiveRow(
 
 static string PauseNoticeFor(string teamLabel) =>
     $"Team '{teamLabel}' is paused. This instruction was queued and will run when the team resumes.";
+
+// A WAKE IS ONLY EVER FOR ITSELF: the caller must be the member the route names, read from its
+// credential. The Concierge has a person in front of it and sets none; a plugin member holds no
+// credential to ask with.
+static IResult? WakeCallerRefusal(HttpContext context, MemberRuntime container)
+{
+    var caller = PrincipalClaims.From(context.User);
+
+    if (caller is { Kind: PrincipalKind.Container } member && ContainerId.Parse(member.Id).Equals(container.Id))
+    {
+        return null;
+    }
+
+    var error = caller?.Kind switch
+    {
+        PrincipalKind.Container =>
+            $"A wake is addressed only to the member asking for it, from its own credential, so you "
+            + $"cannot set or cancel one for '{container.Id.Name}'. Ask for your own with wake_me.",
+        PrincipalKind.Concierge or PrincipalKind.TenantConcierge =>
+            "wake_me is for a team's members and Managers. The Concierge has a person in front of it "
+            + "and sets no wakes: say what you are waiting for and tell the person when to look again.",
+        _ => "wake_me is a member's own request, made from its own run. A person cancels a wake "
+            + "from the member's card or the workflow instead.",
+    };
+
+    return Results.Json(new { error }, statusCode: StatusCodes.Status403Forbidden);
+}
 
 // Carries no {team} route value, so TeamGate's rule 1 passes it through unchecked - filtered here
 // instead of refused there. TeamRegistry.Overview() returns `object` and All() is unfiltered, so
@@ -5811,7 +5861,7 @@ app.MapGet("/api/teams/{team}/workflow", async (
 // per correlation instead of once for the newest - see TeamWorkflows.
 app.MapGet("/api/teams/{team}/workflows", async (
     [Description(Describe.Team)] string team,
-    TeamRegistry teams, IMessageLog log, ContainerHost host, IOutcomeStore outcomes, CancellationToken ct) =>
+    TeamRegistry teams, IMessageLog log, ContainerHost host, IOutcomeStore outcomes, IWakeStore wakes, CancellationToken ct) =>
 {
     if (teams.ExistingName(team) is not { } stored)
     {
@@ -5835,10 +5885,16 @@ app.MapGet("/api/teams/{team}/workflows", async (
     var served = await outcomes.CurrentOutcomesAsync(
         listed.Workflows.Where(w => w.Correlation is not null).Select(w => w.Correlation!.Value).ToList(), ct);
 
+    // AND ITS PENDING WAKES, from one read of this team's.
+    var pendingWakes = (await wakes.ForTeamAsync(stored, ct))
+        .GroupBy(w => w.Workflow)
+        .ToDictionary(g => g.Key, g => (IReadOnlyList<WakeView>)g.Select(w => w.View()).ToList());
+
     return Results.Ok(listed with
     {
         Workflows = listed.Workflows
             .Select(w => w.Correlation is { } c && served.TryGetValue(c, out var outcome) ? w with { Outcome = outcome } : w)
+            .Select(w => w.Correlation is { } c && pendingWakes.TryGetValue(c, out var waiting) ? w with { Wakes = waiting } : w)
             .ToList(),
     });
 })
@@ -7013,13 +7069,7 @@ app.MapPost("/api/teams/{team}/containers/{name}/tell", async (
             // going to fix it by sending different JSON. The body is written to be READ BY AN
             // AGENT, because it is - the tool hands the refusal back verbatim - so it says
             // what to do instead rather than only what went wrong.
-            return Results.Conflict(new
-            {
-                error =
-                    $"This job is already {found.Depth + 1} steps deep, which is the limit. "
-                    + "Something is going round in circles. Stop dispatching and report what you "
-                    + "have to whoever asked you.",
-            });
+            return Results.Conflict(new { error = WorkflowBounds.DepthRefusal(found.Depth + 1) });
         }
 
         // THE SPEND BOUND. Check if this workflow's cumulative spend exceeds the limit.
@@ -7040,13 +7090,7 @@ app.MapPost("/api/teams/{team}/containers/{name}/tell", async (
         if (effectiveBudget is { } bound
             && spend.RunsWithMeasuredUsage > 0 && spend.TokensSpent > bound)
         {
-            return Results.Conflict(new
-            {
-                error =
-                    $"This workflow has spent {spend.TokensSpent:N0} tokens, which exceeds the limit of {bound:N0}. "
-                    + "Something is going too far. Stop dispatching and report what you "
-                    + "have to whoever asked you.",
-            });
+            return Results.Conflict(new { error = WorkflowBounds.BudgetRefusal(spend.TokensSpent, bound) });
         }
 
         causation = seq;
@@ -7521,6 +7565,81 @@ app.MapPost("/api/teams/{team}/containers/{name}/needs-decision", async (
         + "stops one member posting as another. 400 for an empty question; 404 for an unknown team "
         + "or member.");
 
+// `wake_me`: A MEMBER ASKS TO BE WOKEN ONCE, LATER, IN THE WORKFLOW IT IS WORKING. Shaped like
+// progress and blocked: {team} in the route so TeamGate covers it, the caller must BE the member it
+// names, and the workflow is the one its running row belongs to - never a number the caller sends.
+// See `WakeMe` for every limit and why.
+app.MapPost("/api/teams/{team}/containers/{name}/wake", async (
+    [Description(Describe.Team)] string team,
+    [Description("The member asking. Must be the caller itself: a wake is only ever for yourself.")] string name,
+    AskWake request,
+    HttpContext context, TeamRegistry teams, ContainerHost host, WakeMe wakes, CancellationToken ct) =>
+{
+    if (teams.ExistingName(team) is not { } stored) return Results.NotFound(new { error = $"No team '{team}'." });
+    if (!ContainerId.IsLegalName(name) || host.Find(new ContainerId(stored, name)) is not { } container)
+    {
+        return Results.NotFound(new { error = $"No member '{name}'." });
+    }
+
+    if (WakeCallerRefusal(context, container) is { } refused) return refused;
+
+    if (teams.IsArchived(stored)) return Results.Conflict(new { error = TeamArchive.Refusal(teams.LabelFor(stored)) });
+
+    var (wake, refusal) = await wakes.AskAsync(container.Id, container.CurrentCausation, request.In, request.Note, ct);
+    if (refusal is not null) return Results.Json(new { error = refusal.Error }, statusCode: refusal.Status);
+
+    return Results.Ok(new
+    {
+        wake = wake!.Id,
+        workflow = wake.Workflow,
+        dueAt = wake.DueAt.ToUniversalTime(),
+        dueLocal = WakeMe.Both(wake.DueAt),
+        note = wake.Note,
+        notice = wakes.AskedNotice(wake),
+    });
+})
+    .WithTags("Members")
+    .RequirePermit(Permits.Progress)
+    .WithSummary("Ask to be woken once, later, in this workflow")
+    .WithDescription(
+        "A member or Manager asks to be woken `in` a delay from now (`90s`, `10m`, `2h`, `1h30m`) "
+        + "with a one-line `note` of what to look at. At that time one instruction is appended to it, "
+        + "source `wake:<id>`, caused by the `wake.asked` row this writes, in the same workflow, and "
+        + "delivered as any instruction is. **Only about yourself**: the caller must BE the member it "
+        + "names; the Concierge and any other caller are 403. At least 30 seconds and at most the "
+        + "`wake.maxDelay` setting away; at most 3 pending per member and 1 per workflow; refused "
+        + "over the workflow's budget or the chain limit. Each refusal is a sentence in `error`. The "
+        + "200 carries `wake` (the id), `workflow`, `dueAt` (UTC), `dueLocal` (the Host's clock and "
+        + "UTC), `note` and `notice`.");
+
+app.MapPost("/api/teams/{team}/containers/{name}/wake/{id:long}/cancel", async (
+    [Description(Describe.Team)] string team,
+    [Description("The member that asked. Must be the caller itself.")] string name,
+    [Description("The wake's id, as the ask answered it.")] long id,
+    HttpContext context, TeamRegistry teams, ContainerHost host, WakeMe wakes, CancellationToken ct) =>
+{
+    if (teams.ExistingName(team) is not { } stored) return Results.NotFound(new { error = $"No team '{team}'." });
+    if (!ContainerId.IsLegalName(name) || host.Find(new ContainerId(stored, name)) is not { } container)
+    {
+        return Results.NotFound(new { error = $"No member '{name}'." });
+    }
+
+    if (WakeCallerRefusal(context, container) is { } refused) return refused;
+
+    var cancelled = await wakes.CancelAsync(
+        id, container.Id.ToString(), "cancelled by the member that asked for it", owner: container.Id, ct: ct);
+
+    return cancelled is null
+        ? Results.NotFound(new { error = $"You have no pending wake {id}. It has fired, been cancelled, or was never yours." })
+        : Results.Ok(new { wake = cancelled.Id, cancelled = true, notice = $"Cancelled {WakeMe.Describe(cancelled)}." });
+})
+    .WithTags("Members")
+    .RequirePermit(Permits.Progress)
+    .WithSummary("Cancel one of your own pending wakes")
+    .WithDescription(
+        "The caller's own pending wake only: the caller must BE the member it names, and a wake that "
+        + "is not its own answers exactly as a missing one, 404. Appends `wake.cancelled`.");
+
 // A declaration that this workflow is done, by the container the workflow's root instruction
 // addressed - the Manager when the root was not an addressed instruction (a schedule firing, a
 // kanban card event).
@@ -7539,7 +7658,7 @@ app.MapPost("/api/teams/{team}/containers/{name}/workflow-complete", async (
     HttpContext context, TeamRegistry teams, ContainerHost host, IMessageLog log,
     IPendingDeliveries pending, IBacklogStore backlog, ITeamPublisher publisher,
     KanbanStore kanban, WorktreeRemoval worktrees, TeamPaths paths, ILoggerFactory loggers,
-    SolutionNotice solutionNotice, OutcomeGate outcomeGate,
+    SolutionNotice solutionNotice, OutcomeGate outcomeGate, WakeMe wakes,
     CancellationToken ct) =>
 {
     if (teams.ExistingName(team) is not { } stored)
@@ -7712,6 +7831,12 @@ app.MapPost("/api/teams/{team}/containers/{name}/workflow-complete", async (
         declared[WorkflowDeclaration.OnBehalfOfField] = owner.ToString();
     }
 
+    // A DECLARED WORKFLOW HAS NOTHING LEFT TO WAKE ANYBODY FOR: its pending wakes are cancelled,
+    // a row each, BEFORE the declaration, so none can fire into it after - and the answer says so,
+    // because the member that asked for one is told nothing else.
+    var cancelledWakes = await wakes.CancelWorkflowAsync(
+        correlation, container.Id.ToString(), "the workflow was declared complete", ct);
+
     // THE ROW, ITS BACKLOG ITEM AND ITS SETTLED TREES: one sequence, shared with the platform's
     // declaration for a member that cannot declare (`UndeclarableWorkflows`).
     await WorkflowDeclaration.AppendAsync(
@@ -7720,7 +7845,13 @@ app.MapPost("/api/teams/{team}/containers/{name}/workflow-complete", async (
         log, backlog, host, kanban, worktrees, paths, teams.ReposFor(stored),
         loggers.CreateLogger("WorktreeRemoval"), ct, solutionNotice);
 
-    return Results.NoContent();
+    return cancelledWakes.Count == 0
+        ? Results.NoContent()
+        : Results.Ok(new
+        {
+            wakesCancelled = cancelledWakes.Select(w => w.View()).ToList(),
+            notice = WakeMe.CancelledNotice(cancelledWakes),
+        });
 })
     .WithTags("Members")
     .RequirePermit(Permits.Progress)
@@ -7736,7 +7867,9 @@ app.MapPost("/api/teams/{team}/containers/{name}/workflow-complete", async (
         + "counted against the owner; a Manager told to do work in it is. The Manager may declare "
         + "a workflow one of its members owns on that member's behalf, on the same rule, and the "
         + "row records `declaredBy` and `onBehalfOf`. A workflow already declared or closed is "
-        + "refused (409).");
+        + "refused (409). Declaring cancels the workflow's pending wakes, a `wake.cancelled` row "
+        + "each: the answer is then 200 with `wakesCancelled` and a `notice` saying so, and 204 "
+        + "when there were none.");
 
 // A PERSON ENDING A WORKFLOW, WHICH IS NOT A MANAGER DECLARING A DELIVERY.
 //
@@ -7758,7 +7891,7 @@ app.MapPost("/api/teams/{team}/workflows/{correlation:long}/close", async (
         + "`tell` or carried on any message in the thread.")]
     long correlation,
     CloseWorkflow request,
-    TeamRegistry teams, ContainerHost host, IMessageLog log, HttpContext context,
+    TeamRegistry teams, ContainerHost host, IMessageLog log, HttpContext context, WakeMe wakes,
     CancellationToken ct) =>
 {
     if (teams.ExistingName(team) is not { } stored)
@@ -7785,6 +7918,14 @@ app.MapPost("/api/teams/{team}/workflows/{correlation:long}/close", async (
     var from = PrincipalClaims.From(context.User)?.Id ?? "console";
 
     var reason = string.IsNullOrWhiteSpace(request.Reason) ? null : request.Reason.Trim();
+
+    // A CLOSED WORKFLOW IS WOKEN BY NOTHING IT ASKED FOR: its pending wakes are cancelled first, a
+    // row each naming the person, so none fires into it afterwards.
+    await wakes.CancelWorkflowAsync(
+        correlation,
+        context.User.FindFirstValue(ClaimTypes.Email) ?? from,
+        "a person closed the workflow",
+        ct);
 
     await log.AppendAsync(
         new NewMessage(
@@ -7823,6 +7964,47 @@ app.MapPost("/api/teams/{team}/workflows/{correlation:long}/close", async (
         + "correlation exists, which a caller with no business seeing it must never be told. Closing "
         + "an already-closed workflow is 204 and harmless: a second terminal row does not reopen "
         + "anything nothing has woken since.");
+
+// EVERY PENDING WAKE OF ONE TEAM, earliest due first: what a person's screens draw from, beside the
+// `wakes` on each member's snapshot, Kanban card and workflow row.
+app.MapGet("/api/teams/{team}/wakes", async (
+    [Description(Describe.Team)] string team,
+    TeamRegistry teams, IWakeStore wakes, CancellationToken ct) =>
+{
+    if (teams.ExistingName(team) is not { } stored) return Results.NotFound(new { error = $"No team '{team}'." });
+
+    return Results.Ok(new { wakes = (await wakes.ForTeamAsync(stored, ct)).Select(w => w.View()).ToList() });
+})
+    .WithTags("Members")
+    .RequirePermit(Permits.Read)
+    .WithSummary("The team's pending wakes")
+    .WithDescription(
+        "Each wake a member of this team asked for with `wake_me` and that has not fired or been "
+        + "cancelled: `id`, `member`, `workflow`, `dueAt` and `askedAt` (UTC) and `note`. 404 for an "
+        + "unknown team.");
+
+// A PERSON CANCELS ANY PENDING WAKE, from the member's card or the workflow. HumansOnly: a member
+// cancels only its own, through its own route above.
+app.MapPost("/api/teams/{team}/wakes/{id:long}/cancel", async (
+    [Description(Describe.Team)] string team,
+    [Description("The wake's id.")] long id,
+    TeamRegistry teams, WakeMe wakes, HttpContext context, CancellationToken ct) =>
+{
+    if (teams.ExistingName(team) is not { } stored) return Results.NotFound(new { error = $"No team '{team}'." });
+
+    var by = context.User.FindFirstValue(ClaimTypes.Email) ?? PrincipalClaims.From(context.User)?.Id ?? "console";
+    var cancelled = await wakes.CancelAsync(id, by, "cancelled by a person", team: stored, ct: ct);
+
+    return cancelled is null
+        ? Results.NotFound(new { error = $"No pending wake {id} on this team. It has fired or been cancelled." })
+        : Results.Ok(new { wake = cancelled.View(), cancelled = true });
+})
+    .WithTags("Members")
+    .HumansOnly()
+    .WithSummary("Cancel a pending wake")
+    .WithDescription(
+        "A person cancels any member's pending wake on this team. Appends `wake.cancelled` naming the "
+        + "person. 404 for a wake that is not pending on this team. A machine principal is refused.");
 
 // A PERSON WAKING A TEAM'S MANAGER UNDER A SPECIFIC WORKFLOW. A workflow can otherwise only be
 // closed from inside a run already woken under it, so a workflow nobody is inside is a workflow nobody can close; nudge is what puts
@@ -10130,6 +10312,13 @@ internal sealed record ReportNeedsDecision(
         + "card until something wakes you again, so write the actual decision and not a status "
         + "line. Blank is refused.")]
     string? Question);
+
+/// <summary>A member asking to be woken once, later.</summary>
+internal sealed record AskWake(
+    [property: Description("How long from now, as whole hours, minutes or seconds: `90s`, `10m`, `2h`, `1h30m`.")]
+    string? In,
+    [property: Description("One line, at most 300 characters: what to look at when woken.")]
+    string? Note);
 
 /// <summary>
 /// What a worker finished and is handing back.
