@@ -8,9 +8,10 @@ namespace Harness.Host;
 ///
 /// <para>
 /// <b>ONLY ITS OWN FILES ARE EVER DELETED.</b> The directory is shared with the pre-migration
-/// backups (<c>messages-*-before-*.db</c>) and <c>--backup</c>'s manual ones
-/// (<c>messages-*-manual.db</c>). Retention matches the <c>-daily.db</c> suffix and nothing else;
-/// manual copies are kept forever on purpose.
+/// backups (<c>messages-*-before-*.db</c>), <c>--backup</c>'s manual ones
+/// (<c>messages-*-manual.db</c>) and the copy <c>--restore</c> takes first
+/// (<c>messages-*-before-restore.db</c>). Retention matches the <c>-daily.db</c> suffix and nothing
+/// else; manual and before-restore copies are kept forever on purpose.
 /// </para>
 ///
 /// <para>

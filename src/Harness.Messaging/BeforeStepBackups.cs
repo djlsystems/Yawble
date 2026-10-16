@@ -48,6 +48,13 @@ public sealed record BeforeStepPrune(
 /// </para>
 ///
 /// <para>
+/// <b>THE COPY <c>--restore</c> TAKES IS NOT A BEFORE-STEP COPY.</b> Its name
+/// (<c>messages-&lt;stamp&gt;-before-restore[-n].db</c>) has the same shape, but it may be the only
+/// copy of a database someone overwrote by mistake, so it is kept forever like a manual one: never
+/// deleted here and not counted toward the newest <c>keep</c>.
+/// </para>
+///
+/// <para>
 /// <b>AGE IS THE STAMP IN THE NAME, NEVER THE MODIFICATION TIME.</b> A copy restored, synced or
 /// touched gets a new mtime, and that must not make a year-old copy look like yesterday's.
 /// </para>
@@ -135,12 +142,16 @@ public static partial class BeforeStepBackups
         return new BeforeStepPrune(deleted, kept, failed, keep, keepDays);
     }
 
-    /// <summary>When the copy was taken, read from its name (UTC), or null when it is not one.</summary>
+    /// <summary>
+    /// When the copy was taken, read from its name (UTC), or null when it is not one - including
+    /// <c>--restore</c>'s before-restore copy, which only looks like one.
+    /// </summary>
     public static DateTimeOffset? StampOf(string path)
     {
-        var match = Name().Match(Path.GetFileName(path));
+        var name = Path.GetFileName(path);
+        var match = Name().Match(name);
 
-        return match.Success && DateTime.TryParseExact(
+        return match.Success && !BeforeRestore().IsMatch(name) && DateTime.TryParseExact(
             match.Groups["stamp"].Value, StampFormat, CultureInfo.InvariantCulture,
             DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var parsed)
             ? new DateTimeOffset(parsed, TimeSpan.Zero)
@@ -177,4 +188,7 @@ public static partial class BeforeStepBackups
 
     [GeneratedRegex(@"^messages-(?<stamp>\d{8}-\d{6})-before-[^/\\]+\.db$", RegexOptions.CultureInvariant)]
     private static partial Regex Name();
+
+    [GeneratedRegex(@"^messages-\d{8}-\d{6}-before-restore(-\d+)?\.db$", RegexOptions.CultureInvariant)]
+    private static partial Regex BeforeRestore();
 }

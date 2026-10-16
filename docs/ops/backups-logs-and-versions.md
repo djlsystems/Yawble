@@ -21,7 +21,9 @@ There are two kinds of backup, and they cover different things.
 Once a day the host writes `messages-<yyyyMMdd-HHmmss>-daily.db` with SQLite's `VACUUM INTO`. The copy is consistent while the host is running. A plain file copy of `messages.db` is not, because the database is in WAL mode and recent writes are still in `messages.db-wal`.
 
 - The host checks every hour whether the newest daily copy is 24 hours old or missing, and takes one if so. It reads that from the folder, not from memory, so restarting the host does not produce extra copies.
-- It keeps the newest **seven** daily copies and deletes older ones. It deletes only files ending in `-daily.db`. Pre-migration backups (`messages-*-before-*.db`) and `--backup` copies (`messages-*-manual.db`) share the folder and are never deleted automatically.
+- It keeps the newest **seven** daily copies and deletes older ones. It deletes only files ending in `-daily.db`.
+- Pre-migration backups (`messages-<stamp>-before-<step>.db`) are pruned after each migration and on each daily run: every copy from the last 30 days is kept, plus the newest 10. Age comes from the time in the file name.
+- `--backup` copies (`messages-*-manual.db`) and the copy `--restore` takes first (`messages-*-before-restore.db`) are never deleted automatically.
 - A failed copy is logged as a warning and tried again at the next hourly check. It does not stop the host.
 
 Settings (in `appsettings.json` or as environment variables, for example `Backups__Keep=14`):
@@ -29,8 +31,10 @@ Settings (in `appsettings.json` or as environment variables, for example `Backup
 | Setting | Default | Meaning |
 |---|---|---|
 | `Backups:Enabled` | `true` | `false` turns the daily copy off. |
-| `Backups:Directory` | `<data root>/backups`, which is `/data/backups` in the container | Where the copies go. |
+| `Backups:Directory` | `<data root>/backups`, which is `/data/backups` in the container | Where every kind of copy goes: daily, pre-migration, `--backup` and the copy `--restore` takes first. |
 | `Backups:Keep` | `7` | How many daily copies to keep. |
+| `Backups:KeepBeforeStep` | `10` | How many pre-migration copies to keep beyond the age rule (at least 1). |
+| `Backups:KeepBeforeStepDays` | `30` | Pre-migration copies this many days old or newer are all kept. `0` turns the age rule off. |
 
 Separately, the quiet-team sweep (every minute by default) ends with `PRAGMA wal_checkpoint(TRUNCATE)`. This copies the WAL into the database and cuts `messages.db-wal` back to zero bytes, so the WAL does not stay at its largest size. If a reader holds the database at that moment, the checkpoint reports busy and the next sweep tries again.
 
