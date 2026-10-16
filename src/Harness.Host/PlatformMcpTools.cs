@@ -106,6 +106,41 @@ public sealed partial class PlatformMcpTools(
         CancellationToken cancellationToken = default) =>
         OwnAsync("needs-decision", new { question }, cancellationToken);
 
+    [McpServerTool(Name = "wake_me"), Description(
+        "Ask to be woken once, later, in the workflow you are working - to look again at something "
+        + "outside the platform (DNS, a certificate, a deployment, a rate limit) instead of sleeping in "
+        + "your run. Pass in (90s, 10m, 2h; at least 30 seconds, at most 24 hours unless the instance "
+        + "says otherwise) and note (one line: what to look at when woken), then end your run: you are "
+        + "sent one instruction with your note at that time. Pass cancel with a wake's id to cancel "
+        + "your own pending wake. At most 3 pending wakes, and 1 per workflow. A wake is once, not a "
+        + "schedule: for work that repeats, ask the person for a trigger.")]
+    public async Task<string> WakeMe(
+        [Description("How long from now: 90s, 10m, 2h or 1h30m. Omit when cancelling.")] string? @in = null,
+        [Description("One line, at most 300 characters: what to look at when woken. Omit when cancelling.")] string? note = null,
+        [Description("A pending wake's id, to cancel that wake instead of asking for one.")] long? cancel = null,
+        CancellationToken cancellationToken = default)
+    {
+        var context = http.HttpContext;
+        if (context is null) return "Refused: no request.";
+        if (PrincipalClaims.From(context.User) is not { } principal) return "Refused: not signed in.";
+
+        // A WAKE IS ONLY EVER FOR ITSELF, read from the credential: there is no member to name.
+        if (!ContainerId.TryParse(principal.Id, out var id))
+        {
+            return "Refused: wake_me is for a team's members and Managers, about their own run. "
+                + "This credential is not a member.";
+        }
+
+        var self = $"/api/teams/{Uri.EscapeDataString(id.Team)}/containers/{Uri.EscapeDataString(id.Name)}/wake";
+
+        if (cancel is { } wake)
+        {
+            return await SendAsync(HttpMethod.Post, $"{self}/{wake}/cancel", null, cancellationToken);
+        }
+
+        return await SendAsync(HttpMethod.Post, self, new { @in, note }, cancellationToken);
+    }
+
     [McpServerTool(Name = "workflow_complete"), Description(
         "Declare the workflow you own complete; a Manager may also declare one its own member "
         + "owns, once that member and every other member are idle in it (recorded as declaredBy the "

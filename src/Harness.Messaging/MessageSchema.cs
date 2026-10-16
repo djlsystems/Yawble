@@ -74,5 +74,27 @@ public static class MessageSchema
             """
             ALTER TABLE pending_deliveries ADD COLUMN deferred_from_run INTEGER NULL;
             """),
+
+        // THE WAKES A MEMBER ASKED FOR AND THAT HAVE NOT FIRED: one row each, removed in the same
+        // transaction as the row that fires, skips or cancels it, so a restart keeps every pending
+        // wake and none is acted on twice. The log holds the history; this holds only what is due.
+        new MigrationStep(
+            "messages-003",
+            """
+            CREATE TABLE wakes (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                team         TEXT    NOT NULL COLLATE NOCASE,
+                member       TEXT    NOT NULL COLLATE NOCASE,
+                workflow     INTEGER NOT NULL,
+                asked_seq    INTEGER NOT NULL,
+                asked_at     TEXT    NOT NULL,
+                due_at       TEXT    NOT NULL,
+                note         TEXT    NOT NULL
+            );
+
+            CREATE INDEX ix_wakes_due ON wakes(due_at);
+            CREATE INDEX ix_wakes_member ON wakes(team, member);
+            CREATE INDEX ix_wakes_workflow ON wakes(workflow);
+            """),
     ];
 }

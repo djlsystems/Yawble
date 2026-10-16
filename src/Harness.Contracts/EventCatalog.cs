@@ -627,6 +627,50 @@ public static class EventCatalog
             "A member's run was checked against the tools the platform gives it. Written only when the run "
             + "met a foreign tool (a call is marked above an offer) or could not be measured; a clean run "
             + "writes nothing. Source is the member; the Concierge is never checked."),
+
+        // A WAKE'S LIFE, OUT OF THE LEDGER LIKE PROGRESS: the feed, the Monitor and the run history
+        // show it, and the member reads it again in the instruction it is woken with. Source is the
+        // member the wake is for on all four, so its team is the source's.
+        new(MessageTypes.WakeAsked, EventPublisher.Agent, HighVolume: false, InLedger: false,
+            [
+                Source,
+                new(PayloadFields.Wake, EventFieldKind.Integer, "The wake's id."),
+                new(PayloadFields.DueAt, EventFieldKind.String, "When it is due, ISO-8601 UTC."),
+                new(PayloadFields.Note, EventFieldKind.String, "What the member said to look at when woken."),
+            ],
+            "A member asked to be woken once, later, in the workflow it is working."),
+
+        new(MessageTypes.WakeCancelled, EventPublisher.Platform, HighVolume: false, InLedger: false,
+            [
+                Source,
+                new(PayloadFields.Wake, EventFieldKind.Integer, "The wake's id."),
+                new(PayloadFields.By, EventFieldKind.String,
+                    "Who cancelled it: the member itself, a person's email, or the member that declared the workflow."),
+                new(PayloadFields.Reason, EventFieldKind.String, "Why it was cancelled."),
+                new(PayloadFields.Note, EventFieldKind.String, "The wake's note."),
+            ],
+            "A pending wake was cancelled before it fired. Source is the member it was for."),
+
+        new(MessageTypes.WakeFired, EventPublisher.Platform, HighVolume: false, InLedger: false,
+            [
+                Source,
+                new(PayloadFields.Wake, EventFieldKind.Integer, "The wake's id."),
+                new(PayloadFields.DueAt, EventFieldKind.String, "When it was due, ISO-8601 UTC."),
+                new(PayloadFields.LateSeconds, EventFieldKind.Integer,
+                    "How late it fired, when the Host was down at its time. Absent when on time."),
+                new(PayloadFields.Note, EventFieldKind.String, "The wake's note."),
+            ],
+            "A wake fired: one instruction to the member that asked, source `wake:<id>`, in the same workflow."),
+
+        new(MessageTypes.WakeSkipped, EventPublisher.Platform, HighVolume: false, InLedger: false,
+            [
+                Source,
+                new(PayloadFields.Wake, EventFieldKind.Integer, "The wake's id."),
+                new(PayloadFields.Reason, EventFieldKind.String, "Why it did not fire."),
+                new(PayloadFields.Note, EventFieldKind.String, "The wake's note."),
+            ],
+            "A wake came due and did not fire - its team archived, its workflow over its budget or ended - "
+            + "and is gone. Source is the member it was for."),
     ];
 
     public static IReadOnlySet<string> Types { get; } =

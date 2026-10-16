@@ -2082,6 +2082,9 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         // `started` and its terminal row caused by it, and the log refuses a row whose cause is gone,
         // so deleting it would let the run spend and leave no row - and no ledger row - behind.
         //
+        // SO IS A PENDING WAKE'S `wake.asked` ROW (`wakes`): the wake fires, skips or is cancelled
+        // with rows caused by it.
+        //
         // The obvious alternative - delete in descending seq order and catch the constraint
         // violation - is wrong twice over: it relies on foreign keys being ENFORCED, which this
         // store's Open() does not arrange, and it uses an exception for an ordinary outcome that has
@@ -2098,6 +2101,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
                    AND seq NOT IN (
                        SELECT causation_seq FROM messages WHERE causation_seq IS NOT NULL)
                    AND seq NOT IN (SELECT seq FROM pending_deliveries)
+                   AND seq NOT IN (SELECT asked_seq FROM wakes)
                  """;
 
             var removed = await command.ExecuteNonQueryAsync(ct);
