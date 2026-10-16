@@ -3994,11 +3994,14 @@ export interface Pressure {
 export interface RunFigures {
   team: string
   member: string
+  /** The members of the run's process group. */
   processes: number
   residentBytes: number
   cpuPercent: number | null
   /** The worker the run is on; absent from a server that does not say. */
   worker?: string | null
+  /** The threads its processes run between them; null or absent when not measured, never 0. */
+  threads?: number | null
 }
 
 /**
@@ -4065,6 +4068,7 @@ export interface CapacitySample {
     percentOfLimit: number | null
     pressure: Pressure | null
   }
+  /** The cgroup's `pids.current` against `pids.max`: TASKS (every process and every thread), not processes. */
   pids: { current: number | null; limit: number | null; unlimited: boolean }
   notMeasured: string[]
   runs: {

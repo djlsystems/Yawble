@@ -69,4 +69,18 @@ public sealed class ValueRedactorTests
         Assert.Equal($"{Marker} {Marker}", both.Apply("fake-first-Hy6t FAKE-SECOND-PZ3Q"));
         Assert.Same(ValueRedactor.Empty, ValueRedactor.Empty.With(ValueRedactor.Empty));
     }
+
+    [Fact]
+    public void A_bound_secret_equal_to_part_of_a_dkim_key_is_still_removed()
+    {
+        var key = DiagnosticRedactionTests.DkimPublicKey();
+        var part = key.Substring(40, 48);
+        var line = $"TXT default._domainkey \"v=DKIM1; k=rsa; p={key}\"";
+
+        var redacted = ValueRedactor.For([part]).Apply(line);
+
+        Assert.DoesNotContain(part, redacted, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(line.Replace(part, Marker, StringComparison.Ordinal), redacted);
+        Assert.Equal(redacted, DiagnosticRedaction.RedactWithoutLimit(redacted));
+    }
 }

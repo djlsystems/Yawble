@@ -220,11 +220,15 @@ public sealed class CapacityMeasurementTests : IDisposable
         Assert.Null(figures.MemoryInUseBytes);
     }
 
-    /// <summary>A /proc entry: <c>stat</c> with its group and CPU ticks, <c>statm</c> with resident pages.</summary>
-    private void WriteProcess(string proc, int pid, string comm, int group, long utime, long stime, long residentPages)
+    /// <summary>
+    /// A /proc entry: <c>stat</c> with its group, CPU ticks and thread count (field 20; a word there is
+    /// a count that cannot be read), <c>statm</c> with resident pages.
+    /// </summary>
+    private void WriteProcess(
+        string proc, int pid, string comm, int group, long utime, long stime, long residentPages, string threads = "1")
     {
         Write(proc, $"{pid}/stat",
-            $"{pid} ({comm}) S 1 {group} {group} 0 -1 4194560 100 0 0 0 {utime} {stime} 0 0 20 0 1 0 12345 1000000 {residentPages}\n");
+            $"{pid} ({comm}) S 1 {group} {group} 0 -1 4194560 100 0 0 0 {utime} {stime} 0 0 20 0 {threads} 0 12345 1000000 {residentPages}\n");
         Write(proc, $"{pid}/statm", $"9000 {residentPages} 100 10 0 500 0\n");
     }
 
@@ -246,12 +250,59 @@ public sealed class CapacityMeasurementTests : IDisposable
 
         var sums = new ProcessGroupReader(proc, pageSize: 4096).Read([100, 200, 400]);
 
-        Assert.Equal(new ProcessGroupFigures(3, (1000 + 200 + 50) * 4096L, 30 + 20 + 5 + 5 + 1 + 1), sums[100]);
-        Assert.Equal(new ProcessGroupFigures(1, 300 * 4096L, 7), sums[200]);
+        Assert.Equal(new ProcessGroupFigures(3, (1000 + 200 + 50) * 4096L, 30 + 20 + 5 + 5 + 1 + 1, 3), sums[100]);
+        Assert.Equal(new ProcessGroupFigures(1, 300 * 4096L, 7, 1), sums[200]);
 
         // A group with no process in /proc is not measured, never zero.
         Assert.Null(sums[400]);
         Assert.False(sums.ContainsKey(300));
+    }
+
+    [Fact]
+    public async Task A_fake_proc_gives_a_runs_process_count_and_thread_count_apart()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var proc = Path.Combine(_root, "proc");
+
+        // Three processes in the run's group running 41 threads between them: the cgroup's pids.current
+        // would count 41 tasks, and calling those processes is the mistake this pins.
+        WriteProcess(proc, 100, "agent-cli", group: 100, utime: 30, stime: 20, residentPages: 1000, threads: "28");
+        WriteProcess(proc, 101, "node", group: 100, utime: 5, stime: 5, residentPages: 200, threads: "12");
+        WriteProcess(proc, 102, "sh", group: 100, utime: 1, stime: 1, residentPages: 50, threads: "1");
+        WriteProcess(proc, 200, "other", group: 200, utime: 7, stime: 0, residentPages: 300, threads: "9");
+
+        var sums = new ProcessGroupReader(proc, pageSize: 4096).Read([100]);
+        Assert.Equal(3, sums[100]!.Processes);
+        Assert.Equal(41, sums[100]!.Threads);
+
+        // The same figures reach the run's measurement on the worker.
+        var groups = new RunProcessGroups();
+        using var run = groups.Register(100, new ContainerId("Alpha", "Developer"));
+        var events = new Events();
+        var heartbeat = new RunHeartbeat();
+        var host = new WorkerHost(
+            new WorkerId("w1"), events, new RunLauncher(heartbeat, reports: false), heartbeat,
+            processes: new ProcessGroupReader(proc, 4096), groups: groups);
+
+        await host.ApplyAsync(new SampleCapacity(), ct);
+
+        var measured = Assert.Single(events.Published.Select(e => e.Event).OfType<RunMeasured>());
+        Assert.Equal(100, measured.Group);
+        Assert.Equal(3, measured.Processes);
+        Assert.Equal(41, measured.Threads);
+    }
+
+    [Fact]
+    public void A_thread_count_that_cannot_be_read_leaves_the_runs_threads_not_measured_never_a_part_sum()
+    {
+        var proc = Path.Combine(_root, "proc");
+        WriteProcess(proc, 100, "agent-cli", group: 100, utime: 30, stime: 20, residentPages: 1000, threads: "28");
+        WriteProcess(proc, 101, "node", group: 100, utime: 5, stime: 5, residentPages: 200, threads: "x");
+
+        var sums = new ProcessGroupReader(proc, pageSize: 4096).Read([100]);
+
+        Assert.Equal(2, sums[100]!.Processes);
+        Assert.Null(sums[100]!.Threads);
     }
 
     [Fact]

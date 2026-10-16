@@ -138,6 +138,36 @@ public sealed class CapacitySamplingTests
     }
 
     [Fact]
+    public async Task A_top_run_carries_its_process_and_thread_counts_apart()
+    {
+        var clock = new ManualTime(DateTimeOffset.UnixEpoch.AddDays(1));
+        var pool = new WorkerPool(_ => new HeadroomGate(() => 80, () => 0, clock), clock: clock);
+        var wip = new WipLedger(5, pool);
+        var w1 = new Answering((long)1e9, (long)10e9, clock, "w1")
+        {
+            Runs =
+            [
+                new RunMeasured(new RunId(new ContainerId("alpha", "Developer"), "n"), 77, 3, 500_000_000, 10, DateTimeOffset.UnixEpoch, Threads: 41),
+                new RunMeasured(new RunId(new ContainerId("alpha", "Tester"), "n"), 78, 2, 100_000_000, 10, DateTimeOffset.UnixEpoch),
+            ],
+        };
+        pool.Join(w1, new WorkerInfo(w1.Id, "v", 4, (long)10e9, clock.GetUtcNow()));
+        var sampler = new CapacitySampler(
+            () => [.. pool.Entries().Select(e => (e.Worker!, e.Gate))], wip, new NoLease(), () => 80, () => 0, clock: clock, interval: Interval);
+        w1.Control = sampler.HandleAsync;
+
+        var sample = await sampler.SampleAsync(Ct);
+
+        var developer = Assert.Single(sample.TopByMemory, r => r.Member == "Developer");
+        Assert.Equal((3, 41), (developer.Processes, developer.Threads));
+
+        // Threads the worker did not read are not measured, never 0.
+        var tester = Assert.Single(sample.TopByMemory, r => r.Member == "Tester");
+        Assert.Equal(2, tester.Processes);
+        Assert.Null(tester.Threads);
+    }
+
+    [Fact]
     public async Task A_manager_over_a_workers_bound_says_so_in_the_samples_running_runs()
     {
         var clock = new ManualTime(DateTimeOffset.UnixEpoch.AddDays(1));

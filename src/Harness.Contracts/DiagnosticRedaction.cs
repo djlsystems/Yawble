@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text.RegularExpressions;
 
 namespace Harness.Contracts;
@@ -45,6 +47,15 @@ namespace Harness.Contracts;
 ///     by its value.
 ///   </item>
 /// </list>
+///
+/// <para>
+/// <b>A PUBLIC KEY IS KEPT.</b> Rule 2 does not touch the value of a `p=` tag in a record that
+/// starts `v=DKIM1`, up to the end of that record's quoted string or line, nor a base64 run that
+/// begins `MIIB`, `MIIC` or `MIGf` and decodes to an X.509 SubjectPublicKeyInfo. A DKIM key is
+/// published in DNS by definition, and replacing it left an agent reading a zone unable to
+/// compare the record with the one it meant, so it "fixed" a record that was right. Rule 1 still
+/// applies, and a bound secret is still removed by its value whatever its shape.
+/// </para>
 ///
 /// <para>
 /// <b>THE LIMIT IS STATED RATHER THAN HIDDEN:</b> a secret that is all one case, is not named, and
@@ -99,8 +110,55 @@ public static partial class DiagnosticRedaction
         var redacted = NamedSecret().Replace(text, match =>
             match.Groups["name"].Value + match.Groups["separator"].Value + Placeholder);
 
+        var publicKeys = PublicKeys(redacted);
+
         return CredentialShaped().Replace(redacted, match =>
-            LooksRandom(match.Value) && !PrefixedHex().IsMatch(match.Value) ? Placeholder : match.Value);
+            LooksRandom(match.Value) && !PrefixedHex().IsMatch(match.Value) && !Inside(publicKeys, match)
+                ? Placeholder
+                : match.Value);
+    }
+
+    /// <summary>
+    /// The spans of <paramref name="text"/> that hold a public key: a DKIM record's `p=` value, and a
+    /// base64 run that decodes to a SubjectPublicKeyInfo. A run that only looks like one - the right
+    /// first four characters and nothing that decodes - is not a span.
+    /// </summary>
+    private static List<(int Start, int End)> PublicKeys(string text)
+    {
+        var spans = new List<(int Start, int End)>();
+
+        foreach (Match match in DkimKey().Matches(text))
+        {
+            var key = match.Groups["key"];
+            spans.Add((key.Index, key.Index + key.Length));
+        }
+
+        foreach (Match match in SubjectPublicKeyInfoShaped().Matches(text))
+        {
+            if (IsSubjectPublicKeyInfo(match.Value)) spans.Add((match.Index, match.Index + match.Length));
+        }
+
+        return spans;
+    }
+
+    private static bool Inside(List<(int Start, int End)> spans, Match match) =>
+        spans.Exists(span => match.Index >= span.Start && match.Index + match.Length <= span.End);
+
+    /// <summary>Whether <paramref name="base64"/> decodes to exactly one X.509 SubjectPublicKeyInfo.</summary>
+    private static bool IsSubjectPublicKeyInfo(string base64)
+    {
+        var bytes = new byte[base64.Length * 3 / 4];
+        if (!Convert.TryFromBase64String(base64, bytes, out var written)) return false;
+
+        try
+        {
+            PublicKey.CreateFromSubjectPublicKeyInfo(bytes.AsSpan(0, written), out var read);
+            return read == written;
+        }
+        catch (CryptographicException)
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -170,6 +228,16 @@ public static partial class DiagnosticRedaction
     /// <summary>A hex digest behind a short letter prefix: a record's id, not a credential.</summary>
     [GeneratedRegex("^[A-Za-z]{1,4}[_-]?(?:[0-9a-f]{32,}|[0-9A-F]{32,})$", RegexOptions.CultureInvariant)]
     private static partial Regex PrefixedHex();
+
+    /// <summary>A DKIM record's `p=` value: from the tag to the end of the record's quoted string or
+    /// line.</summary>
+    [GeneratedRegex("""\bv=DKIM1\b[^"\r\n]*?(?<![A-Za-z0-9])p=(?<key>[^"\r\n]*)""", RegexOptions.CultureInvariant)]
+    private static partial Regex DkimKey();
+
+    /// <summary>A base64 run that starts as a DER SubjectPublicKeyInfo of a 1024-bit RSA key
+    /// (`MIGf`) or a longer key (`MIIB`, `MIIC`) does. Whether it is one is decided by decoding it.</summary>
+    [GeneratedRegex("(?<![A-Za-z0-9+/])(?:MIIB|MIIC|MIGf)[A-Za-z0-9+/]+={0,2}", RegexOptions.CultureInvariant)]
+    private static partial Regex SubjectPublicKeyInfoShaped();
 
     /// <summary>A run from the base64url alphabet long enough to be a credential. Whether it
     /// actually is one is decided by <see cref="LooksRandom"/>.</summary>

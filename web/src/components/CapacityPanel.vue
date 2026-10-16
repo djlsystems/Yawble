@@ -4,6 +4,8 @@ import type { CapacitySample, RunFigures } from '../api/types';
 import {
   MemoryWhose,
   NotMeasured,
+  TasksHeading,
+  TasksWhat,
   ageWords,
   bytesWords,
   cpuWords,
@@ -11,10 +13,12 @@ import {
   partyWords,
   pidsWords,
   pressureWords,
+  runCountsWords,
   runsWords,
   sparkline,
   workerWords,
 } from '../lib/capacity';
+import FieldHelp from './FieldHelp.vue';
 
 /**
  * THE ACTIVITY MONITOR'S DROPDOWN: the instance's figures in words, each with what it is measured
@@ -128,7 +132,10 @@ function onWorker(run: RunFigures): string {
       </section>
 
       <section class="q-mb-sm" data-test="capacity-pids">
-        <div class="text-subtitle2">Processes</div>
+        <div class="text-subtitle2 row items-center no-wrap q-gutter-x-xs">
+          <span>{{ TasksHeading }}</span>
+          <FieldHelp :text="TasksWhat" />
+        </div>
         <div class="text-body2">{{ pidsWords(sample) }}</div>
       </section>
 
@@ -183,7 +190,7 @@ function onWorker(run: RunFigures): string {
         <ul v-else class="capacity-list text-caption">
           <li v-for="run in sample.topByMemory" :key="`${run.team}/${run.member}`">
             <a href="#" class="capacity-team" @click.prevent="emit('team', run.team)">{{ run.team }}</a>
-            {{ run.member }}{{ onWorker(run) }}: {{ bytesWords(run.residentBytes) }}, {{ run.processes }} processes
+            {{ run.member }}{{ onWorker(run) }}: {{ bytesWords(run.residentBytes) }}, {{ runCountsWords(run) }}
           </li>
         </ul>
       </section>
