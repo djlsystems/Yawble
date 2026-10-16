@@ -307,10 +307,11 @@ public sealed class TenantSettings
     /// <summary>
     /// The built-in <c>causation.depthLimit</c>. Every hop of a workflow counts - a Manager's tell to
     /// a plugin member, its completion, the Manager's next tell - so a build that drives Azure, DNS
-    /// and Stripe through plugin members reaches 25 steps without going round in circles. 100 still
-    /// stops two agents instructing each other forever.
+    /// and Stripe through plugin members reaches 25 steps without going round in circles, and a whole
+    /// product build (deploy, retries, domain binding) passed 100 on 2026-10-15. 200 still stops two
+    /// agents instructing each other forever, and a person's nudge starts the count again.
     /// </summary>
-    public const int DefaultCausationDepthLimit = 100;
+    public const int DefaultCausationDepthLimit = 200;
 
     /// <summary>Megabytes of the container's limit the computed per-run limit leaves to the Host.</summary>
     public const int HostReserveMb = 1024;
