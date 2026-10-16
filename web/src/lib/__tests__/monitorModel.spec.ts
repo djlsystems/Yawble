@@ -210,6 +210,30 @@ describe('the replay clock', () => {
     const clock = new ReplayClock(rows, 1, 20_000, Date.parse(at(25)))
     expect(clock.advance(5000).map((r) => r.type)).toEqual(['b'])
   })
+
+  it('plays recorded file changes at their times beside the rows, and is done only when both are', () => {
+    const change = (seconds: number) => ({ team: 'A', member: 'M', repo: 'r', at: at(seconds), files: [], commits: [], more: false })
+    const rows = [row('a', 'A/M', {}, at(0)), row('b', 'A/M', {}, at(10))]
+    const clock = new ReplayClock(rows, 10, 20_000, Date.parse(at(0)), [change(15), change(5)])
+
+    expect(clock.step(0)).toMatchObject({ rows: [{ type: 'a' }], changes: [] })
+    expect(clock.step(400).changes).toEqual([])
+    expect(clock.step(100)).toMatchObject({ rows: [], changes: [{ at: at(5) }] })
+    expect(clock.step(500)).toMatchObject({ rows: [{ type: 'b' }], changes: [] })
+    expect(clock.done).toBe(false)
+    expect(clock.step(500)).toMatchObject({ rows: [], changes: [{ at: at(15) }] })
+    expect(clock.done).toBe(true)
+  })
+
+  it('skips the quiet down to the next row or change, whichever is sooner', () => {
+    const change = { team: 'A', member: 'M', repo: 'r', at: '2026-10-15T12:00:00Z', files: [], commits: [], more: false }
+    const rows = [row('a', 'A/M', {}, at(0)), row('b', 'A/M', {}, '2026-10-15T14:00:00Z')]
+    const clock = new ReplayClock(rows, 10, 20_000, Date.parse(at(0)), [change])
+    clock.step(0)
+
+    expect(clock.step(2100)).toMatchObject({ rows: [], changes: [{ at: change.at }] })
+    expect(clock.step(2100).rows.map((r) => r.type)).toEqual(['b'])
+  })
 })
 
 describe('the timeline and the words', () => {

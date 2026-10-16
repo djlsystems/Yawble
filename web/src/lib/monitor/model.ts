@@ -123,7 +123,7 @@ export interface TickerEntry {
   workflow: number
   /** A hinted plugin row: its icon, what happened and its label, said in words beside the graph. */
   resource?: Resource
-  /** A file-changes push, not a row of the log: kept only while the page is open. */
+  /** A file-changes push, or a recorded one a replay plays: not a row of the log. */
   workspace?: true
   /** That push's files, each listed by path with what happened to it, and what it left off. */
   files?: { path: string; action: FileAction }[]
@@ -284,7 +284,7 @@ export class MonitorModel {
   settings: ResourceSettings = DefaultSettings
   /** Whether file changes are drawn and listed, and how far down. */
   fileSettings: FileSettings = DefaultFileSettings
-  /** A replay plays the log, and file changes are not in it. */
+  /** A replay plays the log, and the file changes recorded beside it (`GET /api/file-changes`). */
   replay = false
   /**
    * What the Host calls each team and member that exists now, and each member's kind: a replay
@@ -685,10 +685,11 @@ export class MonitorModel {
 
   /**
    * One file-changes push. Returns what to draw for it and appends its line to the activity list;
-   * nothing in a replay, with the setting off, or for a team this model does not show.
+   * nothing with the setting off, or for a team this model does not show. A replay feeds the
+   * recorded changes through here at their times, so they draw and list as they did live.
    */
   applyWorkspace(push: WorkspacePush): MonitorEffect[] {
-    if (this.replay || !this.fileSettings.show) return []
+    if (!this.fileSettings.show) return []
     if (this.only && !this.only.has(push.team)) return []
     this.team(push.team)
     const member = this.members.get(`${push.team}/${push.member}`) ?? null
@@ -739,13 +740,29 @@ function snapshotState(container: Team['containers'][number]): MemberState {
   return 'idle'
 }
 
+/** A recorded file change's time in ms; one whose time cannot be read is placed at 0, never dropped. */
+export function changeTime(push: WorkspacePush): number {
+  return pushTime(push) ?? 0
+}
+
+/** What a replay's clock has due: the log rows and the recorded file changes, each in time order. */
+export interface ReplayDue {
+  rows: Message[]
+  changes: WorkspacePush[]
+}
+
 /**
  * THE REPLAY'S CLOCK. Rows are played at `speed` times their real pace, and a quiet stretch longer
  * than `maxGap` of real time is skipped down to that, so a night with nothing in it does not hold
  * the screen still. Returns the rows due by `elapsed` ms of wall time since the replay began.
+ *
+ * The members' recorded file changes (`GET /api/file-changes`) play on the same clock, each at its
+ * own time beside the rows: a quiet stretch is one with neither.
  */
 export class ReplayClock {
   private index = 0
+  private changeIndex = 0
+  private readonly changes: readonly WorkspacePush[]
   private virtual: number
   speed: number
 
@@ -754,15 +771,19 @@ export class ReplayClock {
     speed: number,
     private readonly maxGap = 20_000,
     start = rows.length > 0 ? timeOf(rows[0]!) : 0,
+    changes: readonly WorkspacePush[] = [],
   ) {
     this.speed = speed
     this.virtual = start
     this.index = rows.findIndex((row) => timeOf(row) >= start)
     if (this.index < 0) this.index = rows.length
+    this.changes = [...changes].sort((a, b) => changeTime(a) - changeTime(b))
+    this.changeIndex = this.changes.findIndex((change) => changeTime(change) >= start)
+    if (this.changeIndex < 0) this.changeIndex = this.changes.length
   }
 
   get done(): boolean {
-    return this.index >= this.rows.length
+    return this.index >= this.rows.length && this.changeIndex >= this.changes.length
   }
 
   /** The log time the replay has reached, ms. */
@@ -772,16 +793,27 @@ export class ReplayClock {
 
   /** Advance by `wallMs` of wall time and return the rows now due, in order. */
   advance(wallMs: number): Message[] {
-    if (this.done) return []
-    const next = timeOf(this.rows[this.index]!)
-    // Skip the quiet: never wait longer than maxGap of real time for the next row.
+    return this.step(wallMs).rows
+  }
+
+  /** Advance by `wallMs` of wall time and return the rows and file changes now due, each in order. */
+  step(wallMs: number): ReplayDue {
+    const due: ReplayDue = { rows: [], changes: [] }
+    if (this.done) return due
+    const nextRow = this.index < this.rows.length ? timeOf(this.rows[this.index]!) : Number.POSITIVE_INFINITY
+    const nextChange = this.changeIndex < this.changes.length ? changeTime(this.changes[this.changeIndex]!) : Number.POSITIVE_INFINITY
+    const next = Math.min(nextRow, nextChange)
+    // Skip the quiet: never wait longer than maxGap of real time for the next row or change.
     if (next - this.virtual > this.maxGap) this.virtual = next - this.maxGap
     this.virtual += wallMs * this.speed
 
-    const due: Message[] = []
     while (this.index < this.rows.length && timeOf(this.rows[this.index]!) <= this.virtual) {
-      due.push(this.rows[this.index]!)
+      due.rows.push(this.rows[this.index]!)
       this.index++
+    }
+    while (this.changeIndex < this.changes.length && changeTime(this.changes[this.changeIndex]!) <= this.virtual) {
+      due.changes.push(this.changes[this.changeIndex]!)
+      this.changeIndex++
     }
     return due
   }

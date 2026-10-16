@@ -3,9 +3,11 @@
 // FILE CHANGES: a `workspaceChanged` push draws the member's files as a repository node off the
 // team, a project node off the repository and a file node off the project, a line from the member
 // to each file, tinted by what happened, for the plugin changes' time to live in display time. The
-// push is built here as the Host sends it; nothing of it is in the log, so a replay draws none.
+// push is built here as the Host sends it. The Host records each during every run, and a replay
+// reads them back (`GET /api/file-changes`) and plays each at its time beside the log rows.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { MonitorModel, type MonitorEffect } from '../monitor/model'
+import { MonitorModel, ReplayClock, type MonitorEffect } from '../monitor/model'
+import type { Message } from '../../api/types'
 import { MonitorScene, type Box } from '../monitor/scene'
 import { DefaultSettings } from '../monitor/hints'
 import {
@@ -20,6 +22,8 @@ import {
   pushHeadline,
   pushMoreWords,
   readPush,
+  readRecorded,
+  type FileChangesPage,
   repoId,
   type FileSettings,
   type WorkspacePush,
@@ -357,14 +361,117 @@ describe('Show file changes off', () => {
 })
 
 describe('a replay', () => {
-  it('draws none of it and lists none of it', () => {
-    const { scene, model, at, play } = setup()
-    model.replay = true
+  const row = (seq: number, type: string, occurredAt: string): Message => ({
+    seq, type, source: 'Alpha/DeveloperMaren', payload: '{}', correlationId: 7, causationSeq: null, depth: 0, occurredAt,
+  })
+  /** A period of the log, and the changes the Host recorded in it, as the route answers them. */
+  const period = () => ({
+    rows: [row(1, 'agentContainer.started', '2026-10-15T10:42:00Z'), row(2, 'agentContainer.completed', '2026-10-15T10:42:30Z')],
+    changes: [
+      { id: 11, correlation: 7, ...push({ at: '2026-10-15T10:42:10Z' }) },
+      { id: 12, correlation: 7, ...commitPush(), at: '2026-10-15T10:42:20Z' },
+    ],
+  })
 
-    expect(model.applyWorkspace(push())).toEqual([])
-    expect(model.ticker).toEqual([])
-    at(500)
+  /** Plays a period through the clock as the Monitor does, one `wallMs` frame at a time. */
+  function replayer(options: { files?: FileSettings } = {}) {
+    const made = setup(options)
+    made.model.replay = true
+    const { rows, changes } = period()
+    const recorded = changes.map((change) => readPush(change)!)
+    const clock = new ReplayClock(rows, 1, 20_000, Date.parse(rows[0]!.occurredAt), recorded)
+    let wall = 0
+    const until = (logTime: string) => {
+      while (clock.at < Date.parse(logTime) && !clock.done) {
+        const due = clock.step(100)
+        for (const message of due.rows) made.play(made.model.apply(message))
+        for (const change of due.changes) made.play(made.model.applyWorkspace(change))
+        made.at((wall += 100))
+      }
+    }
+    return { ...made, clock, until }
+  }
+
+  it('reads a period of recorded changes oldest first, page after page until next is null', async () => {
+    const { changes } = period()
+    const pages: Record<number, FileChangesPage> = {
+      0: { changes: [changes[0]], next: 11 },
+      11: { changes: [changes[1], { id: 13, team: '', member: 'x', repo: 'y' }], next: 13 },
+      13: { changes: [], next: null },
+    }
+    const asked: number[] = []
+    const read = await readRecorded(async (after) => {
+      asked.push(after)
+      return pages[after]!
+    })
+
+    expect(asked).toEqual([0, 11, 13])
+    expect(read.map((change) => change.at)).toEqual(['2026-10-15T10:42:10Z', '2026-10-15T10:42:20Z'])
+    expect(read[1]!.commits[0]).toMatchObject({ sha: '1a2b3c4d5e6f7a8b9c0d', subject: 'Fix the parser' })
+  })
+
+  it('stops at a cursor that does not move on, and at its bound', async () => {
+    const one = { changes: [period().changes[0]], next: 5 }
+    let reads = 0
+    await readRecorded(async () => {
+      reads++
+      return one
+    })
+    expect(reads).toBe(2)
+
+    reads = 0
+    let next = 0
+    await readRecorded(async () => {
+      reads++
+      return { changes: [period().changes[0]], next: ++next }
+    }, 3)
+    expect(reads).toBe(3)
+  })
+
+  it('draws the repository, project and file nodes and the commit at their times, and lists them', () => {
+    const { scene, model, until } = replayer()
+
+    until('2026-10-15T10:42:09Z')
     expect(scene.shownWorkspace().nodes).toEqual([])
+    expect(model.ticker.filter((line) => line.workspace)).toEqual([])
+
+    until('2026-10-15T10:42:10Z')
+    expect(ids(scene)).toEqual([repo, project, parser, fileId('Alpha', 'web', 'harness-web', 'src/lib/lexer.ts'), fileId('Alpha', 'web', 'harness-web', 'src/lib/old.ts')].sort())
+    expect(scene.shownWorkspace().touches.map((touch) => touch.member)).toContain('Alpha/DeveloperMaren')
+    expect(scene.shownWorkspace().flashes).toEqual([])
+
+    until('2026-10-15T10:42:20Z')
+    expect(scene.shownWorkspace().flashes).toMatchObject([{ node: repo, sha: '1a2b3c4', subject: 'Fix the parser' }])
+    expect(ids(scene)).toContain(projectId('Alpha', 'web', 'cli'))
+
+    const lines = model.ticker.filter((line) => line.workspace)
+    expect(lines.map((line) => [line.verb, line.text, line.at])).toEqual([
+      ['committed', '1a2b3c4 Fix the parser', Date.parse('2026-10-15T10:42:20Z')],
+      ['changed files', '', Date.parse('2026-10-15T10:42:10Z')],
+    ])
+    expect(lines[1]!.files).toEqual([
+      { path: 'src/lib/parser.ts', action: 'changed' },
+      { path: 'src/lib/lexer.ts', action: 'created' },
+      { path: 'src/lib/old.ts', action: 'deleted' },
+    ])
+  })
+
+  it('draws only as far down as the setting says', () => {
+    const { scene, until } = replayer({ files: { show: true, depth: 'project' } })
+    until('2026-10-15T10:42:20Z')
+
+    expect(scene.shownWorkspace().nodes.map((found) => found.kind)).not.toContain('file')
+    expect(ids(scene)).toEqual([repo, project, projectId('Alpha', 'web', 'cli')].sort())
+  })
+
+  it('draws none of it and lists none of it with the setting off, and the rows still play', () => {
+    const { scene, model, clock, until } = replayer({ files: { show: false, depth: 'file' } })
+    until('2026-10-15T10:42:30Z')
+
+    expect(clock.done).toBe(true)
+    expect(scene.shownWorkspace()).toEqual({ nodes: [], touches: [], flashes: [] })
+    expect(model.ticker.filter((line) => line.workspace)).toEqual([])
+    expect(model.ticker.map((line) => line.verb)).toHaveLength(2)
   })
 
   it('clears what live drew when it starts', () => {

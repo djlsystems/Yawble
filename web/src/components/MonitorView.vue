@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import FieldHelp from './FieldHelp.vue'
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
-import { getMessages, listEvents } from '../api/client'
+import { getFileChanges, getMessages, listEvents } from '../api/client'
 import type { Message, MonitorHint } from '../api/types'
 import { useConsoleStore } from '../stores/console'
 import { useAppearanceStore } from '../stores/appearance'
@@ -35,7 +35,9 @@ import {
 import { MonitorSymbolsFamily, glyphOf, loadMonitorSymbols, type Codepoints } from '../lib/monitor/font'
 import {
   fileWatch,
+  pushTime,
   readFileSettings,
+  readRecorded,
   writeFileSettings,
   type FileDepth,
   type FileSettings,
@@ -71,7 +73,8 @@ import {
  *
  * While it is open it joins the hub's file watch, and each `workspaceChanged` push draws the
  * member's file changes as repository, project and file nodes off its team (`lib/monitor/workspace.ts`).
- * They are in no row of the log, so a replay draws none of them.
+ * The Host records them during every run, so a replay reads its period's (`GET /api/file-changes`)
+ * and plays each at its time beside the rows, drawn and listed as it was live.
  */
 
 const board = useConsoleStore()
@@ -212,7 +215,7 @@ let pushLines: TickerEntry[] = []
 let pendingPushes: WorkspacePush[] = []
 let stopWatching: (() => void) | null = null
 
-/** One file-changes push: drawn and listed live, and nothing at all in a replay. */
+/** One file-changes push: drawn and listed live; a replay plays the recorded ones instead. */
 function onPush(push: WorkspacePush) {
   if (loading.value) {
     pendingPushes.push(push)
@@ -335,14 +338,24 @@ function timeWords(ms: number): string {
   return ms > 0 ? localTime(ms) : ''
 }
 
-/** Apply rows, playing their effects unless `quiet`. */
-function feed(rows: readonly Message[], quiet: boolean) {
+/** Apply rows, and the recorded file changes beside them in time order, playing their effects unless `quiet`. */
+function feed(rows: readonly Message[], quiet: boolean, changes: readonly WorkspacePush[] = []) {
   const effects: MonitorEffect[] = []
+  let next = 0
+  const changesUntil = (at: number) => {
+    while (next < changes.length && (pushTime(changes[next]!) ?? 0) <= at) {
+      const made = model.applyWorkspace(changes[next]!)
+      if (!quiet) effects.push(...made)
+      next++
+    }
+  }
   for (const row of rows) {
+    changesUntil(timeOf(row))
     const made = model.apply(row)
     if (!quiet) effects.push(...made)
   }
-  if (rows.length > 0) dirty = true
+  changesUntil(Number.POSITIVE_INFINITY)
+  if (rows.length > 0 || changes.length > 0) dirty = true
   if (!quiet && effects.length > 0) scene?.play(effects)
 }
 
@@ -367,7 +380,8 @@ function tick(now: number) {
   lastFrame = now
 
   if (mode.value === 'replay' && replay) {
-    feed(replay.advance(dt), false)
+    const due = replay.step(dt)
+    feed(due.rows, false, due.changes)
     clockAt.value = replay.at
     if (replay.done && !finished.value) finished.value = true
   }
@@ -387,6 +401,7 @@ function tick(now: number) {
 
 function startLive() {
   replay = null
+  replaying++
   finished.value = false
   mode.value = 'live'
   model = newModel(new Set(liveTeams.value))
@@ -398,19 +413,49 @@ function startLive() {
   publish(performance.now())
 }
 
-/** Replay from `from` (log time, ms): the rows before it are applied silently, then played. */
-function startReplay(from?: number) {
+/** Which replay is current: one started later, or live, makes an earlier one's late answer moot. */
+let replaying = 0
+/** The recorded file changes of the period last read, kept so a seek within it reads none again. */
+let recorded: { key: string; changes: Promise<WorkspacePush[]> } | null = null
+
+/**
+ * The members' file changes recorded over the rows held, oldest first, every page of them. A read
+ * that fails leaves the replay without file changes and nothing else, as a failed watch does live.
+ */
+function recordedChanges(rows: readonly Message[]): Promise<WorkspacePush[]> {
+  const period = { from: rows[0]!.occurredAt, to: rows[rows.length - 1]!.occurredAt }
+  const key = `${period.from}|${period.to}`
+  if (recorded?.key !== key) {
+    const changes = readRecorded((after, take) => getFileChanges(period, after, take)).catch(() => [] as WorkspacePush[])
+    recorded = { key, changes }
+  }
+  return recorded.changes
+}
+
+/**
+ * Replay from `from` (log time, ms): the rows and recorded file changes before it are applied
+ * silently, then both are played, each at its time.
+ */
+async function startReplay(from?: number) {
   const rows = history.value
   if (rows.length === 0) return
+  const current = ++replaying
   mode.value = 'replay'
   finished.value = false
+  replay = null
   model = newModel(null, true)
   model.know(board.choosableTeams)
-  // File changes are not in the log: the replay draws none, and says nothing of them.
+  // What live drew goes; the replay draws its own period's file changes.
   scene?.clearFileChanges()
+  const changes = await recordedChanges(rows)
+  if (current !== replaying || unmounted) return
   const start = from ?? timeOf(rows[0]!)
-  feed(rows.filter((row) => timeOf(row) < start), true)
-  replay = new ReplayClock(rows, speed.value, 20_000, start)
+  feed(
+    rows.filter((row) => timeOf(row) < start),
+    true,
+    changes.filter((change) => (pushTime(change) ?? 0) < start),
+  )
+  replay = new ReplayClock(rows, speed.value, 20_000, start, changes)
   tokensShown.value = model.tokens
   dirty = true
   publish(performance.now())
@@ -423,7 +468,7 @@ function seek(event: MouseEvent) {
   if (!s || !bar) return
   const rect = bar.getBoundingClientRect()
   const share = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
-  startReplay(s.from + share * (s.to - s.from))
+  void startReplay(s.from + share * (s.to - s.from))
 }
 
 watch(speed, (value) => {

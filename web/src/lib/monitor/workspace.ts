@@ -7,8 +7,9 @@ import type { ResourceAction } from './hints'
  * A person's connection joins the hub's file watch with `JoinFileWatch()` while the Monitor is open
  * and leaves with `LeaveFileWatch()` when it closes; the Host then pushes `workspaceChanged`, one
  * push per batch of changes a member made: its files, the commits among them, and whether there
- * were more than it lists. Nothing of it is in the log, so a replay has none of it and the activity
- * list keeps a push's line only while the page is open.
+ * were more than it lists. The Host also records each of them during every run, watched or not, and
+ * a replay reads them back (`GET /api/file-changes`, `readRecorded`) and plays each at its time
+ * beside the log rows, through the same `readPush` and the same tree.
  *
  * The scene draws each as a small tree off the team: the repository, its project, the file, and a
  * line from the member to each file it touched. `WorkspaceGraph` is that tree in display time, kept
@@ -129,6 +130,44 @@ export function pushHeadline(push: WorkspacePush): string {
 export function pushMoreWords(push: WorkspacePush): string {
   if (push.more === true) return 'and more'
   return typeof push.more === 'number' && push.more > 0 ? `and ${push.more} more` : ''
+}
+
+// --- the recorded changes, for a replay ----------------------------------------------------------
+
+/** One page of `GET /api/file-changes`: each change is a push's shape with its row's id and workflow. */
+export interface FileChangesPage {
+  changes: unknown[]
+  next: number | null
+}
+
+/** How many recorded changes one replay reads at most: the route pages them, this bounds the pages. */
+export const MaxRecordedChanges = 10_000
+const RecordedPage = 500
+
+/**
+ * Every recorded change of a period, oldest first, paged with `after`/`next` until `next` is null,
+ * each read as a push; one that is not a push is passed over, as a push from the hub would be.
+ */
+export async function readRecorded(
+  readPage: (after: number, take: number) => Promise<FileChangesPage>,
+  max = MaxRecordedChanges,
+): Promise<WorkspacePush[]> {
+  const pushes: WorkspacePush[] = []
+  let after = 0
+  let read = 0
+  for (;;) {
+    const page = await readPage(after, RecordedPage)
+    const changes = Array.isArray(page.changes) ? page.changes : []
+    for (const raw of changes) {
+      const push = readPush(raw)
+      if (push) pushes.push(push)
+    }
+    read += changes.length
+    const next = page.next
+    // A cursor that does not move on would read the same page for ever.
+    if (typeof next !== 'number' || next <= after || read >= max) return pushes
+    after = next
+  }
 }
 
 // --- settings ------------------------------------------------------------------------------------

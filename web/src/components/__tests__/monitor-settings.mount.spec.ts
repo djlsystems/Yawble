@@ -14,8 +14,9 @@ import { MonitorModel, type MonitorEffect } from '../../lib/monitor/model'
 import type { FileSettings, WorkspacePush } from '../../lib/monitor/workspace'
 import { LayoutDefaults, LayoutKeyName, type LayoutSettings } from '../../lib/monitor/layout'
 
-const { getMessages, listEvents, played, fileSettings, layouts } = vi.hoisted(() => ({
+const { getMessages, getFileChanges, listEvents, played, fileSettings, layouts } = vi.hoisted(() => ({
   getMessages: vi.fn(),
+  getFileChanges: vi.fn(),
   listEvents: vi.fn(),
   played: [] as MonitorEffect[],
   fileSettings: [] as FileSettings[],
@@ -25,6 +26,7 @@ const { getMessages, listEvents, played, fileSettings, layouts } = vi.hoisted(()
 vi.mock('../../api/client', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getMessages,
+  getFileChanges,
   listEvents,
 }))
 
@@ -86,8 +88,8 @@ const snapshot = (id: string) => ({
 
 let wrapper: VueWrapper | null = null
 
-async function mountMonitor() {
-  getMessages.mockResolvedValue([])
+async function mountMonitor(rows: Message[] = []) {
+  getMessages.mockResolvedValue(rows)
   listEvents.mockResolvedValue(catalog)
   const board = useConsoleStore()
   board.$patch({
@@ -442,6 +444,89 @@ describe('the Monitor settings for file changes', () => {
     fileWatch.deliver(workspace())
     await flushPromises()
     expect(played).toEqual([])
+  })
+})
+
+// --- the replay of recorded file changes -------------------------------------------------------------
+
+const at = (seconds: number) => new Date(Date.UTC(2026, 9, 15, 10, 0, seconds)).toISOString()
+
+/** The period the Monitor holds: Azure's run, ten seconds long. */
+const period = (): Message[] => [
+  { ...row('agentContainer.started', 'Infra/Azure', {}), occurredAt: at(0) },
+  { ...row('agentContainer.completed', 'Infra/Azure', {}), occurredAt: at(10) },
+]
+
+/** What the Host recorded in it, two pages of the route: a change, then a commit. */
+function recordedPages() {
+  const first = { id: 11, correlation: 3, ...workspace(), at: at(2) }
+  const second = {
+    id: 12,
+    correlation: 3,
+    ...workspace(),
+    at: at(5),
+    files: [],
+    commits: [{ sha: '9f8e7d6c5b4a', subject: 'Add the lexer', files: [{ path: 'src/lib/lexer.ts', project: 'harness-web', action: 'created' }] }],
+  }
+  getFileChanges.mockImplementation((_period: unknown, after: number) =>
+    Promise.resolve(after === 0 ? { changes: [first], next: 11 } : { changes: [second], next: null }),
+  )
+}
+
+/** Switches to Replay and lets it play the period through: ten log seconds at 60x is under a fifth of a second. */
+async function replayed(w: VueWrapper): Promise<MonitorEffect[]> {
+  played.length = 0
+  await w.findAll('.monitor-mode .q-btn')[1]!.trigger('click')
+  await flushPromises()
+  await new Promise((resolve) => setTimeout(resolve, 400))
+  await flushPromises()
+  return played.filter((effect) => effect.kind === 'workspace')
+}
+
+describe('the Monitor replay of recorded file changes', () => {
+  it('reads the period page by page and draws each change at its time, and the activity list says them', async () => {
+    recordedPages()
+    const { wrapper } = await mountMonitor(period())
+
+    const effects = await replayed(wrapper)
+
+    expect(getFileChanges.mock.calls.map(([asked, after]) => [asked, after])).toEqual([
+      [{ from: at(0), to: at(10) }, 0],
+      [{ from: at(0), to: at(10) }, 11],
+    ])
+    expect(effects.map((effect) => effect.kind === 'workspace' && [effect.push.at, effect.at])).toEqual([
+      [at(2), { kind: 'member', key: 'Infra/Azure' }],
+      [at(5), { kind: 'member', key: 'Infra/Azure' }],
+    ])
+    expect(await drawnKinds(effects)).toEqual(['repository', 'project', 'file', 'file', 'project', 'file'])
+    expect(wrapper.find('[data-monitor-mode="replay"]').exists()).toBe(true)
+    expect(await listLines(wrapper)).toEqual(['+ src/lib/lexer.ts', '~ src/lib/parser.ts', '+ src/lib/lexer.ts', '− cli/main.go'])
+    expect(wrapper.text()).toContain('9f8e7d6 Add the lexer')
+  })
+
+  it('draws down only as far as Draw down to says', async () => {
+    recordedPages()
+    const { wrapper } = await mountMonitor(period())
+    await chooseDepth(await openPanel(wrapper), 'Project')
+
+    expect(await drawnKinds(await replayed(wrapper))).toEqual(['repository', 'project', 'project'])
+  })
+
+  it('draws and lists none of it with Show file changes off', async () => {
+    recordedPages()
+    const { wrapper } = await mountMonitor(period())
+    await (await openPanel(wrapper)).find('[data-monitor-setting="files"]').trigger('click')
+
+    expect(await replayed(wrapper)).toEqual([])
+    expect(await listLines(wrapper)).toEqual([])
+  })
+
+  it('plays the rows without file changes when they cannot be read', async () => {
+    getFileChanges.mockRejectedValue(new Error('503 Service Unavailable'))
+    const { wrapper } = await mountMonitor(period())
+
+    expect(await replayed(wrapper)).toEqual([])
+    expect(played.length).toBeGreaterThan(0)
   })
 })
 
