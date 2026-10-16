@@ -143,7 +143,7 @@ public sealed record SolutionStepFailed(
 /// a person's own clicks use, in this order:
 /// <list type="number">
 /// <item>install the package's plugins (<see cref="PluginInstaller"/>);</item>
-/// <item>create the team, with a new local repository by default (<see cref="TeamRegistry.CreateAsync"/>);</item>
+/// <item>create the team (<see cref="TeamRegistry.CreateAsync"/>), with no repository unless <c>localRepository</c> is true;</item>
 /// <item>hire the members, the Manager named and instructed as the package says;</item>
 /// <item>register the team skills (<see cref="TeamSkills.RegisterAsync"/>);</item>
 /// <item>copy <c>tools/</c> to <c>&lt;team folder&gt;/solution</c>, read-only to agents, which every
@@ -791,7 +791,7 @@ public sealed class SolutionInstaller(
                 foreach (var plugin in package.Plugins) await InstallPluginAsync(plugin, run, ct);
             });
 
-            // 2. THE TEAM, with its local repository unless asked not to - or the team that kept the
+            // 2. THE TEAM, with no repository unless asked for a local one - or the team that kept the
             // earlier install, as it is.
             await run.StepAsync(StepTeam, async () =>
             {

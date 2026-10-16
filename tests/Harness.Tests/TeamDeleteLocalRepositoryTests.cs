@@ -248,7 +248,7 @@ public sealed class TeamDeleteLocalRepositoryTests : IAsyncDisposable
     {
         var agent = _factory.Services.GetRequiredService<AgentCatalog>().Definitions.First(d => d.Mode == AgentMode.Headless).Name;
         object body = repos is null
-            ? new { name, agent, memberAgents = new[] { agent } }
+            ? new { name, agent, memberAgents = new[] { agent }, localRepository = true }
             : new { name, agent, memberAgents = new[] { agent }, repos };
         var created = await person.PostAsJsonAsync("/api/teams", body, Ct);
         Assert.True(created.StatusCode == HttpStatusCode.OK, await created.Content.ReadAsStringAsync(Ct));

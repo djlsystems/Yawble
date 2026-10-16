@@ -5,6 +5,7 @@ using System.Text.Json;
 using Harness.Containers;
 using Harness.Contracts;
 using Harness.Host;
+using Harness.Host.Auth;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -15,8 +16,9 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 namespace Harness.Tests;
 
 /// <summary>
-/// FORGIVING TEAM REPOSITORIES (B001F). A team created with no repository gets a local one named
-/// after it; a URL <c>git ls-remote</c> cannot read is refused before anything is made, with the
+/// FORGIVING TEAM REPOSITORIES. A team created with no repository gets none, and its local one,
+/// named after it, is made when its work first needs one (the `repo` tool's `create-local`) or when
+/// the caller asks with <c>localRepository: true</c>; a URL <c>git ls-remote</c> cannot read is refused before anything is made, with the
 /// choices the caller may take; an agent is never let create on GitHub or attach anyway; deleting a
 /// team keeps its local repository.
 ///
@@ -79,11 +81,30 @@ public sealed class ForgivingTeamReposTests : IAsyncDisposable
     // ---- the default ----
 
     [Fact]
-    public async Task A_team_created_with_no_repository_gets_its_local_repository_cloned_with_its_default_branch_known()
+    public async Task A_team_created_with_no_repository_gets_none_and_attaches_none()
     {
         var person = await PersonAsync();
 
         var created = await CreateTeamAsync(person, new { name = "Job Tracker", agent = Agent(), memberAgents = new[] { Agent() } });
+
+        Assert.Equal(HttpStatusCode.OK, created.StatusCode);
+        var body = await JsonAsync(created);
+        var team = body.GetProperty("id").GetString()!;
+        Assert.False(body.TryGetProperty("localRepository", out _));
+        Assert.Empty(Teams.ReposFor(team));
+        Assert.False(Directory.Exists(Bare(team)));
+        Assert.Empty(await TenantRowsAsync(TenantActions.LocalRepoCreated));
+    }
+
+    [Fact]
+    public async Task Asked_for_with_localRepository_true_a_new_team_gets_its_local_repository_cloned_with_its_default_branch_known()
+    {
+        var person = await PersonAsync();
+
+        var created = await CreateTeamAsync(person, new
+        {
+            name = "Job Tracker", agent = Agent(), memberAgents = new[] { Agent() }, localRepository = true,
+        });
 
         Assert.Equal(HttpStatusCode.OK, created.StatusCode);
         var body = await JsonAsync(created);
@@ -102,35 +123,37 @@ public sealed class ForgivingTeamReposTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task The_team_create_tool_gives_a_team_with_no_repository_its_local_repository_and_localRepository_false_gives_none()
+    public async Task The_team_create_tool_gives_a_team_with_no_repository_none_and_localRepository_true_gives_its_local_repository()
     {
         var person = await PersonAsync();
         var tools = ConciergeTools(await ConciergeKeyAsync());
 
-        var reply = await tools.TeamCreate("Tool Team", agent: Agent(), cancellationToken: Ct);
+        var none = await tools.TeamCreate("Bare Team", agent: Agent(), cancellationToken: Ct);
+        Assert.StartsWith("HTTP 200", none, StringComparison.Ordinal);
+        var bareTeam = Teams.All().Single(t => t.Name == "Bare Team").Id;
+        Assert.Empty(Teams.ReposFor(bareTeam));
+        Assert.False(Directory.Exists(Bare(bareTeam)));
+
+        var reply = await tools.TeamCreate("Tool Team", agent: Agent(), localRepository: true, cancellationToken: Ct);
         Assert.StartsWith("HTTP 200", reply, StringComparison.Ordinal);
         var team = Teams.All().Single(t => t.Name == "Tool Team").Id;
         Assert.Equal([$"local:{team}"], Teams.ReposFor(team));
         Assert.True(Directory.Exists(Path.Combine(ClonePath(team, team), ".git")));
         Assert.Equal("main", Teams.DefaultBranchFor(team, team).Branch);
-
-        var none = await tools.TeamCreate("Bare Team", agent: Agent(), localRepository: false, cancellationToken: Ct);
-        Assert.StartsWith("HTTP 200", none, StringComparison.Ordinal);
-        var bareTeam = Teams.All().Single(t => t.Name == "Bare Team").Id;
-        Assert.Empty(Teams.ReposFor(bareTeam));
-        Assert.False(Directory.Exists(Bare(bareTeam)));
         person.Dispose();
     }
 
     [Fact]
-    public void The_team_create_tool_says_a_team_with_no_repos_gets_a_local_repository_unless_told_not_to()
+    public void The_team_create_tool_says_a_team_with_no_repos_gets_its_local_repository_when_its_work_first_needs_one()
     {
         var method = typeof(PlatformMcpTools).GetMethod(nameof(PlatformMcpTools.TeamCreate))!;
         var description = ((System.ComponentModel.DescriptionAttribute)method
             .GetCustomAttributes(typeof(System.ComponentModel.DescriptionAttribute), false).Single()).Description;
 
-        Assert.Contains("local repository", description, StringComparison.Ordinal);
-        Assert.Contains("localRepository: false", description, StringComparison.Ordinal);
+        Assert.Contains("With no repos, the team gets no repository", description, StringComparison.Ordinal);
+        Assert.Contains("repo create-local", description, StringComparison.Ordinal);
+        Assert.Contains("localRepository: true", description, StringComparison.Ordinal);
+        Assert.DoesNotContain("localRepository: false", description, StringComparison.Ordinal);
         Assert.Contains(method.GetParameters(), p => p.Name == "localRepository");
     }
 
@@ -158,13 +181,13 @@ public sealed class ForgivingTeamReposTests : IAsyncDisposable
         var person = await PersonAsync();
         Assert.Equal(HttpStatusCode.Created, (await person.PostAsJsonAsync("/api/local-repos", new { name = "Gamma" }, Ct)).StatusCode);
 
-        var first = await JsonAsync(await CreateTeamAsync(person, new { name = "Gamma", agent = Agent(), memberAgents = new[] { Agent() } }));
+        var first = await JsonAsync(await CreateTeamAsync(person, new { name = "Gamma", agent = Agent(), memberAgents = new[] { Agent() }, localRepository = true }));
         Assert.Equal("Gamma", first.GetProperty("localRepository").GetProperty("name").GetString());
         Assert.False(first.GetProperty("localRepository").GetProperty("created").GetBoolean());
 
         // The first team is deleted, keeping Gamma; a second team takes Gamma, so a third gets Gamma-2.
         Assert.Equal(HttpStatusCode.OK, (await person.DeleteAsync("/api/teams/Gamma", Ct)).StatusCode);
-        var again = await JsonAsync(await CreateTeamAsync(person, new { name = "Gamma", agent = Agent(), memberAgents = new[] { Agent() } }));
+        var again = await JsonAsync(await CreateTeamAsync(person, new { name = "Gamma", agent = Agent(), memberAgents = new[] { Agent() }, localRepository = true }));
         Assert.Equal("Gamma", again.GetProperty("localRepository").GetProperty("name").GetString());
 
         var other = await JsonAsync(await CreateTeamAsync(person, new { name = "Delta", agent = Agent(), memberAgents = new[] { Agent() }, localRepository = false }));
@@ -186,7 +209,7 @@ public sealed class ForgivingTeamReposTests : IAsyncDisposable
         // `<dataRoot>/repos` is a file: no repository can be made under it.
         File.WriteAllText(Path.Combine(_dataRoot, "repos"), "not a folder");
 
-        var created = await CreateTeamAsync(person, new { name = "Doomed", agent = Agent(), memberAgents = new[] { Agent() } });
+        var created = await CreateTeamAsync(person, new { name = "Doomed", agent = Agent(), memberAgents = new[] { Agent() }, localRepository = true });
 
         Assert.Equal(HttpStatusCode.BadRequest, created.StatusCode);
         Assert.Contains("could not be created", (await JsonAsync(created)).GetProperty("error").GetString(), StringComparison.Ordinal);
@@ -371,13 +394,15 @@ public sealed class ForgivingTeamReposTests : IAsyncDisposable
         Assert.Empty(Teams.All());
         Assert.DoesNotContain(_fakeGitHub.Calls, c => c.StartsWith("create", StringComparison.Ordinal));
 
-        // The team_create tool says the same, and its choice - no repos - gives a local repository.
+        // The team_create tool says the same, and its choice - no repos - is a team whose local
+        // repository is made when its work first needs one.
         var tools = ConciergeTools(await ConciergeKeyAsync());
         var toolReply = await tools.TeamCreate("Agent Team", agent: Agent(), repos: [Missing], cancellationToken: Ct);
         Assert.StartsWith("HTTP 422", toolReply, StringComparison.Ordinal);
         Assert.Contains("ask them to create the remote", toolReply, StringComparison.Ordinal);
+        Assert.Contains("when its work first needs one", toolReply, StringComparison.Ordinal);
         Assert.StartsWith("HTTP 200", await tools.TeamCreate("Agent Team", agent: Agent(), cancellationToken: Ct), StringComparison.Ordinal);
-        Assert.Equal(["local:AgentTeam"], Teams.ReposFor("AgentTeam"));
+        Assert.Empty(Teams.ReposFor("AgentTeam"));
     }
 
     [Fact]
@@ -467,7 +492,7 @@ public sealed class ForgivingTeamReposTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task Create_a_local_repository_for_an_existing_team_clones_it_and_is_a_persons_action()
+    public async Task Create_a_local_repository_for_an_existing_team_clones_it_and_an_agent_is_then_refused_naming_it()
     {
         var person = await PersonAsync();
         var team = (await JsonAsync(await CreateTeamAsync(person, new
@@ -485,8 +510,130 @@ public sealed class ForgivingTeamReposTests : IAsyncDisposable
         Assert.Equal("main", Teams.DefaultBranchFor(team, team).Branch);
         Assert.Contains(await TenantRowsAsync(TenantActions.LocalRepoCreated), r => r.Subject == team);
 
+        // The team now has a repository: an agent's create-local is refused naming it, and a pasted key
+        // is refused as before.
         var concierge = await ConciergeClientAsync();
-        Assert.Equal(HttpStatusCode.Forbidden, (await concierge.PostAsync($"/api/teams/{team}/local-repo", null, Ct)).StatusCode);
+        var refused = await concierge.PostAsync($"/api/teams/{team}/local-repo", null, Ct);
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        Assert.Equal(
+            $"{team} already has a repository: {team}. Work in it; a person adds another in Team settings.",
+            (await JsonAsync(refused)).GetProperty("error").GetString());
+        using var pasted = await ApiKeyClientAsync();
+        Assert.Equal(HttpStatusCode.Forbidden, (await pasted.PostAsync($"/api/teams/{team}/local-repo", null, Ct)).StatusCode);
+        Assert.Equal([$"local:{team}"], Teams.ReposFor(team));
+    }
+
+    // ---- made when the work needs it: the repo tool's create-local ----
+
+    [Fact]
+    public async Task A_managers_create_local_makes_attaches_and_clones_the_local_repository_answers_its_clone_and_branches_and_its_next_prompt_lists_it()
+    {
+        var person = await PersonAsync();
+        var team = (await JsonAsync(await CreateTeamAsync(person, new { name = "On Need", agent = Agent(), memberAgents = new[] { Agent() } })))
+            .GetProperty("id").GetString()!;
+        Assert.Empty(Teams.ReposFor(team));
+        var log = _factory.Services.GetRequiredService<IMessageLog>();
+        var before = await log.HighestSeqAsync(Ct);
+
+        var answer = await MemberTools(team, TeamRegistry.DefaultManagerName, await MemberKeyAsync(team, TeamRegistry.DefaultManagerName)).Repo(action: "create-local", cancellationToken: Ct);
+
+        var clone = ClonePath(team, team);
+        Assert.Equal([$"local:{team}"], Teams.ReposFor(team));
+        Assert.True(Directory.Exists(Bare(team)));
+        Assert.True(Directory.Exists(Path.Combine(clone, ".git")), answer);
+        Assert.Contains($"Its clone is {clone}; default branch main, team branch team/{team}.", answer, StringComparison.Ordinal);
+        Assert.Contains("never make a git repository or a code folder anywhere else", answer, StringComparison.Ordinal);
+
+        var row = Assert.Single(await TenantRowsAsync(TenantActions.LocalRepoCreated));
+        Assert.Equal(team, row.Subject);
+        Assert.Contains($"\"team\":\"{team}\"", row.Detail, StringComparison.Ordinal);
+        Assert.Contains($"\"agent\":\"{TeamRegistry.DefaultManagerName}\"", row.Detail, StringComparison.Ordinal);
+
+        // The next run's prompt lists the clone; this run was told by the answer, so no notice wakes the Manager.
+        var manager = _factory.Services.GetRequiredService<ContainerHost>().Find(new ContainerId(team, TeamRegistry.DefaultManagerName))!;
+        Assert.Contains(RepoSetupMessage.PromptHeading, manager.SystemPrompt, StringComparison.Ordinal);
+        Assert.Contains($"local:{team} -> {clone}", manager.SystemPrompt, StringComparison.Ordinal);
+        Assert.Empty(await log.ReadAfterAsync(
+            before, [MessageTypes.InstructionFor(new ContainerId(team, TeamRegistry.DefaultManagerName))], int.MaxValue, Ct));
+    }
+
+    [Fact]
+    public async Task Create_local_on_a_team_with_any_repository_is_refused_with_the_sentence_and_changes_nothing()
+    {
+        var person = await PersonAsync();
+        MakeGitHubRepository("acme", "exists");
+        var team = (await JsonAsync(await CreateTeamAsync(person, new
+        {
+            name = "Has One", agent = Agent(), memberAgents = new[] { Agent() }, repos = new[] { "https://github.com/acme/exists.git" },
+        }))).GetProperty("id").GetString()!;
+
+        foreach (var member in new[] { TeamRegistry.DefaultManagerName, "Builder" })
+        {
+            var answer = await MemberTools(team, member, await MemberKeyAsync(team, member)).Repo(action: "create-local", cancellationToken: Ct);
+
+            Assert.StartsWith("Refused: ", answer, StringComparison.Ordinal);
+            Assert.Contains($"{team} already has a repository: exists. Work in it; a person adds another in Team settings.", answer, StringComparison.Ordinal);
+        }
+
+        var concierge = await ConciergeTools(await ConciergeKeyAsync()).Repo(team: team, action: "create-local", cancellationToken: Ct);
+        Assert.Contains($"{team} already has a repository: exists.", concierge, StringComparison.Ordinal);
+
+        Assert.Equal(["https://github.com/acme/exists.git"], Teams.ReposFor(team));
+        Assert.False(Directory.Exists(Bare(team)));
+        Assert.Empty(await TenantRowsAsync(TenantActions.LocalRepoCreated));
+    }
+
+    [Fact]
+    public async Task A_member_of_another_team_cannot_create_a_local_repository_for_this_team()
+    {
+        var person = await PersonAsync();
+        var team = (await JsonAsync(await CreateTeamAsync(person, new { name = "Target", agent = Agent(), memberAgents = new[] { Agent() } })))
+            .GetProperty("id").GetString()!;
+        var other = (await JsonAsync(await CreateTeamAsync(person, new { name = "Other", agent = Agent(), memberAgents = new[] { Agent() } })))
+            .GetProperty("id").GetString()!;
+
+        var answer = await MemberTools(other, "Builder", await MemberKeyAsync(other, "Builder")).Repo(team: team, action: "create-local", cancellationToken: Ct);
+
+        Assert.StartsWith("Refused: ", answer, StringComparison.Ordinal);
+        Assert.Contains("No such team.", answer, StringComparison.Ordinal);
+        Assert.Empty(Teams.ReposFor(team));
+        Assert.Empty(Teams.ReposFor(other));
+        Assert.False(Directory.Exists(Bare(team)));
+        Assert.Empty(await TenantRowsAsync(TenantActions.LocalRepoCreated));
+    }
+
+    [Fact]
+    public async Task A_second_create_local_while_the_first_is_making_it_waits_and_answers_the_same()
+    {
+        var person = await PersonAsync();
+        var team = (await JsonAsync(await CreateTeamAsync(person, new { name = "Twice", agent = Agent(), memberAgents = new[] { Agent() } })))
+            .GetProperty("id").GetString()!;
+        var onNeed = _factory.Services.GetRequiredService<LocalRepoOnNeed>();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        onNeed.BeforeMake = () =>
+        {
+            started.TrySetResult();
+            return release.Task;
+        };
+
+        var first = MemberTools(team, TeamRegistry.DefaultManagerName, await MemberKeyAsync(team, TeamRegistry.DefaultManagerName)).Repo(action: "create-local", cancellationToken: Ct);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+        var second = MemberTools(team, "Builder", await MemberKeyAsync(team, "Builder")).Repo(action: "create-local", cancellationToken: Ct);
+        await Task.Delay(200, Ct);
+        Assert.False(second.IsCompleted, "the second call answered before the first had made the repository");
+        release.SetResult();
+
+        var answers = await Task.WhenAll(first, second);
+
+        Assert.Equal(answers[0], answers[1]);
+        Assert.Contains($"Its clone is {ClonePath(team, team)}", answers[0], StringComparison.Ordinal);
+        Assert.Equal([$"local:{team}"], Teams.ReposFor(team));
+        Assert.Single(await TenantRowsAsync(TenantActions.LocalRepoCreated));
+        onNeed.BeforeMake = null;
+
+        // Once made, a third call finds it and is refused.
+        Assert.Contains("already has a repository", await MemberTools(team, "Builder", await MemberKeyAsync(team, "Builder")).Repo(action: "create-local", cancellationToken: Ct), StringComparison.Ordinal);
     }
 
     // ---- deletion ----
@@ -497,7 +644,7 @@ public sealed class ForgivingTeamReposTests : IAsyncDisposable
         var person = await PersonAsync();
         var team = (await JsonAsync(await CreateTeamAsync(person, new
         {
-            name = "Short Lived", agent = Agent(), memberAgents = new[] { Agent() },
+            name = "Short Lived", agent = Agent(), memberAgents = new[] { Agent() }, localRepository = true,
         }))).GetProperty("id").GetString()!;
         var before = Assert.Single((await person.GetFromJsonAsync<JsonElement>("/api/local-repos", Ct)).EnumerateArray());
         Assert.False(before.GetProperty("unused").GetBoolean());
@@ -593,13 +740,13 @@ public sealed class ForgivingTeamReposTests : IAsyncDisposable
     // ---- backlog dispatch-to-new: the same path as create ----
 
     [Fact]
-    public async Task Dispatching_to_a_new_team_with_no_repository_gives_it_its_local_repository_and_localRepository_false_gives_none()
+    public async Task Dispatching_to_a_new_team_with_no_repository_gives_it_none_and_localRepository_true_gives_its_local_repository()
     {
         var person = await PersonAsync();
 
         var dispatched = await DispatchToNewAsync(person, await ReadyItemAsync(person), new
         {
-            name = "Dispatched", agent = Agent(), memberAgents = new[] { Agent() },
+            name = "Dispatched", agent = Agent(), memberAgents = new[] { Agent() }, localRepository = true,
         });
 
         Assert.Equal(HttpStatusCode.OK, dispatched.StatusCode);
@@ -615,12 +762,15 @@ public sealed class ForgivingTeamReposTests : IAsyncDisposable
 
         var bare = await DispatchToNewAsync(person, await ReadyItemAsync(person), new
         {
-            name = "DispatchedBare", agent = Agent(), memberAgents = new[] { Agent() }, localRepository = false,
+            name = "DispatchedBare", agent = Agent(), memberAgents = new[] { Agent() },
         });
         Assert.Equal(HttpStatusCode.OK, bare.StatusCode);
-        var bareTeam = (await JsonAsync(bare)).GetProperty("team").GetString()!;
+        var bareBody = await JsonAsync(bare);
+        var bareTeam = bareBody.GetProperty("team").GetString()!;
+        Assert.False(bareBody.TryGetProperty("localRepository", out var noLocal) && noLocal.ValueKind != JsonValueKind.Null);
         Assert.Empty(Teams.ReposFor(bareTeam));
         Assert.False(Directory.Exists(Bare(bareTeam)));
+        Assert.Single(await TenantRowsAsync(TenantActions.LocalRepoCreated));
     }
 
     [Fact]
@@ -690,7 +840,7 @@ public sealed class ForgivingTeamReposTests : IAsyncDisposable
         var item = await ReadyItemAsync(person);
         File.WriteAllText(Path.Combine(_dataRoot, "repos"), "not a folder");
 
-        var refused = await DispatchToNewAsync(person, item, new { name = "Doomed", agent = Agent(), memberAgents = new[] { Agent() } });
+        var refused = await DispatchToNewAsync(person, item, new { name = "Doomed", agent = Agent(), memberAgents = new[] { Agent() }, localRepository = true });
 
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
         Assert.Contains("could not be created", (await JsonAsync(refused)).GetProperty("error").GetString(), StringComparison.Ordinal);
@@ -732,10 +882,11 @@ public sealed class ForgivingTeamReposTests : IAsyncDisposable
         Assert.DoesNotContain(_fakeGitHub.Calls, c => c.StartsWith("create", StringComparison.Ordinal));
         Assert.Empty(await TenantRowsAsync(TenantActions.BacklogItemDispatched));
 
-        // Its choice - no repos - is a team on its local repository with the item on its board.
+        // Its choice - no repos - is a team with the item on its board and no repository until its
+        // work first needs one.
         var local = await DispatchToNewAsync(concierge, item, new { name = "AgentTeam", agent = Agent(), memberAgents = new[] { Agent() } });
         Assert.Equal(HttpStatusCode.OK, local.StatusCode);
-        Assert.Equal(["local:AgentTeam"], Teams.ReposFor("AgentTeam"));
+        Assert.Empty(Teams.ReposFor("AgentTeam"));
     }
 
     private static async Task<long> ReadyItemAsync(HttpClient person)
@@ -811,13 +962,38 @@ public sealed class ForgivingTeamReposTests : IAsyncDisposable
         return client;
     }
 
-    /// <summary>The MCP tools as the Concierge calls them: its key on the request, the Host behind it.</summary>
+    /// <summary>A team member's key, as the platform mints one for its container.</summary>
+    private Task<string> MemberKeyAsync(string team, string member) =>
+        _factory.Services.GetRequiredService<IPrincipalStore>().MintAsync(
+            new ContainerId(team, member).ToString(), PrincipalKind.Container, team,
+            member == TeamRegistry.DefaultManagerName ? TeamRegistry.ManagerPermits : new HashSet<string> { Permits.Progress, Permits.Read, Permits.Sites },
+            ct: Ct);
+
+    /// <summary>A key a person minted and carried away: it acts as its owner, and is no agent of a team.</summary>
+    private async Task<HttpClient> ApiKeyClientAsync()
+    {
+        var user = await _factory.Services.GetRequiredService<IUserStore>().FindAsync("person@example.test", Ct);
+        var key = await _factory.Services.GetRequiredService<IPrincipalStore>().MintAsync(
+            "pasted-" + Guid.NewGuid().ToString("N"), PrincipalKind.ApiKey, null, Permits.All, ownerUserId: user!.Id, ct: Ct);
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", key);
+        return client;
+    }
+
+    private PlatformMcpTools ConciergeTools(string key) => ToolsFor(key);
+
+    /// <summary>The MCP tools as a team member calls them: its key, and the caller the Host resolved it to.</summary>
+    private PlatformMcpTools MemberTools(string team, string member, string key) =>
+        ToolsFor(key, new Principal(new ContainerId(team, member).ToString(), PrincipalKind.Container, new HashSet<string>()));
+
+    /// <summary>The MCP tools as an agent calls them: its key on the request, the Host behind it.</summary>
     /// <remarks>Not async: the accessor's context is an AsyncLocal, which an async helper would set
     /// only for itself.</remarks>
-    private PlatformMcpTools ConciergeTools(string key)
+    private PlatformMcpTools ToolsFor(string key, Principal? caller = null)
     {
         var context = new DefaultHttpContext();
         context.Request.Headers["X-Api-Key"] = key;
+        if (caller is not null) context.User = PrincipalClaims.ToClaimsPrincipal(caller, "ApiKey");
         return new PlatformMcpTools(
             new HttpContextAccessor { HttpContext = context },
             _factory.Services.GetRequiredService<IPrincipalStore>(),

@@ -254,7 +254,10 @@ public sealed partial class PlatformMcpTools
 
     [McpServerTool(Name = "repo"), Description(
         "Repository and worktree status for one team: paths, and whether work is pushed or merged. "
-        + "action is status (the default) or merge. "
+        + "action is status (the default), create-local or merge. "
+        + "create-local makes the team's own local repository when the work needs a repository and the "
+        + "team has none: call it once, then work in the clone it names (its path, default branch and team "
+        + "branch). It is refused, changing nothing, when the team already has any repository. "
         + "status answers conciergeMayMerge, whether a person has turned on concierge.mayMerge now: read it "
         + "before saying whether you may merge, never guess and never try a merge to find out. "
         + "For the Concierge, status with no team answers that setting alone. "
@@ -267,16 +270,16 @@ public sealed partial class PlatformMcpTools
     public async Task<string> Repo(
         [Description("Team id. Required for a Concierge, except status with no team, which answers whether it may merge now. Omit for a member of a team.")] string? team = null,
         [Description("Ask origin again. Omit to read the status already recorded.")] bool? refresh = null,
-        [Description("status (the default) or merge.")] string? action = null,
+        [Description("status (the default), create-local or merge.")] string? action = null,
         [Description("The repository's name, for merge, as the status names it.")] string? repo = null,
         [Description("For merge: true runs Bring current and merge, which first merges the default branch into the team branch.")]
         bool? bringCurrent = null,
         CancellationToken cancellationToken = default)
     {
         var verb = string.IsNullOrWhiteSpace(action) ? "status" : action.Trim().ToLowerInvariant();
-        if (verb is not ("status" or "merge"))
+        if (verb is not ("status" or "create-local" or "merge"))
         {
-            return "Refused: repo action is status or merge.";
+            return "Refused: repo action is status, create-local or merge.";
         }
 
         var resolved = await TeamAsync(team, cancellationToken);
@@ -293,6 +296,8 @@ public sealed partial class PlatformMcpTools
         }
 
         var teamPath = "/api/teams/" + Uri.EscapeDataString(resolved);
+        if (verb == "create-local") return CreateLocalAnswer(await SendAsync(HttpMethod.Post, teamPath + "/local-repo", null, cancellationToken));
+
         if (verb == "status")
         {
             return await SendAsync(
@@ -338,6 +343,36 @@ public sealed partial class PlatformMcpTools
 
         return split[0] + Environment.NewLine
             + JsonSerializer.Serialize(new { conciergeMayMerge = value == "on" });
+    }
+
+    /// <summary>
+    /// create-local's answer in words: where the clone is and its branches, or the route's refusal as
+    /// it said it - the sentence naming the repository the team already has.
+    /// </summary>
+    private static string CreateLocalAnswer(string reply)
+    {
+        if (reply.StartsWith("Refused: ", StringComparison.Ordinal)) return reply;
+
+        var split = reply.Split(Environment.NewLine, 2);
+        if (!reply.StartsWith("HTTP 2", StringComparison.Ordinal) || split.Length < 2)
+        {
+            return "Refused: " + Explain(reply);
+        }
+
+        using var document = JsonDocument.Parse(split[1]);
+        var repository = document.RootElement.GetProperty("localRepository");
+        var clone = document.RootElement.GetProperty("clone");
+        var path = clone.GetProperty("path").GetString();
+        var made = $"The team's local repository {repository.GetProperty("name").GetString()} "
+            + $"({repository.GetProperty("reference").GetString()}) is made and attached. "
+            + $"Its clone is {path}; default branch {clone.GetProperty("defaultBranch").GetString()}, "
+            + $"team branch {clone.GetProperty("teamBranch").GetString()}. ";
+
+        return clone.GetProperty("cloned").GetBoolean()
+            ? made + "Work in that clone, and cut a worktree from it for each card; never make a git "
+                + "repository or a code folder anywhere else. Do not call create-local again."
+            : made + "The clone could not be made yet; the Manager is told, and a person makes it. Do not "
+                + "call create-local again, and make no repository of your own.";
     }
 
     private bool IsConciergeCaller() =>

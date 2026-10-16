@@ -191,6 +191,35 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
         }
     }
 
+    /// <summary>
+    /// What a Manager and a member are actually given - their prompts and the manager and worktrees
+    /// skills served to them - says to call `repo` `create-local` once when the work needs a
+    /// repository and the team has none, and to make no repository anywhere else.
+    /// </summary>
+    [Fact]
+    public async Task The_prompts_and_skills_served_to_agents_make_a_repository_on_first_need_through_create_local()
+    {
+        using var member = host.Container(host.AlphaContainerKey);
+        var worktrees = McpContractTests.Flat(await member.GetStringAsync("/api/me/skills/worktrees", Ct));
+
+        var key = await host.Services.GetRequiredService<IPrincipalStore>().MintAsync(
+            new ContainerId(host.Alpha, TeamRegistry.DefaultManagerName).ToString(),
+            PrincipalKind.Container, host.Alpha, Permits.All, ct: Ct);
+        using var manager = host.Container(key);
+        var managerSkill = McpContractTests.Flat(await manager.GetStringAsync("/api/me/skills/manager", Ct));
+
+        var memberPrompt = McpContractTests.Flat(await NewMemberPromptAsync("Coder", "Writes code."));
+        var managerPrompt = McpContractTests.Flat(Container(host.Alpha, TeamRegistry.DefaultManagerName).SystemPrompt);
+
+        foreach (var text in new[] { worktrees, managerSkill, memberPrompt, managerPrompt })
+        {
+            foreach (var rule in McpContractTests.CreateLocalRules)
+            {
+                Assert.Contains(rule, text, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+    }
+
     [Fact]
     public async Task The_manager_skill_builds_the_skeleton_first_then_staffs_a_developer_per_area_for_software_only()
     {
