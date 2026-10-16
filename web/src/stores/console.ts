@@ -485,7 +485,7 @@ export const useConsoleStore = defineStore('console', {
     toggleWorkflow(correlationId: number) {
       this.highlightedWorkflow =
         this.highlightedWorkflow === correlationId ? null : correlationId;
-      publishSteering(this.highlightedWorkflow);
+      void this.steer(this.highlightedWorkflow);
     },
 
     /**
@@ -495,7 +495,29 @@ export const useConsoleStore = defineStore('console', {
      */
     showWorkflow(correlationId: number) {
       this.highlightedWorkflow = correlationId;
-      publishSteering(correlationId);
+      void this.steer(correlationId);
+    },
+
+    /**
+     * Tell the Host what this page highlights right now, `null` included. The page calls it once
+     * when it starts and once after each reconnect: the Host keeps the last value it was sent, so a
+     * page that only published on a click left a workflow followed on another day as "what the
+     * person is looking at" until somebody clicked again.
+     */
+    announceSteering() {
+      void this.steer(this.highlightedWorkflow);
+    },
+
+    /**
+     * The one writer of the steering. A workflow the Host refuses (it is over, or its team is gone)
+     * is shown as followed no longer - quietly, with no error: there is nothing for the person to
+     * do but pick another. Only the workflow still highlighted is cleared, so a later click wins.
+     */
+    async steer(correlationId: number | null) {
+      const kept = await publishSteering(correlationId);
+      if (kept === false && correlationId !== null && this.highlightedWorkflow === correlationId) {
+        this.highlightedWorkflow = null;
+      }
     },
 
     /**

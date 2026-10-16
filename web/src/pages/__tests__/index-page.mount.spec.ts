@@ -77,7 +77,11 @@ afterEach(() => {
 
 async function mountPage(
   teams: ReturnType<typeof team>[],
-  { active = teams[0]?.id ?? '', view = 'board' as 'board' | 'teams' | 'kanban' | 'monitor' } = {},
+  {
+    active = teams[0]?.id ?? '',
+    view = 'board' as 'board' | 'teams' | 'kanban' | 'monitor',
+    followed = null as number | null,
+  } = {},
 ) {
   setActivePinia(createPinia());
 
@@ -88,6 +92,7 @@ async function mountPage(
   board = useConsoleStore();
   board.$patch({ teams: teams as never, activeTeamId: active as never, openTeamTabs: teams.map((t) => t.id) as never });
   board.view = view;
+  board.highlightedWorkflow = followed;
 
   for (const name of ['refresh', 'refreshForTeamCreated', 'refreshForTeamDeleted', 'pullMessages'] as const) {
     vi.spyOn(board, name).mockResolvedValue(undefined as never);
@@ -289,6 +294,60 @@ describe('socket disconnect state', () => {
     await flushPromises();
 
     expect(page.text()).toContain(banner);
+  });
+});
+
+/** Every `PUT /api/me/steering` the page sent, as the workflow each one named. */
+function steeringSent(): (number | null)[] {
+  return vi.mocked(fetch).mock.calls
+    .filter(([url, init]) => url === '/api/me/steering' && init?.method === 'PUT')
+    .map(([, init]) => (JSON.parse(String(init!.body)) as { correlationId: number | null }).correlationId);
+}
+
+/**
+ * The Host keeps the last steering it was sent, so a page that only spoke on a click left a
+ * workflow followed on another day standing as what the person is looking at.
+ */
+describe('the steering the page publishes', () => {
+  it('publishes null once when it starts with nothing followed', async () => {
+    const page = await mountPage([team('alpha')]);
+
+    // A re-render is not a start.
+    board.setConnected(true);
+    board.openTeamTabs = [];
+    await flushPromises();
+    await page.vm.$forceUpdate();
+    await flushPromises();
+
+    expect(steeringSent()).toEqual([null]);
+  });
+
+  it('publishes the workflow it starts following', async () => {
+    await mountPage([team('alpha')], { followed: 42 });
+
+    expect(steeringSent()).toEqual([42]);
+  });
+
+  it('publishes again after a reconnect', async () => {
+    await mountPage([team('alpha')], { followed: 42 });
+
+    await hub.handlers!.onReconnected();
+    await flushPromises();
+
+    expect(steeringSent()).toEqual([42, 42]);
+  });
+
+  /** The Host refuses a workflow that is over with 409 and a sentence. */
+  it('shows nothing followed, and no error, when the Host refuses the workflow', async () => {
+    vi.mocked(fetch).mockImplementation(async (url) => url === '/api/me/steering'
+      ? new Response('That workflow is over.', { status: 409 })
+      : new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } }));
+
+    await mountPage([team('alpha')], { followed: 42 });
+
+    expect(steeringSent()).toEqual([42]);
+    expect(board.highlightedWorkflow).toBeNull();
+    expect(board.error).toBe('');
   });
 });
 

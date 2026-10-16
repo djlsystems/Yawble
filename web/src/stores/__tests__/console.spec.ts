@@ -102,6 +102,7 @@ const emptyTokens: TeamTokenTotals = {
 const getTeamTokens = vi.fn(async (_team: string) => emptyTokens);
 const setCurrentTeam = vi.fn(async (_team: string | null) => new Response(null, { status: 204 }));
 const getTeamsRollup = vi.fn(async () => ({ teams: [] as TeamRollupRow[] }));
+const publishSteering = vi.fn(async (_correlationId: number | null) => true);
 const getRepoStatus = vi.fn(async (_team: string) => ({
   repos: [],
 }));
@@ -113,7 +114,7 @@ vi.mock('../../api/client', () => ({
   setCurrentTeam: (...args: unknown[]) => setCurrentTeam(...(args as [string | null])),
   getTeamsRollup: (...args: unknown[]) => getTeamsRollup(...(args as [])),
   getRepoStatus: (...args: unknown[]) => getRepoStatus(...(args as [string])),
-  publishSteering: (..._args: unknown[]) => undefined,
+  publishSteering: (...args: unknown[]) => publishSteering(...(args as [number | null])),
 
   // The store checks `cause instanceof Unauthorized` in its catch. Left out of this mock, that
   // line throws a TypeError instead of reporting a signed-out session - and only on the failure
@@ -1240,6 +1241,40 @@ describe('board store', () => {
 
       board.showWorkflow(4);
       board.showWorkflow(11);
+      expect(board.highlightedWorkflow).toBe(11);
+    });
+
+    it('announceSteering publishes what is highlighted, null included', () => {
+      publishSteering.mockClear();
+      const board = useConsoleStore();
+
+      board.announceSteering();
+      board.highlightedWorkflow = 7;
+      board.announceSteering();
+
+      expect(publishSteering.mock.calls).toEqual([[null], [7]]);
+    });
+
+    it('a workflow the Host refuses is followed no longer, with no error', async () => {
+      publishSteering.mockResolvedValueOnce(false);
+      const board = useConsoleStore();
+
+      board.showWorkflow(4);
+      await vi.waitFor(() => expect(board.highlightedWorkflow).toBeNull());
+      expect(board.error).toBe('');
+    });
+
+    it('a refusal answered after the person moved on leaves the newer workflow followed', async () => {
+      let refuse!: (kept: boolean) => void;
+      publishSteering.mockImplementationOnce(() => new Promise<boolean>((resolve) => (refuse = resolve)));
+      const board = useConsoleStore();
+
+      board.showWorkflow(4);
+      board.showWorkflow(11);
+      refuse(false);
+      await Promise.resolve();
+      await Promise.resolve();
+
       expect(board.highlightedWorkflow).toBe(11);
     });
   });
