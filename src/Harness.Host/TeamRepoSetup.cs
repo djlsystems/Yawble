@@ -141,9 +141,10 @@ public sealed record RepoPlan(
     IReadOnlyList<string> Kept, bool UseLocal, IReadOnlyList<(string Url, GitHubRepository Repository)> CreateOnGitHub);
 
 /// <summary>
-/// FORGIVING TEAM REPOSITORIES (B001F). A team with no repository gets a local one named after it; a
-/// URL that cannot be read is caught before anything is created, with the choices the caller may
-/// take. Shared by create (<c>POST /api/teams</c>, and so <c>team_create</c>), attach
+/// FORGIVING TEAM REPOSITORIES. A team created with no repository gets none, and its local one,
+/// named after it, is made when its work first needs it (<c>repo</c> <c>create-local</c>) or when a
+/// caller asks with <c>localRepository: true</c>; a URL that cannot be read is caught before anything
+/// is created, with the choices the caller may take. Shared by create (<c>POST /api/teams</c>, and so <c>team_create</c>), attach
 /// (<c>PUT /api/teams/{team}/repos</c>) and "Create a local repository"
 /// (<c>POST /api/teams/{team}/local-repo</c>).
 ///
@@ -328,9 +329,10 @@ public sealed class TeamRepoSetup(
         teams().ValidateRepos(urls, upstreams);
         var plan = await PlanAsync(urls ?? [], choices, person, alreadyAttached: [], ct);
 
-        // A team that ends up with no repository gets a local one named after it, unless the caller
-        // said not to; `use-local` asks for the same one in place of a URL.
-        return new NewTeamRepos(this, plan, plan.UseLocal || (plan.Kept.Count == 0 && localRepository != false));
+        // A team that ends up with no repository gets none: its local one is made when its work
+        // first needs it (`repo` `create-local`), unless the caller asked for it now with
+        // `localRepository: true`; `use-local` asks for the same one in place of a URL.
+        return new NewTeamRepos(this, plan, plan.UseLocal || (plan.Kept.Count == 0 && localRepository == true));
     }
 
     /// <summary>
@@ -432,8 +434,9 @@ public sealed class TeamRepoSetup(
             _ => "",
         };
         return personOnly
-            + "Offer the person a local repository instead (send it again without this URL: a team with no "
-            + "repository gets a local one), or ask them to create the remote and try again.";
+            + "Offer the person a local repository instead (send it again without this URL: the team gets "
+            + "its own local repository when its work first needs one), or ask them to create the remote "
+            + "and try again.";
     }
 
     private static string AgentRefusal(string url, string choice) =>

@@ -1022,8 +1022,8 @@ public static class BacklogEndpoints
                 + "`{ error, code: \"repo-check-failed\", repos: [{ url, failure, reason, choices }] }` and no team "
                 + "is created or item dispatched. Answer it with `repoChoices`; an agent is offered `use-local` "
                 + "only and refused `create-on-github` and `attach-anyway` with 403. A team left with no "
-                + "repository gets `local:<team id>` unless `localRepository` is false, reported as "
-                + "`localRepository`; when it cannot be made, no team is created.\n\n"
+                + "repository gets none unless `localRepository` is true, which gives it `local:<team id>`, "
+                + "reported as `localRepository`; when it cannot be made, no team is created.\n\n"
                 + "If the dispatch fails after the team is made, THE TEAM IS LEFT. An empty team is "
                 + "visible and deletable; a create that undid itself would be the destructive "
                 + "direction.");
@@ -1670,8 +1670,9 @@ internal sealed record NewTeamDispatch(
         + "exactly as on `POST /api/teams`.")]
     IReadOnlyList<string>? Repos = null,
     [property: Description(
-        "Whether a team left with no repository gets a local repository named after it, attached as "
-        + "`local:<team id>`. Omitted means true. Ignored when `repos` names any repository.")]
+        "True to give a team left with no repository a local repository named after it now, attached "
+        + "as `local:<team id>`. Omitted or false means none: the team's local repository is made when "
+        + "its work first needs it. Ignored when `repos` names any repository.")]
     bool? LocalRepository = null,
     [property: Description(
         "What to do with a URL in `repos` that `git ls-remote` could not read, keyed by that URL: "

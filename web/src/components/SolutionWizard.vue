@@ -166,7 +166,6 @@ function reset() {
   installed.value = [];
   mode.value = 'install';
   teamName.value = '';
-  localRepository.value = true;
   updateTeam.value = '';
   prefilledFor = '';
   teamNow.value = null;
@@ -237,7 +236,6 @@ watch(open, (showing) => {
 
 const mode = ref<'install' | 'update'>('install');
 const teamName = ref('');
-const localRepository = ref(true);
 const updateTeam = ref('');
 
 const preview = ref<SolutionPreview | null>(null);
@@ -824,7 +822,6 @@ async function install() {
         : await installSolution({
             folder: props.folder,
             teamName: teamName.value.trim(),
-            localRepository: localRepository.value,
             settings,
             connections,
           });
@@ -1006,17 +1003,6 @@ function next() {
                 uninstalled: its sites come back with their data, its members and triggers are made again, and your earlier
                 answers are filled in for you to check.
               </div>
-              <template v-else>
-                <q-checkbox
-                  v-model="localRepository"
-                  dense
-                  label="Create a local repository for this team"
-                  data-local-repository
-                />
-                <div class="text-caption os-text-muted">
-                  The team gets a local repository named after it, as a new team does. Untick for none.
-                </div>
-              </template>
               <div v-if="reinstallable.length > 0 && !reinstall" class="q-mt-sm" data-reinstall-candidates>
                 <div class="text-caption os-text-muted">
                   These teams kept an earlier install of this package, its sites offline with their data:

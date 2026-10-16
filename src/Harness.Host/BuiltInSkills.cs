@@ -223,9 +223,15 @@ public static class BuiltInSkills
 
             ## Repositories and trees
 
-            The main clone at `<teamRoot>/repos/<Repo>/main` is made by the platform. If it is not
-            there, that is a platform failure: say so with `blocked` and stop. Do not clone it by
-            hand. Bringing it current against origin is a person's act in the Git dialog; read
+            A team is created with no repository. When the work needs a repository and the team has
+            none, call `repo` with action `create-local` once, then work in the clone it names: the
+            platform makes the team's local repository, attaches it and clones it, and your prompt
+            lists the clone from your next run. Name that clone to the members you dispatch. Never
+            make a git repository or a code folder anywhere else.
+
+            The main clone at `<teamRoot>/repos/<Repo>/main` is made by the platform. If the team has a
+            repository and its clone is not there, that is a platform failure: say so with `blocked`
+            and stop. Do not clone it by hand. Bringing it current against origin is a person's act in the Git dialog; read
             `repo` for its state. Do not create a worktree for yourself: hire and dispatch, or say
             you cannot and stop. The member cuts its own tree for its card.
 
@@ -558,9 +564,13 @@ public static class BuiltInSkills
             """
             # Worktrees
 
-            The main clone at `<teamRoot>/repos/<Repo>/main` is made by the platform. If it is not
-            there, that is a platform failure: say so with `blocked` and stop. Do not clone it by
-            hand.
+            The main clone at `<teamRoot>/repos/<Repo>/main` is made by the platform. If the team has a
+            repository and its clone is not there, that is a platform failure: say so with `blocked`
+            and stop. Do not clone it by hand.
+
+            When the work needs a repository and the team has none, call `repo` with action
+            `create-local` once, then work in the clone it names, cutting your tree from it as below.
+            Never make a git repository or a code folder anywhere else.
 
             ## Your tree for this card
 
@@ -717,9 +727,12 @@ public static class BuiltInSkills
               that team. The reply carries the team id; tell that team's Manager the job next,
               naming the team. Nothing switches the person's current team: say which team you
               created.
-            - Repositories: with no `repos`, the team gets a local repository named after it, which
-              is right for a team that writes code. Pass a URL only when the person names a remote
-              that already exists. Never suggest a repository URL as though it exists: an example
+            - Repositories: with no `repos`, the team gets none, and that is right for a team that
+              writes code too: when the work needs a repository and the team has none, its Manager or
+              a member calls `repo` with action `create-local` once and works in the clone it names.
+              You may call it yourself, naming the team, when the person wants it now. Never make a
+              git repository or a code folder anywhere else. Pass a URL only when the person names a
+              remote that already exists. Never suggest a repository URL as though it exists: an example
               name is not a repository. A URL the platform cannot read refuses the create and
               nothing is made; the refusal names the choices. Creating it on GitHub and
               attaching it anyway are the person's, never yours: offer them a local repository
@@ -1096,16 +1109,19 @@ public static class BuiltInSkills
                additional instructions only add to that. Then read it back with `team_list` and say
                the DERIVED identifier back; every later call uses it as `team`.
             4. **Ask about a repository before it is created.** A team that will write code gets a
-               local repository - `team_create` with no `repos` makes one named after the team -
-               unless the person names a remote that already exists; then pass that URL. Never
+               local repository when its work first needs one - `team_create` with no `repos` makes
+               none, and when the work needs a repository and the team has none, its Manager or a
+               member calls `repo` with action `create-local` once and works in the clone it names,
+               never a git repository or a code folder anywhere else - unless the person names a
+               remote that already exists; then pass that URL. Never
                propose a URL of your own as though it exists. The platform reads every URL before
                the team is made: one that is missing or unreadable refuses the create, and nothing
                is left behind. Then offer the person a local repository, or ask them to
                create the remote; creating it on GitHub and attaching it anyway are theirs to
-               choose, on the Teams screen. Pass `localRepository: false` only for a team that will keep no code.
-               The clone is the platform's work and the attachment wakes the Manager. Only a person
-               can attach one later, on the team's Repos screen. Do not report a team as ready while
-               its card says it has no repository.
+               choose, on the Teams screen.
+               The clone is the platform's work. Only a person attaches a remote later, on the
+               team's Repos screen. A team with no repository is ready: its repository comes with the
+               first work that needs one.
             5. **Created is not selected.** `team_current` reports which team the person is looking
                at; they move it in their browser. Dispatch by name - `team` <id> - regardless.
             6. **Dispatch, or stop and confirm.** A team is cheap; the run that follows is not.

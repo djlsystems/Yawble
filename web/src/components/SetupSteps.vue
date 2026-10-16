@@ -512,7 +512,6 @@ async function setUp() {
     const result = await installSolution({
       folder: props.folder,
       teamName: teamName.value.trim(),
-      localRepository: true,
       settings: setupSettingsBody(setup.value.settings, values.value, props.plan.personSettings),
       connections: connectionsBody(),
     });
