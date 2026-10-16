@@ -317,6 +317,10 @@ onMounted(async () => {
   // happened to move.
   await board.refresh();
 
+  // THE STEERING, ONCE PER START: what this page highlights, `null` when nothing, so a workflow
+  // the Host still holds from another day is cleared by the first page a person opens.
+  board.announceSteering();
+
   // THE RELOAD CASE. The view is persisted, so a reload can land straight on the Teams table -
   // and `refresh()` fetches the overview, not the rollup. Without this the table comes back with
   // every team's Last workflow cell reading "not loaded yet" until some unrelated container
@@ -371,6 +375,9 @@ onMounted(async () => {
       onReconnected: async () => {
         joinedTeams.clear();
         await board.refresh();
+
+        // The Host may have restarted or dropped the workflow while the connection was down.
+        board.announceSteering();
 
         // Samples pushed while the connection was down are missed; the route's history fills them.
         void capacity.load();
