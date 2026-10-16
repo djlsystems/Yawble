@@ -157,3 +157,25 @@ describe('the Monitor', () => {
     expect(wrapper.find('.monitor-overlay--error').exists()).toBe(false)
   })
 })
+
+describe('the Monitor and a wake', () => {
+  it('names each ask, fire and cancel in its activity list, with the note', async () => {
+    const { wrapper } = await mountMonitor([
+      row('wake.asked', 'Alpha/Developer', { wake: 1, dueAt: '2026-10-15T10:10:00Z', note: 'check the certificate' }, '2026-10-15T10:00:00Z'),
+      row('wake.fired', 'Alpha/Developer', { wake: 1, dueAt: '2026-10-15T10:10:00Z', askedAt: '2026-10-15T10:00:00Z', instruction: 3, note: 'check the certificate' }, '2026-10-15T10:10:00Z'),
+      row('wake.asked', 'Alpha/Developer', { wake: 2, dueAt: '2026-10-15T10:40:00Z', note: 'look at the deploy' }, '2026-10-15T10:20:00Z'),
+      row('wake.cancelled', 'Alpha/Developer', { wake: 2, by: 'ada@example.com', reason: 'cancelled by a person', note: 'look at the deploy' }, '2026-10-15T10:21:00Z'),
+    ])
+
+    const rows = wrapper.findAll('.monitor-row')
+    expect(rows.map((found) => found.find('.monitor-row-verb').text())).toEqual([
+      'wake cancelled',
+      'asked to be woken',
+      'wake fired',
+      'asked to be woken',
+    ])
+    expect(rows[0]!.text()).toContain('look at the deploy')
+    expect(rows[2]!.text()).toContain('check the certificate')
+    expect(rows[3]!.text()).toContain('check the certificate')
+  })
+})

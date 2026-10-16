@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { Message } from '../../api/types'
 import { dateTimeOf, detail, label, ownerOf, summarise, timeOf } from '../summarise'
+import { wakeLine, wakeTime } from '../wakes'
+import { localMinute } from '../localTime'
 
 const message = (payload: unknown): Message => ({
   seq: 1,
@@ -623,5 +625,43 @@ describe('an instruction split into a subject and a body', () => {
   it('leaves every other message type where it was', () => {
     expect(summarise(message({ output: 'it is Tuesday' }))).toBe('it is Tuesday')
     expect(detail(message({ output: 'one\r\ntwo' }))).toBe('one\ntwo')
+  })
+})
+
+describe('a wake row', () => {
+  const wake = (type: string, payload: Record<string, unknown>): Message => ({ ...message(payload), type, source: 'Alpha/Developer' })
+
+  it('says the ask with its due time on the reader\'s clock and the note', () => {
+    const due = '2026-10-16T01:41:00Z'
+    expect(summarise(wake('wake.asked', { wake: 1, dueAt: due, note: 'check the certificate' }))).toBe(
+      `asked to be woken at ${wakeTime(due)}: check the certificate`,
+    )
+  })
+
+  it('says the fire with the note, never the instruction seq it carries, and how late when it was', () => {
+    expect(summarise(wake('wake.fired', { wake: 1, instruction: 140, note: 'check' }))).toBe('woken as it asked: check')
+    expect(summarise(wake('wake.fired', { wake: 1, instruction: 140, lateSeconds: 750, note: 'check' }))).toBe(
+      'woken as it asked, 13 min late: check',
+    )
+  })
+
+  it('says who cancelled it and why, and why a skipped one did not fire', () => {
+    expect(summarise(wake('wake.cancelled', { wake: 1, by: 'ada@example.com', reason: 'cancelled by a person', note: 'check' }))).toBe(
+      'cancelled by a person (ada@example.com): check',
+    )
+    expect(summarise(wake('wake.skipped', { wake: 1, reason: 'its team is archived', note: 'check' }))).toBe(
+      'wake skipped: its team is archived: check',
+    )
+  })
+})
+
+describe('wakeLine', () => {
+  it('says the time of day for a wake today, and its date in front for one that is not', () => {
+    const now = Date.parse('2026-10-16T12:00:00Z')
+    const today = new Date(now + 30 * 60_000).toISOString()
+    const tomorrow = new Date(now + 26 * 3600_000).toISOString()
+
+    expect(wakeLine({ dueAt: today, note: 'check' }, now)).toBe(`wakes at ${localMinute(Date.parse(today))}: check`)
+    expect(wakeLine({ dueAt: tomorrow, note: ' ' }, now)).toBe(`wakes at ${localMinute(Date.parse(tomorrow), { date: true })}`)
   })
 })
