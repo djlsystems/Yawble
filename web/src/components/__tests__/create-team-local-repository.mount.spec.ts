@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 //
-// NEW TEAM, B001F: "Create a local repository for this team" (shown only with no repository listed,
-// ticked by default, unticked sends `localRepository: false`), and a refused repository check - the
+// NEW TEAM: no local-repository checkbox and no `localRepository` in the request - with no repository
+// listed the Code tab says the team gets its own when its work first needs one - and a refused
+// repository check - the
 // Host's sentence, ONLY the choices it listed for each URL, and each choice resent as its own code
 // in `repoChoices` until the team is created.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -93,6 +94,12 @@ function checkbox(): HTMLElement | null {
   return document.body.querySelector<HTMLElement>('[data-local-repository-checkbox]');
 }
 
+const ON_NEED = 'With no repository listed, the team gets its own local repository when its work first needs one.';
+
+function onNeedLine(): HTMLElement | null {
+  return document.body.querySelector<HTMLElement>('[data-local-repository-on-need]');
+}
+
 /** The choice buttons the refusal shows, by code, in order. */
 function offered(url?: string): string[] {
   const scope = url ? `[data-repo-check-url="${url}"] ` : '';
@@ -140,39 +147,28 @@ function refused(error: string, repos: RepoCheckFailure[]) {
 const notFoundSentence = `${MISSING} could not be read: remote: Repository not found. Nothing was created. `
   + 'Choose: create it on GitHub (private), or use a local repository instead.';
 
-describe('New Team: Create a local repository for this team', () => {
-  it('is shown ticked with no repository listed, and a create sends localRepository: true', async () => {
+describe('New Team: no local-repository checkbox', () => {
+  it('offers no checkbox with no repository listed, says the team gets one on first need, and sends no localRepository', async () => {
     await open();
 
-    expect(checkbox()).not.toBeNull();
-    expect(bodyText()).toContain('Create a local repository for this team');
-    expect(checkbox()!.getAttribute('aria-checked')).toBe('true');
+    expect(checkbox()).toBeNull();
+    expect(document.body.querySelector('.q-checkbox[aria-label="Create a local repository for this team"]')).toBeNull();
+    expect(bodyText()).not.toContain('Create a local repository for this team');
+    expect(onNeedLine()?.textContent?.trim()).toBe(ON_NEED);
 
     button('Create team').click();
     await settled();
 
     expect(createTeam).toHaveBeenCalledTimes(1);
     expect(createTeam.mock.calls[0]![REPOS]).toEqual([]);
-    expect(createTeam.mock.calls[0]![LOCAL_REPOSITORY]).toBe(true);
+    expect(createTeam.mock.calls[0]![LOCAL_REPOSITORY]).toBeUndefined();
   });
 
-  it('unticked, sends localRepository: false', async () => {
-    await open();
-
-    checkbox()!.click();
-    await settled();
-    expect(checkbox()!.getAttribute('aria-checked')).toBe('false');
-
-    button('Create team').click();
-    await settled();
-
-    expect(createTeam.mock.calls[0]![LOCAL_REPOSITORY]).toBe(false);
-  });
-
-  it('is hidden once a repository URL is listed, which sends no localRepository at all', async () => {
+  it('drops the sentence once a repository URL is listed, and still sends no localRepository', async () => {
     const wrapper = await open();
 
     await addRepo(wrapper, 'https://github.com/owner/app.git');
+    expect(onNeedLine()).toBeNull();
     expect(checkbox()).toBeNull();
 
     button('Create team').click();
@@ -186,16 +182,17 @@ describe('New Team: Create a local repository for this team', () => {
 describe('New Team: a URL typed but not added', () => {
   const TYPED = 'https://github.com/owner/typed.git';
 
-  it('hides the local-repository box while the field holds text, and shows it again when cleared', async () => {
+  it('hides the first-need sentence while the field holds text, and shows it again when cleared', async () => {
     const wrapper = await open();
 
     await field(wrapper, 'GitHub Repos').setValue(TYPED);
     await settled();
-    expect(checkbox()).toBeNull();
+    expect(onNeedLine()).toBeNull();
 
     await field(wrapper, 'GitHub Repos').setValue('   ');
     await settled();
-    expect(checkbox()).not.toBeNull();
+    expect(onNeedLine()).not.toBeNull();
+    expect(checkbox()).toBeNull();
   });
 
   it('Create sends it in repos, as if Add had been pressed, with no local repository requested', async () => {

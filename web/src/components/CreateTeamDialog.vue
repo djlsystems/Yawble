@@ -104,14 +104,12 @@ const repoSuggestionsScope = ref<RecentReposScope>('instance');
 const instanceId = ref<string | null>(null);
 
 /**
- * "Create a local repository for this team": with no repository listed, the Host makes one named
- * after the team unless this is unticked, which sends `localRepository: false`. Ticked by default,
- * as the Host's own default is, and shown only while the list is empty - with a URL listed the Host
- * ignores it, so a box there would be a control that does nothing. A URL typed in the field and not
- * yet added counts as listed: Create adds it, so the box hides while the field holds text.
+ * NO LOCAL-REPOSITORY QUESTION: with no repository listed the team gets none at creation, and makes
+ * its own the first time its work needs one, so the request carries no `localRepository`. The line
+ * saying so shows only while the list is empty; a URL typed in the field and not yet added counts
+ * as listed, since Create adds it.
  */
-const localRepository = ref(true);
-const offerLocalRepository = computed(() => repos.value.length === 0 && repoInput.value.trim() === '');
+const noRepositoryListed = computed(() => repos.value.length === 0 && repoInput.value.trim() === '');
 
 /**
  * A REFUSED REPOSITORY CHECK: a listed URL `git ls-remote` could not read. Nothing was created. The
@@ -329,7 +327,6 @@ async function loadDefaults() {
   repos.value = defaults.repos;
   upstreams.value = [];
   repoInput.value = '';
-  localRepository.value = true;
   refusal.value = null;
   repoChoices.value = {};
 
@@ -562,8 +559,8 @@ async function submit() {
       // In this request, so each clone is made with its upstream remote.
       upstreamsByRepo(),
 
-      // Only with no repository listed: the Host ignores it otherwise.
-      repos.value.length === 0 ? localRepository.value : undefined,
+      // No local-repository choice: the team makes its own when its work first needs one.
+      undefined,
 
       // The answer to a refused check, when there was one.
       repoChoices.value,
@@ -594,7 +591,6 @@ async function submit() {
     repos.value = [];
     upstreams.value = [];
     repoInput.value = '';
-    localRepository.value = true;
     refusal.value = null;
     repoChoices.value = {};
     open.value = false;
@@ -914,7 +910,7 @@ async function submit() {
 
                 <ForkItForMe @forked="addFork" />
 
-                <!-- Attach only: the one way to make a local repository here is the box below. -->
+                <!-- Attach only: with none listed, the team makes its own local repository on first need. -->
                 <LocalRepoPicker :attached="repos" :offer-create="false" @attach="attachLocal" />
 
                 <div v-if="repoSuggestions.length > 0" class="q-mt-sm">
@@ -1007,17 +1003,8 @@ async function submit() {
                   Optional. Add repositories in priority order; the first entry is the team's primary repo.
                 </div>
 
-                <div v-if="offerLocalRepository" class="row items-center no-wrap q-gutter-x-xs q-mt-sm">
-                  <q-checkbox
-                    v-model="localRepository"
-                    dense
-                    label="Create a local repository for this team"
-                    data-local-repository-checkbox
-                  />
-                  <FieldHelp
-                    text="With no repository listed, the team gets a git repository of its own, named after it and kept on this instance only. Untick it for a team with no code."
-                    data-local-repository-hint
-                  />
+                <div v-if="noRepositoryListed" class="text-caption os-text-muted q-mt-sm" data-local-repository-on-need>
+                  With no repository listed, the team gets its own local repository when its work first needs one.
                 </div>
               </div>
             </div>

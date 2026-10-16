@@ -1,8 +1,7 @@
 // @vitest-environment happy-dom
 //
-// BACKLOG DISPATCH TO A NEW TEAM, B001F: the same "Create a local repository for this team" box as
-// New Team (shown only with no repository listed, ticked by default, unticked sends
-// `localRepository: false`), and a refused repository check shown with the same component - the
+// BACKLOG DISPATCH TO A NEW TEAM: as on New Team, no local-repository checkbox and no
+// `localRepository` in the request, and a refused repository check shown with the same component - the
 // Host's sentence, ONLY the choices it listed, and each choice resent in `repoChoices` until the
 // team is made and the item dispatched.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -129,36 +128,22 @@ function refused(error: string, repos: RepoCheckFailure[]) {
 const notFoundSentence = `${MISSING} could not be read: remote: Repository not found. Nothing was created. `
   + 'Choose: create it on GitHub (private), or use a local repository instead.';
 
-describe('Backlog dispatch to a new team: Create a local repository for this team', () => {
-  it('is shown ticked with no repository listed, and Dispatch sends localRepository: true', async () => {
+describe('Backlog dispatch to a new team: no local-repository checkbox', () => {
+  it('offers no checkbox with no repository listed, and Dispatch sends no localRepository', async () => {
     await openDispatchToNew([]);
 
-    expect(checkbox()).not.toBeNull();
-    expect(bodyText()).toContain('Create a local repository for this team');
-    expect(checkbox()!.getAttribute('aria-checked')).toBe('true');
+    expect(checkbox()).toBeNull();
+    expect(bodyText()).not.toContain('Create a local repository for this team');
 
     dispatchButton().click();
     await flushPromises();
 
     expect(dispatchBacklogItemToNewTeam).toHaveBeenCalledTimes(1);
     expect(sent(0).repos).toEqual([]);
-    expect(sent(0).localRepository).toBe(true);
+    expect(sent(0)).not.toHaveProperty('localRepository');
   });
 
-  it('unticked, sends localRepository: false', async () => {
-    await openDispatchToNew([]);
-
-    checkbox()!.click();
-    await flushPromises();
-    expect(checkbox()!.getAttribute('aria-checked')).toBe('false');
-
-    dispatchButton().click();
-    await flushPromises();
-
-    expect(sent(0).localRepository).toBe(false);
-  });
-
-  it('is hidden with a repository listed, which sends no localRepository', async () => {
+  it('offers none with a repository listed either, and sends no localRepository', async () => {
     await openDispatchToNew([MISSING]);
 
     expect(checkbox()).toBeNull();
@@ -167,7 +152,7 @@ describe('Backlog dispatch to a new team: Create a local repository for this tea
     await flushPromises();
 
     expect(sent(0).repos).toEqual([MISSING]);
-    expect(sent(0).localRepository).toBeUndefined();
+    expect(sent(0)).not.toHaveProperty('localRepository');
   });
 });
 
@@ -189,9 +174,8 @@ describe('Backlog dispatch to a new team: a URL added in Team settings', () => {
     await addChips(reposList(), url);
   }
 
-  it('Use these keeps it: the box hides, and Dispatch sends it in repos with no local repository requested', async () => {
+  it('Use these keeps it, and Dispatch sends it in repos with no local repository requested', async () => {
     await openDispatchToNew([]);
-    expect(checkbox()).not.toBeNull();
 
     await addRepository(`  ${TYPED}  `);
     button('Use these').click();
@@ -204,7 +188,7 @@ describe('Backlog dispatch to a new team: a URL added in Team settings', () => {
 
     expect(dispatchBacklogItemToNewTeam).toHaveBeenCalledTimes(1);
     expect(sent(0).repos).toEqual([TYPED]);
-    expect(sent(0).localRepository).toBeUndefined();
+    expect(sent(0)).not.toHaveProperty('localRepository');
   });
 
   it('adds it after the ones already there', async () => {
