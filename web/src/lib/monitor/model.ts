@@ -286,6 +286,11 @@ export class MonitorModel {
   fileSettings: FileSettings = DefaultFileSettings
   /** A replay plays the log, and file changes are not in it. */
   replay = false
+  /**
+   * What the Host calls each team and member that exists now, and each member's kind: a replay
+   * draws from the log alone, which names neither, so it takes them from here (`know`).
+   */
+  private known = new Map<string, { name: string; kind?: 'agent' | 'plugin' }>()
   /** Keys for the activity list's push lines, which have no seq: below every row's. */
   private pushSeq = 0
 
@@ -301,9 +306,19 @@ export class MonitorModel {
     public only: Set<string> | null = null,
   ) {}
 
+  /** Remembers the names and kinds of the teams and members that exist, without adding any. */
+  know(teams: readonly Team[]) {
+    for (const team of teams) {
+      this.known.set(String(team.id), { name: team.name })
+      for (const container of team.containers)
+        this.known.set(`${String(team.id)}/${container.id}`, { name: container.name, kind: container.kind ?? 'agent' })
+    }
+  }
+
   team(id: string, name = id): MonitorTeam {
     let team = this.teams.get(id)
     if (!team) {
+      if (name === id) name = this.known.get(id)?.name ?? id
       team = { id, name, hue: (this.teams.size * GoldenAngle + 190) % 360 }
       this.teams.set(id, team)
     } else if (name !== id) {
@@ -317,6 +332,11 @@ export class MonitorModel {
     const key = `${team}/${id}`
     let member = this.members.get(key)
     if (!member) {
+      const known = this.known.get(key)
+      if (known) {
+        if (name === id) name = known.name
+        kind = known.kind ?? kind
+      }
       member = {
         key,
         team,

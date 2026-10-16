@@ -159,6 +159,29 @@ describe('the snapshots are the truth', () => {
   })
 })
 
+describe('a replay knows what the Host calls things', () => {
+  it('draws a plugin member as a plugin and names teams and members as the Host does, adding none', () => {
+    const model = new MonitorModel('Manager', 80, null)
+    model.replay = true
+    model.know([{
+      id: 'Alpha', name: 'Alpha team', containers: [
+        { id: 'Mailer', name: 'Mail sender', kind: 'plugin' },
+        { id: 'Developer', name: 'Developer Ada', kind: 'agent' },
+      ],
+    }] as unknown as Team[])
+    expect(model.members.size).toBe(0)
+
+    model.apply(row('agentContainer.started', 'Alpha/Mailer'))
+    model.apply(row('agentContainer.started', 'Alpha/Developer'))
+    model.apply(row('agentContainer.started', 'Gone/Someone'))
+
+    expect(model.teams.get('Alpha')?.name).toBe('Alpha team')
+    expect(model.members.get('Alpha/Mailer')).toMatchObject({ name: 'Mail sender', kind: 'plugin' })
+    expect(model.members.get('Alpha/Developer')).toMatchObject({ name: 'Developer Ada', kind: 'agent' })
+    expect(model.members.get('Gone/Someone')).toMatchObject({ name: 'Someone', kind: 'agent' })
+  })
+})
+
 describe('the replay clock', () => {
   const at = (seconds: number) => new Date(Date.UTC(2026, 9, 15, 10, 0, seconds)).toISOString()
 

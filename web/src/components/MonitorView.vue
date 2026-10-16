@@ -405,6 +405,7 @@ function startReplay(from?: number) {
   mode.value = 'replay'
   finished.value = false
   model = newModel(null, true)
+  model.know(board.choosableTeams)
   // File changes are not in the log: the replay draws none, and says nothing of them.
   scene?.clearFileChanges()
   const start = from ?? timeOf(rows[0]!)
