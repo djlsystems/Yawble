@@ -355,7 +355,7 @@ func newPluginRemoveCommand(deps Deps) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&version, "version", "", "remove only this version")
-	cmd.Flags().BoolVar(&yes, "yes", false, "answer yes to the question")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "answer yes to the question")
 	return cmd
 }
 

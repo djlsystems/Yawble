@@ -385,24 +385,26 @@ func TestSolutionInstallSkippingARequiredDocumentSaysTheTeamIsBlocked(t *testing
 
 func TestSolutionInstallYesSkipsTheConfirmation(t *testing.T) {
 	for _, program := range programs {
-		t.Run(program, func(t *testing.T) {
-			s := installScript(t, program,
-				hostReport(t, "n2", 200, routeBody(t, "solution-preview-install.json", nil)),
-				hostReport(t, "n3", 200, routeBody(t, "solution-install-done.json", named("Job Tracker"))),
-			)
-			// No answers at all: every question keeps its default or skips, and nothing asks for a yes.
-			code, out, errOut := run(t, installDeps(s, program, ""), "solution", "install", solutionPackage(t), "--yes")
-			if code != 0 {
-				t.Fatalf("exit %d: %s %s", code, out, errOut)
-			}
-			if strings.Contains(out, "[y/N]") {
-				t.Errorf("--yes asked anyway:\n%s", out)
-			}
-			reqs := requests(t, s, program)
-			if len(reqs) != 2 || reqs[1].Action != "install" || *reqs[1].TeamName != "Job Tracker" {
-				t.Errorf("requests %+v", reqs)
-			}
-		})
+		for _, flag := range []string{"--yes", "-y"} {
+			t.Run(program+" "+flag, func(t *testing.T) {
+				s := installScript(t, program,
+					hostReport(t, "n2", 200, routeBody(t, "solution-preview-install.json", nil)),
+					hostReport(t, "n3", 200, routeBody(t, "solution-install-done.json", named("Job Tracker"))),
+				)
+				// No answers at all: every question keeps its default or skips, and nothing asks for a yes.
+				code, out, errOut := run(t, installDeps(s, program, ""), "solution", "install", solutionPackage(t), flag)
+				if code != 0 {
+					t.Fatalf("exit %d: %s %s", code, out, errOut)
+				}
+				if strings.Contains(out, "[y/N]") {
+					t.Errorf("%s asked anyway:\n%s", flag, out)
+				}
+				reqs := requests(t, s, program)
+				if len(reqs) != 2 || reqs[1].Action != "install" || *reqs[1].TeamName != "Job Tracker" {
+					t.Errorf("requests %+v", reqs)
+				}
+			})
+		}
 	}
 }
 

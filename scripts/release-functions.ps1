@@ -49,7 +49,7 @@ function Get-GitHubRepository {
 # which is what $AgentProcessListing prints inside the container. A CLI is found by the file
 # name of the command, or of the script node was handed. Who is the team/member whose
 # workspace the process runs in, "concierge" for the tenant Concierge, else its folder.
-$AgentCliNames = @('claude', 'codex', 'copilot', 'grok', 'agy')
+$AgentCliNames = @('claude', 'codex', 'copilot', 'grok')
 function Get-AgentProcess {
     param([string[]]$Lines)
     foreach ($line in @($Lines)) {

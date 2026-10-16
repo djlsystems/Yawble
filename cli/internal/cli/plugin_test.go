@@ -339,11 +339,13 @@ func TestPluginRemoveAsksFirstAndYesAnswers(t *testing.T) {
 		t.Errorf("answered no: exit %d %q", code, out)
 	}
 
-	s = pluginScript(t, report(echoInstalled, "", ""), report("", "", ""))
-	s.On(layoutCall, engine.Result{Stdout: "sample-echo\t0.1.0\t0.1.0\n"})
-	code, out, errOut = run(t, stubbed(s), "plugin", "remove", "sample-echo", "--yes")
-	if code != 0 || len(callsContaining(s, "podman exec -e HARNESS_WORKER_KEY= yawble rm -rf -- /data/plugins/sample-echo")) != 1 || !strings.Contains(out, "the Host no longer lists sample-echo") {
-		t.Errorf("--yes: exit %d %s %s\n%s", code, out, errOut, strings.Join(s.Calls, "\n"))
+	for _, flag := range []string{"--yes", "-y"} {
+		s = pluginScript(t, report(echoInstalled, "", ""), report("", "", ""))
+		s.On(layoutCall, engine.Result{Stdout: "sample-echo\t0.1.0\t0.1.0\n"})
+		code, out, errOut = run(t, stubbed(s), "plugin", "remove", "sample-echo", flag)
+		if code != 0 || len(callsContaining(s, "podman exec -e HARNESS_WORKER_KEY= yawble rm -rf -- /data/plugins/sample-echo")) != 1 || !strings.Contains(out, "the Host no longer lists sample-echo") {
+			t.Errorf("%s: exit %d %s %s\n%s", flag, code, out, errOut, strings.Join(s.Calls, "\n"))
+		}
 	}
 }
 
