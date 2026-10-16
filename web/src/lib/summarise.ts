@@ -1,6 +1,7 @@
 import type { Message } from '../api/types'
 import { failureClassWords, resumesAutomatically, resumeTimeText } from './failureClass'
 import { solutionNoticeOf } from './solutionNotice'
+import { wakeTime } from './wakes'
 
 /**
  * One line describing what a message was about, for a card's activity feed.
@@ -165,6 +166,14 @@ function textOf(message: Message): string {
     return typeof reason === 'string' && reason.trim() !== '' ? `closed: ${reason}` : 'closed'
   }
 
+  // A WAKE'S LIFE: asked, fired, cancelled or skipped. Its own arm because the shared chain below
+  // reads `instruction` - on `wake.fired` the seq of the instruction it appended, a bare number - and
+  // `wake.asked` carries none of that chain's fields, so its note would never be said.
+  const wake = wakeText(message.type, payload)
+  if (wake !== null) {
+    return wake
+  }
+
   // A REPORT THAT BELONGED TO NO RUN, marked at the progress route because the container had no
   // current causation when it arrived - so a process outlived the invocation that started it, and
   // whatever it eventually produces will be reported by nobody.
@@ -259,6 +268,42 @@ function textOf(message: Message): string {
   ].find((value) => value !== null && value !== undefined && String(value).trim() !== '')
 
   return text === undefined ? '' : String(text)
+}
+
+/** The words of a `wake.*` row, with the due time on the reader's clock; null for any other row. */
+function wakeText(type: string, payload: Record<string, unknown>): string | null {
+  if (!type.startsWith('wake.')) return null
+
+  const words = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
+  const note = words(payload.note)
+  const withNote = (head: string) => (note === '' ? head : `${head}: ${note}`)
+
+  switch (type) {
+    case 'wake.asked':
+      return withNote(typeof payload.dueAt === 'string' ? `asked to be woken at ${wakeTime(payload.dueAt)}` : 'asked to be woken')
+    case 'wake.fired': {
+      const late = typeof payload.lateSeconds === 'number' && payload.lateSeconds > 0 ? lateWords(payload.lateSeconds) : ''
+      return withNote(late === '' ? 'woken as it asked' : `woken as it asked, ${late} late`)
+    }
+    case 'wake.cancelled': {
+      const by = words(payload.by)
+      const reason = words(payload.reason) || 'wake cancelled'
+      return withNote(by === '' ? reason : `${reason} (${by})`)
+    }
+    case 'wake.skipped':
+      return withNote(`wake skipped: ${words(payload.reason) || 'it did not fire'}`)
+    default:
+      return null
+  }
+}
+
+/** "40 s", "12 min", "3 h 5 min": how late a wake fired. */
+function lateWords(seconds: number): string {
+  if (seconds < 60) return `${Math.round(seconds)} s`
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes} min`
+  const rest = minutes % 60
+  return rest === 0 ? `${Math.floor(minutes / 60)} h` : `${Math.floor(minutes / 60)} h ${rest} min`
 }
 
 const InstructionPrefix = 'agentContainer.instruction.'

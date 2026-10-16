@@ -154,6 +154,13 @@ export interface ContainerSnapshot {
    */
   kind?: 'agent' | 'plugin'
 
+  /**
+   * THE WAKES THIS MEMBER ASKED FOR (`wake_me`) THAT ARE STILL PENDING, earliest due first. Absent
+   * when there are none, and from an older Host. The card says each on the reader's clock, with a
+   * person's Cancel.
+   */
+  wakes?: PendingWake[]
+
   /** Presence of a chosen Agent when this snapshot was created or patched: present on the write
    *  response if a chosen Agent did not resolve at the time. This is a WARNING - the write SUCCEEDED. */
   unresolvedAgents?: UnresolvedAgent[]
@@ -1450,6 +1457,30 @@ export interface TeamWorkflowTiming {
    * for none. `name` is text. Absent from an older server.
    */
   outcome?: { id: string; name: string; status: 'proposed' | 'active' | 'retired' | 'merged' } | null
+
+  /** The wakes members asked for in this workflow that are still pending, earliest due first. Absent when none. */
+  wakes?: PendingWake[]
+}
+
+/**
+ * A WAKE A MEMBER ASKED FOR AND THAT HAS NOT FIRED: one instruction to `member`, in `workflow`, at
+ * `dueAt`. The same shape on a member's snapshot, a Kanban card, a team workflow row and
+ * `GET /api/teams/{team}/wakes`. Every instant is UTC; a screen says it on the reader's clock.
+ */
+export interface PendingWake {
+  id: number
+  member: string
+  workflow: number
+  dueAt: string
+  askedAt: string
+  /** What the member said to look at when woken. Text, never HTML. */
+  note: string
+}
+
+/** A person's cancel of a pending wake: the wake as it was. */
+export interface CancelledWake {
+  wake: PendingWake
+  cancelled: true
 }
 
 export interface MemberExecution {

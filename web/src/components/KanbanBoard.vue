@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUpdate, onMounted, onUnmounted, onUpdated, ref, watch, watchPostEffect } from 'vue';
 import type { KanbanLane } from '../api/kanban';
+import type { PendingWake } from '../api/types';
 import { useKanbanStore, type KanbanView } from '../stores/kanban';
 import { runningAcrossTeams, useWipStore } from '../stores/wip';
 import { useAgentUpdatesStore } from '../stores/agentUpdates';
@@ -40,6 +41,27 @@ defineEmits<{ 'open-outcome': [outcomeId: string]; 'manage-outcomes': [] }>();
 
 /** The card whose "Change outcome…" is open, or ''. */
 const changingOutcome = ref('');
+
+/**
+ * A PERSON'S CANCEL OF A CARD'S WAKE, under the wake's own team, then the refetch every write does. A
+ * refusal (it fired a moment before the click) is the board's error line, as a failed fetch is.
+ */
+const cancellingWake = ref<number | null>(null);
+
+async function cancelWake(wake: PendingWake) {
+  const card = kanban.board?.cards.find((entry) => entry.wakes?.some((pending) => pending.id === wake.id));
+  if (!card) return;
+
+  cancellingWake.value = wake.id;
+
+  try {
+    await kanban.cancelWake(card.team, wake.id);
+  } catch (cause) {
+    kanban.error = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    cancellingWake.value = null;
+  }
+}
 const agentUpdates = useAgentUpdatesStore();
 
 const viewOptions: { label: string; value: KanbanView; icon: string }[] = [
@@ -426,6 +448,8 @@ function openOutcomes(id: string | null = null) {
             @open="kanban.select"
             @open-outcome="(id: string) => { openOutcomes(id); $emit('open-outcome', id); }"
             @change-outcome="(id: string) => (changingOutcome = id)"
+            :cancelling-wake="cancellingWake"
+            @cancel-wake="cancelWake"
           />
         </TransitionGroup>
       </template>
@@ -470,6 +494,8 @@ function openOutcomes(id: string | null = null) {
             @open="kanban.select"
             @open-outcome="(id: string) => { openOutcomes(id); $emit('open-outcome', id); }"
             @change-outcome="(id: string) => (changingOutcome = id)"
+            :cancelling-wake="cancellingWake"
+            @cancel-wake="cancelWake"
           />
         </TransitionGroup>
       </section>

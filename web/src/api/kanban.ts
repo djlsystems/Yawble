@@ -1,5 +1,5 @@
 import { json, send } from './client'
-import type { TeamId } from './types'
+import type { PendingWake, TeamId } from './types'
 import type { OutcomeRef } from './outcomes'
 
 /**
@@ -169,6 +169,12 @@ export interface KanbanCard {
 
   /** The open workflow this card belongs to and its latest row, or null when all have ended. */
   openWorkflow?: { workflow: number; latestSeq: number } | null
+
+  /**
+   * The pending wakes asked in the workflow this card is open in, the card's member's first, then by
+   * due time. Absent when none, and from an older server.
+   */
+  wakes?: PendingWake[] | null
 }
 
 /**

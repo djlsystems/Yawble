@@ -154,6 +154,10 @@ public sealed class MemberRuntime : IAsyncDisposable
     private volatile string? _resumeAt;
     private volatile string? _needsDecision;
 
+    /// <summary>The wakes this member asked for that are still pending, or null for none. Written by
+    /// the wake runner (<see cref="MarkWakes"/>), never by a run, and never cleared by a wake.</summary>
+    private volatile IReadOnlyList<WakeView>? _wakes;
+
     /// <summary>
     /// WHAT THIS MEMBER LAST HANDED BACK, or null. Beside the three marks above and governed by the
     /// opposite rule: read <see cref="ContainerSnapshot.HandedBack"/> before touching it. It is NOT
@@ -423,7 +427,8 @@ public sealed class MemberRuntime : IAsyncDisposable
         UnresolvedAgents: null, FailureClass: _failureClass, ResumeAt: _resumeAt,
         HandedBack: _handedBack, Held: _held,
         Watchable: _watchable?.Invoke(_definition.Agent) ?? false,
-        Kind: MemberRef.KindOf(_definition.Agent));
+        Kind: MemberRef.KindOf(_definition.Agent),
+        Wakes: _wakes);
 
     /// <summary>
     /// Records that this container has stopped without finishing, and pushes it.
@@ -566,6 +571,26 @@ public sealed class MemberRuntime : IAsyncDisposable
         }
 
         _resumeAt = text;
+        Publish();
+    }
+
+    /// <summary>
+    /// Records the wakes this member has pending, earliest due first, and pushes it; an empty list
+    /// clears them. Called by the wake runner whenever a wake is asked, fired, skipped or cancelled,
+    /// and on its heartbeat. Not a mark of trouble and not cleared at the next wake: a pending wake
+    /// is true until it fires or is cancelled. PUSHED ONLY WHEN THE LIST MOVES, like every mark here.
+    /// </summary>
+    public void MarkWakes(IReadOnlyList<WakeView> wakes)
+    {
+        var next = wakes.Count == 0 ? null : wakes;
+        var current = _wakes;
+
+        if (current is null ? next is null : next is not null && current.SequenceEqual(next))
+        {
+            return;
+        }
+
+        _wakes = next;
         Publish();
     }
 

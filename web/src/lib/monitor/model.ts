@@ -18,6 +18,9 @@ import { DefaultFileSettings, filesOf, pushHeadline, pushMoreWords, pushTime, ty
 
 export const InstructionPrefix = 'agentContainer.instruction.'
 
+/** The source of the instruction a member's own wake fires: `wake:<id>`. */
+const WakePrefix = 'wake:'
+
 /** What a member is doing, as the monitor draws it. */
 export type MemberState = 'idle' | 'running' | 'waiting' | 'blocked' | 'decision' | 'failed'
 
@@ -67,6 +70,16 @@ export interface MonitorMember {
   runs: number
   /** Model time of its last row, ms. */
   lastAt: number
+  /** Its pending wakes, earliest due first: the snapshot's, moved by the `wake.*` rows between snapshots. */
+  wakes: MonitorWake[]
+}
+
+/** A wake a member asked for and that has not fired, as the Monitor draws it: a small clock on the member. */
+export interface MonitorWake {
+  id: number
+  /** When it is due, ms. */
+  dueAt: number
+  note: string
 }
 
 export interface MonitorWorkflow {
@@ -146,7 +159,7 @@ function num(value: unknown): number {
 export function splitMember(value: string): { team: string; id: string } | null {
   const slash = value.indexOf('/')
   if (slash <= 0 || slash === value.length - 1) return null
-  if (/^(schedule|trigger|site):/.test(value)) return null
+  if (/^(schedule|trigger|site|wake):/.test(value)) return null
   return { team: value.slice(0, slash), id: value.slice(slash + 1) }
 }
 
@@ -318,6 +331,7 @@ export class MonitorModel {
         tokens: 0,
         runs: 0,
         lastAt: 0,
+        wakes: [],
       }
       this.members.set(key, member)
     }
@@ -348,6 +362,7 @@ export class MonitorModel {
         const said = container.blocked ?? container.needsDecision ?? container.failed
         if (said) member.status = said
         if (container.currentCorrelation !== null) member.workflow = container.currentCorrelation
+        member.wakes = (container.wakes ?? []).map((wake) => ({ id: wake.id, dueAt: wireInstant(wake.dueAt), note: wake.note }))
         seen.add(member.key)
       }
     }
@@ -449,7 +464,14 @@ export class MonitorModel {
       }
     }
 
-    if (type.startsWith(InstructionPrefix) && member) {
+    if (type.startsWith(InstructionPrefix) && member && message.source.startsWith(WakePrefix)) {
+      // THE MEMBER'S OWN WAKE: nobody sent it, so it comes from no one - a ripple on the member.
+      tone = 'tell'
+      verb = 'woken'
+      member.queued++
+      if (member.state === 'idle' || member.state === 'failed') member.state = 'waiting'
+      effects.push({ kind: 'ripple', at: self, tone })
+    } else if (type.startsWith(InstructionPrefix) && member) {
       tone = 'tell'
       verb = 'told'
       member.queued++
@@ -459,6 +481,26 @@ export class MonitorModel {
         ? { kind: 'member', key: this.member(sender.team, sender.id).key }
         : { kind: 'origin', team, origin: originOf(message.source) }
       effects.push({ kind: 'comet', from, to: self, tone, label: short(text(payload.subject) || text(payload.instruction), 36) })
+    } else if (type.startsWith('wake.') && member) {
+      // A WAKE'S LIFE, NAMED IN THE ACTIVITY LIST: asked, fired, cancelled or skipped. The clock on
+      // the member follows: an ask sets it, anything else takes it down.
+      const id = num(payload.wake)
+      member.wakes = member.wakes.filter((wake) => wake.id !== id)
+      if (type === 'wake.asked') {
+        verb = 'asked to be woken'
+        const dueAt = wireInstant(text(payload.dueAt))
+        if (Number.isFinite(dueAt)) {
+          member.wakes = [...member.wakes, { id, dueAt, note: text(payload.note) }].sort((a, b) => a.dueAt - b.dueAt)
+        }
+      } else if (type === 'wake.fired') {
+        tone = 'tell'
+        verb = 'wake fired'
+      } else if (type === 'wake.cancelled') {
+        verb = 'wake cancelled'
+      } else {
+        verb = 'wake skipped'
+      }
+      effects.push({ kind: 'ripple', at: self, tone })
     } else if (type === 'agentContainer.started' && member) {
       tone = 'start'
       verb = 'started'

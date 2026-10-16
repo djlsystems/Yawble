@@ -3,6 +3,7 @@ import { localTime } from './localTime';
 import type {
   ContainerSnapshot,
   Message,
+  PendingWake,
   TeamTokenTotals,
   TeamWorkflows,
   TeamWorkflowTiming,
@@ -1201,6 +1202,9 @@ export interface WorkflowRow {
    */
   outcome: string;
   outcomeProposed: boolean;
+
+  /** The wakes members asked for in this workflow that are still pending, earliest due first; empty when none. */
+  wakes: PendingWake[];
 }
 
 /**
@@ -1551,6 +1555,9 @@ export function workflowsTile(
       // An older Host sends no such field, and absent reads as none.
       outcome: entry.outcome ? outcomeLabel(entry.outcome) : 'No outcome',
       outcomeProposed: entry.outcome?.status === 'proposed',
+
+      // Absent when none, and an older Host sends no such field.
+      wakes: entry.wakes ?? [],
     };
   });
 

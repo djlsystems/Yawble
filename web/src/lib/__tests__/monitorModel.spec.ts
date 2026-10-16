@@ -214,3 +214,63 @@ describe('the timeline and the words', () => {
     expect(initials('Manager')).toBe('M')
   })
 })
+
+describe('a member\'s pending wake', () => {
+  const asked = (id: number, dueAt: string, note: string) =>
+    row('wake.asked', 'Alpha/Developer', { wake: id, dueAt, note }, '2026-10-15T10:00:00Z', 7)
+
+  it('sets the clock on the member at the ask, earliest first, and takes it down at the fire, a cancel or a skip', () => {
+    const model = new MonitorModel()
+    model.apply(asked(2, '2026-10-15T10:30:00Z', 'look at the deploy'))
+    model.apply(asked(1, '2026-10-15T10:10:00Z', 'check the certificate'))
+
+    expect(model.members.get('Alpha/Developer')!.wakes).toEqual([
+      { id: 1, dueAt: Date.parse('2026-10-15T10:10:00Z'), note: 'check the certificate' },
+      { id: 2, dueAt: Date.parse('2026-10-15T10:30:00Z'), note: 'look at the deploy' },
+    ])
+
+    model.apply(row('wake.fired', 'Alpha/Developer', { wake: 1, dueAt: '2026-10-15T10:10:00Z', instruction: 140, note: 'check the certificate' }))
+    expect(model.members.get('Alpha/Developer')!.wakes.map((wake) => wake.id)).toEqual([2])
+
+    model.apply(row('wake.cancelled', 'Alpha/Developer', { wake: 2, by: 'ada@example.com', reason: 'cancelled by a person', note: 'look at the deploy' }))
+    expect(model.members.get('Alpha/Developer')!.wakes).toEqual([])
+
+    model.apply(asked(3, '2026-10-15T11:00:00Z', 'again'))
+    model.apply(row('wake.skipped', 'Alpha/Developer', { wake: 3, reason: 'its team is archived', note: 'again' }))
+    expect(model.members.get('Alpha/Developer')!.wakes).toEqual([])
+  })
+
+  it('names the ask, the fire and the cancel in the activity list, with the note', () => {
+    const model = new MonitorModel()
+    model.apply(asked(1, '2026-10-15T10:10:00Z', 'check the certificate'))
+    model.apply(row('wake.fired', 'Alpha/Developer', { wake: 1, dueAt: '2026-10-15T10:10:00Z', instruction: 140, note: 'check the certificate' }))
+    model.apply(asked(2, '2026-10-15T10:30:00Z', 'look at the deploy'))
+    model.apply(row('wake.cancelled', 'Alpha/Developer', { wake: 2, by: 'ada@example.com', reason: 'cancelled by a person', note: 'look at the deploy' }))
+
+    expect(model.ticker.map((entry) => entry.verb)).toEqual(['wake cancelled', 'asked to be woken', 'wake fired', 'asked to be woken'])
+    expect(model.ticker[0]!.text).toBe('cancelled by a person (ada@example.com): look at the deploy')
+    expect(model.ticker[2]!.text).toBe('woken as it asked: check the certificate')
+    expect(model.ticker[3]!.text).toContain('check the certificate')
+  })
+
+  it('draws the instruction a wake fires as the member\'s own ripple, never a comet from a person', () => {
+    const model = new MonitorModel()
+    const effects = model.apply(row('agentContainer.instruction.Alpha/Developer', 'wake:1', { instruction: 'You asked to be woken.' }, undefined, 7))
+
+    expect(effects).toEqual([{ kind: 'ripple', at: { kind: 'member', key: 'Alpha/Developer' }, tone: 'tell' }])
+    expect(model.ticker[0]!.verb).toBe('woken')
+    expect(model.members.get('Alpha/Developer')).toMatchObject({ queued: 1, state: 'waiting' })
+  })
+
+  it('reads the clock from the snapshot, and takes it down when the snapshot has none', () => {
+    const model = new MonitorModel()
+    const team = (wakes?: unknown[]) =>
+      [{ id: 'Alpha', name: 'Alpha', containers: [{ id: 'Developer', name: 'Developer', state: 'Idle', queueDepth: 0, currentCorrelation: 7, ...(wakes ? { wakes } : {}) }] }] as unknown as Team[]
+
+    model.reconcile(team([{ id: 4, member: 'Developer', workflow: 7, dueAt: '2026-10-15T10:10:00Z', askedAt: '2026-10-15T10:00:00Z', note: 'check' }]))
+    expect(model.members.get('Alpha/Developer')!.wakes).toEqual([{ id: 4, dueAt: Date.parse('2026-10-15T10:10:00Z'), note: 'check' }])
+
+    model.reconcile(team())
+    expect(model.members.get('Alpha/Developer')!.wakes).toEqual([])
+  })
+})

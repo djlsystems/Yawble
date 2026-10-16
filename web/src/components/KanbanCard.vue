@@ -4,6 +4,8 @@ import type { KanbanCard } from '../api/kanban';
 import { itemLabel } from '../lib/backlog';
 import { KanbanStatusLabel, colourFor } from '../lib/kanban';
 import { workflowNumberTitle } from '../lib/workflowNumber';
+import type { PendingWake } from '../api/types';
+import WakeLines from './WakeLines.vue';
 
 /**
  * One card on the board.
@@ -23,13 +25,22 @@ const props = defineProps<{
   waiting?: boolean;
   /** The CLI whose update holds this card's launch, or null. The board decides; the card only draws it. */
   updateWait?: string | null;
+  /** The wake whose cancel the board has in flight, or null. */
+  cancellingWake?: number | null;
 }>();
 
 /**
  * `open-outcome` is the tag clicked, with the outcome's id: the board passes it up to whatever
  * shows outcomes. `change-outcome` is the card menu's "Change outcome…", with the card's id.
+ * `cancel-wake` is a wake line's Cancel, with the wake.
  */
-const emit = defineEmits<{ open: [id: string]; 'open-outcome': [outcomeId: string]; 'change-outcome': [id: string] }>();
+const emit = defineEmits<{
+  open: [id: string];
+  'open-outcome': [outcomeId: string];
+  'change-outcome': [id: string];
+  /** A person's Cancel on one of the card's pending wakes; the board makes the call. */
+  'cancel-wake': [wake: PendingWake];
+}>();
 
 function openOutcome() {
   if (props.card.outcome) emit('open-outcome', props.card.outcome.id);
@@ -82,6 +93,16 @@ const progressCount = computed(() => props.card.progress?.length ?? 0);
       <span class="k-card-outcome-name">{{ card.outcome.name }}</span>
       <span v-if="card.outcome.status === 'proposed'" class="k-card-outcome-proposed">proposed</span>
     </span>
+
+    <!-- A WAKE IS SET IN THIS CARD'S WORKFLOW: the work waits for it, and nothing is stuck. The
+         same line the member's card draws, the card's own member's first. -->
+    <WakeLines
+      v-if="card.wakes && card.wakes.length > 0"
+      class="k-card-wakes"
+      :wakes="card.wakes"
+      :cancelling="cancellingWake ?? null"
+      @cancel="(wake: PendingWake) => emit('cancel-wake', wake)"
+    />
 
     <div class="k-card-meta">
       <!-- NULL IS ITS OWN WORD, not an empty span. A card nobody has been assigned yet is the whole
@@ -245,6 +266,11 @@ const progressCount = computed(() => props.card.progress?.length ?? 0);
   font-weight: 600;
   letter-spacing: 0.04em;
   color: var(--os-ink-muted);
+}
+
+/* THE WAKE LINES, under the outcome tag and above the member. */
+.k-card-wakes {
+  margin-top: 4px;
 }
 
 /* THE OUTCOME TAG: a small outlined pill under the title. Dashed for a proposed outcome. */

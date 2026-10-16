@@ -4,6 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useQuasar } from 'quasar';
 import type {
   ContainerSnapshot,
+  PendingWake,
   TeamRepoStatus,
   TeamTokenTotals,
   TeamWorkflowTiming,
@@ -27,13 +28,14 @@ import { budgetBar, budgetInForce, budgetLine, spendAgainstBudget } from '../lib
 import { installStatus } from '../lib/agentInstall';
 import { unpushedTeamBranchesLine } from '../lib/repoStatus';
 import { asTeamId } from '../api/types';
-import { closeWorkflow, nudgeWorkflow, resumeWorkflow, stopWorkflow } from '../api/client';
+import { cancelWake, closeWorkflow, nudgeWorkflow, resumeWorkflow, stopWorkflow } from '../api/client';
 import { useConsoleStore } from '../stores/console';
 import { vResizableColumns } from '../lib/resizableColumns';
 import TeamStatisticsTile from './TeamStatisticsTile.vue';
 import TeamStatusIcon from './TeamStatusIcon.vue';
 import type { TeamStatus } from '../lib/teamKpis';
 import TeamTokensChart from './TeamTokensChart.vue';
+import WakeLines from './WakeLines.vue';
 
 const props = defineProps<{
   containers: ContainerSnapshot[];
@@ -515,6 +517,37 @@ async function resumeRow(row: WorkflowRow) {
 }
 
 /**
+ * A WORKFLOW'S PENDING WAKES, with a person's Cancel - the same line and the same route as on the
+ * member's card. A cancelled wake is hidden at once and the list is refetched; a refusal (it fired a
+ * moment before the click) is said under that row's line.
+ */
+const cancelledWakes = ref<Set<number>>(new Set());
+const cancellingWake = ref<number | null>(null);
+const wakeErrors = ref<Record<number, string>>({});
+
+function rowWakes(row: WorkflowRow): PendingWake[] {
+  return row.wakes.filter((wake) => !cancelledWakes.value.has(wake.id));
+}
+
+async function cancelRowWake(row: WorkflowRow, wake: PendingWake) {
+  wakeErrors.value = { ...wakeErrors.value, [row.correlation]: '' };
+  cancellingWake.value = wake.id;
+
+  try {
+    await cancelWake(teamIdTyped.value, wake.id);
+    cancelledWakes.value = new Set([...cancelledWakes.value, wake.id]);
+    await board.pullWorkflows();
+  } catch (cause) {
+    wakeErrors.value = {
+      ...wakeErrors.value,
+      [row.correlation]: cause instanceof Error ? cause.message : String(cause),
+    };
+  } finally {
+    cancellingWake.value = null;
+  }
+}
+
+/**
  * SHOW THREAD is not a server call at all - it lights the same feed highlight a message's own
  * `#<correlation>` chip already offers, and closes this dialog so the person lands on the feed it
  * just highlighted rather than reading a thread through a dialog stacked on top of a dialog.
@@ -777,6 +810,24 @@ function showThread(row: WorkflowRow) {
             <div class="workflow-row-detail text-caption os-text-muted">
               with {{ row.withWhom }}
               <span v-if="row.detail"> · {{ row.detail }}</span>
+            </div>
+
+            <!-- A WAKE IS SET IN THIS WORKFLOW: when, on the reader's clock, and why, with
+                 a person's Cancel. -->
+            <WakeLines
+              v-if="rowWakes(row).length > 0"
+              class="q-mt-xs"
+              :wakes="rowWakes(row)"
+              :cancelling="cancellingWake"
+              data-test="workflow-wakes"
+              @cancel="(wake) => cancelRowWake(row, wake)"
+            />
+            <div
+              v-if="wakeErrors[row.correlation]"
+              class="text-caption text-warning q-mt-xs"
+              data-test="workflow-wake-error"
+            >
+              {{ wakeErrors[row.correlation] }}
             </div>
 
             <!-- THE FOUR THINGS A PERSON CAN DO TO THIS WORKFLOW, and WHICH of them this row may

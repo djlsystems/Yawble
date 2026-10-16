@@ -12,7 +12,7 @@ import {
   type KanbanFilters,
   type KanbanLane,
 } from '../api/kanban'
-import { Unauthorized } from '../api/client'
+import { cancelWake, Unauthorized } from '../api/client'
 import {
   linkWorkflowOutcome,
   listLiveOutcomes,
@@ -39,7 +39,7 @@ import {
 } from '../lib/kanban'
 import { useConsoleStore } from './console'
 import { useWipStore } from './wip'
-import type { TeamId } from '../api/types'
+import { asTeamId, type TeamId } from '../api/types'
 
 /** A write names a card the board no longer holds - so there is no team to address it under. */
 const UnknownCard = 'That card is not on the board any more. Refresh and try again.'
@@ -517,6 +517,13 @@ export const useKanbanStore = defineStore('kanban', {
       await this.write(async () => {
         if (outcome === null) await unlinkWorkflowOutcome(found.team, outcomeWorkflowOf(found))
         else await linkWorkflowOutcome(found.team, outcomeWorkflowOf(found), outcome)
+      })
+    },
+
+    /** A person's Cancel of a pending wake on a card, under the card's own team, then the refetch every write does. */
+    async cancelWake(team: string, id: number) {
+      await this.write(async () => {
+        await cancelWake(asTeamId(team), id)
       })
     },
 

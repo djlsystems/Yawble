@@ -97,7 +97,8 @@ public sealed class IdleWorkflowOffer(
     ICursors cursors,
     ISubscriptions subscriptions,
     Func<int> causationDepthLimit,
-    ILogger<IdleWorkflowOffer>? diagnostics = null)
+    ILogger<IdleWorkflowOffer>? diagnostics = null,
+    IWakeStore? wakes = null)
 {
     /// <summary>
     /// The marker that makes an offer RECOGNISABLE AS ONE on the thread it joins, and the whole of
@@ -294,6 +295,11 @@ public sealed class IdleWorkflowOffer(
             stored, correlation, host, pending, log, excluded: member, ct);
 
         if (busy.Count != 0) return false;
+
+        // A PENDING WAKE IS WORK COMING. A member that set `wake_me` and ended its run is waiting
+        // on purpose, and the wake will hand it its next turn; offering here would nag that wait
+        // and spend the workflow's one offer on it.
+        if (wakes is not null && (await wakes.ForWorkflowAsync(correlation, ct)).Count != 0) return false;
 
         // AND THE HALF THE BUSY LIST CANNOT SEE. See <see cref="UndeliveredAsync"/>: without it
         // the very first legitimate wait gets nagged.

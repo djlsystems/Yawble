@@ -6,6 +6,8 @@ import { KanbanStatusLabel, bodyToRender, colourFor, trailRows } from '../lib/ka
 import { workflowNumberTitle } from '../lib/workflowNumber';
 import { localTime, wireInstant } from '../lib/localTime';
 import { KanbanStatuses, type KanbanCardAttributes, type KanbanStatus } from '../api/kanban';
+import type { PendingWake } from '../api/types';
+import WakeLines from './WakeLines.vue';
 
 /**
  * A card, opened.
@@ -169,6 +171,40 @@ async function postComment() {
   comment.value = '';
 }
 
+/**
+ * THE PENDING WAKES OF THIS CARD'S WORKFLOW, with a person's Cancel - the line the card on the board
+ * carries. The store refetches the board and this card after the cancel; until it lands the wake is
+ * hidden here. A refusal (it fired a moment before the click) is said under the line.
+ */
+const cancelledWakes = ref<Set<number>>(new Set());
+const cancellingWake = ref<number | null>(null);
+const wakeError = ref('');
+const wakes = computed(() => (card.value?.wakes ?? []).filter((wake) => !cancelledWakes.value.has(wake.id)));
+
+watch(
+  () => kanban.selectedId,
+  () => {
+    wakeError.value = '';
+  },
+);
+
+async function cancel(wake: PendingWake) {
+  const subject = card.value;
+  if (!subject) return;
+
+  wakeError.value = '';
+  cancellingWake.value = wake.id;
+
+  try {
+    await kanban.cancelWake(subject.team, wake.id);
+    cancelledWakes.value = new Set([...cancelledWakes.value, wake.id]);
+  } catch (cause) {
+    wakeError.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    cancellingWake.value = null;
+  }
+}
+
 function when(value: string | null | undefined): string {
   if (!value) return '';
 
@@ -202,6 +238,20 @@ function when(value: string | null | undefined): string {
             label="awaiting manager"
             class="k-panel-awaiting"
           />
+        </div>
+
+        <!-- A WAKE IS SET IN THIS CARD'S WORKFLOW: when, on the reader's clock, and why, with a
+             person's Cancel. -->
+        <WakeLines
+          v-if="wakes.length > 0"
+          class="q-mt-sm"
+          :wakes="wakes"
+          :cancelling="cancellingWake"
+          data-test="panel-wakes"
+          @cancel="cancel"
+        />
+        <div v-if="wakeError" class="text-caption text-warning q-mt-xs" data-test="panel-wake-error">
+          {{ wakeError }}
         </div>
       </q-card-section>
 

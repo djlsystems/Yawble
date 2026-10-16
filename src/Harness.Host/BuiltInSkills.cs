@@ -109,6 +109,37 @@ public static class BuiltInSkills
         it for you; read it when a job touches something you may have met before.
         """;
 
+    /// <summary>
+    /// ONE COPY, SHARED BY `manager` AND `member`, spliced in after <see cref="WorkflowDeclarationSection"/>:
+    /// how an agent waits for something outside the platform. A run held open with a sleep is a
+    /// paid run doing nothing, and a background process started to "check later" ends with the run,
+    /// so the only true way to wait is a wake. The four rules are pinned word for word by
+    /// `McpContractTests.WakeRules`.
+    /// </summary>
+    private const string WaitingSection =
+        """
+
+
+        ## Waiting for something outside the platform
+
+        A process you start ends with your run. Never say you are watching or waiting for something
+        unless a wake is set.
+
+        To wait for something outside the platform - a deployment to settle, a name to resolve, a
+        certificate to be issued, a limit to pass - write down what you are waiting for, set
+        `wake_me` with a note, and end your run. Prefer one wake at a sensible interval over many
+        short ones.
+
+        `wake_me` with `in` (a duration such as `90s`, `10m` or `2h`) and `note` (one line: what to
+        look at when woken) wakes you once, in the workflow you are working, with that note; it
+        answers the wake's id and when it is due. `wake_me` with `cancel` and the id cancels your
+        own pending wake. A wake is yours alone: it never wakes another member. Never hold a run open
+        with a sleep to wait instead. While a wake is pending, do not declare the workflow complete
+        or hand back the work you are waiting on: declaring the workflow cancels its wakes.
+
+        A wake is not a schedule: for work that repeats, ask the person for a trigger.
+        """;
+
     private static readonly IReadOnlyList<BuiltInSkill> Library =
     [
         new(
@@ -389,7 +420,7 @@ public static class BuiltInSkills
               when that command finishes. Every team on this instance shares it: when `lease`
               answers queued, call it again to wait, and your silence clock is paused meanwhile.
             """
-            + WorkflowDeclarationSection +
+            + WorkflowDeclarationSection + WaitingSection +
             """
 
 
@@ -519,7 +550,7 @@ public static class BuiltInSkills
             finishing: it tells your Manager you abandoned work you delivered. Handing back does not
             declare the workflow complete; only its owner, or the Manager, declares.
             """
-            + WorkflowDeclarationSection),
+            + WorkflowDeclarationSection + WaitingSection),
         new(
             "worktrees",
             "Use when creating or working in a team repository worktree.",

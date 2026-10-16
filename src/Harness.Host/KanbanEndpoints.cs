@@ -256,6 +256,7 @@ public static class KanbanEndpoints
         TeamRegistry teams,
         TenantSettings settings,
         IOutcomeStore outcomes,
+        IWakeStore wakes,
         [Description("Filter by member; several, comma-separated, keep a card of any of them.")] string? member = null,
         [Description("Filter by status; several, comma-separated, keep a card in any of them.")] string? status = null,
         [Description(OutcomeFilterDescription)] string? outcome = null,
@@ -264,8 +265,12 @@ public static class KanbanEndpoints
         try
         {
             var filter = new KanbanFilter(Member: member, Status: status, Outcome: outcome);
+            var board = await BoardAsync(log, teams, outcomes, team, filter, ct);
 
-            return Results.Ok(WithLaneLimits(await BoardAsync(log, teams, outcomes, team, filter, ct), settings));
+            // EACH CARD'S PENDING WAKES, from the one read of the wakes.
+            board = board with { Cards = await CardWakes.AttachAsync(board.Cards, wakes, ct) };
+
+            return Results.Ok(WithLaneLimits(board, settings));
         }
         catch (Exception ex)
         {
@@ -314,6 +319,7 @@ public static class KanbanEndpoints
         TeamAccess access,
         TenantSettings settings,
         IOutcomeStore outcomes,
+        IWakeStore wakes,
         [Description("Narrow to a team, or several comma-separated. Absent means every team the caller reaches.")] string? team = null,
         [Description("Filter by member; several, comma-separated, keep a card of any of them.")] string? member = null,
         [Description("Filter by status; several, comma-separated, keep a card in any of them.")] string? status = null,
@@ -368,6 +374,7 @@ public static class KanbanEndpoints
             // console can show what the board is actually narrowed to. It is not the resolved
             // scope: naming every team a caller reaches back at them is a different fact.
             cards = await CardOutcomes.MatchingAsync(cards, filter.Outcome, outcomes, ct);
+            cards = await CardWakes.AttachAsync(cards, wakes, ct);
 
             return Results.Ok(WithLaneLimits(
                 new KanbanBoard(KanbanLanes.All, cards, filter with { Team = team }), settings));
@@ -384,6 +391,7 @@ public static class KanbanEndpoints
         IMessageLog log,
         TeamRegistry teams,
         IOutcomeStore outcomes,
+        IWakeStore wakes,
         CancellationToken ct = default)
     {
         try
@@ -395,7 +403,7 @@ public static class KanbanEndpoints
                 return Results.NotFound();
             }
 
-            return Results.Ok(card);
+            return Results.Ok((await CardWakes.AttachAsync([card], wakes, ct))[0]);
         }
         catch (Exception ex)
         {

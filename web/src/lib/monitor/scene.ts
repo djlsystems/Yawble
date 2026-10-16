@@ -14,6 +14,7 @@ import { compact } from './model'
 import type { Resource, ResourceAction } from './hints'
 import { MonitorSymbolsFamily, glyphOf, type Codepoints } from './font'
 import { LayoutDefaults, type LayoutSettings } from './layout'
+import { wakeLine } from '../wakes'
 import {
   DefaultFileSettings,
   WorkspaceGraph,
@@ -1162,6 +1163,7 @@ export class MonitorScene {
         member.runs > 0 ? `${member.runs} run${member.runs === 1 ? '' : 's'} · ${compact(member.tokens)} billable tokens` : '',
         member.workflow !== null ? `workflow ${member.workflow}` : '',
         member.status !== '' ? `“${member.status.slice(0, 140)}”` : '',
+        ...member.wakes.map((wake) => wakeLine({ dueAt: new Date(wake.dueAt).toISOString(), note: wake.note.slice(0, 140) })),
       ].filter((line) => line !== '')
       return {
         kind: 'member',
@@ -1423,6 +1425,25 @@ export class MonitorScene {
       ctx.stroke()
       ctx.restore()
     }
+  }
+
+  /** A member's pending wake: a small clock face, ground-filled, its hands at ten past ten. */
+  private drawWakeClock(ctx: CanvasRenderingContext2D, x: number, y: number) {
+    const r = 5
+    ctx.fillStyle = Screen.ground
+    ctx.strokeStyle = Tones.tell
+    ctx.lineWidth = 1.4
+    ctx.beginPath()
+    ctx.arc(x, y, r, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+    ctx.lineWidth = 1.2
+    ctx.beginPath()
+    ctx.moveTo(x, y)
+    ctx.lineTo(x, y - r * 0.7)
+    ctx.moveTo(x, y)
+    ctx.lineTo(x + r * 0.55, y + r * 0.1)
+    ctx.stroke()
   }
 
   private drawRipples(ctx: CanvasRenderingContext2D, now: number) {
@@ -1749,6 +1770,9 @@ export class MonitorScene {
       ctx.textBaseline = 'middle'
       ctx.fillText(`+${member.queued}`, x + ring + 14, y - ring)
     }
+
+    // A pending wake is a small clock at its upper left: it will be woken once, later.
+    if (member.wakes.length > 0) this.drawWakeClock(ctx, x - (ring + 8) * Math.SQRT1_2, y - (ring + 8) * Math.SQRT1_2)
 
     // Initials, then the name under it.
     ctx.fillStyle = Screen.ink

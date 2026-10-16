@@ -176,6 +176,16 @@ public static class MessageText
 
             MessageTypes.Started => $"{who} started working.",
             MessageTypes.ScheduleSkipped => $"{who} skipped a scheduled wake. {Field(payload, PayloadFields.Reason) ?? ""}".Trim(),
+
+            // A WAKE'S LIFE. Out of the ledger, so these are for the feed and a person reading the
+            // thread; the member reads its note again in the instruction the wake fires.
+            MessageTypes.WakeAsked =>
+                $"{who} asked to be woken at {Field(payload, PayloadFields.DueAt) ?? "(no time)"}: {Field(payload, PayloadFields.Note) ?? ""}".TrimEnd(),
+            MessageTypes.WakeCancelled =>
+                $"{who}'s wake was cancelled ({Field(payload, PayloadFields.Reason) ?? "no reason given"}): {Field(payload, PayloadFields.Note) ?? ""}".TrimEnd(),
+            MessageTypes.WakeFired => $"{who} was woken: {Field(payload, PayloadFields.Note) ?? ""}".TrimEnd(),
+            MessageTypes.WakeSkipped =>
+                $"{who}'s wake did not fire. {Field(payload, PayloadFields.Reason) ?? ""}".Trim(),
             MessageTypes.WorkflowCompleted =>
                 $"{who} declared the workflow completed. It delivered:\n{Field(payload, PayloadFields.Delivered) ?? "(no detail)"}",
 

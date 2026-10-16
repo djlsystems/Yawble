@@ -1,7 +1,7 @@
 ﻿<script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import type { ContainerSnapshot, Message } from '../api/types';
-import { listContainerTriggers, stopRun } from '../api/client';
+import type { ContainerSnapshot, Message, PendingWake } from '../api/types';
+import { cancelWake, listContainerTriggers, stopRun } from '../api/client';
 import { containerMark } from '../lib/teamKpis';
 import { useWipStore } from '../stores/wip';
 import { useCapacityStore } from '../stores/capacity';
@@ -10,6 +10,7 @@ import ActivityFeed from './ActivityFeed.vue';
 import LiveViewDialog from './LiveViewDialog.vue';
 import MemberSettingsDialog from './MemberSettingsDialog.vue';
 import TriggersDialog from './TriggersDialog.vue';
+import WakeLines from './WakeLines.vue';
 import { workflowNumberTitle } from '../lib/workflowNumber';
 
 const props = defineProps<{
@@ -173,6 +174,30 @@ async function stop() {
     stopError.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
     stopping.value = false;
+  }
+}
+
+/**
+ * THE WAKES THIS MEMBER ASKED FOR, with a person's Cancel. The snapshot drops a wake once it fires or
+ * is cancelled, so a cancelled one is hidden here only until the next push says the same; a refusal
+ * (it fired a moment before the click) is said under the line, as Stop's is.
+ */
+const cancelled = ref<Set<number>>(new Set());
+const cancellingWake = ref<number | null>(null);
+const wakeError = ref('');
+const wakes = computed(() => (props.snapshot.wakes ?? []).filter((wake) => !cancelled.value.has(wake.id)));
+
+async function cancel(wake: PendingWake) {
+  wakeError.value = '';
+  cancellingWake.value = wake.id;
+
+  try {
+    await cancelWake(props.snapshot.team, wake.id);
+    cancelled.value = new Set([...cancelled.value, wake.id]);
+  } catch (cause) {
+    wakeError.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    cancellingWake.value = null;
   }
 }
 </script>
@@ -439,6 +464,19 @@ async function stop() {
         <q-badge color="primary" label="waiting on a decision" />
         <div class="text-caption os-text-muted q-mt-xs">{{ mark.reason }}</div>
       </div>
+
+      <!-- A WAKE IS SET: this member is not running, and it will be woken once, at that time, in the
+           workflow it asked in. Said beside the state rather than as one - an idle member with a
+           wake is still idle. -->
+      <WakeLines
+        v-if="wakes.length > 0"
+        class="q-mt-xs"
+        :wakes="wakes"
+        :cancelling="cancellingWake"
+        data-test="member-wakes"
+        @cancel="cancel"
+      />
+      <div v-if="wakeError" class="os-body text-warning q-mt-xs" data-test="wake-error">{{ wakeError }}</div>
 
       <!-- The thread a human follows. M3 makes this the point of the screen, so it
            is surfaced from the start rather than added when it matters. -->
