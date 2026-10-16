@@ -9,9 +9,14 @@ namespace Harness.Host;
 /// <para>
 /// <b>ONLY ITS OWN FILES ARE EVER DELETED.</b> The directory is shared with the pre-migration
 /// backups (<c>messages-*-before-*.db</c>) and <c>--backup</c>'s manual ones
-/// (<c>messages-*-manual.db</c>), and both are kept forever on purpose - see
-/// <c>SchemaMigrator.BackUpBeforeAsync</c>. Retention matches the <c>-daily.db</c> suffix and
-/// nothing else.
+/// (<c>messages-*-manual.db</c>). Retention matches the <c>-daily.db</c> suffix and nothing else;
+/// manual copies are kept forever on purpose.
+/// </para>
+///
+/// <para>
+/// <b>EACH RUN ALSO PRUNES THE BEFORE-STEP COPIES</b>, by their own rule rather than this one
+/// (<see cref="BeforeStepBackups"/>: the last <see cref="KeepBeforeStepDays"/> days plus the newest
+/// <see cref="KeepBeforeStep"/>), because a migration alone runs only when a release adds a step.
 /// </para>
 ///
 /// <para>
@@ -19,7 +24,12 @@ namespace Harness.Host;
 /// would otherwise take a copy on every start and retention would keep seven hours, not seven days.
 /// </para>
 /// </summary>
-public sealed class DailyBackup(string databasePath, string directory, int keep = DailyBackup.DefaultKeep)
+public sealed class DailyBackup(
+    string databasePath,
+    string directory,
+    int keep = DailyBackup.DefaultKeep,
+    int keepBeforeStep = BeforeStepBackups.DefaultKeep,
+    int keepBeforeStepDays = BeforeStepBackups.DefaultKeepDays)
 {
     public const int DefaultKeep = 7;
 
@@ -32,6 +42,13 @@ public sealed class DailyBackup(string databasePath, string directory, int keep 
     public string Directory { get; } = directory;
 
     public int Keep { get; } = Math.Max(1, keep);
+
+    public int KeepBeforeStep { get; } = Math.Max(1, keepBeforeStep);
+
+    public int KeepBeforeStepDays { get; } = Math.Max(0, keepBeforeStepDays);
+
+    /// <summary>What the last <see cref="TakeAsync"/> did to the before-step copies, for the runner to say.</summary>
+    public BeforeStepPrune? LastBeforeStepPrune { get; private set; }
 
     /// <summary>This backup's daily copies, newest first. The stamp sorts as the time does.</summary>
     public IReadOnlyList<string> Existing() =>
@@ -61,6 +78,8 @@ public sealed class DailyBackup(string databasePath, string directory, int keep 
         }
 
         Prune();
+
+        LastBeforeStepPrune = BeforeStepBackups.Prune(Directory, now, KeepBeforeStep, KeepBeforeStepDays);
 
         return destination;
     }
@@ -127,6 +146,14 @@ public sealed class DailyBackupRunner(
                 {
                     var written = await backup.TakeAsync(DateTimeOffset.UtcNow, stoppingToken);
                     log.LogInformation("Wrote the daily database backup {Path}.", written);
+
+                    if (backup.LastBeforeStepPrune is { } pruned)
+                    {
+                        log.Log(
+                            pruned.Failed.Count == 0 ? LogLevel.Information : LogLevel.Warning,
+                            "{Prune}",
+                            pruned.Describe());
+                    }
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
