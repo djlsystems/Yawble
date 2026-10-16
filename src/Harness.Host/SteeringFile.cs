@@ -41,6 +41,23 @@ public static class SteeringFile
             : null;
     }
 
+    /// <summary>
+    /// The note for an open workflow names its team and its state in the log's words, and its newest
+    /// row; <c>HARNESS_CAUSATION</c> stays the bare number.
+    /// </summary>
+    public static string NoteFor(SteeredWorkflow? open)
+    {
+        if (open is null) return Note((string?)null);
+
+        var workflow = open.Workflow.ToString(CultureInfo.InvariantCulture);
+        var latest = open.LatestRow.ToString(CultureInfo.InvariantCulture);
+        return $"""
+                The person is looking at workflow {workflow} (team {open.TeamLabel}, {open.State}), latest row {latest}.
+                When you tell a member about that work, pass causation "{workflow}"
+                so the instruction joins the workflow instead of starting a new one.
+                """;
+    }
+
     public static string Note(string? causation) =>
         causation is null
             ? """

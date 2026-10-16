@@ -1525,6 +1525,7 @@ builder.Services.AddSingleton(sp => new WorkerPtyEngine(
     WorkersOf(sp), sp.GetRequiredService<WorkerStreams>(),
     log: sp.GetRequiredService<ILogger<WorkerPtyEngine>>()));
 builder.Services.AddSingleton<IPtyEngine>(sp => sp.GetRequiredService<WorkerPtyEngine>());
+builder.Services.AddSingleton<SteeringWorkflows>();
 builder.Services.AddSingleton(sp => new ConciergeLaunchFactory(
     sp.GetRequiredService<TeamPaths>(),
     memberBaseAddress,
@@ -1544,6 +1545,10 @@ builder.Services.AddSingleton(sp =>
     var terminals = sp.GetRequiredService<WorkerPtyEngine>();
     var teams = sp.GetRequiredService<TeamRegistry>();
     var leaseActions = sp.GetRequiredService<LeaseActions>();
+
+    // The steering, judged at every launch: a workflow that is over, or whose team is gone or
+    // archived, is dropped rather than handed on.
+    var steering = sp.GetRequiredService<SteeringWorkflows>();
 
     // The LOGIN, for the workspace's directory name. Resolved here rather than inside the
     // factory for teamLabel's stated reason - the factory has no store of its own - and captured
@@ -1596,10 +1601,11 @@ builder.Services.AddSingleton(sp =>
                 account?.Email ?? string.Empty,
                 agent,
                 teams.EnvFor(stored ?? ""),
-                SteeringFile.Read(dataRoot, key.User),
-                browser?.PublicUrl,
-                browser?.TimeZone,
-                ct));
+                steeringCausation: null,
+                publicUrl: browser?.PublicUrl,
+                timeZone: browser?.TimeZone,
+                ct: ct,
+                steered: await steering.ReadAsync(key.User, ct)));
             if (staged.Env is { } environment) floors.AddOrUpdate(environment, OutputFloor.Of(catalog.Definition(agent)));
             return staged;
         },
