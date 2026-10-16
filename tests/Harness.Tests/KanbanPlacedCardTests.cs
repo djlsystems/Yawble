@@ -119,6 +119,23 @@ public sealed class KanbanPlacedCardTests
     }
 
     [Fact]
+    public void A_placed_card_back_from_blocked_still_keeps_its_lane_on_its_next_completion()
+    {
+        List<Message> rows =
+        [
+            .. PlacedInProgress(),
+            Row(4, MessageTypes.Blocked, "Alpha/Developer", """{"reason":"no key"}"""),
+            Told(5),
+            Started(6),
+            Completed(7, "the step, with the key"),
+        ];
+
+        var card = Card(rows);
+        Assert.Equal(KanbanLanes.Running, card.LaneId);
+        Assert.Equal("completed", card.Status);
+    }
+
+    [Fact]
     public void A_placed_card_still_goes_to_failed_on_a_failure_and_back_on_its_members_next_start()
     {
         List<Message> rows = [.. PlacedInProgress(), Row(4, MessageTypes.Failed, "Alpha/Developer", """{"output":"crashed"}""")];
