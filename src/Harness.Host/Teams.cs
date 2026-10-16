@@ -2398,7 +2398,14 @@ public sealed class TeamRegistry(
             ReposFor(stored).Count, envCarried, hired, failures);
     }
 
-    public async Task SetReposAsync(string team, IReadOnlyList<string>? repos, CancellationToken ct = default)
+    /// <summary>
+    /// Replaces a team's repository list, clones what is new, and re-composes the Manager's prompt.
+    /// <paramref name="quietWhenCloned"/> sends the Manager no ready notice when every clone is made,
+    /// as at creation: an agent that asked for the repository is told by its own answer, and a notice
+    /// would wake the Manager into a run with nothing to do. A failed clone is still sent.
+    /// </summary>
+    public async Task SetReposAsync(
+        string team, IReadOnlyList<string>? repos, CancellationToken ct = default, bool quietWhenCloned = false)
     {
         var stored = ExistingName(team) ?? throw new InvalidOperationException($"No team '{team}'.");
         var validated = RepoUrls.Validate(repos, LocalRepoExists);
@@ -2438,7 +2445,7 @@ public sealed class TeamRegistry(
         // The Manager's prompt names the clones, so it follows the list.
         await RepromptManagerAsync(stored, ct);
 
-        await WakeManagerForReposAsync(stored, validated, ct);
+        await WakeManagerForReposAsync(stored, validated, ct, atCreation: quietWhenCloned);
     }
 
     /// <summary>

@@ -1302,6 +1302,7 @@ builder.Services.AddSingleton(sp => new TeamRepoSetup(
     () => sp.GetRequiredService<TeamRegistry>(),
     sp.GetRequiredService<IRemoteRepoCheck>(),
     sp.GetRequiredService<IGitHubContributor>()));
+builder.Services.AddSingleton<LocalRepoOnNeed>();
 
 // The instance's git identity (GIT_AUTHOR_NAME / GIT_AUTHOR_EMAIL, set with the operator CLI's `secret set`)
 // and the one place a clone is brought in line with its contributor settings.
@@ -3305,9 +3306,10 @@ app.MapPost("/api/teams", async (
         + "\"repo-check-failed\", repos: [{ url, failure, reason, choices }] }` and nothing is created; send "
         + "it again with `repoChoices` naming a choice per URL: `use-local`, and for a person only "
         + "`create-on-github` and `attach-anyway` (network failure only). An agent sending a person's "
-        + "choice is refused with 403. A team left with no repository gets a local one named after it, "
-        + "`local:<team id>` (an unused one of that name is reused; `-2`, `-3` when a team uses it), "
-        + "unless `localRepository` is false; when it cannot be made, no team is created.\n\n"
+        + "choice is refused with 403. A team left with no repository gets none: its local repository is "
+        + "made when its work first needs it. With `localRepository: true` it gets one now, named after "
+        + "it, `local:<team id>` (an unused one of that name is reused; `-2`, `-3` when a team uses it); "
+        + "when it cannot be made, no team is created.\n\n"
         + "so a refused value leaves nothing behind.");
 
 // A NEW TEAM CARRYING AN EXISTING ONE'S CONFIGURATION.
@@ -4765,11 +4767,45 @@ app.MapPut("/api/teams/{team}/repos", async (
         + "instead of the bare array; `use-local` puts the team's local repository in place of the URL.");
 
 // "Create a local repository" in Team settings: the team's own, by the same naming as a new team's.
+// And the `repo` tool's `create-local`: an agent of the team (TeamGate binds it to its own) makes the
+// team's local repository when its work first needs one, only while the team has none.
 app.MapPost("/api/teams/{team}/local-repo", async (
     [Description(Describe.Team)] string team,
-    TeamRegistry teams, TeamRepoSetup repoSetup, TenantLogging audit, HttpContext context, CancellationToken ct) =>
+    TeamRegistry teams, TeamRepoSetup repoSetup, LocalRepoOnNeed onNeed, TenantLogging audit, HttpContext context,
+    CancellationToken ct) =>
 {
     if (teams.ExistingName(team) is not { } stored) return Results.NotFound(new { error = $"No team '{team}'." });
+
+    // NOT A PERSON: a team's Manager, a member or the Concierge, and only for a team with no repository.
+    // Every other machine principal is refused as the person's action this route otherwise is.
+    if (PrincipalClaims.From(context.User) is { Kind: not PrincipalKind.User } principal)
+    {
+        if (LocalRepoOnNeed.AgentOf(principal) is not { } agent)
+        {
+            return Results.Content(PermitGate.HumansOnlyBody, "application/json", statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        try
+        {
+            var (made, refusal) = await onNeed.CreateAsync(
+                stored,
+                context.User.FindFirstValue(ClaimTypes.NameIdentifier),
+                context.User.FindFirstValue(ClaimTypes.Email),
+                agent);
+            if (made is null) return Results.Conflict(new { error = refusal });
+
+            return Results.Created($"/api/local-repos/{made.Repository.Name}", new
+            {
+                team = teams.All().Single(t => string.Equals(t.Id, stored, StringComparison.OrdinalIgnoreCase)),
+                localRepository = new { name = made.Repository.Name, reference = made.Repository.Reference, created = made.Repository.Created },
+                clone = new { path = made.ClonePath, cloned = made.Cloned, defaultBranch = made.DefaultBranch, teamBranch = made.TeamBranch },
+            });
+        }
+        catch (ArgumentException exception)
+        {
+            return Results.Json(new { error = exception.Message }, statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
 
     var current = teams.ReposFor(stored);
     if (current.FirstOrDefault(LocalRepos.IsLocal) is { } existing)
@@ -4812,7 +4848,9 @@ app.MapPost("/api/teams/{team}/local-repo", async (
     });
 })
     .WithTags("Teams")
-    .HumansOnly()
+    // NOT HumansOnly: a team's own agent may call it for a team with no repository, and the handler
+    // refuses every other machine principal with the humans-only sentence. TeamGate bounds the team.
+    .NoPermitRequired()
     .WithSummary("Create the team's local repository")
     .WithDescription(
         "No body. Creates the team's local repository and adds it to the team's list, which clones it: "
@@ -4820,7 +4858,12 @@ app.MapPost("/api/teams/{team}/local-repo", async (
         + "reused, and `-2`, `-3` are tried when a team uses it. Answers 201 `{ team, localRepository: "
         + "{ name, reference, created } }`. 409 when the team already has a local repository, 404 for an "
         + "unknown team, 500 naming the reason when the repository cannot be made (nothing is attached). "
-        + "Appends `local-repo.created` to the tenant log.\n\n**A person's action.**");
+        + "Appends `local-repo.created` to the tenant log.\n\n**A person's action**, and the `repo` tool's "
+        + "`create-local` for the team's own Manager, members and the Concierge: only while the team has "
+        + "no repository at all, refused otherwise with 409 `{ error }` naming the one it has, and nothing "
+        + "changes. An agent's 201 also carries `clone: { path, cloned, defaultBranch, teamBranch }`, and "
+        + "its row names the `agent`. A second call while the first is making it waits and answers the "
+        + "same. Any other machine principal is refused with 403.");
 
 // A person's choice of one repository's default branch. `branch` null or blank clears it,
 // and the host goes back to what origin's HEAD named on the last clone or successful Fetch (or not
@@ -9868,8 +9911,9 @@ internal sealed record CreateTeam(
     long? BudgetTokens = null,
 
     [property: Description(
-        "Whether a team left with no repository gets a local repository named after it, attached as "
-        + "`local:<team id>`. Omitted means true. Ignored when `repos` names any repository.")]
+        "True to give a team left with no repository a local repository named after it now, attached "
+        + "as `local:<team id>`. Omitted or false means none: the team's local repository is made when "
+        + "its work first needs it. Ignored when `repos` names any repository.")]
     bool? LocalRepository = null,
 
     [property: Description(

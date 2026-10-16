@@ -88,7 +88,10 @@ public sealed class SolutionInstallTests(HostFixture host) : IClassFixture<HostF
         Assert.Equal(["Manager", "Scout", "Writer"], summary.Containers.Select(c => c.Id).Order(StringComparer.Ordinal));
         Assert.Equal("Coordinator", summary.Containers.Single(c => c.Id == "Manager").Name);
         Assert.Equal("plugin:job-board", summary.Containers.Single(c => c.Id == "Scout").Agent);
-        Assert.NotEmpty(teams.ReposFor(team));
+        // Step 2 makes no repository: the team's local one is made when its work first needs one.
+        Assert.Empty(teams.ReposFor(team));
+        Assert.False(Get<LocalRepos>().Exists(team));
+        Assert.Null(await Get<ITenantLog>().FindLatestAsync(TenantActions.LocalRepoCreated, team, Ct));
 
         var writer = Get<ContainerHost>().Find(new ContainerId(team, "Writer"))!;
         Assert.Contains($"{tools}/make-cover-letter.py", writer.SystemPrompt);
@@ -157,6 +160,18 @@ public sealed class SolutionInstallTests(HostFixture host) : IClassFixture<HostF
     }
 
     [Fact]
+    public async Task Asked_for_with_localRepository_true_the_team_step_makes_and_attaches_its_local_repository()
+    {
+        var team = Done(await Get<SolutionInstaller>().InstallAsync(
+            new SolutionInstallRequest(Package(), Unique("Asked Local"), LocalRepository: true), Person, Ct)).Team;
+
+        var made = Assert.Single(Get<TeamRegistry>().ReposFor(team));
+        Assert.StartsWith("local:", made, StringComparison.Ordinal);
+        Assert.True(Get<LocalRepos>().Exists(made["local:".Length..]));
+        Assert.NotNull(await Get<ITenantLog>().FindLatestAsync(TenantActions.LocalRepoCreated, made["local:".Length..], Ct));
+    }
+
+    [Fact]
     public async Task Its_team_skill_is_offered_to_its_manager_and_refused_to_another_teams_manager()
     {
         var team = Done(await Get<SolutionInstaller>().InstallAsync(
@@ -189,8 +204,9 @@ public sealed class SolutionInstallTests(HostFixture host) : IClassFixture<HostF
         var pluginsRoot = Get<PluginCatalog>().Root;
         var before = await Get<IMessageLog>().HighestSeqAsync(Ct);
 
+        // A local repository asked for, so the undo of one is covered too.
         var outcome = await Get<SolutionInstaller>().InstallAsync(
-            new SolutionInstallRequest(folder, name), Person, Ct,
+            new SolutionInstallRequest(folder, name, LocalRepository: true), Person, Ct,
             afterStep: step => step == failing ? throw new InvalidOperationException($"injected at {step}") : Task.CompletedTask);
 
         var failed = Assert.IsType<SolutionStepFailed>(outcome.Body);

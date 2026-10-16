@@ -99,8 +99,8 @@ public static class SolutionEndpoints
             .WithDescription(
                 "Body `{ folder, teamName?, agent?, localRepository?, settings?: { <member>: { <setting>: "
                 + "value } }, connections?: { <member>: { <slot>: <connection id> } } }`. In order: installs "
-                + "the package's plugins, creates the team (with a new local repository unless "
-                + "`localRepository: false`), hires the members, registers the team skills, copies `tools/` "
+                + "the package's plugins, creates the team (with no repository; a new local "
+                + "repository only with `localRepository: true`), hires the members, registers the team skills, copies `tools/` "
                 + "to the team's `solution` folder, publishes the sites, creates the triggers and records "
                 + "the package and version (`solution.installed`). 200 `{ ok: true, team, teamName, id, "
                 + "version, missing, steps }`; `missing` names each required document or connection the "
@@ -227,7 +227,7 @@ public sealed record SolutionInstallBody(
     string? TeamName = null,
     [property: Description("The Agent preset the package's agent members run when they name none; the instance's default when omitted.")]
     string? Agent = null,
-    [property: Description("False to make no local repository for the team. Defaults to true.")]
+    [property: Description("True to make a local repository for the team now. Omitted or false makes none.")]
     bool? LocalRepository = null,
     [property: Description("Package member name to its person-only settings, as the package's inputs ask.")]
     Dictionary<string, Dictionary<string, JsonElement>>? Settings = null,

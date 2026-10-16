@@ -226,6 +226,58 @@ public sealed class McpContractTests
         return end < 0 ? flat[start..] : flat[start..end];
     }
 
+    /// <summary>A repository made on first need, in the words every prompt and skill that says it shares.</summary>
+    public static readonly string[] CreateLocalRules =
+    [
+        "when the work needs a repository and the team has none",
+        "`repo` with action `create-local` once",
+        "a git repository or a code folder anywhere else",
+    ];
+
+    /// <summary>
+    /// The Manager and Member prompts and the manager, worktrees, concierge and new-team skills say:
+    /// when the work needs a repository and the team has none, call `repo` `create-local` once and
+    /// work in the clone it names, never a git repository or a code folder anywhere else - in words
+    /// for any project. The prompts' section names no language, framework, tool chain or host.
+    /// </summary>
+    [Fact]
+    public void The_prompts_and_skills_make_a_repository_on_first_need_through_create_local_in_project_neutral_words()
+    {
+        var texts = new Dictionary<string, string>
+        {
+            ["Manager prompt"] = BuiltInPrompts.ManagerPromptText,
+            ["Member prompt"] = BuiltInPrompts.MemberPromptText,
+            ["manager"] = BuiltInSkills.Find("manager")!.Body,
+            ["worktrees"] = BuiltInSkills.Find("worktrees")!.Body,
+            ["concierge"] = BuiltInSkills.Find("concierge")!.Body,
+            ["new-team"] = BuiltInSkills.Find("new-team")!.Body,
+        };
+
+        foreach (var (name, text) in texts)
+        {
+            foreach (var rule in CreateLocalRules)
+            {
+                Assert.True(Flat(text).Contains(rule, StringComparison.OrdinalIgnoreCase), $"{name} does not say: {rule}");
+            }
+        }
+
+        Assert.Contains("then work in the clone it names", Flat(BuiltInPrompts.ManagerPromptText), StringComparison.Ordinal);
+        Assert.Contains("then work in the clone it names", Flat(BuiltInPrompts.MemberPromptText), StringComparison.Ordinal);
+
+        foreach (var prompt in new[] { BuiltInPrompts.ManagerPromptText, BuiltInPrompts.MemberPromptText })
+        {
+            var section = Section(Flat(prompt), "## A repository when the work needs one");
+            foreach (var word in new[]
+                     {
+                         "dotnet", "npm", "pytest", "cargo", "docker", "C#", "Python", "TypeScript", "GitHub",
+                         "git init", "mkdir",
+                     })
+            {
+                Assert.DoesNotContain(word, section, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+    }
+
     [Fact]
     public void The_package_done_when_line_is_quoted_only_in_packaging_solutions()
     {

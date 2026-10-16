@@ -84,7 +84,7 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
         Clone.Arm();
 
         await AbandonMidCloneAsync("/api/teams", token =>
-            person.PostAsJsonAsync("/api/teams", new { name = "Abandoned Create", agent = Agent(), memberAgents = new[] { Agent() } }, token));
+            person.PostAsJsonAsync("/api/teams", new { name = "Abandoned Create", agent = Agent(), memberAgents = new[] { Agent() }, localRepository = true }, token));
 
         var team = Teams.All().Single(t => t.Name == "Abandoned Create").Id;
         await EventuallyAsync(async () => HasCommit(ClonePath(team, team))
@@ -107,7 +107,7 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
 
         var route = $"/api/backlog/{item}/dispatch-to-new";
         await AbandonMidCloneAsync(route, token =>
-            person.PostAsJsonAsync(route, new { name = "AbandonedDispatch", agent = Agent(), memberAgents = new[] { Agent() } }, token));
+            person.PostAsJsonAsync(route, new { name = "AbandonedDispatch", agent = Agent(), memberAgents = new[] { Agent() }, localRepository = true }, token));
 
         const string team = "AbandonedDispatch";
         Assert.Contains(Teams.All(), t => t.Id == team);
@@ -135,7 +135,7 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
         Clone.Arm();
 
         await AbandonMidCloneAsync("/api/teams", token =>
-            tools.TeamCreate("Abandoned Tool", agent: Agent(), cancellationToken: token));
+            tools.TeamCreate("Abandoned Tool", agent: Agent(), localRepository: true, cancellationToken: token));
 
         var team = Teams.All().Single(t => t.Name == "Abandoned Tool").Id;
         await EventuallyAsync(async () => HasCommit(ClonePath(team, team))
@@ -154,7 +154,7 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
         TenantLog.Arm();
 
         await AbandonMidCloneAsync("/api/teams", token =>
-            person.PostAsJsonAsync("/api/teams", new { name = "Abandoned Failure", agent = Agent(), memberAgents = new[] { Agent() } }, token));
+            person.PostAsJsonAsync("/api/teams", new { name = "Abandoned Failure", agent = Agent(), memberAgents = new[] { Agent() }, localRepository = true }, token));
 
         var team = Teams.All().Single(t => t.Name == "Abandoned Failure").Id;
         var clonePath = ClonePath(team, team);
@@ -419,7 +419,7 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
 
     private async Task<string> CreatedTeamAsync(HttpClient person, string name)
     {
-        var created = await person.PostAsJsonAsync("/api/teams", new { name, agent = Agent(), memberAgents = new[] { Agent() } }, Ct);
+        var created = await person.PostAsJsonAsync("/api/teams", new { name, agent = Agent(), memberAgents = new[] { Agent() }, localRepository = true }, Ct);
         Assert.Equal(HttpStatusCode.OK, created.StatusCode);
         var team = (await JsonAsync(created)).GetProperty("id").GetString()!;
         Assert.True(HasCommit(ClonePath(team, team)), "the platform did not clone");
