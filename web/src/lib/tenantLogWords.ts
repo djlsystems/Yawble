@@ -757,6 +757,16 @@ const words: Record<string, Words> = {
       ]),
   },
 
+  'log.pruned': {
+    did: 'pruned the message log',
+    detail: (d) =>
+      sentence([
+        `removed ${count(num(d, 'purged') ?? 0, 'row')} of finished workflows older than ${num(d, 'days') !== null ? count(num(d, 'days')!, 'day') : 'the retention'}${text(d, 'cutoff') ? ` (before ${text(d, 'cutoff')})` : ''}`,
+        num(d, 'retained') && `kept ${count(num(d, 'retained')!, 'row')} that later rows cite or queued runs need`,
+        num(d, 'fileChanges') && `removed ${count(num(d, 'fileChanges')!, 'recorded file change')}`,
+      ]),
+  },
+
   'schedule.created': {
     did: 'created trigger',
     detail: (d) => sentence([`runs ${text(d, 'member') ?? 'a member'}${onTeam(d)}`, bySolution(d)]),
