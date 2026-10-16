@@ -27,6 +27,6 @@ Start with the [README](../README.md) to install and start Yawble. These pages c
 
 | Doc | What it covers |
 |---|---|
-| [architecture.md](architecture.md) | The components, how work flows through teams, control and workers, where data lives, and the security model. |
+| [architecture.md](architecture.md) | The components, how work flows through teams, the board (Kanban, Monitor, outcomes, archived teams), control and workers, where data lives, and the security model. |
 | [../AGENTS.md](../AGENTS.md) | The rules the code depends on, each with the test that pins it. For contributors. |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | How to build, test and open a pull request. |

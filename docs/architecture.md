@@ -16,6 +16,7 @@ Copilot CLI, Grok). A message log decides who wakes, when, and with what context
 | Backlog, Kanban, Skills | `src/Harness.Backlog`, `src/Harness.Kanban`, `src/Harness.Skills` | The backlog store, the board projection, and the skill index. |
 | Containers | `src/Harness.Containers` | One logical container per member: its subscription and its runs. |
 | Pty, Streaming | `src/Harness.Pty*`, `src/Harness.Streaming` | The Concierge terminal and live output to the browser. |
+| Worker | `src/Harness.Worker` | The only part that starts agent processes, reads `/proc` and sets memory limits; it speaks the run protocol to control. |
 | Web | `web/` | The Quasar (Vue 3) board. |
 | Operator CLI | `cli/` | `yawble`, in Go: install, start, update, diagnose and expose an instance. |
 
@@ -33,17 +34,66 @@ The product name, Yawble, lives in the web app's presentation layer
   `blocked`, `backlog`, `kanban`, `repo`, ...), authenticated with a per-member key. There is no
   agent-facing CLI and no HTTP fallback.
 - **Workflows.** An instruction roots a workflow; `HARNESS_CAUSATION` carries it into each run so
-  follow-up instructions join it. The Manager that owns a workflow declares it complete.
-- **Admission.** `wip.maxRunning` bounds how many agents run at once across the instance (default
-  the smaller of CPUs - 1 and the memory limit / `wip.memoryPerRunMb`; `GET /api/wip` names which). Work
-  that cannot start waits in FIFO order and is shown as waiting, never failed. A Manager has one
-  reserved slot so a pool full of members cannot starve it.
+  follow-up instructions join it. The member the root instruction addressed owns the workflow and
+  declares it complete; the Manager may declare it for an idle member that owns it, and the platform
+  declares one a plugin member owns. Only a person closes a workflow.
+- **Steering the Concierge.** The workflow a person highlights on the board is the one their
+  Concierge continues: its next launch carries it in `HARNESS_CAUSATION`, and a running Concierge
+  reads it from `STEERING.md`. Only an open workflow of a team that exists and is not archived can
+  be the steering; a finished one is dropped and the Concierge sees no workflow selected.
+- **Waiting for something outside.** A member or Manager that must wait (for a deploy, a reply, a
+  build elsewhere) asks to be woken with the `wake_me` tool and ends its run. A wake fires once, to
+  the member that asked, as an instruction in the same workflow. It is at least 30 seconds and at
+  most `wake.maxDelay` away (default one day, at most seven), with a note of up to 300 characters; a
+  member holds at most three, one per workflow. The member's card and the Kanban card show it as
+  "wakes at <time>: <note>" with a person's Cancel. A wake is not a schedule: work that repeats is a
+  trigger ([triggers.md](triggers.md)).
+- **Admission.** `wip.maxRunning` bounds how many agents run at once across the instance. By default
+  it is the sum of each connected worker's own bound, the smaller of its CPUs - 1 and its memory
+  limit / `wip.memoryPerRunMb`; `GET /api/wip` names which. A run also waits while a worker's memory
+  in use is at or above `admission.memoryPercent` (default 80) of its limit, or its memory pressure
+  is at or above `admission.memoryPressurePercent` (default 10). Work that cannot start waits in
+  FIFO order and is shown as waiting, with the reason, never failed. A Manager has one reserved slot
+  and is never held by memory, so a pool full of members cannot starve it.
 - **Repositories.** Each team clones its repositories under `repos/<Repo>/main` and every card gets
   its own git worktree. Agents branch and commit; the platform pushes a team's branches to origin
   when a run ends. Fetching, bringing current, merging to the default branch and opening a pull
   request are a person's actions in the Git dialog (the Concierge merges only when a person turns
   on `concierge.mayMerge`). A repository can also be a local one kept on the
   instance, named `local:<name>`; see [local-repositories.md](local-repositories.md).
+
+## On the board
+
+- **Kanban.** One board for every active team. A card the Manager or a person moved to a lane
+  keeps that lane when a run on it ends: the run's outcome shows as the card's status and colour,
+  and only a later move, or the workflow's completion, puts it in Done. A card nobody placed goes to
+  Done when the member it was given to finishes. Blocked and failed runs still move a card to
+  Blocked or Failed.
+- **Monitor.** A tab beside the Kanban that shows every team at once as a live graph: members orbit
+  their team, open workflows tie together the members working in them, and each row the log takes
+  moves something (an instruction is a comet from its sender, a hand-back a gold comet to the
+  Manager, a finished workflow a burst). The activity list beside it says the same in words.
+  **Replay** plays the newest stretch of the log, or from a point in time, at 10 to 300 times its
+  pace. Its settings, remembered in the browser, choose whether to show the changes plugins report
+  (by each plugin event's monitor hint, see [plugins.md](plugins.md)) and the files members create,
+  change, delete and commit, how deep to draw them, and the layout's forces (link distance, link
+  strength, repulsion, gravity, friction), with **Reset layout**. **Keep my view** stops the graph
+  fitting itself again after you move it.
+- **Member file changes.** While a member runs, the Host reads its worktrees and records the paths
+  it creates, changes, deletes and commits, with commit shas and subjects: never a file's contents
+  or a diff. Replay plays them back beside the log rows. They are pruned with the log, removed with
+  the team, and removed by Reset's Delete memory for the members ticked.
+- **Outcomes.** An outcome names the business result a workflow serves (Admin → Outcomes). A
+  backlog dispatch or a trigger links its workflows to one; a Manager or the Concierge may propose
+  one, or link a workflow that has none. Only a person creates, confirms, renames, merges,
+  retires or rejects an outcome. Its figures (agent time, elapsed time, tokens, time blocked on a
+  person, cost at a rate a person sets) come from the ledger and are never estimated.
+- **Archived teams.** Archive (in the Teams view) keeps everything a team has - members, settings,
+  documents, repositories, sites and history - and stops its work: it is paused, every trigger
+  skips with the reason "team archived", and a tell, a backlog dispatch, a new card or a site action
+  for it is refused. Its sites stay readable. **Unarchive** leaves it paused until a person resumes
+  it. A team is archived or deleted only when it is quiet: no member running and nothing queued.
+  The Concierge archives a team only when a person has turned on `concierge.mayArchive`.
 
 ## Data
 
@@ -97,8 +147,8 @@ The product name, Yawble, lives in the web app's presentation layer
   worker's Host as the user `worker`, and agents run as the user `agent` with no capabilities; the
   database, keys, logs and the doctor's records are readable by control's Host only. `worker`
   (10003, in group `agent`) reads on the volume exactly what `agent` can.
-- A headless agent receives only its own provider's API key (plus `GH_TOKEN` when its team has a
-  GitHub remote). A member's platform key is passed in its environment and referenced, not
+- A headless agent receives only its own command's credential variables (plus `GH_TOKEN` when its
+  team has a GitHub remote). A member's platform key is passed in its environment and referenced, not
   written, in the MCP config files the launcher creates.
 - A member's temporary files go in its own folder, `<dataRoot>/tmp/member-<random>`
   (`/data/tmp/...` in the container), and every headless run is started with `TMPDIR` set to it.
@@ -172,8 +222,8 @@ MCP servers, plugins, skills, memory and instruction files).
   Copilot` and turns it off only through `includeCoAuthoredBy: false` in a settings file, which no
   launch switch reaches, so a Copilot member's commits may still carry it. The Concierge launches
   as its preset says. The platform's own commits carry no trailer whatever the setting.
-- **Checked before a run, too.** At start and after every catalog save, the Host asks each
-  installed CLI what it would load, with the CLI's own listing and no model call (`claude mcp list`
+- **Checked before a run, too.** At start, after every catalog save and whenever the workers
+  change, the Host asks each installed CLI, on a worker, what it would load, with the CLI's own listing and no model call (`claude mcp list`
   and `plugin list`; `codex mcp list`, `features list` and `debug prompt-input`; `grok inspect`;
   `copilot mcp`/`plugin`/`skill list`), run as the agent user: a member's preset with its
   isolation, the Concierge's without it. `yawble doctor` (the `agent tools` row and block) and
