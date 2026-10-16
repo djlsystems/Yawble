@@ -82,8 +82,13 @@ public static class OperatorCommands
 
     /// <summary>True when the arguments were an operator command and the host must not serve.</summary>
     public static async Task<OperatorOutcome> TryRunAsync(
-        string[] args, string dataRoot, TextWriter output, CancellationToken ct = default)
+        string[] args, string dataRoot, TextWriter output, CancellationToken ct = default,
+        BackupSettings? backups = null)
     {
+        // The backups folder and retention Program.cs read from configuration, so a migration run
+        // from here writes and prunes where the daily backup does. Defaults when none is handed in.
+        backups ??= BackupSettings.Defaults(dataRoot);
+
         // ANYWHERE in the arguments, not only first. "--DataRoot=X --backup" is exactly the shape an
         // operator reaches for - and it is the shape scripts/backup.ps1 and scripts/restore.ps1
         // use, because the data root has to precede a valueless switch or ASP.NET's command-line
@@ -111,12 +116,12 @@ public static class OperatorCommands
                     : OperatorOutcome.Refused;
 
             case "--reset-password":
-                return await ResetPasswordAsync(Path.Combine(dataRoot, "messages.db"), value, output, ct)
+                return await ResetPasswordAsync(Path.Combine(dataRoot, "messages.db"), backups, value, output, ct)
                     ? OperatorOutcome.Completed
                     : OperatorOutcome.Refused;
 
             case "--list-users":
-                return await ListUsersAsync(Path.Combine(dataRoot, "messages.db"), output, ct)
+                return await ListUsersAsync(Path.Combine(dataRoot, "messages.db"), backups, output, ct)
                     ? OperatorOutcome.Completed
                     : OperatorOutcome.Refused;
 
@@ -290,7 +295,7 @@ public static class OperatorCommands
     /// existing screen covers.
     /// </summary>
     private static async Task<bool> ResetPasswordAsync(
-        string database, string? email, TextWriter output, CancellationToken ct)
+        string database, BackupSettings backups, string? email, TextWriter output, CancellationToken ct)
     {
         if (email is null)
         {
@@ -302,7 +307,7 @@ public static class OperatorCommands
 
         // The schema first: this command's whole purpose is reaching a database whose owner cannot
         // start the host, and that database may predate the current shape.
-        await MigrateAsync(database, output, ct);
+        await MigrateAsync(database, backups, output, ct);
 
         var store = new SqliteUserStore(database);
         var user = await store.FindAsync(email, ct);
@@ -337,9 +342,9 @@ public static class OperatorCommands
     /// being a switch, and the reason `OperatorCommands` is not a route either.
     /// </summary>
     private static async Task<bool> ListUsersAsync(
-        string database, TextWriter output, CancellationToken ct)
+        string database, BackupSettings backups, TextWriter output, CancellationToken ct)
     {
-        await MigrateAsync(database, output, ct);
+        await MigrateAsync(database, backups, output, ct);
 
         var users = await new SqliteUserStore(database).ListAsync(ct);
 
@@ -418,9 +423,10 @@ public static class OperatorCommands
     /// run by someone whose instance is already not working, and a copy of their database appearing
     /// in a folder they never asked about is worth saying out loud.
     /// </summary>
-    private static async Task MigrateAsync(string database, TextWriter output, CancellationToken ct)
+    private static async Task MigrateAsync(
+        string database, BackupSettings backups, TextWriter output, CancellationToken ct)
     {
-        var migrator = new SchemaMigrator(database);
+        var migrator = backups.MigratorFor(database);
         var backup = await migrator.ApplyAsync(SchemaModules.All, ct);
 
         if (backup is not null) output.WriteLine($"Schema updated. Backup written to {backup}");

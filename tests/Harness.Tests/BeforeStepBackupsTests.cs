@@ -3,6 +3,7 @@ using System.Globalization;
 using Harness.Host;
 using Harness.Messaging;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Harness.Tests;
@@ -196,6 +197,119 @@ public sealed class BeforeStepBackupsTests : IDisposable
             $"Before-step backups: deleted 1 older than 30 days beyond the newest 1 ({Path.GetFileName(gone)}); 1 kept.",
             lines);
     }
+
+    [Fact]
+    public void Copies_that_share_a_second_are_ordered_by_their_numeric_suffix()
+    {
+        var second = Now.AddDays(-40);
+        var first = BeforeStep(second, "auth-001");
+        var two = BeforeStep(second, "auth-001-2");
+        var ten = BeforeStep(second, "auth-001-10");
+        var later = BeforeStep(Now.AddDays(-39), "auth-002");
+
+        Assert.Equal([later, ten, two, first], BeforeStepBackups.Existing(Backups).Select(c => c.Path));
+
+        // The boundary falls inside that second: the later copy and -10 stay, -2 and the unsuffixed go.
+        var pruned = BeforeStepBackups.Prune(Backups, Now, keep: 2, keepDays: 0);
+
+        Assert.Equal([later, ten], BeforeStepBackups.Existing(Backups).Select(c => c.Path));
+        Assert.Equal(new[] { first, two }.Order(), pruned.Deleted.Order());
+    }
+
+    [Fact]
+    public void A_deletion_that_fails_is_reported_and_the_rest_are_still_deleted()
+    {
+        var copies = Enumerable.Range(0, 5).Select(i => BeforeStep(Now.AddDays(-40 - i), "auth-001")).ToArray();
+        var stuck = copies[3];
+
+        var pruned = BeforeStepBackups.Prune(
+            Backups, Now, keep: 1, keepDays: 0,
+            delete: path =>
+            {
+                if (path == stuck) throw new IOException("the file is in use");
+                File.Delete(path);
+            });
+
+        Assert.Equal(new[] { copies[1], copies[2], copies[4] }.Order(), pruned.Deleted.Order());
+        Assert.Equal([$"{Path.GetFileName(stuck)} (the file is in use)"], pruned.Failed);
+        Assert.True(File.Exists(copies[0]));
+        Assert.True(File.Exists(stuck));
+        Assert.False(File.Exists(copies[1]));
+        Assert.False(File.Exists(copies[4]));
+        Assert.EndsWith(
+            $"; 1 kept. Could not delete 1: {Path.GetFileName(stuck)} (the file is in use).",
+            pruned.Describe());
+    }
+
+    [Fact]
+    public async Task With_a_configured_backups_directory_a_migrations_copy_lands_there_and_the_daily_run_prunes_it()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dataRoot = Path.Combine(_directory, "data");
+        var elsewhere = Path.Combine(_directory, "elsewhere");
+        Directory.CreateDirectory(dataRoot);
+        var database = Path.Combine(dataRoot, "messages.db");
+
+        var settings = BackupSettings.From(Configuration(elsewhere), dataRoot);
+        var taken = await settings.MigratorFor(database).ApplyAsync(SchemaModules.All, ct);
+
+        Assert.NotNull(taken);
+        Assert.Equal(elsewhere, Path.GetDirectoryName(taken));
+        Assert.False(Directory.Exists(BackupSettings.DefaultDirectory(dataRoot)));
+
+        var older = Path.Combine(elsewhere, Path.GetFileName(BeforeStep(DateTimeOffset.UtcNow.AddDays(-2), "auth-001")));
+        File.Move(Path.Combine(Backups, Path.GetFileName(older)), older);
+
+        var daily = settings.DailyBackupFor(database);
+        await daily.TakeAsync(DateTimeOffset.UtcNow, ct);
+
+        Assert.Equal(elsewhere, daily.Directory);
+        Assert.Equal([older], daily.LastBeforeStepPrune!.Deleted);
+        Assert.True(File.Exists(taken));
+        Assert.Single(daily.Existing());
+    }
+
+    [Fact]
+    public async Task The_operator_migrate_writes_and_prunes_by_the_configured_settings()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dataRoot = Path.Combine(_directory, "data");
+        var elsewhere = Path.Combine(_directory, "elsewhere");
+        Directory.CreateDirectory(dataRoot);
+        Directory.CreateDirectory(elsewhere);
+
+        var old = new[] { -3, -2 }
+            .Select(days => BeforeStep(DateTimeOffset.UtcNow.AddDays(days), "auth-001"))
+            .Select(path =>
+            {
+                var moved = Path.Combine(elsewhere, Path.GetFileName(path));
+                File.Move(path, moved);
+                return moved;
+            })
+            .ToArray();
+
+        using var output = new StringWriter();
+        await OperatorCommands.TryRunAsync(
+            ["--list-users"], dataRoot, output, ct, BackupSettings.From(Configuration(elsewhere), dataRoot));
+
+        var remaining = BeforeStepBackups.Existing(elsewhere).Select(c => c.Path).ToArray();
+
+        Assert.Single(remaining);
+        Assert.DoesNotContain(remaining[0], old);
+        Assert.All(old, path => Assert.False(File.Exists(path), path));
+        Assert.Contains("Before-step backups: deleted 2 beyond the newest 1 (", output.ToString());
+        Assert.False(Directory.Exists(BackupSettings.DefaultDirectory(dataRoot)));
+    }
+
+    private static IConfiguration Configuration(string directory) =>
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Backups:Directory"] = directory,
+                ["Backups:KeepBeforeStep"] = "1",
+                ["Backups:KeepBeforeStepDays"] = "0",
+            })
+            .Build();
 
     private string BeforeStep(DateTimeOffset taken, string step) =>
         Write($"messages-{taken.UtcDateTime.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture)}-before-{step}.db");

@@ -69,21 +69,26 @@ public static partial class BeforeStepBackups
                 .Where(copy => copy.Taken is not null)
                 .Select(copy => (copy.Path, Taken: copy.Taken!.Value))
                 .OrderByDescending(copy => copy.Taken)
-                .ThenByDescending(copy => Path.GetFileName(copy.Path), StringComparer.Ordinal)];
+                .ThenByDescending(copy => SuffixOf(copy.Path).Name, StringComparer.Ordinal)
+                .ThenByDescending(copy => SuffixOf(copy.Path).N)];
 
     /// <summary>
     /// Deletes every before-step copy older than <paramref name="keepDays"/> days (0: no age rule)
     /// and beyond the newest <paramref name="keep"/> (at least 1). <paramref name="justTaken"/>, the
     /// copy a migration has just written, is never deleted whatever the settings. Never throws for a
     /// file: a deletion that fails is named in <see cref="BeforeStepPrune.Failed"/> and the rest go on.
+    /// <paramref name="delete"/> is <see cref="File.Delete"/> unless a test hands in one that fails.
     /// </summary>
     public static BeforeStepPrune Prune(
         string directory,
         DateTimeOffset now,
         int keep = DefaultKeep,
         int keepDays = DefaultKeepDays,
-        string? justTaken = null)
+        string? justTaken = null,
+        Action<string>? delete = null)
     {
+        delete ??= File.Delete;
+
         keep = Math.Max(1, keep);
         keepDays = Math.Max(0, keepDays);
 
@@ -118,7 +123,7 @@ public static partial class BeforeStepBackups
 
             try
             {
-                File.Delete(path);
+                delete(path);
                 deleted.Add(path);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -140,6 +145,31 @@ public static partial class BeforeStepBackups
             DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var parsed)
             ? new DateTimeOffset(parsed, TimeSpan.Zero)
             : null;
+    }
+
+    /// <summary>
+    /// Orders copies that share a stamp. Two migrations inside one second write
+    /// <c>…-before-auth-001.db</c>, then <c>…-auth-001-2.db</c>, <c>…-auth-001-3.db</c> and on, so a
+    /// higher <c>-n</c> is newer and no suffix counts as 1 - read as a number, or <c>-10</c> would sort
+    /// before <c>-2</c>.
+    ///
+    /// <para>
+    /// The name is split at its LAST <c>-digits</c>. A step id ends in digits of its own
+    /// (<c>auth-001</c>), so the unsuffixed copy splits at those (<c>…-auth</c>, 1) and each suffixed
+    /// one at its suffix (<c>…-auth-001</c>, n): the first is a proper prefix of the second and sorts below it, which
+    /// keeps the unsuffixed copy the oldest of its second without having to tell the two digits apart.
+    /// A name with no trailing digits is itself, with n 1.
+    /// </para>
+    /// </summary>
+    private static (string Name, long N) SuffixOf(string path)
+    {
+        var stem = Path.GetFileNameWithoutExtension(path);
+        var dash = stem.LastIndexOf('-');
+
+        return dash > 0 && long.TryParse(
+            stem.AsSpan(dash + 1), NumberStyles.None, CultureInfo.InvariantCulture, out var n)
+            ? (stem[..dash], n)
+            : (stem, 1);
     }
 
     private static bool SamePath(string a, string b) =>
