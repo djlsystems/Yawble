@@ -271,6 +271,12 @@ public static class TenantActions
     /// last viewed and last active, and the sentence saying so. A person's own end writes no row.</summary>
     public const string ConciergeEndedIdle = "concierge.ended-idle";
 
+    /// <summary>The daily log retention pass removed message-log rows. Actor null; subject the
+    /// setting (<c>log.retentionDays</c>); detail carries <c>setting</c>, <c>days</c>, <c>cutoff</c>,
+    /// <c>purged</c> and <c>retained</c> (the log's purge report) and <c>fileChanges</c> removed. A
+    /// pass that removes nothing writes none.</summary>
+    public const string LogPruned = "log.pruned";
+
     /// <summary>A team's additional instructions changed.</summary>
     public const string TeamInstructionsChanged = "team.instructions-changed";
 

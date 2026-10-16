@@ -28,6 +28,8 @@ export interface TenantSettingField {
   hint: string
   /** The largest count the server accepts. Counts are never below 0. */
   max?: number
+  /** The least count the server accepts other than 0, which turns the setting off. */
+  atLeastUnlessZero?: number
 }
 
 export const WipMaxRunning = 'wip.maxRunning'
@@ -39,6 +41,11 @@ export const ConciergeMayArchive = 'concierge.mayArchive'
 export const AgentsCommitAttribution = 'agents.commitAttribution'
 export const UpdatesCheck = 'updates.check'
 export const MarketplaceCheck = 'marketplace.check'
+export const LogRetentionDays = 'log.retentionDays'
+
+/** This sentence is put in front of a person, word for word: what the pass removes, what it never removes, and that 0 turns it off. The Host's description of the setting starts with it. */
+export const LogRetentionSentence =
+  'Once a day, removes message-log rows, and the file changes recorded before the oldest row kept, of workflows finished more than this many days ago; it never removes an open workflow, a row still queued or cited, the ledgers, spend, outcome figures, the tenant log, admission holds, landed or backlog stats, and 0 turns it off.'
 
 /** This sentence is put in front of a person, word for word: what the setting allows, and that it is off unless turned on. */
 export const ConciergeMayMergeSentence =
@@ -176,6 +183,15 @@ export const TenantSettingFields: readonly TenantSettingField[] = [
     kind: 'toggle',
     label: 'Read the package catalog',
     hint: 'Reads the published package catalog about twice a day, so Marketplace > Browse can list what may be added and whether each is installed or has an update. Nothing is fetched or installed by itself.',
+  },
+  {
+    name: LogRetentionDays,
+    tab: 'system',
+    kind: 'count',
+    label: 'Keep the message log for (days)',
+    hint: LogRetentionSentence,
+    max: 36500,
+    atLeastUnlessZero: 7,
   },
   {
     name: AgentsCommitAttribution,
@@ -424,13 +440,16 @@ export function durationSeconds(text: string): number | null {
 }
 
 /** Why a typed value cannot be saved, or null when it can. The words go under the field. */
-export function validateDraft(kind: TenantSettingKind, text: string, max?: number): string | null {
+export function validateDraft(kind: TenantSettingKind, text: string, max?: number, atLeastUnlessZero?: number): string | null {
   const trimmed = text.trim()
 
   if (kind === 'count') {
     if (!/^\d+$/.test(trimmed)) return 'A whole number, 0 or more.'
     if (!Number.isSafeInteger(Number(trimmed))) return 'That number is too large.'
     if (max !== undefined && Number(trimmed) > max) return `At most ${max}.`
+    if (atLeastUnlessZero !== undefined && Number(trimmed) !== 0 && Number(trimmed) < atLeastUnlessZero) {
+      return `0 turns it off; otherwise at least ${atLeastUnlessZero}.`
+    }
     return null
   }
 
@@ -599,7 +618,7 @@ export function draftErrors(
       continue
     }
 
-    const error = validateDraft(field.kind, drafts[field.name] ?? '', field.max)
+    const error = validateDraft(field.kind, drafts[field.name] ?? '', field.max, field.atLeastUnlessZero)
     if (error) errors[field.name] = error
   }
 
