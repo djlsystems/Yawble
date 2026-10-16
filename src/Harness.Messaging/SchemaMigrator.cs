@@ -61,8 +61,16 @@ public sealed class MigrationFailedException(string stepId, Exception inner)
 public sealed class SchemaMigrator(
     string databasePath,
     string? backupDirectory = null,
-    SqliteDurability durability = SqliteDurability.SurvivesPowerLoss)
+    SqliteDurability durability = SqliteDurability.SurvivesPowerLoss,
+    int keepBeforeStep = BeforeStepBackups.DefaultKeep,
+    int keepBeforeStepDays = BeforeStepBackups.DefaultKeepDays)
 {
+    /// <summary>
+    /// What pruning the before-step copies did after this migrator took its own, or null when no
+    /// copy was taken. Exposed rather than printed, like <see cref="JournalMode"/>: the caller says it.
+    /// </summary>
+    public BeforeStepPrune? LastPrune { get; private set; }
+
     /// <summary>
     /// WHAT `PRAGMA journal_mode` ACTUALLY ANSWERED on the last connection this migrator opened -
     /// `wal` when the file entered WAL, something else when it did not, null when the pragma could
@@ -282,12 +290,17 @@ public sealed class SchemaMigrator(
         }
     }
 
-    /// <summary>Kept forever. They appear only when the schema actually moves, so they are rare,
-    /// and automatically deleting the artifact that exists to save you is not a decision this
-    /// makes on an operator's behalf.</summary>
+    /// <summary>
+    /// Takes the copy, then prunes the older before-step copies: every one of the last
+    /// <c>keepBeforeStepDays</c> days and, beyond that, the newest <c>keepBeforeStep</c> are kept
+    /// (see <see cref="BeforeStepBackups"/>). The copy just taken is never deleted whatever the
+    /// settings - it is the one that exists for the migration about to run. They are no longer kept
+    /// forever: one arrives with every release that adds a step, and they came to fill the folder.
+    /// </summary>
     private async Task<string> BackUpBeforeAsync(MigrationStep first, CancellationToken ct)
     {
-        var stamp = DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss");
+        var now = DateTimeOffset.UtcNow;
+        var stamp = now.ToString("yyyyMMdd-HHmmss");
         var directory = backupDirectory
             ?? Path.Combine(Path.GetDirectoryName(databasePath)!, "backups");
 
@@ -304,7 +317,11 @@ public sealed class SchemaMigrator(
             destination = Path.Combine(directory, $"messages-{stamp}-before-{first.Id}-{n}.db");
         }
 
-        return await BackUpAsync(databasePath, destination, ct);
+        var taken = await BackUpAsync(databasePath, destination, ct);
+
+        LastPrune = BeforeStepBackups.Prune(directory, now, keepBeforeStep, keepBeforeStepDays, justTaken: taken);
+
+        return taken;
     }
 
     /// <summary>

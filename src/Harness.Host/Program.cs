@@ -223,7 +223,18 @@ using var held = taken;
 // itself afterwards: the backup's path, which a terminal would lose at exactly the moment a
 // migration went wrong, and what `PRAGMA journal_mode` actually replied. Both are recorded to the diagnostics log further down, once the store that
 // holds them exists - which is only true AFTER this migration has created its table.
-var migrator = new SchemaMigrator(database);
+//
+// The copies taken before a schema step are pruned after each one is taken and by every daily
+// backup: the last `Backups:KeepBeforeStepDays` days (default 30, 0 for no age rule) plus the newest
+// `Backups:KeepBeforeStep` (default 10). Configuration, not tenant settings: no person acts here.
+var keepBeforeStep = int.TryParse(builder.Configuration["Backups:KeepBeforeStep"], out var configuredKeepBeforeStep)
+    ? configuredKeepBeforeStep
+    : BeforeStepBackups.DefaultKeep;
+var keepBeforeStepDays = int.TryParse(builder.Configuration["Backups:KeepBeforeStepDays"], out var configuredKeepBeforeStepDays)
+    ? configuredKeepBeforeStepDays
+    : BeforeStepBackups.DefaultKeepDays;
+var migrator = new SchemaMigrator(
+    database, keepBeforeStep: keepBeforeStep, keepBeforeStepDays: keepBeforeStepDays);
 string? schemaBackup = null;
 
 try
@@ -237,6 +248,8 @@ try
     {
         Console.WriteLine($"Schema updated. Backup written to {schemaBackup}");
     }
+
+    if (migrator.LastPrune is { } pruned) Console.WriteLine(pruned.Describe());
 }
 catch (Exception exception)
     when (exception is SchemaFromTheFutureException
@@ -1667,7 +1680,9 @@ builder.Services.AddSingleton(CliVersionHistory.In(dataRoot));
 
 // A DAILY COPY OF THE DATABASE. `Backups:Directory` defaults to `<dataRoot>/backups`,
 // which in the container is /data/backups, beside the pre-migration and --backup copies that
-// retention never touches. `Backups:Keep` is how many daily copies survive (default 7).
+// retention never touches. `Backups:Keep` is how many daily copies survive (default 7). Each run
+// also prunes the before-step copies by `Backups:KeepBeforeStep` and `Backups:KeepBeforeStepDays`,
+// read above for the migrator.
 var backupsEnabled = !bool.TryParse(builder.Configuration["Backups:Enabled"], out var configuredBackups)
     || configuredBackups;
 if (backupsEnabled)
@@ -1679,7 +1694,9 @@ if (backupsEnabled)
             : Path.Combine(dataRoot, "backups"),
         int.TryParse(builder.Configuration["Backups:Keep"], out var backupKeep)
             ? backupKeep
-            : DailyBackup.DefaultKeep);
+            : DailyBackup.DefaultKeep,
+        keepBeforeStep,
+        keepBeforeStepDays);
     builder.Services.AddSingleton(dailyBackup);
     builder.Services.AddSingleton<IHostedService>(sp => new DailyBackupRunner(
         dailyBackup,

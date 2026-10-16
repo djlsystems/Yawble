@@ -420,9 +420,11 @@ public static class OperatorCommands
     /// </summary>
     private static async Task MigrateAsync(string database, TextWriter output, CancellationToken ct)
     {
-        var backup = await new SchemaMigrator(database).ApplyAsync(SchemaModules.All, ct);
+        var migrator = new SchemaMigrator(database);
+        var backup = await migrator.ApplyAsync(SchemaModules.All, ct);
 
         if (backup is not null) output.WriteLine($"Schema updated. Backup written to {backup}");
+        if (migrator.LastPrune is { } pruned) output.WriteLine(pruned.Describe());
     }
 
     private static async Task ListAccountsAsync(
