@@ -95,8 +95,14 @@ public static class HostDoctor
         WriteIndented = false,
     };
 
-    public static async Task<DoctorReport> ReportAsync(string dataRoot, CancellationToken ct = default)
+    /// <param name="backups">
+    /// The backups folder the Host uses (<c>Backups:Directory</c>, else <c>&lt;dataRoot&gt;/backups</c>),
+    /// as Program.cs read it; the defaults when omitted.
+    /// </param>
+    public static async Task<DoctorReport> ReportAsync(
+        string dataRoot, CancellationToken ct = default, BackupSettings? backups = null)
     {
+        backups ??= BackupSettings.Defaults(dataRoot);
         var database = Path.Combine(dataRoot, "messages.db");
         var (recordedAt, versions) = await NewestVersionsAsync(dataRoot, ct);
         var history = await CliVersionHistory.In(dataRoot).ReadAsync(CliVersionHistory.MaxTake, ct);
@@ -106,7 +112,7 @@ public static class HostDoctor
             DateTimeOffset.UtcNow,
             DataRoot(dataRoot),
             await DatabaseAsync(database, ct),
-            Backups(database, Path.Combine(dataRoot, "backups")),
+            Backups(backups.DailyBackupFor(database)),
             recordedAt,
             Agents(versions, history, launches, AgentAuthRecord.Read(dataRoot)),
             // Who the Host said, at its last start, agent children run as - and, when it
@@ -246,10 +252,6 @@ public static class HostDoctor
             new DoctorSchema(applied, pending, unknown, Accepted: unknown.Length == 0));
     }
 
-    private static DoctorBackups Backups(string database, string directory)
-    {
-        var daily = new DailyBackup(database, directory);
-
-        return new DoctorBackups(directory, daily.Existing().Count, daily.Newest());
-    }
+    private static DoctorBackups Backups(DailyBackup daily) =>
+        new(daily.Directory, daily.Existing().Count, daily.Newest());
 }

@@ -137,6 +137,11 @@ var instance = InstanceIdentity.For(dataRoot);
 
 var database = Path.Combine(dataRoot, "messages.db");
 
+// WHERE EVERY COPY OF THE DATABASE GOES, and how many of each kind survive: read once, here, ahead
+// of the operator commands, so `migrate` from a recovery switch, the startup migration and the
+// daily backup all use one folder and one rule. See BackupSettings.
+var backupSettings = BackupSettings.From(builder.Configuration, dataRoot);
+
 // An operator command NEVER serves. Returning here is what makes recovery something a person at the
 // machine does rather than a capability of the running system - see OperatorCommands.
 //
@@ -147,7 +152,7 @@ var database = Path.Combine(dataRoot, "messages.db");
 // EARLIER than the catch that prevents it.
 try
 {
-    var outcome = await OperatorCommands.TryRunAsync(args, dataRoot, Console.Out);
+    var outcome = await OperatorCommands.TryRunAsync(args, dataRoot, Console.Out, backups: backupSettings);
 
     if (outcome != OperatorOutcome.NotAnOperatorCommand)
     {
@@ -223,7 +228,11 @@ using var held = taken;
 // itself afterwards: the backup's path, which a terminal would lose at exactly the moment a
 // migration went wrong, and what `PRAGMA journal_mode` actually replied. Both are recorded to the diagnostics log further down, once the store that
 // holds them exists - which is only true AFTER this migration has created its table.
-var migrator = new SchemaMigrator(database);
+//
+// The copies taken before a schema step go to the backups folder and are pruned after each one is
+// taken and by every daily backup: the last `Backups:KeepBeforeStepDays` days (default 30, 0 for no
+// age rule) plus the newest `Backups:KeepBeforeStep` (default 10).
+var migrator = backupSettings.MigratorFor(database);
 string? schemaBackup = null;
 
 try
@@ -237,6 +246,8 @@ try
     {
         Console.WriteLine($"Schema updated. Backup written to {schemaBackup}");
     }
+
+    if (migrator.LastPrune is { } pruned) Console.WriteLine(pruned.Describe());
 }
 catch (Exception exception)
     when (exception is SchemaFromTheFutureException
@@ -1668,19 +1679,14 @@ builder.Services.AddSingleton(CliVersionHistory.In(dataRoot));
 
 // A DAILY COPY OF THE DATABASE. `Backups:Directory` defaults to `<dataRoot>/backups`,
 // which in the container is /data/backups, beside the pre-migration and --backup copies that
-// retention never touches. `Backups:Keep` is how many daily copies survive (default 7).
+// its own retention never touches. `Backups:Keep` is how many daily copies survive (default 7). Each
+// run also prunes the before-step copies in the same folder the migrator wrote them to, by
+// `Backups:KeepBeforeStep` and `Backups:KeepBeforeStepDays` - all read once, above.
 var backupsEnabled = !bool.TryParse(builder.Configuration["Backups:Enabled"], out var configuredBackups)
     || configuredBackups;
 if (backupsEnabled)
 {
-    var dailyBackup = new DailyBackup(
-        database,
-        builder.Configuration["Backups:Directory"] is { Length: > 0 } backupDirectory
-            ? backupDirectory
-            : Path.Combine(dataRoot, "backups"),
-        int.TryParse(builder.Configuration["Backups:Keep"], out var backupKeep)
-            ? backupKeep
-            : DailyBackup.DefaultKeep);
+    var dailyBackup = backupSettings.DailyBackupFor(database);
     builder.Services.AddSingleton(dailyBackup);
     builder.Services.AddSingleton<IHostedService>(sp => new DailyBackupRunner(
         dailyBackup,
