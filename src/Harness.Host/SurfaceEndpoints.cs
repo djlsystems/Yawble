@@ -1,4 +1,3 @@
-using System.Globalization;
 using Harness.Containers;
 using Harness.Contracts;
 using Harness.Host.Auth;
@@ -70,10 +69,11 @@ public static class SurfaceEndpoints
                 + "`notAModel`. `gaps` are the preset's recorded surfaces no launch switch reaches. `at` is null "
                 + "and `presets` empty until the first pass ends; `running` is true while one runs.");
 
-        app.MapPut("/api/me/steering", (
+        app.MapPut("/api/me/steering", async (
             SteeringBody body,
             HttpContext context,
-            TeamPaths paths) =>
+            SteeringWorkflows steering,
+            CancellationToken ct) =>
         {
             if (PrincipalClaims.From(context.User) is not { Kind: PrincipalKind.User } principal)
             {
@@ -82,22 +82,31 @@ public static class SurfaceEndpoints
                     statusCode: StatusCodes.Status403Forbidden);
             }
 
+            // ONLY AN OPEN WORKFLOW OF A LIVE, ACTIVE TEAM is stored: anything else would be handed
+            // to the next Concierge as what the person is looking at. Nothing is stored on a refusal.
+            SteeredWorkflow? open = null;
+            if (body.CorrelationId is { } workflow)
+            {
+                var (judged, over) = await steering.JudgeAsync(workflow, ct);
+                if (judged is null)
+                {
+                    // Nor does anything keep naming it: a stored steering of this same workflow
+                    // goes, as it would at the next launch.
+                    steering.Refused(principal.Id, workflow, over!);
+
+                    return Results.Conflict(new
+                    {
+                        error = $"{over}, so the Concierge cannot follow it. Follow an open workflow of an active team, or none.",
+                    });
+                }
+
+                open = judged;
+            }
+
             SteeringFile.Write(dataRoot, principal.Id, body.CorrelationId);
 
             // A running Concierge reads this file. Do not create a workspace to hold it.
-            var existing = ConciergeWorkspaces.TryExisting(paths, principal.Id);
-            if (existing is not null)
-            {
-                var causation = body.CorrelationId?.ToString(CultureInfo.InvariantCulture);
-                try
-                {
-                    File.WriteAllText(Path.Combine(existing, "STEERING.md"), SteeringFile.Note(causation));
-                }
-                catch (IOException)
-                {
-                    // The data-root copy still stands for the next launch.
-                }
-            }
+            steering.WriteNote(principal.Id, open);
 
             return Results.NoContent();
         })

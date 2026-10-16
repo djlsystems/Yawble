@@ -4,14 +4,15 @@ import type { UpdateStatus } from '../lib/releaseUpdates'
 import { normaliseTenantSettings, rejectedField } from '../lib/tenantSettings'
 
 /** Points the Concierge at the workflow the person is looking at. Advisory: a failure here
- * does not change the board. */
-export function publishSteering(correlationId: number | null): void {
-  void fetch('/api/me/steering', {
+ * does not change the board. Answers false only when the Host refuses the workflow (409: it is
+ * over, or its team is gone), so the caller can stop showing it as followed. */
+export function publishSteering(correlationId: number | null): Promise<boolean> {
+  return fetch('/api/me/steering', {
     method: 'PUT',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ correlationId }),
-  }).catch(() => undefined);
+  }).then((response) => response.status !== 409, () => true);
 }
 import type { AppearanceRecord } from '../lib/appearance'
 import type {
