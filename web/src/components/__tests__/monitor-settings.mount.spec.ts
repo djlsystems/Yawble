@@ -63,7 +63,8 @@ import MonitorView from '../MonitorView.vue'
 import { useConsoleStore } from '../../stores/console'
 import { resetBody } from '../../test/mountQuasar'
 import { SettingsKey } from '../../lib/monitor/hints'
-import { FileSettingsKey, fileWatch } from '../../lib/monitor/workspace'
+import { FileSettingsKey, MaxRecordedChanges, fileWatch } from '../../lib/monitor/workspace'
+import { localTime } from '../../lib/localTime'
 
 let seq = 0
 function row(type: string, source: string, payload: Record<string, unknown>): Message {
@@ -527,6 +528,39 @@ describe('the Monitor replay of recorded file changes', () => {
 
     expect(await replayed(wrapper)).toEqual([])
     expect(played.length).toBeGreaterThan(0)
+  })
+
+  it('says after what time file changes are not shown when the read stops at its bound', async () => {
+    // Twenty full pages reach the bound with the route still saying there is more.
+    getFileChanges.mockImplementation((_period: unknown, after: number) => {
+      const page = after / 500
+      const changes = Array.from({ length: 500 }, (_, i) => ({
+        id: after + i + 1,
+        correlation: 3,
+        ...workspace(),
+        at: page === 19 && i === 499 ? at(4) : at(3),
+      }))
+      return Promise.resolve({ changes, next: after + 500 })
+    })
+    const { wrapper } = await mountMonitor(period())
+
+    await replayed(wrapper)
+
+    expect(getFileChanges).toHaveBeenCalledTimes(MaxRecordedChanges / 500)
+    expect(wrapper.find('[data-monitor-cut]').text().replace(/\s+/g, ' ')).toBe(
+      `File changes after ${localTime(Date.parse(at(4)))} are not shown: this replay reads at most 10,000.`,
+    )
+  })
+
+  it('says nothing of a bound when every change of the period is read', async () => {
+    recordedPages()
+    const { wrapper } = await mountMonitor(period())
+
+    await replayed(wrapper)
+
+    expect(wrapper.find('[data-monitor-mode="replay"]').exists()).toBe(true)
+    expect(wrapper.find('[data-monitor-cut]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('are not shown')
   })
 })
 

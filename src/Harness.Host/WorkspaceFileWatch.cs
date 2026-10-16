@@ -350,7 +350,7 @@ public sealed class WorkspaceFileWatch(
     {
         foreach (var (repo, path) in TreesOf(state.Run))
         {
-            if (await ReadTreeAsync(path, ct) is not { } read) continue;
+            if (await ReadTreeAsync(state, repo, path, ct) is not { } read) continue;
 
             state.Trees[path] = new TreeState(repo, read.Status, read.Head, await ProjectFoldersAsync(path, ct));
         }
@@ -374,7 +374,7 @@ public sealed class WorkspaceFileWatch(
                 state.Trees[path] = tree;
             }
 
-            if (await ReadTreeAsync(path, ct) is not { } read) continue;
+            if (await ReadTreeAsync(state, repo, path, ct) is not { } read) continue;
 
             var commits = new List<(string Sha, string Subject, List<(string Path, string Action)> Files)>();
             var commitsLeftOut = 0;
@@ -509,10 +509,23 @@ public sealed class WorkspaceFileWatch(
         return (commits, leftOut);
     }
 
-    private async Task<TreeRead?> ReadTreeAsync(string path, CancellationToken ct)
+    /// <summary>A tree's status and HEAD, or null when git cannot read it. That is logged once per
+    /// tree per run, so a broken tree does not flood the log, and the tree is skipped while it fails.</summary>
+    private async Task<TreeRead?> ReadTreeAsync(RunState state, string repo, string path, CancellationToken ct)
     {
         var status = await git.RunGitAsync(path, ["status", "--porcelain=v2", "-z", "--untracked-files=all"], ct);
-        if (status.ExitCode != 0) return null;
+        if (status.ExitCode != 0)
+        {
+            if (state.Unreadable.Add(path))
+            {
+                var said = GitOutputRedaction.Redact(Lines(status.Stderr).FirstOrDefault()) ?? "";
+                _logger.LogWarning(
+                    "A read of {Team}/{Member}'s worktree in {Repo} was skipped: git exited {ExitCode}: {Stderr}. It is skipped while it fails and not logged again this run",
+                    state.Run.Team, state.Run.Member, repo, status.ExitCode, said);
+            }
+
+            return null;
+        }
 
         var head = await git.RunGitAsync(path, ["rev-parse", "--verify", "-q", "HEAD"], ct);
 
@@ -565,6 +578,9 @@ public sealed class WorkspaceFileWatch(
         public WorkspaceRun Run { get; } = run;
 
         public Dictionary<string, TreeState> Trees { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>The trees whose failed read this run has already logged.</summary>
+        public HashSet<string> Unreadable { get; } = new(StringComparer.Ordinal);
     }
 
     private sealed class TreeState(string repo, Dictionary<string, string> status, string? head, HashSet<string> projectFolders)

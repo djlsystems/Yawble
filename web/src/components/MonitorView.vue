@@ -35,12 +35,14 @@ import {
 import { MonitorSymbolsFamily, glyphOf, loadMonitorSymbols, type Codepoints } from '../lib/monitor/font'
 import {
   fileWatch,
+  MaxRecordedChanges,
   pushTime,
   readFileSettings,
   readRecorded,
   writeFileSettings,
   type FileDepth,
   type FileSettings,
+  type RecordedChanges,
   type WorkspacePush,
 } from '../lib/monitor/workspace'
 import {
@@ -74,7 +76,8 @@ import {
  * While it is open it joins the hub's file watch, and each `workspaceChanged` push draws the
  * member's file changes as repository, project and file nodes off its team (`lib/monitor/workspace.ts`).
  * The Host records them during every run, so a replay reads its period's (`GET /api/file-changes`)
- * and plays each at its time beside the rows, drawn and listed as it was live.
+ * and plays each at its time beside the rows, drawn and listed as it was live. It reads at most
+ * `MaxRecordedChanges`, and when it stops short the replay bar says after what time none are shown.
  */
 
 const board = useConsoleStore()
@@ -416,17 +419,21 @@ function startLive() {
 /** Which replay is current: one started later, or live, makes an earlier one's late answer moot. */
 let replaying = 0
 /** The recorded file changes of the period last read, kept so a seek within it reads none again. */
-let recorded: { key: string; changes: Promise<WorkspacePush[]> } | null = null
+let recorded: { key: string; changes: Promise<RecordedChanges> } | null = null
+/** The time of the last recorded change a replay read when it stopped short of its period's end; null when nothing is cut off. */
+const cutAfter = ref<number | null>(null)
 
 /**
  * The members' file changes recorded over the rows held, oldest first, every page of them. A read
  * that fails leaves the replay without file changes and nothing else, as a failed watch does live.
  */
-function recordedChanges(rows: readonly Message[]): Promise<WorkspacePush[]> {
+function recordedChanges(rows: readonly Message[]): Promise<RecordedChanges> {
   const period = { from: rows[0]!.occurredAt, to: rows[rows.length - 1]!.occurredAt }
   const key = `${period.from}|${period.to}`
   if (recorded?.key !== key) {
-    const changes = readRecorded((after, take) => getFileChanges(period, after, take)).catch(() => [] as WorkspacePush[])
+    const changes = readRecorded((after, take) => getFileChanges(period, after, take)).catch(
+      (): RecordedChanges => ({ changes: [], cut: false }),
+    )
     recorded = { key, changes }
   }
   return recorded.changes
@@ -447,8 +454,10 @@ async function startReplay(from?: number) {
   model.know(board.choosableTeams)
   // What live drew goes; the replay draws its own period's file changes.
   scene?.clearFileChanges()
-  const changes = await recordedChanges(rows)
+  cutAfter.value = null
+  const { changes, cut } = await recordedChanges(rows)
   if (current !== replaying || unmounted) return
+  cutAfter.value = cut ? (changes.length > 0 ? (pushTime(changes[changes.length - 1]!) ?? 0) : timeOf(rows[0]!)) : null
   const start = from ?? timeOf(rows[0]!)
   feed(
     rows.filter((row) => timeOf(row) < start),
@@ -646,6 +655,10 @@ onUnmounted(() => {
               REPLAY {{ speed }}×
             </span>
             <span class="monitor-clock">{{ timeWords(clockAt) }}</span>
+          </div>
+          <div v-if="mode === 'replay' && cutAfter !== null" class="monitor-replay-cut" data-monitor-cut>
+            File changes after {{ localTime(cutAfter) }} are not shown: this replay reads at most
+            {{ MaxRecordedChanges.toLocaleString('en-US') }}.
           </div>
           <div class="monitor-stats">
             <div class="monitor-stat" data-stat="running">
@@ -1086,6 +1099,12 @@ onUnmounted(() => {
 
 .monitor-replay {
   color: var(--os-monitor-handback);
+}
+
+.monitor-replay-cut {
+  color: var(--monitor-ink-dim);
+  font-size: 0.85em;
+  margin-top: 2px;
 }
 
 .monitor-clock {

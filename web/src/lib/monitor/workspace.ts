@@ -144,14 +144,22 @@ export interface FileChangesPage {
 export const MaxRecordedChanges = 10_000
 const RecordedPage = 500
 
+/** What a replay read: its changes, and whether it stopped before the period's last one. */
+export interface RecordedChanges {
+  changes: WorkspacePush[]
+  /** True when the read stopped with pages still to come, at its bound or at a cursor that did not move on. */
+  cut: boolean
+}
+
 /**
  * Every recorded change of a period, oldest first, paged with `after`/`next` until `next` is null,
  * each read as a push; one that is not a push is passed over, as a push from the hub would be.
+ * A read that stops before `next` is null says so in `cut`, so the replay never stops silently.
  */
 export async function readRecorded(
   readPage: (after: number, take: number) => Promise<FileChangesPage>,
   max = MaxRecordedChanges,
-): Promise<WorkspacePush[]> {
+): Promise<RecordedChanges> {
   const pushes: WorkspacePush[] = []
   let after = 0
   let read = 0
@@ -164,8 +172,9 @@ export async function readRecorded(
     }
     read += changes.length
     const next = page.next
+    if (typeof next !== 'number') return { changes: pushes, cut: false }
     // A cursor that does not move on would read the same page for ever.
-    if (typeof next !== 'number' || next <= after || read >= max) return pushes
+    if (next <= after || read >= max) return { changes: pushes, cut: true }
     after = next
   }
 }

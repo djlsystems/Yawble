@@ -406,26 +406,29 @@ describe('a replay', () => {
     })
 
     expect(asked).toEqual([0, 11, 13])
-    expect(read.map((change) => change.at)).toEqual(['2026-10-15T10:42:10Z', '2026-10-15T10:42:20Z'])
-    expect(read[1]!.commits[0]).toMatchObject({ sha: '1a2b3c4d5e6f7a8b9c0d', subject: 'Fix the parser' })
+    expect(read.cut).toBe(false)
+    expect(read.changes.map((change) => change.at)).toEqual(['2026-10-15T10:42:10Z', '2026-10-15T10:42:20Z'])
+    expect(read.changes[1]!.commits[0]).toMatchObject({ sha: '1a2b3c4d5e6f7a8b9c0d', subject: 'Fix the parser' })
   })
 
-  it('stops at a cursor that does not move on, and at its bound', async () => {
+  it('stops at a cursor that does not move on, and at its bound, and says it stopped short', async () => {
     const one = { changes: [period().changes[0]], next: 5 }
     let reads = 0
-    await readRecorded(async () => {
+    const stuck = await readRecorded(async () => {
       reads++
       return one
     })
     expect(reads).toBe(2)
+    expect(stuck.cut).toBe(true)
 
     reads = 0
     let next = 0
-    await readRecorded(async () => {
+    const bounded = await readRecorded(async () => {
       reads++
       return { changes: [period().changes[0]], next: ++next }
     }, 3)
     expect(reads).toBe(3)
+    expect(bounded.cut).toBe(true)
   })
 
   it('draws the repository, project and file nodes and the commit at their times, and lists them', () => {

@@ -9,7 +9,7 @@ namespace Harness.Tests;
 /// <summary>
 /// A READ THAT FAILS IS LOGGED AND SKIPPED, NEVER A RUN'S FAILURE. A pass whose read throws answers
 /// normally with a warning logged, keeps what it recorded, and the next pass carries on; a tree git
-/// cannot read is skipped without throwing.
+/// cannot read is skipped without throwing, logged once a run however many passes it fails.
 /// </summary>
 public sealed class WorkspaceFileReadFailureTests : IDisposable
 {
@@ -84,6 +84,39 @@ public sealed class WorkspaceFileReadFailureTests : IDisposable
 
         Assert.Equal(0, await watch.PassAsync([Run], readAll: true, Ct));
         Assert.Equal(0, await watch.PassAsync([], readAll: true, Ct));
+    }
+
+    [Fact]
+    public async Task A_tree_whose_git_exits_non_zero_is_logged_once_across_passes_writes_no_row_and_the_run_carries_on()
+    {
+        var clone = Path.Combine(_paths.ReposFor(Team), Repo, "main");
+        var healthy = Path.Combine(_paths.ReposFor(Team), Repo, Worktrees.DirectoryName(Member, "2"));
+        Git(clone, "worktree", "add", "-q", healthy, "-b", "dev/2");
+
+        var logger = new Captured();
+        var watch = new WorkspaceFileWatch(new GitRunner(), _paths, (_, _) => Task.CompletedTask, record: _record, logger: logger);
+
+        await watch.PassAsync([Run], readAll: false, Ct);
+        File.Move(Path.Combine(_tree, ".git"), Path.Combine(_tree, ".git.moved"));
+        File.WriteAllText(Path.Combine(_tree, "broken.txt"), "broken");
+
+        for (var pass = 0; pass < 3; pass++)
+        {
+            File.WriteAllText(Path.Combine(healthy, $"pass{pass}.txt"), "pass");
+            Assert.Equal(1, await watch.PassAsync([Run], readAll: true, Ct));
+        }
+
+        var warning = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, warning.Level);
+        Assert.Contains($"{Team}/{Member}'s worktree in {Repo}", warning.Message);
+        Assert.Contains("git exited 128: fatal: not a git repository", warning.Message);
+        Assert.DoesNotContain("\n", warning.Message);
+
+        var rows = await _record.ReadAsync(
+            DateTimeOffset.MinValue, DateTimeOffset.MaxValue, 0, 10,
+            new Dictionary<string, DateTimeOffset> { [Team] = DateTimeOffset.MinValue }, Ct);
+        Assert.Equal(["pass0.txt", "pass1.txt", "pass2.txt"], rows.SelectMany(r => r.Files).Select(f => f.Path));
+        Assert.DoesNotContain(rows, r => r.Files.Any(f => f.Path == "broken.txt"));
     }
 
     public void Dispose()
