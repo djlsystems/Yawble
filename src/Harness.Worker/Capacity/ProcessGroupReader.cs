@@ -5,13 +5,18 @@ using Harness.Contracts;
 namespace Harness.Host.Capacity;
 
 /// <summary>
-/// One run's figures, summed over its process group: resident memory from <c>/proc/&lt;pid&gt;/statm</c>
-/// and CPU time from <c>/proc/&lt;pid&gt;/stat</c>, read as the Host's own user.
+/// One run's figures, summed over its process group: resident memory from <c>/proc/&lt;pid&gt;/statm</c>,
+/// CPU time and thread count from <c>/proc/&lt;pid&gt;/stat</c>, read as the Host's own user.
 ///
 /// <para>
 /// Every run starts in its own session (<c>setsid</c> in <see cref="ChildProcess"/>), so its group id
 /// is its leader's pid and every process it starts carries that group unless it asks for a session
 /// of its own. A group with no process the Host can read is NOT MEASURED (null), never zero.
+/// </para>
+/// <para>
+/// Processes are the group's members; threads are summed from each member's own count. The cgroup's
+/// <c>pids.current</c> counts tasks (both), so neither figure here is that one. A member whose thread
+/// count cannot be read leaves the group's threads not measured (null), never a part-sum.
 /// </para>
 /// </summary>
 /// <param name="procRoot">The proc mount; tests hand a fixture tree.</param>
@@ -47,18 +52,19 @@ public sealed class ProcessGroupReader(string procRoot = "/proc", long? pageSize
             sums[stat.Group] = new ProcessGroupFigures(
                 (before?.Processes ?? 0) + 1,
                 (before?.ResidentBytes ?? 0) + pages * _pageSize,
-                (before?.CpuTicks ?? 0) + stat.Ticks);
+                (before?.CpuTicks ?? 0) + stat.Ticks,
+                before is null ? stat.Threads : before.Threads + stat.Threads);
         }
 
         return sums;
     }
 
     /// <summary>
-    /// The group (field 5) and utime + stime (fields 14 and 15) of a <c>stat</c> line. The command name
-    /// (field 2) is in parentheses and may hold spaces or parentheses itself, so fields are counted
-    /// from the LAST closing parenthesis.
+    /// The group (field 5), utime + stime (fields 14 and 15) and num_threads (field 20, null when it
+    /// cannot be read) of a <c>stat</c> line. The command name (field 2) is in parentheses and may hold
+    /// spaces or parentheses itself, so fields are counted from the LAST closing parenthesis.
     /// </summary>
-    private static (int Group, long Ticks)? Stat(string entry)
+    private static (int Group, long Ticks, int? Threads)? Stat(string entry)
     {
         var text = ReadText(Path.Combine(entry, "stat"));
         if (text is null) return null;
@@ -67,7 +73,8 @@ public sealed class ProcessGroupReader(string procRoot = "/proc", long? pageSize
         if (close < 0) return null;
 
         // After ")": state(3) ppid(4) pgrp(5) session(6) tty(7) tpgid(8) flags(9) minflt(10)
-        // cminflt(11) majflt(12) cmajflt(13) utime(14) stime(15).
+        // cminflt(11) majflt(12) cmajflt(13) utime(14) stime(15) cutime(16) cstime(17) priority(18)
+        // nice(19) num_threads(20).
         var fields = text[(close + 1)..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (fields.Length < 13) return null;
 
@@ -78,7 +85,12 @@ public sealed class ProcessGroupReader(string procRoot = "/proc", long? pageSize
             return null;
         }
 
-        return (group, utime + stime);
+        int? threads = fields.Length > 17
+            && int.TryParse(fields[17], NumberStyles.Integer, CultureInfo.InvariantCulture, out var count) && count > 0
+                ? count
+                : null;
+
+        return (group, utime + stime, threads);
     }
 
     /// <summary>statm's second field: resident pages.</summary>
@@ -106,8 +118,11 @@ public sealed class ProcessGroupReader(string procRoot = "/proc", long? pageSize
     }
 }
 
-/// <summary>A run's process group: how many processes, their resident memory, and their CPU time in clock ticks.</summary>
-public sealed record ProcessGroupFigures(int Processes, long ResidentBytes, long CpuTicks);
+/// <summary>
+/// A run's process group: how many processes, their resident memory, their CPU time in clock ticks,
+/// and how many threads they run between them (null when not measured).
+/// </summary>
+public sealed record ProcessGroupFigures(int Processes, long ResidentBytes, long CpuTicks, int? Threads);
 
 /// <summary>
 /// Which run leads which process group, so the sampler can name a group's team and member.

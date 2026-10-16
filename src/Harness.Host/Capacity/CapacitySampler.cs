@@ -323,7 +323,8 @@ public sealed class CapacitySampler : BackgroundService, IRunWorkerClient
                         ? (measured.CpuTicks - was) / (double)ticksPerSecond / seconds * 100
                         : null;
 
-                runs.Add(new RunFigures(run.Team, run.Name, measured.Processes, measured.ResidentBytes, cpuPercent, worker.Value));
+                runs.Add(new RunFigures(
+                    run.Team, run.Name, measured.Processes, measured.ResidentBytes, cpuPercent, worker.Value, measured.Threads));
             }
 
             _previous = new Previous(at, figures.CpuUsageUsec, ticks);
@@ -470,6 +471,11 @@ public sealed record MemorySample(
     long? LimitBytes, bool Unlimited, long? CurrentBytes, long? AnonBytes, long? FileBytes, long? ShmemBytes,
     long? InUseBytes, double? PercentOfLimit, PressureFigures? Pressure);
 
+/// <summary>
+/// The cgroup's <c>pids.current</c> against <c>pids.max</c>. Both count TASKS - every process and every
+/// thread - so this is never a count of processes; a run's own processes and threads are on
+/// <see cref="RunFigures"/>.
+/// </summary>
 public sealed record PidsSample(long? Current, long? Limit, bool Unlimited);
 
 /// <param name="Limit"><c>wip.maxRunning</c> in force; 0 is unlimited.</param>
@@ -487,4 +493,7 @@ public sealed record AdmissionSample(int MemoryPercent, int MemoryPressurePercen
 
 /// <param name="CpuPercent">Percent of one CPU since the last sample; null on a run's first.</param>
 /// <param name="Worker">The worker the run is on.</param>
-public sealed record RunFigures(string Team, string Member, int Processes, long ResidentBytes, double? CpuPercent, string? Worker = null);
+/// <param name="Processes">The members of the run's process group.</param>
+/// <param name="Threads">The threads those processes run between them; null when not measured, never 0.</param>
+public sealed record RunFigures(
+    string Team, string Member, int Processes, long ResidentBytes, double? CpuPercent, string? Worker = null, int? Threads = null);

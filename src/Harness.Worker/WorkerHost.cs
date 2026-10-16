@@ -357,7 +357,7 @@ public sealed class WorkerHost
 
                     var owner = byMember.GetValueOrDefault(member) ?? new RunId(member, "");
                     await DeliverLockedAsync(new RunMeasured(
-                        owner, group, measured.Processes, measured.ResidentBytes, measured.CpuTicks, at));
+                        owner, group, measured.Processes, measured.ResidentBytes, measured.CpuTicks, at, measured.Threads));
                 }
 
                 foreach (var (session, group) in terminals)
