@@ -66,7 +66,7 @@ the entry, and everything the page does after that is authorized by a **capabili
 | `GET …/_c/<capability>/_api/data/<collection>/<id>` | The capability. | One document, or 404. |
 | `POST …/_c/<capability>/_api/data/<collection>/<id>` | The capability. | Writes the body (the document's JSON, `text/plain`). |
 | `POST …/_c/<capability>/_api/data/<collection>/<id>/delete` | The capability. | Deletes the document. |
-| `POST …/_c/<capability>/_api/actions/<name>` | The capability. | Appends one `site.action` row. |
+| `POST …/_c/<capability>/_api/actions/<name>` | The capability. | Appends one `site.action` row; 409 with a sentence when the team is archived. |
 | `GET …/_c/<capability>/_api/files/<path>` | The capability. | One file from the site's files folder, as an attachment ([the download route](#the-download-route)). Every other method: 405. |
 | `GET …/_c/<capability>/_api/whoami` | The capability. | `{"displayName": …}`: the part of the person's email before the `@`. Never the email, never a credential. |
 | `GET /sites/_sdk/site.js` | Nobody: it is the same file for everyone and holds nothing. | The helper script. |
@@ -312,6 +312,10 @@ Its instruction can use the fields, for example `Apply for {event.payload} ({eve
 trigger's fire joins the action's workflow. An action widens nothing the team can do: it is an event,
 and what follows is the ordinary trigger path. A plugin's outward-acting settings still need their
 person-only allowlist.
+
+An archived team does no work, so an action on one of its sites is refused with 409 and a sentence
+naming the archiving and Unarchive, and nothing is appended. Its sites stay live: the page and its
+data are still read.
 
 ## For agents: the `site` tool
 

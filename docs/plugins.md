@@ -17,8 +17,8 @@ What a plugin member is **not**:
 
 - It is not an agent. It has no system prompt and runs no model. It holds no platform credential,
   so it has no `HARNESS_KEY` and cannot call MCP tools.
-- It is not a container. It runs as a child process of the Host, as the same non-root `agent` user
-  agents use. There is no Docker or Podman sibling container, and root is never needed.
+- It is not a container. It runs as a child process of the Host's worker, the same place an agent
+  member's CLI runs, as the same non-root `agent` user agents use. There is no Docker or Podman sibling container, and root is never needed.
 - It is not registered in code. A plugin is a directory with a manifest, read at start and on
   rescan. Nothing is compiled in.
 
@@ -511,7 +511,9 @@ folder. `requires` names what it needs from the image, from exactly these: `dotn
 The catalog looks each one up on the Host's `PATH` when it loads and at every rescan, and refuses a
 plugin whose runtime is missing, naming it ("it needs python3, which is not installed on this
 instance"), rather than letting its first run fail. A name outside the list is refused naming the
-name. The install checks the same before it writes.
+name. The install checks the same before it writes. When control and workers run apart, control's
+image carries no runtime, so a runtime is the workers' to have: control does not look it up on its
+own `PATH`, and a run on a worker without it fails at launch.
 
 ## Protocol `harness.member/1`
 
@@ -691,8 +693,8 @@ event. A model member on a short schedule is almost always better as a plugin pl
 
 The trigger's own settings bound what is left (see [triggers.md](triggers.md)):
 
-- **Wake the Manager when a run ends.** A new trigger wakes the Manager only when its run hands back
-  or fails, so a plugin poll that finds nothing wakes nobody, `quiet` or not. Under **Always**,
+- **Wake the Manager when a run ends.** By default a trigger wakes the Manager only when its run
+  hands back or fails, so a plugin poll that finds nothing wakes nobody, `quiet` or not. Under **Always**,
   `quiet` is how a plugin says "nothing happened". Under
   **Never**, not even a failure wakes the Manager; it still shows on the card and in the feed.
 - **Daily token cap.** The billable tokens a trigger's runs, and the Manager runs they woke, may
@@ -712,6 +714,8 @@ minimum.
 | `ok:false` | Failure, in the plugin's own words. |
 | Exit ≠ 0 | Failure: "The plugin exited N." |
 | No progress for `timeoutSeconds` | Failure with class `timeout`. |
+| A required setting, key or connection is missing | Class `needs-person`; the plugin is not started. See [Hiring](#hiring). |
+| The worker running it is lost | Class `worker-lost`. |
 | A person's Stop | Class `interrupted`, marked `stoppedByPerson`. |
 | The Host shutting down | Class `interrupted`. |
 
@@ -726,8 +730,8 @@ slot like any member's.
 - **Secrets are logical keys.** A member stores `{"token": "ACME_STORAGE_KEY"}`, the key only. The
   Host never writes the value in plain text to the database, the manifest or the plugin directory.
   Cloning a team carries the member's configuration and its keys, never a value.
-- **Setting a secret.** A person sets a key's value from the screen: the Add member dialog and the
-  member's settings show a write-only field per secret, with Set, Replace and Clear. The value is
+- **Setting a secret.** A person sets a key's value from the screen: Add member, the member's
+  settings and the solution install wizard show a write-only value field per secret key. The value is
   stored in `plugin_secrets` (schema step `auth-025`) only as Data Protection ciphertext under
   `<dataRoot>/keys`, and the member's next run reads it, with no
   restart. The operator CLI is the second way: `yawble secret set NAME`, then `yawble up`, puts it in
@@ -835,11 +839,13 @@ Add member and Member settings both say under each secret's key whether the Host
 the CLI set - or, when not, the ways to set it, the screen first and the CLI second. This comes from
 `GET /api/secrets/{key}` (`{ key, set, refusal, setWith, setBy, setAt, source }`, a person's; asked
 by name, the value is never read into an answer). Under it is the key's write-only value field: a
-password box that starts empty, with **Set** (**Replace** once the key is set) and, for a key set
-from the screen, **Clear**. Set and Replace send the value with `PUT /api/secrets/{key}`, Clear
-sends `DELETE`; the box is emptied as the write is sent, and the Host's answer is what the form then
-says. A key name the Host refuses offers no field. Setting a key is not a settings change: nothing
-else is saved.
+password box with no button of its own. It starts empty, and shows masked dots saying the value is
+saved and never shown once the key is set. For a key set from the screen there is **Clear**, which
+holds the key for clearing until **Keep** takes it back. What is typed or cleared is written when
+the person presses the form's own button (Add member, Save, Install or Update): typed values go
+with `PUT /api/secrets/{key}` and cleared keys with `DELETE`, before the hire or the settings save.
+A refusal names the key and stops the save. The box is emptied as the write is sent, and the Host's
+answer is what the form then says. A key name the Host refuses offers no field.
 
 - `GET /api/teams/{team}/members/{member}/plugin-settings` answers `plugin`, `version`, the stored
   `config`, `secrets` as logical keys (never a value), the manifest's `fields` and `secretFields`,
@@ -915,7 +921,8 @@ A plugin publishes with a `publish` record:
 ### Monitor hints
 
 An event in `events.publishes` may carry a `monitor` object, so the Monitor draws what the plugin
-did to the outside system as a resource on the team's map.
+did to the outside system as a resource beside the plugin member, with its label, for as long as
+the Monitor's settings say.
 
 ```json
 { "type": "file.written", "summary": "A file was written outside the platform.", "highVolume": true,
@@ -935,14 +942,14 @@ When to declare one:
 
 | Key | Status | Rule |
 |---|---|---|
-| `icon` | required | A Material Symbols Outlined name (`database`, `mail`, `dns`, `deployed_code`), as the `@quasar/extras` list spells it. |
-| `iconBy` | optional | A declared `string` field of the event; its value picks the icon for each publish. |
+| `icon` | required | A Material Symbols Outlined name (`database`, `mail`, `dns`, `deployed_code`), as the `@quasar/extras` list spells it. It is drawn when `iconBy` has no icon for the publish's value. |
+| `iconBy` | optional | `{ "field": "<declared string field>", "icons": { "<value>": "<icon>" } }`: the field's value in each publish picks its icon from `icons`, each a Material Symbols name. |
 | `action` | one of these two | `created`, `changed` or `deleted`: what every publish of the event did. |
 | `actionField` | one of these two | A declared `string` field of the event holding `created`, `changed` or `deleted`. |
 | `label` | optional | Text with `{field}` placeholders over declared `string` or `number` fields, at most 120 characters as written. |
 
 An unknown key inside `monitor` is ignored and named `events.publishes.<type>.monitor.<key>`. The
-Host refuses a bad icon, both or neither of `action` and `actionField`, a bad action, a field that is
+Host refuses a bad icon (in `icon` or in `iconBy.icons`), an `iconBy` that is not such an object, both or neither of `action` and `actionField`, a bad action, a field that is
 not a declared string, a placeholder that is not a declared string or number, and a label over the
 limit, each sentence naming the event type and the field. A Host that does not read `monitor`
 ignores the key, so a manifest that carries one still loads there.
@@ -973,7 +980,20 @@ A person hires a plugin through `POST /api/teams/{team}/containers` with `agent:
   the operator's env file outside the container. A person's binding is a deliberate choice for this
   team. A Manager cannot grow the set, and firing the last member that bound a key removes the key
   from it. Pinned by `PluginManagerHiringTests.A_manager_binds_only_keys_a_person_has_bound_on_its_team`.
+- **Connections** follow the same rule: an agent's hire may name only a connection a person has
+  already bound on a member of the same team.
+- **Person-only settings.** A `config` field marked `"setBy": "person"` may be left at its default
+  by an agent's hire and nothing else (see [the house rule](#plugins-that-act-outward-the-house-rule)).
 - Its own team only: the route's `{team}` is checked against the Manager's credential.
+- **A member an agent could not finish setting up waits for a person.** An agent's hire (a
+  Manager's or a Concierge's) may leave a required secret or a required connection slot unbound.
+  The member is made, and the hire's answer carries `waitingForPerson` (each thing to set, in
+  words) and `waitingNotice`. A person's own hire is still refused an unbound required key. Until a
+  person sets what is missing, each run of the member fails with the class `needs-person` without
+  starting the plugin: it is never resumed automatically and never counted as the plugin's fault.
+  When a person's save leaves nothing missing (the member's settings, or a key's value from the
+  screen), the Manager is told once, in every open workflow whose run of that member last failed
+  that way, to send the instruction again. Pinned by `PluginNeedsPersonTests`.
 
 Pinned by `PluginManagerHiringTests`.
 
