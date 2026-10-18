@@ -74,6 +74,9 @@ public sealed record TeamDeleted(
     /// <summary>How many of the team's recorded file changes (<see cref="WorkspaceFileChangeStore"/>)
     /// went with it.</summary>
     public int FileChanges { get; init; }
+
+    /// <summary>How many of the team's recorded agent steps (<see cref="AgentStepStore"/>) went with it.</summary>
+    public int RunSteps { get; init; }
 }
 
 /// <summary>What a team deletion is about to remove, for the <c>team.deleting</c> row written before
@@ -172,7 +175,8 @@ public sealed class TeamDeletion(
     IWakeStore? wakes = null,
     string? agentHome = null,
     IReadOnlyList<string>? sessionFolders = null,
-    WorkspaceFileChangeStore? fileChanges = null)
+    WorkspaceFileChangeStore? fileChanges = null,
+    AgentStepStore? runSteps = null)
 {
     private readonly FolderRemoval _removal = removal ?? new FolderRemoval();
 
@@ -315,6 +319,20 @@ public sealed class TeamDeletion(
             }
         }
 
+        // ITS RECORDED AGENT STEPS TOO, counted the same way.
+        var removedRunSteps = 0;
+        if (runSteps is not null)
+        {
+            try
+            {
+                removedRunSteps = await runSteps.DeleteForTeamAsync(stored, ct);
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"agent steps: {ex.Message}");
+            }
+        }
+
         // The team's sites, their files and their data, one tenant row per site, in one
         // transaction. Keyed by the stored spelling, so a same-name successor starts with none.
         if (sites is not null)
@@ -442,6 +460,7 @@ public sealed class TeamDeletion(
             SessionFolders = sessionFoldersRemoved,
             SessionFoldersRemaining = sessionFoldersLeft,
             FileChanges = removedFileChanges,
+            RunSteps = removedRunSteps,
         };
     }
 

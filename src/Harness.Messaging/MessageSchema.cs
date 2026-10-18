@@ -119,9 +119,36 @@ public static class MessageSchema
             CREATE INDEX ix_file_changes_at ON file_changes(at, id);
             CREATE INDEX ix_file_changes_member ON file_changes(team, member);
             """),
+
+        // WHAT A RUNNING AGENT DID, one row per step its transcript shows (a tool call, a result,
+        // something it said, a user line, a note), for the Monitor. Kind, tool name and time only:
+        // never a command, path, argument, result, prose, user line or note body. `delivery` is the
+        // run's first delivery; its terminal row is found by causation, which the index makes one
+        // look-up. `count` is the steps over the per-second cap folded into this one. Pruned with
+        // the log (IMessageLog.DeleteAsync), removed with the team and by Delete memory.
+        new MigrationStep(
+            "messages-005",
+            """
+            CREATE TABLE run_steps (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                team         TEXT    NOT NULL COLLATE NOCASE,
+                member       TEXT    NOT NULL COLLATE NOCASE,
+                delivery     INTEGER NOT NULL,
+                workflow     INTEGER NULL,
+                at           TEXT    NOT NULL,
+                kind         TEXT    NOT NULL,
+                label        TEXT    NOT NULL,
+                mcp_tool     TEXT    NULL,
+                count        INTEGER NOT NULL
+            );
+
+            CREATE INDEX ix_run_steps_at ON run_steps(at, id);
+            CREATE INDEX ix_run_steps_member ON run_steps(team, member);
+            CREATE INDEX ix_messages_causation ON messages(causation_seq);
+            """),
     ];
 
-    /// <summary>How <c>file_changes.at</c> spells an instant: round-trip UTC text of one width, so
+    /// <summary>How <c>file_changes.at</c> and <c>run_steps.at</c> spell an instant: round-trip UTC text of one width, so
     /// comparing the text compares the time.</summary>
     public static string FileChangeInstant(DateTimeOffset at) =>
         at.UtcDateTime.ToString("o", System.Globalization.CultureInfo.InvariantCulture);

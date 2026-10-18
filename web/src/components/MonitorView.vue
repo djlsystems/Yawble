@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import FieldHelp from './FieldHelp.vue'
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
-import { getFileChanges, getMessages, listEvents } from '../api/client'
+import { getFileChanges, getMessages, getRunSteps, listEvents } from '../api/client'
 import type { Message, MonitorHint } from '../api/types'
 import { useConsoleStore } from '../stores/console'
 import { useAppearanceStore } from '../stores/appearance'
@@ -46,6 +46,17 @@ import {
   type WorkspacePush,
 } from '../lib/monitor/workspace'
 import {
+  MaxRecordedSteps,
+  readRecordedSteps,
+  readStepSettings,
+  stepTime,
+  writeStepSettings,
+  type AgentStep,
+  type RecordedSteps,
+  type StepSettings,
+  type StepsPush,
+} from '../lib/monitor/steps'
+import {
   LayoutDefaults,
   LayoutFields,
   LayoutMax,
@@ -78,6 +89,11 @@ import {
  * The Host records them during every run, so a replay reads its period's (`GET /api/file-changes`)
  * and plays each at its time beside the rows, drawn and listed as it was live. It reads at most
  * `MaxRecordedChanges`, and when it stops short the replay bar says after what time none are shown.
+ *
+ * Each `agentSteps` push, heard on the same watch, draws each of a member's steps as a small icon
+ * rising off its node (`lib/monitor/steps.ts`), and nothing in the activity list. A replay reads its
+ * period's (`GET /api/run-steps`) at most `MaxRecordedSteps`, says after what time none are shown when
+ * it stops short, and plays each at its time. Show agent steps off, neither is drawn.
  */
 
 const board = useConsoleStore()
@@ -186,6 +202,16 @@ function setFilesDepth(depth: FileDepth) {
   applyFileChanges({ ...fileChanges.value, depth })
 }
 
+/** Show agent steps: remembered per browser like Show file changes; off, no step icon live or in a replay. */
+const agentSteps = ref<StepSettings>(readStepSettings())
+
+function setStepsShow(show: boolean) {
+  agentSteps.value = { show }
+  model.stepSettings = { show }
+  scene?.setAgentSteps(show)
+  writeStepSettings({ show })
+}
+
 /** The layout forces: multipliers a person tunes in the settings, remembered per browser. */
 const layout = ref<LayoutSettings>(readLayout())
 function setLayoutValue(key: LayoutKey, value: number | null) {
@@ -208,6 +234,7 @@ function newModel(only: Set<string> | null, replaying = false): MonitorModel {
   made.hints = hints.value
   made.settings = { ...changes.value, off: [...changes.value.off] }
   made.fileSettings = { ...fileChanges.value }
+  made.stepSettings = { ...agentSteps.value }
   made.replay = replaying
   return made
 }
@@ -217,6 +244,7 @@ let pushLines: TickerEntry[] = []
 /** Pushes heard before the log is read, applied once it is. */
 let pendingPushes: WorkspacePush[] = []
 let stopWatching: (() => void) | null = null
+let stopHearingSteps: (() => void) | null = null
 
 /** One file-changes push: drawn and listed live; a replay plays the recorded ones instead. */
 function onPush(push: WorkspacePush) {
@@ -228,6 +256,13 @@ function onPush(push: WorkspacePush) {
   const effects = model.applyWorkspace(push)
   pushLines = model.ticker.filter((entry) => entry.workspace === true)
   dirty = true
+  if (effects.length > 0) scene?.play(effects)
+}
+
+/** One member's agent steps: drawn live; a replay plays the recorded ones instead, and none are kept for later. */
+function onSteps(push: StepsPush) {
+  if (loading.value || mode.value !== 'live') return
+  const effects = model.applySteps(push.steps)
   if (effects.length > 0) scene?.play(effects)
 }
 
@@ -341,8 +376,11 @@ function timeWords(ms: number): string {
   return ms > 0 ? localTime(ms) : ''
 }
 
-/** Apply rows, and the recorded file changes beside them in time order, playing their effects unless `quiet`. */
-function feed(rows: readonly Message[], quiet: boolean, changes: readonly WorkspacePush[] = []) {
+/**
+ * Apply rows, and the recorded file changes beside them in time order, playing their effects unless
+ * `quiet`. Agent steps only ever play: a step that is over leaves nothing behind to apply.
+ */
+function feed(rows: readonly Message[], quiet: boolean, changes: readonly WorkspacePush[] = [], steps: readonly AgentStep[] = []) {
   const effects: MonitorEffect[] = []
   let next = 0
   const changesUntil = (at: number) => {
@@ -358,6 +396,7 @@ function feed(rows: readonly Message[], quiet: boolean, changes: readonly Worksp
     if (!quiet) effects.push(...made)
   }
   changesUntil(Number.POSITIVE_INFINITY)
+  if (!quiet) effects.push(...model.applySteps(steps))
   if (rows.length > 0 || changes.length > 0) dirty = true
   if (!quiet && effects.length > 0) scene?.play(effects)
 }
@@ -384,7 +423,7 @@ function tick(now: number) {
 
   if (mode.value === 'replay' && replay) {
     const due = replay.step(dt)
-    feed(due.rows, false, due.changes)
+    feed(due.rows, false, due.changes, due.steps)
     clockAt.value = replay.at
     if (replay.done && !finished.value) finished.value = true
   }
@@ -439,6 +478,28 @@ function recordedChanges(rows: readonly Message[]): Promise<RecordedChanges> {
   return recorded.changes
 }
 
+/** The agent steps of the period last read, kept as the file changes are. */
+let recordedStepsRead: { key: string; steps: Promise<RecordedSteps> } | null = null
+/** The time of the last recorded step a replay read when it stopped short; null when nothing is cut off. */
+const stepsCutAfter = ref<number | null>(null)
+
+/**
+ * The members' agent steps recorded over the rows held, oldest first, every page of them; none read
+ * with Show agent steps off. A read that fails leaves the replay without steps and nothing else.
+ */
+function recordedSteps(rows: readonly Message[]): Promise<RecordedSteps> {
+  if (!agentSteps.value.show) return Promise.resolve({ steps: [], cut: false })
+  const period = { from: rows[0]!.occurredAt, to: rows[rows.length - 1]!.occurredAt }
+  const key = `${period.from}|${period.to}`
+  if (recordedStepsRead?.key !== key) {
+    const steps = readRecordedSteps((after, take) => getRunSteps(period, after, take)).catch(
+      (): RecordedSteps => ({ steps: [], cut: false }),
+    )
+    recordedStepsRead = { key, steps }
+  }
+  return recordedStepsRead.steps
+}
+
 /**
  * Replay from `from` (log time, ms): the rows and recorded file changes before it are applied
  * silently, then both are played, each at its time.
@@ -455,16 +516,19 @@ async function startReplay(from?: number) {
   // What live drew goes; the replay draws its own period's file changes.
   scene?.clearFileChanges()
   cutAfter.value = null
-  const { changes, cut } = await recordedChanges(rows)
+  stepsCutAfter.value = null
+  const [{ changes, cut }, recordedRun] = await Promise.all([recordedChanges(rows), recordedSteps(rows)])
   if (current !== replaying || unmounted) return
   cutAfter.value = cut ? (changes.length > 0 ? (pushTime(changes[changes.length - 1]!) ?? 0) : timeOf(rows[0]!)) : null
+  const steps = recordedRun.steps
+  stepsCutAfter.value = recordedRun.cut ? (steps.length > 0 ? stepTime(steps[steps.length - 1]!) : timeOf(rows[0]!)) : null
   const start = from ?? timeOf(rows[0]!)
   feed(
     rows.filter((row) => timeOf(row) < start),
     true,
     changes.filter((change) => (pushTime(change) ?? 0) < start),
   )
-  replay = new ReplayClock(rows, speed.value, 20_000, start, changes)
+  replay = new ReplayClock(rows, speed.value, 20_000, start, changes, steps)
   tokensShown.value = model.tokens
   dirty = true
   publish(performance.now())
@@ -580,6 +644,7 @@ onMounted(async () => {
     })
     scene.setAutoFit(!keepView.value)
     scene.setFileChanges(fileChanges.value)
+    scene.setAgentSteps(agentSteps.value.show)
     scene.setLayout(layout.value)
     measure()
     scene.start()
@@ -594,6 +659,7 @@ onMounted(async () => {
   followBoard()
   // Joined while the Monitor is open, left when it closes.
   stopWatching = fileWatch.listen(onPush)
+  stopHearingSteps = fileWatch.listenSteps(onSteps)
   void loadMonitorSymbols().then((codepoints) => {
     // A font that does not load leaves the dots; nothing is wrong with the events.
     if (!codepoints || unmounted) return
@@ -623,6 +689,8 @@ onUnmounted(() => {
   unmounted = true
   stopWatching?.()
   stopWatching = null
+  stopHearingSteps?.()
+  stopHearingSteps = null
   if (frame !== 0) cancelAnimationFrame(frame)
   unsubscribe?.()
   resizeObserver?.disconnect()
@@ -659,6 +727,10 @@ onUnmounted(() => {
           <div v-if="mode === 'replay' && cutAfter !== null" class="monitor-replay-cut" data-monitor-cut>
             File changes after {{ localTime(cutAfter) }} are not shown: this replay reads at most
             {{ MaxRecordedChanges.toLocaleString('en-US') }}.
+          </div>
+          <div v-if="mode === 'replay' && stepsCutAfter !== null" class="monitor-replay-cut" data-monitor-steps-cut>
+            Agent steps after {{ localTime(stepsCutAfter) }} are not shown: this replay reads at most
+            {{ MaxRecordedSteps.toLocaleString('en-US') }}.
           </div>
           <div class="monitor-stats">
             <div class="monitor-stat" data-stat="running">
@@ -752,7 +824,7 @@ onUnmounted(() => {
               data-monitor-settings
               @click="settingsOpen = !settingsOpen"
             >
-              <q-tooltip v-if="!settingsOpen">Settings: what plugins' changes and file changes show, and for how long</q-tooltip>
+              <q-tooltip v-if="!settingsOpen">Settings: what plugins' changes, file changes and agent steps show, and for how long</q-tooltip>
             </q-btn>
             <div
               v-if="settingsOpen"
@@ -827,6 +899,16 @@ onUnmounted(() => {
                 />
               </div>
               <div class="monitor-settings-none">Each shows for the time above.</div>
+              <div class="monitor-settings-head">Agents</div>
+              <q-toggle
+                :model-value="agentSteps.show"
+                dense
+                dark
+                label="Show agent steps"
+                data-monitor-setting="steps"
+                @update:model-value="setStepsShow"
+              />
+              <div class="monitor-settings-none">Each tool call, note and reply as a small icon rising off its member.</div>
               <div class="monitor-settings-head">Layout</div>
               <div
                 v-for="field in LayoutFields"

@@ -59,7 +59,7 @@ const lines = ref<LiveLine[]>([]);
 const showNotes = ref(false);
 
 /** What is shown: every line, or every line but the attachments. */
-const visible = (all: LiveLine[]) => (showNotes.value ? all : all.filter((line) => line.kind !== 'aside'));
+const visible = (all: LiveLine[]) => (showNotes.value ? all : all.filter((line) => line.kind !== 'note'));
 const shown = computed(() => visible(lines.value));
 const phase = ref<Phase>('idle');
 const reason = ref('');
@@ -567,12 +567,12 @@ onBeforeUnmount(end);
   background: var(--os-tint-warn);
 }
 
-.live-view-line[data-kind='aside'] .live-view-label {
+.live-view-line[data-kind='note'] .live-view-label {
   background: transparent;
   border: 1px solid var(--os-rule-strong);
 }
 
-.live-view-line[data-kind='aside'] .live-view-text {
+.live-view-line[data-kind='note'] .live-view-text {
   color: var(--os-ink-faint);
 }
 
