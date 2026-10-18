@@ -391,6 +391,9 @@ builder.Services.AddSingleton<IWakeStore>(new SqliteWakeStore(database));
 // WHAT RUNNING MEMBERS' WORKTREES DID, recorded for the Monitor's replay. See WorkspaceFileChangeStore.
 builder.Services.AddSingleton(new WorkspaceFileChangeStore(database));
 
+// WHAT RUNNING AGENTS DID, step by step, recorded for the Monitor. See AgentStepStore.
+builder.Services.AddSingleton(new AgentStepStore(database));
+
 // Order carries no schema obligation - SchemaMigrator above has already applied every step
 // and set journal_mode on the file. These are readers and writers over a database that exists.
 var users = new SqliteUserStore(database);
@@ -1427,7 +1430,8 @@ builder.Services.AddSingleton(sp => new TeamDeletion(
     sp.GetRequiredService<TeamSkills>(),
     sp.GetRequiredService<ITeamSolutionStore>(),
     wakes: sp.GetRequiredService<IWakeStore>(),
-    fileChanges: sp.GetRequiredService<WorkspaceFileChangeStore>()));
+    fileChanges: sp.GetRequiredService<WorkspaceFileChangeStore>(),
+    runSteps: sp.GetRequiredService<AgentStepStore>()));
 
 // By hand for the reason TeamDeletion is: every dependency here is one a reset would silently skip
 // if it were optional. A TeamReset missing its pending-delivery store cannot tell a member that has
@@ -1442,7 +1446,8 @@ builder.Services.AddSingleton(sp => new TeamReset(
     sp.GetRequiredService<TeamPaths>(),
     sp.GetRequiredService<FolderRemoval>(),
     sp.GetRequiredService<RepositoryReset>(),
-    sp.GetRequiredService<WorkspaceFileChangeStore>()));
+    sp.GetRequiredService<WorkspaceFileChangeStore>(),
+    sp.GetRequiredService<AgentStepStore>()));
 
 // Reset repositories: trees through the one WorktreeRemoval, git through the one GitRunner (as the
 // agent, and into a local origin as the Host), kept branches named on the log.
@@ -1816,6 +1821,23 @@ builder.Services.AddSingleton(sp => new WorkspaceFileWatch(
     logger: sp.GetRequiredService<ILogger<WorkspaceFileWatch>>()));
 builder.Services.AddHostedService<WorkspaceFileWatchService>();
 
+// WHAT EVERY AGENT RUN DID, step by step: its transcript followed on its worker from the run's start
+// to its end whether or not anybody watches, each step recorded (kind, tool name, time) and pushed
+// only to the people watching, as workspaceChanged is. Off every run's path. See AgentStepFollow.
+builder.Services.AddSingleton(sp => new AgentStepFollow(
+    sp.GetRequiredService<LiveRuns>(),
+    member => sp.GetRequiredService<ContainerHost>().Find(member) is { CurrentCausation: { } delivery } runtime
+        ? new AgentStepRun(delivery, runtime.Snapshot().CurrentCorrelation)
+        : null,
+    member => LiveViewEndpoints.Locate(sp.GetRequiredService<RunDirectory>(), WorkersOf(sp), member, out var placed) is { } why
+        ? (null, why)
+        : (placed, null),
+    sp.GetRequiredService<WorkerStreams>(),
+    sp.GetRequiredService<AgentStepStore>(),
+    (push, ct) => sp.GetRequiredService<IHubContext<ContainerHub>>()
+        .Clients.Group(WorkspaceFileWatch.Group).SendAsync(AgentStepFollow.Message, push, ct),
+    logger: sp.GetRequiredService<ILogger<AgentStepFollow>>()));
+
 // THE PER-RUN FOREIGN TOOLS CHECK, called by every member at the end of its run (`onTerminal`
 // above). What a preset allows is the catalog's isolation model (AgentCatalog.Allowance); a preset
 // that declares no allowed tools is not verified, and its runs are never reported clean. See
@@ -1896,6 +1918,8 @@ builder.Services.AddMcpServer()
 var app = builder.Build();
 app.Lifetime.ApplicationStopped.Register(pluginEvents.Dispose);
 admissionHoldWriter.Logger = app.Services.GetRequiredService<ILogger<AdmissionHoldWriter>>();
+// Made now, not on first use: it follows every run from the first one on.
+app.Services.GetRequiredService<AgentStepFollow>();
 
 {
     var runAs = app.Services.GetRequiredService<AgentLaunchUser>();
@@ -2468,6 +2492,7 @@ TeamActivity.Map(app);
 TeamTokenRuns.Map(app);
 TeamActivityFrom.Map(app);
 WorkspaceFileChangeEndpoints.Map(app);
+AgentStepEndpoints.Map(app);
 OutcomeEndpoints.Map(app);
 HealthEndpoints.Map(app, database, dataRoot);
 VersionEndpoints.Map(app);
@@ -3675,8 +3700,9 @@ app.MapDelete("/api/teams/{team}", async (
             sessionFolders = removed.SessionFolders,
             sessionFoldersRemaining = removed.SessionFoldersRemaining,
 
-            // Its recorded file changes, which went with it.
+            // Its recorded file changes and agent steps, which went with it.
             fileChanges = removed.FileChanges,
+            runSteps = removed.RunSteps,
         },
         ct);
 
@@ -3726,7 +3752,7 @@ app.MapDelete("/api/teams/{team}", async (
         + "**The message log is not touched.** It is append-only, and a team's messages are the "
         + "history of what happened rather than a property of the team; deleting them would take "
         + "other teams' causally-linked messages with them. Its recorded file changes (the Monitor's "
-        + "replay of its worktrees) are removed, counted in `fileChanges` on the response and the "
+        + "replay of its worktrees) and agent steps are removed, counted in `fileChanges` and `runSteps` on the response and the "
         + "`team.deleted` row.\n\n"
         + "**A `team.deleting` row is written to the tenant log BEFORE anything is removed** (after the "
         + "confirmation refusal), naming the containers and root. When it cannot be written the delete "
@@ -3824,8 +3850,9 @@ app.MapPost("/api/teams/{team}/reset", async (
             purged = done.Purged,
             retained = done.Retained,
 
-            // The ticked members' recorded file changes Delete memory removed.
+            // The ticked members' recorded file changes and agent steps Delete memory removed.
             fileChanges = done.FileChanges,
+            runSteps = done.RunSteps,
             cleared = done.Cleared,
             failures = done.Failures,
             remaining = done.Remaining,

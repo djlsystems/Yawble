@@ -530,11 +530,11 @@ public sealed class LiveViewRouteTests(CrossTeamFixture host) : IClassFixture<Cr
 
             using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(Ct));
             // Each line is `<when, UTC>` TAB `<line>`; a line whose event names no time has an empty one.
-            Assert.Equal("2026-09-26T13:34:41.454Z\tUser: Do the card.", await reader.ReadLineAsync(Ct));
-            Assert.Equal("2026-09-26T13:34:42.500Z\tRead README.md", await reader.ReadLineAsync(Ct));
+            Assert.Equal("2026-09-26T13:34:41.454Z\tuser\tUser: Do the card.", await reader.ReadLineAsync(Ct));
+            Assert.Equal("2026-09-26T13:34:42.500Z\ttool\tRead README.md", await reader.ReadLineAsync(Ct));
 
             await File.AppendAllTextAsync(transcript, "garbage\n", Ct);
-            Assert.Equal("\tgarbage", await reader.ReadLineAsync(Ct));
+            Assert.Equal("\traw\tgarbage", await reader.ReadLineAsync(Ct));
 
             run.Dispose();
             Assert.Equal("", await reader.ReadToEndAsync(Ct).WaitAsync(TimeSpan.FromSeconds(10), Ct));

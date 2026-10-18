@@ -436,9 +436,9 @@ public interface IMessageLog
     /// enforcement rests on the native library's compile default rather than on anything this
     /// codebase does.
     ///
-    /// In the same transaction it removes every recorded file change (<c>file_changes</c>) older
-    /// than the oldest message it keeps, so a replay never shows a file change without the run it
-    /// belonged to. Nothing else prunes them.
+    /// In the same transaction it removes every recorded file change (<c>file_changes</c>) and
+    /// every recorded agent step (<c>run_steps</c>) older than the oldest message it keeps, so a
+    /// replay never shows either without the run it belonged to. Nothing else prunes them.
     /// </summary>
     Task<PurgeReport> DeleteAsync(
         IReadOnlyCollection<long> seqs, CancellationToken ct = default);
@@ -457,10 +457,11 @@ public interface IMessageLog
 /// can report. "Cited by other teams" would be a guess, and a wrong one: the citers can be a
 /// DELETED MEMBER of the same team, or the Concierge, on a tenant holding one team.
 ///
-/// <paramref name="FileChanges"/> is how many recorded file changes went with the rows: every one
-/// older than the oldest message kept.
+/// <paramref name="FileChanges"/> is how many recorded file changes went with the rows, and
+/// <paramref name="RunSteps"/> how many recorded agent steps: every one older than the oldest
+/// message kept.
 /// </summary>
-public readonly record struct PurgeReport(int Purged, int Retained, int FileChanges = 0);
+public readonly record struct PurgeReport(int Purged, int Retained, int FileChanges = 0, int RunSteps = 0);
 
 /// <summary>
 /// Where each subscriber has read up to.

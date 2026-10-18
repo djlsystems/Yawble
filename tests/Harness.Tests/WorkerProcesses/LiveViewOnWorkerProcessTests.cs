@@ -43,8 +43,8 @@ public sealed class LiveViewOnWorkerProcessTests
         {
             Assert.Equal(HttpStatusCode.OK, watching.StatusCode);
             using var lines = new StreamReader(await watching.Content.ReadAsStreamAsync(Ct));
-            Assert.Equal("\tUser: tick 1", await lines.ReadLineAsync(Ct).AsTask().WaitAsync(ProcessBed.Bound, Ct));
-            Assert.Equal("\tUser: tick 2", await lines.ReadLineAsync(Ct).AsTask().WaitAsync(ProcessBed.Bound, Ct));
+            Assert.Equal("\tuser\tUser: tick 1", await lines.ReadLineAsync(Ct).AsTask().WaitAsync(ProcessBed.Bound, Ct));
+            Assert.Equal("\tuser\tUser: tick 2", await lines.ReadLineAsync(Ct).AsTask().WaitAsync(ProcessBed.Bound, Ct));
 
             ProcessBed.Signal(w1, "STOP");
             try
@@ -86,7 +86,7 @@ public sealed class LiveViewOnWorkerProcessTests
         {
             Assert.Equal(HttpStatusCode.OK, again.StatusCode);
             using var lines = new StreamReader(await again.Content.ReadAsStreamAsync(Ct));
-            Assert.Equal("\tUser: tick 1", await lines.ReadLineAsync(Ct).AsTask().WaitAsync(ProcessBed.Bound, Ct));
+            Assert.Equal("\tuser\tUser: tick 1", await lines.ReadLineAsync(Ct).AsTask().WaitAsync(ProcessBed.Bound, Ct));
         }
 
         bed.Go("BlockLive");
