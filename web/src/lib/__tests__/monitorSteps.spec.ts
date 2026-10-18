@@ -249,7 +249,7 @@ describe('the model and a step', () => {
 
 describe('the recorded steps, for a replay', () => {
   it('reads every page, oldest first, until the route says there are no more', async () => {
-    const pages = vi.fn((after: number) =>
+    const pages = vi.fn((after: number, _take: number) =>
       Promise.resolve(after === 0 ? { steps: [step({ at: at(1) }), 'junk'], next: 30 } : { steps: [step({ at: at(2) })], next: null }),
     )
 
@@ -314,7 +314,7 @@ describe('Show agent steps', () => {
 describe('the live steps', () => {
   it('join the file watch while anyone hears them, reach each listener, and leave when the last goes', async () => {
     const watch = new FileWatch()
-    const invoke = vi.fn(() => Promise.resolve())
+    const invoke = vi.fn((_method: string) => Promise.resolve())
     watch.attach({ invoke })
     const heard: string[] = []
 
