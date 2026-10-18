@@ -14,12 +14,19 @@ namespace Harness.Host;
 public static class TranscriptLines
 {
     /// <summary>The display lines for one raw transcript line in <paramref name="format"/>.</summary>
-    public static IReadOnlyList<string> Render(string format, string raw) => format switch
+    public static IReadOnlyList<string> Render(string format, string raw) => [.. Lines(format, raw).Select(line => line.Text)];
+
+    /// <summary>
+    /// The display lines for one raw transcript line in <paramref name="format"/>, each with the kind
+    /// of step it is: the one classification the live view, a finished run's transcript and the
+    /// recorded steps all read.
+    /// </summary>
+    public static IReadOnlyList<LiveLine> Lines(string format, string raw) => format switch
     {
-        LiveView.GrokUpdates => GrokUpdateLines.Render(raw),
-        LiveView.CopilotEvents => CopilotEventLines.Render(raw),
-        LiveView.CodexRollout => CodexRolloutLines.Render(raw),
-        _ => ClaudeTranscriptLines.Render(raw),
+        LiveView.GrokUpdates => GrokUpdateLines.Lines(raw),
+        LiveView.CopilotEvents => CopilotEventLines.Lines(raw),
+        LiveView.CodexRollout => CodexRolloutLines.Lines(raw),
+        _ => ClaudeTranscriptLines.Lines(raw),
     };
 
     /// <summary>When the event happened, or null when the line names no time this format reads.</summary>
@@ -29,21 +36,27 @@ public static class TranscriptLines
         _ => ClaudeTranscriptLines.Timestamp(raw),
     };
 
-    /// <summary>Every display line of one raw line, as the routes send it: <c>&lt;when&gt;</c> TAB <c>&lt;line&gt;</c> NEWLINE.</summary>
+    /// <summary>
+    /// Every display line of one raw line, as the routes send it: <c>&lt;when&gt;</c> TAB
+    /// <c>&lt;kind&gt;</c> TAB <c>&lt;line&gt;</c> NEWLINE, the kind one of <see cref="LiveLineKinds"/>.
+    /// </summary>
     public static string Wire(string format, string raw)
     {
-        var lines = Render(format, raw);
+        var lines = Lines(format, raw);
         if (lines.Count == 0) return "";
 
         var at = LiveView.When(Timestamp(format, raw));
-        return string.Concat(lines.Select(line => $"{at}\t{line}\n"));
+        return string.Concat(lines.Select(line => WireLine(at, line.Kind, line.Text)));
     }
+
+    /// <summary>One line as the routes send it.</summary>
+    public static string WireLine(string at, string kind, string text) => $"{at}\t{kind}\t{text}\n";
 
     /// <summary>
     /// Parses <paramref name="raw"/> and hands its root object to <paramref name="render"/>; null
     /// from it, a line that is not a JSON object, or one that does not parse, is the raw line.
     /// </summary>
-    internal static IReadOnlyList<string> Parse(string raw, Func<JsonElement, IReadOnlyList<string>?> render)
+    internal static IReadOnlyList<LiveLine> Parse(string raw, Func<JsonElement, IReadOnlyList<LiveLine>?> render)
     {
         raw = raw.TrimEnd('\r');
         if (string.IsNullOrWhiteSpace(raw)) return [];
@@ -52,26 +65,35 @@ public static class TranscriptLines
         {
             using var document = JsonDocument.Parse(raw);
             return (document.RootElement.ValueKind == JsonValueKind.Object ? render(document.RootElement) : null)
-                ?? [ClaudeTranscriptLines.Clip(raw)];
+                ?? [LiveLine.Raw(ClaudeTranscriptLines.Clip(raw))];
         }
         catch (JsonException)
         {
-            return [ClaudeTranscriptLines.Clip(raw)];
+            return [LiveLine.Raw(ClaudeTranscriptLines.Clip(raw))];
         }
     }
 
     internal static JsonElement Property(JsonElement element, string name) => Harness.Contracts.JsonFields.Property(element, name);
 
     /// <summary>A tool line in the shape Claude's are: <c>&lt;name&gt;: &lt;short input&gt;</c>, or the name alone.</summary>
-    internal static string Tool(string name, JsonElement input)
+    internal static LiveLine Tool(string name, JsonElement input)
     {
         var shortInput = ClaudeTranscriptLines.ShortInput(input);
-        return ClaudeTranscriptLines.Clip(string.IsNullOrEmpty(shortInput) ? name : $"{name}: {shortInput}");
+        return LiveLine.ToolCall(name, ClaudeTranscriptLines.Clip(string.IsNullOrEmpty(shortInput) ? name : $"{name}: {shortInput}"));
     }
 
-    internal static string Text(string text) => ClaudeTranscriptLines.Clip(text);
+    /// <summary>A <c>Read &lt;path&gt;</c> line.</summary>
+    internal static LiveLine Read(string? path) => LiveLine.ToolCall("Read", ClaudeTranscriptLines.Clip("Read " + (path ?? "")));
 
-    internal static string User(string text) => ClaudeTranscriptLines.Clip("User: " + ClaudeTranscriptLines.FirstLine(text));
+    /// <summary>A <c>Bash: &lt;command&gt;</c> line.</summary>
+    internal static LiveLine Bash(string? command) => LiveLine.ToolCall("Bash", ClaudeTranscriptLines.Clip("Bash: " + (command ?? "")));
+
+    /// <summary>An <c>MCP: &lt;tool&gt;</c> line.</summary>
+    internal static LiveLine Mcp(string tool) => LiveLine.Mcp(tool, ClaudeTranscriptLines.Clip("MCP: " + tool));
+
+    internal static LiveLine Text(string text) => LiveLine.Said(ClaudeTranscriptLines.Clip(text));
+
+    internal static LiveLine User(string text) => ClaudeTranscriptLines.UserLine(text);
 
     /// <summary>The text of an array of content blocks, each with a string <c>text</c>, joined.</summary>
     internal static string? Blocks(JsonElement content) =>
@@ -90,7 +112,9 @@ public static class TranscriptLines
 /// </summary>
 public static class GrokUpdateLines
 {
-    public static IReadOnlyList<string> Render(string raw) => TranscriptLines.Parse(raw, Render);
+    public static IReadOnlyList<string> Render(string raw) => [.. Lines(raw).Select(line => line.Text)];
+
+    public static IReadOnlyList<LiveLine> Lines(string raw) => TranscriptLines.Parse(raw, Render);
 
     /// <summary>The line's <c>timestamp</c>, whole seconds since the epoch.</summary>
     public static DateTimeOffset? Timestamp(string raw)
@@ -109,7 +133,7 @@ public static class GrokUpdateLines
         }
     }
 
-    private static IReadOnlyList<string>? Render(JsonElement root)
+    private static IReadOnlyList<LiveLine>? Render(JsonElement root)
     {
         var update = TranscriptLines.Property(TranscriptLines.Property(root, "params"), "update");
         var content = TranscriptLines.Property(update, "content");
@@ -128,25 +152,25 @@ public static class GrokUpdateLines
         };
     }
 
-    private static string Tool(JsonElement update)
+    private static LiveLine Tool(JsonElement update)
     {
         var name = ClaudeTranscriptLines.Text(update, "title") ?? "?";
         var input = TranscriptLines.Property(update, "rawInput");
 
         return name switch
         {
-            "read_file" => ClaudeTranscriptLines.Clip("Read " + (ClaudeTranscriptLines.Text(input, "target_file") ?? "")),
-            "run_terminal_command" => ClaudeTranscriptLines.Clip("Bash: " + (ClaudeTranscriptLines.Text(input, "command") ?? "")),
+            "read_file" => TranscriptLines.Read(ClaudeTranscriptLines.Text(input, "target_file")),
+            "run_terminal_command" => TranscriptLines.Bash(ClaudeTranscriptLines.Text(input, "command")),
 
             // `harness__status`: the tool is what a person recognises.
             "use_tool" when ClaudeTranscriptLines.Text(input, "tool_name") is { } tool =>
-                ClaudeTranscriptLines.Clip("MCP: " + tool[(tool.LastIndexOf("__", StringComparison.Ordinal) is var at and >= 0 ? at + 2 : 0)..]),
+                TranscriptLines.Mcp(tool[(tool.LastIndexOf("__", StringComparison.Ordinal) is var at and >= 0 ? at + 2 : 0)..]),
             _ => TranscriptLines.Tool(name, input),
         };
     }
 
     /// <summary>Only a finished call says anything: its text, or what its raw output carries.</summary>
-    private static IReadOnlyList<string> Result(JsonElement update)
+    private static IReadOnlyList<LiveLine> Result(JsonElement update)
     {
         if (ClaudeTranscriptLines.Text(update, "status") is not ("completed" or "failed")) return [];
 
@@ -154,7 +178,7 @@ public static class GrokUpdateLines
             ? blocks
             : FirstString(TranscriptLines.Property(update, "rawOutput")) ?? "";
 
-        return [ClaudeTranscriptLines.ResultLine(text)];
+        return [ClaudeTranscriptLines.ResultOf(text)];
     }
 
     /// <summary>
@@ -186,9 +210,11 @@ public static class GrokUpdateLines
 /// </summary>
 public static class CopilotEventLines
 {
-    public static IReadOnlyList<string> Render(string raw) => TranscriptLines.Parse(raw, Render);
+    public static IReadOnlyList<string> Render(string raw) => [.. Lines(raw).Select(line => line.Text)];
 
-    private static IReadOnlyList<string>? Render(JsonElement root)
+    public static IReadOnlyList<LiveLine> Lines(string raw) => TranscriptLines.Parse(raw, Render);
+
+    private static IReadOnlyList<LiveLine>? Render(JsonElement root)
     {
         var data = TranscriptLines.Property(root, "data");
 
@@ -200,32 +226,32 @@ public static class CopilotEventLines
             "tool.execution_start" when ClaudeTranscriptLines.Text(data, "toolName") is { } name => [Tool(name, data)],
             "tool.execution_complete" => Result(data),
             "session.error" when ClaudeTranscriptLines.Text(data, "message") is { } message =>
-                [ClaudeTranscriptLines.Clip("Error: " + ClaudeTranscriptLines.FirstLine(message))],
+                [LiveLine.Said(ClaudeTranscriptLines.Clip("Error: " + ClaudeTranscriptLines.FirstLine(message)))],
             "user.message" or "assistant.message" or "tool.execution_start" or "session.error" or null => null,
             _ => [],
         };
     }
 
-    private static string Tool(string name, JsonElement data)
+    private static LiveLine Tool(string name, JsonElement data)
     {
         var input = TranscriptLines.Property(data, "arguments");
 
         if (ClaudeTranscriptLines.Text(data, "mcpServerName") is not null)
         {
-            return ClaudeTranscriptLines.Clip("MCP: " + (ClaudeTranscriptLines.Text(data, "mcpToolName") ?? name));
+            return TranscriptLines.Mcp(ClaudeTranscriptLines.Text(data, "mcpToolName") ?? name);
         }
 
         return name switch
         {
-            "view" => ClaudeTranscriptLines.Clip("Read " + (ClaudeTranscriptLines.Text(input, "path") ?? "")),
-            "bash" => ClaudeTranscriptLines.Clip("Bash: " + (ClaudeTranscriptLines.Text(input, "command") ?? "")),
+            "view" => TranscriptLines.Read(ClaudeTranscriptLines.Text(input, "path")),
+            "bash" => TranscriptLines.Bash(ClaudeTranscriptLines.Text(input, "command")),
             _ => TranscriptLines.Tool(name, input),
         };
     }
 
-    private static IReadOnlyList<string>? Result(JsonElement data) =>
+    private static IReadOnlyList<LiveLine>? Result(JsonElement data) =>
         ClaudeTranscriptLines.Text(TranscriptLines.Property(data, "result"), "content") is { } text
-            ? [ClaudeTranscriptLines.ResultLine(text)]
+            ? [ClaudeTranscriptLines.ResultOf(text)]
             : null;
 }
 
@@ -236,9 +262,11 @@ public static class CopilotEventLines
 /// </summary>
 public static class CodexRolloutLines
 {
-    public static IReadOnlyList<string> Render(string raw) => TranscriptLines.Parse(raw, Render);
+    public static IReadOnlyList<string> Render(string raw) => [.. Lines(raw).Select(line => line.Text)];
 
-    private static IReadOnlyList<string>? Render(JsonElement root)
+    public static IReadOnlyList<LiveLine> Lines(string raw) => TranscriptLines.Parse(raw, Render);
+
+    private static IReadOnlyList<LiveLine>? Render(JsonElement root)
     {
         var payload = TranscriptLines.Property(root, "payload");
 
@@ -251,7 +279,7 @@ public static class CodexRolloutLines
         };
     }
 
-    private static IReadOnlyList<string>? Item(JsonElement item)
+    private static IReadOnlyList<LiveLine>? Item(JsonElement item)
     {
         switch (ClaudeTranscriptLines.Text(item, "type"))
         {
@@ -262,22 +290,23 @@ public static class CodexRolloutLines
                 return string.IsNullOrWhiteSpace(text) ? [] : [TranscriptLines.Text(text)];
 
             case "CommandExecution":
-                return [Command(item), ClaudeTranscriptLines.ResultLine(ClaudeTranscriptLines.Text(item, "aggregated_output") ?? "")];
+                return [Command(item), ClaudeTranscriptLines.ResultOf(ClaudeTranscriptLines.Text(item, "aggregated_output") ?? "")];
 
             case "McpToolCall" when ClaudeTranscriptLines.Text(item, "tool") is { } tool:
                 return
                 [
-                    ClaudeTranscriptLines.Clip("MCP: " + tool),
-                    ClaudeTranscriptLines.ResultLine(
+                    TranscriptLines.Mcp(tool),
+                    ClaudeTranscriptLines.ResultOf(
                         TranscriptLines.Blocks(TranscriptLines.Property(TranscriptLines.Property(item, "result"), "content")) ?? ""),
                 ];
 
             case null:
                 return null;
 
-            // An item this was not measured on still says that something happened.
+            // An item this was not measured on still says that something happened: a step the
+            // agent took, named by its item type.
             case { } other when other is not ("UserMessage" or "AgentMessage" or "McpToolCall"):
-                return [ClaudeTranscriptLines.Clip(other)];
+                return [LiveLine.ToolCall(other, ClaudeTranscriptLines.Clip(other))];
 
             default:
                 return null;
@@ -285,14 +314,14 @@ public static class CodexRolloutLines
     }
 
     /// <summary><c>Read &lt;path&gt;</c> when Codex parsed the command as one read, else <c>Bash: &lt;command&gt;</c>.</summary>
-    private static string Command(JsonElement item)
+    private static LiveLine Command(JsonElement item)
     {
         var parsed = TranscriptLines.Property(item, "parsed_cmd");
         if (parsed.ValueKind == JsonValueKind.Array && parsed.GetArrayLength() == 1
             && ClaudeTranscriptLines.Text(parsed[0], "type") == "read"
             && ClaudeTranscriptLines.Text(parsed[0], "path") is { } path)
         {
-            return ClaudeTranscriptLines.Clip("Read " + path);
+            return TranscriptLines.Read(path);
         }
 
         // ["/bin/bash", "-lc", "<command>"]: the command is the last element.
@@ -302,6 +331,6 @@ public static class CodexRolloutLines
                 ? command[command.GetArrayLength() - 1].GetString()
                 : ClaudeTranscriptLines.Text(item, "command");
 
-        return ClaudeTranscriptLines.Clip("Bash: " + (text ?? ""));
+        return TranscriptLines.Bash(text);
     }
 }

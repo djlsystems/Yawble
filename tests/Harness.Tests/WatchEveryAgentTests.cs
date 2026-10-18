@@ -116,15 +116,15 @@ public sealed class AgentTranscriptRenderTests
     {
         Assert.Equal(
             """
-            2026-09-26T15:18:04.260Z	User: Do exactly three things, in order: 1) read the file notes.txt in this folder with your file viewing tool; 2) run the shell command: echo measured-run && ls; 3) call the MCP tool team_current from the harness server. Then reply with o…
-            2026-09-26T15:18:05.988Z	Read /data/teams/sample-team-for-transcript-run/workspaces/DeveloperCasimir/measure/copilot/notes.txt
-            2026-09-26T15:18:05.989Z	Bash: echo measured-run && ls
-            2026-09-26T15:18:05.990Z	MCP: team_current
-            2026-09-26T15:18:06.011Z	alpha line (21 bytes)
-            2026-09-26T15:18:06.012Z	HTTP 403 (98 bytes)
-            2026-09-26T15:18:06.014Z	measured-run (98 bytes)
-            2026-09-26T15:18:07.355Z	I saw notes.txt contents “alpha line” and “beta line,” the shell printed “measured-run” and listed the folder, and the team current check returned no current team for this principal.
-            	{"type":"assistant.message","data":{"content":"cut off
+            2026-09-26T15:18:04.260Z	user	User: Do exactly three things, in order: 1) read the file notes.txt in this folder with your file viewing tool; 2) run the shell command: echo measured-run && ls; 3) call the MCP tool team_current from the harness server. Then reply with o…
+            2026-09-26T15:18:05.988Z	tool	Read /data/teams/sample-team-for-transcript-run/workspaces/DeveloperCasimir/measure/copilot/notes.txt
+            2026-09-26T15:18:05.989Z	tool	Bash: echo measured-run && ls
+            2026-09-26T15:18:05.990Z	tool	MCP: team_current
+            2026-09-26T15:18:06.011Z	result	alpha line (21 bytes)
+            2026-09-26T15:18:06.012Z	result	HTTP 403 (98 bytes)
+            2026-09-26T15:18:06.014Z	result	measured-run (98 bytes)
+            2026-09-26T15:18:07.355Z	text	I saw notes.txt contents “alpha line” and “beta line,” the shell printed “measured-run” and listed the folder, and the team current check returned no current team for this principal.
+            	raw	{"type":"assistant.message","data":{"content":"cut off
 
             """.ReplaceLineEndings("\n"),
             Wire(LiveView.CopilotEvents, "copilot-events.jsonl", """{"type":"assistant.message","data":{"content":"cut off"""));
@@ -135,16 +135,16 @@ public sealed class AgentTranscriptRenderTests
     {
         Assert.Equal(
             """
-            2026-09-26T15:18:27.089Z	User: Do exactly three things, in order: 1) read the file notes.txt in this folder; 2) run the shell command: echo measured-run && ls; 3) call the MCP tool team_current from the harness server. Then reply with one short sentence summarisin…
-            2026-09-26T15:18:29.746Z	I’ll perform those three steps in order.
-            2026-09-26T15:18:32.725Z	Read notes.txt
-            2026-09-26T15:18:32.725Z	alpha line (21 bytes)
-            2026-09-26T15:18:32.771Z	Bash: echo measured-run && ls
-            2026-09-26T15:18:32.771Z	measured-run (51 bytes)
-            2026-09-26T15:18:32.786Z	MCP: team_current
-            2026-09-26T15:18:32.786Z	HTTP 403 (98 bytes)
-            2026-09-26T15:18:37.746Z	notes.txt contained “alpha line” and “beta line”; the command printed “measured-run” and four filenames; team_current returned HTTP 403 because this principal has no current team.
-            	not json
+            2026-09-26T15:18:27.089Z	user	User: Do exactly three things, in order: 1) read the file notes.txt in this folder; 2) run the shell command: echo measured-run && ls; 3) call the MCP tool team_current from the harness server. Then reply with one short sentence summarisin…
+            2026-09-26T15:18:29.746Z	text	I’ll perform those three steps in order.
+            2026-09-26T15:18:32.725Z	tool	Read notes.txt
+            2026-09-26T15:18:32.725Z	result	alpha line (21 bytes)
+            2026-09-26T15:18:32.771Z	tool	Bash: echo measured-run && ls
+            2026-09-26T15:18:32.771Z	result	measured-run (51 bytes)
+            2026-09-26T15:18:32.786Z	tool	MCP: team_current
+            2026-09-26T15:18:32.786Z	result	HTTP 403 (98 bytes)
+            2026-09-26T15:18:37.746Z	text	notes.txt contained “alpha line” and “beta line”; the command printed “measured-run” and four filenames; team_current returned HTTP 403 because this principal has no current team.
+            	raw	not json
 
             """.ReplaceLineEndings("\n"),
             Wire(LiveView.CodexRollout, "codex-rollout.jsonl", "not json"));
@@ -157,21 +157,21 @@ public sealed class AgentTranscriptRenderTests
 
         Assert.Equal(
             [
-                $"2026-09-26T15:16:03.000Z\tUser: You are the measurement run for Grok (a short task: read one file, run one command, call one platform tool and report what each one returned to you.). Your own session is the thing being measured, so do these steps for real, in this …",
-                "2026-09-26T15:16:11.000Z\tI'll run the measurement steps in this session: read a file, run the shell commands, call harness `status`, then locate this session folder and write the report.",
-                $"2026-09-26T15:16:11.000Z\ttodo_write: {{\"todos\":[{{\"id\":\"1\",\"content\":\"Ensure worktree exists; read a file from {Brand} clone\",\"status\":\"in_progress\"}},{{\"id\":\"2\",\"content\":\"Run ls sessions + pwd; call harness MCP status\",\"status\":\"pending\"}},{{\"id\":\"3\",\"content\":\"Find ow…",
-                $"2026-09-26T15:16:11.000Z\tRead /data/teams/sample-team-for-transcript-run/repos/{Brand}/main/README.md",
-                $"2026-09-26T15:16:11.000Z\tBash: ls -la /data/teams/sample-team-for-transcript-run/repos/{Brand}/wt_ResearcherOttilie_435 2>/dev/null; echo \"---\"; ls /data/agent-home/.grok/sessions; echo \"---PWD---\"; pwd; echo \"---DATE---\"; date -u +\"%Y-%m-%dT%H:%M:%SZ\"; echo \"---WH…",
-                "2026-09-26T15:16:11.000Z\tsearch_tool: harness status",
-                $"2026-09-26T15:16:11.000Z\t- [in_progress] 1: Ensure worktree exists; read a file from {Brand} clone (297 bytes)",
-                $"2026-09-26T15:16:11.000Z\t1→# {Brand} core (6547 bytes)",
-                "2026-09-26T15:16:21.000Z\tREADME and shell checks are done. Next I’ll call harness `status`, inspect this session folder, and confirm the worktree.",
-                "2026-09-26T15:16:21.000Z\tMCP: status",
-                "2026-09-26T15:16:21.000Z\tBash: echo \"=== session workspace dir ===\"; ls -la \"/data/agent-home/.grok/sessions/%2Fdata%2Fteams%2Fsample-team-for-transcript-run%2Fworkspaces%2FResearcherOttilie\"; echo \"=== nested session ids ===\"; find \"/data/agent-home/.grok/session…",
-                "2026-09-26T15:16:21.000Z\tHTTP 200 (2712 bytes)",
-                "2026-09-26T15:16:23.000Z\t=== session workspace dir === (4436 bytes)",
-                "2026-09-26T15:18:39.000Z\tMeasurement report is at `/data/teams/sample-team-for-transcript-run/shared/grok-measurement.md`. **Session folder:** `/data/agent-home/.grok/sessions/%2Fdata%2Fteams%2Fsample-team-for-transcript-run%2Fworkspaces%2FResearcherOttilie/01a0de…",
-                "\t{\"timestamp\":",
+                $"2026-09-26T15:16:03.000Z\tuser\tUser: You are the measurement run for Grok (a short task: read one file, run one command, call one platform tool and report what each one returned to you.). Your own session is the thing being measured, so do these steps for real, in this …",
+                "2026-09-26T15:16:11.000Z\ttext\tI'll run the measurement steps in this session: read a file, run the shell commands, call harness `status`, then locate this session folder and write the report.",
+                $"2026-09-26T15:16:11.000Z\ttool\ttodo_write: {{\"todos\":[{{\"id\":\"1\",\"content\":\"Ensure worktree exists; read a file from {Brand} clone\",\"status\":\"in_progress\"}},{{\"id\":\"2\",\"content\":\"Run ls sessions + pwd; call harness MCP status\",\"status\":\"pending\"}},{{\"id\":\"3\",\"content\":\"Find ow…",
+                $"2026-09-26T15:16:11.000Z\ttool\tRead /data/teams/sample-team-for-transcript-run/repos/{Brand}/main/README.md",
+                $"2026-09-26T15:16:11.000Z\ttool\tBash: ls -la /data/teams/sample-team-for-transcript-run/repos/{Brand}/wt_ResearcherOttilie_435 2>/dev/null; echo \"---\"; ls /data/agent-home/.grok/sessions; echo \"---PWD---\"; pwd; echo \"---DATE---\"; date -u +\"%Y-%m-%dT%H:%M:%SZ\"; echo \"---WH…",
+                "2026-09-26T15:16:11.000Z\ttool\tsearch_tool: harness status",
+                $"2026-09-26T15:16:11.000Z\tresult\t- [in_progress] 1: Ensure worktree exists; read a file from {Brand} clone (297 bytes)",
+                $"2026-09-26T15:16:11.000Z\tresult\t1→# {Brand} core (6547 bytes)",
+                "2026-09-26T15:16:21.000Z\ttext\tREADME and shell checks are done. Next I’ll call harness `status`, inspect this session folder, and confirm the worktree.",
+                "2026-09-26T15:16:21.000Z\ttool\tMCP: status",
+                "2026-09-26T15:16:21.000Z\ttool\tBash: echo \"=== session workspace dir ===\"; ls -la \"/data/agent-home/.grok/sessions/%2Fdata%2Fteams%2Fsample-team-for-transcript-run%2Fworkspaces%2FResearcherOttilie\"; echo \"=== nested session ids ===\"; find \"/data/agent-home/.grok/session…",
+                "2026-09-26T15:16:21.000Z\tresult\tHTTP 200 (2712 bytes)",
+                "2026-09-26T15:16:23.000Z\tresult\t=== session workspace dir === (4436 bytes)",
+                "2026-09-26T15:18:39.000Z\ttext\tMeasurement report is at `/data/teams/sample-team-for-transcript-run/shared/grok-measurement.md`. **Session folder:** `/data/agent-home/.grok/sessions/%2Fdata%2Fteams%2Fsample-team-for-transcript-run%2Fworkspaces%2FResearcherOttilie/01a0de…",
+                "\traw\t{\"timestamp\":",
                 "",
             ],
             lines);
@@ -622,7 +622,7 @@ public sealed class EarlierRunsRouteTests(CrossTeamFixture host) : IClassFixture
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("text/plain; charset=utf-8", response.Content.Headers.ContentType?.ToString());
         Assert.Equal(
-            "2026-09-26T13:34:41.454Z\tUser: Do the card.\n2026-09-26T13:34:42.500Z\tRead README.md\n\tgarbage\n",
+            "2026-09-26T13:34:41.454Z\tuser\tUser: Do the card.\n2026-09-26T13:34:42.500Z\ttool\tRead README.md\n\traw\tgarbage\n",
             await response.Content.ReadAsStringAsync(Ct));
         Assert.Equal(before, await Log.HighestSeqAsync(Ct));
     }
@@ -716,8 +716,8 @@ public sealed class EarlierRunsRouteTests(CrossTeamFixture host) : IClassFixture
         Assert.Equal("text/plain; charset=utf-8", response.Content.Headers.ContentType?.ToString());
 
         using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(Ct));
-        Assert.Equal("2026-09-26T15:18:32.786Z\tMCP: team_current", await reader.ReadLineAsync(Ct));
-        Assert.Equal("2026-09-26T15:18:32.786Z\tHTTP 200 (8 bytes)", await reader.ReadLineAsync(Ct));
+        Assert.Equal("2026-09-26T15:18:32.786Z\ttool\tMCP: team_current", await reader.ReadLineAsync(Ct));
+        Assert.Equal("2026-09-26T15:18:32.786Z\tresult\tHTTP 200 (8 bytes)", await reader.ReadLineAsync(Ct));
 
         run.Dispose();
         Assert.Equal("", await reader.ReadToEndAsync(Ct).WaitAsync(TimeSpan.FromSeconds(10), Ct));

@@ -273,7 +273,7 @@ public static class TenantActions
 
     /// <summary>The daily log retention pass removed message-log rows. Actor null; subject the
     /// setting (<c>log.retentionDays</c>); detail carries <c>setting</c>, <c>days</c>, <c>cutoff</c>,
-    /// <c>purged</c> and <c>retained</c> (the log's purge report) and <c>fileChanges</c> removed. A
+    /// <c>purged</c> and <c>retained</c> (the log's purge report), <c>fileChanges</c> and <c>runSteps</c> removed. A
     /// pass that removes nothing writes none.</summary>
     public const string LogPruned = "log.pruned";
 

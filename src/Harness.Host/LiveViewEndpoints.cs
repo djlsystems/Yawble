@@ -28,8 +28,12 @@ public static class LiveViewEndpoints
                 "Streams the current run's transcript as `text/plain; charset=utf-8`, one display "
                 + "line per event ending in a newline: from the start of the run, then each new "
                 + "line as the agent writes it. The response ends when the run ends.\n\n"
-                + "Each line is `<when>` TAB `<line>`: `<when>` is the event's time in UTC "
-                + "(`2026-09-26T13:34:41.454Z`), empty when the event names none.\n\n"
+                + "Each line is `<when>` TAB `<kind>` TAB `<line>`: `<when>` is the event's time in UTC "
+                + "(`2026-09-26T13:34:41.454Z`), empty when the event names none. `<kind>` is what the "
+                + "Host read the event as: `tool`, `result` (a tool's result), `text` (what the agent "
+                + "said), `user`, `note` (something the CLI attached), `raw` (a line that did not parse, "
+                + "shown as it is) or `notice` (the Host's own last line when the stream ended early, "
+                + "with no time). The same classification the recorded steps (`GET /api/run-steps`) carry.\n\n"
                 + "Lines are at most 240 characters and end with `…` when clipped: `Read <path>`, "
                 + "`Bash: <command>`, `MCP: <tool>`, `<Tool>: <short input>`, the assistant's "
                 + "text, a tool result's first line and size (`<first line> (<n> bytes)`), "
@@ -87,7 +91,7 @@ public static class LiveViewEndpoints
             .WithSummary("One earlier run's transcript")
             .WithDescription(
                 "The whole transcript of one of this member's finished runs, as "
-                + "`text/plain; charset=utf-8`, in the live route's form: one `<when>` TAB `<line>` "
+                + "`text/plain; charset=utf-8`, in the live route's form: one `<when>` TAB `<kind>` TAB `<line>` "
                 + "per step, from the start of the file to its end. It is read once, not followed.\n\n"
                 + $"410 with `{Gone}` when the file is no longer on disk. 500 with a sentence saying "
                 + "why when it is there but cannot be read (e.g. permission denied). 404 when `seq` is not one "
@@ -209,7 +213,7 @@ public static class LiveViewEndpoints
                     // Ended early - its worker lost, a line lost on the way: the last line says so.
                     if (chunk.Gap is { } why)
                     {
-                        await response.WriteAsync($"\t{why}\n", Encoding.UTF8, ct);
+                        await response.WriteAsync(TranscriptLines.WireLine("", LiveLineKinds.Notice, why), Encoding.UTF8, ct);
                         await response.Body.FlushAsync(ct);
                     }
 
@@ -242,7 +246,13 @@ public static class LiveViewEndpoints
     /// volume, and this run's end is control's to say. Answers the 503 to send instead when there is no
     /// worker to ask, or the run's own worker is dropped.
     /// </summary>
-    public static IResult? Place(RunDirectory directory, WorkerPool workers, ContainerId member, out (IRunWorker Worker, RunId Run) placed)
+    public static IResult? Place(RunDirectory directory, WorkerPool workers, ContainerId member, out (IRunWorker Worker, RunId Run) placed) =>
+        Locate(directory, workers, member, out placed) is { } refused
+            ? Results.Problem(refused, statusCode: StatusCodes.Status503ServiceUnavailable)
+            : null;
+
+    /// <summary><see cref="Place"/>'s choice, answering why there is no worker to ask instead of a 503.</summary>
+    public static string? Locate(RunDirectory directory, WorkerPool workers, ContainerId member, out (IRunWorker Worker, RunId Run) placed)
     {
         if (directory.WorkerOf(member) is { } open)
         {
@@ -257,11 +267,11 @@ public static class LiveViewEndpoints
             catch (InvalidOperationException)
             {
                 placed = default;
-                return Results.Problem(WorkerReads.NoWorkerText, statusCode: StatusCodes.Status503ServiceUnavailable);
+                return WorkerReads.NoWorkerText;
             }
         }
 
-        return placed.Worker is IRunWorkerConnection { Dropped: true } ? NotConnected(placed.Worker.Id) : null;
+        return placed.Worker is IRunWorkerConnection { Dropped: true } ? NotConnectedText(placed.Worker.Id) : null;
     }
 
     /// <summary>What a live view of a run whose worker is not connected answers.</summary>

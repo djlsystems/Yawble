@@ -135,6 +135,27 @@ public sealed class LogRetentionTests : IDisposable
     }
 
     [Fact]
+    public async Task The_agent_steps_older_than_the_oldest_kept_row_go_in_the_same_pass_and_newer_ones_stay()
+    {
+        await WorkflowAsync(rootDaysAgo: 110, declaredDaysAgo: 100);
+        await WorkflowAsync(rootDaysAgo: 20, declaredDaysAgo: 20);
+
+        var steps = new AgentStepStore(_database);
+        var older = new NewAgentStep(Now.AddDays(-105), LiveLineKinds.Tool, "Bash", null);
+        var newer = new NewAgentStep(Now.AddDays(-5), LiveLineKinds.Text, "", null);
+        await steps.WriteAsync("Alpha", "Dev", 1, null, [older, newer], [], Ct);
+
+        var pass = await Retention().RunAsync(Now, Ct);
+
+        var left = await steps.ReadAsync(
+            DateTimeOffset.MinValue, DateTimeOffset.MaxValue, 0, 10,
+            new Dictionary<string, DateTimeOffset> { ["Alpha"] = DateTimeOffset.MinValue }, Ct);
+        Assert.Equal([newer.Id], left.Select(s => s.Id));
+        Assert.Equal(1, pass.RunSteps);
+        Assert.Equal(1, Assert.Single(await PrunedRowsAsync()).GetProperty("runSteps").GetInt32());
+    }
+
+    [Fact]
     public async Task No_ledger_row_tenant_row_admission_hold_stored_landed_or_backlog_stat_changes()
     {
         var landed = await WorkflowAsync(rootDaysAgo: 110, declaredDaysAgo: 100);

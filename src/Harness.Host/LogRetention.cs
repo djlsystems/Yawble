@@ -7,10 +7,10 @@ namespace Harness.Host;
 
 /// <summary>What one retention pass did. <paramref name="Cutoff"/> is null when the setting is 0.</summary>
 public sealed record LogRetentionPass(
-    int Days, DateTimeOffset? Cutoff, int Chosen, int Purged, int Retained, int FileChanges)
+    int Days, DateTimeOffset? Cutoff, int Chosen, int Purged, int Retained, int FileChanges, int RunSteps = 0)
 {
     /// <summary>Whether the pass removed anything, and so wrote its <c>log.pruned</c> row.</summary>
-    public bool Removed => Purged > 0 || FileChanges > 0;
+    public bool Removed => Purged > 0 || FileChanges > 0 || RunSteps > 0;
 }
 
 /// <summary>
@@ -19,7 +19,7 @@ public sealed record LogRetentionPass(
 /// <para>
 /// It chooses with <see cref="SqliteLogRetention"/> and deletes with <see cref="IMessageLog.DeleteAsync"/>,
 /// the one delete the log has, so a row a survivor cites or a run is still queued for is retained
-/// there, and the recorded file changes older than the oldest kept row go in the same transaction.
+/// there, and the recorded file changes and agent steps older than the oldest kept row go in the same transaction.
 /// Nothing else is touched: the ledgers refuse a delete, and the tenant log, admission holds, stored
 /// landed and backlog stats are other tables.
 /// </para>
@@ -89,7 +89,8 @@ public sealed class LogRetention(
             body.Count + whole.Count,
             first.Purged + second.Purged,
             first.Retained + second.Retained,
-            first.FileChanges + second.FileChanges);
+            first.FileChanges + second.FileChanges,
+            first.RunSteps + second.RunSteps);
 
         if (!pass.Removed) return pass;
 
@@ -107,12 +108,13 @@ public sealed class LogRetention(
                 purged = pass.Purged,
                 retained = pass.Retained,
                 fileChanges = pass.FileChanges,
+                runSteps = pass.RunSteps,
             }),
             ct);
 
         logger.LogInformation(
-            "Log retention ({Setting} {Days}) removed {Purged} rows older than {Cutoff}, retained {Retained} that kept rows cite or runs are queued for, and removed {FileChanges} recorded file changes.",
-            SettingName, days, pass.Purged, cutoff, pass.Retained, pass.FileChanges);
+            "Log retention ({Setting} {Days}) removed {Purged} rows older than {Cutoff}, retained {Retained} that kept rows cite or runs are queued for, and removed {FileChanges} recorded file changes and {RunSteps} recorded agent steps.",
+            SettingName, days, pass.Purged, cutoff, pass.Retained, pass.FileChanges, pass.RunSteps);
 
         return pass;
     }

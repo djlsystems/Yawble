@@ -2072,6 +2072,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         var ids = string.Join(',', seqs);
         var purged = 0;
         var fileChanges = 0;
+        var runSteps = 0;
 
         // ONE STATEMENT, REPEATED TO A FIXPOINT. Each pass removes the candidates NOTHING currently
         // cites; removing those un-pins whatever they cited, so the next pass reaches one link
@@ -2112,10 +2113,10 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             purged += removed;
         }
 
-        // THE FILE CHANGES GO WITH THE LOG ROWS THEY BELONG WITH: every one older than the oldest
-        // row kept, in the same transaction, so a replay never draws a file change without the run
-        // it was part of. Nothing else prunes them. The oldest row is the lowest seq: rows are
-        // appended in time order.
+        // THE FILE CHANGES AND THE AGENT STEPS GO WITH THE LOG ROWS THEY BELONG WITH: every one
+        // older than the oldest row kept, in the same transaction, so a replay never draws a file
+        // change or a step without the run it was part of. Nothing else prunes them. The oldest row
+        // is the lowest seq: rows are appended in time order.
         await using (var prune = connection.CreateCommand())
         {
             prune.Transaction = transaction;
@@ -2125,11 +2126,14 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             prune.CommandText = oldest is null ? "DELETE FROM file_changes" : "DELETE FROM file_changes WHERE at < $oldest";
             if (oldest is { } at) prune.Parameters.AddWithValue("$oldest", MessageSchema.FileChangeInstant(at));
             fileChanges = await prune.ExecuteNonQueryAsync(ct);
+
+            prune.CommandText = oldest is null ? "DELETE FROM run_steps" : "DELETE FROM run_steps WHERE at < $oldest";
+            runSteps = await prune.ExecuteNonQueryAsync(ct);
         }
 
         await transaction.CommitAsync(ct);
 
-        return new PurgeReport(purged, seqs.Count - purged, fileChanges);
+        return new PurgeReport(purged, seqs.Count - purged, fileChanges, runSteps);
     }
 
     public async Task<long> PositionAsync(ContainerId subscriber, CancellationToken ct = default)

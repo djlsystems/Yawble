@@ -100,6 +100,9 @@ public sealed record TeamWasReset(
 {
     /// <summary>How many of the targeted members' recorded file changes Delete memory removed.</summary>
     public int FileChanges { get; init; }
+
+    /// <summary>How many of the targeted members' recorded agent steps Delete memory removed.</summary>
+    public int RunSteps { get; init; }
 }
 
 /// <summary>
@@ -167,7 +170,8 @@ public sealed class TeamReset(
     TeamPaths paths,
     FolderRemoval? removal = null,
     RepositoryReset? repositories = null,
-    WorkspaceFileChangeStore? fileChanges = null)
+    WorkspaceFileChangeStore? fileChanges = null,
+    AgentStepStore? runSteps = null)
 {
     private readonly FolderRemoval _removal = removal ?? new FolderRemoval();
 
@@ -306,6 +310,20 @@ public sealed class TeamReset(
             }
         }
 
+        // And their recorded agent steps, and only theirs.
+        var removedRunSteps = 0;
+        if (options.Purge && runSteps is not null)
+        {
+            try
+            {
+                removedRunSteps = await runSteps.DeleteForMembersAsync(stored, [.. targeted.Select(id => id.Name)], ct);
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"agent steps: {ex.Message}");
+            }
+        }
+
         // 5. The directories.
         var cleared = new List<string>();
 
@@ -343,6 +361,7 @@ public sealed class TeamReset(
             stored, head, floored, report.Purged, report.Retained, cleared, failures, remaining, reposReset)
         {
             FileChanges = removedFileChanges,
+            RunSteps = removedRunSteps,
         };
     }
 

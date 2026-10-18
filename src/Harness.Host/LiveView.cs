@@ -101,8 +101,15 @@ public sealed class LiveRuns
     {
         var run = new LiveRun(this, container, transcript, format, reason, finding);
         _runs[container] = run;
+        Begun?.Invoke(run);
         return run;
     }
+
+    /// <summary>
+    /// A run began, whether or not anybody watches: what <see cref="AgentStepFollow"/> follows every
+    /// run's transcript on. Raised on the caller's thread, so a handler starts its own work and returns.
+    /// </summary>
+    public event Action<LiveRun>? Begun;
 
     public LiveRun? Find(ContainerId container) => _runs.GetValueOrDefault(container);
 
@@ -174,13 +181,65 @@ public sealed class LiveRun : IDisposable
 }
 
 /// <summary>
+/// WHAT KIND OF STEP A DISPLAY LINE IS, decided where the line is rendered from the transcript's
+/// own event - never read back off the line's text - so the live view, a finished run's transcript
+/// and the recorded steps all read one rule. <see cref="Steps"/> are the kinds a step is recorded
+/// with; <see cref="Raw"/> and <see cref="Notice"/> are shown and never recorded.
+/// </summary>
+public static class LiveLineKinds
+{
+    /// <summary>A tool call: <c>Read &lt;path&gt;</c>, <c>Bash: &lt;command&gt;</c>, <c>MCP: &lt;tool&gt;</c>, <c>&lt;Tool&gt;: &lt;input&gt;</c>.</summary>
+    public const string Tool = "tool";
+
+    /// <summary>A tool's result: its first line and size.</summary>
+    public const string Result = "result";
+
+    /// <summary>What the agent said.</summary>
+    public const string Text = "text";
+
+    /// <summary>A line the user (the platform's prompt) gave the agent.</summary>
+    public const string User = "user";
+
+    /// <summary>Something the CLI attached to the conversation (Claude's <c>Attachment:</c>).</summary>
+    public const string Note = "note";
+
+    /// <summary>A transcript line that did not parse, or is in no shape its format knows: shown raw.</summary>
+    public const string Raw = "raw";
+
+    /// <summary>The Host's own sentence at the end of a stream (its worker lost, a follow refused).</summary>
+    public const string Notice = "notice";
+
+    /// <summary>The kinds a step is recorded with.</summary>
+    public static IReadOnlyList<string> Steps { get; } = [Tool, Result, Text, User, Note];
+}
+
+/// <summary>
+/// One display line and what kind of step it is. <see cref="Label"/> is the tool's name for a
+/// <see cref="LiveLineKinds.Tool"/> line (<c>MCP</c> for an MCP tool, whose own name is
+/// <see cref="McpTool"/>) and empty for every other kind.
+/// </summary>
+public sealed record LiveLine(string Kind, string Text, string Label = "", string? McpTool = null)
+{
+    public static LiveLine ToolCall(string name, string text) => new(LiveLineKinds.Tool, text, name);
+
+    public static LiveLine Mcp(string tool, string text) => new(LiveLineKinds.Tool, text, "MCP", tool);
+
+    public static LiveLine Said(string text) => new(LiveLineKinds.Text, text);
+
+    public static LiveLine Raw(string text) => new(LiveLineKinds.Raw, text);
+}
+
+/// <summary>
 /// One readable line per Claude transcript event. What a person sees is a line, not the
 /// raw event: a tool result can be a whole file. A line that does not parse is shown raw, clipped,
 /// never dropped. Bookkeeping records (queue operations, the last prompt, thinking) show nothing.
 /// </summary>
 public static class ClaudeTranscriptLines
 {
-    public static IReadOnlyList<string> Render(string raw)
+    public static IReadOnlyList<string> Render(string raw) => [.. Lines(raw).Select(line => line.Text)];
+
+    /// <summary>The display lines of one raw line, each with its kind.</summary>
+    public static IReadOnlyList<LiveLine> Lines(string raw)
     {
         raw = raw.TrimEnd('\r');
         if (string.IsNullOrWhiteSpace(raw)) return [];
@@ -188,11 +247,11 @@ public static class ClaudeTranscriptLines
         try
         {
             using var document = JsonDocument.Parse(raw);
-            return Render(document.RootElement) ?? [Clip(raw)];
+            return Render(document.RootElement) ?? [LiveLine.Raw(Clip(raw))];
         }
         catch (JsonException)
         {
-            return [Clip(raw)];
+            return [LiveLine.Raw(Clip(raw))];
         }
     }
 
@@ -219,7 +278,7 @@ public static class ClaudeTranscriptLines
     }
 
     /// <summary>Null when the event is not in a shape this knows, so the caller shows it raw.</summary>
-    private static IReadOnlyList<string>? Render(JsonElement root)
+    private static IReadOnlyList<LiveLine>? Render(JsonElement root)
     {
         if (root.ValueKind != JsonValueKind.Object) return null;
 
@@ -233,7 +292,7 @@ public static class ClaudeTranscriptLines
         };
     }
 
-    private static IReadOnlyList<string>? Assistant(JsonElement root)
+    private static IReadOnlyList<LiveLine>? Assistant(JsonElement root)
     {
         if (!root.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object
             || !message.TryGetProperty("content", out var content))
@@ -243,21 +302,21 @@ public static class ClaudeTranscriptLines
 
         if (content.ValueKind == JsonValueKind.String)
         {
-            return string.IsNullOrWhiteSpace(content.GetString()) ? [] : [Clip(content.GetString()!)];
+            return string.IsNullOrWhiteSpace(content.GetString()) ? [] : [LiveLine.Said(Clip(content.GetString()!))];
         }
 
         if (content.ValueKind != JsonValueKind.Array) return null;
 
-        var lines = new List<string>();
+        var lines = new List<LiveLine>();
         foreach (var block in content.EnumerateArray())
         {
             switch (Text(block, "type"))
             {
                 case "text" when Text(block, "text") is { } text && !string.IsNullOrWhiteSpace(text):
-                    lines.Add(Clip(text));
+                    lines.Add(LiveLine.Said(Clip(text)));
                     break;
                 case "tool_use":
-                    lines.Add(Clip(Tool(Text(block, "name") ?? "?", block.TryGetProperty("input", out var input) ? input : default)));
+                    lines.Add(Tool(Text(block, "name") ?? "?", block.TryGetProperty("input", out var input) ? input : default));
                     break;
             }
         }
@@ -265,19 +324,20 @@ public static class ClaudeTranscriptLines
         return lines;
     }
 
-    private static string Tool(string name, JsonElement input)
+    private static LiveLine Tool(string name, JsonElement input)
     {
-        if (name == "Read") return "Read " + (Text(input, "file_path") ?? Text(input, "path") ?? "");
-        if (name == "Bash") return "Bash: " + (Text(input, "command") ?? "");
+        if (name == "Read") return LiveLine.ToolCall(name, Clip("Read " + (Text(input, "file_path") ?? Text(input, "path") ?? "")));
+        if (name == "Bash") return LiveLine.ToolCall(name, Clip("Bash: " + (Text(input, "command") ?? "")));
 
         // mcp__<server>__<tool>: the tool is what a person recognises.
         if (name.StartsWith("mcp__", StringComparison.Ordinal))
         {
-            return "MCP: " + name[(name.LastIndexOf("__", StringComparison.Ordinal) + 2)..];
+            var tool = name[(name.LastIndexOf("__", StringComparison.Ordinal) + 2)..];
+            return LiveLine.Mcp(tool, Clip("MCP: " + tool));
         }
 
         var shortInput = ShortInput(input);
-        return string.IsNullOrEmpty(shortInput) ? name : $"{name}: {shortInput}";
+        return LiveLine.ToolCall(name, Clip(string.IsNullOrEmpty(shortInput) ? name : $"{name}: {shortInput}"));
     }
 
     private static readonly string[] Preferred =
@@ -304,7 +364,7 @@ public static class ClaudeTranscriptLines
         return json == "{}" ? "" : json;
     }
 
-    private static IReadOnlyList<string>? User(JsonElement root)
+    private static IReadOnlyList<LiveLine>? User(JsonElement root)
     {
         if (!root.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object
             || !message.TryGetProperty("content", out var content))
@@ -312,10 +372,10 @@ public static class ClaudeTranscriptLines
             return null;
         }
 
-        if (content.ValueKind == JsonValueKind.String) return [Clip("User: " + FirstLine(content.GetString()!))];
+        if (content.ValueKind == JsonValueKind.String) return [UserLine(content.GetString()!)];
         if (content.ValueKind != JsonValueKind.Array) return null;
 
-        var lines = new List<string>();
+        var lines = new List<LiveLine>();
         foreach (var block in content.EnumerateArray())
         {
             switch (Text(block, "type"))
@@ -324,7 +384,7 @@ public static class ClaudeTranscriptLines
                     lines.Add(Result(block.TryGetProperty("content", out var result) ? result : default));
                     break;
                 case "text" when Text(block, "text") is { } text:
-                    lines.Add(Clip("User: " + FirstLine(text)));
+                    lines.Add(UserLine(text));
                     break;
             }
         }
@@ -332,8 +392,11 @@ public static class ClaudeTranscriptLines
         return lines;
     }
 
+    /// <summary><c>User: &lt;first line&gt;</c>.</summary>
+    internal static LiveLine UserLine(string text) => new(LiveLineKinds.User, Clip("User: " + FirstLine(text)));
+
     /// <summary>The first line and the size, clipped so the size always shows.</summary>
-    private static string Result(JsonElement content)
+    private static LiveLine Result(JsonElement content)
     {
         var text = content.ValueKind switch
         {
@@ -344,8 +407,11 @@ public static class ClaudeTranscriptLines
             _ => "",
         };
 
-        return ResultLine(text);
+        return ResultOf(text);
     }
+
+    /// <summary><see cref="ResultLine"/> as a line of kind <see cref="LiveLineKinds.Result"/>.</summary>
+    internal static LiveLine ResultOf(string text) => new(LiveLineKinds.Result, ResultLine(text));
 
     /// <summary>A tool result as one line: its first line and its size, clipped so the size always shows.</summary>
     internal static string ResultLine(string text)
@@ -356,7 +422,7 @@ public static class ClaudeTranscriptLines
         return Clip(first.Length == 0 ? "(no text)" : first, LiveView.MaxLine - size.Length) + size;
     }
 
-    private static IReadOnlyList<string>? Attachment(JsonElement root)
+    private static IReadOnlyList<LiveLine>? Attachment(JsonElement root)
     {
         if (!root.TryGetProperty("attachment", out var attachment) || attachment.ValueKind != JsonValueKind.Object)
         {
@@ -370,7 +436,7 @@ public static class ClaudeTranscriptLines
             ?? Text(attachment, "type")
             ?? "";
 
-        return [Clip("Attachment: " + first)];
+        return [new LiveLine(LiveLineKinds.Note, Clip("Attachment: " + first))];
     }
 
     internal static string? Text(JsonElement element, string property) => JsonFields.Text(element, property);
