@@ -21,6 +21,16 @@ describe('parseLiveLine', () => {
     expect(parseLiveLine('\ttool\tNewTool: something')).toEqual({ at: null, kind: 'tool', label: 'NewTool', text: 'something' });
   });
 
+  it("shows a line the Host could not parse, and the Host's own closing sentence, as text", () => {
+    expect(parseLiveLine('2026-09-26T13:34:41.454Z\traw\t{"type":"odd"}')).toMatchObject({ kind: 'text', label: '', text: '{"type":"odd"}' });
+    expect(parseLiveLine('\tnotice\tThe worker running this was lost.')).toEqual({
+      at: null,
+      kind: 'text',
+      label: '',
+      text: 'The worker running this was lost.',
+    });
+  });
+
   it('reads a line with no kind the Host names as text, the second field and all', () => {
     expect(parseLiveLine('\tThe transcript ended early.')).toEqual({ at: null, kind: 'text', label: '', text: 'The transcript ended early.' });
     expect(parseLiveLine('\tbogus\tBash: x')).toEqual({ at: null, kind: 'text', label: '', text: 'bogus\tBash: x' });

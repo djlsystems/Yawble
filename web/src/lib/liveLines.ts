@@ -1,8 +1,10 @@
 /**
  * WHAT KIND OF STEP A LIVE-VIEW LINE IS, as the Host says: every line comes as
- * `<when>` TAB `<kind>` TAB `<line>`, the kind one of `tool`, `result`, `text`, `user` or `note`.
- * The Host classifies each line by one rule, the same one its recorded agent steps use, so the view
- * and the Monitor never disagree; this only splits the line into the chip and the words beside it.
+ * `<when>` TAB `<kind>` TAB `<line>`, the kind one of `tool`, `result`, `text`, `user` or `note`, or
+ * `raw` (a transcript line the Host could not parse) or `notice` (the Host's own sentence at the end
+ * of a stream), both shown as text. The Host classifies each line by one rule, the same one its
+ * recorded agent steps use, so the view and the Monitor never disagree; this only splits the line
+ * into the chip and the words beside it.
  *
  * The line keeps the shape the server renders: `Bash: <command>`, `Read <path>`, `MCP: <tool>`,
  * `<Tool>: <short input>`, a tool result's first line and size, `User: <first line>`,
@@ -12,6 +14,8 @@
 export type LiveLineKind = 'tool' | 'result' | 'text' | 'user' | 'note';
 
 const Kinds: readonly LiveLineKind[] = ['tool', 'result', 'text', 'user', 'note'];
+/** Kinds the Host sends that are no step: shown as plain text. */
+const AsText: readonly string[] = ['raw', 'notice'];
 
 export interface LiveLine {
   /** When the event happened, or null when the server sent no time for it. */
@@ -36,8 +40,9 @@ export function parseLiveLine(raw: string): LiveLine {
     if (at === null || !Number.isNaN(at.getTime())) {
       const rest = raw.slice(tab + 1);
       const second = rest.indexOf('\t');
-      const kind = second >= 0 ? (rest.slice(0, second) as LiveLineKind) : null;
-      if (kind !== null && Kinds.includes(kind)) return { at, ...splitLiveLine(kind, rest.slice(second + 1)) };
+      const kind = second >= 0 ? rest.slice(0, second) : null;
+      if (kind !== null && Kinds.includes(kind as LiveLineKind)) return { at, ...splitLiveLine(kind as LiveLineKind, rest.slice(second + 1)) };
+      if (kind !== null && AsText.includes(kind)) return { at, ...splitLiveLine('text', rest.slice(second + 1)) };
       return { at, ...splitLiveLine('text', rest) };
     }
   }

@@ -141,11 +141,9 @@ export const StepIcons: readonly string[] = [...new Set([...Object.values(ToolIc
 
 // --- the recorded steps, for a replay ------------------------------------------------------------
 
-/** One page of `GET /api/run-steps`: the file changes' envelope, its items step records. */
+/** One page of `GET /api/run-steps`: the file changes' envelope, with `steps` in place of `changes`. */
 export interface StepsPage {
-  steps?: unknown[]
-  /** The file changes page's name for its items, read too. */
-  changes?: unknown[]
+  steps: unknown[]
   next: number | null
 }
 
@@ -174,7 +172,7 @@ export async function readRecordedSteps(
   let read = 0
   for (;;) {
     const page = await readPage(after, RecordedPage)
-    const items = Array.isArray(page.steps) ? page.steps : Array.isArray(page.changes) ? page.changes : []
+    const items = Array.isArray(page.steps) ? page.steps : []
     for (const raw of items) {
       const step = readStep(raw)
       if (step) steps.push(step)
