@@ -3,6 +3,7 @@ import { summarise } from '../summarise'
 import { crossesDays, localMinute, wireInstant } from '../localTime'
 import { DefaultSettings, drawsResource, resolveHint, type Resource, type ResourceSettings } from './hints'
 import { DefaultFileSettings, filesOf, pushHeadline, pushMoreWords, pushTime, type FileAction, type FileSettings, type WorkspacePush } from './workspace'
+import { DefaultStepSettings, stepTime, type AgentStep, type StepSettings } from './steps'
 
 /**
  * THE MONITOR'S MODEL: every team, member and workflow the log has shown, and what each row does
@@ -110,6 +111,8 @@ export type MonitorEffect =
   | { kind: 'resource'; at: NodeRef; resource: Resource; ttlMs: number }
   /** A member's file changes (`workspace.ts`): the files under their projects and repository, for `ttlMs` of display time. */
   | { kind: 'workspace'; at: NodeRef; push: WorkspacePush; ttlMs: number }
+  /** One agent step (`steps.ts`): a short-lived icon off the member's node, and nothing in the activity list. */
+  | { kind: 'step'; at: NodeRef; step: AgentStep }
 
 export interface TickerEntry {
   seq: number
@@ -284,6 +287,8 @@ export class MonitorModel {
   settings: ResourceSettings = DefaultSettings
   /** Whether file changes are drawn and listed, and how far down. */
   fileSettings: FileSettings = DefaultFileSettings
+  /** Whether agent steps are drawn, live and in a replay. */
+  stepSettings: StepSettings = DefaultStepSettings
   /** A replay plays the log, and the file changes recorded beside it (`GET /api/file-changes`). */
   replay = false
   /**
@@ -713,6 +718,23 @@ export class MonitorModel {
   }
 
   /**
+   * A member's agent steps. Returns one step effect each, on the member's node; nothing with the
+   * setting off, for a team this model does not show, or for a member it has no node for. Never a
+   * line in the activity list: a step says what kind of thing was done, and the list says what was.
+   */
+  applySteps(steps: readonly AgentStep[]): MonitorEffect[] {
+    if (!this.stepSettings.show) return []
+    const effects: MonitorEffect[] = []
+    for (const step of steps) {
+      if (this.only && !this.only.has(step.team)) continue
+      const member = this.members.get(`${step.team}/${step.member}`)
+      if (!member) continue
+      effects.push({ kind: 'step', at: { kind: 'member', key: member.key }, step })
+    }
+    return effects
+  }
+
+  /**
    * The push lines of an earlier model of this view, kept when it starts again from the rows held:
    * they are in no row, so feeding the log again would lose them.
    */
@@ -745,10 +767,11 @@ export function changeTime(push: WorkspacePush): number {
   return pushTime(push) ?? 0
 }
 
-/** What a replay's clock has due: the log rows and the recorded file changes, each in time order. */
+/** What a replay's clock has due: the log rows, the recorded file changes and agent steps, each in time order. */
 export interface ReplayDue {
   rows: Message[]
   changes: WorkspacePush[]
+  steps: AgentStep[]
 }
 
 /**
@@ -756,13 +779,15 @@ export interface ReplayDue {
  * than `maxGap` of real time is skipped down to that, so a night with nothing in it does not hold
  * the screen still. Returns the rows due by `elapsed` ms of wall time since the replay began.
  *
- * The members' recorded file changes (`GET /api/file-changes`) play on the same clock, each at its
- * own time beside the rows: a quiet stretch is one with neither.
+ * The members' recorded file changes (`GET /api/file-changes`) and agent steps (`GET /api/run-steps`)
+ * play on the same clock, each at its own time beside the rows: a quiet stretch is one with none.
  */
 export class ReplayClock {
   private index = 0
   private changeIndex = 0
   private readonly changes: readonly WorkspacePush[]
+  private stepIndex = 0
+  private readonly steps: readonly AgentStep[]
   private virtual: number
   speed: number
 
@@ -772,6 +797,7 @@ export class ReplayClock {
     private readonly maxGap = 20_000,
     start = rows.length > 0 ? timeOf(rows[0]!) : 0,
     changes: readonly WorkspacePush[] = [],
+    steps: readonly AgentStep[] = [],
   ) {
     this.speed = speed
     this.virtual = start
@@ -780,10 +806,13 @@ export class ReplayClock {
     this.changes = [...changes].sort((a, b) => changeTime(a) - changeTime(b))
     this.changeIndex = this.changes.findIndex((change) => changeTime(change) >= start)
     if (this.changeIndex < 0) this.changeIndex = this.changes.length
+    this.steps = [...steps].sort((a, b) => stepTime(a) - stepTime(b))
+    this.stepIndex = this.steps.findIndex((step) => stepTime(step) >= start)
+    if (this.stepIndex < 0) this.stepIndex = this.steps.length
   }
 
   get done(): boolean {
-    return this.index >= this.rows.length && this.changeIndex >= this.changes.length
+    return this.index >= this.rows.length && this.changeIndex >= this.changes.length && this.stepIndex >= this.steps.length
   }
 
   /** The log time the replay has reached, ms. */
@@ -796,14 +825,15 @@ export class ReplayClock {
     return this.step(wallMs).rows
   }
 
-  /** Advance by `wallMs` of wall time and return the rows and file changes now due, each in order. */
+  /** Advance by `wallMs` of wall time and return the rows, file changes and steps now due, each in order. */
   step(wallMs: number): ReplayDue {
-    const due: ReplayDue = { rows: [], changes: [] }
+    const due: ReplayDue = { rows: [], changes: [], steps: [] }
     if (this.done) return due
     const nextRow = this.index < this.rows.length ? timeOf(this.rows[this.index]!) : Number.POSITIVE_INFINITY
     const nextChange = this.changeIndex < this.changes.length ? changeTime(this.changes[this.changeIndex]!) : Number.POSITIVE_INFINITY
-    const next = Math.min(nextRow, nextChange)
-    // Skip the quiet: never wait longer than maxGap of real time for the next row or change.
+    const nextStep = this.stepIndex < this.steps.length ? stepTime(this.steps[this.stepIndex]!) : Number.POSITIVE_INFINITY
+    const next = Math.min(nextRow, nextChange, nextStep)
+    // Skip the quiet: never wait longer than maxGap of real time for the next row, change or step.
     if (next - this.virtual > this.maxGap) this.virtual = next - this.maxGap
     this.virtual += wallMs * this.speed
 
@@ -814,6 +844,10 @@ export class ReplayClock {
     while (this.changeIndex < this.changes.length && changeTime(this.changes[this.changeIndex]!) <= this.virtual) {
       due.changes.push(this.changes[this.changeIndex]!)
       this.changeIndex++
+    }
+    while (this.stepIndex < this.steps.length && stepTime(this.steps[this.stepIndex]!) <= this.virtual) {
+      due.steps.push(this.steps[this.stepIndex]!)
+      this.stepIndex++
     }
     return due
   }

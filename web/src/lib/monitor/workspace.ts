@@ -1,5 +1,6 @@
 import { wireInstant } from '../localTime'
 import type { ResourceAction } from './hints'
+import { readStepsPush, type StepsPush } from './steps'
 
 /**
  * FILE CHANGES: what a member did to the files of a team's repositories, as the Host pushes it.
@@ -226,7 +227,7 @@ export interface FileWatchHub {
 }
 
 /**
- * THE FILE WATCH: the hub group whose members hear `workspaceChanged`. The page owns the
+ * THE FILE WATCH: the hub group whose members hear `workspaceChanged`, and `agentSteps` with it. The page owns the
  * connection; the Monitor owns the wish to hear. Joined while anyone is listening and a connection
  * is here, again after a reconnect (group membership lives on the connection id, which a reconnect
  * replaces), and left when the last listener goes. A join that fails leaves the Monitor without
@@ -236,6 +237,7 @@ export class FileWatch {
   private hub: FileWatchHub | null = null
   private joined = false
   private readonly listeners = new Set<(push: WorkspacePush) => void>()
+  private readonly stepListeners = new Set<(push: StepsPush) => void>()
 
   /** The page's connection is up: join if the Monitor is already open. */
   attach(hub: FileWatchHub) {
@@ -266,6 +268,16 @@ export class FileWatch {
     }
   }
 
+  /** Hear each `agentSteps` push until the returned function is called. */
+  listenSteps(listener: (push: StepsPush) => void): () => void {
+    this.stepListeners.add(listener)
+    void this.sync()
+    return () => {
+      this.stepListeners.delete(listener)
+      void this.sync()
+    }
+  }
+
   /** A push from the hub, as it arrived. */
   deliver(raw: unknown) {
     const push = readPush(raw)
@@ -273,10 +285,17 @@ export class FileWatch {
     for (const listener of [...this.listeners]) listener(push)
   }
 
+  /** An `agentSteps` push from the hub, as it arrived. */
+  deliverSteps(raw: unknown) {
+    const push = readStepsPush(raw)
+    if (!push || push.steps.length === 0) return
+    for (const listener of [...this.stepListeners]) listener(push)
+  }
+
   private async sync() {
     const hub = this.hub
     if (!hub) return
-    const wanted = this.listeners.size > 0
+    const wanted = this.listeners.size > 0 || this.stepListeners.size > 0
     if (wanted === this.joined) return
     this.joined = wanted
     try {

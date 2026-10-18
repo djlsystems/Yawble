@@ -5,7 +5,8 @@
 // browser. The canvas is not drawn by happy-dom, so the scene is replaced by one that records what
 // it is asked to draw; what each row resolves to is `monitorResource.spec.ts`. The same panel holds
 // Show file changes and Draw down to (`harness.monitor.fileChanges`); what a push draws at each
-// depth is played into a real scene here and pinned in `monitorWorkspace.spec.ts`.
+// depth is played into a real scene here and pinned in `monitorWorkspace.spec.ts`. Show agent steps
+// (`harness.monitor.agentSteps`) sits beside them; what a step draws is `monitorSteps.spec.ts`.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
@@ -14,9 +15,11 @@ import { MonitorModel, type MonitorEffect } from '../../lib/monitor/model'
 import type { FileSettings, WorkspacePush } from '../../lib/monitor/workspace'
 import { LayoutDefaults, LayoutKeyName, type LayoutSettings } from '../../lib/monitor/layout'
 
-const { getMessages, getFileChanges, listEvents, played, fileSettings, layouts } = vi.hoisted(() => ({
+const { getMessages, getFileChanges, getRunSteps, listEvents, played, fileSettings, layouts, stepsShown } = vi.hoisted(() => ({
   getMessages: vi.fn(),
   getFileChanges: vi.fn(),
+  getRunSteps: vi.fn(),
+  stepsShown: [] as boolean[],
   listEvents: vi.fn(),
   played: [] as MonitorEffect[],
   fileSettings: [] as FileSettings[],
@@ -27,6 +30,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getMessages,
   getFileChanges,
+  getRunSteps,
   listEvents,
 }))
 
@@ -52,6 +56,9 @@ vi.mock('../../lib/monitor/scene', async (importOriginal) => {
       fileSettings.push({ ...settings })
     }
     clearFileChanges() {}
+    setAgentSteps(show: boolean) {
+      stepsShown.push(show)
+    }
     setLayout(layout: LayoutSettings) {
       layouts.push({ ...layout })
     }
@@ -64,6 +71,7 @@ import { useConsoleStore } from '../../stores/console'
 import { resetBody } from '../../test/mountQuasar'
 import { SettingsKey } from '../../lib/monitor/hints'
 import { FileSettingsKey, MaxRecordedChanges, fileWatch } from '../../lib/monitor/workspace'
+import { MaxRecordedSteps, StepSettingsKey } from '../../lib/monitor/steps'
 import { localTime } from '../../lib/localTime'
 
 let seq = 0
@@ -140,6 +148,8 @@ beforeEach(() => {
   played.length = 0
   fileSettings.length = 0
   layouts.length = 0
+  stepsShown.length = 0
+  localStorage.removeItem(StepSettingsKey)
   localStorage.removeItem(LayoutKeyName)
   localStorage.removeItem(SettingsKey)
   localStorage.removeItem(FileSettingsKey)
@@ -561,6 +571,155 @@ describe('the Monitor replay of recorded file changes', () => {
     expect(wrapper.find('[data-monitor-mode="replay"]').exists()).toBe(true)
     expect(wrapper.find('[data-monitor-cut]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('are not shown')
+  })
+})
+
+// --- agent steps -------------------------------------------------------------------------------------
+
+/** One `agentSteps` push for Azure, heard on the hub while the Monitor is open. */
+const stepsPush = () => ({
+  team: 'Infra',
+  member: 'Azure',
+  steps: [
+    { id: 1, team: 'Infra', member: 'Azure', run: 4, workflow: 3, at: at(1), kind: 'tool', label: 'Bash', mcpTool: null, count: 1 },
+    { id: 2, team: 'Infra', member: 'Azure', run: 4, workflow: 3, at: at(1), kind: 'text', label: '', mcpTool: null, count: 2 },
+  ],
+})
+
+async function stepsHeard(): Promise<MonitorEffect[]> {
+  played.length = 0
+  fileWatch.deliverSteps(stepsPush())
+  await flushPromises()
+  return played.filter((effect) => effect.kind === 'step')
+}
+
+const stepWords = (effects: MonitorEffect[]) => effects.map((effect) => effect.kind === 'step' && [effect.at, effect.step.kind, effect.step.label, effect.step.at])
+
+/** The activity list's rows, in words, once the list has had time to show anything new (it is published at least once a second). */
+async function activity(w: VueWrapper): Promise<string[]> {
+  await new Promise((resolve) => setTimeout(resolve, 1100))
+  await flushPromises()
+  return w.findAll('.monitor-rows > li').map((found) => found.text().replace(/\s+/g, ' ').trim())
+}
+
+/** What the Host recorded over the period: two pages of steps. */
+function recordedStepPages() {
+  getRunSteps.mockImplementation((_period: unknown, after: number) =>
+    Promise.resolve(
+      after === 0
+        ? { steps: [{ id: 5, team: 'Infra', member: 'Azure', run: 4, workflow: 3, at: at(3), kind: 'tool', label: 'MCP', mcpTool: 'kanban', count: 1 }], next: 5 }
+        : { steps: [{ id: 6, team: 'Infra', member: 'Azure', run: 4, workflow: 3, at: at(7), kind: 'note', label: '', mcpTool: null, count: 1 }], next: null },
+    ),
+  )
+}
+
+async function replayedSteps(w: VueWrapper): Promise<MonitorEffect[]> {
+  await replayed(w)
+  return played.filter((effect) => effect.kind === 'step')
+}
+
+describe('the Monitor and agent steps', () => {
+  it('lists Show agent steps beside Show file changes, on by default', async () => {
+    const { wrapper } = await mountMonitor()
+    const panel = await openPanel(wrapper)
+
+    const toggles = panel.findAll('[data-monitor-setting]').map((found) => found.attributes('data-monitor-setting'))
+    expect(toggles.indexOf('steps')).toBeGreaterThan(toggles.indexOf('files'))
+    expect(panel.find('[data-monitor-setting="steps"]').text()).toContain('Show agent steps')
+    expect(panel.find('[data-monitor-setting="steps"]').attributes('aria-checked')).toBe('true')
+    expect(stepsShown).toEqual([true])
+  })
+
+  it("draws each live step on its member's node and adds nothing to the activity list", async () => {
+    const { wrapper } = await mountMonitor(period())
+    const before = await activity(wrapper)
+    expect(before.length).toBeGreaterThan(0)
+
+    const effects = await stepsHeard()
+
+    expect(stepWords(effects)).toEqual([
+      [{ kind: 'member', key: 'Infra/Azure' }, 'tool', 'Bash', at(1)],
+      [{ kind: 'member', key: 'Infra/Azure' }, 'text', '', at(1)],
+    ])
+    expect(await activity(wrapper)).toEqual(before)
+  })
+
+  it('draws no live step and replays none with Show agent steps off, and reads no recorded steps', async () => {
+    recordedStepPages()
+    const { wrapper } = await mountMonitor(period())
+    await (await openPanel(wrapper)).find('[data-monitor-setting="steps"]').trigger('click')
+
+    expect(stepsShown.at(-1)).toBe(false)
+    expect(await stepsHeard()).toEqual([])
+    expect(await replayedSteps(wrapper)).toEqual([])
+    expect(getRunSteps).not.toHaveBeenCalled()
+  })
+
+  it('remembers Show agent steps in this browser across a remount', async () => {
+    const first = await mountMonitor()
+    await (await openPanel(first.wrapper)).find('[data-monitor-setting="steps"]').trigger('click')
+    first.wrapper.unmount()
+    wrapper = null
+
+    expect(JSON.parse(localStorage.getItem(StepSettingsKey)!)).toEqual({ show: false })
+
+    const again = await mountMonitor()
+    expect((await openPanel(again.wrapper)).find('[data-monitor-setting="steps"]').attributes('aria-checked')).toBe('false')
+    expect(await stepsHeard()).toEqual([])
+  })
+
+  it('stops hearing steps when the Monitor closes', async () => {
+    const mounted = await mountMonitor()
+    mounted.wrapper.unmount()
+    wrapper = null
+
+    expect(await stepsHeard()).toEqual([])
+  })
+
+  it("replays the period's recorded steps page by page, each on its member, and none in the activity list", async () => {
+    recordedStepPages()
+    const { wrapper } = await mountMonitor(period())
+
+    const effects = await replayedSteps(wrapper)
+
+    expect(getRunSteps.mock.calls.map(([asked, after]) => [asked, after])).toEqual([
+      [{ from: at(0), to: at(10) }, 0],
+      [{ from: at(0), to: at(10) }, 5],
+    ])
+    expect(stepWords(effects)).toEqual([
+      [{ kind: 'member', key: 'Infra/Azure' }, 'tool', 'MCP', at(3)],
+      [{ kind: 'member', key: 'Infra/Azure' }, 'note', '', at(7)],
+    ])
+    expect(wrapper.findAll('.monitor-row').some((row) => /MCP|kanban|note/i.test(row.text()))).toBe(false)
+    expect(wrapper.find('[data-monitor-steps-cut]').exists()).toBe(false)
+  })
+
+  it('plays the rows without steps when they cannot be read', async () => {
+    getRunSteps.mockRejectedValue(new Error('503 Service Unavailable'))
+    const { wrapper } = await mountMonitor(period())
+
+    expect(await replayedSteps(wrapper)).toEqual([])
+    expect(played.length).toBeGreaterThan(0)
+    expect(wrapper.find('[data-monitor-steps-cut]').exists()).toBe(false)
+  })
+
+  it('says after what time agent steps are not shown when the read stops at its bound', async () => {
+    getRunSteps.mockImplementation((_period: unknown, after: number) => {
+      const last = after + 500 >= MaxRecordedSteps
+      const steps = Array.from({ length: 500 }, (_, i) => ({
+        id: after + i + 1, team: 'Infra', member: 'Azure', run: 4, workflow: 3, at: last && i === 499 ? at(4) : at(3), kind: 'tool', label: 'Read', mcpTool: null, count: 1,
+      }))
+      return Promise.resolve({ steps, next: after + 500 })
+    })
+    const { wrapper } = await mountMonitor(period())
+
+    await replayed(wrapper)
+
+    expect(getRunSteps).toHaveBeenCalledTimes(MaxRecordedSteps / 500)
+    expect(wrapper.find('[data-monitor-steps-cut]').text().replace(/\s+/g, ' ')).toBe(
+      `Agent steps after ${localTime(Date.parse(at(4)))} are not shown: this replay reads at most 20,000.`,
+    )
+    expect(wrapper.find('[data-monitor-cut]').exists()).toBe(false)
   })
 })
 

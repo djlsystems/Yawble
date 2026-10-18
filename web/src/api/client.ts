@@ -1,5 +1,6 @@
 import { diagnosticsQuery } from '../lib/diagnostics'
 import type { FileChangesPage } from '../lib/monitor/workspace'
+import type { StepsPage } from '../lib/monitor/steps'
 import type { BuildInfo } from '../lib/buildInfo'
 import type { UpdateStatus } from '../lib/releaseUpdates'
 import { normaliseTenantSettings, rejectedField } from '../lib/tenantSettings'
@@ -346,6 +347,15 @@ export const getMessages = (after: number, take?: number) =>
 export const getFileChanges = (period: { from: string; to: string }, after = 0, take = 500) =>
   json<FileChangesPage>(
     `/api/file-changes?from=${encodeURIComponent(period.from)}&to=${encodeURIComponent(period.to)}&after=${after}&take=${take}`,
+  )
+
+/**
+ * The steps members' runs took (each tool call, note, result and line of text, by kind and tool name
+ * only), recorded during every run, for the Monitor's replay: paged as `getFileChanges` is. People only.
+ */
+export const getRunSteps = (period: { from: string; to: string }, after = 0, take = 500) =>
+  json<StepsPage>(
+    `/api/run-steps?from=${encodeURIComponent(period.from)}&to=${encodeURIComponent(period.to)}&after=${after}&take=${take}`,
   )
 
 /**

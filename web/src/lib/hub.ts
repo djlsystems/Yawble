@@ -60,6 +60,12 @@ export interface HubHandlers {
    * OPTIONAL by the same seam as `onKanbanChanged`. The shape is read there, never trusted here.
    */
   onWorkspaceChanged?: (push: unknown) => void;
+
+  /**
+   * A member's agent steps, pushed to the same connections as `workspaceChanged`
+   * (`lib/monitor/steps.ts`). OPTIONAL by the same seam; the shape is read there, never trusted here.
+   */
+  onAgentSteps?: (push: unknown) => void;
 }
 
 /**
@@ -114,6 +120,7 @@ export async function connectHub(
   if (handlers.onKanbanChanged) connection.on('kanbanChanged', handlers.onKanbanChanged);
   if (handlers.onCapacityChanged) connection.on('capacityChanged', handlers.onCapacityChanged);
   if (handlers.onWorkspaceChanged) connection.on('workspaceChanged', handlers.onWorkspaceChanged);
+  if (handlers.onAgentSteps) connection.on('agentSteps', handlers.onAgentSteps);
 
   connection.onreconnecting(() => handlers.onConnectedChanged(false));
 

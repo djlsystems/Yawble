@@ -120,11 +120,11 @@ describe('the live view dialog', () => {
     expect(rendered).toEqual(['$ dotnet build', '  Restoring   packages…', 'Build succeeded.']);
   });
 
-  it('shows each step as its own row, a tool call with its name as a chip', async () => {
+  it('shows each step as its own row, of the kind the Host gave it, a tool call with its name as a chip', async () => {
     const live = liveStream();
     await openWith(live.response);
 
-    await live.push('Checking the suite.\nBash: npm test\nTests passed (12 bytes)\n');
+    await live.push('\ttext\tChecking the suite.\n\ttool\tBash: npm test\n\tresult\tTests passed (12 bytes)\n');
 
     const rows = [...document.body.querySelectorAll<HTMLElement>('.live-view-line')];
     expect(rows.map((row) => row.dataset.kind)).toEqual(['text', 'tool', 'result']);
@@ -137,7 +137,7 @@ describe('the live view dialog', () => {
     await openWith(live.response);
 
     const at = new Date(2026, 8, 26, 9, 34, 41);
-    await live.push(`${at.toISOString()}\tBash: npm test\n\tgarbage\n`);
+    await live.push(`${at.toISOString()}\ttool\tBash: npm test\n\ttext\tgarbage\n`);
 
     const rows = [...document.body.querySelectorAll<HTMLElement>('.live-view-line')];
     expect(rows[0]!.querySelector('.live-view-time')!.textContent).toBe('09:34:41');
@@ -150,7 +150,7 @@ describe('the live view dialog', () => {
     const live = liveStream();
     await openWith(live.response);
 
-    await live.push('Attachment: <total_tokens>1 tokens left</total_tokens>\nWorking.\nAttachment: environment\n');
+    await live.push('\tnote\tAttachment: <total_tokens>1 tokens left</total_tokens>\n\ttext\tWorking.\n\tnote\tAttachment: environment\n');
 
     expect(document.body.querySelectorAll('.live-view-line')).toHaveLength(1);
     expect(bodyText()).toContain('Notes (2 hidden)');
@@ -159,7 +159,7 @@ describe('the live view dialog', () => {
     await flushPromises();
 
     const rows = [...document.body.querySelectorAll<HTMLElement>('.live-view-line')];
-    expect(rows.map((row) => row.dataset.kind)).toEqual(['aside', 'text', 'aside']);
+    expect(rows.map((row) => row.dataset.kind)).toEqual(['note', 'text', 'note']);
     expect(rows[2]!.querySelector('.live-view-text')!.textContent).toBe('environment');
   });
 
@@ -435,7 +435,7 @@ describe('the watch dialog: live run and earlier runs', () => {
     const fetch = stubApi({
       pages: { '': { runs: [run(7)], nextBefore: null } },
       transcripts: {
-        7: text(`${at.toISOString()}\tRead /work/spec.md\n${at.toISOString()}\tBash: npm test\n\tDone.\n`),
+        7: text(`${at.toISOString()}\ttool\tRead /work/spec.md\n${at.toISOString()}\ttool\tBash: npm test\n\ttext\tDone.\n`),
       },
     });
     await mountDialog(LiveViewDialog, { ...props, running: false });
