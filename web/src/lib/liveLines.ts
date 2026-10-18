@@ -1,14 +1,17 @@
 /**
- * WHAT KIND OF STEP A LIVE-VIEW LINE IS, read off the shape the server gives every line:
- * `Bash: <command>`, `Read <path>`, `MCP: <tool>`, `<Tool>: <short input>`, a tool result's first
- * line and size, `User: <first line>`, `Attachment: <name or first line>`, or the agent's own text.
- * The stream stays plain text; this only decides how a line is shown.
+ * WHAT KIND OF STEP A LIVE-VIEW LINE IS, as the Host says: every line comes as
+ * `<when>` TAB `<kind>` TAB `<line>`, the kind one of `tool`, `result`, `text`, `user` or `note`.
+ * The Host classifies each line by one rule, the same one its recorded agent steps use, so the view
+ * and the Monitor never disagree; this only splits the line into the chip and the words beside it.
  *
- * A TOOL IS RECOGNISED BY NAME, NOT BY SHAPE. `Note: ...` in the agent's prose has the same shape as
- * `Grep: ...`, so only the tools named here get the tool styling; an unknown one reads as text,
- * which is harmless.
+ * The line keeps the shape the server renders: `Bash: <command>`, `Read <path>`, `MCP: <tool>`,
+ * `<Tool>: <short input>`, a tool result's first line and size, `User: <first line>`,
+ * `Attachment: <name or first line>`, or the agent's own text. A line with no kind the Host names
+ * reads as text, which is harmless.
  */
-export type LiveLineKind = 'tool' | 'result' | 'text' | 'user' | 'aside';
+export type LiveLineKind = 'tool' | 'result' | 'text' | 'user' | 'note';
+
+const Kinds: readonly LiveLineKind[] = ['tool', 'result', 'text', 'user', 'note'];
 
 export interface LiveLine {
   /** When the event happened, or null when the server sent no time for it. */
@@ -20,27 +23,26 @@ export interface LiveLine {
   text: string;
 }
 
-const Tools = new Set([
-  'Bash', 'MCP', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Grep', 'Glob', 'LS', 'Skill',
-  'Task', 'Agent', 'TodoWrite', 'ToolSearch', 'WebFetch', 'WebSearch', 'BashOutput', 'KillShell',
-]);
-
-/** A tool result: `<first line> (<n> bytes)`, the size always last. */
-const ResultSize = / \(\d+ bytes\)$/;
-
 /**
- * One line off the stream: `<when>` TAB `<line>`, `<when>` being the event's time in UTC or empty.
- * A line with no tab, or whose first field is not a time, is all line and has no time.
+ * One line off the stream: `<when>` TAB `<kind>` TAB `<line>`, `<when>` being the event's time in
+ * UTC or empty. A first field that is not a time, or no tab at all, is all line, with no time and no
+ * kind; a second field that is not a kind is part of the line.
  */
 export function parseLiveLine(raw: string): LiveLine {
   const tab = raw.indexOf('\t');
   if (tab >= 0) {
     const when = raw.slice(0, tab);
     const at = when === '' ? null : new Date(when);
-    if (at === null || !Number.isNaN(at.getTime())) return { at, ...classifyLiveLine(raw.slice(tab + 1)) };
+    if (at === null || !Number.isNaN(at.getTime())) {
+      const rest = raw.slice(tab + 1);
+      const second = rest.indexOf('\t');
+      const kind = second >= 0 ? (rest.slice(0, second) as LiveLineKind) : null;
+      if (kind !== null && Kinds.includes(kind)) return { at, ...splitLiveLine(kind, rest.slice(second + 1)) };
+      return { at, ...splitLiveLine('text', rest) };
+    }
   }
 
-  return { at: null, ...classifyLiveLine(raw) };
+  return { at: null, ...splitLiveLine('text', raw) };
 }
 
 /** `13:34:41` in the viewer's own time zone. */
@@ -48,18 +50,20 @@ export function liveLineTime(at: Date): string {
   return at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 }
 
-export function classifyLiveLine(line: string): Omit<LiveLine, 'at'> {
-  // `Read <path>` has no colon, so the path is what tells it from "Read the spec first." in prose:
-  // an absolute path, or one word with a slash in it.
-  if (/^Read (\/|~|\S*\/\S*$)/.test(line)) return { kind: 'tool', label: 'Read', text: line.slice(5) };
-  if (line.startsWith('User: ')) return { kind: 'user', label: 'User', text: line.slice(6) };
-  if (line.startsWith('Attachment: ')) return { kind: 'aside', label: 'Note', text: line.slice(12) };
-
-  const colon = line.indexOf(': ');
-  if (colon > 0 && Tools.has(line.slice(0, colon))) {
-    return { kind: 'tool', label: line.slice(0, colon), text: line.slice(colon + 2) };
+/** A line of the kind the Host gave it, as its chip and its words. */
+export function splitLiveLine(kind: LiveLineKind, line: string): Omit<LiveLine, 'at'> {
+  switch (kind) {
+    case 'tool': {
+      // `Read <path>` has no colon; every other tool is `<Tool>: <input>`.
+      if (line.startsWith('Read ')) return { kind, label: 'Read', text: line.slice(5) };
+      const colon = line.indexOf(': ');
+      return colon > 0 ? { kind, label: line.slice(0, colon), text: line.slice(colon + 2) } : { kind, label: '', text: line };
+    }
+    case 'user':
+      return { kind, label: 'User', text: line.startsWith('User: ') ? line.slice(6) : line };
+    case 'note':
+      return { kind, label: 'Note', text: line.startsWith('Attachment: ') ? line.slice(12) : line };
+    default:
+      return { kind, label: '', text: line };
   }
-
-  if (ResultSize.test(line)) return { kind: 'result', label: '', text: line };
-  return { kind: 'text', label: '', text: line };
 }

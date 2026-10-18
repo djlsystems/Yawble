@@ -363,6 +363,9 @@ onMounted(async () => {
       // A member's file changes, heard while the Monitor has joined the file watch.
       onWorkspaceChanged: (push) => fileWatch.deliver(push),
 
+      // A member's agent steps, heard on the same watch.
+      onAgentSteps: (push) => fileWatch.deliverSteps(push),
+
       onTeamChanged: () => {
         void board.refresh();
         board.refreshRollupIfShowing();

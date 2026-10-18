@@ -14,6 +14,7 @@ import { compact } from './model'
 import type { Resource, ResourceAction } from './hints'
 import { MonitorSymbolsFamily, glyphOf, type Codepoints } from './font'
 import { LayoutDefaults, type LayoutSettings } from './layout'
+import { MaxStepIconsEach, StepCaptionMinPx, StepMs, stepIcon, stepMotion, type AgentStep } from './steps'
 import { wakeLine } from '../wakes'
 import {
   DefaultFileSettings,
@@ -165,6 +166,30 @@ interface ResourceMark {
   ttl: number
 }
 
+interface StepMark {
+  at: NodeRef
+  step: AgentStep
+  start: number
+  /** Its place beside the others on the node: 0 over the middle, 1 left of it, 2 right. */
+  lane: number
+}
+
+/** A step's icon as the scene would draw it now. Exposed for tests. */
+export interface ShownStep {
+  at: NodeRef
+  /** The Material Symbols name it draws. */
+  icon: string
+  /** The icon's character, or null while the font is not loaded: a plain dot is drawn instead. */
+  glyph: string | null
+  /** The small number on it: how many steps it stands for, or null for one. */
+  count: number | null
+  /** The MCP tool's name under it, only when the node is drawn large enough; null otherwise. */
+  caption: string | null
+  x: number
+  y: number
+  alpha: number
+}
+
 /** A resource mark as the scene would draw it now. Exposed for tests. */
 export interface ShownResource {
   at: NodeRef
@@ -212,6 +237,9 @@ const WorkspaceGap = 4
 const SeparatePasses = 60
 /** Past this many at once beside one member, the oldest goes early. */
 const MaxResourcesEach = 8
+/** A step's icon size, and how far it climbs over its time. */
+const StepIconPx = 14
+const StepRise = 28
 
 /** "DeveloperHelene" -> "DH", "Namecheap DNS" -> "ND", "Manager" -> "M". */
 export function initials(name: string): string {
@@ -249,6 +277,8 @@ export class MonitorScene {
   private ripples: Ripple[] = []
   private floaters: Floater[] = []
   private resources: ResourceMark[] = []
+  private steps: StepMark[] = []
+  private stepsOn = true
   private readonly workspace = new WorkspaceGraph()
   private fileSettings: FileSettings = DefaultFileSettings
   /** The file changes as last laid out, by node id. */
@@ -344,6 +374,12 @@ export class MonitorScene {
   clearFileChanges() {
     this.workspace.clear()
     this.syncWorkspace()
+  }
+
+  /** Show agent steps: off, every step icon goes at once and none is drawn until it is on again. */
+  setAgentSteps(show: boolean) {
+    this.stepsOn = show
+    if (!show) this.steps = []
   }
 
   /** The full icon font arrived: from the next frame, icons draw instead of plain dots. */
@@ -509,6 +545,17 @@ export class MonitorScene {
           this.workspace.apply(effect.push, now, effect.ttlMs, effect.at.kind === 'member' ? effect.at.key : null)
           this.touch(effect.at)
           break
+        case 'step': {
+          if (!this.stepsOn) break
+          // A BURST KEEPS THE NEWEST: past the few a node shows at once, the oldest goes early.
+          const mine = this.steps.filter((mark) => sameRef(mark.at, effect.at))
+          const gone = new Set(mine.slice(0, Math.max(0, mine.length - MaxStepIconsEach + 1)))
+          if (gone.size > 0) this.steps = this.steps.filter((mark) => !gone.has(mark))
+          const taken = new Set(mine.filter((mark) => !gone.has(mark)).map((mark) => mark.lane))
+          const lane = [0, 1, 2].find((free) => !taken.has(free)) ?? 0
+          this.steps.push({ at: effect.at, step: effect.step, start: now, lane })
+          break
+        }
         case 'resource': {
           this.resources.push({ at: effect.at, resource: effect.resource, start: now, ttl: effect.ttlMs })
           const mine = this.resources.filter((mark) => sameRef(mark.at, effect.at))
@@ -967,6 +1014,7 @@ export class MonitorScene {
     this.ripples = this.ripples.filter((r) => now - r.start < RippleMs)
     this.floaters = this.floaters.filter((f) => now - f.start < FloatMs)
     this.resources = this.resources.filter((mark) => now - mark.start < mark.ttl)
+    this.steps = this.steps.filter((mark) => now - mark.start < StepMs)
     let removed = false
     for (const [id, node] of this.nodes) {
       if (node.dying !== null && now - node.dying > DyingMs) {
@@ -1237,6 +1285,7 @@ export class MonitorScene {
     this.drawNodes(ctx, now, focus)
     this.drawCommits(ctx)
     this.drawResources(ctx)
+    this.drawSteps(ctx)
     this.drawTeamNames(ctx, now, focus)
     this.drawFloaters(ctx, now)
     ctx.restore()
@@ -2000,6 +2049,73 @@ export class MonitorScene {
       ctx.shadowBlur = 4
       const label = mark.resource.label.length > 40 ? `${mark.resource.label.slice(0, 39)}…` : mark.resource.label
       ctx.fillText(label, x + side * (ResourceR + 6), y + 0.5)
+      ctx.restore()
+    }
+  }
+
+  /**
+   * Where each step's icon is now and how strongly it shows: it starts just over its node, rises and
+   * fades, beside the others on the node rather than on top of them.
+   */
+  shownSteps(): ShownStep[] {
+    const now = this.clock
+    const shown: ShownStep[] = []
+    const spread = StepIconPx + 4
+    for (const mark of this.steps) {
+      const pos = this.posOf(mark.at)
+      if (!pos) continue
+      const node = this.nodeOf(mark.at)
+      const r = node?.r ?? 10
+      const { alpha, rise } = stepMotion(now - mark.start, this.options.reducedMotion)
+      const side = mark.lane === 0 ? 0 : mark.lane === 1 ? -1 : 1
+      const icon = stepIcon(mark.step)
+      const roomy = r * this.camera.k >= StepCaptionMinPx
+      shown.push({
+        at: mark.at,
+        icon,
+        glyph: glyphOf(this.symbols, icon),
+        count: mark.step.count > 1 ? mark.step.count : null,
+        caption: roomy && mark.step.label === 'MCP' && mark.step.mcpTool ? mark.step.mcpTool : null,
+        x: pos.x + side * spread,
+        y: pos.y - r - StepIconPx * 0.7 - rise * StepRise,
+        alpha,
+      })
+    }
+    return shown
+  }
+
+  /** The agents' steps: each a small icon in the ink colour, its count beside it, an MCP tool's name under it. */
+  private drawSteps(ctx: CanvasRenderingContext2D) {
+    for (const mark of this.shownSteps()) {
+      if (mark.alpha <= 0.01) continue
+      const { x, y } = mark
+      ctx.save()
+      ctx.globalAlpha = mark.alpha
+      ctx.shadowColor = alphaHex(Screen.ground, 0.9)
+      ctx.shadowBlur = 4
+      ctx.fillStyle = Screen.ink
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      if (mark.glyph !== null) {
+        ctx.font = `${StepIconPx}px "${MonitorSymbolsFamily}"`
+        ctx.fillText(mark.glyph, x, y)
+      } else {
+        ctx.beginPath()
+        ctx.arc(x, y, 2.5, 0, Math.PI * 2)
+        ctx.fill()
+      }
+      if (mark.count !== null) {
+        ctx.font = this.font(0.5, 700)
+        ctx.textAlign = 'left'
+        ctx.fillText(String(mark.count), x + StepIconPx * 0.45, y - StepIconPx * 0.35)
+      }
+      if (mark.caption !== null) {
+        ctx.font = this.font(0.45, 500)
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'top'
+        ctx.fillStyle = Screen.inkDim
+        ctx.fillText(mark.caption.length > 16 ? `${mark.caption.slice(0, 15)}…` : mark.caption, x, y + StepIconPx * 0.55)
+      }
       ctx.restore()
     }
   }
