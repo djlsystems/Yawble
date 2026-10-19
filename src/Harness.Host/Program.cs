@@ -5859,7 +5859,7 @@ app.MapGet("/api/teams/{team}/tokens", async (
 // holding the team and already carries `currentCorrelation`, which is all the push side needs.
 app.MapGet("/api/teams/{team}/workflow", async (
     [Description(Describe.Team)] string team,
-    TeamRegistry teams, IMessageLog log, ContainerHost host, CancellationToken ct) =>
+    TeamRegistry teams, IMessageLog log, ContainerHost host, IBacklogStore backlog, CancellationToken ct) =>
 {
     if (teams.ExistingName(team) is not { } stored)
     {
@@ -5882,7 +5882,8 @@ app.MapGet("/api/teams/{team}/workflow", async (
         .DefaultIfEmpty(0)
         .Min();
 
-    return Results.Ok(await log.ElapsedForTeamAsync(stored, floor, ct));
+    // THE ITEM'S CURRENT TITLE, as `/workflows` and the rollup serve it.
+    return Results.Ok(await WorkflowItems.OverlayAsync(await log.ElapsedForTeamAsync(stored, floor, ct), backlog, ct));
 })
     .WithTags("Activity")
     .RequirePermit(Permits.Read)
@@ -5910,7 +5911,8 @@ app.MapGet("/api/teams/{team}/workflow", async (
 // per correlation instead of once for the newest - see TeamWorkflows.
 app.MapGet("/api/teams/{team}/workflows", async (
     [Description(Describe.Team)] string team,
-    TeamRegistry teams, IMessageLog log, ContainerHost host, IOutcomeStore outcomes, IWakeStore wakes, CancellationToken ct) =>
+    TeamRegistry teams, IMessageLog log, ContainerHost host, IOutcomeStore outcomes, IWakeStore wakes,
+    IBacklogStore backlog, CancellationToken ct) =>
 {
     if (teams.ExistingName(team) is not { } stored)
     {
@@ -5928,7 +5930,8 @@ app.MapGet("/api/teams/{team}/workflows", async (
         .DefaultIfEmpty(0)
         .Min();
 
-    var listed = await log.WorkflowsForTeamAsync(stored, floor, ct);
+    // EACH DISPATCH ROW'S ITEM WITH ITS CURRENT TITLE, in one backlog read for the whole list.
+    var listed = await WorkflowItems.OverlayAsync(await log.WorkflowsForTeamAsync(stored, floor, ct), backlog, ct);
 
     // EACH ROW'S OUTCOME, in one query for the whole list: the workflows view's Outcome column.
     var served = await outcomes.CurrentOutcomesAsync(
@@ -6129,7 +6132,7 @@ app.MapGet("/api/teams/{team}/containers/{name}/workflows", async (
 // would then pay a log projection per team for data it never shows.
 app.MapGet("/api/teams/rollup", async (
     HttpContext context, TeamRegistry teams, TeamAccess access, IMessageLog log, ContainerHost host,
-    WipLedger wip, CancellationToken ct) =>
+    WipLedger wip, IBacklogStore backlog, CancellationToken ct) =>
 {
     if (PrincipalClaims.From(context.User) is not { } principal) return Results.Unauthorized();
 
@@ -6177,7 +6180,9 @@ app.MapGet("/api/teams/rollup", async (
             held.Count > 0 ? waiting[0].Reason ?? TeamRollupRow.WaitingForASlot : null));
     }
 
-    return Results.Ok(new TeamRollup(rows));
+    // EVERY TEAM'S ITEMS WITH THEIR CURRENT TITLES, in one backlog read for the whole rollup - the
+    // same overlay the per-team routes apply, so a row here names its work as they do.
+    return Results.Ok(new TeamRollup(await WorkflowItems.OverlayAsync(rows, backlog, ct)));
 })
     .WithTags("Activity")
     .RequirePermit(Permits.Read)

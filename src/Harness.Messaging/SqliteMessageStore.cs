@@ -767,6 +767,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         // a floor: a subject is a label, not an authority, and the row it names is what began this very
         // workflow whichever side of `sinceSeq` it happens to sit on.
         string? subject = null;
+        WorkflowItem? item = null;
 
         await using (var root = connection.CreateCommand())
         {
@@ -785,6 +786,14 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
                 if (type.StartsWith(MessageTypes.InstructionPrefix, StringComparison.Ordinal))
                 {
                     subject = SubjectFrom(reader.IsDBNull(1) ? null : reader.GetString(1));
+                }
+
+                // A DISPATCH ROOT NAMES ITS ITEM, with the title it had when it was dispatched. The
+                // current title is the Host's to overlay (`WorkflowItems`): this store cannot read the
+                // backlog.
+                else if (type == MessageTypes.BacklogItemDispatched)
+                {
+                    item = ItemFrom(reader.IsDBNull(1) ? null : reader.GetString(1));
                 }
             }
         }
@@ -1333,7 +1342,39 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             pausedAt,
             pausedReason,
             pausedLimit,
-            sinceNudgeToReturn);
+            sinceNudgeToReturn,
+            Item: item);
+    }
+
+    /// <summary>
+    /// A DISPATCH ROOT'S ITEM, out of its payload - <c>item</c> (the route number) and <c>title</c>
+    /// as `BacklogEndpoints` writes them - or null when either is missing or the payload is not
+    /// JSON. Nothing is made up for a missing title: an item with no words is the number alone,
+    /// which the reader already has.
+    /// </summary>
+    private static WorkflowItem? ItemFrom(string? payload)
+    {
+        if (string.IsNullOrEmpty(payload)) return null;
+
+        try
+        {
+            using var json = JsonDocument.Parse(payload);
+
+            if (json.RootElement.ValueKind is not JsonValueKind.Object) return null;
+
+            return json.RootElement.TryGetProperty("item", out var idField)
+                && idField.ValueKind is JsonValueKind.Number
+                && idField.TryGetInt64(out var id)
+                && json.RootElement.TryGetProperty("title", out var titleField)
+                && titleField.ValueKind is JsonValueKind.String
+                && titleField.GetString() is { Length: > 0 } title
+                    ? new WorkflowItem(id, title)
+                    : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>

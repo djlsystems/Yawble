@@ -150,6 +150,13 @@ namespace Harness.Contracts;
 ///
 /// Multi-workflow tracking needs a label a person can read, not a bare correlation seq.
 /// </param>
+/// <param name="Item">
+/// The backlog item, when the ROOT row is <c>backlog.item.dispatched</c>: its <c>item</c> and
+/// <c>title</c>, read off that row's payload. Null for any other root, and null when the payload
+/// lacks either. The projection cannot read the backlog store, so the title here is the one the
+/// dispatch row carried; the Host's <c>WorkflowItems</c> overlays the item's current title on the
+/// routes that serve this record to people.
+/// </param>
 public sealed record TeamWorkflowTiming(
     [property: Description(
         "Whether this team has a workflow to report at all. False for a team that has never run - "
@@ -294,7 +301,29 @@ public sealed record TeamWorkflowTiming(
         + "(id, member, workflow, dueAt, askedAt, note; instants UTC). Absent when there are none. "
         + "Set by the team workflows route, not the projection.")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyList<WakeView>? Wakes = null);
+    IReadOnlyList<WakeView>? Wakes = null,
+
+    [property: Description(
+        "The backlog item this workflow carries: { id, title } when its root row is a "
+        + "backlog.item.dispatched row - id the item's route number, title the item's title - and "
+        + "null for a workflow rooted any other way (a told workflow keeps its subject instead). "
+        + "The team workflow routes and the rollup serve the item's CURRENT title, one backlog read "
+        + "per request; an item since deleted keeps the title the dispatch row carried. A reader "
+        + "that does not go through those routes (an agent tool's read) serves the dispatch row's "
+        + "title.")]
+    WorkflowItem? Item = null);
+
+/// <summary>
+/// The backlog item a dispatch workflow carries, off its root <c>backlog.item.dispatched</c> row.
+/// </summary>
+/// <param name="Id">The item's route number; a reader renders its citation from it.</param>
+/// <param name="Title">
+/// The item's title: the dispatch row's own in the projection, the backlog's current one once the
+/// Host's <c>WorkflowItems</c> overlay has run.
+/// </param>
+public sealed record WorkflowItem(
+    [property: Description("The item's route number.")] long Id,
+    [property: Description("The item's title.")] string Title);
 
 /// <summary>
 /// One member's run time inside a workflow.
