@@ -296,3 +296,21 @@ describe('the workflow row says PAUSED and offers Resume', () => {
     wrapper.unmount();
   });
 });
+
+describe('the tile counts the workflows by state', () => {
+  it('names each state the list holds under the member line, and none with no workflow in it', async () => {
+    const wrapper = mountStrip(
+      payload([
+        timing({ correlation: 1707, state: 'Completed', endedAt: '2026-09-20T09:40:00Z' }),
+        timing({ correlation: 1708, state: 'Completed', endedAt: '2026-09-20T09:45:00Z' }),
+        pausedTiming({ correlation: 1801 }),
+      ]),
+    );
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="workflow-states"]').text()).toBe('1 paused · 2 completed');
+    expect(wrapper.find('.team-kpi-members').text()).toContain('no member working');
+
+    wrapper.unmount();
+  });
+});

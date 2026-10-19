@@ -680,6 +680,9 @@ function showThread(row: WorkflowRow) {
            like what it is. It is underlined so it reads as interactive rather than as a surprise. -->
       <button type="button" class="team-kpi-members" @click="workflowOpen = true">
         {{ workflow.members }}
+        <!-- THE WORKFLOWS THE DIALOG LISTS, BY STATE, only the states that have one: what is
+             running, what finished, what was closed, what waits. -->
+        <span v-if="tile.states" class="team-kpi-states" data-test="workflow-states">{{ tile.states }}</span>
         <q-tooltip>Where the run time went — click for the breakdown</q-tooltip>
       </button>
     </div>
@@ -1377,6 +1380,11 @@ function showThread(row: WorkflowRow) {
   text-decoration: underline;
   color: var(--os-ink-muted);
   cursor: pointer;
+}
+
+/* Its own line under the member counts. */
+.team-kpi-states {
+  display: block;
 }
 
 .team-kpi-members:focus-visible {

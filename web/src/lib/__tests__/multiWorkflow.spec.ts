@@ -837,3 +837,48 @@ describe('teamChip — a wake held behind the WIP limit', () => {
     expect(teamChip(tile, [container({ id: 'Manager', name: 'Manager', held: true })]).label).toBe('BLOCKED');
   });
 });
+
+describe('workflowsTile, the workflows counted by state', () => {
+  const ended = '2026-09-08T11:50:00Z';
+
+  it('counts each state the list holds, loudest first, and leaves out every state with none', () => {
+    const tile = workflowsTile(
+      payload({
+        openCount: 1,
+        totalCount: 5,
+        workflows: [
+          timing({ correlation: 1 }),
+          timing({ correlation: 2, state: 'Completed', endedAt: ended }),
+          timing({ correlation: 3, state: 'Completed', endedAt: ended }),
+          timing({ correlation: 4, state: 'Closed', endedAt: ended }),
+          timing({ correlation: 5, state: 'Completed', endedAt: ended }),
+        ],
+      } as Partial<TeamWorkflows>),
+      [container({ id: 'Manager', state: 'Running', currentCorrelation: 1 })],
+      now,
+    );
+
+    expect(tile.states).toBe('1 running · 3 completed · 1 closed');
+  });
+
+  it('says how many workflows the list does not hold, since only the rows can be counted', () => {
+    const tile = workflowsTile(
+      payload({
+        openCount: 0,
+        totalCount: 40,
+        earliestStartedAt: null,
+        workflows: [timing({ correlation: 1, state: 'Completed', endedAt: ended })],
+      } as Partial<TeamWorkflows>),
+      [],
+      now,
+    );
+
+    expect(tile.states).toBe('1 completed · 39 not listed');
+  });
+
+  it('is empty for a team with no workflow', () => {
+    const tile = workflowsTile(payload({ openCount: 0, totalCount: 0, earliestStartedAt: null, workflows: [] } as Partial<TeamWorkflows>), [], now);
+
+    expect(tile.states).toBe('');
+  });
+});

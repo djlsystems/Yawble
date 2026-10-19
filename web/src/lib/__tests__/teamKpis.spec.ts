@@ -1784,6 +1784,12 @@ describe('workflowTiming', () => {
 
     expect(rendered.members).toBe('1 working · 2 queued · 1 stopped');
   });
+
+  it('leaves a member count of 0 out of the line, and says so when every count is 0', () => {
+    expect(tile(workflow(), [container({ id: 'Manager', state: 'Running' }), container({ id: 'Scout' })]).members)
+      .toBe('1 working');
+    expect(tile(workflow(), [container({ id: 'Scout' })]).members).toBe('no member working');
+  });
 });
 
 describe('containerMark', () => {

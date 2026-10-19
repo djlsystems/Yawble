@@ -775,10 +775,25 @@ export interface WorkflowTile {
    */
   tone: 'live' | 'error' | 'warn' | 'info' | 'quiet' | 'none';
 
-  /** `2 working · 0 queued · 0 stopped` — the click target, and the only one on this tile. */
+  /**
+   * `2 working · 1 queued` — the click target, and the only one on this tile. A count of 0 is left
+   * out rather than printed, so the line names only what is happening; with all three at 0 it reads
+   * `no member working`.
+   */
   members: string;
 
   execution: WorkflowExecution;
+}
+
+/** The member counts that are not 0, e.g. `2 working · 1 stopped`; `no member working` when all are. */
+function memberLine(working: number, queued: number, stopped: number): string {
+  const parts = [
+    working > 0 ? `${working} working` : null,
+    queued > 0 ? `${queued} queued` : null,
+    stopped > 0 ? `${stopped} stopped` : null,
+  ].filter((part): part is string => part !== null);
+
+  return parts.length > 0 ? parts.join(' · ') : 'no member working';
 }
 
 /** `1h 04m`, `38m 02s`, `12s`. Two-digit padding on the smaller unit. */
@@ -877,7 +892,7 @@ export function workflowTiming(
   now: number,
 ): WorkflowTile {
   const kpis = teamKpis(containers);
-  const members = `${kpis.working} working · ${kpis.queued} queued · ${kpis.stopped} stopped`;
+  const members = memberLine(kpis.working, kpis.queued, kpis.stopped);
 
   // NOT LOADED YET, OR NEVER RUN. Both render an em dash and neither renders a zero — the rule that
   // an unknown delta must not look like a zero delta is the same rule the Tokens tile follows.
@@ -1250,6 +1265,15 @@ export interface WorkflowsTile {
    *  the tile beneath it never disagree about which workflow is worst. */
   tone: WorkflowTile['tone'];
 
+  /**
+   * The workflows the list holds, counted by state, loudest first, each state only when at least one
+   * workflow is in it: `1 running · 4 completed · 1 closed`. Empty when the list holds none. When the
+   * list is cut short of {@link totalCount}, it ends `· N not listed`, since the rows are all that can
+   * be counted. A row with no state (unknown, or still inside the grace period) is not counted under
+   * any word.
+   */
+  states: string;
+
   rows: WorkflowRow[];
 }
 
@@ -1480,6 +1504,7 @@ export function workflowsTile(
       spanMs: null,
       ticking: false,
       tone: 'none',
+      states: '',
       rows: [],
     };
   }
@@ -1601,6 +1626,8 @@ export function workflowsTile(
 
   const spanMs = earliest === null ? null : Math.max(0, measuredTo - earliest);
 
+  const totalCount = workflows.totalCount ?? rows.length;
+
   return {
     available: true,
     openCount: workflows.openCount,
@@ -1608,7 +1635,7 @@ export function workflowsTile(
     // `?? rows.length` FOR A PAYLOAD WITHOUT THE FIELD, and never `openCount`. Falling back to the
     // rendered length says "nothing is truncated", which is the only claim that cannot be wrong -
     // where falling back to `openCount` would make the comparison fire backwards.
-    totalCount: workflows.totalCount ?? rows.length,
+    totalCount,
 
     count: `${workflows.openCount} open`,
     span: spanMs === null ? '—' : duration(spanMs),
@@ -1622,8 +1649,26 @@ export function workflowsTile(
     ticking: spanMs !== null && anyLive,
 
     tone: loudestRow(rows)?.tone ?? 'none',
+    states: stateCounts(rows, totalCount),
     rows,
   };
+}
+
+/** {@link WorkflowsTile.states}: each state with at least one row, in {@link RowLoudness} order. */
+function stateCounts(rows: WorkflowRow[], totalCount: number): string {
+  const counts = new Map<WorkflowState, number>();
+  for (const row of rows) {
+    if (row.state !== null) counts.set(row.state, (counts.get(row.state) ?? 0) + 1);
+  }
+
+  const parts = [...counts.entries()]
+    .sort(([a], [b]) => RowLoudness[a] - RowLoudness[b])
+    .map(([state, count]) => `${count} ${state.toLowerCase()}`);
+
+  const notListed = totalCount - rows.length;
+  if (notListed > 0) parts.push(`${notListed} not listed`);
+
+  return parts.join(' · ');
 }
 
 /**
