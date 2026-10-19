@@ -60,17 +60,18 @@ onBeforeUnmount(() => {
 
 watch(() => display.width, () => void nextTick(measure));
 
-/** When the last touch or pen press on a grip began, so a second one soon after is a double-tap. */
+/** When the last touch press on a grip began, so a second one soon after is a double-tap. */
 let lastTap = 0;
 const DoubleTapWindow = 350;
 
 /** A press on a grip is only a drag: captured, not a scroll, not a click on anything beneath. */
 function startDrag(event: PointerEvent, axis: Axis) {
-  if (event.pointerType === 'mouse' && event.button !== 0) return;
+  if (event.button !== 0) return;
   event.preventDefault();
   event.stopPropagation();
 
-  if (event.pointerType !== 'mouse') {
+  // A touch screen sends no double-click, so two presses close together are one.
+  if (event.pointerType === 'touch') {
     const now = event.timeStamp || Date.now();
     if (now - lastTap < DoubleTapWindow) {
       lastTap = 0;
