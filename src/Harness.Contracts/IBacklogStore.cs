@@ -286,6 +286,13 @@ public interface IBacklogStore
     Task<BacklogItem?> GetAsync(long id, CancellationToken ct = default);
 
     /// <summary>
+    /// The titles of the items asked about, by id, in ONE query however many ids there are; an id
+    /// with no item (never minted, or deleted) is absent. Archived items answer like any other.
+    /// Visibility is the CALLER's to apply, as for <see cref="GetAsync"/>.
+    /// </summary>
+    Task<IReadOnlyDictionary<long, string>> TitlesAsync(IReadOnlyCollection<long> ids, CancellationToken ct = default);
+
+    /// <summary>
     /// Appends an item at the end of the order. Answers the row as stored, including the id the
     /// platform minted.
     /// </summary>

@@ -120,6 +120,32 @@ public sealed class SqliteBacklogStore : IBacklogStore
         return await reader.ReadAsync(ct) ? Read(reader) : null;
     }
 
+    /// <summary>
+    /// ONE STATEMENT, whatever the count: the keys travel as one JSON array parameter and
+    /// <c>json_each</c> expands it, so there is no per-id parameter to run into SQLite's variable
+    /// limit and no batching loop to turn one read into several.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<long, string>> TitlesAsync(
+        IReadOnlyCollection<long> ids, CancellationToken ct = default)
+    {
+        var found = new Dictionary<long, string>();
+
+        var keys = ids.Distinct().Select(Key).ToList();
+        if (keys.Count == 0) return found;
+
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        command.CommandText =
+            "SELECT id, title FROM backlog_items WHERE id IN (SELECT value FROM json_each($keys))";
+        command.Parameters.AddWithValue("$keys", System.Text.Json.JsonSerializer.Serialize(keys));
+
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct)) found[Id(reader.GetString(0))] = reader.GetString(1);
+
+        return found;
+    }
+
     public async Task<BacklogItem> CreateAsync(
         string? team, string title, string body, string createdBy, CancellationToken ct = default)
     {
