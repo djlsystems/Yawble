@@ -2,6 +2,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { symbolsIconMap } from '../icons';
+import { EventIcons } from '../eventWords';
 import {
   SubsetFontPath,
   decompress,
@@ -132,6 +133,16 @@ describe('icon font subset', () => {
 
     expect(reached.filter((name) => !all.has(name))).toEqual([]);
     expect(quasarIconNames()).toContain('arrow_drop_down');
+  });
+
+  it('every icon the event vocabulary answers is a Symbols name with a glyph in the subset', async () => {
+    // `said('workflow done', 'workflow', 'done')` is not an icon position the scans read, and `done`
+    // is not a Symbols name, so it drew the letters "done" with every case above green.
+    const subset = await decompress(readFileSync(SubsetFontPath));
+
+    expect(EventIcons.length).toBeGreaterThan(10);
+    expect(EventIcons.filter((name) => !inSymbols(name))).toEqual([]);
+    expect(namesWithoutGlyph(subset, [...EventIcons])).toEqual([]);
   });
 
   it('no icon name is built at runtime, where the subset cannot see it', () => {

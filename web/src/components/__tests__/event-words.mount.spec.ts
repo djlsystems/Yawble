@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 //
-// ONE EVENT VOCABULARY ON EVERY VIEW. A card move, a push, a run's completion and a type nobody knows
-// read the same words on the member card's feed, the Monitor's activity list and the Kanban card
+// ONE EVENT VOCABULARY ON EVERY VIEW. A card move, a push, a run's completion, a type nobody knows
+// and a member's own wake read the same words on the member card's feed, the Monitor's activity list and the Kanban card
 // panel's story - the words of `lib/eventWords` - and the raw type stays in the feed row's tooltip
 // and the opened message's header, for anyone quoting it.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -34,14 +34,25 @@ import { eventWords } from '../../lib/eventWords'
 import { bodyFind, resetBody } from '../../test/mountQuasar'
 import { settle } from '../../test/formProbe'
 
-/** The four rows the item names, oldest first: a card move, a push, a completion, an unknown type. */
-const Types = ['kanban.card.moved', 'repo.pushed', 'agentContainer.completed', 'agentContainer.somethingNew'] as const
+/**
+ * The four rows the item names, oldest first - a card move, a push, a completion, an unknown type -
+ * and a member's own wake, which only its source tells from an instruction somebody sent: a view
+ * that drops the source reads it "told" where the others read "woke".
+ */
+const Rows = [
+  { type: 'kanban.card.moved', source: 'Alpha/Developer' },
+  { type: 'repo.pushed', source: 'Alpha/Developer' },
+  { type: 'agentContainer.completed', source: 'Alpha/Developer' },
+  { type: 'agentContainer.somethingNew', source: 'Alpha/Developer' },
+  { type: 'agentContainer.instruction.Alpha/Developer', source: 'wake:12' },
+] as const
+const Types = Rows.map((entry) => entry.type)
 
-function row(seq: number, type: string): Message {
+function row(seq: number, type: string, source: string): Message {
   return {
     seq,
     type,
-    source: 'Alpha/Developer',
+    source,
     payload: JSON.stringify({ change: 'to Review', branches: 'team/alpha', team: 'Alpha' }),
     correlationId: 1,
     causationSeq: null,
@@ -50,9 +61,9 @@ function row(seq: number, type: string): Message {
   }
 }
 
-const rows = Types.map((type, i) => row(i + 1, type))
+const rows = Rows.map((entry, i) => row(i + 1, entry.type, entry.source))
 /** What each row reads, from the one table and nowhere else. */
-const words = Types.map((type) => eventWords(type).words)
+const words = Rows.map((entry) => eventWords(entry.type, entry.source).words)
 
 let wrapper: VueWrapper | null = null
 
@@ -70,8 +81,8 @@ afterEach(() => {
 })
 
 describe('the one event vocabulary', () => {
-  it('says the four rows in words a person reads, and an unknown type as it always read', () => {
-    expect(words).toEqual(['moved a card', 'pushed', 'finished', 'somethingNew'])
+  it('says the rows in words a person reads, an unknown type as it always read, and a wake as a wake', () => {
+    expect(words).toEqual(['moved a card', 'pushed', 'finished', 'somethingNew', 'woke'])
   })
 
   it("reads the table's words on each feed row, with the raw type in the row's tooltip", async () => {
@@ -134,7 +145,9 @@ describe('the one event vocabulary', () => {
       updatedAt: '2026-10-15T10:00:04Z',
       awaitingManager: false,
       paused: false,
-      trail: rows.map((message) => ({ seq: message.seq, type: message.type, occurredAt: message.occurredAt, text: 'said' })),
+      trail: rows.map((message) => ({
+        seq: message.seq, type: message.type, source: message.source, occurredAt: message.occurredAt, text: 'said',
+      })),
     }
     kanban.selectedId = detail.id
     kanban.detail = detail

@@ -359,7 +359,7 @@ function when(value: string | null | undefined): string {
               <!-- The one table's words (`lib/eventWords`), as the feed and the Monitor say them; the
                    raw type on hover, for anyone quoting it. -->
               <span class="k-trail-type" data-trail-words>
-                {{ eventWords(row.type).words }}
+                {{ eventWords(row.type, row.source).words }}
                 <q-tooltip><span class="mono" data-trail-type>{{ row.type }}</span></q-tooltip>
               </span>
             </div>

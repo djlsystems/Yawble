@@ -1,4 +1,4 @@
-import { localStamp } from './localTime';
+import { localStamp, localTime, wireInstant } from './localTime';
 /**
  * WHAT KIND OF STEP A LIVE-VIEW LINE IS, as the Host says: every line comes as
  * `<when>` TAB `<kind>` TAB `<line>`, the kind one of `tool`, `result`, `text`, `user` or `note`, or
@@ -37,7 +37,7 @@ export function parseLiveLine(raw: string): LiveLine {
   const tab = raw.indexOf('\t');
   if (tab >= 0) {
     const when = raw.slice(0, tab);
-    const at = when === '' ? null : new Date(when);
+    const at = when === '' ? null : new Date(wireInstant(when));
     if (at === null || !Number.isNaN(at.getTime())) {
       const rest = raw.slice(tab + 1);
       const second = rest.indexOf('\t');
@@ -54,6 +54,11 @@ export function parseLiveLine(raw: string): LiveLine {
 /** A line's stamp in the viewer's own time zone and hour cycle (`localStamp`). */
 export function liveLineTime(at: Date): string {
   return localStamp(at.getTime());
+}
+
+/** The same instant with its date, for the stamp's tooltip (`localTime`). */
+export function liveLineTitle(at: Date): string {
+  return localTime(at.getTime(), { date: true });
 }
 
 /** A line of the kind the Host gave it, as its chip and its words. */

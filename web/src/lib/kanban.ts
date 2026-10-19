@@ -349,6 +349,12 @@ export interface KanbanTrailRow {
   at: string | null
   type: string
 
+  /**
+   * Who sent it, `''` when nobody said. It is what tells a member's own wake from an instruction
+   * somebody sent, so the panel says "woke" where the feed and the Monitor do (`lib/eventWords`).
+   */
+  source: string
+
   /** Always a string. `''` renders as an empty cell; `undefined` renders as the word undefined. */
   text: string
 
@@ -384,6 +390,7 @@ export function trailRows(
       key: `trail-${entry.seq}`,
       at: entry.occurredAt ?? null,
       type: entry.type,
+      source: entry.source ?? '',
 
       // The payload when a row carried no prose - a row that says nothing at all is worse than one
       // showing the envelope, and the server sends `text` for every type it knows how to summarise.
@@ -396,6 +403,7 @@ export function trailRows(
     key: `progress-${index}`,
     at: item.at,
     type: 'agentContainer.progress',
+    source: '',
     text: item.text,
     fallback: true,
   }))

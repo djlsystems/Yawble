@@ -3,7 +3,7 @@ import { EndingFact } from '../lib/states';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { listMemberRuns, NoLiveView, openLiveView, readRunTranscript } from '../api/client';
 import type { MemberId, MemberRun, TeamId } from '../api/types';
-import { liveLineTime, parseLiveLine, type LiveLine } from '../lib/liveLines';
+import { liveLineTime, liveLineTitle, parseLiveLine, type LiveLine } from '../lib/liveLines';
 import { runDuration, runItemsText, runItemText, runOutcomeLabel, runStartedText, runStartedTitle } from '../lib/memberRuns';
 import { QuietMark, WorkflowDeclaredMark } from '../lib/runMarks';
 import { workflowNumberTitle } from '../lib/workflowNumber';
@@ -307,7 +307,7 @@ onBeforeUnmount(end);
       <q-card-section v-else class="q-pt-sm">
         <div ref="scroller" class="live-view-lines" @scroll="onScroll">
           <div v-for="(line, index) in shown" :key="index" class="live-view-line" :data-kind="line.kind">
-            <span v-if="line.at" class="live-view-time" :title="line.at.toLocaleString()">{{ liveLineTime(line.at) }}</span>
+            <span v-if="line.at" class="live-view-time" :title="liveLineTitle(line.at)">{{ liveLineTime(line.at) }}</span>
             <span v-if="line.label" class="live-view-label">{{ line.label }}</span>
             <span class="live-view-text">{{ line.text }}</span>
           </div>
@@ -410,7 +410,7 @@ onBeforeUnmount(end);
               class="live-view-line run-transcript-line"
               :data-kind="line.kind"
             >
-              <span v-if="line.at" class="live-view-time" :title="line.at.toLocaleString()">{{ liveLineTime(line.at) }}</span>
+              <span v-if="line.at" class="live-view-time" :title="liveLineTitle(line.at)">{{ liveLineTime(line.at) }}</span>
               <span v-if="line.label" class="live-view-label">{{ line.label }}</span>
               <span class="live-view-text">{{ line.text }}</span>
             </div>

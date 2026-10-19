@@ -1,5 +1,5 @@
 import type { MemberRunItem, RunOutcome } from '../api/types';
-import { localStamp, wireInstant } from './localTime';
+import { localStamp, localTime, wireInstant } from './localTime';
 
 /**
  * HOW AN EARLIER RUN READS IN THE WATCH DIALOG'S LIST: when it started, how long it took and
@@ -42,11 +42,11 @@ export function runStartedText(iso: string | null): string {
   return localStamp(at);
 }
 
-/** The full start time for a tooltip, or none when the start is unknown or unreadable. */
+/** The full start time for a tooltip - the instant `runStartedText` reads - or none when the start is unknown or unreadable. */
 export function runStartedTitle(iso: string | null): string | undefined {
   if (iso === null) return undefined;
-  const at = new Date(iso);
-  return Number.isNaN(at.getTime()) ? undefined : at.toLocaleString();
+  const at = wireInstant(iso);
+  return Number.isNaN(at) ? undefined : localTime(at, { date: true });
 }
 
 /**

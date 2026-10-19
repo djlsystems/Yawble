@@ -58,7 +58,7 @@ const Table: Readonly<Record<string, EventWords>> = {
   'wake.fired': said('wake fired', 'tell', 'alarm'),
   'wake.cancelled': said('wake cancelled', 'quiet', 'alarm'),
   'wake.skipped': said('wake skipped', 'quiet', 'alarm'),
-  'workflow.completed': said('workflow done', 'workflow', 'done'),
+  'workflow.completed': said('workflow done', 'workflow', 'done_all'),
   'workflow.closed': said('closed', 'quiet', 'close'),
   'workflow.paused': said('paused', 'quiet', 'pause'),
   'workflow.resumed': said('resumed', 'quiet', 'play_circle'),
@@ -88,6 +88,24 @@ export function eventWords(type: string, source = ''): EventWords {
 
   return said(type.replace('agentContainer.', ''), 'quiet', 'event')
 }
+
+/**
+ * Every icon this vocabulary can answer: each type in the table and one of each family read by
+ * prefix, through `eventWords` itself. `icon-names.spec.ts` checks each is a Symbols name that forms
+ * its glyph in the committed subset font, since `said(...)` is not an icon position its scans read.
+ */
+export const EventIcons: readonly string[] = [
+  ...new Set(
+    [
+      ...Object.keys(Table).map((type) => eventWords(type)),
+      eventWords(`${InstructionPrefix}icons`),
+      eventWords(`${InstructionPrefix}icons`, WakeSource),
+      eventWords(`${KanbanCardPrefix}icons`),
+      eventWords(`${PluginPrefix}icons.icons`),
+      eventWords('icons.unknown'),
+    ].map((words) => words.icon),
+  ),
+]
 
 /**
  * The Monitor's legend: one entry per tone it colours, each said by the words of the row that
