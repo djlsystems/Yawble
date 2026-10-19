@@ -499,7 +499,7 @@ function openOutcomes(id: string | null = null) {
             @change-outcome="(id: string) => (changingOutcome = id)"
             :cancelling-wake="cancellingWake"
             :flashing="highlight.flashing === cardKey(card.id)"
-            :team-name="teamNames.get(card.team)"
+            :team-name="teamNames.get(card.team) ?? card.team"
             @cancel-wake="cancelWake"
           />
         </TransitionGroup>
@@ -547,7 +547,7 @@ function openOutcomes(id: string | null = null) {
             @change-outcome="(id: string) => (changingOutcome = id)"
             :cancelling-wake="cancellingWake"
             :flashing="highlight.flashing === cardKey(card.id)"
-            :team-name="teamNames.get(card.team)"
+            :team-name="teamNames.get(card.team) ?? card.team"
             @cancel-wake="cancelWake"
           />
         </TransitionGroup>

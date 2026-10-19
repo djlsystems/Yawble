@@ -179,7 +179,7 @@ describe('a Kanban card an address names', () => {
   });
 });
 
-const snapshot = (over: Partial<ContainerSnapshot> & { id: string }): ContainerSnapshot => ({
+const snapshot = (over: Omit<Partial<ContainerSnapshot>, 'id'> & { id: string }): ContainerSnapshot => ({
   team: asTeamId('beta'),
   name: over.id,
   agent: 'echo',
