@@ -222,6 +222,25 @@ describe('a click with the panel open on a ready session', () => {
   });
 });
 
+describe('a click with the panel open on a session not yet ready', () => {
+  it('types nothing until the ready signal, then types the request once', async () => {
+    sessionRunning(true);
+    await mountPanel();
+    await openPanel();
+    await cliPrints('\x1b[?2004h> ');
+
+    click();
+    await wait(ReadyQuietMs - 600);
+    expect(sent()).toEqual([]);
+
+    await wait(800);
+    const pasted = sent().filter((data) => data.startsWith('\x1b[200~'));
+    expect(pasted).toHaveLength(1);
+    expect(typedRequest().request).toContain('seq 4187');
+    expect(typedRequest().after).toEqual(['\r']);
+  });
+});
+
 describe('a click with the panel closed', () => {
   it('opens the panel, and with no session running starts one on the card\'s team and types only once it is ready', async () => {
     sessionRunning(false);

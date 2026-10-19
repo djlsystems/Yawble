@@ -25,6 +25,7 @@ import { useKanbanStore } from '../../stores/kanban';
 import { asMemberId, asTeamId, type ContainerSnapshot, type Team } from '../../api/types';
 import type { KanbanCard as Card, KanbanCardDetail } from '../../api/kanban';
 import { bodyFind, resetBody } from '../../test/mountQuasar';
+import { decisionRequest } from '../../lib/conciergeDecision';
 
 const Button = '[data-test="discuss-with-concierge"]';
 
@@ -119,6 +120,16 @@ describe('on the member card', () => {
 
     expect(asked()).toEqual({ team: 'alpha', teamName: 'Alpha Team', member: 'Manager', workflow: 4100, seq: 4187 });
     expect(useConciergeAskStore().clicks).toBe(1);
+  });
+
+  it('asks with the row, never the question\'s own words', async () => {
+    const card = await memberCard(snapshot(deciding));
+    await card.find(Button).trigger('click');
+
+    const request = decisionRequest(asked()!);
+    expect(request).toContain('seq 4187');
+    expect(request).not.toContain(deciding.needsDecision);
+    expect(Object.values(asked()!)).not.toContain(deciding.needsDecision);
   });
 
   it('does not show on a blocked member, a failed one, or one with no decision', async () => {
