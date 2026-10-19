@@ -1,7 +1,12 @@
 using System.Text.Json;
+using Harness.Containers;
 using Harness.Contracts;
 using Harness.Host;
 using Harness.Kanban;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Harness.Tests;
 
@@ -118,6 +123,52 @@ public sealed class NeedsDecisionRowTests
         Assert.Null(snapshot.NeedsDecisionSeq);
         Assert.Null(snapshot.NeedsDecisionCorrelation);
     }
+
+    [Fact]
+    public async Task A_restarted_host_brings_the_member_back_naming_its_newest_needs_decision_row()
+    {
+        var root = Directory.CreateTempSubdirectory("harness-decision-restart-").FullName;
+        try
+        {
+            ContainerId member;
+            Message newest;
+            await using (var host = StartHost(root))
+            {
+                var registry = host.Services.GetRequiredService<TeamRegistry>();
+                var agent = host.Services.GetRequiredService<AgentCatalog>().Definitions.First(d => d.Mode == AgentMode.Headless).Name;
+                var team = (await registry.CreateAsync("Alpha", agent, memberAgent: agent, ct: Ct)).Id;
+                var added = await registry.AddContainerAsync(team, "DeveloperRowan", agent, "", [], ct: Ct);
+                member = new ContainerId(added.Team, added.Name);
+
+                // Two open decisions, the second under the first's workflow, so the newest is the one
+                // that must come back and its seq and workflow are different numbers.
+                var log = host.Services.GetRequiredService<IMessageLog>();
+                var first = await log.AppendAsync(new NewMessage(MessageTypes.NeedsDecision, """{"question":"first?"}""", member.ToString()), Ct);
+                newest = await log.AppendAsync(new NewMessage(MessageTypes.NeedsDecision, """{"question":"second?"}""", member.ToString(), first.Seq), Ct);
+                Assert.NotEqual(newest.Seq, newest.CorrelationId);
+            }
+
+            await using var restarted = StartHost(root);
+            var snapshot = restarted.Services.GetRequiredService<ContainerHost>().Find(member)!.Snapshot();
+
+            Assert.Equal("second?", snapshot.NeedsDecision);
+            Assert.Equal(newest.Seq, snapshot.NeedsDecisionSeq);
+            Assert.Equal(newest.CorrelationId, snapshot.NeedsDecisionCorrelation);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+        }
+    }
+
+    /// <summary>The real Host over <paramref name="root"/>, its agents a fake that runs nothing.</summary>
+    private static WebApplicationFactory<Program> StartHost(string root) =>
+        new WebApplicationFactory<Program>().WithWebHostBuilder(builder => builder
+            .UseSetting("DataRoot", root)
+            .UseSetting("Logging:LogLevel:Default", "Warning")
+            .ConfigureTestServices(services => services.AddSingleton<IAgentRunner>(new FakeAgent())));
 
     private const long Workflow = 7;
     private const string CardId = "7_Developer";
