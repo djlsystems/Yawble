@@ -114,3 +114,37 @@ export function writeBoardSize(size: Partial<BoardSize>): void {
     // Nothing to do and nothing worth saying: the size still applies for this session.
   }
 }
+
+/** One keyboard step on a card's grip, in pixels: the lane divider's and the column resizer's step. */
+export const GripStep = 16;
+
+/** One keyboard step with Shift held, in pixels. */
+export const GripShiftStep = 64;
+
+/**
+ * The size a drag on a card's grip has reached: the size when the press began, moved by how far the
+ * pointer has gone since (`dx` right, `dy` down, in the same pixels the size is kept in), clamped to
+ * the bounds and rounded to whole pixels on both axes.
+ *
+ * From the START of the drag rather than step by step, so a pointer that runs past a bound and comes
+ * back finds the edge where it left it instead of where the clamp stopped it.
+ */
+export function draggedSize(
+  start: Pick<BoardSize, 'width' | 'height'>,
+  dx: number,
+  dy: number,
+): Pick<BoardSize, 'width' | 'height'> {
+  return {
+    width: clamp(start.width + dx, WidthBounds, DefaultBoardSize.width),
+    height: clamp(start.height + dy, HeightBounds, DefaultBoardSize.height),
+  };
+}
+
+/**
+ * Whether a card is drawn narrower than the width chosen for it - the screen is, and
+ * `min(var(--os-card-w), 100%)` let the screen win. Its width grip would then move nothing on
+ * screen, so it is not offered. A card not laid out yet (width 0) is not clamped.
+ */
+export function widthClamped(renderedWidth: number, chosenWidth: number): boolean {
+  return renderedWidth > 0 && renderedWidth + 0.5 < chosenWidth;
+}

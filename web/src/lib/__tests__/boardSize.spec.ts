@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   clampBoardSize,
   DefaultBoardSize,
+  draggedSize,
   FeedDepthBounds,
   HeightBounds,
   readBoardSize,
   WidthBounds,
+  widthClamped,
   writeBoardSize,
 } from '../boardSize';
 
@@ -173,5 +175,56 @@ describe('the bounds themselves', () => {
 
   it('default to something that fits two across a laptop', () => {
     expect(DefaultBoardSize.width).toBeLessThanOrEqual(420);
+  });
+});
+
+describe('draggedSize', () => {
+  const start = { width: 400, height: 600 };
+
+  it('moves the width by dx and the height by dy from the size the press began at', () => {
+    expect(draggedSize(start, 40, -60)).toEqual({ width: 440, height: 540 });
+  });
+
+  it('rounds both axes to whole pixels', () => {
+    expect(draggedSize(start, 10.4, 20.6)).toEqual({ width: 410, height: 621 });
+  });
+
+  it('clamps the width to WidthBounds on both sides', () => {
+    expect(draggedSize(start, 10_000, 0).width).toBe(WidthBounds.max);
+    expect(draggedSize(start, -10_000, 0).width).toBe(WidthBounds.min);
+  });
+
+  it('clamps the height to HeightBounds on both sides', () => {
+    expect(draggedSize(start, 0, 10_000).height).toBe(HeightBounds.max);
+    expect(draggedSize(start, 0, -10_000).height).toBe(HeightBounds.min);
+  });
+
+  it('clamps both axes at once from a corner drag', () => {
+    expect(draggedSize(start, 10_000, -10_000)).toEqual({ width: WidthBounds.max, height: HeightBounds.min });
+  });
+
+  it('finds the edge where the pointer is after running past a bound and coming back', () => {
+    // Measured from the start, not accumulated: past the max, then back to +20.
+    expect(draggedSize(start, 10_000, 0).width).toBe(WidthBounds.max);
+    expect(draggedSize(start, 20, 0).width).toBe(420);
+  });
+
+  it('reads a movement that is not a number as the default rather than NaN', () => {
+    expect(draggedSize(start, Number.NaN, 0).width).toBe(DefaultBoardSize.width);
+  });
+});
+
+describe('widthClamped', () => {
+  it('is clamped when the card is drawn narrower than its chosen width', () => {
+    expect(widthClamped(340, 380)).toBe(true);
+  });
+
+  it('is not clamped at the chosen width, within half a pixel', () => {
+    expect(widthClamped(380, 380)).toBe(false);
+    expect(widthClamped(379.6, 380)).toBe(false);
+  });
+
+  it('is not clamped for a card not laid out yet', () => {
+    expect(widthClamped(0, 380)).toBe(false);
   });
 });

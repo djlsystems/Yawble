@@ -9,7 +9,8 @@ import { useSessionStore } from '../stores/session';
 import { connectHub } from '../lib/hub';
 import { fileWatch } from '../lib/monitor/workspace';
 import { pauseTeam, resumeTeam } from '../api/client';
-import ContainerCard from '../components/ContainerCard.vue';
+import BoardGrid from '../components/BoardGrid.vue';
+import BoardDisplayDialog from '../components/BoardDisplayDialog.vue';
 import TeamKpiStrip from '../components/TeamKpiStrip.vue';
 import KanbanBoard from '../components/KanbanBoard.vue';
 import MonitorView from '../components/MonitorView.vue';
@@ -18,7 +19,6 @@ import SolutionBlockedBanner from '../components/SolutionBlockedBanner.vue';
 import TellManagerBox from '../components/TellManagerBox.vue';
 import TeamSiteLinks from '../components/TeamSiteLinks.vue';
 import { panelPath } from '../lib/solutionPanel';
-import { useDisplayStore } from '../stores/display';
 import { useKanbanStore } from '../stores/kanban';
 import { useCapacityStore } from '../stores/capacity';
 import { useConsoleHistory } from '../composables/useConsoleHistory';
@@ -39,7 +39,9 @@ import {
 
 const $q = useQuasar();
 const board = useConsoleStore();
-const display = useDisplayStore();
+
+/** The Board display dialog, opened from the board's own header as well as from the account menu. */
+const boardDisplayOpen = ref(false);
 
 /**
  * THE KANBAN TAB IS NOT A TEAM.
@@ -613,6 +615,21 @@ onUnmounted(() => {
         >
           <q-tooltip>{{ teamPauseHint(activeTeam) }}</q-tooltip>
         </q-btn>
+
+        <!-- THE CARDS' SIZE, found from the board it sizes: the exact numbers and the feed settings.
+             The cards' own edges drag the size too; the account menu keeps its entry. -->
+        <q-btn
+          flat
+          dense
+          round
+          size="sm"
+          icon="tune"
+          aria-label="Board display"
+          data-board-display
+          @click="boardDisplayOpen = true"
+        >
+          <q-tooltip>Board display</q-tooltip>
+        </q-btn>
       </div>
 
       <div class="text-body2 os-text-muted q-mb-sm" data-team-members>{{ teamMembersLine(activeTeam) }}</div>
@@ -638,36 +655,15 @@ onUnmounted(() => {
         :repo-status="board.repoStatusTeam === activeTeam.id ? board.repoStatus : null"
       />
 
-      <!-- Fixed-size windows that WRAP, rather than a responsive column count.
-           
-           A responsive column count decides a card's width by the viewport and its height by
-           whichever sibling has the longest feed: a busy Manager sets the height of the whole row,
-           leaving its quiet colleagues as whitespace.
-
-           Here each card is the size this viewer chose and the row simply wraps. The CSS variables
-           come from the display store and are read through the cascade, so changing one re-lays
-           every card out with nothing per-card to keep in step. -->
-      <div class="board-grid" :style="display.cssVars">
-        <ContainerCard
-          v-for="container in activeTeam.containers"
-          :key="container.id"
-          :snapshot="container"
-          :feed="board.activityFor(container.team, container.id)"
-        />
-      </div>
+      <!-- The member cards: fixed-size windows that wrap, every one the size this viewer chose. -->
+      <BoardGrid :containers="activeTeam.containers" />
     </div>
+
+    <BoardDisplayDialog v-model="boardDisplayOpen" />
   </q-page>
 </template>
 
 <style scoped>
-/* Fixed-size windows that wrap, replacing Quasar's responsive column count. */
-.board-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  align-items: flex-start;
-}
-
 .console-tabs {
   display: flex;
   align-items: center;

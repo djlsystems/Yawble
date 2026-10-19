@@ -65,6 +65,29 @@ export const useDisplayStore = defineStore('display', {
       writeBoardSize(next);
     },
 
+    /**
+     * Applies a size to state - and so to `--os-card-w`/`--os-card-h` on the board container, which
+     * reflows every card - WITHOUT writing storage. A drag calls this as the pointer moves and `set`
+     * once when it is let go, so `harness.boardSize` is written once per drag, not once per pixel.
+     */
+    preview(partial: Partial<BoardSize>) {
+      const next = clampBoardSize({
+        width: this.width,
+        height: this.height,
+        feedDepth: this.feedDepth,
+        feedWindow: this.feedWindow,
+        ...partial,
+      });
+
+      this.width = next.width;
+      this.height = next.height;
+    },
+
+    /** Puts the cards back to the default width and height, leaving the feed settings as they are. */
+    resetCardSize() {
+      this.set({ width: DefaultBoardSize.width, height: DefaultBoardSize.height });
+    },
+
     /** Resets the board size. */
     reset() {
       this.set({ ...DefaultBoardSize });

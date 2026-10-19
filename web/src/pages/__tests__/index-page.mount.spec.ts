@@ -255,6 +255,20 @@ describe('a team\'s marks', () => {
     expect(link.attributes('href')).toBe('#/solutions/job-tracker');
   });
 
+  it('opens Board display from a tune button beside Pause at the heading\'s right', async () => {
+    const page = await mountPage([team('alpha')]);
+
+    const button = page.get('[data-board-display]');
+    expect(button.element.previousElementSibling?.classList.contains('team-heading-pause-btn')).toBe(true);
+    expect(button.element.nextElementSibling).toBeNull();
+    expect(document.body.textContent).not.toContain('Board display');
+
+    await button.trigger('click');
+    await flushPromises();
+
+    expect(document.body.querySelector('.board-display-card')).not.toBeNull();
+  });
+
   it('has no Manage solution link for a team made by hand', async () => {
     const page = await mountPage([team('alpha')]);
 

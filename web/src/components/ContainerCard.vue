@@ -16,6 +16,7 @@ import { askForMember } from '../lib/conciergeDecision';
 import { workflowRow } from '../lib/workflowNumber';
 import { useConsoleStore } from '../stores/console';
 import WorkflowName from './WorkflowName.vue';
+import CardSizeGrips from './CardSizeGrips.vue';
 
 const props = defineProps<{
   snapshot: ContainerSnapshot;
@@ -520,6 +521,10 @@ async function cancel(wake: PendingWake) {
         :since-seq="snapshot.sinceSeq"
       />
     </q-card-section>
+
+    <!-- The edges and corner that size every card on the board: inside the border, over the
+         content, so they take no space from the feed. -->
+    <CardSizeGrips />
   </q-card>
 </template>
 
@@ -545,6 +550,9 @@ async function cancel(wake: PendingWake) {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+
+  /* The grips are placed against the card. */
+  position: relative;
 }
 
 /* A PLUGIN MEMBER LOOKS LIKE ONE: its own ground and a violet edge, from the theme's plugin tokens

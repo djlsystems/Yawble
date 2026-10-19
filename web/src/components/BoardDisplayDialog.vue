@@ -17,7 +17,9 @@ import {
  * size is a per-viewer display preference - not team data, not an administrative act - and the
  * ribbon's groups are NEW / TEAMS / ACTIVE TEAM / ADMIN, none of which it belongs to. A ribbon
  * action also has to be added in three separate files or it half-exists. The account menu already
- * hosts *User profile*, which is the same kind of thing.
+ * hosts *User profile*, which is the same kind of thing. It also opens from a `tune` button on the
+ * board's own header, beside Pause, so it is found from the board it sizes; and the cards' own grips
+ * (`CardSizeGrips`) drag the same size this dialog shows.
  *
  * It applies LIVE, with no Save. There is nothing to submit - the value is in this browser and
  * nowhere else - and a size you cannot see while choosing it is a size you have to guess at. The
@@ -70,6 +72,10 @@ const isDefault = computed(
         <div class="text-caption os-text-muted">
           How big each member's card is on this device. Saved in this browser only — everyone else
           keeps their own.
+        </div>
+        <div class="text-caption os-text-muted q-mt-xs" data-drag-line>
+          The cards can also be dragged to size: a card's right edge, bottom edge or corner.
+          <FieldHelp text="Dragging any card resizes every card, and the size is saved when you let go. On a focused edge the arrow keys move it 16px (64px with Shift) and Home resets it; double-clicking an edge resets it too." />
         </div>
       </q-card-section>
 

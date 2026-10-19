@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { useDisplayStore } from '../display';
-import { DefaultBoardSize, WidthBounds } from '../../lib/boardSize';
+import { DefaultBoardSize, HeightBounds, WidthBounds } from '../../lib/boardSize';
 
 function useStorage(initial: Record<string, string> = {}) {
   const store = { ...initial };
@@ -83,5 +83,44 @@ describe('the display store', () => {
 
     expect(display.width).toBe(DefaultBoardSize.width);
     expect(JSON.parse(store['harness.boardSize']!)).toEqual(DefaultBoardSize);
+  });
+});
+
+describe('the display store preview', () => {
+  it('applies a clamped size to state and the CSS variables without writing storage', () => {
+    const store = useStorage();
+    setActivePinia(createPinia());
+    const display = useDisplayStore();
+
+    display.preview({ width: 10_000, height: 333.4 });
+
+    expect(display.width).toBe(WidthBounds.max);
+    expect(display.height).toBe(333);
+    expect(display.cssVars['--os-card-w']).toBe(`${WidthBounds.max / 16}rem`);
+    expect(store['harness.boardSize']).toBeUndefined();
+  });
+
+  it('leaves the feed settings as they are', () => {
+    useStorage();
+    setActivePinia(createPinia());
+    const display = useDisplayStore();
+
+    display.preview({ width: 500, feedDepth: 7 });
+
+    expect(display.feedDepth).toBe(DefaultBoardSize.feedDepth);
+  });
+
+  it('resets the card size only, keeping the feed settings', () => {
+    const store = useStorage();
+    setActivePinia(createPinia());
+    const display = useDisplayStore();
+    display.set({ width: 700, height: HeightBounds.max, feedDepth: 50 });
+
+    display.resetCardSize();
+
+    expect(display.width).toBe(DefaultBoardSize.width);
+    expect(display.height).toBe(DefaultBoardSize.height);
+    expect(display.feedDepth).toBe(50);
+    expect(JSON.parse(store['harness.boardSize']!)).toMatchObject({ width: DefaultBoardSize.width, feedDepth: 50 });
   });
 });
