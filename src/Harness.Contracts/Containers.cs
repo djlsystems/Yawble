@@ -712,7 +712,24 @@ public sealed record ContainerSnapshot(
     /// as before. Written by the wake runner (<c>MemberRuntime.MarkWakes</c>), never by a run.
     /// </summary>
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyList<WakeView>? Wakes = null);
+    IReadOnlyList<WakeView>? Wakes = null,
+
+    /// <summary>
+    /// THE SEQ OF THE `needs-decision` ROW <see cref="NeedsDecision"/> was read from, or null - and
+    /// then absent from the JSON - when there is no open decision. Set and cleared with
+    /// <see cref="NeedsDecision"/>, never apart from it, so the words and the row they name cannot
+    /// describe two different questions; when several are open it is the newest, as the words are.
+    /// It lets a reader name the exact row instead of quoting the question.
+    /// </summary>
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    long? NeedsDecisionSeq = null,
+
+    /// <summary>
+    /// The workflow (correlation) of the row <see cref="NeedsDecisionSeq"/> names, or null and absent
+    /// with it.
+    /// </summary>
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    long? NeedsDecisionCorrelation = null);
 
 /// <summary>
 /// A chosen Agent that did not resolve on this machine's PATH.
