@@ -16,6 +16,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import type { Message } from '../../api/types';
 
 import ActivityFeed from '../ActivityFeed.vue';
+import { localTime } from '../../lib/localTime';
 import { useConsoleStore } from '../../stores/console';
 import { bodyFind, resetBody } from '../../test/mountQuasar';
 import { settle } from '../../test/formProbe';
@@ -82,8 +83,8 @@ describe('a member card row opens its message in a dialog', () => {
 
     const at = new Date('2026-09-29T10:00:00Z');
     const stamp = bodyFind('[data-feed-card-time]')?.textContent?.trim() ?? '';
-    expect(stamp).toContain(at.toLocaleDateString());
-    expect(stamp).toContain(at.toLocaleTimeString(undefined, { hour12: false }));
+    // Through the one formatter, in the locale's own hour cycle: never a forced 24-hour clock.
+    expect(stamp).toBe(localTime(at.getTime(), { date: true }));
   });
 
   it('names the date beside the time, so a message from days ago does not read as today', async () => {
@@ -93,8 +94,8 @@ describe('a member card row opens its message in a dialog', () => {
 
     const at = new Date('2026-09-29T10:00:00Z');
     const stamp = bodyFind('[data-feed-card-time]')?.textContent?.trim() ?? '';
-    expect(stamp).toContain(at.toLocaleDateString());
-    expect(stamp).toContain(at.toLocaleTimeString(undefined, { hour12: false }));
+    // Through the one formatter, in the locale's own hour cycle: never a forced 24-hour clock.
+    expect(stamp).toBe(localTime(at.getTime(), { date: true }));
   });
 
   it('steps to the newer row with Newer and the older row with Older, and stops at each end', async () => {
