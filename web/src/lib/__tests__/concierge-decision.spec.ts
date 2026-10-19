@@ -62,7 +62,7 @@ describe('which decision', () => {
     expect(askForCard(card({ laneId: 'in-progress' }), 'A')).toBeNull();
     expect(askForCard(card({ status: 'blocked' }), 'A')).toBeNull();
     expect(askForCard(card({ member: null }), 'A')).toBeNull();
-    expect(askForCard(card({ needsDecisionSeq: undefined }), 'A')).toBeNull();
+    expect(askForCard(card({ needsDecisionSeq: null }), 'A')).toBeNull();
   });
 });
 
