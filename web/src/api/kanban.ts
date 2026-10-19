@@ -167,6 +167,11 @@ export interface KanbanCard {
   /** Every workflow this card was planned, claimed or told in, oldest first. Absent from an older server. */
   workflows?: number[] | null
 
+  /** On a `needs-decision` card, the seq of the needs-decision row and the workflow (correlation)
+   *  it was asked in; null or absent on any other card. */
+  needsDecisionSeq?: number | null
+  needsDecisionCorrelation?: number | null
+
   /** The open workflow this card belongs to and its latest row, or null when all have ended. */
   openWorkflow?: { workflow: number; latestSeq: number } | null
 

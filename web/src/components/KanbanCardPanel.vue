@@ -8,6 +8,8 @@ import { localTime, wireInstant } from '../lib/localTime';
 import { KanbanStatuses, type KanbanCardAttributes, type KanbanStatus } from '../api/kanban';
 import type { PendingWake } from '../api/types';
 import WakeLines from './WakeLines.vue';
+import DiscussWithConcierge from './DiscussWithConcierge.vue';
+import { askForCard } from '../lib/conciergeDecision';
 
 /**
  * A card, opened.
@@ -40,6 +42,9 @@ const open = computed({
 /** The board's copy renders immediately; the fetched detail fills in the trail and attributes. */
 const card = computed(() => kanban.detail ?? kanban.selectedCard);
 const colour = computed(() => (card.value ? colourFor(card.value) : 'slate'));
+
+/** The open decision this card is waiting on, for "Discuss with Concierge"; null otherwise. */
+const decision = computed(() => (card.value ? askForCard(card.value, undefined) : null));
 /* The word becomes a colour in `app.scss`, the same way it does for the card. */
 const colourClass = computed(() => `os-kanban-${colour.value}`);
 
@@ -238,6 +243,7 @@ function when(value: string | null | undefined): string {
             label="awaiting manager"
             class="k-panel-awaiting"
           />
+          <DiscussWithConcierge v-if="decision" :decision="decision" />
         </div>
 
         <!-- A WAKE IS SET IN THIS CARD'S WORKFLOW: when, on the reader's clock, and why, with a
