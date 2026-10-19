@@ -63,6 +63,7 @@ import PluginSettingsForm from './PluginSettingsForm.vue';
 import SolutionSetupEntry from './SolutionSetupEntry.vue';
 import SolutionWizard from './SolutionWizard.vue';
 import DialogTabs from './DialogTabs.vue';
+import { useNeedsYouStore } from '../stores/needsYou';
 
 /**
  * ONE SOLUTION'S CONTROL PANEL, built from its `solution.json` and the team's live state
@@ -173,6 +174,8 @@ async function upload(item: SolutionPanelBlocked, file: File | null) {
   if (!file) return;
   uploading.value = item.name;
   await act(`upload:${item.name}`, () => uploadDocument(asDocumentsFolderKey(props.team), file, folder));
+  // The header's Needs you lists the input this upload provides: it reads again at once.
+  void useNeedsYouStore().loadLive();
   if (problem.value) problem.value = `${file.name} was not uploaded: ${problem.value}`;
   uploading.value = '';
 }

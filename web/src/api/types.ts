@@ -4144,6 +4144,50 @@ export interface CapacityView {
   history: CapacitySample[]
 }
 
+/** The kinds `GET /api/needs-you?part=live` answers: read from memory, fresh on every push. */
+export const NeedsYouLiveKinds = ['decision', 'blocked', 'failed', 'waiting-input'] as const
+/** The kinds `GET /api/needs-you?part=stored` answers: the stores and the landed cache. */
+export const NeedsYouStoredKinds = ['merge-ready', 'stranded', 'removal'] as const
+
+export type NeedsYouKind = (typeof NeedsYouLiveKinds)[number] | (typeof NeedsYouStoredKinds)[number]
+
+/** Which part of the list a read asks for. */
+export type NeedsYouPart = 'live' | 'stored'
+
+/** What a Needs you row opens: the view, and what in it. */
+export interface NeedsYouWhere {
+  view: 'workflow' | 'card' | 'backlog' | 'merge' | 'solution' | 'removals'
+  team: string
+  workflow?: number | null
+  card?: string | null
+  item?: number | null
+}
+
+/** One thing waiting on a person, as `GET /api/needs-you` answers it. Nothing in it is estimated. */
+export interface NeedsYouItem {
+  /** A kind this browser does not know is still listed, under its own word. */
+  kind: NeedsYouKind | (string & {})
+  team: { id: string; name: string }
+  member: string | null
+  card: string | null
+  workflow: number | null
+  item: { id: number; title: string } | null
+  /** When it began, a wire instant. */
+  since: string
+  /** The platform's own sentence for it. */
+  words: string
+  where: NeedsYouWhere
+  /** On a decision: the needs-decision row's seq. */
+  needsDecisionSeq?: number | null
+  /** On a failure: its class. */
+  failureClass?: string | null
+}
+
+/** `GET /api/needs-you`: newest first. */
+export interface NeedsYouView {
+  items: NeedsYouItem[]
+}
+
 /** What `GET /api/teams/{team}/archive-check` answers before the Archive confirmation. */
 export interface ArchiveCheck {
   /** Nothing running and nothing queued, in any member: archiving would be allowed now. */

@@ -271,6 +271,12 @@ async function landCard(id: string) {
   const element = [...(lanesEl.value?.querySelectorAll<HTMLElement>('[data-card-id]') ?? [])]
     .find((node) => node.dataset.cardId === id) ?? null;
   highlight.land(cardKey(id), element);
+
+  // Asked for with its panel (Needs you's Open on a card): the panel opens on it once it is shown.
+  if (kanban.panelAsk === id) {
+    kanban.panelAsk = '';
+    void kanban.select(id);
+  }
 }
 
 watch(

@@ -22,6 +22,7 @@ import TeamSiteLinks from '../components/TeamSiteLinks.vue';
 import { panelPath } from '../lib/solutionPanel';
 import { useKanbanStore } from '../stores/kanban';
 import { useCapacityStore } from '../stores/capacity';
+import { useNeedsYouStore } from '../stores/needsYou';
 import { useConsoleHistory } from '../composables/useConsoleHistory';
 import { useConsoleTitle } from '../composables/useConsoleTitle';
 import type { Team, TeamId } from '../api/types';
@@ -60,6 +61,7 @@ useConsoleHistory();
 // The tab names the view: Teams, Kanban or the team.
 useConsoleTitle();
 const capacity = useCapacityStore();
+const needsYou = useNeedsYouStore();
 const { hasTeams, error, signedOut, activeTeam, openTeams, connected, connectionEstablished } =
   storeToRefs(board);
 
@@ -353,12 +355,18 @@ onMounted(async () => {
         // fetched when the tab was clicked, and the table quietly ages while the board beside it
         // stays live. A no-op while the table is not the view being shown.
         board.refreshRollupIfShowing();
+
+        // AND NEEDS YOU'S LIVE PART: a mark set or cleared is a row joining or leaving it.
+        void needsYou.loadLive();
       },
 
       // The projection's own push, once the Host raises it: a human edit, or anything else that
       // moved a card without moving a container. Refetch rather than patch - the board is a
       // derived read model and the server owns the derivation.
-      onKanbanChanged: () => kanban.refreshIfActive(),
+      onKanbanChanged: () => {
+        kanban.refreshIfActive();
+        void needsYou.loadLive();
+      },
 
       // The activity monitor's figures: each sample appended to the one copy the app bar reads.
       onCapacityChanged: (sample) => capacity.apply(sample),

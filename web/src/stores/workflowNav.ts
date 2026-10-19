@@ -20,6 +20,8 @@ export const useWorkflowNavStore = defineStore('workflowNav', {
     workflowsTeam: null as string | null,
     /** Counts asks, so asking for the same team twice is still a change the strip sees. */
     workflowsAsks: 0,
+    /** Counts asks for the active team's Git dialog, which the layout opens (Needs you's merge). */
+    gitAsks: 0,
   }),
 
   actions: {
@@ -51,6 +53,13 @@ export const useWorkflowNavStore = defineStore('workflowNav', {
       useConsoleStore().openTeam(team)
       this.workflowsTeam = team
       this.workflowsAsks += 1
+    },
+
+    /** Shows the team's board and asks the layout for its Git dialog, where its branch is merged. */
+    openGit(team: TeamId) {
+      this.backlogOpen = false
+      useConsoleStore().openTeam(team)
+      this.gitAsks += 1
     },
 
     /** Whether the Workflows dialog was asked for this team, taken once. */

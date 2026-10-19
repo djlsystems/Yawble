@@ -136,6 +136,8 @@ describe('the control panel: Status', () => {
     expect(((upload.body as FormData).get('file') as File).name).toBe('cv.pdf');
     expect(sent(calls, 'GET', '/api/teams/job-tracker/solution/panel').length).toBe(before + 1);
     expect(bodyFind('[data-blocked="Resume/"]')).toBeNull();
+    // The header's Needs you reads its live part again at once: no push says an input arrived.
+    expect(sent(calls, 'GET', '/api/needs-you?part=live')).toHaveLength(1);
   });
 
   it("binds a missing connection through the member's settings route, keeping its other settings", async () => {

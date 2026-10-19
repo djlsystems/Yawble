@@ -4,6 +4,7 @@ import { teamSolution } from '../api/client';
 import { uploadDocument } from '../api/documents';
 import { asDocumentsFolderKey, type SolutionMissing, type TeamId } from '../api/types';
 import { missingLine } from '../lib/solutions';
+import { useNeedsYouStore } from '../stores/needsYou';
 
 /**
  * A TEAM INSTALLED FROM A SOLUTION PACKAGE THAT STILL WAITS FOR ITS PERSON: one line per input the
@@ -41,6 +42,8 @@ async function upload(item: SolutionMissing, file: File | null) {
   try {
     // The live team's documents folder is addressed by the team's identifier.
     await uploadDocument(asDocumentsFolderKey(props.team), file, item.name.replace(/\/$/, ''));
+    // The header's Needs you lists the input this upload provides: it reads again at once.
+    void useNeedsYouStore().loadLive();
     await load();
   } catch (cause) {
     problem.value = `${file.name} was not uploaded: ${cause instanceof Error ? cause.message : String(cause)}`;

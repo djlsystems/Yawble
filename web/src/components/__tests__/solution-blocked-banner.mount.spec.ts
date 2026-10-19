@@ -6,6 +6,7 @@
 // and nothing for a team not installed from a package (a 404).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
 import { QFile } from 'quasar';
 
 import SolutionBlockedBanner from '../SolutionBlockedBanner.vue';
@@ -40,6 +41,7 @@ const record: Route = (call) =>
     : undefined;
 
 beforeEach(() => {
+  setActivePinia(createPinia());
   missing = [Resume, Mail];
   serve([record]);
 });
@@ -85,6 +87,8 @@ describe('the blocked banner', () => {
     expect((upload.body as FormData).get('path')).toBe('Resume');
     expect(((upload.body as FormData).get('file') as File).name).toBe('cv.pdf');
     expect(sent(calls, 'GET', '/api/teams/job-tracker/solution')).toHaveLength(2);
+    // The header's Needs you reads its live part again at once: no push says an input arrived.
+    expect(sent(calls, 'GET', '/api/needs-you?part=live')).toHaveLength(1);
     expect(wrapper.find('[data-missing="Resume"]').exists()).toBe(false);
     expect(wrapper.find('[data-missing="mail"]').exists()).toBe(true);
   });

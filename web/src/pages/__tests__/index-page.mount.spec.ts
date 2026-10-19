@@ -34,6 +34,7 @@ import IndexPage from '../IndexPage.vue';
 import { useConsoleStore } from '../../stores/console';
 import { useKanbanStore } from '../../stores/kanban';
 import { useSessionStore } from '../../stores/session';
+import { useNeedsYouStore } from '../../stores/needsYou';
 import { StalledBadgeGrace } from '../../lib/teamKpis';
 import { resetBody } from '../../test/mountQuasar';
 
@@ -437,6 +438,21 @@ describe('what the page re-reads', () => {
     hub.handlers!.onKanbanChanged!({} as never);
 
     expect(kanban.refreshIfActive).toHaveBeenCalled();
+  });
+
+  // Needs you's live part (decisions, blocked, failed, a missing input) is re-read on both pushes;
+  // its stored part is the header's timer's, never a push's.
+  it("re-reads Needs you's live part, and only that part, on container activity and the board's push", async () => {
+    await mountPage([team('alpha')]);
+    const needsYou = useNeedsYouStore();
+    const live = vi.spyOn(needsYou, 'loadLive').mockResolvedValue();
+    const stored = vi.spyOn(needsYou, 'loadStored').mockResolvedValue();
+
+    hub.handlers!.onContainerChanged(team('alpha').containers[0] as never);
+    hub.handlers!.onKanbanChanged!({} as never);
+
+    expect(live).toHaveBeenCalledTimes(2);
+    expect(stored).not.toHaveBeenCalled();
   });
 
   /** A teamChanged push is how a pause or resume made elsewhere lands live. */

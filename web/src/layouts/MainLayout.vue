@@ -38,6 +38,7 @@ import StatusStrip from '../components/StatusStrip.vue';
 import VersionTag from '../components/VersionTag.vue';
 import UpdateNotice from '../components/UpdateNotice.vue';
 import CapacityMonitor from '../components/CapacityMonitor.vue';
+import NeedsYouControl from '../components/NeedsYouControl.vue';
 import ConnectionsDialog from '../components/ConnectionsDialog.vue';
 import FirstRunGuide from '../components/FirstRunGuide.vue';
 import { callbackOutcome, type CallbackOutcome } from '../lib/connections';
@@ -187,6 +188,14 @@ const resetOpen = ref(false);
 /** The Backlog dialog is the nav store's, so a workflow's item chip anywhere opens it on that item. */
 const workflowNav = useWorkflowNavStore();
 const { backlogOpen, backlogItem } = storeToRefs(workflowNav);
+/** The Git dialog asked for from elsewhere (Needs you's merge row): the store made the team active. */
+watch(
+  () => workflowNav.gitAsks,
+  () => {
+    conciergeOpen.value = false;
+    gitOpen.value = true;
+  },
+);
 const tenantLogOpen = ref(false);
 /** Admin → Diagnostics. Beside the tenant log on the ribbon and a different store: `Log` is what a
  *  person did to the instance, this is what the instance did when it went wrong. */
@@ -509,6 +518,8 @@ async function signOut() {
 
         <!-- The activity monitor, to the right of the person's name: the instance's load as one
              gauge, its figures a click away. People only, as its route is. -->
+        <!-- What is waiting on a person, as one count, left of the gauge. People only, as its route is. -->
+        <NeedsYouControl v-if="session.user" />
         <CapacityMonitor v-if="session.user" />
       </q-toolbar>
 

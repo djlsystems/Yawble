@@ -123,6 +123,12 @@ export const useKanbanStore = defineStore('kanban', {
     /** A write is in flight. One at a time - these are appends, and a person clicked once. */
     busy: false,
 
+    /**
+     * The card a link asked to see in its side panel (Needs you's Open), or ''. The board opens the
+     * panel once the card has landed (`card=` in the address), and clears this.
+     */
+    panelAsk: '' as string,
+
     /** The card whose side panel is open, or ''. */
     selectedId: '' as string,
     detail: null as KanbanCardDetail | null,
