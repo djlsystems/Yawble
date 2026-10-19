@@ -154,6 +154,12 @@ public sealed class MemberRuntime : IAsyncDisposable
     private volatile string? _resumeAt;
     private volatile string? _needsDecision;
 
+    /// <summary>The `needs-decision` row <see cref="_needsDecision"/> was read from, or null. One
+    /// reference, so a snapshot never reads one row's seq beside another's workflow.</summary>
+    private volatile DecisionRow? _needsDecisionRow;
+
+    private sealed record DecisionRow(long Seq, long Correlation);
+
     /// <summary>The wakes this member asked for that are still pending, or null for none. Written by
     /// the wake runner (<see cref="MarkWakes"/>), never by a run, and never cleared by a wake.</summary>
     private volatile IReadOnlyList<WakeView>? _wakes;
@@ -428,7 +434,9 @@ public sealed class MemberRuntime : IAsyncDisposable
         HandedBack: _handedBack, Held: _held,
         Watchable: _watchable?.Invoke(_definition.Agent) ?? false,
         Kind: MemberRef.KindOf(_definition.Agent),
-        Wakes: _wakes);
+        Wakes: _wakes,
+        NeedsDecisionSeq: _needsDecisionRow?.Seq,
+        NeedsDecisionCorrelation: _needsDecisionRow?.Correlation);
 
     /// <summary>
     /// Records that this container has stopped without finishing, and pushes it.
@@ -599,14 +607,20 @@ public sealed class MemberRuntime : IAsyncDisposable
     ///
     /// Same lifecycle as <see cref="MarkBlocked(string)"/>: outlives this run, clears on the next
     /// wake in <see cref="RunOneAsync"/>. The field is a mark beside state, not a state value.
+    ///
+    /// <paramref name="seq"/> and <paramref name="correlation"/> name the row the question was
+    /// published on; the latest call wins, so the snapshot carries the newest open decision.
     /// </summary>
-    public void MarkNeedsDecision(string question)
+    public void MarkNeedsDecision(string question, long? seq = null, long? correlation = null)
     {
-        if (string.Equals(_needsDecision, question, StringComparison.Ordinal))
+        var row = seq is { } s && correlation is { } c ? new DecisionRow(s, c) : null;
+
+        if (string.Equals(_needsDecision, question, StringComparison.Ordinal) && Equals(_needsDecisionRow, row))
         {
             return;
         }
 
+        _needsDecisionRow = row;
         _needsDecision = question;
         Publish();
     }
@@ -1390,6 +1404,7 @@ public sealed class MemberRuntime : IAsyncDisposable
         _failureClass = null;
         _resumeAt = null;
         _needsDecision = null;
+        _needsDecisionRow = null;
 
         // The per-run flag, unlike the words below it: a new run has not handed anything back yet.
         _handedBackThisRun = false;

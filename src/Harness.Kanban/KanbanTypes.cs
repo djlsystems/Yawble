@@ -134,7 +134,20 @@ public record KanbanCard(
     /// are none. SET BY THE HOST AT THE FETCH (<c>CardWakes</c>), beside <see cref="OpenWorkflow"/>.
     /// </summary>
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyList<Harness.Contracts.WakeView>? Wakes = null)
+    IReadOnlyList<Harness.Contracts.WakeView>? Wakes = null,
+
+    /// <summary>
+    /// The seq of the newest `needs-decision` row on this card while its <see cref="Status"/> is
+    /// `needs-decision`, or null - and absent from the JSON - in every other status, `blocked` and
+    /// `failed` included. Lets a reader name the exact row a person is asked about.
+    /// </summary>
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    long? NeedsDecisionSeq = null,
+
+    /// <summary>The workflow (correlation) of the row <see cref="NeedsDecisionSeq"/> names, or null
+    /// and absent with it.</summary>
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    long? NeedsDecisionCorrelation = null)
 {
     /// <summary>Whether this card is work of the workflow <paramref name="correlation"/>: born in it,
     /// or claimed or told in it since. See <see cref="Workflows"/>.</summary>

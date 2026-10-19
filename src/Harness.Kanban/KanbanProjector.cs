@@ -670,6 +670,7 @@ public static class KanbanProjector
             state.LaneId = KanbanLanes.ForStatus("needs-decision");
             state.Color = KanbanLanes.ColourForStatus("needs-decision");
         }
+        state.Decision = (msg.Seq, msg.CorrelationId);
         Record(state, msg, FirstStringField(msg, PayloadFields.Question, PayloadFields.Reason, PayloadFields.Output));
         state.UpdatedAt = msg.OccurredAt.UtcDateTime;
     }
@@ -1129,6 +1130,10 @@ public static class KanbanProjector
         /// <summary>The card's foreign tools mark, or null. See <see cref="KanbanCard.ForeignTools"/>.</summary>
         public string? ForeignTools { get; set; }
 
+        /// <summary>The newest `needs-decision` row on this card, as its seq and workflow, or null.
+        /// Carried on the card only while <see cref="Status"/> is `needs-decision`.</summary>
+        public (long Seq, long Correlation)? Decision { get; set; }
+
         /// <summary>Every workflow this card was planned, claimed or told in, oldest first. See
         /// <see cref="KanbanCard.Workflows"/>.</summary>
         public List<long> Workflows { get; } = [];
@@ -1168,7 +1173,11 @@ public static class KanbanProjector
             AwaitingManager,
             Paused,
             Workflows.ToList(),
-            ForeignTools: ForeignTools);
+            ForeignTools: ForeignTools,
+            NeedsDecisionSeq: IsDeciding ? Decision!.Value.Seq : null,
+            NeedsDecisionCorrelation: IsDeciding ? Decision!.Value.Correlation : null);
+
+        private bool IsDeciding => Status == "needs-decision" && Decision is not null;
     }
 }
 

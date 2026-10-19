@@ -1289,7 +1289,7 @@ public sealed class TeamRegistry(
                     // third ranking, on the server, silently overriding both.
                     if (marks.FailureReason is { } failure) container.MarkFailed(failure);
                     if (marks.BlockedReason is { } reason) container.MarkBlocked(reason);
-                    if (marks.Question is { } question) container.MarkNeedsDecision(question);
+                    if (marks.Question is { } question) container.MarkNeedsDecision(question, marks.NeedsDecision!.Seq, marks.NeedsDecision.CorrelationId);
                 }
 
                 roster.Add(id);

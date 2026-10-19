@@ -181,7 +181,7 @@ public sealed class MemberReports : IMemberReports, IRunWorkerClient
 
         question = Redacted(member, question.Trim());
 
-        await log.AppendAsync(
+        var row = await log.AppendAsync(
             new NewMessage(
                 MessageTypes.NeedsDecision,
                 JsonSerializer.Serialize(new { question }),
@@ -189,7 +189,7 @@ public sealed class MemberReports : IMemberReports, IRunWorkerClient
                 container.CurrentCausation),
             ct);
 
-        container.MarkNeedsDecision(question);
+        container.MarkNeedsDecision(question, row.Seq, row.CorrelationId);
 
         return MemberReportOutcome.Ok;
     }
