@@ -31,3 +31,12 @@ export function conciergeNewline(): string {
   // and it is the pair every one of these CLIs was measured reading. LF does nothing in `grok`.
   return '\x1b\r';
 }
+
+/**
+ * WHAT SUBMITS A LINE AT A CONCIERGE'S PROMPT: a bare CR, the byte Enter sends, for every preset -
+ * the same CR a composed line ends with (`composedLine`). The newline above is this byte behind an
+ * ESC, which is what makes the two different keys. Measured in this image on all four built-in
+ * interactive presets by pasting a request (bracketed, as xterm pastes once the CLI asks) and
+ * sending this 50 ms later: each took it as a submitted message.
+ */
+export const ConciergeSubmit = '\r';

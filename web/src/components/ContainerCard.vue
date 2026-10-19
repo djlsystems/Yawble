@@ -11,6 +11,8 @@ import LiveViewDialog from './LiveViewDialog.vue';
 import MemberSettingsDialog from './MemberSettingsDialog.vue';
 import TriggersDialog from './TriggersDialog.vue';
 import WakeLines from './WakeLines.vue';
+import DiscussWithConcierge from './DiscussWithConcierge.vue';
+import { askForMember } from '../lib/conciergeDecision';
 import { workflowNumberTitle } from '../lib/workflowNumber';
 
 const props = defineProps<{
@@ -119,6 +121,9 @@ const heavyQueued = computed(
  * lives in `containerMark`.
  */
 const mark = computed(() => containerMark(props.snapshot));
+
+/** The open decision this member is waiting on, for "Discuss with Concierge"; null otherwise. */
+const decision = computed(() => askForMember(props.snapshot, undefined));
 
 /**
  * A container's feed starts when the container does.
@@ -462,6 +467,7 @@ async function cancel(wake: PendingWake) {
            first. -->
       <div v-else-if="mark?.kind === 'needs-decision'" class="q-mt-xs">
         <q-badge color="primary" label="waiting on a decision" />
+        <DiscussWithConcierge v-if="decision" :decision="decision" class="q-ml-xs" />
         <div class="text-caption os-text-muted q-mt-xs">{{ mark.reason }}</div>
       </div>
 

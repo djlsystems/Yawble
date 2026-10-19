@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { aDialogIsOpen, dismissesPanelOnEscape } from '../lib/escapeDismiss';
-import { conciergeNewline } from '../lib/conciergeNewline';
+import { ConciergeSubmit, conciergeNewline } from '../lib/conciergeNewline';
+import {
+  decisionRequest,
+  NotReadySentence,
+  PromptLine,
+  ReadyWatch,
+  UnsentTextSentence,
+} from '../lib/conciergeDecision';
 import { conciergeKeyAction } from '../lib/conciergeKeystroke';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
@@ -35,9 +42,11 @@ import {
   uploadConciergeAttachment,
 } from '../api/client';
 import { useConsoleStore } from '../stores/console';
+import { useConciergeAskStore } from '../stores/conciergeAsk';
+import { useSessionStore } from '../stores/session';
 import { useTerminalDisplayStore } from '../stores/terminalDisplay';
 import { useWindowFrame } from '../lib/useWindowFrame';
-import { agentsForMode, type ConciergeSettings, type TeamId } from '../api/types';
+import { agentsForMode, asTeamId, type ConciergeSettings, type TeamId } from '../api/types';
 
 const props = defineProps<{
   team: TeamId | null;
@@ -152,6 +161,7 @@ async function reset() {
     detach();
 
     await endConcierge();
+    line.reset();
 
     await nextTick();
     await attach();
@@ -370,7 +380,80 @@ function onTouchMove(event: TouchEvent) {
  * keeps the framing rule in one place: these are keystrokes, so BINARY frames, never control JSON.
  */
 function sendKey(sequence: string) {
-  socket?.sendInput(sequence);
+  sendFromPerson(sequence);
+}
+
+/**
+ * EVERY BYTE THE PERSON SENDS GOES THROUGH HERE, so the panel knows whether the prompt holds text
+ * they have not submitted (`PromptLine`) - the one thing a "Discuss with Concierge" click must not
+ * type over. xterm's own replies to the CLI come through `onData` too, and the line ignores them.
+ */
+const line = new PromptLine();
+
+function sendFromPerson(data: string) {
+  line.input(data);
+  socket?.sendInput(data);
+}
+
+/**
+ * "DISCUSS WITH CONCIERGE": THE REQUEST A CARD'S BUTTON LEFT IN `stores/conciergeAsk`, TYPED ONCE.
+ *
+ * Into the session this panel shows, whatever team it was opened on: nothing here ends, restarts or
+ * switches a session. Only when the person has no session running does the click start one, and
+ * then on the card's team (`attach`). Typed once the session is READY - attached, first output,
+ * then quiet (`ReadyWatch`) - and never before; a session that was ready when the click came is
+ * typed into at once, busy or not, since every built-in preset takes a message typed while it
+ * works. Pasted through xterm's own `paste`, as an image's path is, then submitted.
+ *
+ * NOTHING IS TYPED OVER THE PERSON'S OWN TEXT: with anything unsent at the prompt or in the compose
+ * bar, the panel says so in one sentence and types nothing.
+ */
+const asks = useConciergeAskStore();
+const people = useSessionStore();
+const sessionReady = ref(false);
+let readyWatch: ReadyWatch | null = null;
+
+/** The pause between the pasted request and its submit, as measured. */
+const SubmitGapMs = 50;
+
+function typeAsked() {
+  if (!sessionReady.value || !terminal || !socket) return;
+
+  const decision = asks.take();
+  if (!decision) return;
+
+  if (line.unsent || composeBar.value?.hasText()) {
+    asks.refuse(UnsentTextSentence);
+    return;
+  }
+
+  terminal.paste(decisionRequest(decision));
+  window.setTimeout(() => sendFromPerson(ConciergeSubmit), SubmitGapMs);
+  terminal.focus();
+}
+
+watch(
+  () => asks.clicks,
+  () => {
+    if (!asks.asked) return;
+
+    // Opening attaches, and the attach types it once the session is ready.
+    if (!open.value) {
+      open.value = true;
+      return;
+    }
+
+    typeAsked();
+  },
+);
+
+/** Whether the person already has a Concierge running, as the session list says. Unknown is yes:
+ *  a guess must never start a session on another team over one that is running. */
+function aSessionIsRunning(settings: ConciergeSettings | null): boolean {
+  const me = people.user;
+  if (!settings?.sessions || !me) return true;
+
+  return settings.sessions.some((one) => one.user === me.id || (one.email !== null && one.email === me.email));
 }
 
 /**
@@ -463,7 +546,7 @@ async function onImagePasteChord(chord: { key: string; shiftKey: boolean }) {
   }
 
   const bytes = imagePasteChordBytes(chord, xtermSeesMac(navigator.platform));
-  if (bytes) socket?.sendInput(bytes);
+  if (bytes) sendFromPerson(bytes);
 }
 
 function onShellDragOver(event: DragEvent) {
@@ -646,7 +729,18 @@ async function attach() {
   // start is said here in words, rather than opened and left to print its close reason.
   preflight.value = conciergePreflight(running.value);
 
-  if (preflight.value.kind === 'blocked') return;
+  // Nothing can be typed into a Concierge that cannot start; the line above says why.
+  if (preflight.value.kind === 'blocked') {
+    asks.take();
+    return;
+  }
+
+  // NO SESSION RUNNING, AND A CARD ASKED: this attach starts one, so it starts on the card's team.
+  // A running one is left on whatever team it is on - the request names its team.
+  if (asks.asked && !aSessionIsRunning(running.value)) {
+    line.reset();
+    if (board.activeTeamId !== asks.asked.team) board.setActiveTeam(asTeamId(asks.asked.team));
+  }
 
   startSignInRecheck();
 
@@ -678,6 +772,18 @@ async function attach() {
 
   terminal.write('\x1b[90mattaching...\x1b[0m\r\n');
 
+  sessionReady.value = false;
+  readyWatch?.dispose();
+  readyWatch = new ReadyWatch(
+    () => {
+      sessionReady.value = true;
+      typeAsked();
+    },
+    () => {
+      if (asks.asked) asks.refuse(NotReadySentence);
+    },
+  );
+
   // Measured BEFORE connecting, and sent with the connect: the server spawns the child at this size
   // rather than at a default it would then have to be resized away from. See connectConcierge.
   socket = connectConcierge({ cols: terminal.cols, rows: terminal.rows }, {
@@ -689,9 +795,16 @@ async function attach() {
       nudgeFirstPaint();
     },
 
-    onData: (bytes) => terminal?.write(bytes),
+    onData: (bytes) => {
+      readyWatch?.output();
+      terminal?.write(bytes);
+    },
 
     onClose: (reason) => {
+      readyWatch?.dispose();
+      sessionReady.value = false;
+      if (asks.asked) asks.refuse(NotReadySentence);
+
       // Losing the terminal to another device is not the child exiting, and the difference matters:
       // the session is still there and reopening this panel takes it back. Saying "ended" here would
       // send someone looking for a crash that did not happen.
@@ -713,6 +826,9 @@ async function attach() {
         return;
       }
 
+      // The prompt went with the child.
+      line.reset();
+
       // A close carrying a reason is the child exiting, and saying so out loud matters: an empty
       // terminal looks identical to one that never started.
       terminal?.write(`\r\n\x1b[33m-- Concierge ended${reason ? `: ${reason}` : ''} --\x1b[0m\r\n`);
@@ -730,7 +846,7 @@ async function attach() {
     },
   });
 
-  terminal.onData((data) => socket?.sendInput(data));
+  terminal.onData((data) => sendFromPerson(data));
 
   /**
    * SHIFT+ENTER INSERTS A NEWLINE INSTEAD OF SUBMITTING, FOR WHATEVER AGENT THIS CONCIERGE RUNS.
@@ -775,7 +891,7 @@ async function attach() {
     // deadline: once this handler returns, the browser's default action is already on its way.
     if (action.preventDefault) event.preventDefault();
 
-    if (action.send !== null) socket?.sendInput(action.send);
+    if (action.send !== null) sendFromPerson(action.send);
 
     return !action.swallow;
   });
@@ -838,6 +954,11 @@ function startSignInRecheck() {
 
 function detach() {
   stopSignInRecheck();
+  readyWatch?.dispose();
+  readyWatch = null;
+  sessionReady.value = false;
+  // A request still waiting for its session is not typed into a later one.
+  asks.take();
   window.removeEventListener('resize', trackViewport);
   window.removeEventListener('orientationchange', onOrientationChange);
   window.visualViewport?.removeEventListener('resize', trackViewport);
@@ -1151,6 +1272,17 @@ onBeforeUnmount(() => {
         <span class="col">{{ attachError }}</span>
         <q-btn flat dense round size="sm" icon="close" aria-label="Dismiss" @click="attachError = null" />
       </div>
+      <!-- Why a "Discuss with Concierge" click typed nothing, in one sentence. -->
+      <div
+        v-if="asks.notice"
+        class="concierge-ask-notice row no-wrap items-start q-px-md q-py-xs"
+        role="alert"
+        data-test="concierge-ask-notice"
+      >
+        <q-icon name="info" size="16px" class="q-mr-sm q-mt-xs" aria-hidden="true" />
+        <span class="col">{{ asks.notice }}</span>
+        <q-btn flat dense round size="sm" icon="close" aria-label="Dismiss" @click="asks.notice = null" />
+      </div>
       <div ref="host" class="col concierge-host" />
 
       <!-- Resize handles: only when windowed. Edges and corner grips. -->
@@ -1280,6 +1412,13 @@ onBeforeUnmount(() => {
   line-height: 1.4;
   color: rgba(255, 255, 255, 0.87);
   background: rgba(255, 80, 80, 0.18);
+}
+
+.concierge-ask-notice {
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.87);
+  background: rgba(255, 170, 0, 0.16);
 }
 
 .concierge-preflight-link {

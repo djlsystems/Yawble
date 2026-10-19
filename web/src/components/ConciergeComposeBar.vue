@@ -75,7 +75,12 @@ async function insert(inserted: string) {
   input?.setSelectionRange(caret, caret);
 }
 
-defineExpose({ insert });
+/** Whether the field holds text not yet sent, which a "Discuss with Concierge" click must not lose. */
+function hasText(): boolean {
+  return text.value.trim().length > 0;
+}
+
+defineExpose({ insert, hasText });
 
 function send() {
   const sequence = composedLine(text.value);

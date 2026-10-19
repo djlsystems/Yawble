@@ -386,6 +386,15 @@ public static class AgentCatalogFile
 
         return
         [
+            // TYPED INTO AS A CONCIERGE, MEASURED (claude 2.1.303, codex-cli 0.163.0, copilot 1.0.98 and
+            // grok 1.0.62 in this image, each in a PTY at 120x40 answering the queries xterm.js answers,
+            // in a folder the CLI already trusts). The web's generic ready signal - attached, first
+            // output, then 1500 ms of quiet - was met and a request pasted then (bracketed) and submitted
+            // with CR 50 ms later was taken; 500 ms of quiet was enough too, so no interval is declared.
+            // claude: first output 0.33 s, ready 2.0 s. A message typed while a turn ran a 30 s shell
+            // command was queued and answered in that turn. In a folder it has never trusted, the first
+            // launch shows a trust question whose highlighted answer is "No, exit": a request typed
+            // there would end the CLI, which is why the person's own trusted Concierge folder matters.
             new AgentDefinition(
                 "claude",
                 AgentMode.Interactive,
@@ -464,6 +473,9 @@ public static class AgentCatalogFile
             // is what `{userPrompt}` and `{userPromptFile}` exist for. `codex exec` is the exception - it
             // reads stdin when given no positional prompt - and is left on stdin for that reason.
 
+            // codex: first output 0.07 s, ready 3.6 s (a loading animation for about 2 s, then quiet).
+            // A request typed at ready was answered. A message typed while a turn ran a 30 s shell
+            // command was taken into that turn and answered with it. Measured as the claude note says.
             new AgentDefinition(
                 "codex",
                 AgentMode.Interactive,
@@ -522,6 +534,11 @@ public static class AgentCatalogFile
                 CredentialVariables: codexCredential,
                 Attribution: codexAttribution),
 
+            // copilot: first output 0.75 s, ready 4.5 s. A request typed at ready was answered. A
+            // message typed while a 30 s shell command ran was taken as steering (its event log says
+            // `delivery: steering`) and answered; copilot moved the running command to the background.
+            // In an untrusted folder its trust question takes the first input. Measured as the claude
+            // note says.
             new AgentDefinition(
                 "copilot",
                 AgentMode.Interactive,
@@ -668,6 +685,9 @@ public static class AgentCatalogFile
                 CredentialVariables: copilotCredential,
                 Attribution: copilotAttribution),
 
+            // grok: first output 0.1 s, ready 1.9 s. A request typed at ready was answered. A message
+            // typed while a turn ran a 30 s shell command was queued and answered after that turn, as
+            // its own (its chat history shows it). Measured as the claude note says.
             new AgentDefinition(
                 "grok",
                 AgentMode.Interactive,

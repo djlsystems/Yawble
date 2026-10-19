@@ -6,6 +6,8 @@ import { KanbanStatusLabel, colourFor } from '../lib/kanban';
 import { workflowNumberTitle } from '../lib/workflowNumber';
 import type { PendingWake } from '../api/types';
 import WakeLines from './WakeLines.vue';
+import DiscussWithConcierge from './DiscussWithConcierge.vue';
+import { askForCard } from '../lib/conciergeDecision';
 
 /**
  * One card on the board.
@@ -45,6 +47,9 @@ const emit = defineEmits<{
 function openOutcome() {
   if (props.card.outcome) emit('open-outcome', props.card.outcome.id);
 }
+
+/** The open decision a Needs You card is waiting on, for "Discuss with Concierge"; null otherwise. */
+const decision = computed(() => askForCard(props.card, undefined));
 
 const colour = computed(() => colourFor(props.card));
 
@@ -146,6 +151,10 @@ const progressCount = computed(() => props.card.progress?.length ?? 0);
 
     <div class="k-card-foot">
       <span class="k-card-status">{{ KanbanStatusLabel[card.status] }}</span>
+
+      <!-- A DECISION IS WAITING ON A PERSON: ask the Concierge about it. A span with the button role,
+           because this card is itself a button. -->
+      <DiscussWithConcierge v-if="decision" :decision="decision" inline />
 
       <span v-if="progressCount" class="k-card-progress" :title="`${progressCount} progress lines`">
         <q-icon name="checklist" size="13px" />

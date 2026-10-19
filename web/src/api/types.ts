@@ -114,6 +114,11 @@ export interface ContainerSnapshot {
    */
   needsDecision?: string | null
 
+  /** The seq of the needs-decision row behind `needsDecision`, and the workflow (correlation) it
+   *  was asked in. Set and cleared with it; null or absent when there is no open decision. */
+  needsDecisionSeq?: number | null
+  needsDecisionCorrelation?: number | null
+
   /**
    * WHAT THIS MEMBER LAST HANDED BACK — the words on its most recent `agentContainer.handback`, or
    * `null` when it has never handed anything back.
