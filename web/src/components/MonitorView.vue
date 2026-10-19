@@ -3,9 +3,10 @@ import FieldHelp from './FieldHelp.vue'
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { useQuasar } from 'quasar'
 import { getFileChanges, getMessages, getRunSteps, listEvents } from '../api/client'
-import type { Message, MonitorHint } from '../api/types'
+import type { Message, MonitorHint, TeamId } from '../api/types'
 import { useConsoleStore } from '../stores/console'
 import { useWorkflowNavStore } from '../stores/workflowNav'
+import { boardHref, memberHref } from '../lib/consoleLinks'
 import { itemLabel } from '../lib/backlog'
 import { useAppearanceStore } from '../stores/appearance'
 import { textPx } from '../lib/appearance'
@@ -373,6 +374,30 @@ const pickedItem = computed(() => {
 
 function openItem() {
   if (pickedItem.value) workflowNav.openItem(pickedItem.value.id)
+}
+
+/** A picked member on a live team: "Open member", its card on its board (the highlight link). */
+const pickedMemberHref = computed(() => {
+  const ref = picked.value
+  if (ref?.kind !== 'member') return null
+  const [team, ...rest] = ref.key.split('/')
+  return team && liveTeams.value.has(team) ? memberHref(team, rest.join('/')) : null
+})
+
+/** A picked workflow with no item, on a live team: "Open workflows", that team's Workflows dialog. */
+const pickedWorkflowsTeam = computed(() => {
+  const ref = picked.value
+  if (ref?.kind !== 'workflow' || pickedItem.value) return null
+  return pickedTeam.value
+})
+
+function openWorkflows() {
+  if (pickedWorkflowsTeam.value) workflowNav.openWorkflows(pickedWorkflowsTeam.value as TeamId)
+}
+
+/** A ticker row's team line opens that team's board, while the team is live. */
+function openBoard(team: string) {
+  if (liveTeams.value.has(team)) workflowNav.openBoard(team as TeamId)
 }
 
 const pickedTeam = computed(() => {
@@ -1076,6 +1101,26 @@ onUnmounted(() => {
             data-monitor-open-item
             @click="openItem"
           />
+          <q-btn
+            v-else-if="pickedWorkflowsTeam"
+            flat
+            dense
+            no-caps
+            size="sm"
+            label="Open workflows"
+            data-monitor-open-workflows
+            @click="openWorkflows"
+          />
+          <q-btn
+            v-if="pickedMemberHref"
+            flat
+            dense
+            no-caps
+            size="sm"
+            label="Open member"
+            :href="pickedMemberHref"
+            data-monitor-open-member
+          />
           <q-btn flat dense round size="sm" icon="close" aria-label="Show every team" @click="picked = null" />
         </span>
       </div>
@@ -1088,7 +1133,16 @@ onUnmounted(() => {
               <span class="monitor-row-who">{{ entry.member ?? entry.team }}</span>
               <span class="monitor-row-time">{{ timeWords(entry.at) }}</span>
             </div>
-            <div class="monitor-row-team">{{ model.teams.get(entry.team)?.name ?? entry.team }}</div>
+            <div class="monitor-row-team">
+              <a
+                v-if="liveTeams.has(entry.team)"
+                :href="boardHref(entry.team)"
+                class="os-name-link"
+                data-monitor-row-team
+                @click.prevent="openBoard(entry.team)"
+              >{{ model.teams.get(entry.team)?.name ?? entry.team }}</a>
+              <template v-else>{{ model.teams.get(entry.team)?.name ?? entry.team }}</template>
+            </div>
             <div
               v-if="entry.resource"
               class="monitor-row-resource"

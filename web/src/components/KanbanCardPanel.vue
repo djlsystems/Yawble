@@ -15,6 +15,8 @@ import type { PendingWake } from '../api/types';
 import WakeLines from './WakeLines.vue';
 import DiscussWithConcierge from './DiscussWithConcierge.vue';
 import { askForCard } from '../lib/conciergeDecision';
+import { boardHref, memberHref } from '../lib/consoleLinks';
+import type { TeamId } from '../api/types';
 
 /**
  * A card, opened.
@@ -242,7 +244,19 @@ function when(value: string | null | undefined): string {
           <div class="col">
             <div class="text-subtitle1">{{ card.title }}</div>
             <div class="text-caption os-text-muted">
-              {{ card.team }} / {{ card.member }} ·
+              <!-- The team opens its board and the member its card there (the highlight link). -->
+              <a
+                :href="boardHref(card.team)"
+                class="os-name-link"
+                data-panel-team
+                @click.prevent="workflowNav.openBoard(card.team as TeamId)"
+              >{{ card.team }}</a> /
+              <a
+                v-if="card.member"
+                :href="memberHref(card.team, card.member)"
+                class="os-name-link"
+                data-panel-member
+              >{{ card.member }}</a><template v-else>{{ card.member }}</template> ·
               <button
                 v-if="ownItem !== null"
                 type="button"

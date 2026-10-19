@@ -44,6 +44,8 @@ import TeamStatusIcon from './TeamStatusIcon.vue';
 import { vResizableColumns } from '../lib/resizableColumns';
 import { itemLabel } from '../lib/backlog';
 import { useWorkflowNavStore } from '../stores/workflowNav';
+import { boardHref } from '../lib/consoleLinks';
+import { ActivityStates, stateWords } from '../lib/teamActivity';
 
 const board = useConsoleStore();
 const workflowNav = useWorkflowNavStore();
@@ -709,7 +711,15 @@ async function setPaused(team: Team | null, paused: boolean) {
           <!-- NOT SORTABLE: lanes over time have no single value to order by. -->
           <th data-col="activity" class="text-left">
             <div class="teams-activity-heading">
-              <span>Activity</span>
+              <!-- THE LEGEND, on hover: what a lane, its initials and its colours are. -->
+              <span class="teams-activity-word" tabindex="0" data-activity-legend-anchor>Activity<q-tooltip data-activity-legend>
+                  <div>One lane per member, named by its initials; hover the initials for the full name.</div>
+                  <div v-for="state in ActivityStates" :key="state" class="teams-legend-row">
+                    <span class="teams-legend-swatch" :style="{ background: `var(--os-stat-${state})` }"></span>
+                    {{ stateWords(state) }}
+                  </div>
+                  <div>A click on a team's lanes opens its Statistics.</div>
+                </q-tooltip></span>
               <q-toggle
                 dense
                 size="xs"
@@ -741,7 +751,18 @@ async function setPaused(team: Team | null, paused: boolean) {
           @keydown.enter="rowKey($event, row.id)"
           @keydown.space="rowKey($event, row.id)"
         >
-          <td>{{ row.name }}</td>
+          <!-- THE NAME IS THE LINK TO THE BOARD, so the row reads as one: the same team the row's
+               own click opens, and an address a person can copy or open in a new tab. -->
+          <td>
+            <span v-if="teamFor(row)?.archived">{{ row.name }}</span>
+            <a
+              v-else
+              :href="boardHref(row.id)"
+              class="os-name-link"
+              data-team-name
+              @click.prevent.stop="open(row.id)"
+            >{{ row.name }}</a>
+          </td>
 
           <td>
             {{ row.members }}
@@ -840,7 +861,7 @@ async function setPaused(team: Team | null, paused: boolean) {
               :disable="busy || cloneBusy"
               @click.stop="askClone(teamFor(row))"
             >
-              <q-tooltip>Clone team</q-tooltip>
+              <q-tooltip>Clone this team: a new team with the same roster and settings</q-tooltip>
             </q-btn>
             <q-btn
               v-if="!teamFor(row)?.archived"
@@ -852,7 +873,7 @@ async function setPaused(team: Team | null, paused: boolean) {
               :disable="busy || cloneBusy || archiveBusy"
               @click.stop="askArchive(teamFor(row))"
             >
-              <q-tooltip>Archive team</q-tooltip>
+              <q-tooltip>Archive this team: everything is kept, and it does no work until unarchived</q-tooltip>
             </q-btn>
             <q-btn
               flat
@@ -864,7 +885,7 @@ async function setPaused(team: Team | null, paused: boolean) {
               :disable="busy"
               @click.stop="ask(teamFor(row))"
             >
-              <q-tooltip>Delete team</q-tooltip>
+              <q-tooltip>Delete this team permanently</q-tooltip>
             </q-btn>
           </td>
         </tr>
@@ -1144,6 +1165,24 @@ async function setPaused(team: Team | null, paused: boolean) {
   align-items: center;
   gap: 12px;
   font-weight: inherit;
+}
+
+/* The legend's word: a heading a pointer or focus explains. */
+.teams-activity-word {
+  cursor: help;
+}
+
+.teams-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.teams-legend-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
 }
 
 /* The Activity cell: the chart, then the team's status icon on its right. */

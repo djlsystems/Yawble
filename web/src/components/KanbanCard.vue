@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import type { KanbanCard } from '../api/kanban';
 import { itemLabel } from '../lib/backlog';
 import { KanbanStatusFact, KanbanStatusLabel, colourFor } from '../lib/kanban';
@@ -8,6 +8,8 @@ import type { PendingWake } from '../api/types';
 import WakeLines from './WakeLines.vue';
 import DiscussWithConcierge from './DiscussWithConcierge.vue';
 import { askForCard } from '../lib/conciergeDecision';
+import { boardHref, follow, memberHref } from '../lib/consoleLinks';
+import { copyText } from '../lib/clipboard';
 
 /**
  * One card on the board.
@@ -29,6 +31,10 @@ const props = defineProps<{
   updateWait?: string | null;
   /** The wake whose cancel the board has in flight, or null. */
   cancellingWake?: number | null;
+  /** An address asked for this card and the board landed it: flashed once. The board decides. */
+  flashing?: boolean;
+  /** The card's team as a person reads it; its id when the board does not know the name. */
+  teamName?: string;
 }>();
 
 /**
@@ -58,13 +64,44 @@ const colour = computed(() => colourFor(props.card));
    panel and a dark ground all agree without a hex in any component. */
 const colourClass = computed(() => `os-kanban-${colour.value}`);
 const progressCount = computed(() => props.card.progress?.length ?? 0);
+
+/**
+ * THE NAMES ON THE CARD ARE WAYS IN. Spans with a link's role, because this card is itself a
+ * button and may not hold another control; each follows the address it names (`lib/consoleLinks`),
+ * so the card still holds no store. The member opens that member's card on its board (the
+ * highlight deep link), the team opens its board, and the card id copies itself - what
+ * `tell --card` takes.
+ */
+const teamName = computed(() => props.teamName || props.card.team);
+
+function openMember() {
+  if (props.card.member) follow(memberHref(props.card.team, props.card.member));
+}
+
+function openTeam() {
+  follow(boardHref(props.card.team));
+}
+
+const copied = ref(false);
+let copiedTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function copyId() {
+  try {
+    await copyText(props.card.id);
+  } catch {
+    return;
+  }
+  copied.value = true;
+  if (copiedTimer !== null) clearTimeout(copiedTimer);
+  copiedTimer = setTimeout(() => (copied.value = false), 1500);
+}
 </script>
 
 <template>
   <button
     type="button"
     class="k-card"
-    :class="colourClass"
+    :class="[colourClass, { 'os-flash': flashing }]"
     :data-colour="colour"
     :data-awaiting="card.awaitingManager ? 'yes' : null"
     :data-waiting="waiting ? 'yes' : null"
@@ -113,16 +150,43 @@ const progressCount = computed(() => props.card.progress?.length ?? 0);
       <!-- NULL IS ITS OWN WORD, not an empty span. A card nobody has been assigned yet is the whole
            reason the Todo lane can be filled before anybody is told, and a blank where a name goes
            reads as a rendering fault rather than as a state. -->
-      <span class="k-card-member" :class="card.member === null ? 'k-card-unassigned' : ''">
-        {{ card.member ?? 'Unassigned' }}
-      </span>
+      <span
+        v-if="card.member !== null"
+        role="link"
+        tabindex="0"
+        class="k-card-member k-card-link"
+        :title="`Open ${card.member}'s card on ${teamName}'s board`"
+        :data-href="memberHref(card.team, card.member)"
+        data-card-member
+        @click.stop="openMember"
+        @keydown.enter.stop.prevent="openMember"
+      >{{ card.member }}</span>
+      <span v-else class="k-card-member k-card-unassigned">Unassigned</span>
+      <span
+        role="link"
+        tabindex="0"
+        class="k-card-team k-card-link"
+        :title="`Open ${teamName}'s board`"
+        :data-href="boardHref(card.team)"
+        data-card-team
+        @click.stop="openTeam"
+        @keydown.enter.stop.prevent="openTeam"
+      >{{ teamName }}</span>
       <!-- THE CARD'S OWN ID, AS WELL AS THE WORKFLOW SEQ - both, never one instead of the other.
            The id is what `tell --card <id>` takes and what a member quotes in every progress line
            ("card 2237: read spec"), so it is the one handle a person watching the board and an
            agent reporting to it share. Three cards planned under one workflow all read `#2226`;
            the id is what tells them apart. It is LABELLED, because an instruction card's id is
            `2310_Manager` and a bare `2310_Manager` beside the member's name reads as a fault. -->
-      <span class="k-card-id" :title="`Card id ${card.id} - what tell --card takes`">card {{ card.id }}</span>
+      <span
+        role="button"
+        tabindex="0"
+        class="k-card-id k-card-link"
+        :title="`Card id ${card.id} - what tell --card takes. Click to copy it.`"
+        data-card-copy
+        @click.stop="copyId"
+        @keydown.enter.stop.prevent="copyId"
+      >{{ copied ? 'copied' : `card ${card.id}` }}</span>
       <!-- The workflow seq, because it is the number that GROUPS cards - the one a person quotes
            back at a manager and the one `--workflow` filters on. A card without it could
            not be found among its siblings. -->
@@ -370,6 +434,21 @@ const progressCount = computed(() => props.card.progress?.length ?? 0);
 
 .k-card-id {
   user-select: all;
+}
+
+/* A name on the card that is a way in: the meta line's own ink, underlined on hover and focus. */
+.k-card-link {
+  cursor: pointer;
+}
+
+.k-card-link:hover,
+.k-card-link:focus-visible {
+  text-decoration: underline;
+  color: var(--os-ink);
+}
+
+.k-card-team {
+  white-space: nowrap;
 }
 
 .k-card-foot {

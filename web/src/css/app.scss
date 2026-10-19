@@ -938,3 +938,34 @@ table.os-cols-fixed {
 .stats-tooltip .tokens-chip--6 { background: var(--os-series-6); }
 .stats-tooltip .tokens-chip--7 { background: var(--os-series-7); }
 .stats-tooltip .tokens-chip--8 { background: var(--os-series-8); }
+
+/* THE HIGHLIGHT A LINK LANDS ON: a member card or a Kanban card an address named (`member=`,
+   `card=`) pulses its outline once in the primary colour, then is as it was (`stores/highlight`
+   sets and clears the class). Never under reduced motion - the store does not set it then, and this
+   rule stands down too. */
+@keyframes os-flash {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  25%, 60% { box-shadow: 0 0 0 3px var(--q-primary); }
+}
+
+.os-flash {
+  animation: os-flash 1.6s ease-in-out 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .os-flash {
+    animation: none;
+  }
+}
+
+/* A link a name became, in the text around it: its own ink, underlined on hover and focus. */
+.os-name-link {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.os-name-link:hover,
+.os-name-link:focus-visible {
+  text-decoration: underline;
+}

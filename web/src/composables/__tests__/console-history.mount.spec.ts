@@ -13,6 +13,7 @@ import { createMemoryHistory, createRouter, type Router } from 'vue-router';
 import { useConsoleHistory } from '../useConsoleHistory';
 import { useConsoleStore } from '../../stores/console';
 import { useKanbanStore } from '../../stores/kanban';
+import { useHighlightStore } from '../../stores/highlight';
 import type { TeamId } from '../../api/types';
 
 const teams = [
@@ -159,5 +160,60 @@ describe('the browser back button in the Console', () => {
     const router = await open('/console?connection=done');
     await openTeam('alpha');
     expect(router.currentRoute.value.query).toEqual({ connection: 'done', team: 'alpha' });
+  });
+});
+
+// THE HIGHLIGHT DEEP LINK: `member=` beside `team=` and `card=` on the Kanban are read into the
+// highlight store, stay in the address through a reload until the view lands them, and are dropped
+// (replacing) once it has.
+describe('the highlight keys in the address', () => {
+  it('reads member beside team, keeps it through a reload, and drops it once consumed', async () => {
+    let router = await open('/console?team=beta&member=Mailer');
+    expect(useHighlightStore().member).toEqual({ team: 'beta', member: 'Mailer' });
+    expect(router.currentRoute.value.query).toEqual({ team: 'beta', member: 'Mailer' });
+
+    // A reload before the board landed it: a new page at the same address asks again.
+    router = await open('/console?team=beta&member=Mailer');
+    const highlight = useHighlightStore();
+    expect(highlight.member).toEqual({ team: 'beta', member: 'Mailer' });
+    expect(useConsoleStore().activeTeamId).toBe('beta');
+
+    highlight.land('member:beta/Mailer', null);
+    await settle();
+    expect(router.currentRoute.value.query).toEqual({ team: 'beta' });
+    expect(highlight.member).toBeNull();
+    expect(router.currentRoute.value.query.member).toBeUndefined();
+  });
+
+  it('reads card on the Kanban, keeps it through a reload, and drops it once consumed', async () => {
+    let router = await open('/console?view=kanban&card=c1');
+    expect(useHighlightStore().card).toBe('c1');
+    expect(router.currentRoute.value.query).toEqual({ view: 'kanban', card: 'c1' });
+
+    router = await open('/console?view=kanban&card=c1');
+    const highlight = useHighlightStore();
+    expect(highlight.card).toBe('c1');
+    expect(useConsoleStore().view).toBe('kanban');
+
+    highlight.miss('Card c1 is not on the board.');
+    await settle();
+    expect(router.currentRoute.value.query).toEqual({ view: 'kanban' });
+    expect(highlight.card).toBe('');
+  });
+
+  it('asks again when a link names a member while the board is already showing its team', async () => {
+    const router = await open('/console?team=alpha');
+    expect(useHighlightStore().member).toBeNull();
+
+    await router.push('/console?team=alpha&member=Manager');
+    await settle();
+    expect(useHighlightStore().member).toEqual({ team: 'alpha', member: 'Manager' });
+  });
+
+  it('drops an unconsumed highlight when the person moves to another place', async () => {
+    const router = await open('/console?team=beta&member=Mailer');
+    await openTeam('alpha');
+    expect(router.currentRoute.value.query).toEqual({ team: 'alpha' });
+    expect(useHighlightStore().member).toBeNull();
   });
 });

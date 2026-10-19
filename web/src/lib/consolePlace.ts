@@ -11,8 +11,17 @@ export type ConsolePlace =
   | { kind: 'monitor' }
   | { kind: 'team'; team: string };
 
-/** The two keys this module owns. Every other key in the query (a connection's callback) is left. */
-const keys = ['view', 'team'] as const;
+/**
+ * The keys this module owns: the place, and the highlight beside it (`member` with `team`, `card` on
+ * the Kanban), which a move to another place drops. Every other key in the query (a connection's
+ * callback) is left.
+ */
+const keys = ['view', 'team', 'member', 'card'] as const;
+
+/** The highlight keys alone, dropped from the address once the view has landed them. */
+export const highlightKeys = ['member', 'card'] as const;
+
+const one = (value: LocationQuery[string] | undefined) => (Array.isArray(value) ? value[0] : value) ?? null;
 
 /** The place the store is in, or null when it is in none worth an address (a board with no team). */
 export function placeOf(view: string, activeTeamId: string): ConsolePlace | null {
@@ -24,7 +33,6 @@ export function placeOf(view: string, activeTeamId: string): ConsolePlace | null
 
 /** The place an address names, or null when it names none. */
 export function placeFromQuery(query: LocationQuery): ConsolePlace | null {
-  const one = (value: LocationQuery[string] | undefined) => (Array.isArray(value) ? value[0] : value) ?? null;
   const team = one(query.team);
   if (team) return { kind: 'team', team };
   const view = one(query.view);
@@ -45,4 +53,29 @@ export function samePlace(a: ConsolePlace | null, b: ConsolePlace | null): boole
   if (a === null || b === null) return a === b;
   if (a.kind !== b.kind) return false;
   return a.kind !== 'team' || a.team === (b as { team: string }).team;
+}
+
+/**
+ * The highlight an address asks for: a member's card on the board it names (`team=` and `member=`),
+ * or a card on the Kanban (`view=kanban` and `card=`). Nothing for a key without its place.
+ */
+export function highlightFromQuery(query: LocationQuery): {
+  member: { team: string; member: string } | null;
+  card: string | null;
+} {
+  const team = one(query.team);
+  const member = one(query.member);
+  const card = one(query.card);
+
+  return {
+    member: team && member ? { team, member } : null,
+    card: !team && one(query.view) === 'kanban' && card ? card : null,
+  };
+}
+
+/** The query with the highlight keys dropped. */
+export function withoutHighlight(query: LocationQuery): LocationQueryRaw {
+  const rest: LocationQueryRaw = { ...query };
+  for (const key of highlightKeys) delete rest[key];
+  return rest;
 }

@@ -424,6 +424,42 @@ export const useKanbanStore = defineStore('kanban', {
     },
 
     /**
+     * A CARD AN ADDRESS NAMED (`card=`), made visible. On the board as filtered: shown as it is. Hidden
+     * by the filter: the team filter is set to the card's own team and the member, status and outcome
+     * filters and the search box are cleared, then the board is read again. The card's team is taken
+     * off the board read without filters when the filtered one does not hold the card. `gone`: no
+     * board holds it (or its team is archived). `unknown`: a read failed, so nothing can be said.
+     */
+    async reveal(id: string): Promise<'shown' | 'gone' | 'unknown'> {
+      const drawn = () => this.rendered?.cards.some((card) => card.id === id) === true
+
+      await this.load()
+      if (this.error) return 'unknown'
+      if (drawn()) return 'shown'
+
+      let team = this.board?.cards.find((card) => card.id === id)?.team ?? null
+
+      if (team === null) {
+        if (Object.keys(this.effectiveFilters).length === 0) return 'gone'
+        try {
+          team = (await getKanbanBoard({})).cards.find((card) => card.id === id)?.team ?? null
+        } catch {
+          return 'unknown'
+        }
+        if (team === null) return 'gone'
+      }
+
+      if (archivedTeamIds().has(team.toLowerCase())) return 'gone'
+
+      this.filters = defaultKanbanFilters(team)
+      this.text = ''
+      await this.load()
+      if (this.error) return 'unknown'
+
+      return drawn() ? 'shown' : 'gone'
+    },
+
+    /**
      * The team a card belongs to, taken off the CARD.
      *
      * EVERY PER-CARD CALL IS ADDRESSED WITH THIS AND NEVER WITH THE ACTIVE TEAM. Those two were

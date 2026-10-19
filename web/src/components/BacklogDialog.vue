@@ -85,6 +85,8 @@ import { localDay } from '../lib/localTime';
 import { solutionNotice, type SolutionNoticeView } from '../lib/solutionNotice';
 import { workflowRow } from '../lib/workflowNumber';
 import WorkflowName from './WorkflowName.vue';
+import { boardHref } from '../lib/consoleLinks';
+import { useWorkflowNavStore } from '../stores/workflowNav';
 
 /**
  * The tenant backlog.
@@ -119,6 +121,7 @@ function noticesOf(stats: BacklogExecutionStats | undefined): SolutionNoticeView
 
 const $q = useQuasar();
 const board = useConsoleStore();
+const workflowNav = useWorkflowNavStore();
 
 const tab = ref<'backlog' | 'archived'>('backlog');
 
@@ -1145,16 +1148,21 @@ function down(index: number) {
                      item and is never rewritten on dispatch; this is who is WORKING it, which can
                      be a different team. A tooltip alone is not enough because a phone has no hover -
                      the words are on the row and the long form is the title for those who can. -->
-                <span
+                <!-- A WAY IN: the mark opens the board of the team working it. `.stop` so the
+                     click does not also open the item. -->
+                <a
                   v-if="row.inFlight"
                   class="backlog-inflight"
+                  :href="boardHref(row.inFlight.teamId)"
                   :data-running="row.inFlight.running ? 'yes' : null"
-                  :title="inFlightTitle(row.inFlight)"
+                  :title="`${inFlightTitle(row.inFlight)} Opens its board.`"
                   :aria-label="inFlightTitle(row.inFlight)"
+                  data-inflight-board
+                  @click.prevent.stop="workflowNav.openBoard(asTeamId(row.inFlight.teamId))"
                 >
                   <q-icon :name="row.inFlight.running ? 'play_arrow' : 'hourglass_empty'" size="12px" />
                   {{ inFlightText(row.inFlight) }}
-                </span>
+                </a>
                 <!-- THE WORKFLOW THE WORK LEFT BEHIND: open and Blocked or Failed, while a later
                      workflow finished its card. The words say where the work went; the button is
                      the person's close, and nothing is closed until it is pressed. `.stop` so the
@@ -1925,6 +1933,8 @@ function down(index: number) {
    Running - the same two colours the board's cards use for queued and running, so a person who
    reads one screen reads the other. */
 .backlog-inflight {
+  text-decoration: none;
+  cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 3px;

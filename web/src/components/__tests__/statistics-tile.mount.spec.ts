@@ -183,6 +183,13 @@ describe('the Activity tile', () => {
     expect(tile().findAll('.stats-lane-initials').map((lane) => lane.text())).toEqual(['M', 'TO', 'DI']);
   });
 
+  it('gives each lane\'s initials the member\'s full name as their tooltip', async () => {
+    await mountStrip();
+
+    expect(tile().findAll('.stats-lane-initials').map((lane) => lane.attributes('title')))
+      .toEqual(['Manager', 'Tester Okon', 'Developer Ines']);
+  });
+
   it('gives a removed member no lane', async () => {
     await mountStrip();
 

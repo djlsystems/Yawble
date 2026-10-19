@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUpdate, onMounted, onUnmounted, onUpdated, ref, watch, watchPostEffect } from 'vue';
+import { computed, nextTick, onBeforeUpdate, onMounted, onUnmounted, onUpdated, ref, watch, watchPostEffect } from 'vue';
 import type { KanbanLane } from '../api/kanban';
 import type { PendingWake } from '../api/types';
 import { useKanbanStore, type KanbanView } from '../stores/kanban';
 import { runningAcrossTeams, useWipStore } from '../stores/wip';
 import { useAgentUpdatesStore } from '../stores/agentUpdates';
+import { cardKey, useHighlightStore } from '../stores/highlight';
+import { useConsoleStore } from '../stores/console';
 import { boardCountText, cardShowsWaiting, laneOverLimit, NeedsYouLaneId } from '../lib/kanban';
 import { isRunningLane } from '../lib/tenantSettings';
 import KanbanCard from './KanbanCard.vue';
@@ -241,6 +243,45 @@ function revealRow() {
 watchPostEffect(revealRow);
 
 /**
+ * A CARD THE ADDRESS ASKED FOR (`card=`) lands here: made visible first (`kanban.reveal` widens a
+ * filter that hides it to the card's team), then scrolled into view and flashed once. A card no
+ * board holds shows the board with a one-line notice and no flash; a failed read says nothing more
+ * than the board's own error line.
+ */
+const highlight = useHighlightStore();
+
+/** Each team's name, for the team on a card. */
+const board = useConsoleStore();
+const teamNames = computed(() => new Map(board.teams.map((team) => [String(team.id), team.name])));
+
+async function landCard(id: string) {
+  const result = await kanban.reveal(id);
+  if (highlight.card !== id) return;
+
+  if (result === 'gone') {
+    highlight.miss(`Card ${id} is not on the board.`);
+    return;
+  }
+  if (result === 'unknown') {
+    highlight.consume();
+    return;
+  }
+
+  await nextTick();
+  const element = [...(lanesEl.value?.querySelectorAll<HTMLElement>('[data-card-id]') ?? [])]
+    .find((node) => node.dataset.cardId === id) ?? null;
+  highlight.land(cardKey(id), element);
+}
+
+watch(
+  () => highlight.card,
+  (id) => {
+    if (id) void landCard(id);
+  },
+  { immediate: true },
+);
+
+/**
  * NEEDS YOU'S PROPOSED OUTCOMES are reread on arrival and with every board the store lands - a hub
  * push or a person's move - and after a write in Manage outcomes, so a confirmed, merged, retired or
  * rejected outcome leaves the lane.
@@ -256,6 +297,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  highlight.dismissNotice();
   wip.unwatch();
   agentUpdates.unwatch();
 });
@@ -349,6 +391,13 @@ function openOutcomes(id: string | null = null) {
     <q-banner v-if="kanban.error" dense rounded class="bg-negative text-white q-mb-sm">
       <template #avatar><q-icon name="error" /></template>
       {{ kanban.error }}
+    </q-banner>
+
+    <q-banner v-if="highlight.notice" dense rounded class="q-mb-sm" data-highlight-notice>
+      {{ highlight.notice }}
+      <template #action>
+        <q-btn flat dense no-caps label="Dismiss" @click="highlight.dismissNotice()" />
+      </template>
     </q-banner>
 
     <KanbanFilterBar class="q-mb-md" @manage-outcomes="openOutcomes(); $emit('manage-outcomes')" />
@@ -449,6 +498,8 @@ function openOutcomes(id: string | null = null) {
             @open-outcome="(id: string) => { openOutcomes(id); $emit('open-outcome', id); }"
             @change-outcome="(id: string) => (changingOutcome = id)"
             :cancelling-wake="cancellingWake"
+            :flashing="highlight.flashing === cardKey(card.id)"
+            :team-name="teamNames.get(card.team)"
             @cancel-wake="cancelWake"
           />
         </TransitionGroup>
@@ -495,6 +546,8 @@ function openOutcomes(id: string | null = null) {
             @open-outcome="(id: string) => { openOutcomes(id); $emit('open-outcome', id); }"
             @change-outcome="(id: string) => (changingOutcome = id)"
             :cancelling-wake="cancellingWake"
+            :flashing="highlight.flashing === cardKey(card.id)"
+            :team-name="teamNames.get(card.team)"
             @cancel-wake="cancelWake"
           />
         </TransitionGroup>

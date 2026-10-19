@@ -2,7 +2,17 @@ import { computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useConsoleStore } from '../stores/console';
 import { useKanbanStore } from '../stores/kanban';
-import { placeFromQuery, placeOf, queryFor, samePlace, type ConsolePlace } from '../lib/consolePlace';
+import { useHighlightStore } from '../stores/highlight';
+import {
+  highlightFromQuery,
+  highlightKeys,
+  placeFromQuery,
+  placeOf,
+  queryFor,
+  samePlace,
+  withoutHighlight,
+  type ConsolePlace,
+} from '../lib/consolePlace';
 
 /**
  * THE BROWSER'S BACK AND FORWARD MOVE BETWEEN THE CONSOLE'S VIEWS. The Teams table, a team's board
@@ -17,6 +27,11 @@ import { placeFromQuery, placeOf, queryFor, samePlace, type ConsolePlace } from 
  * other watch sees nothing to do. Writing the address the first time, or correcting it, REPLACES:
  * a reload or a team that is gone adds no step to go back through.
  *
+ * THE HIGHLIGHT RIDES BESIDE THE PLACE. `member=` (with `team=`) and `card=` (with `view=kanban`)
+ * are read into the highlight store on every change of address, so a reload before the view has
+ * landed them asks again; once the view lands one (or says it is not there) the key is dropped from
+ * the address, replacing, so Back and a reload after it do not flash it twice.
+ *
  * Only on `/console`: the same page renders under the Solutions addresses, which are their own.
  */
 export function useConsoleHistory() {
@@ -28,6 +43,7 @@ export function useConsoleHistory() {
 
   const board = useConsoleStore();
   const kanban = useKanbanStore();
+  const highlight = useHighlightStore();
 
   const onConsole = () => route.path === '/console';
   const storePlace = computed(() => placeOf(board.view, board.activeTeamId));
@@ -107,10 +123,27 @@ export function useConsoleHistory() {
     { immediate: true },
   );
 
+  function readHighlight() {
+    const asked = highlightFromQuery(route.query);
+    if (asked.member) highlight.askMember(asked.member.team, asked.member.member);
+    else if (highlight.member) highlight.member = null;
+    if (asked.card) highlight.askCard(asked.card);
+    else if (highlight.card) highlight.card = '';
+  }
+
+  watch(
+    () => highlight.consumed,
+    () => {
+      if (!onConsole() || !highlightKeys.some((key) => key in route.query)) return;
+      void router.replace({ path: '/console', query: withoutHighlight(route.query) });
+    },
+  );
+
   watch(
     () => [route.path, route.query] as const,
     () => {
       if (!onConsole()) return;
+      readHighlight();
       const wanted = placeFromQuery(route.query);
       if (wanted === null) {
         if (storePlace.value !== null) write(storePlace.value, true);

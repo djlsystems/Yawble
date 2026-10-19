@@ -17,6 +17,8 @@ import { workflowRow } from '../lib/workflowNumber';
 import { useConsoleStore } from '../stores/console';
 import WorkflowName from './WorkflowName.vue';
 import CardSizeGrips from './CardSizeGrips.vue';
+import { memberNow } from '../lib/memberNow';
+import { memberKey, useHighlightStore } from '../stores/highlight';
 
 const props = defineProps<{
   snapshot: ContainerSnapshot;
@@ -147,6 +149,21 @@ const own = computed(() => props.feed.filter((m) => m.seq > props.snapshot.since
  * at-ceiling means work is being REFUSED and a human may want to intervene. If it
  * looks like busy, the rejection is the only thing that ever notices.
  */
+/**
+ * THE "NOW" LINE: what this member is doing, from the rows this card already holds - the newest
+ * progress while it runs, the first line of its last outcome while it is idle (`lib/memberNow`).
+ */
+const now = computed(() => memberNow(own.value, running.value));
+
+/** The member's name opens what the eye opens: the live view, or a plugin's earlier runs. */
+const nameOpens = computed(() => isPlugin.value || props.snapshot.watchable === true);
+const nameTitle = computed(() =>
+  isPlugin.value || !running.value ? 'Earlier runs' : 'Watch this run and earlier ones');
+
+/** Flashed once when an address asked for this member (`BoardGrid` lands it). */
+const highlight = useHighlightStore();
+const key = computed(() => memberKey(props.snapshot.team, props.snapshot.id));
+
 const atCeiling = computed(() => props.snapshot.queueDepth >= props.snapshot.ceiling);
 
 /**
@@ -234,13 +251,30 @@ async function cancel(wake: PendingWake) {
     :plugin="isPlugin"
   />
 
-  <q-card flat bordered class="container-window" :class="{ 'container-window-plugin': isPlugin }">
+  <q-card
+    flat
+    bordered
+    class="container-window"
+    :class="{ 'container-window-plugin': isPlugin, 'os-flash': highlight.flashing === key }"
+    :data-member-card="key"
+  >
     <q-card-section class="q-pb-xs">
       <div class="row items-center no-wrap q-gutter-sm">
         <!-- THE LABEL, AND ONLY THE LABEL. `snapshot.name` is NOT the identifier - `Containers.cs`
              and `types.ts` agree: "Render this; address with `id`". A route addressed by the label
              fails for every member whose label carries a space. -->
-        <div class="col text-subtitle1 text-weight-medium ellipsis">{{ snapshot.name }}</div>
+        <!-- THE NAME IS A WAY IN: it opens what the eye opens, the live view or earlier runs. -->
+        <div class="col text-subtitle1 text-weight-medium ellipsis">
+          <button
+            v-if="nameOpens"
+            type="button"
+            class="container-name"
+            :title="nameTitle"
+            data-member-name
+            @click="watchOpen = true"
+          >{{ snapshot.name }}</button>
+          <template v-else>{{ snapshot.name }}</template>
+        </div>
 
         <!-- Running is its OWN green rather than the brand orange, and a different one from the
              `completed` badges in the feed below (Quasar `positive`). Two states that both mean
@@ -351,6 +385,15 @@ async function cancel(wake: PendingWake) {
       </div>
 
       <div v-if="stopError" class="os-body text-warning q-mt-xs">{{ stopError }}</div>
+
+      <!-- WHAT IT IS DOING NOW, in one line, without reading the feed: the newest progress while
+           running, the first line of the last outcome while idle. Text, never markup. -->
+      <div
+        v-if="now"
+        class="text-caption q-mt-xs container-now ellipsis"
+        :title="now.text"
+        :data-member-now="now.kind"
+      >{{ now.text }}</div>
 
       <div class="text-caption os-text-muted q-mt-xs">
         {{ runsWhat.word }} <span class="mono text-weight-medium">{{ runsWhat.name }}</span>
@@ -580,6 +623,30 @@ async function cancel(wake: PendingWake) {
 /* Every class here is USED in the template above. styles-match-templates.spec.ts fails on a class a
    component styles and never uses - a dangling selector can put a whole panel one viewport below
    the fold, invisible rather than ugly. */
+
+/* The name as a way in: the heading's own text, underlined on hover and focus. */
+.container-name {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  text-align: left;
+}
+
+.container-name:hover,
+.container-name:focus-visible {
+  text-decoration: underline;
+}
+
+.container-now {
+  color: var(--os-ink);
+}
 
 /* THE PILL'S DOT TAKES THE STATE'S OWN COLOUR (`.os-state-pill` in `app.scss`), so a running
    member, a running workflow and a running team read as one fact. */

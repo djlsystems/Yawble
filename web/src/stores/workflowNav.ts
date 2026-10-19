@@ -35,6 +35,15 @@ export const useWorkflowNavStore = defineStore('workflowNav', {
       this.backlogOpen = true
     },
 
+    /**
+     * Shows the team's board, from a name that links to it (a team chip, a team's line). The
+     * Backlog is modal over the board, so a link clicked in it leaves it.
+     */
+    openBoard(team: TeamId) {
+      this.backlogOpen = false
+      useConsoleStore().openTeam(team)
+    },
+
     /** Shows the team's board and asks its strip for the Workflows dialog. */
     openWorkflows(team: TeamId) {
       // The Backlog is modal over the board: a number clicked in it leaves it for the dialog asked.

@@ -346,11 +346,14 @@ function onTileClick() {
     <button v-if="!compact" type="button" class="team-kpi-label stats-label" @click.stop="openActivity">Activity</button>
 
     <div v-if="hasChart" class="stats-body" @pointerleave="leaveChart" @mouseleave="leaveChart">
+      <!-- Each lane's initials carry the member's full name as their tooltip. -->
       <div class="stats-initials" aria-hidden="true">
         <div
           v-for="lane in lanes"
           :key="lane.member"
           class="stats-lane-initials mono"
+          :title="lane.name"
+          :data-lane-initials="lane.member"
           :style="{ height: `${LaneHeight}px`, lineHeight: `${LaneHeight}px` }"
         >{{ lane.initials }}</div>
       </div>
