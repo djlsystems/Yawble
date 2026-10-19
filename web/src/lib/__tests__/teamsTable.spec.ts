@@ -22,6 +22,7 @@ const row = (overrides: Partial<TeamRow> = {}): TeamRow => ({
   held: [],
   startedAt: null,
   workflows: null,
+  items: [],
   ...overrides,
 });
 

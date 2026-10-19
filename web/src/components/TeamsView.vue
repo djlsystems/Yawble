@@ -42,8 +42,11 @@ import TeamStatisticsTile from './TeamStatisticsTile.vue';
 import { type ActivityRange, sharedWindow } from '../lib/teamActivity';
 import TeamStatusIcon from './TeamStatusIcon.vue';
 import { vResizableColumns } from '../lib/resizableColumns';
+import { itemLabel } from '../lib/backlog';
+import { useWorkflowNavStore } from '../stores/workflowNav';
 
 const board = useConsoleStore();
+const workflowNav = useWorkflowNavStore();
 const $q = useQuasar();
 
 const SortKey = 'harness.teamSort';
@@ -758,6 +761,19 @@ async function setPaused(team: Team | null, paused: boolean) {
               {{ teamStatusText(row.status, row.held) }}
             </span>
             <div v-if="slotLine(row.id)" class="text-caption os-text-muted">{{ slotLine(row.id) }}</div>
+            <!-- WHAT THE TEAM WORKS ON: the items of its open workflows, newest first, each a way
+                 into the Backlog on that item. Nothing when none - not a word. -->
+            <div v-if="row.items.length > 0" class="teams-items" data-team-items>
+              <button
+                v-for="item in row.items"
+                :key="item.id"
+                type="button"
+                class="teams-item"
+                :title="item.title"
+                data-team-item
+                @click.stop="workflowNav.openItem(item.id)"
+              >{{ itemLabel(item.id) }}</button>
+            </div>
           </td>
 
           <!-- THE TEAM'S ACTIVITY TILE, lanes only: the same chart its page shows, without the
@@ -1100,6 +1116,28 @@ async function setPaused(team: Team | null, paused: boolean) {
 </template>
 
 <style scoped>
+/* THE ITEMS IN FLIGHT, under the status: the Kanban card's item style, as ways into the Backlog. */
+.teams-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.teams-item {
+  padding: 0 4px;
+  border: 1px solid var(--os-rule-strong);
+  border-radius: 4px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 14px;
+  color: var(--os-ink-muted);
+  cursor: pointer;
+}
+
 /* The Activity heading: its word, then the Same time span switch beside it. */
 .teams-activity-heading {
   display: flex;

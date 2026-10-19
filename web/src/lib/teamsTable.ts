@@ -1,4 +1,4 @@
-import type { Team, TeamId, TeamWorkflowTiming, TeamWorkflows } from '../api/types'
+import type { Team, TeamId, TeamWorkflowTiming, TeamWorkflows, WorkflowItem } from '../api/types'
 import { nextSort as nextTableSort, readSort, type TableSort } from './tableSort'
 import {
   RowLoudness,
@@ -48,6 +48,32 @@ export interface TeamRow {
    * Null until the plural payload lands - never a stand-in word. An absent answer is not `idle`.
    */
   workflows: TeamChip | null
+
+  /** The backlog items the team's open workflows work on, newest first, one per item. Empty when
+   *  none is, or before the payload lands: "no item in flight" is nothing, not a word. */
+  items: WorkflowItem[]
+}
+
+/**
+ * THE ITEMS A TEAM IS WORKING ON: the item of each OPEN workflow (`endedAt` null), newest first by
+ * workflow number, an item once however many of its workflows are open. Read off the payload the
+ * row's counts already come from; nothing is looked up or guessed.
+ */
+export function openWorkflowItems(workflows: TeamWorkflows | null): WorkflowItem[] {
+  if (!workflows) return []
+
+  const open = workflows.workflows
+    .filter((entry) => entry.endedAt === null && entry.item)
+    .sort((a, b) => (b.correlation ?? 0) - (a.correlation ?? 0))
+
+  const seen = new Set<number>()
+  const items: WorkflowItem[] = []
+  for (const entry of open) {
+    if (seen.has(entry.item!.id)) continue
+    seen.add(entry.item!.id)
+    items.push(entry.item!)
+  }
+  return items
 }
 
 // The sortable columns the Teams list shows. Its Activity column draws each team's lanes and is not
@@ -88,6 +114,7 @@ export function teamRowFrom(
     workflows: workflows
       ? teamChip(workflowsTile(workflows, team.containers, now), team.containers)
       : null,
+    items: openWorkflowItems(workflows),
   }
 }
 

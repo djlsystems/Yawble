@@ -1,5 +1,6 @@
 import type { Message, MonitorHint, Team } from '../../api/types'
 import { summarise } from '../summarise'
+import { itemLabel } from '../backlog'
 import { crossesDays, localMinute, wireInstant } from '../localTime'
 import { DefaultSettings, drawsResource, resolveHint, type Resource, type ResourceSettings } from './hints'
 import { DefaultFileSettings, filesOf, pushHeadline, pushMoreWords, pushTime, type FileAction, type FileSettings, type WorkspacePush } from './workspace'
@@ -86,8 +87,14 @@ export interface MonitorWake {
 export interface MonitorWorkflow {
   id: number
   team: string
-  /** The subject of the instruction that began it, or what the first row said. */
+  /**
+   * Its name: for a workflow a `backlog.item.dispatched` row began, the item's citation, a
+   * separator and its title; else the subject of the instruction that began it. '' when neither
+   * is known - then the number is all there is, and nothing is guessed.
+   */
   title: string
+  /** The backlog item it works on, from its dispatch row, or null. */
+  item: { id: number; title: string } | null
   members: Set<string>
   openedAt: number
   endedAt: number | null
@@ -210,6 +217,24 @@ export function compact(value: number): string {
 function short(value: string, max = 48): string {
   const one = value.replace(/\s+/g, ' ').trim()
   return one.length > max ? `${one.slice(0, max - 1)}…` : one
+}
+
+/** Between an item's citation and its title in a workflow's name. */
+export const ItemSeparator = ' — '
+
+/**
+ * A workflow's name with its number after (`<name> #N`), the name cut to `max` and the number never;
+ * the number alone when there is no name.
+ */
+export function workflowNameLine(workflow: Pick<MonitorWorkflow, 'id' | 'title'>, max = 60): string {
+  return workflow.title !== '' ? `${short(workflow.title, max)} #${workflow.id}` : `#${workflow.id}`
+}
+
+/** The item a dispatch row names, from its payload (`item`, `title`), or null. */
+function dispatchedItem(payload: Record<string, unknown>): { id: number; title: string } | null {
+  const id = payload.item
+  if (typeof id !== 'number' || !Number.isInteger(id) || id < 0) return null
+  return { id, title: text(payload.title) }
 }
 
 /** A whole token count as the wire sent it, or null when the row did not report one. */
@@ -433,13 +458,14 @@ export class MonitorModel {
     })
   }
 
-  private workflow(id: number, team: string, title: string, at: number): MonitorWorkflow {
+  private workflow(id: number, team: string, title: string, at: number, item: MonitorWorkflow['item'] = null): MonitorWorkflow {
     let workflow = this.workflows.get(id)
     if (!workflow) {
-      workflow = { id, team, title, members: new Set(), openedAt: at, endedAt: null, ending: 'open', events: 0 }
+      workflow = { id, team, title, item, members: new Set(), openedAt: at, endedAt: null, ending: 'open', events: 0 }
       this.workflows.set(id, workflow)
     }
     if (workflow.title === '' && title !== '') workflow.title = title
+    if (workflow.item === null && item !== null) workflow.item = item
     return workflow
   }
 
@@ -473,13 +499,14 @@ export class MonitorModel {
 
     // A workflow row only ends a workflow already drawn; every other row may begin one.
     const drawn = (message.correlationId > 0 && !type.startsWith('workflow.')) || this.workflows.has(message.correlationId)
+    // A DISPATCH ROW NAMES ITS WORKFLOW BY THE ITEM, before any instruction says anything: the
+    // citation built from the number, a separator, the item's title.
+    const item = type === 'backlog.item.dispatched' ? dispatchedItem(payload) : null
+    const named = item
+      ? `${itemLabel(item.id)}${item.title !== '' ? `${ItemSeparator}${item.title}` : ''}`
+      : type.startsWith(InstructionPrefix) ? text(payload.subject) || text(payload.instruction) : ''
     const workflow = drawn
-      ? this.workflow(
-          message.correlationId,
-          team,
-          type.startsWith(InstructionPrefix) ? short(text(payload.subject) || text(payload.instruction), 60) : '',
-          at,
-        )
+      ? this.workflow(message.correlationId, team, short(named, 60), at, item)
       : null
     if (workflow) {
       workflow.events++

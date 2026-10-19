@@ -4,10 +4,13 @@ import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { getFileChanges, getMessages, getRunSteps, listEvents } from '../api/client'
 import type { Message, MonitorHint } from '../api/types'
 import { useConsoleStore } from '../stores/console'
+import { useWorkflowNavStore } from '../stores/workflowNav'
+import { itemLabel } from '../lib/backlog'
 import { useAppearanceStore } from '../stores/appearance'
 import { textPx } from '../lib/appearance'
 import { localTime } from '../lib/localTime'
 import {
+  ItemSeparator,
   MonitorModel,
   ReplayClock,
   TokensTooltip,
@@ -15,6 +18,7 @@ import {
   timeOf,
   timeline,
   tokensWords,
+  workflowNameLine,
   type MonitorEffect,
   type NodeRef,
   type TickerEntry,
@@ -97,6 +101,7 @@ import {
  */
 
 const board = useConsoleStore()
+const workflowNav = useWorkflowNavStore()
 const appearance = useAppearanceStore()
 
 /** How much of the log is held: the route's own ceiling. */
@@ -337,9 +342,24 @@ const pickedWords = computed(() => {
   if (!ref) return ''
   if (ref.kind === 'team') return model.teams.get(ref.id)?.name ?? ref.id
   if (ref.kind === 'member') return model.members.get(ref.key)?.name ?? ref.key
-  if (ref.kind === 'workflow') return `Workflow ${ref.id}`
+  if (ref.kind === 'workflow') {
+    const workflow = model.workflows.get(ref.id)
+    return workflow ? workflowNameLine(workflow) : `Workflow ${ref.id}`
+  }
   return ''
 })
+
+/** The backlog item the picked workflow, or the picked member's workflow, works on: "Open item". */
+const pickedItem = computed(() => {
+  const ref = picked.value
+  if (!ref) return null
+  const id = ref.kind === 'workflow' ? ref.id : ref.kind === 'member' ? model.members.get(ref.key)?.workflow ?? null : null
+  return id !== null ? model.workflows.get(id)?.item ?? null : null
+})
+
+function openItem() {
+  if (pickedItem.value) workflowNav.openItem(pickedItem.value.id)
+}
 
 const pickedTeam = computed(() => {
   const ref = picked.value
@@ -1030,6 +1050,17 @@ onUnmounted(() => {
         <span v-if="picked" class="monitor-picked">
           {{ pickedWords }}
           <q-btn v-if="pickedTeam" flat dense no-caps size="sm" label="Open" @click="openTeam" />
+          <q-btn
+            v-if="pickedItem"
+            flat
+            dense
+            no-caps
+            size="sm"
+            label="Open item"
+            :title="`${itemLabel(pickedItem.id)}${pickedItem.title !== '' ? `${ItemSeparator}${pickedItem.title}` : ''}`"
+            data-monitor-open-item
+            @click="openItem"
+          />
           <q-btn flat dense round size="sm" icon="close" aria-label="Show every team" @click="picked = null" />
         </span>
       </div>

@@ -7,6 +7,7 @@ import type {
   TeamTokenTotals,
   TeamWorkflows,
   TeamWorkflowTiming,
+  WorkflowItem,
 } from '../api/types';
 
 /**
@@ -1160,6 +1161,13 @@ export interface WorkflowRow {
    */
   subject: string;
 
+  /** The server's own subject, null when it has none - what `WorkflowName` is given, which falls
+   *  back to the number itself rather than to `subject`'s built label. */
+  rootSubject: string | null;
+
+  /** The backlog item this workflow works on (`TeamWorkflowTiming.item`), or null. */
+  item: WorkflowItem | null;
+
   state: WorkflowState | null;
 
   /**
@@ -1555,6 +1563,8 @@ export function workflowsTile(
       correlation: entry.correlation ?? 0,
 
       subject: workflowSubject(entry),
+      rootSubject: entry.subject ?? null,
+      item: entry.item ?? null,
       state: tile.state,
       elapsed: tile.elapsed,
       elapsedMs: tile.elapsedMs,

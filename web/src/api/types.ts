@@ -1332,6 +1332,12 @@ export interface WorkflowSpend {
   runsWithoutUsage: number
 }
 
+/** The backlog item a workflow works on: its route number and its title. */
+export interface WorkflowItem {
+  id: number
+  title: string
+}
+
 /**
  * How long this team's current — or last — workflow has been going, from `GET
  * /api/teams/{team}/workflow`.
@@ -1413,6 +1419,14 @@ export interface TeamWorkflowTiming {
    *  re-derived client-side. Null when the root is not an addressed instruction or carries no
    *  subject; `workflowsTile` falls back to a `Workflow #<correlation>` label only then. */
   subject: string | null
+
+  /**
+   * The backlog item this workflow works on, when its root is a `backlog.item.dispatched` row:
+   * `id` the item's route number (cite it with `itemLabel`, never a literal), `title` the item's
+   * current title (the row's own when the item is gone). Null for a workflow a tell began, which
+   * keeps `subject`. Optional so an older Host's answer reads as none.
+   */
+  item?: WorkflowItem | null
 
   /** Total measured workflow spend, or null when this workflow has no completed or failed runs. */
   spend?: WorkflowSpend | null

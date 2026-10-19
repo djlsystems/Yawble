@@ -5,6 +5,7 @@ import { useQuasar } from 'quasar';
 import { useRouter } from 'vue-router';
 import { useConsoleStore } from '../stores/console';
 import { useKanbanStore } from '../stores/kanban';
+import { useWorkflowNavStore } from '../stores/workflowNav';
 import { asDocumentsFolderKey, type DocumentsFolderKey, type TeamId } from '../api/types';
 import { useSessionStore } from '../stores/session';
 import { useTerminalDisplayStore } from '../stores/terminalDisplay';
@@ -183,7 +184,9 @@ const outcomesOpen = ref(false);
 const sitesOpen = ref(false);
 const sitesTeam = ref<TeamId | null>(null);
 const resetOpen = ref(false);
-const backlogOpen = ref(false);
+/** The Backlog dialog is the nav store's, so a workflow's item chip anywhere opens it on that item. */
+const workflowNav = useWorkflowNavStore();
+const { backlogOpen, backlogItem } = storeToRefs(workflowNav);
 const tenantLogOpen = ref(false);
 /** Admin → Diagnostics. Beside the tenant log on the ribbon and a different store: `Log` is what a
  *  person did to the instance, this is what the instance did when it went wrong. */
@@ -313,7 +316,7 @@ function onRibbonAction(action: string) {
   else if (action === 'admin-teams') board.showTeamsView();
   // UNPREFIXED, deliberately - see `lib/ribbon.ts`. The backlog needs no active team, so the
   // `team-` disable predicate does not apply to it by construction.
-  else if (action === 'backlog') backlogOpen.value = true;
+  else if (action === 'backlog') workflowNav.openBacklog();
   else if (action === 'admin-log') tenantLogOpen.value = true;
   else if (action === 'admin-diagnostics') diagnosticsOpen.value = true;
   else if (action === 'admin-users') usersOpen.value = true;
@@ -629,7 +632,7 @@ async function signOut() {
          `team-reset` reaching here with nothing selected would be a render error rather than a
          no-op. -->
     <ResetTeamDialog v-if="board.activeWorkTeam" v-model="resetOpen" :team="board.activeWorkTeam" />
-  <BacklogDialog v-model="backlogOpen" />
+  <BacklogDialog v-model="backlogOpen" :item="backlogItem" />
     <TenantLogDialog v-model="tenantLogOpen" />
     <DiagnosticsDialog v-model="diagnosticsOpen" />
   </q-layout>

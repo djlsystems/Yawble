@@ -83,7 +83,8 @@ import {
 import { vResizableColumns } from '../lib/resizableColumns';
 import { localDay } from '../lib/localTime';
 import { solutionNotice, type SolutionNoticeView } from '../lib/solutionNotice';
-import { workflowNumberTitle } from '../lib/workflowNumber';
+import { workflowRow } from '../lib/workflowNumber';
+import WorkflowName from './WorkflowName.vue';
 
 /**
  * The tenant backlog.
@@ -1452,7 +1453,14 @@ function down(index: number) {
           <div class="text-caption os-text-muted">Dispatched</div>
           <div v-for="(d, i) in selected.dispatches" :key="d.id" class="backlog-dispatch">
             <span :class="d.teamGone ? 'text-negative' : ''">{{ d.teamName }}</span>
-            <span class="os-text-muted"> · <span :title="workflowNumberTitle(d.correlation)" data-workflow-number>workflow #{{ d.correlation }}</span></span>
+            <!-- The number and the subject; the item is this row itself, so no chip. -->
+            <span class="os-text-muted"> · <WorkflowName
+              class="backlog-dispatch-workflow"
+              :number="d.correlation"
+              :subject="workflowRow(board.workflowsFor(d.teamId), d.correlation)?.subject"
+              :team="d.teamGone ? null : d.teamId"
+              noun="workflow"
+            /></span>
             <span class="os-text-muted"> · {{ selected.stats[i]?.outcome ?? 'unknown' }}</span>
             <span class="os-text-muted">
               ·

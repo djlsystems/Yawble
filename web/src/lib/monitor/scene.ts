@@ -10,7 +10,7 @@ import {
   type SimulationNodeDatum,
 } from 'd3-force'
 import type { MemberState, MonitorEffect, MonitorModel, NodeRef, Origin, Tone } from './model'
-import { compact } from './model'
+import { compact, workflowNameLine } from './model'
 import type { Resource, ResourceAction } from './hints'
 import { MonitorSymbolsFamily, glyphOf, type Codepoints } from './font'
 import { LayoutDefaults, type LayoutSettings } from './layout'
@@ -1209,7 +1209,8 @@ export class MonitorScene {
       const lines = [
         `${stateWords(member.state)}${member.queued > 0 ? ` · ${member.queued} queued` : ''}`,
         member.runs > 0 ? `${member.runs} run${member.runs === 1 ? '' : 's'} · ${compact(member.tokens)} billable tokens` : '',
-        member.workflow !== null ? `workflow ${member.workflow}` : '',
+        // THE NAME, THEN THE NUMBER: what the member works on, and what agents quote.
+        member.workflow !== null ? `workflow ${workflowNameLine(model.workflows.get(member.workflow) ?? { id: member.workflow, title: '' })}` : '',
         member.status !== '' ? `“${member.status.slice(0, 140)}”` : '',
         ...member.wakes.map((wake) => wakeLine({ dueAt: new Date(wake.dueAt).toISOString(), note: wake.note.slice(0, 140) })),
       ].filter((line) => line !== '')
@@ -1851,8 +1852,8 @@ export class MonitorScene {
       ctx.textAlign = 'center'
       ctx.textBaseline = 'top'
       ctx.fillStyle = open ? alphaHex(Screen.ink, 0.75) : alphaHex(Screen.inkDim, 0.45)
-      const title = workflow.title.length > 30 ? `${workflow.title.slice(0, 29)}…` : workflow.title
-      ctx.fillText(title, x, y + r + 4)
+      // The name, then the number: the name gives way, the number never.
+      ctx.fillText(workflowNameLine(workflow, 30), x, y + r + 4)
     }
   }
 

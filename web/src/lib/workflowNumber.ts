@@ -1,3 +1,5 @@
+import type { TeamWorkflowTiming, TeamWorkflows } from '../api/types';
+
 /**
  * WHAT A WORKFLOW NUMBER IS, IN ONE PLACE. A workflow's number is the position of its first row in
  * this instance's log, so every other row in between (another team's message, a progress line, a
@@ -11,4 +13,16 @@ export const WORKFLOW_NUMBER_HINT =
 /** The hover text for a shown workflow number: which workflow, then what the number means. */
 export function workflowNumberTitle(workflow: number | string): string {
   return `Workflow #${workflow}. ${WORKFLOW_NUMBER_HINT}`;
+}
+
+/**
+ * One workflow's row in a team's workflows payload, or null when the payload is not loaded or the
+ * workflow is outside its fifty rows - then the number is shown alone, as it always was.
+ */
+export function workflowRow(
+  workflows: TeamWorkflows | null | undefined,
+  workflow: number | null | undefined,
+): TeamWorkflowTiming | null {
+  if (!workflows || workflow == null) return null;
+  return workflows.workflows.find((row) => row.correlation === workflow) ?? null;
 }

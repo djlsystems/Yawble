@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import FieldHelp from './FieldHelp.vue';
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import type {
   ContainerSnapshot,
@@ -30,12 +30,14 @@ import { unpushedTeamBranchesLine } from '../lib/repoStatus';
 import { asTeamId } from '../api/types';
 import { cancelWake, closeWorkflow, nudgeWorkflow, resumeWorkflow, stopWorkflow } from '../api/client';
 import { useConsoleStore } from '../stores/console';
+import { useWorkflowNavStore } from '../stores/workflowNav';
 import { vResizableColumns } from '../lib/resizableColumns';
 import TeamStatisticsTile from './TeamStatisticsTile.vue';
 import TeamStatusIcon from './TeamStatusIcon.vue';
 import type { TeamStatus } from '../lib/teamKpis';
 import TeamTokensChart from './TeamTokensChart.vue';
 import WakeLines from './WakeLines.vue';
+import WorkflowName from './WorkflowName.vue';
 
 const props = defineProps<{
   containers: ContainerSnapshot[];
@@ -141,6 +143,18 @@ const unpushedLine = computed(() => unpushedTeamBranchesLine(props.repoStatus ??
 /** `waiting for a slot: Manager` while a wake is held behind the WIP limit, else ''. */
 const waitingLine = computed(() => waitingForSlotText(heldMembers(props.containers)));
 
+/**
+ * THE ONE WORKFLOW THE TILE DESCRIBES, named by its work: the sole open workflow while the tile is
+ * plural, else the singular timing's. Null when the tile spans several, or knows of none.
+ */
+const singleName = computed(() => {
+  if (usePlural.value) {
+    const open = props.workflows?.workflows.filter((entry) => entry.endedAt === null) ?? [];
+    return open.length === 1 && open[0]!.correlation !== null ? open[0]! : null;
+  }
+  return props.timing?.available && props.timing.correlation !== null ? props.timing : null;
+});
+
 /** The single-workflow word, with a held wake read as waiting rather than as a silence. */
 const singleState = computed(() =>
   waitingLine.value && (workflow.value.state === null || workflow.value.state === 'UNDECLARED')
@@ -181,6 +195,18 @@ const executionScope = computed(() => {
 const displayTone = computed(() => (usePlural.value ? chip.value.tone : workflow.value.tone));
 
 const workflowOpen = ref(false);
+
+/**
+ * A WORKFLOW'S NUMBER, CLICKED ANYWHERE, opens this dialog for its team: the nav store shows the
+ * team's board and leaves the team; this strip takes it when it is that team's, at once if it is on
+ * screen and on mount if the board was not showing.
+ */
+const workflowNav = useWorkflowNavStore();
+function takeWorkflowsAsk() {
+  if (workflowNav.takeWorkflows(props.teamId)) workflowOpen.value = true;
+}
+onMounted(takeWorkflowsAsk);
+watch(() => [workflowNav.workflowsAsks, props.teamId], takeWorkflowsAsk);
 
 /**
  * NO CAPTION NAMES A SINGLE WORKFLOW for "where the run time went". `execution` aggregates across
@@ -638,6 +664,14 @@ function showThread(row: WorkflowRow) {
         {{ usePlural ? tile.span : workflow.elapsed }}
       </div>
 
+      <div v-if="singleName" class="team-kpi-detail team-kpi-name" data-test="workflow-name">
+        <WorkflowName
+          :number="singleName.correlation!"
+          :item="singleName.item"
+          :subject="singleName.subject"
+          :team="teamId"
+        />
+      </div>
       <div v-if="!usePlural && workflow.detail" class="team-kpi-detail">{{ workflow.detail }}</div>
       <div v-if="waitingLine" class="team-kpi-detail team-kpi-waiting">{{ waitingLine }}</div>
       <div v-if="unpushedLine" class="team-kpi-detail team-kpi-unpushed">
@@ -777,9 +811,16 @@ function showThread(row: WorkflowRow) {
             }"
           >
             <div class="row items-center no-wrap">
-              <div class="col ellipsis">
-                {{ row.subject }}
-                <span v-if="row.state" class="os-text-muted"> · {{ row.state }}</span>
+              <!-- THE ITEM CHIP IN FRONT OF THE SUBJECT, then the number: the row named by its work.
+                   No team, so the number is text here: this IS the Workflows dialog it would open. -->
+              <div class="col workflow-row-name" data-workflow-row-name>
+                <WorkflowName
+                  :number="row.correlation"
+                  :item="row.item"
+                  :subject="row.rootSubject"
+                  noun="Workflow"
+                />
+                <span v-if="row.state" class="os-text-muted workflow-row-state"> · {{ row.state }}</span>
               </div>
               <div class="col-auto mono text-caption q-ml-sm">
                 <span v-if="row.tone === 'live'" class="team-kpi-dot" aria-hidden="true"></span>
@@ -1489,6 +1530,21 @@ function showThread(row: WorkflowRow) {
   max-height: 14rem;
   min-height: 0;
   overflow-y: auto;
+}
+
+/* THE ROW'S NAME ON ONE LINE: the words give way with an ellipsis, the chip, number and state do not. */
+.workflow-row-name {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+/* The tile's one workflow, named: one line, the words give way. */
+.team-kpi-name {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .workflow-row {

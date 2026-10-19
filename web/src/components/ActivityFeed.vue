@@ -8,7 +8,8 @@ import { runMarkOf } from '../lib/runMarks';
 import { useCursorList } from '../lib/useCursorList';
 import { useConsoleStore } from '../stores/console';
 import CursorSentinel from './CursorSentinel.vue';
-import { WORKFLOW_NUMBER_HINT, workflowNumberTitle } from '../lib/workflowNumber';
+import { WORKFLOW_NUMBER_HINT, workflowRow } from '../lib/workflowNumber';
+import WorkflowName from './WorkflowName.vue';
 
 /**
  * `team`, `name` and `sinceSeq` name whose feed this is, and turn on "load older". Without
@@ -76,6 +77,11 @@ function onKey(event: KeyboardEvent) {
  * one end of exactly the thing this exists to show both ends of.
  */
 const board = useConsoleStore();
+
+/** A workflow's row in this feed's team's workflows payload, or null: then the number stands alone. */
+function workflowOf(workflow: number) {
+  return props.team ? workflowRow(board.workflowsFor(props.team), workflow) : null;
+}
 
 /** Messages at or below this seq belong to whatever the container replaced - see `sinceSeq`. */
 function floorSeq(): number {
@@ -180,25 +186,36 @@ function tone(type: string): string {
       <!-- The workflow this message belongs to. A BUTTON rather than a label, because its job is to
            be clicked: following one lights up every message of that job on every card, which is the
            only way a person sees a hop as one thing rather than as two unrelated rows. -->
-      <q-item-section side top>
-        <q-btn
-          flat
-          dense
-          no-caps
-          size="sm"
-          class="feed-workflow mono"
-          :class="{ 'feed-workflow-on': board.highlightedWorkflow === message.correlationId }"
-          :label="`#${message.correlationId}`"
-          :aria-label="`Follow workflow ${message.correlationId}`"
-          @click.stop="board.toggleWorkflow(message.correlationId)"
+      <!-- NAMED BY ITS WORK: the item chip and the words before the number, from the team's
+           workflows payload; the number stays the Follow button it always was. -->
+      <q-item-section side top class="feed-workflow-name">
+        <WorkflowName
+          :number="message.correlationId"
+          :item="workflowOf(message.correlationId)?.item"
+          :subject="workflowOf(message.correlationId)?.subject"
+          :team="team"
         >
-          <q-tooltip>
-            {{ board.highlightedWorkflow === message.correlationId
-              ? 'Stop following this workflow'
-              : 'Follow this workflow across every card' }}
-            <div class="q-mt-xs" data-workflow-number-hint>{{ WORKFLOW_NUMBER_HINT }}</div>
-          </q-tooltip>
-        </q-btn>
+          <template #number>
+            <q-btn
+              flat
+              dense
+              no-caps
+              size="sm"
+              class="feed-workflow mono"
+              :class="{ 'feed-workflow-on': board.highlightedWorkflow === message.correlationId }"
+              :label="`#${message.correlationId}`"
+              :aria-label="`Follow workflow ${message.correlationId}`"
+              @click.stop="board.toggleWorkflow(message.correlationId)"
+            >
+              <q-tooltip>
+                {{ board.highlightedWorkflow === message.correlationId
+                  ? 'Stop following this workflow'
+                  : 'Follow this workflow across every card' }}
+                <div class="q-mt-xs" data-workflow-number-hint>{{ WORKFLOW_NUMBER_HINT }}</div>
+              </q-tooltip>
+            </q-btn>
+          </template>
+        </WorkflowName>
       </q-item-section>
 
       <!-- Absolute wall-clock, so a row can be lined up against what the console
@@ -279,7 +296,14 @@ function tone(type: string): string {
         <q-badge :color="toneOf(shown)" :label="label(shown.type)" />
         <span class="feed-card-source mono">{{ shown.source }}</span>
         <span class="feed-card-spacer"></span>
-        <span class="feed-card-meta mono" :title="workflowNumberTitle(shown.correlationId)" data-workflow-number>#{{ shown.correlationId }}</span>
+        <span class="feed-card-meta feed-card-workflow" data-feed-card-workflow>
+          <WorkflowName
+            :number="shown.correlationId"
+            :item="workflowOf(shown.correlationId)?.item"
+            :subject="workflowOf(shown.correlationId)?.subject"
+            :team="team"
+          />
+        </span>
         <span class="feed-card-meta mono" data-feed-card-time>{{ dateTimeOf(shown.occurredAt) }}</span>
       </q-card-section>
 
@@ -304,6 +328,12 @@ function tone(type: string): string {
 
 .feed-dimmed {
   opacity: 0.38;
+}
+
+/* The name gives way before the summary does: at most half the row, the words with an ellipsis. */
+.feed-workflow-name {
+  max-width: 45%;
+  min-width: 0;
 }
 
 .feed-workflow {
@@ -382,6 +412,13 @@ function tone(type: string): string {
   font-size: 0.6875rem;
   opacity: 0.6;
   font-variant-numeric: tabular-nums;
+}
+
+/* The opened message's workflow, named: it gives way before the time beside it. */
+.feed-card-workflow {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
 }
 
 /* pre-wrap is the single line that makes this readable. The agent wrote paragraphs; `summarise`

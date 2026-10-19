@@ -13,12 +13,19 @@ import TriggersDialog from './TriggersDialog.vue';
 import WakeLines from './WakeLines.vue';
 import DiscussWithConcierge from './DiscussWithConcierge.vue';
 import { askForMember } from '../lib/conciergeDecision';
-import { workflowNumberTitle } from '../lib/workflowNumber';
+import { workflowRow } from '../lib/workflowNumber';
+import { useConsoleStore } from '../stores/console';
+import WorkflowName from './WorkflowName.vue';
 
 const props = defineProps<{
   snapshot: ContainerSnapshot;
   feed: Message[];
 }>();
+
+/** The workflow this member works, as the team's workflows payload carries it, or null. */
+const board = useConsoleStore();
+const currentWorkflow = computed(() =>
+  workflowRow(board.workflowsFor(props.snapshot.team), props.snapshot.currentCorrelation));
 
 /**
  * The way into `MemberSettingsDialog`, nested here rather than hoisted to the layout - it needs
@@ -486,13 +493,20 @@ async function cancel(wake: PendingWake) {
 
       <!-- The thread a human follows. M3 makes this the point of the screen, so it
            is surfaced from the start rather than added when it matters. -->
+      <!-- NAMED BY ITS WORK: the item and subject from the team's workflows payload the board
+           already holds; outside its fifty rows the number stands alone, as it always did. -->
       <div
         v-if="snapshot.currentCorrelation !== null"
-        class="text-caption text-primary q-mt-xs"
-        :title="workflowNumberTitle(snapshot.currentCorrelation)"
-        data-workflow-number
+        class="text-caption text-primary q-mt-xs container-workflow"
+        data-member-workflow
       >
-        workflow #{{ snapshot.currentCorrelation }}
+        <WorkflowName
+          :number="snapshot.currentCorrelation"
+          :item="currentWorkflow?.item"
+          :subject="currentWorkflow?.subject"
+          :team="snapshot.team"
+          noun="workflow"
+        />
       </div>
     </q-card-section>
 

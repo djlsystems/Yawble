@@ -3,7 +3,11 @@ import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { useKanbanStore } from '../stores/kanban';
 import { KanbanStatusLabel, bodyToRender, colourFor, trailRows } from '../lib/kanban';
-import { workflowNumberTitle } from '../lib/workflowNumber';
+import { workflowRow } from '../lib/workflowNumber';
+import { itemLabel } from '../lib/backlog';
+import { useConsoleStore } from '../stores/console';
+import { useWorkflowNavStore } from '../stores/workflowNav';
+import WorkflowName from './WorkflowName.vue';
 import { localTime, wireInstant } from '../lib/localTime';
 import { KanbanStatuses, type KanbanCardAttributes, type KanbanStatus } from '../api/kanban';
 import type { PendingWake } from '../api/types';
@@ -30,6 +34,16 @@ import { askForCard } from '../lib/conciergeDecision';
  * the card or commenting on it are all ways of handing it back, and the Manager decides what to do.
  */
 const kanban = useKanbanStore();
+const board = useConsoleStore();
+const workflowNav = useWorkflowNavStore();
+
+/** The card's workflow as its team's workflows payload carries it, or null: then the number alone. */
+const cardWorkflow = computed(() =>
+  card.value ? workflowRow(board.workflowsFor(card.value.team), card.value.workflowSeq) : null);
+
+/** The card's own item chip, unless the workflow's name already carries that item. */
+const ownItem = computed(() =>
+  card.value?.item != null && cardWorkflow.value?.item?.id !== card.value.item ? card.value.item : null);
 const $q = useQuasar();
 
 const open = computed({
@@ -227,7 +241,22 @@ function when(value: string | null | undefined): string {
           <div class="col">
             <div class="text-subtitle1">{{ card.title }}</div>
             <div class="text-caption os-text-muted">
-              {{ card.team }} / {{ card.member }} · <span :title="workflowNumberTitle(card.workflowSeq)" data-workflow-number>workflow #{{ card.workflowSeq }}</span>
+              {{ card.team }} / {{ card.member }} ·
+              <button
+                v-if="ownItem !== null"
+                type="button"
+                class="k-panel-item"
+                data-card-item
+                @click="workflowNav.openItem(ownItem)"
+              >{{ itemLabel(ownItem) }}</button>
+              <WorkflowName
+                class="k-panel-workflow"
+                :number="card.workflowSeq"
+                :item="cardWorkflow?.item"
+                :subject="cardWorkflow?.subject"
+                :team="card.team"
+                noun="workflow"
+              />
             </div>
           </div>
           <q-btn v-close-popup flat dense round icon="close" aria-label="Close" />
@@ -406,6 +435,26 @@ function when(value: string | null | undefined): string {
 </template>
 
 <style scoped>
+/* The card's own item, in the Kanban card's item style, as a way into the Backlog. */
+.k-panel-item {
+  padding: 0 4px;
+  margin-right: 6px;
+  border: 1px solid var(--os-rule-strong);
+  border-radius: 4px;
+  background: transparent;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 14px;
+  color: var(--os-ink-muted);
+  cursor: pointer;
+}
+
+/* The workflow's name gives way with an ellipsis rather than wrapping the header. */
+.k-panel-workflow {
+  max-width: 60%;
+}
+
 .k-panel {
   display: flex;
   flex-direction: column;
