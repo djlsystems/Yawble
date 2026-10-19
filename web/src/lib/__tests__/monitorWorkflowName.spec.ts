@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 //
-// THE MONITOR NAMES A WORKFLOW BY ITS WORK. A workflow a `backlog.item.dispatched` row began is
-// titled from that row - the item's citation, a separator, its title - before any instruction says
-// anything; the workflow node's label and the member tooltip's workflow line read the name, then
+// THE MONITOR NAMES A WORKFLOW BY ITS WORK. A workflow a `backlog.item.dispatched` row opened is
+// titled from that row - the item's citation, a separator, its title - whatever the instruction
+// says; the dispatch names no member, so the workflow is begun by the first member row (UX 8) and
+// takes the item's name then. The workflow node's label and the member tooltip's workflow line read the name, then
 // the number. Citations are built with `itemLabel` over a number, never written out.
 import { describe, expect, it } from 'vitest'
 import type { Message } from '../../api/types'
@@ -27,10 +28,12 @@ const started = (member: string) => row('agentContainer.started', `Alpha/${membe
 const named = `${itemLabel(ITEM)}${ItemSeparator}Name the work`
 
 describe('a workflow begun by a dispatch row', () => {
-  it('is titled by its item before any instruction arrives', () => {
+  it('is titled by its item when the first member row begins it, the dispatch alone begins nothing', () => {
     const model = new MonitorModel()
     model.apply(dispatched())
+    expect(model.workflows.has(WORKFLOW)).toBe(false)
 
+    model.apply(tell('Alpha/Manager', 'Work the item'))
     const workflow = model.workflows.get(WORKFLOW)!
     expect(workflow.title).toBe(named)
     expect(workflow.item).toEqual({ id: ITEM, title: 'Name the work' })
@@ -96,6 +99,7 @@ describe('the tooltips', () => {
     const model = new MonitorModel()
     model.member('Alpha', 'Manager', 'Manager')
     model.apply(dispatched())
+    model.apply(tell('Alpha/Manager', 'Work the item'))
 
     const info = scene(model).describeNode(`w:${WORKFLOW}`)!
     expect(info.title).toBe(named)

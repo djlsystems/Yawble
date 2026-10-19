@@ -491,6 +491,9 @@ export class MonitorScene {
     }
 
     for (const workflow of model.workflows.values()) {
+      // A workflow nobody works is not drawn: with no member it has nothing to tie it, and would
+      // drift. A model built from older rows may hold one; its node appears with its first member.
+      if (workflow.members.size === 0) continue
       const id = `w:${workflow.id}`
       wanted.add(id)
       const first = [...workflow.members].map((key) => this.nodes.get(`m:${key}`)).find((node) => node !== undefined) ?? null
@@ -628,6 +631,11 @@ export class MonitorScene {
   /** Whether the camera is framing the whole graph at this moment. Exposed for tests. */
   get following() {
     return this.userMovedAt === -Infinity || (this.autoFit && this.clock - this.userMovedAt > RefitAfterMs)
+  }
+
+  /** The workflows drawn as nodes now, by number, not counting one fading out. Exposed for tests. */
+  get drawnWorkflows(): number[] {
+    return [...this.nodes.values()].filter((node) => node.kind === 'workflow' && node.dying === null).map((node) => Number(node.id.slice(2)))
   }
 
   /** Centre on one node. */

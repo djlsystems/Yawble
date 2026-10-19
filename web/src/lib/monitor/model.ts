@@ -316,6 +316,11 @@ export class MonitorModel {
   private known = new Map<string, { name: string; kind?: 'agent' | 'plugin' }>()
   /** Keys for the activity list's push lines, which have no seq: below every row's. */
   private pushSeq = 0
+  /**
+   * A dispatch row's item, by its workflow, until a member row begins that workflow: the dispatch
+   * names a team and no member, so it begins nothing, but its item still names the workflow.
+   */
+  private readonly pending = new Map<number, { id: number; title: string }>()
 
   /**
    * @param managerName What every team calls its Manager (`/api/overview`'s `managerName`).
@@ -492,11 +497,19 @@ export class MonitorModel {
 
     if (member) member.lastAt = at
 
-    // A workflow row only ends a workflow already drawn; every other row may begin one.
-    const drawn = (message.correlationId > 0 && !type.startsWith('workflow.')) || this.workflows.has(message.correlationId)
+    // A WORKFLOW IS BEGUN ONLY BY A ROW THAT NAMES A MEMBER: an instruction to one, or a member's
+    // own row. A row addressed to a team alone (a folder's file.changed, a trigger's poll, a
+    // dispatch) adds to a workflow already drawn and begins none, so no node floats tied to nobody.
+    // A workflow row only ends a workflow already drawn.
+    const begins = message.correlationId > 0 && !type.startsWith('workflow.') && member !== null
+    const drawn = begins || this.workflows.has(message.correlationId)
     // A DISPATCH ROW NAMES ITS WORKFLOW BY THE ITEM, before any instruction says anything: the
-    // citation built from the number, a separator, the item's title.
-    const item = type === 'backlog.item.dispatched' ? dispatchedItem(payload) : null
+    // citation built from the number, a separator, the item's title. Kept until a member row
+    // begins the workflow when the dispatch arrives first.
+    const dispatched = type === 'backlog.item.dispatched' ? dispatchedItem(payload) : null
+    if (dispatched && !drawn && message.correlationId > 0) this.hold(message.correlationId, dispatched)
+    const item = dispatched ?? (drawn ? this.pending.get(message.correlationId) ?? null : null)
+    if (drawn) this.pending.delete(message.correlationId)
     const named = item
       ? `${itemLabel(item.id)}${item.title !== '' ? `${ItemSeparator}${item.title}` : ''}`
       : type.startsWith(InstructionPrefix) ? text(payload.subject) || text(payload.instruction) : ''
@@ -722,6 +735,13 @@ export class MonitorModel {
     this.ticker.push(...kept)
     this.ticker.sort((a, b) => b.at - a.at)
     if (this.ticker.length > this.tickerDepth) this.ticker.length = this.tickerDepth
+  }
+
+  /** Keep a dispatch row's item for its workflow, the newest few only. */
+  private hold(correlation: number, item: { id: number; title: string }) {
+    this.pending.delete(correlation)
+    this.pending.set(correlation, item)
+    if (this.pending.size > 64) this.pending.delete(this.pending.keys().next().value!)
   }
 
   private byWorkflow(correlation: number): { team: string; member: null } | null {
