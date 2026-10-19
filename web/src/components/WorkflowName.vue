@@ -62,7 +62,10 @@ function openWorkflows() {
       data-workflow-item
       @click.stop="openItem"
     >{{ itemLabel(item.id) }}</button>
+    <!-- A real space between the parts, so the name copies and reads as words; the gap draws them. -->
+    <template v-if="item">{{ ' ' }}</template>
     <span v-if="words !== null" class="workflow-name-words" :title="words" data-workflow-words>{{ words }}</span>
+    <template v-if="words !== null">{{ ' ' }}</template>
     <!-- THE NUMBER, or what the place puts in its stead that still shows it (the feed's Follow). -->
     <slot name="number">
       <button
