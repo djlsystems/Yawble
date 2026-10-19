@@ -108,10 +108,10 @@ async function openedCard(props: Card) {
 const asked = () => useConciergeAskStore().asked;
 
 describe('on the member card', () => {
-  it('shows beside "waiting on a decision", and a click asks about that decision', async () => {
+  it('shows beside "needs you", and a click asks about that decision', async () => {
     const card = await memberCard(snapshot(deciding));
 
-    expect(card.text()).toContain('waiting on a decision');
+    expect(card.text()).toContain('needs you');
     const button = card.find(Button);
     expect(button.exists()).toBe(true);
     expect(button.text()).toContain('Discuss with Concierge');

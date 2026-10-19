@@ -2,13 +2,14 @@
 import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { useKanbanStore } from '../stores/kanban';
-import { KanbanStatusLabel, bodyToRender, colourFor, trailRows } from '../lib/kanban';
+import { KanbanStatusFact, KanbanStatusLabel, bodyToRender, colourFor, trailRows } from '../lib/kanban';
 import { workflowRow } from '../lib/workflowNumber';
 import { itemLabel } from '../lib/backlog';
 import { useConsoleStore } from '../stores/console';
 import { useWorkflowNavStore } from '../stores/workflowNav';
 import WorkflowName from './WorkflowName.vue';
-import { localTime, wireInstant } from '../lib/localTime';
+import { localStamp, wireInstant } from '../lib/localTime';
+import { eventWords } from '../lib/eventWords';
 import { KanbanStatuses, type KanbanCardAttributes, type KanbanStatus } from '../api/kanban';
 import type { PendingWake } from '../api/types';
 import WakeLines from './WakeLines.vue';
@@ -229,7 +230,7 @@ function when(value: string | null | undefined): string {
 
   const parsed = wireInstant(value);
 
-  return Number.isNaN(parsed) ? value : localTime(parsed, { date: true });
+  return Number.isNaN(parsed) ? value : localStamp(parsed);
 }
 </script>
 
@@ -263,7 +264,9 @@ function when(value: string | null | undefined): string {
         </div>
 
         <div class="row items-center q-gutter-xs q-mt-sm">
-          <q-chip dense square :label="KanbanStatusLabel[card.status]" class="k-panel-status" />
+          <q-chip dense square :label="KanbanStatusLabel[card.status]" class="k-panel-status">
+            <q-tooltip v-if="KanbanStatusFact[card.status]">{{ KanbanStatusFact[card.status] }}</q-tooltip>
+          </q-chip>
           <q-chip dense square outline :label="card.laneId" />
           <q-chip
             v-if="card.awaitingManager"
@@ -339,7 +342,12 @@ function when(value: string | null | undefined): string {
           <div v-for="row in trail" :key="row.key" class="k-trail-row">
             <div class="k-trail-head">
               <span class="k-trail-when">{{ when(row.at) }}</span>
-              <span class="k-trail-type">{{ row.type }}</span>
+              <!-- The one table's words (`lib/eventWords`), as the feed and the Monitor say them; the
+                   raw type on hover, for anyone quoting it. -->
+              <span class="k-trail-type" data-trail-words>
+                {{ eventWords(row.type).words }}
+                <q-tooltip><span class="mono" data-trail-type>{{ row.type }}</span></q-tooltip>
+              </span>
             </div>
             <div class="k-trail-text">{{ row.text }}</div>
           </div>
@@ -530,7 +538,6 @@ function when(value: string | null | undefined): string {
 .k-trail-when,
 .k-trail-type {
   color: var(--os-ink-muted);
-  font-family: 'IBM Plex Mono', monospace;
   font-size: 0.6875rem;
 }
 

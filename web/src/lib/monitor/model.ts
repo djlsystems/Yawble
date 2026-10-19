@@ -1,7 +1,8 @@
 import type { Message, MonitorHint, Team } from '../../api/types'
 import { summarise } from '../summarise'
 import { itemLabel } from '../backlog'
-import { crossesDays, localMinute, wireInstant } from '../localTime'
+import { eventWords, InstructionPrefix, type Tone } from '../eventWords'
+import { crossesDays, localMinute, localStamp, wireInstant } from '../localTime'
 import { DefaultSettings, drawsResource, resolveHint, type Resource, type ResourceSettings } from './hints'
 import { DefaultFileSettings, filesOf, pushHeadline, pushMoreWords, pushTime, type FileAction, type FileSettings, type WorkspacePush } from './workspace'
 import { DefaultStepSettings, stepTime, type AgentStep, type StepSettings } from './steps'
@@ -18,7 +19,7 @@ import { DefaultStepSettings, stepTime, type AgentStep, type StepSettings } from
  * type carries a monitor hint (`hints.ts`) draws the thing it acted on beside the plugin member.
  */
 
-export const InstructionPrefix = 'agentContainer.instruction.'
+export { InstructionPrefix } from '../eventWords'
 
 /** The source of the instruction a member's own wake fires: `wake:<id>`. */
 const WakePrefix = 'wake:'
@@ -26,21 +27,8 @@ const WakePrefix = 'wake:'
 /** What a member is doing, as the monitor draws it. */
 export type MemberState = 'idle' | 'running' | 'waiting' | 'blocked' | 'decision' | 'failed'
 
-/** The colour family of an effect, a ticker row and a legend entry. */
-export type Tone =
-  | 'tell'
-  | 'start'
-  | 'progress'
-  | 'done'
-  | 'handback'
-  | 'fail'
-  | 'blocked'
-  | 'workflow'
-  | 'card'
-  | 'push'
-  | 'plugin'
-  | 'file'
-  | 'quiet'
+/** The colour family of an effect, a ticker row and a legend entry: the one table's. */
+export type { Tone } from '../eventWords'
 
 /** Where work comes from when no member sent it. */
 export type Origin = 'person' | 'trigger' | 'backlog' | 'site'
@@ -141,6 +129,11 @@ export interface TickerEntry {
 }
 
 const GoldenAngle = 137.508
+
+/** An instant in the activity list and the clock, as every view says it (`localStamp`); nothing for none. */
+export function stampOf(ms: number, now: number = Date.now()): string {
+  return ms > 0 ? localStamp(ms, now) : ''
+}
 
 /** A row's time in ms; a row whose time cannot be read is placed at 0, never dropped. */
 export function timeOf(message: Message): number {
@@ -491,8 +484,10 @@ export class MonitorModel {
     const self: NodeRef = member ? { kind: 'member', key: member.key } : { kind: 'team', id: team }
     const flow: NodeRef = { kind: 'workflow', id: message.correlationId }
     const type = message.type
-    let tone: Tone = 'quiet'
-    let verb = type.replace('agentContainer.', '')
+    // THE WORDS AND THE TONE ARE THE ONE TABLE'S (`lib/eventWords`): the branches below draw.
+    const said = eventWords(type, message.source)
+    const tone = said.tone
+    let verb = said.words
     let resource: Resource | undefined
 
     if (member) member.lastAt = at
@@ -518,14 +513,10 @@ export class MonitorModel {
 
     if (type.startsWith(InstructionPrefix) && member && message.source.startsWith(WakePrefix)) {
       // THE MEMBER'S OWN WAKE: nobody sent it, so it comes from no one - a ripple on the member.
-      tone = 'tell'
-      verb = 'woken'
       member.queued++
       if (member.state === 'idle' || member.state === 'failed') member.state = 'waiting'
       effects.push({ kind: 'ripple', at: self, tone })
     } else if (type.startsWith(InstructionPrefix) && member) {
-      tone = 'tell'
-      verb = 'told'
       member.queued++
       if (member.state === 'idle' || member.state === 'failed') member.state = 'waiting'
       const sender = splitMember(message.source)
@@ -539,35 +530,24 @@ export class MonitorModel {
       const id = num(payload.wake)
       member.wakes = member.wakes.filter((wake) => wake.id !== id)
       if (type === 'wake.asked') {
-        verb = 'asked to be woken'
         const dueAt = wireInstant(text(payload.dueAt))
         if (Number.isFinite(dueAt)) {
           member.wakes = [...member.wakes, { id, dueAt, note: text(payload.note) }].sort((a, b) => a.dueAt - b.dueAt)
         }
       } else if (type === 'wake.fired') {
-        tone = 'tell'
-        verb = 'wake fired'
       } else if (type === 'wake.cancelled') {
-        verb = 'wake cancelled'
       } else {
-        verb = 'wake skipped'
       }
       effects.push({ kind: 'ripple', at: self, tone })
     } else if (type === 'agentContainer.started' && member) {
-      tone = 'start'
-      verb = 'started'
       member.queued = Math.max(0, member.queued - 1)
       member.state = 'running'
       effects.push({ kind: 'ripple', at: self, tone })
     } else if (type === 'agentContainer.progress' && member) {
-      tone = 'progress'
-      verb = 'working'
       member.status = text(payload.status)
       if (member.state !== 'running') member.state = 'running'
       if (member.status !== '') effects.push({ kind: 'float', at: self, text: short(member.status, 40), tone })
     } else if (type === 'agentContainer.completed' && member) {
-      tone = 'done'
-      verb = 'finished'
       member.runs++
       const spent = this.spend(member, payload)
       member.state = member.queued > 0 ? 'waiting' : 'idle'
@@ -575,47 +555,34 @@ export class MonitorModel {
       if (spent > 0) effects.push({ kind: 'float', at: self, text: tokensFloat(spent), tone: 'done' })
       if (workflow && payload.handedBack !== true) effects.push({ kind: 'comet', from: self, to: flow, tone })
     } else if (type === 'agentContainer.handback' && member) {
-      tone = 'handback'
-      verb = 'handed back'
       const manager = this.managerOf(team)
       if (manager !== member.key) {
         this.member(team, this.managerName)
         effects.push({ kind: 'comet', from: self, to: { kind: 'member', key: manager }, tone, label: 'hand-back' })
       }
     } else if (type === 'agentContainer.failed' && member) {
-      tone = 'fail'
-      verb = 'failed'
       member.runs++
       this.spend(member, payload)
       member.state = 'failed'
       member.status = summarise(message)
       effects.push({ kind: 'burst', at: self, tone, big: true }, { kind: 'shake', at: self })
     } else if (type === 'agentContainer.blocked' && member) {
-      tone = 'blocked'
-      verb = 'blocked'
       if (payload.item === undefined) member.state = 'blocked'
       member.status = text(payload.reason)
       effects.push({ kind: 'burst', at: self, tone, big: true })
     } else if (type === 'agentContainer.needsDecision' && member) {
-      tone = 'blocked'
-      verb = 'asks'
       member.state = 'decision'
       member.status = text(payload.question)
       effects.push({ kind: 'burst', at: self, tone })
-      effects.push({ kind: 'float', at: self, text: 'needs a decision', tone })
+      effects.push({ kind: 'float', at: self, text: 'needs you', tone })
     } else if (type === 'agentContainer.rejected' && member) {
-      tone = 'fail'
-      verb = 'refused'
       effects.push({ kind: 'ripple', at: self, tone })
     } else if (type === 'agentContainer.removed' && member) {
       this.members.delete(member.key)
       return []
     } else if (type === 'agentContainer.scheduleSkipped') {
-      verb = 'skipped'
       effects.push({ kind: 'ripple', at: self, tone: 'quiet' })
     } else if (type === 'workflow.completed' || type === 'workflow.closed') {
-      tone = type === 'workflow.completed' ? 'workflow' : 'quiet'
-      verb = type === 'workflow.completed' ? 'workflow done' : 'closed'
       const ended = this.workflows.get(message.correlationId)
       if (ended && ended.ending === 'open') {
         ended.ending = type === 'workflow.completed' ? 'completed' : 'closed'
@@ -623,17 +590,12 @@ export class MonitorModel {
         effects.push({ kind: 'burst', at: flow, tone, big: tone === 'workflow' })
       }
     } else if (type === 'workflow.paused' || type === 'workflow.resumed') {
-      verb = type === 'workflow.paused' ? 'paused' : 'resumed'
       effects.push({ kind: 'ripple', at: flow, tone: 'quiet' })
     } else if (type.startsWith('kanban.card.')) {
-      tone = 'card'
       const what = type.slice('kanban.card.'.length)
-      verb = what === 'planned' ? 'planned a card' : what === 'moved' ? 'moved a card' : `card ${what}`
       const words = what === 'planned' ? text(payload.title) : what === 'moved' ? text(payload.change) : ''
       effects.push({ kind: 'float', at: self, text: words !== '' ? `▤ ${short(words, 40)}` : '▤ card', tone })
     } else if (type === 'backlog.item.dispatched') {
-      tone = 'tell'
-      verb = 'dispatched'
       const manager = this.member(team, this.managerName)
       effects.push({
         kind: 'comet',
@@ -643,17 +605,11 @@ export class MonitorModel {
         label: short(text(payload.title), 36),
       })
     } else if (type === 'repo.pushed') {
-      tone = 'push'
-      verb = 'pushed'
       effects.push({ kind: 'ripple', at: self, tone })
       effects.push({ kind: 'float', at: self, text: `⇡ ${short(text(payload.branches), 32)}`, tone })
     } else if (type === 'repo.pushFailed') {
-      tone = 'fail'
-      verb = 'push failed'
       effects.push({ kind: 'ripple', at: self, tone })
     } else if (type.startsWith('plugin.')) {
-      tone = 'plugin'
-      verb = type.slice(type.lastIndexOf('.') + 1)
       const hint = this.hints.get(type)
       if (hint) {
         resource = resolveHint(hint, type, payload)
@@ -666,12 +622,8 @@ export class MonitorModel {
         effects.push({ kind: 'burst', at: self, tone })
       }
     } else if (type === 'file.changed') {
-      tone = 'file'
-      verb = 'files changed'
       effects.push({ kind: 'ripple', at: { kind: 'team', id: team }, tone })
     } else if (type === 'site.action') {
-      tone = 'tell'
-      verb = 'site action'
       effects.push({
         kind: 'comet',
         from: { kind: 'origin', team, origin: 'site' },
@@ -679,8 +631,6 @@ export class MonitorModel {
         tone,
       })
     } else if (type === 'solution.checked') {
-      tone = 'workflow'
-      verb = 'package checked'
       effects.push({ kind: 'burst', at: self, tone })
     } else {
       effects.push({ kind: 'ripple', at: self, tone: 'quiet' })
@@ -923,19 +873,7 @@ export function timeline(rows: readonly Message[], buckets: number): TimelineBuc
   return out
 }
 
-/** A row type's tone, as `apply` gives it, for the timeline's colours. */
+/** A row type's tone, as `apply` gives it, for the timeline's colours: the one table's. */
 export function toneOf(type: string): Tone {
-  if (type.startsWith(InstructionPrefix) || type === 'backlog.item.dispatched' || type === 'site.action') return 'tell'
-  if (type === 'agentContainer.started') return 'start'
-  if (type === 'agentContainer.progress') return 'progress'
-  if (type === 'agentContainer.completed') return 'done'
-  if (type === 'agentContainer.handback') return 'handback'
-  if (type === 'agentContainer.failed' || type === 'agentContainer.rejected' || type === 'repo.pushFailed') return 'fail'
-  if (type === 'agentContainer.blocked' || type === 'agentContainer.needsDecision') return 'blocked'
-  if (type === 'workflow.completed' || type === 'solution.checked') return 'workflow'
-  if (type.startsWith('kanban.card.')) return 'card'
-  if (type === 'repo.pushed') return 'push'
-  if (type.startsWith('plugin.')) return 'plugin'
-  if (type === 'file.changed') return 'file'
-  return 'quiet'
+  return eventWords(type).tone
 }

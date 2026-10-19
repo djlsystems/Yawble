@@ -58,18 +58,58 @@ export const Tones = Object.fromEntries(ToneNames.map((tone) => [tone, ''])) as 
 export const StateColours = Object.fromEntries(StateNames.map((state) => [state, ''])) as Record<MemberState, string>
 /** What a plugin's row did to a thing: green, amber, red. Never the only signal - see `drawResources`. */
 export const ActionColours = Object.fromEntries(ActionNames.map((action) => [action, ''])) as Record<ResourceAction, string>
-const Screen = { ground: '', ink: '', inkDim: '' }
+const Screen = { ground: '', ink: '', inkDim: '', light: false }
 
-/** Read the monitor's tokens off an element inside the page. */
+/** A probe the browser resolves a colour on: `color-mix()` and `var()`-derived tokens come back as hex. */
+let probe: CanvasRenderingContext2D | null | undefined
+
+/**
+ * A token as `#rrggbb`, which `alphaHex` appends an alpha to. The theme's tokens are often a
+ * `color-mix()`; the browser's own canvas resolves it. Left as written where there is no canvas.
+ */
+export function solidHex(value: string): string {
+  if (/^#[0-9a-f]{6}$/i.test(value)) return value.toLowerCase()
+  const short = value.match(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/i)
+  if (short) return `#${short[1]}${short[1]}${short[2]}${short[2]}${short[3]}${short[3]}`.toLowerCase()
+  if (probe === undefined) {
+    try {
+      probe = typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d')
+    } catch {
+      probe = null
+    }
+  }
+  if (!probe || value === '') return value
+  probe.fillStyle = 'black'
+  probe.fillStyle = value
+  const resolved = String(probe.fillStyle)
+  if (resolved.startsWith('#')) return resolved
+  const rgb = resolved.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/)
+  return rgb ? `#${rgb.slice(1, 4).map((part) => Number(part).toString(16).padStart(2, '0')).join('')}` : value
+}
+
+/** Whether a ground is light: then a glow cannot add light to it and is painted over instead. */
+export function isLightGround(hex: string): boolean {
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return false
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255) as [number, number, number]
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5
+}
+
+/** Read the monitor's tokens off an element inside the page: the theme's in the normal view, the wall's in full screen. */
 export function readPalette(element: Element) {
   const css = getComputedStyle(element)
-  const token = (name: string) => css.getPropertyValue(`--os-monitor-${name}`).trim()
+  const token = (name: string) => solidHex(css.getPropertyValue(`--os-monitor-${name}`).trim())
   for (const tone of ToneNames) Tones[tone] = token(tone)
   for (const state of StateNames) StateColours[state] = token(`state-${state}`)
   for (const action of ActionNames) ActionColours[action] = token(action)
   Screen.ground = token('ground')
   Screen.ink = token('ink')
   Screen.inkDim = token('ink-dim')
+  Screen.light = isLightGround(Screen.ground)
+}
+
+/** How a glow is laid on the ground: added light on a dark one, painted over a light one. */
+function glowMode(): GlobalCompositeOperation {
+  return Screen.light ? 'source-over' : 'lighter'
 }
 
 type NodeKind = 'member' | 'team' | 'workflow' | WorkspaceKind
@@ -1278,7 +1318,7 @@ export class MonitorScene {
     this.drawTerritories(ctx, now)
     this.drawLinks(ctx, now, focus)
     this.drawOrigins(ctx, now)
-    ctx.globalCompositeOperation = 'lighter'
+    ctx.globalCompositeOperation = glowMode()
     this.drawRipples(ctx, now)
     this.drawComets(ctx, now)
     this.drawBursts(ctx, now)
@@ -1568,7 +1608,7 @@ export class MonitorScene {
         ctx.textBaseline = 'bottom'
         ctx.fillStyle = alphaHex(colour, Math.min(1, Math.sin(raw * Math.PI) * 1.6))
         ctx.fillText(comet.label, x, y - 10)
-        ctx.globalCompositeOperation = 'lighter'
+        ctx.globalCompositeOperation = glowMode()
       }
     }
   }
@@ -1814,7 +1854,7 @@ export class MonitorScene {
     if ((member.state === 'blocked' || member.state === 'decision') && this.camera.k > 0.6) {
       ctx.fillStyle = state
       ctx.font = this.font(0.58, 700)
-      ctx.fillText(member.state === 'decision' ? 'NEEDS A DECISION' : 'BLOCKED', x, y + ring + (member.manager ? 9 : 5) + this.options.fontPx * 0.8)
+      ctx.fillText(member.state === 'decision' ? 'NEEDS YOU' : 'BLOCKED', x, y + ring + (member.manager ? 9 : 5) + this.options.fontPx * 0.8)
     }
     ctx.shadowBlur = 0
   }
@@ -2189,7 +2229,7 @@ export function stateWords(state: MemberState): string {
     case 'blocked':
       return 'Blocked'
     case 'decision':
-      return 'Needs a decision'
+      return 'Needs you'
     case 'failed':
       return 'Last run failed'
     default:

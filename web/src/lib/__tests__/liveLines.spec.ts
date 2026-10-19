@@ -1,3 +1,4 @@
+import { localStamp } from '../localTime';
 import { describe, expect, it } from 'vitest';
 import { liveLineTime, parseLiveLine, splitLiveLine } from '../liveLines';
 
@@ -50,8 +51,9 @@ describe('parseLiveLine', () => {
     expect(parseLiveLine('\ttext\ta\tb')).toEqual({ at: null, kind: 'text', label: '', text: 'a\tb' });
   });
 
-  it('shows the time as hours, minutes and seconds', () => {
-    expect(liveLineTime(new Date(2026, 8, 26, 9, 5, 7))).toBe('09:05:07');
+  it('shows the time as every view does: through the one stamp, in the locale\'s hour cycle', () => {
+    const at = new Date(2026, 8, 26, 9, 5, 7);
+    expect(liveLineTime(at)).toBe(localStamp(at.getTime()));
   });
 });
 

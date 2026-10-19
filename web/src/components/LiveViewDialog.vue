@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { EndingFact } from '../lib/states';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { listMemberRuns, NoLiveView, openLiveView, readRunTranscript } from '../api/client';
 import type { MemberId, MemberRun, TeamId } from '../api/types';
@@ -455,7 +456,9 @@ onBeforeUnmount(end);
                   {{ WorkflowDeclaredMark.label }}
                   <q-tooltip>{{ WorkflowDeclaredMark.tooltip }}</q-tooltip>
                 </span>
-                <q-badge class="earlier-run-outcome" :data-outcome="run.outcome" :label="runOutcomeLabel(run.outcome)" />
+                <q-badge class="earlier-run-outcome" :data-outcome="run.outcome" :label="runOutcomeLabel(run.outcome)">
+                  <q-tooltip v-if="run.outcome === 'completed'">{{ EndingFact.run }}</q-tooltip>
+                </q-badge>
               </q-item-section>
             </q-item>
           </q-list>

@@ -2,6 +2,7 @@ import type { Message } from '../api/types'
 import { failureClassWords, resumesAutomatically, resumeTimeText } from './failureClass'
 import { solutionNoticeOf } from './solutionNotice'
 import { wakeTime } from './wakes'
+import { localStamp, localTime, wireInstant } from './localTime'
 
 /**
  * One line describing what a message was about, for a card's activity feed.
@@ -428,28 +429,23 @@ export function ownerOf(message: Message): string {
 }
 
 /**
- * Local wall-clock, to the second.
- *
- * Absolute rather than relative: the point of a timestamp here is lining a board
- * row up against what the console printed, and "2m ago" cannot be compared to
- * anything.
+ * A row's stamp (`localStamp`): its time of day today, its date and time on another day, in the
+ * browser's zone and the locale's hour cycle. Absolute rather than relative: the point of a stamp
+ * here is lining a row up against what the console printed, and "2m ago" cannot be compared to
+ * anything. Empty for what is not a time.
  */
-export function timeOf(occurredAt: string): string {
-  const at = new Date(occurredAt)
+export function timeOf(occurredAt: string, now: number = Date.now()): string {
+  const at = wireInstant(occurredAt)
 
-  return Number.isNaN(at.getTime())
-    ? ''
-    : at.toLocaleTimeString(undefined, { hour12: false })
+  return Number.isNaN(at) ? '' : localStamp(at, now)
 }
 
 /**
- * The same clock with its local date in front: the opened message, which can be days old, where a
+ * The same instant with its date always in front: the opened message, which can be days old, where a
  * time of day alone cannot say whether it was today.
  */
 export function dateTimeOf(occurredAt: string): string {
-  const at = new Date(occurredAt)
+  const at = wireInstant(occurredAt)
 
-  return Number.isNaN(at.getTime())
-    ? ''
-    : `${at.toLocaleDateString()} ${at.toLocaleTimeString(undefined, { hour12: false })}`
+  return Number.isNaN(at) ? '' : localTime(at, { date: true })
 }

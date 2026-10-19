@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import FieldHelp from './FieldHelp.vue'
-import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
+import { useQuasar } from 'quasar'
 import { getFileChanges, getMessages, getRunSteps, listEvents } from '../api/client'
 import type { Message, MonitorHint } from '../api/types'
 import { useConsoleStore } from '../stores/console'
@@ -9,12 +10,15 @@ import { itemLabel } from '../lib/backlog'
 import { useAppearanceStore } from '../stores/appearance'
 import { textPx } from '../lib/appearance'
 import { localTime } from '../lib/localTime'
+import { ToneLegend } from '../lib/eventWords'
+import { StateWords } from '../lib/states'
 import {
   ItemSeparator,
   MonitorModel,
   ReplayClock,
   TokensTooltip,
   compact,
+  stampOf,
   timeOf,
   timeline,
   tokensWords,
@@ -130,6 +134,9 @@ const clockAt = ref(0)
 const hover = ref<HoverInfo | null>(null)
 const picked = ref<NodeRef | null>(null)
 const fullscreen = ref(false)
+const $q = useQuasar()
+/** Quasar's controls over the canvas: dark on the wall, and on the theme when the theme is dark. */
+const darkControls = computed(() => fullscreen.value || $q.dark.isActive)
 
 /** Remembered per browser, a convenience only: storage may be missing or refuse, and the default stands. */
 const KeepViewKey = 'harness.monitor.keepView'
@@ -290,24 +297,31 @@ const liveTeams = computed(() => new Set<string>(board.choosableTeams.map((team)
 
 const fontPx = computed(() => textPx(1, appearance.resolved.textSize))
 
-const legend: { tone: Tone; words: string }[] = [
-  { tone: 'tell', words: 'instruction' },
-  { tone: 'start', words: 'run started' },
-  { tone: 'done', words: 'run finished' },
-  { tone: 'handback', words: 'hand-back' },
-  { tone: 'workflow', words: 'workflow' },
-  { tone: 'card', words: 'card' },
-  { tone: 'push', words: 'push' },
-  { tone: 'plugin', words: 'plugin event' },
-  { tone: 'fail', words: 'failure' },
+/** The legend says each tone in the one table's words (`lib/eventWords`), as the list beside it does. */
+const legend = ToneLegend
+
+/** The rings a member wears: each a state's own token (`lib/states`), on the theme or the wall. */
+const states: { colour: string; words: string }[] = [
+  { colour: 'var(--os-monitor-state-running)', words: StateWords.running },
+  { colour: 'var(--os-monitor-state-waiting)', words: StateWords.waiting },
+  { colour: 'var(--os-monitor-state-decision)', words: StateWords['needs-you'] },
+  { colour: 'var(--os-monitor-state-blocked)', words: StateWords.blocked },
+  { colour: 'var(--os-monitor-state-failed)', words: StateWords.failed },
+  { colour: 'var(--os-monitor-state-idle)', words: StateWords.idle },
 ]
 
-const states: { colour: string; words: string }[] = [
-  { colour: 'var(--os-monitor-state-running)', words: 'running' },
-  { colour: 'var(--os-monitor-state-waiting)', words: 'waiting' },
-  { colour: 'var(--os-monitor-state-blocked)', words: 'blocked' },
-  { colour: 'var(--os-monitor-state-idle)', words: 'idle' },
-]
+/**
+ * THE CANVAS READS ITS COLOURS AGAIN when the ground changes under it: into or out of full screen,
+ * and on a change of theme, once the new tokens are on the page.
+ */
+watch(
+  [fullscreen, () => $q.dark.isActive, () => appearance.resolved],
+  async () => {
+    await nextTick()
+    if (canvas.value) readPalette(canvas.value)
+  },
+  { deep: true },
+)
 
 const buckets = computed(() => timeline(history.value, 140))
 const bucketMax = computed(() => Math.max(1, ...buckets.value.map((bucket) => bucket.count)))
@@ -392,8 +406,9 @@ function resourceWords(entry: TickerEntry): string {
   return `${who} ${resource.action} ${resource.label}`
 }
 
+/** An instant as every view says it: its time of day today, its date and time on another day. */
 function timeWords(ms: number): string {
-  return ms > 0 ? localTime(ms) : ''
+  return stampOf(ms)
 }
 
 /**
@@ -722,7 +737,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section ref="root" class="monitor" :class="{ 'monitor--fullscreen': fullscreen }" aria-label="Monitor: every team's activity">
+  <section ref="root" class="monitor" :class="{ 'monitor--fullscreen': fullscreen, 'monitor--wall': fullscreen }" aria-label="Monitor: every team's activity">
     <div class="monitor-main">
       <div ref="stage" class="monitor-stage">
         <canvas
@@ -804,7 +819,7 @@ onUnmounted(() => {
             :options="[...Speeds]"
             dense
             outlined
-            dark
+            :dark="darkControls"
             options-dense
             emit-value
             class="monitor-speed"
@@ -857,7 +872,7 @@ onUnmounted(() => {
               <q-toggle
                 :model-value="changes.show"
                 dense
-                dark
+                :dark="darkControls"
                 label="Show changes plugins make"
                 data-monitor-setting="show"
                 @update:model-value="setShow"
@@ -870,7 +885,7 @@ onUnmounted(() => {
                   type="number"
                   dense
                   outlined
-                  dark
+                  :dark="darkControls"
                   :min="SecondsMin"
                   :max="SecondsMax"
                   suffix="seconds"
@@ -886,7 +901,7 @@ onUnmounted(() => {
                 :key="plugin"
                 :model-value="pluginOn(plugin)"
                 dense
-                dark
+                :dark="darkControls"
                 :label="plugin"
                 :data-monitor-plugin="plugin"
                 @update:model-value="(on: boolean) => setPlugin(plugin, on)"
@@ -898,7 +913,7 @@ onUnmounted(() => {
               <q-toggle
                 :model-value="fileChanges.show"
                 dense
-                dark
+                :dark="darkControls"
                 label="Show file changes"
                 data-monitor-setting="files"
                 @update:model-value="setFilesShow"
@@ -923,7 +938,7 @@ onUnmounted(() => {
               <q-toggle
                 :model-value="agentSteps.show"
                 dense
-                dark
+                :dark="darkControls"
                 label="Show agent steps"
                 data-monitor-setting="steps"
                 @update:model-value="setStepsShow"
@@ -946,7 +961,7 @@ onUnmounted(() => {
                   :max="LayoutMax"
                   :step="LayoutStep"
                   dense
-                  dark
+                  :dark="darkControls"
                   :aria-labelledby="`monitor-layout-${field.key}`"
                   @update:model-value="(value: number | null) => setLayoutValue(field.key, value)"
                 />
@@ -1112,11 +1127,42 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-/* THE MONITOR IS DARK IN EVERY THEME, on purpose: it is a screen to watch, like the Concierge's
-   terminal, and the glow the scene draws only reads on a dark ground. Its colours are the
-   `--os-monitor-*` tokens in `app.scss`, which the canvas reads too, so the legend and the graph
-   cannot disagree. */
+/* THE MONITOR'S CANVAS FOLLOWS THE THEME in the normal view and keeps its dark wall palette in full
+   screen. The `--os-monitor-*` tokens set here are what the canvas reads (`readPalette`) and what
+   the legend and the list paint with, so the two cannot disagree. On the theme, the ground and the
+   ink are the page's, a state's ring is its `--os-state-*` token, and each event hue is the wall's
+   mixed 60/40 toward the theme's ink - darker on a light page, lighter on a dark one - which keeps
+   every hue at 3.7:1 or more on every built-in preset's surface (`state-palette.spec.ts`). */
 .monitor {
+  --os-monitor-ground: var(--os-surface);
+  --os-monitor-panel: var(--os-chrome);
+  --os-monitor-rule: var(--os-rule);
+  --os-monitor-ink: var(--os-ink);
+  --os-monitor-ink-dim: var(--os-ink-muted);
+  --os-monitor-ink-soft: var(--os-ink-muted);
+  --os-monitor-tell: color-mix(in srgb, var(--os-monitor-wall-tell) 60%, var(--os-ink));
+  --os-monitor-start: color-mix(in srgb, var(--os-monitor-wall-start) 60%, var(--os-ink));
+  --os-monitor-progress: color-mix(in srgb, var(--os-monitor-wall-progress) 60%, var(--os-ink));
+  --os-monitor-done: color-mix(in srgb, var(--os-monitor-wall-done) 60%, var(--os-ink));
+  --os-monitor-handback: color-mix(in srgb, var(--os-monitor-wall-handback) 60%, var(--os-ink));
+  --os-monitor-fail: color-mix(in srgb, var(--os-monitor-wall-fail) 60%, var(--os-ink));
+  --os-monitor-blocked: color-mix(in srgb, var(--os-monitor-wall-blocked) 60%, var(--os-ink));
+  --os-monitor-workflow: color-mix(in srgb, var(--os-monitor-wall-workflow) 60%, var(--os-ink));
+  --os-monitor-card: color-mix(in srgb, var(--os-monitor-wall-card) 60%, var(--os-ink));
+  --os-monitor-push: color-mix(in srgb, var(--os-monitor-wall-push) 60%, var(--os-ink));
+  --os-monitor-plugin: color-mix(in srgb, var(--os-monitor-wall-plugin) 60%, var(--os-ink));
+  --os-monitor-file: color-mix(in srgb, var(--os-monitor-wall-file) 60%, var(--os-ink));
+  --os-monitor-quiet: color-mix(in srgb, var(--os-monitor-wall-quiet) 60%, var(--os-ink));
+  --os-monitor-created: color-mix(in srgb, var(--os-monitor-wall-created) 60%, var(--os-ink));
+  --os-monitor-changed: color-mix(in srgb, var(--os-monitor-wall-changed) 60%, var(--os-ink));
+  --os-monitor-deleted: color-mix(in srgb, var(--os-monitor-wall-deleted) 60%, var(--os-ink));
+  --os-monitor-state-idle: var(--os-state-idle);
+  --os-monitor-state-running: var(--os-state-running);
+  --os-monitor-state-waiting: var(--os-state-waiting);
+  --os-monitor-state-blocked: var(--os-state-blocked);
+  --os-monitor-state-decision: var(--os-state-needs-you);
+  --os-monitor-state-failed: var(--os-state-failed);
+
   --monitor-ground: var(--os-monitor-ground);
   --monitor-panel: var(--os-monitor-panel);
   --monitor-rule: var(--os-monitor-rule);
@@ -1136,6 +1182,39 @@ onUnmounted(() => {
   border-radius: 0;
   border: 0;
   height: 100vh;
+}
+
+/* THE WALL: full screen keeps the dark palette `app.scss` holds, and each state's ring is the
+   state's own hue lifted toward white so it glows on the dark ground. */
+.monitor--wall {
+  --os-monitor-ground: var(--os-monitor-wall-ground);
+  --os-monitor-panel: var(--os-monitor-wall-panel);
+  --os-monitor-rule: var(--os-monitor-wall-rule);
+  --os-monitor-ink: var(--os-monitor-wall-ink);
+  --os-monitor-ink-dim: var(--os-monitor-wall-ink-dim);
+  --os-monitor-ink-soft: var(--os-monitor-wall-ink-soft);
+  --os-monitor-tell: var(--os-monitor-wall-tell);
+  --os-monitor-start: var(--os-monitor-wall-start);
+  --os-monitor-progress: var(--os-monitor-wall-progress);
+  --os-monitor-done: var(--os-monitor-wall-done);
+  --os-monitor-handback: var(--os-monitor-wall-handback);
+  --os-monitor-fail: var(--os-monitor-wall-fail);
+  --os-monitor-blocked: var(--os-monitor-wall-blocked);
+  --os-monitor-workflow: var(--os-monitor-wall-workflow);
+  --os-monitor-card: var(--os-monitor-wall-card);
+  --os-monitor-push: var(--os-monitor-wall-push);
+  --os-monitor-plugin: var(--os-monitor-wall-plugin);
+  --os-monitor-file: var(--os-monitor-wall-file);
+  --os-monitor-quiet: var(--os-monitor-wall-quiet);
+  --os-monitor-created: var(--os-monitor-wall-created);
+  --os-monitor-changed: var(--os-monitor-wall-changed);
+  --os-monitor-deleted: var(--os-monitor-wall-deleted);
+  --os-monitor-state-idle: color-mix(in srgb, var(--os-state-idle) 60%, white);
+  --os-monitor-state-running: color-mix(in srgb, var(--os-state-running) 60%, white);
+  --os-monitor-state-waiting: color-mix(in srgb, var(--os-state-waiting) 60%, white);
+  --os-monitor-state-blocked: color-mix(in srgb, var(--os-state-blocked) 60%, white);
+  --os-monitor-state-decision: color-mix(in srgb, var(--os-state-needs-you) 60%, white);
+  --os-monitor-state-failed: color-mix(in srgb, var(--os-state-failed) 60%, white);
 }
 
 .monitor-main {

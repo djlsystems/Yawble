@@ -1,5 +1,6 @@
 import type { Team, TeamId, TeamWorkflowTiming, TeamWorkflows, WorkflowItem } from '../api/types'
 import { nextSort as nextTableSort, readSort, type TableSort } from './tableSort'
+import { localStamp, wireInstant } from './localTime'
 import {
   RowLoudness,
   teamChip,
@@ -261,11 +262,9 @@ function clock(instant: string | null): string {
   // sibling of a defect is the defect.
   if (instant == null) return '—'
 
-  const parsed = new Date(instant)
+  const parsed = wireInstant(instant)
 
-  return Number.isNaN(parsed.getTime())
-    ? '—'
-    : parsed.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  return Number.isNaN(parsed) ? '—' : localStamp(parsed)
 }
 
 /**

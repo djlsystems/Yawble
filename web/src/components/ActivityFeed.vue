@@ -2,7 +2,8 @@
 import { computed, ref } from 'vue';
 import { getMessagesBefore } from '../api/client';
 import type { Message } from '../api/types';
-import { dateTimeOf, detail, label, ownerOf, summarise, timeOf } from '../lib/summarise';
+import { dateTimeOf, detail, ownerOf, summarise, timeOf } from '../lib/summarise';
+import { eventWords, toneInk } from '../lib/eventWords';
 import { solutionNoticeOf } from '../lib/solutionNotice';
 import { runMarkOf } from '../lib/runMarks';
 import { useCursorList } from '../lib/useCursorList';
@@ -123,26 +124,20 @@ const history = useCursorList<Message>(
   { take: 200 },
 );
 
-/** A package's check reads as its outcome: ready is calm, problems are loud. */
-function toneOf(message: Message): string {
-  const notice = solutionNoticeOf(message);
-  if (notice !== null) return notice.ok ? 'positive' : 'negative';
-  return tone(message.type);
+/**
+ * A ROW'S WORDS, TONE AND ICON ARE THE ONE TABLE'S (`lib/eventWords`): the same words the Monitor's
+ * list and the Kanban panel's story say. The raw type stays in the chip's tooltip and in the opened
+ * message's header, for anyone quoting it.
+ */
+function said(message: Message) {
+  return eventWords(message.type, message.source);
 }
 
-/** Completed reads calm, failed and rejected read loud. Busy is normal; refused is not. */
-function tone(type: string): string {
-  if (type.endsWith('failed')) return 'negative';
-  if (type.endsWith('rejected')) return 'warning';
-  if (type.endsWith('completed')) return 'positive';
-  if (type.includes('.instruction.')) return 'primary';
-
-  // Progress is an agent TALKING rather than a lifecycle event, and reads muted so a card of
-  // status updates does not look like a card of state changes. Deliberately not the running
-  // badge's green either: that one means "this is happening now", and every one of these was
-  // true at the time and is history by the time it is read.
-  if (type.endsWith('progress')) return 'grey-5';
-  return 'grey-6';
+/** The ink of a row's chip and its opened card's rule. A package's check reads as its outcome. */
+function inkOf(message: Message): string {
+  const notice = solutionNoticeOf(message);
+  if (notice !== null) return notice.ok ? 'var(--os-state-done)' : 'var(--os-state-failed)';
+  return toneInk(said(message).tone);
 }
 </script>
 
@@ -159,11 +154,14 @@ function tone(type: string): string {
           && board.highlightedWorkflow !== message.correlationId,
       }"
       clickable
-      :aria-label="`Open ${label(message.type)} at ${timeOf(message.occurredAt)}`"
+      :aria-label="`Open ${said(message).words} at ${timeOf(message.occurredAt)}`"
       @click="show(message)"
     >
       <q-item-section side top>
-        <q-badge :color="toneOf(message)" :label="label(message.type)" />
+        <span class="feed-chip" :style="{ '--feed-tone': inkOf(message) }" data-feed-chip>
+          <q-icon :name="said(message).icon" size="12px" class="feed-chip-icon" /><span data-feed-words>{{ said(message).words }}</span>
+          <q-tooltip><span class="mono" data-feed-chip-type>{{ message.type }}</span></q-tooltip>
+        </span>
       </q-item-section>
 
       <q-item-section>
@@ -253,12 +251,7 @@ function tone(type: string): string {
     <q-card
       v-if="shown"
       class="os-dialog-md feed-card"
-      :class="{
-        'feed-card-negative': toneOf(shown) === 'negative',
-        'feed-card-warning': toneOf(shown) === 'warning',
-        'feed-card-positive': toneOf(shown) === 'positive',
-        'feed-card-primary': toneOf(shown) === 'primary',
-      }"
+      :style="{ '--feed-tone': inkOf(shown) }"
       data-feed-dialog
       @keydown="onKey"
     >
@@ -293,7 +286,10 @@ function tone(type: string): string {
       </q-card-section>
 
       <q-card-section class="feed-card-head">
-        <q-badge :color="toneOf(shown)" :label="label(shown.type)" />
+        <span class="feed-chip" data-feed-chip>
+          <q-icon :name="said(shown).icon" size="12px" class="feed-chip-icon" /><span data-feed-words>{{ said(shown).words }}</span>
+        </span>
+        <span class="feed-card-type mono" data-feed-card-type>{{ shown.type }}</span>
         <span class="feed-card-source mono">{{ shown.source }}</span>
         <span class="feed-card-spacer"></span>
         <span class="feed-card-meta feed-card-workflow" data-feed-card-workflow>
@@ -352,12 +348,31 @@ function tone(type: string): string {
   padding-left: 8px;
 }
 
+/* A ROW'S CHIP: the table's words on the page's ink, the tone as its edge and a tint of its ground,
+   so the words read on every theme whatever the tone. */
+.feed-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px 1px 4px;
+  border-left: 3px solid var(--feed-tone, var(--os-rule-strong));
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--feed-tone, var(--os-rule-strong)) 14%, var(--os-surface));
+  color: var(--os-ink);
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.feed-chip-icon {
+  color: var(--feed-tone, var(--os-ink-muted));
+}
+
 /* THE DIALOG'S WIDTH is the dialog scale's (`os-dialog-md`), never set here. What this sets is the
-   tone: a left rule, MUTED by default and overridden by the four tones below. A default of
-   `transparent` with a rule for every tone would need a class per Quasar colour name, and the two
-   muted ones are exactly the colours that have no --q- variable to name. */
+   tone: a left rule in the row's own ink, so a wall of text opened from a failure is identifiably
+   the failure before a word of it is read. */
 .feed-card {
-  border-left: 3px solid var(--os-rule-strong);
+  border-left: 3px solid var(--feed-tone, var(--os-rule-strong));
 
   /* ONE HEIGHT FOR EVERY MESSAGE, so Newer and Older stay under the pointer. The dialog is
      centred, and a card that took each message's own height moved its header - and the buttons in
@@ -439,24 +454,11 @@ function tone(type: string): string {
   overflow-y: auto;
 }
 
-/* The left rule carries the row's own tone through to the card, so a wall of text opened from a
-   red row is identifiably the failure before a word of it is read. Colour is the ONLY thing that
-   varies - the shape is identical for every type, because the type is already named in the badge
-   just above and saying it twice in two languages is not emphasis. */
-.feed-card-negative {
-  border-left-color: var(--q-negative);
-}
-
-.feed-card-warning {
-  border-left-color: var(--q-warning);
-}
-
-.feed-card-positive {
-  border-left-color: var(--q-positive);
-}
-
-.feed-card-primary {
-  border-left-color: var(--q-primary);
+/* The raw type, for anyone quoting it: beside the words, muted. */
+.feed-card-type {
+  font-size: 0.6875rem;
+  opacity: 0.75;
+  white-space: nowrap;
 }
 
 </style>

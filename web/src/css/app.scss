@@ -66,13 +66,27 @@
   // THE ACTIVITY TILE'S LANES: each state a mark of at least 3:1 on `--os-chrome`, the tile it is
   // drawn on (`statistics-tile-contrast.spec.ts` measures both themes). Idle is a pale empty track
   // on purpose, each theme's own strong rule.
-  --os-stat-running: #2e7d4f;
-  --os-stat-waiting: #5f7385;
+  // THE SEVEN STATES A PERSON READS - running, waiting (always with what for), needs you, blocked,
+  // failed, idle, done - one token each, in every theme block. The Teams table and tab chips, the
+  // KPI tile's tone, the member card's pill, the Kanban colour classes, the activity lanes and the
+  // Monitor's legend and rings all draw a state through these, so one state is one colour on every
+  // view. Each holds 3:1 on `--os-chrome` and on `--os-surface` in every built-in preset
+  // (`appearance-presets.spec.ts`).
+  --os-state-running: #2e7d4f;
+  --os-state-waiting: #5f7385;
+  --os-state-needs-you: #7a4fc4;
+  --os-state-blocked: #b26a00;
+  --os-state-failed: #c62828;
+  --os-state-idle: #8a847c;
+  --os-state-done: #1f6fbf;
+
+  --os-stat-running: var(--os-state-running);
+  --os-stat-waiting: var(--os-state-waiting);
   // HELD - waiting for a slot - is a strong warning orange between blocked's amber and failed's red,
   // and is striped wherever it is drawn, so it is never told from either by hue alone.
   --os-stat-held: #c4410c;
-  --os-stat-blocked: #b26a00;
-  --os-stat-failed: #c62828;
+  --os-stat-blocked: var(--os-state-blocked);
+  --os-stat-failed: var(--os-state-failed);
   --os-stat-idle: var(--os-rule-strong);
 
   // ONE COLOUR PER MEMBER in the Tokens dialog's chart, in this fixed order, never by rank. Eight
@@ -104,64 +118,44 @@
   --os-dialog-lg: 46rem;
   --os-dialog-xl: 72rem;
 
-  // THE KANBAN PALETTE, word to colour. `lib/kanban.ts` keeps the WORD (the server's template owns
-  // which word a card wears); this is the only place the word becomes a colour. An accent for the
-  // card's edge and a tint for its ground, per word - see `.os-kanban-*` below.
-  --os-kanban-slate: #546e7a;
-  --os-kanban-blue: #1e88e5;
-  --os-kanban-amber: #ef6c00;
-  --os-kanban-orange: #f4511e;
-  --os-kanban-red: #c62828;
-  --os-kanban-teal: #00897b;
-  --os-kanban-green: #2e7d32;
-
-  --os-kanban-slate-tint: #f6f7f8;
-  --os-kanban-blue-tint: #f1f7fd;
-  --os-kanban-amber-tint: #fdf5ec;
-  --os-kanban-orange-tint: #fdf3f0;
-  --os-kanban-red-tint: #fdf1f1;
-  --os-kanban-teal-tint: #eff8f6;
-  --os-kanban-green-tint: #f1f8f1;
+  // THE KANBAN PALETTE, word to state. `lib/kanban.ts` keeps the WORD (the server's template owns
+  // which word a card wears); `.os-kanban-*` below is the only place the word becomes a colour, and
+  // every word is a state token's. The tint is that state over the card's surface, by this share.
+  --os-kanban-tint-share: 7%;
 
   // A PLUGIN MEMBER'S TILE. A hue nothing else on the board uses - violet - so a plugin reads as a
   // different kind of member at a glance: a tinted ground and a stronger edge, in both themes.
   --os-plugin-surface: #f3f0fc;
   --os-plugin-accent: #6a5acd;
 
-  // THE MONITOR'S SCREEN. Dark in every theme on purpose, as the Concierge's terminal is: it is a
-  // screen to watch, and the glow its graph draws reads only on a dark ground. So these are set
-  // once, here, and no theme block repeats them but for the three action colours below, which
-  // `body.body--dark` says again with the same values. The canvas reads them (`lib/monitor/scene.ts`,
-  // `readPalette`) and so does the view's stylesheet, so the legend and the graph agree.
-  --os-monitor-ground: #070b14;
-  --os-monitor-panel: #0c1322;
-  --os-monitor-rule: #94a3b829;
-  --os-monitor-ink: #e2e8f0;
-  --os-monitor-ink-dim: #94a3b8;
-  --os-monitor-ink-soft: #cbd5e1;
-  --os-monitor-tell: #38bdf8;
-  --os-monitor-start: #22d3ee;
-  --os-monitor-progress: #a5b4fc;
-  --os-monitor-done: #34d399;
-  --os-monitor-handback: #fbbf24;
-  --os-monitor-fail: #f43f5e;
-  --os-monitor-blocked: #fb7185;
-  --os-monitor-workflow: #c084fc;
-  --os-monitor-card: #60a5fa;
-  --os-monitor-push: #2dd4bf;
-  --os-monitor-plugin: #e879f9;
-  --os-monitor-file: #94a3b8;
-  --os-monitor-quiet: #64748b;
-  --os-monitor-state-idle: #475569;
-  --os-monitor-state-running: #34d399;
-  --os-monitor-state-waiting: #fbbf24;
-  --os-monitor-state-blocked: #fb7185;
-  --os-monitor-state-decision: #f59e0b;
-  --os-monitor-state-failed: #f43f5e;
+  // THE MONITOR'S WALL PALETTE: its dark screen, kept in full screen for a wall or a demo, where the
+  // glow its graph draws reads best. `MonitorView.vue` sets the `--os-monitor-*` tokens the canvas
+  // and the legend read from these in full screen, and from the theme (and these hues mixed toward
+  // the theme's ink) in the normal view. A state's ring is never here: it is the state's own token,
+  // lifted for the dark wall in the Monitor's stylesheet. Set once; no theme block repeats them.
+  --os-monitor-wall-ground: #070b14;
+  --os-monitor-wall-panel: #0c1322;
+  --os-monitor-wall-rule: #94a3b829;
+  --os-monitor-wall-ink: #e2e8f0;
+  --os-monitor-wall-ink-dim: #94a3b8;
+  --os-monitor-wall-ink-soft: #cbd5e1;
+  --os-monitor-wall-tell: #38bdf8;
+  --os-monitor-wall-start: #22d3ee;
+  --os-monitor-wall-progress: #a5b4fc;
+  --os-monitor-wall-done: #34d399;
+  --os-monitor-wall-handback: #fbbf24;
+  --os-monitor-wall-fail: #f43f5e;
+  --os-monitor-wall-blocked: #fb7185;
+  --os-monitor-wall-workflow: #c084fc;
+  --os-monitor-wall-card: #60a5fa;
+  --os-monitor-wall-push: #2dd4bf;
+  --os-monitor-wall-plugin: #e879f9;
+  --os-monitor-wall-file: #94a3b8;
+  --os-monitor-wall-quiet: #64748b;
   // What a plugin's row did to a thing it manages (monitor hints): created, changed, deleted.
-  --os-monitor-created: #4ade80;
-  --os-monitor-changed: #fbbf24;
-  --os-monitor-deleted: #f87171;
+  --os-monitor-wall-created: #4ade80;
+  --os-monitor-wall-changed: #fbbf24;
+  --os-monitor-wall-deleted: #f87171;
 }
 
 // The dark theme. Only what differs from light is here.
@@ -169,12 +163,6 @@
 // Paper and surface are the front door's own ground and card; the front door reads these tokens
 // rather than keeping a copy.
 body.body--dark {
-  // The Monitor's three action colours, said again with the same values so both themes resolve
-  // them; the Monitor's screen stays dark either way.
-  --os-monitor-created: #4ade80;
-  --os-monitor-changed: #fbbf24;
-  --os-monitor-deleted: #f87171;
-
   --os-plugin-surface: #221c33;
   --os-plugin-accent: #9d8fef;
   --os-ink: #ece7e3;
@@ -195,11 +183,20 @@ body.body--dark {
   --os-info: #7ea6d6;
   --os-warn-ink: var(--os-warn);
 
-  --os-stat-running: var(--os-ok);
-  --os-stat-waiting: #8fa1b3;
+  // Redeclared, as every token whose value is a var(): it resolves where it is declared.
+  --os-state-running: var(--os-ok);
+  --os-state-waiting: #8fa1b3;
+  --os-state-needs-you: #a993e6;
+  --os-state-blocked: var(--os-warn);
+  --os-state-failed: var(--os-error);
+  --os-state-idle: #8a7f77;
+  --os-state-done: #6fa8e0;
+
+  --os-stat-running: var(--os-state-running);
+  --os-stat-waiting: var(--os-state-waiting);
   --os-stat-held: #f07a3a;
-  --os-stat-blocked: var(--os-warn);
-  --os-stat-failed: var(--os-error);
+  --os-stat-blocked: var(--os-state-blocked);
+  --os-stat-failed: var(--os-state-failed);
   // Redeclared here, not inherited: a var() resolves where it is declared, so the :root one keeps
   // the light rule colour.
   --os-stat-idle: var(--os-rule-strong);
@@ -219,15 +216,9 @@ body.body--dark {
   --os-tint-info: #152131;
 
 
-  // Accents hold; a coloured edge reads on either ground. The tints are each accent at about a
-  // sixth over the dark surface, so the card stays a card rather than a pastel slab.
-  --os-kanban-slate-tint: #242423;
-  --os-kanban-blue-tint: #1b2835;
-  --os-kanban-amber-tint: #3d2410;
-  --os-kanban-orange-tint: #3e1f15;
-  --os-kanban-red-tint: #361916;
-  --os-kanban-teal-tint: #172824;
-  --os-kanban-green-tint: #1e2618;
+  // A darker surface takes more of the state before the card reads as tinted at all, and still
+  // stays a card rather than a pastel slab.
+  --os-kanban-tint-share: 16%;
 }
 
 // THE OTHER BUILT-IN THEMES, each a class on <body> beside Quasar's dark one: `lib/appearance.ts`
@@ -261,11 +252,18 @@ body.os-theme-high-contrast-light {
   --os-error: #a1102e;
   --os-info: #1f4f86;
   --os-warn-ink: #6b4500;
-  --os-stat-running: #0b6b2f;
-  --os-stat-waiting: #3c4f60;
+  --os-state-running: #0b6b2f;
+  --os-state-waiting: #3c4f60;
+  --os-state-needs-you: #5b2fa8;
+  --os-state-blocked: #7a4c00;
+  --os-state-failed: #a1102e;
+  --os-state-idle: #595959;
+  --os-state-done: #12508f;
+  --os-stat-running: var(--os-state-running);
+  --os-stat-waiting: var(--os-state-waiting);
   --os-stat-held: #9a3100;
-  --os-stat-blocked: #7a4c00;
-  --os-stat-failed: #a1102e;
+  --os-stat-blocked: var(--os-state-blocked);
+  --os-stat-failed: var(--os-state-failed);
   --os-stat-idle: #4d4d4d;
 }
 
@@ -294,11 +292,18 @@ body.body--dark.os-theme-high-contrast-dark {
   --os-error: #ff7a9a;
   --os-info: #9cc4ff;
   --os-warn-ink: #ffc24d;
-  --os-stat-running: #6fe39b;
-  --os-stat-waiting: #b9c7d4;
+  --os-state-running: #6fe39b;
+  --os-state-waiting: #b9c7d4;
+  --os-state-needs-you: #cdb8ff;
+  --os-state-blocked: #ffc24d;
+  --os-state-failed: #ff7a9a;
+  --os-state-idle: #a8a8a8;
+  --os-state-done: #8cc4ff;
+  --os-stat-running: var(--os-state-running);
+  --os-stat-waiting: var(--os-state-waiting);
   --os-stat-held: #ff9a5c;
-  --os-stat-blocked: #ffc24d;
-  --os-stat-failed: #ff7a9a;
+  --os-stat-blocked: var(--os-state-blocked);
+  --os-stat-failed: var(--os-state-failed);
   --os-stat-idle: #9a9a9a;
 }
 
@@ -328,11 +333,18 @@ body.body--dark.os-theme-soft-dark {
   --os-error: #e07a8f;
   --os-info: #8aaed6;
   --os-warn-ink: #d9ad5c;
-  --os-stat-running: #7cbf8e;
-  --os-stat-waiting: #98a6b3;
+  --os-state-running: #7cbf8e;
+  --os-state-waiting: #98a6b3;
+  --os-state-needs-you: #ab9ad9;
+  --os-state-blocked: #d9ad5c;
+  --os-state-failed: #e07a8f;
+  --os-state-idle: #958b80;
+  --os-state-done: #84acd6;
+  --os-stat-running: var(--os-state-running);
+  --os-stat-waiting: var(--os-state-waiting);
   --os-stat-held: #e8895a;
-  --os-stat-blocked: #d9ad5c;
-  --os-stat-failed: #e07a8f;
+  --os-stat-blocked: var(--os-state-blocked);
+  --os-stat-failed: var(--os-state-failed);
   --os-stat-idle: #4e4740;
 }
 
@@ -350,6 +362,40 @@ body {
 }
 
 // ---------------------------------------------------------------------------------------------
+// A STATE, AS A PILL: the member card's state and its marks. The state's colour is the edge and a
+// tint of the ground; the words stay the page's ink, so they read on every theme whatever the hue.
+.q-badge.os-state-pill {
+  --os-state-pill: var(--os-state-idle);
+  background: color-mix(in srgb, var(--os-state-pill) 16%, var(--os-surface));
+  color: var(--os-ink);
+  border: 1px solid var(--os-state-pill);
+}
+
+.os-state-pill--running {
+  --os-state-pill: var(--os-state-running);
+}
+
+.os-state-pill--waiting {
+  --os-state-pill: var(--os-state-waiting);
+}
+
+.os-state-pill--needs-you {
+  --os-state-pill: var(--os-state-needs-you);
+}
+
+.os-state-pill--blocked {
+  --os-state-pill: var(--os-state-blocked);
+}
+
+.os-state-pill--failed {
+  --os-state-pill: var(--os-state-failed);
+}
+
+.os-state-pill--idle {
+  --os-state-pill: var(--os-state-idle);
+}
+
+// ---------------------------------------------------------------------------------------------
 // A KANBAN COLOUR WORD, AS A CLASS. `KanbanCard` and `KanbanCardPanel` put `os-kanban-<word>` on
 // their root and paint from the two properties it sets, so a card's colour is chosen here and
 // nowhere else:
@@ -360,38 +406,38 @@ body {
 // The word list is `KanbanColours` in `lib/kanban.ts`; a word added there needs a line here, and
 // `kanban-palette.spec.ts` fails until it has one.
 .os-kanban-slate {
-  --os-kanban-accent: var(--os-kanban-slate);
-  --os-kanban-tint: var(--os-kanban-slate-tint);
+  --os-kanban-accent: var(--os-state-waiting);
+  --os-kanban-tint: color-mix(in srgb, var(--os-state-waiting) var(--os-kanban-tint-share), var(--os-surface));
 }
 
 .os-kanban-blue {
-  --os-kanban-accent: var(--os-kanban-blue);
-  --os-kanban-tint: var(--os-kanban-blue-tint);
+  --os-kanban-accent: var(--os-state-running);
+  --os-kanban-tint: color-mix(in srgb, var(--os-state-running) var(--os-kanban-tint-share), var(--os-surface));
 }
 
 .os-kanban-amber {
-  --os-kanban-accent: var(--os-kanban-amber);
-  --os-kanban-tint: var(--os-kanban-amber-tint);
+  --os-kanban-accent: var(--os-state-blocked);
+  --os-kanban-tint: color-mix(in srgb, var(--os-state-blocked) var(--os-kanban-tint-share), var(--os-surface));
 }
 
 .os-kanban-orange {
-  --os-kanban-accent: var(--os-kanban-orange);
-  --os-kanban-tint: var(--os-kanban-orange-tint);
+  --os-kanban-accent: var(--os-state-needs-you);
+  --os-kanban-tint: color-mix(in srgb, var(--os-state-needs-you) var(--os-kanban-tint-share), var(--os-surface));
 }
 
 .os-kanban-red {
-  --os-kanban-accent: var(--os-kanban-red);
-  --os-kanban-tint: var(--os-kanban-red-tint);
+  --os-kanban-accent: var(--os-state-failed);
+  --os-kanban-tint: color-mix(in srgb, var(--os-state-failed) var(--os-kanban-tint-share), var(--os-surface));
 }
 
 .os-kanban-teal {
-  --os-kanban-accent: var(--os-kanban-teal);
-  --os-kanban-tint: var(--os-kanban-teal-tint);
+  --os-kanban-accent: var(--os-state-idle);
+  --os-kanban-tint: color-mix(in srgb, var(--os-state-idle) var(--os-kanban-tint-share), var(--os-surface));
 }
 
 .os-kanban-green {
-  --os-kanban-accent: var(--os-kanban-green);
-  --os-kanban-tint: var(--os-kanban-green-tint);
+  --os-kanban-accent: var(--os-state-done);
+  --os-kanban-tint: color-mix(in srgb, var(--os-state-done) var(--os-kanban-tint-share), var(--os-surface));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -485,11 +531,11 @@ body {
 }
 
 .console-tab-status--failed {
-  color: #a4133c;
+  color: var(--os-state-failed);
 }
 
 .console-tab-status--blocked {
-  color: #ef6c00;
+  color: var(--os-state-blocked);
 }
 
 .console-tab-status--paused {
@@ -502,17 +548,18 @@ body {
 }
 
 .console-tab-status--running {
-  color: #43a047;
+  color: var(--os-state-running);
 }
 
+/* QUEUED, WAITING FOR A SLOT AND AWAITING ARE ALL WAITING - the word says what for. */
 .console-tab-status--queued {
-  color: #546e7a;
+  color: var(--os-state-waiting);
 }
 
-/* HELD BEHIND THE WIP LIMIT. Amber-brown: about to work, not stopped and not failed. */
+/* HELD BEHIND THE WIP LIMIT: about to work, not stopped and not failed. */
 .console-tab-status--waiting,
 .console-tab-status--waiting-for-a-slot {
-  color: #b26a00;
+  color: var(--os-state-waiting);
 }
 
 /* UNDECLARED IS NOT AN ERROR STATE AND IS NOT COLOURED AS ONE. Indigo rather than the negative red
@@ -525,7 +572,7 @@ body {
 }
 
 .console-tab-status--idle {
-  color: var(--os-ink-faint);
+  color: var(--os-state-idle);
 }
 
 // THE WORKFLOWS COLUMN AND THE TAB CHIP ALSO INTERPOLATE A `WorkflowState` WORD INTO THIS SAME
@@ -536,10 +583,10 @@ body {
 // and `vue-tsc` cannot see any of this, because the class name is built at runtime - the same
 // hazard this file's own comment on the `.console-tab-status` block already warns about.
 
-/* AWAITING is the one state that describes the platform working exactly as intended, so it wears
-   the same blue `workflowTiming`'s `info` tone uses elsewhere in this app, never a warning colour. */
+/* AWAITING is the platform working exactly as intended - a hand-back waiting for its Manager - so
+   it is waiting, never a warning colour. */
 .console-tab-status--awaiting {
-  color: #1976d2;
+  color: var(--os-state-waiting);
 }
 
 /* NO RESULT sits beside `blocked` in loudness (see `RowLoudness`'s own comment) but is quieter, and
@@ -549,10 +596,10 @@ body {
   color: #b8860b;
 }
 
-/* COMPLETED carries no news - the same reason `workflowTiming` gives it `tone: 'none'` - so it wears
-   the same faint grey as `idle` rather than a colour of its own. */
+/* COMPLETED is a workflow declared finished: done, in the done state's colour. The word stays
+   COMPLETED (a declaration, not a card in the Done lane); its tooltip says which fact it is. */
 .console-tab-status--completed {
-  color: var(--os-ink-faint);
+  color: var(--os-state-done);
 }
 
 /* CLOSED is a person having ended a workflow - terminal news and no alarm, exactly like COMPLETED -
@@ -579,33 +626,12 @@ body.body--dark {
     color: #bcaaa4;
   }
 
-  .console-tab-status--failed {
-    color: var(--os-error);
-  }
-
   .console-tab-status--paused {
     color: #4dd0e1;
   }
 
-  .console-tab-status--running {
-    color: var(--os-ok);
-  }
-
-  .console-tab-status--queued {
-    color: #90a4ae;
-  }
-
-  .console-tab-status--waiting,
-  .console-tab-status--waiting-for-a-slot {
-    color: #ffb74d;
-  }
-
   .console-tab-status--undeclared {
     color: #9fa8da;
-  }
-
-  .console-tab-status--awaiting {
-    color: var(--os-info);
   }
 
   .console-tab-status--no-result {

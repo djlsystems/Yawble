@@ -1,5 +1,5 @@
 import type { ActivitySpan, ActivityState, ActivityWindow, TeamActivity, TeamTokenRun } from '../api/types'
-import { localDate, localStretch, localTime } from './localTime'
+import { localDate, localStamp, localStretch, localTime } from './localTime'
 
 /**
  * WHAT THE ACTIVITY TILE DRAWS FROM ONE `/activity` ANSWER, as plain functions so its initials,
@@ -274,14 +274,15 @@ export function escapeHtml(text: string): string {
 }
 
 /**
- * THE HOVER TOOLTIP AS MARKUP: the time under the cursor, then one line per lane - colour chip,
+ * THE HOVER TOOLTIP AS MARKUP: the time under the cursor (`localStamp`, as the feed and the Monitor
+ * say it: its time of day today, its date and time on another day), then one line per lane - colour chip,
  * initials, full name, and the state with how long that stretch lasted and its reason, or "no runs
  * in this window" where nothing was recorded at that time.
  *
  * EVERY NAME AND REASON IS ESCAPED, and the markup carries CLASSES, NEVER A `style` ATTRIBUTE: the
  * app's CSP refuses inline styles, so a styled chip would arrive unstyled and log a violation.
  */
-export function tooltipHtml(lanes: readonly Lane[], at: number, withDate: boolean): string {
+export function tooltipHtml(lanes: readonly Lane[], at: number, now: number = Date.now()): string {
   const rows = lanes.map((lane) => {
     const span = spanAt(lane, at)
     const chip = `<span class="stats-chip stats-chip--${span ? span.state : 'none'}"></span>`
@@ -299,7 +300,7 @@ export function tooltipHtml(lanes: readonly Lane[], at: number, withDate: boolea
     return `<div class="stats-tip-row">${chip}${who} — ${escapeHtml(what)}</div>`
   })
 
-  return `<div class="stats-tip"><div class="stats-tip-time">${escapeHtml(localTime(at, { date: withDate }))}</div>${rows.join('')}</div>`
+  return `<div class="stats-tip"><div class="stats-tip-time">${escapeHtml(localStamp(at, now))}</div>${rows.join('')}</div>`
 }
 
 /** How wide one column of the Activity dialog is: a local minute, hour, day or month. */

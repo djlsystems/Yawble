@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { compileString } from 'sass';
 import { describe, expect, it } from 'vitest';
 import { PRESETS, contrast, type PresetId } from '../../lib/appearance';
+import { States } from '../../lib/states';
 
 /**
  * EVERY BUILT-IN THEME IS READABLE, MEASURED FROM THE COMPILED STYLESHEET. Each preset is the
@@ -71,6 +72,17 @@ describe('every built-in theme', () => {
         expect(contrast(t('--os-ink'), t(ground)), `text on ${ground}`).toBeGreaterThanOrEqual(textFloor);
       }
       expect(contrast(t('--os-ink-muted'), t('--os-surface')), 'muted text on panels').toBeGreaterThanOrEqual(4.5);
+    });
+
+    it(`${preset.label}: every state token holds 3:1 on --os-chrome and on --os-surface`, () => {
+      for (const state of States) {
+        for (const ground of ['--os-chrome', '--os-surface']) {
+          expect(
+            contrast(t(`--os-state-${state}`), t(ground)),
+            `${state} on ${ground}`,
+          ).toBeGreaterThanOrEqual(3);
+        }
+      }
     });
 
     it(`${preset.label}: every state mark holds 3:1 on the tile`, () => {

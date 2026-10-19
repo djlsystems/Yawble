@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 import type { KanbanCard } from '../api/kanban';
 import { itemLabel } from '../lib/backlog';
-import { KanbanStatusLabel, colourFor } from '../lib/kanban';
+import { KanbanStatusFact, KanbanStatusLabel, colourFor } from '../lib/kanban';
 import { workflowNumberTitle } from '../lib/workflowNumber';
 import type { PendingWake } from '../api/types';
 import WakeLines from './WakeLines.vue';
@@ -150,7 +150,10 @@ const progressCount = computed(() => props.card.progress?.length ?? 0);
     </div>
 
     <div class="k-card-foot">
-      <span class="k-card-status">{{ KanbanStatusLabel[card.status] }}</span>
+      <span class="k-card-status">
+        {{ KanbanStatusLabel[card.status] }}
+        <q-tooltip v-if="KanbanStatusFact[card.status]">{{ KanbanStatusFact[card.status] }}</q-tooltip>
+      </span>
 
       <!-- A DECISION IS WAITING ON A PERSON: ask the Concierge about it. A span with the button role,
            because this card is itself a button. -->

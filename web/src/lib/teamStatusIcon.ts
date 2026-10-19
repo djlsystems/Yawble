@@ -1,6 +1,7 @@
 import type { TeamWorkflows } from '../api/types';
 import type { TeamStatus } from './teamKpis';
 import { teamStatusText } from './teamsTable';
+import { EndingFact } from './states';
 
 /**
  * THE ICON BESIDE A TEAM'S ACTIVITY CHART, on the Teams table and on the team's own strip.
@@ -22,6 +23,8 @@ export interface TeamStatusIcon {
   words: string;
   /** Turns while the team works. */
   spin?: boolean;
+  /** Which of the three endings the word is, said on hover under it (`EndingFact`). */
+  fact?: string;
 }
 
 export function teamStatusIcon(
@@ -49,7 +52,7 @@ export function teamStatusIcon(
       return { icon: 'hourglass_top', tone: 'neutral', words };
     case 'idle': {
       const latest = workflows?.workflows[0]?.state ?? null;
-      if (latest === 'Completed') return { icon: 'check_circle', tone: 'positive', words: 'completed' };
+      if (latest === 'Completed') return { icon: 'check_circle', tone: 'positive', words: 'completed', fact: EndingFact.workflow };
       if (latest === 'Closed') return { icon: 'check_circle', tone: 'neutral', words: 'closed by a person' };
       return null;
     }

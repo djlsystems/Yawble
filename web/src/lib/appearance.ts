@@ -266,6 +266,12 @@ export function customTokens(theme: CustomTheme): Record<string, string> {
     '--os-warn': c.blocked,
     '--os-warn-ink': c.blocked,
     '--os-error': c.failed,
+    // The four states a person's theme chooses, said on the state tokens every chip and pill reads
+    // and on the activity lanes; needs you, idle and done keep the preset's.
+    '--os-state-running': c.running,
+    '--os-state-waiting': c.waiting,
+    '--os-state-blocked': c.blocked,
+    '--os-state-failed': c.failed,
     '--os-stat-running': c.running,
     '--os-stat-waiting': c.waiting,
     '--os-stat-blocked': c.blocked,

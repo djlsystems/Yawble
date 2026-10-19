@@ -8,6 +8,7 @@
 // The lanes and the words are pinned without a DOM in `lib/__tests__/teamActivity.spec.ts`;
 // this file pins that the dialog reads the tile's window and draws what those functions decide.
 // Run it in more than one zone: every time here is expected in the browser's own locale and zone.
+import { localStamp } from '../../lib/localTime';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
@@ -394,7 +395,7 @@ describe('the hover, as on the tile', () => {
     layOutChart();
     const box = await hoverAt(500, utc('14:05:00'));
 
-    expect(box.querySelector('.stats-tip-time')!.textContent).toBe(stamp(utc('14:04:30')));
+    expect(box.querySelector('.stats-tip-time')!.textContent).toBe(localStamp(utc('14:04:30')));
   });
 
   it('measures from the element\'s own width only when the chart cannot say', async () => {
@@ -404,7 +405,7 @@ describe('the hover, as on the tile', () => {
     sizeElement(1000);
     vi.spyOn(drawnChart(), 'convertFromPixel').mockReturnValue(Number.NaN as never);
 
-    expect((await hoverAt(500, utc('14:05:00'))).querySelector('.stats-tip-time')!.textContent).toBe(stamp(utc('14:04:30')));
+    expect((await hoverAt(500, utc('14:05:00'))).querySelector('.stats-tip-time')!.textContent).toBe(localStamp(utc('14:04:30')));
   });
 
   it('names what each member was doing at that instant, escaped', async () => {
@@ -416,7 +417,7 @@ describe('the hover, as on the tile', () => {
     // 14:05:45: the Manager running, Ines blocked.
     const box = await hoverAt(750, utc('14:05:30'));
 
-    expect(box.querySelector('.stats-tip-time')!.textContent).toBe(stamp(utc('14:05:45')));
+    expect(box.querySelector('.stats-tip-time')!.textContent).toBe(localStamp(utc('14:05:45')));
     expect(box.querySelector('b')).toBeNull();
     expect(box.textContent).toContain('Manager — running 1 min');
     expect(box.textContent).toContain('<b>Ines</b> — blocked under a minute (needs a key)');

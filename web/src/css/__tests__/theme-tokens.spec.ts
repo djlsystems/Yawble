@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { compileString } from 'sass';
 import { describe, expect, it } from 'vitest';
-import { KanbanColours } from '../../lib/kanban';
+import { KanbanColourState, KanbanColours } from '../../lib/kanban';
 
 /**
  * THE TOKENS, READ FROM THE COMPILED STYLESHEET rather than from the source text.
@@ -133,20 +133,22 @@ describe('the theme tokens', () => {
 });
 
 /**
- * THE KANBAN PALETTE, WORD TO COLOUR. `lib/kanban.ts` keeps the words and `app.scss` owns what they
- * look like, so this is the join: a word the lib can emit with no class behind it is a colourless
- * card and nothing failing.
+ * THE KANBAN PALETTE, WORD TO STATE. `lib/kanban.ts` keeps the words and the state each is drawn in;
+ * `app.scss` paints each word from that state's `--os-state-*` token, so a card wears the colour the
+ * Teams table, the member card and the Monitor give the same state. A word the lib can emit with no
+ * class behind it is a colourless card and nothing failing.
  */
 describe('the kanban palette', () => {
   for (const word of KanbanColours) {
-    it(`paints ${word} from the tokens`, () => {
+    const state = KanbanColourState[word];
+
+    it(`paints ${word} from the ${state} state token`, () => {
       expect(block(`.os-kanban-${word}`)).toEqual({
-        '--os-kanban-accent': `var(--os-kanban-${word})`,
-        '--os-kanban-tint': `var(--os-kanban-${word}-tint)`,
+        '--os-kanban-accent': `var(--os-state-${state})`,
+        '--os-kanban-tint': `color-mix(in srgb, var(--os-state-${state}) var(--os-kanban-tint-share), var(--os-surface))`,
       });
-      expect(light[`--os-kanban-${word}`]).toMatch(/^#[0-9a-f]{6}$/);
-      expect(light[`--os-kanban-${word}-tint`]).toMatch(/^#[0-9a-f]{6}$/);
-      expect(dark[`--os-kanban-${word}-tint`]).toMatch(/^#[0-9a-f]{6}$/);
+      expect(light[`--os-state-${state}`]).toMatch(/^#[0-9a-f]{6}$/);
+      expect(dark[`--os-state-${state}`]).toBeTruthy();
     });
   }
 });

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { EndingFact } from '../lib/states';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useQuasar } from 'quasar';
@@ -493,6 +494,7 @@ onUnmounted(() => {
             aria-hidden="true"
           ></span>
           {{ tabChip(team).text }}
+          <q-tooltip v-if="tabChip(team).text === 'COMPLETED'">{{ EndingFact.workflow }}</q-tooltip>
         </span>
         <q-icon
           name="close"

@@ -305,7 +305,7 @@ describe('a member\'s pending wake', () => {
     const effects = model.apply(row('agentContainer.instruction.Alpha/Developer', 'wake:1', { instruction: 'You asked to be woken.' }, undefined, 7))
 
     expect(effects).toEqual([{ kind: 'ripple', at: { kind: 'member', key: 'Alpha/Developer' }, tone: 'tell' }])
-    expect(model.ticker[0]!.verb).toBe('woken')
+    expect(model.ticker[0]!.verb).toBe('woke')
     expect(model.members.get('Alpha/Developer')).toMatchObject({ queued: 1, state: 'waiting' })
   })
 

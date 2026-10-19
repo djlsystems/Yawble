@@ -52,6 +52,20 @@ export function crossesDays(from: number, to: number, timeZone?: string): boolea
   return localDate(from, timeZone) !== localDate(to, timeZone)
 }
 
+/**
+ * THE ONE STAMP FOR AN INSTANT A PERSON READS on the feed, the Monitor, the tiles and the Kanban
+ * panel: a time on the current day as its time of day with seconds, another day with its date in
+ * front - both in the browser's zone and the locale's own hour cycle. Never relative words. `now`
+ * is a parameter so a spec can pin the day.
+ */
+export function localStamp(ms: number, now: number = Date.now(), timeZone?: string): string {
+  const options: LocalTimeOptions = { date: crossesDays(ms, now, timeZone) }
+
+  if (timeZone) options.timeZone = timeZone
+
+  return localTime(ms, options)
+}
+
 /** A stretch by its two ends, "11:38:02 AM – 3:41:17 PM", each with its date when it crosses days. */
 export function localStretch(from: number, to: number, timeZone?: string): string {
   const options: LocalTimeOptions = { date: crossesDays(from, to, timeZone) }

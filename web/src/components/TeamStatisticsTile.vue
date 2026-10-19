@@ -284,7 +284,7 @@ const option = computed(() => {
         const hovered = pointerAt.value ?? Number(first?.axisValue ?? end.value);
 
         // WITH ITS DATE, always: a time of day alone cannot say whether it was today.
-        return tooltipHtml(lanes.value, hovered, true);
+        return tooltipHtml(lanes.value, hovered);
       },
     },
     series: [

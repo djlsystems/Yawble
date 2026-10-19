@@ -249,15 +249,15 @@ async function cancel(wake: PendingWake) {
 
              The pulsing dot is what actually carries that - colour alone is a weak signal at badge
              size, and it is the one cue that reads at a glance from across a board. -->
-        <q-badge v-if="running" class="container-running">
+        <q-badge v-if="running" class="os-state-pill os-state-pill--running">
           <span class="container-running-dot" aria-hidden="true"></span>
           running
         </q-badge>
-        <q-badge v-else-if="waiting" color="warning" text-color="dark" :label="waitingWords" data-test="waiting-reason">
+        <q-badge v-else-if="waiting" class="os-state-pill os-state-pill--waiting" :label="waitingWords" data-test="waiting-reason">
           <q-tooltip>This member starts when that clears; nothing was refused.</q-tooltip>
         </q-badge>
-        <q-badge v-else color="grey-6" label="idle" />
-        <q-badge v-if="heavyQueued" color="warning" text-color="dark" label="waiting for a heavy-work slot" data-test="heavy-queued">
+        <q-badge v-else class="os-state-pill os-state-pill--idle" label="idle" />
+        <q-badge v-if="heavyQueued" class="os-state-pill os-state-pill--waiting" label="waiting for a heavy-work slot" data-test="heavy-queued">
           <q-tooltip>Its heavy work waits for the instance's heavy-work lease; its silence clock is paused.</q-tooltip>
         </q-badge>
 
@@ -426,7 +426,7 @@ async function cancel(wake: PendingWake) {
            BOTH LINES ARE ABSENT FOR A FAILURE WITH NO CLASS. The log is append-only and so is the
            board's reading of it. -->
       <div v-if="mark?.kind === 'failed'" class="q-mt-xs">
-        <q-badge color="negative" label="run failed" />
+        <q-badge class="os-state-pill os-state-pill--failed" label="run failed" />
         <q-badge
           v-if="failureClassLabel(mark.failureClass, snapshot.kind) !== null"
           color="grey-8"
@@ -451,7 +451,7 @@ async function cancel(wake: PendingWake) {
       </div>
 
       <div v-else-if="mark?.kind === 'blocked'" class="q-mt-xs">
-        <q-badge color="warning" label="stopped without finishing" />
+        <q-badge class="os-state-pill os-state-pill--blocked" label="stopped without finishing" />
         <div class="text-caption os-text-muted q-mt-xs">{{ mark.reason }}</div>
       </div>
 
@@ -474,7 +474,7 @@ async function cancel(wake: PendingWake) {
            did not get its question answered either, and the failure is what has to be cleared
            first. -->
       <div v-else-if="mark?.kind === 'needs-decision'" class="q-mt-xs">
-        <q-badge color="primary" label="waiting on a decision" />
+        <q-badge class="os-state-pill os-state-pill--needs-you" label="needs you" />
         <DiscussWithConcierge v-if="decision" :decision="decision" class="q-ml-xs" />
         <div class="text-caption os-text-muted q-mt-xs">{{ mark.reason }}</div>
       </div>
@@ -581,13 +581,9 @@ async function cancel(wake: PendingWake) {
    component styles and never uses - a dangling selector can put a whole panel one viewport below
    the fold, invisible rather than ugly. */
 
-/* THE LIVE COLOUR, `--os-ok`, the same token the KPI strip's live tile and pulse use, so a running
-   member and a running workflow read as one fact. */
-.container-running {
-  background: var(--os-ok);
-}
-
+/* THE PILL'S DOT TAKES THE STATE'S OWN COLOUR (`.os-state-pill` in `app.scss`), so a running
+   member, a running workflow and a running team read as one fact. */
 .container-running-dot {
-  background: var(--os-surface);
+  background: var(--os-state-pill);
 }
 </style>

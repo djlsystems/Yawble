@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Message } from '../../api/types'
 import { dateTimeOf, detail, label, ownerOf, summarise, timeOf } from '../summarise'
+import { localTime } from '../localTime'
 import { wakeLine, wakeTime } from '../wakes'
 import { localMinute } from '../localTime'
 
@@ -226,8 +227,8 @@ describe('dateTimeOf', () => {
   it('puts the local date in front of the time, so a message from days ago reads as such', () => {
     const at = new Date(2026, 9, 5, 14, 27, 37)
 
-    expect(dateTimeOf(at.toISOString())).toBe(`${at.toLocaleDateString()} ${timeOf(at.toISOString())}`)
-    expect(dateTimeOf(at.toISOString())).toMatch(/14[:.]27[:.]37/)
+    // Through the one formatter, in the locale's own hour cycle: never a forced 24-hour clock.
+    expect(dateTimeOf(at.toISOString())).toBe(localTime(at.getTime(), { date: true }))
   })
 
   it('returns empty for an unparseable stamp', () => {
@@ -236,10 +237,16 @@ describe('dateTimeOf', () => {
 })
 
 describe('timeOf', () => {
-  it('renders local wall-clock to the second', () => {
+  it("is the instant's time of day on its own day, in the locale's hour cycle", () => {
     const at = new Date(2026, 7, 14, 13, 5, 9)
 
-    expect(timeOf(at.toISOString())).toMatch(/13[:.]05[:.]09/)
+    expect(timeOf(at.toISOString(), at.getTime() + 60_000)).toBe(localTime(at.getTime()))
+  })
+
+  it('puts the date in front on another day', () => {
+    const at = new Date(2026, 7, 14, 13, 5, 9)
+
+    expect(timeOf(at.toISOString(), at.getTime() + 86_400_000)).toBe(localTime(at.getTime(), { date: true }))
   })
 
   it('returns empty rather than Invalid Date for an unparseable stamp', () => {

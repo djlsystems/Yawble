@@ -1,3 +1,4 @@
+import { localStamp } from './localTime';
 /**
  * WHAT KIND OF STEP A LIVE-VIEW LINE IS, as the Host says: every line comes as
  * `<when>` TAB `<kind>` TAB `<line>`, the kind one of `tool`, `result`, `text`, `user` or `note`, or
@@ -50,9 +51,9 @@ export function parseLiveLine(raw: string): LiveLine {
   return { at: null, ...splitLiveLine('text', raw) };
 }
 
-/** `13:34:41` in the viewer's own time zone. */
+/** A line's stamp in the viewer's own time zone and hour cycle (`localStamp`). */
 export function liveLineTime(at: Date): string {
-  return at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  return localStamp(at.getTime());
 }
 
 /** A line of the kind the Host gave it, as its chip and its words. */

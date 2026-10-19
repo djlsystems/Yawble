@@ -6,6 +6,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises } from '@vue/test-utils';
 import LiveViewDialog from '../LiveViewDialog.vue';
+import { localStamp } from '../../lib/localTime';
 import { asMemberId, asTeamId } from '../../api/types';
 import { bodyFind, bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
 
@@ -140,7 +141,7 @@ describe('the live view dialog', () => {
     await live.push(`${at.toISOString()}\ttool\tBash: npm test\n\ttext\tgarbage\n`);
 
     const rows = [...document.body.querySelectorAll<HTMLElement>('.live-view-line')];
-    expect(rows[0]!.querySelector('.live-view-time')!.textContent).toBe('09:34:41');
+    expect(rows[0]!.querySelector('.live-view-time')!.textContent).toBe(localStamp(at.getTime()));
     expect(rows[0]!.querySelector('.live-view-text')!.textContent).toBe('npm test');
     expect(rows[1]!.querySelector('.live-view-time')).toBeNull();
     expect(rows[1]!.textContent).toBe('garbage');
@@ -312,7 +313,7 @@ describe('the watch dialog: live run and earlier runs', () => {
 
     const rows = runRows();
     expect(rows.map((row) => row.dataset.seq)).toEqual(['9', '7', '3']);
-    expect(rows[0]!.querySelector('.earlier-run-when')!.textContent).toContain('09:09');
+    expect(rows[0]!.querySelector('.earlier-run-when')!.textContent).toContain(localStamp(new Date(2026, 8, 26, 9, 9).getTime()));
     expect(rows[0]!.textContent).toContain('workflow #409');
     expect(rows[0]!.querySelector('.earlier-run-duration')!.textContent).toBe('3m 05s');
     expect(rows[0]!.querySelector('.earlier-run-outcome')!.textContent).toBe('handed back');
@@ -447,7 +448,7 @@ describe('the watch dialog: live run and earlier runs', () => {
 
     const rows = [...document.body.querySelectorAll<HTMLElement>('.run-transcript-line')];
     expect(rows.map((row) => row.dataset.kind)).toEqual(['tool', 'tool', 'text']);
-    expect(rows[0]!.querySelector('.live-view-time')!.textContent).toBe('09:07:12');
+    expect(rows[0]!.querySelector('.live-view-time')!.textContent).toBe(localStamp(at.getTime()));
     expect(rows[0]!.querySelector('.live-view-label')!.textContent).toBe('Read');
     expect(rows[1]!.querySelector('.live-view-text')!.textContent).toBe('npm test');
     expect(rows[2]!.querySelector('.live-view-time')).toBeNull();

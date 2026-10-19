@@ -35,7 +35,10 @@ const shown = computed(() => teamStatusIcon(props.status, props.workflows, props
     :aria-label="shown.words"
   >
     <q-icon :name="shown.icon" size="22px" :class="{ 'team-status-icon--spin': shown.spin }" />
-    <q-tooltip>{{ shown.words }}</q-tooltip>
+    <q-tooltip>
+      {{ shown.words }}
+      <div v-if="shown.fact" class="q-mt-xs" data-team-status-fact>{{ shown.fact }}</div>
+    </q-tooltip>
   </span>
 </template>
 

@@ -241,7 +241,7 @@ describe('the tooltip', () => {
   ]), [], now)
 
   it('gives the time under the cursor, then one line per member with state and how long it has lasted', () => {
-    const html = tooltipHtml(lanes(), at(14, 25, 7), false)
+    const html = tooltipHtml(lanes(), at(14, 25, 7), now)
     const text = html.replace(/<[^>]+>/g, '')
 
     expect(text.startsWith(new Date(at(14, 25, 7)).toLocaleTimeString())).toBe(true)
@@ -250,8 +250,8 @@ describe('the tooltip', () => {
     expect(html).toContain('stats-chip--blocked')
   })
 
-  it('gives the date too when the window crosses days', () => {
-    const text = tooltipHtml(lanes(), at(14, 25, 7), true).replace(/<[^>]+>/g, '')
+  it('gives the date too when the instant is on another day than today', () => {
+    const text = tooltipHtml(lanes(), at(14, 25, 7), at(14, 25, 7) + 86_400_000).replace(/<[^>]+>/g, '')
 
     expect(text.startsWith(new Date(at(14, 25, 7)).toLocaleString())).toBe(true)
   })
@@ -259,7 +259,7 @@ describe('the tooltip', () => {
   it('escapes every name and reason, so markup reads as characters', () => {
     const html = tooltipHtml(activityLanes(activity([
       member('<b>Bold</b>', [{ state: 'failed', from: iso(at(14, 2)), to: null, reason: '<img src=x onerror=alert(1)>' }]),
-    ]), [], now), at(14, 3), false)
+    ]), [], now), at(14, 3), now)
 
     expect(html).not.toContain('<b>')
     expect(html).not.toContain('<img')
@@ -646,7 +646,7 @@ describe('a hold for a slot', () => {
     ({ state: 'held', from: iso(at(14, 20)), to: iso(at(14, 24)), reason, reasonKind })
 
   const tip = (span: ActivitySpan) =>
-    tooltipHtml(activityLanes(activity([member('Ines Lopez', [span])]), [], now), at(14, 22), false)
+    tooltipHtml(activityLanes(activity([member('Ines Lopez', [span])]), [], now), at(14, 22), now)
 
   it('is a state of its own, between waiting and blocked', () => {
     expect(ActivityStates).toEqual(['running', 'waiting', 'held', 'blocked', 'failed', 'idle'])

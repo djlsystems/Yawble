@@ -7,6 +7,7 @@ import type {
   KanbanStatus,
 } from '../api/kanban'
 import type { Outcome } from '../api/outcomes'
+import { EndingFact, type State } from './states'
 
 /**
  * Everything the board decides that is NOT a fetch and NOT a template.
@@ -61,6 +62,22 @@ export const KanbanColours = ['slate', 'blue', 'amber', 'orange', 'red', 'teal',
 
 export type KanbanColour = (typeof KanbanColours)[number]
 
+/**
+ * THE STATE EACH WORD IS DRAWN IN: `.os-kanban-<word>` takes that state's `--os-state-*` token, so a
+ * card wears the colour the Teams table, the member card and the Monitor give the same state. A
+ * completed or handed-back card (teal) is idle - nobody is working it - and a card in Done is done.
+ * `theme-tokens.spec.ts` holds the stylesheet to this.
+ */
+export const KanbanColourState: Readonly<Record<KanbanColour, State>> = {
+  slate: 'waiting',
+  blue: 'running',
+  amber: 'blocked',
+  orange: 'needs-you',
+  red: 'failed',
+  teal: 'idle',
+  green: 'done',
+}
+
 export function isKanbanColour(word: string | null | undefined): word is KanbanColour {
   return !!word && (KanbanColours as readonly string[]).includes(word)
 }
@@ -74,11 +91,21 @@ export const KanbanStatusLabel: Record<KanbanStatus, string> = {
   queued: 'Queued',
   running: 'Running',
   blocked: 'Blocked',
-  'needs-decision': 'Needs decision',
+  'needs-decision': 'Needs you',
   failed: 'Failed',
   handback: 'Handed back',
   completed: 'Completed',
   done: 'Done',
+}
+
+/**
+ * WHICH OF THE THREE ENDINGS a card's status word is, said on hover: `Completed` and `Handed back`
+ * are a run ending, `Done` is the Done lane. Null for a status that is not an ending.
+ */
+export const KanbanStatusFact: Partial<Record<KanbanStatus, string>> = {
+  completed: EndingFact.run,
+  handback: EndingFact.run,
+  done: EndingFact.card,
 }
 
 /**

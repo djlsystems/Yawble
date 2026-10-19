@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { EndingFact } from '../lib/states';
 import FieldHelp from './FieldHelp.vue';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
@@ -649,8 +650,12 @@ function showThread(row: WorkflowRow) {
         <span v-if="usePlural" class="team-kpi-state">
           <template v-if="chip.label === WaitingForSlot">{{ chip.label }} · {{ chip.held.join(', ') }}</template>
           <template v-else><template v-if="chip.label">{{ chip.label }} · </template>{{ chip.count }}</template>
+          <q-tooltip v-if="chip.label === 'COMPLETED'">{{ EndingFact.workflow }}</q-tooltip>
         </span>
-        <span v-else-if="singleState" class="team-kpi-state">{{ singleState }}</span>
+        <span v-else-if="singleState" class="team-kpi-state">
+          {{ singleState }}
+          <q-tooltip v-if="singleState === 'COMPLETED'">{{ EndingFact.workflow }}</q-tooltip>
+        </span>
       </div>
 
       <!-- AN EM DASH FOR A TEAM THAT HAS NEVER RUN, never `0m`. Zero is a measured duration and
@@ -820,7 +825,10 @@ function showThread(row: WorkflowRow) {
                   :subject="row.rootSubject"
                   noun="Workflow"
                 />
-                <span v-if="row.state" class="os-text-muted workflow-row-state"> · {{ row.state }}</span>
+                <span v-if="row.state" class="os-text-muted workflow-row-state">
+                  · {{ row.state }}
+                  <q-tooltip v-if="row.state === 'COMPLETED'">{{ EndingFact.workflow }}</q-tooltip>
+                </span>
               </div>
               <div class="col-auto mono text-caption q-ml-sm">
                 <span v-if="row.tone === 'live'" class="team-kpi-dot" aria-hidden="true"></span>
@@ -1434,20 +1442,22 @@ function showThread(row: WorkflowRow) {
 }
 
 
+/* THE TILE'S TONE IS A STATE'S COLOUR (`lib/states.ts`): live is running, warn blocked, error
+   failed, info waiting (a hand-back awaiting its Manager, or a slot). */
 .team-kpi--live {
-  border-color: var(--os-ok);
+  border-color: var(--os-state-running);
 }
 
 .team-kpi--warn {
-  border-color: var(--os-warn);
+  border-color: var(--os-state-blocked);
 }
 
 .team-kpi--error {
-  border-color: var(--q-negative);
+  border-color: var(--os-state-failed);
 }
 
 .team-kpi--info {
-  border-color: var(--q-info);
+  border-color: var(--os-state-waiting);
 }
 
 /* UNDECLARED IS NOT AN ERROR COLOUR, deliberately: those runs SUCCEEDED and the work stopped anyway.
@@ -1570,19 +1580,19 @@ function showThread(row: WorkflowRow) {
 }
 
 .workflow-row--live {
-  border-left-color: var(--os-ok);
+  border-left-color: var(--os-state-running);
 }
 
 .workflow-row--warn {
-  border-left-color: var(--os-warn);
+  border-left-color: var(--os-state-blocked);
 }
 
 .workflow-row--error {
-  border-left-color: var(--q-negative);
+  border-left-color: var(--os-state-failed);
 }
 
 .workflow-row--info {
-  border-left-color: var(--q-info);
+  border-left-color: var(--os-state-waiting);
 }
 
 /* UNDECLARED IS NOT AN ERROR COLOUR HERE EITHER, for `.team-kpi--quiet`'s own reason. */

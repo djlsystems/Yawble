@@ -1,4 +1,5 @@
 import type { MemberRunItem, RunOutcome } from '../api/types';
+import { localStamp, wireInstant } from './localTime';
 
 /**
  * HOW AN EARLIER RUN READS IN THE WATCH DIALOG'S LIST: when it started, how long it took and
@@ -32,13 +33,13 @@ export function runDuration(ms: number | null): string {
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
 }
 
-/** When a run started, in the viewer's own zone: `26 Sep 09:34`. Null reads `start unknown`, not 1970. */
+/** When a run started, in the viewer's own zone and hour cycle (`localStamp`). Null reads `start unknown`, not 1970. */
 export function runStartedText(iso: string | null): string {
   if (iso === null) return 'start unknown';
-  const at = new Date(iso);
-  if (Number.isNaN(at.getTime())) return iso;
+  const at = wireInstant(iso);
+  if (Number.isNaN(at)) return iso;
 
-  return at.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+  return localStamp(at);
 }
 
 /** The full start time for a tooltip, or none when the start is unknown or unreadable. */
