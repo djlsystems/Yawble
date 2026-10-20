@@ -376,7 +376,9 @@ builder.Services.AddSingleton(sp => new ConciergeMergeGate(
 builder.Services.AddSingleton(sp => new ConciergeArchiveGate(
     () => sp.GetRequiredService<TenantSettings>().ConciergeMayArchive));
 builder.Services.AddSingleton(new LedgerIdentity(ledgerStart?.InstanceId, ledgerStart?.LedgerStartedAt));
-builder.Services.AddSingleton(new KanbanStore(store));
+// THE ONE BOARD PROJECTION, scoped by each team's floor through TeamRegistry (late-bound: the registry
+// is composed after the stores), and told of the log's purges by retention and Reset.
+builder.Services.AddSingleton(sp => new KanbanStore(store, team => sp.GetRequiredService<TeamRegistry>().FloorFor(team)));
 
 // What each container has accepted and not finished. Without it nothing is durable: a container's
 // queue is an in-memory Channel and its cursor advances when a message is OFFERED, so a host
@@ -1448,7 +1450,8 @@ builder.Services.AddSingleton(sp => new TeamReset(
     sp.GetRequiredService<FolderRemoval>(),
     sp.GetRequiredService<RepositoryReset>(),
     sp.GetRequiredService<WorkspaceFileChangeStore>(),
-    sp.GetRequiredService<AgentStepStore>()));
+    sp.GetRequiredService<AgentStepStore>(),
+    purged: sp.GetRequiredService<KanbanStore>().Invalidate));
 
 // Reset repositories: trees through the one WorktreeRemoval, git through the one GitRunner (as the
 // agent, and into a local origin as the Host), kept branches named on the log.
@@ -1706,7 +1709,8 @@ builder.Services.AddSingleton(sp => new LogRetention(
     sp.GetRequiredService<IMessageLog>(),
     sp.GetRequiredService<ITenantLog>(),
     () => tenantSettings.LogRetentionDays,
-    sp.GetRequiredService<ILogger<LogRetention>>()));
+    sp.GetRequiredService<ILogger<LogRetention>>(),
+    purged: sp.GetRequiredService<KanbanStore>().Invalidate));
 builder.Services.AddHostedService(sp => new LogRetentionLoop(
     sp.GetRequiredService<LogRetention>(),
     sp.GetRequiredService<ILogger<LogRetentionLoop>>()));

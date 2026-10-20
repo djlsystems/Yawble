@@ -45,7 +45,8 @@ public sealed class LogRetention(
     ITenantLog tenant,
     Func<int> retentionDays,
     ILogger<LogRetention> logger,
-    int batch = LogRetention.DefaultBatch)
+    int batch = LogRetention.DefaultBatch,
+    Action? purged = null)
 {
     public const string SettingName = "log.retentionDays";
 
@@ -82,6 +83,10 @@ public sealed class LogRetention(
             if (body.Count > 0) second = await log.DeleteAsync(body, ct);
             _after = body.Count < room ? 0 : body[^1];
         }
+
+        // WHAT HOLDS ROWS IN MEMORY IS TOLD: the board projection appends from the log's position and
+        // cannot see a row go.
+        if (whole.Count > 0 || body.Count > 0) purged?.Invoke();
 
         var pass = new LogRetentionPass(
             days,

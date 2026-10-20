@@ -171,7 +171,8 @@ public sealed class TeamReset(
     FolderRemoval? removal = null,
     RepositoryReset? repositories = null,
     WorkspaceFileChangeStore? fileChanges = null,
-    AgentStepStore? runSteps = null)
+    AgentStepStore? runSteps = null,
+    Action? purged = null)
 {
     private readonly FolderRemoval _removal = removal ?? new FolderRemoval();
 
@@ -436,7 +437,10 @@ public sealed class TeamReset(
             after = page[^1].Seq;
         }
 
-        return await log.DeleteAsync(seqs, ct);
+        var report = await log.DeleteAsync(seqs, ct);
+        // The board projection holds rows in memory and cannot see one go.
+        if (seqs.Count > 0) purged?.Invoke();
+        return report;
     }
 
     /// <summary>Which directories this reset was asked to empty. Every one is keyed by the team's

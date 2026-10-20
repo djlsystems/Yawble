@@ -34,10 +34,44 @@ public static class KanbanProjector
     {
         filter ??= new KanbanFilter();
 
-        return new KanbanBoard(
-            KanbanLanes.All,
-            Matching(messages, filter).Select(state => state.ToCard()).ToList(),
-            filter);
+        return new KanbanBoard(KanbanLanes.All, Filter(ProjectAll(messages), filter), filter);
+    }
+
+    /// <summary>
+    /// Every card the rows make, unfiltered: what <c>KanbanStore</c> projects once per log position
+    /// and narrows per reader with <see cref="Filter"/>.
+    /// </summary>
+    public static IReadOnlyList<KanbanCard> ProjectAll(IReadOnlyList<Message> messages) =>
+        Matching(messages, new KanbanFilter()).Select(state => state.ToCard()).ToList();
+
+    /// <summary>
+    /// The cards <paramref name="filter"/> admits, by the rule <c>Matching</c> applies to projection
+    /// state: each filter is a list (<see cref="KanbanFilter.Values"/>), ANY of its values keeps a
+    /// card, and every filter given must hold. The outcome filter is the host's and is not read here.
+    /// </summary>
+    public static IReadOnlyList<KanbanCard> Filter(IReadOnlyList<KanbanCard> cards, KanbanFilter filter)
+    {
+        IEnumerable<KanbanCard> matching = cards;
+
+        if (KanbanFilter.Values(filter.Team) is { Count: > 0 } teams)
+        {
+            var wanted = teams.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            matching = matching.Where(c => wanted.Contains(c.Team));
+        }
+
+        if (KanbanFilter.Values(filter.Member) is { Count: > 0 } members)
+        {
+            var wanted = members.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            matching = matching.Where(c => c.Member is not null && wanted.Contains(c.Member));
+        }
+
+        if (KanbanFilter.Values(filter.Status) is { Count: > 0 } statuses)
+        {
+            var wanted = statuses.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            matching = matching.Where(c => wanted.Contains(c.Status));
+        }
+
+        return ReferenceEquals(matching, cards) ? cards : matching.ToList();
     }
 
     /// <summary>

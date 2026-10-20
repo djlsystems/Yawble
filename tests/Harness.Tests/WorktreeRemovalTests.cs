@@ -103,7 +103,7 @@ public sealed class WorktreeRemovalTests : IAsyncDisposable
             MessageTypes.Handback, """{"delivered":"part 1"}""", $"{Team}/Dev", done.Seq), Ct);
 
         var kanban = new KanbanStore(_bed.Store);
-        var board = await kanban.GetBoardAsync(filter: new KanbanFilter(Team: Team));
+        var board = await kanban.GetBoardAsync(new KanbanFilter(Team: Team), TestContext.Current.CancellationToken);
         var settledCard = board.Cards.Single(c => c.Member == "Dev").Id;
         var openCard = board.Cards.Single(c => c.Member == "Dev2").Id;
 
@@ -155,7 +155,7 @@ public sealed class WorktreeRemovalTests : IAsyncDisposable
             MessageTypes.Failed, """{"exitCode":1,"output":"gave out"}""", $"{Team}/Dev2", dropped.Seq), Ct);
 
         var kanban = new KanbanStore(_bed.Store);
-        var board = await kanban.GetBoardAsync(filter: new KanbanFilter(Team: Team));
+        var board = await kanban.GetBoardAsync(new KanbanFilter(Team: Team), TestContext.Current.CancellationToken);
 
         var keys = await WorktreeRemoval.SettledKeysAsync(kanban, Team, root.CorrelationId, "Manager");
 

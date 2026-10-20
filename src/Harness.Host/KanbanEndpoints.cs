@@ -138,14 +138,13 @@ public static class KanbanEndpoints
     /// already see, never a widening of it, so it does not exist here.
     /// </summary>
     private static async Task<KanbanBoard> BoardAsync(
-        IMessageLog log, TeamRegistry teams, IOutcomeStore outcomes, string team, KanbanFilter? filter = null,
+        IMessageLog log, KanbanStore kanban, IOutcomeStore outcomes, string team, KanbanFilter? filter = null,
         CancellationToken ct = default)
     {
-        // FROM THIS TEAM'S FLOOR, NOT FROM ZERO. See `AboveTheirFloors` - a board that reads the
-        // whole log shows a recreated team the cards of the team it replaced.
-        var messages = AboveTheirFloors(
-            await log.ReadRangeAsync(0, int.MaxValue),
-            _ => teams.FloorFor(team));
+        // FROM THIS TEAM'S FLOOR, NOT FROM ZERO, and from the one projection every reader shares:
+        // `KanbanStore` holds the rows above each team's floor, so a board never shows a recreated
+        // team the cards of the team it replaced, and never replays the whole log to say so.
+        var messages = await kanban.RowsAsync(ct);
 
         // `with` rather than a fresh record, so every other filter the caller asked for survives
         // while the team is replaced by the gated one.
@@ -174,12 +173,10 @@ public static class KanbanEndpoints
     /// carry none.
     /// </summary>
     private static async Task<KanbanCardDetail?> CardAsync(
-        IMessageLog log, TeamRegistry teams, string team, string id, CancellationToken ct = default,
+        IMessageLog log, KanbanStore kanban, string team, string id, CancellationToken ct = default,
         IOutcomeStore? outcomes = null)
     {
-        var messages = AboveTheirFloors(
-            await log.ReadRangeAsync(0, int.MaxValue),
-            _ => teams.FloorFor(team));
+        var messages = await kanban.RowsAsync(ct);
 
         if (KanbanProjector.ProjectCard(messages, id, new KanbanFilter(Team: team)) is not { } card)
             return null;
@@ -187,49 +184,6 @@ public static class KanbanEndpoints
         // THE OPEN WORKFLOW, as the board's cards carry it, and its outcome when asked.
         var attached = await CardOpenWorkflows.AttachAsync([card], messages, log, ct);
         return (outcomes is null ? attached : await CardOutcomes.AttachAsync(attached, outcomes, ct))[0];
-    }
-
-    /// <summary>
-    /// The rows that belong to the CURRENT incarnation of each team, dropping those a previous one
-    /// wrote.
-    ///
-    /// <para>
-    /// A TEAM IS ITS ID, AND AN ID CAN BE REUSED. Deleting a team does not touch the message log -
-    /// deliberately, because the log is append-only and other teams' messages cite it - so a team
-    /// created again with the same name IS the same id and inherits every row its predecessor
-    /// wrote - its predecessor's members would show cards in Needs You. `floor_seq` records where a
-    /// team's history starts, and the board asks it.
-    /// </para>
-    ///
-    /// <para>
-    /// A MESSAGE WHOSE TEAM CANNOT BE RECOVERED IS KEPT, and that is safe rather than lax. Only an
-    /// INSTRUCTION creates a card; every other arm updates one that already exists, by looking it up
-    /// on <c>{correlation}_{member}</c>. So a `container.started` from below the floor finds no card
-    /// - its instruction was dropped here - and does nothing. Dropping those rows instead would risk
-    /// losing an arm whose team is genuinely underivable on a card that is legitimately in scope.
-    /// </para>
-    /// </summary>
-    private static IReadOnlyList<Message> AboveTheirFloors(
-        IReadOnlyList<Message> messages, Func<string, long> floorFor)
-    {
-        // Cached per call: `FloorFor` walks a team's containers, and the tenant board asks about
-        // the same handful of teams once per message.
-        var floors = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
-
-        return messages
-            .Where(message =>
-            {
-                if (MessageTeam.Of(message) is not { } team) return true;
-
-                if (!floors.TryGetValue(team, out var floor))
-                {
-                    floor = floorFor(team);
-                    floors[team] = floor;
-                }
-
-                return message.Seq > floor;
-            })
-            .ToList();
     }
 
     private const string OutcomeFilterDescription =
@@ -254,6 +208,7 @@ public static class KanbanEndpoints
         HttpContext context,
         IMessageLog log,
         TeamRegistry teams,
+        KanbanStore kanban,
         TenantSettings settings,
         IOutcomeStore outcomes,
         IWakeStore wakes,
@@ -265,7 +220,7 @@ public static class KanbanEndpoints
         try
         {
             var filter = new KanbanFilter(Member: member, Status: status, Outcome: outcome);
-            var board = await BoardAsync(log, teams, outcomes, team, filter, ct);
+            var board = await BoardAsync(log, kanban, outcomes, team, filter, ct);
 
             // EACH CARD'S PENDING WAKES, from the one read of the wakes.
             board = board with { Cards = await CardWakes.AttachAsync(board.Cards, wakes, ct) };
@@ -316,6 +271,7 @@ public static class KanbanEndpoints
         HttpContext context,
         IMessageLog log,
         TeamRegistry teams,
+        KanbanStore kanban,
         TeamAccess access,
         TenantSettings settings,
         IOutcomeStore outcomes,
@@ -352,10 +308,9 @@ public static class KanbanEndpoints
 
             var filter = new KanbanFilter(Member: member, Status: status, Outcome: outcome);
 
-            // PER-TEAM FLOORS HERE, because this projection spans every team the caller reaches and
-            // each one's history starts in a different place.
-            var messages = AboveTheirFloors(
-                await log.ReadRangeAsync(0, int.MaxValue), teams.FloorFor);
+            // PER-TEAM FLOORS, applied where the rows are held: this projection spans every team the
+            // caller reaches and each one's history starts in a different place.
+            var messages = await kanban.RowsAsync(ct);
 
             // ONE PROJECTION, THEN THE SCOPE. The filter carries no team - every other narrowing
             // the caller asked for still runs inside the projection, exactly where it did.
@@ -390,13 +345,14 @@ public static class KanbanEndpoints
         string id,
         IMessageLog log,
         TeamRegistry teams,
+        KanbanStore kanban,
         IOutcomeStore outcomes,
         IWakeStore wakes,
         CancellationToken ct = default)
     {
         try
         {
-            var card = await CardAsync(log, teams, team, id, ct, outcomes);
+            var card = await CardAsync(log, kanban, team, id, ct, outcomes);
 
             if (card is null)
             {
@@ -422,6 +378,7 @@ public static class KanbanEndpoints
         HttpContext context,
         IMessageLog log,
         TeamRegistry teams,
+        KanbanStore kanban,
         CancellationToken ct = default)
     {
         if (request is null || string.IsNullOrWhiteSpace(request.LaneId))
@@ -441,7 +398,7 @@ public static class KanbanEndpoints
         try
         {
             var from = PrincipalClaims.From(context.User)?.Id ?? "console";
-            var card = await CardAsync(log, teams, team, id);
+            var card = await CardAsync(log, kanban, team, id);
 
             if (card is null)
             {
@@ -574,12 +531,13 @@ public static class KanbanEndpoints
         HttpContext context,
         IMessageLog log,
         TeamRegistry teams,
+        KanbanStore kanban,
         CancellationToken ct = default)
     {
         try
         {
             var from = PrincipalClaims.From(context.User)?.Id ?? "console";
-            var card = await CardAsync(log, teams, team, id);
+            var card = await CardAsync(log, kanban, team, id);
 
             if (card is null)
             {
@@ -667,6 +625,7 @@ public static class KanbanEndpoints
         HttpContext context,
         IMessageLog log,
         TeamRegistry teams,
+        KanbanStore kanban,
         CancellationToken ct = default)
     {
         if (request is null || string.IsNullOrWhiteSpace(request.Text))
@@ -677,7 +636,7 @@ public static class KanbanEndpoints
         try
         {
             var from = PrincipalClaims.From(context.User)?.Id ?? "console";
-            var card = await CardAsync(log, teams, team, id);
+            var card = await CardAsync(log, kanban, team, id);
 
             if (card is null)
             {

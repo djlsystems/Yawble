@@ -357,7 +357,7 @@ public sealed class NeedsYouTests : IAsyncLifetime
         var later = await FinishInALaterWorkflowAsync(team, card);
 
         var listed = Assert.Single((await ReadAsync("?part=stored")).GetProperty("items").EnumerateArray());
-        var done = await Services.GetRequiredService<KanbanStore>().GetCardAsync(card);
+        var done = await Services.GetRequiredService<KanbanStore>().GetCardAsync(card, TestContext.Current.CancellationToken);
 
         Assert.Equal("stranded", listed.GetProperty("kind").GetString());
         Assert.Equal($"The work continued in workflow {later}.", listed.GetProperty("words").GetString());
