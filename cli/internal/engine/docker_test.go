@@ -2,6 +2,7 @@ package engine_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -173,5 +174,16 @@ func TestWorkerRunJoinsControlsNamespaceWithNoPublishOrHostname(t *testing.T) {
 		if strings.Contains(line, refused) {
 			t.Errorf("%q carries %q", line, refused)
 		}
+	}
+}
+
+func TestAMissingDockerIsANotRunnableErrorThatNamesDocker(t *testing.T) {
+	_, err := engine.NewDocker(absentRunner{}).Version(context.Background())
+	var notRunnable *engine.NotRunnable
+	if !errors.As(err, &notRunnable) {
+		t.Fatalf("missing docker: %v", err)
+	}
+	if !strings.HasPrefix(err.Error(), "docker could not be run (is Docker installed and on PATH?)") {
+		t.Errorf("the refusal names the wrong engine: %s", err)
 	}
 }

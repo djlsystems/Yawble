@@ -22,7 +22,7 @@ func login(ctx context.Context, r Runner, program, registry, user, password stri
 	args := []string{"login", registry, "-u", user, "--password-stdin"}
 	res, err := in.RunInput(ctx, password, program, args...)
 	if err != nil {
-		return &NotRunnable{Err: err}
+		return &NotRunnable{Program: program, Err: err}
 	}
 	if res.ExitCode != 0 {
 		return fmt.Errorf("%s login %s: %s (exit %d)", program, registry, strings.TrimSpace(res.Stderr), res.ExitCode)

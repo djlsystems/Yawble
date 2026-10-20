@@ -86,7 +86,7 @@ func stats(ctx context.Context, r Runner, program, name string) (Stats, error) {
 	st := Stats{Command: program + " stats"}
 	res, err := r.Run(ctx, program, statsArgs(program, name)...)
 	if err != nil {
-		return st, &NotRunnable{Err: err}
+		return st, &NotRunnable{Program: program, Err: err}
 	}
 	if res.ExitCode != 0 {
 		lower := strings.ToLower(res.Stderr)

@@ -27,5 +27,5 @@ func NewFor(name string, r Runner, goos string) Engine {
 	if name == "docker" {
 		return NewDocker(r)
 	}
-	return podman{r: r, ipv4Pod: goos == "windows"}
+	return podman{base: base{program: "podman", r: r}, ipv4Pod: goos == "windows"}
 }

@@ -1,6 +1,6 @@
-// Package engine is the one interface between the CLI and a container engine. Podman is the
-// implementation this step ships; Docker is a later one behind the same interface. Every
-// method maps to one command line, listed in the Podman file, and tests assert those lines.
+// Package engine is the one interface between the CLI and a container engine, Podman or Docker.
+// Every method maps to one command line - the verbs both spell the same way on base, the rest in
+// each engine's file - and the tests assert those lines.
 package engine
 
 import (
@@ -192,7 +192,7 @@ func runHelper(ctx context.Context, r Runner, program string, s HelperSpec) (Res
 		res, err = r.Run(ctx, program, args...)
 	}
 	if err != nil {
-		return res, &NotRunnable{Err: err}
+		return res, &NotRunnable{Program: program, Err: err}
 	}
 	if res.ExitCode != 0 {
 		return res, fmt.Errorf("%s run %s %s: %s (exit %d)", program, s.Image, s.Entrypoint, strings.TrimSpace(res.Stderr), res.ExitCode)
@@ -208,7 +208,7 @@ func execTo(ctx context.Context, r Runner, program, name string, stdout io.Write
 	}
 	res, err := pipe.RunPipe(ctx, nil, stdout, program, execArgs(nil, name, args)...)
 	if err != nil {
-		return res, &NotRunnable{Err: err}
+		return res, &NotRunnable{Program: program, Err: err}
 	}
 	if res.ExitCode != 0 {
 		return res, fmt.Errorf("%s exec %s: %s (exit %d)", program, name, strings.TrimSpace(res.Stderr), res.ExitCode)
@@ -223,7 +223,7 @@ func execInput(ctx context.Context, r Runner, program, name, stdin string, args 
 	}
 	res, err := in.RunInput(ctx, stdin, program, execArgs([]string{"-i"}, name, args)...)
 	if err != nil {
-		return res, &NotRunnable{Err: err}
+		return res, &NotRunnable{Program: program, Err: err}
 	}
 	if res.ExitCode != 0 {
 		return res, fmt.Errorf("%s exec %s: %s (exit %d)", program, name, strings.TrimSpace(res.Stderr), res.ExitCode)
@@ -314,10 +314,19 @@ func createdDate(stdout string) string {
 // NotRunnable is the engine's program not starting at all: not on PATH, not executable. It is a
 // different fact from the program running and exiting non-zero (a machine that is down), and
 // the two get different advice, so this one is typed.
-type NotRunnable struct{ Err error }
+type NotRunnable struct {
+	// Program is the engine that could not be run: "podman" or "docker".
+	Program string
+	Err     error
+}
 
 func (e *NotRunnable) Error() string {
-	return "podman could not be run (is Podman installed and on PATH?): " + e.Err.Error()
+	program := e.Program
+	if program == "" {
+		program = "podman"
+	}
+	title := strings.ToUpper(program[:1]) + program[1:]
+	return program + " could not be run (is " + title + " installed and on PATH?): " + e.Err.Error()
 }
 
 func (e *NotRunnable) Unwrap() error { return e.Err }

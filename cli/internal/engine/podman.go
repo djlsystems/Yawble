@@ -3,22 +3,20 @@ package engine
 import (
 	"context"
 	"fmt"
-	"io"
 	"sort"
-	"strconv"
 	"strings"
-	"time"
 )
 
 // podman maps each Engine method to one command line. The lines ARE the contract: the tests in
-// podman_test.go and the instance tests assert them verbatim.
+// podman_test.go and the instance tests assert them verbatim. The verbs Docker spells the same
+// way are on base; here is what Podman does its own way.
 type podman struct {
-	r Runner
+	base
 	// ipv4Pod: the pod's network is pasta with -4 (Windows). See CreatePod.
 	ipv4Pod bool
 }
 
-func NewPodman(r Runner) Engine { return podman{r: r} }
+func NewPodman(r Runner) Engine { return podman{base: base{program: "podman", r: r}} }
 
 // podLayoutLabel marks a pod made with the Windows layout, so a pod from before it is known.
 const (
@@ -26,31 +24,16 @@ const (
 	podLayoutIPv4  = "pasta-ipv4"
 )
 
-func (podman) Name() string { return "podman" }
-
 // inspectFormat prints three fields on one line. The label is the settings `up` stamped on the
 // container; an absent label prints as an empty third field.
 const inspectFormat = "{{.State.Status}}|{{.ImageName}}|{{index .Config.Labels \"" + SettingsLabel + "\"}}"
-
-// run is every non-streaming call: one command line, and a non-zero exit becomes an error that
-// carries podman's own sentence, because that sentence is usually the whole diagnosis.
-func (p podman) run(ctx context.Context, args ...string) (Result, error) {
-	res, err := p.r.Run(ctx, "podman", args...)
-	if err != nil {
-		return res, &NotRunnable{Err: err}
-	}
-	if res.ExitCode != 0 {
-		return res, fmt.Errorf("podman %s: %s (exit %d)", strings.Join(args[:min(2, len(args))], " "), strings.TrimSpace(res.Stderr), res.ExitCode)
-	}
-	return res, nil
-}
 
 // exists is `podman <kind> exists <name>`: exit 0 yes, exit 1 no, anything else is a broken
 // engine and is said so rather than read as "no".
 func (p podman) exists(ctx context.Context, kind, name string) (bool, error) {
 	res, err := p.r.Run(ctx, "podman", kind, "exists", name)
 	if err != nil {
-		return false, &NotRunnable{Err: err}
+		return false, &NotRunnable{Program: "podman", Err: err}
 	}
 	switch res.ExitCode {
 	case 0:
@@ -61,18 +44,8 @@ func (p podman) exists(ctx context.Context, kind, name string) (bool, error) {
 	return false, fmt.Errorf("podman %s exists %s: %s (exit %d)", kind, name, strings.TrimSpace(res.Stderr), res.ExitCode)
 }
 
-func (p podman) Version(ctx context.Context) (string, error) {
-	res, err := p.run(ctx, "version", "--format", "{{.Client.Version}}")
-	return strings.TrimSpace(res.Stdout), err
-}
-
 func (p podman) VolumeExists(ctx context.Context, name string) (bool, error) {
 	return p.exists(ctx, "volume", name)
-}
-
-func (p podman) CreateVolume(ctx context.Context, name string) error {
-	_, err := p.run(ctx, "volume", "create", name)
-	return err
 }
 
 func (p podman) PodExists(ctx context.Context, name string) (bool, error) {
@@ -161,7 +134,7 @@ func (p podman) ContainerState(ctx context.Context, name string) (State, error) 
 func (p podman) Inspect(ctx context.Context, name string) (ContainerInfo, error) {
 	res, err := p.r.Run(ctx, "podman", "container", "inspect", "--format", inspectFormat, name)
 	if err != nil {
-		return ContainerInfo{State: StateAbsent}, &NotRunnable{Err: err}
+		return ContainerInfo{State: StateAbsent}, &NotRunnable{Program: "podman", Err: err}
 	}
 	if res.ExitCode != 0 {
 		if strings.Contains(strings.ToLower(res.Stderr), "no such") {
@@ -191,25 +164,6 @@ func parseInspect(stdout string) ContainerInfo {
 	return info
 }
 
-// Stats is `podman stats --no-stream --format json <name>`.
-func (p podman) Stats(ctx context.Context, name string) (Stats, error) {
-	return stats(ctx, p.r, "podman", name)
-}
-
-func (p podman) Remove(ctx context.Context, name string) error {
-	_, err := p.run(ctx, "rm", "-f", name)
-	return err
-}
-
-func (p podman) Exec(ctx context.Context, name string, args ...string) (Result, error) {
-	return p.run(ctx, execArgs(nil, name, args)...)
-}
-
-// List is `podman ps -a --filter <filter> --format {{.Names}}`.
-func (p podman) List(ctx context.Context, filter string) ([]string, error) {
-	return list(ctx, p.run, filter)
-}
-
 // Health reads `.State.Health.Status`; a Podman older than 4 names it `.State.Healthcheck`, and
 // its template error on the first is the sign to ask the second. A missing container is none.
 func (p podman) Health(ctx context.Context, name string) (Health, error) {
@@ -217,7 +171,7 @@ func (p podman) Health(ctx context.Context, name string) (Health, error) {
 	for _, field := range []string{"{{.State.Health.Status}}", "{{.State.Healthcheck.Status}}"} {
 		res, err := p.r.Run(ctx, "podman", "container", "inspect", "--format", field, name)
 		if err != nil {
-			return HealthNone, &NotRunnable{Err: err}
+			return HealthNone, &NotRunnable{Program: "podman", Err: err}
 		}
 		if res.ExitCode == 0 {
 			return healthOf(res.Stdout), nil
@@ -228,24 +182,6 @@ func (p podman) Health(ctx context.Context, name string) (Health, error) {
 		last = fmt.Errorf("podman container inspect %s: %s (exit %d)", name, strings.TrimSpace(res.Stderr), res.ExitCode)
 	}
 	return HealthNone, last
-}
-
-func (p podman) StopWithin(ctx context.Context, name string, grace int) error {
-	_, err := p.run(ctx, "stop", "-t", strconv.Itoa(grace), name)
-	return err
-}
-
-func (p podman) ExecTo(ctx context.Context, name string, stdout io.Writer, args ...string) (Result, error) {
-	return execTo(ctx, p.r, "podman", name, stdout, args)
-}
-
-func (p podman) ExecInput(ctx context.Context, name, stdin string, args ...string) (Result, error) {
-	return execInput(ctx, p.r, "podman", name, stdin, args)
-}
-
-func (p podman) CopyTo(ctx context.Context, name, src, dst string) error {
-	_, err := p.run(ctx, "cp", src, name+":"+dst)
-	return err
 }
 
 func (p podman) Run(ctx context.Context, s RunSpec) error {
@@ -263,26 +199,8 @@ func sortedKeys(m map[string]string) []string {
 	return keys
 }
 
-func (p podman) Start(ctx context.Context, name string) error {
-	_, err := p.run(ctx, "start", name)
-	return err
-}
-
-func (p podman) Stop(ctx context.Context, name string) error {
-	_, err := p.run(ctx, "stop", name)
-	return err
-}
-
 func (p podman) ImagePresent(ctx context.Context, ref string) (bool, error) {
 	return p.exists(ctx, "image", ref)
-}
-
-func (p podman) Pull(ctx context.Context, ref string, progress io.Writer) error {
-	return p.stream(ctx, progress, "pull", ref)
-}
-
-func (p podman) Login(ctx context.Context, registry, user, password string) error {
-	return login(ctx, p.r, "podman", registry, user, password)
 }
 
 // RemoveImage removes the image, or the multi-platform manifest list of that name: on the
@@ -294,55 +212,4 @@ func (p podman) RemoveImage(ctx context.Context, ref string) error {
 		_, err = p.run(ctx, "manifest", "rm", ref)
 	}
 	return err
-}
-
-func (p podman) RemoveVolume(ctx context.Context, name string) error {
-	_, err := p.run(ctx, "volume", "rm", name)
-	return err
-}
-
-// VolumeCreated is `podman volume inspect --format {{.CreatedAt}} <name>`, as a date.
-func (p podman) VolumeCreated(ctx context.Context, name string) (string, error) {
-	res, err := p.run(ctx, "volume", "inspect", "--format", "{{.CreatedAt}}", name)
-	return createdDate(res.Stdout), err
-}
-
-func (p podman) Logs(ctx context.Context, name string, follow bool, tail int, out io.Writer) error {
-	args := []string{"logs"}
-	if follow {
-		args = append(args, "--follow")
-	}
-	if tail > 0 {
-		args = append(args, "--tail", strconv.Itoa(tail))
-	}
-	return p.stream(ctx, out, append(args, name)...)
-}
-
-func (p podman) FollowSince(ctx context.Context, name string, since time.Time, out io.Writer) error {
-	return p.stream(ctx, out, "logs", "--follow", "--since", since.UTC().Format(time.RFC3339), name)
-}
-
-// stream runs a command whose output a person watches. A Runner that cannot stream still works:
-// the output arrives when the command ends.
-func (p podman) stream(ctx context.Context, out io.Writer, args ...string) error {
-	streamer, ok := p.r.(Streamer)
-	if !ok {
-		res, err := p.run(ctx, args...)
-		if err == nil {
-			_, _ = io.WriteString(out, res.Stdout)
-		}
-		return err
-	}
-	code, err := streamer.Stream(ctx, out, "podman", args...)
-	if err != nil {
-		return &NotRunnable{Err: err}
-	}
-	if code != 0 {
-		return fmt.Errorf("podman %s exited %d", args[0], code)
-	}
-	return nil
-}
-
-func (p podman) RunHelper(ctx context.Context, spec HelperSpec) (Result, error) {
-	return runHelper(ctx, p.r, "podman", spec)
 }
