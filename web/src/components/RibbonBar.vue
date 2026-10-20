@@ -160,8 +160,18 @@ onMounted(() => {
 
 onBeforeUnmount(() => observer?.disconnect());
 
-watch(() => entries.map((entry) => (entry.groupStart ? titleOf(entry.tab) : '')).join('\n'), () => void measure());
-watch(() => props.tight, () => void measure());
+/**
+ * A new width drops the old edges AT ONCE, before the new measurement has run: a fitting in between
+ * (the layout asks for one after each give-way step) would otherwise fit the new cluster against the
+ * old padding or title, read too few, and take a step the row did not need.
+ */
+function remeasure() {
+  edges = [];
+  void measure();
+}
+
+watch(() => entries.map((entry) => (entry.groupStart ? titleOf(entry.tab) : '')).join('\n'), remeasure);
+watch(() => props.tight, remeasure);
 
 /** The spilled tail, grouped under its tab's name the way the drawer groups it. */
 const overflowGroups = computed(() => {
