@@ -280,6 +280,12 @@ public static class TenantActions
     /// <summary>A team's additional instructions changed.</summary>
     public const string TeamInstructionsChanged = "team.instructions-changed";
 
+    /// <summary>A person replaced a team's environment: the variable names, never a value.</summary>
+    public const string TeamEnvChanged = "team.env-changed";
+
+    /// <summary>A person replaced a team's repository list.</summary>
+    public const string TeamReposChanged = "team.repos-changed";
+
     /// <summary>A person put the Agent catalog back to this build's built-in seed. Carries
     /// counts and nothing else - what moved, what broke, how many - because a Prompt is words
     /// somebody wrote and this table is readable by every person and kept forever.</summary>

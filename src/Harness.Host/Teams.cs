@@ -2407,7 +2407,8 @@ public sealed class TeamRegistry(
     /// would wake the Manager into a run with nothing to do. A failed clone is still sent.
     /// </summary>
     public async Task SetReposAsync(
-        string team, IReadOnlyList<string>? repos, CancellationToken ct = default, bool quietWhenCloned = false)
+        string team, IReadOnlyList<string>? repos, CancellationToken ct = default, bool quietWhenCloned = false,
+        Func<string, TriggerAudit>? audit = null)
     {
         var stored = ExistingName(team) ?? throw new InvalidOperationException($"No team '{team}'.");
         var validated = RepoUrls.Validate(repos, LocalRepoExists);
@@ -2418,7 +2419,7 @@ public sealed class TeamRegistry(
             return;
         }
 
-        await teams.SetReposAsync(stored, validated, ct);
+        await teams.SetReposAsync(stored, validated, audit?.Invoke(stored), ct);
         if (validated.Count == 0) _repos.Remove(stored);
         else _repos[stored] = validated;
 
@@ -2461,14 +2462,15 @@ public sealed class TeamRegistry(
     /// running agent is told another".
     /// </summary>
     public async Task SetEnvAsync(
-        string team, IReadOnlyDictionary<string, string>? env, CancellationToken ct = default)
+        string team, IReadOnlyDictionary<string, string>? env, CancellationToken ct = default,
+        Func<string, TriggerAudit>? audit = null)
     {
         var stored = ExistingName(team) ?? throw new InvalidOperationException($"No team '{team}'.");
         var validated = TeamEnv.Validate(env);
         var previous = _env.GetValueOrDefault(stored)
             ?? new Dictionary<string, string>(StringComparer.Ordinal);
 
-        await teams.SetEnvAsync(stored, validated, ct);
+        await teams.SetEnvAsync(stored, validated, audit?.Invoke(stored), ct);
 
         if (validated.Count == 0) _env.Remove(stored);
         else _env[stored] = validated;

@@ -207,8 +207,9 @@ public interface ITeamStore
     /// </summary>
     Task SetConciergeSettingsAsync(string? agent, TriggerAudit? audit = null, CancellationToken ct = default);
 
-    /// <summary>Replaces a team's ordered repository list.</summary>
-    Task SetReposAsync(string team, IReadOnlyList<string> repos, CancellationToken ct = default) =>
+    /// <summary>Replaces a team's ordered repository list. The <paramref name="audit"/> row, when given,
+    /// lands in the same transaction: both or neither.</summary>
+    Task SetReposAsync(string team, IReadOnlyList<string> repos, TriggerAudit? audit = null, CancellationToken ct = default) =>
         Task.CompletedTask;
 
     /// <summary>
@@ -220,7 +221,7 @@ public interface ITeamStore
     /// and not its row - it worked all session and was gone after a restart.
     /// </summary>
     Task SetEnvAsync(
-        string team, IReadOnlyDictionary<string, string> env, CancellationToken ct = default);
+        string team, IReadOnlyDictionary<string, string> env, TriggerAudit? audit = null, CancellationToken ct = default);
 
     /// <summary>
     /// Sets whether this team is paused.

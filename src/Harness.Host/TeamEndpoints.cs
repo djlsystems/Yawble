@@ -1120,11 +1120,16 @@ internal static class TeamEndpoints
 
         app.MapPut("/api/teams/{team}/env", async (
             [Description(Describe.Team)] string team,
-            IReadOnlyDictionary<string, string>? env, TeamRegistry teams, CancellationToken ct) =>
+            IReadOnlyDictionary<string, string>? env, TeamRegistry teams, HttpContext context, CancellationToken ct) =>
         {
             try
             {
-                await teams.SetEnvAsync(team, env, ct);
+                // THE ROW NAMES THE VARIABLES AND NEVER A VALUE: a team's env is where a secret goes.
+                await teams.SetEnvAsync(
+                    team, env, ct,
+                    stored => TenantLogging.Row(
+                        context, TenantActions.TeamEnvChanged, stored, teams.LabelFor(stored),
+                        new { names = (env?.Keys ?? []).Order(StringComparer.Ordinal).ToArray() }));
                 return Results.Ok(teams.EnvFor(teams.ExistingName(team)!));
             }
             catch (ArgumentException exception)
@@ -1150,7 +1155,8 @@ internal static class TeamEndpoints
         // clearing it is an explicit empty array rather than a special third state.
         app.MapPut("/api/teams/{team}/repos", async (
             [Description(Describe.Team)] string team,
-            JsonElement body, TeamRegistry teams, TeamRepoSetup repoSetup, LocalRepos localRepos, CancellationToken ct) =>
+            JsonElement body, TeamRegistry teams, TeamRepoSetup repoSetup, LocalRepos localRepos, HttpContext context,
+            CancellationToken ct) =>
         {
             // THE BARE ARRAY AS BEFORE, or `{ repos, repoChoices }` to answer a refused check (B001F).
             SetTeamRepos request;
@@ -1189,7 +1195,9 @@ internal static class TeamEndpoints
                     repos.Add(localRepository.Reference);
                 }
 
-                await teams.SetReposAsync(stored, repos, ct);
+                await teams.SetReposAsync(
+                    stored, repos, ct,
+                    audit: id => TenantLogging.Row(context, TenantActions.TeamReposChanged, id, teams.LabelFor(id), new { repos }));
                 attached = true;
                 return Results.Ok(teams.All().Single(t => string.Equals(t.Id, stored, StringComparison.OrdinalIgnoreCase)));
             }

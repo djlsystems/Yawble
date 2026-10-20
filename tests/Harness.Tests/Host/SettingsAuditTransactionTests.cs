@@ -104,6 +104,8 @@ public sealed class SettingsAuditTransactionTests : IAsyncLifetime
         (await client.PutAsJsonAsync("/api/teams/Alpha/member-agent", new { agents = headless }, Ct)).EnsureSuccessStatusCode();
         (await client.PostAsync("/api/teams/Alpha/pause", null, Ct)).EnsureSuccessStatusCode();
         (await client.PostAsync("/api/teams/Alpha/resume", null, Ct)).EnsureSuccessStatusCode();
+        (await client.PutAsJsonAsync("/api/teams/Alpha/env", new Dictionary<string, string> { ["API_TOKEN"] = "s3cret-value" }, Ct)).EnsureSuccessStatusCode();
+        (await client.PutAsJsonAsync("/api/teams/Alpha/repos", Array.Empty<string>(), Ct)).EnsureSuccessStatusCode();
 
         var rows = (await _factory.Services.GetRequiredService<ITenantLog>().ReadAsync(take: 100, ct: Ct)).Events;
         TenantEvent Row(string action, string? subject) =>
@@ -118,6 +120,41 @@ public sealed class SettingsAuditTransactionTests : IAsyncLifetime
         Assert.Contains(headless[^1], Row(TenantActions.TeamMemberAgentChanged, "Alpha").Detail, StringComparison.Ordinal);
         Assert.Equal("person@example.test", Row(TenantActions.TeamPaused, "Alpha").ActorEmail);
         Assert.Equal("person@example.test", Row(TenantActions.TeamResumed, "Alpha").ActorEmail);
+
+        // THE ENV ROW NAMES THE VARIABLES AND NEVER A VALUE: a team's env is where a secret goes.
+        var env = Row(TenantActions.TeamEnvChanged, "Alpha");
+        Assert.Equal("person@example.test", env.ActorEmail);
+        Assert.Contains("API_TOKEN", env.Detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("s3cret", env.Detail, StringComparison.Ordinal);
+        Assert.Equal("person@example.test", Row(TenantActions.TeamReposChanged, "Alpha").ActorEmail);
+        Assert.Contains("\"repos\"", Row(TenantActions.TeamReposChanged, "Alpha").Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_teams_env_is_not_changed_when_its_tenant_row_cannot_be_written()
+    {
+        var client = await PersonAsync();
+        await DropTenantEventsAsync();
+
+        var put = await client.PutAsJsonAsync("/api/teams/Alpha/env", new Dictionary<string, string> { ["API_TOKEN"] = "value" }, Ct);
+
+        Assert.False(put.IsSuccessStatusCode);
+        Assert.DoesNotContain("API_TOKEN", Teams.EnvFor("Alpha").Keys);
+        Assert.DoesNotContain("API_TOKEN", (await ScalarAsync("SELECT env FROM teams WHERE id = 'Alpha'"))?.ToString() ?? "", StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_teams_repo_list_is_not_changed_when_its_tenant_row_cannot_be_written()
+    {
+        var client = await PersonAsync();
+        await Teams.SetReposAsync("Alpha", ["https://example.test/owner/Widget.git"], Ct);
+        await DropTenantEventsAsync();
+
+        var put = await client.PutAsJsonAsync("/api/teams/Alpha/repos", Array.Empty<string>(), Ct);
+
+        Assert.False(put.IsSuccessStatusCode);
+        Assert.Equal(["https://example.test/owner/Widget.git"], Teams.ReposFor("Alpha"));
+        Assert.Contains("Widget", (await ScalarAsync("SELECT repos FROM teams WHERE id = 'Alpha'"))?.ToString() ?? "", StringComparison.Ordinal);
     }
 
     [Fact]

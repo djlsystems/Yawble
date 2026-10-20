@@ -190,33 +190,31 @@ public sealed class SqliteTeamStore : ITeamStore
             audit,
             ct);
 
-    public async Task SetReposAsync(string team, IReadOnlyList<string> repos, CancellationToken ct = default)
-    {
-        await using var connection = Open();
-        await using var command = connection.CreateCommand();
-
-        command.CommandText = "UPDATE teams SET repos = $repos WHERE id = $id";
-        command.Parameters.AddWithValue("$repos", JsonSerializer.Serialize(repos));
-        command.Parameters.AddWithValue("$id", team);
-
-        await command.ExecuteNonQueryAsync(ct);
-    }
+    public Task SetReposAsync(string team, IReadOnlyList<string> repos, TriggerAudit? audit = null, CancellationToken ct = default) =>
+        WriteAsync(
+            command =>
+            {
+                command.CommandText = "UPDATE teams SET repos = $repos WHERE id = $id";
+                command.Parameters.AddWithValue("$repos", JsonSerializer.Serialize(repos));
+                command.Parameters.AddWithValue("$id", team);
+            },
+            audit,
+            ct);
 
     /// <summary>Replaces a team's environment wholesale. A narrow single-column update rather than
     /// a re-save of the whole row: composing a PersistedTeam from a row read a moment earlier is how
     /// an edit comes to write every other column back as it was THEN.</summary>
-    public async Task SetEnvAsync(
-        string team, IReadOnlyDictionary<string, string> env, CancellationToken ct = default)
-    {
-        await using var connection = Open();
-        await using var command = connection.CreateCommand();
-
-        command.CommandText = "UPDATE teams SET env = $env WHERE id = $id";
-        command.Parameters.AddWithValue("$env", JsonSerializer.Serialize(env));
-        command.Parameters.AddWithValue("$id", team);
-
-        await command.ExecuteNonQueryAsync(ct);
-    }
+    public Task SetEnvAsync(
+        string team, IReadOnlyDictionary<string, string> env, TriggerAudit? audit = null, CancellationToken ct = default) =>
+        WriteAsync(
+            command =>
+            {
+                command.CommandText = "UPDATE teams SET env = $env WHERE id = $id";
+                command.Parameters.AddWithValue("$env", JsonSerializer.Serialize(env));
+                command.Parameters.AddWithValue("$id", team);
+            },
+            audit,
+            ct);
 
     public Task SetPausedAsync(string team, bool paused, TriggerAudit? audit = null, CancellationToken ct = default) =>
         WriteAsync(
