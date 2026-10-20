@@ -146,6 +146,28 @@ public static class MessageSchema
             CREATE INDEX ix_run_steps_member ON run_steps(team, member);
             CREATE INDEX ix_messages_causation ON messages(causation_seq);
             """),
+
+        // messages-006: a generated team column with its index, so a team-scoped read (a member's
+        // feed, the tokens tile, a team's workflows and their timings, the live marks) walks an
+        // index instead of the whole log; and a (correlation, type, seq) index for the reads that
+        // ask one workflow for rows of one type.
+        new MigrationStep(
+            "messages-006",
+            """
+            -- THE TEAM A ROW BELONGS TO, AS A COLUMN: the source up to its first '/', which is how
+            -- every team-scoped read narrowed the log with a LIKE that no index could serve. Virtual,
+            -- so no row is rewritten; NOCASE, as ContainerId compares a team. A source with no '/'
+            -- (a console, a person, a trigger) has no team here, which is what the reads expect:
+            -- MessageTeam.Of stays the rule for a row's team, and these reads only ever asked for
+            -- rows a member of the team wrote.
+            ALTER TABLE messages ADD COLUMN team TEXT COLLATE NOCASE
+                GENERATED ALWAYS AS (CASE WHEN instr(source, '/') > 0 THEN substr(source, 1, instr(source, '/') - 1) END) VIRTUAL;
+
+            CREATE INDEX ix_messages_team_seq ON messages(team, seq);
+
+            -- A workflow's rows of one type, newest first: what the open-workflow and standing reads ask.
+            CREATE INDEX ix_messages_correlation_type ON messages(correlation_id, type, seq);
+            """),
     ];
 
     /// <summary>How <c>file_changes.at</c> and <c>run_steps.at</c> spell an instant: round-trip UTC text of one width, so

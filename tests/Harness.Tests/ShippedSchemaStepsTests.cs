@@ -21,6 +21,7 @@ public sealed class ShippedSchemaStepsTests
         ["messages-003"] = "723b854944e859d30366df25094fd4d6a0a36ec6bde9a80835e8173ef140e2c7",
         ["messages-004"] = "0f253b2352fb1d0c6dc63d4e6e9bdae795e7d8cd3d4b8f362c1fa0b5c5ed9617",
         ["messages-005"] = "b5afce13c4f46e19bacfd783158015c0a468015d046428dec4539a883fa37b07",
+        ["messages-006"] = "c4e771b1609a9af3f3234aa4d9a05915339de032ae559da3644069c15a22ca7d",
         ["auth-001"] = "c2e86a37e99a689f95c32134db882b3add91e4775c1516c759ee1758482d374d",
         ["auth-002"] = "e1b6b1e9b3dab445585d7658667e95067126053948aaf4a0e3ebfd6f500605b4",
         ["auth-003"] = "a632d0adfee1aae846161316f552e5d72a91a586935a7c51dc45c39d624869d5",

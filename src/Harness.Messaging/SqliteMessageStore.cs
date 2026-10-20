@@ -513,14 +513,19 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
     /// `_` - which is exactly the kind of collision a same-length team name produces. Every call site pairs the returned patterns
     /// with `ESCAPE '\'` on both the `LIKE` and the `NOT LIKE` they appear in.
     /// </summary>
-    private static (string Prefix, string Nested) TeamSourcePattern(string team)
+    /// <summary>
+    /// The LIKE pattern that excludes a NESTED source (<c>team/x/y</c>) from a team's rows; the
+    /// team itself is matched on the generated <c>team</c> column (<c>messages-006</c>), which an
+    /// index serves, with <c>%</c>, <c>_</c> and <c>\</c> in the id escaped for the LIKE alone.
+    /// </summary>
+    private static string NestedSourcePattern(string team)
     {
         var escaped = team
             .Replace("\\", "\\\\", StringComparison.Ordinal)
             .Replace("%", "\\%", StringComparison.Ordinal)
             .Replace("_", "\\_", StringComparison.Ordinal);
 
-        return (escaped + "/%", escaped + "/%/%");
+        return escaped + "/%/%";
     }
 
     public async Task<IReadOnlyList<ContainerUsageRow>> SumUsageForTeamAsync(
@@ -531,7 +536,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         await using var connection = Open();
         await using var command = connection.CreateCommand();
 
-        var (prefix, nested) = TeamSourcePattern(team);
+        var nested = NestedSourcePattern(team);
 
         // COLLATE NOCASE because ContainerId equality is case-insensitive and the column has no
         // collation of its own. `ESCAPE '\'` pairs with `TeamSourcePattern`'s escaping of `_` and
@@ -588,7 +593,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             FROM messages
             WHERE type IN ($completed, $failed)
               AND json_extract(payload, '$.usageCountedOn') IS NULL
-              AND source LIKE $prefix COLLATE NOCASE ESCAPE '\'
+              AND team = $team
               AND source NOT LIKE $nested COLLATE NOCASE ESCAPE '\'
               AND seq > $since
             GROUP BY source COLLATE NOCASE
@@ -596,7 +601,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
 
         command.Parameters.AddWithValue("$completed", MessageTypes.Completed);
         command.Parameters.AddWithValue("$failed", MessageTypes.Failed);
-        command.Parameters.AddWithValue("$prefix", prefix);
+        command.Parameters.AddWithValue("$team", team);
         command.Parameters.AddWithValue("$nested", nested);
         command.Parameters.AddWithValue("$excluded", UsageSource.ExcludedEstimate);
         command.Parameters.AddWithValue("$since", sinceSeq);
@@ -644,7 +649,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         await using var connection = Open();
 
         // See TeamSourcePattern's own doc comment for why this is built there and not by hand.
-        var (prefix, nested) = TeamSourcePattern(team);
+        var nested = NestedSourcePattern(team);
 
         long correlation;
 
@@ -667,7 +672,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
                 FROM (
                   SELECT correlation_id, MAX(occurred_at) as last_activity
                   FROM messages
-                  WHERE source LIKE $prefix COLLATE NOCASE ESCAPE '\'
+                  WHERE team = $team
                     AND source NOT LIKE $nested COLLATE NOCASE ESCAPE '\'
                     AND seq > $since
                   GROUP BY correlation_id
@@ -676,7 +681,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
                 )
                 """;
 
-            pick.Parameters.AddWithValue("$prefix", prefix);
+            pick.Parameters.AddWithValue("$team", team);
             pick.Parameters.AddWithValue("$nested", nested);
             pick.Parameters.AddWithValue("$since", sinceSeq);
 
@@ -729,7 +734,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         CancellationToken ct)
     {
         // See TeamSourcePattern's own doc comment for why this is built there and not by hand.
-        var (prefix, nested) = TeamSourcePattern(team);
+        var nested = NestedSourcePattern(team);
 
         DateTimeOffset? startedAt = null;
         DateTimeOffset? lastActivityAt = null;
@@ -978,7 +983,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
                     WHERE correlation_id = $correlation
                       AND seq > $since
                       AND type IN ($completed, $failed)
-                      AND source LIKE $prefix COLLATE NOCASE ESCAPE '\'
+                      AND team = $team
                       AND source NOT LIKE $nested COLLATE NOCASE ESCAPE '\'
                     GROUP BY source COLLATE NOCASE)
                 ORDER BY seq
@@ -988,7 +993,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             last.Parameters.AddWithValue("$since", sinceSeq);
             last.Parameters.AddWithValue("$completed", MessageTypes.Completed);
             last.Parameters.AddWithValue("$failed", MessageTypes.Failed);
-            last.Parameters.AddWithValue("$prefix", prefix);
+            last.Parameters.AddWithValue("$team", team);
             last.Parameters.AddWithValue("$nested", nested);
 
             await using var reader = await last.ExecuteReaderAsync(ct);
@@ -1020,7 +1025,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
                 WHERE m.correlation_id = $correlation
                   AND m.seq > $since
                   AND m.type = $failed
-                  AND m.source LIKE $prefix COLLATE NOCASE ESCAPE '\'
+                  AND m.team = $team
                   AND m.source NOT LIKE $nested COLLATE NOCASE ESCAPE '\'
                   AND m.seq IN (
                     SELECT MAX(seq) FROM messages
@@ -1034,7 +1039,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             failureDetails.Parameters.AddWithValue("$correlation", correlation);
             failureDetails.Parameters.AddWithValue("$since", sinceSeq);
             failureDetails.Parameters.AddWithValue("$failed", MessageTypes.Failed);
-            failureDetails.Parameters.AddWithValue("$prefix", prefix);
+            failureDetails.Parameters.AddWithValue("$team", team);
             failureDetails.Parameters.AddWithValue("$nested", nested);
 
             await using var reader = await failureDetails.ExecuteReaderAsync(ct);
@@ -1092,7 +1097,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
                 WHERE d.correlation_id = $correlation
                   AND d.seq > $since
                   AND d.type IN ($blocked, $needsDecision)
-                  AND d.source LIKE $prefix COLLATE NOCASE ESCAPE '\'
+                  AND d.team = $team
                   AND d.source NOT LIKE $nested COLLATE NOCASE ESCAPE '\'
                   AND NOT EXISTS (
                       SELECT 1 FROM messages later
@@ -1108,7 +1113,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             declarations.Parameters.AddWithValue("$blocked", MessageTypes.Blocked);
             declarations.Parameters.AddWithValue("$needsDecision", MessageTypes.NeedsDecision);
             declarations.Parameters.AddWithValue("$started", MessageTypes.Started);
-            declarations.Parameters.AddWithValue("$prefix", prefix);
+            declarations.Parameters.AddWithValue("$team", team);
             declarations.Parameters.AddWithValue("$nested", nested);
 
             await using var reader = await declarations.ExecuteReaderAsync(ct);
@@ -1146,7 +1151,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
                 WHERE correlation_id = $correlation
                   AND seq > $since
                   AND type = $failed
-                  AND source LIKE $prefix COLLATE NOCASE ESCAPE '\'
+                  AND team = $team
                   AND source NOT LIKE $nested COLLATE NOCASE ESCAPE '\'
                   AND json_extract(payload, '$.{PayloadFields.StoppedByPerson}') IS NOT 1
                 """;
@@ -1154,7 +1159,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             failures.Parameters.AddWithValue("$correlation", correlation);
             failures.Parameters.AddWithValue("$since", sinceSeq);
             failures.Parameters.AddWithValue("$failed", MessageTypes.Failed);
-            failures.Parameters.AddWithValue("$prefix", prefix);
+            failures.Parameters.AddWithValue("$team", team);
             failures.Parameters.AddWithValue("$nested", nested);
 
             runsFailed = Convert.ToInt32(
@@ -1186,7 +1191,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
                 WHERE s.correlation_id = $correlation
                   AND s.seq > $since
                   AND s.type = $started
-                  AND s.source LIKE $prefix COLLATE NOCASE ESCAPE '\'
+                  AND s.team = $team
                   AND s.source NOT LIKE $nested COLLATE NOCASE ESCAPE '\'
                 ORDER BY s.seq
                 """;
@@ -1197,7 +1202,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             pairs.Parameters.AddWithValue("$completed", MessageTypes.Completed);
             pairs.Parameters.AddWithValue("$failed", MessageTypes.Failed);
             pairs.Parameters.AddWithValue("$blocked", MessageTypes.Blocked);
-            pairs.Parameters.AddWithValue("$prefix", prefix);
+            pairs.Parameters.AddWithValue("$team", team);
             pairs.Parameters.AddWithValue("$nested", nested);
 
             await using var reader = await pairs.ExecuteReaderAsync(ct);
@@ -1712,7 +1717,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
 
         await using var connection = Open();
 
-        var (prefix, nested) = TeamSourcePattern(team);
+        var nested = NestedSourcePattern(team);
 
         var correlations = new List<long>();
 
@@ -1747,14 +1752,14 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
                 """
                 SELECT DISTINCT m.correlation_id
                 FROM messages m
-                WHERE m.source LIKE $prefix COLLATE NOCASE ESCAPE '\'
+                WHERE m.team = $team
                   AND m.source NOT LIKE $nested COLLATE NOCASE ESCAPE '\'
                   AND m.seq > $since
                 ORDER BY m.correlation_id DESC
                 LIMIT 50
                 """;
 
-            pick.Parameters.AddWithValue("$prefix", prefix);
+            pick.Parameters.AddWithValue("$team", team);
             pick.Parameters.AddWithValue("$nested", nested);
             pick.Parameters.AddWithValue("$since", sinceSeq);
 
@@ -1790,13 +1795,13 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
                 $"""
                 SELECT COUNT(DISTINCT m.correlation_id)
                 FROM messages m
-                WHERE m.source LIKE $prefix COLLATE NOCASE ESCAPE '\'
+                WHERE m.team = $team
                   AND m.source NOT LIKE $nested COLLATE NOCASE ESCAPE '\'
                   AND m.seq > $since
                   AND {WorkflowOpenSql.NotClosed}
                 """;
 
-            count.Parameters.AddWithValue("$prefix", prefix);
+            count.Parameters.AddWithValue("$team", team);
             count.Parameters.AddWithValue("$nested", nested);
             count.Parameters.AddWithValue("$since", sinceSeq);
             WorkflowOpenSql.Bind(count);
@@ -1817,12 +1822,12 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
                 """
                 SELECT COUNT(DISTINCT m.correlation_id)
                 FROM messages m
-                WHERE m.source LIKE $prefix COLLATE NOCASE ESCAPE '\'
+                WHERE m.team = $team
                   AND m.source NOT LIKE $nested COLLATE NOCASE ESCAPE '\'
                   AND m.seq > $since
                 """;
 
-            total.Parameters.AddWithValue("$prefix", prefix);
+            total.Parameters.AddWithValue("$team", team);
             total.Parameters.AddWithValue("$nested", nested);
             total.Parameters.AddWithValue("$since", sinceSeq);
 
@@ -1852,13 +1857,13 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
                   AND correlation_id IN (
                       SELECT DISTINCT m.correlation_id
                       FROM messages m
-                      WHERE m.source LIKE $prefix COLLATE NOCASE ESCAPE '\'
+                      WHERE m.team = $team
                         AND m.source NOT LIKE $nested COLLATE NOCASE ESCAPE '\'
                         AND m.seq > $since
                         AND {WorkflowOpenSql.NotClosed})
                 """;
 
-            span.Parameters.AddWithValue("$prefix", prefix);
+            span.Parameters.AddWithValue("$team", team);
             span.Parameters.AddWithValue("$nested", nested);
             span.Parameters.AddWithValue("$since", sinceSeq);
             WorkflowOpenSql.Bind(span);
@@ -1892,7 +1897,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
 
         await using var connection = Open();
 
-        var (prefix, nested) = TeamSourcePattern(team);
+        var nested = NestedSourcePattern(team);
 
         await using var stretch = connection.CreateCommand();
 
@@ -1908,12 +1913,12 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
               AND correlation_id IN (
                   SELECT DISTINCT m.correlation_id
                   FROM messages m
-                  WHERE m.source LIKE $prefix COLLATE NOCASE ESCAPE '\'
+                  WHERE m.team = $team
                     AND m.source NOT LIKE $nested COLLATE NOCASE ESCAPE '\'
                     AND m.seq > $since)
             """;
 
-        stretch.Parameters.AddWithValue("$prefix", prefix);
+        stretch.Parameters.AddWithValue("$team", team);
         stretch.Parameters.AddWithValue("$nested", nested);
         stretch.Parameters.AddWithValue("$since", sinceSeq);
 

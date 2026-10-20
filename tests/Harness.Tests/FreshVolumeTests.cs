@@ -41,7 +41,7 @@ public sealed class FreshVolumeTests : IDisposable
     public void The_steps_are_the_squash_and_the_steps_added_after_it()
     {
         Assert.Equal(
-            ["messages-001", "messages-002", "messages-003", "messages-004", "messages-005", "auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "auth-014", "auth-015", "auth-016", "auth-017", "auth-018", "auth-019", "auth-020", "auth-021", "auth-022", "auth-023", "auth-024", "auth-025", "auth-026", "skill-001", "skill-002", "skill-003", "skill-004", "backlog-001", "backlog-002", "backlog-003", "backlog-004", "outcome-001", "outcome-002", "outcome-003", "outcome-004", "outcome-005", "outcome-006", "outcome-007"],
+            ["messages-001", "messages-002", "messages-003", "messages-004", "messages-005", "messages-006", "auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "auth-014", "auth-015", "auth-016", "auth-017", "auth-018", "auth-019", "auth-020", "auth-021", "auth-022", "auth-023", "auth-024", "auth-025", "auth-026", "skill-001", "skill-002", "skill-003", "skill-004", "backlog-001", "backlog-002", "backlog-003", "backlog-004", "outcome-001", "outcome-002", "outcome-003", "outcome-004", "outcome-005", "outcome-006", "outcome-007"],
             SchemaModules.All.Select(s => s.Id));
     }
 
@@ -53,7 +53,7 @@ public sealed class FreshVolumeTests : IDisposable
         await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
 
         Assert.Equal(
-            ["auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "auth-014", "auth-015", "auth-016", "auth-017", "auth-018", "auth-019", "auth-020", "auth-021", "auth-022", "auth-023", "auth-024", "auth-025", "auth-026", "backlog-001", "backlog-002", "backlog-003", "backlog-004", "messages-001", "messages-002", "messages-003", "messages-004", "messages-005", "outcome-001", "outcome-002", "outcome-003", "outcome-004", "outcome-005", "outcome-006", "outcome-007", "skill-001", "skill-002", "skill-003", "skill-004"],
+            ["auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "auth-014", "auth-015", "auth-016", "auth-017", "auth-018", "auth-019", "auth-020", "auth-021", "auth-022", "auth-023", "auth-024", "auth-025", "auth-026", "backlog-001", "backlog-002", "backlog-003", "backlog-004", "messages-001", "messages-002", "messages-003", "messages-004", "messages-005", "messages-006", "outcome-001", "outcome-002", "outcome-003", "outcome-004", "outcome-005", "outcome-006", "outcome-007", "skill-001", "skill-002", "skill-003", "skill-004"],
             await migrator.AppliedAsync(ct: Ct));
 
         // Nothing pending on the second start, so no backup and no change.
@@ -663,6 +663,42 @@ public sealed class FreshVolumeTests : IDisposable
     /// `messages-004` applies to an empty volume and to one with messages: the messages stay, and a
     /// recorded file change is stored, read back and removed with its team.
     /// </summary>
+    /// <summary>
+    /// `messages-006` applies to an empty volume and to one with messages: the generated `team`
+    /// column reads each row's team, its index exists, and nothing of the rows changes.
+    /// </summary>
+    [Fact]
+    public async Task The_team_index_step_applies_to_an_empty_and_an_existing_volume()
+    {
+        var migrator = new SchemaMigrator(Database);
+        await migrator.ApplyAsync([.. SchemaModules.All.Where(s => s.Id != "messages-006")], ct: Ct);
+        Assert.DoesNotContain("ix_messages_team_seq", await ColumnAsync("SELECT name FROM sqlite_master WHERE type = 'index'"));
+
+        await ExecuteAsync(
+            """
+            INSERT INTO messages (type, payload, source, correlation_id, causation_seq, depth, occurred_at)
+            VALUES ('container.started', '{}', 'Alpha/Dev', 1, NULL, 0, '2026-10-16T20:00:00.0000000+00:00'),
+                   ('agentContainer.instruction.Alpha/Dev', '{"instruction":"go"}', 'console', 2, NULL, 0, '2026-10-16T20:00:01.0000000+00:00');
+            """);
+
+        await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
+
+        Assert.Contains("messages-006", await migrator.AppliedAsync(ct: Ct));
+        Assert.Contains("ix_messages_team_seq", await ColumnAsync("SELECT name FROM sqlite_master WHERE type = 'index'"));
+        Assert.Equal(["Alpha", ""], await ColumnAsync("SELECT COALESCE(team, '') FROM messages ORDER BY seq"));
+        Assert.Equal(["container.started", "agentContainer.instruction.Alpha/Dev"], await ColumnAsync("SELECT type FROM messages ORDER BY seq"));
+
+        SqliteConnection.ClearAllPools();
+        File.Delete(Database);
+        await new SchemaMigrator(Database).ApplyAsync(SchemaModules.All, ct: Ct);
+        await ExecuteAsync(
+            """
+            INSERT INTO messages (type, payload, source, correlation_id, causation_seq, depth, occurred_at)
+            VALUES ('container.started', '{}', 'beta/Dev', 1, NULL, 0, '2026-10-16T20:00:00.0000000+00:00');
+            """);
+        Assert.Equal(["beta"], await ColumnAsync("SELECT team FROM messages"));
+    }
+
     [Fact]
     public async Task The_file_changes_step_applies_to_an_empty_and_an_existing_volume()
     {
