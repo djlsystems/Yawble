@@ -65,6 +65,23 @@ public sealed record WorkersRecord(DateTimeOffset RecordedAt, IReadOnlyList<Work
         string.Equals(run.Member.Team, hold.Team, StringComparison.OrdinalIgnoreCase)
         && string.Equals(run.Member.Name, hold.Member, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Composes and writes the record, and never throws: the timer that calls this runs on a thread
+    /// pool thread where an exception would end the process, and a control that cannot record its
+    /// workers still serves them.
+    /// </summary>
+    public static void RecordSafely(Func<WorkersRecord> compose, string dataRoot, ILogger log)
+    {
+        try
+        {
+            compose().Write(dataRoot, log);
+        }
+        catch (Exception exception)
+        {
+            log.LogWarning("Workers: could not record the workers: {Error}", exception.Message);
+        }
+    }
+
     /// <summary>Never throws: a control that cannot record it still serves its workers, and logs why.</summary>
     public void Write(string dataRoot, ILogger? log = null)
     {

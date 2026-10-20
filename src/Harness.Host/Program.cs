@@ -2535,7 +2535,7 @@ workerConnections.Changed += () => WipRecord.Of(tenantSettings, app.Services.Get
 // list of the settings they read would drift from the code that reads them.
 if (control)
 {
-    tenantSettings.Changed += setting => _ = workerConnections.SettingsChangedAsync();
+    tenantSettings.Changed += setting => Observed.Forget(workerConnections.SettingsChangedAsync(), app.Logger, "settings push to the workers");
 }
 // In control the start's retry of unfinished removals ran before any worker could connect: each worker
 // that joins retries them once, so what only the agent's pass can remove does not wait for a person.
@@ -2611,9 +2611,11 @@ if (!control)
 System.Threading.Timer? workersRecording = null;
 if (control)
 {
-    void RecordWorkers() => WorkersRecord.Of(
-        app.Services.GetRequiredService<WorkerPool>(), app.Services.GetRequiredService<WipLedger>(),
-        worker => app.Services.GetRequiredService<RunDirectory>().OpenOn(worker), BuildVersion.Current.Version).Write(dataRoot, app.Logger);
+    void RecordWorkers() => WorkersRecord.RecordSafely(
+        () => WorkersRecord.Of(
+            app.Services.GetRequiredService<WorkerPool>(), app.Services.GetRequiredService<WipLedger>(),
+            worker => app.Services.GetRequiredService<RunDirectory>().OpenOn(worker), BuildVersion.Current.Version),
+        dataRoot, app.Logger);
     workerConnections.Changed += RecordWorkers;
     workersRecording = new System.Threading.Timer(_ => RecordWorkers(), null, TimeSpan.Zero, WorkersRecord.Every);
 }
@@ -2642,13 +2644,17 @@ recordConciergeSessions = () => _ = Task.Run(async () =>
 });
 app.Services.GetRequiredService<ConciergeSessionStore>().Changed += () => recordConciergeSessions?.Invoke();
 recordConciergeSessions();
-app.Lifetime.ApplicationStopping.Register(workerConnections.Stop);
-app.Lifetime.ApplicationStopping.Register(() => workersRecording?.Dispose());
-// The Host going down ends no admission hold: a waiter it withdraws, or admits to a slot it frees,
-// leaves its row open for the next start to close, marked unfinished. Registered after the other
-// stopping callbacks, so it runs before them (a token runs its callbacks newest first) - before
-// dropping the workers frees a slot.
-app.Lifetime.ApplicationStopping.Register(wip.HostStopping);
+// ONE CALLBACK, IN THIS ORDER. The Host going down ends no admission hold: a waiter it withdraws, or
+// admits to a slot it frees, leaves its row open for the next start to close, marked unfinished - so
+// the ledger is told first, before dropping the workers frees a slot. One callback rather than three
+// because a token runs its callbacks newest first, and an order that depends on registration order
+// is an order the next registration silently breaks.
+app.Lifetime.ApplicationStopping.Register(() =>
+{
+    wip.HostStopping();
+    workerConnections.Stop();
+    workersRecording?.Dispose();
+});
 Func<IReadOnlyList<WorkerSample>> workersNow = () => WorkersView.Of(
     app.Services.GetRequiredService<WorkerPool>(), app.Services.GetRequiredService<WipLedger>(), BuildVersion.Current.Version,
     worker => ConciergeSessionsView.TerminalsOn(
@@ -2694,9 +2700,9 @@ var registryForPush = app.Services.GetRequiredService<TeamRegistry>();
 // would learn about another team's queue depth and current instruction the moment anything
 // happened there, regardless of what /api/overview and /api/messages are willing to show.
 containers.Changed += snapshot =>
-    _ = hub.Clients.Group(snapshot.Team).SendAsync("containerChanged", snapshot);
+    Observed.Forget(hub.Clients.Group(snapshot.Team).SendAsync("containerChanged", snapshot), app.Logger, "containerChanged push");
 registryForPush.TeamChanged += team =>
-    _ = hub.Clients.Group(team.Id).SendAsync("teamChanged", team);
+    Observed.Forget(hub.Clients.Group(team.Id).SendAsync("teamChanged", team), app.Logger, "teamChanged push");
 
 // RequireAuthorization, not a null check in the handler: the policy is what populates context.User
 // for a key-authenticated request while the cookie is the default scheme. A handler that only
