@@ -30,7 +30,9 @@ const emit = defineEmits<{ action: [action: string]; fit: [shown: number] }>();
  *
  * `commands` false is the phone row (below `sm`): the same logo and cluster with no commands, which
  * the drawer lists instead. `tight` is the row short of room (`lib/headerFit.ts`): each command's
- * padding drops from 8px to 4px a side, and the row is measured again.
+ * padding drops from 8px to 4px a side, the active team's title is capped at 3rem with an ellipsis
+ * (its full name the title's tooltip and aria-label, and whole on the strip's team tab), and the row
+ * is measured again.
  */
 const props = withDefaults(defineProps<{ commands?: boolean; tight?: boolean }>(), { commands: true, tight: false });
 
@@ -57,13 +59,11 @@ function run(item: RibbonItem) {
 // `fitCount` for why one measurement is enough. Re-measured only when an entry's WIDTH can change,
 // which is the active team's name in front of its group, and once fonts land.
 
-/** The overflow button's footprint: a dense round button and its margin. */
-const OverflowWidth = 40;
-
 const bar = ref<HTMLElement | null>(null);
 const band = ref<HTMLElement | null>(null);
 const start = ref<HTMLElement | null>(null);
 const end = ref<HTMLElement | null>(null);
+const overflow = ref<ComponentPublicInstance | null>(null);
 const entryEls: (HTMLElement | null)[] = [];
 let edges: number[] = [];
 
@@ -88,6 +88,19 @@ function slotWidth(el: HTMLElement | null) {
 }
 
 /**
+ * THE OVERFLOW BUTTON'S FOOTPRINT, READ FROM THE BUTTON: its box and the margin before it, never a
+ * constant (a dense round button is 41.6px wide here, not the 40 once written down). The button is
+ * always rendered so there is one to read; while nothing spills it is out of the flow, hidden and
+ * out of the tab order.
+ */
+function overflowWidth() {
+  const el = overflow.value?.$el as HTMLElement | undefined;
+  if (!el) return 0;
+
+  return el.getBoundingClientRect().width + parseFloat(getComputedStyle(el).marginLeft || '0');
+}
+
+/**
  * NOT WHILE MEASURING, AND NOT BEFORE THE FIRST MEASUREMENT. The cluster is observed too, so a
  * resize can land between `measure` showing every entry and reading their edges; a fitting then
  * hides a tail whose edges read zero, and zero fits anywhere - every command shown, clipped.
@@ -97,9 +110,13 @@ let measuring = false;
 function fit() {
   if (measuring || edges.length === 0) return;
 
-  shown.value = fitCount(edges, available(), OverflowWidth);
+  shown.value = fitCount(edges, available(), overflowWidth());
   emit('fit', shown.value);
 }
+
+/** The layout fits the row again after the cluster gives way a step, whether or not that step
+ *  changed a width the observer would see. */
+defineExpose({ refit: fit });
 
 /** One measurement at a time: two that overlapped (mount, then fonts landing) read each other's
  *  hidden tail. Each waits for the one before it. */
@@ -133,7 +150,7 @@ onMounted(() => {
   // account name widens it without the bar changing size at all.
   if (typeof ResizeObserver !== 'undefined' && bar.value) {
     observer = new ResizeObserver(() => fit());
-    for (const el of [bar.value, start.value, end.value]) if (el) observer.observe(el);
+    for (const el of [bar.value, start.value, end.value, overflow.value?.$el as HTMLElement | undefined]) if (el) observer.observe(el);
   }
 
   // The first measurement can run before IBM Plex has loaded, against a fallback face with
@@ -181,9 +198,15 @@ const overflowGroups = computed(() => {
           <!-- The heading a tab takes from live state - in practice the ACTIVE TEAM's name, in front
                of the commands that act on it. Its rule is the ACCENT and the one accent moment on the
                bar: it marks the group whose every control is scoped to that team. -->
-          <span v-if="entry.groupStart && titleOf(entry.tab)" class="ribbon-group-title">
+          <span
+            v-if="entry.groupStart && titleOf(entry.tab)"
+            class="ribbon-group-title"
+            :class="{ 'ribbon-group-title--capped': tight }"
+            :aria-label="titleOf(entry.tab)"
+            data-test="ribbon-group-title"
+          >
             {{ titleOf(entry.tab) }}
-            <q-tooltip>{{ entry.tab.label }}</q-tooltip>
+            <q-tooltip>{{ tight ? `${titleOf(entry.tab)} - ${entry.tab.label}` : entry.tab.label }}</q-tooltip>
           </span>
 
           <q-separator v-if="entry.item.kind === 'separator'" vertical inset class="q-mx-xs" />
@@ -237,15 +260,18 @@ const overflowGroups = computed(() => {
       </div>
 
       <q-btn
-        v-if="shown < entries.length"
+        ref="overflow"
         flat
         dense
         round
         icon="more_horiz"
         class="ribbon-overflow"
-        aria-label="More commands"
+        :class="{ 'ribbon-overflow--idle': shown >= entries.length }"
+        :aria-label="shown < entries.length ? 'More commands' : undefined"
+        :aria-hidden="shown < entries.length ? undefined : 'true'"
+        :tabindex="shown < entries.length ? undefined : -1"
       >
-        <q-menu anchor="bottom right" self="top right" class="above-concierge">
+        <q-menu v-if="shown < entries.length" anchor="bottom right" self="top right" class="above-concierge">
           <q-list dense class="ribbon-overflow-menu">
             <template v-for="group in overflowGroups" :key="group.label">
               <q-item-label header class="ribbon-overflow-section">{{ group.label }}</q-item-label>
@@ -346,6 +372,7 @@ const overflowGroups = computed(() => {
 }
 
 .ribbon-commands {
+  position: relative;
   flex: 1 1 auto;
   min-width: 0;
   height: 100%;
@@ -403,6 +430,11 @@ const overflowGroups = computed(() => {
   border-bottom: 2px solid var(--os-primary, var(--q-primary));
 }
 
+/* Steps five and six: a row that short keeps its commands rather than a long team name. */
+.ribbon-group-title--capped {
+  max-width: 3rem;
+}
+
 .ribbon-item-wrap {
   display: inline-flex;
 }
@@ -423,6 +455,14 @@ const overflowGroups = computed(() => {
 .ribbon-overflow {
   flex: none;
   margin-left: 8px;
+}
+
+/* Nothing spills: kept for its measurement, out of the flow and out of sight. */
+.ribbon-overflow--idle {
+  position: absolute;
+  right: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 /* A QBtn with no colour prop paints with currentColor, so the ink above reaches every control. */

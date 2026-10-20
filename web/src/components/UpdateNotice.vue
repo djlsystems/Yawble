@@ -13,6 +13,12 @@ import UpdatesDialog from './UpdatesDialog.vue';
  */
 const RereadEvery = 60 * 60 * 1000;
 
+/**
+ * `word` false is the header row's first give-way step (`lib/headerFit.ts`): the icon alone on the
+ * row, the words its tooltip and aria-label, and it still opens the Updates dialog.
+ */
+withDefaults(defineProps<{ word?: boolean }>(), { word: true });
+
 /** UNTIL THE HOST HAS AN ANSWER, asked again this often. A page opened right after the Host
  *  starts reads "not checked yet" (its first read of the release list takes a few seconds), and
  *  waiting an hour after that would hide a newer release for an hour. */
@@ -52,11 +58,14 @@ onBeforeUnmount(() => {
       v-if="status?.updateAvailable"
       type="button"
       class="update-link"
+      :class="{ 'update-link--icon': !word }"
       :aria-label="`Update available: v${status.latest}. Open what changed and how to update.`"
       data-update-notice
       @click="open = true"
     >
-      Update available
+      <q-icon name="upgrade" size="16px" aria-hidden="true" />
+      <span v-if="word" class="update-word" data-test="update-word">Update available</span>
+      <q-tooltip v-else>Update available: v{{ status.latest }}</q-tooltip>
     </button>
     <UpdatesDialog v-model="open" :status="status" @checked="(answer) => (status = answer)" />
   </span>
@@ -82,6 +91,13 @@ onBeforeUnmount(() => {
   line-height: 1.4;
   white-space: nowrap;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.update-link--icon {
+  padding: 1px 4px;
 }
 
 .update-link:hover,

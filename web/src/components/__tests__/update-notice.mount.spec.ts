@@ -55,9 +55,9 @@ const notChecked: UpdateStatus = {
   newer: [],
 };
 
-async function mountNotice() {
+async function mountNotice(props: { word?: boolean } = {}) {
   setActivePinia(createPinia());
-  const wrapper = mount(UpdateNotice);
+  const wrapper = mount(UpdateNotice, { props });
   await flushPromises();
   return wrapper;
 }
@@ -125,5 +125,35 @@ describe('the update notice', () => {
 
     expect(checkForUpdates).toHaveBeenCalledTimes(1);
     expect(bodyFind('[data-updates-headline]')?.textContent).toContain('v2026.10.09.1');
+  });
+
+  /**
+   * THE HEADER ROW'S FIRST GIVE-WAY STEP (`lib/headerFit.ts`): the icon alone on the row, the words
+   * its tooltip and aria-label - and it still opens Updates.
+   */
+  it('shows its icon alone when the row is short, the words in its tooltip and aria-label, and still opens Updates', async () => {
+    readUpdateStatus.mockResolvedValue(available);
+    const full = await mountNotice();
+    expect(full.find('[data-test="update-word"]').text()).toBe('Update available');
+    full.unmount();
+
+    const wrapper = await mountNotice({ word: false });
+    const notice = wrapper.get('[data-update-notice]');
+
+    expect(notice.find('[data-test="update-word"]').exists()).toBe(false);
+    expect(notice.text()).not.toContain('Update available');
+    expect(notice.findComponent({ name: 'QIcon' }).props('name')).toBe('upgrade');
+    expect(notice.attributes('aria-label')).toMatch(/^Update available: v2026\.10\.08\.1\./);
+
+    const tooltip = notice.findComponent({ name: 'QTooltip' });
+    (tooltip.vm as unknown as { show: () => void }).show();
+    await flushPromises();
+    expect(bodyFind('.q-tooltip')?.textContent).toContain('Update available: v2026.10.08.1');
+    (tooltip.vm as unknown as { hide: () => void }).hide();
+    await flushPromises();
+
+    await notice.trigger('click');
+    await flushPromises();
+    expect(bodyFind('[data-updates-headline]')?.textContent).toContain('v2026.10.08.1 (pre-release) is out.');
   });
 });

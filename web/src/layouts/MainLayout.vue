@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useQuasar } from 'quasar';
 import { useRouter } from 'vue-router';
@@ -403,6 +403,16 @@ function onRibbonFit(shown: number) {
   giveWay.value = nextGiveWay(giveWay.value, shown, mustKeep);
 }
 
+/** After each step, fit again: a step with nothing to take (no update pending) changes no width the
+ *  ribbon's observer would see, and the next step would otherwise wait for an unrelated resize. */
+const ribbonBar = ref<InstanceType<typeof RibbonBar> | null>(null);
+
+watch(giveWay, async (level, before) => {
+  if (level <= before) return;
+  await nextTick();
+  ribbonBar.value?.refit();
+});
+
 watch(
   () => $q.screen.width,
   (width, before) => {
@@ -443,7 +453,7 @@ async function signOut() {
 
            Below `sm` the same row carries no commands - the hamburger opens them as a list - and
            the header shrinks to it. One header element: a QLayout computes ONE header offset. -->
-      <RibbonBar :commands="!$q.screen.lt.sm" :tight="headerFit.tight" @action="onRibbonAction" @fit="onRibbonFit">
+      <RibbonBar ref="ribbonBar" :commands="!$q.screen.lt.sm" :tight="headerFit.tight" @action="onRibbonAction" @fit="onRibbonFit">
         <template #start>
           <!-- Phone-only. The ribbon does not fit below `sm` (600px); this is the door into the
                same commands as a list. -->
@@ -471,11 +481,12 @@ async function signOut() {
         </template>
 
         <template #end>
-          <!-- Which build this is. The first thing to leave the row when it is short of room: it
+          <!-- Which build this is. The second thing to leave the row when it is short of room: it
                is under the logo's tooltip and in the account menu as well. -->
           <VersionTag v-if="headerFit.version" class="header-version" />
-          <!-- "Update available" when the release check found a newer release; nothing otherwise. -->
-          <UpdateNotice />
+          <!-- "Update available" when the release check found a newer release; nothing otherwise. The
+               first thing to give way: its icon alone, the words its tooltip and aria-label. -->
+          <UpdateNotice :word="headerFit.updateWord" />
 
           <!--
             Live or not, stated. A board that has quietly stopped receiving pushes looks exactly

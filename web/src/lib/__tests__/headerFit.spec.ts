@@ -14,6 +14,7 @@ describe('the one header row gives way in one order', () => {
 
   /** Each step's field on `HeaderFit`, and what that field reads before the step is taken. */
   const StepField = {
+    'update-word': ['updateWord', true],
     version: ['version', true],
     'live-word': ['liveWord', true],
     'account-name': ['accountName', true],
@@ -22,12 +23,13 @@ describe('the one header row gives way in one order', () => {
     mark: ['mark', false],
   } as const;
 
-  it('names six steps, in the ruled order', () => {
-    expect(GiveWaySteps).toEqual(['version', 'live-word', 'account-name', 'needs-you-word', 'tight', 'mark']);
+  it('names seven steps, in the ruled order, the update notice first', () => {
+    expect(GiveWaySteps).toEqual(['update-word', 'version', 'live-word', 'account-name', 'needs-you-word', 'tight', 'mark']);
   });
 
-  it('gives nothing way at no steps: version, live word, account name, Needs you word, full padding, full logo', () => {
+  it('gives nothing way at no steps: update words, version, live word, account name, Needs you word, full padding, full logo', () => {
     expect(headerFit(0, false)).toEqual({
+      updateWord: true,
       version: true,
       liveWord: true,
       accountName: true,
@@ -50,9 +52,11 @@ describe('the one header row gives way in one order', () => {
     });
   });
 
-  /** A phone row carries neither the version nor the account name nor the Needs you word, as before. */
-  it('never carries the version, the account name or the Needs you word on a phone row', () => {
+  /** A phone row carries neither the version nor the account name nor the Needs you word, as before,
+   *  nor the update notice's words, which pushed the account menu off a 390px row. */
+  it('never carries the version, the account name, the Needs you word or the update words on a phone row', () => {
     expect(headerFit(0, true)).toEqual({
+      updateWord: false,
       version: false,
       liveWord: true,
       accountName: false,
@@ -73,5 +77,12 @@ describe('the one header row gives way in one order', () => {
       expect(nextGiveWay(level, 10, 10)).toBe(level);
       expect(nextGiveWay(level, 23, 10)).toBe(level);
     }
+  });
+
+  /** The 3rem title cap rides on `tight`: taken at the padding step and kept at the mark, never before. */
+  it('caps the active team title only while the padding and mark steps are taken', () => {
+    const tightAt = GiveWaySteps.indexOf('tight');
+    for (let level = 0; level <= GiveWaySteps.length; level++) expect(headerFit(level, false).tight, String(level)).toBe(level > tightAt);
+    expect(GiveWaySteps.slice(tightAt)).toEqual(['tight', 'mark']);
   });
 });

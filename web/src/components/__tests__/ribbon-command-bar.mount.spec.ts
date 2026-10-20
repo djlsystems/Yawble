@@ -7,6 +7,8 @@
 // commands stay on the strip, whether the overflow button exists, and whether a command reached
 // through the menu does what it does on the strip.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 
@@ -18,14 +20,19 @@ vi.mock('../../lib/useAgentInstallations', () => ({
 import RibbonBar from '../RibbonBar.vue';
 import RibbonMobileMenu from '../RibbonMobileMenu.vue';
 import { ConnectionsAction, DocumentsAction, PluginsAction, Ribbon, SitesAction, TenantSettingsAction, ribbonEntries } from '../../lib/ribbon';
+import { useConsoleStore } from '../../stores/console';
+import type { TeamId } from '../../api/types';
 import '../../test/mountQuasar';
 
 const EntryWidth = 100;
+const ribbonSource = readFileSync(join(import.meta.dirname, '..', 'RibbonBar.vue'), 'utf8');
 const entries = ribbonEntries(Ribbon);
 
 let barWidth = 0;
 /** The right cluster's width (version, live chip, Needs you, gauge, account), when a case has one. */
 let clusterWidth = 0;
+/** The overflow button's box, as the browser would measure it (41.6px in Chromium today). */
+let overflowWidth = 40;
 
 beforeEach(() => {
   setActivePinia(createPinia());
@@ -35,6 +42,10 @@ beforeEach(() => {
   });
 
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this.classList.contains('ribbon-overflow')) {
+      return { left: 0, right: overflowWidth, top: 0, bottom: 0, width: overflowWidth, height: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+    }
+
     if (this.classList.contains('ribbon-end')) {
       return { left: 0, right: clusterWidth, top: 0, bottom: 0, width: clusterWidth, height: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
     }
@@ -50,6 +61,7 @@ beforeEach(() => {
 
 afterEach(() => {
   clusterWidth = 0;
+  overflowWidth = 40;
   vi.restoreAllMocks();
   document.body.innerHTML = '';
 });
@@ -162,6 +174,80 @@ describe('the one header row', () => {
     // (1000 - 150 - 40) / 100 = 8.
     expect(visible(wrapper)).toHaveLength(8);
     expect(wrapper.emitted('fit')!.at(-1)).toEqual([8]);
+  });
+
+  /**
+   * THE RESERVE IS THE BUTTON'S MEASURED FOOTPRINT, never a constant: its box plus the margin before
+   * it. A wider button leaves fewer commands on the row; the count follows the measurement.
+   */
+  it('reserves the overflow button as it measures, and the fit count follows its width', async () => {
+    const wrapper = await withCluster(1000, 250);
+    const button = wrapper.get('.ribbon-overflow').element as HTMLElement;
+    const margin = parseFloat(getComputedStyle(button).marginLeft || '0');
+    const expected = (reserve: number) => Math.floor((1000 - 250 - reserve) / EntryWidth);
+
+    expect(visible(wrapper)).toHaveLength(expected(40 + margin));
+
+    overflowWidth = 120;
+    (wrapper.vm as unknown as { refit: () => void }).refit();
+    await flushPromises();
+    expect(expected(120 + margin)).toBeLessThan(expected(40 + margin));
+    expect(visible(wrapper)).toHaveLength(expected(120 + margin));
+    expect(wrapper.emitted('fit')!.at(-1)).toEqual([expected(120 + margin)]);
+
+    overflowWidth = 41.6;
+    (wrapper.vm as unknown as { refit: () => void }).refit();
+    await flushPromises();
+    expect(visible(wrapper)).toHaveLength(expected(41.6 + margin));
+  });
+
+  /** Kept for its measurement while nothing spills: hidden, unnamed and out of the tab order. */
+  it('keeps the overflow button out of sight and out of reach while nothing spills', async () => {
+    const wrapper = await withCluster(entries.length * EntryWidth, 0);
+    const button = wrapper.get('.ribbon-overflow');
+
+    expect(button.classes()).toContain('ribbon-overflow--idle');
+    expect(button.attributes('aria-hidden')).toBe('true');
+    expect(button.attributes('tabindex')).toBe('-1');
+    expect(wrapper.find('[aria-label="More commands"]').exists()).toBe(false);
+  });
+
+  /**
+   * STEPS FIVE AND SIX CAP THE ACTIVE TEAM'S TITLE at 3rem with an ellipsis; the full name stays its
+   * aria-label and tooltip. Without `tight` the title keeps its 12rem room.
+   */
+  it('caps the active team title only when tight, the full name in its aria-label and tooltip', async () => {
+    const name = 'A team whose name runs well past twelve rem';
+    useConsoleStore().$patch({ teams: [{ id: 'long' as TeamId, name, memberAgents: [], repos: [] }], activeTeamId: 'long' as TeamId });
+
+    const wrapper = await withCluster(1000, 250);
+    const title = () => wrapper.get('[data-test="ribbon-group-title"]');
+    const tooltip = async () => {
+      const tip = title().findComponent({ name: 'QTooltip' });
+      (tip.vm as unknown as { show: () => void }).show();
+      await flushPromises();
+      const text = document.body.querySelector('.q-tooltip')?.textContent ?? '';
+      (tip.vm as unknown as { hide: () => void }).hide();
+      await flushPromises();
+      return text;
+    };
+
+    expect(title().classes()).not.toContain('ribbon-group-title--capped');
+    expect(title().text()).toBe(name);
+    expect(title().attributes('aria-label')).toBe(name);
+
+    await wrapper.setProps({ tight: true });
+    await flushPromises();
+
+    expect(title().classes()).toContain('ribbon-group-title--capped');
+    expect(ribbonSource).toMatch(/\.ribbon-group-title--capped\s*\{\s*max-width:\s*3rem;\s*\}/);
+    expect(title().text()).toBe(name);
+    expect(title().attributes('aria-label')).toBe(name);
+    expect(await tooltip()).toContain(name);
+
+    await wrapper.setProps({ tight: false });
+    await flushPromises();
+    expect(title().classes()).not.toContain('ribbon-group-title--capped');
   });
 
   it('puts the logo at the start and the cluster at the end, outside the commands toolbar', async () => {

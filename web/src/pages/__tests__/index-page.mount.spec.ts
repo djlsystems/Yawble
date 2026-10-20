@@ -225,6 +225,17 @@ describe('the tab strip', () => {
     expect(groups[0]!.findAll('.console-view')).toHaveLength(0);
   });
 
+  /**
+   * THE STRIP'S TEAM TAB CARRIES THE WHOLE NAME. The header row caps the active team's title at 3rem
+   * when it is short of room (`RibbonBar` tight); the strip is where the full name stays read.
+   */
+  it('shows a team tab\'s full name, however long', async () => {
+    const name = 'A team whose name runs well past twelve rem';
+    const page = await mountPage([team('alpha', { name })]);
+
+    expect(labels(page.find('[data-test="console-places"]'))).toEqual(['Teams', name]);
+  });
+
   /** One element is active across both groups, whichever group it is in. */
   it('marks exactly one element active, in either group', async () => {
     const page = await mountPage([team('alpha'), team('beta')]);

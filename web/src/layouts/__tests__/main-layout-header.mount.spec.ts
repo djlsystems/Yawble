@@ -30,6 +30,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { createMemoryHistory, createRouter } from 'vue-router';
 import MainLayout from '../MainLayout.vue';
 import RibbonBar from '../../components/RibbonBar.vue';
+import UpdateNotice from '../../components/UpdateNotice.vue';
 import { useSessionStore } from '../../stores/session';
 import { useConsoleStore } from '../../stores/console';
 import { bundleBuild, releaseLabel } from '../../lib/buildInfo';
@@ -154,7 +155,7 @@ describe('the one header row', () => {
 
   /**
    * SHORT OF ROOM, THE ROW GIVES WAY IN ITS ORDER: each fitting that keeps fewer than New Team
-   * through Backlog takes one step - the version leaves the row, the live chip is a dot, the account
+   * through Backlog takes one step - "Update available" is its icon, the version leaves the row, the live chip is a dot, the account
    * menu is its icon, Needs you is its count pill, the commands' padding halves, and last the logo
    * is the head mark - and a fitting that keeps enough takes none. The ribbon's labels stay.
    */
@@ -173,6 +174,7 @@ describe('the one header row', () => {
     };
     /** What has given way, in the order of `GiveWaySteps`. */
     const taken = () => [
+      cluster().findComponent(UpdateNotice).props('word') === false,
       !cluster().find('.version-tag').exists(),
       cluster().find('[data-test="live-chip"]').classes().includes('live-chip-dot'),
       !cluster().find('[data-test="account-name"]').exists(),
@@ -181,9 +183,10 @@ describe('the one header row', () => {
       wrapper.find('[data-test="brand-mark"]').exists(),
     ];
 
-    expect(taken()).toEqual([false, false, false, false, false, false]);
+    const none = GiveWaySteps.map(() => false);
+    expect(taken()).toEqual(none);
     await enough();
-    expect(taken()).toEqual([false, false, false, false, false, false]);
+    expect(taken()).toEqual(none);
 
     for (let step = 1; step <= GiveWaySteps.length; step++) {
       await short();
@@ -253,7 +256,37 @@ describe('the one header row', () => {
     expect(ribbon.props('tight')).toBe(false);
     expect(wrapper.find('.q-header .ribbon-end .version-tag').exists()).toBe(true);
     expect(wrapper.find('[data-test="account-name"]').exists()).toBe(true);
+    expect(cluster(wrapper).findComponent(UpdateNotice).props('word')).toBe(true);
+
+    wrapper.unmount();
+  });
+
+  /**
+   * EACH STEP IS FOLLOWED BY A FITTING. A step with nothing to take - no update pending - changes no
+   * width the ribbon observes, so the layout asks the ribbon to fit again itself; a fitting that
+   * keeps enough takes nothing, so it asks nothing.
+   */
+  it('fits the ribbon again after each step it takes, and not after a fitting that kept enough', async () => {
+    const wrapper = await mountShell();
+    const ribbon = wrapper.findComponent(RibbonBar);
+    const keep = keepThrough(Ribbon);
+    const fits = () => ribbon.emitted('fit')?.length ?? 0;
+
+    const before = fits();
+    ribbon.vm.$emit('fit', keep);
+    await flushPromises();
+    expect(fits()).toBe(before + 1);
+
+    ribbon.vm.$emit('fit', keep - 1);
+    await flushPromises();
+    expect(cluster(wrapper).findComponent(UpdateNotice).props('word')).toBe(false);
+    // The manual fitting, then the ribbon's own one the step asked for.
+    expect(fits()).toBe(before + 3);
 
     wrapper.unmount();
   });
 });
+
+function cluster(wrapper: VueWrapper) {
+  return wrapper.find('.q-header .ribbon-end');
+}
