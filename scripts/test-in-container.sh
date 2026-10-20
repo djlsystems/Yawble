@@ -35,7 +35,7 @@ tar --exclude=./.git \
     -v harness-testsrc:/src \
     -v harness-nuget:/root/.nuget/packages \
     -w /src \
-    -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -e DOTNET_NOLOGO=1 \
+    -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -e DOTNET_NOLOGO=1     -e ASPNETCORE_URLS=http://0.0.0.0:8080 \
     mcr.microsoft.com/dotnet/sdk:10.0 \
     sh -c "rm -rf /src/* /src/.[!.]* 2>/dev/null; tar -xf - \
         && dotnet build tests/Harness.Tests/Harness.Tests.csproj -v q \

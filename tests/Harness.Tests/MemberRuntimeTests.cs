@@ -42,6 +42,30 @@ public sealed class MemberRuntimeTests
     }
 
     [Fact]
+    public async Task A_worktree_lookup_that_throws_once_fails_the_run_on_the_card_and_the_member_takes_its_next_delivery()
+    {
+        var calls = 0;
+        await using var bed = new ContainerTestBed(
+            worktrees: (_, _) => ++calls == 1
+                ? throw new InvalidOperationException("tree lookup failed")
+                : (IReadOnlyList<RepoWorktree>)[]);
+        var runner = new Scripted(_ => new MemberResult(true, 0, "ok"));
+        await bed.Host.AddAsync(ContainerTestBed.Definition(Plug), runner, Ct);
+
+        await bed.Store.AppendAsync(new NewMessage(MessageTypes.InstructionFor(Plug), """{"instruction":"one"}""", "console"), Ct);
+        await bed.Store.AppendAsync(new NewMessage(MessageTypes.InstructionFor(Plug), """{"instruction":"two"}""", "console"), Ct);
+
+        Assert.True(await bed.PumpUntilAsync(async () =>
+            (await bed.Store.ReadAfterAsync(0, [MessageTypes.Completed, MessageTypes.Failed], 10, Ct)).Count >= 2));
+
+        var rows = await bed.Store.ReadAfterAsync(0, [MessageTypes.Completed, MessageTypes.Failed], 10, Ct);
+        Assert.Equal(MessageTypes.Failed, rows[0].Type);
+        Assert.Contains("tree lookup failed", rows[0].Payload);
+        Assert.Equal(MessageTypes.Completed, rows[1].Type);
+        Assert.Single(runner.Seen);
+    }
+
+    [Fact]
     public async Task The_runner_is_handed_the_work_as_data_not_a_prompt()
     {
         await using var bed = new ContainerTestBed();

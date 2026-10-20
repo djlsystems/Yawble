@@ -1238,6 +1238,19 @@ public sealed class MemberRuntime : IAsyncDisposable
                         _currentSeq = null;
                         Publish();
                     }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        // THE NET UNDER THE NET. RunOneAsync answers its own failures on the run's
+                        // row; this is for a throw before it begins (the batch, the queue's start, a
+                        // store refusing). Without it the consumer task faulted with nothing
+                        // observing it: the member read idle forever, its queue filled, and nothing
+                        // said why. The card says why; the loop takes the next delivery.
+                        MarkFailed($"The platform could not start this run: {ex.Message}");
+                        _state = ContainerState.Idle;
+                        _currentCorrelation = null;
+                        _currentSeq = null;
+                        Publish();
+                    }
                     finally
                     {
                         slot?.Dispose();
@@ -1510,10 +1523,12 @@ public sealed class MemberRuntime : IAsyncDisposable
 
         MemberResult result;
 
-        var worktree = WorktreeForInvocation(first);
-
         try
         {
+            // INSIDE THE TRY: a tree lookup that throws is a run that failed, reported on its row,
+            // not an exception out of the consumer loop that leaves the member idle for good.
+            var worktree = WorktreeForInvocation(first);
+
             // THE WORK AS DATA, NOT AS A PROMPT. The batch, the card's worktrees and the floor go to
             // the runner as they are; an agent runner renders them into prose with its ledger
             // history, a plugin runner hands them to its executable as JSON. Rendering here would
