@@ -74,7 +74,7 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
     /// <paramref name="tempRoot"/> is where members' temporary folders go. <paramref name="placedOn"/> is
     /// the worker admission placed a member's run on; without it, every run goes to <paramref name="worker"/>.
     /// <paramref name="launcher"/> is not called: the launch check goes to a worker over the transport
-    /// in every role; it stays a parameter so the runner's callers compose it as before.
+    /// in every role; it stays a parameter so the runner's callers compose it.
     /// <paramref name="gateHere"/> is control's one update gate, which a run's share is taken from
     /// before it is sent - set only where no worker in this process takes it (<c>--Role control</c>);
     /// <paramref name="reports"/> is where a held run says so.

@@ -42,7 +42,7 @@ internal sealed partial class HostComposition
         builder.Services.AddSingleton(sp => new LocalRepoDeletion(
             sp.GetRequiredService<LocalRepos>(), sp.GetRequiredService<TeamRegistry>(), sp.GetRequiredService<ITenantLog>()));
 
-        // FORGIVING TEAM REPOSITORIES (B001F): a team's default local repository, and the `ls-remote` check
+        // FORGIVING TEAM REPOSITORIES: a team's default local repository, and the `ls-remote` check
         // with its choices before a URL is used. The registry is resolved per call: it is built after this.
         builder.Services.AddSingleton<IRemoteRepoCheck>(sp => new RemoteRepoCheck(sp.GetRequiredService<GitRunner>()));
         builder.Services.AddSingleton(sp => new TeamRepoSetup(
@@ -112,7 +112,7 @@ internal sealed partial class HostComposition
         // last, agent content removed as the agent through its launch prefix, and whatever remains recorded
         // to be retried. See FolderRemoval.
         // The agent's pass goes to a connected worker; in control always, in all only where agents run as
-        // another user, as before.
+        // another user.
         builder.Services.AddSingleton(sp => new FolderRemoval(
             sp.GetRequiredService<AgentLaunchUser>(),
             sp.GetRequiredService<IUnfinishedRemovals>(),

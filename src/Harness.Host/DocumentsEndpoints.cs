@@ -46,7 +46,7 @@ internal static class DocumentsEndpoints
         //
         // HumansOnly. This is a picker for a person: it names folders across every team the caller can
         // reach, and no container has a reason to enumerate other teams' documents. The per-folder routes
-        // keep RequirePermit(Read) so an agent goes on reading its OWN team's, exactly as before.
+        // keep RequirePermit(Read) so an agent goes on reading its OWN team's.
         app.MapGet("/api/documents", (TeamDocuments docs, TeamRegistry teams, HttpContext context) =>
         {
             if (PrincipalClaims.From(context.User) is null) return Results.Unauthorized();

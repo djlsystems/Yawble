@@ -708,8 +708,8 @@ public sealed record ContainerSnapshot(
 
     /// <summary>
     /// THE WAKES THIS MEMBER ASKED FOR AND THAT ARE STILL PENDING, earliest due first, or null - and
-    /// then absent from the JSON - when there are none, so a member with no wake reads byte for byte
-    /// as before. Written by the wake runner (<c>MemberRuntime.MarkWakes</c>), never by a run.
+    /// then absent from the JSON - when there are none, so a member with no wake carries no such
+    /// field. Written by the wake runner (<c>MemberRuntime.MarkWakes</c>), never by a run.
     /// </summary>
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     IReadOnlyList<WakeView>? Wakes = null,

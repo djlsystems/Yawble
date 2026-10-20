@@ -33,7 +33,7 @@ internal static class WorkflowBusyState
     /// in it - and counting that run refused the owner for the very wake its own completion caused,
     /// while the Manager was refused as not the owner: the two went round until a person closed it.
     /// Such a run, and the watcher's queued rows of the same kind, are left out; a watcher TOLD to
-    /// do work here still counts. Null - every other caller - counts everything, as before.
+    /// do work here still counts. Null - every other caller - counts everything.
     /// </param>
     public static async Task<IReadOnlyList<string>> DescribeAsync(
         string team,

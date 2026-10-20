@@ -386,7 +386,7 @@ internal static class WorkflowEndpoints
             // the same rule the owner declares by: the owner and every other member idle in it, nothing
             // queued in it but the Manager's own delivery (the busy check below, with the Manager as the
             // caller). Without it a Manager woken by a member-owned workflow could only tell the owner to
-            // declare, and each refusal woke the other again. Any other member is refused, as before.
+            // declare, and each refusal woke the other again. Any other member is refused.
             var onBehalf = !container.Id.Equals(owner)
                 && container.Id.Equals(manager)
                 && string.Equals(owner.Team, stored, StringComparison.OrdinalIgnoreCase)

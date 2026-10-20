@@ -41,13 +41,12 @@ public sealed record PluginManifest(
 
     /// <summary>The accounts at OAuth providers this plugin acts on, by slot: each bound per member to
     /// a person's connection, whose fresh access token the run receives on stdin. Empty when the
-    /// manifest has no <c>connections</c>, which behaves exactly as before.</summary>
+    /// manifest has no <c>connections</c>.</summary>
     public IReadOnlyDictionary<string, PluginConnectionSlot> Connections { get; init; } =
         new Dictionary<string, PluginConnectionSlot>(StringComparer.Ordinal);
 
     /// <summary>The collections of its own team's sites this plugin reads, in declaration order: each
-    /// run receives them on stdin as <c>sites</c>. Empty when the manifest has no <c>reads</c>, which
-    /// behaves exactly as before.</summary>
+    /// run receives them on stdin as <c>sites</c>. Empty when the manifest has no <c>reads</c>.</summary>
     public IReadOnlyList<PluginSiteRead> Reads { get; init; } = [];
 
     /// <summary>The most collections one plugin may declare in <c>reads</c>. A sanity bound: it also

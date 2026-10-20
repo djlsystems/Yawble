@@ -40,7 +40,7 @@ public sealed record TeamDeleted(
     string? DocumentsKept)
 {
     /// <summary>
-    /// THE TEAM'S LOCAL REPOSITORIES, WHICH THIS DELETION KEPT (B001F): the <c>local:&lt;name&gt;</c>
+    /// THE TEAM'S LOCAL REPOSITORIES, WHICH THIS DELETION KEPT: the <c>local:&lt;name&gt;</c>
     /// references it had. They live under <c>&lt;dataRoot&gt;/repos</c>, never under the root, and are
     /// listed as unused afterwards, where a person may delete them. Filled in by the route.
     /// </summary>

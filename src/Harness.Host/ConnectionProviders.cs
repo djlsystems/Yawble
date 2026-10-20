@@ -247,7 +247,7 @@ public static class ConnectionProviders
                     new Dictionary<string, string>(StringComparer.Ordinal),
                     "Register an app in Microsoft Entra ID with public client flows allowed, and paste its Application "
                     + "(client) ID: you sign in with a code, and no secret or redirect URI is needed. Under Advanced, a "
-                    + "\"Web\" app with a client secret and the redirect URIs shown here works as before.",
+                    + "\"Web\" app with a client secret and the redirect URIs shown here works as well.",
                     authority + "/devicecode",
                     saved ? ClientSourceSaved : usesDefault ? ClientSourceDefault : null);
 

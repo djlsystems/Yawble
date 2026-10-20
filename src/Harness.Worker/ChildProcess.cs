@@ -99,7 +99,7 @@ public static class ChildProcess
         };
 
         // As `agent` when the Host can switch, AFTER setsid so the session is still the
-        // child's own: setpriv execs in place, and the group kill below reaches it as before.
+        // child's own: setpriv execs in place, and the group kill below reaches it.
         foreach (var part in runAs?.Prefix ?? []) start.ArgumentList.Add(part);
         foreach (var part in limits ?? []) start.ArgumentList.Add(part);
         start.ArgumentList.Add(resolvedFileName);

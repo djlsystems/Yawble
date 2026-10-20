@@ -193,7 +193,6 @@ public static class KanbanEndpoints
     /// The lane that holds RUNNING work shows `wip.maxRunning`; the rest show
     /// `kanban.wipLimits`.
     /// </summary>
-
     private static KanbanBoard WithLaneLimits(KanbanBoard board, TenantSettings settings) =>
         board with
         {

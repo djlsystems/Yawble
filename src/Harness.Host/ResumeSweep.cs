@@ -301,8 +301,7 @@ public sealed class ResumeSweep(
         }
 
         // THE BOUND. Spent means spent: the card keeps its failure and its class, loses its promise
-        // of a resume, and waits for a person - which is exactly where this product was before any
-        // of this existed, reached deliberately instead of by accident.
+        // of a resume, and waits for a person - reached deliberately rather than by accident.
         if (attempts >= MaxAutomaticResumes) return null;
 
         return new PendingResume(

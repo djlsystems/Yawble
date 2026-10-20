@@ -56,7 +56,7 @@ public static class WorkerOrphans
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            // What could not be read or removed is left: a leftover run outlives this worker as before.
+            // What could not be read or removed is left: a leftover run outlives this worker.
         }
 
         return stopped;

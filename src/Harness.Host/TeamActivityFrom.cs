@@ -15,7 +15,7 @@ namespace Harness.Host;
 /// ONLY TWO READS TAKE IT: the team activity read and the team's token runs, whose floor is the
 /// later of the team's creation and this instant (<see cref="ScopeAsync"/>). Nothing is deleted or
 /// rewritten: spend, budgets, trigger caps, a member's recent cost, outcomes, backlog stats, the
-/// ledger export and admission holds read every row as before, and clearing it brings the whole
+/// ledger export and admission holds read every row, and clearing it brings the whole
 /// history back.
 /// </para>
 ///

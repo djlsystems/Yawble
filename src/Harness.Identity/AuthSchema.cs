@@ -533,7 +533,7 @@ public static class AuthSchema
         // THE EMAIL OF THE PERSON WHO LAST CONFIGURED A TRIGGER, snapshotted when a person creates or
         // changes it, so a fire's outcome link names that person (`set_by`) even after their user is
         // deleted. NULL for every trigger from before the step, which resolves `created_by` through
-        // `users` as before.
+        // `users`.
         new MigrationStep(
             "auth-018",
             """

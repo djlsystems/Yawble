@@ -64,7 +64,7 @@ internal static class TeamEndpoints
                 });
             }
 
-            // EVERY URL IS READ BEFORE ANYTHING IS CREATED (B001F): one `git ls-remote` cannot read is
+            // EVERY URL IS READ BEFORE ANYTHING IS CREATED: one `git ls-remote` cannot read is
             // refused with the choices this caller may take, and no team, row, folder or clone is left.
             // What can be refused without the network is refused first: a URL or upstream that is not one,
             // with the 400 it always had. The same path as backlog dispatch-to-new.
@@ -278,7 +278,7 @@ internal static class TeamEndpoints
                 + "name. 400 for an empty or over-long name.\n\n"
                 + "Requires team-creation authority: a person directly, or a machine principal acting "
                 + "for an owner who still exists.\n\n"
-                + "**Repositories (B001F).** Every URL in `repos` is read with `git ls-remote` first (a github.com "
+                + "**Repositories.** Every URL in `repos` is read with `git ls-remote` first (a github.com "
                 + "URL with `GH_TOKEN`, as Fetch). One that cannot be read is refused with 422 `{ error, code: "
                 + "\"repo-check-failed\", repos: [{ url, failure, reason, choices }] }` and nothing is created; send "
                 + "it again with `repoChoices` naming a choice per URL: `use-local`, and for a person only "
@@ -499,7 +499,7 @@ internal static class TeamEndpoints
                 ? Array.Empty<string>()
                 : (await listPush.EntitledViewerIdsAsync(team, ct)).ToArray();
 
-            // KEPT, NEVER DELETED WITH THE TEAM (B001F): its local repositories live under
+            // KEPT, NEVER DELETED WITH THE TEAM: its local repositories live under
             // `<dataRoot>/repos`, outside the team's root, and show as unused in Admin -> Repositories,
             // where a person may delete them. Read before the deletion, which forgets the list.
             var localRepositories = teams.ExistingName(team) is { } named
@@ -1158,7 +1158,7 @@ internal static class TeamEndpoints
             JsonElement body, TeamRegistry teams, TeamRepoSetup repoSetup, LocalRepos localRepos, HttpContext context,
             CancellationToken ct) =>
         {
-            // THE BARE ARRAY AS BEFORE, or `{ repos, repoChoices }` to answer a refused check (B001F).
+            // THE BARE ARRAY AS BEFORE, or `{ repos, repoChoices }` to answer a refused check.
             SetTeamRepos request;
             try
             {
@@ -1227,7 +1227,7 @@ internal static class TeamEndpoints
                 + "clears it. A `local:` name that is not legal or names no local repository is refused naming it. Every URL is validated before anything is written; repository names are "
                 + "derived from the final path segment and unsafe or colliding names are refused. 404 for "
                 + "an unknown team, 400 for an invalid URL or derived folder name.\n\n"
-                + "**Every URL the team does not have yet is read with `git ls-remote` first (B001F).** One that "
+                + "**Every URL the team does not have yet is read with `git ls-remote` first.** One that "
                 + "cannot be read is refused with 422 `{ error, code: \"repo-check-failed\", repos: [{ url, failure, "
                 + "reason, choices }] }` and the list is unchanged. To answer it, send `{ \"repos\": [...], "
                 + "\"repoChoices\": { \"<url>\": \"create-on-github\" | \"use-local\" | \"attach-anyway\" } }` "

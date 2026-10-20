@@ -235,11 +235,6 @@ internal sealed record CloneTeam(
         + "name deriving to one that is taken is refused with 409 naming the existing team.")]
     string? Name);
 
-/// <summary>
-/// One field, and it is the display name. No Name: this API has no way to express changing a team's
-/// identifier, which is the property that keeps the documents folder and every
-/// container id from needing to move together. See TeamSummary.
-/// </summary>
 /// <summary>A team's additional instructions.</summary>
 internal sealed record SetAdditionalInstructions(
     [property: Description(

@@ -882,7 +882,7 @@ public static class BacklogEndpoints
                 });
             }
 
-            // THE SAME REPOSITORY PATH AS `POST /api/teams` (B001F), asked before the team is made:
+            // THE SAME REPOSITORY PATH AS `POST /api/teams`, asked before the team is made:
             // every URL read with `git ls-remote`, one that cannot be read refused with the caller's
             // choices, a team left with no repository given its local one - and an agent never let
             // create on GitHub or attach anyway. A refusal here leaves no team, row, folder or clone.
@@ -1033,7 +1033,7 @@ public static class BacklogEndpoints
                 + "chosen rather than 'pick something sensible'.\n\n"
                 + "The NAME is required and is not derived here. The screen derives a default from "
                 + "the item's title so a person can edit it before committing.\n\n"
-                + "**Repositories (B001F), exactly as `POST /api/teams`.** Every URL in `repos` is read with "
+                + "**Repositories, exactly as `POST /api/teams`.** Every URL in `repos` is read with "
                 + "`git ls-remote` before the team is made; one that cannot be read is refused with 422 "
                 + "`{ error, code: \"repo-check-failed\", repos: [{ url, failure, reason, choices }] }` and no team "
                 + "is created or item dispatched. Answer it with `repoChoices`; an agent is offered `use-local` "

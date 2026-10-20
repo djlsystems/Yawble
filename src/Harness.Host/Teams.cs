@@ -1996,7 +1996,7 @@ public sealed class TeamRegistry(
         // this id, still carrying its marker. Its removal is FINISHED first, the same removal the
         // deletion ran, so nothing of the dead team is adopted; if it still cannot finish, the
         // create is refused and names what remains. A folder with no marker, or one nothing
-        // recorded, is refused exactly as before.
+        // recorded, is refused.
         if (Directory.Exists(container))
         {
             var finished = removal is null ? null : await removal.FinishBeforeCreateAsync(container, team, ct);
@@ -2015,7 +2015,7 @@ public sealed class TeamRegistry(
 
         // THE TEAM'S OWN REPOSITORY, made here: after every check above has passed, because it is
         // named after the identifier derived above, and before anything of the team is written, so a
-        // repository that cannot be made refuses the create and leaves no team behind (B001F). The
+        // repository that cannot be made refuses the create and leaves no team behind. The
         // caller answers the reference to add - `local:<name>` - or throws the reason.
         if (addRepo is not null && await addRepo(team, ct) is { } added)
         {

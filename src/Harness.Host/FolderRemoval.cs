@@ -541,7 +541,7 @@ public sealed class FolderRemoval(
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // Not recorded: judged by the reset's time alone next time, as before.
+                // Not recorded: judged by the reset's time alone next time.
             }
         }
 
@@ -619,7 +619,7 @@ public sealed class FolderRemoval(
     /// For creating team <paramref name="team"/> at <paramref name="root"/>, which already exists:
     /// finishes the removal when the folder is recorded as the unfinished removal of a deleted
     /// team of that id and still carries its marker. Anything else - an unmarked folder, a folder
-    /// nothing recorded - is refused, as before.
+    /// nothing recorded - is refused.
     /// </summary>
     public async Task<FolderRemovalReport> FinishBeforeCreateAsync(string root, string team, CancellationToken ct = default)
     {

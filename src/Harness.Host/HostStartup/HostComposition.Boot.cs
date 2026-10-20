@@ -48,12 +48,7 @@ internal sealed partial class HostComposition
 
         // One data root, one database, one process. Everything downstream - exactly-once delivery into a
         // container's queue, a plain polling pump instead of a broker - rests on that being true.
-        //
-        // TWO WAYS IN, and the explicit one wins. `DataRoot` names a folder outright, which is what the
-        // operator commands, the ops scripts and every test fixture pass. `Instance` names an instance and
-        // the LAYOUT decides where that lives - one Harness folder in the platform's app-data location,
-        // one subfolder per instance - so a second instance is independent by construction rather than by
-        // somebody remembering to set a path. Nothing set at all is `core`.
+        // `--DataRoot` wins, then `HARNESS_DATA_ROOT`; with neither set the Host refuses to start.
         // REMOVED FROM THE HOST'S OWN PROCESS, BEFORE ANYTHING CAN SPAWN A CHILD.
         //
         // Both spawn paths MERGE into an inherited environment, so a variable the Host holds reaches every

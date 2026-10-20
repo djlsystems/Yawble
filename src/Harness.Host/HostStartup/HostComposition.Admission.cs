@@ -97,7 +97,7 @@ internal sealed partial class HostComposition
                 : null,
             // In control no worker in this process takes a run's share of its CLI's install, so the runner
             // takes it from this control's one gate, around every run on every worker. In all the Host's own
-            // worker takes it from the same gate, as before, and the runner does not, so a run counts once.
+            // worker takes it from the same gate, and the runner does not, so a run counts once.
             control ? sp.GetRequiredService<AgentUpdateGate>() : null,
             () => sp.GetRequiredService<IMemberReports>()));
         builder.Services.AddSingleton<IAgentRunner>(sp => new CredentialUseRunner(

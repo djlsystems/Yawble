@@ -31,7 +31,7 @@ namespace Harness.Host;
 /// both took shared locks, neither conflicted, and two hosts served one data root on macOS and
 /// Linux — found the first night the suite ran there. Holding the pid file with <c>None</c> instead
 /// would refuse the readers too, so a refusal could never say WHICH process to stop. So the pid
-/// stays in <c>host.lock</c>, held exactly as before, and the exclusivity lives in
+/// stays in <c>host.lock</c>, and the exclusivity lives in
 /// <c>host.lock.exclusive</c> beside it, opened with <c>None</c> — an exclusive advisory lock on
 /// Unix and an exclusive handle on Windows, refused by a second opener on both. That second file is
 /// the handle that IS the fact; it holds nothing and is never read.

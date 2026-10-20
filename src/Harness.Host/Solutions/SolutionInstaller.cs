@@ -397,7 +397,7 @@ public sealed class SolutionInstaller(
     /// <summary>
     /// THE TEAM <paramref name="name"/> NAMES, WHEN AN INSTALL OF <paramref name="packageId"/> MAY GO
     /// OVER IT: the team exists, has no package installed, and kept an uninstalled earlier install of
-    /// this same package id. Null for any other team, which the install refuses by name as before.
+    /// this same package id. Null for any other team, which the install refuses by name.
     /// </summary>
     private async Task<TeamSolutionRow?> ReinstallableAsync(string name, string packageId, CancellationToken ct)
     {

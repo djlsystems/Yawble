@@ -34,7 +34,7 @@ public static class LocalRepoEndpoints
         branches = info.Branches,
         commitCount = info.CommitCount,
 
-        // No team names it: kept when its team was deleted (B001F), and a person's to delete.
+        // No team names it: kept when its team was deleted, and a person's to delete.
         unused = info.Teams.Count == 0,
     };
 
