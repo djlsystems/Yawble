@@ -133,7 +133,7 @@ afterEach(() => {
   resetBody();
 });
 
-async function mountControl() {
+async function mountControl(props: { word?: boolean } = {}) {
   router = createRouter({
     history: createMemoryHistory(),
     routes: [
@@ -143,7 +143,7 @@ async function mountControl() {
     ],
   });
   await router.push('/console');
-  wrapper = mount(NeedsYouControl, { global: { plugins: [router] }, attachTo: document.body });
+  wrapper = mount(NeedsYouControl, { props, global: { plugins: [router] }, attachTo: document.body });
   await flushPromises();
   return wrapper;
 }
@@ -169,6 +169,23 @@ describe('the header count', () => {
     expect(control().classes()).toContain('needs-you--waiting');
     expect(control().attributes('aria-label')).toBe('Needs you: 7');
     expect(control().text()).toContain('Needs you');
+  });
+
+  /**
+   * THE ROW SHORT OF ROOM (`lib/headerFit.ts`, its fourth step): the count pill alone, as on a phone.
+   * The words are still the control's aria-label and its tooltip.
+   */
+  it('shows only its count pill when told to drop its word, and keeps the words in its aria-label and tooltip', async () => {
+    answer(Live, Stored);
+    await mountControl({ word: false });
+
+    expect(control().find('[data-test="needs-you-word"]').exists()).toBe(false);
+    expect(wrapper!.get('[data-test="needs-you-count"]').text()).toBe(String(Live.length + Stored.length));
+    expect(control().attributes('aria-label')).toBe('Needs you: 7');
+    expect(wrapper!.findComponent({ name: 'QTooltip' }).exists()).toBe(true);
+
+    await wrapper!.setProps({ word: true });
+    expect(control().find('[data-test="needs-you-word"]').text()).toBe('Needs you');
   });
 
   it('reads 0 muted when the route answers nothing', async () => {

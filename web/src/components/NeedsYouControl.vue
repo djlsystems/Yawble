@@ -30,6 +30,9 @@ import FieldHelp from './FieldHelp.vue';
  * Monitor's. The live part is re-read on the hub's pushes (IndexPage); the stored part here, every
  * 30 s and when the panel opens.
  */
+/** `word: false` is the row short of room (`lib/headerFit.ts`): the count pill alone, as on a phone. */
+const props = withDefaults(defineProps<{ word?: boolean }>(), { word: true });
+
 const needsYou = useNeedsYouStore();
 const { count, items, error } = storeToRefs(needsYou);
 const board = useConsoleStore();
@@ -120,7 +123,7 @@ function open(target: NeedsYouOpen) {
     :data-state="waiting ? 'needs-you' : 'muted'"
     :aria-label="label"
   >
-    <span class="gt-xs">Needs you</span>
+    <span v-if="props.word" class="gt-xs" data-test="needs-you-word">Needs you</span>
     <span class="needs-you-count" data-test="needs-you-count">{{ count ?? '–' }}</span>
     <q-tooltip>{{ label }}</q-tooltip>
 

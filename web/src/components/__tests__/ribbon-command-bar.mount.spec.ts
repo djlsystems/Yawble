@@ -143,6 +143,27 @@ describe('the one header row', () => {
     expect(narrow.find('[aria-label="More commands"]').exists()).toBe(true);
   });
 
+  /**
+   * THE FIFTH GIVE-WAY STEP: `tight` halves each command's padding and the row is measured again,
+   * against the cluster's width as it is THEN measured - a cluster that gave way leaves more room.
+   */
+  it('measures again when tight, reserving the cluster as it now measures', async () => {
+    const wrapper = await withCluster(1000, 250);
+    expect(visible(wrapper)).toHaveLength(7);
+    expect(wrapper.find('.ribbon').classes()).not.toContain('ribbon--tight');
+    const fits = wrapper.emitted('fit')!.length;
+
+    clusterWidth = 150;
+    await wrapper.setProps({ tight: true });
+    await flushPromises();
+
+    expect(wrapper.find('.ribbon').classes()).toContain('ribbon--tight');
+    expect(wrapper.emitted('fit')!.length).toBeGreaterThan(fits);
+    // (1000 - 150 - 40) / 100 = 8.
+    expect(visible(wrapper)).toHaveLength(8);
+    expect(wrapper.emitted('fit')!.at(-1)).toEqual([8]);
+  });
+
   it('puts the logo at the start and the cluster at the end, outside the commands toolbar', async () => {
     const wrapper = await withCluster(entries.length * EntryWidth, 0);
     const row = wrapper.find('.ribbon');

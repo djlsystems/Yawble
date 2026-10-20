@@ -12,21 +12,66 @@ describe('the one header row gives way in one order', () => {
     expect(entries.slice(keep).some((entry) => entry.tab.id === 'active')).toBe(false);
   });
 
-  it('takes the version off the row first, then makes the live chip a dot, and nothing else', () => {
-    expect(GiveWaySteps).toEqual(['version', 'live-word']);
-    expect(headerFit(0, false)).toEqual({ version: true, liveWord: true });
-    expect(headerFit(1, false)).toEqual({ version: false, liveWord: true });
-    expect(headerFit(2, false)).toEqual({ version: false, liveWord: false });
+  /** Each step's field on `HeaderFit`, and what that field reads before the step is taken. */
+  const StepField = {
+    version: ['version', true],
+    'live-word': ['liveWord', true],
+    'account-name': ['accountName', true],
+    'needs-you-word': ['needsYouWord', true],
+    tight: ['tight', false],
+    mark: ['mark', false],
+  } as const;
+
+  it('names six steps, in the ruled order', () => {
+    expect(GiveWaySteps).toEqual(['version', 'live-word', 'account-name', 'needs-you-word', 'tight', 'mark']);
   });
 
-  it('never carries the version on a phone row', () => {
-    expect(headerFit(0, true)).toEqual({ version: false, liveWord: true });
+  it('gives nothing way at no steps: version, live word, account name, Needs you word, full padding, full logo', () => {
+    expect(headerFit(0, false)).toEqual({
+      version: true,
+      liveWord: true,
+      accountName: true,
+      needsYouWord: true,
+      tight: false,
+      mark: false,
+    });
+  });
+
+  it('takes exactly one more thing at each step, the next in the order, and keeps the earlier ones taken', () => {
+    GiveWaySteps.forEach((step, index) => {
+      const before = headerFit(index, false);
+      const after = headerFit(index + 1, false);
+      const [field, untaken] = StepField[step];
+
+      expect(before[field], step).toBe(untaken);
+      expect(after[field], step).toBe(!untaken);
+      const changed = (Object.keys(after) as (keyof typeof after)[]).filter((key) => after[key] !== before[key]);
+      expect(changed, step).toEqual([field]);
+    });
+  });
+
+  /** A phone row carries neither the version nor the account name nor the Needs you word, as before. */
+  it('never carries the version, the account name or the Needs you word on a phone row', () => {
+    expect(headerFit(0, true)).toEqual({
+      version: false,
+      liveWord: true,
+      accountName: false,
+      needsYouWord: false,
+      tight: false,
+      mark: false,
+    });
   });
 
   it('steps once per fitting that keeps too few, and stops at the last step', () => {
-    expect(nextGiveWay(0, 10, 10)).toBe(0);
-    expect(nextGiveWay(0, 9, 10)).toBe(1);
-    expect(nextGiveWay(1, 9, 10)).toBe(2);
-    expect(nextGiveWay(2, 0, 10)).toBe(2);
+    for (let level = 0; level < GiveWaySteps.length; level++) expect(nextGiveWay(level, 9, 10)).toBe(level + 1);
+    expect(nextGiveWay(GiveWaySteps.length, 0, 10)).toBe(GiveWaySteps.length);
+  });
+
+  /** A step is never taken while the ones before it suffice; a wide window that keeps all takes none. */
+  it('takes no step while the row already keeps New Team through Backlog', () => {
+    for (let level = 0; level <= GiveWaySteps.length; level++) {
+      expect(nextGiveWay(level, 10, 10)).toBe(level);
+      expect(nextGiveWay(level, 23, 10)).toBe(level);
+    }
   });
 });

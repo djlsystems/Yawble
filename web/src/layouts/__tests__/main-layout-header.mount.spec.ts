@@ -33,7 +33,9 @@ import RibbonBar from '../../components/RibbonBar.vue';
 import { useSessionStore } from '../../stores/session';
 import { useConsoleStore } from '../../stores/console';
 import { bundleBuild, releaseLabel } from '../../lib/buildInfo';
-import { keepThrough } from '../../lib/headerFit';
+import { GiveWaySteps, keepThrough } from '../../lib/headerFit';
+import { productMark, productTitle } from '../../presentation/product';
+import { Screen } from 'quasar';
 import { Ribbon } from '../../lib/ribbon';
 import { resetBody } from '../../test/mountQuasar';
 
@@ -151,39 +153,106 @@ describe('the one header row', () => {
   });
 
   /**
-   * SHORT OF ROOM, THE CLUSTER GIVES WAY IN ITS ORDER: each fitting that keeps fewer than New Team
-   * through Backlog takes one step - the version leaves the row, then the live chip is a dot with
-   * its word in the tooltip - and the ribbon's labels and the logo stay.
+   * SHORT OF ROOM, THE ROW GIVES WAY IN ITS ORDER: each fitting that keeps fewer than New Team
+   * through Backlog takes one step - the version leaves the row, the live chip is a dot, the account
+   * menu is its icon, Needs you is its count pill, the commands' padding halves, and last the logo
+   * is the head mark - and a fitting that keeps enough takes none. The ribbon's labels stay.
    */
-  it('gives way in order when the ribbon keeps fewer than New Team through Backlog', async () => {
+  it('gives way in order, one step per fitting that keeps too few, and none while enough show', async () => {
     const wrapper = await mountShell();
     const ribbon = wrapper.findComponent(RibbonBar);
     const cluster = () => wrapper.find('.q-header .ribbon-end');
     const keep = keepThrough(Ribbon);
+    const short = async () => {
+      ribbon.vm.$emit('fit', keep - 1);
+      await flushPromises();
+    };
+    const enough = async () => {
+      ribbon.vm.$emit('fit', keep);
+      await flushPromises();
+    };
+    /** What has given way, in the order of `GiveWaySteps`. */
+    const taken = () => [
+      !cluster().find('.version-tag').exists(),
+      cluster().find('[data-test="live-chip"]').classes().includes('live-chip-dot'),
+      !cluster().find('[data-test="account-name"]').exists(),
+      !cluster().find('[data-test="needs-you-word"]').exists(),
+      ribbon.props('tight') === true,
+      wrapper.find('[data-test="brand-mark"]').exists(),
+    ];
 
-    expect(cluster().find('.version-tag').exists()).toBe(true);
+    expect(taken()).toEqual([false, false, false, false, false, false]);
+    await enough();
+    expect(taken()).toEqual([false, false, false, false, false, false]);
 
-    ribbon.vm.$emit('fit', keep);
+    for (let step = 1; step <= GiveWaySteps.length; step++) {
+      await short();
+      expect(taken(), GiveWaySteps[step - 1]).toEqual(GiveWaySteps.map((_, index) => index < step));
+      // A fitting that now keeps enough takes nothing further.
+      await enough();
+      expect(taken(), GiveWaySteps[step - 1]).toEqual(GiveWaySteps.map((_, index) => index < step));
+    }
+
+    // Nothing past the last step; the logo is the mark, named, and the ribbon's labels are whole.
+    await short();
+    expect(taken()).toEqual(GiveWaySteps.map(() => true));
+    const mark = wrapper.get('[data-test="brand-mark"]');
+    expect(mark.attributes('src')).toBe(productMark);
+    expect(mark.attributes('alt')).toBe(productTitle);
+    expect(wrapper.get('[data-test="brand-link"]').attributes('aria-label')).toContain(productTitle);
+    expect(wrapper.find('.ribbon-entry').text()).toContain('New Team');
+
+    wrapper.unmount();
+  });
+
+  /** What leaves the row stays reachable: the account name in the menu, the Needs you words in its
+   *  aria-label and tooltip, the live word in the chip's, the product name in the mark's tooltip. */
+  it('keeps what gave way reachable', async () => {
+    const wrapper = await mountShell();
+    const ribbon = wrapper.findComponent(RibbonBar);
+    for (let step = 0; step < GiveWaySteps.length; step++) {
+      ribbon.vm.$emit('fit', 0);
+      await flushPromises();
+    }
+
+    const account = wrapper.get('.user-menu');
+    expect(account.attributes('aria-label')).toBe('Account: sam@example.com');
+    const needsYou = wrapper.get('[data-test="needs-you"]');
+    expect(needsYou.attributes('aria-label')).toMatch(/^Needs you: /);
+    expect(needsYou.findComponent({ name: 'QTooltip' }).exists()).toBe(true);
+    expect(wrapper.get('[data-test="live-chip"]').attributes('aria-label')).toBe('offline');
+
+    const tooltip = wrapper.find('[data-test="brand-link"]').findComponent({ name: 'QTooltip' });
+    (tooltip.vm as unknown as { show: () => void }).show();
     await flushPromises();
-    expect(cluster().find('.version-tag').exists()).toBe(true);
-
-    ribbon.vm.$emit('fit', keep - 1);
+    expect(document.body.querySelector('.q-tooltip')?.textContent).toContain(productTitle);
+    (tooltip.vm as unknown as { hide: () => void }).hide();
     await flushPromises();
-    expect(cluster().find('.version-tag').exists()).toBe(false);
-    expect(cluster().find('[data-test="live-chip"]').text()).toContain('offline');
 
-    ribbon.vm.$emit('fit', keep - 1);
+    await account.trigger('click');
     await flushPromises();
-    const chip = cluster().find('[data-test="live-chip"]');
-    expect(chip.text()).not.toContain('offline');
-    expect(chip.classes()).toContain('live-chip-dot');
-    expect(chip.attributes('aria-label')).toBe('offline');
+    expect(document.body.querySelector('[data-test="account-email"]')?.textContent).toContain('sam@example.com');
 
-    // Nothing further gives way, and the logo is still there.
-    ribbon.vm.$emit('fit', 0);
+    wrapper.unmount();
+  });
+
+  /** A wider window starts again from no steps; the ribbon's next fitting takes back what it needs. */
+  it('takes back every step when the window widens', async () => {
+    const wrapper = await mountShell();
+    const ribbon = wrapper.findComponent(RibbonBar);
+    for (let step = 0; step < GiveWaySteps.length; step++) {
+      ribbon.vm.$emit('fit', 0);
+      await flushPromises();
+    }
+    expect(wrapper.find('[data-test="brand-mark"]').exists()).toBe(true);
+
+    Screen.width = Screen.width + 200;
     await flushPromises();
-    expect(cluster().find('[data-test="live-chip"]').exists()).toBe(true);
-    expect(wrapper.find('[data-test="brand-link"] img').exists()).toBe(true);
+
+    expect(wrapper.find('[data-test="brand-mark"]').exists()).toBe(false);
+    expect(ribbon.props('tight')).toBe(false);
+    expect(wrapper.find('.q-header .ribbon-end .version-tag').exists()).toBe(true);
+    expect(wrapper.find('[data-test="account-name"]').exists()).toBe(true);
 
     wrapper.unmount();
   });

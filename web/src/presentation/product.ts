@@ -16,5 +16,8 @@ export const productLogoDark = '/logo-dark.png'
 /** The logo for the theme that is showing. */
 export const productLogoFor = (dark: boolean) => (dark ? productLogoDark : productLogoLight)
 
+/** The head mark alone, the logo without its lettering, for a header row short of room. 128 x 128, transparent, one for both themes. */
+export const productMark = '/icons/favicon-128x128.png'
+
 /** The operator CLI's command, for sentences that tell a person what to run. */
 export const productCli = 'yawble'

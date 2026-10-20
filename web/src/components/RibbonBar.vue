@@ -29,9 +29,10 @@ const emit = defineEmits<{ action: [action: string]; fit: [shown: number] }>();
  * never sits on top of a command and a command never pushes the cluster off the bar.
  *
  * `commands` false is the phone row (below `sm`): the same logo and cluster with no commands, which
- * the drawer lists instead.
+ * the drawer lists instead. `tight` is the row short of room (`lib/headerFit.ts`): each command's
+ * padding drops from 8px to 4px a side, and the row is measured again.
  */
-const props = withDefaults(defineProps<{ commands?: boolean }>(), { commands: true });
+const props = withDefaults(defineProps<{ commands?: boolean; tight?: boolean }>(), { commands: true, tight: false });
 
 const {
   board,
@@ -143,6 +144,7 @@ onMounted(() => {
 onBeforeUnmount(() => observer?.disconnect());
 
 watch(() => entries.map((entry) => (entry.groupStart ? titleOf(entry.tab) : '')).join('\n'), () => void measure());
+watch(() => props.tight, () => void measure());
 
 /** The spilled tail, grouped under its tab's name the way the drawer groups it. */
 const overflowGroups = computed(() => {
@@ -160,7 +162,7 @@ const overflowGroups = computed(() => {
 </script>
 
 <template>
-  <div ref="bar" class="ribbon">
+  <div ref="bar" class="ribbon" :class="{ 'ribbon--tight': tight }">
     <div ref="start" class="ribbon-start">
       <slot name="start" />
     </div>
@@ -411,6 +413,11 @@ const overflowGroups = computed(() => {
   padding: 0 8px;
   min-height: 32px;
   border-radius: 4px;
+}
+
+/* The fifth give-way step: half the padding a side, the labels whole. */
+.ribbon--tight .ribbon-btn {
+  padding: 0 4px;
 }
 
 .ribbon-overflow {

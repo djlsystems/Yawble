@@ -23,7 +23,7 @@ import UsersDialog from '../components/UsersDialog.vue';
 import AgentsDialog from '../components/AgentsDialog.vue';
 import TenantSettingsDialog from '../components/TenantSettingsDialog.vue';
 import ResetTeamDialog from '../components/ResetTeamDialog.vue';
-import { productLogoFor, productTitle } from '../presentation/product';
+import { productLogoFor, productMark, productTitle } from '../presentation/product';
 import BacklogDialog from '../components/BacklogDialog.vue';
 import TenantLogDialog from '../components/TenantLogDialog.vue';
 import DiagnosticsDialog from '../components/DiagnosticsDialog.vue';
@@ -443,7 +443,7 @@ async function signOut() {
 
            Below `sm` the same row carries no commands - the hamburger opens them as a list - and
            the header shrinks to it. One header element: a QLayout computes ONE header offset. -->
-      <RibbonBar :commands="!$q.screen.lt.sm" @action="onRibbonAction" @fit="onRibbonFit">
+      <RibbonBar :commands="!$q.screen.lt.sm" :tight="headerFit.tight" @action="onRibbonAction" @fit="onRibbonFit">
         <template #start>
           <!-- Phone-only. The ribbon does not fit below `sm` (600px); this is the door into the
                same commands as a list. -->
@@ -463,7 +463,9 @@ async function signOut() {
           <!-- The mark goes home. Which build this is lives in its tooltip, so the version needs no
                room on the bar. -->
           <router-link to="/" class="brand-link" :aria-label="`${productTitle} home`" data-test="brand-link">
-            <img :src="productLogoFor($q.dark.isActive)" :alt="productTitle" width="1066" height="365" />
+            <!-- Short of room, the last step: the head mark alone; the name stays its alt and tooltip. -->
+            <img v-if="headerFit.mark" :src="productMark" :alt="productTitle" width="128" height="128" data-test="brand-mark" />
+            <img v-else :src="productLogoFor($q.dark.isActive)" :alt="productTitle" width="1066" height="365" />
             <q-tooltip anchor="bottom left" self="top left" :offset="[0, 6]">{{ brandTooltip }}</q-tooltip>
           </router-link>
         </template>
@@ -497,7 +499,7 @@ async function signOut() {
           </q-chip>
 
           <!-- What is waiting on a person, as one count, left of the gauge. People only, as its route is. -->
-          <NeedsYouControl v-if="session.user" />
+          <NeedsYouControl v-if="session.user" :word="headerFit.needsYouWord" />
           <!-- The activity monitor: the instance's load as one gauge, its figures a click away.
                People only, as its route is. -->
           <CapacityMonitor v-if="session.user" />
@@ -515,13 +517,14 @@ async function signOut() {
             >
               <template #label>
                 <q-icon name="account_circle" size="20px" />
-                <!-- The name hides below 600px so the toolbar does not crowd on a phone; the icon and
-                     the caret remain, which is still a full tap target. -->
-                <span class="gt-xs q-ml-xs">{{ shortName }}</span>
+                <!-- The name hides below 600px, and on a row short of room (`lib/headerFit.ts`), so the
+                     toolbar does not crowd; the icon and the caret remain, which is still a full tap
+                     target, and the name is the menu's first line. -->
+                <span v-if="headerFit.accountName" class="gt-xs q-ml-xs" data-test="account-name">{{ shortName }}</span>
               </template>
 
               <q-list>
-                <q-item class="text-caption os-text-muted">
+                <q-item class="text-caption os-text-muted" data-test="account-email">
                   <q-item-section>{{ session.user.email }}</q-item-section>
                 </q-item>
 
