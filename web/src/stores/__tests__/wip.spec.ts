@@ -8,7 +8,9 @@ vi.mock('../../api/client', async (importOriginal) => ({
   getWip,
 }));
 
-import { WipPollMs, runningAcrossTeams, useWipStore, wipLine } from '../wip';
+import { runningAcrossTeams, useWipStore, wipLine } from '../wip';
+import { useCapacityStore } from '../capacity';
+import { sample } from '../../test/capacityFixtures';
 
 const view = {
   max: 4,
@@ -29,7 +31,7 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('the WIP store', () => {
-  it('polls only while something watches, once however many readers there are', async () => {
+  it('reads once when first watched and never polls: every later figure is the capacity push', async () => {
     const wip = useWipStore();
 
     wip.watch();
@@ -37,16 +39,33 @@ describe('the WIP store', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(getWip).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(WipPollMs);
-    expect(getWip).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(getWip).toHaveBeenCalledTimes(1);
 
-    wip.unwatch();
-    await vi.advanceTimersByTimeAsync(WipPollMs);
-    expect(getWip).toHaveBeenCalledTimes(3);
+    useCapacityStore().apply(sample({
+      runs: {
+        limit: 3, managerReserved: 1, runningCount: 1, waitingCount: 1,
+        running: [{ team: 'beta', member: 'Dev1', since: '' }],
+        waiting: [{ team: 'alpha', member: 'Manager', since: '', reason: 'waiting for memory: 11.2 of 12.9 GB in use' }],
+      },
+    }));
 
-    wip.unwatch();
-    await vi.advanceTimersByTimeAsync(WipPollMs * 3);
-    expect(getWip).toHaveBeenCalledTimes(3);
+    expect(wip.max).toBe(3);
+    expect(wip.runningCount).toBe(1);
+    expect(wip.reasonFor('alpha', 'Manager')).toBe('waiting for memory: 11.2 of 12.9 GB in use');
+    expect(wip.isWaiting('alpha', 'Manager')).toBe(true);
+    expect(getWip).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not read at all when a sample has already arrived', async () => {
+    const wip = useWipStore();
+    useCapacityStore().apply(sample());
+
+    wip.watch();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(getWip).not.toHaveBeenCalled();
+    expect(wip.view).not.toBeNull();
   });
 
   it('answers per team and per member', async () => {

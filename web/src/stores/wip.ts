@@ -1,23 +1,23 @@
 import { defineStore, acceptHMRUpdate } from 'pinia'
 import { getWip } from '../api/client'
-import type { WipHold, WipView } from '../api/types'
-
-/** How often the ledger is re-read while anything on screen is showing it. */
-export const WipPollMs = 5000
+import type { CapacitySample, WipHold, WipView } from '../api/types'
 
 /**
- * THE ONE COPY OF `GET /api/wip` IN THE BROWSER.
+ * THE ONE COPY OF THE RUN LEDGER IN THE BROWSER.
  *
  * The header strip, the kanban's In Progress header, the Teams table and the Admission tab all read
- * this; none of them fetches. Polling is reference-counted: each reader calls `watch()` when it
- * mounts and `unwatch()` when it goes, and the timer runs only while somebody is watching.
+ * this; none of them fetches, and NOTHING POLLS: every capacity sample the hub pushes
+ * (`capacityChanged`, every few seconds, people only) carries the ledger's limit, running and
+ * waiting with each waiter's reason - the same figures `GET /api/wip` answers - and the capacity
+ * store hands them here (`applySample`). The route is read once, when the first reader watches
+ * before any sample has arrived, and on a reader's own `refresh()` (the Admission tab after a
+ * change, a reconnect).
  */
 export const useWipStore = defineStore('wip', {
   state: () => ({
     view: null as WipView | null,
     error: '' as string,
     watchers: 0,
-    timer: 0 as ReturnType<typeof setInterval> | 0,
   }),
 
   getters: {
@@ -39,20 +39,22 @@ export const useWipStore = defineStore('wip', {
       }
     },
 
+    /** The pushed sample's ledger figures, which are what the route would answer now. */
+    applySample(runs: CapacitySample['runs']) {
+      this.view = { max: runs.limit, running: runs.running, waiting: runs.waiting }
+      this.error = ''
+    },
+
+    /** A reader has mounted: one read while no sample has arrived yet, and the pushes from then on. */
     watch() {
       this.watchers++
-      if (this.watchers > 1) return
+      if (this.watchers > 1 || this.view !== null) return
 
       void this.refresh()
-      this.timer = setInterval(() => void this.refresh(), WipPollMs)
     },
 
     unwatch() {
       this.watchers = Math.max(0, this.watchers - 1)
-      if (this.watchers > 0 || !this.timer) return
-
-      clearInterval(this.timer)
-      this.timer = 0
     },
 
     runningFor(team: string): WipHold[] {

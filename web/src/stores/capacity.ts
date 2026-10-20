@@ -1,6 +1,7 @@
 import { defineStore, acceptHMRUpdate } from 'pinia'
 import { getCapacity } from '../api/client'
 import type { CapacitySample } from '../api/types'
+import { useWipStore } from './wip'
 
 /** About how much history the monitor keeps: the Host's own window. */
 export const HistorySeconds = 600
@@ -30,6 +31,7 @@ export const useCapacityStore = defineStore('capacity', {
         this.latest = view.latest ?? view.history.at(-1) ?? null
         this.loaded = true
         this.error = ''
+        if (this.latest) useWipStore().applySample(this.latest.runs)
       } catch (cause) {
         // The last figures stay; their age says how far behind they are.
         this.error = cause instanceof Error ? cause.message : String(cause)
@@ -44,6 +46,8 @@ export const useCapacityStore = defineStore('capacity', {
       const from = Date.parse(sample.at) - HistorySeconds * 1000
       this.history = [...this.history.filter((earlier) => Date.parse(earlier.at) >= from), sample]
       this.loaded = true
+      // The ledger's figures ride on every sample: the wip store reads them here and polls nothing.
+      useWipStore().applySample(sample.runs)
     },
 
     /** Whether this member is queued for the heavy lease in the latest sample. */

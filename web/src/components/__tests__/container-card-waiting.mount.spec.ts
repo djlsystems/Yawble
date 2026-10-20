@@ -57,6 +57,19 @@ async function mountCard(snap: ContainerSnapshot) {
 }
 
 describe('the member card while held', () => {
+  it("reads the ledger's reason from the capacity push with nothing read from the wip route", async () => {
+    useCapacityStore().apply(sample({
+      runs: {
+        limit: 2, managerReserved: 1, runningCount: 0, waitingCount: 1, running: [],
+        waiting: [{ team: 'alpha', member: 'Manager', since: '', reason: 'waiting for memory: 11.2 of 12.9 GB in use' }],
+      },
+    }));
+
+    const wrapper = await mountCard(snapshot());
+
+    expect(wrapper.text()).toContain('waiting for memory: 11.2 of 12.9 GB in use');
+  });
+
   it('reads waiting for a slot when the snapshot is held', async () => {
     const wrapper = await mountCard(snapshot({ held: true }));
 
