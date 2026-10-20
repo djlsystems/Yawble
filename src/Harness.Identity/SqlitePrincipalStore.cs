@@ -26,15 +26,7 @@ public sealed class SqlitePrincipalStore : IPrincipalStore
 
     public SqlitePrincipalStore(string databasePath, SqliteDurability durability = SqliteDurability.SurvivesPowerLoss)
     {
-        _connectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = databasePath,
-
-            // Off, matching SqliteUserStore: a pooled native handle stays open past Dispose() on
-            // Windows, which is what turns a raw file read racing a just-closed connection into a
-            // sharing-violation IOException instead of a clean read.
-            Pooling = false,
-        }.ToString();
+        _connectionString = SqliteOpen.ConnectionString(databasePath);
 
         _durability = durability;
     }

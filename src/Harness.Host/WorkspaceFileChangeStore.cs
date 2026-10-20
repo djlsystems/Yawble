@@ -37,11 +37,7 @@ public sealed class WorkspaceFileChangeStore(string databasePath)
 {
     private const string Columns = "id, team, member, repo, at, files_json, commits_json, more, correlation";
 
-    private readonly string _connectionString = new SqliteConnectionStringBuilder
-    {
-        DataSource = databasePath,
-        Pooling = false,
-    }.ToString();
+    private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 
     public async Task AppendAsync(WorkspaceChange change, long? correlation, CancellationToken ct = default)
     {

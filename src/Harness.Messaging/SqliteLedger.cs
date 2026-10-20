@@ -51,13 +51,16 @@ public sealed class SqliteLedger : ILedger
     /// installed or upgraded while the Host runs is seen on the next run. Null: the platform's alone.</param>
     public SqliteLedger(string databasePath, IPluginEventRegistry? plugins = null)
     {
-        _connectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = databasePath,
-            Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Shared,
-        }.ToString();
+        _connectionString = SqliteOpen.ConnectionString(databasePath);
         _plugins = plugins;
+    }
+
+    private async Task<SqliteConnection> OpenAsync(CancellationToken ct)
+    {
+        var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(ct);
+        await SqlitePragmas.ApplyAsync(connection, ct: ct);
+        return connection;
     }
 
     public async Task<IReadOnlyList<Message>> ReadAsync(
@@ -68,8 +71,7 @@ public sealed class SqliteLedger : ILedger
 
         if (max <= 0) return [];
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(ct);
+        await using var connection = await OpenAsync(ct);
         await using var command = connection.CreateCommand();
 
         // THE INSTALLED PLUGINS' EXCLUSIONS, parameterised the same way under their own ordinals. A

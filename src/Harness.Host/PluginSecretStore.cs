@@ -38,11 +38,7 @@ public sealed class PluginSecretStore(string databasePath, IDataProtectionProvid
 
     private readonly IDataProtector _protector = protection.CreateProtector("Harness.PluginSecrets.v1");
 
-    private readonly string _connectionString = new SqliteConnectionStringBuilder
-    {
-        DataSource = databasePath,
-        Pooling = false,
-    }.ToString();
+    private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 
     /// <summary>
     /// Why <paramref name="value"/> cannot be stored, or null. The sentence never repeats the value

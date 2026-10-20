@@ -73,17 +73,7 @@ public sealed class SqliteUserStore : IUserStore
 
         _unknownUserHash = _hasher.HashPassword("", Guid.NewGuid().ToString("N"));
 
-        _connectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = databasePath,
-
-            // Off, unlike Messaging's store. Pooling keeps the native connection - and its file
-            // handle - alive past Dispose() so the NEXT open is cheap, which is exactly wrong here:
-            // auth writes are rare and short (see AuthSchema's remarks), so that cost is not worth
-            // paying, and a lingering handle keeps the database file open after the store is done
-            // with it.
-            Pooling = false,
-        }.ToString();
+        _connectionString = SqliteOpen.ConnectionString(databasePath);
 
         _durability = durability;
     }

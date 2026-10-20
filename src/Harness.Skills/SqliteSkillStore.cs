@@ -24,11 +24,7 @@ public sealed class SqliteSkillStore : ISkillStore
 
     public SqliteSkillStore(string databasePath, SqliteDurability durability = SqliteDurability.SurvivesPowerLoss)
     {
-        _connectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = databasePath,
-            Pooling = false,
-        }.ToString();
+        _connectionString = SqliteOpen.ConnectionString(databasePath);
 
         _durability = durability;
     }

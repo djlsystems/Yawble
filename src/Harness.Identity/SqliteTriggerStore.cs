@@ -14,11 +14,7 @@ public sealed class SqliteTriggerStore : ITriggerStore
 
     public SqliteTriggerStore(string databasePath, SqliteDurability durability = SqliteDurability.SurvivesPowerLoss)
     {
-        _connectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = databasePath,
-            Pooling = false,
-        }.ToString();
+        _connectionString = SqliteOpen.ConnectionString(databasePath);
 
         _durability = durability;
     }

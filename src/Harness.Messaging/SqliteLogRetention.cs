@@ -32,11 +32,7 @@ namespace Harness.Messaging;
 /// </summary>
 public sealed class SqliteLogRetention(string databasePath)
 {
-    private readonly string _connectionString = new SqliteConnectionStringBuilder
-    {
-        DataSource = databasePath,
-        Pooling = false,
-    }.ToString();
+    private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 
     /// <summary>The workflows whose rows may be chosen: over before the cut-off, or no workflow.</summary>
     private const string Eligible =

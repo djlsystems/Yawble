@@ -15,11 +15,7 @@ public sealed class SqliteWakeStore(string databasePath, SqliteDurability durabi
 {
     private const string Columns = "id, team, member, workflow, asked_seq, asked_at, due_at, note";
 
-    private readonly string _connectionString = new SqliteConnectionStringBuilder
-    {
-        DataSource = databasePath,
-        Pooling = false,
-    }.ToString();
+    private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 
     public Task<IReadOnlyList<PendingWake>> AllAsync(CancellationToken ct = default) =>
         ReadAsync($"SELECT {Columns} FROM wakes ORDER BY due_at, id", _ => { }, ct);

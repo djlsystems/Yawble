@@ -35,11 +35,7 @@ public sealed class SqliteBacklogStore : IBacklogStore
         SqliteDurability durability = SqliteDurability.SurvivesPowerLoss,
         Func<SqliteConnection, SqliteTransaction, TriggerAudit, CancellationToken, Task>? audit = null)
     {
-        _connectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = databasePath,
-            Pooling = false,
-        }.ToString();
+        _connectionString = SqliteOpen.ConnectionString(databasePath);
 
         _durability = durability;
         _audit = audit;

@@ -21,11 +21,7 @@ public sealed class SqlitePendingDeliveries : IPendingDeliveries
 
     public SqlitePendingDeliveries(string databasePath, SqliteDurability durability = SqliteDurability.SurvivesPowerLoss)
     {
-        _connectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = databasePath,
-            Pooling = false,
-        }.ToString();
+        _connectionString = SqliteOpen.ConnectionString(databasePath);
 
         _durability = durability;
     }

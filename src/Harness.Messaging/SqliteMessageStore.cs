@@ -30,33 +30,14 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
     public SqliteMessageStore(string databasePath, MessageWaitRegistry? waits = null)
     {
         _waits = waits;
-        _connectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = databasePath,
-            Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Shared,
-
-            // POOLING OFF, FOR THE REASON `SqliteUserStore` ALREADY GIVES: a pooled connection
-            // keeps its NATIVE handle - and the file - alive for the lifetime of the POOL rather
-            // than the connection, and the pool is PROCESS-WIDE.
-            //
-            // That makes the handle something any other code in this process can dispose. It is
-            // not hypothetical: `SqliteConnection.ClearAllPools()` is process-wide and appears in
-            // 55 test teardowns, so one finishing test drops the handle a running one is using,
-            // which surfaces as `ObjectDisposedException: SQLitePCL.sqlite3` in whichever database
-            // call happened to be in flight - on a different test every run, and never in a fully
-            // serial run.
-            //
-            // Every `Open()` sets its own pragmas because they are per-connection, so
-            // nothing here depended on reusing one.
-            Pooling = false,
-        }.ToString();
+        _connectionString = SqliteOpen.ConnectionString(databasePath);
     }
 
     private SqliteConnection Open()
     {
         var connection = new SqliteConnection(_connectionString);
         connection.Open();
+        SqlitePragmas.Apply(connection);
         return connection;
     }
 

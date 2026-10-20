@@ -53,7 +53,7 @@ public static class LedgerStart
     public static async Task<LedgerStartResult> RunAsync(string databasePath, CancellationToken ct = default)
     {
         await using var connection = new SqliteConnection(
-            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+            SqliteOpen.ConnectionString(databasePath));
         await connection.OpenAsync(ct);
         await SqlitePragmas.ApplyAsync(connection, ct: ct);
 

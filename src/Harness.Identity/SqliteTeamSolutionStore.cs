@@ -12,11 +12,7 @@ namespace Harness.Identity;
 public sealed class SqliteTeamSolutionStore(
     string databasePath, SqliteDurability durability = SqliteDurability.SurvivesPowerLoss) : ITeamSolutionStore
 {
-    private readonly string _connectionString = new SqliteConnectionStringBuilder
-    {
-        DataSource = databasePath,
-        Pooling = false,
-    }.ToString();
+    private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 
     private const string Select =
         """

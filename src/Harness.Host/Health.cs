@@ -1,3 +1,4 @@
+using Harness.Contracts;
 using Harness.Host.Auth;
 using Microsoft.Data.Sqlite;
 
@@ -76,12 +77,7 @@ public static class HealthEndpoints
         {
             // ReadWrite, not the default ReadWriteCreate: a missing database is a failure to
             // report, not a file for a health probe to create.
-            var connectionString = new SqliteConnectionStringBuilder
-            {
-                DataSource = database,
-                Mode = SqliteOpenMode.ReadWrite,
-                Pooling = false,
-            }.ToString();
+            var connectionString = SqliteOpen.ConnectionString(database, readOnly: true);
 
             await using var connection = new SqliteConnection(connectionString);
             await connection.OpenAsync(ct);

@@ -43,11 +43,7 @@ public sealed record PluginRemoveResult(
 /// </summary>
 public sealed class PluginRemover(PluginCatalog catalog, PluginInstaller installer, TeamRegistry teams, string databasePath)
 {
-    private readonly string _connectionString = new SqliteConnectionStringBuilder
-    {
-        DataSource = databasePath,
-        Pooling = false,
-    }.ToString();
+    private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 
     /// <summary>Removes plugin <paramref name="id"/>, or only its <paramref name="version"/>, recording
     /// <paramref name="audit"/>'s actor on a <see cref="TenantActions.PluginRemoved"/> row.</summary>
@@ -135,6 +131,7 @@ public sealed class PluginRemover(PluginCatalog catalog, PluginInstaller install
         await using (var connection = new SqliteConnection(_connectionString))
         {
             await connection.OpenAsync(ct);
+            await SqlitePragmas.ApplyAsync(connection, ct: ct);
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
 
             await TenantAuditRow.AppendAsync(connection, transaction, row, ct);

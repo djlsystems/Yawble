@@ -59,11 +59,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
 {
     private readonly IDataProtector _protector = protection.CreateProtector("Harness.Connections.v1");
 
-    private readonly string _connectionString = new SqliteConnectionStringBuilder
-    {
-        DataSource = databasePath,
-        Pooling = false,
-    }.ToString();
+    private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 
     // ---- providers ------------------------------------------------------------------------------
 

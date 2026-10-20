@@ -25,11 +25,7 @@ public sealed record TenantSettingWritten(string Name, TenantSettingRow? Row);
 /// </summary>
 public sealed class SqliteTenantSettingsStore(string databasePath)
 {
-    private readonly string _connectionString = new SqliteConnectionStringBuilder
-    {
-        DataSource = databasePath,
-        Pooling = false,
-    }.ToString();
+    private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 
     public async Task<IReadOnlyList<TenantSettingRow>> ReadAllAsync(CancellationToken ct = default)
     {

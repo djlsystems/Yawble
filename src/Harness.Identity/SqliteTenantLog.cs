@@ -31,11 +31,7 @@ public sealed class SqliteTenantLog : ITenantLog
 
     public SqliteTenantLog(string databasePath, SqliteDurability durability = SqliteDurability.SurvivesPowerLoss)
     {
-        _connectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = databasePath,
-            Pooling = false,
-        }.ToString();
+        _connectionString = SqliteOpen.ConnectionString(databasePath);
 
         _durability = durability;
     }

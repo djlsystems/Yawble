@@ -12,11 +12,7 @@ namespace Harness.Identity;
 /// </summary>
 public sealed class SqliteUnfinishedRemovals(string databasePath) : IUnfinishedRemovals
 {
-    private readonly string _connectionString = new SqliteConnectionStringBuilder
-    {
-        DataSource = databasePath,
-        Pooling = false,
-    }.ToString();
+    private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 
     public async Task RecordAsync(UnfinishedRemoval removal, CancellationToken ct = default)
     {

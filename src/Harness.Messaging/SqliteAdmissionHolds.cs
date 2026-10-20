@@ -10,11 +10,7 @@ namespace Harness.Messaging;
 /// </summary>
 public sealed class SqliteAdmissionHolds(string databasePath) : IAdmissionHoldLedger
 {
-    private readonly string _connectionString = new SqliteConnectionStringBuilder
-    {
-        DataSource = databasePath,
-        Pooling = false,
-    }.ToString();
+    private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 
     private SqliteConnection Open()
     {

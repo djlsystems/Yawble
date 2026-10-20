@@ -89,7 +89,14 @@ public static class SqlitePragmas
         await command.ExecuteNonQueryAsync(ct);
     }
 
+    /// <summary>
+    /// Temporary tables and indexes in memory rather than files; an 8 MB page cache per
+    /// connection (connections are short-lived and unpooled, so the figure bounds a burst, not a
+    /// process); a 256 MB memory map, which readers share through the page cache instead of
+    /// copying pages into each connection.
+    /// </summary>
     private static string Text(int busyTimeoutMilliseconds, SqliteDurability durability) =>
         $"PRAGMA busy_timeout = {busyTimeoutMilliseconds}; PRAGMA foreign_keys = ON; "
-        + $"PRAGMA synchronous = {(int)durability};";
+        + $"PRAGMA synchronous = {(int)durability}; "
+        + "PRAGMA temp_store = MEMORY; PRAGMA cache_size = -8192; PRAGMA mmap_size = 268435456;";
 }

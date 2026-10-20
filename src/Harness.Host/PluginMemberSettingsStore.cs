@@ -34,11 +34,7 @@ public interface IPluginMemberSettingsStore : IPluginMemberSettings
 /// </summary>
 public sealed class SqlitePluginMemberSettings(string databasePath) : IPluginMemberSettingsStore
 {
-    private readonly string _connectionString = new SqliteConnectionStringBuilder
-    {
-        DataSource = databasePath,
-        Pooling = false,
-    }.ToString();
+    private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 
     public async Task<PluginMemberSettings> ForAsync(ContainerId member, CancellationToken ct = default)
     {

@@ -48,11 +48,7 @@ public sealed record NewAgentStep(DateTimeOffset At, string Kind, string Label, 
 /// </summary>
 public sealed class AgentStepStore(string databasePath)
 {
-    private readonly string _connectionString = new SqliteConnectionStringBuilder
-    {
-        DataSource = databasePath,
-        Pooling = false,
-    }.ToString();
+    private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 
     /// <summary>
     /// Writes the steps with no row yet and sets the count of those that have one, in one

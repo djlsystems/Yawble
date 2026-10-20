@@ -24,13 +24,7 @@ public sealed class SqliteTeamStore : ITeamStore
 
     public SqliteTeamStore(string databasePath, SqliteDurability durability = SqliteDurability.SurvivesPowerLoss)
     {
-        _connectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = databasePath,
-
-            // Off, matching SqliteUserStore.
-            Pooling = false,
-        }.ToString();
+        _connectionString = SqliteOpen.ConnectionString(databasePath);
 
         _durability = durability;
     }
