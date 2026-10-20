@@ -142,9 +142,18 @@ public sealed class SqliteBacklogStore : IBacklogStore
         return found;
     }
 
-    public async Task<BacklogItem> CreateAsync(
-        string? team, string title, string body, string createdBy, CancellationToken ct = default)
+    private void RequireWriterFor(TriggerAudit? audit)
     {
+        if (audit is not null && _audit is null)
+        {
+            throw new InvalidOperationException("This backlog store was made without a tenant row writer.");
+        }
+    }
+
+    public async Task<BacklogItem> CreateAsync(
+        string? team, string title, string body, string createdBy, CancellationToken ct = default, TriggerAudit? audit = null)
+    {
+        RequireWriterFor(audit);
         var now = Now();
 
         await using var connection = Open();
@@ -196,6 +205,7 @@ public sealed class SqliteBacklogStore : IBacklogStore
             await insert.ExecuteNonQueryAsync(ct);
         }
 
+        if (audit is not null) await _audit!(connection, transaction, audit, ct);
         await transaction.CommitAsync(ct);
 
         return new BacklogItem(id, team, title, body, BacklogStates.Pending, position, null, now, now, createdBy);
@@ -245,10 +255,7 @@ public sealed class SqliteBacklogStore : IBacklogStore
         IReadOnlyList<TriggerAudit> audit,
         CancellationToken ct = default)
     {
-        if (audit.Count > 0 && _audit is null)
-        {
-            throw new InvalidOperationException("This backlog store was made without a tenant row writer.");
-        }
+        if (audit.Count > 0) RequireWriterFor(audit[0]);
 
         var sets = new List<string>();
 
@@ -365,10 +372,13 @@ public sealed class SqliteBacklogStore : IBacklogStore
         return all;
     }
 
-    public async Task SetArchivedAsync(long id, string? archivedAt, CancellationToken ct = default)
+    public async Task SetArchivedAsync(long id, string? archivedAt, CancellationToken ct = default, TriggerAudit? audit = null)
     {
+        RequireWriterFor(audit);
         await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
 
         command.CommandText =
             "UPDATE backlog_items SET archived_at = $archived, updated_at = $now WHERE id = $id";
@@ -377,10 +387,13 @@ public sealed class SqliteBacklogStore : IBacklogStore
         command.Parameters.AddWithValue("$now", Now());
 
         await command.ExecuteNonQueryAsync(ct);
+        if (audit is not null) await _audit!(connection, transaction, audit, ct);
+        await transaction.CommitAsync(ct);
     }
 
-    public async Task DeleteAsync(long id, CancellationToken ct = default)
+    public async Task DeleteAsync(long id, CancellationToken ct = default, TriggerAudit? audit = null)
     {
+        RequireWriterFor(audit);
         await using var connection = Open();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
 
@@ -431,6 +444,7 @@ public sealed class SqliteBacklogStore : IBacklogStore
             await item.ExecuteNonQueryAsync(ct);
         }
 
+        if (audit is not null) await _audit!(connection, transaction, audit, ct);
         await transaction.CommitAsync(ct);
     }
 
@@ -459,12 +473,16 @@ public sealed class SqliteBacklogStore : IBacklogStore
         string teamName,
         long correlation,
         string dispatchedBy,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        TriggerAudit? audit = null)
     {
+        RequireWriterFor(audit);
         var now = Now();
 
         await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
 
         command.CommandText =
             """
@@ -481,6 +499,8 @@ public sealed class SqliteBacklogStore : IBacklogStore
         command.Parameters.AddWithValue("$by", dispatchedBy);
 
         var id = Convert.ToInt64(await command.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
+        if (audit is not null) await _audit!(connection, transaction, audit, ct);
+        await transaction.CommitAsync(ct);
 
         return new BacklogDispatch(id, item, teamId, teamName, correlation, now, dispatchedBy, null, null);
     }

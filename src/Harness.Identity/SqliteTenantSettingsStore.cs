@@ -125,26 +125,11 @@ public sealed class SqliteTenantSettingsStore(string databasePath)
         return written;
     }
 
-    private static async Task AppendAuditAsync(
+    private static Task AppendAuditAsync(
         SqliteConnection connection, SqliteTransaction transaction, string stamp, string? actorId,
-        string actorEmail, string action, string setting, string detail, CancellationToken ct)
-    {
-        await using var audit = connection.CreateCommand();
-        audit.Transaction = transaction;
-        audit.CommandText =
-            """
-            INSERT INTO tenant_events
-                (occurred_at, actor_id, actor_email, action, subject, subject_name, detail)
-            VALUES ($at, $actorId, $actorEmail, $action, $subject, $subject, $detail)
-            """;
-        audit.Parameters.AddWithValue("$at", stamp);
-        audit.Parameters.AddWithValue("$actorId", (object?)actorId ?? DBNull.Value);
-        audit.Parameters.AddWithValue("$actorEmail", actorEmail);
-        audit.Parameters.AddWithValue("$action", action);
-        audit.Parameters.AddWithValue("$subject", setting);
-        audit.Parameters.AddWithValue("$detail", detail);
-        await audit.ExecuteNonQueryAsync(ct);
-    }
+        string actorEmail, string action, string setting, string detail, CancellationToken ct) =>
+        TenantAuditRow.AppendAtAsync(
+            connection, transaction, new TriggerAudit(actorId, actorEmail, action, setting, setting, detail), DateTimeOffset.Parse(stamp, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind), ct);
 
     private SqliteConnection Open()
     {

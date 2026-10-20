@@ -300,8 +300,12 @@ public interface IBacklogStore
     /// Appends an item at the end of the order. Answers the row as stored, including the id the
     /// platform minted.
     /// </summary>
+    /// <summary>
+    /// Makes the item; with <paramref name="audit"/>, its tenant row lands in the same transaction
+    /// and the item is not made when the row cannot be written.
+    /// </summary>
     Task<BacklogItem> CreateAsync(
-        string? team, string title, string body, string createdBy, CancellationToken ct = default);
+        string? team, string title, string body, string createdBy, CancellationToken ct = default, TriggerAudit? audit = null);
 
     /// <summary>
     /// NARROW UPDATES, NEVER A WHOLE-ROW UPSERT. Reusing a record-shaped save is the change to
@@ -350,10 +354,12 @@ public interface IBacklogStore
     Task<IReadOnlyList<BacklogItem>> RenumberAsync(CancellationToken ct = default);
 
     /// <summary>Sets or clears <c>archived_at</c>. Available at any state.</summary>
-    Task SetArchivedAsync(long id, string? archivedAt, CancellationToken ct = default);
+    /// <summary>Archives (a stamp) or restores (null); with <paramref name="audit"/>, in one transaction with its row.</summary>
+    Task SetArchivedAsync(long id, string? archivedAt, CancellationToken ct = default, TriggerAudit? audit = null);
 
     /// <summary>Permanent, and reachable only from the archive. Takes the dispatch records with it.</summary>
-    Task DeleteAsync(long id, CancellationToken ct = default);
+    /// <summary>Deletes the item and its dispatch records; with <paramref name="audit"/>, in one transaction with its row.</summary>
+    Task DeleteAsync(long id, CancellationToken ct = default, TriggerAudit? audit = null);
 
     /// <summary>Every dispatch of one item, oldest first. The CURRENT one is the last.</summary>
     Task<IReadOnlyList<BacklogDispatch>> DispatchesAsync(long item, CancellationToken ct = default);
@@ -385,7 +391,7 @@ public interface IBacklogStore
         string teamName,
         long correlation,
         string dispatchedBy,
-        CancellationToken ct = default);
+        CancellationToken ct = default, TriggerAudit? audit = null);
 
     /// <summary>
     /// Freezes a dispatch's stats, or clears them when <paramref name="frozenAt"/> is null. See

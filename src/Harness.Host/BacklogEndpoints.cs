@@ -424,12 +424,22 @@ public static class BacklogEndpoints
             var stored = requested is null ? null : teams.ExistingName(requested) ?? requested;
             var actor = await ActorOfAsync(context, principal, users, ct);
 
-            var item = await backlog.CreateAsync(
-                stored, request.Title.Trim(), request.Body ?? "", actor, ct);
-
-            await WriteAuditAsync(
-                context, principal, users, audit, TenantActions.BacklogItemCreated, PlatformBacklogId.Format(item.Id),
-                item.Title, new { item.Id, team = stored }, ct);
+            // THE ROW LANDS WITH THE ITEM, in the store's one transaction: no row, no item. The
+            // item's citation is minted inside, so the row names the title and the team.
+            BacklogItem item;
+            try
+            {
+                item = await backlog.CreateAsync(
+                    stored, request.Title.Trim(), request.Body ?? "", actor, ct,
+                    audit: await AuditRowAsync(
+                        context, principal, users, TenantActions.BacklogItemCreated, null, request.Title.Trim(), new { team = stored }, ct));
+            }
+            catch (Exception exception) when (exception is SqliteException or IOException)
+            {
+                return Results.Json(
+                    new { error = $"The item was not created: its tenant log row could not be written ({exception.Message})." },
+                    statusCode: StatusCodes.Status500InternalServerError);
+            }
 
             return Results.Created($"/api/backlog/{item.Id}", Render(item, teams));
         })
@@ -653,11 +663,17 @@ public static class BacklogEndpoints
                 });
             }
 
-            await backlog.DeleteAsync(id, ct);
-
-            await WriteAuditAsync(
-                context, principal, users, audit, TenantActions.BacklogItemDeleted, PlatformBacklogId.Format(id),
-                item.Title, new { id }, ct);
+            try
+            {
+                await backlog.DeleteAsync(id, ct, audit: await AuditRowAsync(
+                    context, principal, users, TenantActions.BacklogItemDeleted, PlatformBacklogId.Format(id), item.Title, new { id }, ct));
+            }
+            catch (Exception exception) when (exception is SqliteException or IOException)
+            {
+                return Results.Json(
+                    new { error = $"{PlatformBacklogId.Format(id)} was not deleted: its tenant log row could not be written ({exception.Message})." },
+                    statusCode: StatusCodes.Status500InternalServerError);
+            }
 
             return Results.NoContent();
         })
@@ -1221,8 +1237,21 @@ public static class BacklogEndpoints
             return Results.NotFound(new { error = $"No backlog item {PlatformBacklogId.Format(id)}." });
         }
 
-        await backlog.SetArchivedAsync(
-            id, archived ? DateTimeOffset.UtcNow.ToString("O") : null, ct);
+        try
+        {
+            await backlog.SetArchivedAsync(
+                id, archived ? DateTimeOffset.UtcNow.ToString("O") : null, ct,
+                audit: await AuditRowAsync(
+                    context, principal, users,
+                    archived ? TenantActions.BacklogItemArchived : TenantActions.BacklogItemRestored,
+                    PlatformBacklogId.Format(id), item.Title, new { id }, ct));
+        }
+        catch (Exception exception) when (exception is SqliteException or IOException)
+        {
+            return Results.Json(
+                new { error = $"{PlatformBacklogId.Format(id)} was not {(archived ? "archived" : "restored")}: its tenant log row could not be written ({exception.Message})." },
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
 
         // FREEZING IS THE SECOND HALF OF ARCHIVING AND NOT A SEPARATE FEATURE. Team deletion is not
         // the only eraser: log retention purges rows nothing cites, so an archived item deriving
@@ -1230,17 +1259,6 @@ public static class BacklogEndpoints
         // again from whatever the log still holds.
         await BacklogExecutionRecord.FreezeAsync(
             id, archived, backlog, log, ct, context.RequestServices.GetService<IUsageLedger>());
-
-        await WriteAuditAsync(
-            context,
-            principal,
-            users,
-            audit,
-            archived ? TenantActions.BacklogItemArchived : TenantActions.BacklogItemRestored,
-            PlatformBacklogId.Format(id),
-            item.Title,
-            new { id },
-            ct);
 
         return Results.NoContent();
     }
@@ -1335,6 +1353,24 @@ public static class BacklogEndpoints
         ?? context.User.Identity?.Name
         ?? principal.Id;
 
+    /// <summary>A change's tenant row, built before the change so the store lands both in one transaction.</summary>
+    private static async Task<TriggerAudit> AuditRowAsync(
+        HttpContext context,
+        Principal principal,
+        IUserStore users,
+        string action,
+        string? subject,
+        string? subjectName,
+        object? detail,
+        CancellationToken ct) =>
+        new(
+            principal.Id,
+            await ActorEmailOfAsync(context, principal, users, ct),
+            action,
+            subject,
+            subjectName,
+            detail is null ? null : System.Text.Json.JsonSerializer.Serialize(detail));
+
     private static async Task WriteAuditAsync(
         HttpContext context,
         Principal principal,
@@ -1422,7 +1458,10 @@ public static class BacklogEndpoints
             ct);
 
         var record = await backlog.AddDispatchAsync(
-            item.Id, stored, teams.LabelFor(stored), dispatched.Seq, actor, ct);
+            item.Id, stored, teams.LabelFor(stored), dispatched.Seq, actor, ct,
+            audit: new TriggerAudit(
+                who.PrincipalId, who.Email, TenantActions.BacklogItemDispatched, PlatformBacklogId.Format(item.Id), item.Title,
+                System.Text.Json.JsonSerializer.Serialize(new { item = item.Id, team = stored, correlation = dispatched.Seq })));
 
         // WHERE THE DISPATCH STARTS IS READ BEFORE THE MANAGER IS TOLD, so nothing the team does
         // for this item can be mistaken for where it started. Only work beyond it is ever stored as
@@ -1452,10 +1491,6 @@ public static class BacklogEndpoints
                 actor,
                 dispatched.Seq),
             ct);
-
-        await audit.WriteAsAsync(
-            who.PrincipalId, who.Email, TenantActions.BacklogItemDispatched, PlatformBacklogId.Format(item.Id),
-            item.Title, new { item = item.Id, team = stored, correlation = dispatched.Seq }, ct);
 
         return (dispatched.Seq, record.Id);
     }

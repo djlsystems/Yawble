@@ -214,25 +214,16 @@ public static class OutcomeLinks
     /// <summary>The <c>backlog.item-outcome-inherited</c> tenant row, written in the caller's
     /// transaction with the tenant log's own columns (as <c>TenantAuditRow</c> writes them). A
     /// person's row carries their email; an agent's or the platform's, its id.</summary>
-    public static async Task AppendInheritedRowAsync(
+    public static Task AppendInheritedRowAsync(
         SqliteConnection connection, SqliteTransaction transaction, string item, string title, string outcomeId,
         string? outcomeName, long workflow, string by, string byKind, long? linkId, string? how, CancellationToken ct)
     {
-        await using var audit = connection.CreateCommand();
-        audit.Transaction = transaction;
-        audit.CommandText =
-            """
-            INSERT INTO tenant_events (occurred_at, actor_id, actor_email, action, subject, subject_name, detail)
-            VALUES ($at, $actorId, $actorEmail, $action, $subject, $subjectName, $detail)
-            """;
         var person = byKind == OutcomeActorKind.Person;
-        audit.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
-        audit.Parameters.AddWithValue("$actorId", person ? DBNull.Value : by);
-        audit.Parameters.AddWithValue("$actorEmail", person ? by : DBNull.Value);
-        audit.Parameters.AddWithValue("$action", TenantActions.BacklogItemOutcomeInherited);
-        audit.Parameters.AddWithValue("$subject", item);
-        audit.Parameters.AddWithValue("$subjectName", title);
-        audit.Parameters.AddWithValue("$detail", JsonSerializer.Serialize(new
+        return TenantAuditRow.AppendAsync(
+            connection, transaction,
+            new TriggerAudit(
+                person ? null : by, person ? by : null, TenantActions.BacklogItemOutcomeInherited, item, title,
+                JsonSerializer.Serialize(new
         {
             outcomeId,
             outcomeName,
@@ -241,9 +232,10 @@ public static class OutcomeLinks
             how,
             by,
             byKind,
-        }));
-        await audit.ExecuteNonQueryAsync(ct);
+        })),
+            ct);
     }
+
 
     /// <summary>The newest link of <paramref name="correlation"/>, or null.</summary>
     public static async Task<OutcomeLink?> CurrentAsync(

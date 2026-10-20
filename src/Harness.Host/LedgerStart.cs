@@ -176,18 +176,10 @@ public static class LedgerStart
             await insert.ExecuteNonQueryAsync(ct);
         }
 
-        await using var audit = connection.CreateCommand();
-        audit.Transaction = transaction;
-        audit.CommandText =
-            """
-            INSERT INTO tenant_events (occurred_at, actor_id, actor_email, action, subject, subject_name, detail)
-            VALUES ($at, NULL, $by, $action, $name, $name, $detail)
-            """;
-        audit.Parameters.AddWithValue("$at", at);
-        audit.Parameters.AddWithValue("$by", Actor);
-        audit.Parameters.AddWithValue("$action", TenantActions.TenantSettingChanged);
-        audit.Parameters.AddWithValue("$name", name);
-        audit.Parameters.AddWithValue("$detail", JsonSerializer.Serialize(new { setting = name, old = (string?)null, @new = value }));
-        await audit.ExecuteNonQueryAsync(ct);
+        await TenantAuditRow.AppendAtAsync(
+            connection, transaction,
+            new TriggerAudit(
+                null, Actor, TenantActions.TenantSettingChanged, name, name,
+                JsonSerializer.Serialize(new { setting = name, old = (string?)null, @new = value })), DateTimeOffset.Parse(at, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind), ct);
     }
 }

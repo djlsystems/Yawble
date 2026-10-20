@@ -90,21 +90,11 @@ public static class BacklogOutcomeStart
             await insert.ExecuteNonQueryAsync(ct);
         }
 
-        await using (var audit = connection.CreateCommand())
-        {
-            audit.Transaction = transaction;
-            audit.CommandText =
-                """
-                INSERT INTO tenant_events (occurred_at, actor_id, actor_email, action, subject, subject_name, detail)
-                VALUES ($at, NULL, $by, $action, $name, $name, $detail)
-                """;
-            audit.Parameters.AddWithValue("$at", now);
-            audit.Parameters.AddWithValue("$by", LedgerStart.Actor);
-            audit.Parameters.AddWithValue("$action", TenantActions.TenantSettingChanged);
-            audit.Parameters.AddWithValue("$name", DoneName);
-            audit.Parameters.AddWithValue("$detail", JsonSerializer.Serialize(new { setting = DoneName, old = (string?)null, @new = now, items = filled }));
-            await audit.ExecuteNonQueryAsync(ct);
-        }
+        await TenantAuditRow.AppendAtAsync(
+            connection, transaction,
+            new TriggerAudit(
+                null, LedgerStart.Actor, TenantActions.TenantSettingChanged, DoneName, DoneName,
+                JsonSerializer.Serialize(new { setting = DoneName, old = (string?)null, @new = now, items = filled })), DateTimeOffset.Parse(now, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind), ct);
 
         await transaction.CommitAsync(ct);
         return filled;

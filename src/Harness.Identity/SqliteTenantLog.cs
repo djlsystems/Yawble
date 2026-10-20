@@ -49,26 +49,8 @@ public sealed class SqliteTenantLog : ITenantLog
         CancellationToken ct = default)
     {
         await using var connection = Open();
-        await using var command = connection.CreateCommand();
-
-        command.CommandText =
-            """
-            INSERT INTO tenant_events
-                (occurred_at, actor_id, actor_email, action, subject, subject_name, detail)
-            VALUES ($at, $actorId, $actorEmail, $action, $subject, $subjectName, $detail)
-            """;
-
-        // Round-trip ("O"), matching every other timestamp this codebase stores. A local-format
-        // string sorts wrong and parses differently on a machine with another culture.
-        command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
-        command.Parameters.AddWithValue("$actorId", (object?)actorId ?? DBNull.Value);
-        command.Parameters.AddWithValue("$actorEmail", (object?)actorEmail ?? DBNull.Value);
-        command.Parameters.AddWithValue("$action", action);
-        command.Parameters.AddWithValue("$subject", (object?)subject ?? DBNull.Value);
-        command.Parameters.AddWithValue("$subjectName", (object?)subjectName ?? DBNull.Value);
-        command.Parameters.AddWithValue("$detail", (object?)detail ?? DBNull.Value);
-
-        await command.ExecuteNonQueryAsync(ct);
+        await TenantAuditRow.AppendAsync(
+            connection, null, new TriggerAudit(actorId, actorEmail, action, subject, subjectName, detail), ct);
     }
 
     public async Task<TenantEvent?> FindLatestAsync(
