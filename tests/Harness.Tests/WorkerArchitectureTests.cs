@@ -66,7 +66,7 @@ public sealed class WorkerArchitectureTests
     {
         ["PathSearch.Find: " + ResolvesOnThePath] =
             "the resolver: the one walk of PATH; every caller of it is listed here.",
-        ["Program.Main: " + ResolvesOnThePath] =
+        ["HostComposition.StartupAsync: " + ResolvesOnThePath] =
             "gh: whether the GitHub CLI is on control's PATH, where control runs it.",
         ["RepoEndpoints.GetRepoStatusAsync: " + ResolvesOnThePath] =
             "gh: whether the GitHub CLI is on control's PATH, where control runs it.",
