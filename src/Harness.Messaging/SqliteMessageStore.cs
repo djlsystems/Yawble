@@ -1535,6 +1535,62 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
     }
 
     /// <summary>
+    /// WHICH OF THESE CORRELATIONS ENDED COMPLETED. See
+    /// <see cref="IMessageLog.CompletedWorkflowsAmongAsync"/>. The ending rows are the
+    /// <c>workflow.completed</c> and <c>workflow.closed</c> rows no instruction or card row follows -
+    /// the inner clause of <c>WorkflowOpenSql.NotClosed</c>, unchanged - read in seq order, so the
+    /// latest one per correlation is the one kept, and it counts only when it is a completion.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<long, DateTimeOffset>> CompletedWorkflowsAmongAsync(
+        IReadOnlyCollection<long> correlations, CancellationToken ct = default)
+    {
+        var asked = correlations.Distinct().ToList();
+        if (asked.Count == 0) return new Dictionary<long, DateTimeOffset>();
+
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        var names = new List<string>(asked.Count);
+
+        for (var i = 0; i < asked.Count; i++)
+        {
+            var name = $"$c{i}";
+            names.Add(name);
+            command.Parameters.AddWithValue(name, asked[i]);
+        }
+
+        command.CommandText =
+            $"""
+            SELECT d.correlation_id, d.type, d.occurred_at
+            FROM messages d
+            WHERE d.correlation_id IN ({string.Join(", ", names)})
+              AND d.type IN ($completed, $closed)
+              AND NOT EXISTS (
+                  SELECT 1 FROM messages woke
+                  WHERE woke.correlation_id = d.correlation_id
+                    AND woke.seq > d.seq
+                    AND (woke.type LIKE $instructionPrefix OR woke.type LIKE $cardPrefix))
+            ORDER BY d.seq
+            """;
+
+        WorkflowOpenSql.Bind(command);
+
+        var ending = new Dictionary<long, (string Type, DateTimeOffset At)>();
+
+        await using (var reader = await command.ExecuteReaderAsync(ct))
+        {
+            while (await reader.ReadAsync(ct))
+            {
+                ending[reader.GetInt64(0)] = (reader.GetString(1), MessageRows.ReadStamp(reader.GetString(2)));
+            }
+        }
+
+        return ending
+            .Where(pair => pair.Value.Type == MessageTypes.WorkflowCompleted)
+            .ToDictionary(pair => pair.Key, pair => pair.Value.At);
+    }
+
+    /// <summary>
     /// EVERY WORKFLOW THIS TEAM HAS RUN SINCE ITS FLOOR, open and closed alike. See
     /// <see cref="IMessageLog.WorkflowsForTeamAsync"/>.
     /// </summary>

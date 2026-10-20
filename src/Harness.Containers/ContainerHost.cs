@@ -462,7 +462,7 @@ public sealed class ContainerHost : IAsyncDisposable
                         }
                     }
 
-                    await _log.AppendAsync(
+                    var interruptedRow = await _log.AppendAsync(
                         new NewMessage(
                             MessageTypes.Failed,
                             JsonSerializer.Serialize(new
@@ -504,6 +504,7 @@ public sealed class ContainerHost : IAsyncDisposable
                     // only at the other one leaves a restarted Host's interrupted members looking
                     // exactly like members that finished - which is the state this mark exists for.
                     container.MarkFailed(InterruptedByRestart, FailureClasses.Interrupted);
+                    container.NoteMarkRow(interruptedRow);
 
                     await _pending.RemoveAsync(container.Id, row.Seq, ct);
                     interrupted++;

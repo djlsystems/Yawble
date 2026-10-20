@@ -32,7 +32,16 @@ public sealed class SolutionWait(
     ITriggerStore triggers,
     TenantLogging tenant)
 {
-    private readonly ConcurrentDictionary<string, byte> _waiting = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>The teams seen waiting, each with when it was first seen waiting.</summary>
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _waiting = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// When <paramref name="team"/>, found missing an input now, was first seen waiting: by a fire, a
+    /// solution read, an upload or the sweep's heartbeat - or by this call, which is then the first
+    /// sighting. Memory only, like the set: after a restart it is the first sighting since. Clears
+    /// nothing and fires nothing; `GET /api/needs-you` reads it as the row's `since`.
+    /// </summary>
+    public DateTimeOffset WaitingSince(string team) => _waiting.GetOrAdd(team, _ => DateTimeOffset.UtcNow);
 
     /// <summary>
     /// The skip reason while <paramref name="team"/> waits for a missing required input, naming it in
@@ -46,7 +55,7 @@ public sealed class SolutionWait(
         var missing = await installer().MissingAsync(row.Team, row, ct);
         if (missing.Count > 0)
         {
-            _waiting[row.Team] = 0;
+            _waiting.TryAdd(row.Team, DateTimeOffset.UtcNow);
             return ReasonOf(missing);
         }
 

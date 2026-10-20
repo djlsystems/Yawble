@@ -124,7 +124,7 @@ public sealed class MemberReports : IMemberReports, IRunWorkerClient
         }
         else
         {
-            await log.AppendAsync(
+            var row = await log.AppendAsync(
                 new NewMessage(
                     MessageTypes.Blocked,
                     JsonSerializer.Serialize(new { reason }),
@@ -133,6 +133,7 @@ public sealed class MemberReports : IMemberReports, IRunWorkerClient
                 ct);
 
             container.MarkBlocked(reason);
+            container.NoteMarkRow(row);
         }
 
         return MemberReportOutcome.Ok;
@@ -190,6 +191,7 @@ public sealed class MemberReports : IMemberReports, IRunWorkerClient
             ct);
 
         container.MarkNeedsDecision(question, row.Seq, row.CorrelationId);
+        container.NoteMarkRow(row);
 
         return MemberReportOutcome.Ok;
     }

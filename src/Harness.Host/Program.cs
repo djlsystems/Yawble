@@ -2739,6 +2739,7 @@ SkillsEndpoints.Map(app);
 LeaseEndpoints.Map(app);
 KanbanEndpoints.Map(app);
 BacklogEndpoints.Map(app);
+NeedsYou.Map(app);
 BacklogEndpoints.MapTeamScoped(app);
 DiagnosticsEndpoints.Map(app);
 LiveViewEndpoints.Map(app);

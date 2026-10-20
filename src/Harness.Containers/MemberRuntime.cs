@@ -160,6 +160,23 @@ public sealed class MemberRuntime : IAsyncDisposable
 
     private sealed record DecisionRow(long Seq, long Correlation);
 
+    /// <summary>
+    /// The log rows the three trouble marks were read from, or null each: what `GET /api/needs-you`
+    /// answers as a row's `since`, `workflow` and `card` without asking the log. Set beside the mark
+    /// (<see cref="NoteMarkRow"/>), cleared on the line where the mark is cleared. Not on the
+    /// snapshot, so no snapshot changes.
+    /// </summary>
+    private volatile MarkRow? _blockedRow;
+    private volatile MarkRow? _failedRow;
+    private volatile MarkRow? _needsDecisionMarkRow;
+
+    /// <summary>The card the running batch's waking instruction is about - its <c>card</c>, else the
+    /// projector's <c>{correlation}_{member}</c> - in that workflow; null for a wake that is no
+    /// instruction.</summary>
+    private volatile RunCard? _runCard;
+
+    private sealed record RunCard(long Correlation, string Card);
+
     /// <summary>The wakes this member asked for that are still pending, or null for none. Written by
     /// the wake runner (<see cref="MarkWakes"/>), never by a run, and never cleared by a wake.</summary>
     private volatile IReadOnlyList<WakeView>? _wakes;
@@ -424,6 +441,38 @@ public sealed class MemberRuntime : IAsyncDisposable
     /// polling. Handlers must not block: this fires on the consumer thread.</summary>
     public event Action<ContainerSnapshot>? Changed;
 
+    /// <summary>The rows this member's live trouble marks were read from. See <see cref="MarkRows"/>.</summary>
+    public MarkRows Marks() => new(
+        _blocked is null ? null : _blockedRow,
+        _failed is null ? null : _failedRow,
+        _needsDecision is null ? null : _needsDecisionMarkRow);
+
+    /// <summary>
+    /// Records the log row a trouble mark was set from: a <c>blocked</c>, <c>failed</c> or
+    /// <c>needs-decision</c> row of this member. Called beside <see cref="MarkBlocked"/>,
+    /// <see cref="MarkFailed"/> and <see cref="MarkNeedsDecision"/> wherever the row is in hand;
+    /// publishes nothing, because nothing on the snapshot moves. The row's card is the running
+    /// batch's when the row is in its workflow, else none.
+    /// </summary>
+    public void NoteMarkRow(Message row)
+    {
+        var card = _runCard is { } run && run.Correlation == row.CorrelationId ? run.Card : null;
+        var mark = new MarkRow(row.Seq, row.CorrelationId, row.OccurredAt, card);
+
+        if (row.Type == MessageTypes.Blocked) _blockedRow = mark;
+        else if (row.Type == MessageTypes.Failed) _failedRow = mark;
+        else if (row.Type == MessageTypes.NeedsDecision) _needsDecisionMarkRow = mark;
+    }
+
+    /// <summary>The mark as its own row until the log's is noted: the running workflow and card, now.</summary>
+    private MarkRow MarkedNow()
+    {
+        var run = _runCard;
+        var correlation = _currentCorrelation ?? run?.Correlation;
+
+        return new MarkRow(null, correlation, DateTimeOffset.UtcNow, run is not null && run.Correlation == correlation ? run.Card : null);
+    }
+
     public ContainerSnapshot Snapshot() => new(
         _definition.Id.Team, _definition.Id.Name, _definition.Label ?? _definition.Id.Name,
         _definition.Agent, _state, QueueDepth, Ceiling,
@@ -452,6 +501,7 @@ public sealed class MemberRuntime : IAsyncDisposable
     public void MarkBlocked(string reason)
     {
         _blocked = reason;
+        _blockedRow = MarkedNow();
 
         // Pushed, or the board never looks. The SPA's feed has no poll - it refetches only when a
         // `containerChanged` snapshot arrives - so a mark written with nothing published would sit
@@ -526,6 +576,7 @@ public sealed class MemberRuntime : IAsyncDisposable
 
         _failed = reason;
         _failureClass = failureClass;
+        _failedRow = MarkedNow();
 
         // Pushed, or the board never looks. The SPA has no poll - it refetches only when a
         // `containerChanged` snapshot arrives - so a mark written with nothing published sits
@@ -547,6 +598,8 @@ public sealed class MemberRuntime : IAsyncDisposable
 
         _blocked = null;
         _failed = null;
+        _blockedRow = null;
+        _failedRow = null;
         _failureClass = null;
         _resumeAt = null;
         Publish();
@@ -622,6 +675,7 @@ public sealed class MemberRuntime : IAsyncDisposable
 
         _needsDecisionRow = row;
         _needsDecision = question;
+        _needsDecisionMarkRow = MarkedNow();
         Publish();
     }
 
@@ -1397,6 +1451,8 @@ public sealed class MemberRuntime : IAsyncDisposable
         // card wearing half of the last job.
         _blocked = null;
         _failed = null;
+        _blockedRow = null;
+        _failedRow = null;
 
         // THE OTHER TWO HALVES OF THE `failed` MARK, on the line beside it for the reason the trio
         // above is adjacent: a class or a promised resume outliving the reason it belongs to is a
@@ -1405,6 +1461,11 @@ public sealed class MemberRuntime : IAsyncDisposable
         _resumeAt = null;
         _needsDecision = null;
         _needsDecisionRow = null;
+        _needsDecisionMarkRow = null;
+
+        _runCard = first.Type.StartsWith(MessageTypes.InstructionPrefix, StringComparison.Ordinal)
+            ? new RunCard(first.CorrelationId, CardOf(first.Payload) ?? $"{first.CorrelationId}_{Id.Name}")
+            : null;
 
         // The per-run flag, unlike the words below it: a new run has not handed anything back yet.
         _handedBackThisRun = false;
@@ -1790,6 +1851,8 @@ public sealed class MemberRuntime : IAsyncDisposable
                     payload,
                     Id.ToString(),
                     message.Seq));
+
+                if (!result.Succeeded && terminal is not null) NoteMarkRow(terminal);
 
                 if (usageCountedOn is null && terminal is not null && _onTerminal is not null)
                 {
