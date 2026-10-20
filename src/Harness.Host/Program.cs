@@ -380,6 +380,9 @@ builder.Services.AddSingleton(new LedgerIdentity(ledgerStart?.InstanceId, ledger
 // is composed after the stores), and told of the log's purges by retention and Reset.
 builder.Services.AddSingleton(sp => new KanbanStore(store, team => sp.GetRequiredService<TeamRegistry>().FloorFor(team)));
 
+// THE ROLLUP'S TIMINGS PER TEAM, kept until that team's rows move, and told of purges the same way.
+builder.Services.AddSingleton(new RollupCache(store));
+
 // What each container has accepted and not finished. Without it nothing is durable: a container's
 // queue is an in-memory Channel and its cursor advances when a message is OFFERED, so a host
 // stopping between the two would drop the work with no redelivery to fall back on and nothing to
@@ -1451,7 +1454,11 @@ builder.Services.AddSingleton(sp => new TeamReset(
     sp.GetRequiredService<RepositoryReset>(),
     sp.GetRequiredService<WorkspaceFileChangeStore>(),
     sp.GetRequiredService<AgentStepStore>(),
-    purged: sp.GetRequiredService<KanbanStore>().Invalidate));
+    purged: () =>
+    {
+        sp.GetRequiredService<KanbanStore>().Invalidate();
+        sp.GetRequiredService<RollupCache>().Invalidate();
+    }));
 
 // Reset repositories: trees through the one WorktreeRemoval, git through the one GitRunner (as the
 // agent, and into a local origin as the Host), kept branches named on the log.
@@ -1711,7 +1718,11 @@ builder.Services.AddSingleton(sp => new LogRetention(
     sp.GetRequiredService<ITenantLog>(),
     () => tenantSettings.LogRetentionDays,
     sp.GetRequiredService<ILogger<LogRetention>>(),
-    purged: sp.GetRequiredService<KanbanStore>().Invalidate));
+    purged: () =>
+    {
+        sp.GetRequiredService<KanbanStore>().Invalidate();
+        sp.GetRequiredService<RollupCache>().Invalidate();
+    }));
 builder.Services.AddHostedService(sp => new LogRetentionLoop(
     sp.GetRequiredService<LogRetention>(),
     sp.GetRequiredService<ILogger<LogRetentionLoop>>()));
@@ -6154,7 +6165,7 @@ app.MapGet("/api/teams/{team}/containers/{name}/workflows", async (
 // NOT folded into `/api/overview`: that is what the `status` tool reads, and every status call
 // would then pay a log projection per team for data it never shows.
 app.MapGet("/api/teams/rollup", async (
-    HttpContext context, TeamRegistry teams, TeamAccess access, IMessageLog log, ContainerHost host,
+    HttpContext context, TeamRegistry teams, TeamAccess access, RollupCache rollup, ContainerHost host,
     WipLedger wip, IBacklogStore backlog, CancellationToken ct) =>
 {
     if (PrincipalClaims.From(context.User) is not { } principal) return Results.Unauthorized();
@@ -6187,8 +6198,8 @@ app.MapGet("/api/teams/rollup", async (
         // fifty-entry cap rather than up to the open count. Accepted: the alternative is a Workflows column that only ever answers for one
         // team per page load, which is not a working feature. Named here so a later profiler finds
         // the reasoning rather than a surprise.
-        var elapsed = await log.ElapsedForTeamAsync(team.Id, floor, ct);
-        var open = await log.WorkflowsForTeamAsync(team.Id, floor, ct);
+        // KEPT UNTIL THE TEAM'S ROWS MOVE: see RollupCache. A push from one team re-reads that team.
+        var (elapsed, open) = await rollup.ReadAsync(team.Id, floor, ct);
 
         var waiting = slots.Waiting
             .Where(hold => string.Equals(hold.Team, team.Id, StringComparison.OrdinalIgnoreCase))

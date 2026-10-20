@@ -2098,6 +2098,17 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         return (await MessageRows.ReadAllAsync(command, ct)).SingleOrDefault();
     }
 
+    public async Task<long> TeamHighestSeqAsync(string team, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        command.CommandText = "SELECT COALESCE(MAX(seq), 0) FROM messages WHERE team = $team";
+        command.Parameters.AddWithValue("$team", team);
+
+        return Convert.ToInt64(await command.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
+    }
+
     public async Task<long> HighestSeqAsync(CancellationToken ct = default)
     {
         await using var connection = Open();
