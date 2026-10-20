@@ -93,7 +93,7 @@ describe('one instant, one string, on the feed, the Monitor and the Activity til
     for (const path of [
       'lib/summarise.ts', 'lib/liveLines.ts', 'lib/memberRuns.ts', 'lib/teamsTable.ts', 'components/ActivityFeed.vue',
       'components/MonitorView.vue', 'lib/monitor/model.ts', 'lib/teamActivity.ts', 'components/KanbanCardPanel.vue',
-      'components/LiveViewDialog.vue', 'components/TeamKpiStrip.vue',
+      'components/LiveViewDialog.vue', 'components/TeamKpiStrip.vue', 'components/NeedsYouControl.vue', 'stores/needsYou.ts',
     ]) {
       const source = readFileSync(join(src, path), 'utf8')
       expect(source, path).not.toMatch(DateLocale)
@@ -107,7 +107,7 @@ describe('one instant, one string, on the feed, the Monitor and the Activity til
     for (const path of [
       'lib/summarise.ts', 'lib/liveLines.ts', 'lib/memberRuns.ts', 'lib/teamsTable.ts', 'components/ActivityFeed.vue',
       'components/MonitorView.vue', 'lib/monitor/model.ts', 'components/KanbanCardPanel.vue', 'components/LiveViewDialog.vue',
-      'components/TeamKpiStrip.vue',
+      'components/TeamKpiStrip.vue', 'components/NeedsYouControl.vue', 'stores/needsYou.ts',
     ]) {
       const source = readFileSync(join(src, path), 'utf8')
       expect(source, path).not.toMatch(/hour12|hourCycle|toLocaleTimeString|toLocaleString\(\s*(undefined|\[\])/)

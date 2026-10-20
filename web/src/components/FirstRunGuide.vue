@@ -2,6 +2,7 @@
 import { onMounted, ref, watch } from 'vue';
 import { getAgentAuth } from '../api/client';
 import { agentSignIn, readGuideDismissed, writeGuideDismissed, type AgentSignIn } from '../lib/firstRunGuide';
+import { PaletteShortcut } from '../lib/palette';
 
 /**
  * The first-run guide: what the Concierge is, choosing its agent, signing in, then a team.
@@ -114,7 +115,9 @@ function dismiss() {
           </li>
           <li>
             <strong>Then ask the Concierge for a team</strong>, use <strong>New Team</strong>, or get a ready-made one from
-            <strong>Marketplace</strong> on the ribbon.
+            <strong>Marketplace</strong> on the ribbon. After that, press
+            <kbd class="first-run-guide-key" data-test="first-run-guide-shortcut">{{ PaletteShortcut }}</kbd> to find
+            any team, member, item or command.
           </li>
         </ol>
       </q-card-section>
@@ -147,6 +150,14 @@ function dismiss() {
   border-bottom: 3px solid var(--os-primary);
   transform: rotate(45deg);
   box-shadow: 2px 2px 3px rgba(0, 0, 0, 0.12);
+}
+
+.first-run-guide-key {
+  padding: 0 4px;
+  border: 1px solid var(--os-rule-strong);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 0.75rem;
 }
 
 .first-run-guide-steps li + li {

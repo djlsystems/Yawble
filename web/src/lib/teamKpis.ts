@@ -1942,3 +1942,52 @@ export function containerMark(container: ContainerSnapshot): ContainerMark {
 
   return null;
 }
+
+/** The roster word a team's tab falls back to, one per {@link TeamStatus}. */
+export const TeamStatusWords: Readonly<Record<TeamStatus, string>> = {
+  misconfigured: 'misconfigured',
+  failed: 'failed',
+  blocked: 'blocked',
+  paused: 'paused',
+  running: 'running',
+  waiting: 'waiting for a slot',
+  queued: 'queued',
+  undeclared: 'undeclared',
+  idle: 'idle',
+};
+
+/**
+ * THE TAB'S WORD, NOW THE PROJECTION'S RATHER THAN THE ROSTER'S - the same "two questions, two
+ * answers" split `TeamRow.workflows` draws for the Teams table, applied to the one place this tab
+ * had room for a single word. `teamChip` is the loudest OPEN workflow; a busy team's newest
+ * workflow being that word is what keeps `RUNNING` on the tab of a team that is genuinely working.
+ *
+ * FALLS BACK TO THE ROSTER WORD when the chip has none to offer - `board.workflowsFor` has not
+ * landed yet, the tile is empty, or an `UNDECLARED` row is still inside its grace period - so a
+ * team with no open workflows still reads its ordinary roster word rather than nothing at all.
+ * `chipStateClass` on the fallback is simply the roster word itself: every `TeamStatus` value is
+ * already one lower-case word with no space, so it needs no CSS-safe transform of its own.
+ */
+export function teamTabChip(
+  status: TeamStatus,
+  workflows: TeamWorkflows | null,
+  containers: ContainerSnapshot[],
+  now: number,
+): { text: string; token: string } {
+  const tile = workflowsTile(workflows, containers, now);
+  const chip = teamChip(tile, containers);
+
+  if (chip.label === WaitingForSlot) {
+    return { text: `${chip.label} · ${chip.held.join(', ')}`, token: chipStateClass(chip.label) };
+  }
+
+  if (chip.label !== null) {
+    return { text: chip.label, token: chipStateClass(chip.label) };
+  }
+
+  if (status === 'waiting') {
+    return { text: waitingForSlotText(heldMembers(containers)), token: status };
+  }
+
+  return { text: TeamStatusWords[status], token: status };
+}

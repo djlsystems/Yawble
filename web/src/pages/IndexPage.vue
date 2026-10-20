@@ -28,14 +28,9 @@ import { useConsoleTitle } from '../composables/useConsoleTitle';
 import type { Team, TeamId } from '../api/types';
 import {
   StalledBadgeGrace,
-  WaitingForSlot,
-  heldMembers,
-  waitingForSlotText,
-  chipStateClass,
-  teamChip,
   teamLogFacts,
   teamStatus,
-  workflowsTile,
+  teamTabChip,
   type TeamStatus,
 } from '../lib/teamKpis';
 
@@ -91,17 +86,6 @@ let syncHubTeamsQueued = false;
  * subscriptions together, so the board never narrates one team while rendering another.
  */
 const liveTeamIdsKey = computed(() => board.liveTeamIds.join('\u0000'));
-const statusLabel: Record<TeamStatus, string> = {
-  misconfigured: 'misconfigured',
-  failed: 'failed',
-  blocked: 'blocked',
-  paused: 'paused',
-  running: 'running',
-  waiting: 'waiting for a slot',
-  queued: 'queued',
-  undeclared: 'undeclared',
-  idle: 'idle',
-};
 
 function teamPaused(team: Team | null | undefined): boolean {
   return team?.paused === true;
@@ -216,36 +200,9 @@ function tabStatus(team: Team): TeamStatus {
   );
 }
 
-/**
- * THE TAB'S WORD, NOW THE PROJECTION'S RATHER THAN THE ROSTER'S - the same "two questions, two
- * answers" split `TeamRow.workflows` draws for the Teams table, applied to the one place this tab
- * had room for a single word. `teamChip` is the loudest OPEN workflow; a busy team's newest
- * workflow being that word is what keeps `RUNNING` on the tab of a team that is genuinely working.
- *
- * FALLS BACK TO THE ROSTER WORD when the chip has none to offer - `board.workflowsFor` has not
- * landed yet, the tile is empty, or an `UNDECLARED` row is still inside its grace period - so a
- * team with no open workflows still reads its ordinary roster word rather than nothing at all.
- * `chipStateClass` on the fallback is simply the roster word itself: every `TeamStatus` value is
- * already one lower-case word with no space, so it needs no CSS-safe transform of its own.
- */
+/** The chip on a team's tab: `teamTabChip`, which the command palette's team rows read too. */
 function tabChip(team: Team): { text: string; token: string } {
-  const status = tabStatus(team);
-  const tile = workflowsTile(board.workflowsFor(team.id), team.containers, now.value);
-  const chip = teamChip(tile, team.containers);
-
-  if (chip.label === WaitingForSlot) {
-    return { text: `${chip.label} · ${chip.held.join(', ')}`, token: chipStateClass(chip.label) };
-  }
-
-  if (chip.label !== null) {
-    return { text: chip.label, token: chipStateClass(chip.label) };
-  }
-
-  if (status === 'waiting') {
-    return { text: waitingForSlotText(heldMembers(team.containers)), token: status };
-  }
-
-  return { text: statusLabel[status], token: status };
+  return teamTabChip(tabStatus(team), board.workflowsFor(team.id), team.containers, now.value);
 }
 
 
