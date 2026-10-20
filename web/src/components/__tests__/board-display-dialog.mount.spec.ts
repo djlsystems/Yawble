@@ -37,8 +37,9 @@ function slider(label: string): HTMLElement {
 }
 
 function button(label: string): HTMLButtonElement {
-  const found = [...document.body.querySelectorAll('button')]
-    .find((candidate) => candidate.textContent?.trim().includes(label));
+  const buttons = [...document.body.querySelectorAll('button')];
+  const found = buttons.find((candidate) => candidate.textContent?.trim() === label)
+    ?? buttons.find((candidate) => candidate.textContent?.trim().includes(label));
 
   if (!found) throw new Error(`no button labelled "${label}" in the rendered dialog`);
 

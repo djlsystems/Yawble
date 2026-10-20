@@ -17,11 +17,14 @@ import { workflowRow } from '../lib/workflowNumber';
 import { useConsoleStore } from '../stores/console';
 import WorkflowName from './WorkflowName.vue';
 import CardSizeGrips from './CardSizeGrips.vue';
+import CardArrangeHandle from './CardArrangeHandle.vue';
 import { memberNow } from '../lib/memberNow';
 import { memberKey, useHighlightStore } from '../stores/highlight';
 
 const props = defineProps<{
   snapshot: ContainerSnapshot;
+  /** Set by the board while this card is being carried to another place: how far it has moved. */
+  carried?: { x: number; y: number } | null;
   feed: Message[];
 }>();
 
@@ -255,11 +258,14 @@ async function cancel(wake: PendingWake) {
     flat
     bordered
     class="container-window"
-    :class="{ 'container-window-plugin': isPlugin, 'os-flash': highlight.flashing === key }"
+    :class="{ 'container-window-plugin': isPlugin, 'os-flash': highlight.flashing === key, 'board-card--dragging': !!carried }"
+    :style="carried ? { transform: `translate(${carried.x}px, ${carried.y}px)` } : undefined"
     :data-member-card="key"
   >
     <q-card-section class="q-pb-xs">
       <div class="row items-center no-wrap q-gutter-sm">
+        <!-- THE HANDLE THAT MOVES THIS CARD on the board, before the name; shown only on a board. -->
+        <CardArrangeHandle :member="snapshot.id" :name="snapshot.name" />
         <!-- THE LABEL, AND ONLY THE LABEL. `snapshot.name` is NOT the identifier - `Containers.cs`
              and `types.ts` agree: "Render this; address with `id`". A route addressed by the label
              fails for every member whose label carries a space. -->
@@ -565,8 +571,8 @@ async function cancel(wake: PendingWake) {
       />
     </q-card-section>
 
-    <!-- The edges and corner that size every card on the board: inside the border, over the
-         content, so they take no space from the feed. -->
+    <!-- The edges and corner that size every card on the board, in the gutter outside the card's
+         right and bottom edges, so they take no space from the feed. -->
     <CardSizeGrips />
   </q-card>
 </template>
@@ -592,7 +598,11 @@ async function cancel(wake: PendingWake) {
 
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+
+  /* NOT `overflow: hidden`: the size grips hang in the gutter outside the card's edge (see
+     `CardSizeGrips`), and a clipped card would cut them off. Nothing in the card needs the clip -
+     the feed scrolls inside its own section and the header never outgrows the smallest card. */
+  overflow: visible;
 
   /* The grips are placed against the card. */
   position: relative;

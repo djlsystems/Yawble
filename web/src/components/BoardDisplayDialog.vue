@@ -2,6 +2,7 @@
 import FieldHelp from './FieldHelp.vue';
 import { computed } from 'vue';
 import { useDisplayStore } from '../stores/display';
+import { useBoardOrderStore } from '../stores/boardOrder';
 import {
   DefaultBoardSize,
   FeedDepthBounds,
@@ -29,6 +30,7 @@ import {
 const open = defineModel<boolean>({ required: true });
 
 const display = useDisplayStore();
+const order = useBoardOrderStore();
 
 /**
  * Bound with an explicit getter and setter rather than `v-model` straight onto the store, so every
@@ -68,7 +70,11 @@ const isDefault = computed(
   <q-dialog v-model="open">
     <q-card class="board-display-card os-dialog-sm">
       <q-card-section class="q-pb-none">
-        <div class="os-dialog-title">Board display</div>
+        <div class="row items-center">
+          <div class="os-dialog-title">Board display</div>
+          <q-space />
+          <q-btn v-close-popup flat round dense icon="close" aria-label="Close" />
+        </div>
         <div class="text-caption os-text-muted">
           How big each member's card is on this device. Saved in this browser only — everyone else
           keeps their own.
@@ -76,6 +82,16 @@ const isDefault = computed(
         <div class="text-caption os-text-muted q-mt-xs" data-drag-line>
           The cards can also be dragged to size: a card's right edge, bottom edge or corner.
           <FieldHelp text="Dragging any card resizes every card, and the size is saved when you let go. On a focused edge the arrow keys move it 16px (64px with Shift) and Home resets it; double-clicking an edge resets it too." />
+        </div>
+        <div class="text-caption os-text-muted q-mt-xs row items-center" data-arrange-line>
+          <span>
+            A card is moved to another place on its board by the handle at its head.
+            <FieldHelp text="Drag the handle before a card's name to carry the card to another place; the arrow keys on it move the card a place, Home and End to the ends. Each team's arrangement is saved in this browser only." />
+          </span>
+          <q-space />
+          <q-btn flat dense no-caps label="Reset arrangement" data-test="reset-arrangement" @click="order.resetAll()">
+            <q-tooltip>Every team's cards go back to the roster's order, in this browser.</q-tooltip>
+          </q-btn>
         </div>
       </q-card-section>
 

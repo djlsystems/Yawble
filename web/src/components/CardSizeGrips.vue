@@ -9,9 +9,10 @@ import { draggedSize, GripShiftStep, GripStep, widthClamped } from '../lib/board
  * lane shares one width - dragging any card resizes them all, live, through the display store's
  * `preview`, and the release writes the size once with `set`.
  *
- * Drawn inside the card's border, over its content, so a grip takes no space from the feed. The
- * size rules and the drag arithmetic are `lib/boardSize`'s; this only turns pointer and key events
- * into calls on them.
+ * Drawn IN THE GUTTER outside the card's right and bottom edges (`--os-card-gap`, the board's gap), so
+ * the grip between two cards is centred between them as the Kanban's lane divider is centred in its
+ * gap, and a grip takes no space from the feed. The size rules and the drag arithmetic are
+ * `lib/boardSize`'s; this only turns pointer and key events into calls on them.
  */
 type Axis = 'x' | 'y' | 'both';
 
@@ -183,10 +184,19 @@ const title = 'Drag to resize every card; double-click to reset';
 </template>
 
 <style scoped>
-/* Covers the card inside its border and catches nothing itself: only the grips take a press. */
+/* Covers the card AND the gutter to its right and below it, and catches nothing itself: only the
+   grips take a press. The gap is the board's token; 16px when no board sets it (a card mounted alone).
+   The card is `bordered` (1px), and an absolute child is placed against the padding box inside that
+   border, so each edge steps 1px out to meet the card's own edge; otherwise the grip sits 1px short
+   of the gutter. */
 .card-grips {
+  --gap: var(--os-card-gap, 16px);
+  --border: 1px;
   position: absolute;
-  inset: 0;
+  top: calc(-1 * var(--border));
+  left: calc(-1 * var(--border));
+  right: calc(-1 * var(--gap) - var(--border));
+  bottom: calc(-1 * var(--gap) - var(--border));
   pointer-events: none;
   z-index: 2;
 }
@@ -203,31 +213,34 @@ const title = 'Drag to resize every card; double-click to reset';
   outline: none;
 }
 
+/* The width grip is the whole gutter to the card's right, down to the corner; the height grip the
+   whole gutter below it, up to the corner; the corner is where the two gutters cross. */
 .card-grip-width {
   top: 0;
   right: 0;
-  bottom: 0;
-  width: 6px;
+  bottom: var(--gap);
+  width: var(--gap);
   cursor: col-resize;
 }
 
 .card-grip-height {
   left: 0;
-  right: 0;
+  right: var(--gap);
   bottom: 0;
-  height: 6px;
+  height: var(--gap);
   cursor: row-resize;
 }
 
 .card-grip-corner {
   right: 0;
   bottom: 0;
-  width: 16px;
-  height: 16px;
+  width: var(--gap);
+  height: var(--gap);
   cursor: nwse-resize;
 }
 
-/* THE HANDLE, drawn as the Kanban lane divider's line: 2px of the primary colour, on hover and focus. */
+/* THE HANDLE, drawn as the Kanban lane divider's line: 2px of the primary colour, CENTRED in the
+   gutter, on hover and focus. */
 .card-grip-width::after,
 .card-grip-height::after,
 .card-grip-corner::after {
@@ -240,22 +253,23 @@ const title = 'Drag to resize every card; double-click to reset';
 .card-grip-width::after {
   top: 0;
   bottom: 0;
-  right: 2px;
+  left: calc(var(--gap) / 2 - 1px);
   width: 2px;
 }
 
 .card-grip-height::after {
   left: 0;
   right: 0;
-  bottom: 2px;
+  top: calc(var(--gap) / 2 - 1px);
   height: 2px;
 }
 
+/* The corner's mark is an L whose two lines continue the width and height lines to where they meet. */
 .card-grip-corner::after {
-  right: 2px;
-  bottom: 2px;
-  width: 10px;
-  height: 10px;
+  right: calc(var(--gap) / 2 - 1px);
+  bottom: calc(var(--gap) / 2 - 1px);
+  width: calc(var(--gap) / 2 + 1px);
+  height: calc(var(--gap) / 2 + 1px);
   border-right: 2px solid transparent;
   border-bottom: 2px solid transparent;
 }
@@ -272,8 +286,9 @@ const title = 'Drag to resize every card; double-click to reset';
   border-bottom-color: var(--q-primary);
 }
 
-/* A TOUCH SCREEN has no hover: the corner is always drawn, a 24px target, and the edges take no
-   touch (they stay for the keyboard) so a finger near a card's edge still scrolls. */
+/* A TOUCH SCREEN has no hover: the corner is always drawn, a 24px target reaching into the card from
+   the gutters' crossing, and the edges take no touch (they stay for the keyboard) so a finger near a
+   card's edge still scrolls. */
 @media (pointer: coarse) {
   .card-grip-width,
   .card-grip-height {
@@ -286,8 +301,6 @@ const title = 'Drag to resize every card; double-click to reset';
   }
 
   .card-grip-corner::after {
-    right: 4px;
-    bottom: 4px;
     border-right-color: var(--os-ink-muted);
     border-bottom-color: var(--os-ink-muted);
   }
