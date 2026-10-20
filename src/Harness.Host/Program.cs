@@ -1181,18 +1181,20 @@ builder.Services.AddSingleton(sp => new ContainerHost(
     // reason above.
     archived: team => sp.GetRequiredService<TeamRegistry>().IsArchived(team),
 
-    onRunEnding: async (member, causation, succeeded, ct) =>
-    {
-        // NO LEASE OUTLIVES ITS RUN. First, because it cannot fail and everything below can, and
-        // because a run waiting on a push should not keep another team's heavy work waiting too.
-        // Every way a run ends reaches this hook - completed, failed, stopped, a runner that
-        // threw - and a Host that goes down holds no lease when it comes back: they live in memory.
-        await sp.GetRequiredService<LeaseActions>().EndedAsync(LeaseOwner.For(member), ct);
+    onRunEnding: (member, causation, succeeded, ct) => RunEnding.RunAsync(
+        sp.GetRequiredService<ILogger<ContainerHost>>(), member, causation, succeeded, ct,
+
+        // NO LEASE OUTLIVES ITS RUN. First, because a run waiting on a push should not keep another
+        // team's heavy work waiting too. Every way a run ends reaches this hook - completed, failed,
+        // stopped, a runner that threw - and a Host that goes down holds no lease when it comes
+        // back: they live in memory. Each step is guarded by RunEnding, so a release that throws
+        // (a worker dropped as its run ended) never skips the publish below.
+        releaseLeases: () => sp.GetRequiredService<LeaseActions>().EndedAsync(LeaseOwner.For(member), ct),
 
         // THE PUBLISH IGNORES `succeeded` AND THAT IS THE WHOLE POINT: a run killed between
         // doing the work and finishing its turn is the case this exists for, so its branch
         // matters MORE than a clean run's, not less.
-        await TerminalPublish.OnRunEndingAsync(
+        publish: () => TerminalPublish.OnRunEndingAsync(
             sp.GetRequiredService<TeamRegistry>(),
             sp.GetRequiredService<ITeamPublisher>(),
             member,
@@ -1205,22 +1207,22 @@ builder.Services.AddSingleton(sp => new ContainerHost(
             // gone quiet. Without this the bound is elapsed time, and elapsed time cannot tell a
             // slow publish from a hung origin - a HEALTHY push of a dozen branches to a LOCAL
             // origin can take well over ten seconds on a loaded host. See `TerminalPublish.Budget`.
-            activity: () => sp.GetRequiredService<GitRunner>().Activity);
+            activity: () => sp.GetRequiredService<GitRunner>().Activity),
 
         // A MANAGER THAT MOVED ITS CLONE'S DEFAULT BRANCH IS REPORTED, BEFORE THE TERMINAL ROW, so
         // the report lands on its card and in the feed. Reported only; nothing is reset. See
         // `DefaultBranchMove`.
-        await DefaultBranchMove.OnRunEndingAsync(
+        defaultBranch: () => DefaultBranchMove.OnRunEndingAsync(
             sp.GetRequiredService<TeamRegistry>(),
             sp.GetRequiredService<TeamPaths>(),
             sp.GetRequiredService<GitRunner>(),
             sp.GetRequiredService<IMessageLog>(),
             member,
             causation,
-            ct);
+            ct),
 
-        await sp.GetRequiredService<IdleWorkflowOffer>()
-            .OnRunEndingAsync(member, causation, succeeded, ct);
+        idleOffer: () => sp.GetRequiredService<IdleWorkflowOffer>()
+            .OnRunEndingAsync(member, causation, succeeded, ct),
 
         // A WORKFLOW ITS OWNER CANNOT DECLARE - a person told a plugin member directly - is
         // declared by the platform when nothing is left working it. The offer above goes only to
@@ -1234,11 +1236,10 @@ builder.Services.AddSingleton(sp => new ContainerHost(
         // to the owner only; waking the Manager on the run that answered it would hand it the same
         // decision, already made. Never on the Manager's own run, which wakes no Manager anyway; the
         // runtime keeps the key off a row closing a member's own `tell`.
-        return await sp.GetRequiredService<UndeclarableWorkflows>()
+        declare: async () => await sp.GetRequiredService<UndeclarableWorkflows>()
                 .OnRunEndingAsync(member, causation, succeeded, ct)
             || (!member.Equals(new ContainerId(member.Team, TeamRegistry.DefaultManagerName))
-                && await WorkflowDeclaration.DeclaredAsync(sp.GetRequiredService<IMessageLog>(), causation, ct));
-    }));
+                && await WorkflowDeclaration.DeclaredAsync(sp.GetRequiredService<IMessageLog>(), causation, ct)))));
 // A container's credential and its environment, in one place - see AgentEnvironment for why those
 // two belong together rather than either side of the registry.
 // Registered ABOVE AgentEnvironment, which depends on it: TeamDocuments is the one place that

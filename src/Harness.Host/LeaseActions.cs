@@ -130,15 +130,30 @@ public sealed class LeaseActions : IRunWorkerClient
 
         foreach (var owner in answer.Withdrawn ?? [])
         {
-            if (Member(owner) is { } member) await worker.SendAsync(new HoldIdleClock(member, Held: false), CancellationToken.None);
+            if (Member(owner) is { } member) await ReleaseClockAsync(member);
         }
 
         foreach (var owner in answer.Promoted ?? [])
         {
             if (Member(owner) is not { } member) continue;
 
-            await worker.SendAsync(new HoldIdleClock(member, Held: false), CancellationToken.None);
+            await ReleaseClockAsync(member);
             await CardAsync(member, GrantedWords, ct);
+        }
+    }
+
+    /// <summary>
+    /// A courtesy like the allowance above: the lease has moved whether or not the clock could be
+    /// told, and a worker dropped under the run must not make the move throw.
+    /// </summary>
+    private async Task ReleaseClockAsync(ContainerId member)
+    {
+        try
+        {
+            await worker.SendAsync(new HoldIdleClock(member, Held: false), CancellationToken.None);
+        }
+        catch (Exception)
+        {
         }
     }
 
