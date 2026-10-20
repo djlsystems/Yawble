@@ -41,6 +41,8 @@ import CapacityMonitor from '../components/CapacityMonitor.vue';
 import NeedsYouControl from '../components/NeedsYouControl.vue';
 import ConnectionsDialog from '../components/ConnectionsDialog.vue';
 import FirstRunGuide from '../components/FirstRunGuide.vue';
+import CommandPalette from '../components/CommandPalette.vue';
+import { PaletteShortcut } from '../lib/palette';
 import { callbackOutcome, type CallbackOutcome } from '../lib/connections';
 import { announceProviderReturn, leaveForProvider } from '../lib/providerReturn';
 import { goTo } from '../lib/browserNavigation';
@@ -181,6 +183,8 @@ async function leaveForSignin(tag: string) {
 }
 const repositoriesOpen = ref(false);
 const outcomesOpen = ref(false);
+/** The outcome the Outcomes dialog opens at (the palette's outcome row), or null for the list. */
+const outcomesAt = ref<string | null>(null);
 /** Admin > Sites, and Active Team > Sites, which is the same screen with `sitesTeam` set. */
 const sitesOpen = ref(false);
 const sitesTeam = ref<TeamId | null>(null);
@@ -206,6 +210,19 @@ const conciergeOpen = ref(false);
 /** The first-run guide. It opens itself until dismissed or an agent signs in, and the account menu
  *  opens it again. */
 const firstRunGuideOpen = ref(false);
+
+/** The command palette (Ctrl+K). Opening it minimizes the Concierge, whose panel sits above dialogs. */
+const paletteOpen = ref(false);
+watch(paletteOpen, (isOpen) => {
+  if (isOpen) conciergeOpen.value = false;
+});
+
+/** The palette's outcome row: the Outcomes dialog, at that outcome. */
+function openOutcome(id: string) {
+  conciergeOpen.value = false;
+  outcomesAt.value = id;
+  outcomesOpen.value = true;
+}
 
 const conciergeLaunchTeam = ref<TeamId | null>(null);
 const conciergeLaunchTeamName = ref<string | undefined>(undefined);
@@ -337,7 +354,10 @@ function onRibbonAction(action: string) {
     connectionsOpen.value = true;
   }
   else if (action === RepositoriesAction) repositoriesOpen.value = true;
-  else if (action === OutcomesAction) outcomesOpen.value = true;
+  else if (action === OutcomesAction) {
+    outcomesAt.value = null;
+    outcomesOpen.value = true;
+  }
   else if (action === SitesAction) openSites(null);
   else if (action === TenantSettingsAction) tenantSettingsOpen.value = true;
   // NOT A DIALOG: an address, `#/solutions`, so a tile's Manage, the board header and the
@@ -500,6 +520,22 @@ async function signOut() {
               <q-item-section>Getting started</q-item-section>
             </q-item>
 
+            <!-- The command palette, and the one place on the bar its shortcut is said. -->
+            <q-item
+              v-close-popup
+              clickable
+              data-test="account-command-palette"
+              @click="paletteOpen = true"
+            >
+              <q-item-section avatar>
+                <q-icon name="search" />
+              </q-item-section>
+              <q-item-section>Find anything</q-item-section>
+              <q-item-section side>
+                <kbd class="account-shortcut" data-test="account-palette-shortcut">{{ PaletteShortcut }}</kbd>
+              </q-item-section>
+            </q-item>
+
             <q-item v-close-popup clickable @click="minimizeConciergeFor(() => (profileOpen = true))">
               <q-item-section avatar>
                 <q-icon name="manage_accounts" />
@@ -635,7 +671,8 @@ async function signOut() {
     <PluginsDialog v-model="pluginsOpen" />
     <ConnectionsDialog v-model="connectionsOpen" :notice="connectionNotice" />
     <LocalReposDialog v-model="repositoriesOpen" />
-    <OutcomesDialog v-model="outcomesOpen" />
+    <OutcomesDialog v-model="outcomesOpen" :outcome="outcomesAt" />
+    <CommandPalette v-if="session.user" v-model:open="paletteOpen" @action="onRibbonAction" @outcome="openOutcome" />
     <SitesDialog v-model="sitesOpen" :team="sitesTeam" />
     <!-- Guarded on there BEING an active team, because the dialog reads that team's members and
          addresses it by id. The ribbon disables a `team-` action without one, so this is a
@@ -650,6 +687,16 @@ async function signOut() {
 </template>
 
 <style scoped>
+/* The palette's shortcut in the account menu: a key cap, muted. */
+.account-shortcut {
+  padding: 0 6px;
+  border: 1px solid var(--os-rule-strong);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 0.75rem;
+  color: var(--os-ink-muted);
+}
+
 /* The bar follows the theme - a light surface in light, the dark surface in dark - so the logo
    for each theme sits on the ground it was drawn for. */
 .app-header,
