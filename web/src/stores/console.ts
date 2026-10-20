@@ -737,7 +737,10 @@ export const useConsoleStore = defineStore('console', {
       // What was read back on this team's cards goes with the tab; the live tail stays, since a
       // background team still hears its pushes while the Teams table or the Monitor shows.
       for (const owner of Object.keys(this.history)) {
-        if (owner.startsWith(`${id}/`)) delete this.history[owner];
+        if (owner.startsWith(`${id}/`)) {
+          delete this.history[owner];
+          joined.delete(owner);
+        }
       }
 
       if (this.activeTeamId !== id) {

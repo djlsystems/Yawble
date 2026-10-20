@@ -33,16 +33,31 @@ public static class CardOpenWorkflows
     {
         if (cards.Count == 0) return cards;
 
-        var open = await log.OpenWorkflowsAmongAsync(
-            cards.SelectMany(WorkflowsOf).Distinct().ToList(), ct);
-
         var latest = new Dictionary<long, long>();
         foreach (var message in messages)
         {
-            if (!open.Contains(message.CorrelationId)) continue;
             if (!latest.TryGetValue(message.CorrelationId, out var seq) || message.Seq > seq)
                 latest[message.CorrelationId] = message.Seq;
         }
+
+        return await AttachAsync(cards, latest, log, ct);
+    }
+
+    /// <summary>
+    /// The same, over each workflow's latest seq as <c>KanbanStore</c> keeps it, so no row of the
+    /// log is walked for it.
+    /// </summary>
+    public static async Task<IReadOnlyList<T>> AttachAsync<T>(
+        IReadOnlyList<T> cards,
+        IReadOnlyDictionary<long, long> latest,
+        IMessageLog log,
+        CancellationToken ct = default)
+        where T : KanbanCard
+    {
+        if (cards.Count == 0) return cards;
+
+        var open = await log.OpenWorkflowsAmongAsync(
+            cards.SelectMany(WorkflowsOf).Distinct().ToList(), ct);
 
         return cards
             .Select(card => (T)(((KanbanCard)card) with { OpenWorkflow = Pick(card, open, latest) }))

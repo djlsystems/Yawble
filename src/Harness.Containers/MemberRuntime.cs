@@ -1168,9 +1168,10 @@ public sealed class MemberRuntime : IAsyncDisposable
                     // `BeginBatch`, or anything else unforeseen would otherwise leave the slot held
                     // by a container that is no longer running - permanent under-capacity, which is
                     // worse than a brief overshoot.
+                    var batch = new List<Message>(DefaultCeiling) { first };
+                    var counted = 0;
                     try
                     {
-                        var batch = new List<Message>(DefaultCeiling) { first };
                         var lastGrowthAt = DateTime.UtcNow;
 
                         // A DEFERRED ITEM RUNS ALONE: it was deferred out of a batch to be its own run.
@@ -1228,6 +1229,7 @@ public sealed class MemberRuntime : IAsyncDisposable
                             }
 
                             Interlocked.Decrement(ref _queueDepth);
+                            counted++;
                             Publish();
                         }
 
@@ -1246,6 +1248,9 @@ public sealed class MemberRuntime : IAsyncDisposable
                         // observing it: the member read idle forever, its queue filled, and nothing
                         // said why. The card says why; the loop takes the next delivery.
                         MarkFailed($"The platform could not start this run: {ex.Message}");
+                        // The messages taken from the queue are not queued any more, whatever
+                        // happened to them: the card must not show them queued for good.
+                        for (var taken = counted; taken < batch.Count; taken++) Interlocked.Decrement(ref _queueDepth);
                         _state = ContainerState.Idle;
                         _currentCorrelation = null;
                         _currentSeq = null;

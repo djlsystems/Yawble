@@ -200,7 +200,8 @@ public sealed class WorkerStream : IDisposable
 
     public void Dispose() => Finish(null, null);
 
-    private static long SizeOf(StreamChunk chunk) => (chunk.Bytes?.Length ?? 0) + (chunk.Text?.Length ?? 0);
+    /// <summary>Bytes held for a chunk: its bytes, and a text's UTF-16 units counted as two bytes each.</summary>
+    private static long SizeOf(StreamChunk chunk) => (chunk.Bytes?.Length ?? 0) + 2L * (chunk.Text?.Length ?? 0);
 
     private void Taken(StreamChunk chunk) => Interlocked.Add(ref _heldBytes, -SizeOf(chunk));
 

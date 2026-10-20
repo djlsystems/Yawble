@@ -128,6 +128,12 @@ func NewRoot(deps Deps) *cobra.Command {
 func Execute(root *cobra.Command, args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// Once the first interrupt has ended the context, the signal handling stops with it, so a second
+	// Ctrl-C while a request is being withdrawn ends the process the way it always did.
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
 	return ExecuteContext(root, ctx, args)
 }
 

@@ -55,11 +55,11 @@ public sealed class WorkerStreamTests
         for (var n = 1; n <= WorkerStreams.Capacity && !stream.Ended.IsCompleted; n++)
         {
             bed.Streams.Deliver(new WorkerId("w1"), new StreamChunk("live:big", n, Text: megabyte));
-            delivered += megabyte.Length;
+            delivered += 2L * megabyte.Length; // the store counts a text's UTF-16 units as two bytes each
         }
 
         Assert.True(stream.Ended.IsCompleted, "a stream of megabyte chunks never ended");
-        Assert.True(delivered < (long)WorkerStreams.Capacity * megabyte.Length, "the stream ended only on the chunk count");
+        Assert.True(delivered < 2L * WorkerStreams.Capacity * megabyte.Length, "the stream ended only on the chunk count");
         Assert.True(delivered >= WorkerStreams.CapacityBytes, $"the stream ended after {delivered} bytes, under its byte capacity");
         StreamChunk? last = null;
         await foreach (var chunk in stream.Reader.ReadAllAsync(TestContext.Current.CancellationToken)) last = chunk;

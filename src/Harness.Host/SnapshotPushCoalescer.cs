@@ -28,12 +28,14 @@ public sealed class SnapshotPushCoalescer(
         public ContainerSnapshot? Last;
         public ContainerSnapshot? Held;
         public ITimer? Timer;
+
+        /// <summary>The member's sends, one after another: a held snapshot flushed as a change arrives never overtakes it.</summary>
+        public Task Chain = Task.CompletedTask;
     }
 
     public void Offer(ContainerSnapshot snapshot)
     {
         var id = new ContainerId(snapshot.Team, snapshot.Id);
-        ContainerSnapshot? now = null;
 
         lock (_gate)
         {
@@ -43,24 +45,13 @@ public sealed class SnapshotPushCoalescer(
             {
                 entry.Last = snapshot;
                 entry.Held = null;
-                now = snapshot;
+                Enqueue(entry, snapshot);
             }
             else
             {
                 entry.Held = snapshot;
                 entry.Timer ??= _clock.CreateTimer(_ => Flush(id), null, window, Timeout.InfiniteTimeSpan);
             }
-        }
-
-        if (now is not null) Fire(now);
-    }
-
-    /// <summary>A member forgotten: its last snapshot and anything held for it go.</summary>
-    public void Forget(ContainerId member)
-    {
-        lock (_gate)
-        {
-            if (_members.Remove(member, out var entry)) entry.Timer?.Dispose();
         }
     }
 
@@ -79,28 +70,39 @@ public sealed class SnapshotPushCoalescer(
 
     private void Flush(ContainerId id)
     {
-        ContainerSnapshot? held;
         lock (_gate)
         {
             if (!_members.TryGetValue(id, out var entry)) return;
 
             entry.Timer?.Dispose();
             entry.Timer = null;
-            held = entry.Held;
-            entry.Held = null;
-            if (held is not null) entry.Last = held;
-        }
+            if (entry.Held is not { } held) return;
 
-        if (held is not null) Fire(held);
+            entry.Held = null;
+            entry.Last = held;
+            Enqueue(entry, held);
+        }
     }
 
-    private void Fire(ContainerSnapshot snapshot)
+    /// <summary>
+    /// UNDER THE LOCK, ONTO THE MEMBER'S CHAIN: the order the snapshots were decided in is the
+    /// order they reach the browser in, however long a send takes. A faulted send is logged and
+    /// never breaks the chain.
+    /// </summary>
+    private void Enqueue(Entry entry, ContainerSnapshot snapshot)
+    {
+        entry.Chain = entry.Chain.ContinueWith(
+            _ => SendAsync(snapshot),
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default).Unwrap();
+    }
+
+    private async Task SendAsync(ContainerSnapshot snapshot)
     {
         try
         {
-            var task = send(snapshot);
-            if (log is not null) Observed.Forget(task, log, "containerChanged push");
-            else _ = task.ContinueWith(_ => { }, TaskContinuationOptions.OnlyOnFaulted);
+            await send(snapshot);
         }
         catch (Exception exception)
         {

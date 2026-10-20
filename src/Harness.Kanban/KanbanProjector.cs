@@ -38,16 +38,36 @@ public static class KanbanProjector
     }
 
     /// <summary>
-    /// Every card the rows make, unfiltered: what <c>KanbanStore</c> projects once per log position
-    /// and narrows per reader with <see cref="Filter"/>.
+    /// Every card the rows make, unfiltered: what a fresh <see cref="Projection"/> over them answers.
     /// </summary>
     public static IReadOnlyList<KanbanCard> ProjectAll(IReadOnlyList<Message> messages) =>
-        Matching(messages, new KanbanFilter()).Select(state => state.ToCard()).ToList();
+        Projection.Over(messages).Cards();
 
     /// <summary>
-    /// The cards <paramref name="filter"/> admits, by the rule <c>Matching</c> applies to projection
-    /// state: each filter is a list (<see cref="KanbanFilter.Values"/>), ANY of its values keeps a
-    /// card, and every filter given must hold. The outcome filter is the host's and is not read here.
+    /// ONE card, with its TRAIL - the messages that card is made of, oldest-first.
+    ///
+    /// THE SAME PROJECTION THE BOARD RUNS, and deliberately not a second walk of the log beside it.
+    /// The trail is accumulated by the very handlers that decide a card's lane and status, so there
+    /// is no way for the two to disagree about which messages belong to which card - which is the
+    /// failure a separate "fetch this card's messages" query would eventually have, silently, for
+    /// the console-issued instructions whose member is on the TYPE and nowhere else.
+    ///
+    /// <paramref name="filter"/> is applied exactly as the board applies it, so a card outside the
+    /// filtered scope answers NULL rather than being found. The endpoint's team scoping depends on
+    /// that: null becomes a 404, never another team's card.
+    /// </summary>
+    public static KanbanCardDetail? ProjectCard(
+        IReadOnlyList<Message> messages,
+        string cardId,
+        KanbanFilter? filter = null) =>
+        Projection.Over(messages).Detail(cardId, filter ?? new KanbanFilter());
+
+    /// <summary>
+    /// The cards <paramref name="filter"/> admits: each filter is a list (<see cref="KanbanFilter.Values"/>),
+    /// ANY of its values keeps a card, and every filter given must hold. THE FILTER LIVES HERE AND
+    /// NOWHERE ELSE: there is more than one reader, and a reader that filters for itself is how one
+    /// of them ends up admitting a team the other refuses. The outcome filter is the host's and is
+    /// not read here.
     /// </summary>
     public static IReadOnlyList<KanbanCard> Filter(IReadOnlyList<KanbanCard> cards, KanbanFilter filter)
     {
@@ -71,73 +91,41 @@ public static class KanbanProjector
             matching = matching.Where(c => wanted.Contains(c.Status));
         }
 
+        // No date range and no correlation id; see `KanbanFilter` for why, and for what
+        // adding one costs.
         return ReferenceEquals(matching, cards) ? cards : matching.ToList();
     }
 
     /// <summary>
-    /// ONE card, with its TRAIL - the messages that card is made of, oldest-first.
-    ///
-    /// THE SAME PROJECTION THE BOARD RUNS, and deliberately not a second walk of the log beside it.
-    /// The trail is accumulated by the very handlers that decide a card's lane and status, so there
-    /// is no way for the two to disagree about which messages belong to which card - which is the
-    /// failure a separate "fetch this card's messages" query would eventually have, silently, for
-    /// the console-issued instructions whose member is on the TYPE and nowhere else.
-    ///
-    /// <paramref name="filter"/> is applied exactly as the board applies it, so a card outside the
-    /// filtered scope answers NULL rather than being found. The endpoint's team scoping depends on
-    /// that: null becomes a 404, never another team's card.
+    /// THE PROJECTION, APPLIED ROW BY ROW. <see cref="ProcessMessage"/> was always one row onto the
+    /// board's state; this holds that state so a reader applies only the rows since its last read
+    /// (<c>KanbanStore</c>) instead of every row of the log on every read.
     /// </summary>
-    public static KanbanCardDetail? ProjectCard(
-        IReadOnlyList<Message> messages,
-        string cardId,
-        KanbanFilter? filter = null)
+    public sealed class Projection
     {
-        return Matching(messages, filter ?? new KanbanFilter())
-            .FirstOrDefault(state => string.Equals(state.Id, cardId, StringComparison.Ordinal))
-            ?.ToDetail();
-    }
+        private readonly Dictionary<string, CardState> _states = [];
 
-    /// <summary>
-    /// Every card the filter admits, as projection state.
-    ///
-    /// THE FILTER LIVES HERE AND NOWHERE ELSE. There is more than one reader, and a reader that
-    /// filters for itself is how one of them ends up admitting a team the other refuses.
-    /// </summary>
-    private static IEnumerable<CardState> Matching(
-        IReadOnlyList<Message> messages,
-        KanbanFilter filter)
-    {
-        var cardStates = new Dictionary<string, CardState>();
-
-        foreach (var msg in messages)
+        public static Projection Over(IEnumerable<Message> messages)
         {
-            ProcessMessage(msg, cardStates);
+            var projection = new Projection();
+            foreach (var message in messages) projection.Apply(message);
+            return projection;
         }
 
-        var matching = States(cardStates);
+        /// <summary>One row, onto the board.</summary>
+        public void Apply(Message message) => ProcessMessage(message, _states);
 
-        // Each filter is a list (`KanbanFilter.Values`): ANY of its values keeps a card.
-        if (KanbanFilter.Values(filter.Team) is { Count: > 0 } teams)
+        /// <summary>Every card, unfiltered.</summary>
+        public IReadOnlyList<KanbanCard> Cards() => States(_states).Select(state => state.ToCard()).ToList();
+
+        /// <summary>One card with its trail, or null when there is none or <paramref name="filter"/> leaves it out.</summary>
+        public KanbanCardDetail? Detail(string cardId, KanbanFilter filter)
         {
-            var wanted = teams.ToHashSet(StringComparer.OrdinalIgnoreCase);
-            matching = matching.Where(c => c.Team is not null && wanted.Contains(c.Team));
-        }
+            var state = States(_states).FirstOrDefault(s => string.Equals(s.Id, cardId, StringComparison.Ordinal));
+            if (state is null) return null;
 
-        if (KanbanFilter.Values(filter.Member) is { Count: > 0 } members)
-        {
-            var wanted = members.ToHashSet(StringComparer.OrdinalIgnoreCase);
-            matching = matching.Where(c => c.Member is not null && wanted.Contains(c.Member));
+            return Filter([state.ToCard()], filter).Count == 0 ? null : state.ToDetail();
         }
-
-        if (KanbanFilter.Values(filter.Status) is { Count: > 0 } statuses)
-        {
-            var wanted = statuses.ToHashSet(StringComparer.OrdinalIgnoreCase);
-            matching = matching.Where(c => c.Status is not null && wanted.Contains(c.Status));
-        }
-
-        // No date range and no correlation id; see `KanbanFilter` for why, and for what
-        // adding one costs.
-        return matching.ToList();
     }
 
     /// <summary>

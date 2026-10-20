@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json;
 using Harness.Contracts;
 using Harness.Kanban;
 
@@ -119,6 +120,62 @@ public sealed class KanbanStoreTests
         store.Invalidate();
 
         Assert.Single((await store.GetBoardAsync(ct: Ct)).Cards);
+    }
+
+    [Fact]
+    public async Task Floors_are_asked_once_per_team_per_read_never_per_row()
+    {
+        await using var bed = new ContainerTestBed();
+        for (var i = 0; i < 50; i++) await InstructionAsync(bed, Alpha, $"a{i}");
+        for (var i = 0; i < 50; i++) await InstructionAsync(bed, Beta, $"b{i}");
+        var asked = 0;
+        var store = new KanbanStore(bed.Store, _ => { asked++; return 0; });
+
+        await store.GetBoardAsync(ct: Ct);
+        var firstRead = asked;
+        await store.GetBoardAsync(ct: Ct);
+
+        Assert.InRange(firstRead, 1, 4);
+        Assert.InRange(asked - firstRead, 0, 2);
+    }
+
+    [Fact]
+    public async Task A_floor_that_rose_drops_the_rows_below_it_on_the_next_read()
+    {
+        await using var bed = new ContainerTestBed();
+        var early = await InstructionAsync(bed, Alpha, "before");
+        await InstructionAsync(bed, Alpha, "after");
+        var floors = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        var store = new KanbanStore(bed.Store, team => floors.GetValueOrDefault(team));
+        Assert.Equal(2, (await store.GetBoardAsync(ct: Ct)).Cards.Count);
+
+        floors["alpha"] = early.Seq;
+
+        Assert.Single((await store.GetBoardAsync(ct: Ct)).Cards);
+    }
+
+    [Fact]
+    public async Task A_cards_detail_and_the_open_workflow_seqs_match_a_projection_of_the_whole_log()
+    {
+        await using var bed = new ContainerTestBed();
+        var first = await InstructionAsync(bed, Alpha, "one");
+        await bed.Store.AppendAsync(new NewMessage(MessageTypes.Started, "{}", Alpha.ToString(), first.Seq), Ct);
+        var progress = await bed.Store.AppendAsync(new NewMessage(MessageTypes.Progress, """{"status":"half way"}""", Alpha.ToString(), first.Seq), Ct);
+        await InstructionAsync(bed, Beta, "two");
+        var store = new KanbanStore(bed.Store);
+        var rows = await bed.Store.ReadRangeAsync(0, int.MaxValue, Ct);
+
+        var board = await store.GetBoardAsync(ct: Ct);
+        var card = board.Cards.Single(c => c.Team == "alpha");
+        var detail = await store.GetCardDetailAsync(card.Id, new KanbanFilter(Team: "alpha"), Ct);
+        var latest = await store.LatestSeqByWorkflowAsync(Ct);
+
+        // Serialised: the record's list members compare by reference.
+        Assert.Equal(
+            JsonSerializer.Serialize(KanbanProjector.ProjectCard(rows, card.Id, new KanbanFilter(Team: "alpha"))),
+            JsonSerializer.Serialize(detail));
+        Assert.Equal(progress.Seq, latest[first.CorrelationId]);
+        Assert.Null(await store.GetCardDetailAsync(card.Id, new KanbanFilter(Team: "beta"), Ct));
     }
 
     /// <summary>The real store behind a counting, optionally failing, proxy of its interface.</summary>

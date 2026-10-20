@@ -142,20 +142,19 @@ public static class KanbanEndpoints
         CancellationToken ct = default)
     {
         // FROM THIS TEAM'S FLOOR, NOT FROM ZERO, and from the one projection every reader shares:
-        // `KanbanStore` holds the rows above each team's floor, so a board never shows a recreated
+        // `KanbanStore` applies each team's rows above its floor, so a board never shows a recreated
         // team the cards of the team it replaced, and never replays the whole log to say so.
-        var messages = await kanban.RowsAsync(ct);
-
+        //
         // `with` rather than a fresh record, so every other filter the caller asked for survives
         // while the team is replaced by the gated one.
         var scoped = (filter ?? new KanbanFilter()) with { Team = team };
 
-        var board = KanbanProjector.Project(messages, scoped);
+        var board = await kanban.GetBoardAsync(scoped, ct);
 
         // EACH CARD NAMES ITS OPEN WORKFLOW, so a Concierge resuming it joins that workflow, and
         // then the outcome that workflow serves - which is what the Outcome filter reads.
         var cards = await CardOutcomes.AttachAsync(
-            await CardOpenWorkflows.AttachAsync(board.Cards, messages, log, ct), outcomes, ct);
+            await CardOpenWorkflows.AttachAsync(board.Cards, await kanban.LatestSeqByWorkflowAsync(ct), log, ct), outcomes, ct);
 
         return board with { Cards = await CardOutcomes.MatchingAsync(cards, scoped.Outcome, outcomes, ct) };
     }
@@ -176,13 +175,11 @@ public static class KanbanEndpoints
         IMessageLog log, KanbanStore kanban, string team, string id, CancellationToken ct = default,
         IOutcomeStore? outcomes = null)
     {
-        var messages = await kanban.RowsAsync(ct);
-
-        if (KanbanProjector.ProjectCard(messages, id, new KanbanFilter(Team: team)) is not { } card)
+        if (await kanban.GetCardDetailAsync(id, new KanbanFilter(Team: team), ct) is not { } card)
             return null;
 
         // THE OPEN WORKFLOW, as the board's cards carry it, and its outcome when asked.
-        var attached = await CardOpenWorkflows.AttachAsync([card], messages, log, ct);
+        var attached = await CardOpenWorkflows.AttachAsync([card], await kanban.LatestSeqByWorkflowAsync(ct), log, ct);
         return (outcomes is null ? attached : await CardOutcomes.AttachAsync(attached, outcomes, ct))[0];
     }
 
@@ -308,18 +305,17 @@ public static class KanbanEndpoints
 
             var filter = new KanbanFilter(Member: member, Status: status, Outcome: outcome);
 
-            // PER-TEAM FLOORS, applied where the rows are held: this projection spans every team the
-            // caller reaches and each one's history starts in a different place.
-            var messages = await kanban.RowsAsync(ct);
-
+            // PER-TEAM FLOORS, applied where the rows are projected: this projection spans every
+            // team the caller reaches and each one's history starts in a different place.
+            //
             // ONE PROJECTION, THEN THE SCOPE. The filter carries no team - every other narrowing
             // the caller asked for still runs inside the projection, exactly where it did.
             var cards = await CardOutcomes.AttachAsync(
                 await CardOpenWorkflows.AttachAsync(
-                    KanbanProjector.Project(messages, filter).Cards
+                    (await kanban.GetBoardAsync(filter, ct)).Cards
                         .Where(card => scope.Contains(card.Team))
                         .ToList(),
-                    messages,
+                    await kanban.LatestSeqByWorkflowAsync(ct),
                     log,
                     ct),
                 outcomes,

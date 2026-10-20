@@ -50,7 +50,7 @@ public sealed class MemberRuntimeTests
                 ? throw new InvalidOperationException("tree lookup failed")
                 : (IReadOnlyList<RepoWorktree>)[]);
         var runner = new Scripted(_ => new MemberResult(true, 0, "ok"));
-        await bed.Host.AddAsync(ContainerTestBed.Definition(Plug), runner, Ct);
+        var member = await bed.Host.AddAsync(ContainerTestBed.Definition(Plug), runner, Ct);
 
         await bed.Store.AppendAsync(new NewMessage(MessageTypes.InstructionFor(Plug), """{"instruction":"one"}""", "console"), Ct);
         await bed.Store.AppendAsync(new NewMessage(MessageTypes.InstructionFor(Plug), """{"instruction":"two"}""", "console"), Ct);
@@ -63,6 +63,8 @@ public sealed class MemberRuntimeTests
         Assert.Contains("tree lookup failed", rows[0].Payload);
         Assert.Equal(MessageTypes.Completed, rows[1].Type);
         Assert.Single(runner.Seen);
+        Assert.Equal(0, member.Snapshot().QueueDepth);
+        Assert.Equal(ContainerState.Idle, member.Snapshot().State);
     }
 
     [Fact]

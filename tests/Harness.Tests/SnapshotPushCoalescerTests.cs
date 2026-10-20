@@ -92,6 +92,38 @@ public sealed class SnapshotPushCoalescerTests
     }
 
     [Fact]
+    public async Task Sends_for_one_member_keep_their_order_when_a_send_is_slow()
+    {
+        var sent = new List<ContainerSnapshot>();
+        var firstSend = new TaskCompletionSource();
+        var calls = 0;
+        var clock = new ManualTime(Start);
+        var pushes = new SnapshotPushCoalescer(
+            snapshot =>
+            {
+                sent.Add(snapshot);
+                return ++calls == 1 ? firstSend.Task : Task.CompletedTask;
+            },
+            SnapshotPushCoalescer.DefaultWindow, clock);
+
+        var running = Snapshot(ContainerState.Running);
+        pushes.Offer(running);
+        var held = Snapshot(ContainerState.Running);
+        pushes.Offer(held);
+        clock.Advance(SnapshotPushCoalescer.DefaultWindow);
+        var idle = Snapshot();
+        pushes.Offer(idle);
+
+        // The first send is still in flight: nothing else has gone.
+        Assert.Single(sent);
+
+        firstSend.SetResult();
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        Assert.Equal([running, held, idle], sent);
+    }
+
+    [Fact]
     public void A_snapshot_whose_wakes_changed_is_a_change()
     {
         var a = Snapshot() with { Wakes = [new WakeView(1, "Developer", 7, Start.AddMinutes(5), Start, "later")] };
