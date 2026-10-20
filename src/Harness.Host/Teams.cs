@@ -1290,6 +1290,10 @@ public sealed class TeamRegistry(
                     if (marks.FailureReason is { } failure) container.MarkFailed(failure);
                     if (marks.BlockedReason is { } reason) container.MarkBlocked(reason);
                     if (marks.Question is { } question) container.MarkNeedsDecision(question, marks.NeedsDecision!.Seq, marks.NeedsDecision.CorrelationId);
+                    foreach (var row in new[] { marks.Failed, marks.Blocked, marks.NeedsDecision })
+                    {
+                        if (row is not null) container.NoteMarkRow(row);
+                    }
                 }
 
                 roster.Add(id);

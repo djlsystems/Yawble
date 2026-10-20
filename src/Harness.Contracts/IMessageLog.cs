@@ -275,6 +275,17 @@ public interface IMessageLog
         IReadOnlyCollection<long> correlations, CancellationToken ct = default);
 
     /// <summary>
+    /// WHICH OF THESE CORRELATIONS ENDED WITH <c>workflow.completed</c>, each with when that row was
+    /// written. A workflow ends where <see cref="OpenWorkflowsAmongAsync"/> says it is no longer open:
+    /// its latest <c>workflow.completed</c> or <c>workflow.closed</c> row with no instruction or card
+    /// row after it. Only an ending that is a completion is answered; one closed by a person, an open
+    /// one and an unknown correlation are absent. One query for the set, no floor (the caller's, as
+    /// for <see cref="OpenWorkflowsAmongAsync"/>); an empty request is an empty answer without one.
+    /// </summary>
+    Task<IReadOnlyDictionary<long, DateTimeOffset>> CompletedWorkflowsAmongAsync(
+        IReadOnlyCollection<long> correlations, CancellationToken ct = default);
+
+    /// <summary>
     /// ONE MEMBER'S LIVE MARKS - what its last word to a person still is, according to the log.
     ///
     /// <para>
