@@ -68,7 +68,6 @@ function mix(a: string, share: number, b: string): string {
 const monitorSource = readFileSync(join(components, 'MonitorView.vue'), 'utf8');
 const monitorStyle = monitorSource.slice(monitorSource.indexOf('<style scoped>'));
 const monitorTheme = blockIn(monitorStyle, '.monitor');
-const monitorWall = blockIn(monitorStyle, '.monitor--wall');
 /** The Monitor's member states and the state token each ring is. */
 const MonitorRings: Record<string, string> = {
   running: 'running', waiting: 'waiting', decision: 'needs-you', blocked: 'blocked', failed: 'failed', idle: 'idle',
@@ -129,13 +128,14 @@ describe('the chips, the pill and the tile tone draw a state through its token',
   });
 });
 
-describe("the Monitor's legend and rings are the state tokens", () => {
-  it('rings each member state in its state token on the theme, and that hue lifted on the wall', () => {
+describe("the Monitor keeps its dark wall palette in both views", () => {
+  it('rings each member state in its state token lifted toward white, with no second palette for full screen', () => {
     for (const [ring, state] of Object.entries(MonitorRings)) {
-      expect(monitorTheme[`--os-monitor-state-${ring}`]).toBe(`var(--os-state-${state})`);
-      expect(monitorWall[`--os-monitor-state-${ring}`]).toBe(`color-mix(in srgb, var(--os-state-${state}) 60%, white)`);
+      expect(monitorTheme[`--os-monitor-state-${ring}`]).toBe(`color-mix(in srgb, var(--os-state-${state}) 60%, white)`);
       expect(monitorSource, `the legend names ${ring}`).toContain(`colour: 'var(--os-monitor-state-${ring})'`);
     }
+    expect(monitorStyle).not.toContain('.monitor--wall');
+    expect(monitorSource).not.toContain("'monitor--wall'");
   });
 
   it('holds every ring 3:1 on the wall ground, from every preset', () => {
@@ -149,18 +149,18 @@ describe("the Monitor's legend and rings are the state tokens", () => {
     }
   });
 
-  it('keeps every event hue 3:1 on the theme canvas in every preset: the graph keeps its contrast', () => {
-    const hues = Object.keys(monitorTheme).filter((name) => name.startsWith('--os-monitor-') && !name.includes('state-') && monitorTheme[name]!.startsWith('color-mix'));
-    expect(hues.length).toBeGreaterThanOrEqual(13);
-    for (const preset of PRESETS) {
-      const theme = chains[preset.id];
-      const ground = resolve('var(--os-surface)', theme);
-      const ink = resolve('var(--os-ink)', theme);
-      for (const name of hues) {
-        const wall = resolve(`var(${name.replace('--os-monitor-', '--os-monitor-wall-')})`, theme);
-        expect(monitorTheme[name]).toBe(`color-mix(in srgb, var(${name.replace('--os-monitor-', '--os-monitor-wall-')}) 60%, var(--os-ink))`);
-        expect(contrast(mix(wall, 0.6, ink), ground), `${name} on ${preset.id}`).toBeGreaterThanOrEqual(3);
-      }
+  it('paints the ground, the ink and every event hue from the wall palette and never the theme, each hue 3:1 on the wall', () => {
+    const names = Object.keys(monitorTheme).filter((name) => name.startsWith('--os-monitor-') && !name.includes('state-'));
+    expect(names.length).toBeGreaterThanOrEqual(22);
+    for (const name of names) {
+      expect(monitorTheme[name], name).toBe(`var(${name.replace('--os-monitor-', '--os-monitor-wall-')})`);
+    }
+    const theme = chains[PRESETS[0]!.id];
+    const ground = resolve('var(--os-monitor-wall-ground)', theme);
+    for (const name of names) {
+      if (/-(ground|panel|rule)$/.test(name)) continue;
+      const hue = resolve(`var(${name.replace('--os-monitor-', '--os-monitor-wall-')})`, theme);
+      expect(contrast(hue, ground), `${name} on the wall`).toBeGreaterThanOrEqual(3);
     }
   });
 });

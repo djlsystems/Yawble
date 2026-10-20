@@ -128,11 +128,11 @@
   --os-plugin-surface: #f3f0fc;
   --os-plugin-accent: #6a5acd;
 
-  // THE MONITOR'S WALL PALETTE: its dark screen, kept in full screen for a wall or a demo, where the
-  // glow its graph draws reads best. `MonitorView.vue` sets the `--os-monitor-*` tokens the canvas
-  // and the legend read from these in full screen, and from the theme (and these hues mixed toward
-  // the theme's ink) in the normal view. A state's ring is never here: it is the state's own token,
-  // lifted for the dark wall in the Monitor's stylesheet. Set once; no theme block repeats them.
+  // THE MONITOR'S WALL PALETTE: its dark screen, in the normal view and in full screen alike, where
+  // the glow its graph draws reads best. `MonitorView.vue` sets the `--os-monitor-*` tokens the
+  // canvas and the legend read from these, whatever the theme. A state's ring is never here: it is
+  // the state's own token, lifted for the dark wall in the Monitor's stylesheet. Set once; no theme
+  // block repeats them.
   --os-monitor-wall-ground: #070b14;
   --os-monitor-wall-panel: #0c1322;
   --os-monitor-wall-rule: #94a3b829;

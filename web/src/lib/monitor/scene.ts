@@ -94,7 +94,7 @@ export function isLightGround(hex: string): boolean {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5
 }
 
-/** Read the monitor's tokens off an element inside the page: the theme's in the normal view, the wall's in full screen. */
+/** Read the monitor's tokens off an element inside the page: the wall palette, in the normal view and full screen alike. */
 export function readPalette(element: Element) {
   const css = getComputedStyle(element)
   const token = (name: string) => solidHex(css.getPropertyValue(`--os-monitor-${name}`).trim())

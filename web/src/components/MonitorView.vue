@@ -136,8 +136,6 @@ const hover = ref<HoverInfo | null>(null)
 const picked = ref<NodeRef | null>(null)
 const fullscreen = ref(false)
 const $q = useQuasar()
-/** Quasar's controls over the canvas: dark on the wall, and on the theme when the theme is dark. */
-const darkControls = computed(() => fullscreen.value || $q.dark.isActive)
 
 /** Remembered per browser, a convenience only: storage may be missing or refuse, and the default stands. */
 const KeepViewKey = 'harness.monitor.keepView'
@@ -312,8 +310,9 @@ const states: { colour: string; words: string }[] = [
 ]
 
 /**
- * THE CANVAS READS ITS COLOURS AGAIN when the ground changes under it: into or out of full screen,
- * and on a change of theme, once the new tokens are on the page.
+ * THE CANVAS READS ITS COLOURS AGAIN when the tokens under it change: the ground is the wall in both
+ * views, but a state's ring is the theme's state token lifted, so a change of theme is read once
+ * the new tokens are on the page.
  */
 watch(
   [fullscreen, () => $q.dark.isActive, () => appearance.resolved],
@@ -762,7 +761,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section ref="root" class="monitor" :class="{ 'monitor--fullscreen': fullscreen, 'monitor--wall': fullscreen }" aria-label="Monitor: every team's activity">
+  <section ref="root" class="monitor" :class="{ 'monitor--fullscreen': fullscreen }" aria-label="Monitor: every team's activity">
     <div class="monitor-main">
       <div ref="stage" class="monitor-stage">
         <canvas
@@ -844,7 +843,7 @@ onUnmounted(() => {
             :options="[...Speeds]"
             dense
             outlined
-            :dark="darkControls"
+            dark
             options-dense
             emit-value
             class="monitor-speed"
@@ -897,7 +896,7 @@ onUnmounted(() => {
               <q-toggle
                 :model-value="changes.show"
                 dense
-                :dark="darkControls"
+                dark
                 label="Show changes plugins make"
                 data-monitor-setting="show"
                 @update:model-value="setShow"
@@ -910,7 +909,7 @@ onUnmounted(() => {
                   type="number"
                   dense
                   outlined
-                  :dark="darkControls"
+                  dark
                   :min="SecondsMin"
                   :max="SecondsMax"
                   suffix="seconds"
@@ -926,7 +925,7 @@ onUnmounted(() => {
                 :key="plugin"
                 :model-value="pluginOn(plugin)"
                 dense
-                :dark="darkControls"
+                dark
                 :label="plugin"
                 :data-monitor-plugin="plugin"
                 @update:model-value="(on: boolean) => setPlugin(plugin, on)"
@@ -938,7 +937,7 @@ onUnmounted(() => {
               <q-toggle
                 :model-value="fileChanges.show"
                 dense
-                :dark="darkControls"
+                dark
                 label="Show file changes"
                 data-monitor-setting="files"
                 @update:model-value="setFilesShow"
@@ -963,7 +962,7 @@ onUnmounted(() => {
               <q-toggle
                 :model-value="agentSteps.show"
                 dense
-                :dark="darkControls"
+                dark
                 label="Show agent steps"
                 data-monitor-setting="steps"
                 @update:model-value="setStepsShow"
@@ -986,7 +985,7 @@ onUnmounted(() => {
                   :max="LayoutMax"
                   :step="LayoutStep"
                   dense
-                  :dark="darkControls"
+                  dark
                   :aria-labelledby="`monitor-layout-${field.key}`"
                   @update:model-value="(value: number | null) => setLayoutValue(field.key, value)"
                 />
@@ -1181,66 +1180,12 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-/* THE MONITOR'S CANVAS FOLLOWS THE THEME in the normal view and keeps its dark wall palette in full
-   screen. The `--os-monitor-*` tokens set here are what the canvas reads (`readPalette`) and what
-   the legend and the list paint with, so the two cannot disagree. On the theme, the ground and the
-   ink are the page's, a state's ring is its `--os-state-*` token, and each event hue is the wall's
-   mixed 60/40 toward the theme's ink - darker on a light page, lighter on a dark one - which keeps
-   every hue at 3.7:1 or more on every built-in preset's surface (`state-palette.spec.ts`). */
+/* THE MONITOR'S CANVAS IS THE WALL, in the normal view and in full screen alike: the dark palette
+   `app.scss` holds, where the glow its graph draws reads best, the same on a light page as on a dark
+   one. The `--os-monitor-*` tokens set here are what the canvas reads (`readPalette`) and what the
+   legend and the list paint with, so the two cannot disagree. A state's ring is the state's own
+   `--os-state-*` token lifted toward white so it glows on the dark ground, in every theme. */
 .monitor {
-  --os-monitor-ground: var(--os-surface);
-  --os-monitor-panel: var(--os-chrome);
-  --os-monitor-rule: var(--os-rule);
-  --os-monitor-ink: var(--os-ink);
-  --os-monitor-ink-dim: var(--os-ink-muted);
-  --os-monitor-ink-soft: var(--os-ink-muted);
-  --os-monitor-tell: color-mix(in srgb, var(--os-monitor-wall-tell) 60%, var(--os-ink));
-  --os-monitor-start: color-mix(in srgb, var(--os-monitor-wall-start) 60%, var(--os-ink));
-  --os-monitor-progress: color-mix(in srgb, var(--os-monitor-wall-progress) 60%, var(--os-ink));
-  --os-monitor-done: color-mix(in srgb, var(--os-monitor-wall-done) 60%, var(--os-ink));
-  --os-monitor-handback: color-mix(in srgb, var(--os-monitor-wall-handback) 60%, var(--os-ink));
-  --os-monitor-fail: color-mix(in srgb, var(--os-monitor-wall-fail) 60%, var(--os-ink));
-  --os-monitor-blocked: color-mix(in srgb, var(--os-monitor-wall-blocked) 60%, var(--os-ink));
-  --os-monitor-workflow: color-mix(in srgb, var(--os-monitor-wall-workflow) 60%, var(--os-ink));
-  --os-monitor-card: color-mix(in srgb, var(--os-monitor-wall-card) 60%, var(--os-ink));
-  --os-monitor-push: color-mix(in srgb, var(--os-monitor-wall-push) 60%, var(--os-ink));
-  --os-monitor-plugin: color-mix(in srgb, var(--os-monitor-wall-plugin) 60%, var(--os-ink));
-  --os-monitor-file: color-mix(in srgb, var(--os-monitor-wall-file) 60%, var(--os-ink));
-  --os-monitor-quiet: color-mix(in srgb, var(--os-monitor-wall-quiet) 60%, var(--os-ink));
-  --os-monitor-created: color-mix(in srgb, var(--os-monitor-wall-created) 60%, var(--os-ink));
-  --os-monitor-changed: color-mix(in srgb, var(--os-monitor-wall-changed) 60%, var(--os-ink));
-  --os-monitor-deleted: color-mix(in srgb, var(--os-monitor-wall-deleted) 60%, var(--os-ink));
-  --os-monitor-state-idle: var(--os-state-idle);
-  --os-monitor-state-running: var(--os-state-running);
-  --os-monitor-state-waiting: var(--os-state-waiting);
-  --os-monitor-state-blocked: var(--os-state-blocked);
-  --os-monitor-state-decision: var(--os-state-needs-you);
-  --os-monitor-state-failed: var(--os-state-failed);
-
-  --monitor-ground: var(--os-monitor-ground);
-  --monitor-panel: var(--os-monitor-panel);
-  --monitor-rule: var(--os-monitor-rule);
-  --monitor-ink: var(--os-monitor-ink);
-  --monitor-ink-dim: var(--os-monitor-ink-dim);
-  display: flex;
-  gap: 0;
-  min-height: 520px;
-  background: var(--monitor-ground);
-  color: var(--monitor-ink);
-  border: 1px solid var(--monitor-rule);
-  border-radius: 10px;
-  overflow: hidden;
-}
-
-.monitor--fullscreen {
-  border-radius: 0;
-  border: 0;
-  height: 100vh;
-}
-
-/* THE WALL: full screen keeps the dark palette `app.scss` holds, and each state's ring is the
-   state's own hue lifted toward white so it glows on the dark ground. */
-.monitor--wall {
   --os-monitor-ground: var(--os-monitor-wall-ground);
   --os-monitor-panel: var(--os-monitor-wall-panel);
   --os-monitor-rule: var(--os-monitor-wall-rule);
@@ -1269,6 +1214,26 @@ onUnmounted(() => {
   --os-monitor-state-blocked: color-mix(in srgb, var(--os-state-blocked) 60%, white);
   --os-monitor-state-decision: color-mix(in srgb, var(--os-state-needs-you) 60%, white);
   --os-monitor-state-failed: color-mix(in srgb, var(--os-state-failed) 60%, white);
+
+  --monitor-ground: var(--os-monitor-ground);
+  --monitor-panel: var(--os-monitor-panel);
+  --monitor-rule: var(--os-monitor-rule);
+  --monitor-ink: var(--os-monitor-ink);
+  --monitor-ink-dim: var(--os-monitor-ink-dim);
+  display: flex;
+  gap: 0;
+  min-height: 520px;
+  background: var(--monitor-ground);
+  color: var(--monitor-ink);
+  border: 1px solid var(--monitor-rule);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.monitor--fullscreen {
+  border-radius: 0;
+  border: 0;
+  height: 100vh;
 }
 
 .monitor-main {
