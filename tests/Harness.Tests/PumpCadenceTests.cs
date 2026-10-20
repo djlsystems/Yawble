@@ -77,9 +77,10 @@ public sealed class PumpCadenceTests
         await using var bed = new ContainerTestBed();
         var (host, _, cursors) = HostOver(bed);
         await host.AddAsync(ContainerTestBed.Definition(Plug), new Blocking(), Ct);
+        Message last = null!;
         for (var i = 0; i < 3; i++)
         {
-            await bed.Store.AppendAsync(new NewMessage(MessageTypes.InstructionFor(Plug), $$"""{"instruction":"{{i}}"}""", "console"), Ct);
+            last = await bed.Store.AppendAsync(new NewMessage(MessageTypes.InstructionFor(Plug), $$"""{"instruction":"{{i}}"}""", "console"), Ct);
         }
         CountingProxy.Of(cursors).Calls.Clear();
 
@@ -87,8 +88,8 @@ public sealed class PumpCadenceTests
 
         Assert.Equal(3, delivered);
         Assert.Equal(1, CountingProxy.Of(cursors).CallsTo(nameof(ICursors.AdvanceAsync)));
-        var position = await bed.Store.PositionAsync(Plug, Ct);
-        Assert.Equal(await bed.Store.HighestSeqAsync(Ct), position);
+        // At the last row the pass read: a row the started runs write after it is the next pass's.
+        Assert.Equal(last.Seq, await bed.Store.PositionAsync(Plug, Ct));
     }
 
     [Fact]

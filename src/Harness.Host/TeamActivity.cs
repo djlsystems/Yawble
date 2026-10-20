@@ -55,7 +55,7 @@ public static class TeamActivity
 
                 if (Refusal(from, to) is { } refusal) return Results.BadRequest(new { error = refusal });
 
-                return Results.Ok(await ReadAsync(stored, from, to, teams, store, host, log, ledger, holds, clock.GetUtcNow(), ct));
+                return Results.Ok(await ReadAsync(stored, from, to, teams, store, host, log, ledger, holds, clock, ct));
             })
             .WithTags("Activity")
             .RequirePermit(Permits.Read)
@@ -99,7 +99,7 @@ public static class TeamActivity
     public static async Task<TeamActivityAnswer> ReadAsync(
         string team, DateTimeOffset? from, DateTimeOffset? to,
         TeamRegistry teams, ITeamStore store, ContainerHost host, IMessageLog log, IUsageLedger ledger,
-        IAdmissionHoldLedger holdLedger, DateTimeOffset now, CancellationToken ct)
+        IAdmissionHoldLedger holdLedger, TimeProvider clock, CancellationToken ct)
     {
         // SCOPED BY THE TEAM'S CREATION, NOT BY ITS MEMBERS' FLOOR: Reset's "Delete memory" raises
         // every named member's floor to the log head, and the spans must outlive it. The creation
@@ -109,6 +109,10 @@ public static class TeamActivity
         // is later, is the floor instead (`TeamActivityFrom`): nothing below it is read.
         var scope = await TeamActivityFrom.ScopeAsync(team, store, log, ct);
         var floor = scope.Floor;
+
+        // READ AFTER THE WINDOW: its end is the newest row's time, and a row landing between the two
+        // reads must not put it past `serverNow`.
+        var now = clock.GetUtcNow();
 
         string window;
         DateTimeOffset start;

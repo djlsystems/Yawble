@@ -198,6 +198,10 @@ public sealed class PluginQuietRunTests : IAsyncLifetime
         Assert.Equal(MessageTypes.Completed, row.Type);
         Assert.False(Quiet(row));
 
+        await AwaitRowAsync(
+            [MessageTypes.Completed, MessageTypes.Failed],
+            m => m.Source == Manager.ToString() && m.CausationSeq == row.Seq,
+            "the Manager's run woken by Echo's row");
         await SettleManagerAsync(row);
 
         Assert.Equal(1, _agents.RunsFor(Manager));

@@ -41,7 +41,7 @@ public static class TeamTokenRuns
 
                 if (TeamActivity.Refusal(from, to) is { } refusal) return Results.BadRequest(new { error = refusal });
 
-                return Results.Ok(await ReadAsync(stored, from, to, teams, store, log, ledger, clock.GetUtcNow(), ct));
+                return Results.Ok(await ReadAsync(stored, from, to, teams, store, log, ledger, clock, ct));
             })
             .WithTags("Activity")
             .RequirePermit(Permits.Read)
@@ -67,7 +67,7 @@ public static class TeamTokenRuns
     public static async Task<TeamTokenRunsAnswer> ReadAsync(
         string team, DateTimeOffset? from, DateTimeOffset? to,
         TeamRegistry teams, ITeamStore store, IMessageLog log, IUsageLedger ledger,
-        DateTimeOffset now, CancellationToken ct)
+        TimeProvider clock, CancellationToken ct)
     {
         // A person's activity-from, when later than the team's creation, is the floor instead.
         var scope = await TeamActivityFrom.ScopeAsync(team, store, log, ct);
@@ -81,6 +81,10 @@ public static class TeamTokenRuns
             : await log.WorkflowStretchForTeamAsync(team, floor, ct) is { } stretch
                 ? ("workflows", scope.WindowStart(stretch), stretch.To)
                 : ("none", null, null);
+
+        // READ AFTER THE WINDOW: its end is the newest row's time, and a row landing between the two
+        // reads must not put it past `serverNow`.
+        var now = clock.GetUtcNow();
 
         var runs = await ledger.ReadTeamRunsEndedAsync(team, floor, from, to, ct);
         var current = teams.ContainerIdsOf(team).Select(id => id.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
