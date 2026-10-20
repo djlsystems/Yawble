@@ -690,60 +690,6 @@ internal static class TimeoutVerdict
     public const string Quiet = "quiet";
 }
 
-internal static class TeamBusyState
-{
-    public static async Task<IReadOnlyList<string>> DescribeAsync(
-        string team,
-        ContainerHost host,
-        IPendingDeliveries pending,
-        ContainerId? excluded,
-        CancellationToken ct)
-    {
-        var busy = new List<string>();
-
-        foreach (var snapshot in host.Snapshots().Where(s =>
-                     string.Equals(s.Team, team, StringComparison.OrdinalIgnoreCase)))
-        {
-            var member = new ContainerId(snapshot.Team, snapshot.Id);
-
-            // The caller's own RUNNING state is excluded, and only that field. Its queue still
-            // counts: accepted work not yet started means the team is not finished.
-            if ((excluded is null || !member.Equals(excluded)) && snapshot.State == ContainerState.Running)
-            {
-                busy.Add($"{snapshot.Name} is Running");
-            }
-
-            if (snapshot.QueueDepth > 0)
-            {
-                busy.Add($"{snapshot.Name} has {snapshot.QueueDepth} queued");
-            }
-        }
-
-        var excludedSubscriber = excluded?.ToString();
-        var pendingRows = (await pending.ForTeamAsync(team, ct))
-            // The excluded STARTED row is a durable in-flight marker and is ignored only for the
-            // workflow-complete caller. Unstarted rows still count because accepted work remains.
-            .Where(row => !(excludedSubscriber is not null
-                            && row.Started
-                            && string.Equals(
-                                row.Subscriber,
-                                excludedSubscriber,
-                                StringComparison.OrdinalIgnoreCase)))
-            .ToArray();
-
-        foreach (var group in pendingRows.GroupBy(row => row.Subscriber, StringComparer.OrdinalIgnoreCase))
-        {
-            var subscriber = group.Key;
-            var slash = subscriber.LastIndexOf('/');
-            var who = slash >= 0 && slash < subscriber.Length - 1 ? subscriber[(slash + 1)..] : subscriber;
-            var count = group.Count();
-            busy.Add($"{who} has {count} pending deliver{(count == 1 ? "y" : "ies")}");
-        }
-
-        return busy;
-    }
-}
-
 internal sealed record Tell(
     [property: Description("What to tell the member. Empty or whitespace is refused.")]
     string? Instruction,

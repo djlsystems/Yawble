@@ -306,13 +306,14 @@ public static partial class RepoEndpoints
         GitRunner gitRunner,
         TeamPaths paths,
         ContainerHost host,
+        IPendingDeliveries pending,
         ITenantLog log,
         IRepoClone cloner,
         IMessageLog messages,
         ContributorClone contributorClone,
         CancellationToken ct)
     {
-        var (refusal, route) = await RepoRoutePrologue.ResolveAsync(teams, host, paths, log, httpContext, team, repo, TenantActions.RepoBringCurrent, ct);
+        var (refusal, route) = await RepoRoutePrologue.ResolveAsync(teams, host, pending, paths, log, httpContext, team, repo, TenantActions.RepoBringCurrent, ct);
         if (refusal is not null) return refusal;
         var (stored, userId, email, repoUrl, clonePath) = route!;
 
@@ -509,13 +510,14 @@ public static partial class RepoEndpoints
         GitRunner gitRunner,
         TeamPaths paths,
         ContainerHost host,
+        IPendingDeliveries pending,
         ITenantLog log,
         IRepoClone cloner,
         IMessageLog messages,
         ContributorClone contributorClone,
         CancellationToken ct)
     {
-        var (refusal, route) = await RepoRoutePrologue.ResolveAsync(teams, host, paths, log, httpContext, team, repo, TenantActions.RepoFetch, ct);
+        var (refusal, route) = await RepoRoutePrologue.ResolveAsync(teams, host, pending, paths, log, httpContext, team, repo, TenantActions.RepoFetch, ct);
         if (refusal is not null) return refusal;
         var (stored, userId, email, repoUrl, clonePath) = route!;
 
@@ -695,10 +697,11 @@ public static partial class RepoEndpoints
         GitRunner gitRunner,
         TeamPaths paths,
         ContainerHost host,
+        IPendingDeliveries pending,
         ITenantLog log,
         CancellationToken ct)
     {
-        var (refusal, route) = await RepoRoutePrologue.ResolveAsync(teams, host, paths, log, httpContext, team, repo, TenantActions.RepoRebase, ct);
+        var (refusal, route) = await RepoRoutePrologue.ResolveAsync(teams, host, pending, paths, log, httpContext, team, repo, TenantActions.RepoRebase, ct);
         if (refusal is not null) return refusal;
         var (stored, userId, email, repoUrl, clonePath) = route!;
 
@@ -930,10 +933,11 @@ public static partial class RepoEndpoints
         GitRunner gitRunner,
         TeamPaths paths,
         ContainerHost host,
+        IPendingDeliveries pending,
         ITenantLog log,
         CancellationToken ct)
     {
-        var (refusal, route) = await RepoRoutePrologue.ResolveAsync(teams, host, paths, log, httpContext, team, repo, TenantActions.RepoPush, ct);
+        var (refusal, route) = await RepoRoutePrologue.ResolveAsync(teams, host, pending, paths, log, httpContext, team, repo, TenantActions.RepoPush, ct);
         if (refusal is not null) return refusal;
         var (stored, userId, email, repoUrl, clonePath) = route!;
 
@@ -1034,10 +1038,11 @@ public static partial class RepoEndpoints
         GitRunner gitRunner,
         TeamPaths paths,
         ContainerHost host,
+        IPendingDeliveries pending,
         ITenantLog log,
         CancellationToken ct)
     {
-        var (refusal, route) = await RepoRoutePrologue.ResolveAsync(teams, host, paths, log, httpContext, team, repo, TenantActions.RepoDeleteRemoteBranch, ct);
+        var (refusal, route) = await RepoRoutePrologue.ResolveAsync(teams, host, pending, paths, log, httpContext, team, repo, TenantActions.RepoDeleteRemoteBranch, ct);
         if (refusal is not null) return refusal;
         var (stored, userId, email, repoUrl, clonePath) = route!;
 
@@ -1251,6 +1256,7 @@ public static partial class RepoEndpoints
         GitRunner gitRunner,
         TeamPaths paths,
         ContainerHost host,
+        IPendingDeliveries pending,
         ITenantLog log,
         BacklogTipRecorder landedRecorder,
         BacklogLandedCache landedCache,
@@ -1265,7 +1271,7 @@ public static partial class RepoEndpoints
         if (caller.Refusal is { } refused) return refused;
         log = ConciergeMergeGate.For(log, caller);
 
-        var (refusal, route) = await RepoRoutePrologue.ResolveAsync(teams, host, paths, log, httpContext, team, repo, TenantActions.RepoMergeToMain, caller.ActorEmail, ct);
+        var (refusal, route) = await RepoRoutePrologue.ResolveAsync(teams, host, pending, paths, log, httpContext, team, repo, TenantActions.RepoMergeToMain, caller.ActorEmail, ct);
         if (refusal is not null) return refusal;
         var (stored, userId, email, repoUrl, clonePath) = route!;
 
@@ -1722,12 +1728,13 @@ public static partial class RepoEndpoints
         GitRunner gitRunner,
         TeamPaths paths,
         ContainerHost host,
+        IPendingDeliveries pending,
         ITenantLog log,
         KanbanStore kanban,
         WorktreeRemoval worktrees,
         CancellationToken ct)
     {
-        var (refusal, route) = await RepoRoutePrologue.ResolveAsync(teams, host, paths, log, httpContext, team, repo, TenantActions.RepoCleanupWorktrees, ct);
+        var (refusal, route) = await RepoRoutePrologue.ResolveAsync(teams, host, pending, paths, log, httpContext, team, repo, TenantActions.RepoCleanupWorktrees, ct);
         if (refusal is not null) return refusal;
         var (stored, userId, email, repoUrl, clonePath) = route!;
 

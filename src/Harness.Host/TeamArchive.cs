@@ -73,25 +73,15 @@ public sealed class TeamArchive(
     /// </summary>
     public async Task<string?> NotQuietAsync(string stored, CancellationToken ct = default)
     {
-        var rows = await pending.ForTeamAsync(stored, ct);
         var parts = new List<string>();
 
-        foreach (var id in teams.ContainerIdsOf(stored))
+        foreach (var (name, running, queued) in await TeamBusy.MembersAsync(teams, host, pending, stored, ct))
         {
-            var snapshot = host.Find(id)?.Snapshot();
-            var mine = rows
-                .Where(row => ContainerId.TryParse(row.Subscriber, out var subscriber) && subscriber.Equals(id))
-                .ToList();
-
-            // RUNNING is the run loop's state, or a delivery it has started: either is a run going.
-            var running = snapshot?.State == ContainerState.Running || mine.Any(row => row.Started);
-            var queued = mine.Count(row => !row.Started);
-            var name = snapshot?.Name ?? id.Name;
-
             var queuedWords = queued == 1 ? "1 instruction queued" : $"{queued} instructions queued";
+
             if (running && queued > 0) parts.Add($"{name} is running and has {queuedWords}");
             else if (running) parts.Add($"{name} is running");
-            else if (queued > 0) parts.Add($"{name} has {queuedWords}");
+            else parts.Add($"{name} has {queuedWords}");
         }
 
         if (parts.Count == 0) return null;

@@ -44,6 +44,7 @@ public static partial class RepoEndpoints
         GitRunner gitRunner,
         TeamPaths paths,
         ContainerHost host,
+        IPendingDeliveries pending,
         ITenantLog log,
         BacklogTipRecorder landedRecorder,
         BacklogLandedCache landedCache,
@@ -61,7 +62,7 @@ public static partial class RepoEndpoints
 
         // EVERY REFUSAL MERGE TO MAIN MAKES IS MADE HERE FIRST, before the team branch moves: a
         // refusal after the push would leave the team branch changed by a button that said no.
-        var (refusal, route) = await RepoRoutePrologue.ResolveAsync(teams, host, paths, log, httpContext, team, repo, action, caller.ActorEmail, ct);
+        var (refusal, route) = await RepoRoutePrologue.ResolveAsync(teams, host, pending, paths, log, httpContext, team, repo, action, caller.ActorEmail, ct);
         if (refusal is not null) return refusal;
         var (stored, userId, email, repoUrl, _) = route!;
 
@@ -268,7 +269,7 @@ public static partial class RepoEndpoints
 
         // THEN MERGE TO MAIN, THE SAME HANDLER ITS OWN BUTTON CALLS - every check it makes, and its own row.
         var merged = await MergeToMainAsync(
-            team, repo, httpContext, teams, gitRunner, paths, host, log, landedRecorder, landedCache, users, mergeGate, ct);
+            team, repo, httpContext, teams, gitRunner, paths, host, pending, log, landedRecorder, landedCache, users, mergeGate, ct);
         if (merged is IValueHttpResult { Value: RepoActionResult done })
         {
             return Results.Ok(done with { Message = $"{broughtCurrent} {done.Message}" });

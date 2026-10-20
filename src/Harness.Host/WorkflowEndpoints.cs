@@ -1165,7 +1165,7 @@ internal static class WorkflowEndpoints
                 "How long to wait in seconds before answering `timeout`. Defaults to 120 and is capped at 900.")]
             int? timeoutSeconds,
             HttpContext context, IMessageLog log, TeamAccess access, MessageWaitRegistry waits,
-            ContainerHost host, IPendingDeliveries pending,
+            TeamRegistry teams, ContainerHost host, IPendingDeliveries pending,
             CancellationToken ct) =>
         {
             const int defaultTimeoutSeconds = 120;
@@ -1255,8 +1255,7 @@ internal static class WorkflowEndpoints
                     return Results.Ok(WorkflowWaitReply.Timeout(correlationId, timeout, TimeoutVerdict.Working));
                 }
 
-                var busy = await TeamBusyState.DescribeAsync(team, host, pending, excluded: null, ct);
-                if (busy.Count != 0)
+                if ((await TeamBusy.MembersAsync(teams, host, pending, team, ct)).Count != 0)
                 {
                     return Results.Ok(WorkflowWaitReply.Timeout(correlationId, timeout, TimeoutVerdict.Working));
                 }

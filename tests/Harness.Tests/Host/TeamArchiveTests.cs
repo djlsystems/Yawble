@@ -157,6 +157,25 @@ public sealed class TeamArchiveTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_repository_action_is_refused_naming_the_member_with_an_instruction_queued()
+    {
+        // ONE BUSY RULE: a member with an instruction accepted and not started is working, for a
+        // repository action as for an archive, so a fetch cannot move the clone under it.
+        var pending = Services.GetRequiredService<IPendingDeliveries>();
+        var queued = await Log.AppendAsync(new NewMessage("test.queued", "{}", "test"), Ct);
+        await pending.AddAsync(Manager, queued.Seq, Ct);
+
+        var fetch = await _person.PostAsync($"/api/teams/{_team}/repos/anything/fetch", null, Ct);
+
+        Assert.Equal(HttpStatusCode.Conflict, fetch.StatusCode);
+        var body = await fetch.Content.ReadFromJsonAsync<JsonElement>(Ct);
+        Assert.Equal("Manager still working.", body.GetProperty("error").GetString());
+        Assert.Equal(["Manager"], body.GetProperty("busy").EnumerateArray().Select(b => b.GetString()));
+
+        await pending.RemoveAsync(Manager, queued.Seq, Ct);
+    }
+
+    [Fact]
     public async Task Open_workflows_do_not_block_and_the_archive_check_lists_them()
     {
         await TellAsync("Dev", "write the report", subject: "Write the report");
