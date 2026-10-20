@@ -23,6 +23,13 @@ public sealed class WorkerStreams
     /// <summary>The chunks one stream may hold that its reader has not taken; past it the stream ends.</summary>
     public const int Capacity = 10_000;
 
+    /// <summary>
+    /// The bytes one stream may hold that its reader has not taken; past it the stream ends. A
+    /// bound on chunks alone let a transcript of large chunks hold gigabytes for a reader that
+    /// had gone quiet.
+    /// </summary>
+    public const long CapacityBytes = 64L * 1024 * 1024;
+
     /// <summary>What a stream that lost a chunk on the way says.</summary>
     public const string MissedText = "The worker's connection dropped while it was sending; what it sent is incomplete.";
 
@@ -89,6 +96,8 @@ public sealed class WorkerStream : IDisposable
 {
     private readonly Channel<StreamChunk> _chunks =
         Channel.CreateUnbounded<StreamChunk>(new UnboundedChannelOptions { SingleReader = false, SingleWriter = false });
+    private readonly BoundedReader _reader;
+    private long _heldBytes;
     private readonly TaskCompletionSource<WorkerEvent?> _ended = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly bool _whole;
     private readonly WorkerStreams _owner;
@@ -102,6 +111,7 @@ public sealed class WorkerStream : IDisposable
         Worker = worker;
         _whole = whole;
         _owner = owner;
+        _reader = new BoundedReader(this);
     }
 
     public string Id { get; }
@@ -110,7 +120,7 @@ public sealed class WorkerStream : IDisposable
     public IRunWorker Worker { get; }
 
     /// <summary>Every chunk, in order; the last has <see cref="StreamChunk.End"/> set.</summary>
-    public ChannelReader<StreamChunk> Reader => _chunks.Reader;
+    public ChannelReader<StreamChunk> Reader => _reader;
 
     /// <summary>The sequenced event that ended the stream, or null when something else did.</summary>
     public Task<WorkerEvent?> Ended => _ended.Task;
@@ -145,12 +155,13 @@ public sealed class WorkerStream : IDisposable
             }
 
             _last = chunk.N;
-            if (_chunks.Reader.Count >= WorkerStreams.Capacity)
+            if (_chunks.Reader.Count >= WorkerStreams.Capacity || Interlocked.Read(ref _heldBytes) >= WorkerStreams.CapacityBytes)
             {
                 EndLocked(null, WorkerStreams.BehindText);
                 return;
             }
 
+            Interlocked.Add(ref _heldBytes, SizeOf(chunk));
             _chunks.Writer.TryWrite(chunk);
             if (chunk.End)
             {
@@ -188,4 +199,35 @@ public sealed class WorkerStream : IDisposable
     }
 
     public void Dispose() => Finish(null, null);
+
+    private static long SizeOf(StreamChunk chunk) => (chunk.Bytes?.Length ?? 0) + (chunk.Text?.Length ?? 0);
+
+    private void Taken(StreamChunk chunk) => Interlocked.Add(ref _heldBytes, -SizeOf(chunk));
+
+    /// <summary>The channel's reader, counting what it hands out off the bytes the stream holds.</summary>
+    private sealed class BoundedReader(WorkerStream stream) : ChannelReader<StreamChunk>
+    {
+        private ChannelReader<StreamChunk> Inner => stream._chunks.Reader;
+
+        public override Task Completion => Inner.Completion;
+
+        public override bool CanCount => Inner.CanCount;
+
+        public override int Count => Inner.Count;
+
+        public override bool CanPeek => Inner.CanPeek;
+
+        public override bool TryPeek(out StreamChunk item) => Inner.TryPeek(out item!);
+
+        public override bool TryRead(out StreamChunk item)
+        {
+            if (!Inner.TryRead(out item!)) return false;
+
+            stream.Taken(item);
+            return true;
+        }
+
+        public override ValueTask<bool> WaitToReadAsync(CancellationToken cancellationToken = default) =>
+            Inner.WaitToReadAsync(cancellationToken);
+    }
 }

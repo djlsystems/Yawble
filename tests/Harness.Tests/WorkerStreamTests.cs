@@ -44,6 +44,29 @@ public sealed class WorkerStreamTests
     }
 
     [Fact]
+    public async Task A_stream_is_bounded_by_bytes_not_chunks()
+    {
+        await using var bed = new WorkerStreamBed();
+        await bed.StartAsync();
+        using var stream = bed.Streams.Open("live:big", bed.Remote);
+        var megabyte = new string('x', 1024 * 1024);
+
+        var delivered = 0L;
+        for (var n = 1; n <= WorkerStreams.Capacity && !stream.Ended.IsCompleted; n++)
+        {
+            bed.Streams.Deliver(new WorkerId("w1"), new StreamChunk("live:big", n, Text: megabyte));
+            delivered += megabyte.Length;
+        }
+
+        Assert.True(stream.Ended.IsCompleted, "a stream of megabyte chunks never ended");
+        Assert.True(delivered < (long)WorkerStreams.Capacity * megabyte.Length, "the stream ended only on the chunk count");
+        Assert.True(delivered >= WorkerStreams.CapacityBytes, $"the stream ended after {delivered} bytes, under its byte capacity");
+        StreamChunk? last = null;
+        await foreach (var chunk in stream.Reader.ReadAllAsync(TestContext.Current.CancellationToken)) last = chunk;
+        Assert.Equal(WorkerStreams.BehindText, last?.Gap);
+    }
+
+    [Fact]
     public async Task A_chunk_for_an_unknown_stream_is_dropped()
     {
         var streams = new WorkerStreams();

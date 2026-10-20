@@ -1585,7 +1585,8 @@ builder.Services.AddSingleton(sp =>
         sp.GetRequiredService<ConciergeAttachments>().RemovingOnEnd(
             leaseActions.Releasing((key, ct) => launcher.RevokeAsync(key.User, ct))),
         sp.GetRequiredService<TimeProvider>(),
-        launches.FloorOf);
+        launches.FloorOf,
+        sp.GetRequiredService<ILogger<ConciergeSessionStore>>());
 });
 
 // HOW DEEP ONE CHAIN OF CAUSATION MAY GO before the platform stops it.

@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using Harness.Pty;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Harness.Host;
 
@@ -97,7 +99,7 @@ public sealed record ConciergeReaped(
 /// <param name="floorOf">The output floor a session launched by a spec must pass; the platform default when null.</param>
 public sealed class ConciergeSessionStore(
     IPtyEngine engine, ConciergeLaunch launch, ConciergeRevoke revoke,
-    TimeProvider? clock = null, Func<PtySpec, OutputFloor>? floorOf = null) : IAsyncDisposable
+    TimeProvider? clock = null, Func<PtySpec, OutputFloor>? floorOf = null, ILogger? log = null) : IAsyncDisposable
 {
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
 
@@ -169,7 +171,7 @@ public sealed class ConciergeSessionStore(
             // passes. Subscribed after the session is stored, so an exit that has already latched
             // still finds it. Off this thread, because Exited is raised from the session's own pump,
             // which disposal waits for. Ends only THIS console, never a newer one under the key.
-            session.Exited += code => Task.Run(() => EndAsync(console));
+            session.Exited += code => Observed.Forget(Task.Run(() => EndAsync(console)), log ?? NullLogger.Instance, "concierge exit");
 
             Changed?.Invoke();
             return console;
