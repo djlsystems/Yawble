@@ -4,13 +4,9 @@ using Harness.Contracts;
 namespace Harness.Messaging;
 
 /// <summary>
-/// Pending deliveries over the same SQLite file as the log. It shares that FILE with
-/// <see cref="SqliteMessageStore"/>, but not that store's connection shape - <c>SqliteMessageStore</c>
-/// sets neither <c>Pooling</c> nor any pragma, and opens with <c>Cache=Shared</c>. This class is
-/// mechanically closer to the Identity stores (<c>SqliteTeamStore</c>, <c>SqliteUserStore</c>,
-/// <c>SqlitePrincipalStore</c>): same connection string shape, same <c>Pooling=false</c>, same
-/// reliance on <c>MessageSchema</c>'s steps (and <c>OutcomeSchema</c>'s, for
-/// <c>delivery_ledger</c>) having been applied by <c>SchemaMigrator</c> before this is constructed.
+/// Pending deliveries over the same SQLite file as the log, opened as every store opens it. It relies
+/// on <c>MessageSchema</c>'s steps (and <c>OutcomeSchema</c>'s, for <c>delivery_ledger</c>) having
+/// been applied by <c>SchemaMigrator</c> before it is constructed.
 /// </summary>
 public sealed class SqlitePendingDeliveries : IPendingDeliveries
 {

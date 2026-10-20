@@ -97,7 +97,7 @@ public sealed class SqliteLedger : ILedger
             $"""
              SELECT {MessageRows.Columns} FROM (
                  SELECT {MessageRows.Columns} FROM messages
-                 WHERE seq > $since AND seq < $before AND (source = $container OR type = $instruction)
+                 WHERE seq > $since AND seq < $before AND (source = $container COLLATE NOCASE OR type = $instruction)
                    {ExclusionClause}
                    {pluginClause}
                    AND ($correlation IS NULL OR correlation_id = $correlation)

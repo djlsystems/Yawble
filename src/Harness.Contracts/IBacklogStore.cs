@@ -9,8 +9,7 @@ namespace Harness.Contracts;
 /// <param name="Id">
 /// Minted by the platform and rendered to people as <c>B000H</c> (see <see cref="PlatformBacklogId"/>).
 /// The whole point of this object is that a person can say "do B000H" to a Concierge and a Manager
-/// can quote it back. Never reused - see
-/// the <c>AUTOINCREMENT</c> note on the schema.
+/// can quote it back. Never reused: minted from <c>backlog_id_sequence</c>, which only counts up.
 /// </param>
 /// <param name="Team">
 /// A VISIBILITY LINK AND NOTHING ELSE, nullable exactly as <c>skills.team_id</c> is: null means the
@@ -335,12 +334,6 @@ public interface IBacklogStore
         string? outcomeId,
         IReadOnlyList<TriggerAudit> audit,
         CancellationToken ct = default);
-
-    /// <summary>Repoints the visibility link. Null clears it, which only a person may do.</summary>
-    Task SetTeamAsync(long id, string? team, CancellationToken ct = default);
-
-    /// <summary>Sets or clears (null) the outcome the item serves.</summary>
-    Task SetOutcomeAsync(long id, string? outcomeId, CancellationToken ct = default);
 
     /// <summary>Writes ONE row's position. See <see cref="BacklogItem.Position"/>.</summary>
     Task SetPositionAsync(long id, double position, CancellationToken ct = default);

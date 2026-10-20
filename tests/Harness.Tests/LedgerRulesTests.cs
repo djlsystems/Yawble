@@ -69,6 +69,19 @@ public sealed class LedgerExclusionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_row_whose_source_differs_only_in_case_is_still_the_members_own()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var store = new SqliteMessageStore(_database);
+
+        await store.AppendAsync(new NewMessage(MessageTypes.Blocked, """{"reason":"stuck"}""", new ContainerId("Alpha", "Dev").ToString()), ct);
+
+        var ledger = await new SqliteLedger(_database).ReadAsync(new ContainerId("alpha", "dev"), 0, null, long.MaxValue, 100, ct);
+
+        Assert.Contains(ledger, m => m.Type == MessageTypes.Blocked);
+    }
+
+    [Fact]
     public async Task Progress_stays_on_the_log_and_blocked_stays_in_the_ledger()
     {
         var ct = TestContext.Current.CancellationToken;

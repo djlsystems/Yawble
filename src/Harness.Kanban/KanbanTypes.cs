@@ -4,7 +4,7 @@ namespace Harness.Kanban;
 
 /// <summary>
 /// A card represents a workflow instruction to a member, derived from log events.
-/// Card identity: stable id from (tenant, correlationId, member).
+/// Card identity: a stable id from its correlation and member.
 /// </summary>
 /// <remarks>
 /// NOT SEALED, so <see cref="KanbanCardDetail"/> can BE a card rather than carry one. The client
@@ -252,8 +252,6 @@ public sealed record KanbanBoard(
 /// <c>Workflow</c> IS THE ONE WORTH PAUSING OVER. A correlation id is how this product addresses a
 /// thread everywhere else - `nudge`, `stop`, `wait`, the feed - so leaving it off one surface is a
 /// real asymmetry rather than tidying. The judgement is that nobody arrives at a BOARD holding one.
-/// If that is wrong it comes as its own item with a reason, and adding it here is the small part: the flag, the route parameter and the
-/// seeded skill text are what have to come with it.
 /// </para>
 ///
 /// <para>

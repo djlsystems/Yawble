@@ -41,11 +41,6 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         return connection;
     }
 
-    // Round-trip format, invariant culture. "yyyy" renders through the current culture's CALENDAR --
-    // th-TH is Buddhist, so a 2026 timestamp would persist as 2569 and sort against everything else
-    // written on a machine with a different locale. Reading back is MessageRows' half of the same
-    // rule.
-
     /// <summary>
     /// THE LAST LINE OF DEFENCE FOR A WRITE SITE NOBODY HAS FOUND YET - userinfo out of the payload,
     /// at the store, so no call site can forget.

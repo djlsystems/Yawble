@@ -2,8 +2,7 @@ namespace Harness.Kanban;
 
 /// <summary>
 /// The board's lanes and where each status lands. There is ONE set: every team's board has these
-/// lanes. Lanes per team would belong to the business-workflows spec, stored on the team, if that is
-/// built.
+/// lanes.
 /// </summary>
 public static class KanbanLanes
 {

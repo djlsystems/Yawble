@@ -586,7 +586,7 @@ public sealed class FreshVolumeTests : IDisposable
             new TriggerAudit(null, "person", TenantActions.OutcomeCreated, null, null, null), Ct)).Outcome!;
 
         await triggers.SaveAsync((await triggers.FindAsync("t1", Ct))! with { OutcomeId = outcome.Id }, Ct);
-        await backlog.SetOutcomeAsync(item.Id, outcome.Id, Ct);
+        await backlog.EditAsync(item.Id, null, null, null, setOutcome: true, outcome.Id, [], Ct);
         Assert.Equal(outcome.Id, (await triggers.FindAsync("t1", Ct))!.OutcomeId);
         Assert.Equal(outcome.Id, (await backlog.GetAsync(item.Id, Ct))!.OutcomeId);
     }

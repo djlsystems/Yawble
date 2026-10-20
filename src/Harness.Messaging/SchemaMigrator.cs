@@ -183,11 +183,9 @@ public sealed class SchemaMigrator(
     public static async Task<string> BackUpAsync(
         string databasePath, string destination, CancellationToken ct = default)
     {
-        // `Pooling=False`: this connection's native handle must not outlive the method, and must
-        // not be disposable by anything else in the process. The `finally` below already had to
-        // clear the pool by hand to stop the handle holding `databasePath` open against
-        // `--restore`; unpooled, there is nothing to hold and nothing to clear.
-        var connection = new SqliteConnection($"Data Source={databasePath};Pooling=False");
+        // Unpooled, as every connection is: the native handle goes with the connection, so nothing
+        // holds `databasePath` open against a `--restore` that overwrites it next.
+        await using var connection = new SqliteConnection(SqliteOpen.ConnectionString(databasePath));
 
         try
         {
@@ -208,21 +206,6 @@ public sealed class SchemaMigrator(
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             throw new BackupFailedException(destination, exception);
-        }
-        finally
-        {
-            // Microsoft.Data.Sqlite pools by default: closing this connection returns its native
-            // handle to the pool rather than releasing it, which keeps `databasePath` (and, since
-            // that file is in WAL mode, its -wal sidecar) open on Windows for the lifetime of the
-            // POOL rather than the connection. A caller that immediately overwrites or deletes that
-            // same path in this same process - exactly what OperatorCommands.RestoreAsync does right
-            // after the pre-restore backup - would fail against a handle this method never let go of.
-            // Scoped to this one connection string rather than SqliteConnection.ClearAllPools(),
-            // which would also drop every OTHER pooled connection in the process; nothing here needs
-            // that wider a hammer.
-            await connection.CloseAsync();
-            SqliteConnection.ClearPool(connection);
-            await connection.DisposeAsync();
         }
     }
 

@@ -34,19 +34,10 @@ public enum SqliteDurability
 /// keys off - under which `ON DELETE CASCADE` still parses, still applies as schema, and still
 /// deletes nothing.
 ///
-/// THE DUPLICATION THIS REPLACES HAD ALREADY DRIFTED, which is the whole argument for consolidating
-/// rather than adding a ninth copy. Eight sites carried the text and it had become FOUR different
-/// spellings: `busy_timeout = 5000` with foreign keys, the same without them, the same again with
-/// no spaces around the `=`, and the migrator's deliberate `0`. Nobody chose that; it is what one
-/// fact stored in eight places becomes.
-///
-/// SO THE DEFAULT IS THE CORRECT ONE AND A CALLER MUST OPT OUT EXPLICITLY. The ninth store somebody
-/// adds gets foreign keys and a busy timeout by writing nothing, which is the opposite of what
-/// happened here - three stores had drifted to opening without foreign keys at all.
-///
-/// It is safe to turn them on unconditionally: `tenant_events`, `pending_deliveries` and the skills
-/// tables carry no `REFERENCES` clause at all, so the pragma is a no-op there rather than a change
-/// of behaviour. It was verified before this was written, not assumed.
+/// THE DEFAULT IS THE CORRECT ONE AND A CALLER MUST OPT OUT EXPLICITLY: a store gets foreign keys
+/// and a busy timeout by writing nothing. Turning them on unconditionally is safe: `tenant_events`,
+/// `pending_deliveries` and the skills tables carry no `REFERENCES` clause, so the pragma is a no-op
+/// there rather than a change of behaviour.
 ///
 /// TYPED ON <see cref="DbConnection"/> RATHER THAN `SqliteConnection`, so this can live in
 /// `Contracts` - which every store project already references - WITHOUT giving the shared contract

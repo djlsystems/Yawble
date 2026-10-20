@@ -290,32 +290,6 @@ public sealed class SqliteBacklogStore : IBacklogStore
         await transaction.CommitAsync(ct);
     }
 
-    public async Task SetTeamAsync(long id, string? team, CancellationToken ct = default)
-    {
-        await using var connection = Open();
-        await using var command = connection.CreateCommand();
-
-        command.CommandText = "UPDATE backlog_items SET team = $team, updated_at = $now WHERE id = $id";
-        command.Parameters.AddWithValue("$id", Key(id));
-        command.Parameters.AddWithValue("$team", (object?)team ?? DBNull.Value);
-        command.Parameters.AddWithValue("$now", Now());
-
-        await command.ExecuteNonQueryAsync(ct);
-    }
-
-    public async Task SetOutcomeAsync(long id, string? outcomeId, CancellationToken ct = default)
-    {
-        await using var connection = Open();
-        await using var command = connection.CreateCommand();
-
-        command.CommandText = "UPDATE backlog_items SET outcome_id = $outcome, updated_at = $now WHERE id = $id";
-        command.Parameters.AddWithValue("$id", Key(id));
-        command.Parameters.AddWithValue("$outcome", (object?)outcomeId ?? DBNull.Value);
-        command.Parameters.AddWithValue("$now", Now());
-
-        await command.ExecuteNonQueryAsync(ct);
-    }
-
     public async Task SetPositionAsync(long id, double position, CancellationToken ct = default)
     {
         await using var connection = Open();

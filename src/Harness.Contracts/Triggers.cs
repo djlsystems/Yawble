@@ -206,7 +206,6 @@ public interface ITriggerStore
         DbConnection connection, DbTransaction transaction, string id, long seq, TriggerAudit audit,
         CancellationToken ct = default);
 
-    Task SetEnabledAsync(string id, bool enabled, CancellationToken ct = default);
     Task DeleteAsync(string id, CancellationToken ct = default);
 
     /// <summary>Deletes the row and appends <paramref name="audit"/> to `tenant_events` in one

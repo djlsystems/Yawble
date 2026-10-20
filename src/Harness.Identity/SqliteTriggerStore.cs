@@ -347,18 +347,6 @@ public sealed class SqliteTriggerStore : ITriggerStore
         await TenantAuditRow.AppendAsync(sqlite, within, audit, ct);
     }
 
-    public async Task SetEnabledAsync(string id, bool enabled, CancellationToken ct = default)
-    {
-        await using var connection = Open();
-        await using var command = connection.CreateCommand();
-
-        command.CommandText = "UPDATE triggers SET enabled = $enabled WHERE id = $id";
-        command.Parameters.AddWithValue("$enabled", enabled ? 1 : 0);
-        command.Parameters.AddWithValue("$id", id);
-
-        await command.ExecuteNonQueryAsync(ct);
-    }
-
     public async Task DeleteAsync(string id, CancellationToken ct = default)
     {
         await using var connection = Open();

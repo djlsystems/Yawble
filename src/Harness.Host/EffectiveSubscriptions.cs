@@ -40,9 +40,7 @@ public sealed class EffectiveSubscriptions(
     public async Task<IReadOnlyCollection<string>> RecomputeAsync(
         ContainerId container, CancellationToken ct = default)
     {
-        var member = (await teams.MembersAsync(ct)).SingleOrDefault(
-            m => string.Equals(m.Team, container.Team, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(m.Name, container.Name, StringComparison.OrdinalIgnoreCase));
+        var member = await teams.MemberAsync(container.Team, container.Name, ct);
 
         var effective = await EffectiveTypesAsync(container, member?.Subscribes ?? [], ct);
 

@@ -312,6 +312,9 @@ public interface ITeamStore
 
     Task<IReadOnlyList<PersistedMember>> MembersAsync(CancellationToken ct = default);
 
+    /// <summary>One member of <paramref name="team"/> by name, compared as a <see cref="ContainerId"/> compares them; null when there is none.</summary>
+    Task<PersistedMember?> MemberAsync(string team, string name, CancellationToken ct = default);
+
     /// <summary>Removes a team and, through the foreign key's ON DELETE CASCADE, every one of its
     /// members.</summary>
     Task DeleteTeamAsync(string team, CancellationToken ct = default);

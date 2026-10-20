@@ -456,45 +456,53 @@ public sealed class SqliteTeamStore : ITeamStore
         return teams;
     }
 
+    private const string MemberColumns =
+        "team, name, label, agent, system_prompt, subscribes, permits, floor_seq, hired_for, "
+        + "system_prompt_set_by, system_prompt_set_by_kind, system_prompt_set_at";
+
     public async Task<IReadOnlyList<PersistedMember>> MembersAsync(CancellationToken ct = default)
     {
         await using var connection = Open();
         await using var command = connection.CreateCommand();
 
-        command.CommandText =
-            "SELECT team, name, label, agent, system_prompt, subscribes, permits, floor_seq, hired_for, "
-            + "system_prompt_set_by, system_prompt_set_by_kind, system_prompt_set_at "
-            + "FROM team_members";
+        command.CommandText = $"SELECT {MemberColumns} FROM team_members";
 
         var members = new List<PersistedMember>();
         await using var reader = await command.ExecuteReaderAsync(ct);
 
-        while (await reader.ReadAsync(ct))
-        {
-            members.Add(new PersistedMember(
-                reader.GetString(0),
-                reader.GetString(1),
-                reader.IsDBNull(2) ? null : reader.GetString(2),
-                reader.GetString(3),
-                reader.IsDBNull(4) ? null : reader.GetString(4),
-                JsonSerializer.Deserialize<string[]>(reader.GetString(5)) ?? [],
-                JsonSerializer.Deserialize<string[]>(reader.GetString(6)) ?? [],
-                reader.GetInt64(7),
-                reader.IsDBNull(8) ? null : reader.GetString(8),
-
-                // All three or none: they are written together. A row from before `auth-009`
-                // holds NULL in each and reads as nobody known.
-                reader.IsDBNull(9) || reader.IsDBNull(10) || reader.IsDBNull(11)
-                    ? null
-                    : new SystemPromptSetter(
-                        reader.GetString(9),
-                        reader.GetString(10),
-                        Instant.Parse(
-                            reader.GetString(11)))));
-        }
+        while (await reader.ReadAsync(ct)) members.Add(ReadMember(reader));
 
         return members;
     }
+
+    public async Task<PersistedMember?> MemberAsync(string team, string name, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        command.CommandText =
+            $"SELECT {MemberColumns} FROM team_members WHERE team = $team COLLATE NOCASE AND name = $name COLLATE NOCASE";
+        command.Parameters.AddWithValue("$team", team);
+        command.Parameters.AddWithValue("$name", name);
+
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct) ? ReadMember(reader) : null;
+    }
+
+    private static PersistedMember ReadMember(SqliteDataReader reader) =>
+        new(
+            reader.GetString(0),
+            reader.GetString(1),
+            reader.IsDBNull(2) ? null : reader.GetString(2),
+            reader.GetString(3),
+            reader.IsDBNull(4) ? null : reader.GetString(4),
+            JsonSerializer.Deserialize<string[]>(reader.GetString(5)) ?? [],
+            JsonSerializer.Deserialize<string[]>(reader.GetString(6)) ?? [],
+            reader.GetInt64(7),
+            reader.IsDBNull(8) ? null : reader.GetString(8),
+            reader.IsDBNull(9) || reader.IsDBNull(10) || reader.IsDBNull(11)
+                ? null
+                : new SystemPromptSetter(reader.GetString(9), reader.GetString(10), Instant.Parse(reader.GetString(11))));
 
     public async Task DeleteTeamAsync(string team, CancellationToken ct = default)
     {

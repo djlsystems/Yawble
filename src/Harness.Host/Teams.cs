@@ -1674,9 +1674,7 @@ public sealed class TeamRegistry(
         // The manager's STORED override, read fresh - not null. Passing null here would make a
         // manager's own prompt survive only until the next rename or member add and then silently
         // revert to its preset's default. Every composition site passes the stored value.
-        var member = (await teams.MembersAsync(ct)).FirstOrDefault(
-            m => string.Equals(m.Team, team, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(m.Name, DefaultManagerName, StringComparison.OrdinalIgnoreCase));
+        var member = await teams.MemberAsync(team, DefaultManagerName, ct);
 
         container.Reprompt(
             ComposePrompt(
@@ -3047,9 +3045,7 @@ public sealed class TeamRegistry(
             throw new InvalidOperationException($"No member '{name}'.");
         }
 
-        return (await teams.MembersAsync(ct)).Single(
-            m => string.Equals(m.Team, stored, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase));
+        return await teams.MemberAsync(stored, name, ct) ?? throw new InvalidOperationException($"No member '{name}'.");
     }
 
     /// <summary>
@@ -3083,9 +3079,7 @@ public sealed class TeamRegistry(
         var stored = ExistingName(team) ?? throw new InvalidOperationException($"No team '{team}'.");
         var id = new ContainerId(stored, name);
         var container = host.Find(id) ?? throw new InvalidOperationException($"No member '{name}'.");
-        var member = (await teams.MembersAsync(ct)).Single(
-            m => string.Equals(m.Team, stored, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase));
+        var member = await teams.MemberAsync(stored, name, ct) ?? throw new InvalidOperationException($"No member '{name}'.");
 
         // A repoint, when one was asked for. Absent and blank both mean "leave it alone", the same
         // two-state rule the label follows - there is no such thing as clearing a member's Agent.
