@@ -61,6 +61,9 @@ public sealed class ControlConnection : IRunEvents, IRunStreamSink
 
     private readonly Lock _gate = new();
     private readonly LinkedList<(WorkerEnvelope Envelope, long Bytes)> _outbox = new();
+
+    /// <summary>The first outbox entry not yet sent on this session, so a flush never scans the sent ones; null when every entry went.</summary>
+    private LinkedListNode<(WorkerEnvelope Envelope, long Bytes)>? _unsent;
     private readonly SemaphoreSlim _flush = new(1, 1);
     private long _bytes;
     private long _sent;
@@ -241,6 +244,7 @@ public sealed class ControlConnection : IRunEvents, IRunStreamSink
         {
             var bytes = Size(envelope);
             _outbox.AddLast((envelope, bytes));
+            _unsent ??= _outbox.Last;
             _bytes += bytes;
             _lastSeq = envelope.Seq;
             overflowed = _outbox.Count > _outboxLimit || _bytes > _outboxBytes;
@@ -317,6 +321,8 @@ public sealed class ControlConnection : IRunEvents, IRunStreamSink
         {
             Trim(welcome.HandledSeq);
             _sent = welcome.HandledSeq;
+            _unsent = _outbox.First;
+            while (_unsent is not null && _unsent.Value.Envelope.Seq <= _sent) _unsent = _unsent.Next;
             _socket = socket;
         }
 
@@ -441,7 +447,8 @@ public sealed class ControlConnection : IRunEvents, IRunStreamSink
                 lock (_gate)
                 {
                     socket = _socket;
-                    next = _outbox.Select(e => e.Envelope).FirstOrDefault(e => e.Seq > _sent);
+                    while (_unsent is not null && _unsent.Value.Envelope.Seq <= _sent) _unsent = _unsent.Next;
+                    next = _unsent?.Value.Envelope;
                 }
 
                 if (socket is null || next is null) return;
@@ -457,7 +464,11 @@ public sealed class ControlConnection : IRunEvents, IRunStreamSink
                     return;
                 }
 
-                lock (_gate) _sent = Math.Max(_sent, next.Seq);
+                lock (_gate)
+                {
+                    _sent = Math.Max(_sent, next.Seq);
+                    if (_unsent is not null && _unsent.Value.Envelope.Seq == next.Seq) _unsent = _unsent.Next;
+                }
             }
         }
         finally
@@ -477,6 +488,7 @@ public sealed class ControlConnection : IRunEvents, IRunStreamSink
         {
             Session = Guid.NewGuid().ToString("N");
             _outbox.Clear();
+            _unsent = null;
             _bytes = 0;
             _sent = _lastSeq;
             socket = _socket;
@@ -503,6 +515,7 @@ public sealed class ControlConnection : IRunEvents, IRunStreamSink
     {
         while (_outbox.First is { } first && first.Value.Envelope.Seq <= handled)
         {
+            if (ReferenceEquals(first, _unsent)) _unsent = first.Next;
             _bytes -= first.Value.Bytes;
             _outbox.RemoveFirst();
         }

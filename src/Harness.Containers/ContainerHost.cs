@@ -1577,7 +1577,9 @@ public sealed class ContainerHost : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        foreach (var container in _containers.Values) await container.DisposeAsync();
+        // TOGETHER, not one after another: each member's dispose waits for its run to stop, and a host
+        // of thirty members going down one at a time waits thirty times.
+        await Task.WhenAll(_containers.Values.Select(container => container.DisposeAsync().AsTask()));
         _containers.Clear();
     }
 }
