@@ -414,7 +414,7 @@ public static class OutcomeEndpoints
                 IMessageLog log, CancellationToken ct) =>
             {
                 if (PrincipalClaims.From(context.User) is not { } principal) return Results.Unauthorized();
-                if (teams.ExistingName(team) is not { } stored) return Results.NotFound(new { error = $"No team '{team}'." });
+                if (teams.ExistingName(team) is not { } stored) return Refusals.NoTeam(team);
                 if (string.IsNullOrWhiteSpace(request.Outcome)) return Results.BadRequest(new { error = "Name the outcome (`outcome`): its id or exact name." });
 
                 var (workflow, refusal) = await WorkflowOfAsync(principal, stored, correlation, log, ct);
@@ -456,7 +456,7 @@ public static class OutcomeEndpoints
                 HttpContext context, IOutcomeStore outcomes, TeamRegistry teams, IMessageLog log, CancellationToken ct) =>
             {
                 if (PrincipalClaims.From(context.User) is not { } principal) return Results.Unauthorized();
-                if (teams.ExistingName(team) is not { } stored) return Results.NotFound(new { error = $"No team '{team}'." });
+                if (teams.ExistingName(team) is not { } stored) return Refusals.NoTeam(team);
 
                 var (workflow, refusal) = await WorkflowOfAsync(principal, stored, correlation, log, ct);
                 if (refusal is not null) return refusal;
@@ -533,8 +533,7 @@ public static class OutcomeEndpoints
 
     private static OutcomeActor PersonOf(HttpContext context)
     {
-        var email = context.User.FindFirstValue(ClaimTypes.Email);
-        var id = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var (id, email) = ActorClaims.Of(context.User);
         return new OutcomeActor(email ?? id ?? "unknown", OutcomeActorKind.Person, id, email);
     }
 

@@ -42,7 +42,7 @@ internal static class TriggerEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             return Results.Ok(await cost.ViewsAsync(await schedules.ListForTeamAsync(stored, ct), DateTimeOffset.UtcNow, ct));
@@ -100,7 +100,7 @@ internal static class TriggerEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             // THE ONE PATH a trigger is made by, a person's here and a solution install's alike: every check,
@@ -157,7 +157,7 @@ internal static class TriggerEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             if (await schedules.FindAsync(id, ct) is not { } existing
@@ -376,7 +376,7 @@ internal static class TriggerEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             if (await schedules.FindAsync(id, ct) is not { } row
@@ -428,7 +428,7 @@ internal static class TriggerEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             if (await schedules.FindAsync(id, ct) is not { } row
@@ -474,7 +474,7 @@ internal static class TriggerEndpoints
             TeamRegistry teams,
             FolderWatch folders) =>
             teams.ExistingName(team) is not { } stored
-                ? Results.NotFound(new { error = $"No team '{team}'." })
+                ? Refusals.NoTeam(team)
                 : Results.Ok(folders.Test(stored, request.WatchRoot, request.WatchPath, request.WatchGlob)))
             .WithTags("Teams")
             .HumansOnly()
@@ -493,7 +493,7 @@ internal static class TriggerEndpoints
             PreviewSchedule request,
             TeamRegistry teams) =>
         {
-            if (teams.ExistingName(team) is null) return Results.NotFound(new { error = $"No team '{team}'." });
+            if (teams.ExistingName(team) is null) return Refusals.NoTeam(team);
 
             var kind = Enum.GetNames<TriggerKind>().FirstOrDefault(
                 name => string.Equals(name, request.Kind?.Trim(), StringComparison.OrdinalIgnoreCase));
@@ -519,7 +519,7 @@ internal static class TriggerEndpoints
             TeamRegistry teams,
             FolderWatch folders) =>
             teams.ExistingName(team) is null
-                ? Results.NotFound(new { error = $"No team '{team}'." })
+                ? Refusals.NoTeam(team)
                 : Results.Ok(folders.RootOptions()))
             .WithTags("Teams")
             .HumansOnly()
@@ -571,7 +571,7 @@ internal static class TriggerEndpoints
         {
             typed = JsonSerializer.Deserialize<UpdateSchedule>(
                 body.GetRawText(),
-                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+                HostJson.Web);
         }
         catch (JsonException exception)
         {

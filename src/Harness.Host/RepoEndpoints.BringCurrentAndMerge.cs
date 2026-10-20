@@ -57,30 +57,13 @@ public static partial class RepoEndpoints
         if (caller.Refusal is { } refused) return refused;
         log = ConciergeMergeGate.For(log, caller);
 
-        if (teams.ExistingName(team) is not { } stored)
-        {
-            return Results.NotFound(new { error = $"No team '{team}'." });
-        }
-
-        var email = caller.ActorEmail;
-        var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
         const string action = TenantActions.RepoBringCurrentAndMerge;
 
         // EVERY REFUSAL MERGE TO MAIN MAKES IS MADE HERE FIRST, before the team branch moves: a
         // refusal after the push would leave the team branch changed by a button that said no.
-        var busyMembers = GetBusyMembers(teams, host, stored);
-        if (busyMembers.Count > 0)
-        {
-            await log.WriteAsync(userId, email, action, $"{stored}/{repo}", null,
-                JsonSerializer.Serialize(new { refused = true, reason = $"{string.Join(", ", busyMembers)} still working." }), ct);
-            return Results.Conflict(new { error = $"{string.Join(", ", busyMembers)} still working.", busy = busyMembers });
-        }
-
-        var repoUrl = teams.ReposFor(stored).FirstOrDefault(u => RepoUrls.DeriveName(u).Equals(repo, StringComparison.OrdinalIgnoreCase));
-        if (repoUrl is null)
-        {
-            return Results.NotFound(new { error = $"No repo '{repo}' on team '{team}'." });
-        }
+        var (refusal, route) = await RepoRoutePrologue.ResolveAsync(teams, host, paths, log, httpContext, team, repo, action, caller.ActorEmail, ct);
+        if (refusal is not null) return refusal;
+        var (stored, userId, email, repoUrl, _) = route!;
 
         var name = RepoUrls.DeriveName(repoUrl);
         var clonePath = Path.Combine(paths.ReposFor(stored), name, "main");

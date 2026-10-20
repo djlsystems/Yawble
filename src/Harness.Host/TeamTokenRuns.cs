@@ -36,7 +36,7 @@ public static class TeamTokenRuns
             {
                 if (teams.ExistingName(team) is not { } stored)
                 {
-                    return Results.NotFound(new { error = $"No team '{team}'." });
+                    return Refusals.NoTeam(team);
                 }
 
                 if (TeamActivity.Refusal(from, to) is { } refusal) return Results.BadRequest(new { error = refusal });

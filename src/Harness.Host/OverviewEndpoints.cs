@@ -220,7 +220,7 @@ internal static class OverviewEndpoints
             // {team}-scoped route.
             if (teams.ExistingName(request.Team) is not { } canonical)
             {
-                return Results.NotFound(new { error = $"No team '{request.Team}'." });
+                return Refusals.NoTeam(request.Team);
             }
 
             // The CANONICAL spelling, never the caller's. Team identity is case-insensitive and every

@@ -51,14 +51,14 @@ internal static class MemberReportEndpoints
         {
             // The STORED spelling, so the id built here is the one the container was registered under
             // however the caller capitalised the team.
-            if (teams.ExistingName(team) is not { } stored) return Results.NotFound(new { error = $"No team '{team}'." });
+            if (teams.ExistingName(team) is not { } stored) return Refusals.NoTeam(team);
 
             // AN ARCHIVED TEAM DOES NO WORK: nothing is appended, and the sentence names Unarchive.
             if (teams.IsArchived(stored)) return Results.Conflict(new { error = TeamArchive.Refusal(teams.LabelFor(stored)) });
 
             // Checked BEFORE the id is constructed: ContainerId's constructor THROWS on an illegal name, and
             // an unhandled ArgumentException from a route segment is a 500 where a 404 is correct.
-            if (!ContainerId.IsLegalName(name)) return Results.NotFound(new { error = $"No member '{name}'." });
+            if (!ContainerId.IsLegalName(name)) return Refusals.NoMember(name);
 
             var id = new ContainerId(stored, name);
 
@@ -70,7 +70,7 @@ internal static class MemberReportEndpoints
             // `agentContainer.instruction.Alpha/dev1`, so the call would return 200, write a row, and wake
             // nothing. A success reported for work that silently did not happen is the worst outcome available:
             // the person has no reason to look.
-            if (host.Find(id) is not { } container) return Results.NotFound(new { error = $"No member '{name}'." });
+            if (host.Find(id) is not { } container) return Refusals.NoMember(name);
             if (string.IsNullOrWhiteSpace(request.Instruction)) return Results.BadRequest(new { error = "Say something." });
 
             // WORK GOES THROUGH THE COORDINATOR, AND THE PLATFORM SAYS SO RATHER THAN A SKILL.
@@ -337,7 +337,7 @@ internal static class MemberReportEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             var id = new ContainerId(stored, name);
@@ -347,7 +347,7 @@ internal static class MemberReportEndpoints
             // was typed is how a call answers 200 and nothing ever happens.
             if (host.Find(id) is not { } container)
             {
-                return Results.NotFound(new { error = $"No member '{name}'." });
+                return Refusals.NoMember(name);
             }
 
             // THE SPOOF CHECK, and the permit does not cover it: every member holds Progress, and a
@@ -416,14 +416,14 @@ internal static class MemberReportEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             // The FOUND container, never the caller's spelling - the same rule every other route on this
             // path follows, and for the same reason.
             if (host.Find(new ContainerId(stored, name)) is not { } container)
             {
-                return Results.NotFound(new { error = $"No member '{name}'." });
+                return Refusals.NoMember(name);
             }
 
             var stopped = container.Stop();
@@ -461,14 +461,14 @@ internal static class MemberReportEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             var id = new ContainerId(stored, name);
 
             if (host.Find(id) is not { } container)
             {
-                return Results.NotFound(new { error = $"No member '{name}'." });
+                return Refusals.NoMember(name);
             }
 
             if (PrincipalClaims.From(context.User) is not { Kind: PrincipalKind.Container } caller
@@ -548,14 +548,14 @@ internal static class MemberReportEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             var id = new ContainerId(stored, name);
 
             if (host.Find(id) is not { } container)
             {
-                return Results.NotFound(new { error = $"No member '{name}'." });
+                return Refusals.NoMember(name);
             }
 
             // Identity, not permit - `blocked`'s rule exactly. Every member holds `Progress`, so what stops
@@ -607,14 +607,14 @@ internal static class MemberReportEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             var id = new ContainerId(stored, name);
 
             if (host.Find(id) is not { } container)
             {
-                return Results.NotFound(new { error = $"No member '{name}'." });
+                return Refusals.NoMember(name);
             }
 
             if (PrincipalClaims.From(context.User) is not { Kind: PrincipalKind.Container } caller
@@ -656,10 +656,10 @@ internal static class MemberReportEndpoints
             AskWake request,
             HttpContext context, TeamRegistry teams, ContainerHost host, WakeMe wakes, CancellationToken ct) =>
         {
-            if (teams.ExistingName(team) is not { } stored) return Results.NotFound(new { error = $"No team '{team}'." });
+            if (teams.ExistingName(team) is not { } stored) return Refusals.NoTeam(team);
             if (!ContainerId.IsLegalName(name) || host.Find(new ContainerId(stored, name)) is not { } container)
             {
-                return Results.NotFound(new { error = $"No member '{name}'." });
+                return Refusals.NoMember(name);
             }
 
             if (WakeCallerRefusal(context, container) is { } refused) return refused;
@@ -699,10 +699,10 @@ internal static class MemberReportEndpoints
             [Description("The wake's id, as the ask answered it.")] long id,
             HttpContext context, TeamRegistry teams, ContainerHost host, WakeMe wakes, CancellationToken ct) =>
         {
-            if (teams.ExistingName(team) is not { } stored) return Results.NotFound(new { error = $"No team '{team}'." });
+            if (teams.ExistingName(team) is not { } stored) return Refusals.NoTeam(team);
             if (!ContainerId.IsLegalName(name) || host.Find(new ContainerId(stored, name)) is not { } container)
             {
-                return Results.NotFound(new { error = $"No member '{name}'." });
+                return Refusals.NoMember(name);
             }
 
             if (WakeCallerRefusal(context, container) is { } refused) return refused;

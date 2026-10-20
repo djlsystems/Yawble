@@ -717,7 +717,7 @@ public static class BacklogEndpoints
 
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             var view = await ViewFor(principal, access, ct);
@@ -1057,7 +1057,7 @@ public static class BacklogEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             if (await backlog.GetAsync(id, ct) is not { } item)
@@ -1119,7 +1119,7 @@ public static class BacklogEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             // AN ARCHIVED TEAM DOES NO WORK, so no card is planned for it.

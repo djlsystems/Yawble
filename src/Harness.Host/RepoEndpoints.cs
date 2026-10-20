@@ -183,7 +183,7 @@ public static partial class RepoEndpoints
     {
         if (teams.ExistingName(team) is not { } stored)
         {
-            return Results.NotFound(new { error = $"No team '{team}'." });
+            return Refusals.NoTeam(team);
         }
 
         // The clone path is shown to a person and withheld from a machine principal.
@@ -312,31 +312,9 @@ public static partial class RepoEndpoints
         ContributorClone contributorClone,
         CancellationToken ct)
     {
-        if (teams.ExistingName(team) is not { } stored)
-        {
-            return Results.NotFound(new { error = $"No team '{team}'." });
-        }
-
-        var email = httpContext.User.FindFirstValue(ClaimTypes.Email);
-        var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
-
-        // Check if team has any running members
-        var busyMembers = GetBusyMembers(teams, host, stored);
-        if (busyMembers.Count > 0)
-        {
-            await log.WriteAsync(userId, email, TenantActions.RepoBringCurrent, $"{stored}/{repo}", null,
-                JsonSerializer.Serialize(new { refused = true, reason = $"{string.Join(", ", busyMembers)} still working." }), ct);
-            return Results.Conflict(new { error = $"{string.Join(", ", busyMembers)} still working.", busy = busyMembers });
-        }
-
-        // Verify repo exists
-        var repoUrl = teams.ReposFor(stored).FirstOrDefault(u => RepoUrls.DeriveName(u).Equals(repo, StringComparison.OrdinalIgnoreCase));
-        if (repoUrl is null)
-        {
-            return Results.NotFound(new { error = $"No repo '{repo}' on team '{team}'." });
-        }
-
-        var clonePath = Path.Combine(paths.ReposFor(stored), repo, "main");
+        var (refusal, route) = await RepoRoutePrologue.ResolveAsync(teams, host, paths, log, httpContext, team, repo, TenantActions.RepoBringCurrent, ct);
+        if (refusal is not null) return refusal;
+        var (stored, userId, email, repoUrl, clonePath) = route!;
 
         // A CLONE THAT NEVER HAPPENED IS MADE HERE. The platform clones at team creation; when
         // that failed (a private repository before its credential was set, a network error) the
@@ -537,31 +515,9 @@ public static partial class RepoEndpoints
         ContributorClone contributorClone,
         CancellationToken ct)
     {
-        if (teams.ExistingName(team) is not { } stored)
-        {
-            return Results.NotFound(new { error = $"No team '{team}'." });
-        }
-
-        var email = httpContext.User.FindFirstValue(ClaimTypes.Email);
-        var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
-
-        // Check if team has any running members
-        var busyMembers = GetBusyMembers(teams, host, stored);
-        if (busyMembers.Count > 0)
-        {
-            await log.WriteAsync(userId, email, TenantActions.RepoFetch, $"{stored}/{repo}", null,
-                JsonSerializer.Serialize(new { refused = true, reason = $"{string.Join(", ", busyMembers)} still working." }), ct);
-            return Results.Conflict(new { error = $"{string.Join(", ", busyMembers)} still working.", busy = busyMembers });
-        }
-
-        // Verify repo exists
-        var repoUrl = teams.ReposFor(stored).FirstOrDefault(u => RepoUrls.DeriveName(u).Equals(repo, StringComparison.OrdinalIgnoreCase));
-        if (repoUrl is null)
-        {
-            return Results.NotFound(new { error = $"No repo '{repo}' on team '{team}'." });
-        }
-
-        var clonePath = Path.Combine(paths.ReposFor(stored), repo, "main");
+        var (refusal, route) = await RepoRoutePrologue.ResolveAsync(teams, host, paths, log, httpContext, team, repo, TenantActions.RepoFetch, ct);
+        if (refusal is not null) return refusal;
+        var (stored, userId, email, repoUrl, clonePath) = route!;
 
         // A CLONE THAT NEVER HAPPENED IS MADE HERE TOO, as Bring current makes one. A repository
         // attached while its token is unusable fails to clone, and with no clone to measure the Git
@@ -674,7 +630,7 @@ public static partial class RepoEndpoints
     {
         if (teams.ExistingName(team) is not { } stored)
         {
-            return Results.NotFound(new { error = $"No team '{team}'." });
+            return Refusals.NoTeam(team);
         }
 
         var repoUrl = teams.ReposFor(stored).FirstOrDefault(u => RepoUrls.DeriveName(u).Equals(repo, StringComparison.OrdinalIgnoreCase));
@@ -696,8 +652,7 @@ public static partial class RepoEndpoints
             return Results.Conflict(new { error = "This team has no Manager to ask." });
         }
 
-        var email = httpContext.User.FindFirstValue(ClaimTypes.Email);
-        var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var (userId, email) = ActorClaims.Of(httpContext.User);
 
         // Fresh origin/<default>, so the files named are the ones the team will actually meet. A
         // successful fetch reads origin's HEAD too.
@@ -743,31 +698,9 @@ public static partial class RepoEndpoints
         ITenantLog log,
         CancellationToken ct)
     {
-        if (teams.ExistingName(team) is not { } stored)
-        {
-            return Results.NotFound(new { error = $"No team '{team}'." });
-        }
-
-        var email = httpContext.User.FindFirstValue(ClaimTypes.Email);
-        var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
-
-        // Check if team has any running members
-        var busyMembers = GetBusyMembers(teams, host, stored);
-        if (busyMembers.Count > 0)
-        {
-            await log.WriteAsync(userId, email, TenantActions.RepoRebase, $"{stored}/{repo}", null,
-                JsonSerializer.Serialize(new { refused = true, reason = $"{string.Join(", ", busyMembers)} still working." }), ct);
-            return Results.Conflict(new { error = $"{string.Join(", ", busyMembers)} still working.", busy = busyMembers });
-        }
-
-        // Verify repo exists
-        var repoUrl = teams.ReposFor(stored).FirstOrDefault(u => RepoUrls.DeriveName(u).Equals(repo, StringComparison.OrdinalIgnoreCase));
-        if (repoUrl is null)
-        {
-            return Results.NotFound(new { error = $"No repo '{repo}' on team '{team}'." });
-        }
-
-        var clonePath = Path.Combine(paths.ReposFor(stored), repo, "main");
+        var (refusal, route) = await RepoRoutePrologue.ResolveAsync(teams, host, paths, log, httpContext, team, repo, TenantActions.RepoRebase, ct);
+        if (refusal is not null) return refusal;
+        var (stored, userId, email, repoUrl, clonePath) = route!;
 
         if (!Directory.Exists(clonePath))
         {
@@ -1000,31 +933,9 @@ public static partial class RepoEndpoints
         ITenantLog log,
         CancellationToken ct)
     {
-        if (teams.ExistingName(team) is not { } stored)
-        {
-            return Results.NotFound(new { error = $"No team '{team}'." });
-        }
-
-        var email = httpContext.User.FindFirstValue(ClaimTypes.Email);
-        var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
-
-        // Check if team has any running members
-        var busyMembers = GetBusyMembers(teams, host, stored);
-        if (busyMembers.Count > 0)
-        {
-            await log.WriteAsync(userId, email, TenantActions.RepoPush, $"{stored}/{repo}", null,
-                JsonSerializer.Serialize(new { refused = true, reason = $"{string.Join(", ", busyMembers)} still working." }), ct);
-            return Results.Conflict(new { error = $"{string.Join(", ", busyMembers)} still working.", busy = busyMembers });
-        }
-
-        // Verify repo exists
-        var repoUrl = teams.ReposFor(stored).FirstOrDefault(u => RepoUrls.DeriveName(u).Equals(repo, StringComparison.OrdinalIgnoreCase));
-        if (repoUrl is null)
-        {
-            return Results.NotFound(new { error = $"No repo '{repo}' on team '{team}'." });
-        }
-
-        var clonePath = Path.Combine(paths.ReposFor(stored), repo, "main");
+        var (refusal, route) = await RepoRoutePrologue.ResolveAsync(teams, host, paths, log, httpContext, team, repo, TenantActions.RepoPush, ct);
+        if (refusal is not null) return refusal;
+        var (stored, userId, email, repoUrl, clonePath) = route!;
 
         if (!Directory.Exists(clonePath))
         {
@@ -1126,31 +1037,9 @@ public static partial class RepoEndpoints
         ITenantLog log,
         CancellationToken ct)
     {
-        if (teams.ExistingName(team) is not { } stored)
-        {
-            return Results.NotFound(new { error = $"No team '{team}'." });
-        }
-
-        var email = httpContext.User.FindFirstValue(ClaimTypes.Email);
-        var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
-
-        // Check if team has any running members
-        var busyMembers = GetBusyMembers(teams, host, stored);
-        if (busyMembers.Count > 0)
-        {
-            await log.WriteAsync(userId, email, TenantActions.RepoDeleteRemoteBranch, $"{stored}/{repo}", null,
-                JsonSerializer.Serialize(new { refused = true, reason = $"{string.Join(", ", busyMembers)} still working." }), ct);
-            return Results.Conflict(new { error = $"{string.Join(", ", busyMembers)} still working.", busy = busyMembers });
-        }
-
-        // Verify repo exists
-        var repoUrl = teams.ReposFor(stored).FirstOrDefault(u => RepoUrls.DeriveName(u).Equals(repo, StringComparison.OrdinalIgnoreCase));
-        if (repoUrl is null)
-        {
-            return Results.NotFound(new { error = $"No repo '{repo}' on team '{team}'." });
-        }
-
-        var clonePath = Path.Combine(paths.ReposFor(stored), repo, "main");
+        var (refusal, route) = await RepoRoutePrologue.ResolveAsync(teams, host, paths, log, httpContext, team, repo, TenantActions.RepoDeleteRemoteBranch, ct);
+        if (refusal is not null) return refusal;
+        var (stored, userId, email, repoUrl, clonePath) = route!;
 
         if (!Directory.Exists(clonePath))
         {
@@ -1376,31 +1265,9 @@ public static partial class RepoEndpoints
         if (caller.Refusal is { } refused) return refused;
         log = ConciergeMergeGate.For(log, caller);
 
-        if (teams.ExistingName(team) is not { } stored)
-        {
-            return Results.NotFound(new { error = $"No team '{team}'." });
-        }
-
-        var email = caller.ActorEmail;
-        var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
-
-        // Check if team has any running members
-        var busyMembers = GetBusyMembers(teams, host, stored);
-        if (busyMembers.Count > 0)
-        {
-            await log.WriteAsync(userId, email, TenantActions.RepoMergeToMain, $"{stored}/{repo}", null,
-                JsonSerializer.Serialize(new { refused = true, reason = $"{string.Join(", ", busyMembers)} still working." }), ct);
-            return Results.Conflict(new { error = $"{string.Join(", ", busyMembers)} still working.", busy = busyMembers });
-        }
-
-        // Verify repo exists
-        var repoUrl = teams.ReposFor(stored).FirstOrDefault(u => RepoUrls.DeriveName(u).Equals(repo, StringComparison.OrdinalIgnoreCase));
-        if (repoUrl is null)
-        {
-            return Results.NotFound(new { error = $"No repo '{repo}' on team '{team}'." });
-        }
-
-        var clonePath = Path.Combine(paths.ReposFor(stored), repo, "main");
+        var (refusal, route) = await RepoRoutePrologue.ResolveAsync(teams, host, paths, log, httpContext, team, repo, TenantActions.RepoMergeToMain, caller.ActorEmail, ct);
+        if (refusal is not null) return refusal;
+        var (stored, userId, email, repoUrl, clonePath) = route!;
 
         if (!Directory.Exists(clonePath))
         {
@@ -1860,31 +1727,9 @@ public static partial class RepoEndpoints
         WorktreeRemoval worktrees,
         CancellationToken ct)
     {
-        if (teams.ExistingName(team) is not { } stored)
-        {
-            return Results.NotFound(new { error = $"No team '{team}'." });
-        }
-
-        var email = httpContext.User.FindFirstValue(ClaimTypes.Email);
-        var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
-
-        // Check if team has any running members
-        var busyMembers = GetBusyMembers(teams, host, stored);
-        if (busyMembers.Count > 0)
-        {
-            await log.WriteAsync(userId, email, TenantActions.RepoCleanupWorktrees, $"{stored}/{repo}", null,
-                JsonSerializer.Serialize(new { refused = true, reason = $"{string.Join(", ", busyMembers)} still working." }), ct);
-            return Results.Conflict(new { error = $"{string.Join(", ", busyMembers)} still working.", busy = busyMembers });
-        }
-
-        // Verify repo exists
-        var repoUrl = teams.ReposFor(stored).FirstOrDefault(u => RepoUrls.DeriveName(u).Equals(repo, StringComparison.OrdinalIgnoreCase));
-        if (repoUrl is null)
-        {
-            return Results.NotFound(new { error = $"No repo '{repo}' on team '{team}'." });
-        }
-
-        var clonePath = Path.Combine(paths.ReposFor(stored), repo, "main");
+        var (refusal, route) = await RepoRoutePrologue.ResolveAsync(teams, host, paths, log, httpContext, team, repo, TenantActions.RepoCleanupWorktrees, ct);
+        if (refusal is not null) return refusal;
+        var (stored, userId, email, repoUrl, clonePath) = route!;
 
         if (!Directory.Exists(clonePath))
         {
@@ -2468,19 +2313,4 @@ public static partial class RepoEndpoints
         return Results.Conflict(new { error, defaultBranchKnown = false });
     }
 
-    private static List<string> GetBusyMembers(TeamRegistry teams, ContainerHost host, string storedTeamId)
-    {
-        var busy = new List<string>();
-        var teamContainers = teams.ContainerIdsOf(storedTeamId);
-
-        foreach (var id in teamContainers)
-        {
-            if (host.Find(id) is { } container && container.State == ContainerState.Running)
-            {
-                busy.Add(id.Name);
-            }
-        }
-
-        return busy;
-    }
 }

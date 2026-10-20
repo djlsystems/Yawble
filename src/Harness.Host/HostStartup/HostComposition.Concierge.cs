@@ -128,10 +128,7 @@ internal sealed partial class HostComposition
                 && attachmentMax > 0
                 ? attachmentMax
                 : ConciergeAttachments.DefaultMaxBytes,
-            TimeSpan.TryParse(builder.Configuration["ConciergeAttachmentRetention"], CultureInfo.InvariantCulture, out var attachmentRetention)
-                && attachmentRetention > TimeSpan.Zero
-                ? attachmentRetention
-                : ConciergeAttachments.DefaultRetention));
+            Intervals.ReadPositive(builder.Configuration, "ConciergeAttachmentRetention", ConciergeAttachments.DefaultRetention)));
 
         builder.Services.AddSingleton(sp => new UnfinishedRemovalRetry(
             sp.GetRequiredService<FolderRemoval>(),

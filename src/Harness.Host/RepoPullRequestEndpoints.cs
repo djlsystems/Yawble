@@ -80,7 +80,7 @@ public static partial class RepoEndpoints
     {
         if (teams.ExistingName(team) is not { } stored)
         {
-            return Results.NotFound(new { error = $"No team '{team}'." });
+            return Refusals.NoTeam(team);
         }
 
         var draftUrl = teams.ReposFor(stored).FirstOrDefault(u => RepoUrls.DeriveName(u).Equals(repo, StringComparison.OrdinalIgnoreCase));
@@ -114,11 +114,10 @@ public static partial class RepoEndpoints
     {
         if (teams.ExistingName(team) is not { } stored)
         {
-            return Results.NotFound(new { error = $"No team '{team}'." });
+            return Refusals.NoTeam(team);
         }
 
-        var email = httpContext.User.FindFirstValue(ClaimTypes.Email);
-        var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var (userId, email) = ActorClaims.Of(httpContext.User);
 
         var repoUrl = teams.ReposFor(stored).FirstOrDefault(u => RepoUrls.DeriveName(u).Equals(repo, StringComparison.OrdinalIgnoreCase));
         if (repoUrl is null)
@@ -317,8 +316,7 @@ public static partial class RepoEndpoints
     private static async Task<IResult> ForkUpstreamAsync(
         ForkUpstream request, HttpContext httpContext, IGitHubContributor gitHub, ITenantLog log, CancellationToken ct)
     {
-        var email = httpContext.User.FindFirstValue(ClaimTypes.Email);
-        var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var (userId, email) = ActorClaims.Of(httpContext.User);
 
         var upstream = request.UpstreamUrl?.Trim() ?? string.Empty;
         if (GitHubRepository.From(upstream) is null)

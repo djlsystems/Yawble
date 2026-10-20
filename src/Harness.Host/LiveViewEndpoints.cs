@@ -118,13 +118,13 @@ public static class LiveViewEndpoints
     {
         if (teams.ExistingName(team) is not { } stored)
         {
-            return Results.NotFound(new { error = $"No team '{team}'." });
+            return Refusals.NoTeam(team);
         }
 
         // The FOUND container, never the caller's spelling.
         if (!ContainerId.IsLegalName(member) || host.Find(new ContainerId(stored, member)) is not { } container)
         {
-            return Results.NotFound(new { error = $"No member '{member}'." });
+            return Refusals.NoMember(member);
         }
 
         if (live.Find(container.Id) is not { } run)

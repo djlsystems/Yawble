@@ -77,7 +77,7 @@ public static class TeamActivityFrom
             {
                 if (teams.ExistingName(team) is not { } stored)
                 {
-                    return Results.NotFound(new { error = $"No team '{team}'." });
+                    return Refusals.NoTeam(team);
                 }
 
                 if (body.ValueKind != JsonValueKind.Object || !body.TryGetProperty("from", out var asked)

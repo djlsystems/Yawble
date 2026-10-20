@@ -76,7 +76,7 @@ internal static class MemberEndpoints
         {
             if (!teams.Exists(team))
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             // THE CONNECTIONS A PERSON HAS BOUND ON THIS TEAM: the only ones a Manager's hire may name. By id,
@@ -161,7 +161,7 @@ internal static class MemberEndpoints
             var name = (request.Name ?? "").Trim();
 
             if (name.Length == 0) return Results.BadRequest(new { error = "A member needs a name." });
-            if (!teams.Exists(team)) return Results.NotFound(new { error = $"No team '{team}'." });
+            if (!teams.Exists(team)) return Refusals.NoTeam(team);
 
             if (name.Length > TeamRegistry.MaximumLabelLength)
             {
@@ -393,10 +393,10 @@ internal static class MemberEndpoints
                     new { requestedTag, resolvedAgent = snapshot.Agent, team = snapshot.Team }, ct);
 
                 // Serialize snapshot to JsonNode and add unresolvedAgents
-                var node = JsonSerializer.SerializeToNode(snapshot, new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } });
+                var node = JsonSerializer.SerializeToNode(snapshot, HostJson.WebEnums);
                 if (node is JsonObject obj)
                 {
-                    obj["unresolvedAgents"] = JsonSerializer.SerializeToNode(unresolvedList, new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } });
+                    obj["unresolvedAgents"] = JsonSerializer.SerializeToNode(unresolvedList, HostJson.WebEnums);
                     if (hiringNotice is not null) obj["hiringNotice"] = hiringNotice;
 
                     // WHAT A PERSON MUST STILL SET, said to whoever hired: the `member` tool hands it to the
@@ -628,10 +628,10 @@ internal static class MemberEndpoints
                 }
 
                 // Serialize updated to JsonNode and add unresolvedAgents
-                var node = JsonSerializer.SerializeToNode(updated, new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } });
+                var node = JsonSerializer.SerializeToNode(updated, HostJson.WebEnums);
                 if (node is JsonObject obj)
                 {
-                    obj["unresolvedAgents"] = JsonSerializer.SerializeToNode(unresolvedList, new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } });
+                    obj["unresolvedAgents"] = JsonSerializer.SerializeToNode(unresolvedList, HostJson.WebEnums);
 
                     // The same three the GET answers, so a client that just saved need not read back.
                     obj["systemPromptSetBy"] = update.Row.SystemPromptSetBy?.By;
@@ -763,7 +763,7 @@ internal static class MemberEndpoints
             [Description("Omit for every member. The member's identifier, matched case-insensitively.")] string? member,
             TeamRegistry teams, IMessageLog log, IPendingDeliveries pending, CancellationToken ct) =>
         {
-            if (teams.ExistingName(team) is not { } stored) return Results.NotFound(new { error = $"No team '{team}'." });
+            if (teams.ExistingName(team) is not { } stored) return Refusals.NoTeam(team);
 
             var queued = await QueuedInstructions.ForTeamAsync(
                 pending, log, stored, string.IsNullOrWhiteSpace(member) ? null : member.Trim(), ct);

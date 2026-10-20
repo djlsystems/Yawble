@@ -106,7 +106,7 @@ internal static class DocumentsEndpoints
             bool? recursive,
             TeamRegistry teams, TeamDocuments docs) =>
             DocumentsFolderOf(teams, docs, team) is not { } folder
-                ? Results.NotFound(new { error = $"No team '{team}'." })
+                ? Refusals.NoTeam(team)
                 : Documents(() => Results.Ok(docs.List(folder, path, recursive ?? false))))
             .RequirePermit(Permits.Read)
             .WithSummary("List a team's documents")
@@ -121,7 +121,7 @@ internal static class DocumentsEndpoints
         {
             if (DocumentsFolderOf(teams, docs, team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             return Documents(() =>
@@ -154,7 +154,7 @@ internal static class DocumentsEndpoints
         {
             if (DocumentsFolderOf(teams, docs, team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             return await DocumentsAsync(async () =>
@@ -203,7 +203,7 @@ internal static class DocumentsEndpoints
             [Description(Describe.Team)] string team,
             NewFolder request, TeamRegistry teams, TeamDocuments docs) =>
             teams.ExistingName(team) is not { } stored
-                ? Results.NotFound(new { error = $"No team '{team}'." })
+                ? Refusals.NoTeam(team)
                 : Documents(() => Results.Ok(docs.CreateFolder(stored, request.Path ?? ""))))
             .HumansOnly()
             .WithSummary("Create a folder")
@@ -217,7 +217,7 @@ internal static class DocumentsEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             if (!request.HasFormContentType) return Results.BadRequest(new { error = "Send a file." });
@@ -332,7 +332,7 @@ internal static class DocumentsEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             if (!request.HasFormContentType) return Results.BadRequest(new { error = "Send a folder." });
@@ -377,7 +377,7 @@ internal static class DocumentsEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             return await UploadZipFormAsync(request, (form, read) => DocumentsAsync(() => UploadPackageAsync(
@@ -459,7 +459,7 @@ internal static class DocumentsEndpoints
             // out. A person may delete a record; upload and new folder still refuse to add to one.
             if (DocumentsFolderOf(teams, docs, team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             var live = !TeamPaths.IsRetiredDocumentsFolder(stored) && teams.ExistingName(stored) is not null;
@@ -716,7 +716,7 @@ internal static class DocumentsEndpoints
         // things out of a record. Nothing may be added to one, or renamed in one.
         if (DocumentsFolderOf(teams, docs, team) is not { } stored)
         {
-            return Results.NotFound(new { error = $"No team '{team}'." });
+            return Refusals.NoTeam(team);
         }
 
         bool Live(string folder) => !TeamPaths.IsRetiredDocumentsFolder(folder) && teams.ExistingName(folder) is not null;
@@ -785,8 +785,7 @@ internal static class DocumentsEndpoints
             return Results.Json(new { error = sentence, clashes = plan.Clashes }, statusCode: StatusCodes.Status409Conflict);
         }
 
-        var actorId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        var email = context.User.FindFirstValue(ClaimTypes.Email);
+        var (actorId, email) = ActorClaims.Of(context.User);
         var first = plan.Items[0].From;
 
         // RECORDED BEFORE DONE, naming every source, destination and replaced path, and not swallowed:
@@ -880,33 +879,8 @@ internal static class DocumentsEndpoints
         return Results.Json(new { error = said, results }, statusCode: StatusCodes.Status409Conflict);
     }
 
-    static IResult Documents(Func<IResult> action)
-    {
-        try
-        {
-            return action();
-        }
-        catch (DocumentPathException ex)
-        {
-            return Results.BadRequest(new { error = ex.Message });
-        }
-        catch (FileNotFoundException)
-        {
-            return Results.NotFound(new { error = "No such document." });
-        }
-        catch (DirectoryNotFoundException)
-        {
-            return Results.NotFound(new { error = "No such folder." });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Results.Conflict(new { error = ex.Message });
-        }
-        catch (IOException ex)
-        {
-            return Results.Conflict(new { error = ex.Message });
-        }
-    }
+    static IResult Documents(Func<IResult> action) =>
+        DocumentsAsync(() => Task.FromResult(action())).GetAwaiter().GetResult();
 
     static async Task<IResult> DocumentsAsync(Func<Task<IResult>> action)
     {

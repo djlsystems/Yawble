@@ -50,7 +50,7 @@ public static class TeamActivity
             {
                 if (teams.ExistingName(team) is not { } stored)
                 {
-                    return Results.NotFound(new { error = $"No team '{team}'." });
+                    return Refusals.NoTeam(team);
                 }
 
                 if (Refusal(from, to) is { } refusal) return Results.BadRequest(new { error = refusal });

@@ -31,7 +31,7 @@ public static class LeaseEndpoints
                 case PrincipalKind.Container when ContainerId.TryParse(principal.Id, out var id):
                     if (host.Find(id) is not { } container)
                     {
-                        return Results.NotFound(new { error = $"No member '{id}'." });
+                        return Refusals.NoMember(id.ToString());
                     }
 
                     owner = LeaseOwner.For(container.Id);

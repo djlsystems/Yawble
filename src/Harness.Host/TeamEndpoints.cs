@@ -86,8 +86,7 @@ internal static class TeamEndpoints
 
             // WHO ACTED, READ NOW: the create below outlives the request when its caller goes away, and
             // nothing in it may read the request after that.
-            var actorId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
-            var actorEmail = context.User.FindFirstValue(ClaimTypes.Email);
+            var (actorId, actorEmail) = ActorClaims.Of(context.User);
 
             try
             {
@@ -205,10 +204,10 @@ internal static class TeamEndpoints
                 }
 
                 // Serialize created to JsonNode and add unresolvedAgents
-                var node = JsonSerializer.SerializeToNode(created, new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } });
+                var node = JsonSerializer.SerializeToNode(created, HostJson.WebEnums);
                 if (node is JsonObject obj)
                 {
-                    obj["unresolvedAgents"] = JsonSerializer.SerializeToNode(unresolvedList, new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } });
+                    obj["unresolvedAgents"] = JsonSerializer.SerializeToNode(unresolvedList, HostJson.WebEnums);
 
                     // Present only when something WAS displaced, so a client can say it once rather than
                     // render an empty row on every create. See the tenant log line above for why it is
@@ -309,7 +308,7 @@ internal static class TeamEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             var name = (request.Name ?? "").Trim();
@@ -565,7 +564,7 @@ internal static class TeamEndpoints
                 });
             }
 
-            if (removed is null) return Results.NotFound(new { error = $"No team '{team}'." });
+            if (removed is null) return Refusals.NoTeam(team);
 
             // AFTER THE TEAM, and through the one delete Admin -> Repositories uses: its own
             // `local-repo.deleted` row first, the same refusal while another team uses it. One that fails
@@ -761,7 +760,7 @@ internal static class TeamEndpoints
                 return Results.Json(new { error = unrecorded.Message }, statusCode: StatusCodes.Status500InternalServerError);
             }
 
-            if (done is null) return Results.NotFound(new { error = $"No team '{team}'." });
+            if (done is null) return Refusals.NoTeam(team);
 
             // NAMES AND COUNTS, NEVER CONTENT. Every person can read this table and it is kept
             // forever; `payload.output` carries a bounded excerpt of real agent output, so a purge records
@@ -841,7 +840,7 @@ internal static class TeamEndpoints
             TeamReset reset, CancellationToken ct) =>
             await reset.PreviewRepositoriesAsync(team, ct) is { } preview
                 ? Results.Ok(preview)
-                : Results.NotFound(new { error = $"No team '{team}'." }))
+                : Refusals.NoTeam(team))
             .WithTags("Teams")
             .HumansOnly()
             .WithSummary("List what Reset repositories would remove")
@@ -857,7 +856,7 @@ internal static class TeamEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             // The flag and its tenant_events row are one transaction: a change with no record of who
@@ -882,7 +881,7 @@ internal static class TeamEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             // The flag and its tenant_events row are one transaction: a change with no record of who
@@ -910,7 +909,7 @@ internal static class TeamEndpoints
             TeamRegistry teams, TeamArchive archive, CancellationToken ct) =>
             teams.ExistingName(team) is { } stored
                 ? Results.Ok(await archive.CheckAsync(stored, ct))
-                : Results.NotFound(new { error = $"No team '{team}'." }))
+                : Refusals.NoTeam(team))
             .WithTags("Teams")
             .RequirePermit(Permits.Read)
             .WithSummary("Whether this team is quiet enough to archive or delete, and its open workflows")
@@ -927,7 +926,7 @@ internal static class TeamEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             var caller = await gate.CheckAsync(context, users, ct);
@@ -983,7 +982,7 @@ internal static class TeamEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             var caller = await gate.CheckAsync(context, users, ct);
@@ -1031,7 +1030,7 @@ internal static class TeamEndpoints
             [Description(Describe.Team)] string team, TeamRegistry teams) =>
             teams.ExistingName(team) is { } stored
                 ? Results.Ok(teams.EnvFor(stored))
-                : Results.NotFound(new { error = $"No team '{team}'." }))
+                : Refusals.NoTeam(team))
             .WithTags("Teams")
             .HumansOnly()
             .WithSummary("Read a team's environment")
@@ -1170,7 +1169,7 @@ internal static class TeamEndpoints
                 return Results.BadRequest(new { error = "Send the repository list as an array, or as { \"repos\": [...], \"repoChoices\": {...} }." });
             }
 
-            if (teams.ExistingName(team) is not { } stored) return Results.NotFound(new { error = $"No team '{team}'." });
+            if (teams.ExistingName(team) is not { } stored) return Refusals.NoTeam(team);
 
             TeamLocalRepository? localRepository = null;
             var attached = false;
@@ -1234,7 +1233,7 @@ internal static class TeamEndpoints
             TeamRegistry teams, TeamRepoSetup repoSetup, LocalRepoOnNeed onNeed, TenantLogging audit, HttpContext context,
             CancellationToken ct) =>
         {
-            if (teams.ExistingName(team) is not { } stored) return Results.NotFound(new { error = $"No team '{team}'." });
+            if (teams.ExistingName(team) is not { } stored) return Refusals.NoTeam(team);
 
             // NOT A PERSON: a team's Manager, a member or the Concierge, and only for a team with no repository.
             // Every other machine principal is refused as the person's action this route otherwise is.
@@ -1378,7 +1377,7 @@ internal static class TeamEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             var name = teams.ReposFor(stored).Select(RepoUrls.DeriveName)
@@ -1489,10 +1488,10 @@ internal static class TeamEndpoints
                     t.Id, teams.ExistingName(team), StringComparison.OrdinalIgnoreCase));
 
                 // Serialize teamData to JsonNode and add unresolvedAgents
-                var node = JsonSerializer.SerializeToNode(teamData, new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } });
+                var node = JsonSerializer.SerializeToNode(teamData, HostJson.WebEnums);
                 if (node is JsonObject obj)
                 {
-                    obj["unresolvedAgents"] = JsonSerializer.SerializeToNode(unresolvedList, new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } });
+                    obj["unresolvedAgents"] = JsonSerializer.SerializeToNode(unresolvedList, HostJson.WebEnums);
                 }
                 return Results.Json(node, statusCode: 200);
             }
@@ -1537,7 +1536,7 @@ internal static class TeamEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             // One transaction with its tenant_events row. WHETHER they are set, never the words: the log is
@@ -1574,7 +1573,7 @@ internal static class TeamEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             // THROUGH `TeamRegistry.FloorFor`, WHICH IS THE ONE STORE OF THIS RULE. The kanban board needs

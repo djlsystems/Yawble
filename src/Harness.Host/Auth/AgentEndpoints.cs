@@ -247,8 +247,7 @@ public static class AgentEndpoints
             string name,
             AgentCliUpdater updater, ITenantLog tenantLog, HttpContext context) =>
         {
-            var person = context.User.FindFirstValue(ClaimTypes.Email);
-            var actorId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var (actorId, person) = ActorClaims.Of(context.User);
 
             // The row is written when the update has run, as the person who asked; the request has
             // long been answered by then.

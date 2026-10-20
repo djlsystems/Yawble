@@ -47,16 +47,10 @@ internal sealed partial class HostComposition
             ? TimeSpan.FromSeconds(15)
             : TimeSpan.FromMinutes(1);
 
-        var scheduleSweepInterval = TimeSpan.TryParse(builder.Configuration["ScheduleSweepInterval"], out var configuredSweep)
-            ? configuredSweep
-            : TimeSpan.FromSeconds(15);
-        var scheduleRunnerEnabled = !bool.TryParse(builder.Configuration["ScheduleRunnerEnabled"], out var configuredRunner)
-            || configuredRunner;
-        var quietSweepInterval = TimeSpan.TryParse(builder.Configuration["QuietSweepInterval"], out var configuredQuietSweep)
-            ? configuredQuietSweep
-            : TimeSpan.FromMinutes(1);
-        var quietSweepEnabled = !bool.TryParse(builder.Configuration["QuietSweepEnabled"], out var configuredQuietSweepEnabled)
-            || configuredQuietSweepEnabled;
+        var scheduleSweepInterval = Intervals.Read(builder.Configuration, "ScheduleSweepInterval", TimeSpan.FromSeconds(15));
+        var scheduleRunnerEnabled = Intervals.Enabled(builder.Configuration, "ScheduleRunnerEnabled");
+        var quietSweepInterval = Intervals.Read(builder.Configuration, "QuietSweepInterval", TimeSpan.FromMinutes(1));
+        var quietSweepEnabled = Intervals.Enabled(builder.Configuration, "QuietSweepEnabled");
 
         // THE CLOCK IN FRONT OF THE NUDGE. See `ResumeSweep` for the whole argument; these three
         // settings are the parts an operator is allowed to move.
@@ -66,11 +60,8 @@ internal sealed partial class HostComposition
         // rather than a second. `ResumeMaxAutomatic` is the BOUND, and it is configurable DOWNWARDS as much
         // as up - setting it to 0 turns automatic resumes off entirely without removing the class, the
         // card, or a person's own Nudge.
-        var resumeSweepInterval = TimeSpan.TryParse(builder.Configuration["ResumeSweepInterval"], out var configuredResumeSweep)
-            ? configuredResumeSweep
-            : TimeSpan.FromMinutes(1);
-        var resumeSweepEnabled = !bool.TryParse(builder.Configuration["ResumeSweepEnabled"], out var configuredResumeEnabled)
-            || configuredResumeEnabled;
+        var resumeSweepInterval = Intervals.Read(builder.Configuration, "ResumeSweepInterval", TimeSpan.FromMinutes(1));
+        var resumeSweepEnabled = Intervals.Enabled(builder.Configuration, "ResumeSweepEnabled");
         // The resume bound is the tenant setting `resume.maxAutomatic`, read at every sweep.
 
         // Registered even when the runner is gated off. Every schedule write signals it, and a route that
@@ -112,8 +103,7 @@ internal sealed partial class HostComposition
         // its own retention never touches. `Backups:Keep` is how many daily copies survive (default 7). Each
         // run also prunes the before-step copies in the same folder the migrator wrote them to, by
         // `Backups:KeepBeforeStep` and `Backups:KeepBeforeStepDays` - all read once, above.
-        var backupsEnabled = !bool.TryParse(builder.Configuration["Backups:Enabled"], out var configuredBackups)
-            || configuredBackups;
+        var backupsEnabled = Intervals.Enabled(builder.Configuration, "Backups:Enabled");
         if (backupsEnabled)
         {
             var dailyBackup = backupSettings.DailyBackupFor(database);

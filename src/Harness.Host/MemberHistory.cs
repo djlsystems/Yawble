@@ -62,7 +62,7 @@ internal static class MemberHistory
         if (principal.Kind != PrincipalKind.User
             && !(await access.EffectiveTeamsAsync(principal, ct)).Contains(found.Team))
         {
-            return Results.NotFound(new { error = $"No team '{team}'." });
+            return Refusals.NoTeam(team);
         }
 
         // THE FOUND CONTAINER'S SPELLING, never the caller's: the instruction half matches its type

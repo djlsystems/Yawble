@@ -48,7 +48,7 @@ internal static class WorkflowEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             // THE SAME FLOOR THE TOKENS ROUTE COMPUTES, deliberately the same block rather than a second
@@ -101,7 +101,7 @@ internal static class WorkflowEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             // THE SAME FLOOR THE SINGULAR ROUTE COMPUTES, deliberately the same block rather than a second
@@ -206,12 +206,12 @@ internal static class WorkflowEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             if (host.Find(new ContainerId(stored, name)) is not { } container)
             {
-                return Results.NotFound(new { error = $"No member '{name}'." });
+                return Refusals.NoMember(name);
             }
 
             // THE SAME FLOOR THE TWO ROUTES ABOVE COMPUTE, deliberately the same block rather than a
@@ -327,14 +327,14 @@ internal static class WorkflowEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             var id = new ContainerId(stored, name);
 
             if (host.Find(id) is not { } container)
             {
-                return Results.NotFound(new { error = $"No member '{name}'." });
+                return Refusals.NoMember(name);
             }
 
             // Identity, not permit. A member claiming to be somebody else is refused by this check rather
@@ -560,7 +560,7 @@ internal static class WorkflowEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             // ONE CHECK ANSWERS BOTH "no rows at all" AND "not this team's" - `TeamGate` gates `{team}`
@@ -635,7 +635,7 @@ internal static class WorkflowEndpoints
             [Description(Describe.Team)] string team,
             TeamRegistry teams, IWakeStore wakes, CancellationToken ct) =>
         {
-            if (teams.ExistingName(team) is not { } stored) return Results.NotFound(new { error = $"No team '{team}'." });
+            if (teams.ExistingName(team) is not { } stored) return Refusals.NoTeam(team);
 
             return Results.Ok(new { wakes = (await wakes.ForTeamAsync(stored, ct)).Select(w => w.View()).ToList() });
         })
@@ -654,7 +654,7 @@ internal static class WorkflowEndpoints
             [Description("The wake's id.")] long id,
             TeamRegistry teams, WakeMe wakes, HttpContext context, CancellationToken ct) =>
         {
-            if (teams.ExistingName(team) is not { } stored) return Results.NotFound(new { error = $"No team '{team}'." });
+            if (teams.ExistingName(team) is not { } stored) return Refusals.NoTeam(team);
 
             var by = context.User.FindFirstValue(ClaimTypes.Email) ?? PrincipalClaims.From(context.User)?.Id ?? "console";
             var cancelled = await wakes.CancelAsync(id, by, "cancelled by a person", team: stored, ct: ct);
@@ -697,7 +697,7 @@ internal static class WorkflowEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             // The IDENTICAL guard close uses, called rather than re-derived - see WorkflowTeamOwnership's
@@ -809,7 +809,7 @@ internal static class WorkflowEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             // The IDENTICAL guard close, nudge and stop use, called rather than re-derived. Same
@@ -960,7 +960,7 @@ internal static class WorkflowEndpoints
         {
             if (teams.ExistingName(team) is not { } stored)
             {
-                return Results.NotFound(new { error = $"No team '{team}'." });
+                return Refusals.NoTeam(team);
             }
 
             if (!await WorkflowTeamOwnership.OwnsAsync(teams, host, log, stored, correlation, ct))
