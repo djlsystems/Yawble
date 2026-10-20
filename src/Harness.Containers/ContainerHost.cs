@@ -51,6 +51,19 @@ public sealed class ContainerHost : IAsyncDisposable
     private readonly IMessageLog _log;
     private readonly ICursors _cursors;
     private readonly ISubscriptions _subscriptions;
+
+    /// <summary>
+    /// THE PASS GATE. A pass costs three statements per container; most passes found nothing. The
+    /// log's highest seq says whether it moved since the last complete pass, and <see cref="_passDue"/>
+    /// says whether something else changed what a pass would do: a container added or removed, a
+    /// subscription changed, a team paused or resumed, or a read that filled its batch and may have
+    /// more. Either means a pass; neither means the highest seq alone was read.
+    /// </summary>
+    private long _passedHighest = -1;
+    private volatile bool _passDue = true;
+
+    /// <summary>Each container's subscriptions as the store holds them, read once and dropped when they change.</summary>
+    private readonly ConcurrentDictionary<ContainerId, IReadOnlyCollection<string>> _subscriptionCache = new();
     private readonly ITranscriptStore? _transcripts;
     private readonly IPendingDeliveries? _pending;
     private readonly ITriggerStore? _triggers;
@@ -137,7 +150,6 @@ public sealed class ContainerHost : IAsyncDisposable
 
     /// <summary>Handed to every container, for <see cref="ContainerSnapshot.Watchable"/>.</summary>
     private readonly Func<string, bool>? _watchable;
-
 
     /// <param name="transcripts">Handed to every container this host creates.</param>
     /// <param name="pending">Handed to every container this host creates. Null means a container
@@ -255,8 +267,21 @@ public sealed class ContainerHost : IAsyncDisposable
     /// carrying only its base set, and this is what folds in whatever triggers it already held before
     /// the restart, publishing exactly when that changed anything a snapshot carries.
     /// </summary>
-    public void Resubscribe(ContainerId container, IReadOnlyCollection<string> types) =>
+    public void Resubscribe(ContainerId container, IReadOnlyCollection<string> types)
+    {
         _containers.GetValueOrDefault(container)?.Resubscribe(types);
+        _subscriptionCache.TryRemove(container, out _);
+        _passDue = true;
+    }
+
+    private async Task<IReadOnlyCollection<string>> SubscriptionsOfAsync(ContainerId container, CancellationToken ct)
+    {
+        if (_subscriptionCache.TryGetValue(container, out var cached)) return cached;
+
+        var types = await _subscriptions.ForAsync(container, ct);
+        _subscriptionCache[container] = types;
+        return types;
+    }
 
     /// <summary>
     /// Registers a NEW container and records what it listens to.
@@ -291,6 +316,8 @@ public sealed class ContainerHost : IAsyncDisposable
         CancellationToken ct)
     {
         // Refused, not overwritten. `_containers[id] = container` would silently replace the first
+        _subscriptionCache.TryRemove(definition.Id, out _);
+        _passDue = true;
         // team's Manager with the second team's and leave both team member lists pointing at one object.
         // This check precedes the subscription and cursor writes so a refusal leaves no rows behind.
         if (_containers.ContainsKey(definition.Id))
@@ -400,6 +427,8 @@ public sealed class ContainerHost : IAsyncDisposable
     public async Task<bool> RemoveAsync(ContainerId id)
     {
         if (!_containers.TryRemove(id, out var container)) return false;
+        _subscriptionCache.TryRemove(id, out _);
+        _passDue = true;
 
         container.Changed -= OnChanged;
 
@@ -737,6 +766,15 @@ public sealed class ContainerHost : IAsyncDisposable
     {
         var delivered = 0;
 
+        // ONLY WHEN SOMETHING CHANGED. See `_passedHighest`.
+        var highest = await _log.HighestSeqAsync(ct);
+        if (highest == _passedHighest && !_passDue) return 0;
+        _passDue = false;
+        var more = false;
+
+        // One parse of a terminal row for every subscriber it reaches.
+        var facts = new Dictionary<long, TerminalRowFacts>();
+
         foreach (var container in _containers.Values)
         {
             if (IsPaused(container.Id.Team))
@@ -745,12 +783,19 @@ public sealed class ContainerHost : IAsyncDisposable
                 continue;
             }
 
-            var types = await _subscriptions.ForAsync(container.Id, ct);
+            var types = await SubscriptionsOfAsync(container.Id, ct);
             if (types.Count == 0) continue;
 
             var position = await _cursors.PositionAsync(container.Id, ct);
             var messages = await _log.ReadAfterAsync(position, types, BatchSize, ct);
+            if (messages.Count == BatchSize) more = true;
 
+            // ONE CURSOR MOVE PER CONTAINER PER PASS, in a finally: a message offered has left the
+            // channel, so the cursor must pass it whatever the rest of the pass does. AdvanceAsync
+            // is MAX(), so the furthest row reached is the one write.
+            var reached = position;
+            try
+            {
             foreach (var message in messages)
             {
                 // TWO guards, answering different questions. Both are load-bearing and neither
@@ -829,14 +874,15 @@ public sealed class ContainerHost : IAsyncDisposable
                 // trigger naming `completed` still fires. Never a `failed` row, and a hand-back wakes on
                 // its own row. The rule is the row's key, never the member's kind.
                 var isCompleted = string.Equals(message.Type, MessageTypes.Completed, StringComparison.Ordinal);
-                var alreadyWoken = (container.HasBaseSubscription(message.Type) && IsLaterRowOfOneRun(message))
+                if (!facts.TryGetValue(message.Seq, out var fact)) facts[message.Seq] = fact = TerminalRowFacts.Of(message);
+                var alreadyWoken = (container.HasBaseSubscription(message.Type) && fact.LaterRowOfOneRun)
                     || (isCompleted
-                    && ((types.Contains(MessageTypes.Handback) && CompletionSays(message.Payload, PayloadFields.HandedBack))
-                        || CompletionSays(message.Payload, PayloadFields.Quiet)))
+                    && ((types.Contains(MessageTypes.Handback) && fact.HandedBack)
+                        || fact.Quiet))
                     || (container.HasBaseSubscription(message.Type)
-                        && WakeManagerPolicy.PassesOver(message.Type, TerminalWakeManager(message.Payload)))
+                        && WakeManagerPolicy.PassesOver(message.Type, fact.WakeManager))
                     || (isCompleted && container.HasBaseSubscription(message.Type)
-                        && CompletionSays(message.Payload, PayloadFields.WorkflowDeclared));
+                        && fact.WorkflowDeclared);
 
                 if (!alreadyWoken
                     && !string.Equals(message.Source, container.Id.ToString(), StringComparison.OrdinalIgnoreCase)
@@ -955,9 +1001,19 @@ public sealed class ContainerHost : IAsyncDisposable
                 // IS the answer - and a refusal is terminal for the same reason a filter is cheap:
                 // there is nothing to retry, so retrying it would refuse the same work forever and
                 // never move on.
-                await _cursors.AdvanceAsync(container.Id, advanceTo, ct);
+                reached = Math.Max(reached, advanceTo);
+            }
+            }
+            finally
+            {
+                if (reached > position) await _cursors.AdvanceAsync(container.Id, reached, ct);
             }
         }
+
+        // The log's position this pass covered, recorded only once it covered it whole; a pass
+        // that threw leaves it where it was, so the next pass reads again.
+        _passedHighest = highest;
+        if (more) _passDue = true;
 
         return delivered;
     }
@@ -1000,73 +1056,11 @@ public sealed class ContainerHost : IAsyncDisposable
 
     public bool IsPaused(string team) => _pausedTeams.ContainsKey(team);
 
-    /// <summary>
-    /// A `completed` or `failed` row after the first of a batched run: it names the first in
-    /// <see cref="PayloadFields.UsageCountedOn"/>.
-    /// </summary>
-    private static bool IsLaterRowOfOneRun(Message message)
-    {
-        if (message.Type is not (MessageTypes.Completed or MessageTypes.Failed)
-            || !message.Payload.Contains(PayloadFields.UsageCountedOn, StringComparison.Ordinal))
-        {
-            return false;
-        }
 
-        try
-        {
-            using var document = JsonDocument.Parse(message.Payload);
-            return document.RootElement.ValueKind == JsonValueKind.Object
-                && document.RootElement.TryGetProperty(PayloadFields.UsageCountedOn, out var value)
-                && value.ValueKind == JsonValueKind.Number;
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
-    }
-
-    /// <summary>Whether a `completed` row carries <paramref name="field"/> as true
-    /// (<see cref="PayloadFields.HandedBack"/>, <see cref="PayloadFields.Quiet"/>,
-    /// <see cref="PayloadFields.WorkflowDeclared"/>). A payload that does not parse, or predates the
-    /// field, answers false: the wake happens, which is the behaviour before the field existed.</summary>
-    private static bool CompletionSays(string payload, string field)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(payload);
-            return document.RootElement.TryGetProperty(field, out var value)
-                && value.ValueKind == JsonValueKind.True;
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
-    }
-
-    /// <summary>A terminal row's <see cref="PayloadFields.WakeManager"/>, or null when it carries
-    /// none (every row but a trigger's run that chose other than `always`) or does not parse - the
-    /// wake happens, which is the behaviour before the field existed.</summary>
-    private static string? TerminalWakeManager(string payload)
-    {
-        if (!payload.Contains(PayloadFields.WakeManager, StringComparison.Ordinal)) return null;
-
-        try
-        {
-            using var document = JsonDocument.Parse(payload);
-            return document.RootElement.ValueKind == JsonValueKind.Object
-                && document.RootElement.TryGetProperty(PayloadFields.WakeManager, out var value)
-                && value.ValueKind == JsonValueKind.String
-                    ? value.GetString()
-                    : null;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
 
     public Task SetPausedAsync(string team, bool paused)
     {
+        _passDue = true;
         if (paused)
         {
             _pausedTeams[team] = 0;
@@ -1120,7 +1114,6 @@ public sealed class ContainerHost : IAsyncDisposable
         return _wip is null ? ExemptSlot.Instance : _wip.TryEnterFor(id, deliverySeq);
     }
 
-
     /// <summary>
     /// Completes when a refused claim might now succeed: the ledger released a slot, a waiter
     /// withdrew or the limit changed, or a team's pause changed. The claim loop reads this BEFORE
@@ -1158,7 +1151,6 @@ public sealed class ContainerHost : IAsyncDisposable
         {
         }
     }
-
 
     /// <summary>
     /// RE-EMITS THIS TEAM'S SNAPSHOTS UNCHANGED - the platform's one "something happened on this

@@ -44,6 +44,10 @@ internal sealed class KanbanChangePush(
             {
                 await Task.Delay(Interval, stoppingToken);
 
+                // The highest seq first: one scalar read a second, instead of a range read that
+                // nearly always came back empty.
+                if (await log.HighestSeqAsync(stoppingToken) <= last) continue;
+
                 var rows = await log.ReadRangeAsync(last, 500, stoppingToken);
                 if (rows.Count == 0) continue;
 
