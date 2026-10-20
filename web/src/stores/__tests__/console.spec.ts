@@ -12,6 +12,8 @@ import type {
   TeamWorkflowTiming,
 } from '../../api/types';
 import { asMemberId, asTeamId, type TeamId } from '../../api/types';
+import { DefaultBoardSize } from '../../lib/boardSize';
+import { HistoryCapFactor } from '../console';
 
 /** A snapshot with sensible defaults, overridden per test. */
 const container = (
@@ -757,7 +759,8 @@ describe('board store', () => {
         return emptyTokens;
       });
 
-      board.applySnapshot({ ...board.teams[0]!.containers[0]!, state: 'Idle' });
+      // A snapshot that begins a run: the one kind of movement the tile re-reads on.
+      board.applySnapshot({ ...board.teams[0]!.containers[0]!, state: 'Running' });
       await fetched;
 
       expect(getTeamTokens).toHaveBeenCalledWith(board.activeTeamId);
@@ -1397,5 +1400,63 @@ describe('board store', () => {
       expect(board.openTeamTabs).toEqual([alpha]);
       expect(board.activeTeamId).toBe(alpha);
     });
+  });
+});
+
+describe('bounded history and narrow pulls', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    localStorage.clear();
+    getMessages.mockReset();
+    getTeamTokens.mockReset();
+    getTeamTokens.mockResolvedValue(emptyTokens);
+    getRepoStatus.mockReset();
+    getRepoStatus.mockResolvedValue({ repos: [] });
+  });
+
+  it("caps an owner's history at ten feed depths and clears it when the team's tab closes", () => {
+    const board = useConsoleStore();
+    const depth = DefaultBoardSize.feedDepth;
+    board.history['TestTeam/Manager'] = [];
+
+    board.record(Array.from({ length: depth * 12 }, (_, i) => message(i + 1)));
+
+    expect(board.activity['TestTeam/Manager']).toHaveLength(depth);
+    expect(board.history['TestTeam/Manager']).toHaveLength(depth * HistoryCapFactor);
+    expect(board.history['TestTeam/Manager']![0]!.seq).toBe(depth * 11);
+
+    board.openTeamTabs = [asTeamId('TestTeam')];
+    board.closeTeamTab(asTeamId('TestTeam'));
+
+    expect(board.history['TestTeam/Manager']).toBeUndefined();
+  });
+
+  it("answers the same feed array until the owner's rows change", () => {
+    const board = useConsoleStore();
+    board.record([message(5)]);
+    board.history['TestTeam/Manager'] = [message(2), message(1)];
+
+    const first = board.activityFor('TestTeam', 'Manager');
+    expect(board.activityFor('TestTeam', 'Manager')).toBe(first);
+    expect(first.map((m) => m.seq)).toEqual([5, 2, 1]);
+
+    board.record([message(6)]);
+    expect(board.activityFor('TestTeam', 'Manager')).not.toBe(first);
+    expect(board.activityFor('TestTeam', 'Manager').map((m) => m.seq)).toEqual([6, 5, 2, 1]);
+  });
+
+  it('pulls token usage on a state or workflow change, never on a snapshot that changed neither', async () => {
+    const board = useConsoleStore();
+    board.teams = [team(asTeamId('Alpha'), { containers: [container({ team: asTeamId('Alpha'), id: 'Manager', queueDepth: 0 })] })];
+    board.setActiveTeam(asTeamId('Alpha'));
+    await vi.waitFor(() => expect(getTeamTokens).toHaveBeenCalled());
+    getTeamTokens.mockClear();
+
+    board.applySnapshot(container({ team: asTeamId('Alpha'), id: 'Manager', queueDepth: 0 }));
+    board.applySnapshot(container({ team: asTeamId('Alpha'), id: 'Manager', queueDepth: 1 }));
+    expect(getTeamTokens).not.toHaveBeenCalled();
+
+    board.applySnapshot(container({ team: asTeamId('Alpha'), id: 'Manager', queueDepth: 1, state: 'Running' }));
+    expect(getTeamTokens).toHaveBeenCalledTimes(1);
   });
 });

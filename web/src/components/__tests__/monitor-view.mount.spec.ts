@@ -25,6 +25,7 @@ vi.mock('../../lib/monitor/font', async (importOriginal) => ({
 
 import MonitorView from '../MonitorView.vue'
 import { useConsoleStore } from '../../stores/console'
+import { MonitorModel } from '../../lib/monitor/model'
 import { resetBody } from '../../test/mountQuasar'
 
 let seq = 0
@@ -86,6 +87,20 @@ describe('the Monitor', () => {
     const { wrapper } = await mountMonitor([])
 
     expect(wrapper.find('[data-stat="running"] .monitor-stat-value').text()).toBe('1')
+  })
+
+  it('reconciles on a snapshot that changed a member and not on one that changed nothing', async () => {
+    const reconcile = vi.spyOn(MonitorModel.prototype, 'reconcile')
+    const { board } = await mountMonitor([])
+    reconcile.mockClear()
+
+    board.$patch({ teams: [{ id: 'Alpha', name: 'Alpha', containers: [snapshot('Manager', 'Running'), snapshot('Developer')] }] as never })
+    await flushPromises()
+    expect(reconcile).not.toHaveBeenCalled()
+
+    board.$patch({ teams: [{ id: 'Alpha', name: 'Alpha', containers: [snapshot('Manager', 'Running'), snapshot('Developer', 'Running')] }] as never })
+    await flushPromises()
+    expect(reconcile).toHaveBeenCalledTimes(1)
   })
 
   it('shows rows the board pulls while it is live', async () => {

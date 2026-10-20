@@ -471,8 +471,11 @@ export class MonitorScene {
     const wantedLinks = new Set<string>()
     let changed = false
 
+    const membersByTeam = new Map<string, number>()
+    for (const member of model.members.values()) membersByTeam.set(member.team, (membersByTeam.get(member.team) ?? 0) + 1)
+
     for (const team of model.teams.values()) {
-      const members = [...model.members.values()].filter((member) => member.team === team.id).length
+      const members = membersByTeam.get(team.id) ?? 0
       const id = `t:${team.id}`
       wanted.add(id)
       changed = this.ensure(id, 'team', team.id, 26 + Math.min(14, members * 1.5)) || changed

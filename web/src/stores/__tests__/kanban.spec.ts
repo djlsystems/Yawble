@@ -268,6 +268,21 @@ describe('fetching the board', () => {
     expect(kanban.cardCount).toBe(1);
   });
 
+  it('fetches the board at most twice for three push-driven refreshes asked while one is in flight', async () => {
+    const kanban = useKanbanStore();
+    const slow = deferred<KanbanBoard>();
+    getKanbanBoard.mockClear();
+    getKanbanBoard.mockImplementationOnce(() => slow.promise);
+
+    const first = kanban.refresh();
+    void kanban.refresh();
+    void kanban.refresh();
+    slow.release(board);
+    await first;
+
+    expect(getKanbanBoard).toHaveBeenCalledTimes(2);
+  });
+
   /**
    * A refetch that failed is a STALE board, and a stale board beside a stated error is more use
    * than an empty one - especially on a board whose whole claim is that it is live.

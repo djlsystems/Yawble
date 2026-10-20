@@ -622,11 +622,30 @@ function followBoard() {
   })
 }
 
+/**
+ * WHAT THE MODEL READS OF A SNAPSHOT, as one string: the watch below fires when this changes and
+ * not on every push. A deep watch on the teams fired on every snapshot a member published - one
+ * per progress line of every member of every team - and reconciled the whole model each time for
+ * figures that had not moved.
+ */
+const liveKey = computed(() =>
+  board.choosableTeams
+    .map((team) =>
+      `${String(team.id)}=${team.name}|${team.archived ? 1 : 0}:${team.containers
+        .map((c) =>
+          [c.id, c.name, c.kind ?? 'agent', c.state, c.queueDepth, c.currentCorrelation ?? '', c.held ? 1 : 0,
+            c.blocked ?? '', c.needsDecision ?? '', c.failed ?? '',
+            (c.wakes ?? []).map((wake) => `${wake.id}@${wake.dueAt}`).join('+')].join('/'))
+        .join(',')}`)
+    .join(';'),
+)
+
 // LIVE: the snapshots are the truth about who exists and what each is doing.
 watch(
-  () => board.choosableTeams,
-  (teams) => {
+  liveKey,
+  () => {
     if (mode.value !== 'live' || loading.value) return
+    const teams = board.choosableTeams
     const ids = new Set<string>(teams.map((team) => String(team.id)))
     const same = model.only !== null && ids.size === model.only.size && [...ids].every((id) => model.only!.has(id))
     if (!same) {
@@ -638,7 +657,6 @@ watch(
     model.reconcile(teams)
     dirty = true
   },
-  { deep: true },
 )
 
 watch(fontPx, (px) => scene?.setOptions({ fontPx: px }))

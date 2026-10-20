@@ -118,6 +118,8 @@ export const useKanbanStore = defineStore('kanban', {
     seenMembers: [] as string[],
 
     loading: false,
+    /** A refresh asked while one is in flight: one more lap after it, never a fetch of its own. */
+    loadQueued: false,
     error: '' as string,
 
     /** A write is in flight. One at a time - these are appends, and a person clicked once. */
@@ -405,6 +407,10 @@ export const useKanbanStore = defineStore('kanban', {
       if (seen.size !== this.seenMembers.length) this.seenMembers = [...seen]
     },
 
+    /**
+     * A FETCH FOR THE FILTERS AS THEY ARE NOW; the newest asked wins. A filter change starts its
+     * own fetch at once, so a slow older answer never paints over a newer filter.
+     */
     async load() {
       const ticket = ++this.fetchSeq
       this.loading = true
@@ -426,6 +432,24 @@ export const useKanbanStore = defineStore('kanban', {
       } finally {
         if (ticket === this.fetchSeq) this.loading = false
       }
+    },
+
+    /**
+     * THE PUSH-DRIVEN RE-READ: ONE FETCH IN FLIGHT, AND ONE MORE AFTER IT. A burst of pushes (every
+     * member of every team reports progress through the same `containerChanged`) asked for the
+     * board once per push; the board is a projection of the log, so the fetch that follows the
+     * last push carries them all. A filter change goes through `load` and is never held.
+     */
+    async refresh() {
+      if (this.loading) {
+        this.loadQueued = true
+        return
+      }
+
+      do {
+        this.loadQueued = false
+        await this.load()
+      } while (this.loadQueued)
     },
 
     /**
@@ -656,7 +680,7 @@ export const useKanbanStore = defineStore('kanban', {
     refreshIfActive() {
       if (!this.active) return
 
-      void this.load()
+      void this.refresh()
     },
   },
 })

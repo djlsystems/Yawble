@@ -41,6 +41,16 @@ import type {
  */
 const FeedDepth = DefaultBoardSize.feedDepth;
 
+/**
+ * How many feed depths an owner's read-back history may hold. A card somebody read older rows
+ * on gathered every row that fell out of its live tail from then on, for as long as the window
+ * stayed open: bounded here, and let go when the team's tab closes.
+ */
+export const HistoryCapFactor = 10;
+
+/** Each owner's joined feed (live tail plus read-back history), kept while neither half changes. */
+const joined = new Map<string, { live: Message[]; older: Message[]; result: Message[] }>();
+
 /** Survives a reload: ordered tabs plus which one is active. Wrapped because storage throws in a
  *  private window with cookies blocked, and a toolbar preference is not worth a crash. */
 const ActiveTeamKey = 'harness.activeTeam';
@@ -390,13 +400,21 @@ export const useConsoleStore = defineStore('console', {
      * fields rather than reassembling an id to compare.
      */
     activityFor: (state) => (team: string, name: string): Message[] => {
-      const live = state.activity[`${team}/${name}`] ?? [];
-      const older = state.history[`${team}/${name}`];
+      const owner = `${team}/${name}`;
+      const live = state.activity[owner] ?? [];
+      const older = state.history[owner];
       if (!older?.length) return live;
+
+      // THE SAME ARRAY UNTIL THE ROWS CHANGE. A getter with arguments is called on every render of
+      // every card; building a fresh array each time made every feed re-render on every push.
+      const held = joined.get(owner);
+      if (held && held.live === live && held.older === older) return held.result;
 
       // Strictly below the live tail's oldest row, so a row can never be listed twice.
       const floor = live.length ? live[live.length - 1]!.seq : Number.POSITIVE_INFINITY;
-      return [...live, ...older.filter((message) => message.seq < floor)];
+      const result = [...live, ...older.filter((message) => message.seq < floor)];
+      joined.set(owner, { live, older, result });
+      return result;
     },
 
     /**
@@ -716,6 +734,12 @@ export const useConsoleStore = defineStore('console', {
 
       this.openTeamTabs.splice(index, 1);
 
+      // What was read back on this team's cards goes with the tab; the live tail stays, since a
+      // background team still hears its pushes while the Teams table or the Monitor shows.
+      for (const owner of Object.keys(this.history)) {
+        if (owner.startsWith(`${id}/`)) delete this.history[owner];
+      }
+
       if (this.activeTeamId !== id) {
         this.rememberTabs();
         return;
@@ -933,18 +957,18 @@ export const useConsoleStore = defineStore('console', {
       if (index >= 0) {
         const previous = team.containers[index];
         team.containers[index] = snapshot;
-        void this.pullTokenUsage();
 
-        // NARROWER THAN THE TOKENS TRIGGER, ON PURPOSE. A container publishes a snapshot at least
+        // ONLY ON A MOVEMENT THAT CAN BEGIN OR END A RUN. A container publishes a snapshot at least
         // three times per instruction and again for every progress line, and only two of those
-        // movements can BEGIN or END a workflow: a member entering or leaving `Running`, and
-        // `currentCorrelation` moving. Refetching on the rest would put a request behind every
-        // status line a chatty member writes, for a payload that had not changed.
+        // movements can change the tokens tile or the workflow projection: a member entering or
+        // leaving `Running`, and `currentCorrelation` moving. Refetching on the rest put a request
+        // behind every status line a chatty member writes, for payloads that had not changed.
         if (
           previous === undefined
           || previous.state !== snapshot.state
           || previous.currentCorrelation !== snapshot.currentCorrelation
         ) {
+          void this.pullTokenUsage();
           void this.pullWorkflow();
           void this.pullWorkflows();
         }
@@ -983,9 +1007,12 @@ export const useConsoleStore = defineStore('console', {
         this.activity[owner] = next.slice(0, depth);
 
         // The live window bounds only the pushed tail. What it drops from an owner somebody has
-        // read back through becomes history rather than a gap between the two.
+        // read back through becomes history rather than a gap between the two - bounded, so a
+        // window left open for days holds at most `HistoryCapFactor` depths of it.
         const older = this.history[owner];
-        if (older && next.length > depth) this.history[owner] = [...next.slice(depth), ...older];
+        if (older && next.length > depth) {
+          this.history[owner] = [...next.slice(depth), ...older].slice(0, depth * HistoryCapFactor);
+        }
       }
     },
 
