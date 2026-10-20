@@ -420,7 +420,7 @@ public static class BacklogExecutionRecord
         CancellationToken ct = default,
         IUsageLedger? ledger = null)
     {
-        var now = DateTimeOffset.UtcNow.ToString("O");
+        var now = Instant.Now();
 
         foreach (var dispatch in await backlog.DispatchesAsync(item, ct))
         {

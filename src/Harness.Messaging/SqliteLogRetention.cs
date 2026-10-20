@@ -161,7 +161,7 @@ public sealed class SqliteLogRetention(string databasePath)
     {
         // The log stamps `occurred_at` as round-trip UTC text of one width, so comparing the text
         // compares the time.
-        command.Parameters.AddWithValue("$cutoff", cutoff.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$cutoff", Instant.Stamp(cutoff));
         WorkflowOpenSql.Bind(command);
     }
 }

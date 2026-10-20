@@ -79,7 +79,7 @@ public sealed class SqliteUsageLedger(string databasePath) : IUsageLedger
 
         // THE NEWEST `take` OF BOTH, by the one seq space they share: each table is read to `take`
         // below the cursor, and the two are merged and cut. A page shorter than `take` is the end.
-        var stamp = since.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+        var stamp = Instant.Stamp(since);
         var cursor = before ?? long.MaxValue;
 
         await using var runsCommand = connection.CreateCommand();
@@ -261,7 +261,7 @@ public sealed class SqliteUsageLedger(string databasePath) : IUsageLedger
     }
 
     private static string Stamp(DateTimeOffset at) =>
-        at.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+        Instant.Stamp(at);
 
     private static async Task<IReadOnlyList<UsageLedgerRow>> ReadRunsAsync(SqliteCommand command, CancellationToken ct)
     {

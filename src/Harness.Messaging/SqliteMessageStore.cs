@@ -45,7 +45,6 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
     // th-TH is Buddhist, so a 2026 timestamp would persist as 2569 and sort against everything else
     // written on a machine with a different locale. Reading back is MessageRows' half of the same
     // rule.
-    private static string Stamp(DateTimeOffset at) => at.ToString("O", CultureInfo.InvariantCulture);
 
     /// <summary>
     /// THE LAST LINE OF DEFENCE FOR A WRITE SITE NOBODY HAS FOUND YET - userinfo out of the payload,
@@ -181,7 +180,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         insert.Parameters.AddWithValue("$correlation", correlation);
         insert.Parameters.AddWithValue("$causation", (object?)message.CausationSeq ?? DBNull.Value);
         insert.Parameters.AddWithValue("$depth", depth);
-        insert.Parameters.AddWithValue("$at", Stamp(occurredAt));
+        insert.Parameters.AddWithValue("$at", Instant.Stamp(occurredAt));
 
         var seq = (long)(await insert.ExecuteScalarAsync(ct))!;
 
@@ -728,7 +727,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             // moment the work was asked for.
             //
             // MIN/MAX over the stored text is an ordering over ISO-8601 round-trip stamps, all
-            // written UTC by Stamp() above, so it is the same order as the instants they denote.
+            // written UTC by Instant.Stamp() above, so it is the same order as the instants they denote.
             bounds.CommandText =
                 """
                 SELECT MIN(occurred_at), MAX(occurred_at)
@@ -2231,7 +2230,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             command.Parameters.AddWithValue(names[index++], source);
         }
 
-        command.Parameters.AddWithValue("$since", Stamp(since.ToUniversalTime()));
+        command.Parameters.AddWithValue("$since", Instant.Stamp(since.ToUniversalTime()));
 
         return await ReadSpendAsync(command, ct);
     }

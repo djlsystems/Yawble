@@ -59,7 +59,7 @@ public static class LedgerStart
 
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
 
-        var now = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+        var now = Instant.Now();
 
         var instanceId = await SettingAsync(connection, transaction, InstanceIdName, ct);
         if (instanceId is null)
@@ -128,7 +128,7 @@ public static class LedgerStart
                         reader.GetInt64(4),
                         reader.IsDBNull(5) ? null : reader.GetInt64(5),
                         reader.GetInt32(6),
-                        DateTimeOffset.Parse(reader.GetString(7), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)));
+                        Instant.Parse(reader.GetString(7))));
                 }
             }
 
@@ -180,6 +180,6 @@ public static class LedgerStart
             connection, transaction,
             new TriggerAudit(
                 null, Actor, TenantActions.TenantSettingChanged, name, name,
-                JsonSerializer.Serialize(new { setting = name, old = (string?)null, @new = value })), DateTimeOffset.Parse(at, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind), ct);
+                JsonSerializer.Serialize(new { setting = name, old = (string?)null, @new = value })), Instant.Parse(at), ct);
     }
 }

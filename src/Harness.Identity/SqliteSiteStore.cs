@@ -92,7 +92,7 @@ public sealed class SqliteSiteStore : ISiteStore
         {
             command.Parameters.AddWithValue("$team", row.Team);
             command.Parameters.AddWithValue("$name", row.Name);
-            command.Parameters.AddWithValue("$at", row.CreatedAt.ToString("O"));
+            command.Parameters.AddWithValue("$at", Instant.Stamp(row.CreatedAt));
             command.Parameters.AddWithValue("$by", row.CreatedBy);
 
             if (await command.ExecuteNonQueryAsync(ct) == 0) return false;
@@ -119,7 +119,7 @@ public sealed class SqliteSiteStore : ISiteStore
             command.Parameters.AddWithValue("$team", team);
             command.Parameters.AddWithValue("$site", name);
             command.Parameters.AddWithValue("$version", version.Version);
-            command.Parameters.AddWithValue("$at", version.PublishedAt.ToString("O"));
+            command.Parameters.AddWithValue("$at", Instant.Stamp(version.PublishedAt));
             command.Parameters.AddWithValue("$by", version.PublishedBy);
             command.Parameters.AddWithValue("$source", version.Source);
             command.Parameters.AddWithValue("$files", version.Files);
@@ -348,7 +348,7 @@ public sealed class SqliteSiteStore : ISiteStore
             Bind(write, team, site, collection, id);
             write.Parameters.AddWithValue("$doc", json);
             write.Parameters.AddWithValue("$bytes", bytes);
-            write.Parameters.AddWithValue("$at", at.ToString("O"));
+            write.Parameters.AddWithValue("$at", Instant.Stamp(at));
             write.Parameters.AddWithValue("$by", by);
             await write.ExecuteNonQueryAsync(ct);
         }

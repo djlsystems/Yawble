@@ -848,7 +848,7 @@ public sealed class SqliteBacklogStore : IBacklogStore
             ? id
             : throw new InvalidOperationException($"Backlog key '{key}' is not a backlog id.");
 
-    private static string Now() => DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+    private static string Now() => Instant.Now();
 
     private SqliteConnection Open()
     {

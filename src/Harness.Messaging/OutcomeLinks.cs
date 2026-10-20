@@ -152,7 +152,7 @@ public static class OutcomeLinks
         insert.Parameters.AddWithValue("$team", (object?)team ?? DBNull.Value);
         insert.Parameters.AddWithValue("$setBy", setBy);
         insert.Parameters.AddWithValue("$kind", setByKind);
-        insert.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+        insert.Parameters.AddWithValue("$at", Instant.Now());
         insert.Parameters.AddWithValue("$how", how);
 
         OutcomeLink link;

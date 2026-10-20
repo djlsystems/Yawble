@@ -41,7 +41,7 @@ public sealed class SqliteTenantSettingsStore(string databasePath)
             rows.Add(new TenantSettingRow(
                 reader.GetString(0),
                 reader.GetString(1),
-                DateTimeOffset.Parse(reader.GetString(2), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+                Instant.Parse(reader.GetString(2)),
                 reader.GetString(3)));
         }
 
@@ -61,7 +61,7 @@ public sealed class SqliteTenantSettingsStore(string databasePath)
         CancellationToken ct = default)
     {
         var at = DateTimeOffset.UtcNow;
-        var stamp = at.ToString("O");
+        var stamp = Instant.Stamp(at);
         var written = new List<TenantSettingWritten>(changes.Count);
 
         await using var connection = Open();
@@ -129,7 +129,7 @@ public sealed class SqliteTenantSettingsStore(string databasePath)
         SqliteConnection connection, SqliteTransaction transaction, string stamp, string? actorId,
         string actorEmail, string action, string setting, string detail, CancellationToken ct) =>
         TenantAuditRow.AppendAtAsync(
-            connection, transaction, new TriggerAudit(actorId, actorEmail, action, setting, setting, detail), DateTimeOffset.Parse(stamp, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind), ct);
+            connection, transaction, new TriggerAudit(actorId, actorEmail, action, setting, setting, detail), Instant.Parse(stamp), ct);
 
     private SqliteConnection Open()
     {

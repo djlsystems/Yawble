@@ -182,7 +182,7 @@ public sealed class SqliteTriggerStore : ITriggerStore
             ORDER BY next_due_at, id
             """;
 
-        command.Parameters.AddWithValue("$now", now.ToUniversalTime().ToString("O"));
+        command.Parameters.AddWithValue("$now", Instant.Stamp(now));
         return await ReadRowsAsync(command, ct);
     }
 
@@ -206,11 +206,7 @@ public sealed class SqliteTriggerStore : ITriggerStore
 
         var value = await command.ExecuteScalarAsync(ct);
 
-        return value is string text && DateTimeOffset.TryParse(
-            text,
-            CultureInfo.InvariantCulture,
-            DateTimeStyles.RoundtripKind,
-            out var parsed)
+        return value is string text && Instant.TryParse(text, out var parsed)
             ? parsed
             : null;
     }
@@ -498,7 +494,7 @@ public sealed class SqliteTriggerStore : ITriggerStore
             """;
 
         command.Parameters.AddWithValue("$id", id);
-        command.Parameters.AddWithValue("$polledAt", poll.PolledAt.ToString("O"));
+        command.Parameters.AddWithValue("$polledAt", Instant.Stamp(poll.PolledAt));
         command.Parameters.AddWithValue("$elapsedMs", poll.ElapsedMs);
         command.Parameters.AddWithValue("$entries", (object?)poll.Entries ?? DBNull.Value);
         command.Parameters.AddWithValue("$error", (object?)poll.Error ?? DBNull.Value);
@@ -604,7 +600,7 @@ public sealed class SqliteTriggerStore : ITriggerStore
         command.Parameters.AddWithValue(
             "$lastSeq", row.LastSeq is null ? DBNull.Value : row.LastSeq.Value);
         command.Parameters.AddWithValue("$missedCount", row.MissedCount);
-        command.Parameters.AddWithValue("$createdAt", row.CreatedAt.ToString("O"));
+        command.Parameters.AddWithValue("$createdAt", Instant.Stamp(row.CreatedAt));
         command.Parameters.AddWithValue("$createdBy", row.CreatedBy);
         command.Parameters.AddWithValue("$eventType", (object?)row.EventType ?? DBNull.Value);
         command.Parameters.AddWithValue("$filter", (object?)row.Filter ?? DBNull.Value);
@@ -625,7 +621,7 @@ public sealed class SqliteTriggerStore : ITriggerStore
     /// <summary>UTC, always: `next_due_at` is compared as TEXT, and a round-trip string with a local
     /// offset (what a cron time in a trigger's timezone comes back as) sorts wrong.</summary>
     private static object ToDbValue(DateTimeOffset? value) =>
-        value is null ? DBNull.Value : value.Value.ToUniversalTime().ToString("O");
+        value is null ? DBNull.Value : Instant.Stamp(value.Value);
 
     private static string? ReadNullableString(SqliteDataReader reader, int index) =>
         reader.IsDBNull(index) ? null : reader.GetString(index);

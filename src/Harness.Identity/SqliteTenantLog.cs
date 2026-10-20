@@ -208,8 +208,8 @@ public sealed class SqliteTenantLog : ITenantLog
     private static TenantEvent ReadEvent(SqliteDataReader reader) =>
         new(
             reader.GetInt64(0),
-            DateTimeOffset.Parse(
-                reader.GetString(1), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+            Instant.Parse(
+                reader.GetString(1)),
             reader.IsDBNull(2) ? null : reader.GetString(2),
             reader.IsDBNull(3) ? null : reader.GetString(3),
             reader.GetString(4),

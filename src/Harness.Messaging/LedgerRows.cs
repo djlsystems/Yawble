@@ -158,7 +158,7 @@ public static class LedgerRows
         insert.Parameters.AddWithValue("$outcome", outcome);
         insert.Parameters.AddWithValue("$queued", (object?)queuedAt ?? DBNull.Value);
         insert.Parameters.AddWithValue("$started", (object?)started?.OccurredAt ?? DBNull.Value);
-        insert.Parameters.AddWithValue("$ended", Stamp(terminal.OccurredAt));
+        insert.Parameters.AddWithValue("$ended", Instant.Stamp(terminal.OccurredAt));
         insert.Parameters.AddWithValue("$measured", usage.Measured ? 1 : 0);
         insert.Parameters.AddWithValue("$in", (object?)usage.TokensIn ?? DBNull.Value);
         insert.Parameters.AddWithValue("$cachedIn", (object?)usage.CachedIn ?? DBNull.Value);
@@ -201,7 +201,7 @@ public static class LedgerRows
         insert.Parameters.AddWithValue("$correlation", close.CorrelationId);
         insert.Parameters.AddWithValue("$team", (object?)teamId ?? DBNull.Value);
         insert.Parameters.AddWithValue("$rootAt", (object?)rootAt ?? DBNull.Value);
-        insert.Parameters.AddWithValue("$closedAt", Stamp(close.OccurredAt));
+        insert.Parameters.AddWithValue("$closedAt", Instant.Stamp(close.OccurredAt));
         insert.Parameters.AddWithValue(
             "$how", close.Type == MessageTypes.WorkflowCompleted ? WorkflowLedgerRow.Completed : WorkflowLedgerRow.Closed);
         insert.Parameters.AddWithValue("$outcome", (object?)outcome ?? DBNull.Value);
@@ -229,7 +229,7 @@ public static class LedgerRows
 
         insert.Parameters.AddWithValue("$seq", nudge.Seq);
         insert.Parameters.AddWithValue("$correlation", nudge.CorrelationId);
-        insert.Parameters.AddWithValue("$at", Stamp(nudge.OccurredAt));
+        insert.Parameters.AddWithValue("$at", Instant.Stamp(nudge.OccurredAt));
 
         return await insert.ExecuteNonQueryAsync(ct) > 0;
     }
@@ -383,7 +383,6 @@ public static class LedgerRows
             : (null, source);
     }
 
-    private static string Stamp(DateTimeOffset at) => at.ToString("O", CultureInfo.InvariantCulture);
 
     private static bool HasField(string payload, string field)
     {

@@ -87,15 +87,15 @@ public sealed class SqliteTeamSolutionStore(
             command.Parameters.AddWithValue("$name", row.Name);
             command.Parameters.AddWithValue("$version", row.Version);
             command.Parameters.AddWithValue("$folder", row.Folder);
-            command.Parameters.AddWithValue("$installedAt", row.InstalledAt.ToString("O"));
+            command.Parameters.AddWithValue("$installedAt", Instant.Stamp(row.InstalledAt));
             command.Parameters.AddWithValue("$installedBy", (object?)row.InstalledBy ?? DBNull.Value);
-            command.Parameters.AddWithValue("$updatedAt", (object?)row.UpdatedAt?.ToString("O") ?? DBNull.Value);
+            command.Parameters.AddWithValue("$updatedAt", row.UpdatedAt is { } updated ? Instant.Stamp(updated) : DBNull.Value);
             command.Parameters.AddWithValue("$manifest", row.Manifest);
             command.Parameters.AddWithValue("$digests", JsonSerializer.Serialize(row.Digests));
             command.Parameters.AddWithValue("$members", JsonSerializer.Serialize(row.Members));
             command.Parameters.AddWithValue("$triggers", JsonSerializer.Serialize(row.Triggers));
             command.Parameters.AddWithValue("$plugins", JsonSerializer.Serialize(row.Plugins));
-            command.Parameters.AddWithValue("$uninstalledAt", (object?)row.UninstalledAt?.ToString("O") ?? DBNull.Value);
+            command.Parameters.AddWithValue("$uninstalledAt", row.UninstalledAt is { } uninstalled ? Instant.Stamp(uninstalled) : DBNull.Value);
             command.Parameters.AddWithValue("$answers", (object?)row.Answers ?? DBNull.Value);
             await command.ExecuteNonQueryAsync(ct);
         }

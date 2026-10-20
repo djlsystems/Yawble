@@ -42,7 +42,7 @@ public sealed class SqliteOutcomeStore(
         return connection;
     }
 
-    private static string Now() => DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+    private static string Now() => Instant.Now();
 
     public async Task<IReadOnlyList<Outcome>> ListAsync(CancellationToken ct = default)
     {
@@ -777,7 +777,7 @@ public sealed class SqliteOutcomeStore(
     }
 
     private static string Stamp(DateTimeOffset at) =>
-        at.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+        Instant.Stamp(at);
 
     private static string? Text(SqliteDataReader reader, int ordinal) =>
         reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);

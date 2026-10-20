@@ -24,7 +24,7 @@ internal static class MessageRows
     // through the current culture's CALENDAR, so a th-TH machine reads and writes Buddhist years
     // and sorts against everything written anywhere else.
     internal static DateTimeOffset ReadStamp(string raw) =>
-        DateTimeOffset.Parse(raw, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+        Instant.Parse(raw);
 
     internal static async Task<IReadOnlyList<Message>> ReadAllAsync(
         SqliteCommand command, CancellationToken ct)

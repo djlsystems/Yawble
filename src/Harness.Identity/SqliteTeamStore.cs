@@ -86,7 +86,7 @@ public sealed class SqliteTeamStore : ITeamStore
             "$env",
             JsonSerializer.Serialize(
                 team.Env ?? new Dictionary<string, string>(StringComparer.Ordinal)));
-        command.Parameters.AddWithValue("$createdUtc", DateTimeOffset.UtcNow.ToString("O"));
+        command.Parameters.AddWithValue("$createdUtc", Instant.Now());
 
         await command.ExecuteNonQueryAsync(ct);
     }
@@ -241,7 +241,7 @@ public sealed class SqliteTeamStore : ITeamStore
                     : "UPDATE teams SET archived_at = $at, archived_by = $by, paused = 1 WHERE id = $id COLLATE NOCASE";
                 command.Parameters.AddWithValue("$id", team);
                 command.Parameters.AddWithValue(
-                    "$at", archivedAt is { } at ? at.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture) : DBNull.Value);
+                    "$at", archivedAt is { } at ? Instant.Stamp(at) : DBNull.Value);
                 command.Parameters.AddWithValue("$by", (object?)archivedBy ?? DBNull.Value);
             },
             audit,
@@ -332,9 +332,8 @@ public sealed class SqliteTeamStore : ITeamStore
         command.Parameters.AddWithValue("$setByKind", (object?)member.SystemPromptSetBy?.Kind ?? DBNull.Value);
         command.Parameters.AddWithValue(
             "$setAt",
-            (object?)member.SystemPromptSetBy?.At.UtcDateTime.ToString("O", CultureInfo.InvariantCulture)
-                ?? DBNull.Value);
-        command.Parameters.AddWithValue("$createdUtc", DateTimeOffset.UtcNow.ToString("O"));
+            member.SystemPromptSetBy is { } setBy ? Instant.Stamp(setBy.At) : DBNull.Value);
+        command.Parameters.AddWithValue("$createdUtc", Instant.Now());
     }
 
     public async Task SetFloorAsync(
@@ -369,7 +368,7 @@ public sealed class SqliteTeamStore : ITeamStore
         command.Parameters.AddWithValue("$id", team);
 
         return await command.ExecuteScalarAsync(ct) is string created
-            ? DateTimeOffset.Parse(created, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)
+            ? Instant.Parse(created)
             : null;
     }
 
@@ -385,7 +384,7 @@ public sealed class SqliteTeamStore : ITeamStore
 
         return await reader.ReadAsync(ct) && !reader.IsDBNull(0)
             ? new ActivityFrom(
-                DateTimeOffset.Parse(reader.GetString(0), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+                Instant.Parse(reader.GetString(0)),
                 reader.IsDBNull(1) ? "" : reader.GetString(1))
             : null;
     }
@@ -400,7 +399,7 @@ public sealed class SqliteTeamStore : ITeamStore
                     "UPDATE teams SET activity_from = $at, activity_from_by = $by WHERE id = $id COLLATE NOCASE";
                 command.Parameters.AddWithValue("$id", team);
                 command.Parameters.AddWithValue(
-                    "$at", from is { } set ? set.At.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture) : DBNull.Value);
+                    "$at", from is { } set ? Instant.Stamp(set.At) : DBNull.Value);
                 command.Parameters.AddWithValue("$by", (object?)from?.By ?? DBNull.Value);
             },
             audit,
@@ -450,7 +449,7 @@ public sealed class SqliteTeamStore : ITeamStore
                 // Written by the narrow archive setter only, so read here or lost at a restart.
                 reader.IsDBNull(10)
                     ? null
-                    : DateTimeOffset.Parse(reader.GetString(10), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+                    : Instant.Parse(reader.GetString(10)),
                 reader.IsDBNull(11) ? null : reader.GetString(11)));
         }
 
@@ -490,9 +489,8 @@ public sealed class SqliteTeamStore : ITeamStore
                     : new SystemPromptSetter(
                         reader.GetString(9),
                         reader.GetString(10),
-                        DateTimeOffset.Parse(
-                            reader.GetString(11), CultureInfo.InvariantCulture,
-                            DateTimeStyles.RoundtripKind))));
+                        Instant.Parse(
+                            reader.GetString(11)))));
         }
 
         return members;
@@ -599,7 +597,7 @@ public sealed class SqliteTeamStore : ITeamStore
                     reader.GetString(6),
                     reader.GetInt32(7),
                     reader.GetString(8),
-                    DateTimeOffset.Parse(reader.GetString(9), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind));
+                    Instant.Parse(reader.GetString(9)));
 
             rows.Add(new RepoContributor(
                 reader.GetString(0),
@@ -663,7 +661,7 @@ public sealed class SqliteTeamStore : ITeamStore
         command.Parameters.AddWithValue("$number", (object?)pullRequest?.Number ?? DBNull.Value);
         command.Parameters.AddWithValue("$state", (object?)pullRequest?.State ?? DBNull.Value);
         command.Parameters.AddWithValue(
-            "$readAt", (object?)pullRequest?.ReadAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture) ?? DBNull.Value);
+            "$readAt", pullRequest is { } stamped ? Instant.Stamp(stamped.ReadAt) : DBNull.Value);
 
         await command.ExecuteNonQueryAsync(ct);
     }

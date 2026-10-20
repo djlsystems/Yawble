@@ -38,7 +38,7 @@ public sealed class SqliteAdmissionHolds(string databasePath) : IAdmissionHoldLe
         command.Parameters.AddWithValue("$team", team);
         command.Parameters.AddWithValue("$member", member);
         command.Parameters.AddWithValue("$seq", (object?)deliverySeq ?? DBNull.Value);
-        command.Parameters.AddWithValue("$held", Stamp(heldAt));
+        command.Parameters.AddWithValue("$held", Instant.Stamp(heldAt));
         command.Parameters.AddWithValue("$kind", reasonKind);
         command.Parameters.AddWithValue("$reason", reason);
         await command.ExecuteNonQueryAsync(ct);
@@ -55,7 +55,7 @@ public sealed class SqliteAdmissionHolds(string databasePath) : IAdmissionHoldLe
             """;
         command.Parameters.AddWithValue("$team", team);
         command.Parameters.AddWithValue("$member", member);
-        command.Parameters.AddWithValue("$released", Stamp(releasedAt));
+        command.Parameters.AddWithValue("$released", Instant.Stamp(releasedAt));
         await command.ExecuteNonQueryAsync(ct);
     }
 
@@ -64,7 +64,7 @@ public sealed class SqliteAdmissionHolds(string databasePath) : IAdmissionHoldLe
         await using var connection = Open();
         await using var command = connection.CreateCommand();
         command.CommandText = "UPDATE admission_holds SET released_at = $at, unfinished = 1 WHERE released_at IS NULL";
-        command.Parameters.AddWithValue("$at", Stamp(at));
+        command.Parameters.AddWithValue("$at", Instant.Stamp(at));
         return await command.ExecuteNonQueryAsync(ct);
     }
 
@@ -82,9 +82,9 @@ public sealed class SqliteAdmissionHolds(string databasePath) : IAdmissionHoldLe
             ORDER BY held_at, id
             """;
         command.Parameters.AddWithValue("$team", team);
-        command.Parameters.AddWithValue("$since", Stamp(since));
-        command.Parameters.AddWithValue("$from", Stamp(from));
-        command.Parameters.AddWithValue("$to", Stamp(to));
+        command.Parameters.AddWithValue("$since", Instant.Stamp(since));
+        command.Parameters.AddWithValue("$from", Instant.Stamp(from));
+        command.Parameters.AddWithValue("$to", Instant.Stamp(to));
 
         var rows = new List<AdmissionHoldRow>();
         await using var reader = await command.ExecuteReaderAsync(ct);
@@ -107,5 +107,4 @@ public sealed class SqliteAdmissionHolds(string databasePath) : IAdmissionHoldLe
         return rows;
     }
 
-    private static string Stamp(DateTimeOffset at) => at.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
 }

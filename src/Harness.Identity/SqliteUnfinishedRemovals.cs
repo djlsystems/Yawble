@@ -32,7 +32,7 @@ public sealed class SqliteUnfinishedRemovals(string databasePath) : IUnfinishedR
         command.Parameters.AddWithValue("$team", removal.Team);
         command.Parameters.AddWithValue("$member", (object?)removal.Member ?? DBNull.Value);
         command.Parameters.AddWithValue("$remaining", JsonSerializer.Serialize(removal.Remaining));
-        command.Parameters.AddWithValue("$at", removal.RecordedAt.ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$at", Instant.Stamp(removal.RecordedAt));
         command.Parameters.AddWithValue(
             "$hostLeft", removal.HostLeft is { Count: > 0 } left ? JsonSerializer.Serialize(left) : DBNull.Value);
         await command.ExecuteNonQueryAsync(ct);
@@ -81,7 +81,7 @@ public sealed class SqliteUnfinishedRemovals(string databasePath) : IUnfinishedR
                 reader.GetString(2),
                 reader.IsDBNull(3) ? null : reader.GetString(3),
                 JsonSerializer.Deserialize<List<string>>(reader.GetString(4)) ?? [],
-                DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+                Instant.Parse(reader.GetString(5)),
                 reader.GetInt32(6),
                 reader.IsDBNull(7) ? null : JsonSerializer.Deserialize<Dictionary<string, long>>(reader.GetString(7))));
         }

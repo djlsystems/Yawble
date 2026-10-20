@@ -35,7 +35,7 @@ public sealed class SqliteSkillStore : ISkillStore
         IReadOnlyList<SkillDraft> builtIns, DateTimeOffset builtAt, CancellationToken ct = default)
     {
         var moved = new List<string>();
-        var at = Stamp(builtAt);
+        var at = Instant.Stamp(builtAt);
 
         await using var connection = Open();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
@@ -95,7 +95,7 @@ public sealed class SqliteSkillStore : ISkillStore
         string source, IReadOnlyList<SkillDraft> drafts, DateTimeOffset at, CancellationToken ct = default)
     {
         var said = new List<string>();
-        var stamp = Stamp(at);
+        var stamp = Instant.Stamp(at);
 
         await using var connection = Open();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
@@ -333,7 +333,7 @@ public sealed class SqliteSkillStore : ISkillStore
         }
         else
         {
-            await InsertAsync(connection, transaction, clean, "custom", Stamp(DateTimeOffset.UtcNow), by, ct, team: team);
+            await InsertAsync(connection, transaction, clean, "custom", Instant.Stamp(DateTimeOffset.UtcNow), by, ct, team: team);
         }
 
         await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
@@ -455,7 +455,7 @@ public sealed class SqliteSkillStore : ISkillStore
 
         await RefuseTeamNameAsync(connection, transaction, clean.Name, ct);
 
-        await InsertAsync(connection, transaction, clean, "custom", Stamp(DateTimeOffset.UtcNow), by, ct);
+        await InsertAsync(connection, transaction, clean, "custom", Instant.Stamp(DateTimeOffset.UtcNow), by, ct);
         await transaction.CommitAsync(ct);
 
         return (await GetAsync(clean.Name, ct))!;
@@ -618,7 +618,7 @@ public sealed class SqliteSkillStore : ISkillStore
         command.Parameters.AddWithValue("$description", clean.Description);
         command.Parameters.AddWithValue("$roles", string.Join(' ', clean.Roles));
         command.Parameters.AddWithValue("$body", clean.Body);
-        command.Parameters.AddWithValue("$at", Stamp(DateTimeOffset.UtcNow));
+        command.Parameters.AddWithValue("$at", Instant.Stamp(DateTimeOffset.UtcNow));
         command.Parameters.AddWithValue("$by", (object?)by ?? DBNull.Value);
     }
 
@@ -739,7 +739,6 @@ public sealed class SqliteSkillStore : ISkillStore
     private const string Columns =
         "s.id, s.name, s.description, s.roles, s.kind, s.body, s.updated_at, s.updated_by, s.source, s.team";
 
-    private static string Stamp(DateTimeOffset at) => at.ToString("O", CultureInfo.InvariantCulture);
 
     private static string ToInertFtsQuery(string query)
     {

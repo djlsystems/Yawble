@@ -261,7 +261,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
             command.Parameters.AddWithValue("$account", record.Account);
             command.Parameters.AddWithValue("$scopes", JsonSerializer.Serialize(record.Scopes));
             AddTokens(command, tokens);
-            command.Parameters.AddWithValue("$at", record.ConnectedAt.ToString("O", CultureInfo.InvariantCulture));
+            command.Parameters.AddWithValue("$at", Instant.Stamp(record.ConnectedAt));
             command.Parameters.AddWithValue("$by", (object?)connectedBy ?? DBNull.Value);
             await command.ExecuteNonQueryAsync(ct);
         }
@@ -493,7 +493,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
             command.Parameters.AddWithValue("$name", record.Name);
             command.Parameters.AddWithValue("$provider", MailboxSettings.Kind);
             command.Parameters.AddWithValue("$account", record.Account);
-            command.Parameters.AddWithValue("$at", record.ConnectedAt.ToString("O", CultureInfo.InvariantCulture));
+            command.Parameters.AddWithValue("$at", Instant.Stamp(record.ConnectedAt));
             command.Parameters.AddWithValue("$verified", (record.RefreshedAt ?? record.ConnectedAt).ToString("O", CultureInfo.InvariantCulture));
             command.Parameters.AddWithValue("$by", (object?)connectedBy ?? DBNull.Value);
             await command.ExecuteNonQueryAsync(ct);
@@ -557,7 +557,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
             command.Transaction = transaction;
             command.CommandText = "UPDATE connections SET status = 'ok', status_reason = NULL, refreshed_at = $at WHERE id = $id";
             command.Parameters.AddWithValue("$id", id);
-            command.Parameters.AddWithValue("$at", verifiedAt.ToString("O", CultureInfo.InvariantCulture));
+            command.Parameters.AddWithValue("$at", Instant.Stamp(verifiedAt));
             await command.ExecuteNonQueryAsync(ct);
         }
 
@@ -574,7 +574,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
         await using var command = connection.CreateCommand();
         command.CommandText = "UPDATE connections SET refreshed_at = $at WHERE id = $id AND status = 'ok'";
         command.Parameters.AddWithValue("$id", id);
-        command.Parameters.AddWithValue("$at", at.ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$at", Instant.Stamp(at));
         await command.ExecuteNonQueryAsync(ct);
     }
 
@@ -611,7 +611,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
             command.Parameters.AddWithValue("$redirect", flow.RedirectUri);
             command.Parameters.AddWithValue("$loopback", flow.Loopback);
             command.Parameters.AddWithValue("$verifier", _protector.Protect(flow.CodeVerifier));
-            command.Parameters.AddWithValue("$at", flow.IssuedAt.ToString("O", CultureInfo.InvariantCulture));
+            command.Parameters.AddWithValue("$at", Instant.Stamp(flow.IssuedAt));
             await command.ExecuteNonQueryAsync(ct);
         }
 
@@ -656,7 +656,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
             mark.Transaction = transaction;
             mark.CommandText = "UPDATE connection_flows SET used_at = $now WHERE state = $state AND used_at IS NULL";
             mark.Parameters.AddWithValue("$state", state);
-            mark.Parameters.AddWithValue("$now", now.ToString("O", CultureInfo.InvariantCulture));
+            mark.Parameters.AddWithValue("$now", Instant.Stamp(now));
             if (await mark.ExecuteNonQueryAsync(ct) == 0) flow = flow with { UsedAt = now };
         }
 
@@ -670,7 +670,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
     {
         command.Parameters.AddWithValue("$refresh", tokens.RefreshToken is { Length: > 0 } refresh ? _protector.Protect(refresh) : DBNull.Value);
         command.Parameters.AddWithValue("$access", tokens.AccessToken is { Length: > 0 } access ? _protector.Protect(access) : DBNull.Value);
-        command.Parameters.AddWithValue("$expires", tokens.AccessExpiresAt is { } expires ? expires.ToString("O", CultureInfo.InvariantCulture) : DBNull.Value);
+        command.Parameters.AddWithValue("$expires", tokens.AccessExpiresAt is { } expires ? Instant.Stamp(expires) : DBNull.Value);
     }
 
     private string? Unprotect(string? protectedValue)
@@ -692,9 +692,9 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
 
     private static IReadOnlyList<string> List(string json) => JsonSerializer.Deserialize<List<string>>(json) ?? [];
 
-    private static DateTimeOffset Time(string text) => DateTimeOffset.Parse(text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+    private static DateTimeOffset Time(string text) => Instant.Parse(text);
 
-    private static string Now() => DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+    private static string Now() => Instant.Now();
 
     private SqliteConnection Open()
     {

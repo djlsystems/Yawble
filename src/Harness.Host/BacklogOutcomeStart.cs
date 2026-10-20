@@ -76,7 +76,7 @@ public static class BacklogOutcomeStart
             filled++;
         }
 
-        var now = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+        var now = Instant.Now();
 
         await using (var insert = connection.CreateCommand())
         {
@@ -94,7 +94,7 @@ public static class BacklogOutcomeStart
             connection, transaction,
             new TriggerAudit(
                 null, LedgerStart.Actor, TenantActions.TenantSettingChanged, DoneName, DoneName,
-                JsonSerializer.Serialize(new { setting = DoneName, old = (string?)null, @new = now, items = filled })), DateTimeOffset.Parse(now, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind), ct);
+                JsonSerializer.Serialize(new { setting = DoneName, old = (string?)null, @new = now, items = filled })), Instant.Parse(now), ct);
 
         await transaction.CommitAsync(ct);
         return filled;

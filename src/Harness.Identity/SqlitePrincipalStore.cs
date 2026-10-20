@@ -97,7 +97,7 @@ public sealed class SqlitePrincipalStore : IPrincipalStore
         command.Parameters.AddWithValue(
             "$prefix", credential[..Math.Min(PrefixLength, credential.Length)]);
         command.Parameters.AddWithValue("$permits", JsonSerializer.Serialize(permits.ToArray()));
-        command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+        command.Parameters.AddWithValue("$at", Instant.Now());
         command.Parameters.AddWithValue("$owner", (object?)ownerUserId ?? DBNull.Value);
         command.Parameters.AddWithValue("$label", (object?)label ?? DBNull.Value);
 
@@ -290,7 +290,7 @@ public sealed class SqlitePrincipalStore : IPrincipalStore
 
         return value is null or DBNull
             ? null
-            : DateTimeOffset.Parse((string)value, null, DateTimeStyles.RoundtripKind);
+            : Instant.Parse((string)value);
     }
 
     private static async Task TouchAsync(
@@ -298,7 +298,7 @@ public sealed class SqlitePrincipalStore : IPrincipalStore
     {
         await using var command = connection.CreateCommand();
         command.CommandText = "UPDATE principals SET last_used_at = $at WHERE id = $id";
-        command.Parameters.AddWithValue("$at", at.ToString("O"));
+        command.Parameters.AddWithValue("$at", Instant.Stamp(at));
         command.Parameters.AddWithValue("$id", id);
 
         await command.ExecuteNonQueryAsync(ct);

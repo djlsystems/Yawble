@@ -424,7 +424,7 @@ public sealed class SchemaMigrator(
         record.CommandText =
             "INSERT INTO schema_migrations (id, applied_at) VALUES ($id, $at)";
         record.Parameters.AddWithValue("$id", step.Id);
-        record.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+        record.Parameters.AddWithValue("$at", Instant.Now());
 
         await record.ExecuteNonQueryAsync(ct);
 

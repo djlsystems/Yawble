@@ -28,7 +28,6 @@ public sealed class LogSpend(string databasePath)
         return connection;
     }
 
-    private static string Stamp(DateTimeOffset at) => at.ToString("O", CultureInfo.InvariantCulture);
 
     /// <summary>
     /// Spend since the last nudge. See <see cref="IMessageLog.GetSpendSinceNudgeAsync"/> for why the
@@ -186,7 +185,7 @@ public sealed class LogSpend(string databasePath)
             command.Parameters.AddWithValue(names[index++], source);
         }
 
-        command.Parameters.AddWithValue("$since", Stamp(since.ToUniversalTime()));
+        command.Parameters.AddWithValue("$since", Instant.Stamp(since.ToUniversalTime()));
         command.Parameters.AddWithValue("$completed", MessageTypes.Completed);
         command.Parameters.AddWithValue("$failed", MessageTypes.Failed);
         command.Parameters.AddWithValue("$handback", MessageTypes.Handback);

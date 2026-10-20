@@ -115,7 +115,7 @@ public sealed class SqliteDiagnosticsLog : IDiagnosticsLog
                 // local-format string sorts wrong and parses differently on a machine with another
                 // culture - and this column is the age half of the retention bound, so sorting
                 // wrong would mean trimming the wrong rows.
-                command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+                command.Parameters.AddWithValue("$at", Instant.Now());
                 command.Parameters.AddWithValue("$severity", Name(severity));
                 command.Parameters.AddWithValue("$kind", kind);
                 command.Parameters.AddWithValue("$source", (object?)source ?? DBNull.Value);
@@ -257,7 +257,7 @@ public sealed class SqliteDiagnosticsLog : IDiagnosticsLog
                     "DELETE FROM diagnostic_events WHERE occurred_at < $cutoff";
 
                 byAge.Parameters.AddWithValue(
-                    "$cutoff", DateTimeOffset.UtcNow.Subtract(_retention.MaxAge).ToString("O"));
+                    "$cutoff", Instant.Stamp(DateTimeOffset.UtcNow.Subtract(_retention.MaxAge)));
 
                 await byAge.ExecuteNonQueryAsync(ct);
             }
@@ -329,13 +329,13 @@ public sealed class SqliteDiagnosticsLog : IDiagnosticsLog
 
         if (filter.From is { } from)
         {
-            parameters.Add(new SqliteParameter("$from", from.ToUniversalTime().ToString("O")));
+            parameters.Add(new SqliteParameter("$from", Instant.Stamp(from)));
             Append(where, "occurred_at >= $from");
         }
 
         if (filter.To is { } to)
         {
-            parameters.Add(new SqliteParameter("$to", to.ToUniversalTime().ToString("O")));
+            parameters.Add(new SqliteParameter("$to", Instant.Stamp(to)));
             Append(where, "occurred_at <= $to");
         }
 
@@ -406,8 +406,8 @@ public sealed class SqliteDiagnosticsLog : IDiagnosticsLog
     private static DiagnosticEvent ReadEvent(SqliteDataReader reader) =>
         new(
             reader.GetInt64(0),
-            DateTimeOffset.Parse(
-                reader.GetString(1), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+            Instant.Parse(
+                reader.GetString(1)),
             Severity(reader.GetString(2)),
             reader.GetString(3),
             reader.IsDBNull(4) ? null : reader.GetString(4),

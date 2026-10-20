@@ -124,7 +124,7 @@ public sealed class PluginSecretStore(string databasePath, IDataProtectionProvid
             upsert.Parameters.AddWithValue("$key", logicalKey);
             upsert.Parameters.AddWithValue("$value", _protector.Protect(value));
             upsert.Parameters.AddWithValue("$by", actor.Email);
-            upsert.Parameters.AddWithValue("$at", at.ToString("O", CultureInfo.InvariantCulture));
+            upsert.Parameters.AddWithValue("$at", Instant.Stamp(at));
             await upsert.ExecuteNonQueryAsync(ct);
         }
 
@@ -190,7 +190,7 @@ public sealed class PluginSecretStore(string databasePath, IDataProtectionProvid
         }
     }
 
-    private static DateTimeOffset Time(string text) => DateTimeOffset.Parse(text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+    private static DateTimeOffset Time(string text) => Instant.Parse(text);
 
     private SqliteConnection Open()
     {

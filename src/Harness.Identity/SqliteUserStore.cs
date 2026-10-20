@@ -178,7 +178,7 @@ public sealed class SqliteUserStore : IUserStore
         command.Parameters.AddWithValue("$id", user.Id);
         command.Parameters.AddWithValue("$email", user.Email);
         command.Parameters.AddWithValue("$hash", _hasher.HashPassword(user.Email, password));
-        command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+        command.Parameters.AddWithValue("$at", Instant.Now());
 
         await command.ExecuteNonQueryAsync(ct);
 
