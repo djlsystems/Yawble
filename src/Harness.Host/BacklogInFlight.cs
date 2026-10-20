@@ -59,7 +59,32 @@ public static class BacklogInFlightState
         IMessageLog log,
         CancellationToken ct = default)
     {
-        var result = new Dictionary<long, BacklogInFlight>();
+        var candidates = Candidates(latest, teams);
+        if (candidates.Count == 0) return new Dictionary<long, BacklogInFlight>();
+
+        // THE ONE LOG QUERY. Distinct, because two items can in principle share a correlation only
+        // by a fault, and asking twice would not make the answer different.
+        var open = await log.OpenWorkflowsAmongAsync(
+            candidates.Select(c => c.Dispatch.Correlation).Distinct().ToList(), ct);
+
+        return Of(candidates, teams, host, open);
+    }
+
+    /// <summary>
+    /// <see cref="ForAsync"/> over an <paramref name="open"/> set the caller has already asked the
+    /// log for - `GET /api/needs-you` reads it with the rest of each workflow's standing, in its one
+    /// query. The same team, floor and open rule; no query of its own.
+    /// </summary>
+    public static IReadOnlyDictionary<long, BacklogInFlight> From(
+        IEnumerable<BacklogDispatch> latest,
+        TeamRegistry teams,
+        ContainerHost host,
+        IReadOnlySet<long> open) =>
+        Of(Candidates(latest, teams), teams, host, open);
+
+    private static List<(BacklogDispatch Dispatch, string Team)> Candidates(
+        IEnumerable<BacklogDispatch> latest, TeamRegistry teams)
+    {
         var candidates = new List<(BacklogDispatch Dispatch, string Team)>();
         var floors = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
 
@@ -84,14 +109,18 @@ public static class BacklogInFlightState
             candidates.Add((dispatch, stored));
         }
 
-        if (candidates.Count == 0) return result;
+        return candidates;
+    }
 
-        // THE ONE LOG QUERY. Distinct, because two items can in principle share a correlation only
-        // by a fault, and asking twice would not make the answer different.
-        var open = await log.OpenWorkflowsAmongAsync(
-            candidates.Select(c => c.Dispatch.Correlation).Distinct().ToList(), ct);
+    private static Dictionary<long, BacklogInFlight> Of(
+        List<(BacklogDispatch Dispatch, string Team)> candidates,
+        TeamRegistry teams,
+        ContainerHost host,
+        IReadOnlySet<long> open)
+    {
+        var result = new Dictionary<long, BacklogInFlight>();
 
-        if (open.Count == 0) return result;
+        if (candidates.Count == 0 || open.Count == 0) return result;
 
         // READ ONCE, not once per candidate: `Snapshots()` walks every live container.
         var snapshots = host.Snapshots();

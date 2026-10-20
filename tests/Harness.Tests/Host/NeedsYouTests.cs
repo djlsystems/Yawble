@@ -1,6 +1,8 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Reflection;
 using System.Text.Json.Nodes;
 using Harness.Containers;
 using Harness.Contracts;
@@ -30,6 +32,7 @@ public sealed class NeedsYouTests : IAsyncLifetime
 
     private readonly string _root = Directory.CreateTempSubdirectory("harness-needs-you-").FullName;
     private readonly BacklogLandedCache _landed = new();
+    private readonly AsyncLocal<ConcurrentQueue<string>?> _recording = new();
     private WebApplicationFactory<Program> _factory = null!;
     private HttpClient? _person;
 
@@ -64,7 +67,17 @@ public sealed class NeedsYouTests : IAsyncLifetime
                 services.AddSingleton(new GitRunner(gitExecutable: git));
                 services.AddSingleton(_landed);
                 services.AddSingleton<IRepoClone>(new FolderClone());
+
+                // THE LOG AND THE BACKLOG, EACH CALL RECORDED by the read that makes it: the Host
+                // registers both as instances, and every reader here gets these around them.
+                var log = (IMessageLog)services.Last(d => d.ServiceType == typeof(IMessageLog)).ImplementationInstance!;
+                services.AddSingleton(Recorded<IMessageLog>.Around(log, _recording));
+                var backlog = (IBacklogStore)services.Last(d => d.ServiceType == typeof(IBacklogStore)).ImplementationInstance!;
+                services.AddSingleton(Recorded<IBacklogStore>.Around(backlog, _recording));
             }));
+
+        // The read runs in the test's execution context, so it sees the recorder set around it.
+        _factory.Server.PreserveExecutionContext = true;
 
         return ValueTask.CompletedTask;
     }
@@ -193,9 +206,76 @@ public sealed class NeedsYouTests : IAsyncLifetime
         Assert.Equal("solution", listed.GetProperty("where").GetProperty("view").GetString());
         Assert.Equal(team, listed.GetProperty("where").GetProperty("team").GetString());
         Assert.Equal(
-            Services.GetRequiredService<SolutionWait>().WaitingSince(team),
+            (await Services.GetRequiredService<ITeamSolutionStore>().FindAsync(team, Ct))!.InstalledAt,
             listed.GetProperty("since").GetDateTimeOffset());
         Assert.Empty((await ReadAsync("?part=stored")).GetProperty("items").EnumerateArray());
+    }
+
+    /// <summary>
+    /// THE READ RECORDS NOTHING IN THE WAIT. A wait nobody has seen yet is dated from the package's
+    /// install and stays unseen after the read; once the wait's own writer has seen it, the read
+    /// answers that sighting and leaves it as it was.
+    /// </summary>
+    [Fact]
+    public async Task A_read_leaves_the_solution_wait_as_it_found_it()
+    {
+        var team = await TeamAsync("Unseen");
+        await SolutionMissingResumeAsync(team);
+        var wait = Services.GetRequiredService<SolutionWait>();
+        var installed = (await Services.GetRequiredService<ITeamSolutionStore>().FindAsync(team, Ct))!.InstalledAt;
+
+        Assert.Null(wait.WaitingSince(team));
+        var unseen = Assert.Single((await ReadAsync()).GetProperty("items").EnumerateArray());
+        Assert.Equal(installed, unseen.GetProperty("since").GetDateTimeOffset());
+        Assert.Null(wait.WaitingSince(team));
+
+        Assert.Equal("waiting for a file in Resume/", await wait.WaitingForAsync(team, Ct));
+        var seen = wait.WaitingSince(team);
+        Assert.NotNull(seen);
+
+        var listed = Assert.Single((await ReadAsync("?part=live")).GetProperty("items").EnumerateArray());
+        Assert.Equal(seen, listed.GetProperty("since").GetDateTimeOffset());
+        Assert.Equal(seen, wait.WaitingSince(team));
+    }
+
+    /// <summary>
+    /// ONE QUERY PER STORE, HOWEVER MANY ITEMS. A stored read with one item in flight and one with
+    /// five - open, blocked, completed and pushed - asks the log and the backlog exactly the same
+    /// calls: one standing query for every workflow, one read of every dispatch with its item. A
+    /// live read naming a mark's item reads the backlog once.
+    /// </summary>
+    [Fact]
+    public async Task A_read_asks_each_store_once_however_many_items_are_in_flight()
+    {
+        _person ??= await PersonAsync();
+        var team = await TeamAsync("Counts");
+        await DispatchAsync(team, "One");
+
+        var (one, oneBacklog) = await RecordAsync("?part=stored");
+
+        var (blocked, _) = await DispatchAsync(team, "Blocked");
+        await BlockAsync(team, blocked);
+        var (completed, _) = await DispatchAsync(team, "Completed");
+        await Log.AppendAsync(new NewMessage(MessageTypes.WorkflowCompleted, "{}", "console", completed), Ct);
+        _landed.Put(team, new BacklogLanded(BacklogLandedStates.Pushed, team, "On origin."));
+        await DispatchAsync(team, "Three");
+        await DispatchAsync(team, "Four");
+
+        var (five, fiveBacklog) = await RecordAsync("?part=stored");
+
+        Assert.Equal([nameof(IMessageLog.WorkflowStandingsAmongAsync)], one);
+        Assert.Equal(one, five);
+        Assert.Equal([nameof(IBacklogStore.CurrentDispatchesAsync)], oneBacklog);
+        Assert.Equal(oneBacklog, fiveBacklog);
+
+        var manager = Manager(team);
+        var row = await Log.AppendAsync(new NewMessage(MessageTypes.Blocked, """{"reason":"held"}""", manager.Id.ToString(), blocked), Ct);
+        manager.MarkBlocked("held");
+        manager.NoteMarkRow(row);
+
+        var (liveLog, liveBacklog) = await RecordAsync("?part=live");
+        Assert.Empty(liveLog);
+        Assert.Equal([nameof(IBacklogStore.CurrentDispatchesAsync)], liveBacklog);
     }
 
     [Fact]
@@ -287,6 +367,10 @@ public sealed class NeedsYouTests : IAsyncLifetime
         Assert.Equal("backlog", listed.GetProperty("where").GetProperty("view").GetString());
         Assert.Equal(item, listed.GetProperty("where").GetProperty("item").GetInt64());
 
+        // THE SET QUERY'S STATE IS THE ONE-WORKFLOW PROJECTION'S.
+        var timing = await Log.WorkflowForTeamAsync(team, workflow, 0, Ct);
+        Assert.Equal(timing.State, (await Log.WorkflowStandingsAmongAsync(new Dictionary<long, string> { [workflow] = team }, Ct))[workflow].Stuck);
+
         // READING IT CHANGED NOTHING: the workflow is still open, nothing closed or declared.
         Assert.Contains(workflow, await Log.OpenWorkflowsAmongAsync([workflow], Ct));
     }
@@ -366,6 +450,19 @@ public sealed class NeedsYouTests : IAsyncLifetime
         var mark = bed.Host.Find(dev)!.Marks().Blocked;
         Assert.Equal(new MarkRow(blocked.Seq, told.CorrelationId, blocked.OccurredAt, "4242"), mark);
         release.SetResult();
+    }
+
+    /// <summary>The log's and the backlog's calls made by one read, by method name, in order.</summary>
+    private async Task<(List<string> Log, List<string> Backlog)> RecordAsync(string query)
+    {
+        var calls = new ConcurrentQueue<string>();
+        _recording.Value = calls;
+        try { await ReadAsync(query); }
+        finally { _recording.Value = null; }
+
+        return (
+            [.. calls.Where(c => c.StartsWith("log:", StringComparison.Ordinal)).Select(c => c[4..])],
+            [.. calls.Where(c => c.StartsWith("backlog:", StringComparison.Ordinal)).Select(c => c[8..])]);
     }
 
     private async Task<JsonElement> ReadAsync(string query = "")
@@ -488,6 +585,34 @@ public sealed class NeedsYouTests : IAsyncLifetime
 
             return Task.FromResult<IReadOnlyList<RepoCloneOutcome>>(
                 [.. repos.Select(r => new RepoCloneOutcome(r.Url, r.Path, RepoCloneResult.Cloned, DefaultBranch: "main"))]);
+        }
+    }
+
+    /// <summary>The real store, with every call recorded by name before it runs, into the recorder of
+    /// the async flow that makes it, if that flow has one - as <c>BoardOutcomeQueryTests</c> does.</summary>
+    public class Recorded<T> : DispatchProxy where T : class
+    {
+        private T _real = null!;
+        private AsyncLocal<ConcurrentQueue<string>?> _recording = null!;
+
+        public static T Around(T real, AsyncLocal<ConcurrentQueue<string>?> recording)
+        {
+            var proxy = Create<T, Recorded<T>>();
+            var recorded = (Recorded<T>)(object)proxy;
+            recorded._real = real;
+            recorded._recording = recording;
+            return proxy;
+        }
+
+        protected override object? Invoke(MethodInfo? method, object?[]? args)
+        {
+            ArgumentNullException.ThrowIfNull(method);
+            _recording.Value?.Enqueue((typeof(T) == typeof(IMessageLog) ? "log:" : "backlog:") + method.Name);
+            try { return method.Invoke(_real, args); }
+            catch (TargetInvocationException thrown) when (thrown.InnerException is not null)
+            {
+                throw thrown.InnerException;
+            }
         }
     }
 

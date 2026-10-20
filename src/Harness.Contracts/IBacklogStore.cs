@@ -197,6 +197,10 @@ public sealed record BacklogDispatch(
     string? LandedSha = null,
     string? LandedBranch = null);
 
+/// <summary>An item's current dispatch with the item as it stands now. See
+/// <see cref="IBacklogStore.CurrentDispatchesAsync"/>.</summary>
+public sealed record BacklogCurrentDispatch(BacklogDispatch Dispatch, string Title, string State, bool Archived);
+
 /// <summary>
 /// THE WORK'S TIP IN ONE REPOSITORY, as the team's publish last pushed it. One row per
 /// dispatch and repository, replaced by the newer tip on every publish. It is what lets
@@ -365,6 +369,14 @@ public interface IBacklogStore
     /// </para>
     /// </summary>
     Task<IReadOnlyList<BacklogDispatch>> LatestDispatchesAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// <see cref="LatestDispatchesAsync"/> with the item each dispatch is for - its current title,
+    /// state and whether it is archived - in ONE read. Exists for <c>GET /api/needs-you</c>, which
+    /// names the item of every workflow it lists and keeps only live, unimplemented ones, and would
+    /// otherwise read the dispatches and the items as two queries.
+    /// </summary>
+    Task<IReadOnlyList<BacklogCurrentDispatch>> CurrentDispatchesAsync(CancellationToken ct = default);
 
     /// <summary>Records a dispatch. <paramref name="correlation"/> is the seq of the row that began it.</summary>
     Task<BacklogDispatch> AddDispatchAsync(

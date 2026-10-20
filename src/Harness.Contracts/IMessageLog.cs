@@ -275,15 +275,25 @@ public interface IMessageLog
         IReadOnlyCollection<long> correlations, CancellationToken ct = default);
 
     /// <summary>
-    /// WHICH OF THESE CORRELATIONS ENDED WITH <c>workflow.completed</c>, each with when that row was
-    /// written. A workflow ends where <see cref="OpenWorkflowsAmongAsync"/> says it is no longer open:
-    /// its latest <c>workflow.completed</c> or <c>workflow.closed</c> row with no instruction or card
-    /// row after it. Only an ending that is a completion is answered; one closed by a person, an open
-    /// one and an unknown correlation are absent. One query for the set, no floor (the caller's, as
-    /// for <see cref="OpenWorkflowsAmongAsync"/>); an empty request is an empty answer without one.
+    /// WHERE EACH OF THESE WORKFLOWS STANDS, in ONE query for the set - keyed by correlation, each
+    /// asked with the team whose members' rows decide its state. Open is the predicate
+    /// <see cref="OpenWorkflowsAmongAsync"/> asks; <see cref="WorkflowStanding.CompletedAt"/> is set
+    /// when the workflow ENDED with <c>workflow.completed</c> (its latest ending row no instruction or
+    /// card row follows is a completion; one closed by a person is not); and
+    /// <see cref="WorkflowStanding.Stuck"/> is <c>Blocked</c> or <c>Failed</c> exactly when
+    /// <see cref="WorkflowForTeamAsync"/> would answer that state - the same ladder, asked of a set
+    /// instead of one at a time.
+    ///
+    /// <para>
+    /// Exists for <c>GET /api/needs-you</c>, which has to say of every item's current dispatch both
+    /// whether it is merge-ready and whether it is stranded without a query per item. No floor, as for
+    /// <see cref="OpenWorkflowsAmongAsync"/>: every row of a correlation sits at or above its root, so a
+    /// caller that has already dropped correlations at or below the team's floor reads only rows above
+    /// it. An unknown correlation is absent; an empty request is an empty answer without a query.
+    /// </para>
     /// </summary>
-    Task<IReadOnlyDictionary<long, DateTimeOffset>> CompletedWorkflowsAmongAsync(
-        IReadOnlyCollection<long> correlations, CancellationToken ct = default);
+    Task<IReadOnlyDictionary<long, WorkflowStanding>> WorkflowStandingsAmongAsync(
+        IReadOnlyDictionary<long, string> teams, CancellationToken ct = default);
 
     /// <summary>
     /// ONE MEMBER'S LIVE MARKS - what its last word to a person still is, according to the log.
@@ -557,6 +567,12 @@ public enum RunsWith
     /// its batch, whose last item <c>blocked</c> row stands as its terminal.</summary>
     AnyRun,
 }
+
+/// <summary>Where one workflow stands. See <see cref="IMessageLog.WorkflowStandingsAmongAsync"/>.</summary>
+/// <param name="Open">No ending row that nothing has woken since - the open predicate.</param>
+/// <param name="CompletedAt">When it ended with <c>workflow.completed</c>; null while open or when it ended closed.</param>
+/// <param name="Stuck"><c>Blocked</c> or <c>Failed</c> when that is the workflow's state; otherwise null.</param>
+public sealed record WorkflowStanding(long Correlation, bool Open, DateTimeOffset? CompletedAt, string? Stuck);
 
 /// <summary>
 /// One finished run, as <see cref="IMessageLog.ReadRunsAsync(ContainerId, long, long, int, CancellationToken)"/> reads it: the terminal row

@@ -1535,60 +1535,166 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
     }
 
     /// <summary>
-    /// WHICH OF THESE CORRELATIONS ENDED COMPLETED. See
-    /// <see cref="IMessageLog.CompletedWorkflowsAmongAsync"/>. The ending rows are the
-    /// <c>workflow.completed</c> and <c>workflow.closed</c> rows no instruction or card row follows -
-    /// the inner clause of <c>WorkflowOpenSql.NotClosed</c>, unchanged - read in seq order, so the
-    /// latest one per correlation is the one kept, and it counts only when it is a completion.
+    /// WHERE EACH OF THESE WORKFLOWS STANDS. See <see cref="IMessageLog.WorkflowStandingsAmongAsync"/>.
+    ///
+    /// <para>
+    /// ONE STATEMENT, FIVE FACETS, each the set form of a query <see cref="TimingForAsync"/> asks of one
+    /// correlation, tagged by its first column and read back here: <c>row</c> (the correlation has
+    /// rows), <c>end</c> (every <c>workflow.completed</c>/<c>workflow.closed</c> row, flagged when an
+    /// instruction or card row woke it since - the inner clause of <c>WorkflowOpenSql.NotClosed</c>),
+    /// <c>pause</c> (the latest paused and resumed seq), <c>last</c> (each source's last run outcome,
+    /// with whether a failure was stopped by a person) and <c>blocked</c> (a blocked row its source has
+    /// not started again since). The team's own rows - <c>Team/x</c>, not a nested <c>Team/x/y</c> -
+    /// are picked here, per correlation, rather than by a <c>LIKE</c> per team in SQL.
+    /// </para>
+    ///
+    /// <para>
+    /// THE LADDER IS <see cref="TimingForAsync"/>'S: Completed (any completion), Closed (a close nothing
+    /// woke), Paused, then Failed (a member whose last outcome failed, not stopped by a person), then
+    /// Blocked. Only the last two are answered, as <see cref="WorkflowStanding.Stuck"/>.
+    /// </para>
     /// </summary>
-    public async Task<IReadOnlyDictionary<long, DateTimeOffset>> CompletedWorkflowsAmongAsync(
-        IReadOnlyCollection<long> correlations, CancellationToken ct = default)
+    public async Task<IReadOnlyDictionary<long, WorkflowStanding>> WorkflowStandingsAmongAsync(
+        IReadOnlyDictionary<long, string> teams, CancellationToken ct = default)
     {
-        var asked = correlations.Distinct().ToList();
-        if (asked.Count == 0) return new Dictionary<long, DateTimeOffset>();
+        var standings = new Dictionary<long, WorkflowStanding>();
+        if (teams.Count == 0) return standings;
 
         await using var connection = Open();
         await using var command = connection.CreateCommand();
 
-        var names = new List<string>(asked.Count);
-
-        for (var i = 0; i < asked.Count; i++)
-        {
-            var name = $"$c{i}";
-            names.Add(name);
-            command.Parameters.AddWithValue(name, asked[i]);
-        }
-
         command.CommandText =
             $"""
-            SELECT d.correlation_id, d.type, d.occurred_at
+            WITH asked(correlation_id) AS (SELECT value FROM json_each($asked))
+            SELECT 'row', a.correlation_id, NULL, NULL, NULL, 0, 0
+            FROM asked a
+            WHERE EXISTS (SELECT 1 FROM messages r WHERE r.correlation_id = a.correlation_id)
+            UNION ALL
+            SELECT 'end', d.correlation_id, NULL, d.type, d.occurred_at,
+                   EXISTS (
+                       SELECT 1 FROM messages woke
+                       WHERE woke.correlation_id = d.correlation_id
+                         AND woke.seq > d.seq
+                         AND (woke.type LIKE $instructionPrefix OR woke.type LIKE $cardPrefix)),
+                   d.seq
             FROM messages d
-            WHERE d.correlation_id IN ({string.Join(", ", names)})
+            WHERE d.correlation_id IN (SELECT correlation_id FROM asked)
               AND d.type IN ($completed, $closed)
+            UNION ALL
+            SELECT 'pause', p.correlation_id, NULL, p.type, NULL, 0, MAX(p.seq)
+            FROM messages p
+            WHERE p.correlation_id IN (SELECT correlation_id FROM asked)
+              AND p.type IN ($paused, $resumed)
+            GROUP BY p.correlation_id, p.type
+            UNION ALL
+            SELECT 'last', o.correlation_id, o.source, o.type, NULL,
+                   CASE WHEN o.type = $runFailed AND json_valid(o.payload)
+                        THEN json_extract(o.payload, '$.{PayloadFields.StoppedByPerson}') IS 1
+                        ELSE 0 END,
+                   o.seq
+            FROM messages o
+            WHERE o.seq IN (
+                SELECT MAX(seq) FROM messages
+                WHERE correlation_id IN (SELECT correlation_id FROM asked)
+                  AND type IN ($runCompleted, $runFailed)
+                GROUP BY correlation_id, source COLLATE NOCASE)
+            UNION ALL
+            SELECT 'blocked', b.correlation_id, b.source, b.type, NULL, 0, b.seq
+            FROM messages b
+            WHERE b.correlation_id IN (SELECT correlation_id FROM asked)
+              AND b.type = $blocked
               AND NOT EXISTS (
-                  SELECT 1 FROM messages woke
-                  WHERE woke.correlation_id = d.correlation_id
-                    AND woke.seq > d.seq
-                    AND (woke.type LIKE $instructionPrefix OR woke.type LIKE $cardPrefix))
-            ORDER BY d.seq
+                  SELECT 1 FROM messages later
+                  WHERE later.correlation_id = b.correlation_id
+                    AND later.seq > b.seq
+                    AND later.type = $started
+                    AND later.source = b.source COLLATE NOCASE)
             """;
 
+        command.Parameters.AddWithValue("$asked", JsonSerializer.Serialize(teams.Keys.ToList()));
+        command.Parameters.AddWithValue("$paused", MessageTypes.WorkflowPaused);
+        command.Parameters.AddWithValue("$resumed", MessageTypes.WorkflowResumed);
+        command.Parameters.AddWithValue("$runCompleted", MessageTypes.Completed);
+        command.Parameters.AddWithValue("$runFailed", MessageTypes.Failed);
+        command.Parameters.AddWithValue("$blocked", MessageTypes.Blocked);
+        command.Parameters.AddWithValue("$started", MessageTypes.Started);
         WorkflowOpenSql.Bind(command);
 
-        var ending = new Dictionary<long, (string Type, DateTimeOffset At)>();
+        var known = new HashSet<long>();
+        var ends = new Dictionary<long, List<(long Seq, string Type, DateTimeOffset At, bool Woken)>>();
+        var pauses = new Dictionary<long, (long Paused, long Resumed)>();
+        var failed = new HashSet<long>();
+        var blocked = new HashSet<long>();
 
         await using (var reader = await command.ExecuteReaderAsync(ct))
         {
             while (await reader.ReadAsync(ct))
             {
-                ending[reader.GetInt64(0)] = (reader.GetString(1), MessageRows.ReadStamp(reader.GetString(2)));
+                var correlation = reader.GetInt64(1);
+
+                switch (reader.GetString(0))
+                {
+                    case "row":
+                        known.Add(correlation);
+                        break;
+
+                    case "end":
+                        if (!ends.TryGetValue(correlation, out var list)) ends[correlation] = list = [];
+                        list.Add((reader.GetInt64(6), reader.GetString(3), MessageRows.ReadStamp(reader.GetString(4)), reader.GetInt64(5) != 0));
+                        break;
+
+                    case "pause":
+                        var pause = pauses.GetValueOrDefault(correlation);
+                        pauses[correlation] = reader.GetString(3) == MessageTypes.WorkflowPaused
+                            ? pause with { Paused = reader.GetInt64(6) }
+                            : pause with { Resumed = reader.GetInt64(6) };
+                        break;
+
+                    case "last" when TeamOwn(teams[correlation], reader.GetString(2)):
+                        if (reader.GetString(3) == MessageTypes.Failed && reader.GetInt64(5) == 0) failed.Add(correlation);
+                        break;
+
+                    case "blocked" when TeamOwn(teams[correlation], reader.GetString(2)):
+                        blocked.Add(correlation);
+                        break;
+                }
             }
         }
 
-        return ending
-            .Where(pair => pair.Value.Type == MessageTypes.WorkflowCompleted)
-            .ToDictionary(pair => pair.Key, pair => pair.Value.At);
+        foreach (var correlation in known)
+        {
+            var rows = ends.GetValueOrDefault(correlation) ?? [];
+            var ending = rows.Where(r => !r.Woken).OrderBy(r => r.Seq).LastOrDefault();
+            var open = ending.Type is null;
+
+            var completed = rows.Any(r => r.Type == MessageTypes.WorkflowCompleted);
+            var closed = rows.Any(r => r.Type == MessageTypes.WorkflowClosed && !r.Woken);
+            var paused = pauses.TryGetValue(correlation, out var p) && p.Paused > p.Resumed;
+
+            var stuck = completed || closed || paused ? null
+                : failed.Contains(correlation) ? "Failed"
+                : blocked.Contains(correlation) ? "Blocked"
+                : null;
+
+            standings[correlation] = new WorkflowStanding(
+                correlation,
+                open,
+                ending.Type == MessageTypes.WorkflowCompleted ? ending.At : null,
+                stuck);
+        }
+
+        return standings;
     }
+
+    /// <summary>
+    /// Whether <paramref name="source"/> is one of <paramref name="team"/>'s own members - the C# form
+    /// of <see cref="TeamSourcePattern"/>'s pair: <c>Team/x</c>, case-insensitive, and not a nested
+    /// <c>Team/x/y</c>.
+    /// </summary>
+    private static bool TeamOwn(string team, string source) =>
+        source.Length > team.Length + 1
+        && source.StartsWith(team + "/", StringComparison.OrdinalIgnoreCase)
+        && source.IndexOf('/', team.Length + 1) < 0;
 
     /// <summary>
     /// EVERY WORKFLOW THIS TEAM HAS RUN SINCE ITS FLOOR, open and closed alike. See

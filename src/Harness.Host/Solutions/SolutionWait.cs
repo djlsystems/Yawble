@@ -36,12 +36,12 @@ public sealed class SolutionWait(
     private readonly ConcurrentDictionary<string, DateTimeOffset> _waiting = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// When <paramref name="team"/>, found missing an input now, was first seen waiting: by a fire, a
-    /// solution read, an upload or the sweep's heartbeat - or by this call, which is then the first
-    /// sighting. Memory only, like the set: after a restart it is the first sighting since. Clears
-    /// nothing and fires nothing; `GET /api/needs-you` reads it as the row's `since`.
+    /// When <paramref name="team"/> was first seen waiting - by a fire, a solution read, an upload or
+    /// the sweep's heartbeat - or null when it has not been seen waiting since the Host started.
+    /// A READ: it records nothing, so asking never makes a sighting; <see cref="WaitingForAsync"/> is
+    /// the only writer. `GET /api/needs-you` reads it as the row's `since`.
     /// </summary>
-    public DateTimeOffset WaitingSince(string team) => _waiting.GetOrAdd(team, _ => DateTimeOffset.UtcNow);
+    public DateTimeOffset? WaitingSince(string team) => _waiting.TryGetValue(team, out var since) ? since : null;
 
     /// <summary>
     /// The skip reason while <paramref name="team"/> waits for a missing required input, naming it in

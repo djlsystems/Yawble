@@ -137,8 +137,8 @@ public static class NeedsYou
     /// <summary>
     /// The live part. Each member's marks, from its snapshot and the rows behind them; each solution
     /// team's missing inputs, in the wait's own sentence. The item a mark's workflow was dispatched
-    /// for is named from the backlog's latest dispatches and current titles - one read each, for the
-    /// whole list, and none when nothing is marked.
+    /// for is named from the backlog's current dispatches with their items' titles - one read for
+    /// the whole list, and none when nothing is marked.
     /// </summary>
     public static async Task<IReadOnlyList<NeedsYouItem>> LiveAsync(
         IReadOnlyDictionary<string, string> names,
@@ -179,21 +179,19 @@ public static class NeedsYou
 
         if (marked.Count > 0)
         {
-            var dispatched = (await backlog.LatestDispatchesAsync(ct))
-                .GroupBy(d => d.Correlation)
-                .ToDictionary(g => g.Key, g => g.First().Item);
+            var dispatched = (await backlog.CurrentDispatchesAsync(ct))
+                .GroupBy(d => d.Dispatch.Correlation)
+                .ToDictionary(g => g.Key, g => g.First());
             var workflows = marked
                 .Select(m => m.Kind == NeedsYouKinds.Decision ? m.Snapshot.NeedsDecisionCorrelation ?? m.Row.Correlation : m.Row.Correlation)
                 .ToList();
-            var ids = workflows.Where(w => w is { } c && dispatched.ContainsKey(c)).Select(w => dispatched[w!.Value]).Distinct().ToList();
-            var titles = ids.Count == 0 ? new Dictionary<long, string>() : await backlog.TitlesAsync(ids, ct);
 
             for (var i = 0; i < marked.Count; i++)
             {
                 var (snapshot, kind, row) = marked[i];
                 var workflow = workflows[i];
-                var item = workflow is { } w && dispatched.TryGetValue(w, out var id) && titles.TryGetValue(id, out var title)
-                    ? new WorkflowItem(id, title)
+                var item = workflow is { } w && dispatched.TryGetValue(w, out var current)
+                    ? new WorkflowItem(current.Dispatch.Item, current.Title)
                     : null;
                 var team = new NeedsYouTeam(snapshot.Team, names[snapshot.Team]);
                 var where = row.Card is { } card
@@ -216,6 +214,8 @@ public static class NeedsYou
 
         // A SOLUTION TEAM'S MISSING INPUT, in the wait's own sentence. Read through the installer, not
         // `SolutionWait.WaitingForAsync`, which clears marks when a wait ends: this read changes nothing.
+        // Since is when the wait was first seen; a wait the Host has not seen yet (the sweep's heartbeat
+        // will) is dated from when the package that asks for the input was installed or last updated.
         foreach (var solution in await solutions.ListAsync(ct))
         {
             if (!names.TryGetValue(solution.Team, out var name)) continue;
@@ -225,7 +225,7 @@ public static class NeedsYou
 
             result.Add(new NeedsYouItem(
                 NeedsYouKinds.WaitingInput, new NeedsYouTeam(solution.Team, name), null, null, null, null,
-                waiting.WaitingSince(solution.Team), SolutionWait.ReasonOf(missing),
+                waiting.WaitingSince(solution.Team) ?? solution.UpdatedAt ?? solution.InstalledAt, SolutionWait.ReasonOf(missing),
                 new NeedsYouWhere("solution", solution.Team)));
         }
 
@@ -233,10 +233,11 @@ public static class NeedsYou
     }
 
     /// <summary>
-    /// The stored part. The live backlog and every item's current dispatch, one store read each;
-    /// which of those dispatches' workflows ended completed, one log query; landed from the
-    /// dispatch's stored proof or the landed cache, never git; stranded by the Backlog's own rule;
-    /// the unfinished removals, one read.
+    /// The stored part. Every item's current dispatch with the item, one backlog read; where each of
+    /// those workflows stands - open, ended completed, Blocked or Failed - one log query
+    /// (<see cref="IMessageLog.WorkflowStandingsAmongAsync"/>); landed from the dispatch's stored proof
+    /// or the landed cache, never git; stranded by the Backlog's own rule, with the board read once
+    /// and only when an item in flight is Blocked or Failed; the unfinished removals, one read.
     /// </summary>
     public static async Task<IReadOnlyList<NeedsYouItem>> StoredAsync(
         IReadOnlyDictionary<string, string> names,
@@ -251,31 +252,33 @@ public static class NeedsYou
     {
         var result = new List<NeedsYouItem>();
 
-        var live = (await backlog.ListAsync(null, includeUnlinked: true, archived: false, ct))
-            .ToDictionary(item => item.Id);
-        var latest = (await backlog.LatestDispatchesAsync(ct))
-            .Where(d => live.ContainsKey(d.Item))
-            .ToList();
+        var live = (await backlog.CurrentDispatchesAsync(ct))
+            .Where(d => !d.Archived)
+            .ToDictionary(d => d.Dispatch.Item);
+        var latest = live.Values.Select(d => d.Dispatch).ToList();
 
         NeedsYouTeam TeamOf(BacklogDispatch d) =>
             new(teams.ExistingName(d.TeamId) ?? d.TeamId, names.GetValueOrDefault(teams.ExistingName(d.TeamId) ?? d.TeamId) ?? d.TeamName);
 
         WorkflowItem ItemOf(BacklogDispatch d) => new(d.Item, live[d.Item].Title);
 
+        // WHERE EVERY DISPATCH'S WORKFLOW STANDS, in one log query: the dispatches of teams that still
+        // exist, above their floors - the candidates `BacklogInFlightState` itself would ask about.
+        var asked = latest
+            .Where(d => teams.ExistingName(d.TeamId) is { } stored && d.Correlation > teams.FloorFor(stored))
+            .GroupBy(d => d.Correlation)
+            .ToDictionary(g => g.Key, g => teams.ExistingName(g.First().TeamId)!);
+        var standings = await log.WorkflowStandingsAmongAsync(asked, ct);
+
         // MERGE-READY: the dispatch workflow ENDED COMPLETED (closed by a person is not finished
         // work), and its landed reads `pushed` - on origin, not on the default branch. `local`,
         // `unknown`, `in-review` and an uncached team are not listed.
-        var current = latest
-            .Where(d => !string.Equals(live[d.Item].State, BacklogStates.Implemented, StringComparison.Ordinal))
-            .Where(d => teams.ExistingName(d.TeamId) is { } stored && d.Correlation > teams.FloorFor(stored))
-            .ToList();
-        var completed = await log.CompletedWorkflowsAmongAsync([.. current.Select(d => d.Correlation)], ct);
-
-        foreach (var dispatch in current)
+        foreach (var dispatch in latest)
         {
-            if (!completed.TryGetValue(dispatch.Correlation, out var at)) continue;
+            if (string.Equals(live[dispatch.Item].State, BacklogStates.Implemented, StringComparison.Ordinal)) continue;
+            if (standings.GetValueOrDefault(dispatch.Correlation) is not { CompletedAt: { } at }) continue;
             if (dispatch.LandedAt is not null) continue;
-            if (landedCache.Get(teams.ExistingName(dispatch.TeamId)!) is not { State: BacklogLandedStates.Pushed } landed) continue;
+            if (landedCache.Get(asked[dispatch.Correlation]) is not { State: BacklogLandedStates.Pushed } landed) continue;
 
             var team = TeamOf(dispatch);
             result.Add(new NeedsYouItem(
@@ -285,15 +288,14 @@ public static class NeedsYou
 
         // STRANDED, by the Backlog's own rule over the items in flight. Its notice is the words; it
         // began when the latest of its cards reached Done in the later workflow.
-        var inFlight = await BacklogInFlightState.ForAsync(latest, teams, host, log, ct);
+        var open = standings.Values.Where(s => s.Open).Select(s => s.Correlation).ToHashSet();
+        var inFlight = BacklogInFlightState.From(latest, teams, host, open);
         var stuck = new List<(BacklogDispatch Dispatch, string State)>();
 
         foreach (var dispatch in latest)
         {
-            if (!inFlight.TryGetValue(dispatch.Item, out var flight)) continue;
-
-            var timing = await log.WorkflowForTeamAsync(flight.TeamId, flight.Correlation, teams.FloorFor(flight.TeamId), ct);
-            if (timing.State is { } state && BacklogStrandedState.Stuck.Contains(state)) stuck.Add((dispatch, state));
+            if (!inFlight.ContainsKey(dispatch.Item)) continue;
+            if (standings.GetValueOrDefault(dispatch.Correlation)?.Stuck is { } state) stuck.Add((dispatch, state));
         }
 
         if (stuck.Count > 0)

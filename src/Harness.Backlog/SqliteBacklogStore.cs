@@ -530,6 +530,35 @@ public sealed class SqliteBacklogStore : IBacklogStore
         return rows;
     }
 
+    /// <summary>
+    /// <see cref="LatestDispatchesAsync"/>'s rule joined to the item it is for, in one statement. The
+    /// join drops nothing: deleting an item takes its dispatch records with it.
+    /// </summary>
+    public async Task<IReadOnlyList<BacklogCurrentDispatch>> CurrentDispatchesAsync(
+        CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        command.CommandText =
+            "SELECT " + string.Join(", ", DispatchColumns.Split(',').Select(column => "d." + column.Trim()))
+            + ", i.title, i.state, i.archived_at"
+            + " FROM backlog_dispatches d JOIN backlog_items i ON i.id = d.item"
+            + " WHERE d.id IN (SELECT MAX(id) FROM backlog_dispatches GROUP BY item)"
+            + " ORDER BY d.item";
+
+        var rows = new List<BacklogCurrentDispatch>();
+
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(new BacklogCurrentDispatch(
+                ReadDispatch(reader), reader.GetString(12), reader.GetString(13), !reader.IsDBNull(14)));
+        }
+
+        return rows;
+    }
+
     /// <summary>Every column <see cref="ReadDispatch"/> reads, in its order.</summary>
     private const string DispatchColumns =
         "id, item, team_id, team_name, correlation, dispatched_at, dispatched_by, frozen_at, frozen_stats,"
