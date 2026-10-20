@@ -128,6 +128,8 @@ func installFromInstance(cmd *cobra.Command, deps Deps, folder string, force boo
 		}
 		select {
 		case <-ctx.Done():
+			// Interrupted: the request is withdrawn, so a Host started later never carries it out.
+			_, _ = e.Exec(context.WithoutCancel(ctx), instance.ContainerName, "sh", "-c", installWithdrawScript, "sh", pluginsRoot, nonce)
 			return ctx.Err()
 		case <-time.After(rescanPoll):
 		}
@@ -514,6 +516,7 @@ func rescan(ctx context.Context, e engine.Engine) (hostReport, error) {
 		}
 		select {
 		case <-ctx.Done():
+			// A rescan request left behind is harmless: a Host that finds it later rescans.
 			return hostReport{}, ctx.Err()
 		case <-time.After(rescanPoll):
 		}

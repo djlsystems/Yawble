@@ -9,7 +9,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -120,11 +123,19 @@ func NewRoot(deps Deps) *cobra.Command {
 	return root
 }
 
-// Execute runs the root and maps the outcome to an exit code: 0, 1 (it failed), 2 (the
-// invocation was wrong). Cobra's own parse errors are invocation errors.
+// Execute runs the root under a context that Ctrl-C and SIGTERM end, so a verb waiting on the
+// Host withdraws its request and a backup removes its partial file instead of leaving either behind.
 func Execute(root *cobra.Command, args []string) int {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return ExecuteContext(root, ctx, args)
+}
+
+// ExecuteContext runs the root under ctx and maps the outcome to an exit code: 0, 1 (it failed),
+// 2 (the invocation was wrong). Cobra's own parse errors are invocation errors.
+func ExecuteContext(root *cobra.Command, ctx context.Context, args []string) int {
 	root.SetArgs(args)
-	err := root.ExecuteContext(context.Background())
+	err := root.ExecuteContext(ctx)
 	if err == nil {
 		return 0
 	}

@@ -610,6 +610,7 @@ func (in *solutionInstall) askHost(req solutionRequest, wait time.Duration) (int
 		}
 		select {
 		case <-in.ctx.Done():
+			_, _ = in.e.Exec(context.WithoutCancel(in.ctx), instance.ContainerName, "sh", "-c", solutionWithdrawScript, "sh", pluginsRoot, req.Request)
 			return 0, nil, in.ctx.Err()
 		case <-time.After(rescanPoll):
 		}

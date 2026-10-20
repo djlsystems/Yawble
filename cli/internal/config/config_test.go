@@ -117,3 +117,26 @@ func TestSaveRoundTrips(t *testing.T) {
 		t.Errorf("got %+v err %v", got, err)
 	}
 }
+
+func TestWriteAtomicReplacesTheFileWholeAndLeavesNoTemporary(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.WriteAtomic(path, []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != "new" {
+		t.Errorf("got %q err %v", got, err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 || entries[0].Name() != "config.toml" {
+		names := []string{}
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("the folder holds %v; only config.toml should be there", names)
+	}
+}

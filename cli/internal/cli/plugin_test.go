@@ -1,6 +1,8 @@
 package cli_test
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/djlsystems/yawble/cli/internal/cli"
 	"github.com/djlsystems/yawble/cli/internal/engine"
@@ -676,4 +679,25 @@ func TestPluginInstallRequestScriptsUnderSh(t *testing.T) {
 		t.Errorf("not withdrawn: %v", err)
 	}
 	runScript(cli.PluginInstallWithdrawScript, root, "abc")
+}
+
+// Ctrl-C while the Host is being waited on withdraws the request, so a Host started later never
+// carries out an install nobody is waiting for.
+func TestAnInterruptedPluginInstallWithdrawsItsRequest(t *testing.T) {
+	s := fromInstanceScript(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(20*time.Millisecond, cancel)
+	var out, errb bytes.Buffer
+	deps := stubbed(s)
+	deps.Stdout, deps.Stderr, deps.ConfigDir = &out, &errb, t.TempDir()
+	seedWorkerKey(t, deps.ConfigDir)
+
+	code := cli.ExecuteContext(cli.NewRoot(deps), ctx, []string{"plugin", "install", "--from-instance", instanceFolder})
+
+	if code != 1 {
+		t.Errorf("exit %d stderr %q", code, errb.String())
+	}
+	if len(callsContaining(s, execPrefix+cli.PluginInstallWithdrawScript+" sh /data/plugins "+nonce)) != 1 {
+		t.Errorf("the request was not withdrawn:\n%s", strings.Join(s.Calls, "\n"))
+	}
 }

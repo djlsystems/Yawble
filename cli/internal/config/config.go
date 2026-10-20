@@ -158,7 +158,38 @@ func Save(dir string, c Config) (string, error) {
 	if err := toml.NewEncoder(&b).Encode(c); err != nil {
 		return path, err
 	}
-	return path, os.WriteFile(path, []byte(b.String()), 0o644)
+	return path, WriteAtomic(path, []byte(b.String()), 0o644)
+}
+
+// WriteAtomic writes data to path whole or not at all: into a temporary file beside it, then a
+// rename over it, so a crash or an interrupt mid-write never leaves a truncated file the next
+// start refuses to read.
+func WriteAtomic(path string, data []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	cleanup := func() { _ = os.Remove(name) }
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		cleanup()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Chmod(name, mode); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Rename(name, path); err != nil {
+		cleanup()
+		return err
+	}
+	return nil
 }
 
 // Get answers one key as a person would want it printed: the port default is applied, because

@@ -869,13 +869,20 @@ public static class AgentCatalogFile
     private sealed record CatalogFileContents(IReadOnlyList<AgentDefinition>? Agents);
 
     /// <summary>Writes the custom presets. A built-in handed in here is a bug, and is dropped.</summary>
+    /// <summary>
+    /// Writes the catalog whole or not at all: a temporary file beside it, then a move over it, so
+    /// a Host that goes down mid-write never leaves a truncated catalog the next start refuses.
+    /// </summary>
     public static void Save(string dataRoot, IReadOnlyList<AgentDefinition> custom)
     {
         Directory.CreateDirectory(dataRoot);
 
+        var path = PathIn(dataRoot);
+        var temp = path + "." + Environment.CurrentManagedThreadId + ".tmp";
         File.WriteAllText(
-            PathIn(dataRoot),
+            temp,
             JsonSerializer.Serialize(
                 new CatalogFileContents([.. custom.Where(d => !IsBuiltIn(d.Name))]), JsonOptions));
+        File.Move(temp, path, overwrite: true);
     }
 }

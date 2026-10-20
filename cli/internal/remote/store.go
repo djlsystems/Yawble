@@ -3,6 +3,7 @@ package remote
 import (
 	"errors"
 	"fmt"
+	"github.com/djlsystems/yawble/cli/internal/config"
 	"os"
 	"path/filepath"
 	"sort"
@@ -84,10 +85,7 @@ func WriteEnvFile(dir string, env map[string]string) (string, error) {
 }
 
 func writeOwnerOnly(path string, data []byte) error {
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return err
-	}
-	return os.Chmod(path, 0o600)
+	return config.WriteAtomic(path, data, 0o600)
 }
 
 // Forget removes the config and the env file. Missing is fine.

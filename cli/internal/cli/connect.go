@@ -633,7 +633,7 @@ func exchangeWithin(ctx context.Context, e engine.Engine, req connectRequest, wa
 		}
 		select {
 		case <-ctx.Done():
-			_, _ = e.Exec(context.Background(), instance.ContainerName, "sh", "-c", connectWithdrawScript, "sh", connectionsRoot, req.Request)
+			_, _ = e.Exec(context.WithoutCancel(ctx), instance.ContainerName, "sh", "-c", connectWithdrawScript, "sh", connectionsRoot, req.Request)
 			return connectReport{}, ctx.Err()
 		case <-time.After(connectPoll):
 		}
