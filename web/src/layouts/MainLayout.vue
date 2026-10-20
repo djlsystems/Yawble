@@ -552,10 +552,10 @@ async function signOut() {
           </q-list>
         </q-btn-dropdown>
 
-        <!-- The activity monitor, to the right of the person's name: the instance's load as one
-             gauge, its figures a click away. People only, as its route is. -->
         <!-- What is waiting on a person, as one count, left of the gauge. People only, as its route is. -->
         <NeedsYouControl v-if="session.user" />
+        <!-- The activity monitor, to the right of the person's name: the instance's load as one
+             gauge, its figures a click away. People only, as its route is. -->
         <CapacityMonitor v-if="session.user" />
       </q-toolbar>
 
