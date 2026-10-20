@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { EndingFact } from '../lib/states';
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useQuasar } from 'quasar';
 import { useRouter } from 'vue-router';
@@ -14,7 +14,7 @@ import BoardGrid from '../components/BoardGrid.vue';
 import BoardDisplayDialog from '../components/BoardDisplayDialog.vue';
 import TeamKpiStrip from '../components/TeamKpiStrip.vue';
 import KanbanBoard from '../components/KanbanBoard.vue';
-import MonitorView from '../components/MonitorView.vue';
+const MonitorView = defineAsyncComponent(() => import('../components/MonitorView.vue'));
 import TeamsView from '../components/TeamsView.vue';
 import SolutionBlockedBanner from '../components/SolutionBlockedBanner.vue';
 import TellManagerBox from '../components/TellManagerBox.vue';
