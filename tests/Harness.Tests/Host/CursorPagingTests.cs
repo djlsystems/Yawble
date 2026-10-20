@@ -254,6 +254,34 @@ public sealed class CursorPagingTests
     }
 
     [Fact]
+    public async Task A_containers_feed_holds_its_own_teams_rows_however_many_another_team_wrote_since()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await HostAsync();
+        var log = host.Services.GetRequiredService<IMessageLog>();
+
+        // THE TEAM FILTER IS IN THE QUERY, BEFORE THE WINDOW: three rows of this team, then four hundred
+        // of another; a window cut before the filter would hold none of this team's.
+        var mine = new List<long>();
+        for (var i = 0; i < 3; i++)
+        {
+            mine.Add((await log.AppendAsync(new NewMessage(MessageTypes.Completed, """{"output":"done"}""", $"{host.Alpha}/Manager"), ct)).Seq);
+        }
+        for (var i = 0; i < 400; i++)
+        {
+            await log.AppendAsync(new NewMessage(MessageTypes.Completed, """{"output":"noise"}""", $"{host.Beta}/Manager"), ct);
+        }
+
+        using var alpha = host.Container(host.AlphaContainerKey);
+        var rows = (await GetAsync(alpha, "/api/messages?after=0", ct)).EnumerateArray()
+            .Select(r => (Seq: r.GetProperty("seq").GetInt64(), Source: r.GetProperty("source").GetString()))
+            .ToList();
+
+        Assert.All(mine, seq => Assert.Contains(seq, rows.Select(r => r.Seq)));
+        Assert.All(rows, row => Assert.StartsWith($"{host.Alpha}/", row.Source, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task The_archive_pages_by_id_and_the_backlog_does_not_page()
     {
         var ct = TestContext.Current.CancellationToken;

@@ -1077,7 +1077,12 @@ internal static class WorkflowEndpoints
             // and rendering an empty board that looks like a fault.
             var window = Math.Clamp(take ?? 200, 50, 2000);
 
-            var messages = await log.ReadLatestAsync(after ?? 0, types, window, ct);
+            // A PERSON SEES EVERY TEAM, so the window is the log's newest rows; a machine principal's
+            // window is cut among its own team's rows, in the query, so a quiet team is never crowded
+            // out of it by a busy one.
+            var messages = person
+                ? await log.ReadLatestAsync(after ?? 0, types, window, ct)
+                : await log.ReadLatestAsync(after ?? 0, types, effective, window, ct);
 
             return Results.Ok(messages.Where(m => MessageTeam.Of(m) switch
             {
@@ -1106,9 +1111,8 @@ internal static class WorkflowEndpoints
             .WithDescription(
                 "The append-only message log: instructions going in, and what members published coming "
                 + "back. This is what the board's activity feed renders.\n\n"
-                + "At most 200 rows per call, and the cap applies BEFORE the caller's teams are filtered "
-                + "out - so you may receive fewer than 200 and should page on `seq` rather than assume a "
-                + "short page means the end.\n\n"
+                + "At most 200 rows per call. A machine principal's window holds only its own team's rows; "
+                + "page on `seq` rather than assume a short page means the end.\n\n"
                 + "Messages that cannot be attributed to a team are shown only to people.\n\n"
                 + "**Backward, one member** (`before`, `team`, `member`): that member's history below "
                 + "`before`, NEWEST FIRST - instructions addressed to it and the feed rows it published - "
@@ -1278,8 +1282,7 @@ internal static class WorkflowEndpoints
                 var latestTerminals = new List<Message>(snapshots.Length);
                 foreach (var snapshot in snapshots)
                 {
-                    var rows = await log.ReadForContainerAsync($"{snapshot.Team}/{snapshot.Id}", 0, 200, ct);
-                    var latestTerminal = rows.FirstOrDefault(message => teamTerminals.Contains(message.Type));
+                    var latestTerminal = await log.LatestPublishedAsync($"{snapshot.Team}/{snapshot.Id}", teamTerminals, 0, ct);
                     if (latestTerminal is null || latestTerminal.Type != MessageTypes.Completed)
                     {
                         return Results.Ok(WorkflowWaitReply.Timeout(correlationId, timeout, TimeoutVerdict.Working));

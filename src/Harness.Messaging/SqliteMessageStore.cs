@@ -299,6 +299,68 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         return [.. newestFirst.Reverse()];
     }
 
+    public async Task<IReadOnlyList<Message>> ReadLatestAsync(
+        long afterSeq, IReadOnlyCollection<string> types, IReadOnlyCollection<string> teams, int max, CancellationToken ct = default)
+    {
+        if (types.Count == 0 || teams.Count == 0 || max <= 0) return [];
+
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        var names = types.Select((_, i) => $"$t{i}").ToArray();
+        var owners = teams.Select((_, i) => $"$team{i}").ToArray();
+
+        // THE TEAM BEFORE THE WINDOW: `team` is the generated NOCASE column `messages-006` added, walked
+        // through `ix_messages_team_seq`, so the newest rows OF THESE TEAMS are read and the cap is
+        // applied to them, never to the whole log first.
+        command.CommandText =
+            $"""
+             SELECT seq, type, payload, source, correlation_id, causation_seq, depth, occurred_at
+             FROM messages
+             WHERE seq > $after
+               AND team IN ({string.Join(", ", owners)})
+               AND (type IN ({string.Join(", ", names)}) OR type LIKE $instructionPrefix)
+             ORDER BY seq DESC
+             LIMIT $max
+             """;
+
+        command.Parameters.AddWithValue("$after", afterSeq);
+        command.Parameters.AddWithValue("$max", max);
+        command.Parameters.AddWithValue("$instructionPrefix", MessageTypes.InstructionPrefix + "%");
+        var i = 0;
+        foreach (var type in types) command.Parameters.AddWithValue(names[i++], type);
+        i = 0;
+        foreach (var team in teams) command.Parameters.AddWithValue(owners[i++], team);
+
+        var newestFirst = await MessageRows.ReadAllAsync(command, ct);
+        return [.. newestFirst.Reverse()];
+    }
+
+    public async Task<Message?> LatestPublishedAsync(
+        string qualifiedId, IReadOnlyCollection<string> types, long sinceSeq, CancellationToken ct = default)
+    {
+        if (types.Count == 0) return null;
+
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        var names = types.Select((_, i) => $"$t{i}").ToArray();
+        command.CommandText =
+            $"""
+             SELECT seq, type, payload, source, correlation_id, causation_seq, depth, occurred_at
+             FROM messages
+             WHERE source = $source COLLATE NOCASE AND seq > $since AND type IN ({string.Join(", ", names)})
+             ORDER BY seq DESC
+             LIMIT 1
+             """;
+        command.Parameters.AddWithValue("$source", qualifiedId);
+        command.Parameters.AddWithValue("$since", sinceSeq);
+        var i = 0;
+        foreach (var type in types) command.Parameters.AddWithValue(names[i++], type);
+
+        return (await MessageRows.ReadAllAsync(command, ct)).FirstOrDefault();
+    }
+
     public async Task<IReadOnlyList<Message>> ReadForContainerAsync(
         string qualifiedId, long sinceSeq, int max, CancellationToken ct = default)
     {

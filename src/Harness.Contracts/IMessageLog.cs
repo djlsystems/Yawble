@@ -69,6 +69,25 @@ public interface IMessageLog
         long afterSeq, IReadOnlyCollection<string> types, int max, CancellationToken ct = default);
 
     /// <summary>
+    /// As <see cref="ReadLatestAsync(long, IReadOnlyCollection{string}, int, CancellationToken)"/>,
+    /// narrowed IN THE QUERY to rows whose team is one of <paramref name="teams"/> (the message's
+    /// team column, matched whatever its case), so the window is cut after the filter and never
+    /// before it: a quiet team's rows are in the window however many another team wrote since. A row
+    /// no team owns is not in it.
+    /// </summary>
+    Task<IReadOnlyList<Message>> ReadLatestAsync(
+        long afterSeq, IReadOnlyCollection<string> types, IReadOnlyCollection<string> teams, int max,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// The newest row this container PUBLISHED among <paramref name="types"/>, above
+    /// <paramref name="sinceSeq"/>, or null: one row, where a window read and filtered would be two
+    /// hundred. Source matched as <see cref="ReadForContainerAsync"/> matches it.
+    /// </summary>
+    Task<Message?> LatestPublishedAsync(
+        string qualifiedId, IReadOnlyCollection<string> types, long sinceSeq, CancellationToken ct = default);
+
+    /// <summary>
     /// The newest <paramref name="max"/> messages this container PUBLISHED, newest first.
     ///
     /// A SIBLING of ReadLatestAsync rather than a filter over it, for the reason that method exists
