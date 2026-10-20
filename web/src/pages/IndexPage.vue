@@ -24,6 +24,7 @@ import { stripScrollToShow } from '../lib/consoleStrip';
 import { useKanbanStore } from '../stores/kanban';
 import { useCapacityStore } from '../stores/capacity';
 import { useNeedsYouStore } from '../stores/needsYou';
+import { useAgentUpdatesStore } from '../stores/agentUpdates';
 import { useConsoleHistory } from '../composables/useConsoleHistory';
 import { useConsoleTitle } from '../composables/useConsoleTitle';
 import type { Team, TeamId } from '../api/types';
@@ -337,6 +338,10 @@ onMounted(async () => {
 
         // AND NEEDS YOU'S LIVE PART: a mark set or cleared is a row joining or leaving it.
         void needsYou.loadLive();
+
+        // A HELD LAUNCH may be held behind an Agent CLI update: the list that says so is read now,
+        // while the board shows it, rather than on a clock.
+        if (snapshot.held) useAgentUpdatesStore().onHeld();
       },
 
       // The projection's own push, once the Host raises it: a human edit, or anything else that
