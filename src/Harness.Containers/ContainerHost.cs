@@ -106,16 +106,14 @@ public sealed class ContainerHost : IAsyncDisposable
     ///
     /// OPTIONAL, LIKE EVERY OTHER SEAM HERE. Null is a host that does not bound spend - which is
     /// what every fixture wants, and what an operator gets by setting the limit to 0.
+    ///
+    /// READ AT EACH WAKE (`workflow.spendLimit` is settable at runtime), never captured.
     /// </summary>
-    private readonly long? _workflowSpendLimit;
-
-    /// <summary>The instance figure READ AT EACH WAKE (`workflow.spendLimit` is settable at
-    /// runtime). Null falls back to the constructor's figure, which is what fixtures pass.</summary>
     private readonly Func<long>? _workflowSpendLimitNow;
 
     /// <summary>The instance spend limit in force now; null is unlimited, as 0 is.</summary>
     private long? WorkflowSpendLimit =>
-        _workflowSpendLimitNow is { } now ? (now() is > 0 and var limit ? limit : null) : _workflowSpendLimit;
+        _workflowSpendLimitNow is { } now && now() is > 0 and var limit ? limit : null;
 
     /// <summary>
     /// WHAT ACTUALLY BOUNDS ONE OF THIS TEAM'S WORKFLOWS, already resolved - null means UNLIMITED
@@ -129,11 +127,11 @@ public sealed class ContainerHost : IAsyncDisposable
     /// </para>
     ///
     /// <para>
-    /// <b>IN THE HOST IT IS ALWAYS SUPPLIED, SO <see cref="_workflowSpendLimit"/> BESIDE IT IS
-    /// DEAD IN PRODUCTION.</b> That field stays as the no-delegate fallback because this project's
+    /// <b>IN THE HOST IT IS ALWAYS SUPPLIED, SO <see cref="_workflowSpendLimitNow"/> BESIDE IT IS
+    /// DEAD IN PRODUCTION.</b> That delegate stays as the no-registry fallback because this project's
     /// own tests construct a host with no `TeamRegistry` anywhere in the picture. Two sources for
     /// one figure is how the two start disagreeing, so it is worth saying plainly which one
-    /// decides: if the delegate is here, it is the only answer.
+    /// decides: if this delegate is here, it is the only answer.
     /// </para>
     ///
     /// <para>
@@ -209,7 +207,6 @@ public sealed class ContainerHost : IAsyncDisposable
         IPendingDeliveries? pending = null,
         ITriggerStore? triggers = null,
         Func<ContainerId, CancellationToken, Task>? onRegistered = null,
-        long? workflowSpendLimit = null,
         Func<string, CancellationToken, ValueTask<long?>>? effectiveWorkflowBudget = null,
         Func<ContainerId, long?, bool, CancellationToken, Task<bool>>? onRunEnding = null,
         WipLedger? wip = null,
@@ -237,9 +234,6 @@ public sealed class ContainerHost : IAsyncDisposable
         _triggers = triggers;
         _onRegistered = onRegistered;
 
-        // 0 IS UNLIMITED, the same answer as absent. A person who clears the setting and a person
-        // who types 0 both mean "do not stop this", and making those differ would be a trap.
-        _workflowSpendLimit = workflowSpendLimit is > 0 ? workflowSpendLimit : null;
     }
 
     /// <summary>Any container's snapshot changed. The host's one outbound signal, which the API
@@ -1402,7 +1396,7 @@ public sealed class ContainerHost : IAsyncDisposable
         // silently refuses what a person typed is a worse lie than a number they can change.
         //
         // THE FALLBACK IS FOR FIXTURES. In the Host the delegate is always wired, so
-        // `_workflowSpendLimit` is only ever read by a test that built a host with no team
+        // `WorkflowSpendLimit` is only ever read by a test that built a host with no team
         // settings at all.
         var limit = _effectiveWorkflowBudget is { } resolve
             ? await resolve(container.Id.Team, ct)

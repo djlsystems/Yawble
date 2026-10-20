@@ -30,7 +30,7 @@ namespace Harness.Host;
 public sealed class ConciergeReaper(
     ConciergeSessionStore consoles,
     Func<TimeSpan> window,
-    TimeSpan sweep,
+    Func<TimeSpan> sweep,
     ILogger<ConciergeReaper> log,
     ITenantLog? tenantLog = null,
     Func<string, CancellationToken, Task<string?>>? emailOf = null,
@@ -40,15 +40,18 @@ public sealed class ConciergeReaper(
     {
         log.LogInformation(
             "Console sessions unwatched and inactive for more than {Window} will be ended; sweeping every {Sweep}.",
-            window(), sweep);
+            window(), sweep());
 
-        using var timer = new PeriodicTimer(sweep, consoles.Clock);
+        // THE SWEEP FOLLOWS THE WINDOW AT EVERY TICK: an idle timeout shortened on the settings screen
+        // brings its sweep with it, as the window itself is read at every sweep.
+        using var timer = new PeriodicTimer(sweep(), consoles.Clock);
 
         while (!stopping.IsCancellationRequested)
         {
             try
             {
                 if (!await timer.WaitForNextTickAsync(stopping)) return;
+                timer.Period = sweep();
 
                 await SweepAsync(consoles.Clock.GetUtcNow(), stopping);
             }

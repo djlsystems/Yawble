@@ -64,7 +64,7 @@ public sealed class ContainerTestBed : IAsyncDisposable
             pending: Pending,
             triggers: triggers,
             onRegistered: (id, ct) => Store.SetAsync(id, host.Find(id)!.Snapshot().Subscribes, ct),
-            workflowSpendLimit: workflowSpendLimit,
+            workflowSpendLimitNow: workflowSpendLimit is { } spendLimit ? () => spendLimit : null,
             wip: wip,
             worktrees: worktrees,
             onTerminal: onTerminal,

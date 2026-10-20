@@ -38,12 +38,11 @@ internal sealed partial class HostComposition
         // Configurable for deployment AND for a demonstration: the default is far too long to sit through,
         // so setting ConciergeIdleTimeout to something like 00:02:00 is how a person watches this work.
         // `concierge.idleTimeout`, read at every sweep.
-        var consoleIdle = tenantSettings.ConciergeIdleTimeout;
-
-        // The sweep follows the window rather than being fixed. A one-minute sweep against a two-minute
-        // window would make the window mean anything up to three minutes, which is exactly the kind of
-        // vagueness that makes someone conclude the feature does not work.
-        var consoleSweep = consoleIdle < TimeSpan.FromMinutes(4)
+        //
+        // The sweep follows the window rather than being fixed, and is read with it. A one-minute sweep
+        // against a two-minute window would make the window mean anything up to three minutes, which is
+        // exactly the kind of vagueness that makes someone conclude the feature does not work.
+        TimeSpan ConsoleSweep() => tenantSettings.ConciergeIdleTimeout < TimeSpan.FromMinutes(4)
             ? TimeSpan.FromSeconds(15)
             : TimeSpan.FromMinutes(1);
 
@@ -77,7 +76,7 @@ internal sealed partial class HostComposition
             return new ConciergeReaper(
                 sp.GetRequiredService<ConciergeSessionStore>(),
                 () => tenantSettings.ConciergeIdleTimeout,
-                consoleSweep,
+                ConsoleSweep,
                 sp.GetRequiredService<ILogger<ConciergeReaper>>(),
                 sp.GetRequiredService<ITenantLog>(),
                 async (user, ct) => (await accounts.FindByIdAsync(user, ct))?.Email,

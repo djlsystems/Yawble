@@ -54,8 +54,7 @@ internal sealed partial class HostComposition
             // WIRED HERE OR THE BOUND DOES NOTHING. The seam is an optional parameter, so an unwired host
             // is a host that never refuses a wake - and nothing would fail. `WorkflowBudgetAtTheWakeTests`
             // is the only thing that would notice, which is the same argument that keeps
-            // `CredentialUseRunner`'s decorator wired.
-            workflowSpendLimit: workflowSpendLimit,
+            // `CredentialUseRunner`'s decorator wired. Read at every wake, never captured.
             workflowSpendLimitNow: () => tenantSettings.WorkflowSpendLimit,
 
             // THE FIGURE ACTUALLY IN FORCE FOR A TEAM, resolved per wake. Late-bound through the
@@ -66,7 +65,7 @@ internal sealed partial class HostComposition
             // the very next wake.
             //
             // WIRED HERE OR THE TEAM'S NUMBER DOES NOTHING. The seam is optional, so an unwired host
-            // quietly falls back to `workflowSpendLimit` above and every team setting is ignored - and
+            // quietly falls back to the instance figure above and every team setting is ignored - and
             // nothing fails. The same argument that keeps the line above it wired.
             effectiveWorkflowBudget: (team, _) =>
                 ValueTask.FromResult(sp.GetRequiredService<TeamRegistry>().EffectiveWorkflowBudgetFor(team)),
@@ -226,11 +225,8 @@ internal sealed partial class HostComposition
             sp.GetRequiredService<EffectiveSubscriptions>(),
             sp.GetRequiredService<IRepoClone>(),
 
-            // THE INSTANCE FIGURE, because `EffectiveWorkflowBudgetFor` is the one function allowed to
-            // know that a team which has chosen nothing falls back to it. The same variable the
-            // ContainerHost registration above and `IdleWorkflowOffer` below are handed - one source read
-            // three times, never three sources.
-            workflowSpendLimit,
+            // THE INSTANCE FIGURE, read at every call: the one `EffectiveWorkflowBudgetFor` falls back to
+            // for a team that has chosen nothing.
             workflowSpendLimitNow: () => tenantSettings.WorkflowSpendLimit,
             skillDirectory: sp.GetRequiredService<SkillDirectory>(),
             // Resolved per call: the git runner reads the registry, so it cannot be built first.

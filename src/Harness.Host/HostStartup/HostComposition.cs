@@ -59,7 +59,6 @@ internal sealed partial class HostComposition(string[] args, HostLog hostLog) : 
     private IReadOnlyList<string> unmeasuredHeadlessPresets = default!;
     private PluginCatalog pluginCatalog = default!;
     private IDisposable pluginEvents = default!;
-    private long? workflowSpendLimit = default!;
     private HeadroomGate headroom = default!;
     private WorkerPool workers = default!;
     private WipLedger wip = default!;

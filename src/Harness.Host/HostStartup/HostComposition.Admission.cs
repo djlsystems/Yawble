@@ -138,41 +138,6 @@ internal sealed partial class HostComposition
             sp.GetRequiredService<AgentMemberRunner>(),
             sp.GetRequiredService<PluginMemberRunner>()));
 
-        // Constructed explicitly rather than by convention: the two artifact seams and the pending store are
-        // all OPTIONAL parameters, and a container silently built without them is a container that silently
-        // does not remember - and, without the third, one that silently loses accepted work on a restart.
-        // `onRegistered` is left at its default (null) DELIBERATELY, not merely omitted. `TeamRegistry`
-        // already calls `EffectiveSubscriptions.RecomputeAsync` itself, once per container, AFTER
-        // `SaveMemberAsync` has written the member's row - `RecomputeAsync` reads that row back, and a call
-        // any earlier finds none and computes an empty base set. Wiring this host's own seam to it as well
-        // would fire from INSIDE `AddAsync`, which `TeamRegistry.AddContainerAsync` always calls BEFORE that
-        // row exists - so every registration would persist an empty set first and the correct one a moment
-        // later: not a second production WRITER (`EffectiveSubscriptions` stays the only caller of
-        // `ISubscriptions.SetAsync`), just the same one called twice, the first time with the wrong answer.
-        // See `ContainerHost`'s constructor for the parameter this decision is about, and
-        // `EffectiveSubscriptions`'s own doc comment for why it also cannot be handed to this factory
-        // directly - `EffectiveSubscriptions` itself depends on `ContainerHost`.
-        // Per-workflow spend limit. A backstop against a runaway loop, not a budget anyone should feel.
-        // An agent that omits its causation starts a fresh chain at spend 0, exactly as it does at depth
-        // 0, so this bounds the ACCIDENT - the runaway that actually costs money.
-        //
-        // ASKED AT THE WAKE, not only at `tell`: a Manager woken by its members' completions never
-        // goes through `tell`, so a limit read there alone would let it spend unbounded. `ContainerHost`
-        // asks at the WAKE, which is where the cost is incurred, so it is declared before the
-        // registration that takes it.
-        //
-        // 0 MEANS UNLIMITED, and `ContainerHost` reads it that way - the same answer as absent, because a
-        // person who clears a setting and one who types 0 mean the same thing.
-        //
-        // THE DEFAULT (100M) IS A BACKSTOP, NOT A BUDGET. Real jobs run a few million tokens a round, and a
-        // lower figure would bound honest work from a place nobody can see. It sits above the offered team
-        // default (50M), so the number a person sets is the one that normally decides and this only
-        // catches something genuinely away.
-        //
-        // **SETTABLE.** `workflow.spendLimit` in the Tenant Settings dialog; this
-        // startup figure is only what a fixture or an unwired reader falls back to. The decision and its
-        // reason are recorded in the setting's own description in `TenantSettings`.
-        workflowSpendLimit = tenantSettings.WorkflowSpendLimit;
 
         // Instance-wide, shared across users. 0 is unlimited. Absent means the smaller of max(1, CPUs - 1)
         // and, under a container memory limit, limit / wip.memoryPerRunMb (`TenantSettings.RunLimit`). The container's cgroup is a blast radius; this is

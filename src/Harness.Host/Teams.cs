@@ -370,21 +370,21 @@ public sealed class FirehoseSubscriptionException(string type, string agent)
 /// have no door: a console instructs the manager, so a team lacking one could be created and then
 /// never spoken to. Making that structural rather than a step someone remembers is the point.
 /// </summary>
-/// <param name="workflowSpendLimit">
-/// The instance `WorkflowSpendLimit` - what bounds one workflow on a team that has chosen nothing.
+/// <param name="workflowSpendLimitNow">
+/// The instance `WorkflowSpendLimit`, read at every call - what bounds one workflow on a team that
+/// has chosen nothing.
 ///
 /// HERE BECAUSE THE RESOLUTION LIVES HERE, in <see cref="TeamRegistry.EffectiveWorkflowBudgetFor"/>,
-/// and one function has to know both halves of it or the knowledge is in two places. It is already
-/// parsed once in `Program.cs` and handed to `ContainerHost` and `IdleWorkflowOffer` from the same
-/// variable, so this is a third reader of one value rather than a second source of it.
+/// and one function has to know both halves of it or the knowledge is in two places. `ContainerHost`
+/// is handed the same delegate, so this is a second reader of one setting rather than a second source.
 ///
 /// OPTIONAL, AND NULL MEANS UNLIMITED, which is what a fixture that never configured one wants.
-/// `Program.cs` always supplies it.
+/// The Host always supplies it.
 /// </param>
 public sealed class TeamRegistry(
     ContainerHost host, AgentCatalog agents, IMemberRunner runner, TeamPaths paths,
     ITeamStore teams, AgentEnvironment environment, FileBrowserPolicy fileBrowser, IMessageLog log,
-    EffectiveSubscriptions effective, IRepoClone cloner, long? workflowSpendLimit = null,
+    EffectiveSubscriptions effective, IRepoClone cloner,
     Func<long>? workflowSpendLimitNow = null, SkillDirectory? skillDirectory = null,
     Func<RepoContributor, string, CancellationToken, Task>? prepareClone = null,
     PluginCatalog? plugins = null,
@@ -578,7 +578,7 @@ public sealed class TeamRegistry(
         return chosen switch
         {
             // The instance figure is settable at runtime, so it is read here, per wake.
-            null => (workflowSpendLimitNow?.Invoke() ?? workflowSpendLimit) is > 0 and var instance
+            null => workflowSpendLimitNow?.Invoke() is > 0 and var instance
                 ? instance
                 : null,
             0 => null,

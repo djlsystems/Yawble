@@ -470,6 +470,53 @@ public sealed class ConciergeReapTests
         new("fixture", AgentMode.Interactive, new AgentLaunch("fixture-cli", []), IdleOutput: floor);
 
     /// <summary>A store over fake terminals on one hand-moved clock, a tenant log that records, and a reaper over both.</summary>
+    [Fact]
+    public async Task The_sweep_interval_follows_the_idle_timeout_as_it_is_written()
+    {
+        // THE SWEEP IS READ WITH THE WINDOW, at every tick: an idle timeout shortened for a demonstration
+        // brings the quarter-minute sweep with it, without a restart, as the window itself does.
+        var bed = new Bed();
+        var window = TimeSpan.FromHours(1);
+        var sweeps = 0;
+        var reaper = new ConciergeReaper(
+            bed.Store, () => window, () => window < TimeSpan.FromMinutes(4) ? TimeSpan.FromSeconds(15) : TimeSpan.FromMinutes(1),
+            NullLogger<ConciergeReaper>.Instance, swept: () => Interlocked.Increment(ref sweeps));
+
+        await reaper.StartAsync(Ct);
+        try
+        {
+            await UntilAsync(() => bed.Clock.Waiting == 1);
+            bed.Clock.Advance(TimeSpan.FromSeconds(45));
+            await Task.Delay(50, Ct);
+            Assert.Equal(0, Volatile.Read(ref sweeps));
+
+            bed.Clock.Advance(TimeSpan.FromSeconds(15));
+            await UntilAsync(() => Volatile.Read(ref sweeps) == 1);
+
+            // Shortened mid-session: the tick already armed comes at the old interval, and every one
+            // after it at the new.
+            window = TimeSpan.FromMinutes(2);
+            bed.Clock.Advance(TimeSpan.FromMinutes(1));
+            await UntilAsync(() => Volatile.Read(ref sweeps) == 2);
+            bed.Clock.Advance(TimeSpan.FromSeconds(15));
+            await UntilAsync(() => Volatile.Read(ref sweeps) == 3);
+        }
+        finally
+        {
+            await reaper.StopAsync(CancellationToken.None);
+        }
+    }
+
+    private static async Task UntilAsync(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline) throw new TimeoutException("Not true within 5 s.");
+            await Task.Delay(10, Ct);
+        }
+    }
+
     private sealed class Bed(ConciergeRevoke? revoke = null, OutputFloor? floor = null)
     {
         public ManualTime Clock { get; } = new(Start);
@@ -498,7 +545,7 @@ public sealed class ConciergeReapTests
         public Task<IReadOnlyList<ConciergeReaped>> ReapAsync() => Store.ReapIdleAsync(Window, Clock.GetUtcNow());
 
         public ConciergeReaper Reaper() => new(
-            Store, () => Window, TimeSpan.FromMinutes(1), NullLogger<ConciergeReaper>.Instance, Log,
+            Store, () => Window, () => TimeSpan.FromMinutes(1), NullLogger<ConciergeReaper>.Instance, Log,
             (_, _) => Task.FromResult<string?>("person@example.test"));
     }
 
