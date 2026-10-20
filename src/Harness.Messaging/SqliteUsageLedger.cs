@@ -181,53 +181,55 @@ public sealed class SqliteUsageLedger(string databasePath) : IUsageLedger
         var start = Stamp(from);
         var end = Stamp(to);
 
-        // EVERY RUN THAT OVERLAPS the period: it ended at or after its start, and began before its
-        // end. The beginning is tested here rather than in SQL because `queued_at` is not stored in
-        // the "O" form `ended_at` is, so the two do not compare as text.
-        await using var inside = connection.CreateCommand();
-        inside.CommandText =
+        // ONE STATEMENT: every run that ended at or after the period's start (the inside candidates:
+        // the ones that began before its end are kept below, because `queued_at` is not stored in
+        // the "O" form `ended_at` is, so the two do not compare as text), then each member's last
+        // run that ended before the start and first run that ended at or after the end. The edges
+        // are kept only for a member named or seen inside, as the per-member reads this replaces
+        // read them.
+        await using var command = connection.CreateCommand();
+        command.CommandText =
             $"""
-             SELECT {RunColumns} FROM usage_ledger
+             SELECT {RunColumns}, 0 AS part FROM usage_ledger
              WHERE team_id = $team AND run_seq > $floor AND ended_at >= $from
+             UNION ALL
+             SELECT {RunColumns}, 1 FROM (
+                 SELECT {RunColumns}, row_number() OVER (PARTITION BY member ORDER BY ended_at DESC, run_seq DESC) AS n
+                 FROM usage_ledger WHERE team_id = $team AND run_seq > $floor AND ended_at < $from)
+             WHERE n = 1
+             UNION ALL
+             SELECT {RunColumns}, 2 FROM (
+                 SELECT {RunColumns}, row_number() OVER (PARTITION BY member ORDER BY ended_at, run_seq) AS n
+                 FROM usage_ledger WHERE team_id = $team AND run_seq > $floor AND ended_at >= $to)
+             WHERE n = 1
              """;
-        inside.Parameters.AddWithValue("$team", team);
-        inside.Parameters.AddWithValue("$floor", floor);
-        inside.Parameters.AddWithValue("$from", start);
+        command.Parameters.AddWithValue("$team", team);
+        command.Parameters.AddWithValue("$floor", floor);
+        command.Parameters.AddWithValue("$from", start);
+        command.Parameters.AddWithValue("$to", end);
 
         var rows = new Dictionary<long, UsageLedgerRow>();
-        foreach (var row in await ReadRunsAsync(inside, ct))
+        var edges = new List<UsageLedgerRow>();
+        await using (var reader = await command.ExecuteReaderAsync(ct))
         {
-            if ((row.QueuedAt ?? row.StartedAt ?? row.EndedAt) < to) rows[row.RunSeq] = row;
+            while (await reader.ReadAsync(ct))
+            {
+                var row = ReadRun(reader);
+                if (reader.GetInt64(21) == 0)
+                {
+                    if ((row.QueuedAt ?? row.StartedAt ?? row.EndedAt) < to) rows[row.RunSeq] = row;
+                }
+                else
+                {
+                    edges.Add(row);
+                }
+            }
         }
 
-        var named = members
-            .Concat(rows.Values.Select(r => r.Member))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        foreach (var member in named)
+        var named = new HashSet<string>(members.Concat(rows.Values.Select(r => r.Member)), StringComparer.OrdinalIgnoreCase);
+        foreach (var row in edges)
         {
-            foreach (var edge in new[]
-                     {
-                         "ended_at < $from ORDER BY ended_at DESC, run_seq DESC",
-                         "ended_at >= $to ORDER BY ended_at, run_seq",
-                     })
-            {
-                await using var command = connection.CreateCommand();
-                command.CommandText =
-                    $"""
-                     SELECT {RunColumns} FROM usage_ledger
-                     WHERE team_id = $team AND member = $member AND run_seq > $floor AND {edge}
-                     LIMIT 1
-                     """;
-                command.Parameters.AddWithValue("$team", team);
-                command.Parameters.AddWithValue("$floor", floor);
-                command.Parameters.AddWithValue("$member", member);
-                command.Parameters.AddWithValue("$from", start);
-                command.Parameters.AddWithValue("$to", end);
-
-                foreach (var row in await ReadRunsAsync(command, ct)) rows[row.RunSeq] = row;
-            }
+            if (named.Contains(row.Member)) rows.TryAdd(row.RunSeq, row);
         }
 
         return [.. rows.Values.OrderBy(r => r.RunSeq)];
@@ -263,36 +265,37 @@ public sealed class SqliteUsageLedger(string databasePath) : IUsageLedger
     private static string Stamp(DateTimeOffset at) =>
         Instant.Stamp(at);
 
+    /// <summary>One row of <see cref="RunColumns"/>, by ordinal.</summary>
+    private static UsageLedgerRow ReadRun(SqliteDataReader reader) =>
+        new(
+            reader.GetInt64(0),
+            reader.GetInt64(1),
+            Text(reader, 2),
+            Text(reader, 3),
+            reader.GetString(4),
+            Text(reader, 5),
+            Text(reader, 6),
+            reader.GetString(7),
+            At(reader, 8),
+            At(reader, 9),
+            MessageRows.ReadStamp(reader.GetString(10)),
+            reader.GetInt64(11) != 0,
+            Long(reader, 12),
+            Long(reader, 13),
+            Long(reader, 14),
+            Long(reader, 15),
+            Long(reader, 16),
+            Long(reader, 17),
+            Text(reader, 18),
+            At(reader, 19),
+            reader.GetInt64(20) != 0);
+
     private static async Task<IReadOnlyList<UsageLedgerRow>> ReadRunsAsync(SqliteCommand command, CancellationToken ct)
     {
         var rows = new List<UsageLedgerRow>();
         await using var reader = await command.ExecuteReaderAsync(ct);
 
-        while (await reader.ReadAsync(ct))
-        {
-            rows.Add(new UsageLedgerRow(
-                reader.GetInt64(0),
-                reader.GetInt64(1),
-                Text(reader, 2),
-                Text(reader, 3),
-                reader.GetString(4),
-                Text(reader, 5),
-                Text(reader, 6),
-                reader.GetString(7),
-                At(reader, 8),
-                At(reader, 9),
-                MessageRows.ReadStamp(reader.GetString(10)),
-                reader.GetInt64(11) != 0,
-                Long(reader, 12),
-                Long(reader, 13),
-                Long(reader, 14),
-                Long(reader, 15),
-                Long(reader, 16),
-                Long(reader, 17),
-                Text(reader, 18),
-                At(reader, 19),
-                reader.GetInt64(20) != 0));
-        }
+        while (await reader.ReadAsync(ct)) rows.Add(ReadRun(reader));
 
         return rows;
     }

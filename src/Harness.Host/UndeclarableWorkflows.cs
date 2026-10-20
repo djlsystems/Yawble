@@ -56,11 +56,16 @@ public sealed class UndeclarableWorkflows(
 
     /// <summary>Called as a run ends, beside <see cref="IdleWorkflowOffer"/>. Returns whether the
     /// workflow was declared.</summary>
-    public async Task<bool> OnRunEndingAsync(ContainerId member, long? causation, bool succeeded, CancellationToken ct)
+    public Task<bool> OnRunEndingAsync(ContainerId member, long? causation, bool succeeded, CancellationToken ct) =>
+        OnRunEndingAsync(member, causation, succeeded, new RunEnding.Reads(), ct);
+
+    /// <summary>As above, reading the workflow's rows through <paramref name="reads"/>, shared with the idle offer before it.</summary>
+    public async Task<bool> OnRunEndingAsync(
+        ContainerId member, long? causation, bool succeeded, RunEnding.Reads reads, CancellationToken ct)
     {
         try
         {
-            return await DecideAsync(member, causation, succeeded, ct);
+            return await DecideAsync(member, causation, succeeded, reads, ct);
         }
         catch (Exception error) when (!ct.IsCancellationRequested)
         {
@@ -70,7 +75,7 @@ public sealed class UndeclarableWorkflows(
         }
     }
 
-    private async Task<bool> DecideAsync(ContainerId member, long? causation, bool succeeded, CancellationToken ct)
+    private async Task<bool> DecideAsync(ContainerId member, long? causation, bool succeeded, RunEnding.Reads reads, CancellationToken ct)
     {
         if (ct.IsCancellationRequested || !succeeded) return false;
 
@@ -98,7 +103,7 @@ public sealed class UndeclarableWorkflows(
 
         if (!(await log.OpenWorkflowsAmongAsync([correlation], ct)).Contains(correlation)) return false;
 
-        var thread = await log.ReadCorrelationAsync(correlation, ct);
+        var thread = await reads.ThreadAsync(log, correlation, ct);
 
         if (WorkflowPause.IsPaused(thread)) return false;
 

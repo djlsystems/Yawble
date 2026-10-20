@@ -4,6 +4,7 @@ using System.Text.Json;
 using Harness.Contracts;
 using Harness.Host;
 using Harness.Host.Auth;
+using Harness.Kanban;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -79,6 +80,32 @@ public sealed class StrandedWorkflowTests(HostFixture host) : IClassFixture<Host
         var after = (await person.GetFromJsonAsync<JsonElement>($"/api/backlog/{item}", Ct)).GetProperty("item");
         Assert.Equal(JsonValueKind.Null, after.GetProperty("stranded").ValueKind);
         Assert.Equal(JsonValueKind.Null, after.GetProperty("inFlight").ValueKind);
+    }
+
+    [Fact]
+    public async Task The_stranded_read_asks_the_log_once_however_many_items_are_in_flight()
+    {
+        var (team, original, item) = await DispatchAsync("Stranded Once A");
+        var card = await BlockAsync(team, original);
+        await FinishInALaterWorkflowAsync(team, card);
+        var (teamB, originalB, itemB) = await DispatchAsync("Stranded Once B");
+        var (teamC, originalC, itemC) = await DispatchAsync("Stranded Once C");
+
+        var inFlight = new Dictionary<long, BacklogInFlight>
+        {
+            [item] = new(team, team, original, Running: false),
+            [itemB] = new(teamB, teamB, originalB, Running: false),
+            [itemC] = new(teamC, teamC, originalC, Running: false),
+        };
+        var log = CountingProxy.Over<IMessageLog>(host.Services.GetRequiredService<IMessageLog>());
+
+        var stranded = await BacklogStrandedState.ForAsync(
+            inFlight, host.Services.GetRequiredService<TeamRegistry>(), log, host.Services.GetRequiredService<KanbanStore>(), Ct);
+
+        Assert.Equal(1, CountingProxy.Of(log).CallsTo("WorkflowStandingsAmongAsync"));
+        Assert.Equal(0, CountingProxy.Of(log).CallsTo("WorkflowForTeamAsync"));
+        Assert.Equal([item], stranded.Keys);
+        Assert.Equal("Blocked", stranded[item].State);
     }
 
     [Fact]

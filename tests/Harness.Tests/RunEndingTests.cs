@@ -1,5 +1,7 @@
 using Harness.Contracts;
 using Harness.Host;
+using Harness.Messaging;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 
 namespace Harness.Tests;
@@ -26,8 +28,8 @@ public sealed class RunEndingTests
             releaseLeases: () => throw new InvalidOperationException("the worker is gone"),
             publish: () => { called.Add("publish"); return Task.CompletedTask; },
             defaultBranch: () => { called.Add("defaultBranch"); return Task.CompletedTask; },
-            idleOffer: () => { called.Add("idleOffer"); return Task.CompletedTask; },
-            declare: () => { called.Add("declare"); return Task.FromResult(true); });
+            idleOffer: _ => { called.Add("idleOffer"); return Task.CompletedTask; },
+            declare: _ => { called.Add("declare"); return Task.FromResult(true); });
 
         Assert.True(declared);
         Assert.Equal(["publish", "defaultBranch", "idleOffer", "declare"], called);
@@ -47,8 +49,8 @@ public sealed class RunEndingTests
             releaseLeases: () => Task.CompletedTask,
             publish: () => throw new IOException("origin refused"),
             defaultBranch: () => Task.CompletedTask,
-            idleOffer: () => Task.CompletedTask,
-            declare: () => throw new InvalidOperationException("log locked"));
+            idleOffer: _ => Task.CompletedTask,
+            declare: _ => throw new InvalidOperationException("log locked"));
 
         Assert.False(declared);
         Assert.Equal(2, log.Entries.Count);
@@ -66,7 +68,44 @@ public sealed class RunEndingTests
             releaseLeases: () => throw new OperationCanceledException(cancelled.Token),
             publish: () => Task.CompletedTask,
             defaultBranch: () => Task.CompletedTask,
-            idleOffer: () => Task.CompletedTask,
-            declare: () => Task.FromResult(false)));
+            idleOffer: _ => Task.CompletedTask,
+            declare: _ => Task.FromResult(false)));
+    }
+
+    [Fact]
+    public async Task The_idle_offer_and_the_declaration_share_one_read_of_the_workflow()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"harness-run-ending-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var database = Path.Combine(directory, "messages.db");
+            await new SchemaMigrator(database).ApplyAsync(SchemaModules.All, Ct);
+            var store = new SqliteMessageStore(database);
+            var root = await store.AppendAsync(new NewMessage(MessageTypes.InstructionFor(Member), """{"text":"go"}""", "person-1"), Ct);
+            await store.AppendAsync(new NewMessage(MessageTypes.Progress, """{"status":"working"}""", Member.ToString(), root.Seq), Ct);
+            var log = CountingProxy.Over<IMessageLog>(store);
+
+            IReadOnlyList<Message>? offered = null;
+            IReadOnlyList<Message>? declared = null;
+
+            await RunEnding.RunAsync(
+                new CapturingLogger(), Member, root.Seq, succeeded: true, Ct,
+                releaseLeases: () => Task.CompletedTask,
+                publish: () => Task.CompletedTask,
+                defaultBranch: () => Task.CompletedTask,
+                idleOffer: async reads => offered = await reads.ThreadAsync(log, root.Seq, Ct),
+                declare: async reads => (declared = await reads.ThreadAsync(log, root.Seq, Ct)).Count > 0);
+
+            Assert.Equal(1, CountingProxy.Of(log).CallsTo("ReadCorrelationAsync"));
+            Assert.NotNull(offered);
+            Assert.Same(offered, declared);
+            Assert.Equal(2, offered.Count);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            try { Directory.Delete(directory, recursive: true); } catch (IOException) { }
+        }
     }
 }

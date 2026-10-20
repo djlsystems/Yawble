@@ -13,18 +13,41 @@ namespace Harness.Host;
 /// </summary>
 public static class RunEnding
 {
+    /// <summary>
+    /// What the offer and the declaration both read of the run's workflow, read once per run end. The
+    /// two decide on the same thread of rows; before this each read the whole correlation for itself.
+    /// </summary>
+    public sealed class Reads
+    {
+        private long _correlation;
+        private Task<IReadOnlyList<Message>>? _thread;
+
+        public Task<IReadOnlyList<Message>> ThreadAsync(IMessageLog log, long correlation, CancellationToken ct)
+        {
+            if (_thread is null || _correlation != correlation)
+            {
+                _correlation = correlation;
+                _thread = log.ReadCorrelationAsync(correlation, ct);
+            }
+
+            return _thread;
+        }
+    }
+
     public static async Task<bool> RunAsync(
         ILogger log, ContainerId member, long? causation, bool succeeded, CancellationToken ct,
-        Func<Task> releaseLeases, Func<Task> publish, Func<Task> defaultBranch, Func<Task> idleOffer, Func<Task<bool>> declare)
+        Func<Task> releaseLeases, Func<Task> publish, Func<Task> defaultBranch, Func<Reads, Task> idleOffer, Func<Reads, Task<bool>> declare)
     {
+        var reads = new Reads();
+
         await StepAsync(log, member, "lease release", releaseLeases);
         await StepAsync(log, member, "terminal publish", publish);
         await StepAsync(log, member, "default-branch report", defaultBranch);
-        await StepAsync(log, member, "idle offer", idleOffer);
+        await StepAsync(log, member, "idle offer", () => idleOffer(reads));
 
         try
         {
-            return await declare();
+            return await declare(reads);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {

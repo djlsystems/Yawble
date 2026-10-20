@@ -54,9 +54,10 @@ public static class BacklogStrandedState
     /// <summary>
     /// Stranded state keyed by ITEM id. ONLY IN-FLIGHT ITEMS ARE ASKED: a closed or completed
     /// workflow is not stranded, and <see cref="BacklogInFlightState"/> has already applied the
-    /// team's existence, its floor and the open predicate. The board is read once per team, and
-    /// only for a team with a Blocked or Failed dispatch, so an ordinary list costs one log query
-    /// per in-flight item and no board read at all.
+    /// team's existence, its floor and the open predicate. Where every workflow stands is one log
+    /// query for all of them (<see cref="IMessageLog.WorkflowStandingsAmongAsync"/>, as the needs-you
+    /// read asks it); the board is read once per team, and only for a team with a Blocked or Failed
+    /// dispatch, so an ordinary list costs one log query and no board read at all.
     /// </summary>
     public static async Task<IReadOnlyDictionary<long, BacklogStranded>> ForAsync(
         IReadOnlyDictionary<long, BacklogInFlight> inFlight,
@@ -68,12 +69,17 @@ public static class BacklogStrandedState
         var result = new Dictionary<long, BacklogStranded>();
         var boards = new Dictionary<string, KanbanBoard>(StringComparer.OrdinalIgnoreCase);
 
+        var asked = new Dictionary<long, string>();
+        foreach (var flight in inFlight.Values)
+        {
+            if (flight.Correlation > teams.FloorFor(flight.TeamId)) asked[flight.Correlation] = flight.TeamId;
+        }
+
+        var standings = await log.WorkflowStandingsAmongAsync(asked, ct);
+
         foreach (var (item, flight) in inFlight)
         {
-            var timing = await log.WorkflowForTeamAsync(
-                flight.TeamId, flight.Correlation, teams.FloorFor(flight.TeamId), ct);
-
-            if (timing.State is not { } state || !Stuck.Contains(state)) continue;
+            if (standings.GetValueOrDefault(flight.Correlation) is not { Stuck: { } state }) continue;
 
             if (!boards.TryGetValue(flight.TeamId, out var board))
             {

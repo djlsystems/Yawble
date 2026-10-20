@@ -162,12 +162,16 @@ public sealed class IdleWorkflowOffer(
     /// difference between a Manager that ended its turn holding an open workflow - the incident -
     /// and one whose turn was taken away by a Stop, a spend limit or a crash.
     /// </param>
+    public Task<bool> OnRunEndingAsync(ContainerId member, long? causation, bool succeeded, CancellationToken ct) =>
+        OnRunEndingAsync(member, causation, succeeded, new RunEnding.Reads(), ct);
+
+    /// <summary>As above, reading the workflow's rows through <paramref name="reads"/>, shared with the declaration that follows.</summary>
     public async Task<bool> OnRunEndingAsync(
-        ContainerId member, long? causation, bool succeeded, CancellationToken ct)
+        ContainerId member, long? causation, bool succeeded, RunEnding.Reads reads, CancellationToken ct)
     {
         try
         {
-            return await DecideAsync(member, causation, succeeded, ct);
+            return await DecideAsync(member, causation, succeeded, reads, ct);
         }
         catch (Exception error) when (!ct.IsCancellationRequested)
         {
@@ -183,7 +187,7 @@ public sealed class IdleWorkflowOffer(
     }
 
     private async Task<bool> DecideAsync(
-        ContainerId member, long? causation, bool succeeded, CancellationToken ct)
+        ContainerId member, long? causation, bool succeeded, RunEnding.Reads reads, CancellationToken ct)
     {
         if (ct.IsCancellationRequested) return false;
 
@@ -265,7 +269,7 @@ public sealed class IdleWorkflowOffer(
         // this the feature is a way to spend forever on a workflow nobody wants finished.
         //
         // Read off the thread rather than remembered, so a Host restart cannot forget it.
-        var thread = await log.ReadCorrelationAsync(correlation, ct);
+        var thread = await reads.ThreadAsync(log, correlation, ct);
 
         if (thread.Any(IsOffer)) return false;
 

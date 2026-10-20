@@ -34,6 +34,7 @@ public sealed class QuietTeamSweep(
     ITeamStore teamStore,
     IPendingDeliveries pending,
     IMessageLog messages,
+    WorkflowEndings endings,
     ITenantLog tenantLog,
     GitRunner git,
     TeamPaths paths)
@@ -56,7 +57,7 @@ public sealed class QuietTeamSweep(
         var teamSummaries = teams.All();
         var memberFloors = await MemberFloorsAsync(ct);
         var pendingByTeam = await PendingByTeamAsync(teamSummaries.Select(summary => summary.Id), ct);
-        var workflowState = await WorkflowStateAsync(ct);
+        var workflowState = await endings.ReadAsync(ct);
         var latestTerminals = await LatestTerminalByContainerAsync(teamSummaries, memberFloors, ct);
 
         static void AddCandidate(
@@ -172,7 +173,7 @@ public sealed class QuietTeamSweep(
         // only repos whose clone actually exists.
         //
         // `Declared*` AND NEVER `Ended*`: this is a check on a CLAIM, and a person's
-        // `workflow.closed` is not one. See `WorkflowState`'s own comment for why the asymmetry with
+        // `workflow.closed` is not one. See `WorkflowEndings`' own comment for why the asymmetry with
         // the quiet finding above is deliberate.
         foreach (var summary in teamSummaries)
         {
@@ -387,70 +388,6 @@ public sealed class QuietTeamSweep(
         return byTeam;
     }
 
-    /// <summary>
-    /// TWO SETS, BECAUSE THIS SWEEP ASKS TWO DIFFERENT QUESTIONS OF ONE PAIR OF MESSAGE TYPES, and
-    /// collapsing them into one is how a `workflow.closed` reaches the reader it must not.
-    ///
-    /// <see cref="EndedWorkflowCorrelations"/> answers **IS THIS WORKFLOW OVER** - either terminal
-    /// type - and is what the quiet-team finding reads. Asking `workflow.completed` alone would make that
-    /// finding permanent for any workflow a PERSON had closed: every other quiet clause still holds
-    /// after a close, so the team would be reported to people as one nobody had declared finished,
-    /// about work somebody had explicitly ended.
-    ///
-    /// <see cref="DeclaredWorkflowCorrelations"/> answers **DID SOMEBODY CLAIM A DELIVERY** -
-    /// `workflow.completed` ONLY - and is what the unpushed-clone finding reads. That finding exists
-    /// because a manager can report a merge and a push it has not performed, so it is a check on a
-    /// CLAIM. A person closing a workflow makes no claim; they are saying stop counting this. Adding
-    /// closes here would point a filesystem-touching detector at abandoned work and report it as an
-    /// unkept promise nobody made, so the asymmetry is deliberate rather than an oversight.
-    /// </summary>
-    private sealed record WorkflowState(
-        HashSet<long> EndedWorkflowCorrelations,
-        HashSet<long> DeclaredWorkflowCorrelations);
-
-    private async Task<Dictionary<string, WorkflowState>> WorkflowStateAsync(CancellationToken ct)
-    {
-        var state = new Dictionary<string, WorkflowState>(StringComparer.OrdinalIgnoreCase);
-        var after = 0L;
-
-        while (true)
-        {
-            // BOTH TERMINAL TYPES, as `WorkflowOpenSql` reads them. WHICH one ended it does not
-            // matter to this sweep - it asks only whether anything still needs a person - and the
-            // distinction between a delivery and an administrative close belongs to the surfaces
-            // that show a WORD.
-            var page = await messages.ReadAfterAsync(
-                after, [MessageTypes.WorkflowCompleted, MessageTypes.WorkflowClosed], 500, ct);
-            if (page.Count == 0) break;
-
-            foreach (var row in page)
-            {
-                // A `workflow.closed` ROW'S TEAM COMES FROM ITS PAYLOAD, not its Source - it is
-                // published by a PERSON, whose id carries no `/`. `MessageTeam.Of` already knows
-                // that, which is why this loop needs no second arm; without that arm the row would
-                // have no team here and the check above would silently do nothing.
-                var team = MessageTeam.Of(row);
-                if (team is null) continue;
-                if (!state.TryGetValue(team, out var workflowState))
-                {
-                    workflowState = new WorkflowState([], []);
-                    state[team] = workflowState;
-                }
-
-                workflowState.EndedWorkflowCorrelations.Add(row.CorrelationId);
-
-                if (string.Equals(row.Type, MessageTypes.WorkflowCompleted, StringComparison.Ordinal))
-                {
-                    workflowState.DeclaredWorkflowCorrelations.Add(row.CorrelationId);
-                }
-            }
-
-            after = page[^1].Seq;
-        }
-
-        return state;
-    }
-
     private async Task<Dictionary<ContainerId, Message>> LatestTerminalByContainerAsync(
         IReadOnlyCollection<TeamSummary> teamSummaries,
         IReadOnlyDictionary<ContainerId, long> memberFloors,
@@ -477,7 +414,7 @@ public sealed class QuietTeamSweep(
     private static bool IsQuietTeam(
         TeamSummary summary,
         IReadOnlyDictionary<string, List<PendingEvidence>> pendingByTeam,
-        IReadOnlyDictionary<string, WorkflowState> workflowState,
+        IReadOnlyDictionary<string, WorkflowEndings.OfTeam> workflowState,
         IReadOnlyDictionary<ContainerId, Message> latestTerminals)
     {
         if (summary.Containers.Count == 0) return false;

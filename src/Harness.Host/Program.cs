@@ -1226,8 +1226,8 @@ builder.Services.AddSingleton(sp => new ContainerHost(
             causation,
             ct),
 
-        idleOffer: () => sp.GetRequiredService<IdleWorkflowOffer>()
-            .OnRunEndingAsync(member, causation, succeeded, ct),
+        idleOffer: reads => sp.GetRequiredService<IdleWorkflowOffer>()
+            .OnRunEndingAsync(member, causation, succeeded, reads, ct),
 
         // A WORKFLOW ITS OWNER CANNOT DECLARE - a person told a plugin member directly - is
         // declared by the platform when nothing is left working it. The offer above goes only to
@@ -1241,8 +1241,8 @@ builder.Services.AddSingleton(sp => new ContainerHost(
         // to the owner only; waking the Manager on the run that answered it would hand it the same
         // decision, already made. Never on the Manager's own run, which wakes no Manager anyway; the
         // runtime keeps the key off a row closing a member's own `tell`.
-        declare: async () => await sp.GetRequiredService<UndeclarableWorkflows>()
-                .OnRunEndingAsync(member, causation, succeeded, ct)
+        declare: async reads => await sp.GetRequiredService<UndeclarableWorkflows>()
+                .OnRunEndingAsync(member, causation, succeeded, reads, ct)
             || (!member.Equals(new ContainerId(member.Team, TeamRegistry.DefaultManagerName))
                 && await WorkflowDeclaration.DeclaredAsync(sp.GetRequiredService<IMessageLog>(), causation, ct)))));
 // A container's credential and its environment, in one place - see AgentEnvironment for why those
@@ -1458,6 +1458,7 @@ builder.Services.AddSingleton(sp => new TeamReset(
     {
         sp.GetRequiredService<KanbanStore>().Invalidate();
         sp.GetRequiredService<RollupCache>().Invalidate();
+        sp.GetRequiredService<WorkflowEndings>().Invalidate();
     }));
 
 // Reset repositories: trees through the one WorktreeRemoval, git through the one GitRunner (as the
@@ -1680,6 +1681,7 @@ builder.Services.AddSingleton<IHostedService>(sp =>
         async (user, ct) => (await accounts.FindByIdAsync(user, ct))?.Email,
         () => recordConciergeSessions?.Invoke());
 });
+builder.Services.AddSingleton<WorkflowEndings>();
 builder.Services.AddSingleton<QuietTeamSweep>();
 if (quietSweepEnabled)
 {
@@ -1722,6 +1724,7 @@ builder.Services.AddSingleton(sp => new LogRetention(
     {
         sp.GetRequiredService<KanbanStore>().Invalidate();
         sp.GetRequiredService<RollupCache>().Invalidate();
+        sp.GetRequiredService<WorkflowEndings>().Invalidate();
     }));
 builder.Services.AddHostedService(sp => new LogRetentionLoop(
     sp.GetRequiredService<LogRetention>(),
