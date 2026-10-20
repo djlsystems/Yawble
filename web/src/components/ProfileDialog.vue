@@ -236,7 +236,11 @@ function copyCredential() {
   <q-dialog v-model="open">
     <q-card class="profile-card os-dialog-sm">
       <q-card-section class="q-pb-none">
-        <div class="os-dialog-title">User profile</div>
+        <div class="row items-center">
+          <div class="os-dialog-title">User profile</div>
+          <q-space />
+          <q-btn v-close-popup flat round dense icon="close" aria-label="Close" />
+        </div>
         <div class="text-caption os-text-muted q-mt-xs">
           Signed in as <strong>{{ session.user?.email }}</strong>
         </div>

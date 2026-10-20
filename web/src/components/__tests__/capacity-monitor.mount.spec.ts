@@ -188,14 +188,13 @@ describe('the dropdown', () => {
     expect(runs).toContain('beta DeveloperB: 200 MB, 1 process, threads not measured');
   });
 
-  // The engine's total (the size screen, doctor) is another figure: this one is the container's
-  // own memory against the container's own limit, and says so rather than reading as a disagreement.
-  it("names the memory figure as this worker's container against its own limit", async () => {
+  // The dropdown heads the memory figure "Resources"; whose memory it is (this worker's container,
+  // against its own limit, not the engine's total on the size screen and in doctor) stays the gauge's
+  // tooltip sentence.
+  it('heads the memory figure Resources', async () => {
     const wrapper = await mountPanel(memoryAt(87));
 
-    expect(wrapper.get('[data-test="capacity-memory"] .text-subtitle2').text()).toBe(
-      "Memory of this worker's container, against its own limit",
-    );
+    expect(wrapper.get('[data-test="capacity-memory"] .text-subtitle2').text()).toBe('Resources');
   });
 
   it('shows runs running and waiting against the limit, the reserved slot, and each waiter\'s reason', async () => {

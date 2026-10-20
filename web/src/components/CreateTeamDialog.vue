@@ -634,8 +634,10 @@ async function submit() {
        not, deliberately - see its own comment). -->
   <q-dialog v-model="open">
     <q-card class="os-dialog-md create-card">
-      <q-card-section>
+      <q-card-section class="row items-center">
         <div class="os-dialog-title">New team</div>
+        <q-space />
+        <q-btn v-close-popup flat round dense icon="close" aria-label="Close" :disable="busy" />
       </q-card-section>
 
       <q-form lazy-rules="ondemand" @submit="submit" @validation-error="showFailingTab">

@@ -376,9 +376,13 @@ async function submit() {
   <q-dialog v-model="open" no-route-dismiss>
     <q-card class="member-settings-card os-dialog-md">
       <q-form ref="form" @submit="submit" @keydown="onEnter">
-      <q-card-section>
-        <div class="os-dialog-title">Member settings</div>
-        <div class="text-caption os-text-muted">{{ snapshot.name }}</div>
+      <q-card-section class="row items-center">
+        <div>
+          <div class="os-dialog-title">Member settings</div>
+          <div class="text-caption os-text-muted">{{ snapshot.name }}</div>
+        </div>
+        <q-space />
+        <q-btn v-close-popup flat round dense icon="close" aria-label="Close" :disable="busy" />
       </q-card-section>
 
       <q-card-section class="q-gutter-md">

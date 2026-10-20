@@ -204,6 +204,7 @@ async function remove(user: AdminUser) {
           <q-btn flat dense round icon="refresh" aria-label="Refresh" :disable="rowBusy" @click="load" />
           <q-tooltip>Reload the list.</q-tooltip>
         </span>
+        <q-btn v-close-popup flat round dense icon="close" aria-label="Close" />
       </q-card-section>
 
       <q-card-section class="users-body q-pt-sm">

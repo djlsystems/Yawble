@@ -1040,11 +1040,15 @@ function down(index: number) {
 <template>
   <q-dialog v-model="open">
     <q-card class="backlog-card os-dialog-xl">
-      <q-card-section class="q-pb-none">
-        <div class="os-dialog-title">Backlog</div>
-        <div class="text-caption os-text-muted">
-          An item is the spec. Dispatch it to a team and its Manager cuts it into cards.
+      <q-card-section class="q-pb-none row items-center">
+        <div>
+          <div class="os-dialog-title">Backlog</div>
+          <div class="text-caption os-text-muted">
+            An item is the spec. Dispatch it to a team and its Manager cuts it into cards.
+          </div>
         </div>
+        <q-space />
+        <q-btn flat round dense icon="close" aria-label="Close" @click="open = false" />
       </q-card-section>
 
       <DialogTabs v-model="tab">

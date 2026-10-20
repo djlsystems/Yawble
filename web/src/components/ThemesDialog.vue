@@ -162,7 +162,11 @@ function cancel() {
   <q-dialog v-model="open" data-test="themes-dialog">
     <q-card class="os-dialog-lg themes-card">
       <q-card-section class="q-pb-none">
-        <div class="os-dialog-title">Themes</div>
+        <div class="row items-center">
+          <div class="os-dialog-title">Themes</div>
+          <q-space />
+          <q-btn flat round dense icon="close" aria-label="Close" data-test="themes-close" @click="cancel" />
+        </div>
         <div class="text-caption os-text-muted">
           How the app looks to you, on every computer you sign in from. Changes show at once; Save
           keeps them. The Concierge terminal keeps its own look.

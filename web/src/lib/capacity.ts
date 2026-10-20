@@ -71,6 +71,9 @@ function percent(value: number): string {
  */
 export const MemoryWhose = "Memory of this worker's container, against its own limit"
 
+/** The dropdown's heading over the memory figure: one word, the whose-sentence stays the gauge's. */
+export const ResourcesHeading = 'Resources'
+
 /** "11.2 of 12.9 GB in use (87%)", "11.2 GB in use, no limit", or "not measured". */
 export function memoryWords(sample: CapacitySample): string {
   const { inUseBytes, limitBytes, unlimited, percentOfLimit } = sample.memory

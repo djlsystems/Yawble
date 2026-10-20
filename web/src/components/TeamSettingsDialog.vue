@@ -825,9 +825,13 @@ watch(open, (showing) => {
   <q-dialog v-model="open">
     <q-card class="team-card os-dialog-lg">
       <q-form lazy-rules="ondemand" @submit="save">
-        <q-card-section class="q-pb-none">
-          <div class="os-dialog-title">Team settings</div>
-          <div class="text-caption os-text-muted">{{ team?.name ?? 'No team selected' }}</div>
+        <q-card-section class="q-pb-none row items-center">
+          <div>
+            <div class="os-dialog-title">Team settings</div>
+            <div class="text-caption os-text-muted">{{ team?.name ?? 'No team selected' }}</div>
+          </div>
+          <q-space />
+          <q-btn flat round dense icon="close" aria-label="Close" @click="open = false" />
         </q-card-section>
 
         <DialogTabs v-model="tab">
