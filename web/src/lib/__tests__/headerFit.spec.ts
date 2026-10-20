@@ -66,6 +66,13 @@ describe('the one header row gives way in one order', () => {
     });
   });
 
+  /** The phone row's one give: with an update pending, its icon takes the live word's room. */
+  it('shows the live chip as its dot on a phone row only while an update is pending', () => {
+    expect(headerFit(0, true, false).liveWord).toBe(true);
+    expect(headerFit(0, true, true).liveWord).toBe(false);
+    expect(headerFit(0, false, true).liveWord).toBe(true);
+  });
+
   it('steps once per fitting that keeps too few, and stops at the last step', () => {
     for (let level = 0; level < GiveWaySteps.length; level++) expect(nextGiveWay(level, 9, 10)).toBe(level + 1);
     expect(nextGiveWay(GiveWaySteps.length, 0, 10)).toBe(GiveWaySteps.length);

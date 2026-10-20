@@ -397,7 +397,9 @@ const brandTooltip = `${productTitle} ${releaseLabel(bundleBuild.version)}`;
  */
 const giveWay = ref(0);
 const mustKeep = keepThrough(Ribbon);
-const headerFit = computed(() => fitHeader(giveWay.value, $q.screen.lt.sm));
+/** An update is pending, so the notice is on the row (UpdateNotice says). */
+const updatePending = ref(false);
+const headerFit = computed(() => fitHeader(giveWay.value, $q.screen.lt.sm, updatePending.value));
 
 function onRibbonFit(shown: number) {
   giveWay.value = nextGiveWay(giveWay.value, shown, mustKeep);
@@ -486,7 +488,7 @@ async function signOut() {
           <VersionTag v-if="headerFit.version" class="header-version" />
           <!-- "Update available" when the release check found a newer release; nothing otherwise. The
                first thing to give way: its icon alone, the words its tooltip and aria-label. -->
-          <UpdateNotice :word="headerFit.updateWord" />
+          <UpdateNotice :word="headerFit.updateWord" @pending="(pending) => (updatePending = pending)" />
 
           <!--
             Live or not, stated. A board that has quietly stopped receiving pushes looks exactly

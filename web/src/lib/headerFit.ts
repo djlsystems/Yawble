@@ -38,14 +38,17 @@ export interface HeaderFit {
   mark: boolean;
 }
 
-/** What the cluster carries after `level` steps. A phone row never carries the version, the account
- *  name, the Needs you words or the update notice's words: beside the logo and hamburger, the words
- *  would push the account menu off a 390px row. */
-export function headerFit(level: number, phone: boolean): HeaderFit {
+/**
+ * What the cluster carries after `level` steps. A phone row runs no steps (it has no commands to fit)
+ * and never carries the version, the account name, the Needs you words or the update notice's words.
+ * With an update pending it also shows the live chip as its dot - the next step in the same order -
+ * since the update icon beside the full chip would push the account menu off a 390px row.
+ */
+export function headerFit(level: number, phone: boolean, updatePending = false): HeaderFit {
   return {
     updateWord: !phone && level < 1,
     version: !phone && level < 2,
-    liveWord: level < 3,
+    liveWord: !(phone && updatePending) && level < 3,
     accountName: !phone && level < 4,
     needsYouWord: !phone && level < 5,
     tight: level >= 6,

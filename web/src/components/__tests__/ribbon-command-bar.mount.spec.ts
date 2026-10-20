@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
+import { defineComponent, nextTick, ref, watch } from 'vue';
 
 vi.mock('../../lib/useAgentInstallations', () => ({
   useAgentInstallations: () => ({ badge: { value: null } }),
@@ -33,6 +34,8 @@ let barWidth = 0;
 let clusterWidth = 0;
 /** The overflow button's box, as the browser would measure it (41.6px in Chromium today). */
 let overflowWidth = 40;
+/** A command's width once the row is tight; the same as at full padding unless a case says. */
+let tightEntryWidth = EntryWidth;
 
 beforeEach(() => {
   setActivePinia(createPinia());
@@ -53,7 +56,8 @@ beforeEach(() => {
     const index = this.classList.contains('ribbon-entry')
       ? [...(this.parentElement?.children ?? [])].indexOf(this)
       : -1;
-    const right = index < 0 ? 0 : (index + 1) * EntryWidth;
+    const width = this.closest('.ribbon--tight') ? tightEntryWidth : EntryWidth;
+    const right = index < 0 ? 0 : (index + 1) * width;
 
     return { left: 0, right, top: 0, bottom: 0, width: right, height: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
   });
@@ -62,6 +66,7 @@ beforeEach(() => {
 afterEach(() => {
   clusterWidth = 0;
   overflowWidth = 40;
+  tightEntryWidth = EntryWidth;
   vi.restoreAllMocks();
   document.body.innerHTML = '';
 });
@@ -199,6 +204,48 @@ describe('the one header row', () => {
     (wrapper.vm as unknown as { refit: () => void }).refit();
     await flushPromises();
     expect(visible(wrapper)).toHaveLength(expected(41.6 + margin));
+  });
+
+  /**
+   * NO FITTING ON STALE EDGES. Mounted as the layout mounts it: a fitting that keeps too few takes a
+   * step, the step makes the row tight, and after a tick the layout asks the bar to fit again. The
+   * step is taken INSIDE the fitting that ends a measurement, so the new measurement waits behind
+   * it - and the layout's fitting in between must not fit against the old, wider edges, read too few
+   * again and take a second step the row did not need.
+   */
+  it('fits nothing between tight changing and its new measurement, so one step is enough', async () => {
+    barWidth = 1000;
+    clusterWidth = 400;
+    tightEntryWidth = 50;
+    const keep = 8;
+    const Layout = defineComponent({
+      components: { RibbonBar },
+      setup() {
+        const level = ref(0);
+        const bar = ref<{ refit: () => void } | null>(null);
+        const counts: number[] = [];
+        const onFit = (shown: number) => {
+          counts.push(shown);
+          if (shown < keep) level.value++;
+        };
+        watch(level, async () => {
+          await nextTick();
+          bar.value?.refit();
+        });
+        return { level, bar, counts, onFit };
+      },
+      template: '<RibbonBar ref="bar" :tight="level >= 1" @fit="onFit" />',
+    });
+    const wrapper = mount(Layout, { attachTo: document.body });
+    await flushPromises();
+    await flushPromises();
+    const vm = wrapper.vm as unknown as { level: number; counts: number[] };
+
+    // Full padding keeps (1000 - 400 - 40) / 100 = 5, too few; tight keeps (1000 - 400 - 40) / 50 = 11.
+    expect(vm.counts[0]).toBe(5);
+    expect(vm.counts.at(-1)).toBe(11);
+    expect(vm.counts.slice(1)).toEqual(vm.counts.slice(1).map(() => 11));
+    expect(vm.level).toBe(1);
   });
 
   /** Kept for its measurement while nothing spills: hidden, unnamed and out of the tab order. */

@@ -74,6 +74,7 @@ describe('the update notice', () => {
     readUpdateStatus.mockResolvedValue(notChecked);
     const quiet = await mountNotice();
     expect(quiet.find('[data-update-notice]').exists()).toBe(false);
+    expect(quiet.emitted('pending')).toBeUndefined();
     quiet.unmount();
 
     readUpdateStatus.mockRejectedValue(new Error('offline'));
@@ -135,6 +136,7 @@ describe('the update notice', () => {
     readUpdateStatus.mockResolvedValue(available);
     const full = await mountNotice();
     expect(full.find('[data-test="update-word"]').text()).toBe('Update available');
+    expect(full.emitted('pending')).toEqual([[true]]);
     full.unmount();
 
     const wrapper = await mountNotice({ word: false });

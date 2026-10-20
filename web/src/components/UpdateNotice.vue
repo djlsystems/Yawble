@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { readUpdateStatus } from '../api/client';
 import type { UpdateStatus } from '../lib/releaseUpdates';
 import UpdatesDialog from './UpdatesDialog.vue';
@@ -18,6 +18,9 @@ const RereadEvery = 60 * 60 * 1000;
  * row, the words its tooltip and aria-label, and it still opens the Updates dialog.
  */
 withDefaults(defineProps<{ word?: boolean }>(), { word: true });
+
+/** Whether the notice is on the row, so the phone row can make room for it (`lib/headerFit.ts`). */
+const emit = defineEmits<{ pending: [pending: boolean] }>();
 
 /** UNTIL THE HOST HAS AN ANSWER, asked again this often. A page opened right after the Host
  *  starts reads "not checked yet" (its first read of the release list takes a few seconds), and
@@ -40,6 +43,8 @@ async function read() {
     soon = setTimeout(() => void read(), RereadUntilCheckedEvery);
   }
 }
+
+watch(() => status.value?.updateAvailable === true, (pending) => emit('pending', pending));
 
 onMounted(() => {
   void read();
