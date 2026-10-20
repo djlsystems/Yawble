@@ -290,6 +290,8 @@ export const useConsoleStore = defineStore('console', {
      * been true, a later false means the cards on screen may now be stale.
      */
     connectionEstablished: false,
+    /** When `connected` last changed, on this browser's clock; null until it first does. The status control says it. */
+    connectionChangedAt: null as number | null,
     error: '' as string,
 
     /**
@@ -526,6 +528,7 @@ export const useConsoleStore = defineStore('console', {
      * would sit blank until something happened to move.
      */
     setConnected(value: boolean) {
+      if (value !== this.connected || (value && !this.connectionEstablished)) this.connectionChangedAt = Date.now();
       this.connected = value;
       if (value) this.connectionEstablished = true;
     },

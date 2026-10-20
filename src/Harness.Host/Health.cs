@@ -39,14 +39,7 @@ public static class HealthEndpoints
         // paths, no counts, no team names - a stranger on the tunnel learns only "up" or "down".
         app.MapGet(Route, async (PumpHeartbeat pump, CancellationToken ct) =>
         {
-            Check[] checks =
-            [
-                await DatabaseAsync(database, ct),
-                DataRootWritable(dataRoot),
-                pump.IsAlive
-                    ? new Check("pump", true, "delivering")
-                    : new Check("pump", false, pump.LastBeat is null ? "not started" : "no pass for over a minute"),
-            ];
+            var checks = await ChecksAsync(database, dataRoot, pump, ct);
 
             var healthy = checks.All(c => c.Ok);
 
@@ -63,6 +56,19 @@ public static class HealthEndpoints
                 + "accepts a write, and the delivery pump has made a pass in the last minute. 200 "
                 + "when all three pass, 503 otherwise; the body names each check either way.");
     }
+
+    /// <summary>
+    /// The three checks, made one way: <c>/healthz</c> and the people's <c>/api/service-status</c>
+    /// both read these, so neither can disagree with the other about whether the instance can serve.
+    /// </summary>
+    public static async Task<Check[]> ChecksAsync(string database, string dataRoot, PumpHeartbeat pump, CancellationToken ct) =>
+    [
+        await DatabaseAsync(database, ct),
+        DataRootWritable(dataRoot),
+        pump.IsAlive
+            ? new Check("pump", true, "delivering")
+            : new Check("pump", false, pump.LastBeat is null ? "not started" : "no pass for over a minute"),
+    ];
 
     private static async Task<Check> DatabaseAsync(string database, CancellationToken ct)
     {

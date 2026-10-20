@@ -4251,3 +4251,35 @@ export interface MarketplaceFetched {
   /** The folder was already there holding exactly this version, so nothing was written. */
   alreadyThere: boolean
 }
+
+/** One of /healthz's three checks, as `GET /api/service-status` repeats it: `database`, `dataRoot` or `pump`. */
+export interface ServiceCheck {
+  name: string
+  ok: boolean
+  detail: string
+}
+
+/** One worker as the status control lists it. */
+export interface ServiceWorker {
+  id: string
+  version: string | null
+  state: 'connected' | 'dropped'
+  connectedSince: string
+  droppedAt: string | null
+}
+
+/**
+ * `GET /api/service-status` (people only): the instance's own state for the app bar's status
+ * control. `startedAt` is the process's start (null when the Host could not read it) and `now` the
+ * Host's clock, so the uptime needs no trust in this browser's clock; `checks` are /healthz's three,
+ * made the same way; `build` is /api/version's answer.
+ */
+export interface ServiceStatus {
+  status: 'healthy' | 'unhealthy'
+  startedAt: string | null
+  now: string
+  checks: ServiceCheck[]
+  pumpLastPass: string | null
+  build: { version: string; commit: string; builtAt: string | null }
+  workers: ServiceWorker[]
+}

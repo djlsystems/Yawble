@@ -34,6 +34,44 @@ public sealed class HealthAndHeadersTests(HostFixture host) : IClassFixture<Host
     }
 
     [Fact]
+    public async Task A_person_reads_the_service_status_with_its_start_the_three_checks_the_build_and_the_workers_and_nobody_signed_out_does()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var person = await host.PersonAsync();
+
+        var response = await person.GetAsync(ServiceStatusEndpoints.Route, ct);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+        var root = body.RootElement;
+
+        Assert.Equal("healthy", root.GetProperty("status").GetString());
+        var startedAt = root.GetProperty("startedAt").GetDateTimeOffset();
+        var now = root.GetProperty("now").GetDateTimeOffset();
+        Assert.True(startedAt <= now, $"started {startedAt:O} after now {now:O}");
+        Assert.Equal(ServiceStatusEndpoints.StartedAt, startedAt);
+
+        var checks = root.GetProperty("checks").EnumerateArray()
+            .ToDictionary(c => c.GetProperty("name").GetString()!, c => c.GetProperty("ok").GetBoolean());
+        Assert.Equal(["dataRoot", "database", "pump"], checks.Keys.Order(StringComparer.Ordinal));
+        Assert.All(checks.Values, Assert.True);
+        Assert.NotEqual(JsonValueKind.Null, root.GetProperty("pumpLastPass").ValueKind);
+
+        Assert.Equal(BuildVersion.Current.Version, root.GetProperty("build").GetProperty("version").GetString());
+        Assert.Equal(BuildVersion.Current.Commit, root.GetProperty("build").GetProperty("commit").GetString());
+
+        // The Host runs its runs itself here, so its own one worker is listed, connected.
+        var workers = root.GetProperty("workers").EnumerateArray().ToList();
+        Assert.Single(workers);
+        Assert.Equal("connected", workers[0].GetProperty("state").GetString());
+        Assert.NotEqual(JsonValueKind.Null, workers[0].GetProperty("connectedSince").ValueKind);
+
+        using var anonymous = host.Anonymous(allowAutoRedirect: false);
+        var refused = await anonymous.GetAsync(ServiceStatusEndpoints.Route, ct);
+        Assert.Equal(HttpStatusCode.Unauthorized, refused.StatusCode);
+    }
+
+    [Fact]
     public void A_pump_that_has_not_beaten_for_a_minute_is_not_alive()
     {
         var clock = new ManualClock(DateTimeOffset.Parse("2026-09-23T12:00:00Z"));

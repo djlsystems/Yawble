@@ -38,6 +38,7 @@ import VersionTag from '../components/VersionTag.vue';
 import UpdateNotice from '../components/UpdateNotice.vue';
 import CapacityMonitor from '../components/CapacityMonitor.vue';
 import NeedsYouControl from '../components/NeedsYouControl.vue';
+import LiveStatusControl from '../components/LiveStatusControl.vue';
 import ConnectionsDialog from '../components/ConnectionsDialog.vue';
 import FirstRunGuide from '../components/FirstRunGuide.vue';
 import CommandPalette from '../components/CommandPalette.vue';
@@ -63,7 +64,6 @@ import {
 } from '../lib/ribbon';
 
 const board = useConsoleStore();
-const { connected } = storeToRefs(board);
 
 const session = useSessionStore();
 const router = useRouter();
@@ -384,8 +384,6 @@ function openSites(team: TeamId | null) {
  */
 const shortName = computed(() => session.user?.email.split('@')[0] ?? '');
 
-/** The live chip's word, said on the chip, or in its tooltip when the chip is a dot. */
-const liveWord = computed(() => (connected.value ? 'live' : 'offline'));
 
 /** The logo's tooltip: the product and which build this is, the version the row no longer carries. */
 const brandTooltip = `${productTitle} ${releaseLabel(bundleBuild.version)}`;
@@ -494,22 +492,10 @@ async function signOut() {
             Live or not, stated. A board that has quietly stopped receiving pushes looks exactly
             like a board where nothing is happening, and the two want very different reactions.
             There is deliberately NO refresh button: a manual refresh lets a broken push hide
-            behind a click.
-
-            The brand orange when live and an outline when not, so offline reads as ABSENT rather
-            than as a second colour to decode. Short of room it is a dot, the word in its tooltip.
+            behind a click. Green while live, grey when not; a click opens the service's state.
+            Short of room it is the icon alone, the word in its tooltip.
           -->
-          <q-chip
-            dense
-            class="live-chip"
-            :class="{ 'live-chip-on': connected, 'live-chip-dot': !headerFit.liveWord }"
-            :icon="connected ? 'sync' : 'sync_disabled'"
-            :label="headerFit.liveWord ? liveWord : undefined"
-            :aria-label="liveWord"
-            data-test="live-chip"
-          >
-            <q-tooltip v-if="!headerFit.liveWord">{{ liveWord }}</q-tooltip>
-          </q-chip>
+          <LiveStatusControl :word="headerFit.liveWord" />
 
           <!-- What is waiting on a person, as one count, left of the gauge. People only, as its route is. -->
           <NeedsYouControl v-if="session.user" :word="headerFit.needsYouWord" />
@@ -759,20 +745,6 @@ async function signOut() {
   color: var(--os-ink);
 }
 
-.live-chip {
-  background: transparent;
-  color: inherit;
-  border: 1px solid currentColor;
-  opacity: 0.7;
-}
-
-.live-chip-on {
-  background: var(--os-primary, var(--q-primary));
-  border-color: var(--os-primary, var(--q-primary));
-  color: white;
-  opacity: 1;
-}
-
 .brand-link {
   display: inline-flex;
   align-items: center;
@@ -793,11 +765,6 @@ async function signOut() {
 .header-version {
   margin-right: 4px;
   flex: 0 1 auto;
-}
-
-/* The live chip short of room: the dot of its colour and its icon, the word in its tooltip. */
-.live-chip-dot {
-  padding: 0 4px;
 }
 
 .user-menu {

@@ -107,6 +107,7 @@ import type {
   CapacityView,
   NeedsYouPart,
   NeedsYouView,
+  ServiceStatus,
 } from './types'
 
 export type { BacklogDispatchView, BacklogExecutionStats, BacklogItemView } from './types'
@@ -886,6 +887,9 @@ export const backlogItems = (archived = false, page?: { before?: number | undefi
   )
 
 export const backlogItem = (id: number) => json<BacklogItemDetail>(`/api/backlog/${id}`)
+
+/** The instance's own state for the status control: uptime, the three checks, the build, the workers. People only. */
+export const serviceStatus = () => json<ServiceStatus>('/api/service-status')
 
 export const createBacklogItem = (body: { title: string; body?: string; team?: string | null }) =>
   json<BacklogItemView>('/api/backlog', {

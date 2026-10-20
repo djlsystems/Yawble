@@ -2654,6 +2654,7 @@ Func<IReadOnlyList<WorkerSample>> workersNow = () => WorkersView.Of(
     worker => ConciergeSessionsView.TerminalsOn(
         app.Services.GetRequiredService<ConciergeSessionStore>(), worker, app.Services.GetRequiredService<CapacitySampler>().Terminal));
 WorkerEndpoints.MapList(app, workersNow);
+ServiceStatusEndpoints.Map(app, database, dataRoot, workersNow);
 app.Services.GetRequiredService<CapacitySampler>().Describe = workersNow;
 if (control)
 {
