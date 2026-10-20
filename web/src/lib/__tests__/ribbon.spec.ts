@@ -8,9 +8,12 @@ import {
   RepositoriesAction,
   Ribbon,
   SitesAction,
+  TeamBoardAction,
   TeamSitesAction,
   TeamDocumentsAction,
   TenantSettingsAction,
+  commandRoom,
+  fitCount,
   needsActiveWorkTeam,
 } from '../ribbon'
 
@@ -32,6 +35,33 @@ describe('the ribbon', () => {
   it('still gates team actions by prefix', () => {
     expect(needsActiveWorkTeam('team-kanban', undefined)).toBe(true)
     expect(needsActiveWorkTeam('team-kanban', 'alpha')).toBe(false)
+    expect(needsActiveWorkTeam(TeamBoardAction, undefined)).toBe(true)
+    expect(needsActiveWorkTeam(TeamBoardAction, 'alpha')).toBe(false)
+    expect(needsActiveWorkTeam(undefined, undefined)).toBe(false)
+    expect(needsActiveWorkTeam('teams', undefined)).toBe(false)
+  })
+
+  /**
+   * THE RIBBON ACTS ON THE TEAM; THE STRIP CHOOSES THE VIEW. Active Team is Board, Git, Sites,
+   * Documents, Settings, Reset - in that order, every one gated by `team-` - and no Kanban: the
+   * console strip's Kanban tab is the one door to it, opening it filtered to the active team.
+   */
+  it('lists Board, Git, Sites, Documents, Settings, Reset under Active Team, and no Kanban', () => {
+    const active = Ribbon.tabs.find((tab) => tab.id === 'active')!
+
+    expect(active.items.map((item) => item.label)).toEqual(['Board', 'Git', 'Sites', 'Documents', 'Settings', 'Reset'])
+    expect(active.items[0]!.action).toBe(TeamBoardAction)
+    expect(active.items.every((item) => item.action?.startsWith('team-'))).toBe(true)
+
+    const everything = Ribbon.tabs.flatMap((tab) => tab.items)
+    expect(everything.map((item) => item.action)).not.toContain('team-kanban')
+    expect(everything.map((item) => item.label)).not.toContain('Kanban')
+    expect(everything.map((item) => item.label)).not.toContain('Members')
+  })
+
+  /** Every other group is as it was, in the same order. */
+  it('keeps the tab order', () => {
+    expect(Ribbon.tabs.map((tab) => tab.id)).toEqual(['new', 'solutions', 'teams', 'active', 'projects', 'admin'])
   })
 
   /**
@@ -220,5 +250,15 @@ describe('the ribbon', () => {
 
     expect(ids.indexOf('projects')).toBeGreaterThan(ids.indexOf('active'))
     expect(ids.indexOf('projects')).toBeLessThan(ids.indexOf('admin'))
+  })
+
+  /** The one header row: the logo and the right cluster are reserved before the commands are fitted. */
+  it('fits the commands into what the logo and the cluster leave', () => {
+    const edges = [100, 200, 300, 400, 500]
+
+    expect(fitCount(edges, commandRoom(500, 0, 0), 40)).toBe(5)
+    expect(fitCount(edges, commandRoom(700, 100, 100), 40)).toBe(5)
+    expect(fitCount(edges, commandRoom(700, 100, 250), 40)).toBe(3)
+    expect(commandRoom(100, 80, 200)).toBe(0)
   })
 })

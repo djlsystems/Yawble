@@ -358,13 +358,12 @@ export const useKanbanStore = defineStore('kanban', {
     },
 
     /**
-     * The ribbon's kanban button.
+     * The Kanban for one team: `showKanban` under the name a caller naming a team reads best.
      *
-     * ONE BEHAVIOUR, TWO NAMES, AND THE NAMES BELONG TO THE CALLERS. The ribbon action and the tab
-     * button are two entry points and they must agree: both are a person naming a team and asking
-     * to see it, so both clear what was there and set that team. A separate body that merged the
-     * team into the existing filters would make the same icon mean different things from the two
-     * places.
+     * ONE BEHAVIOUR. It was the ribbon's Kanban button; the ribbon no longer has one (one door per
+     * view: the console strip's Kanban tab, which calls `showKanban` with the active team). A
+     * person naming a team and asking to see it clears what was there and sets that team; a body
+     * that merged the team into the existing filters would make the same request mean two things.
      */
     openForTeam(team: string) {
       this.showKanban(team)

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance } from 'vue';
 import { useRibbon } from '../lib/useRibbon';
-import { fitCount, ribbonEntries, type RibbonEntry, type RibbonItem } from '../lib/ribbon';
+import { commandRoom, fitCount, ribbonEntries, type RibbonEntry, type RibbonItem } from '../lib/ribbon';
 import RibbonTeamList from './RibbonTeamList.vue';
 
 /**
@@ -15,11 +15,23 @@ import RibbonTeamList from './RibbonTeamList.vue';
  * an edit there plus a handler and never a change here.
  *
  * WHAT DOES NOT FIT GOES INTO THE OVERFLOW MENU, from the right, and the menu lists it under the
- * same tab names the drawer uses. Below `sm` (600px) MainLayout unmounts this and opens
- * RibbonMobileMenu from a hamburger instead - same `useRibbon()` state, same `Ribbon` constant, so
- * the three cannot drift on which commands exist or when they disable.
+ * same tab names the drawer uses. Below `sm` (600px) MainLayout renders this row without its
+ * commands and opens RibbonMobileMenu from a hamburger instead - same `useRibbon()` state, same
+ * `Ribbon` constant, so the three cannot drift on which commands exist or when they disable.
  */
-const emit = defineEmits<{ action: [action: string] }>();
+/** `fit` says how many commands are on the row after each fitting, so the header can give way. */
+const emit = defineEmits<{ action: [action: string]; fit: [shown: number] }>();
+
+/**
+ * THE HEADER IS ONE ROW, AND THIS IS IT. The `start` slot holds the logo (and on a phone the
+ * hamburger), the `end` slot the right cluster - version, live chip, Needs you, the activity gauge,
+ * the account menu. Their widths come off the room the commands are fitted into, so the cluster
+ * never sits on top of a command and a command never pushes the cluster off the bar.
+ *
+ * `commands` false is the phone row (below `sm`): the same logo and cluster with no commands, which
+ * the drawer lists instead.
+ */
+const props = withDefaults(defineProps<{ commands?: boolean }>(), { commands: true });
 
 const {
   board,
@@ -49,6 +61,8 @@ const OverflowWidth = 40;
 
 const bar = ref<HTMLElement | null>(null);
 const band = ref<HTMLElement | null>(null);
+const start = ref<HTMLElement | null>(null);
+const end = ref<HTMLElement | null>(null);
 const entryEls: (HTMLElement | null)[] = [];
 let edges: number[] = [];
 
@@ -62,21 +76,50 @@ function available() {
   if (!bar.value) return 0;
 
   const style = getComputedStyle(bar.value);
+  const inner = bar.value.clientWidth - parseFloat(style.paddingLeft || '0') - parseFloat(style.paddingRight || '0');
 
-  return bar.value.clientWidth - parseFloat(style.paddingLeft || '0') - parseFloat(style.paddingRight || '0');
+  return commandRoom(inner, slotWidth(start.value), slotWidth(end.value));
 }
+
+/** A slot's footprint; its spacing is its own padding, so the box is the whole of it. */
+function slotWidth(el: HTMLElement | null) {
+  return el?.getBoundingClientRect().width ?? 0;
+}
+
+/**
+ * NOT WHILE MEASURING, AND NOT BEFORE THE FIRST MEASUREMENT. The cluster is observed too, so a
+ * resize can land between `measure` showing every entry and reading their edges; a fitting then
+ * hides a tail whose edges read zero, and zero fits anywhere - every command shown, clipped.
+ */
+let measuring = false;
 
 function fit() {
+  if (measuring || edges.length === 0) return;
+
   shown.value = fitCount(edges, available(), OverflowWidth);
+  emit('fit', shown.value);
 }
 
-async function measure() {
+/** One measurement at a time: two that overlapped (mount, then fonts landing) read each other's
+ *  hidden tail. Each waits for the one before it. */
+let measured: Promise<void> = Promise.resolve();
+
+function measure(): Promise<void> {
+  measured = measured.then(measureOnce);
+  return measured;
+}
+
+async function measureOnce() {
+  if (!props.commands) return;
+
+  measuring = true;
   shown.value = entries.length;
   await nextTick();
 
   const left = band.value?.getBoundingClientRect().left ?? 0;
 
   edges = entryEls.map((el) => (el ? el.getBoundingClientRect().right - left : 0));
+  measuring = false;
   fit();
 }
 
@@ -85,9 +128,11 @@ let observer: ResizeObserver | null = null;
 onMounted(() => {
   void measure();
 
+  // The cluster is watched as well as the bar: a count that grows, live going offline or a longer
+  // account name widens it without the bar changing size at all.
   if (typeof ResizeObserver !== 'undefined' && bar.value) {
     observer = new ResizeObserver(() => fit());
-    observer.observe(bar.value);
+    for (const el of [bar.value, start.value, end.value]) if (el) observer.observe(el);
   }
 
   // The first measurement can run before IBM Plex has loaded, against a fallback face with
@@ -115,138 +160,148 @@ const overflowGroups = computed(() => {
 </script>
 
 <template>
-  <div ref="bar" class="ribbon" role="toolbar" aria-label="Commands">
-    <div ref="band" class="ribbon-band">
-      <div
-        v-for="(entry, index) in entries"
-        v-show="index < shown"
-        :key="entry.key"
-        :ref="(el) => setEntry(index, el)"
-        class="ribbon-entry"
-        :class="{ 'ribbon-group-start': entry.groupStart && index > 0 }"
-        :aria-label="entry.groupStart ? entry.tab.label : undefined"
-      >
-        <!-- The heading a tab takes from live state - in practice the ACTIVE TEAM's name, in front
-             of the commands that act on it. Its rule is the ACCENT and the one accent moment on the
-             bar: it marks the group whose every control is scoped to that team. -->
-        <span v-if="entry.groupStart && titleOf(entry.tab)" class="ribbon-group-title">
-          {{ titleOf(entry.tab) }}
-          <q-tooltip>{{ entry.tab.label }}</q-tooltip>
-        </span>
+  <div ref="bar" class="ribbon">
+    <div ref="start" class="ribbon-start">
+      <slot name="start" />
+    </div>
 
-        <q-separator v-if="entry.item.kind === 'separator'" vertical inset class="q-mx-xs" />
-
-        <!-- Built from live state, so the file describes only that it belongs here. -->
-        <q-btn-dropdown
-          v-else-if="entry.item.kind === 'team-switcher'"
-          flat
-          dense
-          no-caps
-          class="ribbon-btn"
-          content-class="above-concierge"
-          :disable="teams.length === 0"
-          :icon="entry.item.icon"
-          :label="entry.item.label"
+    <div v-if="commands" class="ribbon-commands" role="toolbar" aria-label="Commands">
+      <div ref="band" class="ribbon-band">
+        <div
+          v-for="(entry, index) in entries"
+          v-show="index < shown"
+          :key="entry.key"
+          :ref="(el) => setEntry(index, el)"
+          class="ribbon-entry"
+          :class="{ 'ribbon-group-start': entry.groupStart && index > 0 }"
+          :aria-label="entry.groupStart ? entry.tab.label : undefined"
         >
-          <RibbonTeamList @pick="board.openTeam" />
-        </q-btn-dropdown>
+          <!-- The heading a tab takes from live state - in practice the ACTIVE TEAM's name, in front
+               of the commands that act on it. Its rule is the ACCENT and the one accent moment on the
+               bar: it marks the group whose every control is scoped to that team. -->
+          <span v-if="entry.groupStart && titleOf(entry.tab)" class="ribbon-group-title">
+            {{ titleOf(entry.tab) }}
+            <q-tooltip>{{ entry.tab.label }}</q-tooltip>
+          </span>
 
-        <span v-else class="ribbon-item-wrap">
-          <q-btn
+          <q-separator v-if="entry.item.kind === 'separator'" vertical inset class="q-mx-xs" />
+
+          <!-- Built from live state, so the file describes only that it belongs here. -->
+          <q-btn-dropdown
+            v-else-if="entry.item.kind === 'team-switcher'"
             flat
             dense
             no-caps
             class="ribbon-btn"
+            content-class="above-concierge"
+            :disable="teams.length === 0"
             :icon="entry.item.icon"
             :label="entry.item.label"
-            :disable="needsTeam(entry.item)"
-            @click="run(entry.item)"
           >
-            <!-- TEXT PLUS ICON, NEVER COLOUR ALONE, and ABSENT WHEN THERE IS NOTHING TO SAY: a
-                 badge that is always lit is wallpaper. -->
-            <q-badge
-              v-if="badgeFor(entry.item)"
-              floating
-              color="warning"
-              text-color="dark"
-              :aria-label="badgeFor(entry.item)?.label"
-            >
-              <q-icon :name="badgeFor(entry.item)?.icon" size="12px" class="q-mr-xs" />
-              {{ badgeFor(entry.item)?.text }}
-            </q-badge>
-          </q-btn>
+            <RibbonTeamList @pick="board.openTeam" />
+          </q-btn-dropdown>
 
-          <!-- On the WRAPPER, not the button: a disabled control swallows pointer events, so a
-               tooltip inside it never fires. -->
-          <q-tooltip v-if="badgeFor(entry.item)">{{ badgeFor(entry.item)?.label }}</q-tooltip>
-          <q-tooltip v-else-if="tooltipFor(entry.item)">{{ tooltipFor(entry.item) }}</q-tooltip>
-        </span>
+          <span v-else class="ribbon-item-wrap">
+            <q-btn
+              flat
+              dense
+              no-caps
+              class="ribbon-btn"
+              :icon="entry.item.icon"
+              :label="entry.item.label"
+              :disable="needsTeam(entry.item)"
+              @click="run(entry.item)"
+            >
+              <!-- TEXT PLUS ICON, NEVER COLOUR ALONE, and ABSENT WHEN THERE IS NOTHING TO SAY: a
+                   badge that is always lit is wallpaper. -->
+              <q-badge
+                v-if="badgeFor(entry.item)"
+                floating
+                color="warning"
+                text-color="dark"
+                :aria-label="badgeFor(entry.item)?.label"
+              >
+                <q-icon :name="badgeFor(entry.item)?.icon" size="12px" class="q-mr-xs" />
+                {{ badgeFor(entry.item)?.text }}
+              </q-badge>
+            </q-btn>
+
+            <!-- On the WRAPPER, not the button: a disabled control swallows pointer events, so a
+                 tooltip inside it never fires. -->
+            <q-tooltip v-if="badgeFor(entry.item)">{{ badgeFor(entry.item)?.label }}</q-tooltip>
+            <q-tooltip v-else-if="tooltipFor(entry.item)">{{ tooltipFor(entry.item) }}</q-tooltip>
+          </span>
+        </div>
       </div>
+
+      <q-btn
+        v-if="shown < entries.length"
+        flat
+        dense
+        round
+        icon="more_horiz"
+        class="ribbon-overflow"
+        aria-label="More commands"
+      >
+        <q-menu anchor="bottom right" self="top right" class="above-concierge">
+          <q-list dense class="ribbon-overflow-menu">
+            <template v-for="group in overflowGroups" :key="group.label">
+              <q-item-label header class="ribbon-overflow-section">{{ group.label }}</q-item-label>
+              <q-item v-if="group.title" dense class="ribbon-overflow-title">
+                <q-item-section>{{ group.title }}</q-item-section>
+              </q-item>
+
+              <template v-for="entry in group.entries" :key="entry.key">
+                <q-separator v-if="entry.item.kind === 'separator'" />
+
+                <q-item v-else-if="entry.item.kind === 'team-switcher'" clickable :disable="teams.length === 0">
+                  <q-item-section v-if="entry.item.icon" avatar>
+                    <q-icon :name="entry.item.icon" />
+                  </q-item-section>
+                  <q-item-section>{{ entry.item.label }}</q-item-section>
+                  <q-item-section side>
+                    <q-icon name="chevron_right" />
+                  </q-item-section>
+
+                  <q-menu anchor="top start" self="top end" class="above-concierge">
+                    <RibbonTeamList @pick="board.openTeam" />
+                  </q-menu>
+                </q-item>
+
+                <q-item
+                  v-else
+                  v-close-popup
+                  clickable
+                  :disable="needsTeam(entry.item)"
+                  @click="run(entry.item)"
+                >
+                  <q-item-section v-if="entry.item.icon" avatar>
+                    <q-icon :name="entry.item.icon" />
+                  </q-item-section>
+                  <q-item-section>
+                    <q-item-label>{{ entry.item.label }}</q-item-label>
+                    <!-- A disabled row in a menu fires no tooltip either, so its reason is a caption,
+                         as in the phone menu. -->
+                    <q-item-label v-if="needsTeam(entry.item)" caption>{{ tooltipFor(entry.item) }}</q-item-label>
+                  </q-item-section>
+                  <q-item-section v-if="badgeFor(entry.item)" side>
+                    <q-badge
+                      color="warning"
+                      text-color="dark"
+                      :aria-label="badgeFor(entry.item)?.label"
+                    >{{ badgeFor(entry.item)?.text }}</q-badge>
+                  </q-item-section>
+                </q-item>
+              </template>
+            </template>
+          </q-list>
+        </q-menu>
+      </q-btn>
     </div>
 
-    <q-btn
-      v-if="shown < entries.length"
-      flat
-      dense
-      round
-      icon="more_horiz"
-      class="ribbon-overflow"
-      aria-label="More commands"
-    >
-      <q-menu anchor="bottom right" self="top right" class="above-concierge">
-        <q-list dense class="ribbon-overflow-menu">
-          <template v-for="group in overflowGroups" :key="group.label">
-            <q-item-label header class="ribbon-overflow-section">{{ group.label }}</q-item-label>
-            <q-item v-if="group.title" dense class="ribbon-overflow-title">
-              <q-item-section>{{ group.title }}</q-item-section>
-            </q-item>
-
-            <template v-for="entry in group.entries" :key="entry.key">
-              <q-separator v-if="entry.item.kind === 'separator'" />
-
-              <q-item v-else-if="entry.item.kind === 'team-switcher'" clickable :disable="teams.length === 0">
-                <q-item-section v-if="entry.item.icon" avatar>
-                  <q-icon :name="entry.item.icon" />
-                </q-item-section>
-                <q-item-section>{{ entry.item.label }}</q-item-section>
-                <q-item-section side>
-                  <q-icon name="chevron_right" />
-                </q-item-section>
-
-                <q-menu anchor="top start" self="top end" class="above-concierge">
-                  <RibbonTeamList @pick="board.openTeam" />
-                </q-menu>
-              </q-item>
-
-              <q-item
-                v-else
-                v-close-popup
-                clickable
-                :disable="needsTeam(entry.item)"
-                @click="run(entry.item)"
-              >
-                <q-item-section v-if="entry.item.icon" avatar>
-                  <q-icon :name="entry.item.icon" />
-                </q-item-section>
-                <q-item-section>
-                  <q-item-label>{{ entry.item.label }}</q-item-label>
-                  <!-- A disabled row in a menu fires no tooltip either, so its reason is a caption,
-                       as in the phone menu. -->
-                  <q-item-label v-if="needsTeam(entry.item)" caption>{{ tooltipFor(entry.item) }}</q-item-label>
-                </q-item-section>
-                <q-item-section v-if="badgeFor(entry.item)" side>
-                  <q-badge
-                    color="warning"
-                    text-color="dark"
-                    :aria-label="badgeFor(entry.item)?.label"
-                  >{{ badgeFor(entry.item)?.text }}</q-badge>
-                </q-item-section>
-              </q-item>
-            </template>
-          </template>
-        </q-list>
-      </q-menu>
-    </q-btn>
+    <div ref="end" class="ribbon-end" data-test="ribbon-cluster">
+      <slot name="end" />
+    </div>
   </div>
 </template>
 
@@ -266,6 +321,34 @@ const overflowGroups = computed(() => {
   background: var(--os-chrome);
   color: var(--os-ink-muted);
   border-bottom: 1px solid var(--os-rule-strong);
+}
+
+/* The logo at the left and the cluster at the end never shrink: the commands between them are what
+   gives way, into the overflow menu. */
+.ribbon-start,
+.ribbon-end {
+  flex: none;
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.ribbon-start:not(:empty) {
+  padding-right: 8px;
+}
+
+.ribbon-end {
+  margin-left: auto;
+  padding-left: 8px;
+  gap: 4px;
+}
+
+.ribbon-commands {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
 }
 
 /* Clipped rather than scrolled: what does not fit is in the overflow menu, and a sideways

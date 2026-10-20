@@ -24,6 +24,8 @@ const EntryWidth = 100;
 const entries = ribbonEntries(Ribbon);
 
 let barWidth = 0;
+/** The right cluster's width (version, live chip, Needs you, gauge, account), when a case has one. */
+let clusterWidth = 0;
 
 beforeEach(() => {
   setActivePinia(createPinia());
@@ -33,6 +35,10 @@ beforeEach(() => {
   });
 
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this.classList.contains('ribbon-end')) {
+      return { left: 0, right: clusterWidth, top: 0, bottom: 0, width: clusterWidth, height: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+    }
+
     const index = this.classList.contains('ribbon-entry')
       ? [...(this.parentElement?.children ?? [])].indexOf(this)
       : -1;
@@ -43,6 +49,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  clusterWidth = 0;
   vi.restoreAllMocks();
   document.body.innerHTML = '';
 });
@@ -100,6 +107,62 @@ describe('the command bar', () => {
     await flushPromises();
 
     expect(wrapper.emitted('action')).toEqual([[DocumentsAction]]);
+  });
+});
+
+describe('the one header row', () => {
+  async function withCluster(width: number, cluster: number): Promise<VueWrapper> {
+    barWidth = width;
+    clusterWidth = cluster;
+
+    const wrapper = mount(RibbonBar, {
+      attachTo: document.body,
+      slots: {
+        start: '<a data-test="logo">logo</a>',
+        end: '<span data-test="cluster">cluster</span>',
+      },
+    });
+    await flushPromises();
+
+    return wrapper as VueWrapper;
+  }
+
+  /**
+   * THE OVERFLOW COUNT RESERVES THE CLUSTER. A bar exactly as wide as every command fits them all
+   * alone; with a 250px cluster at its end the same bar keeps only what fits beside it, the
+   * overflow button's 40px reserved too: (1000 - 250 - 40) / 100 = 7.
+   */
+  it('fits the commands into the room the cluster leaves', async () => {
+    const width = entries.length * EntryWidth;
+
+    expect(visible(await withCluster(width, 0))).toHaveLength(entries.length);
+    document.body.innerHTML = '';
+
+    const narrow = await withCluster(1000, 250);
+    expect(visible(narrow)).toHaveLength(7);
+    expect(narrow.find('[aria-label="More commands"]').exists()).toBe(true);
+  });
+
+  it('puts the logo at the start and the cluster at the end, outside the commands toolbar', async () => {
+    const wrapper = await withCluster(entries.length * EntryWidth, 0);
+    const row = wrapper.find('.ribbon');
+    const parts = row.findAll(':scope > div').map((part) => part.classes()[0]);
+
+    expect(parts).toEqual(['ribbon-start', 'ribbon-commands', 'ribbon-end']);
+    expect(row.find('.ribbon-start [data-test="logo"]').exists()).toBe(true);
+    expect(row.find('.ribbon-end [data-test="cluster"]').exists()).toBe(true);
+    expect(row.find('[role="toolbar"] [data-test="cluster"]').exists()).toBe(false);
+  });
+
+  /** The phone row: the logo and the cluster, no commands - the drawer lists them. */
+  it('renders no commands when told the row is a phone row', async () => {
+    barWidth = 390;
+    const wrapper = mount(RibbonBar, { props: { commands: false }, slots: { end: '<span data-test="cluster" />' } });
+    await flushPromises();
+
+    expect(wrapper.findAll('.ribbon-entry')).toHaveLength(0);
+    expect(wrapper.find('[role="toolbar"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="cluster"]').exists()).toBe(true);
   });
 });
 

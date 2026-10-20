@@ -60,14 +60,14 @@ import { createPinia, setActivePinia } from 'pinia';
 import { createMemoryHistory, createRouter } from 'vue-router';
 import MainLayout from '../MainLayout.vue';
 import { useConsoleStore } from '../../stores/console';
-import { useKanbanStore } from '../../stores/kanban';
 import { useTerminalDisplayStore } from '../../stores/terminalDisplay';
 import ConciergePanel from '../../components/ConciergePanel.vue';
 import RibbonBar from '../../components/RibbonBar.vue';
 import SitesDialog from '../../components/SitesDialog.vue';
 import TeamGitDialog from '../../components/TeamGitDialog.vue';
+import TeamSettingsDialog from '../../components/TeamSettingsDialog.vue';
 import { useWorkflowNavStore } from '../../stores/workflowNav';
-import { Ribbon, SitesAction, TeamSitesAction, needsActiveWorkTeam } from '../../lib/ribbon';
+import { Ribbon, SitesAction, TeamBoardAction, TeamSitesAction, needsActiveWorkTeam } from '../../lib/ribbon';
 import type { Team, TeamId } from '../../api/types';
 import { resetBody } from '../../test/mountQuasar';
 
@@ -329,14 +329,12 @@ describe('MainLayout ribbon actions', () => {
   async function ribbonAction(action: string) {
     const wrapper = await mountShell([team], team.id);
     const board = useConsoleStore();
-    const kanban = useKanbanStore();
     const pullRepoStatus = vi.spyOn(board, 'pullRepoStatus').mockResolvedValue();
-    const openForTeam = vi.spyOn(kanban, 'openForTeam').mockImplementation(() => {});
 
     wrapper.findComponent(RibbonBar).vm.$emit('action', action);
     await flushPromises();
 
-    return { wrapper, pullRepoStatus, openForTeam };
+    return { wrapper, pullRepoStatus };
   }
 
   // A dialog opened from the ribbon painted behind an open panel (7000 over a dialog's 6000) and,
@@ -383,13 +381,16 @@ describe('MainLayout ribbon actions', () => {
   });
 
   /**
-   * `team-kanban` opens no dialog: it selects the Kanban tab pre-filtered to the team whose ribbon
-   * was used.
+   * Active Team › Board opens no dialog: it is the active team's board, the door its console tab is.
+   * There is no ribbon Kanban; the strip's Kanban tab opens it filtered to the active team.
    */
-  it('opens the board filtered to the active team on team-kanban', async () => {
-    const { wrapper, openForTeam } = await ribbonAction('team-kanban');
+  it('opens the active team\'s board on Board', async () => {
+    const { wrapper } = await ribbonAction(TeamBoardAction);
+    const board = useConsoleStore();
 
-    expect(openForTeam).toHaveBeenCalledWith('alpha');
+    expect(board.view).toBe('board');
+    expect(board.activeWorkTeamId).toBe('alpha');
+    expect(wrapper.findComponent(TeamSettingsDialog).props('modelValue')).toBe(false);
 
     wrapper.unmount();
   });
@@ -412,11 +413,12 @@ describe('MainLayout ribbon actions', () => {
     wrapper.unmount();
   });
 
-  /** `team-` is the prefix that means "needs an active team", and the button inherits it. */
-  it('keeps team-kanban a ribbon action that needs an active team', () => {
+  /** `team-` is the prefix that means "needs an active team", and Board inherits it. */
+  it('keeps Board a ribbon action that needs an active team, and offers no ribbon Kanban', () => {
     const actions = Ribbon.tabs.flatMap((tab) => tab.items.map((item) => item.action));
 
-    expect(actions).toContain('team-kanban');
-    expect(needsActiveWorkTeam('team-kanban', undefined)).toBe(true);
+    expect(actions).toContain(TeamBoardAction);
+    expect(actions).not.toContain('team-kanban');
+    expect(needsActiveWorkTeam(TeamBoardAction, undefined)).toBe(true);
   });
 });

@@ -4,7 +4,6 @@ import { storeToRefs } from 'pinia';
 import { useQuasar } from 'quasar';
 import { useRouter } from 'vue-router';
 import { useConsoleStore } from '../stores/console';
-import { useKanbanStore } from '../stores/kanban';
 import { useWorkflowNavStore } from '../stores/workflowNav';
 import { asDocumentsFolderKey, type DocumentsFolderKey, type TeamId } from '../api/types';
 import { useSessionStore } from '../stores/session';
@@ -43,6 +42,8 @@ import ConnectionsDialog from '../components/ConnectionsDialog.vue';
 import FirstRunGuide from '../components/FirstRunGuide.vue';
 import CommandPalette from '../components/CommandPalette.vue';
 import { PaletteShortcut } from '../lib/palette';
+import { bundleBuild, releaseLabel } from '../lib/buildInfo';
+import { headerFit as fitHeader, keepThrough, nextGiveWay } from '../lib/headerFit';
 import { callbackOutcome, type CallbackOutcome } from '../lib/connections';
 import { announceProviderReturn, leaveForProvider } from '../lib/providerReturn';
 import { goTo } from '../lib/browserNavigation';
@@ -53,17 +54,16 @@ import {
   OutcomesAction,
   PluginsAction,
   RepositoriesAction,
+  Ribbon,
   SitesAction,
   SolutionsAction,
+  TeamBoardAction,
   TeamSitesAction,
   TenantSettingsAction,
 } from '../lib/ribbon';
 
 const board = useConsoleStore();
 const { connected } = storeToRefs(board);
-
-/** The Kanban tab's state. The shell only ever SELECTS it; the board itself lives on the page. */
-const kanban = useKanbanStore();
 
 const session = useSessionStore();
 const router = useRouter();
@@ -292,12 +292,11 @@ async function teamCreated(id: TeamId) {
  * not handle is ignored rather than thrown - the toolbar is hand-edited, and a stale name in it
  * should cost a dead button, not the page.
  *
- * Settings and Members are the same dialog opened on different tabs, not two dialogs: they show
- * the same team and would otherwise drift into two answers to "what is this team".
+ * Settings opens on its General tab; the team's members are its Members tab, one dialog for "what
+ * is this team". Board is not a dialog: it is the team's board.
  */
 const teamSettingsTabs: Record<string, 'general' | 'members'> = {
   'team-settings': 'general',
-  'team-members': 'members',
 };
 
 /**
@@ -325,10 +324,11 @@ function onRibbonAction(action: string) {
     return;
   }
 
-  // THE KANBAN ICON IS NOT A DIALOG. It selects the top-level Kanban tab and pre-applies
-  // this team as the board's filter - the board is one page per tenant, and the ribbon button is
-  // the team-shaped way in rather than a per-team board of its own.
-  if (action === 'team-kanban') kanban.openForTeam(board.activeWorkTeamId);
+  // BOARD IS NOT A DIALOG: the active team's board, the same door its console tab is. There is no
+  // Kanban here - the console strip's Kanban tab opens it filtered to the active team.
+  if (action === TeamBoardAction) {
+    if (board.activeWorkTeamId) workflowNav.openBoard(board.activeWorkTeamId);
+  }
   else if (action === 'team-git') gitOpen.value = true;
   else if (action === 'team-reset') resetOpen.value = true;
   else if (action === TeamSitesAction) openSites(board.activeWorkTeamId || null);
@@ -384,6 +384,32 @@ function openSites(team: TeamId | null) {
  */
 const shortName = computed(() => session.user?.email.split('@')[0] ?? '');
 
+/** The live chip's word, said on the chip, or in its tooltip when the chip is a dot. */
+const liveWord = computed(() => (connected.value ? 'live' : 'offline'));
+
+/** The logo's tooltip: the product and which build this is, the version the row no longer carries. */
+const brandTooltip = `${productTitle} ${releaseLabel(bundleBuild.version)}`;
+
+/**
+ * What of the right cluster the one header row carries (`lib/headerFit.ts`). Each fitting the
+ * ribbon reports that keeps fewer than New Team through Backlog takes one more step; a wider window
+ * starts again from none, and the ribbon's next fitting takes back the steps it still needs.
+ */
+const giveWay = ref(0);
+const mustKeep = keepThrough(Ribbon);
+const headerFit = computed(() => fitHeader(giveWay.value, $q.screen.lt.sm));
+
+function onRibbonFit(shown: number) {
+  giveWay.value = nextGiveWay(giveWay.value, shown, mustKeep);
+}
+
+watch(
+  () => $q.screen.width,
+  (width, before) => {
+    if (width > before) giveWay.value = 0;
+  },
+);
+
 async function signOut() {
   // The redirect happens whether or not the request did. `session.signOut()` clears the local user
   // in a finally but still rethrows, so a network-level failure - the ordinary case on a phone -
@@ -410,162 +436,174 @@ async function signOut() {
          on a light console and the dark surface on a dark one - both tokens, so a theme change
          reaches the header with nothing here knowing the values. -->
     <q-header elevated class="app-header" :class="{ 'app-header-dark': $q.dark.isActive }">
-      <q-toolbar>
-        <!-- Phone-only. The ribbon does not fit below `sm` (600px); this is the door into the
-             same commands as a list. Round + dense keeps the tap target without crowding the
-             logo beside it. -->
-        <q-btn
-          v-if="$q.screen.lt.sm"
-          flat
-          dense
-          round
-          icon="menu"
-          :aria-label="ribbonMenuOpen ? 'Close menu' : 'Open menu'"
-          :aria-expanded="ribbonMenuOpen ? 'true' : 'false'"
-          aria-controls="ribbon-menu"
-          @click="ribbonMenuOpen = !ribbonMenuOpen"
-        />
+      <!-- ONE ROW, 44px: the logo, the ribbon's commands, and the right cluster at its end. The
+           brand row it replaced, the ribbon and the console strip spent about 150px before the
+           first card. The ribbon reserves the cluster's width before it fits its commands, so what
+           gives way is a command into the overflow menu, never the cluster.
 
-        <!-- The mark goes home. A board with no way back to the front page is how someone who
-             signed out on the landing page ends up with two apps that do not know about each
-             other. -->
-        <q-toolbar-title class="row items-center no-wrap">
-          <router-link to="/" class="brand-link" :aria-label="`${productTitle} home`">
+           Below `sm` the same row carries no commands - the hamburger opens them as a list - and
+           the header shrinks to it. One header element: a QLayout computes ONE header offset. -->
+      <RibbonBar :commands="!$q.screen.lt.sm" @action="onRibbonAction" @fit="onRibbonFit">
+        <template #start>
+          <!-- Phone-only. The ribbon does not fit below `sm` (600px); this is the door into the
+               same commands as a list. -->
+          <q-btn
+            v-if="$q.screen.lt.sm"
+            flat
+            dense
+            round
+            icon="menu"
+            class="q-mr-xs"
+            :aria-label="ribbonMenuOpen ? 'Close menu' : 'Open menu'"
+            :aria-expanded="ribbonMenuOpen ? 'true' : 'false'"
+            aria-controls="ribbon-menu"
+            @click="ribbonMenuOpen = !ribbonMenuOpen"
+          />
+
+          <!-- The mark goes home. Which build this is lives in its tooltip, so the version needs no
+               room on the bar. -->
+          <router-link to="/" class="brand-link" :aria-label="`${productTitle} home`" data-test="brand-link">
             <img :src="productLogoFor($q.dark.isActive)" :alt="productTitle" width="1066" height="365" />
+            <q-tooltip anchor="bottom left" self="top left" :offset="[0, 6]">{{ brandTooltip }}</q-tooltip>
           </router-link>
-          <!-- Which build this is, beside the mark. It gives way first on a narrow bar. -->
-          <VersionTag class="header-version" />
+        </template>
+
+        <template #end>
+          <!-- Which build this is. The first thing to leave the row when it is short of room: it
+               is under the logo's tooltip and in the account menu as well. -->
+          <VersionTag v-if="headerFit.version" class="header-version" />
           <!-- "Update available" when the release check found a newer release; nothing otherwise. -->
           <UpdateNotice />
-        </q-toolbar-title>
 
-        <!--
-          Live or not, stated. A board that has quietly stopped receiving pushes
-          looks exactly like a board where nothing is happening, and the two want
-          very different reactions from the person looking at it.
+          <!--
+            Live or not, stated. A board that has quietly stopped receiving pushes looks exactly
+            like a board where nothing is happening, and the two want very different reactions.
+            There is deliberately NO refresh button: a manual refresh lets a broken push hide
+            behind a click.
 
-          There is deliberately NO refresh button. Not an oversight: a manual
-          refresh lets a broken push hide behind a click, and this board's whole
-          claim is that it does not need one.
-        -->
-        <!-- The brand orange when live - the one accent the header carries - and an outline when
-             not, so offline reads as ABSENT rather than as a second colour to decode. -->
-        <q-chip
-          dense
-          class="live-chip"
-          :class="{ 'live-chip-on': connected }"
-          :icon="connected ? 'sync' : 'sync_disabled'"
-          :label="connected ? 'live' : 'offline'"
-        />
+            The brand orange when live and an outline when not, so offline reads as ABSENT rather
+            than as a second colour to decode. Short of room it is a dot, the word in its tooltip.
+          -->
+          <q-chip
+            dense
+            class="live-chip"
+            :class="{ 'live-chip-on': connected, 'live-chip-dot': !headerFit.liveWord }"
+            :icon="connected ? 'sync' : 'sync_disabled'"
+            :label="headerFit.liveWord ? liveWord : undefined"
+            :aria-label="liveWord"
+            data-test="live-chip"
+          >
+            <q-tooltip v-if="!headerFit.liveWord">{{ liveWord }}</q-tooltip>
+          </q-chip>
 
-        <!-- One control, not a name beside a logout icon. The account is a place you go rather
-             than a label with a button next to it, and the profile has nowhere else to live. -->
-        <q-btn-dropdown
-          v-if="session.user"
-          flat
-          dense
-          no-caps
-          class="q-ml-sm user-menu"
-          content-class="above-concierge"
-          :aria-label="`Account: ${session.user.email}`"
-        >
-          <template #label>
-            <q-icon name="account_circle" size="20px" />
-            <!-- The name hides below 600px so the toolbar does not crowd on a phone; the icon and
-                 the caret remain, which is still a full tap target. -->
-            <span class="gt-xs q-ml-xs">{{ shortName }}</span>
-          </template>
+          <!-- What is waiting on a person, as one count, left of the gauge. People only, as its route is. -->
+          <NeedsYouControl v-if="session.user" />
+          <!-- The activity monitor: the instance's load as one gauge, its figures a click away.
+               People only, as its route is. -->
+          <CapacityMonitor v-if="session.user" />
 
-          <q-list>
-            <q-item class="text-caption os-text-muted">
-              <q-item-section>{{ session.user.email }}</q-item-section>
-            </q-item>
-
-            <q-separator />
-
-            <!-- A DISPLAY preference, which is why it is here rather than in the ribbon: it is
-                 about this browser's view rather than about a team or the tenant, and it sits
-                 beside the other thing in this menu that is about you. -->
-            <q-item v-close-popup clickable @click="minimizeConciergeFor(() => (boardDisplayOpen = true))">
-              <q-item-section avatar>
-                <q-icon name="dashboard_customize" />
-              </q-item-section>
-              <q-item-section>Board display</q-item-section>
-            </q-item>
-
-            <!-- Theme, beside Board display for the same reason: it is about you. It names what is on
-                 screen and opens Themes, where it is chosen and saved for the person. -->
-            <q-item
-              v-close-popup
-              clickable
-              data-test="theme-open"
-              @click="minimizeConciergeFor(() => (themesOpen = true))"
+            <!-- One control, not a name beside a logout icon. The account is a place you go rather
+                 than a label with a button next to it, and the profile has nowhere else to live. -->
+            <q-btn-dropdown
+              v-if="session.user"
+              flat
+              dense
+              no-caps
+              class="user-menu"
+              content-class="above-concierge"
+              :aria-label="`Account: ${session.user.email}`"
             >
-              <q-item-section avatar>
-                <q-icon name="contrast" />
-              </q-item-section>
-              <q-item-section>Theme: {{ themeLabel }}</q-item-section>
-            </q-item>
+              <template #label>
+                <q-icon name="account_circle" size="20px" />
+                <!-- The name hides below 600px so the toolbar does not crowd on a phone; the icon and
+                     the caret remain, which is still a full tap target. -->
+                <span class="gt-xs q-ml-xs">{{ shortName }}</span>
+              </template>
 
-            <!-- The first-run guide, again: its own text says this is where it lives once dismissed. -->
-            <q-item
-              v-close-popup
-              clickable
-              data-test="account-first-run-guide"
-              @click="minimizeConciergeFor(() => (firstRunGuideOpen = true))"
-            >
-              <q-item-section avatar>
-                <q-icon name="flag" />
-              </q-item-section>
-              <q-item-section>Getting started</q-item-section>
-            </q-item>
+              <q-list>
+                <q-item class="text-caption os-text-muted">
+                  <q-item-section>{{ session.user.email }}</q-item-section>
+                </q-item>
 
-            <!-- The command palette, and the one place on the bar its shortcut is said. -->
-            <q-item
-              v-close-popup
-              clickable
-              data-test="account-command-palette"
-              @click="paletteOpen = true"
-            >
-              <q-item-section avatar>
-                <q-icon name="search" />
-              </q-item-section>
-              <q-item-section>Find anything</q-item-section>
-              <q-item-section side>
-                <kbd class="account-shortcut" data-test="account-palette-shortcut">{{ PaletteShortcut }}</kbd>
-              </q-item-section>
-            </q-item>
+                <!-- Which build this is: off the bar, here and under the logo's tooltip (and in Updates). -->
+                <q-item class="text-caption os-text-muted" data-test="account-version">
+                  <q-item-section>
+                    <VersionTag />
+                  </q-item-section>
+                </q-item>
 
-            <q-item v-close-popup clickable @click="minimizeConciergeFor(() => (profileOpen = true))">
-              <q-item-section avatar>
-                <q-icon name="manage_accounts" />
-              </q-item-section>
-              <q-item-section>User profile</q-item-section>
-            </q-item>
+                <q-separator />
 
-            <q-item v-close-popup clickable @click="signOut">
-              <q-item-section avatar>
-                <q-icon name="logout" />
-              </q-item-section>
-              <q-item-section>Log out</q-item-section>
-            </q-item>
-          </q-list>
-        </q-btn-dropdown>
+                <!-- A DISPLAY preference, which is why it is here rather than in the ribbon: it is
+                     about this browser's view rather than about a team or the tenant, and it sits
+                     beside the other thing in this menu that is about you. -->
+                <q-item v-close-popup clickable @click="minimizeConciergeFor(() => (boardDisplayOpen = true))">
+                  <q-item-section avatar>
+                    <q-icon name="dashboard_customize" />
+                  </q-item-section>
+                  <q-item-section>Board display</q-item-section>
+                </q-item>
 
-        <!-- What is waiting on a person, as one count, left of the gauge. People only, as its route is. -->
-        <NeedsYouControl v-if="session.user" />
-        <!-- The activity monitor, to the right of the person's name: the instance's load as one
-             gauge, its figures a click away. People only, as its route is. -->
-        <CapacityMonitor v-if="session.user" />
-      </q-toolbar>
+                <!-- Theme, beside Board display for the same reason: it is about you. It names what is on
+                     screen and opens Themes, where it is chosen and saved for the person. -->
+                <q-item
+                  v-close-popup
+                  clickable
+                  data-test="theme-open"
+                  @click="minimizeConciergeFor(() => (themesOpen = true))"
+                >
+                  <q-item-section avatar>
+                    <q-icon name="contrast" />
+                  </q-item-section>
+                  <q-item-section>Theme: {{ themeLabel }}</q-item-section>
+                </q-item>
 
-      <!-- The application bar, inside the header rather than beside it: a QLayout computes ONE
-           header offset, so a second QHeader would leave the page sliding under whichever of them
-           it did not measure. Being in here also means it stays put while the board scrolls.
-           Unmounted below `sm` rather than hidden: a `display: none` strip still occupies the
-           header box QLayout measured, and that is how a whole panel lands one viewport below
-           the fold while every test stays green. -->
-      <RibbonBar v-if="!$q.screen.lt.sm" @action="onRibbonAction" />
+                <!-- The first-run guide, again: its own text says this is where it lives once dismissed. -->
+                <q-item
+                  v-close-popup
+                  clickable
+                  data-test="account-first-run-guide"
+                  @click="minimizeConciergeFor(() => (firstRunGuideOpen = true))"
+                >
+                  <q-item-section avatar>
+                    <q-icon name="flag" />
+                  </q-item-section>
+                  <q-item-section>Getting started</q-item-section>
+                </q-item>
+
+                <!-- The command palette, and the one place on the bar its shortcut is said. -->
+                <q-item
+                  v-close-popup
+                  clickable
+                  data-test="account-command-palette"
+                  @click="paletteOpen = true"
+                >
+                  <q-item-section avatar>
+                    <q-icon name="search" />
+                  </q-item-section>
+                  <q-item-section>Find anything</q-item-section>
+                  <q-item-section side>
+                    <kbd class="account-shortcut" data-test="account-palette-shortcut">{{ PaletteShortcut }}</kbd>
+                  </q-item-section>
+                </q-item>
+
+                <q-item v-close-popup clickable @click="minimizeConciergeFor(() => (profileOpen = true))">
+                  <q-item-section avatar>
+                    <q-icon name="manage_accounts" />
+                  </q-item-section>
+                  <q-item-section>User profile</q-item-section>
+                </q-item>
+
+                <q-item v-close-popup clickable @click="signOut">
+                  <q-item-section avatar>
+                    <q-icon name="logout" />
+                  </q-item-section>
+                  <q-item-section>Log out</q-item-section>
+                </q-item>
+              </q-list>
+            </q-btn-dropdown>
+        </template>
+      </RibbonBar>
     </q-header>
     <StatusStrip />
 
@@ -736,20 +774,14 @@ async function signOut() {
   display: block;
 }
 
-.q-toolbar__title .header-version {
-  margin-left: 10px;
+.header-version {
+  margin-right: 4px;
   flex: 0 1 auto;
 }
 
-/* A phone bar (below Quasar's sm) also carries the menu button, the live chip and the account.
-   Measured at 390px wide: a release (2026.09.23.1) fits whole at this size and ellipsised at the
-   desktop one; a dev build's longer string ellipsises, and its hover and aria-label still say it.
-   Under the title's class so it outranks VersionTag's own rule rather than tying with it. */
-@media (max-width: 599.98px) {
-  .q-toolbar__title .header-version {
-    margin-left: 6px;
-    font-size: 0.66rem;
-  }
+/* The live chip short of room: the dot of its colour and its icon, the word in its tooltip. */
+.live-chip-dot {
+  padding: 0 4px;
 }
 
 .user-menu {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { EndingFact } from '../lib/states';
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useQuasar } from 'quasar';
 import { useRouter } from 'vue-router';
@@ -20,6 +20,7 @@ import SolutionBlockedBanner from '../components/SolutionBlockedBanner.vue';
 import TellManagerBox from '../components/TellManagerBox.vue';
 import TeamSiteLinks from '../components/TeamSiteLinks.vue';
 import { panelPath } from '../lib/solutionPanel';
+import { stripScrollToShow } from '../lib/consoleStrip';
 import { useKanbanStore } from '../stores/kanban';
 import { useCapacityStore } from '../stores/capacity';
 import { useNeedsYouStore } from '../stores/needsYou';
@@ -251,6 +252,27 @@ async function syncHubTeams() {
  * or a re-filter, the next time somebody wants the board to follow the tab strip. It must not: a
  * board narrowed to Beta stays narrowed to Beta when you go and look at Alpha.
  */
+/**
+ * THE ACTIVE TAB STAYS IN VIEW on a strip that scrolls sideways (a phone): whichever tab or view
+ * became active, from the strip, a link, the palette or a reload, the strip scrolls just far enough
+ * to show it whole. A strip that fits does not scroll, so this moves nothing on a wide screen.
+ */
+const strip = ref<HTMLElement | null>(null);
+
+watch(
+  () => [board.view, kanban.active, activeTeam.value?.id ?? ''].join('|'),
+  async () => {
+    await nextTick();
+    const el = strip.value;
+    const tab = el?.querySelector<HTMLElement>('.console-tab.active');
+    if (!el || !tab) return;
+
+    const left = tab.getBoundingClientRect().left - el.getBoundingClientRect().left + el.scrollLeft;
+    el.scrollLeft = stripScrollToShow(el.scrollLeft, el.clientWidth, left, tab.getBoundingClientRect().width);
+  },
+  { immediate: true },
+);
+
 function selectTeamTab(teamId: TeamId) {
   board.showBoard();
   board.setActiveTeam(teamId);
@@ -421,85 +443,95 @@ onUnmounted(() => {
     </q-banner>
 
     <!-- UNCONDITIONAL. The Teams tab below is permanent, so the strip always holds at least one
-         thing and there is always a way back to a team. -->
-    <div class="console-tabs q-mb-md">
-      <!-- THE TEAMS TAB. First, permanent, and not a team: it has no status chip and no close
-           icon, and selecting it leaves NO ACTIVE TEAM - which is the one way it differs from the
-           Kanban tab beside it, whose whole point is that it is a view change and not a team
-           switch. -->
-      <q-btn
-        unelevated
-        no-caps
-        class="console-tab console-tab--teams"
-        :class="{ active: board.view === 'teams' }"
-        icon="groups"
-        :aria-pressed="board.view === 'teams' ? 'true' : 'false'"
-        @click="board.showTeamsView()"
-      >
-        <span class="console-tab-label">Teams</span>
-      </q-btn>
+         thing and there is always a way back to a team.
 
-      <q-btn
-        v-for="team in openTeams"
-        :key="team.id"
-        unelevated
-        no-caps
-        class="console-tab"
-        :class="{ active: board.view === 'board' && team.id === activeTeam?.id }"
-        @click="selectTeamTab(team.id)"
-      >
-        <span class="console-tab-label">{{ team.name }}</span>
-        <span v-if="teamPaused(team)" class="console-tab-status console-tab-status--paused team-pause-chip">
-          PAUSED
-        </span>
-        <span class="console-tab-status" :class="`console-tab-status--${tabChip(team).token}`">
-          <span
-            v-if="teamRunning(team)"
-            class="container-running-dot"
-            aria-hidden="true"
-          ></span>
-          {{ tabChip(team).text }}
-          <q-tooltip v-if="tabChip(team).text === 'COMPLETED'">{{ EndingFact.workflow }}</q-tooltip>
-        </span>
-        <q-icon
-          name="close"
-          size="16px"
-          class="console-tab-close"
-          aria-label="Close this view"
-          @click.stop="closeTab(team.id)"
-        />
-      </q-btn>
+         THE STRIP SHOWS SCOPE. Left, the places: Teams, then the open team tabs with their chips.
+         Right, at the strip's end, the views of every team at once - Kanban and Monitor - as one
+         segmented control in one style. The active element in either group takes the primary
+         underline the ribbon's active team title uses. On a phone the strip scrolls sideways and
+         keeps the active tab in view. -->
+    <div ref="strip" class="console-tabs q-mb-md">
+      <div class="console-places" role="group" aria-label="Places" data-test="console-places">
+        <!-- THE TEAMS TAB. First, permanent, and not a team: it has no status chip and no close
+             icon, and selecting it leaves NO ACTIVE TEAM - which is the one way it differs from the
+             Kanban tab beside it, whose whole point is that it is a view change and not a team
+             switch. -->
+        <q-btn
+          unelevated
+          no-caps
+          class="console-tab console-tab--teams"
+          :class="{ active: board.view === 'teams' }"
+          icon="groups"
+          :aria-pressed="board.view === 'teams' ? 'true' : 'false'"
+          @click="board.showTeamsView()"
+        >
+          <span class="console-tab-label">Teams</span>
+        </q-btn>
 
-      <!-- THE KANBAN TAB. In the strip, alongside the teams, and NOT one of them: it is one board
-           per tenant, it has no team status chip and it cannot be closed. It is here rather than in
-           a dialog because a board you have to open over your work is a board you stop opening. -->
-      <q-btn
-        unelevated
-        no-caps
-        class="console-tab console-tab--kanban"
-        :class="{ active: kanban.active }"
-        icon="view_kanban"
-        :aria-pressed="kanban.active ? 'true' : 'false'"
-        @click="kanban.showKanban(board.activeWorkTeamId)"
-      >
-        <span class="console-tab-label">Kanban</span>
-      </q-btn>
+        <q-btn
+          v-for="team in openTeams"
+          :key="team.id"
+          unelevated
+          no-caps
+          class="console-tab"
+          :class="{ active: board.view === 'board' && team.id === activeTeam?.id }"
+          @click="selectTeamTab(team.id)"
+        >
+          <span class="console-tab-label">{{ team.name }}</span>
+          <span v-if="teamPaused(team)" class="console-tab-status console-tab-status--paused team-pause-chip">
+            PAUSED
+          </span>
+          <span class="console-tab-status" :class="`console-tab-status--${tabChip(team).token}`">
+            <span
+              v-if="teamRunning(team)"
+              class="container-running-dot"
+              aria-hidden="true"
+            ></span>
+            {{ tabChip(team).text }}
+            <q-tooltip v-if="tabChip(team).text === 'COMPLETED'">{{ EndingFact.workflow }}</q-tooltip>
+          </span>
+          <q-icon
+            name="close"
+            size="16px"
+            class="console-tab-close"
+            aria-label="Close this view"
+            @click.stop="closeTab(team.id)"
+          />
+        </q-btn>
+      </div>
 
-      <!-- THE MONITOR TAB, beside the Kanban and of the same kind: one view of every team, not a
-           team. It shows the work moving - who is told what, who runs, what finishes - as a live
-           graph, and can play the newest stretch of the log back at speed. -->
-      <q-btn
-        unelevated
-        no-caps
-        class="console-tab console-tab--monitor"
-        :class="{ active: board.view === 'monitor' }"
-        icon="hub"
-        :aria-pressed="board.view === 'monitor' ? 'true' : 'false'"
-        data-monitor-tab
-        @click="board.showMonitor()"
-      >
-        <span class="console-tab-label">Monitor</span>
-      </q-btn>
+      <div class="console-views" role="group" aria-label="Views of every team" data-test="console-views">
+        <!-- THE KANBAN TAB. In the strip, and NOT a team: it is one board per tenant, it has no team
+             status chip and it cannot be closed. It is the one door to the Kanban: it opens it
+             filtered to the active team (the ribbon's Kanban button, which did the same, is gone). -->
+        <q-btn
+          unelevated
+          no-caps
+          class="console-tab console-view console-tab--kanban"
+          :class="{ active: kanban.active }"
+          icon="view_kanban"
+          :aria-pressed="kanban.active ? 'true' : 'false'"
+          @click="kanban.showKanban(board.activeWorkTeamId)"
+        >
+          <span class="console-tab-label">Kanban</span>
+        </q-btn>
+
+        <!-- THE MONITOR TAB, beside the Kanban and of the same kind: one view of every team, not a
+             team. It shows the work moving - who is told what, who runs, what finishes - as a live
+             graph, and can play the newest stretch of the log back at speed. -->
+        <q-btn
+          unelevated
+          no-caps
+          class="console-tab console-view console-tab--monitor"
+          :class="{ active: board.view === 'monitor' }"
+          icon="hub"
+          :aria-pressed="board.view === 'monitor' ? 'true' : 'false'"
+          data-monitor-tab
+          @click="board.showMonitor()"
+        >
+          <span class="console-tab-label">Monitor</span>
+        </q-btn>
+      </div>
     </div>
 
     <!-- THE FIRST BRANCH, because the Teams table is the one view that is reachable with no active
@@ -635,7 +667,24 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* The places wrap onto a second line on a wide screen with many teams open; the views stay at the
+   strip's end. */
+.console-places {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex-wrap: wrap;
+}
+
+.console-views {
+  flex: none;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
 }
 
 .console-tab {
@@ -650,25 +699,50 @@ onUnmounted(() => {
   font-weight: 600;
 }
 
-/* Set apart from the team tabs with a rule rather than a colour: it is a different KIND of tab,
-   not a tab in a different state, and colouring it would compete with the status words beside it. */
-.console-tab--kanban {
-  margin-left: 4px;
-  border-left-width: 3px;
-  border-left-color: var(--os-rule-strong);
+/* ONE SEGMENTED CONTROL: the two views share their borders and only the outer corners are round,
+   so they read as one choice of how to look at every team, not as two more places. */
+.console-view {
+  border-radius: 0;
 }
 
-/* The mirror of `--kanban`, and set apart the same way for the same reason. It sits at the other
-   end of the strip, so the rule that separates it faces the team tabs rather than away from them. */
+.console-view + .console-view {
+  margin-left: -1px;
+}
+
+.console-view:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.console-view:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+/* Set apart from the team tabs with a rule rather than a colour: it is a different KIND of tab,
+   not a tab in a different state, and colouring it would compete with the status words beside it. */
 .console-tab--teams {
   margin-right: 4px;
   border-right-width: 3px;
   border-right-color: var(--os-rule-strong);
 }
 
+/* THE ACTIVE ELEMENT, in either group: the primary underline the ribbon's active team title draws
+   (2px, `--os-primary`), inside the tab so the strip does not move when it changes. */
 .console-tab.active {
-  border-color: var(--q-primary);
   color: var(--os-ink);
+  box-shadow: inset 0 -2px 0 var(--os-primary, var(--q-primary));
+}
+
+/* A PHONE: one line that scrolls sideways, the active tab kept in view by the page's script. */
+@media (max-width: 599.98px) {
+  .console-tabs {
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .console-places {
+    flex: none;
+    flex-wrap: nowrap;
+  }
 }
 
 .console-tab-label {

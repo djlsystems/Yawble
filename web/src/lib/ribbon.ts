@@ -84,6 +84,16 @@ export const SitesAction = 'admin-sites';
  */
 export const TeamDocumentsAction = 'team-documents';
 
+/**
+ * Active Team > Board: the active team's board, the member cards its console tab shows. It was
+ * "Members" and opened the same team; it is named for what it is.
+ *
+ * THERE IS NO KANBAN HERE, AND THAT IS ONE DOOR PER VIEW. The console strip's Kanban tab opens the
+ * Kanban filtered to the active team, exactly what the ribbon's Kanban button did (`showKanban`):
+ * the ribbon acts on the team, the strip chooses the view.
+ */
+export const TeamBoardAction = 'team-board';
+
 /** Active Team > Sites, the same screen filtered to the active team. `team-`, so it needs one. */
 export const TeamSitesAction = 'team-sites';
 
@@ -126,14 +136,20 @@ export const Ribbon: RibbonSpec = {
       label: 'Teams',
       items: [{ kind: 'team-switcher', label: 'Choose Team', icon: 'groups', size: 'large' }],
     },
+    /**
+     * Board, Git, Sites, Documents, Settings, Reset - in that order, every one `team-`.
+     *
+     * THE DOCUMENTS PAIR IS DELIBERATE. This Documents opens the explorer at the active team's
+     * folder and needs a team; Projects > Documents below opens the root and needs none, so every
+     * folder - a gone team's included - stays reachable. A shortcut and the door, not a duplicate.
+     */
     {
       id: 'active',
       label: 'Active Team',
       title: 'No team',
       titleFrom: 'active-team',
       items: [
-        { kind: 'button', action: 'team-members', label: 'Members', icon: 'groups', size: 'small' },
-        { kind: 'button', action: 'team-kanban', label: 'Kanban', icon: 'view_kanban', size: 'small' },
+        { kind: 'button', action: TeamBoardAction, label: 'Board', icon: 'groups', size: 'small' },
         { kind: 'button', action: 'team-git', label: 'Git', icon: 'account_tree', size: 'small' },
         { kind: 'button', action: TeamSitesAction, label: 'Sites', icon: 'public', size: 'small' },
         { kind: 'button', action: TeamDocumentsAction, label: 'Documents', icon: 'folder_open', size: 'small' },
@@ -293,4 +309,13 @@ export function fitCount(edges: number[], available: number, overflowWidth: numb
   const fits = edges.findIndex((edge) => edge > room);
 
   return fits === -1 ? edges.length : fits;
+}
+
+/**
+ * The room the commands are fitted into on the one header row: the bar's inner width less the logo
+ * at its start and the right cluster at its end. Neither of those gives way to a command - the
+ * commands spill into the overflow menu first - so their widths are reserved before `fitCount`.
+ */
+export function commandRoom(inner: number, startWidth: number, clusterWidth: number): number {
+  return Math.max(0, inner - startWidth - clusterWidth);
 }

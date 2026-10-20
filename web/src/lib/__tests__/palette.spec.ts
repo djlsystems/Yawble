@@ -60,7 +60,13 @@ describe('the palette matches by words', () => {
   });
 
   it('an exact label ranks above a label it only begins', () => {
-    expect(keys('kanban').slice(0, 2).sort()).toEqual(['action:team-kanban', 'view:kanban']);
+    const crew = source({ teams: [{ id: 'crew', name: 'Kanban Crew', state: null, members: [] }] });
+    expect(keys('kanban', crew).slice(0, 2)).toEqual(['view:kanban', 'team:crew']);
+  });
+
+  /** One door per view: the Kanban is the strip's view, and the ribbon no longer offers a second. */
+  it('offers the Kanban once, as the view', () => {
+    expect(keys('kanban')).toEqual(['view:kanban']);
   });
 
   it('an empty query lists everything in the list order, views first', () => {

@@ -65,8 +65,8 @@ function wrapIndex(wrapper: VueWrapper, label: string, nth = 0): number {
 }
 
 describe('a greyed ribbon command with no team chosen', () => {
-  it('there are seven of them, so the hint is not tested on an empty list', () => {
-    expect(TeamCommands).toHaveLength(7);
+  it('there are six of them, so the hint is not tested on an empty list', () => {
+    expect(TeamCommands).toHaveLength(6);
   });
 
   it('says to pick or create a team, on hover, on every one of them', async () => {
@@ -89,8 +89,8 @@ describe('a greyed ribbon command with no team chosen', () => {
     board.activeTeamId = asTeamId('alpha');
     const wrapper = await render(RibbonBar);
 
-    // Members has no description of its own, so with a team it has no tooltip at all.
-    expect(await hoverText(wrapper, wrapIndex(wrapper, 'Members'))).toBeNull();
+    // Board has no description of its own, so with a team it has no tooltip at all.
+    expect(await hoverText(wrapper, wrapIndex(wrapper, 'Board'))).toBeNull();
   });
 
   it('leaves a command that needs no team saying only what it does', async () => {

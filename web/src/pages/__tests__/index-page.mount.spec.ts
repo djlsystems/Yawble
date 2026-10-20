@@ -112,9 +112,13 @@ async function mountPage(
   return wrapper;
 }
 
-/** The tab strip, one entry per tab, left to right. */
+/** The tab strip, one entry per tab, left to right, across both of its groups. */
 function tabs(page: VueWrapper) {
-  return page.findAll('.console-tabs > .console-tab');
+  return page.findAll('.console-tabs .console-tab');
+}
+
+function labels(group: ReturnType<VueWrapper['find']>) {
+  return group.findAll('.console-tab').map((tab) => tab.find('.console-tab-label').text());
 }
 
 /** The top-level views and blocks in document order, as the tag or class a reader would name. */
@@ -201,6 +205,74 @@ describe('the tab strip', () => {
     expect(setActiveTeam).not.toHaveBeenCalled();
     expect(page.find('[data-monitor-tab]').classes()).toContain('active');
     expect(tabs(page)[1]!.classes()).not.toContain('active');
+  });
+
+  /**
+   * THE STRIP SHOWS SCOPE: the places at the left (Teams, then the open teams), the views of every
+   * team at the right as one segmented control - and nothing else in either.
+   */
+  it('renders two groups: places on the left, and Kanban and Monitor on the right', async () => {
+    const page = await mountPage([team('alpha'), team('beta')]);
+    const strip = page.find('.console-tabs');
+    const groups = strip.findAll(':scope > div');
+
+    expect(groups.map((group) => group.attributes('data-test'))).toEqual(['console-places', 'console-views']);
+    expect(labels(groups[0]!)).toEqual(['Teams', 'Alpha', 'Beta']);
+    expect(labels(groups[1]!)).toEqual(['Kanban', 'Monitor']);
+    expect(groups[1]!.attributes('role')).toBe('group');
+    // One style: both are segments of the same control.
+    expect(groups[1]!.findAll('.console-tab').every((tab) => tab.classes().includes('console-view'))).toBe(true);
+    expect(groups[0]!.findAll('.console-view')).toHaveLength(0);
+  });
+
+  /** One element is active across both groups, whichever group it is in. */
+  it('marks exactly one element active, in either group', async () => {
+    const page = await mountPage([team('alpha'), team('beta')]);
+    const active = () => page.findAll('.console-tab.active').map((tab) => tab.find('.console-tab-label').text());
+
+    expect(active()).toEqual(['Alpha']);
+
+    await page.find('[data-monitor-tab]').trigger('click');
+    expect(active()).toEqual(['Monitor']);
+
+    await page.find('.console-tab--kanban').trigger('click');
+    expect(active()).toEqual(['Kanban']);
+  });
+
+  /**
+   * A PHONE: the strip scrolls sideways and the tab that becomes active is scrolled into view, on the
+   * strip alone. happy-dom lays nothing out, so the strip is 300px wide and each tab 120px, stated.
+   */
+  it('scrolls the strip to keep the active tab in view when it does not fit', async () => {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('console-tabs') ? 300 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const all = [...(this.closest('.console-tabs')?.querySelectorAll('.console-tab') ?? [])];
+      const index = all.indexOf(this);
+      const strip = this.classList.contains('console-tabs') ? (this as HTMLElement) : null;
+      const left = index < 0 ? 0 : index * 120 - (this.closest<HTMLElement>('.console-tabs')?.scrollLeft ?? 0);
+      const width = index < 0 ? (strip ? 300 : 0) : 120;
+      return { left, right: left + width, width, top: 0, bottom: 0, height: 0, x: left, y: 0, toJSON: () => ({}) } as DOMRect;
+    });
+
+    const page = await mountPage([team('alpha'), team('beta'), team('gamma')]);
+    const strip = page.find('.console-tabs').element as HTMLElement;
+
+    // Monitor is the sixth tab: 600px to 720px. Shown whole, its right edge at the strip's end.
+    await page.find('[data-monitor-tab]').trigger('click');
+    await flushPromises();
+    expect(strip.scrollLeft).toBe(720 - 300);
+
+    // Back to Teams, the first: the strip scrolls back to its start.
+    vi.spyOn(board, 'showTeamsView').mockImplementation(() => {
+      board.view = 'teams';
+    });
+    await page.find('.console-tab--teams').trigger('click');
+    await flushPromises();
+    expect(strip.scrollLeft).toBe(0);
+
+    vi.restoreAllMocks();
   });
 
   it('keeps the strip on screen while the board is showing', async () => {

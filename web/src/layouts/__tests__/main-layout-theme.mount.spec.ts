@@ -212,16 +212,16 @@ describe('the theme, from the account menu', () => {
   });
 
   /** The version sits right of the logo, in the same title row, in both themes. */
-  it('shows this build to the right of the logo', async () => {
+  it('shows this build at the start of the right cluster, on the one header row', async () => {
     const wrapper = await mountShell();
-    const title = document.body.querySelector('.q-toolbar__title')!;
-    const version = title.querySelector('.version-tag');
+    const cluster = document.body.querySelector('.q-header .ribbon-end')!;
+    const version = cluster.querySelector('.version-tag');
 
     expect(version?.textContent?.trim()).toBe(releaseLabel(bundleBuild.version));
-    expect(title.querySelector('.brand-link')!.nextElementSibling).toBe(version);
+    expect(cluster.firstElementChild).toBe(version);
 
     await choose(wrapper, 'dark');
-    expect(document.body.querySelector('.q-toolbar__title .version-tag')?.textContent?.trim()).toBe(releaseLabel(bundleBuild.version));
+    expect(document.body.querySelector('.q-header .ribbon-end .version-tag')?.textContent?.trim()).toBe(releaseLabel(bundleBuild.version));
     await choose(wrapper, 'light');
 
     wrapper.unmount();
