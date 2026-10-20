@@ -65,6 +65,8 @@ import { useTerminalDisplayStore } from '../../stores/terminalDisplay';
 import ConciergePanel from '../../components/ConciergePanel.vue';
 import RibbonBar from '../../components/RibbonBar.vue';
 import SitesDialog from '../../components/SitesDialog.vue';
+import TeamGitDialog from '../../components/TeamGitDialog.vue';
+import { useWorkflowNavStore } from '../../stores/workflowNav';
 import { Ribbon, SitesAction, TeamSitesAction, needsActiveWorkTeam } from '../../lib/ribbon';
 import type { Team, TeamId } from '../../api/types';
 import { resetBody } from '../../test/mountQuasar';
@@ -353,6 +355,21 @@ describe('MainLayout ribbon actions', () => {
     expect(panel.props('modelValue')).toBe(false);
     expect(pullRepoStatus).toHaveBeenCalled();
     expect(wrapper.find('.concierge-fab').attributes('aria-label')).toBe('Open the Concierge');
+
+    wrapper.unmount();
+  });
+
+  // Needs you's Open on a merge-ready row: the store makes the team active and asks for its Git dialog.
+  it('opens the Git dialog on the team a link asked for', async () => {
+    const wrapper = await mountShell([team, beta], team.id);
+    vi.spyOn(useConsoleStore(), 'pullRepoStatus').mockResolvedValue();
+
+    useWorkflowNavStore().openGit(beta.id);
+    await flushPromises();
+
+    const git = wrapper.findComponent(TeamGitDialog);
+    expect(git.props('modelValue')).toBe(true);
+    expect(git.props('teamId')).toBe('beta');
 
     wrapper.unmount();
   });

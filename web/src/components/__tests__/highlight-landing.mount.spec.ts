@@ -136,6 +136,25 @@ describe('a Kanban card an address names', () => {
     expect(kanban.filters).toEqual({});
   });
 
+  it('opens the card in its side panel once it has landed, when the link asked for the panel', async () => {
+    setActivePinia(createPinia());
+    const kanban = useKanbanStore();
+    kanban.panelAsk = 'b7';
+    useHighlightStore().askCard('b7');
+    wrapper = mount(KanbanBoard, { attachTo: document.body });
+    await settle();
+
+    expect(flashed(wrapper)).toEqual(['b7']);
+    expect(kanban.selectedId).toBe('b7');
+    expect(kanban.panelAsk).toBe('');
+  });
+
+  it('opens no panel for a card asked for without one', async () => {
+    const kanban = await mountKanban({}, 'b7');
+
+    expect(kanban.selectedId).toBe('');
+  });
+
   it('flashes once and then stops', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     await mountKanban({}, 'b7');

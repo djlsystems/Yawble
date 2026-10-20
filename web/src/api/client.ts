@@ -105,6 +105,8 @@ import type {
   TenantSettings,
   WipView,
   CapacityView,
+  NeedsYouPart,
+  NeedsYouView,
 } from './types'
 
 export type { BacklogDispatchView, BacklogExecutionStats, BacklogItemView } from './types'
@@ -1034,6 +1036,14 @@ export const getWip = () => json<WipView>('/api/wip')
  * (`HumansOnly`); after this one read, each new sample arrives as the hub's `capacityChanged`.
  */
 export const getCapacity = () => json<CapacityView>('/api/capacity')
+
+/**
+ * WHAT IS WAITING ON A PERSON, one part at a time (HumansOnly): `live` is read from memory (decisions,
+ * blocked and failed members, a solution's missing input), `stored` from the stores and the landed
+ * cache (merge-ready items, stranded workflows, unfinished removals). Newest first.
+ */
+export const getNeedsYou = (part: NeedsYouPart) =>
+  json<NeedsYouView>(`/api/needs-you?${new URLSearchParams({ part }).toString()}`)
 
 /**
  * THE INSTANCE'S OWN ID, a GUID written once at its first start, or null when it cannot be told.
