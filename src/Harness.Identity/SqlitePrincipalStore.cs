@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -24,11 +25,25 @@ public sealed class SqlitePrincipalStore : IPrincipalStore
     /// <summary>Absence means the safe value. Only the test fixture asks for anything else.</summary>
     private readonly SqliteDurability _durability;
 
-    public SqlitePrincipalStore(string databasePath, SqliteDurability durability = SqliteDurability.SurvivesPowerLoss)
+    /// <summary>
+    /// How long a principal's <c>last_used_at</c> stands before another request writes it again.
+    /// Every authenticated request touched it under a synchronous write: a member's run makes
+    /// hundreds. The value is a signal that a credential is in use, not a clock of each call.
+    /// </summary>
+    public static readonly TimeSpan TouchInterval = TimeSpan.FromMinutes(1);
+
+    private readonly TimeProvider _clock;
+
+    /// <summary>When each principal's <c>last_used_at</c> was last written by this process.</summary>
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _touched = new(StringComparer.Ordinal);
+
+    public SqlitePrincipalStore(
+        string databasePath, SqliteDurability durability = SqliteDurability.SurvivesPowerLoss, TimeProvider? clock = null)
     {
         _connectionString = SqliteOpen.ConnectionString(databasePath);
 
         _durability = durability;
+        _clock = clock ?? TimeProvider.System;
     }
 
     public async Task<string> MintAsync(
@@ -140,7 +155,14 @@ public sealed class SqlitePrincipalStore : IPrincipalStore
         // AFTER both parses, never before. Stamped first, a row that could not be read still
         // recorded a successful use - and last_used_at is exactly the signal that tells a live
         // credential from an abandoned one in the credential roster.
-        await TouchAsync(connection, id, ct);
+        // ONCE A MINUTE, unless somebody read the value since: `CredentialUseRunner` reads it before
+        // a run and compares after, so a read makes the next request write whatever the clock says.
+        var now = _clock.GetUtcNow();
+        if (!_touched.TryGetValue(id, out var last) || now - last >= TouchInterval)
+        {
+            await TouchAsync(connection, id, now, ct);
+            _touched[id] = now;
+        }
 
         return new Principal(
             id,
@@ -255,6 +277,9 @@ public sealed class SqlitePrincipalStore : IPrincipalStore
     /// </summary>
     public async Task<DateTimeOffset?> LastUsedAtAsync(string id, CancellationToken ct = default)
     {
+        // A reader is watching for the next use: it is written, not held for the interval.
+        _touched.TryRemove(id, out _);
+
         await using var connection = Open();
         await using var command = connection.CreateCommand();
 
@@ -269,11 +294,11 @@ public sealed class SqlitePrincipalStore : IPrincipalStore
     }
 
     private static async Task TouchAsync(
-        SqliteConnection connection, string id, CancellationToken ct)
+        SqliteConnection connection, string id, DateTimeOffset at, CancellationToken ct)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = "UPDATE principals SET last_used_at = $at WHERE id = $id";
-        command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+        command.Parameters.AddWithValue("$at", at.ToString("O"));
         command.Parameters.AddWithValue("$id", id);
 
         await command.ExecuteNonQueryAsync(ct);

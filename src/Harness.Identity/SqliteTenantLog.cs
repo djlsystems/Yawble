@@ -29,6 +29,9 @@ public sealed class SqliteTenantLog : ITenantLog
     /// <summary>Absence means the safe value. Only the test fixture asks for anything else.</summary>
     private readonly SqliteDurability _durability;
 
+    /// <summary>The last count taken, and the highest seq it was taken at.</summary>
+    private (long Highest, long Total) _counted = (-1, 0);
+
     public SqliteTenantLog(string databasePath, SqliteDurability durability = SqliteDurability.SurvivesPowerLoss)
     {
         _connectionString = SqliteOpen.ConnectionString(databasePath);
@@ -164,12 +167,27 @@ public sealed class SqliteTenantLog : ITenantLog
         // The total FIRST, and in the same connection: it is the screen's caption, and reading it
         // after the page would let a write land between the two and report a count the rows do not
         // add up to.
+        // COUNTED ONCE PER APPEND: the highest seq (the primary key, one step) says whether anything
+        // was appended since the last count, and the table is only ever appended to.
         long total;
-
-        await using (var counting = connection.CreateCommand())
+        long highest;
+        await using (var top = connection.CreateCommand())
         {
+            top.CommandText = "SELECT COALESCE(MAX(seq), 0) FROM tenant_events";
+            highest = (long)(await top.ExecuteScalarAsync(ct) ?? 0L);
+        }
+
+        var counted = _counted;
+        if (counted.Highest == highest)
+        {
+            total = counted.Total;
+        }
+        else
+        {
+            await using var counting = connection.CreateCommand();
             counting.CommandText = "SELECT COUNT(*) FROM tenant_events";
             total = (long)(await counting.ExecuteScalarAsync(ct) ?? 0L);
+            _counted = (highest, total);
         }
 
         await using var command = connection.CreateCommand();
