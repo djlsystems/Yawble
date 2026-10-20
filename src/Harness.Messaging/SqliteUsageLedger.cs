@@ -128,6 +128,52 @@ public sealed class SqliteUsageLedger(string databasePath) : IUsageLedger
             page.Count == take ? floor : null);
     }
 
+    public async Task<IReadOnlyList<ContainerUsageRow>> SumForTeamAsync(string team, long floorSeq, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+
+        // THE SAME ANSWER THE LOG'S SUM GIVES, from the ledger's columns: with usage is a run that
+        // carries both an in and an out figure; a combined total (codex) stays out of the in/out
+        // sums and in the without count, summed on its own; billable is the ledger's own weighting.
+        command.CommandText =
+            """
+            SELECT
+                team_id || '/' || member,
+                COALESCE(SUM(CASE WHEN tokens_in IS NOT NULL AND tokens_out IS NOT NULL THEN tokens_in END), 0),
+                COALESCE(SUM(CASE WHEN tokens_in IS NOT NULL AND tokens_out IS NOT NULL THEN tokens_out END), 0),
+                SUM(CASE WHEN tokens_in IS NOT NULL AND tokens_out IS NOT NULL THEN 1 ELSE 0 END),
+                SUM(CASE WHEN tokens_in IS NULL OR tokens_out IS NULL THEN 1 ELSE 0 END),
+                SUM(tokens_combined),
+                COALESCE(SUM(CASE WHEN tokens_in IS NOT NULL AND tokens_out IS NOT NULL THEN tokens_cached_in END), 0),
+                COALESCE(SUM(CASE WHEN tokens_in IS NOT NULL AND tokens_out IS NOT NULL THEN tokens_cache_creation END), 0),
+                COALESCE(SUM(billable), 0)
+            FROM usage_ledger
+            WHERE team_id = $team COLLATE NOCASE AND run_seq > $floor
+            GROUP BY member COLLATE NOCASE
+            """;
+        command.Parameters.AddWithValue("$team", team);
+        command.Parameters.AddWithValue("$floor", floorSeq);
+
+        var rows = new List<ContainerUsageRow>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(new ContainerUsageRow(
+                reader.GetString(0),
+                reader.GetInt64(1),
+                reader.GetInt64(2),
+                checked((int)reader.GetInt64(3)),
+                checked((int)reader.GetInt64(4)),
+                reader.IsDBNull(5) ? null : reader.GetInt64(5),
+                reader.GetInt64(6),
+                reader.GetInt64(7),
+                reader.GetInt64(8)));
+        }
+
+        return rows;
+    }
+
     public async Task<IReadOnlyList<UsageLedgerRow>> ReadTeamRunsAsync(
         string team, long floor, DateTimeOffset from, DateTimeOffset to, IReadOnlyCollection<string> members,
         CancellationToken ct = default)

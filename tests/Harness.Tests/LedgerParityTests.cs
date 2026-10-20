@@ -138,6 +138,41 @@ public sealed class LedgerParityTests : IDisposable
         return new MemberRecentCost(runs.Count, measured.Length, runs.Count - measured.Length, median, "agent");
     }
 
+    [Fact]
+    public async Task The_teams_tokens_tile_reads_the_same_figures_from_the_ledger_as_from_the_log()
+    {
+        var store = new SqliteMessageStore(Database);
+        var ledger = new SqliteUsageLedger(Database);
+
+        var root = await store.AppendAsync(Instruction(Dev, "build it", "console"), Ct);
+        var first = await RunAsync(store, Dev, root.Seq, new { tokensIn = 1000, tokensOut = 200, tokensCachedIn = 5000, tokensCacheCreation = 400, tokensSource = "claude" });
+        var failedDelivery = await store.AppendAsync(Instruction(Dev, "again", "console", root.Seq), Ct);
+        await RunAsync(store, Dev, failedDelivery.Seq, new { tokensIn = (int?)null, tokensOut = (int?)null }, MessageTypes.Failed);
+        var codexDelivery = await store.AppendAsync(Instruction(Dev, "codex", "console", root.Seq), Ct);
+        var batchedDelivery = await store.AppendAsync(Instruction(Dev, "batched", "console", root.Seq), Ct);
+        await RunAsync(store, Dev, codexDelivery.Seq, new { tokensTotal = 777, tokensSource = "codex" });
+        await store.AppendAsync(new NewMessage(MessageTypes.Completed,
+            JsonSerializer.Serialize(new { tokensIn = (int?)null, tokensOut = (int?)null, usageCountedOn = codexDelivery.Seq }),
+            Dev.ToString(), batchedDelivery.Seq), Ct);
+        var estimateDelivery = await store.AppendAsync(Instruction(Dev, "estimate", "console", root.Seq), Ct);
+        await RunAsync(store, Dev, estimateDelivery.Seq, new { tokensIn = 90, tokensOut = 10, tokensSource = UsageSource.ExcludedEstimate });
+        var echoDelivery = await store.AppendAsync(Instruction(Echo, "echo", "console", root.Seq), Ct);
+        await RunAsync(store, Echo, echoDelivery.Seq, new { tokensIn = (int?)null, tokensOut = (int?)null, tokensSource = UsageSource.NoModel });
+        var managerDelivery = await store.AppendAsync(Instruction(Manager, "carry on", "person-1", root.Seq), Ct);
+        await RunAsync(store, Manager, managerDelivery.Seq, new { tokensIn = 300, tokensOut = 100, tokensCachedIn = 999, tokensSource = "claude" });
+
+        foreach (var floor in new[] { 0L, first.Seq })
+        {
+            var fromLog = (await store.SumUsageForTeamAsync("Alpha", floor, Ct)).OrderBy(r => r.Source, StringComparer.OrdinalIgnoreCase).ToList();
+            var fromLedger = (await ledger.SumForTeamAsync("Alpha", floor, Ct)).OrderBy(r => r.Source, StringComparer.OrdinalIgnoreCase).ToList();
+
+            Assert.Equal(fromLog, fromLedger);
+        }
+
+        var dev = Assert.Single(await ledger.SumForTeamAsync("Alpha", 0, Ct), r => r.Source == "Alpha/Dev");
+        Assert.Equal((1000L, 200L, 1, 3, 777L), (dev.TokensIn, dev.TokensOut, dev.RunsWithUsage, dev.RunsWithoutUsage, dev.TokensTotal));
+    }
+
     private static NewMessage Instruction(ContainerId to, string text, string source, long? causation = null) =>
         new(MessageTypes.InstructionFor(to), JsonSerializer.Serialize(new { instruction = text }), source, causation);
 

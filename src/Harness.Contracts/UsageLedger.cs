@@ -13,6 +13,15 @@ public interface IUsageLedger
     /// <paramref name="member"/>'s last <paramref name="max"/> runs, newest first - one row per run,
     /// never a batched run's extra rows. What a member's recent cost reads.
     /// </summary>
+    /// <summary>
+    /// The team's tokens tile: one row per member, over the runs whose <c>run_seq</c> is above
+    /// <paramref name="floorSeq"/>, in the shape the log's own sum answers - a run with both an in
+    /// and an out figure counts as with usage, any other (a combined total, no model, unmeasured) as
+    /// without, the combined and billable sums beside them. Read from the ledger, which the log's
+    /// retention and a Reset never touch, instead of a scan of every terminal row's payload.
+    /// </summary>
+    Task<IReadOnlyList<ContainerUsageRow>> SumForTeamAsync(string team, long floorSeq, CancellationToken ct = default);
+
     Task<IReadOnlyList<UsageLedgerRow>> ReadRecentRunsAsync(
         ContainerId member, int max, CancellationToken ct = default);
 

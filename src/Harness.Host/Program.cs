@@ -2705,8 +2705,14 @@ var registryForPush = app.Services.GetRequiredService<TeamRegistry>();
 // container state, which is a side channel around every gate the routes above enforce - a browser
 // would learn about another team's queue depth and current instruction the moment anything
 // happened there, regardless of what /api/overview and /api/messages are willing to show.
-containers.Changed += snapshot =>
-    Observed.Forget(hub.Clients.Group(snapshot.Team).SendAsync("containerChanged", snapshot), app.Logger, "containerChanged push");
+// COALESCED PER MEMBER: a changed snapshot goes at once, a progress line's unchanged one is held
+// for a quarter of a second and the newest sent once. See SnapshotPushCoalescer.
+var containerPushes = new SnapshotPushCoalescer(
+    snapshot => hub.Clients.Group(snapshot.Team).SendAsync("containerChanged", snapshot),
+    SnapshotPushCoalescer.DefaultWindow,
+    app.Services.GetRequiredService<TimeProvider>(),
+    app.Logger);
+containers.Changed += containerPushes.Offer;
 registryForPush.TeamChanged += team =>
     Observed.Forget(hub.Clients.Group(team.Id).SendAsync("teamChanged", team), app.Logger, "teamChanged push");
 
@@ -5753,7 +5759,7 @@ app.MapGet("/api/teams/{team}/containers/{name}/messages", async (
 // failure wearing a spend number. Historical rows without the keys are missing, not zeros.
 app.MapGet("/api/teams/{team}/tokens", async (
     [Description(Describe.Team)] string team,
-    TeamRegistry teams, IMessageLog log, ContainerHost host, AgentCatalog catalog,
+    TeamRegistry teams, IUsageLedger ledger, ContainerHost host, AgentCatalog catalog,
     CancellationToken ct) =>
 {
     if (teams.ExistingName(team) is not { } stored)
@@ -5766,7 +5772,10 @@ app.MapGet("/api/teams/{team}/tokens", async (
     // replaced - and a second copy is how the next reader ends up being one that does not ask.
     var floor = teams.FloorFor(stored);
 
-    var rows = await log.SumUsageForTeamAsync(stored, floor, ct);
+    // FROM THE LEDGER, NOT A SCAN OF EVERY TERMINAL ROW'S PAYLOAD: the same figures the log's own
+    // sum gives (LedgerParityTests pins the two against each other), over columns that are indexed
+    // and that neither retention nor a Reset ever touch.
+    var rows = await ledger.SumForTeamAsync(stored, floor, ct);
 
     var tokensIn = rows.Sum(r => r.TokensIn);
     var tokensOut = rows.Sum(r => r.TokensOut);
