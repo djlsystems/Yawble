@@ -451,8 +451,8 @@ export class MonitorModel {
   /**
    * THE ACTIVITY PANE'S CLEAR: forget everything the rows applied so far made - the activity list,
    * the workflows, the token figure and its stretch, the rate and each member's runs and tokens -
-   * and keep the teams and members, which the snapshots give. Each member's state, queue and
-   * wakes go back to `teams`, the snapshots held now, so what the forgotten rows moved between
+   * and keep the teams and members, which the snapshots give. Each member's state, queue, last
+   * line and wakes go back to `teams`, the snapshots held now, so what the forgotten rows moved between
    * snapshots goes too. The next row shows as it would in a fresh model; nothing is carried over.
    */
   forget(teams: readonly Team[]) {
@@ -470,6 +470,7 @@ export class MonitorModel {
       member.runs = 0
       member.lastAt = 0
       member.workflow = null
+      member.status = ''
     }
     this.reconcile(teams)
   }

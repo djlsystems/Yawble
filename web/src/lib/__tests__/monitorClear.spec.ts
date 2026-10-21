@@ -37,7 +37,7 @@ function busy(): MonitorModel {
   model.apply(row('agentContainer.completed', 'Alpha/Developer', { tokensIn: 1200, tokensOut: 300 }, 41, '2026-10-21T09:01:00Z'))
   model.apply(row('agentContainer.completed', 'Alpha/Developer', {}, 41, '2026-10-21T09:02:00Z'))
   model.apply(tell(42, '2026-10-21T09:03:00Z', 'Alpha/Manager'))
-  model.applyWorkspace({ team: 'Alpha', member: 'Developer', repo: 'Yawble', at: '2026-10-21T09:03:30Z', files: [{ path: 'web/a.ts', project: 'web', action: 'changed' }], commits: [], more: false })
+  model.applyWorkspace({ team: 'Alpha', member: 'Developer', repo: 'Shop', at: '2026-10-21T09:03:30Z', files: [{ path: 'web/a.ts', project: 'web', action: 'changed' }], commits: [], more: false })
   return model
 }
 
@@ -70,6 +70,25 @@ describe('forgetting what the Monitor holds', () => {
     expect(model.counts()).toMatchObject({ teams: 1, members: 2 })
     // The forgotten instruction had queued the Manager; the snapshot says idle with nothing queued.
     expect(model.members.get('Alpha/Manager')).toMatchObject({ state: 'idle', queued: 0, workflow: null })
+  })
+
+  it('forgets the last line a row said, and keeps the one a snapshot says', () => {
+    const model = busy()
+    model.apply(row('agentContainer.progress', 'Alpha/Developer', { status: 'Writing the spec' }, 41, '2026-10-21T09:04:00Z'))
+    model.apply(row('agentContainer.blocked', 'Alpha/Manager', { reason: 'Waiting on a key' }, 42, '2026-10-21T09:04:10Z'))
+    expect(model.members.get('Alpha/Developer')?.status).toBe('Writing the spec')
+
+    model.forget(teams)
+    expect(model.members.get('Alpha/Developer')?.status).toBe('')
+    expect(model.members.get('Alpha/Manager')?.status).toBe('')
+
+    const [alpha] = teams as unknown as [Team]
+    const said = [{
+      ...alpha,
+      containers: [alpha.containers[0], { ...alpha.containers[1], state: 'Blocked', blocked: 'No key yet' }],
+    }] as unknown as Team[]
+    model.forget(said)
+    expect(model.members.get('Alpha/Developer')?.status).toBe('No key yet')
   })
 
   it('shows the next row as a fresh model shows it', () => {
@@ -114,7 +133,7 @@ describe('the scene on a clear', () => {
     scene.sync(model)
     scene.step(0)
     scene.play([{ kind: 'step', at: { kind: 'member', key: 'Alpha/Developer' }, step: { id: 1, team: 'Alpha', member: 'Developer', run: 9, workflow: 41, at: '2026-10-21T09:03:00Z', kind: 'tool', label: 'Bash', mcpTool: null, count: 1 } }])
-    scene.play(model.applyWorkspace({ team: 'Alpha', member: 'Developer', repo: 'Yawble', at: '2026-10-21T09:03:40Z', files: [{ path: 'web/b.ts', project: 'web', action: 'created' }], commits: [], more: false }))
+    scene.play(model.applyWorkspace({ team: 'Alpha', member: 'Developer', repo: 'Shop', at: '2026-10-21T09:03:40Z', files: [{ path: 'web/b.ts', project: 'web', action: 'created' }], commits: [], more: false }))
     scene.step(16)
     expect(scene.describeNode('w:41')).not.toBeNull()
     expect(scene.shownSteps().length).toBe(1)
