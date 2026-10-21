@@ -29,7 +29,7 @@ tar --exclude=./.git \
     --exclude='./src/*/bin' --exclude='./src/*/obj' \
     --exclude='./tests/*/bin' --exclude='./tests/*/obj' \
     --exclude=./web/node_modules --exclude=./web/dist \
-    --exclude=./.superpowers \
+    --exclude=./.superpowers --exclude=./.claude \
     -cf - . \
 | podman run --rm -i \
     -v harness-testsrc:/src \
