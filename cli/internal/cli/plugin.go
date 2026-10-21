@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -107,33 +108,19 @@ func installFromInstance(cmd *cobra.Command, deps Deps, folder string, force boo
 	}
 	nonce := newNonce()
 	request, _ := json.Marshal(installRequest{Request: nonce, Path: folder, Replace: force})
-	if _, err := e.Exec(ctx, instance.ContainerName, "sh", "-c", installRequestScript, "sh", pluginsRoot, string(request)); err != nil {
+	x := hostExchange{root: pluginsRoot, request: installRequestScript, report: installReportScript, withdraw: installWithdrawScript, poll: rescanPoll}
+	answer, err := x.ask(ctx, e, string(request), nonce, installWait)
+	if errors.Is(err, errNoAnswer) {
+		// A request no Host answered must not be carried out later, by a Host started after an upgrade.
+		return fmt.Errorf("the Host did not answer the install request within %s, and the request was withdrawn. "+
+			"An image from before `plugin install --from-instance` does not answer; `yawble plugin list` shows what the instance holds", installWait)
+	}
+	if err != nil {
 		return err
 	}
-	deadline := time.Now().Add(installWait)
-	for {
-		res, err := e.Exec(ctx, instance.ContainerName, "sh", "-c", installReportScript, "sh", pluginsRoot)
-		if err != nil {
-			return err
-		}
-		var r installReport
-		if json.Unmarshal([]byte(strings.TrimSpace(res.Stdout)), &r) == nil && r.Request == nonce {
-			return r.verdict(out, folder)
-		}
-		if time.Now().After(deadline) {
-			// A request no Host answered must not be carried out later, by a Host started after an upgrade.
-			_, _ = e.Exec(ctx, instance.ContainerName, "sh", "-c", installWithdrawScript, "sh", pluginsRoot, nonce)
-			return fmt.Errorf("the Host did not answer the install request within %s, and the request was withdrawn. "+
-				"An image from before `plugin install --from-instance` does not answer; `yawble plugin list` shows what the instance holds", installWait)
-		}
-		select {
-		case <-ctx.Done():
-			// Interrupted: the request is withdrawn, so a Host started later never carries it out.
-			_, _ = e.Exec(context.WithoutCancel(ctx), instance.ContainerName, "sh", "-c", installWithdrawScript, "sh", pluginsRoot, nonce)
-			return ctx.Err()
-		case <-time.After(rescanPoll):
-		}
-	}
+	var r installReport
+	_ = json.Unmarshal([]byte(answer), &r)
+	return r.verdict(out, folder)
 }
 
 // installRequest is <plugins>/.install; installReport is <plugins>/.install-report.json, the
@@ -497,30 +484,19 @@ func (r hostReport) hiredOn(id string) []string {
 // request, so what is printed is the Host's verdict now and never an older one.
 func rescan(ctx context.Context, e engine.Engine) (hostReport, error) {
 	nonce := newNonce()
-	if _, err := e.Exec(ctx, instance.ContainerName, "sh", "-c", requestScript, "sh", pluginsRoot, nonce); err != nil {
+	// A rescan request left behind is harmless: a Host that finds it later rescans. So no withdraw.
+	x := hostExchange{root: pluginsRoot, request: requestScript, report: reportScript, poll: rescanPoll}
+	answer, err := x.ask(ctx, e, nonce, nonce, rescanWait)
+	if errors.Is(err, errNoAnswer) {
+		return hostReport{}, fmt.Errorf("the Host did not answer the plugin rescan within %s. An image from before `yawble plugin` does not; "+
+			"the files are in place, and `yawble down` then `yawble up` loads them", rescanWait)
+	}
+	if err != nil {
 		return hostReport{}, err
 	}
-	deadline := time.Now().Add(rescanWait)
-	for {
-		res, err := e.Exec(ctx, instance.ContainerName, "sh", "-c", reportScript, "sh", pluginsRoot)
-		if err != nil {
-			return hostReport{}, err
-		}
-		var r hostReport
-		if json.Unmarshal([]byte(strings.TrimSpace(res.Stdout)), &r) == nil && r.Request == nonce {
-			return r, nil
-		}
-		if time.Now().After(deadline) {
-			return hostReport{}, fmt.Errorf("the Host did not answer the plugin rescan within %s. An image from before `yawble plugin` does not; "+
-				"the files are in place, and `yawble down` then `yawble up` loads them", rescanWait)
-		}
-		select {
-		case <-ctx.Done():
-			// A rescan request left behind is harmless: a Host that finds it later rescans.
-			return hostReport{}, ctx.Err()
-		case <-time.After(rescanPoll):
-		}
-	}
+	var r hostReport
+	_ = json.Unmarshal([]byte(answer), &r)
+	return r, nil
 }
 
 // layoutEntry is one plugin directory on the volume.

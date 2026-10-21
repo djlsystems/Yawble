@@ -17,7 +17,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/djlsystems/yawble/cli/internal/engine"
-	"github.com/djlsystems/yawble/cli/internal/instance"
 )
 
 // connectionsRoot is where the CLI and the Host trade connect requests: <data root>/connections,
@@ -613,31 +612,18 @@ func exchangeWithin(ctx context.Context, e engine.Engine, req connectRequest, wa
 	req.Request = newNonce()
 	body, _ := json.Marshal(req)
 	// ON STDIN, never argv: a complete request carries the authorization code.
-	if _, err := e.ExecInput(ctx, instance.ContainerName, string(body)+"\n", "sh", "-c", connectRequestScript, "sh", connectionsRoot); err != nil {
+	x := hostExchange{root: connectionsRoot, request: connectRequestScript, report: connectReportScript, withdraw: connectWithdrawScript, onStdin: true, poll: connectPoll}
+	answer, err := x.ask(ctx, e, string(body), req.Request, wait)
+	if errors.Is(err, errNoAnswer) {
+		return connectReport{}, fmt.Errorf("%w within %s, and the request was withdrawn. "+
+			"An image from before connections does not answer; `yawble update` brings the instance current", errUnanswered, wait)
+	}
+	if err != nil {
 		return connectReport{}, err
 	}
-	deadline := time.Now().Add(wait)
-	for {
-		res, err := e.Exec(ctx, instance.ContainerName, "sh", "-c", connectReportScript, "sh", connectionsRoot)
-		if err != nil {
-			return connectReport{}, err
-		}
-		var r connectReport
-		if json.Unmarshal([]byte(strings.TrimSpace(res.Stdout)), &r) == nil && r.Request == req.Request {
-			return r, nil
-		}
-		if time.Now().After(deadline) {
-			_, _ = e.Exec(ctx, instance.ContainerName, "sh", "-c", connectWithdrawScript, "sh", connectionsRoot, req.Request)
-			return connectReport{}, fmt.Errorf("%w within %s, and the request was withdrawn. "+
-				"An image from before connections does not answer; `yawble update` brings the instance current", errUnanswered, wait)
-		}
-		select {
-		case <-ctx.Done():
-			_, _ = e.Exec(context.WithoutCancel(ctx), instance.ContainerName, "sh", "-c", connectWithdrawScript, "sh", connectionsRoot, req.Request)
-			return connectReport{}, ctx.Err()
-		case <-time.After(connectPoll):
-		}
-	}
+	var r connectReport
+	_ = json.Unmarshal([]byte(answer), &r)
+	return r, nil
 }
 
 func listConnections(ctx context.Context, e engine.Engine) ([]connection, error) {

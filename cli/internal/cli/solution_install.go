@@ -587,34 +587,21 @@ func (in *solutionInstall) askHost(req solutionRequest, wait time.Duration) (int
 		req.Documents = map[string][]string{}
 	}
 	request, _ := json.Marshal(req)
-	if _, err := in.e.Exec(in.ctx, instance.ContainerName, "sh", "-c", solutionRequestScript, "sh", pluginsRoot, string(request)); err != nil {
+	x := hostExchange{root: pluginsRoot, request: solutionRequestScript, report: solutionReportScript, withdraw: solutionWithdrawScript, poll: rescanPoll}
+	answer, err := x.ask(in.ctx, in.e, string(request), req.Request, wait)
+	if errors.Is(err, errNoAnswer) {
+		if req.Action == "preview" {
+			return 0, nil, errNoAnswer
+		}
+		return 0, nil, fmt.Errorf("the Host did not answer the %s request within %s, and the request was withdrawn; "+
+			"the team board shows whether the team was made", req.Action, wait)
+	}
+	if err != nil {
 		return 0, nil, err
 	}
-	deadline := time.Now().Add(wait)
-	for {
-		res, err := in.e.Exec(in.ctx, instance.ContainerName, "sh", "-c", solutionReportScript, "sh", pluginsRoot)
-		if err != nil {
-			return 0, nil, err
-		}
-		var r solutionReport
-		if json.Unmarshal([]byte(strings.TrimSpace(res.Stdout)), &r) == nil && r.Request == req.Request {
-			return r.Status, r.Body, nil
-		}
-		if time.Now().After(deadline) {
-			_, _ = in.e.Exec(context.WithoutCancel(in.ctx), instance.ContainerName, "sh", "-c", solutionWithdrawScript, "sh", pluginsRoot, req.Request)
-			if req.Action == "preview" {
-				return 0, nil, errNoAnswer
-			}
-			return 0, nil, fmt.Errorf("the Host did not answer the %s request within %s, and the request was withdrawn; "+
-				"the team board shows whether the team was made", req.Action, wait)
-		}
-		select {
-		case <-in.ctx.Done():
-			_, _ = in.e.Exec(context.WithoutCancel(in.ctx), instance.ContainerName, "sh", "-c", solutionWithdrawScript, "sh", pluginsRoot, req.Request)
-			return 0, nil, in.ctx.Err()
-		case <-time.After(rescanPoll):
-		}
-	}
+	var r solutionReport
+	_ = json.Unmarshal([]byte(answer), &r)
+	return r.Status, r.Body, nil
 }
 
 // askTeamName asks for the new team's name until the Host accepts one, asking it again about
