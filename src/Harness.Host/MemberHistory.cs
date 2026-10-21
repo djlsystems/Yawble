@@ -21,6 +21,11 @@ namespace Harness.Host;
 /// unnecessary rather than merely skipped. A team the caller cannot see answers the same 404 an
 /// unknown one does.
 /// </para>
+///
+/// <para>
+/// FLOORED BY THE TEAM'S CREATION as well as by the member's own floor, whichever is higher
+/// (<see cref="TeamCreationFloor"/>): what is below it is a same-named predecessor's.
+/// </para>
 /// </summary>
 internal static class MemberHistory
 {
@@ -29,7 +34,7 @@ internal static class MemberHistory
 
     public static async Task<IResult> ReadAsync(
         Principal principal, long? after, long? before, string? team, string? member, int? take,
-        IMessageLog log, TeamAccess access, TeamRegistry teams, CancellationToken ct)
+        IMessageLog log, TeamAccess access, TeamRegistry teams, ITeamStore store, CancellationToken ct)
     {
         if (before is null || string.IsNullOrWhiteSpace(team) || string.IsNullOrWhiteSpace(member))
         {
@@ -69,8 +74,12 @@ internal static class MemberHistory
         // under binary collation, and a type built from what was typed answers 200 over nothing.
         var id = new ContainerId(found.Team, found.Name);
 
+        // THE TEAM'S CREATION IS A FLOOR BENEATH THE MEMBER'S OWN: a member named as a predecessor's
+        // (its Manager, always) never pages into the rows that predecessor wrote.
+        var floor = Math.Max(found.FloorSeq, await TeamCreationFloor.OfAsync(found.Team, store, log, ct) ?? 0);
+
         return Results.Ok(await log.ReadMemberBeforeAsync(
-            id, found.FloorSeq, before.Value, FeedTypes.Explicit,
+            id, floor, before.Value, FeedTypes.Explicit,
             Math.Clamp(take ?? DefaultTake, 1, MaxTake), ct));
     }
 }

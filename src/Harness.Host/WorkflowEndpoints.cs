@@ -1019,9 +1019,10 @@ internal static class WorkflowEndpoints
             long? after,
 
             [Description(
-                "How many of the most recent messages to consider, before the team filter below. Default "
-                + "200, clamped to 2000.\n\nA VIEWER-FACING KNOB rather than tuning: the cap is applied "
-                + "BEFORE filtering to the teams a caller may see, so a quiet member on a busy team drops "
+                "How many of the most recent messages to consider, before the team filter and the creation "
+                + "cut below. Default 200, clamped to 2000.\n\nA VIEWER-FACING KNOB rather than tuning: the cap "
+                + "is applied BEFORE filtering to the teams a caller may see and BEFORE cutting each team's rows "
+                + "at its creation, so a predecessor's rows make the window emptier, never wrong, and a quiet member on a busy team drops "
                 + "out of the window entirely and its card renders empty - which is indistinguishable from "
                 + "having never done anything. Raising this widens how far back the board can reach.")]
             int? take,
@@ -1036,7 +1037,7 @@ internal static class WorkflowEndpoints
             [Description("With `before`: the member's team.")] string? team,
             [Description("With `before`: the member's current identifier.")] string? member,
 
-            HttpContext context, IMessageLog log, TeamAccess access, TeamRegistry teams,
+            HttpContext context, IMessageLog log, TeamAccess access, TeamRegistry teams, ITeamStore store,
             CancellationToken ct) =>
         {
             if (PrincipalClaims.From(context.User) is not { } principal) return Results.Unauthorized();
@@ -1044,7 +1045,7 @@ internal static class WorkflowEndpoints
             if (before is not null || team is not null || member is not null)
             {
                 return await MemberHistory.ReadAsync(
-                    principal, after, before, team, member, take, log, access, teams, ct);
+                    principal, after, before, team, member, take, log, access, teams, store, ct);
             }
 
             // THE CATALOG IS THE SET, not a union over live subscriptions.
@@ -1084,7 +1085,25 @@ internal static class WorkflowEndpoints
                 ? await log.ReadLatestAsync(after ?? 0, types, window, ct)
                 : await log.ReadLatestAsync(after ?? 0, types, effective, window, ct);
 
-            return Results.Ok(messages.Where(m => MessageTeam.Of(m) switch
+            var rows = messages.Select(m => (Message: m, Team: MessageTeam.Of(m))).ToList();
+
+            // EACH TEAM FROM ITS CREATION. The identifier is derived from the name, so a team deleted
+            // and created again under the same name owns every row its predecessor wrote by identifier
+            // alone; what is at or below the position its creation fell at is the predecessor's. Read
+            // once per request for each team the window holds a row of, in its stored spelling; a team
+            // whose creation the store cannot give has no floor rather than a guessed one.
+            var floors = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+            foreach (var named in rows.Select(r => r.Team).OfType<string>().Where(effective.Contains)
+                         .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (teams.ExistingName(named) is { } stored
+                    && await TeamCreationFloor.OfAsync(stored, store, log, ct) is { } floor)
+                {
+                    floors[named] = floor;
+                }
+            }
+
+            return Results.Ok(rows.Where(r => r.Team switch
             {
                 // Unattributable: a caller-supplied `from`, or a row predating qualified identity. Shown
                 // to a person, hidden from every machine principal - the conservative reading, and consistent
@@ -1102,8 +1121,9 @@ internal static class WorkflowEndpoints
                 // `TeamGate` already checked. What would be wrong is the opposite state: a person edits a card on their own team and cannot see the row they just wrote.
                 // Pinned by `FilteredReadTests.A_card_event_reaches_the_teams_members_and_nobody_else`.
                 null => person,
-                var team => effective.Contains(team),
-            }));
+                var team => effective.Contains(team)
+                    && (!floors.TryGetValue(team, out var floor) || r.Message.Seq > floor),
+            }).Select(r => r.Message));
         })
             .WithTags("Activity")
             .RequirePermit(Permits.Read)
@@ -1114,10 +1134,15 @@ internal static class WorkflowEndpoints
                 + "At most 200 rows per call. A machine principal's window holds only its own team's rows; "
                 + "page on `seq` rather than assume a short page means the end.\n\n"
                 + "Messages that cannot be attributed to a team are shown only to people.\n\n"
+                + "**Each team from its creation**: a team's rows are answered only above the log position "
+                + "its creation fell at, so a team re-created under the same name never shows its "
+                + "predecessor's. A team whose creation is not known is not cut. `take` is applied before "
+                + "this cut, as before the team filter.\n\n"
                 + "**Backward, one member** (`before`, `team`, `member`): that member's history below "
                 + "`before`, NEWEST FIRST - instructions addressed to it and the feed rows it published - "
                 + "at most `take` (default 50, clamped to 1..200). The next cursor is the last row's `seq`; "
-                + "an empty page is the end, which is the first message the member ever received. A row "
+                + "an empty page is the end, which is the first message the member ever received, and never "
+                + "below its team's creation. A row "
                 + "appended meanwhile is above every cursor and never enters or shifts an older page. 400 "
                 + "when `before`, `team` and `member` are not all given or `after` is given with them; 404 "
                 + "for an unknown team or member, or one the caller cannot see.");
