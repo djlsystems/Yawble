@@ -530,8 +530,9 @@ export class MonitorModel {
     // A WORKFLOW IS BEGUN ONLY BY A ROW THAT NAMES A MEMBER: an instruction to one, or a member's
     // own row. A row addressed to a team alone (a folder's file.changed, a trigger's poll, a
     // dispatch) adds to a workflow already drawn and begins none, so no node floats tied to nobody.
-    // A workflow row only ends a workflow already drawn.
-    const begins = message.correlationId > 0 && !type.startsWith('workflow.') && member !== null
+    // A workflow row only ends a workflow already drawn. A member's removal names the member but is
+    // no work: alone in a correlation of its own, it begins none, as the Host reads it.
+    const begins = message.correlationId > 0 && !type.startsWith('workflow.') && type !== 'agentContainer.removed' && member !== null
     const drawn = begins || this.workflows.has(message.correlationId)
     // A DISPATCH ROW NAMES ITS WORKFLOW BY THE ITEM, before any instruction says anything: the
     // citation built from the number, a separator, the item's title. Kept until a member row

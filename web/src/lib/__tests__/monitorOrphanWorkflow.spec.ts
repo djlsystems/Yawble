@@ -106,3 +106,19 @@ describe('a replay', () => {
     expect(model.counts().open).toBe(1)
   })
 })
+
+describe("a member's removal", () => {
+  /** A person removes a member: the row the Host appends, in a correlation of its own, empty payload. */
+  const removal = (correlation: number) => row('agentContainer.removed', 'Alpha/Developer', {}, correlation)
+
+  it('begins no workflow and draws no node, though its source names the member', () => {
+    const model = new MonitorModel()
+    model.apply(tell(18800))
+    model.apply(removal(18801))
+    const made = scene(model)
+
+    expect([...model.workflows.keys()]).toEqual([18800])
+    expect(model.counts().open).toBe(1)
+    expect(made.drawnWorkflows).toEqual([18800])
+  })
+})
