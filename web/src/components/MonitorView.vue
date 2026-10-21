@@ -31,6 +31,8 @@ import {
 } from '../lib/monitor/model'
 import { MonitorScene, readPalette, type HoverInfo } from '../lib/monitor/scene'
 import { loadAvatarSheet } from '../lib/avatars'
+import MemberAvatar from './MemberAvatar.vue'
+import type { MemberState } from '../lib/memberState'
 import {
   SecondsMax,
   SecondsMin,
@@ -393,6 +395,19 @@ const pickedWorkflowsTeam = computed(() => {
 
 function openWorkflows() {
   if (pickedWorkflowsTeam.value) workflowNav.openWorkflows(pickedWorkflowsTeam.value as TeamId)
+}
+
+/**
+ * The member a row is one member's, as its avatar in the list draws it: the model's own member (its
+ * kind and state now), else the key alone, an idle agent. Null for a row of a team or a workflow.
+ */
+function rowMember(entry: TickerEntry): { team: string; id: string; name: string; kind: 'agent' | 'plugin'; state: MemberState } | null {
+  if (!entry.memberKey) return null
+  const known = model.members.get(entry.memberKey)
+  if (known) return { team: known.team, id: known.id, name: known.name, kind: known.kind, state: known.state }
+  const [team, ...rest] = entry.memberKey.split('/')
+  const id = rest.join('/')
+  return { team: team!, id, name: entry.member ?? id, kind: 'agent', state: 'idle' }
 }
 
 /** A ticker row's team line opens that team's board, while the team is live. */
@@ -1147,6 +1162,18 @@ onUnmounted(() => {
       <ol class="monitor-rows">
         <li v-for="entry in shownTicker" :key="entry.seq" class="monitor-row" :data-tone="entry.tone">
           <span class="monitor-row-mark" :style="{ background: entryColour(entry) }"></span>
+          <!-- THE MEMBER'S AVATAR in its state ring, as its node, its board card and its Kanban cards wear it. -->
+          <MemberAvatar
+            v-if="rowMember(entry)"
+            class="monitor-row-avatar"
+            :team="rowMember(entry)!.team"
+            :member="rowMember(entry)!.id"
+            :name="rowMember(entry)!.name"
+            :kind="rowMember(entry)!.kind"
+            :state="rowMember(entry)!.state"
+            :size="22"
+            wall
+          />
           <div class="monitor-row-body">
             <div class="monitor-row-head">
               <span class="monitor-row-verb" :style="{ color: entryColour(entry) }">{{ entry.verb }}</span>
@@ -1663,6 +1690,17 @@ onUnmounted(() => {
   gap: 10px;
   padding: 7px 12px;
   border-bottom: 1px solid color-mix(in srgb, var(--monitor-ink-dim) 6%, transparent);
+}
+
+/* A row's member's avatar, beside its words. Its letters (a plugin, or the sheet not loaded) are in
+   the wall's ink on the wall's panel, not the page's. */
+.monitor-row-avatar {
+  align-self: flex-start;
+}
+
+.monitor-row-avatar :deep(.member-avatar-initials) {
+  background: color-mix(in srgb, var(--avatar-ring) 30%, var(--monitor-panel));
+  color: var(--monitor-ink);
 }
 
 .monitor-row-mark {

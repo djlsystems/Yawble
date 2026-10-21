@@ -26,8 +26,10 @@ const props = withDefaults(
     kind?: 'agent' | 'plugin';
     /** The face's side in px; the ring sits outside it. */
     size?: number;
+    /** On the Monitor's dark wall: the ring in the state lifted toward white, as the canvas draws it. */
+    wall?: boolean;
   }>(),
-  { kind: 'agent', size: 32 },
+  { kind: 'agent', size: 32, wall: false },
 );
 
 onMounted(() => void loadAvatarSheet());
@@ -41,7 +43,7 @@ const picture = computed(() =>
 const letters = computed(() => initials(props.name ?? props.member ?? ''));
 const style = computed(() => ({
   '--avatar-size': `${props.size}px`,
-  '--avatar-ring': `var(--os-state-${stateToken(props.state)})`,
+  '--avatar-ring': props.wall ? `var(--os-monitor-state-${props.state})` : `var(--os-state-${stateToken(props.state)})`,
 }));
 </script>
 

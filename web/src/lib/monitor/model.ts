@@ -115,6 +115,8 @@ export interface TickerEntry {
   at: number
   team: string
   member: string | null
+  /** The member's `<team>/<id>` when the row is one member's: what its avatar in the list is dealt by. */
+  memberKey?: string
   tone: Tone
   /** One or two words: told, started, done, handed back... */
   verb: string
@@ -657,6 +659,7 @@ export class MonitorModel {
         at,
         team,
         member: member?.name ?? null,
+        ...(member ? { memberKey: member.key } : {}),
         tone,
         verb,
         text: short(summarise(message), 140),
@@ -695,6 +698,7 @@ export class MonitorModel {
       at,
       team: push.team,
       member: member?.name ?? push.member,
+      memberKey: member?.key ?? `${push.team}/${push.member}`,
       tone: 'file',
       verb: push.commits.length > 0 ? 'committed' : 'changed files',
       text: pushHeadline(push),

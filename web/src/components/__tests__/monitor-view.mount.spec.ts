@@ -27,6 +27,7 @@ import MonitorView from '../MonitorView.vue'
 import { useConsoleStore } from '../../stores/console'
 import { MonitorModel } from '../../lib/monitor/model'
 import { resetBody } from '../../test/mountQuasar'
+import { avatarIndex, setAvatarSheet } from '../../lib/avatars'
 
 let seq = 0
 function row(type: string, source: string, payload: Record<string, unknown>, at: string): Message {
@@ -81,6 +82,29 @@ describe('the Monitor', () => {
     expect(rows.map((found) => found.find('.monitor-row-verb').text())).toEqual(['started', 'told'])
     expect(rows[1]!.text()).toContain('Write the skeleton')
     expect(wrapper.find('[data-monitor-mode="live"]').exists()).toBe(true)
+  })
+
+  it('shows the avatar of a row\'s member to the left of its words, in the ring of its state on the wall', async () => {
+    setAvatarSheet(null, 1024, 1024)
+    try {
+      const { wrapper } = await mountMonitor([
+        row('agentContainer.started', 'Alpha/Manager', {}, '2026-10-15T10:00:00Z'),
+        row('agentContainer.started', 'Alpha/Developer', {}, '2026-10-15T10:00:01Z'),
+      ])
+
+      const rows = wrapper.findAll('.monitor-row')
+      expect(rows).toHaveLength(2)
+      const [developer, manager] = rows.map((found) => found.get('[data-test="member-avatar"]'))
+      expect(developer!.attributes('data-avatar')).toBe(String(avatarIndex('Alpha', 'Developer', 100)))
+      expect(manager!.attributes('data-avatar')).toBe(String(avatarIndex('Alpha', 'Manager', 100)))
+      expect(manager!.attributes('data-state')).toBe('running')
+      expect(manager!.attributes('style')).toContain('var(--os-monitor-state-running)')
+      // Left of the words: after the tone's mark, before the body.
+      expect(rows[0]!.element.children[1]!.getAttribute('data-test')).toBe('member-avatar')
+      expect(rows[0]!.element.children[2]!.classList.contains('monitor-row-body')).toBe(true)
+    } finally {
+      setAvatarSheet(null, 0, 0)
+    }
   })
 
   it('counts the members the snapshots say are running', async () => {
