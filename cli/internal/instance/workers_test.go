@@ -769,3 +769,18 @@ func TestWorkersThreeAddsWorkerTwoAndThreeAndWaitsHealthy(t *testing.T) {
 		}
 	}
 }
+
+func TestADrainPollsEverySecondThenEveryThreeThenEveryTen(t *testing.T) {
+	base := time.Second
+	for _, c := range []struct {
+		elapsed time.Duration
+		want    time.Duration
+	}{
+		{0, base}, {9 * time.Second, base}, {10 * time.Second, 3 * base}, {59 * time.Second, 3 * base},
+		{time.Minute, 10 * base}, {2 * time.Hour, 10 * base},
+	} {
+		if got := instance.DrainPollInterval(c.elapsed, base); got != c.want {
+			t.Errorf("after %s: %s, want %s", c.elapsed, got, c.want)
+		}
+	}
+}

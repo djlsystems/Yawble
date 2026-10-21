@@ -98,11 +98,20 @@ func machineOf(info machine.Info) instance.Machine {
 	return instance.Machine{MemoryBytes: int64(info.MemoryMB) << 20, CPUs: info.CPUs, Measured: true, Source: "podman machine", Kind: instance.KindPodmanMachine}
 }
 
-// prepare loads config, derives settings and picks the engine. Every lifecycle verb but `up`
+// prepare loads config, derives settings and picks the engine, WITHOUT measuring what the engine
+// has: only `up`, `doctor` and `restore` need that (prepareMeasured), and on Windows with Podman
+// measuring is four processes a `status` or a `logs` has no use for. Every lifecycle verb but `up`
 // starts here; `up` does the same in pieces around its preflight.
 func prepare(deps Deps) (engine.Engine, instance.Settings, []string, error) {
-	e, s, notes, _, err := prepareMeasured(deps)
-	return e, s, notes, err
+	c, err := loadConfig(deps)
+	if err != nil {
+		return nil, instance.Settings{}, nil, err
+	}
+	s, notes, err := settingsFor(deps, c, instance.Machine{})
+	if err != nil {
+		return nil, instance.Settings{}, nil, err
+	}
+	return engineOf(deps, c), s, notes, nil
 }
 
 // prepareMeasured is prepare, also answering what the engine has (for `doctor`).

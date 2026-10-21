@@ -521,7 +521,8 @@ func drain(ctx context.Context, e engine.Engine, name, id string, runsOf RunsOf,
 	notKnown := func(err error) error {
 		return fmt.Errorf("the runs on %s are not known (%v), so it was not stopped; it is left running and draining. `yawble workers <n> --now` stops it anyway, failing any run on it as worker-lost", id, err)
 	}
-	deadline := time.Now().Add(drainShownWithin)
+	started := time.Now()
+	deadline := started.Add(drainShownWithin)
 	waitedPeriod := false
 	for {
 		rec, err := runsOf(ctx, id)
@@ -552,9 +553,23 @@ func drain(ctx context.Context, e engine.Engine, name, id string, runsOf RunsOf,
 			}
 			return nil, fmt.Errorf("control's record did not show %s draining within %s, so its runs cannot be trusted to have ended; it is left running and draining. `yawble workers <n> --now` stops it", id, drainShownWithin)
 		}
-		if err := sleep(ctx, drainShownInterval); err != nil {
+		if err := sleep(ctx, drainPollInterval(time.Since(started), drainShownInterval)); err != nil {
 			return nil, err
 		}
+	}
+}
+
+// drainPollInterval is how long a drain waits between two reads of control's record: every base
+// for the first ten, every three for the first minute, every ten after that. A worker usually
+// drains in seconds, and one that takes an hour is not asked a thousand times.
+func drainPollInterval(elapsed, base time.Duration) time.Duration {
+	switch {
+	case elapsed < 10*base:
+		return base
+	case elapsed < 60*base:
+		return 3 * base
+	default:
+		return 10 * base
 	}
 }
 

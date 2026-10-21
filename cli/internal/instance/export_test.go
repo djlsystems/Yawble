@@ -19,3 +19,6 @@ func SetDrainPollingForTests(interval, timeout time.Duration) func() {
 		drainInterval, drainTimeout, drainShownInterval, drainShownWithin, recordPeriod = old[0], old[1], old[2], old[3], old[4]
 	}
 }
+
+// DrainPollInterval is the drain loop's poll policy, for its test.
+var DrainPollInterval = drainPollInterval
