@@ -80,7 +80,7 @@ The signer represents that they have authority to bind the entity. The entity gr
 
 A signature by the entity does not remove the need for the individual author to accept this agreement as well, covering any part of a Contribution the entity does not own. This follows the same split the Apache Software Foundation uses between its individual and corporate contributor agreements.
 
-Companies that want a countersigned copy may email the address in the repository's CONTRIBUTING file. The click-through in a pull request is enough for an individual. It is enough for an employee only if that employee has authority, or already has permission, to bind the employer.
+The click-through in a pull request is enough for an individual. It is enough for an employee only if that employee has authority, or already has permission, to bind the employer.
 
 ## 11. Transfer
 
@@ -101,8 +101,7 @@ Counsel may later publish a version governed by Delaware law once the licensee o
 You accept this agreement by any of the following:
 
 - Signing through the CLA Assistant prompt on a pull request, while authenticated as the GitHub account that authored the commits.
-- Emailing a signed copy of this file to the address in CONTRIBUTING, from the account you contribute under.
-- For an entity, having an authorized person do either of the above and naming the entity.
+- For an entity, having an authorized person sign that way and name the entity.
 
 Typing a name into a commit is not acceptance, and a `Signed-off-by` trailer is not acceptance.
 
