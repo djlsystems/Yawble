@@ -1,3 +1,5 @@
+import { localTime, wireInstant } from './localTime'
+
 /**
  * WHICH BUILD THIS IS: the version, commit and build time. The bundle's own is injected at
  * build time by `quasar.config.ts` from `scripts/version.mjs`; the Host answers the same shape from
@@ -29,8 +31,8 @@ export function shortCommit(commit: string): string {
 /** When it was built, in the viewer's locale, or `unknown`. */
 export function builtWhen(builtAt: string | null): string {
   if (!builtAt) return 'unknown'
-  const at = new Date(builtAt)
-  return Number.isNaN(at.getTime()) ? builtAt : at.toLocaleString()
+  const at = wireInstant(builtAt)
+  return Number.isNaN(at) ? builtAt : localTime(at, { date: true })
 }
 
 /**

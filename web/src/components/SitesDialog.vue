@@ -14,6 +14,7 @@ import {
 } from '../api/sites';
 import { useConsoleStore } from '../stores/console';
 import { documentFields } from '../lib/siteDocumentFields';
+import { localTime, wireInstant } from '../lib/localTime';
 
 /**
  * ADMIN > SITES: every site across teams, from `GET /api/sites` - its team, live version, who
@@ -80,7 +81,7 @@ function size(bytes: number) {
 }
 
 function when(at: string | null) {
-  return at ? new Date(at).toLocaleString() : '';
+  return at ? localTime(wireInstant(at), { date: true }) : '';
 }
 
 function teamName(id: string) {

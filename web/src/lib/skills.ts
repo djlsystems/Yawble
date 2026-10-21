@@ -1,4 +1,5 @@
 import type { SkillKind, SkillRecord, SkillRole, TeamId } from '../api/types'
+import { localTime, wireInstant } from './localTime'
 
 /**
  * The roles a custom skill may be offered to, in the order the picker shows them. `any` is every
@@ -45,7 +46,7 @@ export const isReadOnlySkill = (row: Pick<SkillRecord, 'kind'>): boolean => row.
  */
 export function lastModified(
   row: Pick<SkillRecord, 'kind' | 'updatedAt' | 'updatedBy'>,
-  format: (iso: string) => string = (iso) => new Date(iso).toLocaleString(),
+  format: (iso: string) => string = (iso) => localTime(wireInstant(iso), { date: true }),
 ): string {
   if (!row.updatedAt) return row.kind === 'builtin' ? 'With this build' : '—'
   const when = format(row.updatedAt)

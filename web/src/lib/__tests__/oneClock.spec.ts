@@ -94,6 +94,10 @@ describe('one instant, one string, on the feed, the Monitor and the Activity til
       'lib/summarise.ts', 'lib/liveLines.ts', 'lib/memberRuns.ts', 'lib/teamsTable.ts', 'components/ActivityFeed.vue',
       'components/MonitorView.vue', 'lib/monitor/model.ts', 'lib/teamActivity.ts', 'components/KanbanCardPanel.vue',
       'components/LiveViewDialog.vue', 'components/TeamKpiStrip.vue', 'components/NeedsYouControl.vue', 'stores/needsYou.ts',
+      'components/CapacityPanel.vue', 'components/ConciergeSessions.vue', 'components/DiagnosticsDialog.vue',
+      'components/LocalReposDialog.vue', 'components/ProfileDialog.vue', 'components/SitesDialog.vue',
+      'components/TenantLogDialog.vue', 'lib/buildInfo.ts', 'lib/connections.ts', 'lib/failureClass.ts', 'lib/outcomes.ts',
+      'lib/repoStatus.ts', 'lib/skills.ts',
     ]) {
       const source = readFileSync(join(src, path), 'utf8')
       expect(source, path).not.toMatch(DateLocale)

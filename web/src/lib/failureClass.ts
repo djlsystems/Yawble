@@ -1,3 +1,5 @@
+import { localTime, wireInstant } from './localTime'
+
 /**
  * WHAT A FAILURE CLASS SAYS TO A PERSON — the browser's one store for those words.
  *
@@ -150,7 +152,7 @@ export function failureClassLabel(
 export function resumeTimeText(resumeAt: string | null | undefined): string | null {
   if (typeof resumeAt !== 'string' || resumeAt.trim() === '') return null
 
-  const at = new Date(resumeAt)
+  const at = wireInstant(resumeAt)
 
-  return Number.isNaN(at.getTime()) ? null : at.toLocaleString()
+  return Number.isNaN(at) ? null : localTime(at, { date: true })
 }

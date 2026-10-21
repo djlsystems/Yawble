@@ -8,6 +8,7 @@ import { listKeys, mintKey, revokeKey } from '../api/client';
 import type { ApiKey, MintedKey } from '../api/types';
 import { MINIMUM_PASSWORD_LENGTH, email as emailRule, password as passwordRule, required } from '../lib/rules';
 import { passes } from '../lib/forms';
+import { localTime, wireInstant } from '../lib/localTime';
 
 /**
  * The signed-in account's own credentials.
@@ -440,7 +441,7 @@ function copyCredential() {
               <q-item-label>{{ key.label ?? '(unnamed)' }}</q-item-label>
               <q-item-label caption>
                 {{ key.prefix }}… · last used
-                {{ key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleString() : 'never' }}
+                {{ key.lastUsedAt ? localTime(wireInstant(key.lastUsedAt), { date: true }) : 'never' }}
               </q-item-label>
             </q-item-section>
             <q-item-section side>

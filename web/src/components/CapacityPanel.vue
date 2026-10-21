@@ -19,6 +19,7 @@ import {
   workerWords,
 } from '../lib/capacity';
 import FieldHelp from './FieldHelp.vue';
+import { localTime, wireInstant } from '../lib/localTime';
 
 /**
  * THE ACTIVITY MONITOR'S DROPDOWN: the instance's figures in words, each with what it is measured
@@ -156,7 +157,7 @@ function onWorker(run: RunFigures): string {
         <div class="text-subtitle2">Workers</div>
         <ul class="capacity-list text-caption">
           <li v-for="worker in workers" :key="worker.id" :data-test="`capacity-worker-${worker.id}`">
-            <strong>{{ worker.id }}</strong> ({{ worker.version ?? NotMeasured }}, connected {{ new Date(worker.connectedSince).toLocaleString() }}):
+            <strong>{{ worker.id }}</strong> ({{ worker.version ?? NotMeasured }}, connected {{ localTime(wireInstant(worker.connectedSince), { date: true }) }}):
             {{ workerWords(worker) }}<template v-if="worker.holding">; a run asking it now would be {{ worker.holding }}</template>
           </li>
         </ul>

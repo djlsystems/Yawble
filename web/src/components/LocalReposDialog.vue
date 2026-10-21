@@ -4,6 +4,7 @@ import { deleteLocalRepo, listLocalRepos } from '../api/client';
 import type { LocalRepo } from '../api/types';
 import { useConsoleStore } from '../stores/console';
 import { vResizableColumns } from '../lib/resizableColumns';
+import { localTime, wireInstant } from '../lib/localTime';
 
 /**
  * ADMIN > REPOSITORIES: the instance's local repositories, from `GET /api/local-repos` - each one's
@@ -51,7 +52,7 @@ function size(bytes: number) {
 }
 
 function when(at: string | null) {
-  return at ? new Date(at).toLocaleString() : '';
+  return at ? localTime(wireInstant(at), { date: true }) : '';
 }
 
 function teamName(id: string) {

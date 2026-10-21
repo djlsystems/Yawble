@@ -1,4 +1,5 @@
 import type { Outcome, OutcomeFigures, OutcomeStatus, OutcomeWorkflowLine } from '../api/outcomes'
+import { localTime, wireInstant } from './localTime'
 
 /**
  * THE MANAGE OUTCOMES DIALOG'S WORDING, kept out of the component so each rule is one function.
@@ -65,7 +66,7 @@ export function linkedWorkflowsText(total: number): string {
 }
 
 export function when(at: string | null | undefined): string {
-  return at ? new Date(at).toLocaleString() : '—'
+  return at ? localTime(wireInstant(at), { date: true }) : '—'
 }
 
 // --- The period --------------------------------------------------------------------------------
@@ -120,7 +121,7 @@ function localDay(text: string | undefined): Date | null {
 export function reachesBeforeLedger(from: string | null, ledgerStartedAt: string | null): boolean {
   if (!ledgerStartedAt) return false
   if (!from) return true
-  return new Date(from).getTime() < new Date(ledgerStartedAt).getTime()
+  return wireInstant(from) < wireInstant(ledgerStartedAt)
 }
 
 export function accountingSinceText(ledgerStartedAt: string): string {

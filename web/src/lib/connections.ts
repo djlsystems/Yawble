@@ -1,4 +1,5 @@
 import type { Connection, ConnectionProvider, ConnectionSlot, MailServer } from '../api/types';
+import { localTime, wireInstant } from './localTime';
 
 /**
  * CONNECTIONS, READ FOR A PERSON: the redirect URI to register, which connections a plugin's slot
@@ -273,8 +274,8 @@ export function landProviderReturn(target: Pick<Window, 'location' | 'history'> 
 /** A timestamp for a person: the local date and time, or "never". */
 export function when(iso: string | null): string {
   if (!iso) return 'never';
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
+  const at = wireInstant(iso);
+  return Number.isNaN(at) ? iso : localTime(at, { date: true });
 }
 
 /**
@@ -380,7 +381,7 @@ export function refusalWords(text: string | null | undefined): string | null {
 
 /** "14:59": what is left of a sign-in code's life, in minutes and seconds, never below 0:00. */
 export function countdown(expiresAt: string, now: number): string {
-  const left = Math.max(0, Math.ceil((new Date(expiresAt).getTime() - now) / 1000));
+  const left = Math.max(0, Math.ceil((wireInstant(expiresAt) - now) / 1000));
   if (Number.isNaN(left)) return '';
   return `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
 }

@@ -6,6 +6,7 @@ import { useCursorList } from '../lib/useCursorList';
 import { detailWords, didWords } from '../lib/tenantLogWords';
 import { vResizableColumns } from '../lib/resizableColumns';
 import CursorSentinel from './CursorSentinel.vue';
+import { localTime, wireInstant } from '../lib/localTime';
 
 /**
  * The tenant log: who did what, administratively.
@@ -44,7 +45,7 @@ const { rows, loading, exhausted, error } = list;
 /** Local time, because the reader is a person deciding whether this was them ten minutes ago. The
  *  wire carries a round-trip UTC string, so nothing here depends on the server's timezone. */
 function when(value: string) {
-  return new Date(value).toLocaleString();
+  return localTime(wireInstant(value), { date: true });
 }
 
 /**

@@ -1,4 +1,5 @@
 import type { Prerequisite, RepoStatus, TeamRepoStatus, WorktreeStatus } from '../api/types'
+import { localTime, wireInstant } from './localTime'
 
 /**
  * THE REPOSITORY'S STORED DEFAULT BRANCH IS WHAT EVERY "main" ON THE CARD MEANS. The server
@@ -128,8 +129,8 @@ export function formatMergedState(status: RepoStatus): string {
 export function pullRequestReadAt(status: RepoStatus): string | null {
   const at = status.pullRequest?.readAt
   if (!at) return null
-  const date = new Date(at)
-  return Number.isNaN(date.getTime()) ? null : date.toLocaleString()
+  const ms = wireInstant(at)
+  return Number.isNaN(ms) ? null : localTime(ms, { date: true })
 }
 
 /**

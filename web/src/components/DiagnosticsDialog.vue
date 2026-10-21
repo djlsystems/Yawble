@@ -22,6 +22,10 @@ import {
 import { useCursorList } from '../lib/useCursorList';
 import CursorSentinel from './CursorSentinel.vue';
 import { vResizableColumns } from '../lib/resizableColumns';
+import { localTime, wireInstant } from '../lib/localTime';
+
+/** An instant on the reader's clock, with its date: the wire carries UTC. */
+const when = (value: string) => localTime(wireInstant(value), { date: true });
 
 /**
  * Admin › Diagnostics — what this instance was doing when it went wrong.
@@ -161,7 +165,7 @@ const columns: Column[] = [
     // Local time, because the reader is a person deciding whether this was the run they were just
     // watching. The wire carries a round-trip UTC string, so nothing here depends on the server's
     // timezone.
-    format: (value: string) => new Date(value).toLocaleString(),
+    format: when,
   },
   { name: 'severity', label: 'Severity', field: 'severity' },
   // Worded in `format`, so the stacked cards below `sm` and the wide grid say the same words.
@@ -341,7 +345,7 @@ watch(open, (showing) => {
               </thead>
               <tbody>
                 <tr v-for="(start, index) in cliStarts" :key="start.at">
-                  <td class="diagnostics-when">{{ new Date(start.at).toLocaleString() }}</td>
+                  <td class="diagnostics-when">{{ when(start.at) }}</td>
                   <td
                     v-for="name in cliNames"
                     :key="name"

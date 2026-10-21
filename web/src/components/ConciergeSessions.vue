@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { concierge as readConcierge, endConciergeOf } from '../api/client';
 import type { ConciergeSessionView } from '../api/types';
+import { localTime, wireInstant } from '../lib/localTime';
 
 /**
  * THE RUNNING CONCIERGE SESSIONS, any person's: on which worker, whether someone has it open, what it
@@ -46,7 +47,7 @@ async function end(user: string) {
 
 /** Local time: the reader is deciding whether this was them a moment ago. */
 function when(value: string) {
-  return new Date(value).toLocaleString();
+  return localTime(wireInstant(value), { date: true });
 }
 
 function megabytes(bytes: number) {
