@@ -506,6 +506,7 @@ function openOutcomes(id: string | null = null) {
             :cancelling-wake="cancellingWake"
             :flashing="highlight.flashing === cardKey(card.id)"
             :team-name="teamNames.get(card.team) ?? card.team"
+            :ring="kanban.memberRing(card)"
             @cancel-wake="cancelWake"
           />
         </TransitionGroup>
@@ -554,6 +555,7 @@ function openOutcomes(id: string | null = null) {
             :cancelling-wake="cancellingWake"
             :flashing="highlight.flashing === cardKey(card.id)"
             :team-name="teamNames.get(card.team) ?? card.team"
+            :ring="kanban.memberRing(card)"
             @cancel-wake="cancelWake"
           />
         </TransitionGroup>

@@ -18,6 +18,8 @@ import { useConsoleStore } from '../stores/console';
 import WorkflowName from './WorkflowName.vue';
 import CardSizeGrips from './CardSizeGrips.vue';
 import CardArrangeHandle from './CardArrangeHandle.vue';
+import MemberAvatar from './MemberAvatar.vue';
+import { memberStateOf } from '../lib/memberState';
 import { memberNow } from '../lib/memberNow';
 import { memberKey, useHighlightStore } from '../stores/highlight';
 
@@ -80,6 +82,9 @@ const running = computed(() => props.snapshot.state === 'Running');
  * what it reported, open from a history button instead. Absent `kind` is an agent, from an older Host.
  */
 const isPlugin = computed(() => props.snapshot.kind === 'plugin');
+
+/** The state its avatar's ring draws: the one derivation the Monitor and the Kanban read too. */
+const ringState = computed(() => memberStateOf(props.snapshot));
 
 /** What this member runs, as the card's second line names it: the plugin id, or the Agent. */
 const runsWhat = computed(() =>
@@ -264,8 +269,17 @@ async function cancel(wake: PendingWake) {
   >
     <q-card-section class="q-pb-xs">
       <div class="row items-center no-wrap q-gutter-sm">
-        <!-- THE HANDLE THAT MOVES THIS CARD on the board, before the name; shown only on a board. -->
-        <CardArrangeHandle :member="snapshot.id" :name="snapshot.name" />
+        <!-- THE MEMBER'S AVATAR, at the card's upper left, and on a board the handle that moves the card. -->
+        <CardArrangeHandle :member="snapshot.id" :name="snapshot.name">
+          <MemberAvatar
+            :team="snapshot.team"
+            :member="snapshot.id"
+            :name="snapshot.name"
+            :kind="snapshot.kind ?? 'agent'"
+            :state="ringState"
+            :size="36"
+          />
+        </CardArrangeHandle>
         <!-- THE LABEL, AND ONLY THE LABEL. `snapshot.name` is NOT the identifier - `Containers.cs`
              and `types.ts` agree: "Render this; address with `id`". A route addressed by the label
              fails for every member whose label carries a space. -->

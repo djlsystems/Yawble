@@ -10,6 +10,8 @@ import {
   type SimulationLinkDatum,
   type SimulationNodeDatum,
 } from 'd3-force'
+import { stateWords } from '../memberState'
+import { avatarSheet, memberAvatar, tileSource } from '../avatars'
 import type { MemberState, MonitorEffect, MonitorModel, NodeRef, Origin, Tone } from './model'
 import { compact, workflowNameLine } from './model'
 import type { Resource, ResourceAction } from './hints'
@@ -1766,6 +1768,20 @@ export class MonitorScene {
     ctx.fill()
     ctx.shadowBlur = 0
 
+    // An agent wears its avatar over the body, cut to the disc: the tile its board and Kanban cards show.
+    const avatar = member.kind === 'plugin' ? -1 : memberAvatar(member.team, member.id)
+    const sheet = avatarSheet.image
+    if (avatar >= 0 && sheet) {
+      const src = tileSource(avatar, { cols: avatarSheet.cols, rows: avatarSheet.rows, width: sheet.naturalWidth, height: sheet.naturalHeight })
+      ctx.save()
+      ctx.beginPath()
+      ctx.arc(x, y, r, 0, Math.PI * 2)
+      ctx.clip()
+      ctx.globalAlpha = member.state === 'idle' ? 0.8 : 1
+      ctx.drawImage(sheet, src.sx, src.sy, src.sw, src.sh, x - r, y - r, r * 2, r * 2)
+      ctx.restore()
+    }
+
     // The state ring.
     const ring = r + 5
     ctx.lineWidth = 2.5
@@ -1838,12 +1854,14 @@ export class MonitorScene {
     // A pending wake is a small clock at its upper left: it will be woken once, later.
     if (member.wakes.length > 0) this.drawWakeClock(ctx, x - (ring + 8) * Math.SQRT1_2, y - (ring + 8) * Math.SQRT1_2)
 
-    // Initials, then the name under it.
-    ctx.fillStyle = Screen.ink
-    ctx.font = this.font(r > 15 ? 0.72 : 0.62, 700)
+    // Initials where there is no avatar (a plugin, or the sheet not loaded), then the name under it.
     ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(initials(member.name), x, y + 0.5)
+    if (avatar < 0 || !sheet) {
+      ctx.fillStyle = Screen.ink
+      ctx.font = this.font(r > 15 ? 0.72 : 0.62, 700)
+      ctx.textBaseline = 'middle'
+      ctx.fillText(initials(member.name), x, y + 0.5)
+    }
 
     ctx.font = this.font(0.66, 500)
     ctx.textBaseline = 'top'
@@ -2219,23 +2237,6 @@ function refOf(node: SceneNode): NodeRef | null {
 
 function sameRef(a: NodeRef, b: NodeRef): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
-}
-
-export function stateWords(state: MemberState): string {
-  switch (state) {
-    case 'running':
-      return 'Running'
-    case 'waiting':
-      return 'Waiting to start'
-    case 'blocked':
-      return 'Blocked'
-    case 'decision':
-      return 'Needs you'
-    case 'failed':
-      return 'Last run failed'
-    default:
-      return 'Idle'
-  }
 }
 
 /** The spiral `separate` searches when its passes stall: twelve directions a ring, out to this many rings. */

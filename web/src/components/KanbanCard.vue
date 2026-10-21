@@ -6,6 +6,8 @@ import { KanbanStatusFact, KanbanStatusLabel, colourFor } from '../lib/kanban';
 import { workflowNumberTitle } from '../lib/workflowNumber';
 import type { PendingWake } from '../api/types';
 import WakeLines from './WakeLines.vue';
+import MemberAvatar from './MemberAvatar.vue';
+import type { MemberState } from '../lib/memberState';
 import DiscussWithConcierge from './DiscussWithConcierge.vue';
 import { askForCard } from '../lib/conciergeDecision';
 import { boardHref, follow, memberHref } from '../lib/consoleLinks';
@@ -35,6 +37,8 @@ const props = defineProps<{
   flashing?: boolean;
   /** The card's team as a person reads it; its id when the board does not know the name. */
   teamName?: string;
+  /** What the card's member is doing and its kind, for its avatar's ring; null with nobody assigned. The board decides. */
+  ring?: { state: MemberState; kind: 'agent' | 'plugin' } | null;
 }>();
 
 /**
@@ -110,31 +114,46 @@ async function copyId() {
     :aria-label="`${card.title} — ${KanbanStatusLabel[card.status]}`"
     @click="$emit('open', card.id)"
   >
-    <!-- THE ITEM THIS CARD IS A PIECE OF, when it is one. `B000H` rather than a bare number, which
-         is the same prefix the backlog screen renders and the one an agent quotes back. -->
-    <div v-if="card.item != null" class="k-card-item">{{ itemLabel(card.item) }}</div>
+    <!-- THE MEMBER'S AVATAR at the upper left, in its state ring: the same face and ring as on its
+         board card and the Monitor. A card nobody is assigned has none. -->
+    <div class="k-card-head">
+      <MemberAvatar
+        v-if="card.member !== null && ring"
+        :team="card.team"
+        :member="card.member"
+        :name="card.member"
+        :kind="ring.kind"
+        :state="ring.state"
+        :size="26"
+      />
+      <div class="k-card-head-text">
+        <!-- THE ITEM THIS CARD IS A PIECE OF, when it is one. `B000H` rather than a bare number, which
+             is the same prefix the backlog screen renders and the one an agent quotes back. -->
+        <div v-if="card.item != null" class="k-card-item">{{ itemLabel(card.item) }}</div>
 
-    <div class="k-card-title">{{ card.title }}</div>
+        <div class="k-card-title">{{ card.title }}</div>
 
-    <!-- THE OUTCOME THIS CARD'S WORK SERVES, under the title: the open workflow's, else the latest
-         one's. No outcome, no tag. A proposed one is dashed and says so, because only a person
-         confirms it. A span with a button's role rather than a button: this whole card is a
-         button, and one may not hold another. The name is text, never HTML. -->
-    <span
-      v-if="card.outcome"
-      role="button"
-      tabindex="0"
-      class="k-card-outcome"
-      :class="{ 'k-card-outcome--proposed': card.outcome.status === 'proposed' }"
-      :data-outcome-id="card.outcome.id"
-      :title="`Outcome: ${card.outcome.name}`"
-      @click.stop="openOutcome"
-      @keydown.enter.stop.prevent="openOutcome"
-      @keydown.space.stop.prevent="openOutcome"
-    >
-      <span class="k-card-outcome-name">{{ card.outcome.name }}</span>
-      <span v-if="card.outcome.status === 'proposed'" class="k-card-outcome-proposed">proposed</span>
-    </span>
+        <!-- THE OUTCOME THIS CARD'S WORK SERVES, under the title: the open workflow's, else the latest
+             one's. No outcome, no tag. A proposed one is dashed and says so, because only a person
+             confirms it. A span with a button's role rather than a button: this whole card is a
+             button, and one may not hold another. The name is text, never HTML. -->
+        <span
+          v-if="card.outcome"
+          role="button"
+          tabindex="0"
+          class="k-card-outcome"
+          :class="{ 'k-card-outcome--proposed': card.outcome.status === 'proposed' }"
+          :data-outcome-id="card.outcome.id"
+          :title="`Outcome: ${card.outcome.name}`"
+          @click.stop="openOutcome"
+          @keydown.enter.stop.prevent="openOutcome"
+          @keydown.space.stop.prevent="openOutcome"
+        >
+          <span class="k-card-outcome-name">{{ card.outcome.name }}</span>
+          <span v-if="card.outcome.status === 'proposed'" class="k-card-outcome-proposed">proposed</span>
+        </span>
+      </div>
+    </div>
 
     <!-- A WAKE IS SET IN THIS CARD'S WORKFLOW: the work waits for it, and nothing is stuck. The
          same line the member's card draws, the card's own member's first. -->
@@ -290,6 +309,18 @@ async function copyId() {
 </template>
 
 <style scoped>
+/* THE HEAD: the member's avatar at the upper left, the item and the title beside it. */
+.k-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.k-card-head-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 /* The colour transition. A status change repaints the card in place over the same third of a
    second the FLIP move takes, so a card that changes colour AND lane does one movement rather
    than a jump and a flash. */

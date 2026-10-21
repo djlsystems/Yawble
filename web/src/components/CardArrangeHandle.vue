@@ -11,6 +11,9 @@ import { BoardArrangerKey } from '../lib/boardOrder';
  * A handle rather than the whole card, because the card is full of things that take a press - the
  * name, the eye, the feed that scrolls - and a drag that began on any of them would fight each. The
  * board provides the arranger; a card mounted with none around it shows no handle.
+ *
+ * The handle is the member's avatar (the default slot): what a person grabs is the member's own
+ * face. With no board the avatar is still shown, as a plain span that moves nothing.
  */
 const props = defineProps<{ member: string; name: string }>();
 
@@ -42,8 +45,9 @@ function onKey(event: KeyboardEvent) {
     @keydown="onKey"
     @click.stop
   >
-    <q-icon name="drag_indicator" size="20px" aria-hidden="true" />
+    <slot />
   </button>
+  <span v-else class="card-arrange-still"><slot /></span>
 </template>
 
 <style scoped>
@@ -53,12 +57,10 @@ function onKey(event: KeyboardEvent) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
   margin-left: -4px;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: 50%;
   background: none;
   color: var(--os-ink-muted);
   cursor: grab;
@@ -71,6 +73,12 @@ function onKey(event: KeyboardEvent) {
   color: var(--q-primary);
   background: color-mix(in srgb, var(--q-primary) 12%, transparent);
   outline: none;
+}
+
+.card-arrange-still {
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-left: -4px;
 }
 
 .card-arrange-handle:active {

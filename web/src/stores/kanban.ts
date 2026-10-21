@@ -12,6 +12,7 @@ import {
   type KanbanFilters,
   type KanbanLane,
 } from '../api/kanban'
+import { memberStateOf, type MemberState } from '../lib/memberState'
 import { cancelWake, Unauthorized } from '../api/client'
 import {
   linkWorkflowOutcome,
@@ -305,6 +306,20 @@ export const useKanbanStore = defineStore('kanban', {
      * THIS CARD'S MEMBER IS WAITING FOR A WIP SLOT. The member's snapshot says so (`held`), or the
      * ledger names it waiting - either is enough, and the ledger is what moves first.
      */
+    /**
+     * What the card's member is doing and what kind it is, for its avatar's ring: from the same
+     * snapshot the board's member card and the Monitor read. Null for a card nobody is assigned; a
+     * member the roster no longer holds is idle.
+     */
+    memberRing(card: KanbanCard): { state: MemberState; kind: 'agent' | 'plugin' } | null {
+      if (!card.member) return null
+
+      const team = useConsoleStore().teams.find((entry) => entry.id === card.team)
+      const snapshot = team?.containers.find((container) => container.id === card.member)
+
+      return snapshot ? { state: memberStateOf(snapshot), kind: snapshot.kind ?? 'agent' } : { state: 'idle', kind: 'agent' }
+    },
+
     memberHeld(card: KanbanCard): boolean {
       if (!card.member) return false
 

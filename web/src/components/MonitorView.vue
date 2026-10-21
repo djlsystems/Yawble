@@ -30,6 +30,7 @@ import {
   type Tone,
 } from '../lib/monitor/model'
 import { MonitorScene, readPalette, type HoverInfo } from '../lib/monitor/scene'
+import { loadAvatarSheet } from '../lib/avatars'
 import {
   SecondsMax,
   SecondsMin,
@@ -709,6 +710,8 @@ function fitAll() {
 }
 
 onMounted(async () => {
+  // The members' avatars: the scene draws initials until the sheet has loaded.
+  void loadAvatarSheet()
   sizeRoot()
   if (canvas.value) {
     readPalette(canvas.value)

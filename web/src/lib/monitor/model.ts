@@ -1,5 +1,6 @@
 import type { Message, MonitorHint, Team } from '../../api/types'
 import { summarise } from '../summarise'
+import { memberStateOf, type MemberState } from '../memberState'
 import { itemLabel } from '../backlog'
 import { eventWords, InstructionPrefix, type Tone } from '../eventWords'
 import { crossesDays, localMinute, localStamp, wireInstant } from '../localTime'
@@ -24,8 +25,8 @@ export { InstructionPrefix } from '../eventWords'
 /** The source of the instruction a member's own wake fires: `wake:<id>`. */
 const WakePrefix = 'wake:'
 
-/** What a member is doing, as the monitor draws it. */
-export type MemberState = 'idle' | 'running' | 'waiting' | 'blocked' | 'decision' | 'failed'
+/** What a member is doing, as the monitor draws it: the one derivation every view's avatar ring reads. */
+export type { MemberState } from '../memberState'
 
 /** The colour family of an effect, a ticker row and a legend entry: the one table's. */
 export type { Tone } from '../eventWords'
@@ -406,7 +407,7 @@ export class MonitorModel {
         member.name = container.name
         member.kind = container.kind ?? 'agent'
         member.queued = container.queueDepth
-        member.state = snapshotState(container)
+        member.state = memberStateOf(container)
         const said = container.blocked ?? container.needsDecision ?? container.failed
         if (said) member.status = said
         if (container.currentCorrelation !== null) member.workflow = container.currentCorrelation
@@ -748,15 +749,6 @@ export class MonitorModel {
     const workflow = this.workflows.get(correlation)
     return workflow ? { team: workflow.team, member: null } : null
   }
-}
-
-function snapshotState(container: Team['containers'][number]): MemberState {
-  if (container.failed) return 'failed'
-  if (container.needsDecision) return 'decision'
-  if (container.blocked) return 'blocked'
-  if (container.state === 'Running') return container.held ? 'waiting' : 'running'
-  if (container.queueDepth > 0 || container.held) return 'waiting'
-  return 'idle'
 }
 
 /** A recorded file change's time in ms; one whose time cannot be read is placed at 0, never dropped. */
