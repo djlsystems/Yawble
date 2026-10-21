@@ -388,7 +388,7 @@ wizard's steps:
 
 1. **Team**, one choice a line:
    - **Install as a new team**, named after the package by default (editable, and checked as any
-     team name is), with a new local repository unless unticked;
+     team name is); the team gets its own local repository when its work first needs one;
    - **Update**: when one team runs an earlier version of the same package id, the choice reads
      "Update <team> from <old> to <new>", says what the update keeps, and the wizard starts on it;
      with several such teams, each is listed as "<team>: <old> to <new>" and you pick one. Opened
@@ -430,7 +430,7 @@ usual tenant row:
 | # | Step | What it makes |
 |---|---|---|
 | 1 | `plugins` | Each of the package's plugins, installed as `yawble plugin install` would. One already active at that version or newer is left alone: a plugin is the instance's, and an install never downgrades what other teams run. |
-| 2 | `team` | The team, with the package's team instructions and a new local repository unless the person unticked it. |
+| 2 | `team` | The team, with the package's team instructions and no repository: it gets its own local repository when its work first needs one. |
 | 3 | `members` | The Manager takes the package manager's name and instructions; every other member is hired. An agent member with no preset runs the Agent the wizard names (the instance's first installed model preset by default). |
 | 4 | `skills` | Each skill, registered as a **team skill** (`TeamSkills.RegisterAsync`). |
 | 5 | `tools` | `tools/` copied to `<team folder>/solution/`, read-only to agents (the Host's files with the agent's group: folders 0750, files 0640, executables 0750). Every agent member's prompt names the folder, and `{solution}` resolves to it. |
@@ -439,7 +439,7 @@ usual tenant row:
 | 8 | `record` | The package id and version in `team_solutions` (schema step `auth-016`), with the `solution.installed` row in the same transaction. |
 
 **When a step fails**, everything made so far is undone in reverse order - the triggers, the
-sites, the tools, the skills, the members, the team with its local repository and its empty
+sites, the tools, the skills, the members, the team (with the local repository it was asked for) and its empty
 documents folder, each outcome it created, and each plugin version it installed (the previously
 active version made active again) - and the answer names the step, its number and the reason;
 `solution.failed` records what was undone.

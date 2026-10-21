@@ -168,7 +168,7 @@ a field the active version does not declare is refused, naming the field.
 ### Plugins to install, and the template to build one
 
 A plugin to install comes from the marketplace, [yawble.ai](https://yawble.ai), not from this
-repository: `sample-echo` (the proof-of-concept plugin: deterministic, it upper-cases or reverses
+repository: `sample-echo` (the sample plugin: deterministic, it upper-cases or reverses
 each instruction's text; a .NET console app its launcher runs with `dotnet`), `sample-echo-go`,
 WhoAmI and the rest are packages there, each with its own build and install steps. This repository
 holds no plugin to install. Its tests build their own copies as test data under `tests/Fixtures/`,
@@ -698,8 +698,8 @@ The trigger's own settings bound what is left (see [triggers.md](triggers.md)):
   `quiet` is how a plugin says "nothing happened". Under
   **Never**, not even a failure wakes the Manager; it still shows on the card and in the feed.
 - **Daily token cap.** The billable tokens a trigger's runs, and the Manager runs they woke, may
-  spend in a day; past it, fires are skipped until the next day. A plugin run reports no usage, so
-  it counts as not measured and never towards the cap - the cap matters on the agent's event trigger.
+  spend in a day; past it, fires are skipped until the next day. A plugin run runs no model, so it
+  is measured at 0 tokens and never moves the cap - the cap matters on the agent's event trigger.
 
 The Triggers dialog asks for confirmation before a schedule more frequent than every 5 minutes on an
 agent member, naming what a run of it has cost and suggesting this shape. A plugin member has no
@@ -719,8 +719,8 @@ minimum.
 | A person's Stop | Class `interrupted`, marked `stoppedByPerson`. |
 | The Host shutting down | Class `interrupted`. |
 
-Plugin runs report no token usage, so the spend bound never counts them. A plugin run takes a WIP
-slot like any member's.
+A plugin run runs no model, so its ledger row is measured at 0 tokens and no spend bound is moved by
+it. A plugin run takes a WIP slot like any member's.
 
 ## Configuration and secrets
 
@@ -1082,7 +1082,7 @@ plugin declares none.
 - **Agents are unchanged.** `MemberGoldenTests` pins an agent member's rows, prompt, context,
   environment, persisted row and snapshot on recorded goldens. Re-record them
   only with `HARNESS_UPDATE_GOLDENS=1`, and only for a change that is meant to be visible.
-- **The end-to-end proof of concept.** `PluginMemberEndToEndTests` installs and hires sample-echo on
+- **The end-to-end tests.** `PluginMemberEndToEndTests` installs and hires sample-echo on
   the real Host. It also asserts that the pump (`Harness.Containers`) has no code naming plugins.
   `PluginGoTemplateEndToEndTests` does the same for sample-echo-go, built for both processors.
 - **The pump stays generic, structurally.** `PumpArchitectureTests` reads the pump's compiled IL:
