@@ -105,7 +105,7 @@ func supportedPlatform(deps Deps) error {
 		goarch = runtime.GOARCH
 	}
 	if goosOf(deps) == "darwin" && goarch != "arm64" {
-		return errors.New("Intel Macs are not tested yet, so yawble runs on Apple silicon (M1 or later) only for now; this Mac has an Intel processor")
+		return errors.New("this Mac has an Intel processor; Intel Macs are not tested yet, so yawble runs on Apple silicon (M1 or later) only for now")
 	}
 	return nil
 }

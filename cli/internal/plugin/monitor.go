@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -111,7 +112,7 @@ func monitorHint(typ string, value any, kinds map[string][]string, ignored *[]st
 	}
 	isKind := func(name string, allowed ...string) bool {
 		for _, kind := range kinds[name] {
-			if containsString(allowed, kind) {
+			if slices.Contains(allowed, kind) {
 				return true
 			}
 		}
@@ -160,7 +161,7 @@ func monitorHint(typ string, value any, kinds map[string][]string, ignored *[]st
 	}
 	if hasAction {
 		action, ok := monitor["action"].(string)
-		if !ok || !containsString(monitorActions, action) {
+		if !ok || !slices.Contains(monitorActions, action) {
 			return at + " `monitor.action` must be created, changed or deleted."
 		}
 	} else {
@@ -190,7 +191,7 @@ func monitorHint(typ string, value any, kinds map[string][]string, ignored *[]st
 
 	var unknown []string
 	for key := range monitor {
-		if !containsString(monitorKnownKeys, key) {
+		if !slices.Contains(monitorKnownKeys, key) {
 			unknown = append(unknown, key)
 		}
 	}

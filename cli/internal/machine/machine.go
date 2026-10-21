@@ -13,8 +13,6 @@ import (
 	"github.com/djlsystems/yawble/cli/internal/engine"
 )
 
-const DefaultName = "podman-machine-default"
-
 // Info is what could be measured. Applies is false on Linux, where there is no machine.
 type Info struct {
 	Applies      bool

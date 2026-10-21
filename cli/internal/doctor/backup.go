@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"fmt"
+	"github.com/djlsystems/yawble/cli/internal/text"
 	"os"
 	"time"
 
@@ -68,17 +69,10 @@ func age(d time.Duration) string {
 	case d < time.Minute:
 		return "just now"
 	case d < time.Hour:
-		return plural(int(d/time.Minute), "minute") + " old"
+		return text.Plural(int(d/time.Minute), "minute") + " old"
 	case d < 48*time.Hour:
-		return plural(int(d/time.Hour), "hour") + " old"
+		return text.Plural(int(d/time.Hour), "hour") + " old"
 	default:
-		return plural(int(d/(24*time.Hour)), "day") + " old"
+		return text.Plural(int(d/(24*time.Hour)), "day") + " old"
 	}
-}
-
-func plural(n int, unit string) string {
-	if n == 1 {
-		return "1 " + unit
-	}
-	return fmt.Sprintf("%d %ss", n, unit)
 }

@@ -47,4 +47,3 @@ func TestProseWithoutJsonIsAnErrorSayingTheImagePredatesDoctor(t *testing.T) {
 		t.Error("empty stdout must be an error")
 	}
 }
-

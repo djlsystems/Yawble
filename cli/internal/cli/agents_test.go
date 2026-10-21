@@ -158,4 +158,3 @@ func TestDoctorShowsEachLaunchBesideTheSignIn(t *testing.T) {
 		}
 	}
 }
-

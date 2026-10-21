@@ -341,12 +341,6 @@ func WaitHealthy(ctx context.Context, e engine.Engine, url string, health func(s
 
 func waitHealthy(ctx context.Context, e engine.Engine, url string, health func(string) bool, out io.Writer) error {
 	started := time.Now()
-	deadline := started.Add(healthTimeout)
-	noted := false
-
-	// The log is followed from just before this start (the margin covers the machine's clock
-	// running a little behind this computer's) and filtered to what a person waiting wants. It
-	// is held back until the note: a restart that answers in seconds shows none of it.
 	shown := &progress{out: out}
 	follow, cancel := context.WithCancel(ctx)
 	followed := make(chan struct{})
@@ -358,35 +352,60 @@ func waitHealthy(ctx context.Context, e engine.Engine, url string, health func(s
 	stopFollowing := func() { once.Do(func() { cancel(); <-followed; shown.flush() }) }
 	defer stopFollowing()
 
-	for poll := 0; ; poll++ {
-		if health(url + "/healthz") {
+	return waitUntil(ctx, e, ContainerName,
+		func() (bool, error) {
+			if !health(url + "/healthz") {
+				return false, nil
+			}
 			stopFollowing()
 			fmt.Fprintf(out, "Yawble is up at %s\n", url)
-			return nil
+			return true, nil
+		},
+		func() error {
+			stopFollowing()
+			return stoppedError(ctx, e, url)
+		},
+		func() error {
+			return fmt.Errorf("the instance did not answer at %s/healthz within %s; read `yawble logs`", url, healthTimeout)
+		},
+		func() {
+			fmt.Fprintln(out, "waiting for the instance (the first start installs the agent CLIs onto the volume, which takes a few minutes):")
+			shown.show()
+		})
+}
+
+// waitUntil is the one wait on a container coming up: check every healthInterval until it answers
+// done or an error; every stateCheckEvery polls, a container no longer running is stopped(); past
+// healthTimeout it is timedOut(); noted() is said once after healthNoteAt.
+func waitUntil(
+	ctx context.Context, e engine.Engine, name string,
+	check func() (bool, error), stopped func() error, timedOut func() error, noted func()) error {
+	started := time.Now()
+	deadline := started.Add(healthTimeout)
+	said := false
+	for poll := 0; ; poll++ {
+		done, err := check()
+		if err != nil || done {
+			return err
 		}
 		if poll > 0 && poll%stateCheckEvery == 0 {
-			if state, err := e.ContainerState(ctx, ContainerName); err == nil && state != engine.StateRunning {
-				stopFollowing()
-				return stoppedError(ctx, e, url)
+			if state, err := e.ContainerState(ctx, name); err == nil && state != engine.StateRunning {
+				return stopped()
 			}
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("the instance did not answer at %s/healthz within %s; read `yawble logs`", url, healthTimeout)
+			return timedOut()
 		}
-		if !noted && time.Since(started) > healthNoteAt {
-			fmt.Fprintln(out, "waiting for the instance (the first start installs the agent CLIs onto the volume, which takes a few minutes):")
-			shown.show()
-			noted = true
+		if !said && time.Since(started) > healthNoteAt {
+			noted()
+			said = true
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(healthInterval):
+		if err := sleep(ctx, healthInterval); err != nil {
+			return err
 		}
 	}
 }
 
-// followMargin is how far before this start the log is followed from.
 const followMargin = 30 * time.Second
 
 // progress is the log as a person waiting for a start sees it: whole lines, only those that say

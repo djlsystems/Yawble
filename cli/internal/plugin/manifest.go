@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -287,7 +288,7 @@ func parse(root map[string]any) (Manifest, []string, string) {
 			return m, nil, "`requires` must be an array of runtime names."
 		}
 		for _, item := range r.([]any) {
-			if !containsString(Runtimes, item.(string)) {
+			if !slices.Contains(Runtimes, item.(string)) {
 				return m, nil, fmt.Sprintf("`requires` names '%s', which is not a runtime this Host knows (%s).", item, strings.Join(Runtimes, ", "))
 			}
 		}
@@ -391,7 +392,7 @@ func connectionSlot(name string, value any) string {
 				if key == "imap" {
 					return fmt.Sprintf("`connections.%s.scopes` has an entry for 'imap', but scopes do not apply to an imap connection: a mailbox signs in with its app password.", name)
 				}
-				if !containsString(providers, key) {
+				if !slices.Contains(providers, key) {
 					return fmt.Sprintf("`connections.%s.scopes` has scopes for '%s', which the slot's providers do not name.", name, key)
 				}
 				if !scopeList(v[key]) {
@@ -448,7 +449,7 @@ func configField(name string, value any) string {
 			return fmt.Sprintf("`%s` must be a list of strings.", name)
 		}
 		for _, item := range d.([]any) {
-			if choices != nil && !containsString(choices, item.(string)) {
+			if choices != nil && !slices.Contains(choices, item.(string)) {
 				return fmt.Sprintf("`%s` holds '%s'; each item must be one of: %s.", name, item, strings.Join(choices, ", "))
 			}
 		}
@@ -466,7 +467,7 @@ func configField(name string, value any) string {
 	if !fits {
 		return fmt.Sprintf("`%s` must be a %s.", name, typ)
 	}
-	if s, ok := d.(string); ok && choices != nil && !containsString(choices, s) {
+	if s, ok := d.(string); ok && choices != nil && !slices.Contains(choices, s) {
 		return fmt.Sprintf("`%s` must be one of: %s.", name, strings.Join(choices, ", "))
 	}
 	return ""
@@ -474,15 +475,6 @@ func configField(name string, value any) string {
 
 // Runtimes are the names `requires` may list: what the image guarantees. A Go plugin needs none.
 var Runtimes = []string{"dotnet", "node", "python3"}
-
-func containsString(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
-}
 
 // text is a string property that is not blank, trimmed.
 func text(obj map[string]any, name string) (string, bool) {

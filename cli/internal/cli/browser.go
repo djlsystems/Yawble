@@ -2,17 +2,13 @@ package cli
 
 import (
 	"context"
-	"runtime"
 )
 
 // openBrowser hands the URL to the desktop's opener. Best effort: a failure is nobody's problem,
 // the URL was printed anyway. Only ever called from an interactive `up`; a script does not want
 // a window.
 func openBrowser(ctx context.Context, deps Deps, url string) {
-	goos := deps.GOOS
-	if goos == "" {
-		goos = runtime.GOOS
-	}
+	goos := goosOf(deps)
 	r := runnerOf(deps)
 	switch goos {
 	case "darwin":

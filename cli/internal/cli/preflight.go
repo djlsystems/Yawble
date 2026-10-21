@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"runtime"
 	"strings"
 
 	"github.com/djlsystems/yawble/cli/internal/doctor"
@@ -33,10 +32,7 @@ func confirm(deps Deps, yes bool, out io.Writer, question string) (bool, error) 
 // It answers the machine's facts as they are afterwards, because the container's default limits
 // come from them.
 func preflight(ctx context.Context, deps Deps, yes bool, engineName string, memoryMB int, out, errOut io.Writer) (machine.Info, error) {
-	goos := deps.GOOS
-	if goos == "" {
-		goos = runtime.GOOS
-	}
+	goos := goosOf(deps)
 	r := runnerOf(deps)
 
 	// Docker: no Podman machine to mind. Docker Desktop runs its own VM (and sets up WSL on

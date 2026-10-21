@@ -171,10 +171,7 @@ func startStoppedMachine(cmd *cobra.Command, deps Deps) error {
 // startStoppedPodmanMachine is startStoppedMachine for Podman whichever engine is selected:
 // `uninstall` asks every installed engine, Podman among them.
 func startStoppedPodmanMachine(cmd *cobra.Command, deps Deps) error {
-	goos := deps.GOOS
-	if goos == "" {
-		goos = runtime.GOOS
-	}
+	goos := goosOf(deps)
 	info, err := machine.Inspect(cmd.Context(), runnerOf(deps), goos)
 	if err != nil || !info.Applies || !info.Exists || info.Running {
 		return nil // nothing to start; the engine's own error says what is wrong
@@ -187,10 +184,7 @@ func startStoppedPodmanMachine(cmd *cobra.Command, deps Deps) error {
 // answers the path of the binary it installed, or "" when there is nothing newer.
 func updateCLI(cmd *cobra.Command, deps Deps, prerelease bool) (string, error) {
 	out := cmd.OutOrStdout()
-	goos := deps.GOOS
-	if goos == "" {
-		goos = runtime.GOOS
-	}
+	goos := goosOf(deps)
 	base := deps.ReleaseBaseURL
 	if base == "" {
 		base = release.DefaultBaseURL

@@ -466,20 +466,3 @@ func Last(configDir string) (Record, bool) {
 	}
 	return r, true
 }
-
-// ProviderOf names the provider a secret's key is for, or "" for a name yawble does not know.
-func ProviderOf(name string) string {
-	switch name {
-	case "ANTHROPIC_API_KEY":
-		return "Anthropic (Claude)"
-	case "OPENAI_API_KEY":
-		return "OpenAI (Codex)"
-	case "XAI_API_KEY":
-		return "xAI (Grok)"
-	case "GEMINI_API_KEY", "GOOGLE_API_KEY":
-		return "Google (Gemini)"
-	case "GH_TOKEN", "GITHUB_TOKEN":
-		return "GitHub"
-	}
-	return ""
-}

@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"fmt"
+	"github.com/djlsystems/yawble/cli/internal/text"
 	"io"
 	"strings"
 	"time"
@@ -141,7 +142,7 @@ func RenderAgentTools(w io.Writer, tools *AgentTools) {
 		if off := toolItems(p.SwitchedOff); len(off) > 0 {
 			var parts []string
 			for _, i := range off {
-				parts = append(parts, i.Name+" ("+deref(i.Off)+")")
+				parts = append(parts, i.Name+" ("+text.OrEmpty(i.Off)+")")
 			}
 			fmt.Fprintf(w, "  off         %s\n", strings.Join(parts, ", "))
 		}
@@ -180,11 +181,4 @@ func count(items []ListedItem, kind string) int {
 		}
 	}
 	return n
-}
-
-func deref(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }

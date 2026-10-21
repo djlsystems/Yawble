@@ -1,13 +1,15 @@
 package cli
 
 import (
-	"errors"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/djlsystems/yawble/cli/internal/text"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -145,7 +147,7 @@ type installReport struct {
 // the Host's own sentence (400 refused, 409 installed already without --force, 200 written but
 // refused by the catalog).
 func (r installReport) verdict(out io.Writer, folder string) error {
-	reason, id, version := deref(r.Reason), deref(r.ID), deref(r.Version)
+	reason, id, version := text.OrEmpty(r.Reason), text.OrEmpty(r.ID), text.OrEmpty(r.Version)
 	switch {
 	case r.Status == 200 && r.Installed:
 		verb := "installed"
@@ -159,13 +161,6 @@ func (r installReport) verdict(out io.Writer, folder string) error {
 	default:
 		return fmt.Errorf("%s was not installed: %s", folder, reason)
 	}
-}
-
-func deref(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }
 
 // install is what both install paths share once the folder has passed its checks: refuse an
@@ -292,7 +287,7 @@ func newPluginRemoveCommand(deps Deps) *cobra.Command {
 			if !ok {
 				return fmt.Errorf("plugin %s is not installed in the instance", id)
 			}
-			if version != "" && !contains(entry.Versions, version) {
+			if version != "" && !slices.Contains(entry.Versions, version) {
 				return fmt.Errorf("plugin %s has no version %s (it has: %s)", id, version, strings.Join(entry.Versions, ", "))
 			}
 			whole := version == "" || len(entry.Versions) == 1
@@ -558,7 +553,7 @@ func pluginRows(layout map[string]layoutEntry, report hostReport) []pluginRow {
 		entry := layout[id]
 		reason, refused := report.refusal(id)
 		inUse := entry.inUse()
-		if len(entry.Versions) == 0 || (refused && !contains(entry.Versions, inUse)) {
+		if len(entry.Versions) == 0 || (refused && !slices.Contains(entry.Versions, inUse)) {
 			rows = append(rows, pluginRow{ID: id, Version: "-", State: "refused", Reason: reason})
 		}
 		for _, v := range entry.Versions {
@@ -578,15 +573,6 @@ func pluginRows(layout map[string]layoutEntry, report hostReport) []pluginRow {
 		rows = []pluginRow{}
 	}
 	return rows
-}
-
-func contains(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }
 
 func flag01(b bool) string {

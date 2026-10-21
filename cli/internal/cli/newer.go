@@ -30,10 +30,7 @@ func sayIfNewer(ctx context.Context, deps Deps, out io.Writer) {
 	if base == "" {
 		base = release.DefaultBaseURL
 	}
-	goos := deps.GOOS
-	if goos == "" {
-		goos = runtime.GOOS
-	}
+	goos := goosOf(deps)
 	ctx, cancel := context.WithTimeout(ctx, newerReleaseWait)
 	defer cancel()
 	rel, err := release.Latest(ctx, deps.HTTP, base, githubToken(deps), goos, runtime.GOARCH, true)

@@ -430,7 +430,7 @@ func providersNote(deps Deps, m backup.Manifest, out io.Writer) {
 	fmt.Fprintln(out, "yawble's settings are not in a backup. The backed-up instance used these keys; set any you still need with `yawble secret set NAME`, then `yawble up`:")
 	for _, name := range m.Providers {
 		line := "  " + name
-		if p := backup.ProviderOf(name); p != "" {
+		if p := config.ProviderOf(name); p != "" {
 			line += "  " + p
 		}
 		if here[name] {

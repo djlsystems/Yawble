@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/djlsystems/yawble/cli/internal/text"
 	"io"
 	"sort"
 	"strconv"
@@ -280,46 +281,34 @@ func upWorker(ctx context.Context, e engine.Engine, s Settings, i int, ref strin
 // makes exactly "connected to control". A worker image without a health check cannot say, and is
 // not waited for; one that stops is reported at once, not after the whole wait.
 func waitWorker(ctx context.Context, e engine.Engine, name string, out io.Writer) error {
-	started := time.Now()
-	deadline := started.Add(healthTimeout)
-	noted := false
-	for poll := 0; ; poll++ {
-		h, err := e.Health(ctx, name)
-		if err != nil {
-			return err
-		}
-		switch h {
-		case engine.HealthHealthy:
-			fmt.Fprintf(out, "%s is connected to control\n", name)
-			return nil
-		case engine.HealthNone:
-			fmt.Fprintf(out, "note: %s has no health check (an image built without --format docker), so its connection to control is not waited for; yawble status shows it\n", name)
-			return nil
-		}
-		if poll > 0 && poll%stateCheckEvery == 0 {
-			if state, err := e.ContainerState(ctx, name); err == nil && state != engine.StateRunning {
-				return fmt.Errorf("%s stopped before it connected to control; the reason is in `yawble logs %s`, and `yawble up` starts it again", name, strings.TrimPrefix(name, ContainerName+"-"))
+	short := strings.TrimPrefix(name, ContainerName+"-")
+	return waitUntil(ctx, e, name,
+		func() (bool, error) {
+			h, err := e.Health(ctx, name)
+			if err != nil {
+				return false, err
 			}
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("%s did not connect to control within %s; read `yawble logs %s`", name, healthTimeout, strings.TrimPrefix(name, ContainerName+"-"))
-		}
-		if !noted && time.Since(started) > healthNoteAt {
+			switch h {
+			case engine.HealthHealthy:
+				fmt.Fprintf(out, "%s is connected to control\n", name)
+				return true, nil
+			case engine.HealthNone:
+				fmt.Fprintf(out, "note: %s has no health check (an image built without --format docker), so its connection to control is not waited for; yawble status shows it\n", name)
+				return true, nil
+			}
+			return false, nil
+		},
+		func() error {
+			return fmt.Errorf("%s stopped before it connected to control; the reason is in `yawble logs %s`, and `yawble up` starts it again", name, short)
+		},
+		func() error {
+			return fmt.Errorf("%s did not connect to control within %s; read `yawble logs %s`", name, healthTimeout, short)
+		},
+		func() {
 			fmt.Fprintf(out, "waiting for %s to connect to control (a first start installs the agent CLIs onto the volume, which takes a few minutes)\n", name)
-			noted = true
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(healthInterval):
-		}
-	}
+		})
 }
 
-// Bound is the one rule for how many workers an engine holds. Memory is a hard bound: workers ×
-// each worker's memory + control's allowance must fit in the engine's memory, and the refusal
-// names all three figures. CPUs are only warned about: a CPU limit is a ceiling the containers
-// share, not a reservation. Equal to the engine is within it.
 func Bound(engineMB, engineCPUs, workers, workerMB, workerCPUs int) (cpuWarning string, refusal error) {
 	total := workers*workerMB + ControlMemoryMB()
 	if total > engineMB {
@@ -417,13 +406,6 @@ func runNames(runs []Run) string {
 	return strings.Join(names, ", ")
 }
 
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return fmt.Sprintf("%d %s", n, one)
-	}
-	return fmt.Sprintf("%d %s", n, many)
-}
-
 // removeWorker stops and removes worker i. One that is not running holds no run and goes at once.
 // A running one is drained first, always: told to take no new run, and its runs read only once
 // control's record shows it draining, since a run can be placed on it until then and the record
@@ -448,9 +430,9 @@ func removeWorker(ctx context.Context, e engine.Engine, i int, runsOf RunsOf, op
 	}
 	if opt.Now {
 		if err != nil || len(runs) > 0 {
-			what := "the runs on it are not known (" + errText(err) + "); any run on it fails as worker-lost"
+			what := "the runs on it are not known (" + text.ErrorText(err) + "); any run on it fails as worker-lost"
 			if err == nil {
-				what = fmt.Sprintf("this fails its %s as worker-lost (%s); the Manager re-sends each once", plural(len(runs), "run", "runs"), runNames(runs))
+				what = fmt.Sprintf("this fails its %s as worker-lost (%s); the Manager re-sends each once", text.PluralOf(len(runs), "run", "runs"), runNames(runs))
 			}
 			fmt.Fprintf(out, "Stopping %s now: %s.\n", id, what)
 			ok, err := opt.Confirm("Stop " + id + " now?")
@@ -477,11 +459,11 @@ func removeWorker(ctx context.Context, e engine.Engine, i int, runsOf RunsOf, op
 	said := -1
 	for len(runs) > 0 {
 		if len(runs) != said {
-			fmt.Fprintf(out, "%s: %s still going (%s); waiting. `--now` stops it at once.\n", id, plural(len(runs), "run", "runs"), runNames(runs))
+			fmt.Fprintf(out, "%s: %s still going (%s); waiting. `--now` stops it at once.\n", id, text.PluralOf(len(runs), "run", "runs"), runNames(runs))
 			said = len(runs)
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("%s still holds %s after %s; it is left running and draining. `yawble workers <n> --now` stops it", id, plural(len(runs), "run", "runs"), drainTimeout)
+			return fmt.Errorf("%s still holds %s after %s; it is left running and draining. `yawble workers <n> --now` stops it", id, text.PluralOf(len(runs), "run", "runs"), drainTimeout)
 		}
 		select {
 		case <-ctx.Done():
@@ -580,11 +562,4 @@ func sleep(ctx context.Context, d time.Duration) error {
 	case <-time.After(d):
 		return nil
 	}
-}
-
-func errText(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
 }

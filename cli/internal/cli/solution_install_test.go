@@ -304,7 +304,7 @@ func TestSolutionInstallFailureNamesTheStepAndExitsOne(t *testing.T) {
 			if code != 1 {
 				t.Fatalf("exit %d: %s %s", code, out, errOut)
 			}
-			want := "Failed at step 6 (Publish the sites): The site tracker could not be published: the team already has a site named tracker. Nothing was left behind."
+			want := "the install failed at step 6 (Publish the sites): The site tracker could not be published: the team already has a site named tracker. Nothing was left behind."
 			if !strings.Contains(errOut, want) {
 				t.Errorf("stderr lacks %q: %q", want, errOut)
 			}

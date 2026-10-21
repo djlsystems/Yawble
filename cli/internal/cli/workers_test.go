@@ -574,7 +574,6 @@ func TestBackupNamesAgentsOnEveryWorkerStopsWorkersFirstAndStartsThemAfterContro
 				t.Errorf("the agent on worker-2 was not named: %s", out)
 			}
 			w2, w1, control := indexOf(s.Calls, program+" stop yawble-worker-2"), indexOf(s.Calls, program+" stop yawble-worker-1"), indexOf(s.Calls, program+" stop yawble\n")
-			control = -1
 			for i, c := range s.Calls {
 				if c == program+" stop yawble" {
 					control = i

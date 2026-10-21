@@ -501,4 +501,3 @@ func TestDoctorPrintsNoFormulaDerivedFigure(t *testing.T) {
 		}
 	}
 }
-

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/djlsystems/yawble/cli/internal/text"
 	"io"
 	"os"
 	"path"
@@ -106,7 +107,7 @@ func newSolutionCheckCommand(deps Deps) *cobra.Command {
 				if !asJSON {
 					renderRefusals(out, folder, body.Refusals)
 				}
-				return fmt.Errorf("%s does not pass its check: %s", folder, plural(len(body.Refusals), "problem"))
+				return fmt.Errorf("%s does not pass its check: %s", folder, text.Plural(len(body.Refusals), "problem"))
 			}
 			if !asJSON {
 				renderPlan(out, folder, body.Plan)
@@ -252,7 +253,7 @@ type plan struct {
 }
 
 func renderRefusals(out io.Writer, folder string, refusals []refusalRow) {
-	fmt.Fprintf(out, "%s does not pass its check (%s):\n", folder, plural(len(refusals), "problem"))
+	fmt.Fprintf(out, "%s does not pass its check (%s):\n", folder, text.Plural(len(refusals), "problem"))
 	for _, r := range refusals {
 		fmt.Fprintf(out, "  %s %s: %s\n", r.File, r.Field, r.Reason)
 	}
@@ -268,7 +269,7 @@ func renderPlan(out io.Writer, folder string, p *plan) {
 	fmt.Fprintf(out, "\nMembers (%d):\n", len(p.Members))
 	for _, m := range p.Members {
 		if m.Kind == "plugin" {
-			fmt.Fprintf(out, "  %s: plugin %s %s\n", m.Name, deref(m.PluginID), deref(m.PluginVersion))
+			fmt.Fprintf(out, "  %s: plugin %s %s\n", m.Name, text.OrEmpty(m.PluginID), text.OrEmpty(m.PluginVersion))
 			keys := make([]string, 0, len(m.Settings))
 			for k := range m.Settings {
 				keys = append(keys, k)
@@ -303,14 +304,14 @@ func renderPlan(out io.Writer, folder string, p *plan) {
 		var when string
 		switch t.Kind {
 		case "schedule":
-			when = deref(t.Schedule)
+			when = text.OrEmpty(t.Schedule)
 		case "event":
-			when = "on " + deref(t.EventType)
+			when = "on " + text.OrEmpty(t.EventType)
 			if t.Filter != nil {
 				when += " where " + *t.Filter
 			}
 		case "folder":
-			when = "when files change in documents/" + deref(t.FolderPath)
+			when = "when files change in documents/" + text.OrEmpty(t.FolderPath)
 			if t.FolderGlob != nil {
 				when += " matching " + *t.FolderGlob
 			}
@@ -332,12 +333,12 @@ func renderPlan(out io.Writer, folder string, p *plan) {
 	if len(p.Sites) > 0 {
 		fmt.Fprintf(out, "\nSites published (%d):\n", len(p.Sites))
 		for _, s := range p.Sites {
-			fmt.Fprintf(out, "  %s (%s)\n", s.Name, plural(len(s.Files), "file"))
+			fmt.Fprintf(out, "  %s (%s)\n", s.Name, text.Plural(len(s.Files), "file"))
 		}
 	}
 	if p.Tools != nil {
 		fmt.Fprintf(out, "\nTools: %s/ copied to the team's %s/ folder, named {solution} in instructions (%s): %s\n",
-			p.Tools.Folder, p.Tools.InstalledAs, plural(len(p.Tools.Files), "file"), strings.Join(p.Tools.Files, ", "))
+			p.Tools.Folder, p.Tools.InstalledAs, text.Plural(len(p.Tools.Files), "file"), strings.Join(p.Tools.Files, ", "))
 	}
 
 	asks := len(p.Inputs.Documents) + len(p.PersonSettings) + len(p.Inputs.Connections)
@@ -381,13 +382,6 @@ func requirement(required bool) string {
 		return "required"
 	}
 	return "optional"
-}
-
-func plural(n int, noun string) string {
-	if n == 1 {
-		return "1 " + noun
-	}
-	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 func thousands(n int64) string {

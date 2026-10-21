@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/djlsystems/yawble/cli/internal/text"
 	"io"
 	"net/http"
 	"os"
@@ -266,7 +267,7 @@ func newStatusCommand(deps Deps) *cobra.Command {
 			if asJSON {
 				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
-				return enc.Encode(statusJSON{Status: st, Stats: stats, StatsError: errText(statsErr), Workers: workers})
+				return enc.Encode(statusJSON{Status: st, Stats: stats, StatsError: text.ErrorText(statsErr), Workers: workers})
 			}
 			w := cmd.OutOrStdout()
 			fmt.Fprintf(w, "container  %s\n", st.Container)
@@ -333,7 +334,7 @@ func workersOf(ctx context.Context, e engine.Engine, st instance.Status) []worke
 	out := make([]workerJSON, 0, len(st.Workers))
 	for _, w := range st.Workers {
 		stats, err := containerStats(ctx, e, w.Name, w.Container)
-		out = append(out, workerJSON{WorkerStatus: w, Stats: stats, StatsError: errText(err), Control: record.Worker(w.ID), record: record})
+		out = append(out, workerJSON{WorkerStatus: w, Stats: stats, StatsError: text.ErrorText(err), Control: record.Worker(w.ID), record: record})
 	}
 	return out
 }
@@ -370,13 +371,6 @@ func statsLine(e engine.Engine, st *engine.Stats, err error) string {
 	default:
 		return fmt.Sprintf("%s  (%s)", st.Summary(), st.Command)
 	}
-}
-
-func errText(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
 }
 
 func newLogsCommand(deps Deps) *cobra.Command {

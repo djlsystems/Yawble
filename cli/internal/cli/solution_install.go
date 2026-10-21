@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/djlsystems/yawble/cli/internal/text"
 	"io"
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -280,7 +282,7 @@ func (k *keptPart) connection(member, slot string) (string, bool) {
 	if k != nil {
 		for _, c := range k.Connections {
 			if c.Member == member && c.Slot == slot {
-				return deref(c.Connection), true
+				return text.OrEmpty(c.Connection), true
 			}
 		}
 	}
@@ -558,7 +560,7 @@ func (in *solutionInstall) preview(team *string) (previewBody, error) {
 		return previewBody{}, fmt.Errorf("%s cannot be installed: %s", in.folder, p.Error)
 	case !p.OK && len(p.Refusals) > 0:
 		renderRefusals(in.out, in.folder, p.Refusals)
-		return previewBody{}, fmt.Errorf("%s does not pass its check: %s", in.folder, plural(len(p.Refusals), "problem"))
+		return previewBody{}, fmt.Errorf("%s does not pass its check: %s", in.folder, text.Plural(len(p.Refusals), "problem"))
 	case !p.OK:
 		return p, errRefused{p.Error}
 	case p.Plan == nil:
@@ -684,7 +686,7 @@ func (in *solutionInstall) askSettings(p *plan, kept *keptPart) (map[string]map[
 			fmt.Fprintf(in.out, "\n%s's setting %s: kept: %s. The update keeps it; change it in the member's settings.\n", s.Member, s.Setting, keptWords(value))
 			continue
 		}
-		kind := deref(s.Type)
+		kind := text.OrEmpty(s.Type)
 		if kind == "" {
 			kind = "string"
 		}
@@ -743,7 +745,7 @@ func isListType(kind string) bool {
 // parseSetting turns a typed answer into the JSON value the setting's type takes.
 func parseSetting(kind, answer string, choices []string) (any, error) {
 	check := func(v string) error {
-		if len(choices) > 0 && !contains(choices, v) {
+		if len(choices) > 0 && !slices.Contains(choices, v) {
 			return fmt.Errorf("%q is not one of %s", v, strings.Join(choices, ", "))
 		}
 		return nil
@@ -918,7 +920,7 @@ func (in *solutionInstall) result(p previewBody, status int, raw json.RawMessage
 	}
 	if !b.OK && len(b.Refusals) > 0 {
 		renderRefusals(in.out, in.folder, b.Refusals)
-		return fmt.Errorf("%s does not pass its check: %s", in.folder, plural(len(b.Refusals), "problem"))
+		return fmt.Errorf("%s does not pass its check: %s", in.folder, text.Plural(len(b.Refusals), "problem"))
 	}
 	for _, s := range b.Steps {
 		if s.Done {
@@ -935,7 +937,7 @@ func (in *solutionInstall) result(p previewBody, status int, raw json.RawMessage
 				title = s.Title
 			}
 		}
-		return fmt.Errorf("Failed at step %d (%s): %s. Nothing was left behind.", b.StepNumber, title, strings.TrimSuffix(b.Reason, "."))
+		return fmt.Errorf("the install failed at step %d (%s): %s. Nothing was left behind.", b.StepNumber, title, strings.TrimSuffix(b.Reason, "."))
 	}
 	if p.Mode == "update" {
 		fmt.Fprintf(in.out, "\nUpdated team %s from %s %s to %s.\n", b.TeamName, p.Plan.Package.Name, p.From, p.To)
