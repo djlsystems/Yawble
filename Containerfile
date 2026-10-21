@@ -33,12 +33,13 @@ WORKDIR /src/web
 # quasar.config.ts imports the version rule from ../scripts.
 COPY scripts/version.mjs /src/scripts/
 # THE DEPENDENCIES IN THEIR OWN LAYER: the lockfile changes rarely, the sources every build, so npm
-# ci runs again only when the lockfile moved. The image's npm 10 fails this tree with "Cannot read
-# properties of null (reading 'edgesOut')".
+# ci runs again only when the lockfile moved. Its postinstall (quasar prepare) reads the project
+# files, so it is skipped here and run once they are copied. The image's npm 10 fails this tree
+# with "Cannot read properties of null (reading 'edgesOut')".
 COPY web/package.json web/package-lock.json ./
-RUN npm install -g npm@11 && npm ci
+RUN npm install -g npm@11 && npm ci --ignore-scripts
 COPY web/ ./
-RUN npx quasar build
+RUN npx quasar prepare --silent && npx quasar build
 
 # The compiler runs natively and CROSS-publishes for TARGETARCH. Running the .NET SDK under QEMU for
 # the arm64 half is an hour and crashes; a framework-dependent publish only has to pick the right
