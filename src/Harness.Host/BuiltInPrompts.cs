@@ -102,9 +102,8 @@ public static class BuiltInPrompts
     /// IT ALSO NAMES NO AGENT, for the same reason. A manager copies what it is shown, so an
     /// `--agent <preset>` in the hiring example would put every team's hires on that preset whatever
     /// the team was configured for. A literal in a prompt is not a default; it is an instruction.
-    /// The example carries no flag and the team's own default answers instead, which is what
-    /// `harness member`'s help promises. `PromptCatalogTests` fails if a preset
-    /// name appears here again.
+    /// The example carries no flag and the team's own default answers instead, as the member
+    /// tool's description promises.
     ///
     /// STANDING NOTES ARE A POINTER AND NEVER AN INJECTION. Each role's prompt names one file and
     /// stops. The notes' CONTENT must not reach the prompt: that would have a member re-reading its
@@ -128,7 +127,8 @@ public static class BuiltInPrompts
 
         Platform tools are MCP tools on the server named harness: skills_get, tell, progress,
         blocked, handback, needs_decision, workflow_complete, workflow_show, team_list,
-        team_current, wip, lease, status, hiring, member, kanban, backlog, repo, site and skills_search. member hires, status
+        team_current, wip, lease, wake_me, status, hiring, member, kanban, backlog, repo, site, outcome and
+        skills_search. member hires, status
         is the roster, and hiring is the mix you read before a hire. There is no shell command and
         no HTTP fallback. HARNESS_CAUSATION is the message you are answering: pass it as causation
         on every tell, or you start a new workflow.
@@ -175,13 +175,11 @@ public static class BuiltInPrompts
         """;
 
     /// <summary>
-    /// What the console is told about where it is, as DATA rather than a string literal in
-    /// ConciergeLaunchFactory.cs. Steering
-    /// happens through `harness tell`, never through file edits: the manager owns the plan and
-    /// the console asks. That is what keeps the console non-privileged, and it needs no
-    /// plan-editing CLI surface.
-    /// </summary>
-    /// <summary>
+    /// What the Concierge is told about where it is, as DATA rather than a string literal in
+    /// ConciergeLaunchFactory.cs. Steering happens through the tell tool, never through file edits:
+    /// the Manager owns the plan and the Concierge asks. That is what keeps the Concierge
+    /// non-privileged, and it needs no plan-editing surface.
+    ///
     /// IT NAMES NO TEAM, on purpose rather than by omission. A Concierge has no single team to
     /// name: it is one person's door onto every team they reach, with one of them current at a time.
     ///
@@ -189,12 +187,8 @@ public static class BuiltInPrompts
     /// cannot be revised, so naming a team here would freeze the current team in the one artifact
     /// that can never follow a switch.
     ///
-    /// THE FIRST `harness skills get ` IN A SEEDED PROMPT DECLARES ITS ROLE, so do not write that
-    /// phrase in PROSE above the bootstrap line. <c>RoleSkillWorkflowCoverageTests</c> derives which
-    /// role a prompt belongs to by taking the token after the FIRST occurrence - the seed's own
-    /// instruction text being the source of truth rather than a second list - and a generic mention
-    /// earlier in the prompt makes it derive a role that does not exist, pulling this prompt into a
-    /// set of assertions written for containers. In prose, say `the get verb`.
+    /// THE ROLE SKILL IS NAMED ONCE, on the `Your role skill is` line, and the skills_get call that
+    /// follows loads it; nothing else in the prompt names a role skill.
     /// </summary>
     public const string ConciergePromptText =
         """
@@ -239,8 +233,8 @@ public static class BuiltInPrompts
 
         Platform tools are MCP tools on the server named harness: skills_get, skills_search, tell,
         progress, blocked, handback, needs_decision, workflow_complete, workflow_show, team_list,
-        team_current, wip, lease, status, hiring, member, kanban, backlog, repo, and site. There is no shell
-        command and no HTTP fallback.
+        team_current, team_create, team_archive, wip, lease, status, hiring, member, kanban, backlog, repo, site
+        and outcome. There is no shell command and no HTTP fallback.
 
         Before you tell a member about work already running, read STEERING.md in your workspace.
         When it names a workflow, pass that number as causation so you join it. Omitting causation
@@ -286,8 +280,8 @@ public static class BuiltInPrompts
 
         Platform tools are MCP tools on the server named harness: skills_get, skills_search, tell,
         progress, blocked, handback, needs_decision, workflow_complete, workflow_show, team_list,
-        team_current, wip, lease, status, hiring, member, kanban, backlog, repo, and site. There is no shell
-        command and no HTTP fallback. Call progress while you work. Pass HARNESS_CAUSATION as
+        team_current, wip, lease, wake_me, status, hiring, member, kanban, backlog, repo, and site. There is no
+        shell command and no HTTP fallback. Call progress while you work. Pass HARNESS_CAUSATION as
         causation on every tell.
 
         ## A run with several numbered items

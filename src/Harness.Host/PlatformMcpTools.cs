@@ -426,7 +426,7 @@ public sealed partial class PlatformMcpTools(
     }
 
     [McpServerTool(Name = "member"), Description(
-        "Hire one member onto your team. This is harness member. You do not choose which agent "
+        "Hire one member onto your team. You do not choose which agent "
         + "they run. The reply's id is who you tell; the spaced name is what the board shows. "
         + "When the reply carries hiringNotice, no allowed agent had your tag and it says who was "
         + "hired instead. "

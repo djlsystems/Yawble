@@ -1145,8 +1145,8 @@ public static class BuiltInSkills
                is left behind. Then offer the person a local repository, or ask them to
                create the remote; creating it on GitHub and attaching it anyway are theirs to
                choose, on the Teams screen.
-               The clone is the platform's work. Only a person attaches a remote later, on the
-               team's Repos screen. A team with no repository is ready: its repository comes with the
+               The clone is the platform's work. Only a person attaches a remote later, in Team
+               settings (Settings on the ribbon). A team with no repository is ready: its repository comes with the
                first work that needs one.
             5. **Created is not selected.** `team_current` reports which team the person is looking
                at; they move it in their browser. Dispatch by name - `team` <id> - regardless.
@@ -1293,10 +1293,6 @@ public static class BuiltInSkills
             `edit` or `comment` does not wake it, and it clears the "awaiting manager" mark the
             person's edit raised. `edit` needs something to change, or it is refused.
 
-            ## Suggesting a template
-
-            research -> research; market -> marketing; ops/invoice/hire -> ops; build/fix/test ->
-            development; else generic.
             """),
         new(
             "authoring-plugins",
@@ -1420,8 +1416,8 @@ public static class BuiltInSkills
 
             Settings are per member, chosen when the member is hired, and checked against the manifest
             then: a wrong type, a number outside its bounds or a missing required field is refused. Secrets are logical key names.
-            The person sets the value with the operator CLI's secret command, on the machine that runs
-            the platform. A spec, a manifest, a message or a backlog item names the key, never the
+            The person sets the value under the key's name in the member's settings screen, or with
+            the operator CLI's secret command on the machine that runs the platform. A spec, a manifest, a message or a backlog item names the key, never the
             value. The value reaches the plugin only on its input when a run starts. The platform
             redacts bound values from what a plugin writes, but that is a net, not a guarantee: the
             plugin must never write a secret out.
@@ -1506,8 +1502,8 @@ public static class BuiltInSkills
 
             ## 7. Commands are text lines
 
-            In this version a command is a line of text the plugin's own skill documents, such as
-            `list from:<address> is:unread`. Structured actions are reserved for later. A Manager
+            A command is a line of text the plugin's own skill documents, such as
+            `list from:<address> is:unread`. A Manager
             finds a plugin's skill with `skills_search`, and `hiring` lists each installed plugin with
             its skill.
 
