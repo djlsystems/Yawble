@@ -32,7 +32,13 @@ internal static class RepoRoutePrologue
 
         var userId = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
 
-        var busyMembers = (await TeamBusy.MembersAsync(teams, host, pending, stored, ct)).Select(member => member.Name).ToList();
+        // A STARTED RUN REFUSES, A QUEUED INSTRUCTION DOES NOT: a run can move the clone under the
+        // action; a queued instruction on a paused team never starts, and the person who paused it is
+        // the one pressing Fetch. An archive counts the queued ones too (TeamArchive).
+        var busyMembers = (await TeamBusy.MembersAsync(teams, host, pending, stored, ct))
+            .Where(member => member.Running)
+            .Select(member => member.Name)
+            .ToList();
         if (busyMembers.Count > 0)
         {
             await log.WriteAsync(userId, email, action, $"{stored}/{repo}", null,

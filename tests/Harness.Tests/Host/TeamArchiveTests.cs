@@ -157,15 +157,20 @@ public sealed class TeamArchiveTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task A_repository_action_is_refused_naming_the_member_with_an_instruction_queued()
+    public async Task A_repository_action_is_refused_for_a_run_that_has_started_and_not_for_an_instruction_only_queued()
     {
-        // ONE BUSY RULE: a member with an instruction accepted and not started is working, for a
-        // repository action as for an archive, so a fetch cannot move the clone under it.
+        // ONE BUSY READ, TWO RULES: an archive counts a queued instruction, a repository action does
+        // not. A paused team's queued instruction never starts, and the person who paused it is the
+        // one pressing Fetch; a started run can move the clone, so it still refuses.
         var pending = Services.GetRequiredService<IPendingDeliveries>();
         var queued = await Log.AppendAsync(new NewMessage("test.queued", "{}", "test"), Ct);
         await pending.AddAsync(Manager, queued.Seq, Ct);
 
         var fetch = await _person.PostAsync($"/api/teams/{_team}/repos/anything/fetch", null, Ct);
+        Assert.Equal(HttpStatusCode.NotFound, fetch.StatusCode); // past the busy rule: no such repository
+
+        await pending.StartAsync(Manager, queued.Seq, Ct);
+        fetch = await _person.PostAsync($"/api/teams/{_team}/repos/anything/fetch", null, Ct);
 
         Assert.Equal(HttpStatusCode.Conflict, fetch.StatusCode);
         var body = await fetch.Content.ReadFromJsonAsync<JsonElement>(Ct);
