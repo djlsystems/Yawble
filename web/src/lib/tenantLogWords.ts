@@ -455,6 +455,23 @@ const words: Record<string, Words> = {
     did: 'changed team instructions',
     detail: (d) => (get(d, 'set') === false ? 'Team instructions cleared.' : 'Team instructions set.'),
   },
+  // THE ROW NAMES THE VARIABLES AND NEVER A VALUE: a team's env is where a secret goes.
+  'team.env-changed': {
+    did: 'changed team environment',
+    detail: (d) => {
+      const names = get(d, 'names');
+      return Array.isArray(names) && names.length > 0
+        ? `Environment variables set: ${names.map(String).join(', ')}. Values are never recorded.`
+        : 'Environment cleared.';
+    },
+  },
+  'team.repos-changed': {
+    did: 'changed team repositories',
+    detail: (d) => {
+      const repos = get(d, 'repos');
+      return Array.isArray(repos) && repos.length > 0 ? `Repositories: ${repos.map(String).join(', ')}.` : 'Repositories cleared.';
+    },
+  },
 
   'backlog.item-created': {
     did: 'created backlog item',
