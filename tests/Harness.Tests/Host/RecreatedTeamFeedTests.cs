@@ -165,10 +165,20 @@ public sealed class RecreatedTeamFeedTests
         Assert.Equal(alphas, await SeqsAsync(container, "/api/messages?after=0&take=2000", ct));
     }
 
+    /// <summary>
+    /// A host whose fixture teams are PAUSED, so the instructions the tests write are rows on the log
+    /// and not runs: a delivered instruction would launch an agent whose own rows would land among the
+    /// rows a read answers, at times the test does not control.
+    /// </summary>
     private static async Task<HostFixture> HostAsync()
     {
         var host = new HostFixture();
         await host.InitializeAsync();
+
+        var registry = host.Services.GetRequiredService<TeamRegistry>();
+        var ct = TestContext.Current.CancellationToken;
+        await registry.SetPausedAsync(host.Alpha, paused: true, ct);
+        await registry.SetPausedAsync(host.Beta, paused: true, ct);
         return host;
     }
 
