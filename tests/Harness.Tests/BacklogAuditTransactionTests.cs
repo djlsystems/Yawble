@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Harness.Backlog;
 using Harness.Contracts;
 using Harness.Host;
@@ -83,6 +84,29 @@ public sealed class BacklogAuditTransactionTests : IDisposable
             actions);
         Assert.Equal(4, await CountAsync("SELECT COUNT(*) FROM tenant_events"));
         Assert.Null(await store.GetAsync(item.Id, Ct));
+    }
+
+    [Fact]
+    public async Task A_created_rows_subject_is_the_items_citation_and_its_detail_names_the_id()
+    {
+        // THE CITATION IS MINTED INSIDE THE TRANSACTION, so the caller cannot name it: the store
+        // fills the subject and the id, as the row carried before it moved into the transaction.
+        var rows = new List<TriggerAudit>();
+        var store = new SqliteBacklogStore(_database, audit: (connection, transaction, row, ct) =>
+        {
+            rows.Add(row);
+            return TenantAuditRow.AppendAsync(connection, transaction, row, ct);
+        });
+
+        var item = await store.CreateAsync("alpha", "Crawl openings", "spec", "person@example.test", Ct,
+            audit: new("person-1", "person@example.test", TenantActions.BacklogItemCreated, null, "Crawl openings", """{"team":"alpha"}"""));
+
+        var row = Assert.Single(rows);
+        Assert.Equal(PlatformBacklogId.Format(item.Id), row.Subject);
+        Assert.Equal("Crawl openings", row.SubjectName);
+        var detail = JsonDocument.Parse(row.Detail!).RootElement;
+        Assert.Equal(item.Id, detail.GetProperty("id").GetInt64());
+        Assert.Equal("alpha", detail.GetProperty("team").GetString());
     }
 
     [Fact]

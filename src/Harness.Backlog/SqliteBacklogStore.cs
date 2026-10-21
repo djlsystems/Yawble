@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Harness.Contracts;
@@ -205,10 +206,19 @@ public sealed class SqliteBacklogStore : IBacklogStore
             await insert.ExecuteNonQueryAsync(ct);
         }
 
-        if (audit is not null) await _audit!(connection, transaction, audit, ct);
+        // THE CITATION IS MINTED HERE, so the caller cannot name it: the row gets the citation as its
+        // subject and the id in its detail, as the Admin Log and FindLatestAsync read it.
+        if (audit is not null) await _audit!(connection, transaction, Naming(audit, id), ct);
         await transaction.CommitAsync(ct);
 
         return new BacklogItem(id, team, title, body, BacklogStates.Pending, position, null, now, now, createdBy);
+    }
+
+    private static TriggerAudit Naming(TriggerAudit audit, long id)
+    {
+        var detail = audit.Detail is null ? new JsonObject() : JsonNode.Parse(audit.Detail) as JsonObject;
+        if (detail is not null && !detail.ContainsKey("id")) detail["id"] = id;
+        return audit with { Subject = audit.Subject ?? Key(id), Detail = detail?.ToJsonString() ?? audit.Detail };
     }
 
     public async Task UpdateAsync(
