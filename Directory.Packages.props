@@ -18,17 +18,6 @@
          (TeamCreatedAnnouncementTests). 10.0.13: 10.0.0's SignalR.Common has a known
          high-severity advisory, which the build treats as an error. -->
     <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.13" />
-
-    <!-- A REAL BROWSER, for Harness.Ui.Tests. It drives the BUILT bundle served by a real Host
-         on a real socket - never `npm run dev`, and not as a preference:
-         a child started inside an agent invocation joins a job object and dies with it, so a
-         dev-server suite would work on a desktop and break the moment a member ran it. The Host
-         here is owned by the test, which is a process that is SUPPOSED to die with the run.
-
-         The base package, NOT Microsoft.Playwright.Xunit: that one brings its own fixture model,
-         and this repository has its own. Assertions come from Microsoft.Playwright.Assertions, which is
-         in here. -->
-    <PackageVersion Include="Microsoft.Playwright" Version="1.62.0" />
   </ItemGroup>
 
   <ItemGroup Label="Runtime">

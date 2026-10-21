@@ -17,9 +17,7 @@ import { monitorSymbols } from './scripts/monitor-symbols.mjs';
  * that needs one says so in its own first line, where the next reader sees it rather than having to
  * find this file.
  *
- * `include` is stated rather than left to the default so that the second runner - the UI smoke
- * suite is an xUnit project, deliberately, so `test.ps1` and the corpus can see it - can never be
- * picked up by this one.
+ * `include` is stated rather than left to the default, so nothing outside `src` is ever picked up.
  */
 export default defineConfig({
   plugins: [

@@ -53,10 +53,16 @@ public sealed class ContainerImageTests
         var worker = Stages()["worker"];
         var text = string.Join('\n', worker.Instructions);
 
-        foreach (var tool in new[] { "build-essential", "python3", "ripgrep", "fd-find", "nodejs.org/dist/v22", "corepack enable", "go.dev/dl/go", "dotnet-install.sh", "astral.sh/uv", "playwright install-deps chromium" })
+        foreach (var tool in new[] { "build-essential", "python3", "ripgrep", "fd-find", "nodejs.org/dist/v${NODE_VERSION}", "corepack enable", "go.dev/dl/go${GO_VERSION}", "dotnet-install.sh", "astral.sh/uv", "playwright install-deps chromium" })
         {
             Assert.Contains(tool, text);
         }
+
+        // The toolchain versions are declared once, at the head of the file, and the stages read them.
+        var file = File.ReadAllText(Path.Combine(RepoRoot(), "Containerfile"));
+        Assert.Matches(@"(?m)^ARG NODE_VERSION=22\.\d+\.\d+$", file);
+        Assert.Matches(@"(?m)^ARG GO_VERSION=1\.\d+\.\d+$", file);
+        Assert.Contains("ARG NODE_VERSION\nARG GO_VERSION", text);
 
         Assert.Equal(
             ["/opt/harness/container-entrypoint.sh", "/opt/harness/ensure-agent-clis.sh", "/opt/harness/npm-torn-install.sh", "/opt/harness/prepare-volume.sh"],

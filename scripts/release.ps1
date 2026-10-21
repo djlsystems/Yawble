@@ -192,7 +192,7 @@ $tag = "v$version"
 
 if ($DryRun) {
     Write-Host ''
-    Write-Host "Dry run. Both suites passed. Next version: $version"
+    Write-Host "Dry run. All three suites passed. Next version: $version"
     Write-Host "Would tag      $tag on $head and push it to origin"
     foreach ($b in Get-ImageBuilds -Image $image -Version $version) {
         Write-Host "Would build    --target $($b.Target) at $tag for $platforms with --build-arg HARNESS_VERSION=$version HARNESS_COMMIT=$head"

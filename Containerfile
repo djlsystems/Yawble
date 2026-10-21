@@ -14,23 +14,31 @@
 # Both stages stamp from these, and the image carries them as OCI labels. Left out, every stamp
 # reads 0.0.0+unknown - never a release.
 #
-# BUILT FOR linux/amd64 AND linux/arm64 by scripts/release.ps1; scripts/podman-up.ps1 builds the
+# BUILT FOR linux/amd64 AND linux/arm64 by scripts/release.ps1; scripts/dev-up.ps1 builds the
 # local one for the machine it runs on. --platform=$BUILDPLATFORM on the two compile stages: they
 # run natively on the machine doing the build and their output (JavaScript, a framework-dependent
 # .NET publish) is the same for both targets, so only the runtime stage runs under emulation for
 # the arm64 half.
 ARG HARNESS_VERSION=""
 ARG HARNESS_COMMIT=""
+# THE TOOLCHAIN VERSIONS, declared once: the web stage's Node, and the worker's Node and Go.
+ARG NODE_MAJOR=22
+ARG NODE_VERSION=22.23.2
+ARG GO_VERSION=1.27.1
 
-FROM --platform=$BUILDPLATFORM node:22-bookworm AS web
+FROM --platform=$BUILDPLATFORM node:${NODE_MAJOR}-bookworm AS web
 ARG HARNESS_VERSION
 ARG HARNESS_COMMIT
 WORKDIR /src/web
 # quasar.config.ts imports the version rule from ../scripts.
 COPY scripts/version.mjs /src/scripts/
+# THE DEPENDENCIES IN THEIR OWN LAYER: the lockfile changes rarely, the sources every build, so npm
+# ci runs again only when the lockfile moved. The image's npm 10 fails this tree with "Cannot read
+# properties of null (reading 'edgesOut')".
+COPY web/package.json web/package-lock.json ./
+RUN npm install -g npm@11 && npm ci
 COPY web/ ./
-# The image's npm 10 fails this tree with "Cannot read properties of null (reading 'edgesOut')".
-RUN npm install -g npm@11 && npm ci && npx quasar build
+RUN npx quasar build
 
 # The compiler runs natively and CROSS-publishes for TARGETARCH. Running the .NET SDK under QEMU for
 # the arm64 half is an hour and crashes; a framework-dependent publish only has to pick the right
@@ -41,6 +49,21 @@ ARG HARNESS_COMMIT
 ARG TARGETARCH
 WORKDIR /src
 COPY Directory.Build.props Directory.Packages.props global.json ./
+# THE PACKAGES IN THEIR OWN LAYER: the project files change rarely, the sources every build, so the
+# restore runs again only when a project file moved.
+COPY src/Harness.Backlog/Harness.Backlog.csproj src/Harness.Backlog/
+COPY src/Harness.Containers/Harness.Containers.csproj src/Harness.Containers/
+COPY src/Harness.Contracts/Harness.Contracts.csproj src/Harness.Contracts/
+COPY src/Harness.Host/Harness.Host.csproj src/Harness.Host/
+COPY src/Harness.Identity/Harness.Identity.csproj src/Harness.Identity/
+COPY src/Harness.Kanban/Harness.Kanban.csproj src/Harness.Kanban/
+COPY src/Harness.Messaging/Harness.Messaging.csproj src/Harness.Messaging/
+COPY src/Harness.Pty.Abstractions/Harness.Pty.Abstractions.csproj src/Harness.Pty.Abstractions/
+COPY src/Harness.Pty/Harness.Pty.csproj src/Harness.Pty/
+COPY src/Harness.Skills/Harness.Skills.csproj src/Harness.Skills/
+COPY src/Harness.Streaming/Harness.Streaming.csproj src/Harness.Streaming/
+COPY src/Harness.Worker/Harness.Worker.csproj src/Harness.Worker/
+RUN dotnet restore src/Harness.Host/Harness.Host.csproj -a "$TARGETARCH"
 COPY src/ src/
 # The Material Symbols names the Host embeds; the operator CLI embeds the same file.
 COPY cli/internal/plugin/material-symbols.txt cli/internal/plugin/
@@ -58,7 +81,7 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
 # made every release reinstall the whole toolchain below, twice, the arm64 half under emulation.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        git ca-certificates curl openssh-client jq sqlite3 less procps util-linux passwd \
+        git ca-certificates curl openssh-client sqlite3 util-linux passwd \
     && mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
         -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
@@ -101,7 +124,6 @@ FROM base AS control
 COPY --from=build /out .
 COPY scripts/container-entrypoint.sh scripts/prepare-volume.sh /opt/harness/
 RUN chmod +x /opt/harness/container-entrypoint.sh /opt/harness/prepare-volume.sh \
-    && sed -i 's/\r$//' /opt/harness/container-entrypoint.sh /opt/harness/prepare-volume.sh \
     && ln -sf /opt/harness/container-entrypoint.sh /entrypoint.sh
 # HARNESS_IMAGE says which image this is; the entrypoint refuses any role but control here, since a
 # worker or `all` would look for agent CLIs this image does not have. HOME stays agent-home for what
@@ -133,6 +155,8 @@ LABEL org.opencontainers.image.version="${HARNESS_VERSION}" \
 # THE WORKER IMAGE, and the image that can run every role: the toolchain agents assume, the Host, and
 # all four scripts. It opens no listener (no ASPNETCORE_URLS, no EXPOSE): a worker dials out to control.
 FROM base AS worker
+ARG NODE_VERSION
+ARG GO_VERSION
 # amd64 or arm64. The Node and Go tarballs below name an architecture; everything else picks its own.
 ARG TARGETARCH
 # Tools an agent can assume are already on PATH. The coding CLIs (claude, codex,
@@ -146,7 +170,7 @@ ARG TARGETARCH
 #     Add one when a team actually needs it.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        wget xz-utils unzip zip \
+        wget xz-utils unzip zip jq less procps \
         build-essential pkg-config \
         python3 python3-pip python3-venv python3-dev \
         ripgrep fd-find \
@@ -154,10 +178,10 @@ RUN apt-get update \
     && ln -sf "$(command -v fdfind)" /usr/local/bin/fd \
     && printf '[global]\nbreak-system-packages = true\n' > /etc/pip.conf \
     && case "$TARGETARCH" in amd64) node_arch=x64 ;; arm64) node_arch=arm64 ;; *) echo "unsupported TARGETARCH '$TARGETARCH'" && exit 1 ;; esac \
-    && curl -fsSL "https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-${node_arch}.tar.xz" \
+    && curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" \
         | tar -xJ --no-same-owner -C /usr/local --strip-components=1 \
     && corepack enable \
-    && curl -fsSL "https://go.dev/dl/go1.27.1.linux-${TARGETARCH}.tar.gz" | tar --no-same-owner -C /usr/local -xz \
+    && curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${TARGETARCH}.tar.gz" | tar --no-same-owner -C /usr/local -xz \
     && curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
     && bash /tmp/dotnet-install.sh --channel 10.0 --install-dir /usr/share/dotnet \
     && rm /tmp/dotnet-install.sh \
@@ -173,7 +197,6 @@ RUN npx -y playwright install-deps chromium \
 COPY --from=build /out .
 COPY scripts/container-entrypoint.sh scripts/ensure-agent-clis.sh scripts/npm-torn-install.sh scripts/prepare-volume.sh /opt/harness/
 RUN chmod +x /opt/harness/container-entrypoint.sh /opt/harness/ensure-agent-clis.sh /opt/harness/npm-torn-install.sh /opt/harness/prepare-volume.sh \
-    && sed -i 's/\r$//' /opt/harness/container-entrypoint.sh /opt/harness/ensure-agent-clis.sh /opt/harness/npm-torn-install.sh /opt/harness/prepare-volume.sh \
     && ln -sf /opt/harness/container-entrypoint.sh /entrypoint.sh
 # IS_SANDBOX: Claude Code refuses --dangerously-skip-permissions when it runs as root unless it is
 # told it is inside a sandbox. This container is that sandbox. Every agent child inherits it; a
