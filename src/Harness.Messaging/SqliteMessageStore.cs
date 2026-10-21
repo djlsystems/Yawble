@@ -312,13 +312,16 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
 
         // THE TEAM BEFORE THE WINDOW: `team` is the generated NOCASE column `messages-006` added, walked
         // through `ix_messages_team_seq`, so the newest rows OF THESE TEAMS are read and the cap is
-        // applied to them, never to the whole log first.
+        // applied to them, never to the whole log first. A ROW WITH NO PREFIX IS LET THROUGH: a
+        // person's instruction, close or card move has the person as its source and belongs to a
+        // team by its type or payload, which the caller's own rule (MessageTeam.Of) judges after.
+        // Only a row positively another team's is cut here.
         command.CommandText =
             $"""
              SELECT seq, type, payload, source, correlation_id, causation_seq, depth, occurred_at
              FROM messages
              WHERE seq > $after
-               AND team IN ({string.Join(", ", owners)})
+               AND (team IN ({string.Join(", ", owners)}) OR team IS NULL)
                AND (type IN ({string.Join(", ", names)}) OR type LIKE $instructionPrefix)
              ORDER BY seq DESC
              LIMIT $max
@@ -2140,8 +2143,19 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         await using var connection = Open();
         await using var command = connection.CreateCommand();
 
-        command.CommandText = "SELECT COALESCE(MAX(seq), 0) FROM messages WHERE team = $team";
+        // A PERSON'S ROW HAS NO TEAM PREFIX (a close, a tell, a card move: the source is the person),
+        // and is this team's by its TYPE (an instruction to one of its members) or its PAYLOAD (a
+        // close, a card event, a dispatch), as MessageTeam.Of reads it. Those rows end and open this
+        // team's workflows, so they move its key too, and the rollup re-reads on a person's close
+        // rather than answering the workflow as open until a member writes a row.
+        command.CommandText =
+            """
+            SELECT COALESCE(MAX(seq), 0) FROM messages
+            WHERE team = $team
+               OR (team IS NULL AND (type LIKE $instruction OR json_extract(payload, '$.team') = $team COLLATE NOCASE))
+            """;
         command.Parameters.AddWithValue("$team", team);
+        command.Parameters.AddWithValue("$instruction", MessageTypes.InstructionPrefix + team + "/%");
 
         return Convert.ToInt64(await command.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
     }

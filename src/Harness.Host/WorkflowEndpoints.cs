@@ -1069,9 +1069,9 @@ internal static class WorkflowEndpoints
             // route would answer `[]` permanently: a board showing "Nothing yet." over a running team.
             // A cap applied BEFORE a filter degrades to nothing rather than to less.
             //
-            // Filtering by team in the query would solve it at the other end, and is refused: MessageTeam.Of
-            // reads the TYPE for an instruction and the SOURCE for a container event, and pushing that rule
-            // into SQL is a second copy of it in a second language, free to drift. Reading the newest rows gets the behaviour right without it.
+            // The query cuts only rows positively ANOTHER team's (by the source's prefix) and lets every
+            // row with no prefix through: MessageTeam.Of reads the TYPE for an instruction and the PAYLOAD
+            // for a close or a card event, and that rule stays here, in one place, applied below.
             // Clamped rather than trusted. This is a per-viewer preference reaching a query cost, so the
             // ceiling is the server's to set - and the floor stops a zero or negative asking for nothing
             // and rendering an empty board that looks like a fault.

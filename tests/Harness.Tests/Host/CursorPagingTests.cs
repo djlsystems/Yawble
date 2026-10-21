@@ -282,6 +282,33 @@ public sealed class CursorPagingTests
     }
 
     [Fact]
+    public async Task A_containers_feed_keeps_the_rows_its_team_owns_by_type_or_payload_whose_source_is_a_person()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var host = await HostAsync();
+        var log = host.Services.GetRequiredService<IMessageLog>();
+
+        // THE QUERY'S TEAM COLUMN IS THE SOURCE'S PREFIX, and a person's row has none: a person's
+        // instruction belongs to its team by its TYPE and a person's close by its PAYLOAD
+        // (MessageTeam.Of). The window must let such rows through for the route's own rule to judge.
+        var told = await log.AppendAsync(new NewMessage(
+            MessageTypes.InstructionFor(new ContainerId(host.Alpha, "Manager")), """{"instruction":"go"}""", "person-1"), ct);
+        var closed = await log.AppendAsync(new NewMessage(
+            MessageTypes.WorkflowClosed, $$"""{"team":"{{host.Alpha}}","reason":"done"}""", "person-1", told.Seq), ct);
+        var other = await log.AppendAsync(new NewMessage(
+            MessageTypes.InstructionFor(new ContainerId(host.Beta, "Manager")), """{"instruction":"go"}""", "person-1"), ct);
+
+        using var alpha = host.Container(host.AlphaContainerKey);
+        var seqs = (await GetAsync(alpha, "/api/messages?after=0", ct)).EnumerateArray()
+            .Select(r => r.GetProperty("seq").GetInt64())
+            .ToList();
+
+        Assert.Contains(told.Seq, seqs);
+        Assert.Contains(closed.Seq, seqs);
+        Assert.DoesNotContain(other.Seq, seqs);
+    }
+
+    [Fact]
     public async Task The_archive_pages_by_id_and_the_backlog_does_not_page()
     {
         var ct = TestContext.Current.CancellationToken;

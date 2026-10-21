@@ -94,6 +94,27 @@ public sealed class RollupCacheTests
     }
 
     [Fact]
+    public async Task A_persons_close_of_a_workflow_re_reads_the_team_although_no_member_wrote_a_row()
+    {
+        await using var bed = new ContainerTestBed();
+        var root = await RunAsync(bed, Alpha, "one", finish: false);
+        var log = CountingProxy.Over<IMessageLog>(bed.Store);
+        var cache = new RollupCache(log);
+        var open = await cache.ReadAsync("alpha", 0, Ct);
+        Assert.Equal(1, open.Open.OpenCount);
+
+        // A PERSON'S CLOSE: its source is the person, so the generated team column is null for it and
+        // the team's highest member-sourced seq does not move. The row still ends the workflow.
+        await bed.Store.AppendAsync(
+            new NewMessage(MessageTypes.WorkflowClosed, """{"team":"alpha","reason":"done"}""", "person-1", root.Seq), Ct);
+
+        var after = await cache.ReadAsync("alpha", 0, Ct);
+        Assert.Equal(4, Reads(log));
+        Assert.Equal(0, after.Open.OpenCount);
+        Assert.Equal(1, after.Open.TotalCount);
+    }
+
+    [Fact]
     public async Task A_floor_that_rose_and_an_invalidate_each_re_read()
     {
         await using var bed = new ContainerTestBed();
