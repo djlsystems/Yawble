@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import MemberAvatar from './MemberAvatar.vue';
+import { memberStateOf } from '../lib/memberState';
 import FieldHelp from './FieldHelp.vue';
 import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
@@ -1028,7 +1030,14 @@ watch(open, (showing) => {
             <q-list v-if="containers.length > 0" bordered separator>
               <q-item v-for="container in containers" :key="container.id">
                 <q-item-section avatar>
-                  <q-icon name="smart_toy" />
+                  <MemberAvatar
+                    :team="container.team"
+                    :member="container.id"
+                    :name="container.name"
+                    :kind="container.kind ?? 'agent'"
+                    :state="memberStateOf(container)"
+                    :size="28"
+                  />
                 </q-item-section>
 
                 <q-item-section>

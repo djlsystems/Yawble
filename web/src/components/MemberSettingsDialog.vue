@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import MemberAvatar from './MemberAvatar.vue';
+import { memberStateOf } from '../lib/memberState';
 import FieldHelp from './FieldHelp.vue';
 import { computed, ref, watch } from 'vue';
 import { useQuasar, type QForm } from 'quasar';
@@ -376,7 +378,16 @@ async function submit() {
   <q-dialog v-model="open" no-route-dismiss>
     <q-card class="member-settings-card os-dialog-md">
       <q-form ref="form" @submit="submit" @keydown="onEnter">
-      <q-card-section class="row items-center">
+      <q-card-section class="row items-center no-wrap">
+        <MemberAvatar
+          class="q-mr-sm"
+          :team="snapshot.team"
+          :member="snapshot.id"
+          :name="snapshot.name"
+          :kind="snapshot.kind ?? 'agent'"
+          :state="memberStateOf(snapshot)"
+          :size="30"
+        />
         <div>
           <div class="os-dialog-title">Member settings</div>
           <div class="text-caption os-text-muted">{{ snapshot.name }}</div>

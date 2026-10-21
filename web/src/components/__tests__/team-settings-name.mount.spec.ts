@@ -38,6 +38,7 @@ import { useConsoleStore } from '../../stores/console';
 import { useSessionStore } from '../../stores/session';
 import type { TeamId } from '../../api/types';
 import { mountDialog, resetBody } from '../../test/mountQuasar';
+import { avatarIndex, setAvatarSheet } from '../../lib/avatars';
 import {
   TeamInstructionsHint,
   TeamInstructionsLabel,
@@ -127,6 +128,36 @@ async function chooseTab(label: string) {
   await new Promise((resolve) => setTimeout(resolve, 10));
   await flushPromises();
 }
+
+describe('TeamSettingsDialog, Members', () => {
+  it('lists each member with its avatar where the robot head was', async () => {
+    setAvatarSheet(null, 1024, 1024);
+    try {
+      setActivePinia(createPinia());
+      useConsoleStore().$patch({
+        teams: [{
+          ...team,
+          containers: [{
+            team: 'alpha', id: 'Builder', name: 'Builder', agent: 'claude-headless', state: 'Running', queueDepth: 0,
+            ceiling: 16, subscribes: [], currentCorrelation: null, sinceSeq: 0,
+          }],
+        }] as never,
+        activeTeamId: team.id,
+        overviewLanded: true,
+      });
+      vi.spyOn(useConsoleStore(), 'refresh').mockResolvedValue();
+      useSessionStore().$patch({ user: { id: 'u1', email: 'admin@example.com' } });
+      await mountDialog(TeamSettingsDialog, {}, { pinia: false });
+      await chooseTab('Members (1)');
+      const avatar = document.body.querySelector('.q-item__section--avatar [data-test="member-avatar"]');
+      expect(avatar?.getAttribute('data-avatar')).toBe(String(avatarIndex('alpha', 'Builder', 100)));
+      expect(avatar?.getAttribute('data-state')).toBe('running');
+      expect(document.body.innerHTML).not.toContain('smart_toy');
+    } finally {
+      setAvatarSheet(null, 0, 0);
+    }
+  });
+});
 
 describe('TeamSettingsDialog, mounted, and the removed team rename', () => {
   it('ignores a typed team name and saves only the field route that actually changed', async () => {

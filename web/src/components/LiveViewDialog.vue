@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import MemberAvatar from './MemberAvatar.vue';
 import { EndingFact } from '../lib/states';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { listMemberRuns, NoLiveView, openLiveView, readRunTranscript } from '../api/client';
@@ -275,6 +276,7 @@ onBeforeUnmount(end);
   <q-dialog v-model="open">
     <q-card class="os-dialog-lg live-view-card">
       <q-card-section class="row items-center q-pb-none">
+        <MemberAvatar class="q-mr-sm" :team="team" :member="member" :name="name" :size="28" />
         <div class="os-dialog-title ellipsis">{{ plugin ? `Runs of ${name}` : `Watching ${name}` }}</div>
         <q-space />
         <q-toggle

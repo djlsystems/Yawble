@@ -5,9 +5,14 @@
 // plain face off one; the Kanban card of a member wears the same tile at its upper left and none
 // when nobody is assigned. The ring is the member's state, in its token; a plugin is a diamond of
 // initials; and before the sheet loads an agent shows its initials.
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { mount, type VueWrapper } from '@vue/test-utils';
+
+vi.mock('../../api/client', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  listContainerTriggers: vi.fn().mockResolvedValue([]),
+}));
 
 import MemberAvatar from '../MemberAvatar.vue';
 import ContainerCard from '../ContainerCard.vue';

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import MemberAvatar from './MemberAvatar.vue';
 import { computed, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { useKanbanStore } from '../stores/kanban';
@@ -241,6 +242,8 @@ function when(value: string | null | undefined): string {
     <q-card v-if="card" class="k-panel os-dialog-md" :class="colourClass" :data-colour="colour">
       <q-card-section class="k-panel-head">
         <div class="row items-start no-wrap">
+          <!-- THE CARD'S MEMBER'S AVATAR in its state ring, as on the card; none with nobody assigned. -->
+          <MemberAvatar v-if="card.member" class="k-panel-avatar" :team="card.team" :member="card.member" :size="30" />
           <div class="col">
             <div class="text-subtitle1">{{ card.title }}</div>
             <div class="text-caption os-text-muted">

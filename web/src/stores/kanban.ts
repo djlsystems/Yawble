@@ -12,7 +12,7 @@ import {
   type KanbanFilters,
   type KanbanLane,
 } from '../api/kanban'
-import { memberStateOf, type MemberState } from '../lib/memberState'
+import type { MemberState } from '../lib/memberState'
 import { cancelWake, Unauthorized } from '../api/client'
 import {
   linkWorkflowOutcome,
@@ -314,10 +314,8 @@ export const useKanbanStore = defineStore('kanban', {
     memberRing(card: KanbanCard): { state: MemberState; kind: 'agent' | 'plugin' } | null {
       if (!card.member) return null
 
-      const team = useConsoleStore().teams.find((entry) => entry.id === card.team)
-      const snapshot = team?.containers.find((container) => container.id === card.member)
-
-      return snapshot ? { state: memberStateOf(snapshot), kind: snapshot.kind ?? 'agent' } : { state: 'idle', kind: 'agent' }
+      const { state, kind } = useConsoleStore().memberRing(card.team, card.member)
+      return { state, kind }
     },
 
     memberHeld(card: KanbanCard): boolean {

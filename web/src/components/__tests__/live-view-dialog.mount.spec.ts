@@ -9,6 +9,7 @@ import LiveViewDialog from '../LiveViewDialog.vue';
 import { localStamp } from '../../lib/localTime';
 import { asMemberId, asTeamId } from '../../api/types';
 import { bodyFind, bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
+import { avatarIndex, setAvatarSheet } from '../../lib/avatars';
 
 /** A text/plain body the spec feeds by hand, so "as it arrives" is something a case can step through. */
 function liveStream() {
@@ -104,6 +105,18 @@ afterEach(() => {
 });
 
 describe('the live view dialog', () => {
+  it('wears the member\'s avatar in its title bar, before the title', async () => {
+    setAvatarSheet(null, 1024, 1024);
+    try {
+      await openWith(liveStream().response);
+      const avatar = bodyFind('.live-view-card [data-test="member-avatar"]');
+      expect(avatar?.getAttribute('data-avatar')).toBe(String(avatarIndex('alpha', 'Builder', 100)));
+      expect(avatar?.nextElementSibling?.classList.contains('os-dialog-title')).toBe(true);
+    } finally {
+      setAvatarSheet(null, 0, 0);
+    }
+  });
+
   it('asks the live route for this member', async () => {
     const { fetch } = await openWith(liveStream().response);
 

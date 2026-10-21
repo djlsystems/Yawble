@@ -22,6 +22,7 @@ import { useKanbanStore } from '../../stores/kanban';
 import type { KanbanCardDetail } from '../../api/kanban';
 import type { PendingWake } from '../../api/types';
 import { localMinute } from '../../lib/localTime';
+import { avatarIndex, setAvatarSheet } from '../../lib/avatars';
 
 /** 9:41 PM in New York on the 15th; 01:41 on the 16th in UTC. */
 const Due = '2026-10-16T01:41:00Z';
@@ -93,6 +94,20 @@ async function open(wakes: PendingWake[] | undefined) {
 }
 
 const line = () => bodyFind('[data-test="panel-wakes"]');
+
+describe('the opened card\'s title bar', () => {
+  it('wears its member\'s avatar before the title', async () => {
+    setAvatarSheet(null, 1024, 1024);
+    try {
+      await open(undefined);
+      const avatar = bodyFind('.k-panel-head [data-test="member-avatar"]');
+      expect(avatar?.getAttribute('data-avatar')).toBe(String(avatarIndex('alpha', 'DeveloperIda', 100)));
+      expect(avatar?.nextElementSibling?.querySelector('.text-subtitle1')?.textContent).toBe('Renew the certificate');
+    } finally {
+      setAvatarSheet(null, 0, 0);
+    }
+  });
+});
 
 describe('an opened card with a pending wake', () => {
   it('says when it wakes on the reader\'s clock, with the note and Cancel', async () => {

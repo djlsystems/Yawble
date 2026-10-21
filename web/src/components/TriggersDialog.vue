@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import MemberAvatar from './MemberAvatar.vue'
 import { computed, ref, watch } from 'vue'
 import { useQuasar } from 'quasar'
 import {
@@ -310,6 +311,7 @@ watch(open, (showing) => {
   <q-dialog v-model="open">
     <q-card class="triggers-card os-dialog-lg">
       <q-card-section class="row items-center q-pb-none">
+        <MemberAvatar class="q-mr-sm" :team="team" :member="container" :kind="memberKind" :size="28" />
         <div class="os-dialog-title">What wakes {{ container }}</div>
         <q-space />
         <q-btn v-close-popup flat round dense icon="close" :disable="saving" />

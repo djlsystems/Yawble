@@ -25,6 +25,7 @@ import TriggersDialog from '../TriggersDialog.vue';
 import { getMemberMeasuredCost, listContainerTriggers, listEvents, listWatchRoots, runScheduleNow } from '../../api/client';
 import { asTeamId, type TeamTrigger } from '../../api/types';
 import { mountDialog, resetBody } from '../../test/mountQuasar';
+import { avatarIndex, setAvatarSheet } from '../../lib/avatars';
 
 function row(over: Partial<TeamTrigger> = {}): TeamTrigger {
   return {
@@ -82,6 +83,19 @@ function runButtons(): HTMLButtonElement[] {
 }
 
 describe('TriggersDialog: Run now', () => {
+  it('wears the member\'s avatar in its title bar, before What wakes', async () => {
+    setAvatarSheet(null, 1024, 1024)
+    try {
+      const wrapper = await mountDialog(TriggersDialog, props)
+      const avatar = document.body.querySelector('.triggers-card [data-test="member-avatar"]')
+      expect(avatar?.getAttribute('data-avatar')).toBe(String(avatarIndex('Alpha', 'Dev', 100)))
+      expect(avatar?.nextElementSibling?.textContent).toBe('What wakes Dev')
+      wrapper.unmount()
+    } finally {
+      setAvatarSheet(null, 0, 0)
+    }
+  })
+
   it('offers Run now on a schedule only, and a fire is said as running', async () => {
     vi.mocked(runScheduleNow).mockResolvedValue({
       outcome: 'fired', reason: null, seq: 42, trigger: row({ lastOutcome: 'fired', lastSeq: 42 }),

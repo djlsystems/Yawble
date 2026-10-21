@@ -23,6 +23,7 @@ import { useConsoleStore } from '../../stores/console';
 import { asMemberId, asTeamId, type ContainerSnapshot, type MemberDetail, type Team } from '../../api/types';
 import { bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
 import { blur, button, field, fieldWrapper, hasError, isDisabled, pressEnter, settle, type } from '../../test/formProbe';
+import { avatarIndex, setAvatarSheet } from '../../lib/avatars';
 
 const snapshot: ContainerSnapshot = {
   team: asTeamId('alpha'),
@@ -80,6 +81,18 @@ async function mountSettings(
 }
 
 describe('MemberSettingsDialog, mounted', () => {
+  it('wears the member\'s avatar in its title bar, before the title', async () => {
+    setAvatarSheet(null, 1024, 1024);
+    try {
+      await mountSettings();
+      const avatar = document.body.querySelector('.member-settings-card [data-test="member-avatar"]');
+      expect(avatar?.getAttribute('data-avatar')).toBe(String(avatarIndex('alpha', 'scout', 100)));
+      expect(avatar?.nextElementSibling?.querySelector('.os-dialog-title')?.textContent).toBe('Member settings');
+    } finally {
+      setAvatarSheet(null, 0, 0);
+    }
+  });
+
   it('disables Save when the name is cleared', async () => {
     const wrapper = await mountSettings();
 

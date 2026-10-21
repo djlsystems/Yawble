@@ -15,6 +15,7 @@ import {
 import { asMemberId, asTeamId } from '../api/types';
 import { joinTeam, leaveTeam } from '../lib/hub';
 import { ownerOf } from '../lib/summarise';
+import { memberStateOf, type MemberState } from '../lib/memberState';
 import { DefaultBoardSize } from '../lib/boardSize';
 import { useDisplayStore } from './display';
 import type {
@@ -358,6 +359,16 @@ export const useConsoleStore = defineStore('console', {
 
   getters: {
     hasTeams: (state) => state.teams.length > 0,
+    /**
+     * What a member is doing, its kind and its name, for its avatar's ring wherever it is drawn: from
+     * the member's snapshot. A member the board does not hold is an idle agent named by its id.
+     */
+    memberRing: (state) => (team: string, member: string): { state: MemberState; kind: 'agent' | 'plugin'; name: string } => {
+      const snapshot = state.teams.find((entry) => entry.id === team)?.containers?.find((container) => container.id === member);
+      return snapshot
+        ? { state: memberStateOf(snapshot), kind: snapshot.kind ?? 'agent', name: snapshot.name ?? member }
+        : { state: 'idle', kind: 'agent', name: member };
+    },
     /**
      * The ACTIVE teams: what the tabs, the ribbon's chooser, the Kanban and backlog dispatch offer.
      * An archived team stays in `teams`, so the Teams list, Delete and Clone still find it.
