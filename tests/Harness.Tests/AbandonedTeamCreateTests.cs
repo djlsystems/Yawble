@@ -121,10 +121,12 @@ public sealed class AbandonedTeamCreateTests : IAsyncDisposable
         Assert.Equal(PersonEmail, dispatched.ActorEmail);
         Assert.Equal(await PersonIdAsync(), dispatched.ActorId);
 
+        // THE MANAGER IS TOLD AFTER THE DISPATCH ROW, by the same detached work, so its instruction
+        // is waited for as the clone and the row were: read at once, a run under load found none yet.
         var manager = MessageTypes.InstructionFor(new ContainerId(team, TeamRegistry.DefaultManagerName));
-        Assert.Contains(
-            await _factory.Services.GetRequiredService<IMessageLog>().ReadAfterAsync(0, [manager], 100, Ct),
-            m => m.Payload.Contains("has been dispatched to your team", StringComparison.Ordinal));
+        var log = _factory.Services.GetRequiredService<IMessageLog>();
+        await EventuallyAsync(async () => (await log.ReadAfterAsync(0, [manager], 100, Ct))
+            .Any(m => m.Payload.Contains("has been dispatched to your team", StringComparison.Ordinal)));
     }
 
     [Fact]
