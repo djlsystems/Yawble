@@ -10,6 +10,7 @@ namespace Harness.Tests.Host;
 /// needs a built image - real users, setpriv dropping to them, apt-get reaching a mirror - is listed
 /// in the Containerfile, not here.
 /// </summary>
+[Collection(ProcessEnvironmentCollection.Name)]
 public sealed class PrepareVolumeTests : IDisposable
 {
     private const string HostOwner = "10001:10001";

@@ -16,6 +16,7 @@ namespace Harness.Tests;
 /// never to values. Driven through the real tool, calling back into the real Host with the
 /// Manager's own credential.
 /// </summary>
+[Collection(ProcessEnvironmentCollection.Name)]
 public sealed class PluginManagerHiringTests : IAsyncLifetime
 {
     private const string TokenKey = "SAMPLE_ECHO_MANAGER_HIRE_TOKEN";

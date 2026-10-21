@@ -16,6 +16,7 @@ namespace Harness.Tests.Host;
 /// the Host has it set (never its value), a key for a source the person left off is not needed, and an
 /// update keeps a binding the person changed. No value appears in any response, row or file.
 /// </summary>
+[Collection(ProcessEnvironmentCollection.Name)]
 public sealed class SolutionSecretsTests(HostFixture host) : IClassFixture<HostFixture>
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

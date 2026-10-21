@@ -276,7 +276,7 @@ public sealed class LandedStartRetryTests : IAsyncDisposable
     }
 
     /// <summary>
-    /// B0025GapProbeTests.Probe5, pinned: the start fetch fails at dispatch, the start is retried on
+    /// Pinned: the start fetch fails at dispatch, the start is retried on
     /// a read before the team's first commit, and landed proven afterwards survives the team.
     /// </summary>
     [Fact]

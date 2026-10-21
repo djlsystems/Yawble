@@ -22,6 +22,7 @@ namespace Harness.Tests;
 /// <see cref="PluginMemberEndToEndTests"/> does for the .NET test plugin. Go is in the product image,
 /// where the release runs this suite; without it the build fails, naming the missing command.
 /// </summary>
+[Collection(ProcessEnvironmentCollection.Name)]
 public sealed class PluginGoTemplateEndToEndTests : IAsyncLifetime
 {
     private const string Email = "person@example.test";

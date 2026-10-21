@@ -12,6 +12,7 @@ namespace Harness.Tests;
 /// credential and no environment; restored without a missing-Agent mark; never repointed across
 /// kinds. The agent side of every one of these is pinned by <see cref="MemberGoldenTests"/>.
 /// </summary>
+[Collection(ProcessEnvironmentCollection.Name)]
 public sealed class PluginMemberRegistryTests : IAsyncLifetime
 {
     private readonly string _dataRoot = Path.Combine(Path.GetTempPath(), $"harness-plugin-reg-{Guid.NewGuid():N}");

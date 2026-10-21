@@ -20,6 +20,7 @@ namespace Harness.Tests.Host;
 /// falls back to the environment. Each write lands with its tenant row or not at all, a machine
 /// principal is refused, and no value appears in any response, row or file under the data root.
 /// </summary>
+[Collection(ProcessEnvironmentCollection.Name)]
 public sealed class PluginSecretsTests : IAsyncLifetime
 {
     private const string Email = "person@example.test";

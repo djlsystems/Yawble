@@ -22,6 +22,7 @@ namespace Harness.Tests;
 /// connection, and told work through the ordinary `tell` route. Everything the site then serves -
 /// the files, the data, every answer the test was given - is scanned for anything secret.
 /// </summary>
+[Collection(ProcessEnvironmentCollection.Name)]
 public sealed class SiteFilesEndToEndTests : IAsyncLifetime
 {
     private const string Email = "person@example.test";

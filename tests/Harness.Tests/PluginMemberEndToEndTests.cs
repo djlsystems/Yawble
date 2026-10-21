@@ -27,6 +27,7 @@ namespace Harness.Tests;
 /// 6. its result and status are visible as usual;    (same)
 /// 7. nothing plugin-specific is in the pump.         <see cref="P7_Nothing_plugin_specific_is_in_the_pump"/>
 /// </summary>
+[Collection(ProcessEnvironmentCollection.Name)]
 public sealed class PluginMemberEndToEndTests : IAsyncLifetime
 {
     private const string Email = "person@example.test";
