@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Harness.Contracts;
 using Harness.Host;
+using Harness.Host.Auth;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
@@ -28,6 +29,7 @@ public sealed class MemberRemovalWorkflowTests : IAsyncLifetime
     private WebApplicationFactory<Program> _factory = null!;
     private HttpClient _person = null!;
     private string _team = "";
+    private readonly FakeAgent _agent = new();
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -40,7 +42,7 @@ public sealed class MemberRemovalWorkflowTests : IAsyncLifetime
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host => host
             .UseSetting("DataRoot", _dataRoot)
             .UseSetting("Logging:LogLevel:Default", "Warning")
-            .ConfigureTestServices(services => services.AddSingleton<IAgentRunner>(new FakeAgent())));
+            .ConfigureTestServices(services => services.AddSingleton<IAgentRunner>(_agent)));
 
         var registry = _factory.Services.GetRequiredService<TeamRegistry>();
         _team = (await registry.CreateAsync("Removals", "claude-headless", memberAgent: "claude-headless", ct: Ct)).Id;
@@ -109,38 +111,77 @@ public sealed class MemberRemovalWorkflowTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// The team runs one workflow: a person tells the Manager, the Manager puts Dev on it, both run,
-    /// and the Manager declares it. Answers the workflow's correlation.
+    /// The team runs one workflow as a team does: a person tells the Manager, the Manager's run puts
+    /// Dev on it, Dev runs, and Dev's completion wakes the Manager, whose run declares it through the
+    /// real <c>workflow-complete</c> route. Answers the workflow's correlation once that declaring run
+    /// has ended, so nothing the platform does at a run's end can land after the declaration.
     /// </summary>
+    /// <remarks>
+    /// DECLARED FROM INSIDE THE MANAGER'S RUN, AS PRODUCTION DOES. A declaration appended from outside
+    /// while the Manager's re-wake run was still in flight let that run's end offer the workflow
+    /// another turn (<c>IdleWorkflowOffer</c>), an instruction after the declaration that reopens it.
+    /// </remarks>
     private async Task<long> CompletedWorkflowAsync()
     {
+        var root = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var declared = new TaskCompletionSource<(HttpStatusCode, string)>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var manager = new ContainerId(_team, TeamRegistry.DefaultManagerName);
+        var dev = new ContainerId(_team, Dev);
+
+        _agent.Behaviour = async invocation =>
+        {
+            if (invocation.Container == manager)
+            {
+                var correlation = await root.Task;
+                var thread = await Log.ReadCorrelationAsync(correlation, Ct);
+
+                if (thread.Any(m => m.Type == MessageTypes.Completed && m.Source == dev.ToString()))
+                {
+                    declared.TrySetResult(await DeclareAsync(invocation, "Widget built."));
+                }
+                else if (!thread.Any(m => m.Type == MessageTypes.InstructionFor(dev)))
+                {
+                    await Log.AppendAsync(new NewMessage(
+                        MessageTypes.InstructionFor(dev),
+                        """{"instruction":"Build the widget","subject":"Build the widget"}""",
+                        manager.ToString(),
+                        long.Parse(invocation.Environment["HARNESS_CAUSATION"])), Ct);
+                }
+            }
+
+            return new AgentResult(0, "done");
+        };
+
         var told = await _person.PostAsJsonAsync(
             $"/api/teams/{_team}/containers/{TeamRegistry.DefaultManagerName}/tell",
             new { instruction = "Build the widget", subject = "Build the widget" }, Ct);
         Assert.True(told.IsSuccessStatusCode, await told.Content.ReadAsStringAsync(Ct));
-        var root = JsonDocument.Parse(await told.Content.ReadAsStringAsync(Ct)).RootElement.GetProperty("correlationId").GetInt64();
+        var workflow = JsonDocument.Parse(await told.Content.ReadAsStringAsync(Ct)).RootElement.GetProperty("correlationId").GetInt64();
+        root.SetResult(workflow);
 
-        var manager = new ContainerId(_team, TeamRegistry.DefaultManagerName);
-        await Log.AppendAsync(new NewMessage(
-            MessageTypes.InstructionPrefix + new ContainerId(_team, Dev),
-            """{"instruction":"Build the widget","subject":"Build the widget"}""",
-            manager.ToString(), root), Ct);
+        var (status, body) = await declared.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct);
+        Assert.True(status == HttpStatusCode.NoContent, $"{status}: {body}");
 
-        await RanAsync(root, manager.ToString());
-        await RanAsync(root, new ContainerId(_team, Dev).ToString());
-
-        await Log.AppendAsync(new NewMessage(MessageTypes.WorkflowCompleted, """{"delivered":"Widget built."}""", manager.ToString(), root), Ct);
-        return root;
-    }
-
-    private async Task RanAsync(long correlation, string source)
-    {
+        // THE DECLARING RUN HAS ENDED: its own `agentContainer.completed` follows the declaration.
         for (var tries = 0; ; tries++)
         {
-            if ((await Log.ReadCorrelationAsync(correlation, Ct)).Any(m => m.Type == MessageTypes.Completed && m.Source == source)) return;
-            Assert.True(tries < 200, $"{source} never ran workflow {correlation}.");
+            var thread = await Log.ReadCorrelationAsync(workflow, Ct);
+            var declaration = thread.Single(m => m.Type == MessageTypes.WorkflowCompleted);
+            if (thread.Any(m => m.Type == MessageTypes.Completed && m.Source == manager.ToString() && m.Seq > declaration.Seq)) break;
+            Assert.True(tries < 200, $"The Manager's declaring run never ended in workflow {workflow}.");
             await Task.Delay(50, Ct);
         }
+
+        return workflow;
+    }
+
+    private async Task<(HttpStatusCode, string)> DeclareAsync(AgentInvocation invocation, string delivered)
+    {
+        using var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add(ApiKeyAuthenticationHandler.Header, invocation.Environment["HARNESS_KEY"]);
+        var response = await client.PostAsJsonAsync(
+            $"/api/teams/{_team}/containers/{invocation.Container.Name}/workflow-complete", new { delivered }, Ct);
+        return (response.StatusCode, await response.Content.ReadAsStringAsync(Ct));
     }
 
     /// <summary>The team's workflow reads answer <paramref name="workflow"/>, Completed, and nothing open.</summary>
