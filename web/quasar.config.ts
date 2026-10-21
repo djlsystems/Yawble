@@ -6,22 +6,8 @@ import { describeDevProxyTarget, resolveDevProxyTarget } from './src/lib/devProx
 import { buildInfo } from '../scripts/version.mjs';
 import { monitorSymbols } from './scripts/monitor-symbols.mjs';
 
-// Which Host this dev server proxies to.
-//
-// Not derived from the tree name here, deliberately. start.bat already owns that table, and a
-// second copy of it in another language is two stores of one fact - the shape this codebase has
-// paid for three times. An environment variable is the seam between them, and the line printed
-// below is what keeps the answer visible rather than assumed.
-//
-// B78: `HARNESS_PORT` WAS SET BY NOTHING. Not by start.bat, which computes PORT and exports
-// URL and ASPNETCORE_URLS inside a setlocal; not by AgentEnvironment, which mints HARNESS_URL,
-// TEAM, MEMBER, KEY, SHARED and CAUSATION. So `?? '8090'` was not a default - it was the ONLY
-// reachable value, and every member of every instance proxied to core, the dogfooding instance.
-// Measured live, with five real teams behind it.
-//
-// HARNESS_URL is already minted per container and already names the exact host that container
-// belongs to, so it is the answer. A new HARNESS_PORT from the platform would be a second
-// spelling of the same fact, and two spellings are free to disagree.
+// Which Host this dev server proxies to: HARNESS_URL, minted per container, names the exact Host
+// the tree belongs to, and the line printed below keeps the answer visible rather than assumed.
 //
 // THE DECISION LIVES IN `src/lib/devProxyTarget.ts` SO THAT IT CAN BE TESTED - this file is loaded
 // by the Quasar CLI and cannot be driven from a spec. What stays here is the side effects: reading
@@ -33,9 +19,7 @@ export default defineConfig((ctx) => {
   // bundle FROM the Host, same-origin, and printing a proxy target there would name a host nothing
   // is talking to.
   //
-  // The line names the SOURCE as well as the target. That provenance is the whole diagnostic: the
-  // previous line named the target alone, which is what made a wrong instance indistinguishable
-  // from a right one for as long as this defect lived.
+  // The line names the SOURCE as well as the target, so a wrong instance is told from a right one.
   if (ctx.dev) {
     console.log(describeDevProxyTarget(target));
   }

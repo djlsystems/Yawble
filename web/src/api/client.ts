@@ -218,10 +218,6 @@ export const stopRun = (team: TeamId, name: MemberId) =>
     { method: 'POST' },
   )
 
-/** A team's pending wakes, earliest due first. */
-export const listWakes = async (team: TeamId): Promise<PendingWake[]> =>
-  (await json<{ wakes: PendingWake[] }>(`/api/teams/${encodeURIComponent(team)}/wakes`)).wakes
-
 /**
  * A PERSON CANCELS A PENDING WAKE: it never fires, and the log says who cancelled it. A wake that
  * already fired or was cancelled answers 404, thrown by `send` with the Host's sentence.

@@ -1,3 +1,4 @@
+import { initials } from './initials'
 import type { ActivitySpan, ActivityState, ActivityWindow, TeamActivity, TeamTokenRun } from '../api/types'
 import { localDate, localStamp, localStretch, localTime } from './localTime'
 
@@ -53,28 +54,12 @@ export function heldFor(span: { reason?: string; reasonKind?: string }): string 
 }
 
 /**
- * A NAME'S INITIALS: its words split on space, `-`, `_` and `.`; two or more words give the first
- * and the LAST word's initial ("Ana Maria Lopez" → "AL"), one word gives its first letter. Always
- * uppercase, so "rhea" and "Rhea" read the same.
- */
-export function memberInitials(name: string): string {
-  const words = name.split(/[\s\-_.]+/).filter((word) => word.length > 0)
-
-  if (words.length === 0) return '?'
-
-  const first = words[0]!
-  const last = words[words.length - 1]!
-
-  return (words.length === 1 ? first[0]! : first[0]! + last[0]!).toUpperCase()
-}
-
-/**
  * EVERY LANE'S INITIALS, in the order given (board order). Initials two lanes share are numbered in
  * that order ("D1", "D2"), every one of them and not only the second, so neither reads as the
  * "real" D. Initials nobody shares are left as they are.
  */
 export function laneInitials(names: readonly string[]): string[] {
-  const bare = names.map(memberInitials)
+  const bare = names.map(initials)
   const counts = new Map<string, number>()
 
   for (const initials of bare) counts.set(initials, (counts.get(initials) ?? 0) + 1)

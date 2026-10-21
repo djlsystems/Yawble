@@ -234,7 +234,6 @@ const conciergeActiveTeam = computed(() => board.activeWorkTeam ?? null);
  * before the first open while preserving the launch pin once captured.
  */
 const conciergeSessionTeam = computed<TeamId | null>(() => conciergeLaunchTeam.value ?? board.activeWorkTeam?.id ?? null);
-const conciergeSessionTeamName = computed(() => conciergeLaunchTeamName.value ?? board.activeWorkTeam?.name);
 
 /** The bubble opens the Concierge and, pressed again, minimises it: one control, both ways. */
 /** A dialog chosen outside the ribbon (the account menu's): the same rule as `onRibbonAction`. */
@@ -681,7 +680,6 @@ async function signOut() {
     <ConciergePanel
       v-model="conciergeOpen"
       :team="conciergeSessionTeam"
-      :team-name="conciergeSessionTeamName"
       :active-team="conciergeActiveTeam?.id ?? null"
       :active-team-name="conciergeActiveTeam?.name"
     />

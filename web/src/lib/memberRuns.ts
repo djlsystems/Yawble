@@ -1,4 +1,5 @@
 import type { MemberRunItem, RunOutcome } from '../api/types';
+import { clockDuration } from './duration';
 import { localStamp, localTime, wireInstant } from './localTime';
 
 /**
@@ -23,14 +24,7 @@ export function runOutcomeLabel(outcome: RunOutcome | string): string {
  * start is not in the log - is `—`, never a made-up `0s`.
  */
 export function runDuration(ms: number | null): string {
-  if (ms === null) return '—';
-  const seconds = Math.max(0, Math.round(ms / 1000));
-  if (seconds < 60) return `${seconds}s`;
-
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`;
-
-  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
+  return ms === null ? '—' : clockDuration(ms);
 }
 
 /** When a run started, in the viewer's own zone and hour cycle (`localStamp`). Null reads `start unknown`, not 1970. */

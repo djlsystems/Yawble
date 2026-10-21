@@ -50,7 +50,6 @@ import { agentsForMode, asTeamId, type ConciergeSettings, type TeamId } from '..
 
 const props = defineProps<{
   team: TeamId | null;
-  teamName?: string | undefined;
   activeTeam?: TeamId | null | undefined;
   activeTeamName?: string | undefined;
 }>();

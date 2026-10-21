@@ -1,3 +1,4 @@
+import { initials } from '../initials'
 import { describe, expect, it } from 'vitest'
 import type { ActivityMember, ActivitySpan, ActivityState, TeamActivity, TeamTokenRun } from '../../api/types'
 import {
@@ -17,7 +18,6 @@ import {
   escapeHtml,
   growSpans,
   laneInitials,
-  memberInitials,
   sharedWindow,
   stateShapes,
   type StatePalette,
@@ -48,24 +48,24 @@ function activity(members: ActivityMember[], over: Partial<TeamActivity> = {}): 
 
 describe('initials before each lane', () => {
   it('takes the first and last initial of a two-word name', () => {
-    expect(memberInitials('Ines Lopez')).toBe('IL')
-    expect(memberInitials('Developer Ines')).toBe('DI')
+    expect(initials('Ines Lopez')).toBe('IL')
+    expect(initials('Developer Ines')).toBe('DI')
   })
 
   it('takes the first and LAST initial of a longer name, not the second', () => {
-    expect(memberInitials('Ana Maria Lopez')).toBe('AL')
+    expect(initials('Ana Maria Lopez')).toBe('AL')
   })
 
   it('takes one uppercase letter of a one-word name', () => {
-    expect(memberInitials('Manager')).toBe('M')
-    expect(memberInitials('rhea')).toBe('R')
+    expect(initials('Manager')).toBe('M')
+    expect(initials('rhea')).toBe('R')
   })
 
   it('splits on hyphens, underscores and dots as on spaces', () => {
-    expect(memberInitials('test-runner')).toBe('TR')
-    expect(memberInitials('build_bot')).toBe('BB')
-    expect(memberInitials('j.doe')).toBe('JD')
-    expect(memberInitials('  spaced -- out__name ')).toBe('SN')
+    expect(initials('test-runner')).toBe('TR')
+    expect(initials('build_bot')).toBe('BB')
+    expect(initials('j.doe')).toBe('JD')
+    expect(initials('  spaced -- out__name ')).toBe('SN')
   })
 
   it('numbers colliding initials in board order and leaves the rest alone', () => {

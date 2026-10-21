@@ -92,8 +92,7 @@ export function needsYouOpen(item: NeedsYouItem): NeedsYouOpen | null {
 
   switch (where.view) {
     case 'workflow':
-      // UX 4's deep link: the member's card on its board; a workflow nobody is named in opens the
-      // team's Workflows dialog.
+      // The member's card on its board; a workflow nobody is named in opens the team's Workflows dialog.
       return item.member ? { to: 'member', team, member: item.member } : { to: 'workflows', team }
     case 'card': {
       const card = where.card ?? item.card

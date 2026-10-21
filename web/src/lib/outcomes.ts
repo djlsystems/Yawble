@@ -37,15 +37,6 @@ export function unmeasuredText(unmeasuredRuns: number): string {
 }
 
 /**
- * The Tokens cell's figure. AN UNMEASURED RUN IS NEVER SHOWN AS 0: with no measured run there is no
- * number, so the cell says "not measured" and the count follows it.
- */
-export function tokensFigure(tokens: OutcomeFigures['tokens']): string {
-  if (tokens.measuredRuns === 0) return tokens.unmeasuredRuns > 0 ? 'not measured' : '—'
-  return compactTokens(tokens.billable)
-}
-
-/**
  * A workflow line's Tokens figure, from the route's own counts: with no measured run there is no
  * number ("not measured"), and a measured 0 is a 0 however many runs went unmeasured beside it.
  * The unmeasured count follows it as `unmeasuredText`.
@@ -55,17 +46,6 @@ export function lineTokensFigure(line: Pick<OutcomeWorkflowLine, 'billableTokens
   return line.billableTokens.toLocaleString()
 }
 
-/** `2 open · 5/9`: open, then completed of total, all the route's counts. */
-export function workflowsText(workflows: OutcomeFigures['workflows']): string {
-  return `${workflows.open} open · ${workflows.completed}/${workflows.total}`
-}
-
-/** `3h 5m · 9h`: the median and the longest workflow. NEVER A SUM of workflows. */
-export function elapsedText(elapsed: OutcomeFigures['elapsed']): string {
-  if (elapsed.medianSeconds === null || elapsed.longestSeconds === null) return '—'
-  return `${duration(elapsed.medianSeconds)} · ${duration(elapsed.longestSeconds)}`
-}
-
 function teamName(team: OutcomeFigures['teams'][number]): string {
   return team.deleted ? `${team.name} (deleted)` : team.name
 }
@@ -73,20 +53,6 @@ function teamName(team: OutcomeFigures['teams'][number]): string {
 /** Every team, a gone one named deleted: the Teams cell's tooltip. */
 export function teamsText(teams: OutcomeFigures['teams']): string {
   return teams.map(teamName).join(', ')
-}
-
-/** How many team names the Teams cell shows before "+N more". */
-export const TeamsShown = 3
-
-/**
- * `Alpha, Beta, Old crew (deleted) +27 more`: the Teams cell. The No outcome row can name dozens of
- * teams, which would push every figure column off-screen; the rest, deleted ones counted, are in
- * the tooltip (`teamsText`).
- */
-export function teamsCellText(teams: OutcomeFigures['teams']): string {
-  const shown = teams.slice(0, TeamsShown).map(teamName).join(', ')
-  const more = teams.length - TeamsShown
-  return more > 0 ? `${shown} +${more} more` : shown
 }
 
 export function firstLine(text: string | null | undefined): string {

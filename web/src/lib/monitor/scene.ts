@@ -1,3 +1,4 @@
+import { initials } from '../initials'
 import {
   forceCollide,
   forceLink,
@@ -280,17 +281,6 @@ const MaxResourcesEach = 8
 /** A step's icon size, and how far it climbs over its time. */
 const StepIconPx = 14
 const StepRise = 28
-
-/** "DeveloperHelene" -> "DH", "Namecheap DNS" -> "ND", "Manager" -> "M". */
-export function initials(name: string): string {
-  const words = name
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .split(/[\s_\-.]+/)
-    .filter((word) => word !== '')
-  if (words.length === 0) return '?'
-  if (words.length === 1) return words[0]!.slice(0, 1).toUpperCase()
-  return (words[0]!.slice(0, 1) + words[words.length - 1]!.slice(0, 1)).toUpperCase()
-}
 
 function hsl(hue: number, s: number, l: number, a = 1): string {
   return `hsla(${hue.toFixed(0)}, ${s}%, ${l}%, ${a})`

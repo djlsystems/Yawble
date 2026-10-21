@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Message, Team } from '../../api/types'
 import { MonitorModel, ReplayClock, addressOf, compact, originOf, timeline, toneOf } from '../monitor/model'
-import { initials } from '../monitor/scene'
+import { initials } from '../initials'
 
 let seq = 100
 

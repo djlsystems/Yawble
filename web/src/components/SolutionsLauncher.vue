@@ -14,7 +14,7 @@ import PluginInstallDialog from './PluginInstallDialog.vue';
 import SolutionWizard from './SolutionWizard.vue';
 
 /**
- * MARKETPLACE (the component and its route keep the old name, the launcher): three tabs.
+ * MARKETPLACE: three tabs.
  *
  * INSTALLED: one tile per team installed from a solution package - its name and
  * version, its team, its status line and a state badge - with Open (the package's primary site, in

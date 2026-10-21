@@ -24,8 +24,6 @@ export type PaletteTarget =
   | { kind: 'action'; action: string }
   | { kind: 'outcome'; id: string };
 
-export type PaletteKind = PaletteTarget['kind'];
-
 export interface PaletteEntry {
   /** Unique across the list. */
   key: string;

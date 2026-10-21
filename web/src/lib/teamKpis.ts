@@ -1,3 +1,4 @@
+import { clockDuration } from './duration';
 import { outcomeLabel } from '../api/outcomes';
 import { localTime } from './localTime';
 import type {
@@ -797,24 +798,12 @@ function memberLine(working: number, queued: number, stopped: number): string {
   return parts.length > 0 ? parts.join(' · ') : 'no member working';
 }
 
-/** `1h 04m`, `38m 02s`, `12s`. Two-digit padding on the smaller unit. */
-function duration(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const seconds = total % 60;
-
-  if (hours > 0) return `${hours}h ${String(minutes).padStart(2, '0')}m`;
-  if (minutes > 0) return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
-  return `${seconds}s`;
-}
-
 /** How long ago, coarsely — "12m", "2h 05m". For "finished N ago" and nothing else. */
 function ago(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
   if (total < 60) return `${total}s`;
   if (total < 3600) return `${Math.floor(total / 60)}m`;
-  return duration(ms);
+  return clockDuration(ms);
 }
 
 /** An instant the payload may not carry, and may carry unreadably. Null rather than `NaN`. */
@@ -1115,7 +1104,7 @@ export function workflowTiming(
     // `(unknown)` AND NEVER `0s`. A member whose only run was cut short by a host restart spent
     // real time, and nothing knows how much — the same idiom the Tokens dialog uses for a run with
     // no usage recorded.
-    execution: row.executionSeconds === null ? '(unknown)' : duration(row.executionSeconds * 1000),
+    execution: row.executionSeconds === null ? '(unknown)' : clockDuration(row.executionSeconds * 1000),
     unfinished: row.unfinished,
   }));
 
@@ -1125,7 +1114,7 @@ export function workflowTiming(
     available: true,
     state,
     elapsedMs,
-    elapsed: elapsedMs === null ? '—' : duration(elapsedMs),
+    elapsed: elapsedMs === null ? '—' : clockDuration(elapsedMs),
     ticking: open && live,
     detail,
     tone,
@@ -1137,7 +1126,7 @@ export function workflowTiming(
       // on the tile: members run concurrently.
       total:
         timing.runsCounted > 0
-          ? `${duration(timing.executionSeconds * 1000)} across ${counted} `
+          ? `${clockDuration(timing.executionSeconds * 1000)} across ${counted} `
             + `${counted === 1 ? 'member' : 'members'}`
           : 'no measured run time',
       partial: timing.partial,
@@ -1648,7 +1637,7 @@ export function workflowsTile(
     totalCount,
 
     count: `${workflows.openCount} open`,
-    span: spanMs === null ? '—' : duration(spanMs),
+    span: spanMs === null ? '—' : clockDuration(spanMs),
     spanMs,
 
     // TICKING IFF THE SPAN CAN STILL GROW, which takes BOTH halves: `earliestStartedAt` named
@@ -1746,7 +1735,7 @@ export function workflowsExecution(workflows: TeamWorkflows | null): WorkflowExe
 
     // `(unknown)` AND NEVER `0s`, the same idiom the single-workflow arm uses: a member whose only
     // runs were cut short by a host restart spent real time, and nothing knows how much.
-    execution: held.seconds === null ? '(unknown)' : duration(held.seconds * 1000),
+    execution: held.seconds === null ? '(unknown)' : clockDuration(held.seconds * 1000),
     unfinished: held.unfinished,
   }));
 
@@ -1760,7 +1749,7 @@ export function workflowsExecution(workflows: TeamWorkflows | null): WorkflowExe
     // clocks as well.
     total:
       runsCounted > 0
-        ? `${duration(seconds * 1000)} across ${counted} ${counted === 1 ? 'member' : 'members'}`
+        ? `${clockDuration(seconds * 1000)} across ${counted} ${counted === 1 ? 'member' : 'members'}`
         : 'no measured run time',
     partial,
     unfinished,

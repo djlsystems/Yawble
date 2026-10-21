@@ -18,9 +18,6 @@ export interface NumberBounds {
 
 const has = (bound: number | null | undefined): bound is number => typeof bound === 'number' && Number.isFinite(bound);
 
-/** Whether the field declares any bound at all. */
-export const isBounded = (bounds: NumberBounds) => has(bounds.min) || has(bounds.max) || bounds.integer === true;
-
 /** "Between 0 and 100, whole numbers only." - or null when the field declares nothing. */
 export function boundsHint(bounds: NumberBounds): string | null {
   const whole = bounds.integer === true;

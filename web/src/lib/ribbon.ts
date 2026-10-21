@@ -98,7 +98,7 @@ export const TeamBoardAction = 'team-board';
 export const TeamSitesAction = 'team-sites';
 
 /**
- * Marketplace (the action keeps its old name, `solutions`): the package catalog to browse and get
+ * Marketplace (the action `solutions`): the package catalog to browse and get
  * from, and one tile per team installed from a solution package, each opening its site and its
  * control panel. NEAR THE START and NOT UNDER ADMIN: it is where a person goes every
  * day, not a place they configure the instance. UNPREFIXED, like `backlog`: it needs no active team.

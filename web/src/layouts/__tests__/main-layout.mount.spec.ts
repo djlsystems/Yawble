@@ -317,7 +317,6 @@ describe('the Concierge entry point, with and without a team', () => {
 
     const panel = wrapper.findComponent(ConciergePanel);
     expect(panel.props('team')).toBe('alpha');
-    expect(panel.props('teamName')).toBe('Alpha');
     expect(panel.props('activeTeam')).toBe('beta');
     expect(panel.props('activeTeamName')).toBe('Beta');
 

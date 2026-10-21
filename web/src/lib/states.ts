@@ -24,11 +24,6 @@ export const StateWords: Readonly<Record<State, string>> = {
   done: 'done',
 }
 
-/** The colour a state is drawn in, as a CSS value. */
-export function stateInk(state: State): string {
-  return `var(--os-state-${state})`
-}
-
 /**
  * THREE FACTS THAT END IN ONE WORD, AND ARE NOT MERGED. A run ending (`completed` on a run), a
  * workflow's declaration (`COMPLETED` on a workflow) and a card in the Done lane (`Done`) are three

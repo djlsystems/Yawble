@@ -82,11 +82,6 @@ export function isKanbanColour(word: string | null | undefined): word is KanbanC
   return !!word && (KanbanColours as readonly string[]).includes(word)
 }
 
-/** The class that paints a colour word, spelled once. See `.os-kanban-*` in `app.scss`. */
-export function kanbanColourClass(word: string): string {
-  return `os-kanban-${word}`
-}
-
 export const KanbanStatusLabel: Record<KanbanStatus, string> = {
   queued: 'Queued',
   running: 'Running',
