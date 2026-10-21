@@ -408,6 +408,25 @@ export class MonitorScene {
     this.syncWorkspace()
   }
 
+  /**
+   * The activity pane's Clear: what the forgotten rows drew goes at once, with no fade - the
+   * workflow nodes and their ties, the file changes and every effect in flight - and the graph
+   * is brought in line with the model, whose teams and members stay.
+   */
+  forget(model: MonitorModel) {
+    this.comets = []
+    this.bursts = []
+    this.ripples = []
+    this.floaters = []
+    this.resources = []
+    this.steps = []
+    for (const [id, node] of this.nodes) if (node.kind === 'workflow') this.nodes.delete(id)
+    for (const [id, link] of this.links) if (link.kind === 'work') this.links.delete(id)
+    this.clearFileChanges()
+    this.sync(model)
+    this.restartSim()
+  }
+
   /** Show agent steps: off, every step icon goes at once and none is drawn until it is on again. */
   setAgentSteps(show: boolean) {
     this.stepsOn = show

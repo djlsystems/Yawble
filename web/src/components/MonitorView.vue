@@ -30,6 +30,7 @@ import {
   type Tone,
 } from '../lib/monitor/model'
 import { MonitorScene, readPalette, type HoverInfo } from '../lib/monitor/scene'
+import { readClearedAfter, windowAfter, writeClearedAfter } from '../lib/monitor/cleared'
 import { loadAvatarSheet } from '../lib/avatars'
 import MemberAvatar from './MemberAvatar.vue'
 import type { MemberState } from '../lib/memberState'
@@ -127,6 +128,13 @@ const loadError = ref('')
 const finished = ref(false)
 
 const history = shallowRef<Message[]>([])
+/**
+ * The seq the activity pane was cleared after, remembered in this browser (`lib/monitor/cleared`):
+ * live, the list, the chart and the figures read the rows after it; null reads every row held.
+ */
+const clearedAfter = ref<number | null>(readClearedAfter())
+/** The rows held from the clear on: what live shows and the timeline charts. A replay reads its own period. */
+const shownRows = computed(() => windowAfter(history.value, clearedAfter.value))
 const ticker = shallowRef<TickerEntry[]>([])
 const counts = ref({ running: 0, waiting: 0, blocked: 0, queued: 0, open: 0, teams: 0, members: 0 })
 const rate = ref(0)
@@ -326,10 +334,10 @@ watch(
   { deep: true },
 )
 
-const buckets = computed(() => timeline(history.value, 140))
+const buckets = computed(() => timeline(shownRows.value, 140))
 const bucketMax = computed(() => Math.max(1, ...buckets.value.map((bucket) => bucket.count)))
 const span = computed(() => {
-  const rows = history.value
+  const rows = shownRows.value
   if (rows.length === 0) return null
   return { from: timeOf(rows[0]!), to: timeOf(rows[rows.length - 1]!) }
 })
@@ -522,12 +530,42 @@ function startLive() {
   finished.value = false
   mode.value = 'live'
   model = newModel(new Set(liveTeams.value))
-  feed(history.value, true)
+  feed(shownRows.value, true)
   model.reconcile(board.choosableTeams)
   model.keepPushLines(pushLines)
   tokensShown.value = model.tokens
   dirty = true
   publish(performance.now())
+}
+
+/**
+ * THE ACTIVITY PANE'S CLEAR: forget, in this browser, what the Monitor holds - the list, the chart,
+ * the token figure and its stretch, the counts and the workflows drawn - and remember the seq it
+ * cleared after, so a reload reads from the row after it. The teams and members stay, and the live
+ * connection: the next row shows as before. Everything goes at once; nothing animates.
+ */
+function clearActivity() {
+  const last = history.value.at(-1)?.seq
+  if (last !== undefined) {
+    clearedAfter.value = last
+    writeClearedAfter(last)
+  }
+  pushLines = []
+  // A replay's own model goes with it: live reads the window from the mark, which is empty.
+  if (mode.value !== 'live') startLive()
+  else model.forget(board.choosableTeams)
+  scene?.forget(model)
+  tokensTarget = 0
+  tokensShown.value = 0
+  dirty = true
+  publish(performance.now())
+}
+
+/** Show everything again (the settings): forget the mark and read the whole window as before. */
+function showEverything() {
+  clearedAfter.value = null
+  writeClearedAfter(null)
+  if (mode.value === 'live') startLive()
 }
 
 /** Which replay is current: one started later, or live, makes an earlier one's late answer moot. */
@@ -1035,6 +1073,18 @@ onUnmounted(() => {
                 data-monitor-layout-reset
                 @click="resetLayout"
               />
+              <template v-if="clearedAfter !== null">
+                <div class="monitor-settings-head">Activity</div>
+                <q-btn
+                  flat
+                  dense
+                  no-caps
+                  label="Show everything again"
+                  data-monitor-show-everything
+                  @click="showEverything"
+                />
+                <div class="monitor-settings-none">The activity list and the chart were cleared in this browser.</div>
+              </template>
             </div>
           </span>
           <q-btn
@@ -1111,7 +1161,7 @@ onUnmounted(() => {
         </div>
         <div class="monitor-span">
           <span>{{ span ? timeWords(span.from) : '' }}</span>
-          <span class="monitor-span-hint">{{ history.length }} rows · click to replay from a moment</span>
+          <span class="monitor-span-hint">{{ shownRows.length }} rows · click to replay from a moment</span>
           <span>{{ span ? timeWords(span.to) : '' }}</span>
         </div>
       </div>
@@ -1158,6 +1208,19 @@ onUnmounted(() => {
           />
           <q-btn flat dense round size="sm" icon="close" aria-label="Show every team" @click="picked = null" />
         </span>
+        <q-btn
+          flat
+          dense
+          round
+          size="sm"
+          icon="clear_all"
+          class="monitor-clear"
+          aria-label="Clear"
+          data-monitor-clear
+          @click="clearActivity"
+        >
+          <q-tooltip>Clear</q-tooltip>
+        </q-btn>
       </div>
       <ol class="monitor-rows">
         <li v-for="entry in shownTicker" :key="entry.seq" class="monitor-row" :data-tone="entry.tone">
@@ -1661,6 +1724,11 @@ onUnmounted(() => {
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+  color: var(--monitor-ink-dim);
+}
+
+.monitor-clear {
+  margin-left: auto;
   color: var(--monitor-ink-dim);
 }
 
