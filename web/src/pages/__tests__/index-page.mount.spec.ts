@@ -604,25 +604,11 @@ describe('the console with no team yet', () => {
 describe('who is on the team', () => {
   const member = (id: string, name = id) => ({ id, name, team: 'mail', state: 'Idle', label: name, progress: null, blocked: null });
 
-  /** A new team of two opened with only the Manager's card in view: the second member went unseen. */
-  it('says how many members there are and names each, in the heading, before the tell box and the cards', async () => {
+  /** The cards say who is on the team; a line repeating their names above them was noise. */
+  it('says nothing about the members above the cards', async () => {
     const page = await mountPage([team('mail', { containers: [member('Manager'), member('Mailer')] })]);
 
-    const line = page.find('[data-team-members]');
-    expect(line.exists()).toBe(true);
-    expect(line.text()).toBe('2 members: Manager, Mailer');
-
-    const first = page.find('tell-manager-box-stub').element;
-    expect(line.element.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(line.element.compareDocumentPosition(page.find('container-card-stub').element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
-
-  it('names each member by its label, not its id, and counts one as one', async () => {
-    const page = await mountPage([team('mail', { containers: [member('Manager'), member('Researcher', 'Researcher Rhea'), member('Mailer')] })]);
-    expect(page.find('[data-team-members]').text()).toBe('3 members: Manager, Researcher Rhea, Mailer');
-
-    board.$patch({ teams: [team('solo', { containers: [member('Manager')] })] as never, activeTeamId: 'solo' as never, openTeamTabs: ['solo'] as never });
-    await flushPromises();
-    expect(page.find('[data-team-members]').text()).toBe('1 member: Manager');
+    expect(page.find('[data-team-members]').exists()).toBe(false);
+    expect(page.text()).not.toContain('2 members');
   });
 });
