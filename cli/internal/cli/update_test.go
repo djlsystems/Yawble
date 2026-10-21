@@ -48,6 +48,29 @@ func TestUpdateOnThePinnedImageSaysSoAndChangesNothing(t *testing.T) {
 	}
 }
 
+// With no size in the config, update sizes the containers from what the engine has, measured
+// now, never from the unmeasured defaults: otherwise a first up that could not measure leaves an
+// update that recreates every container at the defaults and the next up recreates them again.
+func TestUpdateWithNoSizeInTheConfigMeasuresTheEngineBeforeSizing(t *testing.T) {
+	pinBuild(t)
+	old := "ghcr.io/djlsystems/yawble:2026.09.24.1"
+	s := engine.NewScripted()
+	s.On(machineInspect, engine.Result{Stdout: "podman-machine-default|running|false|16384|8\n"})
+	s.On("wsl -d podman-machine-default -e free -m", engine.Result{Stdout: "Mem: 15688 1 1\n"})
+	s.On("podman container inspect", engine.Result{Stdout: "running|" + old + "|" + labelFor(old) + "\n"})
+	s.On("podman image exists", engine.Result{ExitCode: 1})
+	deps := stubbed(s)
+	deps.GOOS = "windows"
+	deps.Env = func(string) string { return "" }
+	code, out, errOut := run(t, deps, "update")
+	if code != 0 {
+		t.Fatalf("exit %d: %s %s", code, out, errOut)
+	}
+	if strings.Contains(errOut, "not measured") {
+		t.Errorf("update sized the containers from the unmeasured defaults: %q", errOut)
+	}
+}
+
 func TestUpdateMovesARunningInstanceToThePinnedImageOnTheSameVolume(t *testing.T) {
 	pinBuild(t)
 	old := "ghcr.io/djlsystems/yawble:2026.09.24.1"

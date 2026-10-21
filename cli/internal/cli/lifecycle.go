@@ -100,8 +100,9 @@ func machineOf(info machine.Info) instance.Machine {
 }
 
 // prepare loads config, derives settings and picks the engine, WITHOUT measuring what the engine
-// has: only `up`, `doctor` and `restore` need that (prepareMeasured), and on Windows with Podman
-// measuring is four processes a `status` or a `logs` has no use for. Every lifecycle verb but `up`
+// has: only the verbs that size a container - `up`, `update`, `workers` - and `doctor` and
+// `restore` need that (prepareMeasured), and on Windows with Podman measuring is four processes a
+// `status` or a `logs` has no use for. Every lifecycle verb but `up`
 // starts here; `up` does the same in pieces around its preflight.
 func prepare(deps Deps) (engine.Engine, instance.Settings, []string, error) {
 	c, err := loadConfig(deps)
@@ -115,7 +116,9 @@ func prepare(deps Deps) (engine.Engine, instance.Settings, []string, error) {
 	return engineOf(deps, c), s, notes, nil
 }
 
-// prepareMeasured is prepare, also answering what the engine has (for `doctor`).
+// prepareMeasured is prepare, also answering what the engine has: for `doctor`, and for every verb
+// that sizes a container from it (`update`, `workers`), so no container is sized from the
+// unmeasured defaults while the engine can be asked.
 func prepareMeasured(deps Deps) (engine.Engine, instance.Settings, []string, instance.Machine, error) {
 	c, err := loadConfig(deps)
 	if err != nil {

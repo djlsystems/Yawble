@@ -100,7 +100,7 @@ func updateInstance(cmd *cobra.Command, deps Deps) error {
 	if err := startStoppedMachine(cmd, deps); err != nil {
 		return err
 	}
-	e, s, notes, err := prepare(deps)
+	e, s, notes, _, err := prepareMeasured(deps)
 	if err != nil {
 		return err
 	}

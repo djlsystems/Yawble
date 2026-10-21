@@ -109,7 +109,7 @@ func saveWorkers(deps Deps, n int) error {
 // showWorkers is the count and one line per worker: the engine's state and health, and what
 // control recorded of it.
 func showWorkers(cmd *cobra.Command, deps Deps) error {
-	e, s, _, err := prepare(deps)
+	e, s, _, _, err := prepareMeasured(deps)
 	if err != nil {
 		return err
 	}
