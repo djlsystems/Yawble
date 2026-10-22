@@ -126,17 +126,20 @@ internal sealed partial class HostComposition
         // THE PUBLISHED PREVIEW PORTS, listened on beside the Host's own address. A port taken on this
         // machine is skipped with a line here, because Kestrel refuses to start when any one of its
         // addresses cannot be bound - and a preview is never worth the instance. See PreviewPorts.
-        previewPorts = PreviewPorts.Open(
-            PreviewPorts.Parse(builder.Configuration[PreviewPorts.Variable], Console.WriteLine),
-            PreviewPorts.IsFree,
-            Console.WriteLine);
+        // Each is forwarded to its internal port (PreviewPorts.Map), decided over every published
+        // port, so a port taken today does not move the others.
+        var published = PreviewPorts.Parse(builder.Configuration[PreviewPorts.Variable], Console.WriteLine);
+        var open = PreviewPorts.Open(published, PreviewPorts.IsFree, Console.WriteLine);
+        previewPorts = PreviewPorts.Map(published, Console.WriteLine)
+            .Where(pair => open.Contains(pair.Key))
+            .ToDictionary();
 
         if (previewPorts.Count > 0)
         {
             builder.WebHost.UseUrls(PreviewPorts.Urls(
-                builder.Configuration["urls"], previewPorts, builder.Configuration["http_ports"], builder.Configuration["https_ports"]));
+                builder.Configuration["urls"], previewPorts.Keys, builder.Configuration["http_ports"], builder.Configuration["https_ports"]));
             Console.WriteLine(
-                $"Preview ports forwarded: {string.Join(", ", previewPorts.Order().Select(p => $"{p} -> 127.0.0.1:{PreviewPorts.BehindPort(p)}"))}.");
+                $"Preview ports forwarded: {string.Join(", ", previewPorts.OrderBy(p => p.Key).Select(p => $"{p.Key} -> 127.0.0.1:{p.Value}"))}.");
         }
 
         return true;

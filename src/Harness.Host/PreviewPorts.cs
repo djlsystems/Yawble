@@ -10,11 +10,12 @@ namespace Harness.Host;
 /// each and <see cref="PreviewForwarder"/> forwards it to an app the person's Concierge started.
 ///
 /// <para>
-/// THE APP NEVER BINDS A PUBLISHED PORT: it listens on <see cref="BehindPort"/>, the published port
-/// plus <see cref="BehindOffset"/>, on loopback. Control and every worker share ONE network
-/// namespace - one process in <c>all</c>, one pod under Podman, <c>--network container:</c> under
-/// Docker (docs/architecture.md, "The pod") - so once the Host listens on <c>0.0.0.0:8081</c> nothing
-/// else can bind 8081 on any address, and the worker's address is loopback in every layout.
+/// THE APP NEVER BINDS A PUBLISHED PORT: it listens on its internal port (<see cref="Map"/>), on
+/// loopback. Control and every worker share ONE network namespace - one process in <c>all</c>, one pod
+/// under Podman, <c>--network container:</c> under Docker (docs/architecture.md, "The pod") - so once
+/// the Host listens on <c>0.0.0.0:8081</c> nothing else can bind 8081 on any address, and the worker's
+/// address is loopback in every layout. <see cref="Map"/> is the ONE place a published port's internal
+/// port is decided; the Host forwards to it and the Concierge tells the app to bind it.
 /// </para>
 /// </summary>
 public static class PreviewPorts
@@ -23,15 +24,19 @@ public static class PreviewPorts
     /// Host's configuration, so the environment variable of that name sets it.</summary>
     public const string Variable = "HARNESS_PUBLISHED_PREVIEW_PORTS";
 
-    /// <summary>How far above its published port an app listens: 8081 is served from 18081.</summary>
-    public const int BehindOffset = 10000;
+    /// <summary>The step between a published port and the internal ports tried for it: 8081 -> 18081.</summary>
+    public const int Step = 10000;
 
-    /// <summary>Where the app behind <paramref name="published"/> listens, on the worker's loopback.</summary>
-    public static int BehindPort(int published) => published + BehindOffset;
+    /// <summary>The lowest internal port: below it a port is privileged.</summary>
+    public const int InternalLowest = 1024;
+
+    /// <summary>The highest internal port: above it starts the range the system hands out for outgoing
+    /// connections (32768 on Linux, 49152 elsewhere), where an app's port could already be in use.</summary>
+    public const int InternalHighest = 32767;
 
     /// <summary>
     /// The published ports in <paramref name="value"/>, in order, once each. A value that is not a
-    /// port, or whose behind port would be past 65535, is skipped with a line to <paramref name="say"/>.
+    /// port is skipped with a line to <paramref name="say"/>.
     /// </summary>
     public static IReadOnlyList<int> Parse(string? value, Action<string> say)
     {
@@ -40,9 +45,9 @@ public static class PreviewPorts
         foreach (var part in (value ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             if (!int.TryParse(part, NumberStyles.None, CultureInfo.InvariantCulture, out var port)
-                || port < 1 || BehindPort(port) > IPEndPoint.MaxPort)
+                || port < 1 || port > IPEndPoint.MaxPort)
             {
-                say($"Preview port '{part}' in {Variable} is not a port from 1 to {IPEndPoint.MaxPort - BehindOffset}; it is not forwarded.");
+                say($"Preview port '{part}' in {Variable} is not a port from 1 to {IPEndPoint.MaxPort}; it is not forwarded.");
                 continue;
             }
 
@@ -50,6 +55,48 @@ public static class PreviewPorts
         }
 
         return ports;
+    }
+
+    /// <summary>
+    /// THE MAPPING: each published port to the internal port its app listens on. Deterministic for a
+    /// given list, whatever range was configured. Ports are taken lowest first, and each gets the first
+    /// of <c>N+10000, N-10000, N+20000, N-20000, ...</c> that lies from <see cref="InternalLowest"/> to
+    /// <see cref="InternalHighest"/>, is not itself a published port and was not given to a lower one;
+    /// failing all of those, the lowest such port from <see cref="Step"/> up. So 8081 -> 18081, and
+    /// 28081 (whose 38081 is in the outgoing range) -> 18081. A port with no internal port left is
+    /// skipped with a line to <paramref name="say"/>.
+    /// </summary>
+    public static IReadOnlyDictionary<int, int> Map(IEnumerable<int> published, Action<string> say)
+    {
+        var ports = published.Distinct().Order().ToList();
+        var taken = new HashSet<int>(ports);
+        var map = new Dictionary<int, int>();
+
+        foreach (var port in ports)
+        {
+            var found = 0;
+            for (var k = 1; found == 0 && k * Step <= IPEndPoint.MaxPort; k++)
+            {
+                foreach (var candidate in new[] { port + k * Step, port - k * Step })
+                {
+                    if (candidate is >= InternalLowest and <= InternalHighest && taken.Add(candidate))
+                    {
+                        found = candidate;
+                        break;
+                    }
+                }
+            }
+
+            for (var candidate = Step; found == 0 && candidate <= InternalHighest; candidate++)
+            {
+                if (taken.Add(candidate)) found = candidate;
+            }
+
+            if (found == 0) say($"Preview port {port} has no free internal port from {InternalLowest} to {InternalHighest}; it is not forwarded.");
+            else map[port] = found;
+        }
+
+        return map;
     }
 
     /// <summary>

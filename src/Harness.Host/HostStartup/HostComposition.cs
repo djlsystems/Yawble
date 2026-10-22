@@ -68,7 +68,7 @@ internal sealed partial class HostComposition(string[] args, HostLog hostLog) : 
     private List<string> missingPrerequisites = default!;
     private string? schemaBackup = default!;
     private string? workerKey = default!;
-    private IReadOnlySet<int> previewPorts = default!;
+    private IReadOnlyDictionary<int, int> previewPorts = default!;
 
     internal void Run()
     {

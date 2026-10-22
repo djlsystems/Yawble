@@ -29,13 +29,15 @@ public sealed class PreviewForwarderTests : IAsyncLifetime
     /// <summary>A published port with nothing behind it.</summary>
     private int _empty;
 
+    /// <summary>The internal port the echo app listens on, behind <see cref="_preview"/>.</summary>
+    private int _internal;
+
     private string _hostAddress = "";
 
     public async ValueTask InitializeAsync()
     {
         Directory.CreateDirectory(_dataRoot);
-        _preview = FreePair();
-        _empty = FreePair(except: _preview);
+        (_preview, _empty, _internal) = FreePorts();
 
         _factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(host => host
@@ -65,7 +67,7 @@ public sealed class PreviewForwarderTests : IAsyncLifetime
     [Fact]
     public async Task A_request_to_a_preview_port_reaches_the_app_behind_it_with_no_cookie_the_host_sets()
     {
-        await using var app = await EchoHeadersServer.StartAsync(PreviewPorts.BehindPort(_preview));
+        await using var app = await EchoHeadersServer.StartAsync(_internal);
         var session = await SessionCookieAsync();
         var name = InstanceIdentity.CookieNameFor(_dataRoot);
 
@@ -90,7 +92,7 @@ public sealed class PreviewForwarderTests : IAsyncLifetime
     [Fact]
     public async Task A_request_carrying_only_host_cookies_reaches_the_app_with_no_cookie_header()
     {
-        await using var app = await EchoHeadersServer.StartAsync(PreviewPorts.BehindPort(_preview));
+        await using var app = await EchoHeadersServer.StartAsync(_internal);
         var session = await SessionCookieAsync();
 
         using var client = Plain();
@@ -105,7 +107,7 @@ public sealed class PreviewForwarderTests : IAsyncLifetime
     [Fact]
     public async Task The_apps_answer_passes_through_with_nothing_of_the_hosts_added()
     {
-        await using var app = await EchoHeadersServer.StartAsync(PreviewPorts.BehindPort(_preview));
+        await using var app = await EchoHeadersServer.StartAsync(_internal);
 
         using var client = Plain();
         using var response = await client.GetAsync($"http://127.0.0.1:{_preview}/page", Ct);
@@ -126,7 +128,7 @@ public sealed class PreviewForwarderTests : IAsyncLifetime
     [Fact]
     public async Task A_post_body_reaches_the_app_and_a_host_route_on_a_preview_port_is_the_apps()
     {
-        await using var app = await EchoHeadersServer.StartAsync(PreviewPorts.BehindPort(_preview));
+        await using var app = await EchoHeadersServer.StartAsync(_internal);
 
         using var client = Plain();
         using var response = await client.PostAsync(
@@ -141,7 +143,7 @@ public sealed class PreviewForwarderTests : IAsyncLifetime
     [Fact]
     public async Task A_websocket_on_a_preview_port_reaches_the_app()
     {
-        await using var app = await EchoHeadersServer.StartAsync(PreviewPorts.BehindPort(_preview));
+        await using var app = await EchoHeadersServer.StartAsync(_internal);
 
         using var socket = new ClientWebSocket();
         await socket.ConnectAsync(new Uri($"ws://127.0.0.1:{_preview}/ws"), Ct);
@@ -186,16 +188,26 @@ public sealed class PreviewForwarderTests : IAsyncLifetime
     private static HttpClient Plain() =>
         new(new SocketsHttpHandler { UseCookies = false, AllowAutoRedirect = false, UseProxy = false });
 
-    /// <summary>A port free on every interface whose behind port is free on loopback too.</summary>
-    private static int FreePair(int except = 0)
+    /// <summary>
+    /// Two published ports and the echo app's internal port, all free, with every internal port the
+    /// Host's own mapping gives. The published ports are where 10000 up is the outgoing range, so the
+    /// app listens below its published port, never on it.
+    /// </summary>
+    private static (int Preview, int Empty, int Internal) FreePorts()
     {
         for (var attempt = 0; attempt < 200; attempt++)
         {
-            var port = Random.Shared.Next(20000, 45000);
-            if (port == except || port == PreviewPorts.BehindPort(except)) continue;
-            if (PreviewPorts.IsFree(port) && PreviewPorts.IsFree(PreviewPorts.BehindPort(port))) return port;
+            var preview = Random.Shared.Next(PreviewPorts.InternalHighest - PreviewPorts.Step + 1, PreviewPorts.InternalHighest + 1);
+            var empty = Random.Shared.Next(PreviewPorts.InternalHighest - PreviewPorts.Step + 1, PreviewPorts.InternalHighest + 1);
+            if (preview == empty) continue;
+
+            var map = PreviewPorts.Map([preview, empty], _ => { });
+            if (map.Count == 2 && new[] { preview, empty, map[preview], map[empty] }.All(PreviewPorts.IsFree))
+            {
+                return (preview, empty, map[preview]);
+            }
         }
 
-        throw new InvalidOperationException("No free port pair found.");
+        throw new InvalidOperationException("No free ports found.");
     }
 }

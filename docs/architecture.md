@@ -124,7 +124,8 @@ The product name, Yawble, lives in the web app's presentation layer
   published port reaches it. A tunnel (`yawble remote`) runs in a container of its own.
 - **Previews.** The ports the CLI publishes for previews (`HARNESS_PUBLISHED_PREVIEW_PORTS`) are
   listened on by control too, and a request on one is forwarded to the app behind it on
-  loopback at that port plus 10000 (8081 -> 18081): every container shares control's network
+  loopback at an internal port (`PreviewPorts.Map`: 8081 -> 18081, 28081 -> 18081, always from
+  1024 to 32767 and never a published port): every container shares control's network
   namespace, so the app cannot bind the published port itself. Every cookie the Host issues is
   removed on the way, the app's answer comes back untouched, and with nothing behind the port the
   person sees a page saying no preview is running. Because a preview's page is the same site as
