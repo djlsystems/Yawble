@@ -14,6 +14,18 @@ import { monitorSymbols } from './scripts/monitor-symbols.mjs';
 // the real environment, printing, and failing the process.
 const target = resolveDevProxyTarget(process.env);
 
+// A proxied request carries the Host's own Origin, not the dev server's, when it carries one at all.
+const asTheHostsOwnOrigin = (proxy: {
+  on(event: 'proxyReq' | 'proxyReqWs', listener: (request: { getHeader(name: string): unknown; setHeader(name: string, value: string): void }) => void): void
+}) => {
+  const own = new URL(target.host).origin;
+  for (const event of ['proxyReq', 'proxyReqWs'] as const) {
+    proxy.on(event, (request) => {
+      if (request.getHeader('origin')) request.setHeader('origin', own);
+    });
+  }
+};
+
 export default defineConfig((ctx) => {
   // Only in dev, and only because the proxy exists only in dev - a production build serves the
   // bundle FROM the Host, same-origin, and printing a proxy target there would name a host nothing
@@ -145,10 +157,13 @@ export default defineConfig((ctx) => {
         // proxy without ws here would leave the console dead in dev while every
         // plain fetch kept working, which reads as a console bug rather than a
         // proxy one.
-        '/api': { target: target.host, changeOrigin: true, ws: true },
+        //
+        // The Origin is the Host's own as well: `changeOrigin` rewrites only Host, and the Host
+        // refuses a change (and a WebSocket) whose Origin is another port (`OriginGate`).
+        '/api': { target: target.host, changeOrigin: true, ws: true, configure: asTheHostsOwnOrigin },
 
         // And SignalR negotiates up to a WebSocket, so the hub needs it too.
-        '/hub': { target: target.host, changeOrigin: true, ws: true }
+        '/hub': { target: target.host, changeOrigin: true, ws: true, configure: asTheHostsOwnOrigin }
       }
     },
 
