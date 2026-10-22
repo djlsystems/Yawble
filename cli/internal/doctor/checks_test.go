@@ -36,7 +36,8 @@ func healthyObserved() doctor.Observed {
 		Port:   8080,
 		ExeDir: "/home/d/.local/bin", OnPath: boolp(true),
 		ContainerMemoryMB: 12288,
-		Stats:             &engine.Stats{Command: "podman stats", CPUPercent: float64p(12.3), MemoryUsage: "1.2GB", MemoryLimit: "12.88GB", MemoryPercent: float64p(9.4), PIDs: intp(412)},
+		PreviewPorts:      "28081-28090", PreviewMadeWith: "28081-28090", PreviewPublished: []int{28081, 28082, 28083, 28084, 28085, 28086, 28087, 28088, 28089, 28090},
+		Stats: &engine.Stats{Command: "podman stats", CPUPercent: float64p(12.3), MemoryUsage: "1.2GB", MemoryLimit: "12.88GB", MemoryPercent: float64p(9.4), PIDs: intp(412)},
 	}
 }
 

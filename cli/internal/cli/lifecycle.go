@@ -53,6 +53,7 @@ func githubToken(deps Deps) string {
 // container will run in, and adds the env file when there is one.
 func settingsFor(deps Deps, c config.Config, m instance.Machine) (instance.Settings, []string, error) {
 	s, notes := instance.Defaults(c, m, buildinfo.Image())
+	s.PortFree = deps.PortFree
 	envFile := config.EnvFile(deps.ConfigDir)
 	hash, err := readEnvFile(envFile)
 	if err != nil {

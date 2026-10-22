@@ -123,8 +123,15 @@ The engine is the one configured, else the one installed (asked when both are); 
 | `workerImage` | the worker image; by default derived from `image` |
 | `marketplaceCatalog` | the package catalog the Host lists under **Marketplace** > Browse; default `https://yawble.ai/api/marketplace/catalog.json`, empty turns the catalog off |
 | `microsoftClientId` | the Application (client) ID of the public Microsoft app Add connection signs in through when no Microsoft app of your own is set up, passed to the Host as `HARNESS_MICROSOFT_CLIENT_ID`; default the published Yawble app's (`config.DefaultMicrosoftClientID`, empty in a build that names none, which passes nothing), empty turns it off |
+| `previewPorts` | the preview ports published beside the board's port, so a person can open a team's app that the Concierge starts (see below); default `28081-28090`, a range or a list such as `28081,28085-28087` (at most 100 ports), empty turns previews off |
 
-`YAWBLE_*` environment variables (`YAWBLE_ENGINE`, `YAWBLE_PORT`, `YAWBLE_MEMORY`, `YAWBLE_CPUS`, `YAWBLE_MAX_RUNNING`, `YAWBLE_IMAGE`, `YAWBLE_WORKERS`, `YAWBLE_WORKER_IMAGE`, `YAWBLE_MARKETPLACE_CATALOG`, `YAWBLE_MICROSOFT_CLIENT_ID`) override the file.
+`YAWBLE_*` environment variables (`YAWBLE_ENGINE`, `YAWBLE_PORT`, `YAWBLE_MEMORY`, `YAWBLE_CPUS`, `YAWBLE_MAX_RUNNING`, `YAWBLE_IMAGE`, `YAWBLE_WORKERS`, `YAWBLE_WORKER_IMAGE`, `YAWBLE_MARKETPLACE_CATALOG`, `YAWBLE_MICROSOFT_CLIENT_ID`, `YAWBLE_PREVIEW_PORTS`) override the file.
+
+### Preview ports
+
+`up` publishes the `previewPorts` range beside the board's port, on `0.0.0.0` like it, so the board and a preview are reached from this computer and from others on the network alike: on Podman the pod publishes them, on Docker the control container does. The Host forwards each to the preview the Concierge starts on that port when you ask it to let you try a team's app. The default, `28081-28090`, is ten ports above the 8000-8999 band where development servers and local tools listen by default, and below every operating system's ephemeral range (from 32768 on Linux, 49152 on Windows and macOS), so the system never hands one out to an outgoing connection.
+
+A port of the range that something on this computer already holds is skipped with one line (`preview port 28083 is already in use on this computer; skipped (the instance starts without it)`), and the instance starts without it; Yawble's own port is never one. The Host is told the ports actually published (`HARNESS_PUBLISHED_PREVIEW_PORTS`, comma-separated). A later `up` after `down` checks the range again, so a port taken since is dropped and one freed since is published. A pod or container made before the range, or with another one, is made again once by the next `up`, which says so; the data volume is kept. `yawble doctor`'s `preview` row shows the range and the ports published.
 
 ## Connections
 

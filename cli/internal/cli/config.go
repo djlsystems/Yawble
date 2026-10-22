@@ -14,12 +14,14 @@ import (
 func newConfigCommand(deps Deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
-		Short: "Read or change yawble's own settings (engine, port, memory, cpus, maxRunning, image, workers, workerImage, marketplaceCatalog, microsoftClientId)",
+		Short: "Read or change yawble's own settings (engine, port, memory, cpus, maxRunning, image, workers, workerImage, marketplaceCatalog, microsoftClientId, previewPorts)",
 		Long: "config reads and changes yawble's own settings. memory and cpus are each worker's: every " +
 			"worker container gets them, and control gets its own fixed allowance beside them. workers " +
 			"is how many worker containers run (yawble workers <n> changes it and applies it at once). marketplaceCatalog is the address of the " +
 			"package catalog the Host lists under Marketplace > Browse; set it empty to turn the catalog off. microsoftClientId is " +
-			"the Microsoft app Add connection signs in through when no app of your own is set up; set it empty to turn it off.",
+			"the Microsoft app Add connection signs in through when no app of your own is set up; set it empty to turn it off. " +
+			"previewPorts is the range of ports published beside Yawble's for previews of a team's app (default " + config.DefaultPreviewPorts + ", " +
+			"or a list like 28081,28085-28087); a port already in use is skipped, and an empty value turns previews off.",
 	}
 	var asJSON bool
 	get := &cobra.Command{
@@ -80,6 +82,7 @@ func newConfigCommand(deps Deps) *cobra.Command {
 // come from instance.Defaults, so this and `up` can never disagree.
 func effective(deps Deps, c config.Config) config.Config {
 	s, _ := instance.Defaults(c, measure(deps, c), buildinfo.Image())
+	preview := config.FormatPorts(s.PreviewPorts)
 	return config.Config{
 		Engine:     c.Engine,
 		Port:       s.Port,
@@ -94,5 +97,6 @@ func effective(deps Deps, c config.Config) config.Config {
 		}(),
 		MarketplaceCatalog: &s.MarketplaceCatalog,
 		MicrosoftClientID:  &s.MicrosoftClientID,
+		PreviewPorts:       &preview,
 	}
 }

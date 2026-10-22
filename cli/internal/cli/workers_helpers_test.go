@@ -34,6 +34,8 @@ func seedWorkerKey(t *testing.T, dir string) {
 func settingsForImage(image string) instance.Settings {
 	s, _ := instance.Defaults(config.Config{Image: image}, instance.Measure(), "")
 	s.KeyHash = testKeyHash()
+	// What an up on a machine with every preview port free publishes.
+	s.PreviewPublished = s.PreviewPorts
 	return s
 }
 

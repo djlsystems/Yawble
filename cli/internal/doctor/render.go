@@ -19,7 +19,7 @@ func Render(w io.Writer, checks []Check) {
 
 // keyRows are the rows the short list always shows, whatever their verdict: whether the
 // instance runs, whether an agent can work in it, and whether it is backed up.
-var keyRows = map[string]bool{"machine": true, "engine": true, "container": true, "health": true, "agents": true, "backups": true}
+var keyRows = map[string]bool{"machine": true, "engine": true, "container": true, "health": true, "agents": true, "backups": true, "preview": true}
 
 // Short is the default list: the key rows and every row that warns or fails, so each line is
 // one a person can act on or wants to know. The rest - information, skips, rows that are ok -

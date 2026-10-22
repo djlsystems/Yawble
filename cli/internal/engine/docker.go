@@ -51,7 +51,7 @@ func (d docker) PodExists(ctx context.Context, name string) (bool, error) {
 // PodCurrent: the network has no layout that changed, so every one is current.
 func (docker) PodCurrent(context.Context, string) (bool, error) { return true, nil }
 
-func (d docker) CreatePod(ctx context.Context, name string, _, _ int) error {
+func (d docker) CreatePod(ctx context.Context, name string, _, _ int, _ ...int) error {
 	_, err := d.run(ctx, "network", "create", name)
 	return err
 }
@@ -111,6 +111,9 @@ func (d docker) Run(ctx context.Context, s RunSpec) error {
 	args := []string{"run", "-d", "--name", s.Name, "--network", network}
 	if s.HostPort > 0 && s.ContainerPort > 0 && !strings.HasPrefix(network, "container:") {
 		args = append(args, "-p", fmt.Sprintf("0.0.0.0:%d:%d", s.HostPort, s.ContainerPort))
+		for _, port := range s.PreviewPorts {
+			args = append(args, "-p", fmt.Sprintf("0.0.0.0:%d:%d", port, port))
+		}
 	}
 	_, err := d.run(ctx, append(args, runArgs(s)...)...)
 	return err
