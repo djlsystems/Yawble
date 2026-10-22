@@ -30,7 +30,12 @@ public static class InstanceIdentity
     /// every other instance's cookie - that is what "not scoped by port" means, and it costs a few
     /// hundred bytes a request for the three or four local hosts this is built for. Worth knowing
     /// before somebody runs fifty.</summary>
-    public static string CookieNameFor(string dataRoot) => $"harness-{For(dataRoot)}";
+    public static string CookieNameFor(string dataRoot) => $"{CookiePrefix}{For(dataRoot)}";
+
+    /// <summary>What every instance's session cookie name begins with, and so every cookie a Host on
+    /// this machine issues - its chunks (<c>...C1</c>, <c>...C2</c>) included. The preview forwarder
+    /// removes every cookie under it (see <see cref="PreviewForwarder"/>).</summary>
+    public const string CookiePrefix = "harness-";
 
     /// <summary>
     /// A stable, legal, readable identifier for the instance rooted at <paramref name="dataRoot"/>.

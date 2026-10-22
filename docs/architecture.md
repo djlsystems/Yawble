@@ -122,6 +122,13 @@ The product name, Yawble, lives in the web app's presentation layer
   (`ws://127.0.0.1:8080`, loopback, so plain `ws://` is accepted). On Docker each worker joins
   control's network namespace (`--network container:yawble`). Only control listens, and only the
   published port reaches it. A tunnel (`yawble remote`) runs in a container of its own.
+- **Previews.** The ports the CLI publishes for previews (`HARNESS_PUBLISHED_PREVIEW_PORTS`) are
+  listened on by control too, and a request on one is forwarded to the app behind it on
+  loopback at that port plus 10000 (8081 -> 18081): every container shares control's network
+  namespace, so the app cannot bind the published port itself. Every cookie the Host issues is
+  removed on the way, the app's answer comes back untouched, and with nothing behind the port the
+  person sees a page saying no preview is running. Because a preview's page is the same site as
+  Yawble, the Host refuses any change or WebSocket whose `Origin` is not its own.
 - **The worker key** reaches the containers only as an env file. The entrypoint writes it to
   `/run/harness/worker-key`, readable only by that container's Host user, and unsets it before
   anything else runs, so no agent can read it from a process's environment.

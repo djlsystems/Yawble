@@ -46,12 +46,26 @@ internal sealed partial class HostComposition
         // record, and why that set is closed.
         DiagnosticsMiddleware.Use(app);
 
+        // BEFORE THE HEADERS: a request on a published preview port is the app's, not the Host's, and is
+        // forwarded with every cookie the Host issues removed, its answer passed through with nothing of
+        // the Host's added. Nothing below sees it. See PreviewForwarder.
+        if (previewPorts.Count > 0)
+        {
+            var forwarder = new PreviewForwarder(previewPorts, InstanceIdentity.CookieNameFor(dataRoot));
+            app.Lifetime.ApplicationStopped.Register(forwarder.Dispose);
+            forwarder.Use(app);
+        }
+
         // SECOND, so every response carries them - the bundle, an API answer, a gate's refusal, a 404.
         SecurityHeaders.Use(app);
 
         // THIRD, before the console's pages and files are served: the worker key is refused everywhere but
         // the worker connection, with a sentence, before anything else reads it.
         workerKeys.Use(app);
+
+        // AND BEFORE ANY HANDLER: a change or a WebSocket whose Origin is another origin - a preview
+        // port's page is the same SITE as the Host, so its requests carry the cookie - is refused.
+        OriginGate.Use(app);
 
         app.UseDefaultFiles();
 

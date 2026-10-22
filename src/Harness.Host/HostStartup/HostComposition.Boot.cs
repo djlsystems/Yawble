@@ -123,6 +123,22 @@ internal sealed partial class HostComposition
 
         database = Path.Combine(dataRoot, "messages.db");
 
+        // THE PUBLISHED PREVIEW PORTS, listened on beside the Host's own address. A port taken on this
+        // machine is skipped with a line here, because Kestrel refuses to start when any one of its
+        // addresses cannot be bound - and a preview is never worth the instance. See PreviewPorts.
+        previewPorts = PreviewPorts.Open(
+            PreviewPorts.Parse(builder.Configuration[PreviewPorts.Variable], Console.WriteLine),
+            PreviewPorts.IsFree,
+            Console.WriteLine);
+
+        if (previewPorts.Count > 0)
+        {
+            builder.WebHost.UseUrls(PreviewPorts.Urls(
+                builder.Configuration["urls"], previewPorts, builder.Configuration["http_ports"], builder.Configuration["https_ports"]));
+            Console.WriteLine(
+                $"Preview ports forwarded: {string.Join(", ", previewPorts.Order().Select(p => $"{p} -> 127.0.0.1:{PreviewPorts.BehindPort(p)}"))}.");
+        }
+
         return true;
     }
 }

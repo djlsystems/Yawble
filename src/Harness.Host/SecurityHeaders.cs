@@ -58,18 +58,25 @@ public static class SecurityHeaders
     {
         context.Response.OnStarting(() =>
         {
-            var headers = context.Response.Headers;
-            headers.XContentTypeOptions = "nosniff";
-            headers["Referrer-Policy"] = "same-origin";
-
-            // Both: frame-ancestors is the standard, X-Frame-Options is what an older browser
-            // reads. Nothing here is meant to be framed.
-            headers.XFrameOptions = "DENY";
-            headers.ContentSecurityPolicy =
-                context.Items[PolicyOverride] as string ?? ContentSecurityPolicy;
+            Stamp(context);
             return Task.CompletedTask;
         });
 
         await next();
     });
+
+    /// <summary>The headers themselves, for a response answered before <see cref="Use"/> runs: the
+    /// preview forwarder's own "no preview running" page.</summary>
+    public static void Stamp(HttpContext context)
+    {
+        var headers = context.Response.Headers;
+        headers.XContentTypeOptions = "nosniff";
+        headers["Referrer-Policy"] = "same-origin";
+
+        // Both: frame-ancestors is the standard, X-Frame-Options is what an older browser
+        // reads. Nothing here is meant to be framed.
+        headers.XFrameOptions = "DENY";
+        headers.ContentSecurityPolicy =
+            context.Items[PolicyOverride] as string ?? ContentSecurityPolicy;
+    }
 }
