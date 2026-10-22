@@ -139,7 +139,9 @@ The product name, Yawble, lives in the web app's presentation layer
   machine or another on the network. It runs until the person asks the Concierge to stop it or
   the Concierge session ends, which also removes the environment file. A page saying no preview
   is running means nothing is listening behind that port: ask the Concierge. With no preview
-  ports published, `yawble update` opens them.
+  ports published, `yawble update` opens them. The app binds the app port paired with the
+  published port, never another: if that bind fails the Concierge uses the next free pair and its
+  link, and with none free it says no preview port is available.
 - **The worker key** reaches the containers only as an env file. The entrypoint writes it to
   `/run/harness/worker-key`, readable only by that container's Host user, and unsets it before
   anything else runs, so no agent can read it from a process's environment.

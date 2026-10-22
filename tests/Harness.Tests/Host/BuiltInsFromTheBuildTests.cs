@@ -704,7 +704,11 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
         Assert.Contains("Check it answers on the app port before you give the link.", section, StringComparison.Ordinal);
         Assert.Contains("runs until they ask you to stop it or your session ends", section, StringComparison.Ordinal);
         Assert.Contains("When the page says no preview is running on that port", section, StringComparison.Ordinal);
-        Assert.Contains("If the port is already in use, take the next pair from the two lists.", section, StringComparison.Ordinal);
+        Assert.Contains("listening on that app port on `127.0.0.1`", section, StringComparison.Ordinal);
+        Assert.Contains("never let the app move to another port.", section, StringComparison.Ordinal);
+        Assert.Contains("If that bind fails, try the next free pair, and give the link on its own published port.", section, StringComparison.Ordinal);
+        Assert.Contains("If no pair is free, tell the person no preview port is available.", section, StringComparison.Ordinal);
+        Assert.DoesNotContain("free app port", section, StringComparison.Ordinal);
         Assert.Contains("never by name or pattern", section, StringComparison.Ordinal);
 
         foreach (var word in new[] { "npm", "dotnet", "python", "node", "java", "docker", "ASP.NET", "SQL", "React", "Playwright", "localhost:" })

@@ -1084,10 +1084,13 @@ public static class BuiltInSkills
               folder and answers its path and the variable names. The values are secrets: load the
               file in the shell that starts the app (`. <path>`), and never print it, read it out or
               echo a value from it.
-            - Start the app in the background from your worktree, with that file loaded, listening
-              on a free app port on `127.0.0.1`, in whatever way the project's own README or scripts
-              say it is started. Record its process id. If the port is already in use, take the next
-              pair from the two lists.
+            - Choose a pair: a published port and the app port paired with it. Start the app in the
+              background from your worktree, with that file loaded, listening on that app port on
+              `127.0.0.1`, in whatever way the project's own README or scripts say it is started.
+              Record its process id. The platform forwards the published port to that one app port
+              only, so never let the app move to another port. If that bind fails, try the next free
+              pair, and give the link on its own published port. If no pair is free, tell the person
+              no preview port is available.
             - Check it answers on the app port before you give the link. Then give the person the
               link on the published port, and say it runs until they ask you to stop it or your
               session ends.
