@@ -204,6 +204,10 @@ internal sealed partial class HostComposition
             Console.WriteLine($"WARNING: unfinished removals could not be retried at start: {exception.Message}");
         }
 
+        // PREVIEW ENV FILES a Host stopped rather than its sessions ended would otherwise keep. Before any
+        // Concierge starts. Never fatal: the removal never throws.
+        app.Services.GetRequiredService<PreviewEnvFiles>().RemoveAll();
+
         // CONCIERGE ATTACHMENTS PAST THEIR RETENTION, which a Host stopped rather than its sessions ended
         // would otherwise keep for good. Before any Concierge starts. Never fatal.
         try

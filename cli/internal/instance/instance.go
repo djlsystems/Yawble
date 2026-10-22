@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/djlsystems/yawble/cli/internal/config"
 	"github.com/djlsystems/yawble/cli/internal/engine"
 	"github.com/djlsystems/yawble/cli/internal/release"
 )
@@ -28,6 +30,12 @@ type Status struct {
 	Pending       []string     `json:"pending,omitempty"`
 	// Workers is each worker container, configured or found, by number.
 	Workers []WorkerStatus `json:"workers"`
+	// PreviewPorts is the configured preview range ("" with previews off). PreviewMadeWith is the
+	// range control was made with and PreviewPublished the ports of it published, as its label
+	// records them; nil with no control of yawble's.
+	PreviewPorts     string `json:"previewPorts"`
+	PreviewMadeWith  string `json:"previewMadeWith,omitempty"`
+	PreviewPublished []int  `json:"previewPublished"`
 }
 
 // WorkerStatus is one worker container as the engine sees it. Health is the engine's verdict
@@ -76,11 +84,28 @@ type applied struct {
 	Catalog string `json:"marketplaceCatalog,omitempty"`
 	// MicrosoftClient is omitted when none is passed, so a label from before it reads the same.
 	MicrosoftClient string `json:"microsoftClientId,omitempty"`
+	// Preview is the configured preview range and Published the ports of it actually published,
+	// each as config.FormatPorts writes them; both omitted with previews off, so a label from
+	// before them reads as previews off.
+	Preview   string `json:"previewPorts,omitempty"`
+	Published string `json:"previewPublished,omitempty"`
 }
 
 // controlApplied is control's label for the settings now: its own fixed allowance, not a worker's.
 func controlApplied(s Settings) applied {
-	return applied{RoleControl, s.Port, ControlMemory, ControlCPUs, s.MaxRunning, s.Image, s.EnvFileHash, s.KeyHash, s.MarketplaceCatalog, s.MicrosoftClientID}
+	return applied{RoleControl, s.Port, ControlMemory, ControlCPUs, s.MaxRunning, s.Image, s.EnvFileHash, s.KeyHash, s.MarketplaceCatalog, s.MicrosoftClientID,
+		config.FormatPorts(s.PreviewPorts), config.FormatPorts(s.PreviewPublished)}
+}
+
+// PreviewOf is the preview range a container's settings label records and the ports of it that
+// were published; ok is false for a label that is not yawble's.
+func PreviewOf(label string) (preview string, published []int, ok bool) {
+	var was applied
+	if label == "" || json.Unmarshal([]byte(label), &was) != nil {
+		return "", nil, false
+	}
+	published, _ = config.ParsePorts(was.Published)
+	return was.Preview, published, true
 }
 
 // PreSplit says whether control's label is from before control and workers: a yawble label with
@@ -136,7 +161,20 @@ func Changes(label string, s Settings) []string {
 	if was.MicrosoftClient != now.MicrosoftClient {
 		out = append(out, fmt.Sprintf("microsoftClientId %q -> %q", was.MicrosoftClient, now.MicrosoftClient))
 	}
+	if was.Preview != now.Preview {
+		out = append(out, fmt.Sprintf("previewPorts %s -> %s", orNone(was.Preview), orNone(now.Preview)))
+	} else if s.PreviewPublished != nil && was.Published != now.Published {
+		// Decided only by Up: a port it published is taken now by something else.
+		out = append(out, fmt.Sprintf("published preview ports %s -> %s", orNone(was.Published), orNone(now.Published)))
+	}
 	return out
+}
+
+func orNone(ports string) string {
+	if ports == "" {
+		return "none"
+	}
+	return ports
 }
 
 // PortOf is the port a container's settings label records, else fallback: where a container
@@ -195,17 +233,30 @@ func Up(ctx context.Context, e engine.Engine, s Settings, health func(string) bo
 			podExisted = false
 		}
 	}
+	// On Podman the pod publishes the preview ports beside the Host's; on Docker control does.
+	podPublishes := e.Name() != "docker"
 	if !podExisted {
-		if err := e.CreatePod(ctx, PodName, s.Port, ContainerPort); err != nil {
-			return portError(err, s.Port)
+		if err := createPod(ctx, e, &s, podPublishes, "created", out); err != nil {
+			return err
 		}
-		fmt.Fprintf(out, "created pod %s publishing port %d\n", PodName, s.Port)
 	}
 	info, err := e.Inspect(ctx, ContainerName)
 	if err != nil {
 		return err
 	}
 	podCreatedHere := !podExisted
+	if podExisted && podPublishes && info.State == engine.StateAbsent && len(s.PreviewPorts) > 0 {
+		// A pod with no control in it publishes ports nothing records. Made again, it publishes
+		// what is free of the range now.
+		if err := e.RemovePod(ctx, PodName); err != nil {
+			return err
+		}
+		if err := createPod(ctx, e, &s, podPublishes, "recreated", out); err != nil {
+			return err
+		}
+		podCreatedHere = true
+	}
+	wasPublished := keptPreview(ctx, e, &s, info, podPublishes)
 	// On Docker a worker lives in control's network namespace: a control made again leaves it in
 	// a dead one, and a control started again has a new one. Podman's pod owns the namespace.
 	var step workerStep
@@ -221,17 +272,21 @@ func Up(ctx context.Context, e engine.Engine, s Settings, health func(string) bo
 			if err := e.Remove(ctx, ContainerName); err != nil {
 				return err
 			}
-			if portOf(info.Label, s.Port) != s.Port {
-				// The pod holds the port. A new pod, then the container joins it below. The
+			podPorts := podPublishes && (s.PreviewPublished == nil || config.FormatPorts(s.PreviewPublished) != config.FormatPorts(wasPublished))
+			if portOf(info.Label, s.Port) != s.Port || podPorts {
+				// The pod holds the ports. A new pod, then the container joins it below. The
 				// tunnel sidecar was in that pod too and goes with it; `remote enable` recreates it.
 				if err := e.RemovePod(ctx, PodName); err != nil {
 					return err
 				}
-				if err := e.CreatePod(ctx, PodName, s.Port, ContainerPort); err != nil {
-					return portError(err, s.Port)
+				s.PreviewPublished = nil
+				if err := createPod(ctx, e, &s, podPublishes, "recreated", out); err != nil {
+					return err
 				}
 				podCreatedHere = true
-				fmt.Fprintf(out, "recreated pod %s publishing port %d\n", PodName, s.Port)
+			} else if !podPublishes {
+				// Docker: control publishes, and is made again below on what is free now.
+				s.PreviewPublished = nil
 			}
 			info = engine.ContainerInfo{State: engine.StateAbsent}
 		}
@@ -260,7 +315,29 @@ func Up(ctx context.Context, e engine.Engine, s Settings, health func(string) bo
 				return fmt.Errorf("the pull of %s failed (%w); podman's own message is above. Is the image name right, and can this machine reach the registry?", s.Image, err)
 			}
 		}
-		if err := e.Run(ctx, controlSpec(s)); err != nil {
+		if !podPublishes || s.PreviewPublished == nil {
+			s.PreviewPublished = publishable(s, out)
+		}
+		err := e.Run(ctx, controlSpec(s))
+		if err != nil && len(s.PreviewPublished) > 0 {
+			// A preview port the probe saw free and the engine could not bind (taken since, or
+			// held where a loopback dial does not reach) never stops the instance: once more with
+			// none, said.
+			_ = e.Remove(ctx, ContainerName)
+			fmt.Fprintf(out, "the preview ports could not be published (%v); starting without them\n", err)
+			s.PreviewPublished = []int{}
+			err = nil
+			if podPublishes {
+				if err = e.RemovePod(ctx, PodName); err == nil {
+					podCreatedHere = true
+					err = createPod(ctx, e, &s, true, "recreated", out)
+				}
+			}
+			if err == nil {
+				err = e.Run(ctx, controlSpec(s))
+			}
+		}
+		if err != nil {
 			// A failed first run leaves a container in "created" and, when this up made the pod,
 			// a pod on a port nobody can use. Both would make every later up fail the same way.
 			_ = e.Remove(ctx, ContainerName)
@@ -308,6 +385,15 @@ func controlSpec(s Settings) engine.RunSpec {
 	if s.MicrosoftClientID != "" {
 		env["HARNESS_MICROSOFT_CLIENT_ID"] = s.MicrosoftClientID
 	}
+	// HARNESS_PUBLISHED_PREVIEW_PORTS is the preview ports actually published, comma-separated: the
+	// ports the Host forwards to a preview. Absent with none.
+	if len(s.PreviewPublished) > 0 {
+		ports := make([]string, len(s.PreviewPublished))
+		for i, port := range s.PreviewPublished {
+			ports[i] = strconv.Itoa(port)
+		}
+		env[PublishedPreviewPortsVariable] = strings.Join(ports, ",")
+	}
 	return engine.RunSpec{
 		Name: ContainerName, Pod: PodName, Image: s.Image,
 		Volumes: []string{VolumeName + ":/data"},
@@ -317,8 +403,83 @@ func controlSpec(s Settings) engine.RunSpec {
 		},
 		EnvFiles: s.EnvFiles(), Memory: ControlMemory, CPUs: ControlCPUs,
 		CapDrop: []string{"ALL"}, CapAdd: ControlCaps,
-		HostPort: s.Port, ContainerPort: ContainerPort,
+		HostPort: s.Port, ContainerPort: ContainerPort, PreviewPorts: s.PreviewPublished,
 	}
+}
+
+// PublishedPreviewPortsVariable tells control the preview ports actually published: the contract
+// with the Host, which forwards each of them to a preview.
+const PublishedPreviewPortsVariable = "HARNESS_PUBLISHED_PREVIEW_PORTS"
+
+// createPod makes the pod. When it publishes (Podman) it publishes the Host's port and every
+// preview port free now, and the settings record which; verb is "created" or "recreated".
+func createPod(ctx context.Context, e engine.Engine, s *Settings, publishes bool, verb string, out io.Writer) error {
+	var preview []int
+	if publishes {
+		if s.PreviewPublished == nil {
+			s.PreviewPublished = publishable(*s, out)
+		}
+		preview = s.PreviewPublished
+	}
+	if err := e.CreatePod(ctx, PodName, s.Port, ContainerPort, preview...); err != nil {
+		return portError(err, s.Port)
+	}
+	if len(preview) > 0 {
+		fmt.Fprintf(out, "%s pod %s publishing port %d and preview ports %s\n", verb, PodName, s.Port, config.FormatPorts(preview))
+	} else {
+		fmt.Fprintf(out, "%s pod %s publishing port %d\n", verb, PodName, s.Port)
+	}
+	return nil
+}
+
+// publishable is the configured preview ports less any this computer has taken, each skipped
+// port said in one line: a taken port never stops the instance starting. The Host's own ports
+// are never a preview's. Asked only where nothing of the instance holds the ports.
+func publishable(s Settings, out io.Writer) []int {
+	free := s.PortFree
+	if free == nil {
+		free = PortFree
+	}
+	published := []int{}
+	for _, port := range s.PreviewPorts {
+		switch {
+		case port == s.Port || port == ContainerPort:
+			fmt.Fprintf(out, "preview port %d is Yawble's own port; skipped\n", port)
+		case !free(port):
+			fmt.Fprintf(out, "preview port %d is already in use on this computer; skipped (the instance starts without it)\n", port)
+		default:
+			published = append(published, port)
+		}
+	}
+	return published
+}
+
+// keptPreview decides, for a control that exists with the preview range configured now, which
+// preview ports are published: those its label records while they are held, or, when nothing of
+// the instance holds them (a stopped instance), every port of the range free now, so a port
+// taken since is dropped and one freed since is taken up. It answers the ports the label
+// records. A changed range leaves PreviewPublished undecided: Changes names it, and the ports are
+// probed again where they are bound.
+func keptPreview(ctx context.Context, e engine.Engine, s *Settings, info engine.ContainerInfo, podPublishes bool) []int {
+	if info.State == engine.StateAbsent {
+		return nil
+	}
+	preview, published, ok := PreviewOf(info.Label)
+	if !ok || preview != config.FormatPorts(s.PreviewPorts) {
+		return published
+	}
+	s.PreviewPublished = append([]int{}, published...)
+	if info.State == engine.StateStopped && len(s.PreviewPorts) > 0 {
+		held := false
+		if podPublishes {
+			// The pod's infra container holds them while the pod runs with the container stopped.
+			held, _ = e.PodRunning(ctx, PodName)
+		}
+		if !held {
+			s.PreviewPublished = publishable(*s, io.Discard)
+		}
+	}
+	return published
 }
 
 // portError names the port as the thing to check when a pod, run or start fails. When podman
@@ -522,7 +683,7 @@ func Down(ctx context.Context, e engine.Engine, port int, out io.Writer) error {
 // GetStatus asks the engine what runs and, only when the container runs, the instance itself.
 // The config is consulted only to say what a future `up` would change.
 func GetStatus(ctx context.Context, e engine.Engine, s Settings, health func(string) bool) (Status, error) {
-	st := Status{Engine: e.Name(), Image: s.Image, URL: URL(s.Port)}
+	st := Status{Engine: e.Name(), Image: s.Image, URL: URL(s.Port), PreviewPorts: config.FormatPorts(s.PreviewPorts)}
 	if v, err := e.Version(ctx); err == nil {
 		st.EngineVersion = v
 	} else {
@@ -539,6 +700,9 @@ func GetStatus(ctx context.Context, e engine.Engine, s Settings, health func(str
 		}
 		st.URL = URL(portOf(info.Label, s.Port))
 		st.Pending = Changes(info.Label, s)
+		if preview, published, ok := PreviewOf(info.Label); ok {
+			st.PreviewMadeWith, st.PreviewPublished = preview, append([]int{}, published...)
+		}
 	}
 	if info.State == engine.StateRunning {
 		h := health(st.URL + "/healthz")

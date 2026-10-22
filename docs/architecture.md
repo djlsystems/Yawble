@@ -122,6 +122,26 @@ The product name, Yawble, lives in the web app's presentation layer
   (`ws://127.0.0.1:8080`, loopback, so plain `ws://` is accepted). On Docker each worker joins
   control's network namespace (`--network container:yawble`). Only control listens, and only the
   published port reaches it. A tunnel (`yawble remote`) runs in a container of its own.
+- **Previews.** The ports the CLI publishes for previews (`HARNESS_PUBLISHED_PREVIEW_PORTS`) are
+  listened on by control too, and a request on one is forwarded to the app behind it on
+  loopback at an internal port (`PreviewPorts.Map`: 8081 -> 18081, 28081 -> 18081, always from
+  1024 to 32767 and never a published port): every container shares control's network
+  namespace, so the app cannot bind the published port itself. Every cookie the Host issues is
+  removed on the way, the app's answer comes back untouched, and with nothing behind the port the
+  person sees a page saying no preview is running. Because a preview's page is the same site as
+  Yawble, the Host refuses any change or WebSocket whose `Origin` is not its own.
+- **Asking for a preview.** A person asks their Concierge, in its terminal, to let them try a
+  team's app ("let me try the app"). The Concierge makes its own worktree of the team's branch,
+  writes the team's environment to a file in its own folder with the `preview` tool (the values
+  never pass through its terminal), starts the app in the background on the app port
+  (`HARNESS_PREVIEW_APP_PORTS`), checks it answers, and gives the link on the published port
+  (`HARNESS_PREVIEW_URL:<port from HARNESS_PREVIEW_PORTS>`), which opens in a new tab on this
+  machine or another on the network. It runs until the person asks the Concierge to stop it or
+  the Concierge session ends, which also removes the environment file. A page saying no preview
+  is running means nothing is listening behind that port: ask the Concierge. With no preview
+  ports published, `yawble update` opens them. The app binds the app port paired with the
+  published port, never another: if that bind fails the Concierge uses the next free pair and its
+  link, and with none free it says no preview port is available.
 - **The worker key** reaches the containers only as an env file. The entrypoint writes it to
   `/run/harness/worker-key`, readable only by that container's Host user, and unsets it before
   anything else runs, so no agent can read it from a process's environment.

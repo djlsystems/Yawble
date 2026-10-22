@@ -4,8 +4,10 @@ package instance
 
 import (
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/djlsystems/yawble/cli/internal/config"
 )
@@ -44,6 +46,15 @@ type Settings struct {
 	MarketplaceCatalog string
 	// MicrosoftClientID is the Microsoft client ID control is given; "" passes none.
 	MicrosoftClientID string
+	// PreviewPorts are the configured preview ports, the previewPorts setting read; none turns
+	// previews off.
+	PreviewPorts []int
+	// PreviewPublished are the preview ports actually published: PreviewPorts less any port taken
+	// on this computer when the pod (Docker: control) was made. nil is not decided yet; Up decides
+	// it, from the running instance or by probing.
+	PreviewPublished []int
+	// PortFree probes a port on this computer before it is published; nil is the real probe.
+	PortFree func(port int) bool
 }
 
 // EnvFiles are the env files every instance container is given, in order: the env file, then
@@ -87,7 +98,7 @@ const (
 // because a number that looks measured and was not is the thing this product refuses to do.
 func Defaults(c config.Config, m Machine, pinned string) (Settings, []string) {
 	var notes []string
-	s := Settings{Port: config.DefaultPort, Memory: c.Memory, CPUs: c.CPUs, MaxRunning: c.MaxRunning, Image: c.Image, Workers: c.WorkerCount(), WorkerImage: c.WorkerImage, MarketplaceCatalog: c.Catalog(), MicrosoftClientID: c.MicrosoftClient()}
+	s := Settings{Port: config.DefaultPort, Memory: c.Memory, CPUs: c.CPUs, MaxRunning: c.MaxRunning, Image: c.Image, Workers: c.WorkerCount(), WorkerImage: c.WorkerImage, MarketplaceCatalog: c.Catalog(), MicrosoftClientID: c.MicrosoftClient(), PreviewPorts: c.Preview()}
 	if c.Port != 0 {
 		s.Port = c.Port
 	}
@@ -158,4 +169,15 @@ func MemoryMB(size string) int {
 		return n / 1024
 	}
 	return 0
+}
+
+// PortFree dials the loopback port for an instant: a listener on any address answers there, and
+// nothing there refuses. Dialing rather than listening raises no firewall prompt on Windows.
+func PortFree(port int) bool {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 500*time.Millisecond)
+	if err != nil {
+		return true
+	}
+	_ = conn.Close()
+	return false
 }

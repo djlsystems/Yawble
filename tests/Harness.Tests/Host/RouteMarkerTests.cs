@@ -34,7 +34,7 @@ public sealed class RouteMarkerTests(HostFixture host) : IClassFixture<HostFixtu
     }
 
     [Fact]
-    public void Only_the_merge_and_archive_routes_open_a_door_to_the_Concierge_each_for_its_own_permit()
+    public void Only_the_merge_archive_and_preview_env_routes_open_a_door_to_the_Concierge_each_for_its_own_permit()
     {
         var doors = host.Services.GetRequiredService<EndpointDataSource>().Endpoints
             .Where(e => e.Metadata.GetMetadata<HumansOrConciergeMarker>() is not null)
@@ -44,6 +44,7 @@ public sealed class RouteMarkerTests(HostFixture host) : IClassFixture<HostFixtu
             new Dictionary<string, string>
             {
                 ["POST /api/teams/{team}/archive"] = Harness.Contracts.Permits.Archive,
+                ["POST /api/teams/{team}/preview-env"] = Harness.Contracts.Permits.Preview,
                 ["POST /api/teams/{team}/repos/{repo}/bring-current-and-merge"] = Harness.Contracts.Permits.Merge,
                 ["POST /api/teams/{team}/repos/{repo}/merge-to-main"] = Harness.Contracts.Permits.Merge,
                 ["POST /api/teams/{team}/unarchive"] = Harness.Contracts.Permits.Archive,

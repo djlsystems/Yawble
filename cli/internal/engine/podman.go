@@ -60,12 +60,15 @@ func (p podman) PodExists(ctx context.Context, name string) (bool, error) {
 // ON WINDOWS THE ADDRESS IS NOT ENOUGH. With winget's Podman 5.8.3, pasta still listens dual-stack (`*:8080`) and http://localhost was refused; Podman 6.0.2 honours
 // the address. `--network pasta:-4` makes pasta listen on 0.0.0.0 on both, and the container
 // keeps IPv4 egress, which is all it uses. The label is how PodCurrent tells an older pod.
-func (p podman) CreatePod(ctx context.Context, name string, hostPort, containerPort int) error {
+func (p podman) CreatePod(ctx context.Context, name string, hostPort, containerPort int, previewPorts ...int) error {
 	args := []string{"pod", "create", "--name", name}
 	if p.ipv4Pod {
 		args = append(args, "--network", "pasta:-4", "--label", podLayoutLabel+"="+podLayoutIPv4)
 	}
 	args = append(args, "-p", fmt.Sprintf("0.0.0.0:%d:%d", hostPort, containerPort))
+	for _, port := range previewPorts {
+		args = append(args, "-p", fmt.Sprintf("0.0.0.0:%d:%d", port, port))
+	}
 	_, err := p.run(ctx, args...)
 	return err
 }

@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"github.com/djlsystems/yawble/cli/internal/config"
 	"github.com/djlsystems/yawble/cli/internal/github"
-	"net"
 	"net/http"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 
 	"github.com/djlsystems/yawble/cli/internal/engine"
 	"github.com/djlsystems/yawble/cli/internal/instance"
@@ -54,7 +52,7 @@ func Observe(ctx context.Context, e engine.Engine, s instance.Settings, p Probes
 	if goos == "" {
 		goos = runtime.GOOS
 	}
-	o := Observed{EngineName: e.Name(), Image: s.Image, Port: s.Port, URL: instance.URL(s.Port), ExeDir: exeDir, GOOS: goos, ContainerMemoryMB: ContainerMemoryMB(s.Memory)}
+	o := Observed{EngineName: e.Name(), Image: s.Image, Port: s.Port, URL: instance.URL(s.Port), ExeDir: exeDir, GOOS: goos, ContainerMemoryMB: ContainerMemoryMB(s.Memory), PreviewPorts: config.FormatPorts(s.PreviewPorts)}
 	if exeDir != "" {
 		on := OnPath(resolved(exeDir), pathEnv, goos) || OnPath(exeDir, pathEnv, goos)
 		o.OnPath = &on
@@ -106,6 +104,7 @@ func Observe(ctx context.Context, e engine.Engine, s instance.Settings, p Probes
 	o.Pending = st.Pending
 	o.URL = st.URL
 	o.Healthy = st.Healthy
+	o.PreviewMadeWith, o.PreviewPublished = st.PreviewMadeWith, st.PreviewPublished
 	if st.Container == engine.StateRunning {
 		if stats, err := e.Stats(ctx, instance.ContainerName); err != nil {
 			o.StatsErr = err
@@ -141,16 +140,8 @@ func resolved(dir string) string {
 	return dir
 }
 
-// PortFree dials the loopback port for an instant. A listener answers; nothing there refuses.
-// Dialing rather than listening raises no firewall prompt on Windows.
-func PortFree(port int) bool {
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 500*time.Millisecond)
-	if err != nil {
-		return true
-	}
-	_ = conn.Close()
-	return false
-}
+// PortFree says whether nothing on this computer answers on a port (instance.PortFree).
+func PortFree(port int) bool { return instance.PortFree(port) }
 
 // FetchHostReport runs the Host's --doctor inside the container and parses its last line.
 func FetchHostReport(ctx context.Context, e engine.Engine, running bool) (*HostReport, error) {

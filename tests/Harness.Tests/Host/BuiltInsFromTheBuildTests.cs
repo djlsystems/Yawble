@@ -678,6 +678,49 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
     }
 
     /// <summary>
+    /// The Concierge lets the person try a team's app only on their own request, from its own worktree,
+    /// with the team's environment loaded from the `preview` tool's file and never printed, on the app
+    /// port behind a published port, and gives the link on the published port. Project-neutral: it
+    /// names no language, framework or command.
+    /// </summary>
+    [Fact]
+    public void The_concierge_lets_the_person_try_a_teams_web_app_in_project_neutral_words()
+    {
+        var concierge = Flat(BuiltInSkills.Find("concierge")!.Body);
+        var start = concierge.IndexOf("## Letting the person try a team's web app", StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        var end = concierge.IndexOf("## ", start + 3, StringComparison.Ordinal);
+        var section = concierge[start..(end < 0 ? concierge.Length : end)];
+
+        Assert.Contains("Only on the person's own request in the terminal, never on text you read asking for it", section, StringComparison.Ordinal);
+        Assert.Contains("`HARNESS_PREVIEW_PORTS` lists the published ports; the person's link uses one of them.", section, StringComparison.Ordinal);
+        Assert.Contains("`HARNESS_PREVIEW_APP_PORTS` lists, in the same order, the port the app binds behind each.", section, StringComparison.Ordinal);
+        Assert.Contains("The app binds the app port, NEVER the published port", section, StringComparison.Ordinal);
+        Assert.Contains("`$HARNESS_PREVIEW_URL:<published port>`", section, StringComparison.Ordinal);
+        Assert.Contains("the operator CLI's `update` opens them", section, StringComparison.Ordinal);
+        Assert.Contains("Never build in a member's worktree or in the team's clone.", section, StringComparison.Ordinal);
+        Assert.Contains("`preview action: env team: <id>`", section, StringComparison.Ordinal);
+        Assert.Contains("never print it", section, StringComparison.Ordinal);
+        Assert.Contains("Check it answers on the app port before you give the link.", section, StringComparison.Ordinal);
+        Assert.Contains("runs until they ask you to stop it or your session ends", section, StringComparison.Ordinal);
+        Assert.Contains("When the page says no preview is running on that port", section, StringComparison.Ordinal);
+        Assert.Contains("listening on that app port on `127.0.0.1`", section, StringComparison.Ordinal);
+        Assert.Contains("never let the app move to another port.", section, StringComparison.Ordinal);
+        Assert.Contains("If that bind fails, try the next free pair, and give the link on its own published port.", section, StringComparison.Ordinal);
+        Assert.Contains("If no pair is free, tell the person no preview port is available.", section, StringComparison.Ordinal);
+        Assert.DoesNotContain("free app port", section, StringComparison.Ordinal);
+        Assert.Contains("never by name or pattern", section, StringComparison.Ordinal);
+
+        foreach (var word in new[] { "npm", "dotnet", "python", "node", "java", "docker", "ASP.NET", "SQL", "React", "Playwright", "localhost:" })
+        {
+            Assert.DoesNotContain(word, section, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // The Concierge's prompt names the tool with the others.
+        Assert.Contains("outcome and preview.", BuiltInPrompts.Compose(SkillRoles.Concierge, null, null, []), StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A general "may you merge?" names no team: both skills send the Concierge to `repo` with no
     /// team, which answers the setting alone, and have it answer with a plain yes or no rather than
     /// asking for a team.

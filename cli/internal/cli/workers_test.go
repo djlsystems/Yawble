@@ -388,11 +388,15 @@ func TestUpdateFromASingleContainerReplacesItWithControlAndOneWorkerOnTheSameVol
 		t.Errorf("remove, control, worker 1:\n%s", calls(s))
 	}
 	for _, c := range s.Calls {
-		for _, never := range []string{"volume rm", "volume create", "pod rm", "pod create"} {
+		for _, never := range []string{"volume rm", "volume create"} {
 			if strings.Contains(c, never) {
 				t.Errorf("the upgrade ran %q", c)
 			}
 		}
+	}
+	// The pod from before the preview ports is made again once, to publish them, and says so.
+	if len(callsContaining(s, "pod rm")) != 1 || len(callsContaining(s, "pod create")) != 1 || !strings.Contains(out, "recreated pod yawble publishing port 8080 and preview ports 28081-28090") {
+		t.Errorf("the pod was not remade once for the preview ports: out %q\n%s", out, calls(s))
 	}
 	if _, err := os.Stat(filepath.Join(deps.ConfigDir, config.WorkerKeyFileName)); err != nil {
 		t.Errorf("no key: %v", err)

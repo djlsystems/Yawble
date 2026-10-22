@@ -3,9 +3,11 @@ package doctor
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/djlsystems/yawble/cli/internal/config"
 	"github.com/djlsystems/yawble/cli/internal/engine"
 	"github.com/djlsystems/yawble/cli/internal/github"
 	"github.com/djlsystems/yawble/cli/internal/instance"
@@ -66,6 +68,12 @@ type Observed struct {
 	// StatsErr nil is not asked (the container is not running).
 	Stats    *engine.Stats
 	StatsErr error
+	// PreviewPorts is the configured preview range ("" with previews off); PreviewMadeWith and
+	// PreviewPublished are what control's label records: the range it was made with and the
+	// ports of it published, nil with no control of yawble's.
+	PreviewPorts     string
+	PreviewMadeWith  string
+	PreviewPublished []int
 }
 
 // memoryWarnPercent is the container's memory use, of its limit, from which the stats row warns:
@@ -329,6 +337,8 @@ func HostChecks(o Observed) []Check {
 		checks = append(checks, Check{"remote", OK, o.Remote.Provider + " at " + o.Remote.URL, ""})
 	}
 
+	checks = append(checks, previewRow(o))
+
 	switch {
 	case o.ContainerKnown && o.Container == engine.StateRunning:
 		checks = append(checks, Check{"port", Skip, "measured only while the instance is stopped", ""})
@@ -353,6 +363,45 @@ func HostChecks(o Observed) []Check {
 
 	checks = append(checks, Check{"release", Skip, "newer yawble releases are not checked in this build", ""})
 	return checks
+}
+
+// previewRow is the preview range configured and the ports of it published, as control's label
+// records them. A port skipped because it was taken is information, not a fault; none published
+// of a range is a warning.
+func previewRow(o Observed) Check {
+	published := config.FormatPorts(o.PreviewPublished)
+	switch {
+	case o.PreviewPorts == "" && published == "":
+		return Check{"preview", Skip, "previews are off (previewPorts is empty)", ""}
+	case o.PreviewPorts == "":
+		return Check{"preview", Warn, "previews are off, but the instance still publishes " + published, "yawble up"}
+	case !o.ContainerKnown:
+		return Check{"preview", Skip, "range " + o.PreviewPorts + "; the engine could not be asked what is published", ""}
+	case o.PreviewPublished == nil:
+		return Check{"preview", Skip, "range " + o.PreviewPorts + "; nothing published until the instance is made", "yawble up"}
+	case o.PreviewMadeWith != o.PreviewPorts:
+		return Check{"preview", Warn, fmt.Sprintf("range %s; the instance publishes %s, made with %s", o.PreviewPorts, orNone(published), orNone(o.PreviewMadeWith)), "yawble up"}
+	case published == "":
+		return Check{"preview", Warn, "range " + o.PreviewPorts + "; none published: every port was in use on this computer when the instance was made", "free them, then: yawble down && yawble up"}
+	}
+	configured, _ := config.ParsePorts(o.PreviewPorts)
+	var missing []int
+	for _, port := range configured {
+		if !slices.Contains(o.PreviewPublished, port) {
+			missing = append(missing, port)
+		}
+	}
+	if len(missing) == 0 {
+		return Check{"preview", OK, "range " + o.PreviewPorts + "; published " + published, ""}
+	}
+	return Check{"preview", OK, fmt.Sprintf("range %s; published %s (not %s: in use when the instance was made)", o.PreviewPorts, published, config.FormatPorts(missing)), ""}
+}
+
+func orNone(ports string) string {
+	if ports == "" {
+		return "none"
+	}
+	return ports
 }
 
 // InstanceChecks is the table over the Host's own report. With no report, the reason decides:

@@ -37,6 +37,9 @@ type RunSpec struct {
 	CPUs          int
 	HostPort      int
 	ContainerPort int
+	// PreviewPorts are published beside HostPort, each to the same port inside, by engines without
+	// pods; Podman ignores them because the pod already publishes.
+	PreviewPorts []int
 	// CapDrop and CapAdd are the container's capabilities, one flag each, drops first. Empty is
 	// the engine's default set.
 	CapDrop, CapAdd []string
@@ -85,7 +88,9 @@ type Engine interface {
 	VolumeExists(ctx context.Context, name string) (bool, error)
 	CreateVolume(ctx context.Context, name string) error
 	PodExists(ctx context.Context, name string) (bool, error)
-	CreatePod(ctx context.Context, name string, hostPort, containerPort int) error
+	// CreatePod makes the pod; on Podman it publishes hostPort to containerPort and each preview
+	// port to the same port inside, all on 0.0.0.0. Docker's network publishes nothing.
+	CreatePod(ctx context.Context, name string, hostPort, containerPort int, previewPorts ...int) error
 	RemovePod(ctx context.Context, name string) error
 	// StopPod stops a pod, and with it the infra container that holds the published port. A
 	// missing pod is not an error. A Docker network runs nothing, so there it does nothing.

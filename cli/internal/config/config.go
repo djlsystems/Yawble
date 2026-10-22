@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -38,10 +39,14 @@ type Config struct {
 	// through while no Microsoft client is saved. nil is not chosen, which is DefaultMicrosoftClientID;
 	// an empty value turns it off.
 	MicrosoftClientID *string `toml:"microsoftClientId,omitempty" json:"microsoftClientId"`
+	// PreviewPorts is the range of ports `up` publishes beside the Host's for previews of a team's
+	// app ("28081-28090", or a list like "28081,28085-28087"). nil is not chosen, which is
+	// DefaultPreviewPorts; an empty value turns previews off.
+	PreviewPorts *string `toml:"previewPorts,omitempty" json:"previewPorts"`
 }
 
 // Keys are the names `config get` and `config set` accept, in the order they are listed.
-var Keys = []string{"engine", "port", "memory", "cpus", "maxRunning", "image", "workers", "workerImage", "marketplaceCatalog", "microsoftClientId"}
+var Keys = []string{"engine", "port", "memory", "cpus", "maxRunning", "image", "workers", "workerImage", "marketplaceCatalog", "microsoftClientId", "previewPorts"}
 
 const FileName = "config.toml"
 
@@ -56,6 +61,17 @@ const DefaultMarketplaceCatalog = "https://yawble.ai/api/marketplace/catalog.jso
 // DefaultMicrosoftClientID is the published Microsoft app's Application (client) ID: a multi-tenant
 // public client that signs in with a code, registered in the DJL Systems tenant as "Yawble".
 const DefaultMicrosoftClientID = "40149369-2b22-45de-a449-cbd7f4756377"
+
+// DefaultPreviewPorts is the preview range an unset previewPorts reads: ten ports above the
+// 8000-8999 band where dev servers and local tools default (8081, 8088, 8888 ...), below every
+// operating system's ephemeral range (Linux from 32768, Windows and macOS from 49152), so the OS
+// never hands one out as the source port of an outgoing connection, and the default of no common
+// software.
+const DefaultPreviewPorts = "28081-28090"
+
+// maxPreviewPorts bounds how many ports a range may publish: each is a published port on the
+// engine, and a typo like 2000-20000 must not ask for eighteen thousand.
+const maxPreviewPorts = 100
 
 // MicrosoftClientDefault is what an unset microsoftClientId reads: DefaultMicrosoftClientID. A variable
 // only so tests drive `up` with a default that is not empty.
@@ -79,6 +95,8 @@ var envNames = map[string]string{
 	"marketplaceCatalog": "YAWBLE_MARKETPLACE_CATALOG",
 	// The same: the file is where the default client is turned off.
 	"microsoftClientId": "YAWBLE_MICROSOFT_CLIENT_ID",
+	// The same: the file is where previews are turned off.
+	"previewPorts": "YAWBLE_PREVIEW_PORTS",
 }
 
 // WorkerCount is the number of workers the config asks for: 1 when none was chosen.
@@ -105,6 +123,69 @@ func (c Config) MicrosoftClient() string {
 		return MicrosoftClientDefault
 	}
 	return *c.MicrosoftClientID
+}
+
+// Preview is the preview ports `up` publishes, in order: the default range when none was chosen,
+// none when the config turned previews off. The value was validated when it was read or set.
+func (c Config) Preview() []int {
+	spec := DefaultPreviewPorts
+	if c.PreviewPorts != nil {
+		spec = *c.PreviewPorts
+	}
+	ports, _ := ParsePorts(spec)
+	return ports
+}
+
+// ParsePorts reads a port range as a person writes one: comma-separated ports and low-high ranges,
+// each between 1 and 65535. The answer is sorted with no repeats; an empty spec is none.
+func ParsePorts(spec string) ([]int, error) {
+	seen := map[int]bool{}
+	var ports []int
+	for _, item := range strings.Split(spec, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		low, high, isRange := strings.Cut(item, "-")
+		from, err := strconv.Atoi(strings.TrimSpace(low))
+		to := from
+		if err == nil && isRange {
+			to, err = strconv.Atoi(strings.TrimSpace(high))
+		}
+		if err != nil || from < 1 || to > 65535 || to < from {
+			return nil, fmt.Errorf("%q is not a port or a low-high range of ports between 1 and 65535", item)
+		}
+		for p := from; p <= to; p++ {
+			if !seen[p] {
+				seen[p] = true
+				ports = append(ports, p)
+			}
+			if len(ports) > maxPreviewPorts {
+				return nil, fmt.Errorf("%q is more than %d ports", spec, maxPreviewPorts)
+			}
+		}
+	}
+	sort.Ints(ports)
+	return ports, nil
+}
+
+// FormatPorts writes ports back as ParsePorts reads them, each run of consecutive ports as one
+// low-high range: "28081-28090", "28081-28082,28084-28090". None is "".
+func FormatPorts(ports []int) string {
+	var parts []string
+	for i := 0; i < len(ports); {
+		j := i
+		for j+1 < len(ports) && ports[j+1] == ports[j]+1 {
+			j++
+		}
+		if j == i {
+			parts = append(parts, strconv.Itoa(ports[i]))
+		} else {
+			parts = append(parts, fmt.Sprintf("%d-%d", ports[i], ports[j]))
+		}
+		i = j + 1
+	}
+	return strings.Join(parts, ",")
 }
 
 // Load reads the file if it exists, then applies YAWBLE_* overrides. A missing file is the zero
@@ -219,6 +300,11 @@ func (c Config) Get(key string) (string, error) {
 		return c.Catalog(), nil
 	case "microsoftClientId":
 		return c.MicrosoftClient(), nil
+	case "previewPorts":
+		if c.PreviewPorts == nil {
+			return DefaultPreviewPorts, nil
+		}
+		return *c.PreviewPorts, nil
 	}
 	return "", unknownKey(key)
 }
@@ -289,6 +375,11 @@ func (c *Config) Set(key, value string) error {
 			return fmt.Errorf("microsoftClientId must be an Application (client) ID like 00000000-0000-0000-0000-000000000000 (or empty to turn the default Microsoft app off), not %q", value)
 		}
 		c.MicrosoftClientID = &value
+	case "previewPorts":
+		if _, err := ParsePorts(value); err != nil {
+			return fmt.Errorf("previewPorts must be a range of ports like %s or a list like 28081,28085-28087 (or empty to turn previews off): %w", DefaultPreviewPorts, err)
+		}
+		c.PreviewPorts = &value
 	default:
 		return unknownKey(key)
 	}
@@ -318,6 +409,9 @@ func (c *Config) validate() error {
 	}
 	if c.MicrosoftClientID != nil {
 		checks = append(checks, struct{ key, value string }{"microsoftClientId", *c.MicrosoftClientID})
+	}
+	if c.PreviewPorts != nil {
+		checks = append(checks, struct{ key, value string }{"previewPorts", *c.PreviewPorts})
 	}
 	for _, check := range checks {
 		if err := probe.Set(check.key, check.value); err != nil {

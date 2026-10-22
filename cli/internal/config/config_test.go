@@ -140,3 +140,22 @@ func TestWriteAtomicReplacesTheFileWholeAndLeavesNoTemporary(t *testing.T) {
 		t.Errorf("the folder holds %v; only config.toml should be there", names)
 	}
 }
+
+func TestPreviewPortsReadAsRangesAndWriteBackTheSame(t *testing.T) {
+	ports, err := config.ParsePorts(" 28085-28087, 28081 ,28086,28090")
+	if err != nil || config.FormatPorts(ports) != "28081,28085-28087,28090" {
+		t.Errorf("%v %v -> %q", ports, err, config.FormatPorts(ports))
+	}
+	if got := (config.Config{}).Preview(); config.FormatPorts(got) != config.DefaultPreviewPorts || len(got) != 10 {
+		t.Errorf("unset reads %v", got)
+	}
+	off := ""
+	if got := (config.Config{PreviewPorts: &off}).Preview(); len(got) != 0 {
+		t.Errorf("empty reads %v", got)
+	}
+	for _, bad := range []string{"9-1", "x", "0", "65536", "1-65535"} {
+		if _, err := config.ParsePorts(bad); err == nil {
+			t.Errorf("%q read as ports", bad)
+		}
+	}
+}
