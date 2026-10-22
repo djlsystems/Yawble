@@ -130,6 +130,10 @@ internal sealed partial class HostComposition
                 : ConciergeAttachments.DefaultMaxBytes,
             Intervals.ReadPositive(builder.Configuration, "ConciergeAttachmentRetention", ConciergeAttachments.DefaultRetention)));
 
+        // A TEAM'S ENVIRONMENT FOR A PREVIEW, as a file in the Concierge's own folder. See PreviewEnvFiles.
+        builder.Services.AddSingleton(sp => new PreviewEnvFiles(
+            sp.GetRequiredService<TeamPaths>(), sp.GetRequiredService<AgentLaunchUser>()));
+
         builder.Services.AddSingleton(sp => new UnfinishedRemovalRetry(
             sp.GetRequiredService<FolderRemoval>(),
             sp.GetRequiredService<IUnfinishedRemovals>(),
@@ -295,7 +299,8 @@ internal sealed partial class HostComposition
             sp.GetRequiredService<SkillDirectory>(),
             // Who the agent runs as is the worker's to decide and refuse; control alone has no agent child.
             control ? null : sp.GetRequiredService<AgentLaunchUser>(),
-            sp.GetRequiredService<AgentUpdateGate>()));
+            sp.GetRequiredService<AgentUpdateGate>(),
+            previewPorts));
         builder.Services.AddSingleton(sp =>
         {
             // Resolved ONCE, here, and captured - never re-resolved inside the delegates. The revoke runs
@@ -311,9 +316,10 @@ internal sealed partial class HostComposition
                 launches.LaunchAsync,
                 // A Concierge's run is its session: a lease it took ends with it, through the same path
                 // as a run's end, so a member the queue hands it to is un-paused and its card told.
-                // And the images the person attached go with it, however it ended.
+                // And the images the person attached and the preview env files go with it, however it ended.
                 sp.GetRequiredService<ConciergeAttachments>().RemovingOnEnd(
-                    leaseActions.Releasing((key, ct) => launcher.RevokeAsync(key.User, ct))),
+                    sp.GetRequiredService<PreviewEnvFiles>().RemovingOnEnd(
+                        leaseActions.Releasing((key, ct) => launcher.RevokeAsync(key.User, ct)))),
                 sp.GetRequiredService<TimeProvider>(),
                 launches.FloorOf,
                 sp.GetRequiredService<ILogger<ConciergeSessionStore>>());

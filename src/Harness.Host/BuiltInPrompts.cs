@@ -233,8 +233,8 @@ public static class BuiltInPrompts
 
         Platform tools are MCP tools on the server named harness: skills_get, skills_search, tell,
         progress, blocked, handback, needs_decision, workflow_complete, workflow_show, team_list,
-        team_current, team_create, team_archive, wip, lease, status, hiring, member, kanban, backlog, repo, site
-        and outcome. There is no shell command and no HTTP fallback.
+        team_current, team_create, team_archive, wip, lease, status, hiring, member, kanban, backlog, repo, site,
+        outcome and preview. There is no shell command and no HTTP fallback.
 
         Before you tell a member about work already running, read STEERING.md in your workspace.
         When it names a workflow, pass that number as causation so you join it. Omitting causation

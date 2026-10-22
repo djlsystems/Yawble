@@ -121,6 +121,16 @@ public static class Permits
     /// </summary>
     public const string Archive = "Archive";
 
+    /// <summary>
+    /// Writing a team's environment to a file in the Concierge's own folder, for an app the person
+    /// asked to try (<c>POST /api/teams/{team}/preview-env</c>), for the CONCIERGE: its own verb, as
+    /// <see cref="Merge"/> is. Held by <c>ConciergeLaunchFactory.ConciergePermits</c> alone and taken
+    /// from every other principal at authentication however its key was made.
+    ///
+    /// NOT IN <see cref="All"/>, which is what a member key or an API key can be minted with.
+    /// </summary>
+    public const string Preview = "Preview";
+
     public static IReadOnlySet<string> All { get; } = new HashSet<string>(StringComparer.Ordinal)
     {
         Read, Tell, CreateContainer, CreateTeam, Progress,

@@ -9,7 +9,8 @@ namespace Harness.Host;
 /// </summary>
 public sealed class ConciergeLaunchFactory(
     TeamPaths paths, string baseAddress, IPrincipalStore principals, AgentCatalog agents,
-    SkillDirectory? skills = null, AgentLaunchUser? runAs = null, AgentUpdateGate? updates = null)
+    SkillDirectory? skills = null, AgentLaunchUser? runAs = null, AgentUpdateGate? updates = null,
+    IReadOnlyDictionary<int, int>? previewPorts = null)
 {
     /// <summary>
     /// What a console's agent may cause. It is a human's door into a team, so it reads and
@@ -30,11 +31,14 @@ public sealed class ConciergeLaunchFactory(
 
             // ITS ALONE too, and only useful while a person has turned on concierge.mayArchive.
             Permits.Archive,
+
+            // ITS ALONE: a team's environment written to a file in its own folder, for a preview.
+            Permits.Preview,
         };
 
     /// <summary>The permits only the Concierge may hold: <see cref="Strip"/> takes them from anyone else.</summary>
     public static IReadOnlySet<string> ConciergeOnlyPermits { get; } =
-        new HashSet<string>(StringComparer.Ordinal) { Permits.Merge, Permits.Archive };
+        new HashSet<string>(StringComparer.Ordinal) { Permits.Merge, Permits.Archive, Permits.Preview };
 
     /// <summary>
     /// Whether <paramref name="principal"/> is one person's tenant Concierge: its kind, and the id
@@ -262,6 +266,15 @@ public sealed class ConciergeLaunchFactory(
         // opened this session; the internal address when there was none. Members never get it: they
         // hand nothing to a person's browser, and the container path does not set it.
         environment["HARNESS_PUBLIC_URL"] = PublicUrl(publicUrl) ?? baseAddress;
+
+        // THE PREVIEW PORTS, for an app the person asks to try: the published ports the Host listens on,
+        // the internal port behind each that the app binds, and the link base on the browser's host.
+        // Fixed at spawn like the address above. Empty ports when none are published. Members never get
+        // them: the container path does not set them and drops a `HARNESS_` entry from team env.
+        foreach (var (key, value) in PreviewPorts.ForConcierge(previewPorts ?? new Dictionary<int, int>(), environment["HARNESS_PUBLIC_URL"]))
+        {
+            environment[key] = value;
+        }
 
         // THE PERSON'S TIME ZONE, the one their browser shows every time in, so the times the
         // Concierge states read as the page does. TZ too, so the CLI's own clock reads it. None when

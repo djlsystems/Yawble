@@ -31,6 +31,7 @@ namespace Harness.Host;
 
 internal static class ConciergeEndpoints
 {
+
     public static void Map(WebApplication app)
     {
         // Its OWN route because this is tenant-wide Concierge launch configuration, not team
@@ -175,6 +176,56 @@ internal static class ConciergeEndpoints
             // rendered there with a Send button that can only ever fail.
             .ExcludeFromDescription()
             .HumansOnly();
+
+        // A TEAM'S ENVIRONMENT FOR A PREVIEW, written to a file in the Concierge's own folder so its shell
+        // starts the app with it and never shows a value. The Concierge's only: the marker refuses every
+        // other machine principal, and the handler a person too - it is the Concierge's folder and the
+        // Concierge's terminal. Its key lives only as long as its session, whose end removes the file.
+        // The answer names the path and the variable names; nothing is logged or stored.
+        app.MapPost("/api/teams/{team}/preview-env", (
+            [Description(Describe.Team)] string team, HttpContext context, TeamRegistry teams, PreviewEnvFiles files) =>
+        {
+            if (PrincipalClaims.From(context.User) is not { } caller || !ConciergeLaunchFactory.IsConcierge(caller))
+            {
+                return Results.Json(new { error = PreviewEnvFiles.Refusal }, statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            if (teams.ExistingName(team) is not { } stored) return Refusals.NoTeam(team);
+
+            PreviewEnvFile? written;
+
+            try
+            {
+                written = files.Write(caller.OwnerUserId!, stored, teams.EnvFor(stored));
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // The exception's message names the path only, never a value.
+                return Results.Json(
+                    new { error = $"The preview environment file could not be written: {exception.Message}" },
+                    statusCode: StatusCodes.Status409Conflict);
+            }
+
+            return written is null
+                ? Results.Json(new { error = "The Concierge has no working folder yet." }, statusCode: StatusCodes.Status409Conflict)
+                : Results.Ok(new
+                {
+                    team = stored,
+                    path = written.Path,
+                    variables = written.Variables,
+                    note = "Load it in the shell that starts the app (. <path>), and never print it. It is removed when this session ends.",
+                });
+        })
+            .WithTags("Teams")
+            .HumansOrConcierge(Permits.Preview)
+            .WithSummary("Write a team's environment for a preview")
+            .WithDescription(
+                "Writes the team's environment as `export NAME='value'` lines to a file in the calling Concierge's "
+                + "own folder, mode 0600 (the agent's group may read it where the agent runs as another user), "
+                + "replacing the one before, for an app the person asked to try. The answer is the path and the "
+                + "variable NAMES, never a value; nothing is logged or stored. The file is removed when the "
+                + "Concierge session ends.\n\n"
+                + "**The person's Concierge only.** A Manager, a member, any other key and a person are refused.");
 
         // AN IMAGE FOR THE PERSON'S OWN CONCIERGE, saved into its working folder so the page can paste the
         // path into the prompt. A person's only: a machine principal is refused by the marker, and no member

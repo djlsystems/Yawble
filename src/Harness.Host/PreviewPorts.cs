@@ -34,6 +34,37 @@ public static class PreviewPorts
     /// connections (32768 on Linux, 49152 elsewhere), where an app's port could already be in use.</summary>
     public const int InternalHighest = 32767;
 
+    /// <summary>The Concierge's: the published ports the Host listens on, comma-separated, lowest first.
+    /// The person's link uses one of these. Empty when there are none.</summary>
+    public const string ConciergePortsVariable = "HARNESS_PREVIEW_PORTS";
+
+    /// <summary>The Concierge's: the internal port behind each of <see cref="ConciergePortsVariable"/>,
+    /// in the same order. The app binds one of these, never a published port.</summary>
+    public const string ConciergeAppPortsVariable = "HARNESS_PREVIEW_APP_PORTS";
+
+    /// <summary>The Concierge's: the link base, scheme and host of the browser that opened its session
+    /// with no port. The person's link is this, a colon and a published port.</summary>
+    public const string ConciergeUrlVariable = "HARNESS_PREVIEW_URL";
+
+    /// <summary>
+    /// What the Concierge's launch carries about previews, from the ports the Host listens on
+    /// (<paramref name="open"/>, published to internal) and the address the person's browser used
+    /// (<paramref name="publicUrl"/>). The link is always http: the Host listens on a preview port
+    /// without TLS, whatever fronts its own.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> ForConcierge(IReadOnlyDictionary<int, int> open, string publicUrl)
+    {
+        var ports = open.OrderBy(pair => pair.Key).ToList();
+        var host = Uri.TryCreate(publicUrl, UriKind.Absolute, out var uri) ? uri.Host : "localhost";
+
+        return new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [ConciergePortsVariable] = string.Join(',', ports.Select(p => p.Key.ToString(CultureInfo.InvariantCulture))),
+            [ConciergeAppPortsVariable] = string.Join(',', ports.Select(p => p.Value.ToString(CultureInfo.InvariantCulture))),
+            [ConciergeUrlVariable] = "http://" + host,
+        };
+    }
+
     /// <summary>
     /// The published ports in <paramref name="value"/>, in order, once each. A value that is not a
     /// port is skipped with a line to <paramref name="say"/>.
