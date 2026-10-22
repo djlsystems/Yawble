@@ -706,8 +706,12 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             //
             // Grouped by correlation_id and ordered by maximum occurred_at, so this picks the
             // workflow that was ACTIVE most recently, not merely the one that STARTED most recently.
+            //
+            // A MEMBER'S REMOVAL IS NOT A WORKFLOW (`NotAWorkflowSql`): its row, alone in a correlation
+            // of its own, would otherwise be the most recently active one the moment a person removes
+            // a member.
             pick.CommandText =
-                """
+                $"""
                 SELECT COALESCE(MAX(correlation_id), 0)
                 FROM (
                   SELECT correlation_id, MAX(occurred_at) as last_activity
@@ -715,6 +719,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
                   WHERE team = $team
                     AND source NOT LIKE $nested COLLATE NOCASE ESCAPE '\'
                     AND seq > $since
+                    AND {NotAWorkflowSql.Counts("messages")}
                   GROUP BY correlation_id
                   ORDER BY last_activity DESC
                   LIMIT 1
@@ -724,6 +729,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             pick.Parameters.AddWithValue("$team", team);
             pick.Parameters.AddWithValue("$nested", nested);
             pick.Parameters.AddWithValue("$since", sinceSeq);
+            NotAWorkflowSql.Bind(pick);
 
             correlation = Convert.ToInt64(await pick.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
         }
@@ -1785,16 +1791,20 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             // see TeamWorkflows for why a capped count would silently under-report, and note that
             // `TotalCount`, not `OpenCount`, is the one to compare this list's length against.
             //
+            // A MEMBER'S REMOVAL IS NOT A WORKFLOW (`NotAWorkflowSql`), here and in the count, the
+            // total and the span below: the same team scope, minus the removal rows.
+            //
             // ORDERED BY CORRELATION ID, WHICH IS A ROOT SEQ - so "newest first" means most recently
             // STARTED, the ordering the wire tests pin. A re-woken old workflow therefore sorts by
             // when it began rather than by when it was last touched.
             pick.CommandText =
-                """
+                $"""
                 SELECT DISTINCT m.correlation_id
                 FROM messages m
                 WHERE m.team = $team
                   AND m.source NOT LIKE $nested COLLATE NOCASE ESCAPE '\'
                   AND m.seq > $since
+                  AND {NotAWorkflowSql.Counts("m")}
                 ORDER BY m.correlation_id DESC
                 LIMIT 50
                 """;
@@ -1802,6 +1812,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             pick.Parameters.AddWithValue("$team", team);
             pick.Parameters.AddWithValue("$nested", nested);
             pick.Parameters.AddWithValue("$since", sinceSeq);
+            NotAWorkflowSql.Bind(pick);
 
             await using var reader = await pick.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct)) correlations.Add(reader.GetInt64(0));
@@ -1838,6 +1849,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
                 WHERE m.team = $team
                   AND m.source NOT LIKE $nested COLLATE NOCASE ESCAPE '\'
                   AND m.seq > $since
+                  AND {NotAWorkflowSql.Counts("m")}
                   AND {WorkflowOpenSql.NotClosed}
                 """;
 
@@ -1845,6 +1857,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             count.Parameters.AddWithValue("$nested", nested);
             count.Parameters.AddWithValue("$since", sinceSeq);
             WorkflowOpenSql.Bind(count);
+            NotAWorkflowSql.Bind(count);
 
             openCount = Convert.ToInt32(
                 await count.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
@@ -1859,17 +1872,19 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             // cheap; this must not, or a team that has run sixty workflows reports fifty with
             // nothing on the payload saying so. A client rendering "50 of 63" reads 63 from here.
             total.CommandText =
-                """
+                $"""
                 SELECT COUNT(DISTINCT m.correlation_id)
                 FROM messages m
                 WHERE m.team = $team
                   AND m.source NOT LIKE $nested COLLATE NOCASE ESCAPE '\'
                   AND m.seq > $since
+                  AND {NotAWorkflowSql.Counts("m")}
                 """;
 
             total.Parameters.AddWithValue("$team", team);
             total.Parameters.AddWithValue("$nested", nested);
             total.Parameters.AddWithValue("$since", sinceSeq);
+            NotAWorkflowSql.Bind(total);
 
             totalCount = Convert.ToInt32(
                 await total.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
@@ -1900,6 +1915,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
                       WHERE m.team = $team
                         AND m.source NOT LIKE $nested COLLATE NOCASE ESCAPE '\'
                         AND m.seq > $since
+                        AND {NotAWorkflowSql.Counts("m")}
                         AND {WorkflowOpenSql.NotClosed})
                 """;
 
@@ -1907,6 +1923,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             span.Parameters.AddWithValue("$nested", nested);
             span.Parameters.AddWithValue("$since", sinceSeq);
             WorkflowOpenSql.Bind(span);
+            NotAWorkflowSql.Bind(span);
 
             if (await span.ExecuteScalarAsync(ct) is string stamp)
             {
