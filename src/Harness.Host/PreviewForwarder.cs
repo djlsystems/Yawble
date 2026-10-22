@@ -46,15 +46,16 @@ public sealed class PreviewForwarder : IDisposable
     /// <summary>The longest response head an upgrade's answer may have.</summary>
     private const int MaxHead = 64 * 1024;
 
-    private readonly IReadOnlySet<int> _ports;
+    private readonly IReadOnlyDictionary<int, int> _ports;
     private readonly string _sessionCookie;
     private readonly string _behindHost;
     private readonly HttpMessageInvoker _client;
 
-    /// <param name="ports">The preview ports this Host listens on.</param>
+    /// <param name="ports">The preview ports this Host listens on, each to its internal port
+    /// (<see cref="PreviewPorts.Map"/>).</param>
     /// <param name="sessionCookie">This instance's session cookie name.</param>
     /// <param name="behindHost">Where the apps listen: the worker's loopback.</param>
-    public PreviewForwarder(IReadOnlySet<int> ports, string sessionCookie, string behindHost = "127.0.0.1")
+    public PreviewForwarder(IReadOnlyDictionary<int, int> ports, string sessionCookie, string behindHost = "127.0.0.1")
     {
         _ports = ports;
         _sessionCookie = sessionCookie;
@@ -97,24 +98,22 @@ public sealed class PreviewForwarder : IDisposable
     public void Use(IApplicationBuilder app) => app.Use(async (context, next) =>
     {
         var port = context.Connection.LocalPort;
-        if (!_ports.Contains(port))
+        if (!_ports.TryGetValue(port, out var behind))
         {
             await next();
             return;
         }
 
-        await ForwardAsync(context, port);
+        await ForwardAsync(context, port, behind);
     });
 
-    private async Task ForwardAsync(HttpContext context, int port)
+    private async Task ForwardAsync(HttpContext context, int port, int behind)
     {
         // The app decides how large a body it takes, not the Host's limit for its own routes.
         if (context.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
         {
             limit.MaxRequestBodySize = null;
         }
-
-        var behind = PreviewPorts.BehindPort(port);
 
         try
         {

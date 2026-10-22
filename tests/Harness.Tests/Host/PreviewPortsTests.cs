@@ -16,12 +16,12 @@ public sealed class PreviewPortsTests
     {
         var lines = new List<string>();
 
-        var ports = PreviewPorts.Parse("8081, 8082,8081,eighty,0,60000", lines.Add);
+        var ports = PreviewPorts.Parse("8081, 8082,8081,eighty,0,65536", lines.Add);
 
         Assert.Equal([8081, 8082], ports);
         Assert.Equal(3, lines.Count);
         Assert.Contains(lines, l => l.Contains("'eighty'", StringComparison.Ordinal));
-        Assert.Contains(lines, l => l.Contains("'60000'", StringComparison.Ordinal));
+        Assert.Contains(lines, l => l.Contains("'65536'", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -35,11 +35,46 @@ public sealed class PreviewPortsTests
         Assert.Equal("Preview port 8082 is already taken on this machine; it is not forwarded.", Assert.Single(lines));
     }
 
+    [Theory]
+    [InlineData(8081, 18081)]
+    [InlineData(28081, 18081)]
+    [InlineData(18081, 28081)]
+    [InlineData(45000, 25000)]
+    [InlineData(65535, 25535)]
+    [InlineData(80, 10080)]
+    public void A_published_port_maps_to_an_internal_port_above_the_privileged_and_below_the_outgoing_range(int published, int expected) =>
+        Assert.Equal(expected, PreviewPorts.Map([published], _ => { })[published]);
+
     [Fact]
-    public void The_app_behind_a_published_port_listens_above_it()
+    public void The_default_range_maps_one_to_one_onto_internal_ports_none_of_them_published()
     {
-        Assert.Equal(18081, PreviewPorts.BehindPort(8081));
+        var published = Enumerable.Range(28081, 10).ToList();
+
+        var map = PreviewPorts.Map(published, _ => { });
+
+        Assert.Equal(Enumerable.Range(18081, 10), published.Select(p => map[p]));
     }
+
+    [Fact]
+    public void Ports_whose_steps_collide_each_get_their_own_internal_port_and_never_a_published_one()
+    {
+        var lines = new List<string>();
+
+        var map = PreviewPorts.Map([28081, 8081, 18081], lines.Add);
+
+        // Every step of each lands on another published port or outside the internal range, so each
+        // takes the lowest free port from 10000 up, lowest published port first.
+        Assert.Equal(10000, map[8081]);
+        Assert.Equal(10001, map[18081]);
+        Assert.Equal(10002, map[28081]);
+        Assert.Empty(lines);
+    }
+
+    [Fact]
+    public void The_mapping_is_the_same_whatever_order_the_ports_are_given_in() =>
+        Assert.Equal(
+            PreviewPorts.Map([8081, 28081, 18081, 9000], _ => { }).OrderBy(p => p.Key),
+            PreviewPorts.Map([9000, 18081, 28081, 8081], _ => { }).OrderBy(p => p.Key));
 
     [Theory]
     [InlineData("http://0.0.0.0:8080", "http://0.0.0.0:8080;http://0.0.0.0:8081;http://0.0.0.0:8082")]
