@@ -133,7 +133,8 @@ internal sealed partial class HostComposition
             sp.GetRequiredService<IPluginMemberSettingsStore>(),
             sp.GetRequiredService<ISecretStore>(),
             sp.GetRequiredService<Connections>(),
-            sp.GetRequiredService<SiteService>()));
+            sp.GetRequiredService<SiteService>(),
+            memberSecrets: sp.GetRequiredService<IPluginMemberSecrets>()));
         builder.Services.AddSingleton<IMemberRunner>(sp => new MemberRunnerRouter(
             sp.GetRequiredService<AgentMemberRunner>(),
             sp.GetRequiredService<PluginMemberRunner>()));

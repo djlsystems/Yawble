@@ -98,6 +98,24 @@ public sealed record PluginManifest(
     /// <summary>
     /// Reads a manifest, or says in one sentence which field is wrong. Never throws on content.
     /// </summary>
+    /// <summary>The longest <c>label</c> a field may carry.</summary>
+    public const int MaxLabelLength = 80;
+
+    /// <summary>A field's optional <c>label</c> at <paramref name="at"/>, or the sentence refusing it:
+    /// a string of 1 to <see cref="MaxLabelLength"/> characters on one line.</summary>
+    internal static (string? Label, string? Refusal) Label(string at, JsonElement field)
+    {
+        if (!field.TryGetProperty("label", out var label)) return (null, null);
+
+        if (label.ValueKind != JsonValueKind.String || label.GetString() is not { } text
+            || string.IsNullOrWhiteSpace(text) || text.Length > MaxLabelLength || text.Any(char.IsControl))
+        {
+            return (null, $"`{at}.label` must be a short piece of text (1 to {MaxLabelLength} characters, one line).");
+        }
+
+        return (text.Trim(), null);
+    }
+
     public static (PluginManifest? Manifest, string? Refusal) Parse(string json)
     {
         JsonDocument document;
@@ -236,11 +254,29 @@ public sealed record PluginManifest(
                         when = new PluginSecretWhen(condition.Name, condition.Value.GetString()!);
                     }
 
+                    // MASKED BY DEFAULT: `"masked": false` declares the field not secret (an account
+                    // name), so its value is shown and answered; anything but true or false is refused.
+                    var masked = true;
+                    if (secret.Value.TryGetProperty("masked", out var maskedElement))
+                    {
+                        if (maskedElement.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                        {
+                            return (null, $"`secrets.{secret.Name}.masked` must be true or false.");
+                        }
+
+                        masked = maskedElement.ValueKind == JsonValueKind.True;
+                    }
+
+                    var (label, labelRefusal) = Label($"secrets.{secret.Name}", secret.Value);
+                    if (labelRefusal is not null) return (null, labelRefusal);
+
                     secrets[secret.Name] = new PluginSecret(
                         Text(secret.Value, "description") ?? "",
                         secret.Value.TryGetProperty("required", out var required) && required.ValueKind == JsonValueKind.True)
                     {
                         When = when,
+                        Masked = masked,
+                        Label = label,
                     };
                 }
             }
@@ -483,6 +519,10 @@ public sealed record PluginConfigField(
     /// <summary>A number field that takes whole numbers only.</summary>
     public bool Integer { get; init; }
 
+    /// <summary>The manifest's <c>label</c>: the short words a settings screen names the field with;
+    /// null when the manifest has none, and the screen words the field's name.</summary>
+    public string? Label { get; init; }
+
     /// <summary><c>"advanced": true</c>: a setting most people never change, shown behind the settings
     /// form's Advanced section. It changes nothing about who may set it or how it is checked.</summary>
     public bool Advanced { get; init; }
@@ -569,6 +609,9 @@ public sealed record PluginConfigField(
             advanced = advancedFlag.ValueKind == JsonValueKind.True;
         }
 
+        var (label, labelRefusal) = PluginManifest.Label($"config.{name}", element);
+        if (labelRefusal is not null) return (null, labelRefusal);
+
         var field = new PluginConfigField(
             type,
             element.TryGetProperty("description", out var desc) && desc.ValueKind == JsonValueKind.String ? desc.GetString()! : "",
@@ -581,6 +624,7 @@ public sealed record PluginConfigField(
             Max = max,
             Integer = integer,
             Advanced = advanced,
+            Label = label,
         };
 
         if (fallback is { } value && field.Refusal(name, value) is { } badDefault)
@@ -669,6 +713,14 @@ public sealed record PluginSecret(string Description, bool Required)
 {
     /// <summary>Needed only while this setting holds this value; null when always needed.</summary>
     public PluginSecretWhen? When { get; init; }
+
+    /// <summary>The manifest's <c>masked</c>, true unless it says false: a masked value is never
+    /// answered and is redacted from what the plugin writes; an unmasked one (declared not secret, as
+    /// an account name) is shown on the settings screen and answered by the read.</summary>
+    public bool Masked { get; init; } = true;
+
+    /// <summary>The manifest's <c>label</c>, or null.</summary>
+    public string? Label { get; init; }
 }
 
 /// <summary>

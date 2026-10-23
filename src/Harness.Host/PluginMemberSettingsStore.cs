@@ -93,7 +93,7 @@ public sealed class SqlitePluginMemberSettings(string databasePath) : IPluginMem
         return ids;
     }
 
-    private static async Task UpsertAsync(
+    internal static async Task UpsertAsync(
         SqliteConnection connection, SqliteTransaction? transaction, ContainerId member, PluginMemberSettings settings, CancellationToken ct)
     {
         await using var command = connection.CreateCommand();

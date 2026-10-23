@@ -36,6 +36,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
     private readonly AgentLaunchUser? runAs;
     private readonly IPluginMemberSettings? settings;
     private readonly ISecretStore? secrets;
+    private readonly IPluginMemberSecrets? memberSecrets;
     private readonly Connections? connections;
     private readonly SiteService? sites;
     private readonly long siteReadBudget;
@@ -74,7 +75,8 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         ISecretStore? secrets = null,
         Connections? connections = null,
         SiteService? sites = null,
-        long siteReadBudget = SiteReadBudgetBytes)
+        long siteReadBudget = SiteReadBudgetBytes,
+        IPluginMemberSecrets? memberSecrets = null)
     {
         this.catalog = catalog;
         this.reports = reports;
@@ -83,6 +85,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         this.runAs = runAs;
         this.settings = settings;
         this.secrets = secrets;
+        this.memberSecrets = memberSecrets;
         this.connections = connections;
         this.sites = sites;
         this.siteReadBudget = siteReadBudget;
@@ -101,7 +104,8 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         ISecretStore? secrets = null,
         Connections? connections = null,
         SiteService? sites = null,
-        long siteReadBudget = SiteReadBudgetBytes)
+        long siteReadBudget = SiteReadBudgetBytes,
+        IPluginMemberSecrets? memberSecrets = null)
     {
         var directory = new RunDirectory(reports);
         this.catalog = catalog;
@@ -114,6 +118,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         this.runAs = runAs;
         this.settings = settings;
         this.secrets = secrets;
+        this.memberSecrets = memberSecrets;
         this.connections = connections;
         this.sites = sites;
         this.siteReadBudget = siteReadBudget;
@@ -181,14 +186,22 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         var (config, configRefusal) = EffectiveConfig(manifest, bound);
         if (configRefusal is not null) return MemberResult.NotRun(configRefusal, FailureClasses.NeedsPerson);
 
-        var (resolvedSecrets, secretKeys, secretRefusal) = ResolveSecrets(manifest, bound);
+        var own = memberSecrets is null
+            ? new Dictionary<string, string>(StringComparer.Ordinal)
+            : await memberSecrets.ValuesAsync(invocation.Member, ct);
+        var (resolvedSecrets, secretKeys, secretRefusal) = ResolveSecrets(manifest, bound, own);
         if (secretRefusal is not null) return MemberResult.NotRun(secretRefusal, FailureClasses.NeedsPerson);
 
         var (grants, connectionRefusal) = await GrantConnectionsAsync(manifest, bound, ct);
         if (connectionRefusal is not null) return MemberResult.NotRun(connectionRefusal, FailureClasses.NeedsPerson);
 
         // THE REDACTION SET: every bound secret AND every access token and app password this run is handed.
-        IReadOnlyList<string> redacted = [.. resolvedSecrets.Values, .. grants.Values.SelectMany(g => g.Secrets)];
+        // A field the manifest declares `"masked": false` is not secret, and is not redacted.
+        IReadOnlyList<string> redacted =
+        [
+            .. resolvedSecrets.Where(s => manifest.Secrets.GetValueOrDefault(s.Key)?.Masked != false).Select(s => s.Value),
+            .. grants.Values.SelectMany(g => g.Secrets),
+        ];
 
         var siteFiles = await SiteFilesAsync(invocation.Member, ct);
         var request = Request(invocation, manifest, config, resolvedSecrets, grants, new JsonArray(), siteFiles, secretKeys);
@@ -678,7 +691,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
     /// </summary>
     public static string? SettingsRefusal(
         PluginManifest manifest, PluginMemberSettings settings, ISecretStore? secrets, bool requireSet = true, PluginMemberSettings? stored = null,
-        bool requireBound = true)
+        bool requireBound = true, IReadOnlySet<string>? valued = null)
     {
         foreach (var (name, value) in settings.Config)
         {
@@ -725,12 +738,16 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
 
         foreach (var (name, secret) in manifest.Secrets.Where(s => s.Value.Required))
         {
-            // An agent's hire may leave a required secret unbound (requireBound false): the member
-            // is made and waits for a person to bind it (PluginReadyNotice.Missing).
+            // THE MEMBER'S OWN VALUE satisfies the field, whatever is bound.
+            if (valued?.Contains(name) == true) continue;
+
+            // An agent's hire may leave a required secret unset (requireBound false): the member
+            // is made and waits for a person to set it (PluginReadyNotice.Missing).
             if (!settings.Secrets.TryGetValue(name, out var key))
             {
                 if (!requireBound) continue;
-                return $"Plugin '{manifest.Id}' requires the secret `{name}`: bind it to a logical key, as in \"secrets\": {{\"{name}\": \"MY_KEY\"}}.";
+                return $"Plugin '{manifest.Id}' requires the secret `{name}`: type its value in the member's settings "
+                    + $"(\"secretValues\": {{\"{name}\": \"...\"}}).";
             }
 
             if (requireSet && secrets?.TryGet(key) is null)
@@ -743,12 +760,15 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
     }
 
     /// <summary>
-    /// Each bound secret resolved by its logical key NOW, never earlier and never stored, and each
-    /// declared field's bound key NAME, set or not. Both come from the one binding per field, so a
-    /// value is only ever beside the field, and so the name, it was bound to.
+    /// Each declared secret field resolved NOW, never earlier: THE MEMBER'S OWN VALUE first
+    /// (<see cref="IPluginMemberSecrets"/>), else the key the member's settings bind the field to,
+    /// through <see cref="ISecretStore"/> (a key stored from the screen, then the Host's environment).
+    /// Beside each, the NAME a plugin is told it by on stdin (<c>secretKeys</c>): the bound key when
+    /// there is one, else the field's own name for a field set only by a member value - so a plugin can
+    /// always say which value is missing.
     /// </summary>
     private (IReadOnlyDictionary<string, string> Secrets, IReadOnlyDictionary<string, string> Keys, string? Refusal) ResolveSecrets(
-        PluginManifest manifest, PluginMemberSettings bound)
+        PluginManifest manifest, PluginMemberSettings bound, IReadOnlyDictionary<string, string> own)
     {
         var resolved = new Dictionary<string, string>(StringComparer.Ordinal);
         var keys = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -756,11 +776,19 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         foreach (var (name, secret) in manifest.Secrets)
         {
             var key = bound.Secrets.GetValueOrDefault(name);
+
+            if (own.TryGetValue(name, out var mine))
+            {
+                keys[name] = key ?? name;
+                resolved[name] = mine;
+                continue;
+            }
+
             var value = key is null || secrets is null ? null : secrets.TryGet(key);
 
             if (key is not null) keys[name] = key;
 
-            if (value is { Length: < MinimumSecretLength })
+            if (value is { Length: < MinimumSecretLength } && secret.Masked)
             {
                 return (resolved, keys, ShortSecret(key!, name));
             }
@@ -772,15 +800,40 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             else if (secret.Required)
             {
                 return (resolved, keys, key is null
-                    ? $"This member binds no key for the plugin's required secret `{name}`."
+                    ? $"This member has no value for the plugin's required secret `{name}`. A person types it in the member's settings."
                     : $"The secret `{key}` that this member binds for `{name}` is not set on this Host. {SetIt(key)}");
             }
         }
 
-        // A KEY NAME THAT IS A BOUND VALUE is refused here as at binding: the names go on stdin unredacted.
-        if (KeyNamedByAValue(keys, secrets) is { } named) return (resolved, keys, named);
+        // A NAME THAT IS A HANDED VALUE is refused here as at binding: the names go on stdin unredacted.
+        if (NameIsAValue(keys, resolved, own, manifest) is { } named) return (resolved, keys, named);
 
         return (resolved, keys, null);
+    }
+
+    /// <summary>Why a name handed on stdin as <c>secretKeys</c> is itself a masked value this run is
+    /// handed, or null. The sentence names the field, never the value.</summary>
+    private static string? NameIsAValue(
+        IReadOnlyDictionary<string, string> keys, IReadOnlyDictionary<string, string> resolved,
+        IReadOnlyDictionary<string, string> own, PluginManifest manifest)
+    {
+        var names = keys.Values.ToHashSet(StringComparer.Ordinal);
+
+        foreach (var (name, value) in resolved)
+        {
+            if (manifest.Secrets.GetValueOrDefault(name)?.Masked == false || !names.Contains(value)) continue;
+
+            if (!own.ContainsKey(name) && keys.GetValueOrDefault(name) is { } key)
+            {
+                return $"The secret `{key}` bound for `{name}` has a value that is the name of a key this member binds, "
+                    + $"and key names are not secret. Set a real value for `{key}`. {SetIt(key)}";
+            }
+
+            return $"The value handed for `{name}` is the name of a key or field this member's plugin is told, "
+                + "and names are not secret. Set a real value in the member's settings.";
+        }
+
+        return null;
     }
 
     /// <summary>

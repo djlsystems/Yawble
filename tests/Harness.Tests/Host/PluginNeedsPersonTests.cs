@@ -71,7 +71,7 @@ public sealed class PluginNeedsPersonTests : IAsyncLifetime
 
         Assert.StartsWith("HTTP 200", hired);
         Assert.Contains("waitingForPerson", hired);
-        Assert.Contains("bind the secret `token` to a key and set its value", hired);
+        Assert.Contains("set the secret `token` in the member's settings", hired);
         Assert.Contains("fails needs-person", hired);
         Assert.NotNull(Services.GetRequiredService<Harness.Containers.ContainerHost>().Find(new ContainerId(_team, "Keyed")));
 
