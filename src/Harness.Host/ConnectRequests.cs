@@ -189,7 +189,7 @@ public sealed class ConnectRequests(Connections connections, string dataRoot, IL
     {
         var request = new StartConnection(
             Text(root, "provider"), Strings(root, "scopes"), Text(root, "name"), Text(root, "reconnectId"), Text(root, "redirectUri"),
-            Text(root, "flow"));
+            Text(root, "flow"), Text(root, "tenant"));
 
         if (request.Flow?.Trim() == Connections.DeviceFlow)
         {
@@ -286,7 +286,7 @@ public sealed class ConnectRequests(Connections connections, string dataRoot, IL
 
     private static object Bare(ConnectionRecord c, IEnumerable<ConnectionUse> uses) => new
     {
-        id = c.Id, name = c.Name, provider = c.Provider, account = c.Account, scopes = c.Scopes,
+        id = c.Id, name = c.Name, provider = c.Provider, account = c.Account, tenant = c.Tenant, scopes = c.Scopes,
         connectedAt = c.ConnectedAt, refreshedAt = c.RefreshedAt, status = c.Status, statusReason = c.StatusReason,
         usedBy = uses.Select(u => new { team = u.Team, member = u.Member, label = u.Member, slot = u.Slot }),
         kind = ConnectionEndpoints.KindOf(c), username = c.Mailbox?.Username, imap = ConnectionEndpoints.Server(c.Mailbox?.Imap),

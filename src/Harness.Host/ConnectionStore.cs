@@ -18,7 +18,8 @@ public sealed record ConnectionRecord(
     DateTimeOffset? RefreshedAt,
     string Status,
     string? StatusReason,
-    MailboxSettings? Mailbox = null)
+    MailboxSettings? Mailbox = null,
+    string? Tenant = null)
 {
     public const string Ok = "ok";
 
@@ -43,7 +44,8 @@ public sealed record ConnectionFlow(
     bool Loopback,
     string CodeVerifier,
     DateTimeOffset IssuedAt,
-    DateTimeOffset? UsedAt);
+    DateTimeOffset? UsedAt,
+    string? Tenant = null);
 
 /// <summary>A plugin member binding a connection, by slot.</summary>
 public sealed record ConnectionUse(string Team, string Member, string Slot);
@@ -184,7 +186,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
     private const string ConnectionSelect =
         "SELECT c.id, c.name, c.provider, c.account, c.scopes, c.connected_at, c.refreshed_at, c.status, c.status_reason, "
         + "m.username, m.imap_host, m.imap_port, m.imap_security, m.smtp_host, m.smtp_port, m.smtp_security, m.preset, "
-        + "m.password_protected IS NOT NULL "
+        + "m.password_protected IS NOT NULL, c.tenant "
         + "FROM connections c LEFT JOIN imap_connections m ON m.id = c.id";
 
     public async Task<IReadOnlyList<ConnectionRecord>> ListAsync(CancellationToken ct = default)
@@ -223,7 +225,8 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
             reader.GetString(9),
             new MailServer(reader.GetString(10), reader.GetInt32(11), reader.GetString(12)),
             new MailServer(reader.GetString(13), reader.GetInt32(14), reader.GetString(15)),
-            NullableText(reader, 16), reader.GetBoolean(17)));
+            NullableText(reader, 16), reader.GetBoolean(17)),
+        NullableText(reader, 18));
 
     /// <summary>The tokens, decrypted, for the Host's own refresh and run. Never answered by a route.</summary>
     public async Task<ConnectionTokens?> TokensAsync(string id, CancellationToken ct = default)
@@ -252,8 +255,8 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
             command.CommandText =
                 """
                 INSERT INTO connections (id, name, provider, account, scopes, refresh_token_protected, access_token_protected,
-                                         access_expires_at, connected_at, refreshed_at, status, status_reason, connected_by)
-                VALUES ($id, $name, $provider, $account, $scopes, $refresh, $access, $expires, $at, NULL, 'ok', NULL, $by)
+                                         access_expires_at, connected_at, refreshed_at, status, status_reason, connected_by, tenant)
+                VALUES ($id, $name, $provider, $account, $scopes, $refresh, $access, $expires, $at, NULL, 'ok', NULL, $by, $tenant)
                 """;
             command.Parameters.AddWithValue("$id", record.Id);
             command.Parameters.AddWithValue("$name", record.Name);
@@ -263,6 +266,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
             AddTokens(command, tokens);
             command.Parameters.AddWithValue("$at", Instant.Stamp(record.ConnectedAt));
             command.Parameters.AddWithValue("$by", (object?)connectedBy ?? DBNull.Value);
+            command.Parameters.AddWithValue("$tenant", (object?)record.Tenant ?? DBNull.Value);
             await command.ExecuteNonQueryAsync(ct);
         }
 
@@ -270,10 +274,10 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
         await transaction.CommitAsync(ct);
     }
 
-    /// <summary>A Reconnect: new tokens and scopes, and the status back to <c>ok</c>. A refresh token
-    /// the provider did not re-issue keeps the stored one.</summary>
+    /// <summary>A Reconnect: new tokens and scopes, the directory it signed in through, and the status
+    /// back to <c>ok</c>. A refresh token the provider did not re-issue keeps the stored one.</summary>
     public async Task ReconnectAsync(
-        string id, IReadOnlyList<string> scopes, ConnectionTokens tokens, TriggerAudit audit, CancellationToken ct = default)
+        string id, IReadOnlyList<string> scopes, ConnectionTokens tokens, TriggerAudit audit, CancellationToken ct = default, string? tenant = null)
     {
         await using var connection = Open();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
@@ -290,11 +294,13 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
                     access_expires_at = $expires,
                     refreshed_at = $now,
                     status = 'ok',
-                    status_reason = NULL
+                    status_reason = NULL,
+                    tenant = $tenant
                 WHERE id = $id
                 """;
             command.Parameters.AddWithValue("$id", id);
             command.Parameters.AddWithValue("$scopes", JsonSerializer.Serialize(scopes));
+            command.Parameters.AddWithValue("$tenant", (object?)tenant ?? DBNull.Value);
             command.Parameters.AddWithValue("$now", Now());
             AddTokens(command, tokens);
             await command.ExecuteNonQueryAsync(ct);
@@ -599,8 +605,8 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
             command.Transaction = transaction;
             command.CommandText =
                 """
-                INSERT INTO connection_flows (state, user_id, provider, scopes, name, reconnect_id, redirect_uri, loopback, verifier_protected, issued_at)
-                VALUES ($state, $user, $provider, $scopes, $name, $reconnect, $redirect, $loopback, $verifier, $at)
+                INSERT INTO connection_flows (state, user_id, provider, scopes, name, reconnect_id, redirect_uri, loopback, verifier_protected, issued_at, tenant)
+                VALUES ($state, $user, $provider, $scopes, $name, $reconnect, $redirect, $loopback, $verifier, $at, $tenant)
                 """;
             command.Parameters.AddWithValue("$state", flow.State);
             command.Parameters.AddWithValue("$user", flow.UserId);
@@ -612,6 +618,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
             command.Parameters.AddWithValue("$loopback", flow.Loopback);
             command.Parameters.AddWithValue("$verifier", _protector.Protect(flow.CodeVerifier));
             command.Parameters.AddWithValue("$at", Instant.Stamp(flow.IssuedAt));
+            command.Parameters.AddWithValue("$tenant", (object?)flow.Tenant ?? DBNull.Value);
             await command.ExecuteNonQueryAsync(ct);
         }
 
@@ -635,7 +642,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
         {
             read.Transaction = transaction;
             read.CommandText =
-                "SELECT state, user_id, provider, scopes, name, reconnect_id, redirect_uri, loopback, verifier_protected, issued_at, used_at FROM connection_flows WHERE state = $state";
+                "SELECT state, user_id, provider, scopes, name, reconnect_id, redirect_uri, loopback, verifier_protected, issued_at, used_at, tenant FROM connection_flows WHERE state = $state";
             read.Parameters.AddWithValue("$state", state);
             await using var reader = await read.ExecuteReaderAsync(ct);
             if (await reader.ReadAsync(ct))
@@ -644,7 +651,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
                     reader.GetString(0), reader.GetString(1), reader.GetString(2), List(reader.GetString(3)),
                     NullableText(reader, 4), NullableText(reader, 5), reader.GetString(6), reader.GetBoolean(7),
                     Unprotect(reader.GetString(8)) ?? "", Time(reader.GetString(9)),
-                    NullableText(reader, 10) is { } used ? Time(used) : null);
+                    NullableText(reader, 10) is { } used ? Time(used) : null, NullableText(reader, 11));
             }
         }
 

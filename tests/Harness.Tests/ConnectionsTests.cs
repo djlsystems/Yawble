@@ -1234,6 +1234,8 @@ public sealed partial class ConnectionsTests : IAsyncLifetime
         public readonly List<(string Access, string Refresh)> Issued = [];
         public readonly List<(string? Secret, string RedirectUri, string Verifier)> Exchanges = [];
         public readonly List<(string? Secret, string RefreshToken)> Refreshes = [];
+        public readonly List<string> ExchangeUrls = [];
+        public readonly List<string> RefreshUrls = [];
         public readonly List<string> Revoked = [];
 
         public int DeviceInterval = 5;
@@ -1289,6 +1291,7 @@ public sealed partial class ConnectionsTests : IAsyncLifetime
                 if (code != GoodCode) return Task.FromResult(new OAuthTokenAnswer(null, null, null, null, null, "invalid_grant", "Bad code.", true));
 
                 Exchanges.Add((clientSecret, redirectUri, codeVerifier));
+                ExchangeUrls.Add(provider.TokenUrl);
                 var (access, refresh) = Issue(newRefresh: true);
                 return Task.FromResult(new OAuthTokenAnswer(access, refresh, 3600, null, IdToken(), null, null, false));
             }
@@ -1307,6 +1310,7 @@ public sealed partial class ConnectionsTests : IAsyncLifetime
             lock (_lock)
             {
                 Refreshes.Add((clientSecret, refreshToken));
+                RefreshUrls.Add(provider.TokenUrl);
 
                 if (RefuseRefresh)
                 {
