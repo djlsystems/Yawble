@@ -129,6 +129,40 @@ public sealed class PluginNeedsPersonTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task An_agents_hire_cannot_carry_a_value_and_a_persons_typed_value_tells_the_manager_once()
+    {
+        // A Manager sending a value with its hire is refused, and nothing is made.
+        using var manager = _factory.CreateClient();
+        manager.DefaultRequestHeaders.Add(ApiKeyAuthenticationHandler.Header, await ManagerKeyAsync());
+        var steered = await manager.PostAsJsonAsync($"/api/teams/{_team}/containers", new
+        {
+            name = "Keyed",
+            agent = "plugin:keyed",
+            secretValues = new Dictionary<string, string> { ["token"] = $"value-{Guid.NewGuid():N}" },
+        }, Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, steered.StatusCode);
+        Assert.Contains("An agent's hire cannot carry a secret value", await steered.Content.ReadAsStringAsync(Ct));
+        Assert.Null(Services.GetRequiredService<Harness.Containers.ContainerHost>().Find(new ContainerId(_team, "Keyed")));
+
+        // Without one the member is made and waits for a person.
+        var hired = await ManagerTools(await ManagerKeyAsync()).Hire("Keyed", plugin: "keyed", cancellationToken: Ct);
+        Assert.Contains("set the secret `token` in the member's settings", hired);
+        var failed = await TellAndAwaitAsync("Keyed");
+        Assert.Equal(MessageTypes.Failed, failed.Type);
+
+        // A person types the member's own value: the Manager is told once, in that workflow.
+        var typed = await _person.PutAsJsonAsync($"/api/teams/{_team}/members/Keyed/secrets/token", new { value = $"value-{Guid.NewGuid():N}" }, Ct);
+        Assert.True(typed.IsSuccessStatusCode, await typed.Content.ReadAsStringAsync(Ct));
+        var notice = Assert.Single(await NoticesAsync());
+        Assert.Equal(failed.CorrelationId, notice.CorrelationId);
+
+        // Replacing it says nothing more, and the member now runs.
+        Assert.True((await _person.PutAsJsonAsync($"/api/teams/{_team}/members/Keyed/secrets/token", new { value = $"value-{Guid.NewGuid():N}" }, Ct)).IsSuccessStatusCode);
+        Assert.Single(await NoticesAsync());
+        Assert.Equal(MessageTypes.Completed, (await TellAndAwaitAsync("Keyed")).Type);
+    }
+
+    [Fact]
     public void Needs_person_is_a_class_of_its_own_never_resumed_and_the_manager_is_told_what_to_do_with_it()
     {
         Assert.Contains(FailureClasses.NeedsPerson, FailureClasses.All);

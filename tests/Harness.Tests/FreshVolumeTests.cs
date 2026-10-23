@@ -471,6 +471,44 @@ public sealed class FreshVolumeTests : IDisposable
         await PluginSecretRoundTripAsync();
     }
 
+    /// <summary>
+    /// `auth-028` applies to a volume with a team and a member, which stay, and to an empty one; a
+    /// member's own value is kept as ciphertext and goes with the member's row.
+    /// </summary>
+    [Fact]
+    public async Task The_plugin_member_secrets_step_applies_to_an_empty_and_an_existing_volume()
+    {
+        var migrator = new SchemaMigrator(Database);
+        await migrator.ApplyAsync([.. SchemaModules.All.Where(s => s.Id != "auth-028")], ct: Ct);
+        Assert.DoesNotContain("plugin_member_secrets", await ColumnAsync("SELECT name FROM sqlite_master WHERE type = 'table'"));
+
+        await new SqliteTeamStore(Database).SaveTeamAsync(new PersistedTeam("kept-team", null), Ct);
+        await ExecuteAsync(
+            "INSERT INTO team_members (team, name, agent, subscribes, permits, floor_seq, created_utc) "
+            + "VALUES ('kept-team', 'Keeper', 'plugin:fixture', '[]', '[]', 0, '2026-10-01T00:00:00Z')");
+
+        await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
+
+        Assert.Contains("auth-028", await migrator.AppliedAsync(ct: Ct));
+        Assert.Contains("Keeper", await ColumnAsync("SELECT name FROM team_members"));
+
+        var store = new PluginMemberSecretStore(Database, new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider());
+        var keeper = new ContainerId("kept-team", "Keeper");
+        await store.SetAsync(keeper, "Keeper", "fixture", "token", "own-value-1234", new CredentialActor(null, "person@example.test"), Ct);
+        Assert.Equal("own-value-1234", (await store.ValuesAsync(keeper, Ct))["token"]);
+        Assert.DoesNotContain("own-value-1234", Assert.Single(await ColumnAsync("SELECT value_protected FROM plugin_member_secrets")));
+
+        // The row goes with the member's.
+        await ExecuteAsync("PRAGMA foreign_keys = ON; DELETE FROM team_members WHERE name = 'Keeper'");
+        Assert.Empty(await ColumnAsync("SELECT field FROM plugin_member_secrets"));
+
+        // And an empty volume, from nothing.
+        SqliteConnection.ClearAllPools();
+        File.Delete(Database);
+        await new SchemaMigrator(Database).ApplyAsync(SchemaModules.All, ct: Ct);
+        Assert.Contains("plugin_member_secrets", await ColumnAsync("SELECT name FROM sqlite_master WHERE type = 'table'"));
+    }
+
     private async Task PluginSecretRoundTripAsync()
     {
         var store = new PluginSecretStore(
