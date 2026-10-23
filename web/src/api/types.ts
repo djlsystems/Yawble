@@ -3204,6 +3204,11 @@ export interface Connection {
   preset?: string | null
   /** A mailbox says only whether its app password is set. No route ever answers the password. */
   passwordSet?: boolean | null
+  /**
+   * A Microsoft connection's own directory (a tenant ID or a domain) it signs in through; null for
+   * the provider's. Absent from a Host older than it.
+   */
+  tenant?: string | null
 }
 
 /** One mail server of a mailbox connection: where it is and how the connection is secured. */
@@ -3253,6 +3258,11 @@ export interface ConnectionStartRequest {
   name?: string | null
   reconnectId?: string | null
   redirectUri?: string | null
+  /**
+   * Microsoft only: the directory to sign in through, a tenant ID or a domain. On a reconnect, left
+   * out keeps the connection's, a value changes it and `""` clears it.
+   */
+  tenant?: string
 }
 
 /** Its answer: where to send the browser. The PKCE verifier stays on the Host. */

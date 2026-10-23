@@ -138,6 +138,32 @@ again - never as an error code alone (`ConnectionProviders.MicrosoftAdminApprova
 refusals carrying `AADSTS65001`, `AADSTS90094`, `AADSTS90095`, `AADSTS900941`, `AADSTS90099`,
 `admin_consent_required` or `consent_required`, and the dialog words them alike whatever reaches it).
 
+### A Microsoft connection's own directory
+
+The **Sign in** step has an optional field, **Directory (tenant) ID or domain**. A personal Microsoft
+account that owns an Azure subscription needs it: such an account belongs to the subscription's
+directory only as an external user, and signed in through the provider's tenant (`common` for the
+instance's app) it gets tokens from its personal home, which Azure management and the directory's
+other APIs refuse. Type the subscription's directory ID - in the Azure portal, **Microsoft Entra ID**,
+**Overview**, the Tenant ID (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`) - or one of its domains
+(`example.onmicrosoft.com`). A work or school account leaves it empty.
+
+- The connection then signs in, redeems its code, refreshes and gets each API's token at
+  `https://login.microsoftonline.com/<directory>/oauth2/v2.0/...`, with the same client (the
+  instance's app or one you saved). It is sent as `tenant` on `POST /api/connections/start`, for the
+  code and the browser sign-in alike; Advanced's **Connect an account** offers the same field for
+  Microsoft.
+- A value that is neither a directory ID nor a domain (`common` and `organizations` included) is
+  refused with one sentence naming the field, shown at the field, and nothing is stored.
+- Each connection with a directory names it in Admin → **Connections** (`tenant` on
+  `GET /api/connections`; `null` without one). A directory is not a secret.
+- **Reconnect** shows the connection's directory: left as it is, it is kept (no `tenant` is sent);
+  changed, the new one is used; emptied, it is cleared (`tenant: ""`). Reconnect as another account
+  is refused. The same account in two directories is two connections.
+- The solution wizard's Reconnect, in Your part and in the install step's refusal, signs a Microsoft
+  connection in with a code in place and keeps its directory.
+- From the operator's computer: `yawble connect microsoft --device --tenant <directory ID or domain>`.
+
 The redirect app with a client secret is under **Advanced** (the `tenant` field and the
 secret); the long form is under [Registering a Microsoft client](#registering-a-microsoft-client).
 
@@ -252,6 +278,11 @@ Through the request file below it sends `{ op: "start", flow: "device", ... }`, 
 `flow: { state, sentence, connection? }` (404 for a flow that is not the operator's, exactly as for a
 missing one). For a provider with no device endpoint the start answers status 400 with the sentence in
 `error`. The device code is in no report and no file under the data root.
+
+`--tenant <directory ID or domain>` signs the connection in through its own directory (see
+[A Microsoft connection's own directory](#a-microsoft-connections-own-directory)): it puts `tenant`
+on the start, and without the flag no `tenant` is sent, so a reconnect (`--name` of an existing
+connection) keeps the connection's directory. A value the Host refuses is said in its sentence.
 
 ### How the CLI reaches the Host
 

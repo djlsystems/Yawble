@@ -48,6 +48,7 @@ func newConnectCommand(deps Deps) *cobra.Command {
 	var name string
 	var port int
 	var device bool
+	var tenant string
 	cmd := &cobra.Command{
 		Use:   "connect <provider>",
 		Short: "Connect an account at an OAuth service (google, microsoft, custom-<id>) for plugins to use",
@@ -61,11 +62,16 @@ func newConnectCommand(deps Deps) *cobra.Command {
 			"With --device (Microsoft), it signs in with a code instead: it prints a link and a code to enter there, from any " +
 			"browser on any device, and waits for the Host to say the sign-in is done. No port is opened and nothing comes back " +
 			"to this computer. A provider with no sign-in with a code refuses it, and says so.\n\n" +
+			"With --tenant (Microsoft), the connection signs in through that directory: its Directory (tenant) ID or a domain. " +
+			"A personal Microsoft account that owns an Azure subscription needs it, naming the subscription's directory " +
+			"(Azure portal, Microsoft Entra ID, Overview); a work or school account leaves it out. Reconnecting without it " +
+			"keeps the connection's directory.\n\n" +
 			"It reaches the Host the way `plugin install --from-instance` does: through the container engine, by a request " +
 			"file the Host answers. Nothing is signed in and no port of the instance is used.",
 		Example: "  yawble connect google --scopes https://mail.google.com/ --name \"Work mail\"\n" +
 			"  yawble connect microsoft --scopes offline_access,https://outlook.office.com/SMTP.Send\n" +
 			"  yawble connect microsoft --device --scopes Mail.Send\n" +
+			"  yawble connect microsoft --device --tenant example.onmicrosoft.com\n" +
 			"  yawble connect list\n" +
 			"  yawble connect remove \"Work mail\"",
 		Args: cobra.ExactArgs(1),
@@ -81,15 +87,16 @@ func newConnectCommand(deps Deps) *cobra.Command {
 				if cmd.Flags().Changed("port") {
 					return UsageError{"--device signs in with a code and opens no port; leave out --port"}
 				}
-				return connectDevice(cmd.Context(), cmd.OutOrStdout(), deps, provider, splitScopes(scopes), strings.TrimSpace(name))
+				return connectDevice(cmd.Context(), cmd.OutOrStdout(), deps, provider, splitScopes(scopes), strings.TrimSpace(name), strings.TrimSpace(tenant))
 			}
-			return connect(cmd.Context(), cmd.OutOrStdout(), deps, provider, splitScopes(scopes), strings.TrimSpace(name), port)
+			return connect(cmd.Context(), cmd.OutOrStdout(), deps, provider, splitScopes(scopes), strings.TrimSpace(name), strings.TrimSpace(tenant), port)
 		},
 	}
 	cmd.Flags().StringSliceVar(&scopes, "scopes", nil, "scopes to ask for besides the provider's own, separated by commas")
 	cmd.Flags().StringVar(&name, "name", "", "the connection's name (default: the account's); an existing one of this provider is reconnected")
 	cmd.Flags().IntVar(&port, "port", 0, "the loopback port to listen on (default: a free one); for a client that needs the redirect registered exactly")
 	cmd.Flags().BoolVar(&device, "device", false, "sign in with a code entered at the provider's page, from any browser (Microsoft); opens no port")
+	cmd.Flags().StringVar(&tenant, "tenant", "", "Microsoft: the directory to sign in through, its Directory (tenant) ID or domain (default: the provider's; a reconnect keeps its own)")
 	cmd.AddCommand(newConnectListCommand(deps), newConnectRemoveCommand(deps))
 	return cmd
 }
@@ -173,13 +180,13 @@ func newConnectRemoveCommand(deps Deps) *cobra.Command {
 
 // connect runs one flow: start on the Host, the browser round trip on this computer, complete on
 // the Host.
-func connect(ctx context.Context, out io.Writer, deps Deps, provider string, scopes []string, name string, port int) error {
+func connect(ctx context.Context, out io.Writer, deps Deps, provider string, scopes []string, name, tenant string, port int) error {
 	e, err := runningEngine(ctx, deps, "connect")
 	if err != nil {
 		return err
 	}
 
-	request := connectRequest{Op: "start", Provider: provider, Scopes: scopes}
+	request := connectRequest{Op: "start", Provider: provider, Scopes: scopes, Tenant: tenant}
 	// What is stored before the flow, so a complete the Host answered too late can still be told
 	// apart from one it refused.
 	before, err := listConnections(ctx, e)

@@ -379,6 +379,23 @@ export function refusalWords(text: string | null | undefined): string | null {
   return adminApprovalMarks.test(text) ? AdminApprovalSentence : text;
 }
 
+/** The field a Microsoft connection's own directory is typed in, as the Host names it in a refusal. */
+export const DirectoryLabel = 'Directory (tenant) ID or domain';
+
+/** The Host refused the directory typed: its sentence names the field, so it is shown there. */
+export function directoryRefusal(text: string): boolean {
+  return text.startsWith(DirectoryLabel);
+}
+
+/**
+ * What a reconnect sends for a connection's directory, from the field it was shown in: nothing when
+ * untouched (the Host keeps it), the new one when changed, `""` when emptied (the Host clears it).
+ */
+export function reconnectTenant(connection: Pick<Connection, 'tenant'>, typed: string): { tenant?: string } {
+  const value = typed.trim();
+  return value === (connection.tenant ?? '') ? {} : { tenant: value };
+}
+
 /** "14:59": what is left of a sign-in code's life, in minutes and seconds, never below 0:00. */
 export function countdown(expiresAt: string, now: number): string {
   const left = Math.max(0, Math.ceil((wireInstant(expiresAt) - now) / 1000));

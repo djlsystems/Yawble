@@ -194,3 +194,30 @@ func TestConnectDeviceTakesNoPort(t *testing.T) {
 		t.Errorf("printed a code for a refused command line:\n%s", out)
 	}
 }
+
+func TestConnectDeviceSendsTheTenantNamedAndNoneWithoutTheFlag(t *testing.T) {
+	done := map[string]any{"state": "done", "sentence": "Connected person@example.test.", "connection": outlook}
+
+	h := deviceHost(t, done)
+	code, _, errOut := run(t, stubbed(h), "connect", "microsoft", "--device", "--tenant", "example.onmicrosoft.com")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	if start := h.sent("start"); len(start) != 1 || start[0]["tenant"] != "example.onmicrosoft.com" {
+		t.Fatalf("the start did not carry the tenant named: %v", start)
+	}
+
+	h = deviceHost(t, done)
+	code, _, errOut = run(t, stubbed(h), "connect", "microsoft", "--device")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	start := h.sent("start")
+	if len(start) != 1 {
+		t.Fatalf("start requests: %v", start)
+	}
+	// Left out, not empty: an empty tenant on a reconnect would clear the connection's directory.
+	if _, has := start[0]["tenant"]; has {
+		t.Errorf("a start without --tenant carried one: %v", start[0]["tenant"])
+	}
+}
