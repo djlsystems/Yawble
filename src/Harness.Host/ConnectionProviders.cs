@@ -264,6 +264,51 @@ public static class ConnectionProviders
         }
     }
 
+    /// <summary>The field a connection's directory is, as a person reads it.</summary>
+    public const string DirectoryField = "Directory (tenant) ID or domain";
+
+    /// <summary>What a value that is neither a GUID nor a domain is refused with: one sentence naming the field.</summary>
+    public const string DirectoryRefusal =
+        DirectoryField + " is a directory ID such as xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx or a domain such as example.onmicrosoft.com.";
+
+    /// <summary>
+    /// A connection's directory as stored: a tenant ID (a GUID, lowercased) or a domain (lowercased
+    /// labels of letters, digits and hyphens, at least two of them). Null for anything else, including
+    /// <c>common</c>, <c>organizations</c> and <c>consumers</c>, which are audiences, not directories.
+    /// </summary>
+    public static string? ParseDirectory(string? text)
+    {
+        var value = text?.Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(value)) return null;
+        if (IsGuid(value)) return value;
+
+        var labels = value.Split('.');
+        return value.Length <= 253 && labels.Length >= 2
+            && labels.All(l => l.Length is > 0 and <= 63 && l[0] != '-' && l[^1] != '-' && l.All(c => char.IsAsciiLetterLower(c) || char.IsAsciiDigit(c) || c == '-'))
+            && !labels[^1].All(char.IsAsciiDigit)
+                ? value
+                : null;
+    }
+
+    /// <summary>
+    /// <paramref name="provider"/> as one connection uses it: a Microsoft connection with its own
+    /// <paramref name="directory"/> signs in, redeems, refreshes and gets each API's token at that
+    /// directory's endpoints, with the provider's client. With no directory, the provider unchanged.
+    /// </summary>
+    public static OAuthProvider InDirectory(OAuthProvider provider, string? directory)
+    {
+        if (directory is null || provider.Kind != Microsoft) return provider;
+
+        var authority = $"https://login.microsoftonline.com/{Uri.EscapeDataString(directory)}/oauth2/v2.0";
+        return provider with
+        {
+            Tenant = directory,
+            AuthorizeUrl = authority + "/authorize",
+            TokenUrl = authority + "/token",
+            DeviceAuthorizationUrl = provider.DeviceAuthorizationUrl is null ? null : authority + "/devicecode",
+        };
+    }
+
     /// <summary>Why <paramref name="url"/> cannot be a provider endpoint, or null: absolute https, or
     /// http on loopback for testing.</summary>
     public static string? UrlRefusal(string field, string? url, bool required)
