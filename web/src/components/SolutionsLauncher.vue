@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import { listPlugins, solutionsInstalled } from '../api/client';
 import type { InstalledPlugin, InstalledSolution, MarketplaceCatalog, MarketplacePackage, SolutionCheck, SolutionStateKind } from '../api/types';
-import { pluginUpdateFor, pluginUsedByWords, updateFor } from '../lib/marketplace';
+import { pluginNeedWords, pluginUpdateFor, pluginUsedByWords, updateFor } from '../lib/marketplace';
 import { fetchIntoDocuments } from '../lib/marketplaceFetch';
 import { solutionMatches, stateBadge, stateChoices, teamChoices, whenWords } from '../lib/solutionPanel';
 import { localInstants } from '../lib/localTime';
@@ -33,7 +33,8 @@ import SolutionWizard from './SolutionWizard.vue';
  * until the person presses Install there.
  *
  * BELOW THE SOLUTIONS, THE PLUGINS installed on the instance (`GET /api/plugins`), one tile each -
- * its name, version and who uses it - with Update when the catalog lists a newer version, which
+ * its name, version, who uses it, and each solution team that uses it with the oldest version that
+ * team needs (`solutions`; an older one is refused at install) - with Update when the catalog lists a newer version, which
  * fetches it and opens the plugin install dialog as Browse's Get does. Members are hired on a plugin
  * from Add member; Admin -> Plugins holds the rest.
  *
@@ -380,6 +381,14 @@ watch(() => pluginInstall.value.open, (showing, was) => {
               </div>
             </div>
             <div class="os-tile-line os-text-muted" data-plugin-used-by>{{ pluginUsedByWords(plugin.members) }}</div>
+            <!-- THE SOLUTION TEAMS THAT USE IT, each with the oldest version it needs: an older one is
+                 refused at install while the team is installed. -->
+            <div
+              v-for="need in plugin.solutions ?? []"
+              :key="need.team"
+              class="os-tile-line os-text-muted"
+              :data-plugin-solution="need.team"
+            >{{ pluginNeedWords(need) }}</div>
             <div v-if="pluginUpdateFor(plugin.id, catalog)" class="os-tile-line text-warning" data-tile-update-available>
               Update available: {{ pluginUpdateFor(plugin.id, catalog)?.version }}
             </div>
