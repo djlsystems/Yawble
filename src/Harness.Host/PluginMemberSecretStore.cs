@@ -166,7 +166,7 @@ public sealed class PluginMemberSecretStore(string databasePath, IDataProtection
     }
 
     /// <summary>
-    /// THE ONE-TIME START STEP (B006R): for every plugin member whose secret field is bound to a key
+    /// THE ONE-TIME START STEP: for every plugin member whose secret field is bound to a key
     /// with a STORED value (<c>plugin_secrets</c>) and that has no value of its own for the field, that
     /// value is copied onto the member, and the step is marked done by its
     /// <see cref="TenantActions.MemberSecretsCopied"/> row (counts only) in the same transaction. The

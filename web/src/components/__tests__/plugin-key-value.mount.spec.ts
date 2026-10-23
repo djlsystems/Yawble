@@ -9,7 +9,7 @@
 // Documentation link to its marketplace page, or the whole description and no link when the catalog
 // does not list it. A typed value rides the hire and the Save as `secretValues`.
 //
-// THE MOCK IS OF `api/client`, in the Host's shapes (`docs` B006R API contract): no route is reached.
+// THE MOCK IS OF `api/client`, in the Host's shapes (the member secret routes): no route is reached.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 

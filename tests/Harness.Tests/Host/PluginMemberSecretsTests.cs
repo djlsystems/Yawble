@@ -278,6 +278,24 @@ public sealed class PluginMemberSecretsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_first_set_on_a_member_with_no_value_yet_that_cannot_write_its_row_keeps_no_value_and_no_row()
+    {
+        var key = Key();
+        Assert.Equal(HttpStatusCode.OK, (await SendAsync(HttpMethod.Put, $"/api/secrets/{key}", new { value = Value("stored-key") })).Status);
+        await HireAsync("Fresh", new(), bindings: new() { ["token"] = key });
+        Assert.Null(await OwnValueAsync("Fresh", "token"));
+        Assert.Empty(await ColumnAsync("SELECT name FROM plugin_member_secrets WHERE name = $key", "Fresh"));
+
+        await RefuseTenantRowAsync(TenantActions.MemberSecretSet);
+        var set = await SendAsync(HttpMethod.Put, $"/api/teams/{_team}/members/Fresh/secrets/token", new { value = Value("lost-first") });
+        Assert.Equal(HttpStatusCode.InternalServerError, set.Status);
+        Assert.Null(await OwnValueAsync("Fresh", "token"));
+        Assert.Empty(await ColumnAsync("SELECT name FROM plugin_member_secrets WHERE name = $key", "Fresh"));
+        Assert.Empty(await SecretRowsAsync("Fresh"));
+        Assert.Equal("key", State(await GetAsync($"/api/teams/{_team}/members/Fresh/secrets"), "token").GetProperty("source").GetString());
+    }
+
+    [Fact]
     public async Task A_machine_principal_is_refused_every_route_and_an_agents_hire_cannot_carry_a_value()
     {
         var first = Value("person");

@@ -163,6 +163,34 @@ public sealed class PluginNeedsPersonTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_persons_settings_save_with_a_typed_value_tells_the_manager_once_after_an_agents_hire_made_the_member_wait()
+    {
+        var hired = await ManagerTools(await ManagerKeyAsync()).Hire("Saved", plugin: "keyed", cancellationToken: Ct);
+        Assert.Contains("set the secret `token` in the member's settings", hired);
+        var failed = await TellAndAwaitAsync("Saved");
+        Assert.Equal(MessageTypes.Failed, failed.Type);
+
+        // The person's Save carries the member's own value with its settings: the Manager is told once, in that workflow.
+        var saved = await _person.PutAsJsonAsync($"/api/teams/{_team}/members/Saved/plugin-settings", new
+        {
+            config = new { },
+            secretValues = new Dictionary<string, string?> { ["token"] = $"value-{Guid.NewGuid():N}" },
+        }, Ct);
+        Assert.True(saved.IsSuccessStatusCode, await saved.Content.ReadAsStringAsync(Ct));
+        var notice = Assert.Single(await NoticesAsync());
+        Assert.Equal(failed.CorrelationId, notice.CorrelationId);
+
+        // A second Save replacing it says nothing more, and the member now runs.
+        Assert.True((await _person.PutAsJsonAsync($"/api/teams/{_team}/members/Saved/plugin-settings", new
+        {
+            config = new { },
+            secretValues = new Dictionary<string, string?> { ["token"] = $"value-{Guid.NewGuid():N}" },
+        }, Ct)).IsSuccessStatusCode);
+        Assert.Single(await NoticesAsync());
+        Assert.Equal(MessageTypes.Completed, (await TellAndAwaitAsync("Saved")).Type);
+    }
+
+    [Fact]
     public void Needs_person_is_a_class_of_its_own_never_resumed_and_the_manager_is_told_what_to_do_with_it()
     {
         Assert.Contains(FailureClasses.NeedsPerson, FailureClasses.All);
