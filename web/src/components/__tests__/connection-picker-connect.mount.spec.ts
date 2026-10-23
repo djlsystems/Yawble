@@ -324,7 +324,7 @@ describe("a plugin member's slot with nothing suitable bound", () => {
     wrapper.unmount();
   });
 
-  it('shows the sentence of a binding the Host refuses, and offers Reconnect', async () => {
+  it('shows the sentence of a binding the Host refuses, and offers Reconnect, which signs Microsoft in with a code here', async () => {
     const sentence =
       "Connection 'person@example.test' was not granted the scope `https://graph.microsoft.com/Mail.Send` that slot `mail` needs. " +
       'Press Reconnect to grant that scope.';
@@ -342,9 +342,13 @@ describe("a plugin member's slot with nothing suitable bound", () => {
     expect(refused?.textContent).toContain(sentence);
     vi.useRealTimers();
 
+    startDeviceConnection.mockClear();
     await click([...refused!.querySelectorAll('button')].find((candidate) => candidate.textContent?.includes('Reconnect')));
-    expect(startConnection).toHaveBeenCalledWith({ reconnectId: 'conn-new', scopes: [mailSend] });
-    expect(goTo).toHaveBeenCalledWith('https://login.microsoftonline.com/common/oauth2/v2.0/authorize?state=r1');
+    // Microsoft has no consent page to send the browser to: the code is shown here, under the slot.
+    expect(startDeviceConnection).toHaveBeenCalledWith({ reconnectId: 'conn-new', scopes: [mailSend], flow: 'device' });
+    expect(startConnection).not.toHaveBeenCalled();
+    expect(goTo).not.toHaveBeenCalled();
+    expect(bodyFind('[data-connection-slot="mail"] [data-reconnect-code] [data-device-code]')?.textContent).toContain('FAKE-CODE');
 
     wrapper.unmount();
   });
