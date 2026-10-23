@@ -37,6 +37,7 @@ import {
   redirectUriWarning,
   refusalWords,
   rememberGuidedConnect,
+  UsernameIncorrectHint,
 } from '../lib/connections';
 import { listOf } from '../lib/agentInstall';
 import { productCli } from '../presentation/product';
@@ -1057,6 +1058,7 @@ const stepLabels = computed(() => [
             window: the second code will be here.
           </div>
           <DirectoryField v-model="directory" :error="directoryProblem" />
+          <div class="text-caption os-text-muted" data-signin-directory-hint>{{ UsernameIncorrectHint }}</div>
           <div v-if="usesDefault" data-signin-advanced>
             <q-btn
               flat

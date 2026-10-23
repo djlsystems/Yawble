@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import FieldHelp from './FieldHelp.vue';
-import { DirectoryLabel } from '../lib/connections';
+import { DirectoryLabel, UsernameIncorrectHint } from '../lib/connections';
 
 /**
  * A MICROSOFT CONNECTION'S OWN DIRECTORY, optional: a tenant ID or a domain it signs in through. Add
@@ -17,7 +17,7 @@ const value = defineModel<string>({ required: true });
 const help =
   'Optional. Needed for a personal Microsoft account that owns an Azure subscription: the subscription\'s '
   + 'directory ID (Azure portal, Microsoft Entra ID, Overview) or one of its domains, such as '
-  + 'example.onmicrosoft.com. A work or school account leaves it empty.';
+  + `example.onmicrosoft.com. A work or school account leaves it empty. ${UsernameIncorrectHint}`;
 </script>
 
 <template>

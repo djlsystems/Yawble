@@ -146,7 +146,20 @@ directory only as an external user, and signed in through the provider's tenant 
 instance's app) it gets tokens from its personal home, which Azure management and the directory's
 other APIs refuse. Type the subscription's directory ID - in the Azure portal, **Microsoft Entra ID**,
 **Overview**, the Tenant ID (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`) - or one of its domains
-(`example.onmicrosoft.com`). A work or school account leaves it empty.
+(`example.onmicrosoft.com`). A work or school account leaves it empty. If Microsoft says the username
+may be incorrect, the account is not in the directory the sign-in used: name that directory here and
+sign in again.
+
+- When Microsoft refuses an account as not in the directory the sign-in used - `AADSTS50020`,
+  `AADSTS50034` or `AADSTS90072` in Microsoft's published Entra error list - the code sign-in, the
+  browser sign-in and the operator CLI's `connect` end `refused` with one sentence
+  (`ConnectionProviders.MicrosoftNotInDirectory`): the account was not found in that directory, a
+  personal Microsoft account that owns an Azure subscription signs in through that subscription's
+  directory (its ID under Directory), and a work account in that directory works too. Never the code
+  or Microsoft's own words, and nothing is stored.
+- Microsoft's own sign-in page often turns such an account away itself ("This username may be
+  incorrect") and the code just runs out: a Microsoft code that expires says so on a second line
+  after the expiry sentence (`ConnectionProviders.MicrosoftExpiredNotInDirectory`).
 
 - The connection then signs in, redeems its code, refreshes and gets each API's token at
   `https://login.microsoftonline.com/<directory>/oauth2/v2.0/...`, with the same client (the

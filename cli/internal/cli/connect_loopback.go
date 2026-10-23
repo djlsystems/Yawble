@@ -15,6 +15,21 @@ type callbackResult struct {
 	err  error
 }
 
+// providerRefused is the provider's `error` on the redirect. The Host is told it on `complete`,
+// and its sentence is what is said; these words are said only when the Host cannot be asked.
+type providerRefused struct {
+	Reason      string
+	Description string
+}
+
+func (r *providerRefused) Error() string {
+	reason := r.Reason
+	if r.Description != "" {
+		reason += ": " + r.Description
+	}
+	return "the provider did not connect the account: " + reason
+}
+
 // awaitCode serves the provider's redirect on listener and answers the code it carries. A request
 // whose state is not this flow's is answered 400 and ignored: it is not the provider's answer to
 // this flow. An `error` from the provider ends the wait with the provider's words.
@@ -39,11 +54,9 @@ func awaitCode(ctx context.Context, listener net.Listener, state string, wait ti
 				return
 			}
 			if reason := q.Get("error"); reason != "" {
-				if d := q.Get("error_description"); d != "" {
-					reason += ": " + d
-				}
-				page(w, http.StatusOK, "The provider did not connect the account: "+reason+". Go back to the terminal.")
-				deliver(callbackResult{err: fmt.Errorf("the provider did not connect the account: %s", reason)})
+				refused := &providerRefused{Reason: reason, Description: q.Get("error_description")}
+				page(w, http.StatusOK, "The provider did not connect the account. Go back to the terminal.")
+				deliver(callbackResult{err: refused})
 				return
 			}
 			page(w, http.StatusOK, "Got it. yawble is finishing the connection; you can close this tab and go back to the terminal.")
