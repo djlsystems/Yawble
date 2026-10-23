@@ -1,49 +1,55 @@
 <script setup lang="ts">
-import FieldHelp from './FieldHelp.vue';
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { listConnectionProviders, listConnections } from '../api/client';
-import type { Connection, ConnectionProvider, PluginConfigField, SecretKeyState } from '../api/types';
+import type { Connection, ConnectionProvider, PluginSecretState } from '../api/types';
 import {
-  defaultLabel,
   defaultValue,
   fieldBoundsHint,
+  fieldLabel,
+  fieldWords,
   hasSlots,
   isDefault,
+  isUnmasked,
   missingRequired,
   outOfRange,
-  secretKeySentence,
-  setByPerson,
+  placeholderOf,
+  secretSetWords,
+  secretsSet,
   settingsBody,
   type PluginFieldValues,
   type PluginSettingsShape,
+  type SecretValues,
 } from '../lib/pluginSettings';
 import ChipListInput from './ChipListInput.vue';
 import ConnectionPicker from './ConnectionPicker.vue';
-import SecretKeyField from './SecretKeyField.vue';
-import { isClear, writeKeyValues, type PendingKeyValues } from '../lib/secretKeyValues';
-import { productCli } from '../presentation/product';
 
 /**
- * A PLUGIN MEMBER'S SETTINGS, GENERATED FROM ITS MANIFEST. The one editor Add member (a hire) and
- * Member settings (an edit after hire) both show, so the two cannot drift on what a field looks like
- * or what is saved.
+ * A PLUGIN MEMBER'S SETTINGS, GENERATED FROM ITS MANIFEST. The one editor Add member (a hire),
+ * Member settings (an edit after hire) and a solution's Change setup show, so they cannot drift on
+ * what a field looks like or what is saved.
  *
  * NO FREE-FORM JSON. One input per `config` field, typed - text for a string, a number box for a
  * number, a toggle for a bool, a dropdown for a field with `enum`, chips for a list (`ChipListInput`:
- * chosen from the `enum` when there is one, else added through its dialog; × removes) - so the shape saved is always one the
- * plugin accepts. Each field says its default, whether it is required and whether only a person may
- * set it, and can be put back to its default. A number field with manifest bounds says them in its
- * hint and shows a value outside them as out of range - typed, or already stored - and the dialogs
- * hold Save until it is fixed, as they do for a missing required field (`outOfRange`). Secrets are KEY NAMES, the logical key a
- * member is bound to, never a value: the settings carry none. Given `checkKey`, each key typed says
- * whether the Host has it set - by whom and when, or from its environment - and offers the key's
- * write-only value field (`SecretKeyField`), and Clear for a key set from the screen. What is typed
- * there is written by the dialog's own button, through `saveKeys`, before the settings are saved;
- * the Host's answer is then what is said. Connection slots are one picker each
- * (`ConnectionPicker`), storing a connection's id, never a token.
+ * chosen from the `enum` when there is one, else added through its dialog; × removes) - so the shape
+ * saved is always one the plugin accepts. EVERY SETTING IS ON THE ONE SCREEN, in the manifest's
+ * order: the manifest's `advanced` is ignored. Each is labelled by the manifest's `label`, else its
+ * name in words (`apiKey` -> "API key"); a text or number box's default is its placeholder, and
+ * Reset to default puts it back. No info icon and no Default line: the plugin's Documentation says
+ * what its settings do. What a person must see now - an error, Required, a value not set, the saved
+ * line - stays printed. A number field with manifest bounds shows a value outside them as out of
+ * range - typed, or already stored - and the dialogs hold Save until it is fixed, as they do for a
+ * missing required field (`outOfRange`).
  *
- * The "as JSON" view is read-only, and it is exactly `settingsBody` - what will be stored - for
- * checking, never for editing.
+ * A SECRET IS ONE BOX FOR ITS VALUE, the member's own: no other member can read or change it. A
+ * masked field (the default) is a password box that starts empty and says when a value is saved and
+ * by whom; typing replaces it and Clear removes it. A field the manifest declares `masked: false` is
+ * a text box showing the saved value. What is typed waits in `values` for the dialog's own button,
+ * which sends it as `secretValues` with the hire or the Save. A key name the member is bound to (the
+ * old binding, still honoured by the Host) is never on the screen: only "As JSON" shows it. Connection
+ * slots are one picker each (`ConnectionPicker`), storing a connection's id, never a token.
+ *
+ * The "as JSON" view is read-only, and it is exactly `settingsBody` - the settings and key bindings
+ * stored - for checking, never for editing. It never shows a value.
  */
 const props = defineProps<{
   shape: PluginSettingsShape;
@@ -51,18 +57,23 @@ const props = defineProps<{
   plugin?: string | undefined;
   /** Binds a slot of the member being edited at the Host, throwing its refusal. Absent at hire. */
   bindSlot?: ((slot: string, connectionId: string) => Promise<void>) | undefined;
-  /** Asks the Host whether a key is set, by name. Absent: no state is shown under a secret. */
-  checkKey?: ((key: string) => Promise<SecretKeyState>) | undefined;
-  /** The dialog's button that saves the form, named in what a key not set says. */
+  /** Each secret field's state on the member being edited. Absent at hire: nothing is set yet. */
+  states?: PluginSecretState[] | undefined;
+  /** The dialog's button that saves the form, named in what a typed value says. */
   saveLabel?: string | undefined;
 }>();
 
 const config = defineModel<PluginFieldValues>('config', { required: true });
+/** Each secret's key binding as stored: shown only in "As JSON", never edited here. */
 const secrets = defineModel<Record<string, string>>('secrets', { required: true });
+/** The secret values typed or cleared, waiting for the dialog's button. */
+const values = defineModel<SecretValues>('values', { default: () => ({}) });
 /** Slot -> the chosen connection's id. Only a plugin that declares slots has any. */
 const connections = defineModel<Record<string, string>>('connections', { default: () => ({}) });
 
-const missing = computed(() => missingRequired(props.shape, config.value, secrets.value));
+const missing = computed(() =>
+  missingRequired(props.shape, config.value, secretsSet(props.shape, props.states, values.value)),
+);
 /** Number fields outside their bounds, with the sentence shown under each - typed or stored. */
 const bounds = computed(() => outOfRange(props.shape, config.value));
 
@@ -91,118 +102,89 @@ async function loadConnections() {
 onMounted(() => void loadConnections());
 watch(() => props.shape, () => void loadConnections());
 
+/** A secret field's state on the member, or null at hire and for a field the Host did not answer. */
+function stateOf(name: string): PluginSecretState | null {
+  return props.states?.find((entry) => entry.field === name) ?? null;
+}
+
+const button = computed(() => props.saveLabel ?? 'Save');
+
+/** What the box shows: what was typed; else, for an unmasked field, the saved value; else nothing. */
+function boxValue(name: string): string {
+  const typed = values.value[name];
+  if (typeof typed === 'string') return typed;
+  if (typed === null) return '';
+  return isUnmasked(props.shape.secrets[name]) ? stateOf(name)?.value ?? '' : '';
+}
+
 /**
- * EACH SECRET KEY'S STATE ON THE HOST, by the key as typed: asked a moment after typing stops, once
- * per key. A failed ask shows nothing rather than a guess.
+ * Typing into a secret's box. A masked box emptied again changes nothing. An unmasked box set back
+ * to its saved value changes nothing; one emptied clears the saved value, as Clear does.
  */
-const keyStates = ref<Record<string, SecretKeyState>>({});
-let keyTimer: ReturnType<typeof setTimeout> | undefined;
+function typeSecret(name: string, typed: string) {
+  const { [name]: _, ...rest } = values.value;
+  const saved = stateOf(name);
 
-function checkKeys() {
-  clearTimeout(keyTimer);
-  const check = props.checkKey;
-  if (!check) return;
+  if (isUnmasked(props.shape.secrets[name]) && saved?.source === 'member') {
+    if (typed === (saved.value ?? '')) values.value = rest;
+    else values.value = { ...rest, [name]: typed === '' ? null : typed };
+    return;
+  }
 
-  keyTimer = setTimeout(() => {
-    for (const key of new Set(Object.values(secrets.value).map((value) => value.trim()))) {
-      if (key === '' || keyStates.value[key]) continue;
-      check(key).then(
-        (state) => (keyStates.value = { ...keyStates.value, [key]: state }),
-        () => undefined,
-      );
-    }
-  }, 250);
+  values.value = typed === '' ? rest : { ...rest, [name]: typed };
 }
 
-/** Values typed, and clears asked for, by key name: written by the dialog's button (`saveKeys`). */
-const pending = ref<PendingKeyValues>({});
-
-function typedValue(key: string): string {
-  const entry = pending.value[key];
-  return entry && !isClear(entry) ? entry.value : '';
+/** Clear asks for the member's own value to be removed on the button; Keep takes that back. */
+function toggleClear(name: string) {
+  const { [name]: entry, ...rest } = values.value;
+  values.value = entry === null ? rest : { ...rest, [name]: null };
 }
 
-function typeValue(key: string, value: string) {
-  pending.value = { ...pending.value, [key]: { value } };
+/** Whether the member has its own value for the field now: what Clear removes. */
+const clearable = (name: string) => stateOf(name)?.source === 'member';
+
+/** The one line under a secret: what waits for the button, else where the value stands now. */
+function secretSaying(name: string): string {
+  const typed = values.value[name];
+  if (typed === null) return `Cleared when you press ${button.value}.`;
+  if (typeof typed === 'string' && typed !== '') return `Saved when you press ${button.value}.`;
+
+  const state = stateOf(name);
+  if (state && !state.needed) return 'Not needed with these settings.';
+  if (state?.set) return secretSetWords(state);
+  return 'Not set.';
 }
 
-function toggleClear(key: string) {
-  const { [key]: entry, ...rest } = pending.value;
-  pending.value = isClear(entry) ? rest : { ...rest, [key]: { clear: true } };
-}
-
-/**
- * Writes what was typed into the key fields, each answered by the Host's state of the key; the
- * dialog calls it on its button before it saves the settings, and a refusal (a sentence naming the
- * key, never the value) stops the save.
- */
-async function saveKeys(): Promise<void> {
-  await writeKeyValues(pending.value, (state) => {
-    const { [state.key]: _, ...rest } = pending.value;
-    pending.value = rest;
-    keyStates.value = { ...keyStates.value, [state.key]: state };
-  });
-}
-
-defineExpose({ saveKeys });
-
-/** What is said under a key: what waits for the button, else the Host's state of it. */
-function keySaying(state: SecretKeyState, required: boolean): string {
-  const entry = pending.value[state.key];
-  const button = props.saveLabel ?? 'Save';
-  if (isClear(entry)) return `Cleared when you press ${button}.`;
-  if (entry && entry.value !== '') return `Saved when you press ${button}.`;
-  return secretKeySentence(state, required, button);
-}
-
-function valueHelp(key: string): string {
-  return `The value is sent to the Host when you press ${props.saveLabel ?? 'Save'} and is never shown again. It can also be set with ${productCli} secret set ${key}, then ${productCli} up.`;
-}
-
-function keyState(field: string | number): SecretKeyState | null {
-  const key = (secrets.value[field] ?? '').trim();
-  return key === '' ? null : keyStates.value[key] ?? null;
-}
-
-watch(secrets, checkKeys, { immediate: true });
-onBeforeUnmount(() => clearTimeout(keyTimer));
-
-/** The essential settings, then (after the secrets and slots) the advanced ones, each in the manifest's order. */
-const essential = computed(() => Object.keys(props.shape.config).filter((name) => !props.shape.config[name]!.advanced));
-const advancedNames = computed(() => Object.keys(props.shape.config).filter((name) => props.shape.config[name]!.advanced));
-const fieldOrder = computed(() => [...essential.value, ...advancedNames.value]);
-const advancedCount = computed(() => advancedNames.value.length);
-const advancedShown = ref(false);
-/** Open when a person opened it, or when an advanced setting needs fixing. */
-const advancedOpen = computed(
-  () =>
-    advancedShown.value
-    || fieldOrder.value.some((name) => props.shape.config[name]!.advanced && (missing.value.includes(name) || bounds.value[name])),
-);
-
-/** A setting's explanation, and its number bounds, for its info icon. */
-function helpFor(field: PluginConfigField): string {
-  return [field.description, fieldBoundsHint(field)].filter((part) => part).join(' ');
+/** Whether the line under a secret is a warning: nothing set and nothing typed. */
+function secretUnset(name: string): boolean {
+  const typed = values.value[name];
+  if (typeof typed === 'string' && typed !== '') return false;
+  const state = stateOf(name);
+  if (state && !state.needed) return false;
+  return typed === null || !state?.set;
 }
 
 /**
- * THE FORM'S ROWS, IN THE ORDER A PERSON READS THEM: the everyday settings, the secrets, the
- * connection slots, then the advanced settings behind their one toggle - so nothing an everyday
- * person must fill (a key) sits under Advanced.
+ * THE FORM'S ROWS, IN THE MANIFEST'S ORDER: every setting, then the secrets, then the connection
+ * slots - all on the one screen. The manifest's `advanced` mark is accepted and ignored: a setting a
+ * person needs is never behind a toggle.
  */
 type Row =
   | { kind: 'config'; name: string }
   | { kind: 'secret'; name: string }
-  | { kind: 'slots' }
-  | { kind: 'advanced' };
+  | { kind: 'slots' };
 
 const rows = computed<Row[]>(() => [
-  ...essential.value.map((name): Row => ({ kind: 'config', name })),
+  ...Object.keys(props.shape.config).map((name): Row => ({ kind: 'config', name })),
   ...Object.keys(props.shape.secrets).map((name): Row => ({ kind: 'secret', name })),
   ...(hasSlots(props.shape) ? [{ kind: 'slots' } as Row] : []),
-  ...(advancedCount.value > 0 ? [{ kind: 'advanced' } as Row] : []),
-  ...(advancedOpen.value ? advancedNames.value.map((name): Row => ({ kind: 'config', name })) : []),
 ]);
+
+/** What a setting or secret is called on the form: the manifest's label, else its name in words. */
+function labelOf(name: string): string {
+  const declared = props.shape.config[name] ?? props.shape.secrets[name];
+  return declared ? fieldLabel(name, declared) : fieldWords(name);
+}
 
 const rowKey = (row: Row) => ('name' in row ? `${row.kind}-${row.name}` : row.kind);
 
@@ -229,54 +211,32 @@ function text(name: string): string {
   const value = config.value[name];
   return typeof value === 'string' ? value : '';
 }
-
-function secretHint(description: string | null | undefined, required: boolean) {
-  const where = props.checkKey ? 'the value is set in the field under it' : 'the value is set with secret set';
-  return `${description ? description + ' ' : ''}The name of the key, never its value: ${where}.${required ? '' : ' Optional.'}`;
-}
 </script>
 
 <template>
   <div class="plugin-settings q-gutter-sm" data-plugin-settings>
     <template v-for="row in rows" :key="rowKey(row)">
-      <!-- ADVANCED SETTINGS, the ones most people never change (`"advanced": true` in the
-           manifest), behind one toggle after everything else. It opens by itself when one of them
-           needs fixing, so a problem is never hidden. -->
-      <div v-if="row.kind === 'advanced'">
-        <q-btn
-          flat
-          dense
-          no-caps
-          align="left"
-          class="plugin-settings-advanced"
-          :icon="advancedOpen ? 'keyboard_arrow_up' : 'keyboard_arrow_down'"
-          :label="`Advanced settings (${advancedCount})`"
-          data-advanced-toggle
-          @click="advancedShown = !advancedShown"
-        />
-      </div>
-
+      <!-- A SETTING: its label, its value (the default as an empty box's placeholder), and one line
+           with what a person must see now - Required, a number's bounds - and Reset to default. No info icon and no
+           Default line: the plugin's documentation explains its settings. -->
       <div
-        v-else-if="row.kind === 'config'"
+        v-if="row.kind === 'config'"
         class="plugin-setting"
         :data-setting="row.name"
-        :data-advanced="shape.config[row.name]!.advanced ? '' : undefined"
       >
         <div v-if="shape.config[row.name]!.type === 'bool'" class="row items-center no-wrap q-gutter-x-xs">
           <q-toggle
             :model-value="config[row.name] === true"
             dense
-            :label="row.name"
+            :label="labelOf(row.name)"
             @update:model-value="(value: boolean) => set(row.name, value)"
           />
-          <FieldHelp :text="helpFor(shape.config[row.name]!)" />
         </div>
 
         <ChipListInput
           v-else-if="shape.config[row.name]!.type === 'list'"
           :model-value="listOf(row.name)"
-          :label="row.name"
-          :hint="helpFor(shape.config[row.name]!)"
+          :label="labelOf(row.name)"
           :options="shape.config[row.name]!.enum && shape.config[row.name]!.enum!.length > 0 ? shape.config[row.name]!.enum : null"
           @update:model-value="(value: string[]) => set(row.name, value)"
         />
@@ -287,12 +247,10 @@ function secretHint(description: string | null | undefined, required: boolean) {
           :options="shape.config[row.name]!.enum!"
           outlined
           dense
-          :label="row.name"
+          :label="labelOf(row.name)"
           :error="missing.includes(row.name) ? true : undefined"
           @update:model-value="(value: string) => set(row.name, value)"
-        >
-          <template #append><FieldHelp :text="helpFor(shape.config[row.name]!)" /></template>
-        </q-select>
+        />
 
         <q-input
           v-else
@@ -300,19 +258,18 @@ function secretHint(description: string | null | undefined, required: boolean) {
           outlined
           dense
           :type="shape.config[row.name]!.type === 'number' ? 'number' : 'text'"
-          :label="row.name"
+          :label="labelOf(row.name)"
+          :placeholder="placeholderOf(shape.config[row.name]!)"
+          stack-label
           :error="missing.includes(row.name) || bounds[row.name] ? true : undefined"
           :error-message="bounds[row.name] ?? ''"
           :data-out-of-range="bounds[row.name] ? '' : undefined"
           @update:model-value="(value) => set(row.name, value === null ? '' : String(value))"
-        >
-          <template #append><FieldHelp :text="helpFor(shape.config[row.name]!)" /></template>
-        </q-input>
+        />
 
         <div class="plugin-setting-marks text-caption os-text-muted row items-center q-gutter-x-sm">
-          <span v-if="defaultLabel(shape.config[row.name]!)" data-default>{{ defaultLabel(shape.config[row.name]!) }}</span>
           <span v-if="shape.config[row.name]!.required" class="text-weight-medium" data-required>Required</span>
-          <span v-if="setByPerson(shape.config[row.name]!)" class="text-weight-medium" data-person-only>Set by a person only</span>
+          <span v-if="fieldBoundsHint(shape.config[row.name]!)" data-bounds>{{ fieldBoundsHint(shape.config[row.name]!) }}</span>
           <q-space />
           <q-btn
             flat
@@ -320,60 +277,57 @@ function secretHint(description: string | null | undefined, required: boolean) {
             no-caps
             size="sm"
             label="Reset to default"
-            :aria-label="`Reset ${row.name} to default`"
+            :aria-label="`Reset ${labelOf(row.name)} to default`"
             :disable="isDefault(shape.config[row.name]!, config[row.name])"
             @click="reset(row.name)"
           />
         </div>
       </div>
 
-      <!-- A SECRET: the key name it is bound to, then (once the Host has said what it holds) the
-           key's write-only value field, then one line saying where the key stands, as every
-           setting has its line - with Clear for a key set from the screen, where Reset is. -->
-      <div v-else-if="row.kind === 'secret'" class="plugin-setting" :data-secret-setting="row.name">
+      <!-- A SECRET: one box for the member's own value - a password box that starts empty for a
+           masked field, a text box showing the saved value for an unmasked one - then one line
+           saying where it stands, with Clear where Reset sits on a setting. No key name. -->
+      <div
+        v-else-if="row.kind === 'secret'"
+        class="plugin-setting"
+        :data-secret-setting="row.name"
+        :data-masked="isUnmasked(shape.secrets[row.name]) ? 'false' : 'true'"
+      >
         <q-input
-          :model-value="secrets[row.name] ?? ''"
+          :model-value="boxValue(row.name)"
           outlined
           dense
-          :label="`Secret ${row.name}: key name`"
+          :type="isUnmasked(shape.secrets[row.name]) ? 'text' : 'password'"
+          :label="labelOf(row.name)"
+          :placeholder="!isUnmasked(shape.secrets[row.name]) && stateOf(row.name)?.set ? 'Saved, never shown: type a new value to replace it' : undefined"
+          :stack-label="!isUnmasked(shape.secrets[row.name]) && stateOf(row.name)?.set ? true : undefined"
           :error="missing.includes(row.name) ? true : undefined"
-          autocomplete="off"
+          :disable="values[row.name] === null"
+          :autocomplete="isUnmasked(shape.secrets[row.name]) ? 'off' : 'new-password'"
           spellcheck="false"
-          @update:model-value="(value) => (secrets = { ...secrets, [row.name]: value === null ? '' : String(value) })"
-        >
-          <template #append>
-            <FieldHelp :text="secretHint(shape.secrets[row.name]!.description, shape.secrets[row.name]!.required)" />
-          </template>
-        </q-input>
-        <template v-if="keyState(row.name)">
-          <SecretKeyField
-            class="q-mt-sm"
-            :state="keyState(row.name)!"
-            :help="valueHelp(keyState(row.name)!.key)"
-            :clearing="isClear(pending[keyState(row.name)!.key])"
-            :model-value="typedValue(keyState(row.name)!.key)"
-            @update:model-value="(value: string) => typeValue(keyState(row.name)!.key, value)"
+          data-secret-value-input
+          @update:model-value="(value) => typeSecret(row.name, value === null ? '' : String(value))"
+        />
+        <div class="plugin-setting-marks text-caption row items-center no-wrap q-gutter-x-sm">
+          <span
+            :class="secretUnset(row.name) ? 'text-warning' : 'os-text-muted'"
+            :data-secret-state="stateOf(row.name)?.set ? 'set' : 'unset'"
+            :data-secret-field="row.name"
+          >{{ secretSaying(row.name) }}</span>
+          <span v-if="shape.secrets[row.name]!.required" class="text-weight-medium" data-required>Required</span>
+          <q-space />
+          <q-btn
+            v-if="clearable(row.name)"
+            flat
+            dense
+            no-caps
+            size="sm"
+            :label="values[row.name] === null ? 'Keep' : 'Clear'"
+            :aria-label="`${values[row.name] === null ? 'Keep' : 'Clear'} ${labelOf(row.name)}`"
+            data-secret-value-clear
+            @click="toggleClear(row.name)"
           />
-          <div class="plugin-setting-marks text-caption row items-center no-wrap q-gutter-x-sm">
-            <span
-              :class="keyState(row.name)!.set || pending[keyState(row.name)!.key] ? 'os-text-muted' : 'text-warning'"
-              :data-secret-key-state="keyState(row.name)!.set ? 'set' : 'unset'"
-              :data-secret-field="row.name"
-            >{{ keySaying(keyState(row.name)!, shape.secrets[row.name]!.required) }}</span>
-            <q-space />
-            <q-btn
-              v-if="keyState(row.name)!.source === 'stored'"
-              flat
-              dense
-              no-caps
-              size="sm"
-              :label="isClear(pending[keyState(row.name)!.key]) ? 'Keep' : 'Clear'"
-              :aria-label="`${isClear(pending[keyState(row.name)!.key]) ? 'Keep' : 'Clear'} ${keyState(row.name)!.key}`"
-              data-secret-value-clear
-              @click="toggleClear(keyState(row.name)!.key)"
-            />
-          </div>
-        </template>
+        </div>
       </div>
 
       <!-- CONNECTION SLOTS: one picker each, listing connections of an allowed provider. The member
@@ -408,8 +362,8 @@ function secretHint(description: string | null | undefined, required: boolean) {
         :label="showJson ? 'Hide JSON' : 'As JSON'"
         @click="showJson = !showJson"
       />
-      <!-- READ-ONLY, and exactly what will be stored: only fields that differ from their default,
-           and secrets as key names. For checking, never for editing. -->
+      <!-- READ-ONLY, and exactly what is stored: only fields that differ from their default, and
+           any key binding by name - the one place a key name shows. Never a value. -->
       <pre v-if="showJson" class="plugin-settings-json mono" data-settings-json>{{ json }}</pre>
     </div>
   </div>

@@ -2,7 +2,7 @@
 import FieldHelp from './FieldHelp.vue';
 import { computed, ref, watch } from 'vue';
 import { useQuasar, type QForm } from 'quasar';
-import { addMember, getSecretKey, listCatalog, listPlugins } from '../api/client';
+import { addMember, listCatalog, listPlugins } from '../api/client';
 import { agentsForMode, type Agent, type InstalledPlugin } from '../api/types';
 import { allowedAgentOptions, allowlistIncludes, normalizeAllowlist } from '../lib/memberAllowlist';
 import { installStatus, installationFor } from '../lib/agentInstall';
@@ -15,10 +15,14 @@ import {
   initialSecrets,
   missingRequired,
   outOfRange,
+  secretValuesBody,
+  secretsSet,
   settingsBody,
   type PluginFieldValues,
+  type SecretValues,
 } from '../lib/pluginSettings';
 import { initialBindings } from '../lib/connections';
+import PluginAbout from './PluginAbout.vue';
 import PluginSettingsForm from './PluginSettingsForm.vue';
 import { MemberInstructionsHint, MemberInstructionsLabel } from '../lib/memberInstructions';
 
@@ -40,9 +44,10 @@ import { MemberInstructionsHint, MemberInstructionsLabel } from '../lib/memberIn
  * so the field is not offered for one and nothing is sent.
  *
  * INSTALLED PLUGINS ARE OFFERED BESIDE THE PRESETS, by their `plugin:<id>` reference, from
- * `GET /api/plugins`. Choosing one shows its manifest's config fields as inputs and its secrets BY
- * NAME: what a person types for a secret is the LOGICAL KEY set with `secret set`, never a value, and
- * no route ever answers one. The hire goes through the same route as an Agent's. A person may name
+ * `GET /api/plugins`. Choosing one shows the first paragraph of its description with a link to its
+ * Documentation, then its manifest's settings as inputs and one box per secret for the new member's
+ * OWN value, sent with the hire as `secretValues`: no other member shares it, and no key name is
+ * asked for. The hire goes through the same route as an Agent's. A person may name
  * any installed plugin, as they may name any preset; the team's allowlist bounds machine callers.
  */
 const emit = defineEmits<{ added: [] }>();
@@ -117,20 +122,23 @@ function optionLabel(option: string) {
   return entry ? `${entry.name} (plugin)` : option;
 }
 
-/** The chosen plugin's config values and secret keys, reset to its manifest whenever the choice changes. */
+/** The chosen plugin's config values and secret values, reset to its manifest whenever the choice changes. */
 const pluginConfig = ref<PluginFieldValues>({});
+/** No key binding at hire: the member's values are its own. Kept for the form's "As JSON". */
 const pluginSecrets = ref<Record<string, string>>({});
+const pluginValues = ref<SecretValues>({});
 /** Slot -> connection id, for a plugin that declares connection slots. */
 const pluginConnections = ref<Record<string, string>>({});
 
 watch(plugin, (chosen) => {
   pluginConfig.value = chosen ? initialConfig(chosen) : {};
   pluginSecrets.value = chosen ? initialSecrets(chosen) : {};
+  pluginValues.value = {};
   pluginConnections.value = chosen ? initialBindings(chosen.connections) : {};
 });
 
 const pluginMissing = computed(() =>
-  plugin.value ? missingRequired(plugin.value, pluginConfig.value, pluginSecrets.value) : [],
+  plugin.value ? missingRequired(plugin.value, pluginConfig.value, secretsSet(plugin.value, undefined, pluginValues.value)) : [],
 );
 /** Number fields outside their manifest bounds: held like a missing required field; the Host refuses them too. */
 const pluginOutOfRange = computed(() =>
@@ -227,8 +235,6 @@ const nameTaken = computed(
 );
 
 const form = ref<QForm | null>(null);
-/** The plugin's settings form: Add member writes the key values typed there first (`saveKeys`). */
-const settingsForm = ref<{ saveKeys: () => Promise<void> } | null>(null);
 const onEnter = submitOnEnter(() => form.value, () => valid.value && !busy.value);
 
 async function submit() {
@@ -240,20 +246,19 @@ async function submit() {
   refusedName.value = name.value.trim();
 
   try {
-    // THE KEY VALUES TYPED ON THE FORM FIRST: a refusal names the key and nothing is hired.
-    if (plugin.value) await settingsForm.value?.saveKeys();
-
+    // THE SECRET VALUES RIDE THE HIRE: kept with the member in one transaction, so a value the
+    // Host refuses (named by field, never repeated) makes no member.
+    const typed = plugin.value ? secretValuesBody(pluginValues.value) : undefined;
     const created = plugin.value
-      ? await addMember(
-          props.team,
-          name.value.trim(),
-          agent.value!,
-          settingsBody(plugin.value, pluginConfig.value, pluginSecrets.value, pluginConnections.value),
-        )
+      ? await addMember(props.team, name.value.trim(), agent.value!, {
+          ...settingsBody(plugin.value, pluginConfig.value, pluginSecrets.value, pluginConnections.value),
+          ...(typed ? { secretValues: typed } : {}),
+        })
       : await addMember(props.team, name.value.trim(), agent.value!, undefined, instructions.value.trim() || undefined);
 
     name.value = '';
     instructions.value = '';
+    pluginValues.value = {};
     open.value = false;
 
     // Handle unresolvedAgents if present
@@ -346,20 +351,19 @@ async function submit() {
           </span>
         </div>
 
-        <!-- THE CHOSEN PLUGIN'S MANIFEST, AS INPUTS: the same editor Member settings shows after
-             hire. Config fields by type; secrets by NAME, each asking for the logical key a person
-             set with `secret set`. No value is ever shown, because no route carries one. -->
+        <!-- THE CHOSEN PLUGIN: what it is, with its Documentation, then its manifest as inputs - the
+             same editor Member settings shows after hire. One box per secret for this member's own
+             value, sent with the hire. -->
         <div v-if="plugin" class="plugin-hire q-gutter-sm" data-plugin-hire>
-          <div class="text-caption os-text-muted">{{ plugin.description }}</div>
+          <PluginAbout :description="plugin.description" :url="plugin.marketplaceUrl ?? null" />
 
           <PluginSettingsForm
-            ref="settingsForm"
             v-model:config="pluginConfig"
             v-model:secrets="pluginSecrets"
+            v-model:values="pluginValues"
             v-model:connections="pluginConnections"
             :shape="plugin"
             :plugin="plugin.id"
-            :check-key="getSecretKey"
             save-label="Add member"
           />
         </div>

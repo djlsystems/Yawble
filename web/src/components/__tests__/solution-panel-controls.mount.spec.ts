@@ -282,14 +282,32 @@ describe('the control panel: Controls', () => {
     expect(html.indexOf('data-listed-settings')).toBeLessThan(html.indexOf('data-all-settings'));
   });
 
-  it('lists every setting under All settings, the person-only one included', async () => {
+  it('lists every setting under All settings, the person-only one included, and a secret as a value box with no key name', async () => {
     await controls();
     await click('[data-all-settings] .q-item');
 
     const all = bodyFind('[data-all-settings-member="scout"]')!;
     expect(all.querySelector('[data-setting="keywords"]')).not.toBeNull();
-    const region = all.querySelector('[data-setting="region"]')!;
-    expect(region.querySelector('[data-person-only]')?.textContent).toContain('Set by a person only');
+    expect(all.querySelector('[data-setting="region"]')).not.toBeNull();
+    expect(all.querySelector('[data-setting="region"] [data-person-only]')).toBeNull();
+    expect(all.querySelector('[data-secret-setting="apiKey"] input')?.getAttribute('type')).toBe('password');
+    expect(all.textContent).not.toContain('JOB_BOARD_KEY');
+  });
+
+  it("sends a secret value typed under All settings with that member's Save, and no key bindings", async () => {
+    await controls();
+    await click('[data-all-settings] .q-item');
+
+    const input = bodyFind('[data-all-settings-member="scout"] [data-secret-setting="apiKey"] input') as HTMLInputElement;
+    input.value = 'board-key-2';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    await click('[data-all-settings-member="scout"] [data-settings-save]');
+
+    const put = sent(calls, 'PUT', '/api/teams/job-tracker/members/scout/plugin-settings');
+    expect(put.map((call) => call.body)).toEqual([
+      { config: { keywords: ['dotnet'], region: 'EU' }, connections: {}, secretValues: { apiKey: 'board-key-2' } },
+    ]);
   });
 
   it("saves a listed setting with the member's whole body, so nothing else it holds is lost", async () => {
@@ -303,7 +321,7 @@ describe('the control panel: Controls', () => {
 
     const put = sent(calls, 'PUT', '/api/teams/job-tracker/members/scout/plugin-settings');
     expect(put.map((call) => call.body)).toEqual([
-      { config: { region: 'EU' }, secrets: { apiKey: 'JOB_BOARD_KEY' }, connections: {} },
+      { config: { region: 'EU' }, connections: {} },
     ]);
     expect(bodyFind('[data-settings-saved]')).not.toBeNull();
   });

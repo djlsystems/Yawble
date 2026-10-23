@@ -2,11 +2,10 @@
 import FieldHelp from './FieldHelp.vue';
 import ChipListInput from './ChipListInput.vue';
 import ConnectionPicker from './ConnectionPicker.vue';
+import MemberSettingsDialog from './MemberSettingsDialog.vue';
 import SetupSteps from './SetupSteps.vue';
 import SolutionPlanReview from './SolutionPlanReview.vue';
 import SlotReconnect from './SlotReconnect.vue';
-import SecretKeyField from './SecretKeyField.vue';
-import { hasPendingKeys, writeKeyValues, type PendingKeyValues } from '../lib/secretKeyValues';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import {
   checkSolution,
@@ -29,9 +28,9 @@ import {
   type ConnectionProvider,
   type ConnectionSlot,
   type InstalledSolution,
-  type SecretKeyState,
   type SolutionCheck,
   type SolutionConnectionOption,
+  type ContainerSnapshot,
   type SolutionDiff,
   type SolutionDiffSection,
   type SolutionInstallResult,
@@ -47,7 +46,7 @@ import {
 } from '../api/types';
 import { firstProblem, teamLabel } from '../lib/rules';
 import { named, providerName } from '../lib/connections';
-import { secretKeySetWords } from '../lib/pluginSettings';
+import { fieldLabel } from '../lib/pluginSettings';
 import { refusedReconnect } from '../lib/slotBinding';
 import {
   SolutionStepTitles,
@@ -61,7 +60,6 @@ import {
   refusalLine,
   firstRunLine,
   secretNeeded,
-  secretSetWith,
   secretSentence,
   secretState,
   settingDefaultWords,
@@ -93,11 +91,13 @@ import { useConsoleStore } from '../stores/console';
  *    how the Manager is woken and its daily cap. An update marks what is new or changed, shows each
  *    changed value as it was beside what it becomes, and lists what goes.
  * 3. **Your part**: what only a person provides - person-only settings, connections, documents -
- *    and the secrets the package binds, by key name: set on the Host, not set (its source fails
- *    until it is, and how to set it), or not needed for a source left off. Each needed key offers
- *    its write-only value field (`SecretKeyField`) first and the CLI's `secret set` second, as the
- *    result's list of keys still unset does. What is typed is written when Install (or Update) is
- *    pressed, before the install; in the result's list, by its Save keys. Never a value.
+ *    and each plugin member's secret fields, by the field's label and the member, never a key name:
+ *    set, not set (its source fails until it is), or not needed for a source left off. Each needed
+ *    field offers one box for that member's OWN value (a password box, or a text box for a field
+ *    the manifest declares `masked: false`); what is typed rides Install (or Update) as
+ *    `secretValues` and is that member's alone. The result lists each needed field still unset
+ *    (`unsetFields`) under its member, whose "Settings" opens that member's settings - the
+ *    container it was hired as (`container`), never the package's member name.
  *    Skipping a required one is allowed; the team then shows as blocked, naming it, until provided.
  * 4. **Install**: nothing is written before the person presses Install. A failed step is named by
  *    its number and title, and the Host undid everything. After a success the chosen documents are
@@ -585,8 +585,8 @@ const connectionOptions = computed(() =>
   })),
 );
 
-// SECRETS, BY KEY NAME: whether each is needed follows the setting it depends on as the person
-// chooses it here (or as the update keeps it).
+// SECRETS, BY MEMBER AND FIELD: whether each is needed follows the setting it depends on as the
+// person chooses it here (or as the update keeps it).
 const secrets = computed<SolutionSecret[]>(() => okPreview.value?.secrets ?? []);
 
 function secretSettingValue(secret: SolutionSecret): unknown {
@@ -596,60 +596,32 @@ function secretSettingValue(secret: SolutionSecret): unknown {
   return keptEntry ? keptEntry.value : values.value[key];
 }
 
-/**
- * EACH KEY AS THE HOST ANSWERED A WRITE FROM ITS FIELD HERE, by key: it outranks what the preview
- * said, so a key set in this wizard reads as set - by whom and when - with no new preview.
- */
-const writtenKeys = ref<Record<string, SecretKeyState>>({});
+/** The values typed for each member's secret fields, by `member/field`: sent with Install or Update. */
+const secretTyped = ref<Record<string, string>>({});
+const secretRowKey = (secret: { member: string; field: string }) => `${secret.member}/${secret.field}`;
 
-function keyWritten(state: SecretKeyState) {
-  writtenKeys.value = { ...writtenKeys.value, [state.key]: state };
-  const { [state.key]: _, ...rest } = pendingKeys.value;
-  pendingKeys.value = rest;
+function typeSecret(secret: SolutionSecret, value: string) {
+  const { [secretRowKey(secret)]: _, ...rest } = secretTyped.value;
+  secretTyped.value = value === '' ? rest : { ...rest, [secretRowKey(secret)]: value };
 }
 
-/** Values typed into the key fields, by key: written by Install (or Update), or by Save keys after. */
-const pendingKeys = ref<PendingKeyValues>({});
-const keysProblem = ref('');
-const savingKeys = ref(false);
-
-function typedKey(key: string): string {
-  const entry = pendingKeys.value[key];
-  return entry && 'value' in entry ? entry.value : '';
-}
-
-function typeKey(key: string, value: string) {
-  pendingKeys.value = { ...pendingKeys.value, [key]: { value } };
-}
-
-/** The result's list of keys still unset: what was typed there, written by its own Save keys. */
-async function saveKeys() {
-  if (savingKeys.value || !hasPendingKeys(pendingKeys.value)) return;
-  savingKeys.value = true;
-  keysProblem.value = '';
-  try {
-    await writeKeyValues(pendingKeys.value, keyWritten);
-  } catch (cause) {
-    keysProblem.value = cause instanceof Error ? cause.message : String(cause);
-  } finally {
-    savingKeys.value = false;
+/** `secretValues` for the install: package member -> field -> value, for each field still needed. */
+function secretValuesBody(): Record<string, Record<string, string>> | undefined {
+  const body: Record<string, Record<string, string>> = {};
+  for (const row of secretRows.value) {
+    const typed = secretTyped.value[secretRowKey(row.secret)];
+    if (row.state !== 'not-needed' && typed) (body[row.secret.member] ??= {})[row.secret.field] = typed;
   }
-}
-
-/** What a key's field starts from: the Host's answer to a write here, else the preview's word. */
-function keyFieldState(key: string, set: boolean): SecretKeyState {
-  return writtenKeys.value[key] ?? { key, set, refusal: null, setWith: '', setBy: null, setAt: null, source: null };
+  return Object.keys(body).length > 0 ? body : undefined;
 }
 
 const secretRows = computed(() =>
   secrets.value.map((secret) => {
-    const written = writtenKeys.value[secret.key];
-    const current = written ? { ...secret, set: written.set } : secret;
-    const state = secretState(current, secretNeeded(current, secretSettingValue(current)));
-    const sentence = state === 'set' && written
-      ? secretKeySetWords(written)
-      : secretSentence(current, state, updatePreview.value ? 'Update' : 'Install');
-    return { secret: current, state, sentence };
+    const state = secretState(secret, secretNeeded(secret, secretSettingValue(secret)));
+    const typed = (secretTyped.value[secretRowKey(secret)] ?? '') !== '';
+    const button = updatePreview.value ? 'Update' : 'Install';
+    const sentence = typed && state !== 'not-needed' ? `Saved for this member when you press ${button}.` : secretSentence(secret, state, button);
+    return { secret, state, sentence, label: fieldLabel(secret.field, secret), masked: secret.masked !== false };
   }),
 );
 
@@ -754,17 +726,40 @@ const missingProblem = ref('');
 
 const succeeded = computed(() => (result.value && result.value.ok ? result.value : null));
 
-/** The keys the result says are still to set, each with the way to set it - and, once set from its
- *  field here, what the Host says of it now. */
-const unsetSecrets = computed(() => {
-  const done = succeeded.value;
-  if (!done) return [];
-  const unset = done.unset ?? [];
-  return unset.map((key) => {
-    const written = writtenKeys.value[key];
-    return { key, setWith: secretSetWith(key, 'Save keys'), now: written?.set ? secretKeySetWords(written) : null };
-  });
+/** Each needed secret field the result says has no value yet, by its label, grouped under its member. */
+const unsetMembers = computed(() => {
+  const groups: { member: string; container: string; labels: { field: string; label: string }[] }[] = [];
+  for (const entry of succeeded.value?.unsetFields ?? []) {
+    const container = entry.container || entry.member;
+    let group = groups.find((candidate) => candidate.container === container);
+    if (!group) groups.push((group = { member: entry.member, container, labels: [] }));
+    group.labels.push({ field: entry.field, label: fieldLabel(entry.field, entry) });
+  }
+  return groups;
 });
+
+/** Member settings for an unset field's member: the board's snapshot of the container it was hired as. */
+const settingsSnapshot = ref<ContainerSnapshot | null>(null);
+const settingsOpen = ref(false);
+const settingsProblem = ref('');
+
+async function openMemberSettings(container: string) {
+  const team = succeeded.value?.team;
+  if (!team) return;
+  settingsProblem.value = '';
+  const find = () => board.teams.find((candidate) => candidate.id === team)?.containers.find((member) => member.id === container);
+  let snapshot = find();
+  if (!snapshot) {
+    await board.refreshForTeamCreated(team);
+    snapshot = find();
+  }
+  if (!snapshot) {
+    settingsProblem.value = `${container} is not on the board yet, so its settings cannot be opened here.`;
+    return;
+  }
+  settingsSnapshot.value = snapshot;
+  settingsOpen.value = true;
+}
 /** Each schedule's first run, as the result names it: ran now, or when it first runs. */
 const firstRuns = computed(() =>
   (succeeded.value?.firstRuns ?? []).map((run) => ({ trigger: run.trigger, ranNow: run.ranNow, line: firstRunLine(run) + theirClock(run) })),
@@ -817,18 +812,20 @@ async function install() {
   const settings = settingsBody(askedSettings.value, values.value);
   const connections = connectionsBody();
 
+  // THE SECRET VALUES TYPED IN YOUR PART RIDE THE INSTALL: each becomes that member's own value at
+  // its hire, in the same transaction; a refusal names the member and field, never the value.
+  const secretValues = secretValuesBody();
+
   try {
-    // THE KEYS TYPED IN YOUR PART FIRST, so the install's list of keys still unset is true. A
-    // refusal names the key, never its value, and nothing is installed.
-    await writeKeyValues(pendingKeys.value, keyWritten);
     result.value =
       updatePreview.value
-        ? await updateSolution({ folder: props.folder, team: updatePreview.value.team, settings, connections })
+        ? await updateSolution({ folder: props.folder, team: updatePreview.value.team, settings, connections, ...(secretValues ? { secretValues } : {}) })
         : await installSolution({
             folder: props.folder,
             teamName: teamName.value.trim(),
             settings,
             connections,
+            ...(secretValues ? { secretValues } : {}),
           });
   } catch (cause) {
     // A 409 (the name was taken meanwhile) or a 400 (the folder refused): the Host's sentence.
@@ -1206,29 +1203,34 @@ function next() {
             <section v-if="secretRows.length > 0" data-secrets>
               <div class="solution-heading">Secrets</div>
               <div class="text-caption os-text-muted q-mb-xs">
-                The install binds each by its key name. A value typed in a key's field goes to the Host
-                and is never shown again.
+                Each value is that member's own: no other member uses it. A secret value is never shown again.
               </div>
               <div
                 v-for="row in secretRows"
-                :key="`${row.secret.member}/${row.secret.field}`"
+                :key="secretRowKey(row.secret)"
                 class="q-mb-sm"
-                :data-secret="row.secret.key"
+                :data-secret="secretRowKey(row.secret)"
                 :data-secret-state="row.state"
               >
-                <span class="text-weight-medium mono">{{ row.secret.key }}</span>
+                <span class="text-weight-medium">{{ row.label }}</span>
                 <span class="os-text-muted"> · {{ row.secret.member }}</span>
                 <span v-if="row.state === 'set'" class="text-positive"> · set</span>
                 <span v-else-if="row.state === 'unset'" class="text-warning"> · not set</span>
                 <span v-else class="os-text-muted"> · not needed</span>
-                <div class="text-caption os-text-muted">{{ row.secret.description }}</div>
                 <div class="text-caption" data-secret-sentence>{{ row.sentence }}</div>
-                <SecretKeyField
+                <q-input
                   v-if="row.state !== 'not-needed'"
                   class="q-mt-xs"
-                  :state="keyFieldState(row.secret.key, row.secret.set)"
-                  :model-value="typedKey(row.secret.key)"
-                  @update:model-value="(value: string) => typeKey(row.secret.key, value)"
+                  :model-value="secretTyped[secretRowKey(row.secret)] ?? ''"
+                  outlined
+                  dense
+                  :type="row.masked ? 'password' : 'text'"
+                  :label="row.label"
+                  :autocomplete="row.masked ? 'new-password' : 'off'"
+                  spellcheck="false"
+                  :data-masked="row.masked ? 'true' : 'false'"
+                  data-secret-value-input
+                  @update:model-value="(value) => typeSecret(row.secret, value === null ? '' : String(value))"
                 />
               </div>
             </section>
@@ -1307,38 +1309,25 @@ function next() {
                 </div>
               </div>
 
-              <div v-if="unsetSecrets.length > 0" class="q-mt-sm" data-unset-secrets>
-                <div>These keys are still not set on the Host. Each one's source fails until it is set:</div>
-                <div
-                  v-for="secret in unsetSecrets"
-                  :key="secret.key"
-                  class="q-mb-xs"
-                  :data-unset-secret="secret.key"
-                  :data-unset-secret-now="secret.now ? 'set' : undefined"
-                >
-                  <span class="mono">{{ secret.key }}</span> - {{ secret.now ?? `To set it, ${secret.setWith}.` }}
-                  <SecretKeyField
-                    v-if="!secret.now"
-                    class="q-mt-xs"
-                    :state="keyFieldState(secret.key, false)"
-                    :model-value="typedKey(secret.key)"
-                    @update:model-value="(value: string) => typeKey(secret.key, value)"
-                  />
-                </div>
-                <div class="row items-center q-gutter-sm q-mt-xs">
+              <div v-if="unsetMembers.length > 0" class="q-mt-sm" data-unset-secrets>
+                <div>These are still not set. Each one's source fails until it is; set it in the member's settings:</div>
+                <div v-for="group in unsetMembers" :key="group.container" class="q-mb-xs" :data-unset-member="group.container">
+                  <span class="text-weight-medium">{{ group.member }}</span>:
+                  <span v-for="(secret, index) in group.labels" :key="secret.field" :data-unset-secret="`${group.member}/${secret.field}`"
+                    >{{ index > 0 ? ', ' : '' }}{{ secret.label }}</span
+                  >
                   <q-btn
-                    unelevated
+                    flat
                     dense
                     no-caps
                     color="primary"
-                    label="Save keys"
-                    :disable="!hasPendingKeys(pendingKeys)"
-                    :loading="savingKeys"
-                    data-save-keys
-                    @click="saveKeys"
+                    label="Settings"
+                    class="q-ml-sm"
+                    :data-unset-settings="group.container"
+                    @click="openMemberSettings(group.container)"
                   />
-                  <span v-if="keysProblem" class="text-caption text-negative" data-secret-value-problem>{{ keysProblem }}</span>
                 </div>
+                <div v-if="settingsProblem" class="text-negative" data-unset-settings-problem>{{ settingsProblem }}</div>
               </div>
             </template>
           </div>
@@ -1379,6 +1368,8 @@ function next() {
       </q-card-actions>
     </q-card>
   </q-dialog>
+
+  <MemberSettingsDialog v-if="settingsSnapshot" v-model="settingsOpen" :snapshot="settingsSnapshot" />
 </template>
 
 <style scoped>

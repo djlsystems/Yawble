@@ -26,15 +26,17 @@ import {
   type SolutionPanelRun,
   type SolutionPanelTrigger,
   type SolutionUninstallResult,
+  type PluginSecretState,
 } from '../api/types';
 import {
   initialConfig,
   initialSecrets,
   outOfRange,
   refusedOutOfRange,
-  settingsBody,
+  saveBody,
   type PluginFieldValues,
   type PluginSettingsShape,
+  type SecretValues,
 } from '../lib/pluginSettings';
 import { capWords, missingLine } from '../lib/solutions';
 import { localInstants } from '../lib/localTime';
@@ -322,7 +324,11 @@ function togglePaused() {
 interface MemberSettings {
   shape: PluginSettingsShape;
   config: PluginFieldValues;
+  /** Key bindings as stored, for "As JSON" only: Save sends none, which keeps them. */
   secrets: Record<string, string>;
+  /** Each secret field's state as read, and the member's own values typed or cleared since. */
+  states: PluginSecretState[];
+  values: SecretValues;
   connections: Record<string, string>;
   /** The plugin it runs, for a slot's Connect; empty when its settings could not be read. */
   plugin: string;
@@ -353,6 +359,8 @@ async function loadSettings(read: SolutionPanel) {
           shape: { ...shape, stored: { config, outOfRange: stored.outOfRange ?? {} } },
           config,
           secrets: initialSecrets(shape, stored.secrets),
+          states: stored.secretStates ?? [],
+          values: {},
           connections: { ...(stored.connections ?? {}) },
           plugin: stored.plugin,
           problem: '',
@@ -363,6 +371,8 @@ async function loadSettings(read: SolutionPanel) {
           shape: { config: {}, secrets: {}, connections: {} },
           config: {},
           secrets: {},
+          states: [],
+          values: {},
           connections: {},
           plugin: '',
           problem: `The settings could not be read: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -429,9 +439,14 @@ async function saveSettings(member: string) {
   }
   busy.value = `settings:${member}`;
   try {
-    const answer = await savePluginSettings(props.team, member, settingsBody(state.shape, state.config, state.secrets, state.connections));
+    // The member's own secret values ride the Save; no `secrets`, so the Host keeps the key bindings.
+    const answer = await savePluginSettings(props.team, member, saveBody(state.shape, state.config, state.values, state.connections));
     state.saved = true;
-    if (answer) state.shape = { ...state.shape, stored: { config: { ...state.config }, outOfRange: answer.outOfRange ?? {} } };
+    state.values = {};
+    if (answer) {
+      state.shape = { ...state.shape, stored: { config: { ...state.config }, outOfRange: answer.outOfRange ?? {} } };
+      if (answer.secretStates) state.states = answer.secretStates;
+    }
     const read = await solutionPanel(props.team);
     panel.value = { ...read };
   } catch (cause) {
@@ -846,7 +861,7 @@ function closeUninstall() {
 
           <q-expansion-item dense dense-toggle label="All settings" class="q-mb-md" data-all-settings header-class="solution-heading-toggle">
             <div class="text-caption os-text-muted q-mb-sm">
-              Every setting of every plugin member, including those only a person may set. Secrets are key names, never values.
+              Every setting of every plugin member, including those only a person may set. Each member's secrets are its own.
             </div>
             <div v-if="pluginMembers.length === 0" class="os-body os-text-muted">This solution has no plugin members.</div>
             <div v-for="member in pluginMembers" :key="`all-${member.member}`" class="q-mb-md" :data-all-settings-member="member.member">
@@ -855,8 +870,10 @@ function closeUninstall() {
                 <PluginSettingsForm
                   v-model:config="settings[member.member]!.config"
                   v-model:secrets="settings[member.member]!.secrets"
+                  v-model:values="settings[member.member]!.values"
                   v-model:connections="settings[member.member]!.connections"
                   :shape="settings[member.member]!.shape"
+                  :states="settings[member.member]!.states"
                   :plugin="settings[member.member]!.plugin || undefined"
                   :bind-slot="(slot: string, id: string) => bindConnected(member.member, slot, id)"
                 />

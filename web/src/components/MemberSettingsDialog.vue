@@ -4,7 +4,7 @@ import { memberStateOf } from '../lib/memberState';
 import FieldHelp from './FieldHelp.vue';
 import { computed, ref, watch } from 'vue';
 import { useQuasar, type QForm } from 'quasar';
-import { getMember, getPluginSettings, getSecretKey, listCatalog, savePluginSettings, updateMember } from '../api/client';
+import { getMember, getPluginSettings, listCatalog, savePluginSettings, updateMember } from '../api/client';
 import {
   agentsForMode,
   isManagerContainer,
@@ -12,6 +12,7 @@ import {
   type ContainerSnapshot,
   type MemberDetail,
   type PluginHire,
+  type PluginSecretState,
 } from '../api/types';
 import { allowedAgentOptions, allowlistIncludes, normalizeAllowlist } from '../lib/memberAllowlist';
 import { installStatus, installationFor } from '../lib/agentInstall';
@@ -31,12 +32,16 @@ import {
   initialSecrets,
   missingRequired,
   refusedOutOfRange,
+  saveBody,
+  secretsSet,
   settingsBody,
   type PluginFieldValues,
   type PluginSettingsShape,
+  type SecretValues,
 } from '../lib/pluginSettings';
 import { bindingsBody, initialBindings } from '../lib/connections';
 import { bindSlot } from '../lib/slotBinding';
+import PluginAbout from './PluginAbout.vue';
 import PluginSettingsForm from './PluginSettingsForm.vue';
 
 
@@ -53,8 +58,12 @@ import PluginSettingsForm from './PluginSettingsForm.vue';
  *
  * A PLUGIN MEMBER HAS A SETTINGS SECTION instead: the same manifest-shaped editor Add member shows,
  * filled with what is stored for it, saved through `PUT .../plugin-settings` - a person's route,
- * validated by the Host exactly as a hire is, taking effect on the member's next run. Its secrets are
- * key names; no value is ever read or shown.
+ * validated by the Host exactly as a hire is, taking effect on the member's next run. Each secret is
+ * one box for the member's own value (`secretStates` says whether it is set, by whom and when; a
+ * masked value is never read); what is typed or cleared rides the same Save as `secretValues`. A
+ * key binding is kept as stored and shown only in "As JSON". Above the settings sits what the plugin
+ * is, as Add member shows it: its description's first paragraph and a Documentation link when the
+ * catalog lists it (`marketplaceUrl`), else the whole description.
  *
  * The Agent IS editable. The preset is resolved by name on every invocation, so a repoint is a
  * single write and takes effect on the member’s next wake, with no Host restart. The manager can be repointed like any other member.
@@ -148,6 +157,12 @@ const isPlugin = computed(() => props.snapshot.kind === 'plugin');
 const pluginShape = ref<PluginSettingsShape | null>(null);
 const pluginConfig = ref<PluginFieldValues>({});
 const pluginSecrets = ref<Record<string, string>>({});
+/** Each secret field's state as read, and the values typed or cleared since. */
+const pluginStates = ref<PluginSecretState[]>([]);
+const pluginValues = ref<SecretValues>({});
+/** The plugin's marketplace page, or null when the catalog does not list it. */
+const pluginUrl = ref<string | null>(null);
+const pluginDescription = ref<string | null>(null);
 /** Slot -> connection id; saved with the settings, which replace the bindings whole. */
 const pluginConnections = ref<Record<string, string>>({});
 const pluginSaved = ref('');
@@ -168,7 +183,9 @@ async function bindPluginSlot(slot: string, connectionId: string) {
 }
 
 const pluginMissing = computed(() =>
-  pluginShape.value ? missingRequired(pluginShape.value, pluginConfig.value, pluginSecrets.value) : [],
+  pluginShape.value
+    ? missingRequired(pluginShape.value, pluginConfig.value, secretsSet(pluginShape.value, pluginStates.value, pluginValues.value))
+    : [],
 );
 /**
  * Number fields outside their manifest bounds: held like a missing required field; the Host refuses
@@ -182,8 +199,11 @@ const pluginBody = computed(() =>
   pluginShape.value ? settingsBody(pluginShape.value, pluginConfig.value, pluginSecrets.value, pluginConnections.value) : null,
 );
 
+/** Moved settings, or a secret value typed or cleared: either is a Save of the settings. */
 const pluginChanged = computed(
-  () => pluginBody.value !== null && JSON.stringify(pluginBody.value) !== pluginSaved.value,
+  () =>
+    pluginBody.value !== null
+    && (JSON.stringify(pluginBody.value) !== pluginSaved.value || saveBody(pluginShape.value!, {}, pluginValues.value).secretValues !== undefined),
 );
 
 async function loadPluginSettings() {
@@ -205,6 +225,10 @@ async function loadPluginSettings() {
     pluginConfig.value = initialConfig(shape, settings.config);
     pluginSecrets.value = initialSecrets(shape, settings.secrets);
     pluginConnections.value = initialBindings(shape.connections, settings.connections ?? {});
+    pluginStates.value = settings.secretStates ?? [];
+    pluginValues.value = {};
+    pluginUrl.value = settings.marketplaceUrl ?? null;
+    pluginDescription.value = settings.description ?? null;
     pluginShape.value = { ...shape, stored: { config: pluginConfig.value, outOfRange: settings.outOfRange ?? {} } };
     pluginSaved.value = JSON.stringify(settingsBody(shape, pluginConfig.value, pluginSecrets.value, pluginConnections.value));
   } catch (cause) {
@@ -285,8 +309,6 @@ const nameTaken = computed(
 );
 
 const form = ref<QForm | null>(null);
-/** The plugin's settings form: Save writes the key values typed there first (`saveKeys`). */
-const settingsForm = ref<{ saveKeys: () => Promise<void> } | null>(null);
 const onEnter = submitOnEnter(() => form.value, () => valid.value && !busy.value);
 
 async function submit() {
@@ -301,16 +323,20 @@ async function submit() {
   const renamedTo = name.value.trim() !== props.snapshot.name ? name.value.trim() : null;
 
   try {
-    // THE KEY VALUES TYPED ON THE FORM FIRST: a refusal names the key and nothing else is saved.
-    if (pluginShape.value) await settingsForm.value?.saveKeys();
-
-    // THE SETTINGS NEXT, and only when they moved: the Host validates them as it does a hire, and
-    // a refusal naming a field should leave the rest of the dialog unsaved too.
+    // THE SETTINGS FIRST, and only when they or a secret value moved: one request, so the values
+    // and the settings land together or not at all. No `secrets`: the Host keeps the key bindings.
+    // A refusal naming a field leaves the rest of the dialog unsaved too.
     if (pluginShape.value && pluginChanged.value && pluginBody.value) {
-      const answer = await savePluginSettings(props.snapshot.team, props.snapshot.id, pluginBody.value);
+      const answer = await savePluginSettings(
+        props.snapshot.team,
+        props.snapshot.id,
+        saveBody(pluginShape.value, pluginConfig.value, pluginValues.value, pluginConnections.value),
+      );
       pluginSaved.value = JSON.stringify(pluginBody.value);
+      pluginValues.value = {};
       if (answer) {
         pluginShape.value = { ...pluginShape.value, stored: { config: pluginConfig.value, outOfRange: answer.outOfRange ?? {} } };
+        if (answer.secretStates) pluginStates.value = answer.secretStates;
       }
     }
 
@@ -465,19 +491,20 @@ async function submit() {
         </div>
 
         <!-- A PLUGIN MEMBER'S SETTINGS: the manifest-shaped editor Add member shows, filled with
-             what is stored. Secrets are key names only. -->
+             what is stored, one box per secret for this member's own value. -->
         <div v-if="isPlugin" class="q-gutter-sm" data-member-plugin-settings>
           <div class="text-subtitle2">Settings</div>
+          <PluginAbout v-if="pluginShape" :description="pluginDescription" :url="pluginUrl" />
           <PluginSettingsForm
             v-if="pluginShape"
-            ref="settingsForm"
             v-model:config="pluginConfig"
             v-model:secrets="pluginSecrets"
+            v-model:values="pluginValues"
             v-model:connections="pluginConnections"
             :shape="pluginShape"
+            :states="pluginStates"
             :plugin="pluginId"
             :bind-slot="bindPluginSlot"
-            :check-key="getSecretKey"
           />
           <div v-else-if="pluginProblem" class="text-negative text-caption">{{ pluginProblem }}</div>
           <div v-else class="text-caption os-text-muted">Reading its settings…</div>

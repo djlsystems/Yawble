@@ -1451,14 +1451,19 @@ export const addMember = (
     headers: { 'content-type': 'application/json' },
 
     // An agent member may carry its OWN INSTRUCTIONS as `systemPrompt`, added after the built-in
-    // Member prompt; blank or absent sends none. A plugin has no prompt: its config and secret KEYS
-    // ride the same hire instead, and the server checks them against the manifest and refuses both
-    // on an Agent.
+    // Member prompt; blank or absent sends none. A plugin has no prompt: its config, its secret
+    // values typed on the form (`secretValues`, the member's own) and any key bindings ride the same
+    // hire instead, and the server checks them against the manifest and refuses them on an Agent.
     body: JSON.stringify(
       plugin
-        ? plugin.connections
-          ? { name, agent, config: plugin.config, secrets: plugin.secrets, connections: plugin.connections }
-          : { name, agent, config: plugin.config, secrets: plugin.secrets }
+        ? {
+            name,
+            agent,
+            config: plugin.config,
+            secrets: plugin.secrets ?? {},
+            ...(plugin.connections ? { connections: plugin.connections } : {}),
+            ...(plugin.secretValues && Object.keys(plugin.secretValues).length > 0 ? { secretValues: plugin.secretValues } : {}),
+          }
         : systemPrompt
           ? { name, agent, systemPrompt }
           : { name, agent },
@@ -1530,13 +1535,15 @@ export const clearSecretKey = (key: string) =>
 const pluginSettingsPath = (team: string, member: string) =>
   `/api/teams/${encodeURIComponent(team)}/members/${encodeURIComponent(member)}/plugin-settings`
 
-/** A plugin member's stored settings and secret KEY bindings - never a secret's value. */
+/** A plugin member's stored settings, each secret field's state (never a masked value) and its key bindings. */
 export const getPluginSettings = (team: string, member: string) =>
   json<PluginMemberSettings>(pluginSettingsPath(team, member))
 
 /**
- * Replaces a plugin member's settings. Validated by the Host exactly as a hire is, refused naming
- * the field; takes effect on the member's next run. A person's: a Manager is refused. Answers the
+ * Replaces a plugin member's settings, and sets or clears the member's own secret values named in
+ * `secretValues`, in one transaction. A body with no `secrets` keeps the stored key bindings.
+ * Validated by the Host exactly as a hire is, refused naming the field; takes effect on the member's
+ * next run. A person's: a Manager is refused. Answers the
  * settings as now stored (with `outOfRange`), or undefined when the answer carries no body.
  */
 export const savePluginSettings = (team: string, member: string, settings: PluginHire) =>
