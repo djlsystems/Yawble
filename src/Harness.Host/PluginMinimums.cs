@@ -32,8 +32,8 @@ public sealed class PluginMinimums(ITeamSolutionStore solutions, TeamRegistry te
     /// <summary>
     /// The sentence refusing to make <paramref name="id"/> <paramref name="version"/> active over
     /// <paramref name="active"/> (null when none is), naming each installed team that needs newer:
-    /// "mail 2.2.0 is older than what Mail 2.3.1 on team Inbox needs (2.3.0 or newer)." Null when
-    /// nothing needs newer, or the version is newer than the active one.
+    /// "sample-echo 0.1.0 is older than what Fixture Pack 1.0.0 on team Inbox needs (0.2.0 or
+    /// newer)." Null when nothing needs newer, or the version is newer than the active one.
     /// </summary>
     public async Task<string?> RefusalAsync(string id, string version, string? active, CancellationToken ct = default)
     {

@@ -30,8 +30,9 @@ signed; a person reviews what they install.
 
 ## Install a plugin
 
-There are two install paths. Both check the same rules, lay the plugin out the same way, set the
-same owner and modes, switch `active` to it and print the Host's verdict:
+There are two install paths. Both end in the Host's one installer (`PluginInstaller`), so both check
+the same rules, lay the plugin out the same way, set the same owner and modes, switch `active` to it
+and print the Host's verdict:
 
 - **From your computer.** `yawble plugin install <folder>` copies a version you built on the machine
   that runs the instance into it (below).
@@ -52,17 +53,32 @@ The command:
 
 1. **Checks the manifest before anything is copied.** It uses the Host's rules (below) and names the
    field that is wrong. It also checks that the executable and every skill are files inside the
-   folder after symlinks are resolved. It does not require an execute bit, because step 3 sets one.
-2. **Copies the folder into the running instance** at `/data/plugins/<id>/<version>/`, through the
-   instance's engine (Podman or Docker, `podman cp` / `docker cp`). It creates `/data/plugins` if it
-   is missing. An existing `<id>/<version>` is refused unless you pass `--force`.
-3. **Sets ownership and modes, whatever they were on your computer.** Everything becomes
-   `harness:agent`, with directories `0750`, files `0640`, and the manifest's executable (and every
-   `platforms` entry) `0750`. A folder copied from Windows has no execute bit, and without this step
-   the Host refuses the plugin with "chmod +x it".
-4. **Writes `active`** naming that version, so installing a new version switches to it. Earlier version
-   directories are kept, for going back: `yawble plugin install <older folder> --force`.
-5. **Has the Host rescan, and prints the Host's verdict**: installed, or refused with its reason (exit 1).
+   folder after symlinks are resolved. It does not require an execute bit: the Host sets one. An
+   existing `<id>/<version>` is refused here unless you pass `--force`.
+2. **Copies the folder into the running instance's staging folder**, `/data/plugins/.incoming/<id>-<version>/`,
+   through the instance's engine (Podman or Docker, `podman cp` / `docker cp`), and gives the copy
+   `harness:agent` with directories `0750`, files `0640` and the manifest's executable `0750`, so the
+   Host can read it. The folder is dot-named, so the catalog passes over it.
+3. **Has the running Host install it from there**, through the same request file as
+   `--from-instance` ([below](#install-from-a-folder-inside-the-instance)), so every check, the layout
+   at `/data/plugins/<id>/<version>/`, the owner and modes (a folder copied from Windows has no
+   execute bit, and the Host's installer sets it), `active` and the rescan are the Host's
+   `PluginInstaller`'s, and so is the rule below on what an installed solution team needs.
+   Earlier version directories are kept, for going back: `yawble plugin install <older folder> --force`.
+4. **Prints the Host's verdict**: installed, or refused with its reason (exit 1). The staging folder
+   is removed either way.
+
+**A solution team is never left on a plugin older than it needs.** Each team installed from a
+solution package needs, for each plugin the package ships, a minimum version: the package's
+`pluginMinimums` entry for it, else the version it ships ([solutions.md](solutions.md#solutionjson)).
+Making a version active - installing it, Replace (`--force`), or installing a kept older version
+again - through the web app, `yawble plugin install` or `--from-instance`, is refused (409) while it
+is older than any installed solution team's minimum for that plugin, with one sentence naming each
+team, its package and version, and the minimum: "job-board 0.0.9 is older than what Job Tracker 1.0.0 on
+team Job Tracker needs (0.1.0 or newer)." Nothing changes. A package that was uninstalled (its team and sites
+kept) needs nothing, and a version newer than the active one is never refused by this rule.
+Marketplace → Installed lists, under each plugin, the solution teams that use it and the minimum
+each needs (`solutions` on `GET /api/plugins`).
 
 `yawble plugin list` shows every version on the volume, whether it is active, and what the Host made
 of it. `yawble plugin remove <id> [--version <v>]` removes a plugin or one kept version. It asks first
@@ -116,8 +132,10 @@ The route and the request file share one implementation (`PluginInstaller`), so 
    - a folder already under `/data/plugins`;
    - a manifest the catalog would refuse, by the catalog's own check: its rules, the executable and
      every skill inside the folder after symlinks, and every runtime it `requires`;
-   - an id and version already installed, unless replacing was asked for (409).
-2. **The layout, ownership and modes** of the CLI's install: `/data/plugins/<id>/<version>/`, owned by
+   - an id and version already installed, unless replacing was asked for (409);
+   - a version older than an installed solution team needs (409), naming each team, its package and
+     version, and the minimum - whether it is new, a Replace or a kept version installed again.
+2. **The layout, ownership and modes**: `/data/plugins/<id>/<version>/`, owned by
    the Host user with the `agent` group, directories `0750`, files `0640`, the manifest's executable and
    every `platforms` entry `0750`. The copy is staged beside the target and moved into place.
 3. **`active`** names the new version, and the catalog is rescanned.
@@ -133,7 +151,7 @@ yawble plugin install --from-instance /data/teams/<team>/repos/<repo>/<tree>/bui
 ```
 
 The CLI prints the Host's verdict and exits 1 on a refusal (400), an installed version without
-`--force` (409), or `installed: false`. If the Host does not answer within 60 seconds, it says so
+`--force` or one older than an installed solution team needs (409), or `installed: false`. If the Host does not answer within 60 seconds, it says so
 and withdraws the request, so a later Host never carries it out.
 
 The layout the Host reads, whatever put it there:
@@ -1109,12 +1127,20 @@ plugin declares none.
   and `MemberReportsTests` (the shared report path).
 - **The install.** `cli/internal/cli/plugin_test.go` pins each `yawble plugin` command and each
   refusal against a scripted engine, including an install from a folder whose launcher has no execute
-  bit. It also runs the container scripts under a real `sh`: the modes, a setgid parent, `active`, and
-  a kept version. `plugin install --from-instance` is pinned against a faked request/report exchange:
+  bit, copied to the staging folder and installed by the Host's request file
+  (`TestPluginInstallCopiesToTheStageAndTheHostInstallsItAndPrintsItsVerdict`), and the Host's
+  refusal of a version older than a solution team needs (`TestPluginInstallPrintsTheHostsRefusalAndExitsOne`).
+  It also runs the container scripts under a real `sh`: the stage's modes under a setgid parent, an
+  installed version refused without `--force`, and the layout `plugin list` reads. `plugin install --from-instance` is pinned against a faked request/report exchange:
   the request it writes (`replace` only with `--force`), no copy or rescan of its own, the Host's
   verdict for a good folder, a refused manifest, an installed version without and with `--force`,
   and a folder outside the data root, and a request the Host never answers being withdrawn; its
-  request, report and withdraw scripts run under `sh`. `PluginInstallRouteTests` pins the Host's side.
+  request, report and withdraw scripts run under `sh`. `PluginInstallRouteTests` pins the Host's side,
+  a copy staged under `.incoming` included (`A_copy_the_operator_cli_staged_under_incoming_installs_through_the_installer`).
+- **The minimum a solution team needs.** `PluginMinimumTests.A_plugin_version_older_than_an_installed_solution_team_needs_is_refused_naming_the_team_and_a_newer_one_is_not`
+  (a new install, a Replace and a kept version through the route and the request file, each refused
+  with nothing changed; a newer version accepted; accepted again once the package is uninstalled) and
+  `PluginMinimumTests.Without_plugin_minimums_the_team_needs_the_shipped_version_and_an_update_rewrites_what_it_needs`.
   `cli/internal/plugin` pins the manifest rules against the Go template and the test plugins under
   `tests/Fixtures/Packages`, the `connections` slot rules included.
 - **A site's files folder.** `PluginSiteFilesTests` pins `siteFiles`: own team only, every site, with or without `reads`,

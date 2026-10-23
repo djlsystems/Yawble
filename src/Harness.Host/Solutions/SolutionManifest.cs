@@ -198,7 +198,7 @@ public sealed record SolutionManifest(
 
         if (map.ValueKind != JsonValueKind.Object)
         {
-            read.Refuse("pluginMinimums", "`pluginMinimums` must be an object of plugin id to version, such as { \"mail\": \"2.3.0\" }.");
+            read.Refuse("pluginMinimums", "`pluginMinimums` must be an object of plugin id to version, such as { \"<plugin id>\": \"1.2.0\" }.");
             return minimums;
         }
 

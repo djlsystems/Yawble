@@ -50,7 +50,7 @@ export function pluginUsedByWords(members: { team: string; member: string }[]): 
 
 /**
  * An installed solution team's need of a plugin, as a person reads it on the Installed tab:
- * "Inbox (Mail 2.3.1) needs 2.3.0 or newer". An older version is refused while it is installed.
+ * "Inbox (Fixture Mail 1.0.0) needs 2.3.0 or newer". An older version is refused while it is installed.
  */
 export function pluginNeedWords(need: { teamName: string; package: string; version: string; minimum: string }): string {
   return `${need.teamName} (${need.package} ${need.version}) needs ${need.minimum} or newer`;
