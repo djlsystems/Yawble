@@ -40,6 +40,7 @@ import {
   redirectUriFor,
   redirectUriWarning,
   reconnectTenant,
+  refusalWords,
   rememberReconnect,
   statusLabel,
   takeGuidedConnect,
@@ -177,8 +178,8 @@ const noticeText = computed(() => {
   if (!notice) return '';
   if (notice.outcome === 'refused') {
     const from = connections.value.find((candidate) => candidate.id === reconnectedFrom.value);
-    if (reconnectedFrom.value !== null) return `${from ? from.name : 'The connection'} was not reconnected: ${notice.reason}`;
-    return `The account was not connected: ${notice.reason}`;
+    if (reconnectedFrom.value !== null) return `${from ? from.name : 'The connection'} was not reconnected: ${refusalWords(notice.reason)}`;
+    return `The account was not connected: ${refusalWords(notice.reason)}`;
   }
 
   const connection = notice.id ? connections.value.find((candidate) => candidate.id === notice.id) : undefined;
@@ -396,7 +397,7 @@ async function readCode(connection: Connection) {
   const made = read.connection ?? connection;
   codeNotice.value = read.state === 'done'
     ? { refused: false, text: `Reconnected ${made.name} (${made.account}).` }
-    : { refused: true, text: `${connection.name} was not reconnected: ${read.sentence}` };
+    : { refused: true, text: `${connection.name} was not reconnected: ${refusalWords(read.sentence)}` };
   reconnecting.value = null;
   await load();
 }
@@ -628,6 +629,7 @@ async function removeProvider(provider: ConnectionProvider) {
           v-if="noticeText"
           dense
           :class="noticeRefused ? 'os-bg-tint-error text-negative q-mb-md' : 'os-bg-tint-ok text-positive q-mb-md'"
+          style="white-space: pre-line"
           data-connections-notice
         >
           {{ noticeText }}

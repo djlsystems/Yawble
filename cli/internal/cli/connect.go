@@ -229,6 +229,15 @@ func connect(ctx context.Context, out io.Writer, deps Deps, provider string, sco
 		}
 	}
 	code, err := awaitCode(ctx, listener, flow.State, wait)
+	var refused *providerRefused
+	if errors.As(err, &refused) {
+		// The Host says what the refusal means; the provider's own words only when it cannot be asked.
+		told, tellErr := exchangeWithin(ctx, e, connectRequest{Op: "complete", State: flow.State, Error: refused.Reason, ErrorDescription: refused.Description}, completeWait)
+		if tellErr == nil && !told.ok() {
+			return told.refusal(err.Error())
+		}
+		return err
+	}
 	if err != nil {
 		return err
 	}

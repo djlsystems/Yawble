@@ -1238,6 +1238,10 @@ public sealed partial class ConnectionsTests : IAsyncLifetime
         public readonly List<string> RefreshUrls = [];
         public readonly List<string> Revoked = [];
 
+        /// <summary>An Entra code the authorization code exchange is refused with, in Microsoft's own
+        /// words around it; null exchanges <see cref="GoodCode"/>.</summary>
+        public string? ExchangeRefusal;
+
         public int DeviceInterval = 5;
         public int DeviceExpiresIn = 900;
         public readonly List<string> DeviceCodes = [];
@@ -1277,6 +1281,8 @@ public sealed partial class ConnectionsTests : IAsyncLifetime
                         return new OAuthTokenAnswer(access, refresh, 3600, null, IdToken(), null, null, false);
                     case "pending":
                         return new OAuthTokenAnswer(null, null, null, null, null, "authorization_pending", "The user has not yet finished.", true);
+                    case var entra when entra.StartsWith("AADSTS", StringComparison.Ordinal):
+                        return Refusal(entra);
                     default:
                         return new OAuthTokenAnswer(null, null, null, null, null, answer, $"The provider said {answer}.", true);
                 }
@@ -1288,6 +1294,7 @@ public sealed partial class ConnectionsTests : IAsyncLifetime
         {
             lock (_lock)
             {
+                if (ExchangeRefusal is { } entra) return Task.FromResult(Refusal(entra));
                 if (code != GoodCode) return Task.FromResult(new OAuthTokenAnswer(null, null, null, null, null, "invalid_grant", "Bad code.", true));
 
                 Exchanges.Add((clientSecret, redirectUri, codeVerifier));
@@ -1324,6 +1331,10 @@ public sealed partial class ConnectionsTests : IAsyncLifetime
 
         public Task<JsonElement?> UserInfoAsync(OAuthProvider provider, string accessToken, CancellationToken ct) =>
             Task.FromResult<JsonElement?>(null);
+
+        /// <summary>A refusal as Microsoft words one: the code, its own sentence, and trace IDs.</summary>
+        private static OAuthTokenAnswer Refusal(string entra) => new(null, null, null, null, null, "invalid_grant",
+            $"{entra}: The account was refused by the directory. Trace ID: 0000 Correlation ID: 0000 Timestamp: 2026-01-01 00:00:00Z", true);
 
         public Task<string?> RevokeAsync(OAuthProvider provider, string token, CancellationToken ct)
         {

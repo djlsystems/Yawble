@@ -57,6 +57,7 @@ import ConnectionPicker from '../ConnectionPicker.vue';
 import SlotConnect from '../SlotConnect.vue';
 import type { Connection, InstalledPlugin, TeamId } from '../../api/types';
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
+import { ExpiredNotInDirectoryLine, NotInDirectorySentence } from '../../lib/connections';
 import { hostConnection, hostList, hostPlugin, hostProvider, hostSlot } from '../../test/pluginFixtures';
 import { button, settle, type } from '../../test/formProbe';
 
@@ -312,6 +313,40 @@ describe('Reconnect a refused binding offers, for a Microsoft connection', () =>
     expect(bind).toHaveBeenLastCalledWith('conn-ms');
     expect(slot().querySelector('[data-bind-refused]')).toBeNull();
     expect(wrapper.emitted('connected')?.at(-1)).toEqual([outlookFull]);
+
+    wrapper.unmount();
+  });
+});
+
+describe('Reconnect on a Microsoft connection the directory does not know, in the same picker', () => {
+  it('says the not-in-the-directory sentence, never the code or Microsoft\'s own words, and binds nothing', async () => {
+    const wrapper = await reconnectInAddMember();
+
+    getConnectionFlow.mockResolvedValue({
+      state: 'refused',
+      sentence: 'Microsoft refused the sign-in: invalid_grant: AADSTS50034: The user account does not exist in the directory. Trace ID: 0000. Nothing was stored; try again.',
+    });
+    await advance(3_000);
+
+    const shown = slot().querySelector('[data-device-sentence]')!.textContent!.trim();
+    expect(shown).toBe(NotInDirectorySentence);
+    expect(shown).not.toMatch(/AADSTS|invalid_grant|Trace ID/);
+    expect(slot().querySelector('[data-binding-refusal]')?.textContent).toContain(smtp);
+
+    wrapper.unmount();
+  });
+
+  it('says where to name the directory on its own line after a code that ran out', async () => {
+    const wrapper = await reconnectInAddMember();
+
+    const expiry = 'The code expired before the sign-in was finished. Nothing was stored; try again.';
+    getConnectionFlow.mockResolvedValue({ state: 'expired', sentence: `${expiry}\n${ExpiredNotInDirectoryLine}` });
+    await advance(3_000);
+
+    const sentence = slot().querySelector('[data-device-sentence]')!;
+    expect(sentence.textContent!.trim().split('\n')).toEqual([expiry, ExpiredNotInDirectoryLine]);
+    expect(ExpiredNotInDirectoryLine).toContain('username may be incorrect');
+    expect(sentence.classList.contains('code-sign-in-sentence')).toBe(true);
 
     wrapper.unmount();
   });

@@ -437,6 +437,12 @@ public sealed class Connections(
 
         if (providerError is not null)
         {
+            if (ConnectionProviders.NotInDirectory(providerError, providerErrorDescription)
+                && (await ProviderAsync(flow.Provider, ct))?.Kind == ConnectionProviders.Microsoft)
+            {
+                return (null, false, ConnectionProviders.MicrosoftNotInDirectory);
+            }
+
             return (null, false, $"The provider did not grant access ({providerError}{(string.IsNullOrWhiteSpace(providerErrorDescription) ? "" : ": " + providerErrorDescription)}).");
         }
 
@@ -455,6 +461,11 @@ public sealed class Connections(
             : new ConnectionActor(flow.UserId, users is null ? null : (await users.FindByIdAsync(flow.UserId, ct))?.Email));
 
         var answer = await endpoints.ExchangeCodeAsync(provider, await ClientSecretAsync(provider, ct), code, flow.RedirectUri, flow.CodeVerifier, ct);
+        if (!answer.Ok && provider.Kind == ConnectionProviders.Microsoft && ConnectionProviders.NotInDirectory(answer.Error, answer.ErrorDescription))
+        {
+            return (null, false, ConnectionProviders.MicrosoftNotInDirectory);
+        }
+
         if (!answer.Ok) return (null, false, $"{provider.Name} refused the sign-in: {answer.Reason}.");
 
         return await FinishAsync(provider, answer, flow.UserId, flow.Scopes, flow.Name, flow.ReconnectId, flow.Tenant, who, now, ct);
@@ -667,7 +678,7 @@ public sealed class Connections(
 
                 if (clock.GetUtcNow() >= flow.ExpiresAt)
                 {
-                    flow.Settle(Expired, ExpiredSentence);
+                    flow.Settle(Expired, ExpiredSentenceFor(provider));
                     return;
                 }
 
@@ -686,6 +697,12 @@ public sealed class Connections(
                 if (provider.Kind == ConnectionProviders.Microsoft && ConnectionProviders.NeedsAdminApproval(answer.Error, answer.ErrorDescription))
                 {
                     flow.Settle(Refused, ConnectionProviders.MicrosoftAdminApproval);
+                    return;
+                }
+
+                if (provider.Kind == ConnectionProviders.Microsoft && ConnectionProviders.NotInDirectory(answer.Error, answer.ErrorDescription))
+                {
+                    flow.Settle(Refused, ConnectionProviders.MicrosoftNotInDirectory);
                     return;
                 }
 
@@ -722,7 +739,7 @@ public sealed class Connections(
                         interval += SlowDown;
                         continue;
                     case "expired_token" or "code_expired":
-                        flow.Settle(Expired, ExpiredSentence);
+                        flow.Settle(Expired, ExpiredSentenceFor(provider));
                         return;
                     case "access_denied" or "authorization_declined":
                         flow.Settle(Refused, $"The sign-in was declined at {provider.Name}. Nothing was stored; try again.");
@@ -748,7 +765,12 @@ public sealed class Connections(
         }
     }
 
-    private const string ExpiredSentence = "The code expired before the sign-in was finished. Nothing was stored; try again.";
+    public const string ExpiredSentence = "The code expired before the sign-in was finished. Nothing was stored; try again.";
+
+    /// <summary>What an expired code says: for Microsoft, a second line after the sentence, since its own
+    /// page turns away an account that is not in the directory without the Host ever hearing of it.</summary>
+    public static string ExpiredSentenceFor(OAuthProvider provider) =>
+        provider.Kind == ConnectionProviders.Microsoft ? $"{ExpiredSentence}\n{ConnectionProviders.MicrosoftExpiredNotInDirectory}" : ExpiredSentence;
 
     /// <summary>Finished flows go a while after their expiry; nothing reads them later than that.</summary>
     private void Sweep(DateTimeOffset now)

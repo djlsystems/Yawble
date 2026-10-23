@@ -15,7 +15,8 @@ import { countdown, refusalWords } from '../lib/connections';
  * the waiting at the provider. A SECOND CODE - Microsoft finishing a sign-in that names more than one
  * API - is the same flow waiting on a new code: it is shown in place of the first, numbered, with the
  * first said done. When the flow ends, `ended` carries the read; a refused or expired one is said
- * here in the Host's sentence (`refusalWords`). A read that fails is no ending: `problem` carries
+ * here in the Host's sentence (`refusalWords`), line by line: a Microsoft code that ran out says on
+ * a second line where to name the directory. A read that fails is no ending: `problem` carries
  * its sentence, and an empty one once a read succeeds again.
  *
  * A new `code` (Try again) starts over; `reading` false stops the reads (its opener closed). The
@@ -171,11 +172,16 @@ async function copy(value: string) {
       </div>
     </template>
     <div v-else-if="state === 'done'" data-device-sentence>{{ sentence }}</div>
-    <div v-else class="text-negative" data-device-sentence>{{ sentence }}</div>
+    <div v-else class="text-negative code-sign-in-sentence" data-device-sentence>{{ sentence }}</div>
   </div>
 </template>
 
 <style scoped>
+/* The Host's sentence keeps its lines: a Microsoft code that ran out says where to name the directory on the next. */
+.code-sign-in-sentence {
+  white-space: pre-line;
+}
+
 .connect-device-code {
   font-size: 2rem;
   font-weight: 600;

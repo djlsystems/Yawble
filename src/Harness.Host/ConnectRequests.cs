@@ -216,7 +216,8 @@ public sealed class ConnectRequests(Connections connections, string dataRoot, IL
     private async Task<object> CompleteAsync(string nonce, JsonElement root, CancellationToken ct)
     {
         var (connection, _, error) = await connections.CompleteAsync(
-            Text(root, "state"), Text(root, "code"), ConnectionActor.Operator, viaCallback: false, ct: ct);
+            Text(root, "state"), Text(root, "code"), ConnectionActor.Operator, viaCallback: false,
+            Text(root, "error"), Text(root, "errorDescription"), ct);
 
         return error is not null
             ? new { request = nonce, status = 400, error }
