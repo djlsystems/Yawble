@@ -28,8 +28,10 @@ import { currentOrigin, goTo } from '../lib/browserNavigation';
 import { productCli } from '../presentation/product';
 import ConnectDialog from './ConnectDialog.vue';
 import DialogTabs from './DialogTabs.vue';
+import DirectoryField from './DirectoryField.vue';
 import {
   countdown,
+  directoryRefusal,
   mailServerLabel,
   parseScopes,
   permissionsOf,
@@ -37,6 +39,7 @@ import {
   providerName,
   redirectUriFor,
   redirectUriWarning,
+  reconnectTenant,
   rememberReconnect,
   statusLabel,
   takeGuidedConnect,
@@ -60,6 +63,11 @@ import {
  * message saying it worked or what failed. A MICROSOFT connection was made with a code - its app is a
  * public client with no redirect URI, so the browser sign-in would stop at Microsoft - and reconnects
  * with a code too: the Reconnect dialog shows it, reads the flow, and closes on the same message.
+ *
+ * A MICROSOFT CONNECTION'S OWN DIRECTORY (`tenant`) shows on its tile when it has one. Reconnect shows
+ * it in DirectoryField to change or clear: left as it was, nothing is sent and the Host keeps it;
+ * changed, the new one is sent; emptied, `""` clears it. Connect an account offers the same field for
+ * Microsoft. The Host's refusal of a directory is shown at the field.
  *
  * THE DIALOG STAYS OPEN ON A ROUTE CHANGE (`no-route-dismiss`). Quasar closes a dialog whenever the
  * route changes; the Console takes the provider's answer off the address just after opening this
@@ -203,6 +211,10 @@ const connectProvider = ref<string | null>(null);
 const connectScopes = ref('');
 const connectName = ref('');
 const connectProblem = ref('');
+const connectDirectory = ref('');
+const connectDirectoryProblem = ref('');
+
+watch(connectDirectory, () => (connectDirectoryProblem.value = ''));
 
 const chosenProvider = computed(() => providers.value.find((provider) => provider.id === connectProvider.value) ?? null);
 
@@ -218,21 +230,31 @@ function startConnect() {
   connectScopes.value = '';
   connectName.value = '';
   connectProblem.value = '';
+  connectDirectory.value = '';
+  connectDirectoryProblem.value = '';
   connectOpen.value = true;
 }
 
-function connect() {
+async function connect() {
   const provider = chosenProvider.value;
   if (!provider || !provider.configured || leaving.value) return;
 
-  void sendToProvider(
+  const tenant = provider.kind === 'microsoft' ? connectDirectory.value.trim() : '';
+  connectDirectoryProblem.value = '';
+  await sendToProvider(
     {
       provider: provider.id,
       scopes: parseScopes(connectScopes.value),
       name: connectName.value.trim() || null,
+      ...(tenant ? { tenant } : {}),
     },
     connectProblem,
   );
+  // A directory refused is said at its field.
+  if (directoryRefusal(connectProblem.value)) {
+    connectDirectoryProblem.value = connectProblem.value;
+    connectProblem.value = '';
+  }
 }
 
 // --- Reconnect ------------------------------------------------------------------------------------
@@ -242,6 +264,11 @@ const reconnecting = ref<Connection | null>(null);
 const reconnectNeeds = ref<ConnectionNeeds | null>(null);
 const reconnectReading = ref(false);
 const reconnectProblem = ref('');
+/** The connection's directory as shown to change or clear; sent only when it differs. */
+const reconnectDirectory = ref('');
+const reconnectDirectoryProblem = ref('');
+
+watch(reconnectDirectory, () => (reconnectDirectoryProblem.value = ''));
 
 /** What the slots ask that this connection was not granted: Reconnect adds those. */
 const reconnectAdds = computed(() => {
@@ -264,6 +291,8 @@ async function reconnect(connection: Connection) {
   reconnecting.value = connection;
   reconnectNeeds.value = null;
   reconnectProblem.value = '';
+  reconnectDirectory.value = connection.tenant ?? '';
+  reconnectDirectoryProblem.value = '';
   reconnectReading.value = true;
   try {
     reconnectNeeds.value = await getConnectionNeeds(connection.provider);
@@ -321,13 +350,21 @@ watch(reconnecting, (connection) => {
 async function startCode(connection: Connection, scopes: string[]) {
   leaving.value = true;
   reconnectProblem.value = '';
+  reconnectDirectoryProblem.value = '';
   try {
-    reconnectCode.value = await startDeviceConnection({ reconnectId: connection.id, scopes, flow: 'device' });
+    reconnectCode.value = await startDeviceConnection({
+      reconnectId: connection.id,
+      scopes,
+      flow: 'device',
+      ...reconnectTenant(connection, reconnectDirectory.value),
+    });
     codeNow.value = Date.now();
     codeClock = setInterval(() => (codeNow.value = Date.now()), 1000);
     codeTimer = setTimeout(() => void readCode(connection), codeReadEvery);
   } catch (cause) {
-    reconnectProblem.value = cause instanceof Error ? cause.message : String(cause);
+    const text = cause instanceof Error ? cause.message : String(cause);
+    if (directoryRefusal(text)) reconnectDirectoryProblem.value = text;
+    else reconnectProblem.value = text;
   } finally {
     leaving.value = false;
   }
@@ -641,6 +678,9 @@ async function removeProvider(provider: ConnectionProvider) {
                 <span class="os-text-muted" data-connection-provider>{{ nameOf(connection.provider) }}</span>
                 · <span class="mono" data-connection-account>{{ connection.account }}</span>
               </div>
+              <div v-if="connection.tenant" class="conn-tile-line os-text-muted" data-connection-directory>
+                Directory <span class="mono">{{ connection.tenant }}</span>
+              </div>
 
               <div v-if="connection.status !== 'ok'" class="conn-tile-line text-negative" data-connection-reason>
                 <template v-if="isMailbox(connection)">
@@ -887,6 +927,11 @@ async function removeProvider(provider: ConnectionProvider) {
             <li v-for="words in reconnectAddWords" :key="words">{{ words }}</li>
           </ul>
         </template>
+        <DirectoryField
+          v-if="reconnectWithCode && !reconnectCode"
+          v-model="reconnectDirectory"
+          :error="reconnectDirectoryProblem"
+        />
         <template v-if="reconnectCode">
           <div data-reconnect-code>
             Open <a :href="reconnectCode.verificationUri" target="_blank" rel="noopener noreferrer" data-device-link>{{ reconnectCode.verificationUri }}</a>
@@ -967,6 +1012,11 @@ async function removeProvider(provider: ConnectionProvider) {
         >
           <template #append><FieldHelp text="Optional. Defaults to the account's name." /></template>
         </q-input>
+        <DirectoryField
+          v-if="chosenProvider?.kind === 'microsoft'"
+          v-model="connectDirectory"
+          :error="connectDirectoryProblem"
+        />
 
         <div class="connect-redirect" data-redirect-uri-block>
           <div class="text-caption os-text-muted">Redirect URI to register at the provider for this address:</div>

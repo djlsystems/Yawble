@@ -12,13 +12,13 @@ import (
 // connectDevice runs one sign-in with a code: start on the Host, which asks the provider for a code
 // and keeps the provider's device code itself; print the link and the code; read the flow until the
 // Host says it is done, refused or expired. No listener, no browser, no redirect.
-func connectDevice(ctx context.Context, out io.Writer, deps Deps, provider string, scopes []string, name string) error {
+func connectDevice(ctx context.Context, out io.Writer, deps Deps, provider string, scopes []string, name, tenant string) error {
 	e, err := runningEngine(ctx, deps, "connect")
 	if err != nil {
 		return err
 	}
 
-	request := connectRequest{Op: "start", Provider: provider, Scopes: scopes, Flow: "device"}
+	request := connectRequest{Op: "start", Provider: provider, Scopes: scopes, Flow: "device", Tenant: tenant}
 	if name != "" {
 		before, err := listConnections(ctx, e)
 		if err != nil {

@@ -29,6 +29,7 @@ import { currentOrigin, goTo } from '../lib/browserNavigation';
 import { copyText } from '../lib/clipboard';
 import {
   type CallbackOutcome,
+  directoryRefusal,
   googleClientIdProblem,
   guideLink,
   microsoftIdProblem,
@@ -43,6 +44,7 @@ import { awaitProviderReturn, newSigninTag, signinTabAddress } from '../lib/prov
 import { mailboxHint, OutlookHint, setupTime } from '../lib/mailboxHints';
 import MailboxForm from './MailboxForm.vue';
 import CodeSignIn from './CodeSignIn.vue';
+import DirectoryField from './DirectoryField.vue';
 import { letGoSignIns } from '../lib/letGoSignIns';
 
 /**
@@ -63,7 +65,8 @@ import { letGoSignIns } from '../lib/letGoSignIns';
  *    and an optional name for it. For Microsoft, sign-in with a code: the Host asks Microsoft for
  *    one, the person enters it at Microsoft's page in another tab, and this step reads the flow until
  *    it is done and moves on to `result` by itself. Nothing leaves this address, so it works from
- *    localhost, a LAN address or a tunnel alike.
+ *    localhost, a LAN address or a tunnel alike. Microsoft's step has an optional DIRECTORY field
+ *    (DirectoryField), sent as `tenant` when typed; the Host's refusal of it is shown at the field.
  *
  * STARTED FROM A SLOT (`need`): a plugin's connection slot that has nothing suitable bound opens this
  * dialog for that slot alone - its providers only, the scopes of that one slot - and skips the
@@ -185,6 +188,8 @@ watch(open, (showing) => {
   clientSecret.value = '';
   audience.value = 'common';
   tenantId.value = '';
+  directory.value = '';
+  directoryProblem.value = '';
 
   void begin(++opening);
 });
@@ -547,6 +552,13 @@ async function signIn() {
 
 // --- 3. Sign in with a code -----------------------------------------------------------------------
 
+/** The connection's own directory, optional: sent as `tenant` when typed. */
+const directory = ref('');
+/** The Host's refusal of the directory typed, shown at the field. */
+const directoryProblem = ref('');
+
+watch(directory, () => (directoryProblem.value = ''));
+
 /** The code the Host gave; CodeSignIn shows it and reads the flow until it ends. */
 const device = ref<ConnectionDeviceStart | null>(null);
 /** How the flow ended; null while it waits. */
@@ -564,13 +576,20 @@ async function startDevice() {
 
   leaving.value = true;
   problem.value = '';
+  directoryProblem.value = '';
   resumed.value = false;
+  const tenant = directory.value.trim();
   try {
     // A fresh object each time, so Try again starts over even on the same answer.
-    device.value = { ...(await startDeviceConnection({ provider: chosen.id, scopes: chosenScopes.value, flow: 'device' })) };
+    device.value = {
+      ...(await startDeviceConnection({ provider: chosen.id, scopes: chosenScopes.value, flow: 'device', ...(tenant ? { tenant } : {}) })),
+    };
     deviceEnded.value = null;
   } catch (cause) {
-    problem.value = refusalWords(cause instanceof Error ? cause.message : String(cause));
+    const text = cause instanceof Error ? cause.message : String(cause);
+    // A directory refused is said at its field; anything else under the step.
+    if (directoryRefusal(text)) directoryProblem.value = text;
+    else problem.value = refusalWords(text);
   } finally {
     leaving.value = false;
   }
@@ -690,7 +709,7 @@ async function finish() {
 const typed = computed(
   () =>
     (mailboxForm.value?.typed ?? false)
-    || [projectId, clientId, clientSecret, tenantId, resultName].some((field) => field.value.trim() !== ''),
+    || [projectId, clientId, clientSecret, tenantId, directory, resultName].some((field) => field.value.trim() !== ''),
 );
 
 const stepLabels = computed(() => [
@@ -1037,6 +1056,7 @@ const stepLabels = computed(() => [
             When {{ provider.name }} says you can close its page after the first code, come back to this
             window: the second code will be here.
           </div>
+          <DirectoryField v-model="directory" :error="directoryProblem" />
           <div v-if="usesDefault" data-signin-advanced>
             <q-btn
               flat

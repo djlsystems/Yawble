@@ -4,7 +4,9 @@
 // only with a code, so Your part's Reconnect asks the Host for one (`flow: "device"`, the
 // connection's ID, the missing scopes) and shows it in place - no other tab, no trip away - so the
 // person's answers are kept. Once approved the connection is read again and stays the binding, and
-// the warning goes.
+// the warning goes. An INSTALL the Host refuses for those scopes offers the same Reconnect in its
+// banner (SlotReconnect): a Microsoft one shows its code there too, in place, and sends no `tenant`,
+// so the connection keeps its own directory.
 //
 // A FAKE HOST at `fetch`. No provider is called, and every code and address here is a fake one.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -18,7 +20,7 @@ import SolutionWizard from '../SolutionWizard.vue';
 import { goTo } from '../../lib/browserNavigation';
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
 import { button, settle } from '../../test/formProbe';
-import { Folder, fakeHost, hostPlan, reply, sent, wizardRoutes, type Call } from '../../test/solutionFixtures';
+import { Folder, fakeHost, hostPlan, reply, sent, steps, wizardRoutes, type Call } from '../../test/solutionFixtures';
 import { hostConnection, hostProvider } from '../../test/pluginFixtures';
 import type { Connection, ConnectionFlow, SolutionPlan } from '../../api/types';
 
@@ -40,17 +42,30 @@ function microsoftPlan(): SolutionPlan {
   return plan;
 }
 
-const short = hostConnection({ id: 'conn-ms', provider: 'microsoft', name: 'Office', account: 'person@example.test', scopes: ['openid', 'email'] });
+const short = hostConnection({
+  id: 'conn-ms',
+  provider: 'microsoft',
+  name: 'Office',
+  account: 'person@example.test',
+  scopes: ['openid', 'email'],
+  tenant: 'example.onmicrosoft.com',
+});
+
+const installRefusal =
+  "'Scout': Connection 'person@example.test' was not granted the scope `" + send + "` that slot `mail` needs. Press Reconnect to grant it.";
 
 let calls: Call[] = [];
 let listed: Connection[] = [];
 let flowRead: ConnectionFlow = { state: 'waiting', sentence: 'Waiting for you to sign in.' };
+/** The install's answers, in turn; a success once they run out. */
+let installs: Response[] = [];
 
 beforeEach(() => {
   setActivePinia(createPinia());
   calls = [];
   listed = [short];
   flowRead = { state: 'waiting', sentence: 'Waiting for you to sign in.' };
+  installs = [];
   vi.mocked(goTo).mockClear();
   const plan = microsoftPlan();
   vi.stubGlobal(
@@ -58,6 +73,12 @@ beforeEach(() => {
     vi.fn(
       fakeHost(
         [
+          (call) =>
+            call.url === '/api/solutions/install'
+              ? installs.shift() ??
+                reply(200, { ok: true, team: 'job-tracker', teamName: 'Job Tracker', version: '1.1.0', missing: [], steps: steps(8) })
+              : undefined,
+          (call) => (call.url === '/api/teams/job-tracker/solution' ? reply(200, { team: 'job-tracker', missing: [] }) : undefined),
           (call) =>
             call.method === 'GET' && call.url.startsWith('/api/connections/providers')
               ? reply(200, [hostProvider({ id: 'google' }), hostProvider({ id: 'microsoft', configured: true, clientSource: 'default' })])
@@ -153,6 +174,52 @@ describe('Solution wizard - Reconnect on a Microsoft connection', () => {
     expect(bodyFind('[data-step="inputs"]')).not.toBeNull();
     expect(picker(wrapper).props('modelValue')).toBe('conn-ms');
     expect(input().querySelector('[data-binding-refusal]')).toBeNull();
+    expect(goTo).not.toHaveBeenCalled();
+
+    wrapper.unmount();
+  });
+});
+
+describe('Solution wizard - an install refused for a Microsoft connection\'s missing scopes', () => {
+  it('reconnects with a code in place, keeping the directory, and Install can be pressed again', async () => {
+    installs = [reply(400, { error: installRefusal, reconnect: { connectionId: 'conn-ms', scopes: [send] } })];
+    const wrapper = await yourPart();
+    picker(wrapper).vm.$emit('update:modelValue', 'conn-ms');
+    await settle();
+    button('Next').click();
+    await settle();
+    button('Install').click();
+    await settle();
+
+    const banner = () => bodyFind('[data-install-error]');
+    expect(banner()?.textContent).toContain('Press Reconnect');
+
+    vi.useFakeTimers({ now: new Date('2026-10-04T10:00:00Z'), toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    reconnectIn(banner()!).click();
+    await settled();
+
+    // A code, for that connection and those scopes; no tenant, so the Host keeps its directory.
+    expect(sent(calls, 'POST', '/api/connections/start').map((call) => call.body)).toEqual([
+      { reconnectId: 'conn-ms', scopes: [send], flow: 'device' },
+    ]);
+    expect(goTo).not.toHaveBeenCalled();
+    expect(banner()!.querySelector('a[data-reconnect-link]')).toBeNull();
+    expect(banner()!.querySelector('[data-device-code]')?.textContent).toContain('FAKE-CODE-ONE');
+    expect(bodyFind('[data-step="install"]')).not.toBeNull();
+
+    listed = [{ ...short, scopes: ['openid', 'email', send] }];
+    flowRead = { state: 'done', sentence: 'Reconnected.', connection: listed[0]! };
+    await vi.advanceTimersByTimeAsync(3_000);
+    await settled();
+
+    expect(banner()).toBeNull();
+    expect(bodyFind('[data-install-retry]')?.textContent).toContain('Press Install again');
+    vi.useRealTimers();
+
+    button('Install').click();
+    await settle();
+    expect(sent(calls, 'POST', '/api/solutions/install')).toHaveLength(2);
+    expect(bodyFind('[data-install-success]')).not.toBeNull();
     expect(goTo).not.toHaveBeenCalled();
 
     wrapper.unmount();

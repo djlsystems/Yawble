@@ -245,6 +245,9 @@ public sealed class ConnectionNeedsTests : IAsyncLifetime
 
         // 4: only the client ID, no secret and no redirect URI anywhere.
         Assert.Contains("Application (client) ID", steps[3].GetProperty("text").GetString()!, StringComparison.Ordinal);
+        // ...and when Sign in's directory field is needed, and where its value is.
+        Assert.Contains("personal Microsoft account that owns an Azure subscription", steps[3].GetProperty("text").GetString()!, StringComparison.Ordinal);
+        Assert.Contains("Microsoft Entra ID, Overview", steps[3].GetProperty("text").GetString()!, StringComparison.Ordinal);
         Assert.DoesNotContain(steps, s => s.GetProperty("copy").EnumerateArray().Any(c => c.GetProperty("value").GetString()!.Contains(Connections.CallbackPath, StringComparison.Ordinal)));
         Assert.DoesNotContain(steps, s => s.GetProperty("title").GetString()!.Contains("secret", StringComparison.OrdinalIgnoreCase));
 
