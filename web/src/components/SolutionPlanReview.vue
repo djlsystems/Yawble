@@ -155,6 +155,10 @@ function memberKindLine(member: SolutionPlanMember) {
         <span class="mono">{{ plugin.id }} {{ plugin.version }}</span>
         <span v-if="plugin.description" class="os-text-muted"> · {{ plugin.description }}</span>
         <q-badge v-if="mark('plugins', plugin.id)" outline color="primary" class="q-ml-sm" :label="mark('plugins', plugin.id)!" data-mark />
+        <div v-if="plugin.minimum" class="os-text-muted q-ml-md" data-plugin-minimum>
+          The team needs {{ plugin.minimum }} or newer; an older version is refused while it is installed.
+        </div>
+        <div v-if="plugin.onInstall" class="os-text-muted q-ml-md" data-plugin-on-install>{{ plugin.onInstall }}</div>
       </div>
     </section>
 

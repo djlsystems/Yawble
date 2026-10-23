@@ -52,6 +52,7 @@ export function hostPlugin(plugin: Partial<InstalledPlugin> & Pick<InstalledPlug
     skill: null,
     requires: [],
     members: [],
+    solutions: [],
     reserved: [],
     ignored: [],
     ...plugin,

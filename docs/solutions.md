@@ -72,6 +72,7 @@ job-tracker/
 | `inputs` | no | What only a person provides, below. |
 | `panel` | no | What the solution's launcher tile and control panel show, below. |
 | `setup` | no | The setup wizard's plain questions, below. |
+| `pluginMinimums` | no | The oldest version of each shipped plugin the team needs, as `{ "<plugin id>": "<version>" }`, such as `{ "job-board": "0.1.0" }`. A plugin it does not name needs the version the package ships. See [The minimum plugin version](#the-minimum-plugin-version). |
 
 **Unknown top-level keys are kept and ignored**, never refused, so a package written for a later
 Host still checks here. The check lists them as
@@ -256,6 +257,25 @@ placeholders is refused by the check. Data that is missing - no such collection,
 counts as 0. The filled line is plain text; the platform renders it, and a site document's value
 that looks like HTML, as the characters it is. A `{data...}` placeholder needs `primarySite`.
 
+### The minimum plugin version
+
+A plugin is the instance's, with one active version for every team, so a team installed from a
+package needs, for each plugin the package ships, a **minimum** version: its `pluginMinimums` entry,
+else the version the package ships. The check refuses an entry naming
+`solution.json pluginMinimums.<id>` when `<id>` is not a plugin the package ships, the value is not
+a plain version, or it is newer than the version the package ships. The install keeps the team's
+minimums with its `team_solutions` record (schema step `auth-028`), and an update replaces them with
+the new version's.
+
+While the team is installed, **making an older version of that plugin active is refused** - an
+install, a Replace, or a kept version installed again, through Admin → Plugins, Marketplace,
+`POST /api/plugins/install`, `yawble plugin install` or `--from-instance` - with one sentence naming
+each team, its package and version, and the minimum: "job-board 0.0.9 is older than what Job Tracker
+1.0.0 on team Job Tracker needs (0.1.0 or newer)." Nothing changes. An uninstalled package (its team and sites
+kept) needs nothing, and a version newer than the active one is never refused by this rule.
+Marketplace → Installed lists, under each plugin, the solution teams that use it and the minimum
+each needs.
+
 ## The check
 
 The check reads a package and answers either **what an install would create** or **everything
@@ -271,7 +291,10 @@ board's notice, the preview, the install and the update.
   [cli/README.md](../cli/README.md#solution-packages).
 
 **The plan** lists the package; the team; each member with its role, preset, instructions or plugin
-and settings; the plugins installed and the events they publish; each trigger with its kind, its
+and settings; the plugins installed, the events they publish, the minimum version of each the team
+needs (`minimum`) and what the install does with it against the instance's active version
+(`onInstall`: "job-board 0.0.9 is active here, older than the 0.1.0 this team needs: 0.1.0 is
+installed and made active", or "... newer than the 0.1.0 this package ships, and stays active"); each trigger with its kind, its
 schedule, event and filter or folder, the member it wakes, its wake setting, its daily cap and its
 **full instruction text**; each skill with its roles and body; each site and its files; the tools
 and where they go; and what the person will be asked for. Agent-written instructions become prompts,
@@ -287,6 +310,8 @@ refuses:
 - a missing or malformed field in `solution.json`, or a `format` it does not read;
 - a trigger naming a member the package does not have;
 - a plugin member naming a plugin the package does not ship;
+- a `pluginMinimums` entry naming a plugin the package does not ship, a value that is not a plain
+  version, or a version newer than the one shipped (`pluginMinimums.<id>`);
 - a plugin manifest the Host would refuse, or one whose `id` is not its folder's name;
 - a setting the plugin does not have, a value its manifest refuses, a person-only setting set by
   the package, or a required setting with no default left unset and not asked for; an input naming
@@ -429,14 +454,14 @@ usual tenant row:
 
 | # | Step | What it makes |
 |---|---|---|
-| 1 | `plugins` | Each of the package's plugins, installed as `yawble plugin install` would. One already active at that version or newer is left alone: a plugin is the instance's, and an install never downgrades what other teams run. |
+| 1 | `plugins` | Each of the package's plugins, installed as `yawble plugin install` would. One already active at that version or newer is left alone: a plugin is the instance's, and an install never downgrades what other teams run. One active at an older version - older than the team's minimum or not - is replaced by the shipped one. The plan says which, per plugin. |
 | 2 | `team` | The team, with the package's team instructions and no repository: it gets its own local repository when its work first needs one. |
 | 3 | `members` | The Manager takes the package manager's name and instructions; every other member is hired. An agent member with no preset runs the Agent the wizard names (the instance's first installed model preset by default). |
 | 4 | `skills` | Each skill, registered as a **team skill** (`TeamSkills.RegisterAsync`). |
 | 5 | `tools` | `tools/` copied to `<team folder>/solution/`, read-only to agents (the Host's files with the agent's group: folders 0750, files 0640, executables 0750). Every agent member's prompt names the folder, and `{solution}` resolves to it. |
 | 6 | `sites` | Each site created and published (`site.created`, `site.published`). |
 | 7 | `triggers` | Each document input's folder, then each trigger, through the Triggers dialog's own path (`TriggerCreation`) with every check it makes, linked to the outcome it names. |
-| 8 | `record` | The package id and version in `team_solutions` (schema step `auth-016`), with the `solution.installed` row in the same transaction. |
+| 8 | `record` | The package id and version in `team_solutions` (schema step `auth-016`), with the minimum version of each plugin the team needs (`auth-028`), and the `solution.installed` row in the same transaction. |
 
 **When a step fails**, everything made so far is undone in reverse order - the triggers, the
 sites, the tools, the skills, the members, the team (with the local repository it was asked for) and its empty

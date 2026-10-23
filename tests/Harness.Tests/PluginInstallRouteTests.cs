@@ -366,6 +366,26 @@ public sealed class PluginInstallRouteTests : IAsyncLifetime
         Assert.All(rows, row => Assert.Contains("\"operator\"", row.Detail));
     }
 
+    /// <summary>
+    /// The operator CLI's `plugin install <folder>` copies the folder from the operator's computer to
+    /// `plugins/.incoming/<id>-<version>` and asks the same installer through the request file: a
+    /// dot-named folder under the plugins root is staging, which the catalog passes over and the
+    /// installer takes as a source, laying the version out and making it active.
+    /// </summary>
+    [Fact]
+    public async Task A_copy_the_operator_cli_staged_under_incoming_installs_through_the_installer()
+    {
+        var staged = Built(Path.Combine(Plugins, ".incoming"), "staged-echo", "0.3.0");
+        await Services.GetRequiredService<PluginCatalog>().RescanAsync(Ct);
+        Assert.Null(Services.GetRequiredService<PluginCatalog>().For("staged-echo"));
+
+        var result = await Services.GetRequiredService<PluginInstaller>().InstallAsync(staged, replace: false, Ct);
+
+        Assert.Equal((200, true), (result.Status, result.Installed));
+        Assert.Equal("0.3.0\n", await File.ReadAllTextAsync(Path.Combine(Plugins, "staged-echo", PluginCatalog.ActiveFile), Ct));
+        Assert.Equal(Rwxrx, Mode(Path.Combine(Plugins, "staged-echo", "0.3.0", "bin", "run")));
+    }
+
     // ---- A: the listing ------------------------------------------------------------------------
 
     [Fact]

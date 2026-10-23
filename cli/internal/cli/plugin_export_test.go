@@ -16,7 +16,7 @@ func FastRescan(nonce string) func() {
 // The scripts the plugin commands run in the container, so a scripted engine can answer each.
 const (
 	PluginPrepareScript         = prepareScript
-	PluginPlaceScript           = placeScript
+	PluginStageScript           = stageScript
 	PluginRequestScript         = requestScript
 	PluginLayoutScript          = layoutScript
 	PluginReportScript          = reportScript

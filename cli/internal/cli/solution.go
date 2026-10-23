@@ -198,6 +198,10 @@ type plan struct {
 		Name    string   `json:"name"`
 		Version string   `json:"version"`
 		Events  []string `json:"events"`
+		// Minimum is the oldest version the team needs (pluginMinimums, else the shipped one), and
+		// OnInstall what the install does with it on this instance; both absent from an older Host.
+		Minimum   *string `json:"minimum"`
+		OnInstall *string `json:"onInstall"`
 	} `json:"plugins"`
 	Triggers []struct {
 		Name          string  `json:"name"`
@@ -296,6 +300,12 @@ func renderPlan(out io.Writer, folder string, p *plan) {
 				fmt.Fprintf(out, ", publishes %s", strings.Join(pl.Events, ", "))
 			}
 			fmt.Fprintln(out)
+			if pl.Minimum != nil {
+				fmt.Fprintf(out, "    The team needs %s or newer; an older version is refused while it is installed.\n", *pl.Minimum)
+			}
+			if pl.OnInstall != nil {
+				fmt.Fprintf(out, "    %s\n", *pl.OnInstall)
+			}
 		}
 	}
 

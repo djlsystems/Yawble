@@ -2932,6 +2932,18 @@ export interface PluginMemberRef {
   member: string
 }
 
+/** An installed solution team's need of a plugin: the team, its package and version, and the minimum. */
+export interface PluginSolutionNeed {
+  team: string
+  teamName: string
+  packageId: string
+  /** The package's name. */
+  package: string
+  version: string
+  /** The oldest version of the plugin the team needs: the package's `pluginMinimums`, else what it shipped. */
+  minimum: string
+}
+
 /** An event a plugin publishes: its full type (`plugin.<id>.<suffix>`), and the manifest's one line on it. */
 export interface PluginEvent {
   type: string
@@ -2963,6 +2975,12 @@ export interface InstalledPlugin {
   requires: string[]
   /** The members hired on it, team by team. Empty to a machine principal. */
   members: PluginMemberRef[]
+  /**
+   * Each installed solution team whose package ships it, with the oldest version of it that team
+   * needs: a version older than that is refused at install. Empty to a machine principal; absent
+   * from a Host older than plugin minimums.
+   */
+  solutions?: PluginSolutionNeed[]
   /** Its connection slots, by slot name; `{}` when the manifest declares none. Absent from a Host older than connections. */
   connections?: Record<string, ConnectionSlot>
   /** Manifest keys reserved for a later Host, and unknown keys it ignored. */
@@ -3423,6 +3441,10 @@ export interface SolutionPlanPlugin {
   description: string
   folder: string
   events: string[]
+  /** The oldest version the team needs: `pluginMinimums`, else `version`. Absent from an older Host. */
+  minimum?: string | null
+  /** What the install does with it against the instance's active version, in words; null when unknown. */
+  onInstall?: string | null
 }
 
 export type SolutionWakeManager = 'always' | 'onHandbackOrFailure' | 'never'

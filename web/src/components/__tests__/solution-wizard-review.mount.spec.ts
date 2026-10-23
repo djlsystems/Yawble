@@ -74,6 +74,16 @@ describe('Solution wizard - Review', () => {
     expect(trigger('Morning summary').querySelector('[data-cap]')!.textContent).toBe('100,000 tokens a day');
   });
 
+  it('says for each plugin the version the team needs and what the install does with the active one', async () => {
+    await review();
+
+    const plugin = bodyFind('[data-plugin="job-board"]')!;
+    expect(plugin.querySelector('[data-plugin-minimum]')!.textContent?.trim())
+      .toBe('The team needs 0.2.0 or newer; an older version is refused while it is installed.');
+    expect(plugin.querySelector('[data-plugin-on-install]')!.textContent)
+      .toBe('job-board 0.1.0 is active here, older than the 0.2.0 this team needs: 0.2.0 is installed and made active.');
+  });
+
   it('says what fires each trigger and how the Manager is woken, in words', async () => {
     await review();
 

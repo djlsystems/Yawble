@@ -62,15 +62,17 @@ func newPluginInstallCommand(deps Deps) *cobra.Command {
 		Use:   "install <folder>",
 		Short: "Install a built plugin version into the instance and make it the active one",
 		Long: "<folder> is one built version of a plugin: it holds plugin.json and everything the manifest names. " +
-			"The manifest is checked with the Host's rules before anything is copied. The folder goes to " +
-			"/data/plugins/<id>/<version>/, owned harness:agent with directories 0750, files 0640 and the " +
-			"manifest's executable 0750, whatever the modes were here (a folder from Windows has no execute bit). " +
-			"That version becomes active; earlier versions are kept. Then the Host rescans, and its verdict is printed.\n\n" +
+			"The manifest is checked with the Host's rules before anything is copied. The folder is copied into the " +
+			"instance's staging folder, " + pluginsRoot + "/.incoming, and the running Host installs it from there with the " +
+			"installer Admin → Plugins uses: to " + pluginsRoot + "/<id>/<version>/, owned harness:agent with directories 0750, " +
+			"files 0640 and the manifest's executable 0750, whatever the modes were here (a folder from Windows has no " +
+			"execute bit). That version becomes active; earlier versions are kept. The Host's verdict is printed.\n\n" +
+			"The Host refuses a version older than an installed solution team needs (the package's pluginMinimums, else " +
+			"the version it shipped), naming each team; a newer version is never refused for that.\n\n" +
 			"With --from-instance, <folder> is an absolute path inside the instance (a plugin a team built in its worktree, or " +
-			"the Concierge in its workspace) and nothing is copied from this computer: the running Host installs it with the " +
-			"installer Admin → Plugins uses, which checks the folder (under " + dataRoot + ", no symlink leaving it, a manifest " +
-			"it accepts), lays it out with the same modes and makes it active. --force replaces an installed version; the " +
-			"Host's verdict is printed.",
+			"the Concierge in its workspace) and nothing is copied from this computer: the running Host installs it where it " +
+			"is, with the same installer, which checks the folder (under " + dataRoot + ", no symlink leaving it, a manifest " +
+			"it accepts). --force replaces an installed version; the Host's verdict is printed.",
 		Example: "  yawble plugin install ~/plugins-build/sample-echo/0.1.0\n  yawble plugin install .\\sample-echo\\0.2.0 --force\n" +
 			"  yawble plugin install --from-instance /data/teams/acme/repos/Tools/main/build/sample-echo-go/0.1.0",
 		Args: cobra.ExactArgs(1),
@@ -87,7 +89,7 @@ func newPluginInstallCommand(deps Deps) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return install(ctx, cmd.OutOrStdout(), e, m, force, func(stage string) error {
+			return install(ctx, cmd.OutOrStdout(), e, m, args[0], force, func(stage string) error {
 				return e.CopyTo(ctx, instance.ContainerName, args[0], stage)
 			})
 		},
@@ -107,21 +109,30 @@ func installFromInstance(cmd *cobra.Command, deps Deps, folder string, force boo
 	if err != nil {
 		return err
 	}
+	r, err := askInstall(ctx, e, folder, force)
+	if err != nil {
+		return err
+	}
+	return r.verdict(out, folder)
+}
+
+// askInstall writes the install request for path and answers the Host's report on it.
+func askInstall(ctx context.Context, e engine.Engine, path string, force bool) (installReport, error) {
 	nonce := newNonce()
-	request, _ := json.Marshal(installRequest{Request: nonce, Path: folder, Replace: force})
+	request, _ := json.Marshal(installRequest{Request: nonce, Path: path, Replace: force})
 	x := hostExchange{root: pluginsRoot, request: installRequestScript, report: installReportScript, withdraw: installWithdrawScript, poll: rescanPoll}
 	answer, err := x.ask(ctx, e, string(request), nonce, installWait)
 	if errors.Is(err, errNoAnswer) {
 		// A request no Host answered must not be carried out later, by a Host started after an upgrade.
-		return fmt.Errorf("the Host did not answer the install request within %s, and the request was withdrawn. "+
+		return installReport{}, fmt.Errorf("the Host did not answer the install request within %s, and the request was withdrawn. "+
 			"An image from before `plugin install --from-instance` does not answer; `yawble plugin list` shows what the instance holds", installWait)
 	}
 	if err != nil {
-		return err
+		return installReport{}, err
 	}
 	var r installReport
 	_ = json.Unmarshal([]byte(answer), &r)
-	return r.verdict(out, folder)
+	return r, nil
 }
 
 // installRequest is <plugins>/.install; installReport is <plugins>/.install-report.json, the
@@ -143,8 +154,8 @@ type installReport struct {
 }
 
 // verdict prints an install the Host made active and listed; anything else is an error carrying
-// the Host's own sentence (400 refused, 409 installed already without --force, 200 written but
-// refused by the catalog).
+// the Host's own sentence (400 refused, 409 installed already without --force or older than an
+// installed solution team needs, 200 written but refused by the catalog).
 func (r installReport) verdict(out io.Writer, folder string) error {
 	reason, id, version := text.OrEmpty(r.Reason), text.OrEmpty(r.ID), text.OrEmpty(r.Version)
 	switch {
@@ -162,13 +173,14 @@ func (r installReport) verdict(out io.Writer, folder string) error {
 	}
 }
 
-// install is what both install paths share once the folder has passed its checks: refuse an
-// installed version without force, put the folder in a staging folder (copy), give it the Host's
-// modes and make it active, then print the Host's verdict.
-func install(ctx context.Context, out io.Writer, e engine.Engine, m plugin.Manifest, force bool, copy func(stage string) error) error {
-	dir := pluginsRoot + "/" + m.ID
-	target := dir + "/" + m.Version
-	stage := dir + "/.incoming-" + m.Version
+// install copies a folder from this computer into the instance's staging folder (copy), gives it
+// the Host's owner and modes, and has the running Host install it from there with the installer
+// --from-instance and the web app use - so its every check, the minimum an installed solution team
+// needs among them, is the Host's. An installed version without force is refused before copying.
+// The staging folder goes afterwards, whatever the Host answered.
+func install(ctx context.Context, out io.Writer, e engine.Engine, m plugin.Manifest, folder string, force bool, copy func(stage string) error) error {
+	target := pluginsRoot + "/" + m.ID + "/" + m.Version
+	stage := pluginsRoot + "/.incoming/" + m.ID + "-" + m.Version
 
 	res, err := e.Exec(ctx, instance.ContainerName, "sh", "-c", prepareScript, "sh", pluginsRoot, m.ID, m.Version, flag01(force))
 	if err != nil {
@@ -177,29 +189,21 @@ func install(ctx context.Context, out io.Writer, e engine.Engine, m plugin.Manif
 	if strings.TrimSpace(res.Stdout) == "exists" {
 		return fmt.Errorf("%s %s is already installed in the instance (%s); run again with --force to replace it", m.ID, m.Version, target)
 	}
-	if err := copy(stage); err != nil {
-		_, _ = e.Exec(ctx, instance.ContainerName, "rm", "-rf", stage)
-		return err
-	}
-	place := append([]string{"sh", "-c", placeScript, "sh", pluginsRoot, m.ID, m.Version}, m.Executables...)
-	if _, err := e.Exec(ctx, instance.ContainerName, place...); err != nil {
-		_, _ = e.Exec(ctx, instance.ContainerName, "rm", "-rf", stage)
-		return err
-	}
-	fmt.Fprintf(out, "copied %s %s to %s and made it the active version\n", m.ID, m.Version, target)
+	defer func() { _, _ = e.Exec(context.WithoutCancel(ctx), instance.ContainerName, "rm", "-rf", stage) }()
 
-	report, err := rescan(ctx, e)
+	if err := copy(stage); err != nil {
+		return err
+	}
+	if _, err := e.Exec(ctx, instance.ContainerName, append([]string{"sh", "-c", stageScript, "sh", stage}, m.Executables...)...); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "copied %s %s into the instance; the Host installs it\n", m.ID, m.Version)
+
+	r, err := askInstall(ctx, e, stage, force)
 	if err != nil {
 		return err
 	}
-	if reason, refused := report.refusal(m.ID); refused {
-		return fmt.Errorf("the Host refused %s: %s", m.ID, reason)
-	}
-	if v, ok := report.installed(m.ID); !ok || v != m.Version {
-		return fmt.Errorf("the Host does not list %s %s after the rescan (it lists %q)", m.ID, m.Version, v)
-	}
-	fmt.Fprintf(out, "the Host reports %s %s installed; hire it as plugin:%s\n", m.ID, m.Version, m.ID)
-	return nil
+	return r.verdict(out, folder)
 }
 
 func newPluginListCommand(deps Deps) *cobra.Command {
@@ -363,31 +367,28 @@ func runningEngine(ctx context.Context, deps Deps, verb string) (engine.Engine, 
 // sets no USER), and take every value as a positional argument, never spliced into the text.
 const (
 	// $1 root, $2 id, $3 version, $4 force: "exists" when the version is there and force is not
-	// given, else clears the staging folder and answers "ready".
+	// given, else makes the staging folder's parent, root/.incoming - dot-named, so the catalog passes
+	// it over and the Host's installer takes a folder in it - clears root/.incoming/<id>-<version>
+	// and answers "ready".
 	prepareScript = `set -e
-d="$1/$2"; t="$d/$3"; s="$d/.incoming-$3"
+r="$1"; t="$1/$2/$3"; s="$1/.incoming/$2-$3"
 if [ -e "$t" ] && [ "$4" != 1 ]; then echo exists; exit 0; fi
-mkdir -p "$d"
+mkdir -p "$r/.incoming"
+chown harness:agent "$r" "$r/.incoming"
+chmod u=rwx,g=rx,o=,ug-s "$r" "$r/.incoming"
 rm -rf "$s"
 echo ready`
 
-	// $1 root, $2 id, $3 version, then the executables. The staged copy gets the Host's modes
-	// whatever the source had: harness:agent, directories 0750, files 0640, executables 0750. -h and
-	// ! -type l leave a symlink's target alone. Directories are set symbolically: GNU chmod keeps a
-	// directory's setgid bit through an octal mode. Then it replaces the version, and `active` names it.
-	placeScript = `set -e
-r="$1"; d="$1/$2"; v="$3"; t="$d/$3"; s="$d/.incoming-$3"; shift 3
+	// $1 the staging folder, then the executables. The copy gets the Host's owner and modes whatever
+	// the source had - harness:agent, directories 0750, files 0640, executables 0750 - so the Host
+	// reads it, and installs it with its own. -h and ! -type l leave a symlink's target alone.
+	// Directories are set symbolically: GNU chmod keeps a directory's setgid bit through an octal mode.
+	stageScript = `set -e
+s="$1"; shift
 chown -R -h harness:agent "$s"
 find "$s" -type d -exec chmod u=rwx,g=rx,o=,ug-s {} +
 find "$s" ! -type d ! -type l -exec chmod 0640 {} +
-for x in "$@"; do chmod 0750 "$s/$x"; done
-rm -rf "$t"
-mv "$s" "$t"
-printf '%s\n' "$v" > "$d/.active.tmp"
-mv -f "$d/.active.tmp" "$d/active"
-chown harness:agent "$r" "$d" "$d/active"
-chmod u=rwx,g=rx,o=,ug-s "$r" "$d"
-chmod 0640 "$d/active"`
+for x in "$@"; do chmod 0750 "$s/$x"; done`
 
 	// $1 root, $2 nonce: the request the Host's PluginRescanRequests answers. Only harness and root
 	// can write in root, so an agent cannot ask for one.

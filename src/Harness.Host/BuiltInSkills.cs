@@ -1385,6 +1385,16 @@ public static class BuiltInSkills
             run never fails for that. Anything else the plugin needs ships inside its own folder. The
             spec states `requires` for the language chosen.
 
+            `version` is a plain version, raised for every build that ships. A plugin is the
+            instance's, one active version for every team, and each team installed from a solution
+            package that ships the plugin needs a minimum version of it: the package's
+            `pluginMinimums` entry, else the version the package ships. While such a team is
+            installed, the platform refuses to make an older version active - an install, a
+            Replace or a kept version installed again - naming the team, its package and the
+            minimum, and changes nothing; a newer version is never refused for that. So a fix goes
+            out as a newer version, never as a rebuild of an older one, and the spec says which
+            version a package that ships the plugin needs.
+
             A run reads one request and writes records, one per line:
 
             - `progress` - a line on the card; it resets the idle clock.
@@ -2168,7 +2178,21 @@ public static class BuiltInSkills
               {lastRun.at}"`. A `{data...}` placeholder needs `primarySite`. Leave `status` out and
               the tile shows the last run and the state.
 
-            ## 6. When the build finishes
+            ## 6. The plugin version the team needs
+
+            The team the install makes needs, for each plugin the package ships, a minimum version:
+            the version the package ships, unless `pluginMinimums` in `solution.json` names an
+            older one, `{ "<plugin id>": "<version>" }`, the oldest the team's instructions and
+            triggers work with. The check refuses an entry naming a plugin the package does not
+            ship, a value that is not a plain version, or a version newer than the one shipped,
+            naming `pluginMinimums.<id>`. The install leaves a newer active version alone and
+            installs the shipped one over an older one; the review says which, per plugin. While the
+            team is installed, making an older version of that plugin active is refused, naming
+            the team, the package and the minimum, so another team's install or a person's
+            Replace never leaves it on a plugin it cannot use. Name a lower minimum only when the
+            team truly works with that version: it is what keeps other teams free to use it.
+
+            ## 7. When the build finishes
 
             The Concierge hands the person the deep link and one line on what they will be asked
             for. Build the link on `HARNESS_PUBLIC_URL`, the address the person's browser uses,

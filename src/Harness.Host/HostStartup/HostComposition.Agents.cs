@@ -49,12 +49,17 @@ internal sealed partial class HostComposition
         PluginEndpoints.Report(pluginCatalog.Rescan(), Console.Out);
         builder.Services.AddSingleton(pluginCatalog);
 
+        // WHAT INSTALLED SOLUTION TEAMS NEED OF EACH PLUGIN: an install refuses a version older than that.
+        builder.Services.AddSingleton(sp => new PluginMinimums(
+            sp.GetRequiredService<ITeamSolutionStore>(), sp.GetRequiredService<TeamRegistry>()));
+
         // INSTALLING FROM A FOLDER INSIDE THE INSTANCE, for a person's route and the operator CLI's request
         // file alike. Files are given the agent's group, which runs every plugin, when the Host switches to it.
         builder.Services.AddSingleton(sp =>
         {
             var runAs = sp.GetRequiredService<AgentLaunchUser>();
-            return new PluginInstaller(pluginCatalog, dataRoot, runAs.Switches ? runAs.Gid : -1);
+            return new PluginInstaller(
+                pluginCatalog, dataRoot, runAs.Switches ? runAs.Gid : -1, sp.GetRequiredService<PluginMinimums>());
         });
 
         // REMOVING A PLUGIN OR ONE VERSION, from the web app: `plugin remove`'s rules, the installer's

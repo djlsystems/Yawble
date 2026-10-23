@@ -5,7 +5,7 @@ namespace Harness.Host;
 /// <summary>What an install did, or why it did nothing. <paramref name="Status"/> is the HTTP status
 /// the route answers: 200 written (and <paramref name="Installed"/> is the Host's verdict after the
 /// rescan), 400 refused before anything was written, 409 that version is there and replacing was not
-/// asked for.</summary>
+/// asked for, or it is older than an installed solution team needs.</summary>
 public sealed record PluginInstallResult(
     int Status, string? Id, string? Version, bool Installed, bool Replaced, string? Reason);
 
@@ -20,7 +20,8 @@ public sealed record PluginInstallResult(
 /// EVERYTHING IS REFUSED BEFORE ANYTHING IS WRITTEN: a folder outside the data root, one reached
 /// through a symlink that leaves it, a symlink inside it that leaves the folder, a manifest the
 /// catalog would refuse (<see cref="PluginCatalog.Check"/>, the same code a rescan runs), and an
-/// existing version unless replacing was asked for.
+/// existing version unless replacing was asked for, and a version older than an installed solution
+/// team needs (<see cref="PluginMinimums"/>), whether new, replaced or kept.
 /// </para>
 ///
 /// <para>
@@ -32,7 +33,9 @@ public sealed record PluginInstallResult(
 /// </summary>
 /// <param name="group">The group every installed file is given (the agent's, which runs plugins), or
 /// -1 to leave the Host's own - development and the test suite.</param>
-public sealed class PluginInstaller(PluginCatalog catalog, string dataRoot, int group = -1)
+/// <param name="minimums">What installed solution teams need of each plugin: a version older than one
+/// of them needs is refused (409) before anything is written, naming each team. Null checks none.</param>
+public sealed class PluginInstaller(PluginCatalog catalog, string dataRoot, int group = -1, PluginMinimums? minimums = null)
 {
     private const UnixFileMode DirectoryMode =
         UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
@@ -46,6 +49,11 @@ public sealed class PluginInstaller(PluginCatalog catalog, string dataRoot, int 
 
     public Task<PluginInstallResult> InstallAsync(string? path, bool replace, CancellationToken ct = default) =>
         ExclusiveAsync(() => InstallLockedAsync(path, replace, ct), ct);
+
+    /// <summary>Why <paramref name="id"/> <paramref name="version"/> may not be made active over the
+    /// active version - an installed solution team needs newer - or null when it may.</summary>
+    public async Task<string?> MinimumRefusalAsync(string id, string version, CancellationToken ct = default) =>
+        minimums is null ? null : await minimums.RefusalAsync(id, version, catalog.For(id)?.Manifest.Version, ct);
 
     /// <summary>Runs <paramref name="work"/> while no install runs: <see cref="PluginRemover"/> takes the
     /// same gate, so a version is never removed from under an install of it.</summary>
@@ -123,6 +131,12 @@ public sealed class PluginInstaller(PluginCatalog catalog, string dataRoot, int 
         if (PluginCatalog.Check(source, version, manifest, catalog.RuntimeFound, requireExecutableBit: false) is { Reason: { } checkRefusal })
         {
             return Refused($"The Host refuses {id} {version}: {checkRefusal}", id, version);
+        }
+
+        // OLDER THAN A SOLUTION TEAM NEEDS: new, a Replace, or a kept version installed again alike.
+        if (await MinimumRefusalAsync(id, version, ct) is { } tooOld)
+        {
+            return new PluginInstallResult(409, id, version, false, false, tooOld);
         }
 
         var pluginDirectory = Path.Combine(catalog.Root, id);
