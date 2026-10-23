@@ -174,6 +174,66 @@ public sealed class SolutionSecretsTests(HostFixture host) : IClassFixture<HostF
     }
 
     [Fact]
+    public async Task A_value_typed_in_the_wizard_is_the_members_own_kept_with_its_hire_and_never_answered()
+    {
+        var typed = $"typed-usajobs-{Guid.NewGuid():N}";
+        var agent = $"typed-agent-{Guid.NewGuid():N}";
+        using var client = await host.PersonAsync();
+        var person = new Recorded(client);
+        var folder = Package();
+
+        // A value that cannot be kept is refused naming the member and the field, and makes no team.
+        var refusedName = Unique("Refused");
+        using (var refused = await client.PostAsJsonAsync("/api/solutions/install", new
+        {
+            folder,
+            teamName = refusedName,
+            settings = Sources("sample", "usajobs"),
+            secretValues = new Dictionary<string, Dictionary<string, string>> { ["Scout"] = new() { ["usajobsApiKey"] = "abc" } },
+        }, Ct))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+            Assert.Contains("'Scout': `usajobsApiKey`: the value is shorter than 4", await refused.Content.ReadAsStringAsync(Ct));
+        }
+
+        Assert.Null(Get<TeamRegistry>().ExistingName(ContainerId.DeriveName(refusedName)!));
+
+        var done = await person.PostAsync("/api/solutions/install", new
+        {
+            folder,
+            teamName = Unique("Typed"),
+            settings = Sources("sample", "usajobs"),
+            secretValues = new Dictionary<string, Dictionary<string, string>>
+            {
+                ["Scout"] = new() { ["usajobsApiKey"] = typed, ["usajobsUserAgent"] = agent },
+            },
+        });
+        Assert.True(done.GetProperty("ok").GetBoolean(), done.ToString());
+        var team = done.GetProperty("team").GetString()!;
+
+        // The member's own values, beside the package's key binding, which stays.
+        var scout = new ContainerId(team, "Scout");
+        var own = await Get<PluginMemberSecretStore>().ValuesAsync(scout, Ct);
+        Assert.Equal(typed, own["usajobsApiKey"]);
+        Assert.Equal(agent, own["usajobsUserAgent"]);
+        Assert.Equal("USAJOBS_API_KEY", (await Get<IPluginMemberSettingsStore>().ForAsync(scout, Ct)).Secrets["usajobsApiKey"]);
+        Assert.NotNull(await Get<ITenantLog>().FindLatestAsync(TenantActions.MemberSecretSet, $"{team}/Scout", Ct));
+
+        // The result says each is set from the member, and asks for neither.
+        var result = ByKey(done.GetProperty("secrets"));
+        Assert.True(result["USAJOBS_API_KEY"].GetProperty("set").GetBoolean());
+        Assert.Equal("member", result["USAJOBS_API_KEY"].GetProperty("source").GetString());
+        Assert.DoesNotContain("USAJOBS_API_KEY", done.GetProperty("unset").EnumerateArray().Select(k => k.GetString()));
+        Assert.DoesNotContain("usajobsApiKey", done.GetProperty("unsetFields").EnumerateArray().Select(f => f.GetProperty("field").GetString()));
+
+        Assert.All(person.Bodies, body =>
+        {
+            Assert.DoesNotContain(typed, body, StringComparison.Ordinal);
+            Assert.DoesNotContain(agent, body, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
     public async Task An_update_keeps_a_binding_the_person_changed_and_takes_the_packages_new_key_where_they_did_not()
     {
         using var client = await host.PersonAsync();
