@@ -129,7 +129,6 @@ describe("the control panel's connection fix", () => {
     expect(put).toHaveLength(1);
     expect(put[0]!.body).toEqual({
       config: { keywords: ['dotnet'], region: 'EU' },
-      secrets: { apiKey: 'JOB_BOARD_KEY' },
       connections: { mailbox: 'conn-new' },
     });
 

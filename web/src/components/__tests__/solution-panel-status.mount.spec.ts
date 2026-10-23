@@ -155,7 +155,6 @@ describe('the control panel: Status', () => {
     expect(put).toHaveLength(1);
     expect(put[0]!.body).toEqual({
       config: { keywords: ['dotnet'], region: 'EU' },
-      secrets: { apiKey: 'JOB_BOARD_KEY' },
       connections: { mailbox: 'conn_1' },
     });
   });

@@ -3,8 +3,8 @@ import type {
   PluginConfigField,
   PluginHire,
   PluginSecretField,
+  PluginSecretState,
   PluginSettingValue,
-  SecretKeyState,
 } from '../api/types';
 import { bindingsBody } from './connections';
 import { boundsHint, boundsProblem } from './numberBounds';
@@ -51,14 +51,65 @@ export const hasSlots = (shape: PluginSettingsShape) => Object.keys(shape.connec
 export type PluginFieldValue = string | boolean | string[];
 export type PluginFieldValues = Record<string, PluginFieldValue>;
 
-/** A field's default, in the form's own terms: `[]` for a list, off for a bool with none. */
+/**
+ * Whether the field is a box whose EMPTY state stands for its default: a string or number box with
+ * no `enum`. Its default is its placeholder, so a person sees it without it being typed in for them,
+ * and an empty box is saved as nothing - the default, including a later change to it.
+ */
+const emptyIsDefault = (field: PluginConfigField) =>
+  (field.type === 'string' || field.type === 'number') && !(field.enum && field.enum.length > 0);
+
+/** A field's default, in the form's own terms: `[]` for a list, off for a bool with none, an empty box for text. */
 export function defaultValue(field: PluginConfigField): PluginFieldValue {
   const fallback = field.default;
 
   if (field.type === 'list') return Array.isArray(fallback) ? fallback.map(String) : [];
   if (field.type === 'bool') return fallback === true;
+  if (emptyIsDefault(field)) return '';
 
   return fallback === null || fallback === undefined || Array.isArray(fallback) ? '' : String(fallback);
+}
+
+/** A text or number box's placeholder: the manifest's default, or nothing when it gives none. */
+export function placeholderOf(field: PluginConfigField): string | undefined {
+  const fallback = field.default;
+  if (!emptyIsDefault(field) || fallback === null || fallback === undefined || Array.isArray(fallback)) return undefined;
+
+  const text = String(fallback);
+  return text === '' ? undefined : text;
+}
+
+/** Words a person knows for a whole name that is a run of capitals or a known short form. */
+const ShortForms: Record<string, string> = {
+  api: 'API', id: 'ID', ip: 'IP', url: 'URL', uri: 'URI', dns: 'DNS', smtp: 'SMTP', imap: 'IMAP', http: 'HTTP',
+  https: 'HTTPS', sms: 'SMS', ttl: 'TTL', json: 'JSON', ssl: 'SSL', tls: 'TLS', oauth: 'OAuth', sql: 'SQL',
+};
+
+/**
+ * A field's name in words, for a manifest that gives it no `label`: `apiKey` -> "API key",
+ * `clientIp` -> "Client IP", `daily_send_cap` -> "Daily send cap". Camel case, underscores and
+ * dashes split it; a known short form is said in capitals, any other word in lower case, the first
+ * word capitalised.
+ */
+export function fieldWords(name: string): string {
+  const words = name
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .split(/[\s_\-.]+/)
+    .filter((word) => word !== '');
+
+  const said = words.map((word) => ShortForms[word.toLowerCase()] ?? (/^[A-Z0-9]+$/.test(word) && word.length > 1 ? word : word.toLowerCase()));
+  if (said.length === 0) return name;
+
+  const first = said[0]!;
+  said[0] = first.charAt(0).toUpperCase() + first.slice(1);
+  return said.join(' ');
+}
+
+/** What a field is called on the form: the manifest's `label`, else its name in words. */
+export function fieldLabel(name: string, field: { label?: string | null | undefined }): string {
+  const label = field.label?.trim();
+  return label ? label : fieldWords(name);
 }
 
 /** A stored value, in the form's own terms. */
@@ -87,7 +138,10 @@ export function initialConfig(
   return values;
 }
 
-/** Each secret's LOGICAL KEY: the one bound already, else empty until a person names one. Never a value. */
+/**
+ * Each secret's KEY BINDING as stored (the old way a member named a logical key), empty when none:
+ * kept so "As JSON" can show it. The form never edits one, and Save sends none, which keeps them.
+ */
 export function initialSecrets(
   shape: PluginSettingsShape,
   stored: Record<string, string> = {},
@@ -96,27 +150,58 @@ export function initialSecrets(
 }
 
 /**
- * What the Host says of a secret's key, in the solution wizard's words: set, not set with the exact
- * commands that set it, or why no plugin may be bound to it.
+ * THE SECRET VALUES A PERSON HAS TYPED OR CLEARED ON THE FORM, by field, waiting for the dialog's
+ * own button: a string sets or replaces the member's own value, null clears it. A field not here is
+ * left as it is. Sent as `secretValues` with the hire and with Save.
  */
-export function secretKeySentence(state: SecretKeyState, required: boolean, button = 'Save'): string {
-  if (state.refusal) return state.refusal;
-  if (state.set) return secretKeySetWords(state);
-  const meaning = required ? 'the hire is refused until it is' : 'the plugin runs without it until it is';
-  return `Not set on this Host: ${meaning}. Type its value above and press ${button}.`;
+export type SecretValues = Record<string, string | null>;
+
+/** Whether the manifest declares the field's value not secret (`masked: false`): a text box showing it. */
+export const isUnmasked = (field: PluginSecretField | undefined) => field?.masked === false;
+
+/** `secretValues` to send: what was typed or cleared, never an empty box. Undefined when nothing was. */
+export function secretValuesBody(values: SecretValues): Record<string, string | null> | undefined {
+  const body = Object.fromEntries(Object.entries(values).filter(([, value]) => value === null || value !== ''));
+  return Object.keys(body).length > 0 ? body : undefined;
 }
 
 /**
- * Where a set key comes from: set from the screen, by whom and when; or the Host's environment (the
- * CLI's `secret set`), which a key set here overrides. Never its value - the Host sends none.
+ * Whether each secret field will have a value once the form is sent: typed here, or set now and not
+ * cleared (a cleared value falls back to a bound key, when there is one). A field its settings leave
+ * off for this member (`needed: false`) counts as having one: nothing waits on it. At hire there is
+ * no state: only what is typed counts.
  */
-export function secretKeySetWords(state: SecretKeyState): string {
-  if (state.source === 'environment') return "Set in this Host's environment.";
-  if (state.source === 'stored' && state.setBy) {
-    const at = state.setAt ? wireInstant(state.setAt) : NaN;
-    return Number.isNaN(at) ? `Set by ${state.setBy}.` : `Set by ${state.setBy} on ${localTime(at, { date: true })}.`;
+export function secretsSet(
+  shape: PluginSettingsShape,
+  states: PluginSecretState[] | undefined,
+  values: SecretValues,
+): Record<string, boolean> {
+  const set: Record<string, boolean> = {};
+
+  for (const name of Object.keys(shape.secrets)) {
+    const state = states?.find((entry) => entry.field === name);
+    const typed = values[name];
+
+    if (state && !state.needed) set[name] = true;
+    else if (typeof typed === 'string' && typed.trim() !== '') set[name] = true;
+    else if (typed === null) set[name] = state?.key != null;
+    else set[name] = state?.set ?? false;
   }
-  return 'Set on this Host.';
+
+  return set;
+}
+
+/**
+ * Where a set secret field's value stands, in words: saved by whom and when, or from the Host's
+ * environment. Never the value.
+ */
+export function secretSetWords(state: PluginSecretState): string {
+  if (state.source === 'environment') return "Set in this Host's environment.";
+  if (state.setBy) {
+    const at = state.setAt ? wireInstant(state.setAt) : NaN;
+    return Number.isNaN(at) ? `Saved by ${state.setBy}.` : `Saved by ${state.setBy} on ${localTime(at, { date: true })}.`;
+  }
+  return 'Saved.';
 }
 
 /** A number box's text as the number it names, or null when it names none. */
@@ -140,13 +225,17 @@ export function isDefault(field: PluginConfigField, value: PluginFieldValue | un
   if (field.type === 'bool') return (value === true) === fallback;
 
   const text = typeof value === 'string' ? value : '';
+  // An empty box is the default; so is the default typed out in full.
+  const declared = emptyIsDefault(field) ? placeholderOf(field) ?? '' : (fallback as string);
 
-  if (field.type === 'number' && text.trim() !== '' && fallback !== '') {
+  if (emptyIsDefault(field) && text.trim() === '') return true;
+
+  if (field.type === 'number' && text.trim() !== '' && declared !== '') {
     const typed = asNumber(text);
-    return typed !== null && typed === asNumber(fallback as string);
+    return typed !== null && typed === asNumber(declared);
   }
 
-  return text.trim() === (fallback as string).trim();
+  return text.trim() === declared.trim();
 }
 
 /** "Default: upper", or null when the manifest gives the field none. */
@@ -167,17 +256,17 @@ export function defaultLabel(field: PluginConfigField): string | null {
 export const setByPerson = (field: PluginConfigField) => field.setBy === 'person';
 
 /**
- * A required field left empty, or a required secret with no key: the names, in order. A required
- * connection slot left unbound is NOT here: the Host hires and saves a member without it and blocks
- * its runs instead, so a person may hire first and connect the account later - the slot's picker
- * says what the runs will be blocked with. A bool is
+ * A required field left empty with no default, or a required secret that will have no value
+ * (`secretsSet`): the names, in order. A required connection slot left unbound is NOT here: the Host
+ * hires and saves a member without it and blocks its runs instead, so a person may hire first and
+ * connect the account later - the slot's picker says what the runs will be blocked with. A bool is
  * never empty - it is on or off - and a list is never missing: the Host defaults one to `[]`, so a
  * required list left empty saves, exactly as the Host takes it.
  */
 export function missingRequired(
   shape: PluginSettingsShape,
   config: PluginFieldValues,
-  secrets: Record<string, string>,
+  secrets: Record<string, boolean>,
 ): string[] {
   const missing: string[] = [];
 
@@ -185,11 +274,11 @@ export function missingRequired(
     if (!field.required || field.type === 'bool' || field.type === 'list') continue;
 
     const value = config[name];
-    if (typeof value !== 'string' || value.trim() === '') missing.push(name);
+    if ((typeof value !== 'string' || value.trim() === '') && placeholderOf(field) === undefined) missing.push(name);
   }
 
   for (const [name, secret] of Object.entries(shape.secrets)) {
-    if (secret.required && (secrets[name] ?? '').trim() === '') missing.push(name);
+    if (secret.required && secrets[name] !== true) missing.push(name);
   }
 
   return missing;
@@ -239,7 +328,7 @@ function keptStored(shape: PluginSettingsShape, config: PluginFieldValues, name:
 export const fieldBoundsHint = (field: PluginConfigField) => (field.type === 'number' ? boundsHint(field) : null);
 
 /**
- * The `config` and `secrets` to store, holding ONLY what differs from the manifest's defaults - so
+ * The `config` and `secrets` (key bindings) to store, holding ONLY what differs from the manifest's defaults - so
  * a later change to a default reaches every member that never chose otherwise. An empty text box is left out rather than sent
  * as a blank the person never meant; a number box is sent as a number, and one that does not parse
  * is sent as typed so the server's refusal names it.
@@ -250,7 +339,8 @@ export function settingsBody(
   secrets: Record<string, string>,
   connections: Record<string, string> = {},
 ): PluginHire {
-  const body: PluginHire = { config: {}, secrets: {} };
+  const bindings: Record<string, string> = {};
+  const body: PluginHire = { config: {}, secrets: bindings };
 
   for (const [name, field] of Object.entries(shape.config)) {
     const value = config[name];
@@ -275,7 +365,7 @@ export function settingsBody(
 
   for (const name of Object.keys(shape.secrets)) {
     const key = (secrets[name] ?? '').trim();
-    if (key !== '') body.secrets[name] = key;
+    if (key !== '') bindings[name] = key;
   }
 
   // Connection ids per slot, never a token. Sent whole for a plugin with slots - the route replaces
@@ -283,4 +373,24 @@ export function settingsBody(
   if (hasSlots(shape)) body.connections = bindingsBody(shape.connections, connections);
 
   return body;
+}
+
+/** A description's first paragraph: up to its first blank line, trimmed. */
+export function firstParagraph(description: string): string {
+  return description.trim().split(/\n\s*\n/)[0]!.trim();
+}
+
+/**
+ * THE BODY A SAVE SENDS: the settings as `settingsBody` has them, with NO `secrets` - the Host then
+ * keeps the key bindings, which this form never edits - and the secret values typed or cleared.
+ */
+export function saveBody(
+  shape: PluginSettingsShape,
+  config: PluginFieldValues,
+  values: SecretValues,
+  connections: Record<string, string> = {},
+): PluginHire {
+  const { secrets: _bindings, ...settings } = settingsBody(shape, config, {}, connections);
+  const typed = secretValuesBody(values);
+  return typed ? { ...settings, secretValues: typed } : settings;
 }

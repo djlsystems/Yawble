@@ -2916,14 +2916,20 @@ export interface PluginConfigField {
   max?: number | null
   /** A `number` field that takes whole numbers only. */
   integer?: boolean
-  /** A setting most people never change: shown behind the form's Advanced section. */
+  /** The manifest's old mark for a setting most people never change. Accepted and ignored: every setting is on the one form. */
   advanced?: boolean
+  /** The manifest's short label for the field; the form says the field's name in words without one. */
+  label?: string | null
 }
 
-/** One secret a plugin's manifest names. Its NAME only: no route ever carries a value. */
+/** One secret a plugin's manifest names: its declaration, never a value. */
 export interface PluginSecretField {
   description: string
   required: boolean
+  /** The manifest's short label for the field; the form says the field's name in words without one. */
+  label?: string | null
+  /** False when the plugin declares the value not secret: the form shows it as text. Absent or true: a password box. */
+  masked?: boolean
 }
 
 /** A member hired on a plugin, as the plugins list names it. */
@@ -2965,6 +2971,8 @@ export interface InstalledPlugin {
   members: PluginMemberRef[]
   /** Its connection slots, by slot name; `{}` when the manifest declares none. Absent from a Host older than connections. */
   connections?: Record<string, ConnectionSlot>
+  /** Its marketplace page when the catalog lists it, else null. */
+  marketplaceUrl?: string | null
   /** Manifest keys reserved for a later Host, and unknown keys it ignored. */
   reserved: string[]
   ignored: string[]
@@ -3044,12 +3052,45 @@ export interface PluginMemberSettings {
    * Host's sentence. Always present on the read and the PUT answer; `{}` when none is.
    */
   outOfRange?: Record<string, string>
+  /** Each secret field's state on this member, in the manifest's order. Absent from a Host older than member values. */
+  secretStates?: PluginSecretState[]
+  /** The plugin's marketplace page when the catalog lists it, else null. */
+  marketplaceUrl?: string | null
 }
 
-/** A plugin member's settings on hire: config values, and each secret bound to a LOGICAL KEY. */
+/** Where a run would get a secret field's value now: the member's own value, its bound key (stored, or the Host's environment), or nowhere. */
+export type PluginSecretSource = 'member' | 'key' | 'environment'
+
+/**
+ * One secret field of a plugin member, as `GET .../secrets` and the settings read's `secretStates`
+ * answer it: whether it is set, by whom and when, and from where. `value` only for a field the
+ * manifest declares `masked: false`, and only when set; never a masked value. `key` is the bound
+ * key's NAME, shown only in "As JSON".
+ */
+export interface PluginSecretState {
+  field: string
+  label: string | null
+  masked: boolean
+  required: boolean
+  /** False when the setting the field depends on leaves it off for this member. */
+  needed: boolean
+  set: boolean
+  setBy: string | null
+  setAt: string | null
+  source: PluginSecretSource | null
+  key: string | null
+  value?: string
+}
+
+/**
+ * A plugin member's settings on hire or Save: config values, each secret's key binding (only "As
+ * JSON" shows one; omitted on Save, which keeps them), and the secret values typed on the form -
+ * the member's own: a string sets or replaces one, null clears it.
+ */
 export interface PluginHire {
   config: Record<string, PluginSettingValue>
-  secrets: Record<string, string>
+  secrets?: Record<string, string>
+  secretValues?: Record<string, string | null>
   /** Slot -> connection id. Sent only for a plugin that declares slots; `{}` unbinds every slot. */
   connections?: Record<string, string>
 }
@@ -3685,13 +3726,27 @@ export interface SolutionDiff {
 export interface SolutionSecret {
   member: string
   field: string
+  /** The key name the package binds: never shown on the main screen. */
   key: string
   description: string
   required: boolean
   when: { setting: string; value: string } | null
+  /** True when the member has its own value or its bound key is set. */
   set: boolean
   needed: boolean | null
   setWith: string
+  /** The manifest's label for the field, or null. Absent from a Host older than member values. */
+  label?: string | null
+  /** False when the manifest declares the value not secret. */
+  masked?: boolean
+  source?: PluginSecretSource | null
+}
+
+/** A needed secret field still without a value from any source, as an install's result names it. */
+export interface SolutionUnsetField {
+  member: string
+  field: string
+  label: string | null
 }
 
 /** Where the key a member's run resolves comes from: one set from the screen (`stored`, which wins),
@@ -3792,6 +3847,8 @@ export interface SolutionMissing {
 export interface SolutionInstallInputs {
   settings?: Record<string, Record<string, unknown>>
   connections?: Record<string, Record<string, string>>
+  /** Package member -> field -> the value typed: that member's own. */
+  secretValues?: Record<string, Record<string, string>>
 }
 
 export interface SolutionInstallRequest extends SolutionInstallInputs {
@@ -3838,6 +3895,8 @@ export type SolutionInstallResult =
       secrets?: SolutionSecret[]
       /** The keys still to set: bound, needed and not set on the Host. */
       unset?: string[]
+      /** Each needed secret field with no value from any source: what the result lists. */
+      unsetFields?: SolutionUnsetField[]
       /** Each schedule's first run: ran now at install, or when it first comes due. */
       firstRuns?: SolutionFirstRun[]
       /** For a reinstall onto a team that kept an earlier install, the version it held. */

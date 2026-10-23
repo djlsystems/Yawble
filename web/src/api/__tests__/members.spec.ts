@@ -80,6 +80,16 @@ describe('addMember', () => {
     expect(bodyOf()).not.toHaveProperty('systemPrompt')
   })
 
+  it("sends a plugin hire's typed secret values as secretValues, and none when nothing was typed", async () => {
+    await addMember(asTeamId('Alpha'), 'dns', 'plugin:sample-dns', { config: {}, secrets: {}, secretValues: { apiKey: 'key-1' } })
+    expect(bodyOf()).toEqual({ name: 'dns', agent: 'plugin:sample-dns', config: {}, secrets: {}, secretValues: { apiKey: 'key-1' } })
+
+    fetcher.mockClear()
+    fetcher.mockResolvedValue(new Response(JSON.stringify({ name: 'dns' }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    await addMember(asTeamId('Alpha'), 'dns', 'plugin:sample-dns', { config: {}, secrets: {} })
+    expect(bodyOf()).not.toHaveProperty('secretValues')
+  })
+
   it('surfaces the server’s own refusal wording', async () => {
     vi.stubGlobal(
       'fetch',

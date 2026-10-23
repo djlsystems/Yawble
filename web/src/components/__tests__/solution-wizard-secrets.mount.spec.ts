@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
 //
-// THE SOLUTION WIZARD: THE SECRETS A PACKAGE BINDS. "Your part" lists each by its key name with
-// whether the Host has it set - never a value - what it is for, and, when unset, that its source
-// fails until it is set and the ways to set it: its write-only value field here first, the CLI
-// second. A secret for a source the person leaves off is not needed, and follows the person's
-// choice. The result lists the keys still unset, each with the same field.
+// THE SOLUTION WIZARD: EACH PLUGIN MEMBER'S SECRET FIELDS. "Your part" lists each by the field's
+// label (else its name in words) and its member - never a key name - with whether it is set, and,
+// when unset, that its source fails until it is set. Each needed field offers one box for that
+// member's OWN value: a password box, or a text box for a field declared `masked: false`. What is
+// typed rides Install as `secretValues`; no key is written. A secret for a source the person leaves
+// off is not needed, and follows the person's choice. The result lists the fields still unset
+// (`unsetFields`), to be set in the member's settings.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import type { VueWrapper } from '@vue/test-utils';
@@ -12,22 +14,12 @@ import { QSelect } from 'quasar';
 
 import SolutionWizard from '../SolutionWizard.vue';
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
-import { button, field, isDisabled, settle, type } from '../../test/formProbe';
-import { localTime } from '../../lib/localTime';
-import { productCli } from '../../presentation/product';
+import { button, field, settle, type } from '../../test/formProbe';
 import { Folder, fakeHost, hostSecrets, reply, steps, wizardRoutes, type Call } from '../../test/solutionFixtures';
 
 let calls: Call[] = [];
 
 const Value = 'usajobs-0123456789abcdef';
-const SetAt = '2026-10-11T09:30:00Z';
-
-/** `PUT /api/secrets/{key}`: the key's state now, set from the screen - never its value. */
-const keyWrites = (call: Call) => {
-  const key = /^\/api\/secrets\/([A-Z_]+)$/.exec(call.url)?.[1];
-  if (!key || call.method !== 'PUT') return undefined;
-  return reply(200, { key, set: true, refusal: null, setWith: '', setBy: 'dana@example.com', setAt: SetAt, source: 'stored' });
-};
 
 beforeEach(() => {
   setActivePinia(createPinia());
@@ -48,10 +40,10 @@ beforeEach(() => {
                   steps: steps(8),
                   secrets: hostSecrets().map((secret) => ({ ...secret, needed: secret.key !== 'THEMUSE_API_KEY' })),
                   unset: ['USAJOBS_API_KEY'],
+                  unsetFields: [{ member: 'Scout', field: 'usajobsApiKey', label: 'USAJOBS API key' }],
                 })
               : undefined,
           (call) => (call.url === '/api/teams/job-tracker/solution' ? reply(200, { team: 'job-tracker', missing: [] }) : undefined),
-          keyWrites,
           ...wizardRoutes({ secrets: hostSecrets() }),
         ],
         calls,
@@ -76,33 +68,45 @@ async function yourPart() {
   return wrapper;
 }
 
-const secret = (key: string) => bodyFind(`[data-secret="${key}"]`)!;
+async function installNow() {
+  button('Next').click();
+  await settle();
+  button('Install').click();
+  await settle();
+  await settle();
+}
+
+const secret = (field: string) => bodyFind(`[data-secret="Scout/${field}"]`)!;
 
 const selectLabelled = (wrapper: VueWrapper, label: string) =>
   wrapper.findAllComponents(QSelect).find((select) => select.props('label') === label)!;
 
 describe('Solution wizard - secrets', () => {
-  it('lists each secret by key name: set, unset with how to set it, and not needed', async () => {
+  it("lists each secret field by its label and member, never a key name: set, unset, and not needed", async () => {
     await yourPart();
 
-    expect(bodyFind('[data-secrets]')).not.toBeNull();
+    const section = bodyFind('[data-secrets]')!;
+    expect(section).not.toBeNull();
+    for (const key of ['ADZUNA_APP_ID', 'USAJOBS_API_KEY', 'THEMUSE_API_KEY']) expect(section.textContent).not.toContain(key);
 
-    const set = secret('ADZUNA_APP_ID');
+    const set = secret('adzunaAppId');
     expect(set.dataset.secretState).toBe('set');
-    expect(set.textContent).toContain('Your Adzuna application id.');
-    expect(set.textContent).toContain('Set on this Host.');
+    expect(set.textContent).toContain('Adzuna app ID');
+    expect(set.textContent).toContain('Scout');
+    expect(set.querySelector('[data-secret-sentence]')?.textContent).toContain('Set.');
 
-    const unset = secret('USAJOBS_API_KEY');
+    const unset = secret('usajobsApiKey');
     expect(unset.dataset.secretState).toBe('unset');
+    expect(unset.textContent).toContain('USAJOBS API key');
     expect(unset.textContent).toContain('not set');
     expect(unset.textContent).toContain('its source fails until it is set');
-    expect(unset.textContent).toContain(`${productCli} secret set USAJOBS_API_KEY (it prompts for the value), then ${productCli} up to restart the Host`);
+    expect(unset.textContent).not.toContain('secret set');
 
     // THE MUSE'S SOURCE IS NOT TICKED (sources starts empty): not needed, and says why.
-    const notNeeded = secret('THEMUSE_API_KEY');
+    const notNeeded = secret('themuseApiKey');
     expect(notNeeded.dataset.secretState).toBe('not-needed');
     expect(notNeeded.textContent).toContain("Not needed: Scout's sources leaves other off.");
-    expect(notNeeded.textContent).not.toContain('secret set');
+    expect(notNeeded.querySelector('[data-secret-value-input]')).toBeNull();
   });
 
   it('follows the person ticking the source a secret belongs to', async () => {
@@ -111,86 +115,47 @@ describe('Solution wizard - secrets', () => {
     selectLabelled(wrapper, 'Scout: sources').vm.$emit('update:modelValue', ['other']);
     await settle();
 
-    expect(secret('THEMUSE_API_KEY').dataset.secretState).toBe('unset');
-    expect(secret('THEMUSE_API_KEY').textContent).toContain(`${productCli} secret set THEMUSE_API_KEY`);
+    expect(secret('themuseApiKey').dataset.secretState).toBe('unset');
+    expect(secret('themuseApiKey').querySelector('[data-secret-value-input]')).not.toBeNull();
   });
 
-  it('the result lists the keys still unset, each with the way to set it', async () => {
+  it("offers a password box for a masked field and a text box for an unmasked one, and sends what is typed with Install as that member's own", async () => {
     await yourPart();
-    button('Next').click();
-    await settle();
-    button('Install').click();
-    await settle();
-    await settle();
+
+    expect(field('USAJOBS API key').getAttribute('type')).toBe('password');
+    expect(field('USAJOBS API key').value).toBe('');
+    expect(field('Adzuna app ID').getAttribute('type')).toBe('text');
+
+    await type('USAJOBS API key', Value);
+    expect(secret('usajobsApiKey').querySelector('[data-secret-sentence]')?.textContent).toBe('Saved for this member when you press Install.');
+
+    await installNow();
+
+    const install = calls.find((call) => call.url === '/api/solutions/install')!;
+    expect((install.body as { secretValues?: unknown }).secretValues).toEqual({ Scout: { usajobsApiKey: Value } });
+    // No key is written from the wizard: the value is the member's own.
+    expect(calls.filter((call) => call.url.startsWith('/api/secrets/'))).toHaveLength(0);
+    expect(document.body.textContent).not.toContain(Value);
+  });
+
+  it('sends no secretValues when nothing is typed', async () => {
+    await yourPart();
+    await installNow();
+
+    const install = calls.find((call) => call.url === '/api/solutions/install')!;
+    expect(install.body).not.toHaveProperty('secretValues');
+  });
+
+  it('the result lists each needed field still unset by its label and member, never a key name', async () => {
+    await yourPart();
+    await installNow();
 
     const list = bodyFind('[data-unset-secrets]')!;
     expect(list).not.toBeNull();
-    expect(list.textContent).toContain('still not set on the Host');
-    const row = bodyFind('[data-unset-secret="USAJOBS_API_KEY"]')!;
-    expect(row.textContent).toContain(`${productCli} secret set USAJOBS_API_KEY (it prompts for the value), then ${productCli} up to restart the Host`);
-    expect(bodyFind('[data-unset-secret="ADZUNA_APP_ID"]')).toBeNull();
-    expect(bodyFind('[data-unset-secret="THEMUSE_API_KEY"]')).toBeNull();
-  });
-
-  it("offers each needed key's write-only field before the CLI, written by Install before the install", async () => {
-    await yourPart();
-
-    const unset = secret('USAJOBS_API_KEY');
-    const words = unset.querySelector('[data-secret-sentence]')!.textContent!;
-    expect(words.indexOf('type its value in the field here and press Install')).toBeGreaterThan(-1);
-    expect(words.indexOf('type its value in the field here and press Install')).toBeLessThan(words.indexOf(`${productCli} secret set USAJOBS_API_KEY`));
-    expect(unset.querySelector('[data-secret-value="USAJOBS_API_KEY"]')).not.toBeNull();
-    expect(secret('ADZUNA_APP_ID').querySelector('[data-secret-value="ADZUNA_APP_ID"]')).not.toBeNull();
-    expect(secret('THEMUSE_API_KEY').querySelector('[data-secret-value]')).toBeNull();
-    // The field has no button of its own: Install writes it.
-    expect(() => button('Set')).toThrow();
-
-    const box = field('Value for USAJOBS_API_KEY') as HTMLInputElement;
-    expect(box.getAttribute('type')).toBe('password');
-    expect(box.value).toBe('');
-
-    await type('Value for USAJOBS_API_KEY', Value);
-    expect(calls.filter((call) => call.url.startsWith('/api/secrets/') && call.method === 'PUT')).toHaveLength(0);
-
-    button('Next').click();
-    await settle();
-    button('Install').click();
-    await settle();
-    await settle();
-
-    const writes = calls.filter((call) => call.method === 'PUT' && call.url === '/api/secrets/USAJOBS_API_KEY');
-    expect(writes.map((call) => call.body)).toEqual([{ value: Value }]);
-    // Written before the install, so the install's list of keys still unset is true.
-    expect(calls.indexOf(writes[0]!)).toBeLessThan(calls.findIndex((call) => call.url === '/api/solutions/install'));
-    // The install binds the key by name only.
-    expect(JSON.stringify(calls.find((call) => call.url === '/api/solutions/install')?.body)).not.toContain(Value);
-    // Set from the screen now, by whom and when, in the result's list too.
-    expect(bodyFind('[data-unset-secret="USAJOBS_API_KEY"]')!.dataset.unsetSecretNow).toBe('set');
-    expect(document.body.textContent).not.toContain(Value);
-  });
-
-  it("the result's unset list offers each key's field, written by its Save keys", async () => {
-    await yourPart();
-    button('Next').click();
-    await settle();
-    button('Install').click();
-    await settle();
-    await settle();
-
-    const row = () => bodyFind('[data-unset-secret="USAJOBS_API_KEY"]')!;
-    expect(row().querySelector('[data-secret-value="USAJOBS_API_KEY"]')).not.toBeNull();
-    expect(row().textContent).toContain('To set it, type its value in the field here and press Save keys, or run');
-    expect(isDisabled('Save keys')).toBe(true);
-
-    await type('Value for USAJOBS_API_KEY', Value);
-    expect(calls.filter((call) => call.method === 'PUT' && call.url === '/api/secrets/USAJOBS_API_KEY')).toHaveLength(0);
-    button('Save keys').click();
-    await settle();
-
-    expect(calls.filter((call) => call.method === 'PUT' && call.url === '/api/secrets/USAJOBS_API_KEY')).toHaveLength(1);
-    expect(row().dataset.unsetSecretNow).toBe('set');
-    expect(row().textContent).toContain(`Set by dana@example.com on ${localTime(Date.parse(SetAt), { date: true })}.`);
-    expect(row().textContent).not.toContain('secret set');
-    expect(document.body.textContent).not.toContain(Value);
+    expect(list.textContent).toContain("set it in the member's settings");
+    const row = bodyFind('[data-unset-secret="Scout/usajobsApiKey"]')!;
+    expect(row.textContent).toContain('USAJOBS API key · Scout');
+    expect(list.textContent).not.toContain('USAJOBS_API_KEY');
+    expect(bodyFind('[data-unset-secret="Scout/adzunaAppId"]')).toBeNull();
   });
 });
