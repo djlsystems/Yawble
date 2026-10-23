@@ -84,7 +84,8 @@ internal sealed partial class HostComposition
                 sp.GetRequiredService<ISecretStore>(),
                 sp.GetRequiredService<TriggerSweep>(),
                 sp.GetRequiredService<SqliteOutcomeStore>(),
-                sp.GetRequiredService<FolderRemoval>());
+                sp.GetRequiredService<FolderRemoval>(),
+                sp.GetRequiredService<PluginMemberSecretStore>());
         });
 
         // WHAT A SOLUTION TEAM WAITS FOR, asked before every trigger's fire. The installer is late-bound:

@@ -183,6 +183,21 @@ public static class TenantActions
     /// the field and secret NAMES that changed - never a value.</summary>
     public const string MemberPluginSettingsChanged = "member.plugin-settings-changed";
 
+    /// <summary>A person typed a plugin member's own value for one of its manifest's secret fields
+    /// where none was kept. Detail: team, member, plugin and field - never the value.</summary>
+    public const string MemberSecretSet = "member.secret-set";
+
+    /// <summary>A person replaced a plugin member's own secret value. Detail as for a set.</summary>
+    public const string MemberSecretReplaced = "member.secret-replaced";
+
+    /// <summary>A person cleared a plugin member's own secret value; a run then resolves the field's
+    /// bound key, if any. Detail as for a set.</summary>
+    public const string MemberSecretCleared = "member.secret-cleared";
+
+    /// <summary>The one-time start step copied each stored plugin key onto every plugin member bound
+    /// to it, as that member's own value. Detail: counts only - members, fields and keys.</summary>
+    public const string MemberSecretsCopied = "member.secrets-copied";
+
     /// <summary>A plugin member's connection bindings were set or changed (at hire, in its settings,
     /// or carried by a clone). Detail names the slots and connection ids - never a token.</summary>
     public const string MemberConnectionsChanged = "member.connections-changed";

@@ -91,14 +91,15 @@ public static class SolutionEndpoints
             Answer(await installer.InstallAsync(
                 new SolutionInstallRequest(
                     request.Folder, request.TeamName, request.Agent, request.LocalRepository,
-                    new SolutionAnswers(request.Settings, request.Connections)),
+                    new SolutionAnswers(request.Settings, request.Connections, SecretValues: request.SecretValues)),
                 ActorOf(context), ct)))
             .WithTags(Area)
             .HumansOnly()
             .WithSummary("Install a solution package as a new team")
             .WithDescription(
                 "Body `{ folder, teamName?, agent?, localRepository?, settings?: { <member>: { <setting>: "
-                + "value } }, connections?: { <member>: { <slot>: <connection id> } } }`. In order: installs "
+                + "value } }, connections?: { <member>: { <slot>: <connection id> } }, secretValues?: { <member>: "
+                + "{ <field>: value } } }`; each secret value is that member's own, kept with its hire. In order: installs "
                 + "the package's plugins, creates the team (with no repository; a new local "
                 + "repository only with `localRepository: true`), hires the members, registers the team skills, copies `tools/` "
                 + "to the team's `solution` folder, publishes the sites, creates the triggers and records "
@@ -117,13 +118,13 @@ public static class SolutionEndpoints
         app.MapPost("/api/solutions/update", async (
             SolutionUpdateBody request, SolutionInstaller installer, HttpContext context, CancellationToken ct) =>
             Answer(await installer.UpdateAsync(
-                new SolutionUpdateRequest(request.Folder, request.Team, new SolutionAnswers(request.Settings, request.Connections)),
+                new SolutionUpdateRequest(request.Folder, request.Team, new SolutionAnswers(request.Settings, request.Connections, SecretValues: request.SecretValues)),
                 ActorOf(context), ct)))
             .WithTags(Area)
             .HumansOnly()
             .WithSummary("Update a team to a newer version of its solution package")
             .WithDescription(
-                "Body `{ folder, team, settings?, connections? }`. Adds, changes and removes what the diff "
+                "Body `{ folder, team, settings?, connections?, secretValues? }` (the last for members the update adds). Adds, changes and removes what the diff "
                 + "(`POST /api/solutions/preview`) names, keeping the person's settings, bindings, uploaded "
                 + "documents and site data (a site the package no longer has is unpublished, not deleted), "
                 + "and appends `solution.updated`. The same answers as the install, with `from` and `diff`; "
@@ -232,7 +233,9 @@ public sealed record SolutionInstallBody(
     [property: Description("Package member name to its person-only settings, as the package's inputs ask.")]
     Dictionary<string, Dictionary<string, JsonElement>>? Settings = null,
     [property: Description("Package member name to slot to connection id, as the package's inputs ask.")]
-    Dictionary<string, Dictionary<string, string>>? Connections = null);
+    Dictionary<string, Dictionary<string, string>>? Connections = null,
+    [property: Description("Package member name to secret field to the value a person typed: that member's own value, kept with its hire.")]
+    Dictionary<string, Dictionary<string, string>>? SecretValues = null);
 
 /// <summary>Body of <c>POST /api/solutions/update</c>.</summary>
 public sealed record SolutionUpdateBody(
@@ -243,7 +246,9 @@ public sealed record SolutionUpdateBody(
     [property: Description("Package member name to its person-only settings, for members the update adds.")]
     Dictionary<string, Dictionary<string, JsonElement>>? Settings = null,
     [property: Description("Package member name to slot to connection id, for members the update adds.")]
-    Dictionary<string, Dictionary<string, string>>? Connections = null);
+    Dictionary<string, Dictionary<string, string>>? Connections = null,
+    [property: Description("Package member name to secret field to the value a person typed, for members the update adds.")]
+    Dictionary<string, Dictionary<string, string>>? SecretValues = null);
 
 /// <summary>Body of <c>POST /api/teams/{team}/solution/uninstall</c>.</summary>
 public sealed record SolutionUninstallBody(

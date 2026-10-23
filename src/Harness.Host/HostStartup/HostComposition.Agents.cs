@@ -75,6 +75,18 @@ internal sealed partial class HostComposition
         builder.Services.AddSingleton<ISecretStore>(sp => sp.GetRequiredService<PluginSecretStore>());
         builder.Services.AddSingleton<IPluginMemberSettingsStore>(new SqlitePluginMemberSettings(database));
 
+        // EACH PLUGIN MEMBER OWNS ITS SECRETS: the values a person typed for one member's fields
+        // (`plugin_member_secrets`, Data Protection ciphertext under a purpose of its own), resolved
+        // before any key binding. The start step copies each STORED key onto the members bound to it,
+        // once, and never an environment value.
+        builder.Services.AddSingleton(sp => new PluginMemberSecretStore(database, sp.GetRequiredService<IDataProtectionProvider>()));
+        builder.Services.AddSingleton<IPluginMemberSecrets>(sp => sp.GetRequiredService<PluginMemberSecretStore>());
+        builder.Services.AddSingleton(sp => new MemberSecretReads(
+            sp.GetRequiredService<PluginMemberSecretStore>(), sp.GetRequiredService<PluginSecretStore>(), sp.GetService<Marketplace>()));
+        builder.Services.AddHostedService(sp => new MemberSecretsCopyAtStart(
+            sp.GetRequiredService<PluginMemberSecretStore>(), sp.GetRequiredService<IDataProtectionProvider>(),
+            sp.GetRequiredService<ILogger<MemberSecretsCopyAtStart>>()));
+
         // CONNECTIONS: OAuth accounts the Host holds for plugins (see Connections). The client secret and
         // every token are Data Protection ciphertext under `<dataRoot>/keys`; the provider is reached only
         // through IOAuthEndpoints, which the tests replace.

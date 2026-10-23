@@ -173,6 +173,104 @@ public sealed class SolutionSecretsTests(HostFixture host) : IClassFixture<HostF
         }
     }
 
+    /// <summary>A neutral package whose one plugin member, Keeper, binds a masked `token` to a key
+    /// and has an unmasked `account`.</summary>
+    private string KeyedPackage()
+    {
+        var pluginId = $"pack-{Guid.NewGuid().ToString("N")[..8]}";
+        var folder = SolutionSamples.Neutral(
+            Path.Combine(Get<TeamDocuments>().EnsureFor(host.Alpha), "packages", Guid.NewGuid().ToString("N")), pluginId, [], []);
+
+        var solution = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Path.Combine(folder, "solution.json")))!;
+        solution["members"]![0]!["secrets"] = new System.Text.Json.Nodes.JsonObject { ["token"] = "FIXTURE_PACK_TOKEN" };
+        File.WriteAllText(Path.Combine(folder, "solution.json"), solution.ToJsonString());
+
+        var manifestPath = Path.Combine(folder, "plugins", pluginId, "plugin.json");
+        var manifest = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(manifestPath))!;
+        manifest["secrets"] = System.Text.Json.Nodes.JsonNode.Parse(
+            """
+            {
+              "token": { "description": "The service's token.", "required": true, "label": "Service token" },
+              "account": { "description": "The account's name.", "masked": false }
+            }
+            """);
+        File.WriteAllText(manifestPath, manifest.ToJsonString());
+
+        return folder;
+    }
+
+    [Fact]
+    public async Task A_value_typed_in_the_wizard_is_the_members_own_kept_with_its_hire_and_never_answered()
+    {
+        var typed = $"typed-token-{Guid.NewGuid():N}";
+        using var client = await host.PersonAsync();
+        var person = new Recorded(client);
+        var folder = KeyedPackage();
+
+        // A value that cannot be kept is refused naming the member and the field, and makes no team.
+        var refusedName = Unique("Refused");
+        using (var refused = await client.PostAsJsonAsync("/api/solutions/install", new
+        {
+            folder,
+            teamName = refusedName,
+            secretValues = new Dictionary<string, Dictionary<string, string>> { ["Keeper"] = new() { ["token"] = "abc" } },
+        }, Ct))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+            Assert.Contains("'Keeper': `token`: the value is shorter than 4", await refused.Content.ReadAsStringAsync(Ct));
+        }
+
+        Assert.Null(Get<TeamRegistry>().ExistingName(ContainerId.DeriveName(refusedName)!));
+
+        var done = await person.PostAsync("/api/solutions/install", new
+        {
+            folder,
+            teamName = Unique("Typed"),
+            secretValues = new Dictionary<string, Dictionary<string, string>> { ["Keeper"] = new() { ["token"] = typed } },
+        });
+        Assert.True(done.GetProperty("ok").GetBoolean(), done.ToString());
+        var team = done.GetProperty("team").GetString()!;
+
+        // The member's own value, beside the package's key binding, which stays.
+        var keeper = new ContainerId(team, "Keeper");
+        Assert.Equal(typed, (await Get<PluginMemberSecretStore>().ValuesAsync(keeper, Ct))["token"]);
+        Assert.Equal("FIXTURE_PACK_TOKEN", (await Get<IPluginMemberSettingsStore>().ForAsync(keeper, Ct)).Secrets["token"]);
+        Assert.NotNull(await Get<ITenantLog>().FindLatestAsync(TenantActions.MemberSecretSet, $"{team}/Keeper", Ct));
+
+        // The result says it is set from the member, labelled, and asks for nothing.
+        var result = ByKey(done.GetProperty("secrets"));
+        Assert.True(result["FIXTURE_PACK_TOKEN"].GetProperty("set").GetBoolean());
+        Assert.Equal("member", result["FIXTURE_PACK_TOKEN"].GetProperty("source").GetString());
+        Assert.Equal("Service token", result["FIXTURE_PACK_TOKEN"].GetProperty("label").GetString());
+        Assert.Empty(done.GetProperty("unset").EnumerateArray());
+        Assert.Empty(done.GetProperty("unsetFields").EnumerateArray());
+
+        Assert.All(person.Bodies, body => Assert.DoesNotContain(typed, body, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_field_with_no_value_from_any_source_is_listed_by_package_member_and_the_container_it_was_hired_as()
+    {
+        using var client = await host.PersonAsync();
+        var person = new Recorded(client);
+
+        var done = await person.PostAsync("/api/solutions/install", new { folder = KeyedPackage(), teamName = Unique("Unset") });
+        Assert.True(done.GetProperty("ok").GetBoolean(), done.ToString());
+        var team = done.GetProperty("team").GetString()!;
+
+        var unset = Assert.Single(done.GetProperty("unsetFields").EnumerateArray());
+        Assert.Equal("Keeper", unset.GetProperty("member").GetString());
+        Assert.Equal("token", unset.GetProperty("field").GetString());
+        Assert.Equal("Service token", unset.GetProperty("label").GetString());
+
+        // `container` is the id the member routes take: the member's settings answer under it.
+        var container = unset.GetProperty("container").GetString()!;
+        Assert.Equal(container, ByKey(done.GetProperty("secrets"))["FIXTURE_PACK_TOKEN"].GetProperty("container").GetString());
+        var states = await person.GetAsync($"/api/teams/{team}/members/{container}/secrets");
+        var token = states.GetProperty("secrets").EnumerateArray().Single(s => s.GetProperty("field").GetString() == "token");
+        Assert.False(token.GetProperty("set").GetBoolean());
+    }
+
     [Fact]
     public async Task An_update_keeps_a_binding_the_person_changed_and_takes_the_packages_new_key_where_they_did_not()
     {

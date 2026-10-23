@@ -26,19 +26,24 @@ public static class PluginReadyNotice
 
     /// <summary>
     /// Each thing a person must still set before the member's runs can start, in words, or none:
-    /// a required secret with no key bound, a bound key with no value on the Host, a required
+    /// a required secret with no value of the member's own and no key bound, a bound key with no value
+    /// on the Host, a required
     /// connection slot with nothing bound. A connection that needs reconnecting or lacks a scope is
     /// said by the run itself, which asks the provider.
     /// </summary>
-    public static IReadOnlyList<string> Missing(PluginManifest manifest, PluginMemberSettings settings, ISecretStore? secrets)
+    public static IReadOnlyList<string> Missing(
+        PluginManifest manifest, PluginMemberSettings settings, ISecretStore? secrets, IReadOnlySet<string>? valued = null)
     {
         var missing = new List<string>();
 
         foreach (var (name, secret) in manifest.Secrets.Where(s => s.Value.Required))
         {
+            // The member's own value satisfies the field.
+            if (valued?.Contains(name) == true) continue;
+
             if (!settings.Secrets.TryGetValue(name, out var key))
             {
-                missing.Add($"bind the secret `{name}` to a key and set its value, in the member's settings");
+                missing.Add($"set the secret `{name}` in the member's settings");
             }
             else if (secrets?.TryGet(key) is null)
             {

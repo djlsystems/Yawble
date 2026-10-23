@@ -652,5 +652,25 @@ public static class AuthSchema
             ALTER TABLE connections ADD COLUMN tenant TEXT NULL;
             ALTER TABLE connection_flows ADD COLUMN tenant TEXT NULL;
             """),
+
+        // A PLUGIN MEMBER'S OWN SECRET VALUES, one row per manifest secret field it has a value for.
+        // `value_protected` is Data Protection ciphertext under the instance's `<dataRoot>/keys` and a
+        // purpose of its own; no column holds the value or any part of it. The rows die with the
+        // member's `team_members` row (a removal, a team deletion), so a same-name successor inherits
+        // none. Beside `tenant_events`, so every set, replace and clear lands with its row or not at all.
+        new MigrationStep(
+            "auth-028",
+            """
+            CREATE TABLE plugin_member_secrets (
+                team            TEXT NOT NULL COLLATE NOCASE,
+                name            TEXT NOT NULL COLLATE NOCASE,
+                field           TEXT NOT NULL,
+                value_protected TEXT NOT NULL,
+                set_by          TEXT NOT NULL,
+                set_at          TEXT NOT NULL,
+                PRIMARY KEY (team, name, field),
+                FOREIGN KEY (team, name) REFERENCES team_members(team, name) ON DELETE CASCADE
+            );
+            """),
     ];
 }
