@@ -304,7 +304,7 @@ public sealed class Connections(
                 : $"`flow` is \"{DeviceFlow}\" to sign in with a code, or left out for the browser sign-in.");
         }
 
-        var (provider, reconnecting, scopes, error) = await PrepareAsync(request, ct);
+        var (provider, reconnecting, scopes, directory, error) = await PrepareAsync(request, ct);
         if (error is not null) return (null, error);
 
         // The instance's default client is public and registers no redirect URI: it signs in with a code.
@@ -322,7 +322,7 @@ public sealed class Connections(
 
         await store.InsertFlowAsync(new ConnectionFlow(
             state, actor.Id, provider!.Id, scopes!, string.IsNullOrWhiteSpace(request.Name) ? null : request.Name.Trim(),
-            reconnecting?.Id, redirectUri!, loopback, verifier, now, null), ct);
+            reconnecting?.Id, redirectUri!, loopback, verifier, now, null, directory), ct);
 
         var query = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -343,9 +343,11 @@ public sealed class Connections(
         return (new ConnectionStart(url, state, redirectUri!, now + FlowLifetime), null);
     }
 
-    /// <summary>What both flows check first: the connection reconnected, the provider set up, and
-    /// the scopes to ask - the provider's defaults, the asked, and a reconnect's old ones.</summary>
-    private async Task<(OAuthProvider? Provider, ConnectionRecord? Reconnecting, IReadOnlyList<string>? Scopes, string? Error)> PrepareAsync(
+    /// <summary>What both flows check first: the connection reconnected, the provider set up, the
+    /// scopes to ask - the provider's defaults, the asked, and a reconnect's old ones - and the
+    /// directory signed in through: the asked one, else a reconnect's own (an empty one asked clears
+    /// it), the provider answered at that directory's endpoints.</summary>
+    private async Task<(OAuthProvider? Provider, ConnectionRecord? Reconnecting, IReadOnlyList<string>? Scopes, string? Directory, string? Error)> PrepareAsync(
         StartConnection request, CancellationToken ct)
     {
         ConnectionRecord? reconnecting = null;
@@ -353,43 +355,56 @@ public sealed class Connections(
         if (!string.IsNullOrWhiteSpace(request.ReconnectId))
         {
             reconnecting = await store.GetAsync(request.ReconnectId.Trim(), ct);
-            if (reconnecting is null) return (null, null, null, $"There is no connection '{request.ReconnectId}' to reconnect.");
+            if (reconnecting is null) return (null, null, null, null, $"There is no connection '{request.ReconnectId}' to reconnect.");
 
             if (reconnecting.Mailbox is not null)
             {
-                return (null, null, null, $"Connection {reconnecting.Named} is a mailbox; update its password instead of reconnecting it.");
+                return (null, null, null, null, $"Connection {reconnecting.Named} is a mailbox; update its password instead of reconnecting it.");
             }
 
             if (!string.IsNullOrWhiteSpace(request.Provider) && request.Provider.Trim() != reconnecting.Provider)
             {
-                return (null, null, null, $"Connection {reconnecting.Named} is a {ConnectionProviders.Display(reconnecting.Provider)} connection; reconnect it with that provider.");
+                return (null, null, null, null, $"Connection {reconnecting.Named} is a {ConnectionProviders.Display(reconnecting.Provider)} connection; reconnect it with that provider.");
             }
         }
 
         var providerId = reconnecting?.Provider ?? request.Provider?.Trim();
-        if (string.IsNullOrEmpty(providerId)) return (null, null, null, "`provider` is required: google, microsoft or a custom provider's id.");
+        if (string.IsNullOrEmpty(providerId)) return (null, null, null, null, "`provider` is required: google, microsoft or a custom provider's id.");
 
         if (await ProviderAsync(providerId, ct) is not { } provider)
         {
-            return (null, null, null, $"'{providerId}' is not a provider on this Host. Set one up in {Where} first.");
+            return (null, null, null, null, $"'{providerId}' is not a provider on this Host. Set one up in {Where} first.");
         }
 
         if (!provider.Configured)
         {
-            return (null, null, null, $"{provider.Name} has no OAuth client yet. Set its client ID{(provider.DeviceAuthorizationUrl is null ? " and secret" : "")} in {Where} first.");
+            return (null, null, null, null, $"{provider.Name} has no OAuth client yet. Set its client ID{(provider.DeviceAuthorizationUrl is null ? " and secret" : "")} in {Where} first.");
         }
 
-        if (Scopes(request.Scopes) is not { } asked) return (null, null, null, "`scopes` must be scope strings with no spaces.");
+        if (Scopes(request.Scopes) is not { } asked) return (null, null, null, null, "`scopes` must be scope strings with no spaces.");
 
         if (request.Name is { } name && name.Trim().Length > MaximumNameLength)
         {
-            return (null, null, null, $"`name` is longer than {MaximumNameLength} characters.");
+            return (null, null, null, null, $"`name` is longer than {MaximumNameLength} characters.");
+        }
+
+        var directory = reconnecting?.Tenant;
+
+        if (request.Tenant is { } named)
+        {
+            if (string.IsNullOrWhiteSpace(named)) directory = null;
+            else if (provider.Kind != ConnectionProviders.Microsoft)
+            {
+                return (null, null, null, null, $"{ConnectionProviders.DirectoryField} is for a Microsoft connection only; leave it out for {provider.Name}.");
+            }
+            else if (ConnectionProviders.ParseDirectory(named) is { } parsed) directory = parsed;
+            else return (null, null, null, null, ConnectionProviders.DirectoryRefusal);
         }
 
         var scopes = Union(provider.DefaultScopes, asked, reconnecting?.Scopes ?? []);
         if (provider.Kind == ConnectionProviders.Microsoft) scopes = Union(scopes, ["offline_access"]);
 
-        return (provider, reconnecting, scopes, null);
+        return (ConnectionProviders.InDirectory(provider, directory), reconnecting, scopes, directory, null);
     }
 
     /// <summary>
@@ -422,15 +437,23 @@ public sealed class Connections(
 
         if (providerError is not null)
         {
+            if (ConnectionProviders.NotInDirectory(providerError, providerErrorDescription)
+                && (await ProviderAsync(flow.Provider, ct))?.Kind == ConnectionProviders.Microsoft)
+            {
+                return (null, false, ConnectionProviders.MicrosoftNotInDirectory);
+            }
+
             return (null, false, $"The provider did not grant access ({providerError}{(string.IsNullOrWhiteSpace(providerErrorDescription) ? "" : ": " + providerErrorDescription)}).");
         }
 
         if (string.IsNullOrWhiteSpace(code)) return (null, false, "The provider sent back no code. Start again.");
 
-        if (await ProviderAsync(flow.Provider, ct) is not { Configured: true } provider)
+        if (await ProviderAsync(flow.Provider, ct) is not { Configured: true } found)
         {
             return (null, false, $"'{flow.Provider}' is no longer set up on this Host.");
         }
+
+        var provider = ConnectionProviders.InDirectory(found, flow.Tenant);
 
         // The web callback carries no session: the person is the one the state was issued to.
         var who = actor ?? (flow.UserId == ConnectionActor.Operator.Id
@@ -438,20 +461,27 @@ public sealed class Connections(
             : new ConnectionActor(flow.UserId, users is null ? null : (await users.FindByIdAsync(flow.UserId, ct))?.Email));
 
         var answer = await endpoints.ExchangeCodeAsync(provider, await ClientSecretAsync(provider, ct), code, flow.RedirectUri, flow.CodeVerifier, ct);
+        if (!answer.Ok && provider.Kind == ConnectionProviders.Microsoft && ConnectionProviders.NotInDirectory(answer.Error, answer.ErrorDescription))
+        {
+            return (null, false, ConnectionProviders.MicrosoftNotInDirectory);
+        }
+
         if (!answer.Ok) return (null, false, $"{provider.Name} refused the sign-in: {answer.Reason}.");
 
-        return await FinishAsync(provider, answer, flow.UserId, flow.Scopes, flow.Name, flow.ReconnectId, who, now, ct);
+        return await FinishAsync(provider, answer, flow.UserId, flow.Scopes, flow.Name, flow.ReconnectId, flow.Tenant, who, now, ct);
     }
 
     /// <summary>
     /// THE ONE COMPLETION of every flow, once the provider has answered tokens: the account read
     /// from the ID token or userinfo, then a new connection, or a reconnect that must be the same
     /// account with the scopes merged. Tokens are stored as ciphertext, with the tenant row in the
-    /// same transaction.
+    /// same transaction. <paramref name="directory"/> is the directory signed in through, stored on the
+    /// connection and named in its tenant row (it is not a secret); a row of a connection that has
+    /// none is as it always was.
     /// </summary>
     private async Task<(ConnectionRecord? Connection, bool Reconnected, string? Error)> FinishAsync(
         OAuthProvider provider, OAuthTokenAnswer answer, string userId, IReadOnlyList<string> asked, string? name,
-        string? reconnectId, ConnectionActor who, DateTimeOffset now, CancellationToken ct)
+        string? reconnectId, string? directory, ConnectionActor who, DateTimeOffset now, CancellationToken ct)
     {
         var account = await AccountAsync(provider, answer, ct);
         var granted = Granted(asked, answer);
@@ -485,9 +515,13 @@ public sealed class Connections(
 
                 var scopes = Union(existing.Scopes, granted);
                 ForgetApis(existing.Id);
+                var wasNeedingReconnect = existing.Status == ConnectionRecord.NeedsReconnect;
                 await store.ReconnectAsync(existing.Id, scopes, tokens, who.Row(
                     TenantActions.ConnectionReconnected, existing.Id, existing.Name,
-                    new { connection = existing.Id, provider = provider.Id, account = existing.Account, scopes, wasNeedingReconnect = existing.Status == ConnectionRecord.NeedsReconnect }), ct);
+                    directory is null && existing.Tenant is null
+                        ? new { connection = existing.Id, provider = provider.Id, account = existing.Account, scopes, wasNeedingReconnect }
+                        : new { connection = existing.Id, provider = provider.Id, account = existing.Account, tenant = directory, scopes, wasNeedingReconnect }), ct,
+                    directory);
 
                 return (await store.GetAsync(existing.Id, ct), true, null);
             }
@@ -499,11 +533,13 @@ public sealed class Connections(
 
         var record = new ConnectionRecord(
             "conn-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(6)).ToLowerInvariant(),
-            name ?? account, provider.Id, account, granted, now, null, ConnectionRecord.Ok, null);
+            name ?? account, provider.Id, account, granted, now, null, ConnectionRecord.Ok, null, Tenant: directory);
 
         await store.InsertAsync(record, tokens, userId, who.Row(
             TenantActions.ConnectionConnected, record.Id, record.Name,
-            new { connection = record.Id, provider = provider.Id, account, scopes = granted }), ct);
+            directory is null
+                ? new { connection = record.Id, provider = provider.Id, account, scopes = granted }
+                : new { connection = record.Id, provider = provider.Id, account, tenant = directory, scopes = granted }), ct);
 
         return (await store.GetAsync(record.Id, ct), false, null);
     }
@@ -547,7 +583,7 @@ public sealed class Connections(
             return (null, "`redirectUri` is not used when signing in with a code; leave it out.");
         }
 
-        var (provider, reconnecting, scopes, error) = await PrepareAsync(request, ct);
+        var (provider, reconnecting, scopes, directory, error) = await PrepareAsync(request, ct);
         if (error is not null) return (null, error);
 
         if (provider!.DeviceAuthorizationUrl is null)
@@ -579,7 +615,7 @@ public sealed class Connections(
 
         var flow = new DeviceSignIn(
             Random(24), actor, provider.Id, scopes!, codeScopes, string.IsNullOrWhiteSpace(request.Name) ? null : request.Name.Trim(), reconnecting?.Id,
-            answer.DeviceCode!, answer.UserCode!, answer.VerificationUri!, CodeExpiry(now, answer));
+            answer.DeviceCode!, answer.UserCode!, answer.VerificationUri!, CodeExpiry(now, answer), directory);
 
         _deviceFlows[flow.Id] = flow;
         _ = Task.Run(() => PollAsync(flow, provider, answer.Interval is > 0 ? TimeSpan.FromSeconds(answer.Interval.Value) : DefaultInterval));
@@ -642,7 +678,7 @@ public sealed class Connections(
 
                 if (clock.GetUtcNow() >= flow.ExpiresAt)
                 {
-                    flow.Settle(Expired, ExpiredSentence);
+                    flow.Settle(Expired, ExpiredSentenceFor(provider));
                     return;
                 }
 
@@ -651,7 +687,7 @@ public sealed class Connections(
                 if (answer.Ok)
                 {
                     var (connection, reconnected, refusal) = await FinishAsync(
-                        provider, answer, flow.Actor.Id, flow.Scopes, flow.Name, flow.ReconnectId, flow.Actor, clock.GetUtcNow(), ct);
+                        provider, answer, flow.Actor.Id, flow.Scopes, flow.Name, flow.ReconnectId, flow.Tenant, flow.Actor, clock.GetUtcNow(), ct);
 
                     if (refusal is not null) flow.Settle(Refused, refusal);
                     else flow.Settle(Done, $"{(reconnected ? "Reconnected" : "Connected")} {connection!.Named}.", connection.Id);
@@ -661,6 +697,12 @@ public sealed class Connections(
                 if (provider.Kind == ConnectionProviders.Microsoft && ConnectionProviders.NeedsAdminApproval(answer.Error, answer.ErrorDescription))
                 {
                     flow.Settle(Refused, ConnectionProviders.MicrosoftAdminApproval);
+                    return;
+                }
+
+                if (provider.Kind == ConnectionProviders.Microsoft && ConnectionProviders.NotInDirectory(answer.Error, answer.ErrorDescription))
+                {
+                    flow.Settle(Refused, ConnectionProviders.MicrosoftNotInDirectory);
                     return;
                 }
 
@@ -697,7 +739,7 @@ public sealed class Connections(
                         interval += SlowDown;
                         continue;
                     case "expired_token" or "code_expired":
-                        flow.Settle(Expired, ExpiredSentence);
+                        flow.Settle(Expired, ExpiredSentenceFor(provider));
                         return;
                     case "access_denied" or "authorization_declined":
                         flow.Settle(Refused, $"The sign-in was declined at {provider.Name}. Nothing was stored; try again.");
@@ -723,7 +765,12 @@ public sealed class Connections(
         }
     }
 
-    private const string ExpiredSentence = "The code expired before the sign-in was finished. Nothing was stored; try again.";
+    public const string ExpiredSentence = "The code expired before the sign-in was finished. Nothing was stored; try again.";
+
+    /// <summary>What an expired code says: for Microsoft, a second line after the sentence, since its own
+    /// page turns away an account that is not in the directory without the Host ever hearing of it.</summary>
+    public static string ExpiredSentenceFor(OAuthProvider provider) =>
+        provider.Kind == ConnectionProviders.Microsoft ? $"{ExpiredSentence}\n{ConnectionProviders.MicrosoftExpiredNotInDirectory}" : ExpiredSentence;
 
     /// <summary>Finished flows go a while after their expiry; nothing reads them later than that.</summary>
     private void Sweep(DateTimeOffset now)
@@ -743,10 +790,12 @@ public sealed class Connections(
 
     /// <summary>One sign-in with a code, in memory. The device code goes when the flow settles, or
     /// when a second code replaces it. <see cref="Scopes"/> are every scope asked, which the
-    /// connection records; <see cref="CodeScopes"/> are what the current code named.</summary>
+    /// connection records; <see cref="CodeScopes"/> are what the current code named; <see cref="Tenant"/>
+    /// is the directory it signs in through, or null for the provider's.</summary>
     private sealed class DeviceSignIn(
         string id, ConnectionActor actor, string provider, IReadOnlyList<string> scopes, IReadOnlyList<string> codeScopes,
-        string? name, string? reconnectId, string deviceCode, string userCode, string verificationUri, DateTimeOffset expiresAt)
+        string? name, string? reconnectId, string deviceCode, string userCode, string verificationUri, DateTimeOffset expiresAt,
+        string? tenant)
     {
         private readonly Lock _lock = new();
 
@@ -770,6 +819,8 @@ public sealed class Connections(
         public string? Name => name;
 
         public string? ReconnectId => reconnectId;
+
+        public string? Tenant => tenant;
 
         public DateTimeOffset ExpiresAt
         {
@@ -874,11 +925,12 @@ public sealed class Connections(
                 return (null, await MarkAsync(connection, "the provider issued no refresh token, so the access token cannot be renewed", ct));
             }
 
-            if (await ProviderAsync(connection.Provider, ct) is not { Configured: true } provider)
+            if (await ProviderAsync(connection.Provider, ct) is not { Configured: true } found)
             {
                 return (null, $"Connection {connection.Named} could not be refreshed: its provider '{connection.Provider}' has no OAuth client on this Host. Set it in {Where}.");
             }
 
+            var provider = ConnectionProviders.InDirectory(found, connection.Tenant);
             var answer = await endpoints.RefreshAsync(provider, await ClientSecretAsync(provider, ct), tokens.RefreshToken, ct);
 
             if (!answer.Ok)
@@ -959,7 +1011,7 @@ public sealed class Connections(
                     return (null, $"Connection {connection.Named} could not be refreshed: its provider '{connection.Provider}' has no OAuth client on this Host. Set it in {Where}.");
                 }
 
-                provider = found;
+                provider = ConnectionProviders.InDirectory(found, connection.Tenant);
                 secret = await ClientSecretAsync(provider, ct);
             }
 
@@ -1413,10 +1465,11 @@ public sealed record ProviderChange(
     string? AuthorizeUrl = null, string? TokenUrl = null, string? UserinfoUrl = null, IReadOnlyList<string>? DefaultScopes = null,
     string? Audience = null, string? TenantId = null);
 
-/// <summary>Body of <c>POST /api/connections/start</c>.</summary>
+/// <summary>Body of <c>POST /api/connections/start</c>. <see cref="Tenant"/> is a Microsoft connection's
+/// directory: a tenant ID or a domain; left out, a Reconnect keeps the connection's, and empty clears it.</summary>
 public sealed record StartConnection(
     string? Provider, IReadOnlyList<string>? Scopes = null, string? Name = null, string? ReconnectId = null, string? RedirectUri = null,
-    string? Flow = null);
+    string? Flow = null, string? Tenant = null);
 
 /// <summary>Body of <c>POST /api/connections/imap</c>. Its printed form leaves the password out.</summary>
 public sealed record AddMailbox(

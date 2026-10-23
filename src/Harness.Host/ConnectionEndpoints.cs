@@ -232,7 +232,7 @@ public static class ConnectionEndpoints
             .HumansOnly()
             .WithSummary("Start connecting an account")
             .WithDescription(
-                "Body `{ provider, scopes, name?, reconnectId?, redirectUri?, flow? }`. Answers the provider's "
+                "Body `{ provider, scopes, name?, reconnectId?, redirectUri?, flow?, tenant? }`. Answers the provider's "
                 + "`authorizationUrl`, the `state` (issued to the caller, single use, 10 minutes), the "
                 + "`redirectUri` and `expiresAt`. With no `redirectUri` the Host's own "
                 + "`/api/connections/callback` at the address the request came to is used; a loopback "
@@ -240,7 +240,10 @@ public static class ConnectionEndpoints
                 + "verifier stays on the Host. A reconnect asks the old scopes plus `scopes`. With "
                 + "`flow: \"device\"` (a provider with a device endpoint: Microsoft) it is a sign-in with a "
                 + "code instead: answers only `{ flowId, userCode, verificationUri, expiresAt }`; the Host "
-                + "keeps the device code and polls the provider itself. Read it with `GET /api/connections/flows/{flowId}`.");
+                + "keeps the device code and polls the provider itself. Read it with `GET /api/connections/flows/{flowId}`. "
+                + "`tenant` is a Microsoft connection's own directory, a tenant ID or a domain: the sign-in, its "
+                + "refreshes and every API's token go through it, and the connection answers it as `tenant`. A "
+                + "reconnect keeps the connection's unless `tenant` is given (empty clears it); any other value is 400.");
 
         app.MapGet("/api/connections/flows/open", (Connections connections, HttpContext context) =>
             Results.Ok(connections.OpenDeviceFlows(Actor(context)).Select(f => f.Body())))
@@ -485,6 +488,7 @@ public static class ConnectionEndpoints
         provider = connection.Provider,
         providerKind = ConnectionProviders.KindOf(connection.Provider),
         account = connection.Account,
+        tenant = connection.Tenant,
         scopes = connection.Scopes,
         permissions = ConnectionNeeds.Permissions(connection.Scopes),
         connectedAt = connection.ConnectedAt,

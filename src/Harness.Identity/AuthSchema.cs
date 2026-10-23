@@ -642,5 +642,15 @@ public static class AuthSchema
             DROP TABLE IF EXISTS agent_credentials;
             DELETE FROM tenant_settings WHERE name = 'agents.credentialSource';
             """),
+
+        // A MICROSOFT CONNECTION'S OWN DIRECTORY: a tenant ID or a domain its sign-in, refresh and every
+        // API's token go through, in place of the provider's tenant. NULL is the provider's, as before.
+        // A browser sign-in in progress carries it on its `connection_flows` row. Not a secret.
+        new MigrationStep(
+            "auth-027",
+            """
+            ALTER TABLE connections ADD COLUMN tenant TEXT NULL;
+            ALTER TABLE connection_flows ADD COLUMN tenant TEXT NULL;
+            """),
     ];
 }

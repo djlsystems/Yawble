@@ -726,6 +726,11 @@ function installProviderName(connectionId: string): string {
   return connection ? providerName(connection.provider, providers.value) : 'the provider';
 }
 
+/** Microsoft's connections reconnect with a code, shown in place: there is no consent page to open. */
+function installWithCode(connectionId: string): boolean {
+  return wizardConnections.value.find((candidate) => candidate.id === connectionId)?.providerKind === 'microsoft';
+}
+
 /** Reconnected from the refusal: with every scope granted, the refusal goes and Install is pressed again. */
 function installReconnected(connection: Connection, lacking: string[]) {
   rememberConnection(connection);
@@ -1264,6 +1269,7 @@ function next() {
                 :connection-id="installReconnect.connectionId"
                 :scopes="installReconnect.scopes"
                 :provider-name="installProviderName(installReconnect.connectionId)"
+                :with-code="installWithCode(installReconnect.connectionId)"
                 @reconnected="installReconnected"
               />
             </q-banner>

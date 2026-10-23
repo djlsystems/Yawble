@@ -26,6 +26,13 @@ type connectRequest struct {
 	// Flow is "device" on a start that signs in with a code; FlowID names that sign-in on a read.
 	Flow   string `json:"flow,omitempty"`
 	FlowID string `json:"flowId,omitempty"`
+	// Tenant is a Microsoft connection's own directory on a start: a tenant ID or a domain. Left
+	// out, a new connection signs in through the provider's tenant and a reconnect keeps its own.
+	Tenant string `json:"tenant,omitempty"`
+	// Error and ErrorDescription are the provider's refusal on the redirect, told to the Host on a
+	// complete instead of a code: it answers the sentence a person reads.
+	Error            string `json:"error,omitempty"`
+	ErrorDescription string `json:"errorDescription,omitempty"`
 }
 
 // connectReport is <data>/connections/.connect-report.json: the Host's answer, with the status

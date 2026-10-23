@@ -369,14 +369,56 @@ export const AdminApprovalSentence =
 const adminApprovalMarks = /AADSTS(65001|90094|90095|900941|90099)\b|admin_consent_required|consent_required/i;
 
 /**
- * A refusal as a person reads it: the admin-approval sentence when Microsoft's answer is that one,
- * whatever words or code it came in, and the text itself otherwise.
+ * What a person reads when Microsoft refuses a sign-in because the account is not in the directory the
+ * sign-in used: one sentence, with no error code. The Host's `MicrosoftNotInDirectory`, word for word.
+ */
+export const NotInDirectorySentence =
+  "The account was not found in the directory this sign-in used: a personal Microsoft account that owns an Azure subscription signs in through that subscription's directory, so enter its ID under Directory and sign in again, and a work account in that directory works too.";
+
+/**
+ * The line a Microsoft code that ran out carries after the expiry sentence: Microsoft's own page turns
+ * such an account away without telling the Host. The Host's `MicrosoftExpiredNotInDirectory`, word for word.
+ */
+export const ExpiredNotInDirectoryLine =
+  'If Microsoft said the username may be incorrect, the account is not in the directory this sign-in used: name that directory under Directory and sign in again.';
+
+/**
+ * What a Microsoft sign-in says before the person signs in, at the Directory field and on Add connection's
+ * Sign in step: the words Microsoft's own page uses for an account that is not in the directory.
+ */
+export const UsernameIncorrectHint =
+  'If Microsoft says the username may be incorrect, the account is not in the directory the sign-in used: name that directory here and sign in again.';
+
+/** The Entra codes Microsoft's published list says mean the account is not in the directory signed in to. */
+const notInDirectoryMarks = /\bAADSTS(50020|50034|51004|90072)\b/;
+
+/**
+ * A refusal as a person reads it: the admin-approval sentence, or the not-in-the-directory one, when
+ * Microsoft's answer is that one, whatever words or code it came in, and the text itself otherwise.
  */
 export function refusalWords(text: string): string;
 export function refusalWords(text: string | null | undefined): string | null;
 export function refusalWords(text: string | null | undefined): string | null {
   if (text == null) return null;
-  return adminApprovalMarks.test(text) ? AdminApprovalSentence : text;
+  if (adminApprovalMarks.test(text)) return AdminApprovalSentence;
+  return notInDirectoryMarks.test(text) ? NotInDirectorySentence : text;
+}
+
+/** The field a Microsoft connection's own directory is typed in, as the Host names it in a refusal. */
+export const DirectoryLabel = 'Directory (tenant) ID or domain';
+
+/** The Host refused the directory typed: its sentence names the field, so it is shown there. */
+export function directoryRefusal(text: string): boolean {
+  return text.startsWith(DirectoryLabel);
+}
+
+/**
+ * What a reconnect sends for a connection's directory, from the field it was shown in: nothing when
+ * untouched (the Host keeps it), the new one when changed, `""` when emptied (the Host clears it).
+ */
+export function reconnectTenant(connection: Pick<Connection, 'tenant'>, typed: string): { tenant?: string } {
+  const value = typed.trim();
+  return value === (connection.tenant ?? '') ? {} : { tenant: value };
 }
 
 /** "14:59": what is left of a sign-in code's life, in minutes and seconds, never below 0:00. */

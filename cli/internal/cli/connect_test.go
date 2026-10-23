@@ -3,6 +3,7 @@ package cli_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -110,6 +111,11 @@ func googleHost(t *testing.T) *scriptedHost {
 				"redirectUri": req["redirectUri"], "expiresAt": time.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339),
 			}}
 		case "complete":
+			if refused, ok := req["error"].(string); ok && req["state"] == "st4te" && req["code"] == nil {
+				// As the Host answers a provider's refusal: its words, and nothing stored.
+				e := fmt.Sprintf("The provider did not grant access (%s: %s).", refused, req["errorDescription"])
+				return map[string]any{"status": 400, "error": e}
+			}
 			if req["state"] != "st4te" || req["code"] != "the-code" {
 				e := "The connection's state is unknown, used or expired. Start again."
 				return map[string]any{"status": 400, "error": e}
@@ -191,7 +197,7 @@ func TestConnectRunsTheLoopbackFlowAndTheHostDoesTheExchange(t *testing.T) {
 	}
 }
 
-func TestConnectStopsWithTheProvidersRefusalAndCompletesNothing(t *testing.T) {
+func TestConnectTellsTheHostTheProvidersRefusalWithNoCode(t *testing.T) {
 	h := googleHost(t)
 	h.browse = provider(t, func(state string) url.Values {
 		return url.Values{"error": {"access_denied"}, "error_description": {"The user denied access."}, "state": {state}}
@@ -202,8 +208,34 @@ func TestConnectStopsWithTheProvidersRefusalAndCompletesNothing(t *testing.T) {
 	if code != 1 || !strings.Contains(errOut, "access_denied: The user denied access.") {
 		t.Fatalf("exit %d: %s", code, errOut)
 	}
-	if len(h.sent("complete")) != 0 {
-		t.Error("a refused consent was completed")
+	// The refusal is told to the Host, with no code: it says what it means, and stores nothing.
+	complete := h.sent("complete")
+	if len(complete) != 1 || complete[0]["code"] != nil || complete[0]["error"] != "access_denied" || complete[0]["errorDescription"] != "The user denied access." {
+		t.Errorf("complete requests: %v", complete)
+	}
+}
+
+func TestConnectSaysTheHostsSentenceForARefusalNotTheProvidersWords(t *testing.T) {
+	sentence := "The account was not found in the directory this sign-in used."
+	h := googleHost(t)
+	inner := h.answer
+	h.answer = func(req map[string]any) map[string]any {
+		if req["op"] == "complete" && req["error"] != nil {
+			return map[string]any{"status": 400, "error": sentence}
+		}
+		return inner(req)
+	}
+	h.browse = provider(t, func(state string) url.Values {
+		return url.Values{"error": {"invalid_request"}, "error_description": {"AADSTS50020: User account from identity provider does not exist in tenant."}, "state": {state}}
+	})
+
+	code, _, errOut := run(t, stubbed(h), "connect", "google")
+
+	if code != 1 || !strings.Contains(errOut, sentence) {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	if strings.Contains(errOut, "AADSTS50020") {
+		t.Errorf("the provider's own words were said: %s", errOut)
 	}
 }
 

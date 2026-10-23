@@ -78,6 +78,14 @@ public static class ConnectionGuides
         ];
     }
 
+    /// <summary>What Sign in's optional directory field is for and where its value is found, said the
+    /// same in the guide, the web's field help and <c>docs/connections.md</c>.</summary>
+    public const string DirectoryText =
+        "A personal Microsoft account that owns an Azure subscription signs in through that subscription's directory: "
+        + "on the Sign in step, type its Directory (tenant) ID (Azure portal, Microsoft Entra ID, Overview) or one of its "
+        + "domains in Directory (tenant) ID or domain. A work or school account leaves it empty. If Microsoft says the username "
+        + "may be incorrect, the account is not in the directory the sign-in used: name that directory there and sign in again.";
+
     /// <summary>Microsoft's guided app is a PUBLIC CLIENT signed in with a code: no redirect URI and
     /// no secret, only the client ID and who can sign in. The redirect app with a secret is Advanced.</summary>
     private static IReadOnlyList<GuideStep> Microsoft(IReadOnlyList<string> scopes) =>
@@ -104,7 +112,7 @@ public static class ConnectionGuides
         new("credentials", "Paste the Application (client) ID",
             "Copy the Application (client) ID from the app's Overview - it looks like xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx - "
             + "and paste it here. For only your organisation, paste the Directory (tenant) ID from the same page too. "
-            + "Nothing else is needed.",
+            + "Nothing else is needed. " + DirectoryText,
             null, []),
     ];
 
