@@ -49,9 +49,9 @@ describe("a card's contents, in bullets", () => {
   const none: CatalogContents = { plugins: [], members: [], skills: [], triggers: [], sites: [], settings: [], secrets: [], connections: [], events: [] };
 
   it('says nothing without contents, so the card shows what it showed before', () => {
-    expect(contentsLines({ kind: 'solution', contents: undefined })).toEqual([]);
+    expect(contentsLines({ kind: 'solution' })).toEqual([]);
     expect(contentsLines({ kind: 'plugin', contents: null })).toEqual([]);
-    expect(includedInWords({ kind: 'plugin', includedIn: undefined })).toBe('');
+    expect(includedInWords({ kind: 'plugin' })).toBe('');
   });
 
   it("names a member by its role, Agent for an agent, and by name alone when it has neither", () => {
