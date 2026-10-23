@@ -155,12 +155,13 @@ public static class PluginEndpoints
             .HumansOnly()
             .WithSummary("A plugin member's settings")
             .WithDescription(
-                "`{ team, member, plugin, version, config, secrets, secretStates, fields, secretFields, outOfRange, "
-                + "marketplaceUrl }`: what is stored for this plugin member - its configuration, each secret's bound "
+                "`{ team, member, plugin, version, description, config, secrets, secretStates, fields, secretFields, "
+                + "outOfRange, marketplaceUrl }`: what is stored for this plugin member - its configuration, each secret's bound "
                 + "LOGICAL KEY if any (`secrets`), and `secretStates`, each manifest secret field as "
                 + "`GET .../secrets` answers it (whether it is set, by whom, from which source; a value only for a "
                 + "field the manifest declares `masked: false`) - with its plugin's declarations to build the form "
-                + "from (each with its `label`, and a secret's `masked`), `marketplaceUrl` (the plugin's page on the "
+                + "from (each with its `label`, and a secret's `masked`), the plugin's `description` (its manifest's, "
+                + "whole; null when it has none), `marketplaceUrl` (the plugin's page on the "
                 + "package catalog's origin when the catalog lists it, else null), and `outOfRange` - each stored number "
                 + "outside its field's bounds, by field, with the sentence a write of it is refused with; never "
                 + "rewritten, `{}` when none. 404 for an unknown member, 400 "
@@ -647,6 +648,7 @@ public static class PluginEndpoints
         member = id.Name,
         plugin = plugin.Manifest.Id,
         version = plugin.Manifest.Version,
+        description = string.IsNullOrWhiteSpace(plugin.Manifest.Description) ? null : plugin.Manifest.Description,
         config = stored.Config,
         secrets = stored.Secrets,
         secretStates = await reads.StatesAsync(id, plugin.Manifest, stored, ct),

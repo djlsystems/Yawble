@@ -420,8 +420,10 @@ wizard's steps:
    made, naming the member and the field. The package's key binding still installs, so a key set with
    `yawble secret set <KEY>` and `yawble up` still serves a member that has no value of its own. Unset
    is not a refusal. The preview's `secrets` carries these (`label`, `masked`, `source`; in an update,
-   as the update will leave them). The result's `unsetFields` (`member`, `field`, `label`) lists each
-   needed field with no value from any source, each with its box; `unset` still names their keys.
+   as the update will leave them). The result's `unsetFields` (`member`, `container`, `field`, `label`) lists
+   each needed field with no value from any source, each with its box: `member` is the package's member
+   name (the key of `secretValues`), `container` the id it was hired as, which the member's settings
+   routes take. `unset` still names their keys.
 4. **Install**: the steps below; on failure the wizard names the step and the reason. The result
    names each schedule's first run ("Scan for postings ran now", "Morning summary first runs at
    8:00 AM"), and lists the keys still unset, each with the way to set it. The answer's `firstRuns`

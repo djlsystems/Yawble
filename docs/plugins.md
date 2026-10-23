@@ -333,7 +333,8 @@ field's default is its placeholder, and "Reset to default" puts it back. `"advan
 field - and answered as `advanced` by the settings read and `GET /api/plugins`, but no screen hides a
 field behind it.
 
-The plugin's description shows its first paragraph and a **Documentation** link that opens the
+The plugin's description (`description`, which the settings read answers whole) shows its first
+paragraph and a **Documentation** link that opens the
 plugin's page on the package catalog in a new tab: `marketplaceUrl`, which the settings read and
 `GET /api/plugins` answer as `<origin of the catalog address>/marketplace/<id>` when the catalog's
 last read lists the plugin, and null otherwise - then the screen shows the whole description and no
@@ -889,7 +890,8 @@ connection lacking a scope the slot asks for is refused with a sentence that off
 required slot left unbound says, in grey, that the member's runs are blocked until a connection is
 chosen there; it is not a refusal, because the picker and Connect are right beside it.
 
-- `GET /api/teams/{team}/members/{member}/plugin-settings` answers `plugin`, `version`, the stored
+- `GET /api/teams/{team}/members/{member}/plugin-settings` answers `plugin`, `version`, the plugin's
+  `description` (the manifest's, whole; null when it has none), the stored
   `config`, `secrets` (bound logical keys, never a value), `secretStates` (each secret field as
   `GET .../secrets` answers it), the manifest's `fields` and `secretFields` (each with `label`, a
   secret with `masked`), `connections` (slot → bound connection id), `connectionFields` (each slot

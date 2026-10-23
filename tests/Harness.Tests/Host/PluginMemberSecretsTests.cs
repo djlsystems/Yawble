@@ -41,6 +41,9 @@ public sealed class PluginMemberSecretsTests : IAsyncLifetime
 
     private string Database => Path.Combine(_dataRoot, "messages.db");
 
+    /// <summary>The fixture plugin's description: two paragraphs, answered whole.</summary>
+    private const string Description = "Reads one account of a fixture service.\n\nEach member reads its own account.";
+
     /// <summary>Each request the plugin was handed on stdin, one per line, kept OUTSIDE the data root
     /// so the no-leak scan does not find the plugin's own copy.</summary>
     private string Requests => Path.Combine(_outside, "requests.jsonl");
@@ -53,13 +56,17 @@ public sealed class PluginMemberSecretsTests : IAsyncLifetime
         // The plugin ECHOES its request: a masked value it prints must be redacted from what the Host keeps.
         PluginInstall.Write(_dataRoot, "owned",
             script: $"req=$(cat); printf '%s\\n' \"$req\" >> '{Requests}'; printf '%s\\n' \"$req\"; echo '{{\"t\":\"result\",\"ok\":true,\"output\":\"read\"}}'",
-            manifest: PluginInstall.Manifest("owned", edit: m => m["secrets"] = JsonNode.Parse(
-                """
-                {
-                  "token": { "description": "The service's token.", "required": true, "label": "Service token" },
-                  "account": { "description": "The account's name.", "masked": false, "label": "Account name" }
-                }
-                """)));
+            manifest: PluginInstall.Manifest("owned", edit: m =>
+            {
+                m["description"] = Description;
+                m["secrets"] = JsonNode.Parse(
+                    """
+                    {
+                      "token": { "description": "The service's token.", "required": true, "label": "Service token" },
+                      "account": { "description": "The account's name.", "masked": false, "label": "Account name" }
+                    }
+                    """);
+            }));
 
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host => host
             .UseSetting("DataRoot", _dataRoot)
@@ -370,12 +377,13 @@ public sealed class PluginMemberSecretsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task The_settings_read_answers_no_marketplace_page_when_no_catalog_lists_the_plugin()
+    public async Task The_settings_read_answers_the_plugins_description_and_no_marketplace_page_when_no_catalog_lists_the_plugin()
     {
         await HireAsync("Plain", new() { ["token"] = Value("plain") });
 
         var settings = await GetAsync($"/api/teams/{_team}/members/Plain/plugin-settings");
         Assert.Equal(JsonValueKind.Null, settings.GetProperty("marketplaceUrl").ValueKind);
+        Assert.Equal(Description, settings.GetProperty("description").GetString());
         var plugin = (await GetAsync("/api/plugins")).GetProperty("plugins").EnumerateArray().Single(p => p.GetProperty("id").GetString() == "owned");
         Assert.Equal(JsonValueKind.Null, plugin.GetProperty("marketplaceUrl").ValueKind);
         Assert.Equal("Account name", plugin.GetProperty("secrets").GetProperty("account").GetProperty("label").GetString());

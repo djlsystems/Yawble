@@ -249,6 +249,29 @@ public sealed class SolutionSecretsTests(HostFixture host) : IClassFixture<HostF
     }
 
     [Fact]
+    public async Task A_field_with_no_value_from_any_source_is_listed_by_package_member_and_the_container_it_was_hired_as()
+    {
+        using var client = await host.PersonAsync();
+        var person = new Recorded(client);
+
+        var done = await person.PostAsync("/api/solutions/install", new { folder = KeyedPackage(), teamName = Unique("Unset") });
+        Assert.True(done.GetProperty("ok").GetBoolean(), done.ToString());
+        var team = done.GetProperty("team").GetString()!;
+
+        var unset = Assert.Single(done.GetProperty("unsetFields").EnumerateArray());
+        Assert.Equal("Keeper", unset.GetProperty("member").GetString());
+        Assert.Equal("token", unset.GetProperty("field").GetString());
+        Assert.Equal("Service token", unset.GetProperty("label").GetString());
+
+        // `container` is the id the member routes take: the member's settings answer under it.
+        var container = unset.GetProperty("container").GetString()!;
+        Assert.Equal(container, ByKey(done.GetProperty("secrets"))["FIXTURE_PACK_TOKEN"].GetProperty("container").GetString());
+        var states = await person.GetAsync($"/api/teams/{team}/members/{container}/secrets");
+        var token = states.GetProperty("secrets").EnumerateArray().Single(s => s.GetProperty("field").GetString() == "token");
+        Assert.False(token.GetProperty("set").GetBoolean());
+    }
+
+    [Fact]
     public async Task An_update_keeps_a_binding_the_person_changed_and_takes_the_packages_new_key_where_they_did_not()
     {
         using var client = await host.PersonAsync();

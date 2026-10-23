@@ -91,9 +91,10 @@ public sealed record SolutionDone(
     public IReadOnlyList<string> Unset => [.. Secrets.Where(s => s.Needed != false && !s.Set).Select(s => s.Key).Distinct(StringComparer.Ordinal)];
 
     /// <summary>Each needed secret field with no value from any source - the member's own, or its
-    /// bound key - by member and field: what the result screen asks a person to type.</summary>
+    /// bound key - by package member, the container it was hired as, and field: what the result
+    /// screen asks a person to type, linked to that container's settings.</summary>
     public IReadOnlyList<SolutionUnsetField> UnsetFields =>
-        [.. Secrets.Where(s => s.Needed != false && !s.Set).Select(s => new SolutionUnsetField(s.Member, s.Field, s.Label))];
+        [.. Secrets.Where(s => s.Needed != false && !s.Set).Select(s => new SolutionUnsetField(s.Member, s.Container, s.Field, s.Label))];
 
     /// <summary>Each schedule's first run: ran now at install, or when it first comes due.</summary>
     public IReadOnlyList<SolutionFirstRun> FirstRuns { get; init; } = [];
@@ -138,6 +139,10 @@ public sealed record SolutionSecret(
     /// <summary>The manifest's <c>masked</c>.</summary>
     public bool Masked { get; init; } = true;
 
+    /// <summary>The id of the container <paramref name="Member"/> was hired as - what the member
+    /// routes take; null in a preview, where nothing is hired yet.</summary>
+    public string? Container { get; init; }
+
     /// <summary>Where the member's run would get the value now: <c>member</c> (its own), <c>key</c>
     /// (the bound key, stored from the screen), <c>environment</c>, or null.</summary>
     public string? Source { get; init; }
@@ -151,8 +156,10 @@ public sealed record SolutionSecret(
         + $"or the operator CLI's `secret set {key}` (it prompts for the value), then its `up` to restart the Host";
 }
 
-/// <summary>A needed secret field with no value from any source.</summary>
-public sealed record SolutionUnsetField(string Member, string Field, string? Label);
+/// <summary>A needed secret field with no value from any source: <paramref name="Member"/> is the
+/// package member's name (the key of <c>secretValues</c>), <paramref name="Container"/> the id of the
+/// container it was hired as (the <c>{member}</c> of the member routes).</summary>
+public sealed record SolutionUnsetField(string Member, string? Container, string Field, string? Label);
 
 public sealed record SolutionStepFailed(
     bool Ok, string Step, int StepNumber, string Title, string Reason, IReadOnlyList<string> Undone,
@@ -711,11 +718,12 @@ public sealed class SolutionInstaller(
             }
         }
 
-        return SecretStates(
+        return [.. SecretStates(
             package,
             (member, field) => stored.GetValueOrDefault(member)?.Secrets.GetValueOrDefault(field),
             member => stored.GetValueOrDefault(member)?.Config,
-            (member, field) => own.GetValueOrDefault(member)?.ContainsKey(field) == true);
+            (member, field) => own.GetValueOrDefault(member)?.ContainsKey(field) == true)
+            .Select(s => s with { Container = memberIds.GetValueOrDefault(s.Member) })];
     }
 
     private async Task<IReadOnlyList<object>> ConnectionsAsync(CancellationToken ct) =>
