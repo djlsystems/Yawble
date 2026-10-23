@@ -259,6 +259,14 @@ public sealed class TeamHasNoMemberAgentException(string team)
 /// sentence names the field or the key.</summary>
 public sealed class PluginSettingsException(string message) : InvalidOperationException(message);
 
+/// <summary>A hired plugin member's settings and values could not be written: the member was made and
+/// is to be removed again, so a hire whose values cannot be kept makes no member.</summary>
+public sealed class PluginSettingsNotKeptException(ContainerId member, Exception inner)
+    : Exception($"The member was not added: its settings and values could not be written ({inner.Message}).", inner)
+{
+    public ContainerId Member { get; } = member;
+}
+
 public sealed class NoSuchAgentException : InvalidOperationException
 {
     public NoSuchAgentException(string agent, IReadOnlyList<string> available)
@@ -2715,6 +2723,11 @@ public sealed class TeamRegistry(
     /// instructions. Null records nobody.</param>
     /// <param name="secretsSetLater">A solution install: a bound key the Host has not set yet is not
     /// a refusal (see <see cref="PluginMemberRunner.SettingsRefusal"/>).</param>
+    /// <param name="valued">The secret fields the hire carries the member's own values for: each
+    /// satisfies its field, whatever is bound.</param>
+    /// <param name="saveSettings">Writes the plugin member's settings in place of the settings store -
+    /// with its values and their rows in one transaction. When it throws,
+    /// <see cref="PluginSettingsNotKeptException"/> says so and the caller removes the member.</param>
     public Task<ContainerSnapshot> HireMemberAsync(
         string team, string label, string agent, string systemPrompt, IReadOnlyCollection<string> subscribes,
         string? hiredFor = null,
@@ -2723,11 +2736,13 @@ public sealed class TeamRegistry(
         SystemPromptSetter? promptSetBy = null,
         Func<ContainerId, TriggerAudit>? connectionsAudit = null,
         bool secretsSetLater = false,
-        bool waitForPerson = false) =>
+        bool waitForPerson = false,
+        IReadOnlySet<string>? valued = null,
+        Func<ContainerId, PluginMemberSettings, CancellationToken, Task>? saveSettings = null) =>
         AddContainerAsync(
             team, label, agent, systemPrompt, subscribes, hiredFor: hiredFor, ct: ct, settings: settings,
             promptSetBy: promptSetBy, connectionsAudit: connectionsAudit, secretsSetLater: secretsSetLater,
-            waitForPerson: waitForPerson);
+            waitForPerson: waitForPerson, valued: valued, saveSettings: saveSettings);
 
     /// <summary>
     /// Adds a container called <paramref name="label"/>, deriving its identifier the same way a
@@ -2747,7 +2762,9 @@ public sealed class TeamRegistry(
         SystemPromptSetter? promptSetBy = null,
         Func<ContainerId, TriggerAudit>? connectionsAudit = null,
         bool secretsSetLater = false,
-        bool waitForPerson = false)
+        bool waitForPerson = false,
+        IReadOnlySet<string>? valued = null,
+        Func<ContainerId, PluginMemberSettings, CancellationToken, Task>? saveSettings = null)
     {
         if (!_teams.TryGetValue(team, out var members)) throw new InvalidOperationException($"No team '{team}'.");
 
@@ -2773,7 +2790,7 @@ public sealed class TeamRegistry(
         if (isPlugin && plugins?.For(pluginId!) is { } installed
             && PluginMemberRunner.SettingsRefusal(
                 installed.Manifest, settings ?? PluginMemberSettings.None, secrets,
-                requireSet: !secretsSetLater && !waitForPerson, requireBound: !waitForPerson) is { } settingsRefusal)
+                requireSet: !secretsSetLater && !waitForPerson, requireBound: !waitForPerson, valued: valued) is { } settingsRefusal)
         {
             throw new PluginSettingsException(settingsRefusal);
         }
@@ -2970,7 +2987,20 @@ public sealed class TeamRegistry(
         // a call made any earlier would find no row and compute an empty base set. This member has
         // no triggers of its own yet - it cannot, it did not exist a moment ago - but this is still
         // the one and only write of its subscriptions row; ContainerHost does not write one.
-        if (isPlugin && pluginSettings is not null)
+        if (isPlugin && saveSettings is not null)
+        {
+            // THE MEMBER'S OWN VALUES land with its settings and their rows, or the member is not made:
+            // the caller removes it on this exception.
+            try
+            {
+                await saveSettings(id, settings ?? PluginMemberSettings.None, ct);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                throw new PluginSettingsNotKeptException(id, exception);
+            }
+        }
+        else if (isPlugin && pluginSettings is not null)
         {
             // A CONNECTION BINDING lands with its `member.connections-changed` row, or not at all.
             if (connectionsAudit is not null && settings is { Connections.Count: > 0 })

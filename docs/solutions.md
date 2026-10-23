@@ -408,16 +408,22 @@ wizard's steps:
    (the update never changes them), and a document folder names the files already in it; only an
    empty required folder or an unbound required slot warns that the team will be blocked. The
    preview's `kept` carries these, and `yawble solution install` shows them the same way.
-   **Secrets** are listed here too, each by key name with whether the Host has it set (by name
-   only, never the value), what the manifest says it is for, and either "set on this Host", "not
-   set: its source fails until it is set" with the ways to set it - its value field here first,
-   then `yawble secret set <KEY>` and `yawble up` - or "not needed" when it belongs to a setting the
-   person left off. Each needed key has its write-only value field, as in
-   [Add member](plugins.md#changing-a-plugin-members-settings-after-hire): it has no button of its
-   own, and what is typed is written when you press **Install** (or **Update**); a key set there
-   says who set it and when, and its value is never shown. Unset is not a refusal. The preview's
-   `secrets` carries these (in an update, as the update will leave them). The result's list of keys
-   still unset offers the same field beside each key, written by its **Save keys** button.
+   **Secrets** are asked here too, as values ON EACH MEMBER: one box per secret field the
+   package binds, labelled by the plugin manifest's `label`, a password box for a masked field and a
+   text box for a `"masked": false` one, saying whether the field already has a value and from where
+   (the member's own, a key stored from the screen, or the Host's environment - never the value),
+   what the manifest says it is for, or "not needed" when it belongs to a setting the person left
+   off. A value typed there is that member's own (each plugin member owns its secrets; see
+   [plugins.md](plugins.md#configuration-and-secrets)): it goes with **Install** (or **Update**, for
+   the members the update adds) as `secretValues: { <member>: { <field>: value } }` and is kept with
+   the member's hire, in one transaction. A value that cannot be kept is refused before anything is
+   made, naming the member and the field. The package's key binding still installs, so a key set with
+   `yawble secret set <KEY>` and `yawble up` still serves a member that has no value of its own. Unset
+   is not a refusal. The preview's `secrets` carries these (`label`, `masked`, `source`; in an update,
+   as the update will leave them). The result's `unsetFields` (`member`, `container`, `field`, `label`) lists
+   each needed field with no value from any source, each with its box: `member` is the package's member
+   name (the key of `secretValues`), `container` the id it was hired as, which the member's settings
+   routes take. `unset` still names their keys.
 4. **Install**: the steps below; on failure the wizard names the step and the reason. The result
    names each schedule's first run ("Scan for postings ran now", "Morning summary first runs at
    8:00 AM"), and lists the keys still unset, each with the way to set it. The answer's `firstRuns`
@@ -571,8 +577,8 @@ address and whether it is published now - a read, with no control of its own. It
   install wizard, started on this team's update) and **Uninstall**.
 
 Members, triggers and sites are tiles, laid out as the Plugins and Agents tiles are; the settings,
-connections and maintenance are forms. Plugin settings marked `advanced` sit behind the form's
-**Advanced settings** toggle ([plugins.md](plugins.md#advanced-settings)).
+connections and maintenance are forms. A plugin's settings form shows every setting on one screen
+([plugins.md](plugins.md#every-setting-on-one-screen)), its secrets as each member's own values.
 
 **Every control is an existing route**, with its own permit marker and tenant row - the panel adds
 none:

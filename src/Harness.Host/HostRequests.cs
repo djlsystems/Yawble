@@ -442,7 +442,14 @@ internal sealed record CreateContainer(
         + "CONNECTION ID (Admin > Connections) - never a token. The connection must suit the slot's "
         + "providers and hold its scopes. A Manager or a Concierge may name only a connection a person "
         + "has already bound on a member of this team. Refused for an Agent.")]
-    Dictionary<string, string>? Connections = null);
+    Dictionary<string, string>? Connections = null,
+    [property: Description(
+        "A PLUGIN member's OWN secret values, typed by a person: each secret field its manifest names, to "
+        + "the value. Kept for this member only, as ciphertext, with the member's settings and a "
+        + "`member.secret-set` row each, in one transaction; a hire whose values cannot be kept makes no "
+        + "member. Refused for an agent's hire (a Manager's, a Concierge's): a person sets them in the "
+        + "member's settings. Refused for an Agent.")]
+    Dictionary<string, string>? SecretValues = null);
 
 /// <summary>A repository's contributor settings. See the route.</summary>
 internal sealed record SetRepoContributor(

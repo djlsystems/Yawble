@@ -365,13 +365,17 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
     /// settings screen first, the operator CLI's `secret set KEY` second.
     /// </summary>
     [Fact]
-    public void The_plugin_skill_names_secret_keys_and_words_an_unset_key_screen_first()
+    public void The_plugin_skill_says_each_member_owns_its_secrets_and_words_a_missing_value_screen_first()
     {
         var plugins = System.Text.RegularExpressions.Regex.Replace(BuiltInSkills.Find("authoring-plugins")!.Body, @"\s+", " ");
 
+        Assert.Contains("Each plugin member owns its secrets.", plugins, StringComparison.Ordinal);
+        Assert.Contains("a spec never names a key for the person to type", plugins, StringComparison.Ordinal);
+        Assert.Contains("`\"masked\": false` declares a value that is not secret", plugins, StringComparison.Ordinal);
+        Assert.Contains("A plugin reads its values from its input when a run starts, under `secrets`, and never from its environment.", plugins, StringComparison.Ordinal);
         Assert.Contains("Each run's request also carries `secretKeys`", plugins, StringComparison.Ordinal);
         Assert.Contains("A key name is not a secret and is not redacted", plugins, StringComparison.Ordinal);
-        Assert.Contains("in this member's settings, or with the operator CLI's `secret set TWILIO_ACCOUNT_SID_SHOP`", plugins, StringComparison.Ordinal);
+        Assert.Contains("in this member's settings, or with the operator CLI's `secret set SHOP_ACCOUNT_SID`", plugins, StringComparison.Ordinal);
     }
 
     /// <summary>
