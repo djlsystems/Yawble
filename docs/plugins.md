@@ -215,23 +215,27 @@ Content-Type: application/json
 {
   "name": "Echo",
   "agent": "plugin:sample-echo",
-  "config":  { "mode": "reverse" },
-  "secrets": { "token": "SAMPLE_ECHO_TOKEN" }
+  "config":       { "mode": "reverse" },
+  "secretValues": { "token": "…the value the person typed…" }
 }
 ```
 
 - **`config`** is checked against the manifest. Refused at hire, with the field named: an unknown
   field, a value of the wrong type, outside its `enum` or outside a number's bounds (see
   [Number bounds](#number-bounds)), or a missing `required` field with no default.
-- **`secrets`** binds each secret the manifest names to a **logical key**, never to a value (see
-  [Configuration and secrets](#configuration-and-secrets)). A `required` secret whose key is not set
-  is refused at hire.
+- **`secretValues`** is THIS member's own value for each secret field the manifest names (see
+  [Configuration and secrets](#configuration-and-secrets)). It is kept for this member only, with the
+  member, or the member is not made. A `required` secret with no value and no set key binding is
+  refused at hire. An agent's hire (a Manager's, a Concierge's) cannot carry one.
+- **`secrets`** (optional) binds a field to a **logical key** instead, a name such as
+  `ACME_STORAGE_KEY` whose value the Host holds instance-wide; the API, the operator CLI and solution
+  packages use it. A member's own value wins over its binding.
 - **What you get.** The member appears on the team's board with `kind: "plugin"`. Work it is told
   through `tell`, the board, a trigger or a schedule reaches it through the same queue any member
   has. Its result is its `agentContainer.completed` row's `output`, and that row wakes the Manager
   like any member's.
 - **What is refused.**
-  - `config` and `secrets` on an Agent member.
+  - `config`, `secrets` and `secretValues` on an Agent member.
   - A plugin that is not installed.
   - Repointing a member between an Agent and a plugin. Hire a new member instead: an agent member's
     credential and environment must not survive into a plugin member.
@@ -239,10 +243,12 @@ Content-Type: application/json
 ### In the web UI
 
 - **Add member.** The dialog offers each installed plugin (from `GET /api/plugins`) after the Agent
-  presets. Choosing one shows its manifest's `config` fields as inputs, prefilled with their
-  defaults, and each of its `secrets` by name: what a person types there is the logical key, never a
-  value. Under each key is that key's write-only value field (see below). The hire goes through the
-  route above. An empty optional field or an unnamed optional secret is left out of the request.
+  presets. Choosing one shows every setting of its manifest on one screen, in the manifest's order:
+  each `config` field as an input whose placeholder is its default, and each secret field as ONE box
+  for its value, labelled by the manifest's `label` (else the field's name in words). A masked field
+  is a password box; a `"masked": false` field is a plain text box. No key name is asked for; one
+  bound shows only in "As JSON". The typed values go with the hire as `secretValues`, through the
+  route above. An empty optional field is left out of the request.
 - **Member card.** A `kind: plugin` card shows no live view, no tokens and no spend. It names the
   plugin instead of an Agent and words its failures without provider or spend terms. Its history
   button lists its earlier runs, and each run opens to what it reported.
@@ -273,7 +279,7 @@ Content-Type: application/json
   "executable": { "path": "sample-echo", "args": [] },
   "timeoutSeconds": 60,
   "config":  { "mode": { "type": "string", "enum": ["upper", "reverse"], "default": "upper" } },
-  "secrets": { "token": { "description": "A demo credential.", "required": false } },
+  "secrets": { "token": { "description": "A demo credential.", "required": false, "label": "Demo token" } },
   "events":  { "publishes": [ { "type": "done", "summary": "Text was transformed.", "highVolume": false,
                                 "fields": [ { "name": "length", "kind": "number", "summary": "Output length." } ] } ] },
   "skills":  ["skills/sample-echo.md"]
@@ -289,8 +295,8 @@ Content-Type: application/json
 | `protocol` | required | `harness.member/1`, the only protocol this Host speaks. |
 | `executable.path`, `executable.args` | required / optional | A relative path inside the version directory. `args` is a fixed argv with no substitution. |
 | `timeoutSeconds` | optional | An **idle** clock: this long with no `progress` record ends the run. Default 300. |
-| `config` | optional | Name → `{type: string, number, bool or list (string when absent); enum; default; required; setBy: "person" or "anyone"; advanced; description}`. A name starts with a letter and holds letters, digits, `_` and `-`, at most 64 characters. `"advanced": true` (true or false, nothing else) marks a setting most people never change (see [Advanced settings](#advanced-settings)); a `number` may add `min`, `max` and `integer` (see [Number bounds](#number-bounds)). Flat in v1. A `list` is a list of strings, default `[]`. See [List settings](#list-settings). |
-| `secrets` | optional | Name → `{description, required, when?}`. A `value` key is refused. `when` - `{"<config field>": "<value>"}`, one pair - says the secret is needed only while that list or choice setting holds that value (`{"sources": "adzuna"}`); the field must be declared and the value one of its `enum`. A solution install uses it to say a secret for a setting the person left off is not needed. |
+| `config` | optional | Name → `{type: string, number, bool or list (string when absent); enum; default; required; setBy: "person" or "anyone"; advanced; label; description}`. `label` - a short line of text, 1 to 80 characters - is what a settings screen names the field; anything else refuses the manifest naming the field. A name starts with a letter and holds letters, digits, `_` and `-`, at most 64 characters. `"advanced"` (true or false, nothing else) is accepted and no screen hides a field behind it (see [Every setting on one screen](#every-setting-on-one-screen)); a `number` may add `min`, `max` and `integer` (see [Number bounds](#number-bounds)). Flat in v1. A `list` is a list of strings, default `[]`. See [List settings](#list-settings). |
+| `secrets` | optional | Name → `{description, required, label?, masked?, when?}`. A `value` key is refused. `masked` (default `true`; `true` or `false`, anything else refuses the manifest naming the field) says the value is secret: never answered, never shown, redacted from what the plugin writes. `"masked": false` declares a value that is not secret (an account name): the settings screen shows it in a plain text box and the read answers it. `label` is as for `config`. `when` - `{"<config field>": "<value>"}`, one pair - says the secret is needed only while that list or choice setting holds that value (`{"sources": "adzuna"}`); the field must be declared and the value one of its `enum`. A solution install uses it to say a secret for a setting the person left off is not needed. |
 | `connections` | optional | Slot name → `{description, providers, scopes, required}`: an OAuth account the plugin acts on, which the Host holds and refreshes. See [Connections](#connections-oauth-accounts). |
 | `reads` | optional | A list of `{site, collection}`, at most 32: the collections of the plugin's OWN team's sites it reads, delivered on stdin at each run. See [Reading site data](#reading-site-data-reads). |
 | `events.publishes` | optional | `type` is a suffix: lowercase letters, digits, `-` and `.`. The full type is `plugin.<id>.<type>`. `highVolume` (default false) and `fields` (`name`, `kind`: `string`, `number`, `boolean` or `list`, `summary`) are optional; `source` cannot be declared. `monitor` (optional) tells the Monitor what the event did outside the platform; see [Monitor hints](#monitor-hints). `inLedger` is not read in v1: a plugin event declared `highVolume` stays out of the member ledger and is still an ordinary log row, and any other plugin event stays in the ledger. See [Events](#events). |
@@ -318,24 +324,25 @@ manifest gives none, so the plugin always receives an array in the request's `co
 A `type` other than `string`, `number`, `bool` or `list` refuses the manifest, naming the field.
 The web's settings editor shows a list as chips.
 
-### Advanced settings
+### Every setting on one screen
 
-`"advanced": true` on a `config` field marks a setting most people never change. The settings
-form (Add member, Member settings and a solution's panel) shows the everyday fields first and the
-advanced ones after them, behind one **Advanced settings (n)** toggle. The toggle is closed until a
-person opens it, or until one of its fields is missing or out of range, so a problem is never
-hidden. `advanced` changes nothing about who may set a field or how its value is checked. The
-settings read (`fields.<field>.advanced`) and `GET /api/plugins` carry it. A value other than `true`
-or `false` refuses the manifest, naming the field.
+The settings screens (Add member, Member settings, the solution wizard and a solution's panel) show
+every `config` field and every secret field of a plugin on one screen, in the manifest's order. A
+field's default is its placeholder, and "Reset to default" puts it back. `"advanced": true` on a
+`config` field is still accepted - `true` or `false`, anything else refuses the manifest naming the
+field - and answered as `advanced` by the settings read and `GET /api/plugins`, but no screen hides a
+field behind it.
 
-```json
-"config": {
-  "keywords":         { "type": "list", "description": "Words a title must hold." },
-  "archiveAfterDays": { "type": "number", "min": 1, "integer": true, "default": 7, "advanced": true }
-}
-```
+The plugin's description shows its first paragraph and a **Documentation** link that opens the
+plugin's page on the package catalog in a new tab: `marketplaceUrl`, which the settings read and
+`GET /api/plugins` answer as `<origin of the catalog address>/marketplace/<id>` when the catalog's
+last read lists the plugin, and null otherwise - then the screen shows the whole description and no
+link. The Host names no catalog host: the origin is the one the operator configured
+(`Marketplace:Catalog`).
 
-Pinned by `PluginAdvancedSettingsTests` and `web/src/components/__tests__/plugin-settings-advanced.mount.spec.ts`.
+Pinned by `PluginAdvancedSettingsTests`, `PluginFieldLabelsTests`,
+`MarketplaceTests.A_plugins_page_is_the_catalog_origin_and_its_id_when_the_catalog_lists_it_and_null_otherwise`
+and `PluginMemberSecretsTests.The_settings_read_answers_no_marketplace_page_when_no_catalog_lists_the_plugin`.
 
 ### Number bounds
 
@@ -572,17 +579,18 @@ own `PATH`, and a run on a worker without it fails at launch.
 - **`work`** is the batch, oldest first, all from one workflow. Up to 32 messages can arrive in one
   run.
 - **`config`** is the manifest's defaults with this member's own values on top.
-- **`secrets`** holds only the secrets this member binds, resolved at the moment the run starts.
-- **`secretKeys`** maps every secret field this member binds to the logical key NAME it is bound
-  to, whether that key is set or not; `{}` when it binds none. A field in `secretKeys` and not in
-  `secrets` is a bound key with no value on this Host (above, `backup` is bound to
-  `SAMPLE_ECHO_BACKUP`, which is not set). A field the member does not bind is in neither. It is
-  additive: every other member of the request is byte for byte what it was before, and a plugin
-  that ignores it is unchanged. A key name is not a secret and is not redacted. Each name comes from
-  the same binding as the value beside it in `secrets`, so a value is never beside a name it was not
-  bound to; and a binding whose key's VALUE is the name of a key the member binds is refused, at
-  hire, in the member's settings, and before every run, because that value would ride on stdin
-  unredacted. How a plugin words a key that is not set is under
+- **`secrets`** holds each secret field this member has a value for, resolved at the moment the
+  run starts: the member's own value, else the value of the key it binds. This is the only place a
+  plugin reads its values: never its environment, which holds none.
+- **`secretKeys`** names each secret field: the logical key NAME it is bound to, whether that key is
+  set or not, or - for a field set only by the member's own value - the field's own name. `{}` when
+  it has none. A field in `secretKeys` and not in `secrets` is a bound key with no value on this
+  Host (above, `backup` is bound to `SAMPLE_ECHO_BACKUP`, which is not set). A field with neither a
+  value nor a binding is in neither. It is additive: every other member of the request is byte for
+  byte what it was before, and a plugin that ignores it is unchanged. A name is not a secret and is
+  not redacted. Each name comes from the same field as the value beside it in `secrets`, so a value
+  is never beside a name it was not given for; and a value that is itself one of the names is
+  refused, at binding and before every run, because it would ride on stdin unredacted. How a plugin words a key that is not set is under
   [Configuration and secrets](#configuration-and-secrets).
 - **`connections`** holds one entry per slot this member has bound: the provider, the account name,
   a fresh access token, when it expires and the scopes it was granted. The Host refreshes the token
@@ -727,19 +735,50 @@ it. A plugin run takes a WIP slot like any member's.
 - **Ordinary configuration.** Stored per member in `team_member_config` (schema step `auth-008`).
   It is checked against the manifest at hire and delivered in the request's `config`. It is never
   put in the environment.
-- **Secrets are logical keys.** A member stores `{"token": "ACME_STORAGE_KEY"}`, the key only. The
-  Host never writes the value in plain text to the database, the manifest or the plugin directory.
-  Cloning a team carries the member's configuration and its keys, never a value.
-- **Setting a secret.** A person sets a key's value from the screen: Add member, the member's
-  settings and the solution install wizard show a write-only value field per secret key. The value is
-  stored in `plugin_secrets` (schema step `auth-025`) only as Data Protection ciphertext under
-  `<dataRoot>/keys`, and the member's next run reads it, with no
-  restart. The operator CLI is the second way: `yawble secret set NAME`, then `yawble up`, puts it in
-  the Host's environment.
-  - **Which value a run gets.** At each run the key is resolved from the stored value first, then
-    from the Host's environment. So a key set with the CLI keeps working, a key set from the screen
-    wins over it, and clearing the stored key falls back to the environment.
-  - **The routes**, each `HumansOnly` (a machine principal is refused 403):
+- **Each plugin member owns its secrets.** Any number of members may use one plugin, on one team
+  or several, with the same account or different ones, and none can read, change or clash with
+  another's values. A plugin never needs to tell its members apart, and a package author never names
+  a key for a person to type. A person types a member's value for each secret field on that member's
+  settings screen (Add member, Member settings, the solution wizard); it is kept for that team,
+  member and field in `plugin_member_secrets` (schema step `auth-028`) only as Data Protection
+  ciphertext under `<dataRoot>/keys` (purpose `Harness.PluginMemberSecrets.v1`), with who set it and
+  when, and the member's next run reads it, with no restart. Removing the member or deleting its team
+  removes its values; a member hired again under the same name starts with none, and cloning a team
+  carries the member's configuration and key bindings, never a value.
+- **Which value a run gets.** At each run a field resolves to the member's own value; else, when the
+  member's settings bind the field to a logical key, that key - its value stored from the screen
+  (`PUT /api/secrets/{key}`), then the Host's environment, where the operator CLI's
+  `yawble secret set NAME` and `yawble up` put it. Clearing a member's value falls back to its
+  binding; clearing a stored key falls back to the environment. Key bindings remain for the API, the
+  operator CLI and solution packages; a person on the screen never sees one.
+- **Moving to member values.** Once, at the first start of a Host with `auth-028`, every member
+  bound to a key with a STORED value gets that value as its own (`member.secrets-copied`, counts
+  only). The binding and the stored key stay, so the CLI and the environment still work. A key the
+  Host holds only in its environment is never copied: the Host never moves an environment value into
+  its database.
+- **The member routes**, each `HumansOnly` (a machine principal is refused 403):
+  - `GET /api/teams/{team}/members/{member}/secrets` answers `{ team, member, secrets: [...] }`, one
+    entry per manifest secret field in the manifest's order: `field`, `label`, `masked`, `required`,
+    `needed`, `set`, `setBy`, `setAt`, `source` (`member`, `key`, `environment` or null) and `key` (the
+    bound key's name or null) - and `value` only for a `"masked": false` field. The settings read
+    carries the same list as `secretStates`.
+  - `PUT .../secrets/{field}` with `{ "value": "..." }` sets or replaces the member's value, with a
+    `member.secret-set` or `member.secret-replaced` tenant row; `DELETE .../secrets/{field}` clears it,
+    with a `member.secret-cleared` row, and clearing nothing writes nothing. Each answers the field's
+    entry. The row names the team, member, plugin and field, never the value, and lands in the same
+    transaction as the write: when it cannot be written nothing changes, and the answer is 500 with
+    `error`.
+  - A field the manifest does not declare is refused 400, and so is a value that is empty, holds a
+    line break or a NUL, or is over 8192 characters - and, for a masked field, one that begins or ends
+    with white space or is under 4 characters. The sentence names the field and never repeats the
+    value.
+  - A person's hire carries values as `secretValues`; the settings save as `secretValues` too (a
+    string sets, null clears, a field not named is left), each in one transaction with the settings.
+  - No answer, tenant row, log or file carries a masked value.
+- **Setting a key from the screen** (the binding's value, instance-wide). `plugin_secrets` (schema
+  step `auth-025`) keeps a logical key's value as Data Protection ciphertext (purpose
+  `Harness.PluginSecrets.v1`); every member binding the key reads it.
+  - **The routes**, each `HumansOnly`:
     - `GET /api/secrets/{key}` answers `{ key, set, refusal, setWith, setBy, setAt, source }`.
       `source` is `stored` (with `setBy`, the person's email, and `setAt`), `environment` (with
       `setBy` and `setAt` null) or null when the key is not set. `setWith` names the screen first
@@ -747,18 +786,17 @@ it. A plugin run takes a WIP slot like any member's.
     - `PUT /api/secrets/{key}` with `{ "value": "..." }` sets or replaces the stored key, with a
       `secrets.set` or `secrets.replaced` tenant row; `DELETE /api/secrets/{key}` clears it, with a
       `secrets.cleared` row, and clearing a key that is not stored writes nothing. Both answer as GET
-      does. The row names the key, never the value, and lands in the same transaction as the write:
-      when it cannot be written nothing changes, and the answer is 500 with `error`.
+      does, in the same transaction as their row, or nothing changes (500 with `error`).
     - A key a plugin may not be pointed at is refused 400 with `error` and `refusal`. So is a value
       that is empty, holds a line break or a NUL, begins or ends with white space, or is under 4 or
       over 8192 characters; the sentence never repeats the value.
-    - No answer, tenant row, log or file carries the value.
   - Keys starting `HARNESS_` and model-provider keys are refused, from both sources, by the same
     name rules (`EnvironmentSecretStore.Refusal`).
-  - The value reaches the plugin only on stdin, never in argv or the environment.
+  - The value reaches the plugin only on stdin, never in argv or the environment. A plugin reads its
+    values from stdin and never from its environment.
   - **Redaction is a net, not a guarantee.** Every text the plugin writes - its result output and
     error, its stderr, the text of each `progress`, `blocked`, `needsDecision` and `handback`
-    record, and every string in a published event's payload - has each bound value replaced with
+    record, and every string in a published event's payload - has each masked value it was handed replaced with
     `[redacted]` before it is stored or reported, and then the platform's diagnostic redaction runs
     over it (named values such as `password=...`, and credential-shaped strings). The rules, each
     pinned by a test in `PluginMemberRunnerTests`:
@@ -787,13 +825,12 @@ it. A plugin run takes a WIP slot like any member's.
   - A bound value shorter than 4 characters cannot be redacted without mangling the text around
     it, so it is refused: at hire if it is already set, and on every run
     (`A_secret_too_short_to_redact_is_refused_before_launch`).
-- **Naming a key that is not set.** A plugin that needs a key with no value says which key, by the
-  name in `secretKeys`, and how to set it: the member's settings screen first, the operator CLI
-  second - "Set `TWILIO_ACCOUNT_SID_SHOP` in this member's settings, or with
-  `yawble secret set TWILIO_ACCOUNT_SID_SHOP` and `yawble up`." It names the key it was given, never
-  a guess and never a field name standing in for it, and never writes a value beside it. (A
-  `required` secret whose key is not set never reaches the plugin: the Host refuses the run in the
-  same words.) Pinned by
+- **Naming a value that is missing.** A plugin that needs a value it was not handed says which, by
+  the name in `secretKeys` (a bound key, or the field), and how to set it: the member's settings
+  screen first, the operator CLI second for a bound key - "Set `SHOP_ACCOUNT_SID` in this member's
+  settings, or with `yawble secret set SHOP_ACCOUNT_SID` and `yawble up`." It names what it was given,
+  never a guess, and never writes a value beside it. (A `required` secret with no value never reaches
+  the plugin: the Host refuses the run, naming the field or the key.) Pinned by
   `PluginMemberRunnerTests.A_run_is_told_each_bound_secret_fields_key_name_and_an_unset_keys_name_with_no_value`,
   `PluginMemberRunnerTests.The_request_is_otherwise_byte_identical_to_the_one_before_secret_keys`,
   `PluginMemberRunnerTests.No_secret_value_appears_beside_a_key_name_it_was_not_bound_to` and
@@ -813,55 +850,64 @@ it. A plugin run takes a WIP slot like any member's.
     reconnect` at the next run and blocks it with a sentence saying to reconnect it from
     Admin, Connections.
   - A refresh the provider refuses blocks the run before it starts, naming the connection.
-- **Worked example.** An Azure Storage plugin would declare `config.account`, `config.container`
-  and `secrets.accountKey`. Its member would store
-  `{"config": {"account": "acme", "container": "invoices"}, "secrets": {"accountKey": "ACME_STORAGE_KEY"}}`.
-  A person sets `ACME_STORAGE_KEY` in the member's settings, or the operator runs
-  `yawble secret set ACME_STORAGE_KEY` and `yawble up`.
-- **The store.** Only the resolver (`ISecretStore`, which is `PluginSecretStore`) knows where values
-  live; a plugin and a binding name keys only.
+- **Worked example.** A storage plugin declares `config.account`, `config.container` and
+  `secrets.accountKey` (`"label": "Account key"`). Two members of it on one team, for two accounts,
+  each have the person type their own account key in their own settings; neither sees or changes the
+  other's. An operator who would rather hold the value instance-wide binds
+  `{"secrets": {"accountKey": "ACME_STORAGE_KEY"}}` and runs `yawble secret set ACME_STORAGE_KEY` and
+  `yawble up`; a member's own value still wins.
+- **The store.** Only the resolver knows where values live: `PluginMemberSecretStore` for a member's
+  own, `ISecretStore` (which is `PluginSecretStore`) for a key. A plugin reads values on stdin only.
+
+Pinned by `PluginMemberSecretsTests` (every case: two members of one plugin each receive their own
+value; a value wins over its key, then the environment; the scan of every response, row and file
+under the data root; the rows in one transaction; a machine refused every route; removal, team
+deletion, a same-name successor and a clone), `MemberSecretsCopyTests`, `PluginNeedsPersonTests`,
+`PluginSecretsTests` and `FreshVolumeTests.The_plugin_member_secrets_step_applies_to_an_empty_and_an_existing_volume`.
 
 ### Changing a plugin member's settings after hire
 
-A person changes a plugin member's configuration, secret bindings and connection bindings without hiring a new member:
+A person changes a plugin member's configuration, its secret values and its connection bindings without hiring a new member:
 **Member settings → Settings**, the same form Add member shows, filled with what is stored. It is
-generated from the manifest: one typed input per `config` field (text, number box, toggle, dropdown
-for an `enum`, chips for a `list`), each with its description behind an info icon, default, whether it is required, and
-"Set by a person only" for a `setBy: person` field; `advanced` fields after the rest, behind the
-**Advanced settings (n)** toggle ([Advanced settings](#advanced-settings)); "Reset to default" per field; secrets as key-name
-inputs; and a read-only view of the JSON that will be stored. It saves only the fields that differ from
-their default. Each connection slot is a picker listing the connections of the providers the slot
-allows; a connection lacking a scope the slot asks for is refused with a sentence that offers
-Reconnect. A required slot left unbound says, in grey, that the member's runs are blocked until a
-connection is chosen there; it is not a refusal, because the picker and Connect are right beside it.
-Add member and Member settings both say under each secret's key whether the Host has that key set -
-"Set by <person> on <time>" for a key set from the screen, "Set in this Host's environment" for one
-the CLI set - or, when not, the ways to set it, the screen first and the CLI second. This comes from
-`GET /api/secrets/{key}` (`{ key, set, refusal, setWith, setBy, setAt, source }`, a person's; asked
-by name, the value is never read into an answer). Under it is the key's write-only value field: a
-password box with no button of its own. It starts empty, and shows masked dots saying the value is
-saved and never shown once the key is set. For a key set from the screen there is **Clear**, which
-holds the key for clearing until **Keep** takes it back. What is typed or cleared is written when
-the person presses the form's own button (Add member, Save, Install or Update): typed values go
-with `PUT /api/secrets/{key}` and cleared keys with `DELETE`, before the hire or the settings save.
-A refusal names the key and stops the save. The box is emptied as the write is sent, and the Host's
-answer is what the form then says. A key name the Host refuses offers no field.
+generated from the manifest: every setting on one screen in the manifest's order
+([Every setting on one screen](#every-setting-on-one-screen)) - one typed input per `config` field
+(text, number box, toggle, dropdown for an `enum`, chips for a `list`), its default as its
+placeholder, "Reset to default" per field; one value box per secret field; and a read-only view of
+the JSON that will be stored, the only place a bound key name shows. It saves only the fields that
+differ from their default. A plugin form's fields carry no info icon and no "Default" or "Set by"
+line; what a person must see now - an error, Required, "not set", the saved line - stays printed.
+
+Each secret field is one box, labelled by the manifest's `label`. A masked field is a password box:
+it starts empty, says when a value is saved and by whom ("Set by <person> on <time>", or "Set in
+this Host's environment" for a bound key the CLI set), typing replaces it, and **Clear** removes the
+member's own value. A `"masked": false` field is a plain text box showing the saved value. The typed
+values are sent with the form's own button (Add member, Save, Install or Update) as `secretValues`.
+A refusal names the field and stops the save.
+
+Each connection slot is a picker listing the connections of the providers the slot allows; a
+connection lacking a scope the slot asks for is refused with a sentence that offers Reconnect. A
+required slot left unbound says, in grey, that the member's runs are blocked until a connection is
+chosen there; it is not a refusal, because the picker and Connect are right beside it.
 
 - `GET /api/teams/{team}/members/{member}/plugin-settings` answers `plugin`, `version`, the stored
-  `config`, `secrets` as logical keys (never a value), the manifest's `fields` and `secretFields`,
-  `connections` (slot → bound connection id) and `connectionFields` (each slot as `/api/plugins`
-  describes it).
-- `PUT` the same route with `{ "config": {...}, "secrets": {...}, "connections": {...} }` replaces
-  them. `connections` given replaces the bindings (`{}` unbinds every slot); **omitted, the stored
-  bindings are kept**, so a client that knows nothing of connections cannot unbind them. It is validated
+  `config`, `secrets` (bound logical keys, never a value), `secretStates` (each secret field as
+  `GET .../secrets` answers it), the manifest's `fields` and `secretFields` (each with `label`, a
+  secret with `masked`), `connections` (slot → bound connection id), `connectionFields` (each slot
+  as `/api/plugins` describes it) and `marketplaceUrl`.
+- `PUT` the same route with `{ "config": {...}, "secretValues": {...}, "secrets": {...}, "connections": {...} }`
+  replaces the configuration. `secretValues` sets (a string) or clears (null) the member's own value
+  of each field it names. `secrets` and `connections` given replace the bindings (`{}` unbinds every
+  key or slot); **omitted, the stored bindings are kept**, so a form that shows no key name and
+  knows nothing of connections unbinds nothing. It is validated
   exactly as a hire is - field and secret names, types, `enum` (per item for a list), required fields,
-  the key's form, a reserved or provider key, a required secret not set on this Host, a value too short
-  to redact - and refused with a 400 naming the field, with nothing written. Two stored values are
+  the key's form, a reserved or provider key, a required secret with no value and no set key, a value
+  too short to redact - and refused with a 400 naming the field, with nothing written. Two stored values are
   kept when they are sent back unchanged: a number outside bounds added later (named in
   `outOfRange`), and a value for a field the active version no longer declares (the run never
   receives it).
-- The save and its `member.plugin-settings-changed` row in `tenant_events` (the plugin and the NAMES of
-  the fields and secrets that changed, never a value) are one transaction.
+- The save, its `member.plugin-settings-changed` row in `tenant_events` (the plugin and the NAMES of
+  the fields and secret bindings that changed, never a value) and each value with its own
+  `member.secret-*` row are one transaction.
 - It takes effect on the member's next run: the runner reads the settings at every run.
 - Both routes are humans-only. A Manager cannot change a member's settings after hire, as it cannot
   change a member's instructions.
