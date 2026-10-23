@@ -224,7 +224,7 @@ public sealed class MarketplaceTests : IDisposable
     // ---- what a package holds, and its page ----
 
     /// <summary>A fixture solution and the fixture plugin it ships, each with the catalog's
-    /// <c>contents</c>, and the plugin's <c>includedIn</c>.</summary>
+    /// <c>contents</c>.</summary>
     private static string ContentsCatalog(byte[] zip)
     {
         var solution = JsonSerializer.SerializeToNode(Entry("sample-solution", "solution", "1.2.0", zip))!.AsObject();
@@ -253,12 +253,11 @@ public sealed class MarketplaceTests : IDisposable
             connections = new[] { new { slot = "mailbox", providers = new[] { "imap", "google" }, required = true } },
             events = new[] { new { type = "sample.found", summary = "A new item was found" } },
         });
-        plugin["includedIn"] = JsonSerializer.SerializeToNode(new[] { new { id = "sample-solution", name = "Sample Solution" } });
         return JsonSerializer.Serialize(new { schema = 1, generatedAt = "2026-10-09T08:00:00Z", packages = new object[] { solution, plugin } });
     }
 
     [Fact]
-    public async Task A_packages_contents_included_in_and_page_on_the_catalogs_own_site_pass_through_as_written()
+    public async Task A_packages_contents_and_page_on_the_catalogs_own_site_pass_through_as_written()
     {
         var feed = new FakeFeed { Catalog = ContentsCatalog(MailZip) };
         var status = await Market(feed).CheckAsync(Ct);
@@ -271,7 +270,6 @@ public sealed class MarketplaceTests : IDisposable
         Assert.Equal(["drafting"], contents.Skills);
         Assert.Equal([new CatalogContentTrigger("morning", "Every weekday at 8:00")], contents.Triggers);
         Assert.Equal(["Tracker"], contents.Sites);
-        Assert.Null(solution.IncludedIn);
 
         var plugin = status.Packages.Single(p => p.Id == "sample-plugin");
         Assert.Equal("https://example.test:8443/marketplace/sample-plugin", plugin.Page);
@@ -284,18 +282,16 @@ public sealed class MarketplaceTests : IDisposable
         Assert.Equal(("mailbox", true), (connection.Slot, connection.Required));
         Assert.Equal(["imap", "google"], connection.Providers);
         Assert.Equal([new CatalogContentEvent("sample.found", "A new item was found")], set.Events);
-        Assert.Equal([new CatalogIncluded("sample-solution", "Sample Solution")], plugin.IncludedIn);
     }
 
     [Fact]
-    public async Task A_catalog_without_contents_or_included_in_still_reads_and_answers_them_null()
+    public async Task A_catalog_without_contents_still_reads_and_answers_it_null()
     {
         var status = await Market(MailFeed()).CheckAsync(Ct);
 
         var mail = Assert.Single(status.Packages);
         Assert.True(status.Checked);
         Assert.Null(mail.Contents);
-        Assert.Null(mail.IncludedIn);
         Assert.Equal("https://example.test:8443/marketplace/mail", mail.Page);
     }
 
@@ -311,7 +307,7 @@ public sealed class MarketplaceTests : IDisposable
     }
 
     [Fact]
-    public async Task Get_api_marketplace_passes_contents_included_in_and_the_page_through()
+    public async Task Get_api_marketplace_passes_contents_and_the_page_through()
     {
         var dataRoot = Directory.CreateTempSubdirectory("harness-marketplace-contents-").FullName;
         var feed = new FakeFeed { Catalog = ContentsCatalog(MailZip) };
@@ -342,7 +338,6 @@ public sealed class MarketplaceTests : IDisposable
             Assert.True(contents.GetProperty("members")[1].GetProperty("agent").GetBoolean());
             Assert.Equal(["name", "words"], contents.GetProperty("triggers")[0].EnumerateObject().Select(p => p.Name));
             Assert.Equal("Tracker", contents.GetProperty("sites")[0].GetString());
-            Assert.Equal(JsonValueKind.Null, solution.GetProperty("includedIn").ValueKind);
 
             var plugin = packages["sample-plugin"];
             Assert.Equal("https://example.test:8443/marketplace/sample-plugin", plugin.GetProperty("page").GetString());
@@ -351,8 +346,7 @@ public sealed class MarketplaceTests : IDisposable
             Assert.Equal(["name", "label", "required", "masked"], set.GetProperty("secrets")[0].EnumerateObject().Select(p => p.Name));
             Assert.Equal(["slot", "providers", "required"], set.GetProperty("connections")[0].EnumerateObject().Select(p => p.Name));
             Assert.Equal(["type", "summary"], set.GetProperty("events")[0].EnumerateObject().Select(p => p.Name));
-            var included = Assert.Single(plugin.GetProperty("includedIn").EnumerateArray());
-            Assert.Equal(("sample-solution", "Sample Solution"), (included.GetProperty("id").GetString(), included.GetProperty("name").GetString()));
+            Assert.False(plugin.TryGetProperty("includedIn", out _));
         }
         finally
         {
@@ -823,7 +817,7 @@ public sealed class MarketplaceTests : IDisposable
                 Assert.True(root.GetProperty("checked").GetBoolean());
                 var mail = root.GetProperty("packages")[0];
                 Assert.Equal(
-                    ["id", "kind", "name", "summary", "version", "needs", "installed", "installedVersion", "installedOn", "updateAvailable", "catalogNeeds", "description", "page", "contents", "includedIn"],
+                    ["id", "kind", "name", "summary", "version", "needs", "installed", "installedVersion", "installedOn", "updateAvailable", "catalogNeeds", "description", "page", "contents"],
                     mail.EnumerateObject().Select(p => p.Name));
                 Assert.Equal("solution", mail.GetProperty("kind").GetString());
 

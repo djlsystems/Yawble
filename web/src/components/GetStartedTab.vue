@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { getMarketplace, refreshMarketplace } from '../api/client';
 import type { MarketplaceCatalog, MarketplacePackage } from '../api/types';
-import { contentsLines, getLabel, includedInWords, installedWords, kindWords, noneMatchWords, notCheckedWords, packageMatches, plainNeeds, unreachableWords } from '../lib/marketplace';
+import { contentsLines, getLabel, installedWords, kindWords, noneMatchWords, notCheckedWords, packageMatches, plainNeeds, unreachableWords } from '../lib/marketplace';
 import { fetchIntoDocuments } from '../lib/marketplaceFetch';
 import { claimFirstOpenRefresh } from '../lib/marketplaceRefresh';
 import { whenWords } from '../lib/solutionPanel';
@@ -145,7 +145,6 @@ async function get(pkg: MarketplacePackage) {
           <ul v-if="contentsLines(pkg).length" class="os-tile-line get-started-text get-started-contents" data-package-contents>
             <li v-for="(line, i) in contentsLines(pkg)" :key="i" data-package-content>{{ line }}</li>
           </ul>
-          <div v-if="includedInWords(pkg)" class="os-tile-line get-started-text" data-package-included-in>{{ includedInWords(pkg) }}</div>
           <div class="os-tile-line get-started-text" data-package-summary>{{ pkg.summary }}</div>
           <template v-if="pkg.kind !== 'plugin' || !contentsLines(pkg).length">
             <div v-if="plainNeeds(pkg.catalogNeeds).length" class="os-tile-line get-started-text" data-package-needs>

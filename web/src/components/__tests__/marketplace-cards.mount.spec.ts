@@ -3,12 +3,11 @@
 // MARKETPLACE > BROWSE, A CARD SAYS WHAT A PACKAGE IS: a solution card in the solution colour and a
 // plugin card in the plugin colour (edge and kind icon), each opening with the catalog's `contents`
 // in bullets - a solution's plugins, members, skills, triggers and sites; a plugin's settings, keys,
-// sign-ins, events and skills, then the solutions that include it - and ONE Documentation link to
+// sign-ins, events and skills (a plugin stands alone: it never names a solution) - and ONE Documentation link to
 // the package's page on the catalog's own site, in a new tab. A catalog without `contents` shows the
 // card as it was. Fixture packages only.
 //
-// SEEN TO FAIL: before the change no card had a kind class, a contents bullet, an included-in line
-// or a Documentation link.
+// SEEN TO FAIL: before the change no card had a kind class, a contents bullet or a Documentation link.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { compileString } from 'sass';
@@ -71,10 +70,9 @@ const SamplePlugin = pkg({
     connections: [{ slot: 'mailbox', providers: ['google', 'microsoft'], required: true }],
     events: [{ type: 'sample.found', summary: 'A new item was found' }],
   },
-  includedIn: [{ id: 'sample-solution', name: 'Sample Solution' }],
 });
 
-// AS A CATALOG WITHOUT THE NEW FIELDS ANSWERS: no contents, no includedIn, no page key at all.
+// AS A CATALOG WITHOUT THE NEW FIELDS ANSWERS: no contents, no page key at all.
 const { page: _page, ...plainFields } = pkg({
   id: 'plain-solution',
   name: 'Plain Solution',
@@ -159,10 +157,9 @@ describe('Marketplace > Browse, the package cards', () => {
     expect(contents.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // A solution keeps what it needs at install.
     expect(tile.querySelector('[data-package-needs]')!.textContent).toContain('Needs a file in Notes');
-    expect(tile.querySelector('[data-package-included-in]')).toBeNull();
   });
 
-  it('shows a plugin card in the plugin colour, with what a person sets up, its events, skills and an included-in line', async () => {
+  it('shows a plugin card in the plugin colour, with what a person sets up, its events and skills, and no solution named', async () => {
     await browse([SampleSolution, SamplePlugin]);
 
     const tile = card('sample-plugin');
@@ -177,7 +174,9 @@ describe('Marketplace > Browse, the package cards', () => {
       'Announces: A new item was found',
       'Skill: sample-plugin',
     ]);
-    expect(tile.querySelector('[data-package-included-in]')!.textContent!.trim()).toBe('Included in Sample Solution');
+    // A plugin is independent: its card never names a solution, though one in the catalog ships it.
+    expect(tile.textContent).not.toContain('Sample Solution');
+    expect(tile.textContent).not.toContain('Included in');
     // The bullets say what it asks for: the short needs lines give way to them.
     expect(tile.querySelector('[data-package-needs]')).toBeNull();
   });
@@ -203,13 +202,12 @@ describe('Marketplace > Browse, the package cards', () => {
     }
   });
 
-  it('renders a catalog without contents as before: no bullets, no included-in, no link, its needs and Get', async () => {
+  it('renders a catalog without contents as before: no bullets, no link, its needs and Get', async () => {
     await browse([PlainSolution]);
 
     const tile = card('plain-solution');
     expect(tile.classList.contains('os-tile-kind-solution')).toBe(true);
     expect(tile.querySelector('[data-package-contents]')).toBeNull();
-    expect(tile.querySelector('[data-package-included-in]')).toBeNull();
     expect(docs('plain-solution')).toHaveLength(0);
     expect(tile.querySelector('[data-package-summary]')!.textContent).toBe('Plain Solution does its one job.');
     expect(tile.querySelector('[data-package-needs]')!.textContent).toContain('Needs a file in Notes');

@@ -87,7 +87,7 @@ public sealed class MarketplaceRefusal(string sentence, int status = StatusCodes
 public sealed record CatalogPackage(
     string Id, string Kind, string Name, string Summary, string Version, IReadOnlyList<string> Needs,
     Uri DownloadUrl, string Sha256, long Bytes, CatalogNeeds CatalogNeeds, string Description = "",
-    CatalogContents? Contents = null, IReadOnlyList<CatalogIncluded>? IncludedIn = null);
+    CatalogContents? Contents = null);
 
 /// <summary>
 /// What a package holds and asks for, as the catalog writes it (<c>contents</c>): a solution's
@@ -124,9 +124,6 @@ public sealed record CatalogContentSecret(string Name, string Label, bool Requir
 /// <summary>An event a plugin announces, with its one-line summary.</summary>
 public sealed record CatalogContentEvent(string Type, string Summary);
 
-/// <summary>A solution that ships this plugin (<c>includedIn</c>).</summary>
-public sealed record CatalogIncluded(string Id, string Name);
-
 /// <summary>
 /// A package's <c>needs</c> as the catalog writes them, without the <c>why</c> texts (those are in the
 /// sentences): the console words a card's short lines from these, so a provider id is never shown to a
@@ -155,7 +152,7 @@ public sealed record MarketplacePackage(
     string Id, string Kind, string Name, string Summary, string Version, IReadOnlyList<string> Needs,
     bool Installed, string? InstalledVersion, IReadOnlyList<string> InstalledOn, bool UpdateAvailable,
     CatalogNeeds CatalogNeeds, string Description = "",
-    string? Page = null, CatalogContents? Contents = null, IReadOnlyList<CatalogIncluded>? IncludedIn = null);
+    string? Page = null, CatalogContents? Contents = null);
 
 /// <summary>What <c>GET /api/marketplace</c> and its refresh answer. <paramref name="Checked"/> false
 /// is "not known", never an empty catalog, and <paramref name="Reason"/> says why.</summary>
@@ -509,7 +506,7 @@ public sealed partial class Marketplace(
             version is not null, version, on,
             version is not null && ReleaseCheck.Compare(package.Version, version) > 0,
             package.CatalogNeeds, package.Description,
-            PageFor(package.Id), package.Contents, package.IncludedIn);
+            PageFor(package.Id), package.Contents);
     }
 
     private static MarketplaceStatus NotChecked(string reason, DateTimeOffset? at) => new(false, reason, at, []);
@@ -609,7 +606,7 @@ public sealed partial class Marketplace(
             entry.TryGetProperty("description", out var description) && description.ValueKind == JsonValueKind.String
                 ? description.GetString()!
                 : "",
-            Contents(entry), IncludedIn(entry));
+            Contents(entry));
     }
 
     private static IEnumerable<JsonElement> Objects(JsonElement from, string field) =>
@@ -667,17 +664,6 @@ public sealed partial class Marketplace(
             [.. Objects(contents, "events")
                 .Where(e => !string.IsNullOrWhiteSpace(Text(e, "type")))
                 .Select(e => new CatalogContentEvent(Text(e, "type")!, Text(e, "summary") ?? ""))]);
-    }
-
-    /// <summary>The solutions the catalog says ship this plugin (<c>includedIn</c>), or null when it
-    /// says nothing.</summary>
-    public static IReadOnlyList<CatalogIncluded>? IncludedIn(JsonElement entry)
-    {
-        if (!entry.TryGetProperty("includedIn", out var list) || list.ValueKind != JsonValueKind.Array) return null;
-
-        return [.. list.EnumerateArray()
-            .Where(e => e.ValueKind == JsonValueKind.Object && !string.IsNullOrWhiteSpace(Text(e, "id")))
-            .Select(e => new CatalogIncluded(Text(e, "id")!, Text(e, "name") ?? Text(e, "id")!))];
     }
 
     /// <summary>The catalog's needs fields as written, each list empty when the catalog has none.</summary>
@@ -814,9 +800,8 @@ public static class MarketplaceEndpoints
             + "null without an address), contents (the catalog's `contents` as written: `{ plugins: [{ id, version, "
             + "minimum }], members: [{ name, role, agent }], skills, triggers: [{ name, words }], sites, settings: "
             + "[{ name, label, kind, required, default }], secrets: [{ name, label, required, masked }], connections: "
-            + "[{ slot, providers, required }], events: [{ type, summary }] }`, null when the catalog has none), "
-            + "includedIn (a plugin's `[{ id, name }]` of the solutions that ship it, null when the catalog says "
-            + "nothing) }`; a solution matches by package id on each team, a plugin "
+            + "[{ slot, providers, required }], events: [{ type, summary }] }`, null when the catalog has none) }`; "
+            + "a solution matches by package id on each team, a plugin "
             + "by id and its active version, and `updateAvailable` is true when the catalog's version is newer.";
 
         app.MapGet(Route, (Marketplace marketplace) => Results.Ok(marketplace.Status()))

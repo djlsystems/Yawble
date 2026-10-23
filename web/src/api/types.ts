@@ -4234,8 +4234,6 @@ export interface MarketplacePackage {
   /** What the package holds and asks for, as the catalog writes it; null or absent when the catalog
    *  has none, and the card then shows what it showed before. */
   contents?: CatalogContents | null
-  /** A plugin's solutions that ship it; null or absent when the catalog says nothing. */
-  includedIn?: { id: string; name: string }[] | null
 }
 
 /** A package's `contents` as the catalog writes it: a solution's plugins, members, skills, triggers

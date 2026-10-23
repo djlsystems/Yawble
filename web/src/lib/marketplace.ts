@@ -56,7 +56,7 @@ export function pluginUsedByWords(members: { team: string; member: string }[]): 
 export function packageMatches(pkg: MarketplacePackage, text: string): boolean {
   return matchesWords(
     filterWords(text), pkg.name, pkg.summary, pkg.description, ...plainNeeds(pkg.catalogNeeds), ...pkg.needs,
-    ...contentsLines(pkg), includedInWords(pkg));
+    ...contentsLines(pkg));
 }
 
 /** A filter that kept no card, as a sentence naming what was typed. */
@@ -238,10 +238,4 @@ export function contentsLines(pkg: Pick<MarketplacePackage, 'kind' | 'contents'>
   for (const event of c.events ?? []) lines.push(`Announces: ${event.summary.trim() || event.type}`);
   if (skills.length) lines.push(`${skills.length === 1 ? 'Skill' : 'Skills'}: ${skills.join(', ')}`);
   return lines;
-}
-
-/** A plugin's solutions that ship it, as a line: "Included in A, B"; empty when the catalog names none. */
-export function includedInWords(pkg: Pick<MarketplacePackage, 'kind' | 'includedIn'>): string {
-  const names = pkg.kind === 'plugin' ? (pkg.includedIn ?? []).map((s) => s.name.trim() || s.id) : [];
-  return names.length ? `Included in ${names.join(', ')}` : '';
 }

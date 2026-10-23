@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { CatalogContents, MarketplaceCatalog, MarketplacePackage } from '../../api/types';
 import { installedRow } from '../../test/solutionFixtures';
 import { published } from '../../test/catalogFixtures';
-import { PROVIDER_WORDS, connectionWords, contentsLines, includedInWords, packageMatches, providerWords, updateFor } from '../marketplace';
+import { PROVIDER_WORDS, connectionWords, contentsLines, packageMatches, providerWords, updateFor } from '../marketplace';
 
 /**
  * Every provider id the Host knows, as `PluginConnectionSlot.Parse` takes them
@@ -51,7 +51,6 @@ describe("a card's contents, in bullets", () => {
   it('says nothing without contents, so the card shows what it showed before', () => {
     expect(contentsLines({ kind: 'solution' })).toEqual([]);
     expect(contentsLines({ kind: 'plugin', contents: null })).toEqual([]);
-    expect(includedInWords({ kind: 'plugin' })).toBe('');
   });
 
   it("names a member by its role, Agent for an agent, and by name alone when it has neither", () => {
@@ -75,22 +74,14 @@ describe("a card's contents, in bullets", () => {
     })).toEqual(['Setting: limit', 'Key: TOKEN', 'Sign-in: an account', 'Announces: thing.done']);
   });
 
-  it("names a plugin's solutions on one line, and never on a solution's card", () => {
-    const includedIn = [{ id: 'one', name: 'One' }, { id: 'two', name: '' }];
-    expect(includedInWords({ kind: 'plugin', includedIn })).toBe('Included in One, two');
-    expect(includedInWords({ kind: 'solution', includedIn })).toBe('');
-  });
-
-  it('lets the filter find a package by what it holds and what includes it', () => {
+  it('lets the filter find a package by what it holds', () => {
     const plugin = {
       id: 'p', kind: 'plugin', name: 'P', summary: '', version: '1.0.0', needs: [],
       catalogNeeds: { connections: [], secrets: [], inputs: [], runtimes: [] },
       installed: false, installedVersion: null, installedOn: [], updateAvailable: false,
       contents: { ...none, events: [{ type: 'x', summary: 'A parcel arrived' }] },
-      includedIn: [{ id: 's', name: 'Shipping desk' }],
     } satisfies MarketplacePackage;
     expect(packageMatches(plugin, 'parcel')).toBe(true);
-    expect(packageMatches(plugin, 'shipping')).toBe(true);
     expect(packageMatches(plugin, 'nowhere')).toBe(false);
   });
 });
