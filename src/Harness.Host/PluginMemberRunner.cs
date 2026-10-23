@@ -411,8 +411,9 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             ["config"] = new JsonObject(config.Select(c => KeyValuePair.Create(c.Key, c.Value?.DeepClone()))),
             ["secrets"] = new JsonObject(resolvedSecrets.Select(s => KeyValuePair.Create(s.Key, (JsonNode?)JsonValue.Create(s.Value)))),
 
-            // EACH BOUND SECRET FIELD'S LOGICAL KEY NAME - a name, never a value, and not redacted -
-            // set or not, so a plugin can say which key to set. Additive: `secrets` is unchanged.
+            // EACH SECRET FIELD'S NAME FOR IT - the bound logical key, set or not, or the field's own
+            // name for a field set only by the member's own value - a name, never a value, and not
+            // redacted, so a plugin can say which value is missing. Additive: `secrets` is unchanged.
             ["secretKeys"] = new JsonObject((secretKeys ?? new Dictionary<string, string>()).Select(k => KeyValuePair.Create(k.Key, (JsonNode?)JsonValue.Create(k.Value)))),
             ["workingDirectory"] = invocation.WorkingDirectory,
             ["worktrees"] = worktrees,

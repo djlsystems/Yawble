@@ -31,10 +31,13 @@ public sealed record SolutionActor(string? UserId, string? Email)
 /// <param name="Documents">An input folder to files already inside the instance (the operator CLI
 /// stages them); copied into the team's documents once the install has succeeded. The web uploads
 /// through the documents route instead.</param>
+/// <param name="SecretValues">Package member name to secret field to the value a person typed: kept as
+/// that member's own value at its hire.</param>
 public sealed record SolutionAnswers(
     IReadOnlyDictionary<string, Dictionary<string, JsonElement>>? Settings = null,
     IReadOnlyDictionary<string, Dictionary<string, string>>? Connections = null,
-    IReadOnlyDictionary<string, List<string>>? Documents = null);
+    IReadOnlyDictionary<string, List<string>>? Documents = null,
+    IReadOnlyDictionary<string, Dictionary<string, string>>? SecretValues = null);
 
 /// <summary>A new team from a package.</summary>
 public sealed record SolutionInstallRequest(
@@ -87,6 +90,11 @@ public sealed record SolutionDone(
     /// one's source fails until it is set.</summary>
     public IReadOnlyList<string> Unset => [.. Secrets.Where(s => s.Needed != false && !s.Set).Select(s => s.Key).Distinct(StringComparer.Ordinal)];
 
+    /// <summary>Each needed secret field with no value from any source - the member's own, or its
+    /// bound key - by member and field: what the result screen asks a person to type.</summary>
+    public IReadOnlyList<SolutionUnsetField> UnsetFields =>
+        [.. Secrets.Where(s => s.Needed != false && !s.Set).Select(s => new SolutionUnsetField(s.Member, s.Field, s.Label))];
+
     /// <summary>Each schedule's first run: ran now at install, or when it first comes due.</summary>
     public IReadOnlyList<SolutionFirstRun> FirstRuns { get; init; } = [];
 
@@ -124,6 +132,16 @@ public sealed record SolutionSecret(
     string Member, string Field, string Key, string Description, bool Required, SolutionPlanSecretWhen? When,
     bool Set, bool? Needed, string SetWith)
 {
+    /// <summary>The manifest's <c>label</c> for the field, or null.</summary>
+    public string? Label { get; init; }
+
+    /// <summary>The manifest's <c>masked</c>.</summary>
+    public bool Masked { get; init; } = true;
+
+    /// <summary>Where the member's run would get the value now: <c>member</c> (its own), <c>key</c>
+    /// (the bound key, stored from the screen), <c>environment</c>, or null.</summary>
+    public string? Source { get; init; }
+
     /// <summary>How a person sets <paramref name="key"/>: the screen first - its field in the member's
     /// settings, stored and read by the member's next run - and the operator CLI second, which prompts
     /// for the value for the Host to read from its environment when it starts. The web and the CLI
@@ -132,6 +150,9 @@ public sealed record SolutionSecret(
         $"its field in the member's settings on the screen (Set, Replace or Clear), read by the next run; "
         + $"or the operator CLI's `secret set {key}` (it prompts for the value), then its `up` to restart the Host";
 }
+
+/// <summary>A needed secret field with no value from any source.</summary>
+public sealed record SolutionUnsetField(string Member, string Field, string? Label);
 
 public sealed record SolutionStepFailed(
     bool Ok, string Step, int StepNumber, string Title, string Reason, IReadOnlyList<string> Undone,
@@ -180,7 +201,8 @@ public sealed class SolutionInstaller(
     ISecretStore? secretStore = null,
     TriggerSweep? sweep = null,
     Harness.Messaging.SqliteOutcomeStore? outcomes = null,
-    FolderRemoval? removal = null)
+    FolderRemoval? removal = null,
+    PluginMemberSecretStore? memberSecrets = null)
 {
     private readonly FolderRemoval _removal = removal ?? new FolderRemoval();
 
@@ -563,7 +585,8 @@ public sealed class SolutionInstaller(
     /// asked for waits on the answer.
     /// </summary>
     private IReadOnlyList<SolutionSecret> SecretStates(
-        SolutionPackage package, Func<string, string, string?> keyOf, Func<string, IReadOnlyDictionary<string, JsonElement>?>? config)
+        SolutionPackage package, Func<string, string, string?> keyOf, Func<string, IReadOnlyDictionary<string, JsonElement>?>? config,
+        Func<string, string, bool>? ownValue = null)
     {
         var states = new List<SolutionSecret>();
 
@@ -593,9 +616,27 @@ public sealed class SolutionInstaller(
                 }
             }
 
+            var declared = package.Plugin(package.Manifest.Member(planned.Member)?.PluginId)?.Manifest.Secrets.GetValueOrDefault(planned.Field);
+            var own = ownValue?.Invoke(planned.Member, planned.Field) == true;
+            var source = own
+                ? MemberSecretReads.Member
+                : secretStore is PluginSecretStore keys
+                    ? keys.Status(key) switch
+                    {
+                        { Set: false } => null,
+                        { Source: SecretStatus.Stored } => MemberSecretReads.Key,
+                        _ => MemberSecretReads.Environment,
+                    }
+                    : secretStore?.TryGet(key) is not null ? MemberSecretReads.Key : null;
+
             states.Add(new SolutionSecret(
                 planned.Member, planned.Field, key, planned.Description, planned.Required, planned.When,
-                secretStore?.TryGet(key) is not null, needed, SolutionSecret.SetWithFor(key)));
+                source is not null, needed, SolutionSecret.SetWithFor(key))
+            {
+                Label = declared?.Label,
+                Masked = declared?.Masked ?? true,
+                Source = source,
+            });
         }
 
         return states;
@@ -659,19 +700,22 @@ public sealed class SolutionInstaller(
         string team, IReadOnlyDictionary<string, string> memberIds, SolutionPackage package, CancellationToken ct)
     {
         var stored = new Dictionary<string, PluginMemberSettings>(StringComparer.OrdinalIgnoreCase);
+        var own = new Dictionary<string, IReadOnlyDictionary<string, MemberSecretState>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var member in package.Manifest.Members.Where(m => m.Kind == MemberRef.PluginKind))
         {
             if (pluginSettings is not null && memberIds.TryGetValue(member.Name, out var id))
             {
                 stored[member.Name] = await pluginSettings.ForAsync(new ContainerId(team, id), ct);
+                if (memberSecrets is not null) own[member.Name] = await memberSecrets.StatesAsync(new ContainerId(team, id), ct);
             }
         }
 
         return SecretStates(
             package,
             (member, field) => stored.GetValueOrDefault(member)?.Secrets.GetValueOrDefault(field),
-            member => stored.GetValueOrDefault(member)?.Config);
+            member => stored.GetValueOrDefault(member)?.Config,
+            (member, field) => own.GetValueOrDefault(member)?.ContainsKey(field) == true);
     }
 
     private async Task<IReadOnlyList<object>> ConnectionsAsync(CancellationToken ct) =>
@@ -1556,20 +1600,44 @@ public sealed class SolutionInstaller(
             foreach (var (key, value) in AnswersFor(answers.Settings, member.Name)) config[key] = value;
 
             var bindings = new Dictionary<string, string>(AnswersFor(answers.Connections, member.Name), StringComparer.Ordinal);
+            var values = AnswersFor(answers.SecretValues, member.Name);
+            var settings = new PluginMemberSettings(config, new Dictionary<string, string>(member.Secrets, StringComparer.Ordinal)) { Connections = bindings };
 
-            snapshot = await teams.HireMemberAsync(
-                team, member.Name, MemberRef.PluginPrefix + member.PluginId, "", [], ct: ct,
-                // THE PACKAGE'S SECRET BINDINGS land in the same hire as the member, checked by the
-                // same SettingsRefusal a person's binding in the member's settings is - except that
-                // a key the Host has not set yet is not a refusal: its source fails until it is set.
-                // The install is a person's action, so it may bind keys no one bound on the team yet.
-                settings: new PluginMemberSettings(config, new Dictionary<string, string>(member.Secrets, StringComparer.Ordinal)) { Connections = bindings },
-                promptSetBy: actor.PromptSetter,
-                connectionsAudit: bindings.Count == 0
-                    ? null
-                    : id => actor.Row(TenantActions.MemberConnectionsChanged, $"{id.Team}/{id.Name}", member.Name,
-                        new { plugin = member.PluginId, slots = bindings.Keys.Order(StringComparer.Ordinal) }),
-                secretsSetLater: true);
+            try
+            {
+                snapshot = await teams.HireMemberAsync(
+                    team, member.Name, MemberRef.PluginPrefix + member.PluginId, "", [], ct: ct,
+                    // THE PACKAGE'S SECRET BINDINGS land in the same hire as the member, checked by the
+                    // same SettingsRefusal a person's binding in the member's settings is - except that
+                    // a key the Host has not set yet is not a refusal: its source fails until it is set.
+                    // The install is a person's action, so it may bind keys no one bound on the team yet.
+                    settings: settings,
+                    promptSetBy: actor.PromptSetter,
+                    connectionsAudit: bindings.Count == 0
+                        ? null
+                        : id => actor.Row(TenantActions.MemberConnectionsChanged, $"{id.Team}/{id.Name}", member.Name,
+                            new { plugin = member.PluginId, slots = bindings.Keys.Order(StringComparer.Ordinal) }),
+                    secretsSetLater: true,
+                    valued: values.Keys.ToHashSet(StringComparer.Ordinal),
+
+                    // A VALUE THE PERSON TYPED IN THE WIZARD is the member's own, kept with its settings and
+                    // its `member.secret-set` row in one transaction.
+                    saveSettings: values.Count == 0 || memberSecrets is null
+                        ? null
+                        : (id, kept, token) => memberSecrets.SaveWithSettingsAsync(
+                            id, member.Name, member.PluginId!, kept,
+                            bindings.Count == 0
+                                ? []
+                                : [actor.Row(TenantActions.MemberConnectionsChanged, $"{id.Team}/{id.Name}", member.Name,
+                                    new { plugin = member.PluginId, slots = bindings.Keys.Order(StringComparer.Ordinal) })],
+                            values.ToDictionary(v => v.Key, v => (string?)v.Value, StringComparer.Ordinal),
+                            new CredentialActor(actor.UserId, actor.Label), token));
+            }
+            catch (PluginSettingsNotKeptException notKept)
+            {
+                await memberDeletion.DeleteAsync(team, notKept.Member.Name, CancellationToken.None);
+                throw new SolutionStepException($"{member.Name}: {notKept.Message}");
+            }
         }
         else
         {
@@ -1894,6 +1962,21 @@ public sealed class SolutionInstaller(
                 {
                     return $"The package does not ask for '{memberName}''s connection slot '{slot}'.";
                 }
+            }
+        }
+
+        foreach (var (memberName, values) in answers.SecretValues ?? new Dictionary<string, Dictionary<string, string>>())
+        {
+            if (manifest.Member(memberName) is not { Kind: MemberRef.PluginKind } valuedMember
+                || package.Plugin(valuedMember.PluginId) is not { } valuedPlugin)
+            {
+                return $"The package has no plugin member '{memberName}' to keep secret values for.";
+            }
+
+            if (PluginMemberSecretStore.ChangesRefusal(
+                    valuedPlugin.Manifest, values.ToDictionary(v => v.Key, v => (string?)(v.Value ?? ""), StringComparer.Ordinal)) is { } refused)
+            {
+                return $"'{memberName}': {refused}";
             }
         }
 

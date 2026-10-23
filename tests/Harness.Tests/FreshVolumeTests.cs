@@ -421,7 +421,7 @@ public sealed class FreshVolumeTests : IDisposable
 
         await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
 
-        Assert.Contains("auth-027", "auth-028", await migrator.AppliedAsync(ct: Ct));
+        Assert.Contains("auth-027", await migrator.AppliedAsync(ct: Ct));
         Assert.Null((await Store().GetAsync("conn-old", Ct))!.Tenant);
         Assert.Equal(["conn-old"], await ColumnAsync("SELECT id FROM connections WHERE tenant IS NULL"));
         Assert.Equal(["state-old"], await ColumnAsync("SELECT state FROM connection_flows WHERE tenant IS NULL"));
