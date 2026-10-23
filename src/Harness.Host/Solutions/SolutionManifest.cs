@@ -61,7 +61,7 @@ public sealed record SolutionManifest(
     public static IReadOnlySet<string> KnownKeys { get; } = new HashSet<string>(StringComparer.Ordinal)
     {
         "format", "id", "name", "version", "description", "team", "members", "triggers", "skills",
-        "sites", "inputs", "panel", "setup",
+        "sites", "inputs", "panel", "setup", "pluginMinimums",
     };
 
     /// <summary>What the solution's control panel and launcher tile show: its <c>panel</c> key.</summary>
@@ -70,6 +70,12 @@ public sealed record SolutionManifest(
     /// <summary>The setup wizard's plain questions: its <c>setup</c> key, or null when it has none
     /// and the install asks as it always has.</summary>
     public SolutionSetup? Setup { get; init; }
+
+    /// <summary>The oldest version of each shipped plugin the package's team needs: its
+    /// <c>pluginMinimums</c> key, plugin id to version. A plugin it does not name needs the version
+    /// the package ships (<see cref="SolutionPackage.Minimum"/>). Which ids it may name, and how new
+    /// each may be, is the checker's: it needs the package's plugins.</summary>
+    public IReadOnlyDictionary<string, string> PluginMinimums { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
 
     /// <summary>Unknown top-level keys, in file order, then unknown keys inside <c>setup</c> as dotted
     /// paths (<c>setup.colour</c>): kept or skipped, never acted on, never refused.</summary>
@@ -164,6 +170,7 @@ public sealed record SolutionManifest(
             var inputs = ReadInputs(read, root, members);
             var panel = ReadPanel(read, root, members, sites);
             var setup = ReadSetup(read, root, inputs);
+            var minimums = ReadPluginMinimums(read, root);
 
             var extra = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
             foreach (var property in root.EnumerateObject())
@@ -176,8 +183,40 @@ public sealed record SolutionManifest(
             {
                 Panel = panel,
                 Setup = setup,
+                PluginMinimums = minimums,
             });
         }
+    }
+
+    /// <summary><c>pluginMinimums</c>: an object of plugin id to a plain version. A value that is not
+    /// one is refused naming <c>pluginMinimums.&lt;id&gt;</c> and left out.</summary>
+    private static Dictionary<string, string> ReadPluginMinimums(Reader read, JsonElement root)
+    {
+        var minimums = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        if (!root.TryGetProperty("pluginMinimums", out var map) || map.ValueKind == JsonValueKind.Null) return minimums;
+
+        if (map.ValueKind != JsonValueKind.Object)
+        {
+            read.Refuse("pluginMinimums", "`pluginMinimums` must be an object of plugin id to version, such as { \"mail\": \"2.3.0\" }.");
+            return minimums;
+        }
+
+        foreach (var entry in map.EnumerateObject())
+        {
+            var field = $"pluginMinimums.{entry.Name}";
+            var value = entry.Value.ValueKind == JsonValueKind.String ? entry.Value.GetString()!.Trim() : null;
+
+            if (value is null || !IsVersion(value))
+            {
+                read.Refuse(field, $"`{field}` must be a plain version such as 2.3.0.");
+                continue;
+            }
+
+            minimums[entry.Name] = value;
+        }
+
+        return minimums;
     }
 
     private static SolutionTeam ReadTeam(Reader read, JsonElement root, string? packageName)

@@ -23,13 +23,20 @@ public sealed record SolutionPlatform(
     Func<string, bool> RuntimeFound,
     Func<string, bool> IsBuiltInSkill)
 {
+    /// <summary>The active version of a plugin by id, null when none is: what the plan says the install
+    /// does with each shipped plugin. Null says nothing of the instance.</summary>
+    public Func<string, string?>? ActiveVersion { get; init; }
+
     /// <summary>The running Host's: its Agent catalog, the event catalog (plugins included) and its
     /// plugin catalog's runtime check.</summary>
     public static SolutionPlatform For(AgentCatalog agents, PluginCatalog plugins) => new(
         name => PresetOf(agents.Definitions, name),
         EventCatalog.For,
         plugins.RuntimeFound,
-        BuiltInSkills.IsBuiltIn);
+        BuiltInSkills.IsBuiltIn)
+    {
+        ActiveVersion = id => plugins.For(id)?.Manifest.Version,
+    };
 
     /// <summary>
     /// An instance's, read from its data root with nothing running and nothing written: the built-in
@@ -52,7 +59,10 @@ public sealed record SolutionPlatform(
             name => PresetOf(presets, name),
             type => EventCatalog.For(type) ?? events.GetValueOrDefault(type),
             runtimeFound,
-            BuiltInSkills.IsBuiltIn);
+            BuiltInSkills.IsBuiltIn)
+        {
+            ActiveVersion = id => installed.Plugins.FirstOrDefault(p => p.Manifest.Id == id)?.Manifest.Version,
+        };
     }
 
     private static bool? PresetOf(IEnumerable<AgentDefinition> definitions, string name) =>
@@ -76,6 +86,16 @@ public sealed record SolutionPackage(
     bool HasReadme)
 {
     public SolutionPlugin? Plugin(string? id) => Plugins.FirstOrDefault(p => p.Id == id);
+
+    /// <summary>The oldest version of plugin <paramref name="id"/> the package's team needs: its
+    /// <c>pluginMinimums</c> entry, else the version the package ships; null for a plugin it does not ship.</summary>
+    public string? Minimum(string id) =>
+        Plugin(id) is { } plugin ? Manifest.PluginMinimums.GetValueOrDefault(id) ?? plugin.Manifest.Version : null;
+
+    /// <summary><see cref="Minimum"/> for every plugin the package ships, as the team's
+    /// <c>team_solutions</c> record keeps it.</summary>
+    public IReadOnlyDictionary<string, string> Minimums() =>
+        Plugins.ToDictionary(p => p.Id, p => Minimum(p.Id)!, StringComparer.Ordinal);
 }
 
 /// <summary>One plugin the package ships, at <c>plugins/&lt;id&gt;/</c>: one built version.</summary>
@@ -183,6 +203,7 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
         CheckTriggers(read, plugins, tools is not null, refusals);
         CheckInputs(read, plugins, refusals);
         CheckSetup(read, plugins, refusals);
+        CheckPluginMinimums(manifest, plugins, refusals);
 
         if (refusals.Count > 0) return new SolutionCheck(root, null, null, refusals);
 
@@ -191,7 +212,7 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
             tools is null ? null : toolsFolder, tools ?? [],
             File.Exists(Path.Combine(root, ReadmeFile)));
 
-        return new SolutionCheck(root, package, SolutionPlan.Of(package), []);
+        return new SolutionCheck(root, package, SolutionPlan.Of(package, platform.ActiveVersion), []);
     }
 
     private List<SolutionPlugin> ReadPlugins(string root, List<SolutionRefusal> refusals)
@@ -401,6 +422,30 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
 
                 refusals.Add(new($"{PluginsFolder}/{plugin.Id}/{PluginManifest.FileName}", $"reads[{n}].site",
                     $"'{site}' is not one of this package's `sites`; a plugin in a package reads only a site the package ships."));
+            }
+        }
+    }
+
+    /// <summary>
+    /// <c>pluginMinimums</c> against the plugins the package ships: each entry names one of them, at
+    /// a version no newer than the one shipped - a package cannot need what it does not bring.
+    /// </summary>
+    private static void CheckPluginMinimums(SolutionManifest manifest, List<SolutionPlugin> plugins, List<SolutionRefusal> refusals)
+    {
+        foreach (var (id, minimum) in manifest.PluginMinimums)
+        {
+            var field = $"pluginMinimums.{id}";
+
+            if (plugins.FirstOrDefault(p => p.Id == id) is not { } plugin)
+            {
+                var shipped = plugins.Count == 0 ? $"it ships none under {PluginsFolder}/" : "it ships " + string.Join(", ", plugins.Select(p => p.Id));
+                refusals.Add(new(SolutionManifest.FileName, field, $"`{field}` names '{id}', which is not a plugin in this package; {shipped}."));
+                continue;
+            }
+
+            if (SolutionInstaller.CompareVersions(minimum, plugin.Manifest.Version) > 0)
+            {
+                refusals.Add(new(SolutionManifest.FileName, field, $"`{field}` is {minimum}, newer than the {id} {plugin.Manifest.Version} the package ships; a minimum is at most the version shipped."));
             }
         }
     }

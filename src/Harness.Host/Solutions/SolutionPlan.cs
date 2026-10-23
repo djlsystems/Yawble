@@ -43,7 +43,9 @@ public sealed record SolutionPlan(
     /// <summary>How the plan starts a schedule the install runs once: "runs once now, then every …".</summary>
     public const string RunsOnceNow = "runs once now, then ";
 
-    public static SolutionPlan Of(SolutionPackage package)
+    /// <param name="activeVersion">The instance's active version of a plugin by id, null when none is;
+    /// null for a plan read with no instance, which then says only what the package ships.</param>
+    public static SolutionPlan Of(SolutionPackage package, Func<string, string?>? activeVersion = null)
     {
         var manifest = package.Manifest;
 
@@ -57,7 +59,11 @@ public sealed record SolutionPlan(
             [.. package.Plugins.Select(p => new SolutionPlanPlugin(
                 p.Id, p.Manifest.Name, p.Manifest.Version, p.Manifest.Description,
                 $"{SolutionChecker.PluginsFolder}/{p.Id}",
-                [.. p.Manifest.Publishes.Select(e => EventCatalog.PluginType(p.Id, e.Type))]))],
+                [.. p.Manifest.Publishes.Select(e => EventCatalog.PluginType(p.Id, e.Type))])
+            {
+                Minimum = package.Minimum(p.Id),
+                OnInstall = activeVersion is null ? null : OnInstall(p.Id, p.Manifest.Version, package.Minimum(p.Id)!, activeVersion(p.Id)),
+            })],
             [.. manifest.Triggers.Select(t => new SolutionPlanTrigger(
                 t.Name, t.Kind, t.PlatformKind.ToString(), t.Member, t.Instruction, t.WakeManager, t.DailyTokenCap, t.IdleOnly,
                 t.Schedule is null ? null : t.RunAtInstall ? $"{RunsOnceNow}{t.Schedule}" : t.Schedule.ToString(),
@@ -104,6 +110,30 @@ public sealed record SolutionPlan(
 
     /// <summary>The wizard's screens: each kind's questions in <c>setup</c> order, then every input
     /// of that kind it asks nothing about, behind Advanced… with no question.</summary>
+    /// <summary>
+    /// What the install does with a shipped plugin against the instance's active version, in words:
+    /// the active one is left when it is the same or newer (an install never downgrades what other
+    /// teams run), and the shipped one is installed and made active when it is newer - saying so when
+    /// the active one is older than this team needs.
+    /// </summary>
+    public static string OnInstall(string id, string shipped, string minimum, string? active)
+    {
+        if (active is null) return $"{id} is not installed here: {shipped} is installed and made active.";
+
+        var compared = SolutionInstaller.CompareVersions(active, shipped);
+
+        if (compared == 0) return $"{id} {active} is active here already and stays.";
+
+        if (compared > 0)
+        {
+            return $"{id} {active} is active here, newer than the {shipped} this package ships, and stays active (this team needs {minimum} or newer).";
+        }
+
+        return SolutionInstaller.CompareVersions(minimum, active) > 0
+            ? $"{id} {active} is active here, older than the {minimum} this team needs: {shipped} is installed and made active."
+            : $"{id} {active} is active here: {shipped} is installed and made active (this team needs {minimum} or newer).";
+    }
+
     private static SolutionPlanSetup? SetupOf(SolutionPackage package)
     {
         var manifest = package.Manifest;
@@ -146,7 +176,15 @@ public sealed record SolutionPlanMember(
     string Name, string Kind, string Role, string? Preset, string Instructions, string? PluginId, string? PluginVersion,
     IReadOnlyDictionary<string, JsonElement> Settings);
 
-public sealed record SolutionPlanPlugin(string Id, string Name, string Version, string Description, string Folder, IReadOnlyList<string> Events);
+public sealed record SolutionPlanPlugin(string Id, string Name, string Version, string Description, string Folder, IReadOnlyList<string> Events)
+{
+    /// <summary>The oldest version of it the team needs: <c>pluginMinimums</c>, else <see cref="Version"/>.</summary>
+    public string? Minimum { get; init; }
+
+    /// <summary>What the install does with it on this instance (<see cref="SolutionPlan.OnInstall"/>);
+    /// null when the plan was read with no instance.</summary>
+    public string? OnInstall { get; init; }
+}
 
 /// <param name="Kind">The package's word: schedule, event or folder.</param>
 /// <param name="PlatformKind">What the Triggers dialog will show: Cron, Every, Event or FolderChange.</param>

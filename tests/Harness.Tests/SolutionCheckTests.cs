@@ -363,6 +363,61 @@ public sealed class SolutionCheckTests : IDisposable
         Assert.Contains("'linkedin-scraper' is not a plugin in this package; it ships job-board", refusal.Reason);
     }
 
+    public static TheoryData<string, string, string, string> RefusedPluginMinimums() => new()
+    {
+        { "other-plugin", "\"0.1.0\"", "pluginMinimums.other-plugin", "names 'other-plugin', which is not a plugin in this package; it ships job-board" },
+        { "job-board", "\"latest\"", "pluginMinimums.job-board", "must be a plain version such as 2.3.0" },
+        { "job-board", "2", "pluginMinimums.job-board", "must be a plain version such as 2.3.0" },
+        { "job-board", "\"0.2.0\"", "pluginMinimums.job-board", "is 0.2.0, newer than the job-board 0.1.0 the package ships" },
+    };
+
+    [Theory]
+    [MemberData(nameof(RefusedPluginMinimums))]
+    public void PluginMinimums_naming_an_unshipped_plugin_a_non_version_or_one_newer_than_shipped_is_refused_naming_the_field(
+        string plugin, string value, string field, string reason)
+    {
+        var folder = Sample();
+        SolutionSamples.Edit(folder, m => m["pluginMinimums"] = new JsonObject { [plugin] = JsonNode.Parse(value) });
+
+        var refusal = Refused(Check(folder), "solution.json", field);
+        Assert.Contains(reason, refusal.Reason);
+    }
+
+    [Fact]
+    public void Without_pluginMinimums_the_minimum_is_the_shipped_version_and_with_it_the_one_named()
+    {
+        var folder = Sample();
+        var absent = Check(folder);
+        Assert.True(absent.Ok, string.Join("\n", absent.Refusals));
+        Assert.Equal("0.1.0", absent.Package!.Minimum("job-board"));
+        Assert.Equal("0.1.0", Assert.Single(absent.Plan!.Plugins).Minimum);
+        Assert.DoesNotContain("pluginMinimums", absent.Plan!.Ignored);
+
+        SolutionSamples.Edit(folder, m => m["pluginMinimums"] = new JsonObject { ["job-board"] = "0.0.9" });
+        var named = Check(folder);
+        Assert.True(named.Ok, string.Join("\n", named.Refusals));
+        Assert.Equal("0.0.9", named.Package!.Minimum("job-board"));
+        Assert.Equal(new Dictionary<string, string> { ["job-board"] = "0.0.9" }, named.Package.Minimums());
+        Assert.Equal("0.0.9", Assert.Single(named.Plan!.Plugins).Minimum);
+    }
+
+    [Theory]
+    [InlineData(null, "job-board is not installed here: 0.1.0 is installed and made active.")]
+    [InlineData("0.1.0", "job-board 0.1.0 is active here already and stays.")]
+    [InlineData("0.2.0", "job-board 0.2.0 is active here, newer than the 0.1.0 this package ships, and stays active (this team needs 0.0.9 or newer).")]
+    [InlineData("0.0.8", "job-board 0.0.8 is active here, older than the 0.0.9 this team needs: 0.1.0 is installed and made active.")]
+    [InlineData("0.0.9", "job-board 0.0.9 is active here: 0.1.0 is installed and made active (this team needs 0.0.9 or newer).")]
+    public void The_plan_says_whether_the_install_keeps_the_active_plugin_or_installs_the_shipped_one(string? active, string words)
+    {
+        var folder = Sample();
+        SolutionSamples.Edit(folder, m => m["pluginMinimums"] = new JsonObject { ["job-board"] = "0.0.9" });
+
+        var check = new SolutionChecker(Platform with { ActiveVersion = id => id == "job-board" ? active : null }).Check(folder);
+
+        Assert.Equal(words, Assert.Single(check.Plan!.Plugins).OnInstall);
+        Assert.Null(Assert.Single(Check(folder).Plan!.Plugins).OnInstall);
+    }
+
     [Fact]
     public void A_skill_named_like_a_built_in_is_refused()
     {

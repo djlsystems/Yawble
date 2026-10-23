@@ -918,7 +918,10 @@ public sealed class SolutionInstaller(
                     stored!, manifest.Id, manifest.Name, manifest.Version, package.Folder, DateTimeOffset.UtcNow, actor.Label, null,
                     await File.ReadAllTextAsync(Path.Combine(package.Folder, SolutionManifest.FileName), ct),
                     Digests(package), memberIds, triggerIds,
-                    package.Plugins.ToDictionary(p => p.Id, p => p.Manifest.Version, StringComparer.Ordinal));
+                    package.Plugins.ToDictionary(p => p.Id, p => p.Manifest.Version, StringComparer.Ordinal))
+                {
+                    PluginMinimums = package.Minimums(),
+                };
 
                 await store.SaveAsync(row, actor.Row(TenantActions.SolutionInstalled, stored, teams.LabelFor(stored!), new
                 {
@@ -932,6 +935,7 @@ public sealed class SolutionInstaller(
                     sites = package.Sites.Select(s => s.Name),
                     tools = package.Tools,
                     plugins = row.Plugins,
+                    pluginMinimums = row.PluginMinimums,
                 }), ct);
 
                 run.Made($"record {stored}", () => kept is null
@@ -1393,6 +1397,7 @@ public sealed class SolutionInstaller(
                     Members = memberIds,
                     Triggers = triggerIds,
                     Plugins = package.Plugins.ToDictionary(p => p.Id, p => p.Manifest.Version, StringComparer.Ordinal),
+                    PluginMinimums = package.Minimums(),
                 };
 
                 await store.SaveAsync(updated, actor.Row(TenantActions.SolutionUpdated, stored, teams.LabelFor(stored), new
@@ -1482,9 +1487,15 @@ public sealed class SolutionInstaller(
         var activeFile = Path.Combine(directory, PluginCatalog.ActiveFile);
         var previous = File.Exists(activeFile) ? (await File.ReadAllTextAsync(activeFile, ct)).Trim() : null;
 
-        // THIS VERSION IS KEPT BUT NOT ACTIVE (an older one is): made active again, not copied over.
+        // THIS VERSION IS KEPT BUT NOT ACTIVE (an older one is): made active again, not copied over -
+        // under the rule every activation meets, an installed solution team's minimum.
         if (Directory.Exists(Path.Combine(directory, plugin.Manifest.Version)))
         {
+            if (await pluginInstaller.MinimumRefusalAsync(plugin.Id, plugin.Manifest.Version, ct) is { } tooOld)
+            {
+                throw new SolutionStepException(tooOld);
+            }
+
             await File.WriteAllTextAsync(activeFile, plugin.Manifest.Version + "\n", ct);
             await plugins.RescanAsync(ct);
 
