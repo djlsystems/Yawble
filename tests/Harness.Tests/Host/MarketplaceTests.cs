@@ -221,6 +221,140 @@ public sealed class MarketplaceTests : IDisposable
         Assert.Equal(["python3"], fields.Runtimes);
     }
 
+    // ---- what a package holds, and its page ----
+
+    /// <summary>A fixture solution and the fixture plugin it ships, each with the catalog's
+    /// <c>contents</c>.</summary>
+    private static string ContentsCatalog(byte[] zip)
+    {
+        var solution = JsonSerializer.SerializeToNode(Entry("sample-solution", "solution", "1.2.0", zip))!.AsObject();
+        solution["contents"] = JsonSerializer.SerializeToNode(new
+        {
+            plugins = new[] { new { id = "sample-plugin", version = "2.4.0", minimum = "2.3.0" } },
+            members = new object[] { new { name = "Scout", role = "Finds the work", agent = false }, new { name = "Writer", role = (string?)null, agent = true } },
+            skills = new[] { "drafting" },
+            triggers = new[] { new { name = "morning", words = "Every weekday at 8:00" } },
+            sites = new[] { "Tracker" },
+            settings = Array.Empty<object>(),
+            secrets = Array.Empty<object>(),
+            connections = Array.Empty<object>(),
+            events = Array.Empty<object>(),
+        });
+        var plugin = JsonSerializer.SerializeToNode(Entry("sample-plugin", "plugin", "2.4.0", zip))!.AsObject();
+        plugin["contents"] = JsonSerializer.SerializeToNode(new
+        {
+            plugins = Array.Empty<object>(),
+            members = Array.Empty<object>(),
+            skills = new[] { "sample-plugin" },
+            triggers = Array.Empty<object>(),
+            sites = Array.Empty<object>(),
+            settings = new object[] { new { name = "folder", label = "Folder to watch", kind = "string", required = true, @default = "Inbox" }, new { name = "limit", label = "Most per day", kind = "number", required = false, @default = 20 } },
+            secrets = new[] { new { name = "API_KEY", label = "Service key", required = true, masked = true } },
+            connections = new[] { new { slot = "mailbox", providers = new[] { "imap", "google" }, required = true } },
+            events = new[] { new { type = "sample.found", summary = "A new item was found" } },
+        });
+        return JsonSerializer.Serialize(new { schema = 1, generatedAt = "2026-10-09T08:00:00Z", packages = new object[] { solution, plugin } });
+    }
+
+    [Fact]
+    public async Task A_packages_contents_and_page_on_the_catalogs_own_site_pass_through_as_written()
+    {
+        var feed = new FakeFeed { Catalog = ContentsCatalog(MailZip) };
+        var status = await Market(feed).CheckAsync(Ct);
+
+        var solution = status.Packages.Single(p => p.Id == "sample-solution");
+        Assert.Equal("https://example.test:8443/marketplace/sample-solution", solution.Page);
+        var contents = Assert.IsType<CatalogContents>(solution.Contents);
+        Assert.Equal([new CatalogContentPlugin("sample-plugin", "2.4.0", "2.3.0")], contents.Plugins);
+        Assert.Equal([new CatalogContentMember("Scout", "Finds the work", false), new CatalogContentMember("Writer", null, true)], contents.Members);
+        Assert.Equal(["drafting"], contents.Skills);
+        Assert.Equal([new CatalogContentTrigger("morning", "Every weekday at 8:00")], contents.Triggers);
+        Assert.Equal(["Tracker"], contents.Sites);
+
+        var plugin = status.Packages.Single(p => p.Id == "sample-plugin");
+        Assert.Equal("https://example.test:8443/marketplace/sample-plugin", plugin.Page);
+        var set = Assert.IsType<CatalogContents>(plugin.Contents);
+        Assert.Equal(
+            [new CatalogContentSetting("folder", "Folder to watch", "string", true, "Inbox"), new CatalogContentSetting("limit", "Most per day", "number", false, "20")],
+            set.Settings);
+        Assert.Equal([new CatalogContentSecret("API_KEY", "Service key", true, true)], set.Secrets);
+        var connection = Assert.Single(set.Connections);
+        Assert.Equal(("mailbox", true), (connection.Slot, connection.Required));
+        Assert.Equal(["imap", "google"], connection.Providers);
+        Assert.Equal([new CatalogContentEvent("sample.found", "A new item was found")], set.Events);
+    }
+
+    [Fact]
+    public async Task A_catalog_without_contents_still_reads_and_answers_it_null()
+    {
+        var status = await Market(MailFeed()).CheckAsync(Ct);
+
+        var mail = Assert.Single(status.Packages);
+        Assert.True(status.Checked);
+        Assert.Null(mail.Contents);
+        Assert.Equal("https://example.test:8443/marketplace/mail", mail.Page);
+    }
+
+    [Theory]
+    [InlineData("http://catalog.example.test/c.json", "http://catalog.example.test/marketplace/mail")]
+    [InlineData("https://user:pw@catalog.example.test/c.json", null)]
+    public async Task The_page_is_on_the_catalog_addresses_origin_and_none_with_a_user_in_it(string address, string? page)
+    {
+        var feed = new FakeFeed(address) { Catalog = Catalog(Entry("mail", "solution", "2.0.3", MailZip)) };
+        var status = await Market(feed).CheckAsync(Ct);
+
+        Assert.Equal(page, Assert.Single(status.Packages).Page);
+    }
+
+    [Fact]
+    public async Task Get_api_marketplace_passes_contents_and_the_page_through()
+    {
+        var dataRoot = Directory.CreateTempSubdirectory("harness-marketplace-contents-").FullName;
+        var feed = new FakeFeed { Catalog = ContentsCatalog(MailZip) };
+        var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host => host
+            .UseSetting("DataRoot", dataRoot)
+            .UseSetting("Logging:LogLevel:Default", "Warning")
+            .ConfigureTestServices(services => services.Replace(ServiceDescriptor.Singleton<IMarketplaceFeed>(feed))));
+        try
+        {
+            await factory.Services.GetRequiredService<IUserStore>().CreateAsync("person@example.test", HostFixture.Password, Ct);
+            using var person = factory.CreateClient();
+            (await person.PostAsJsonAsync("/api/auth/login", new { email = "person@example.test", password = HostFixture.Password }, Ct))
+                .EnsureSuccessStatusCode();
+            (await person.PostAsync(MarketplaceEndpoints.Route + "/refresh", null, Ct)).EnsureSuccessStatusCode();
+
+            using var read = JsonDocument.Parse(await person.GetStringAsync(MarketplaceEndpoints.Route, Ct));
+            var packages = read.RootElement.GetProperty("packages").EnumerateArray().ToDictionary(p => p.GetProperty("id").GetString()!);
+
+            var solution = packages["sample-solution"];
+            Assert.Equal("https://example.test:8443/marketplace/sample-solution", solution.GetProperty("page").GetString());
+            var contents = solution.GetProperty("contents");
+            Assert.Equal(
+                ["plugins", "members", "skills", "triggers", "sites", "settings", "secrets", "connections", "events"],
+                contents.EnumerateObject().Select(p => p.Name));
+            Assert.Equal(["id", "version", "minimum"], contents.GetProperty("plugins")[0].EnumerateObject().Select(p => p.Name));
+            Assert.Equal("2.3.0", contents.GetProperty("plugins")[0].GetProperty("minimum").GetString());
+            Assert.Equal(["name", "role", "agent"], contents.GetProperty("members")[0].EnumerateObject().Select(p => p.Name));
+            Assert.True(contents.GetProperty("members")[1].GetProperty("agent").GetBoolean());
+            Assert.Equal(["name", "words"], contents.GetProperty("triggers")[0].EnumerateObject().Select(p => p.Name));
+            Assert.Equal("Tracker", contents.GetProperty("sites")[0].GetString());
+
+            var plugin = packages["sample-plugin"];
+            Assert.Equal("https://example.test:8443/marketplace/sample-plugin", plugin.GetProperty("page").GetString());
+            var set = plugin.GetProperty("contents");
+            Assert.Equal(["name", "label", "kind", "required", "default"], set.GetProperty("settings")[0].EnumerateObject().Select(p => p.Name));
+            Assert.Equal(["name", "label", "required", "masked"], set.GetProperty("secrets")[0].EnumerateObject().Select(p => p.Name));
+            Assert.Equal(["slot", "providers", "required"], set.GetProperty("connections")[0].EnumerateObject().Select(p => p.Name));
+            Assert.Equal(["type", "summary"], set.GetProperty("events")[0].EnumerateObject().Select(p => p.Name));
+            Assert.False(plugin.TryGetProperty("includedIn", out _));
+        }
+        finally
+        {
+            await factory.DisposeAsync();
+            try { Directory.Delete(dataRoot, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
     [Fact]
     public void The_console_has_the_hosts_words_for_every_provider_a_manifest_may_name()
     {
@@ -683,7 +817,7 @@ public sealed class MarketplaceTests : IDisposable
                 Assert.True(root.GetProperty("checked").GetBoolean());
                 var mail = root.GetProperty("packages")[0];
                 Assert.Equal(
-                    ["id", "kind", "name", "summary", "version", "needs", "installed", "installedVersion", "installedOn", "updateAvailable", "catalogNeeds", "description"],
+                    ["id", "kind", "name", "summary", "version", "needs", "installed", "installedVersion", "installedOn", "updateAvailable", "catalogNeeds", "description", "page", "contents"],
                     mail.EnumerateObject().Select(p => p.Name));
                 Assert.Equal("solution", mail.GetProperty("kind").GetString());
 

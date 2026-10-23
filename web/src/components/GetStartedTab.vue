@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { getMarketplace, refreshMarketplace } from '../api/client';
 import type { MarketplaceCatalog, MarketplacePackage } from '../api/types';
-import { getLabel, installedWords, kindWords, noneMatchWords, notCheckedWords, packageMatches, plainNeeds, unreachableWords } from '../lib/marketplace';
+import { contentsLines, getLabel, installedWords, kindWords, noneMatchWords, notCheckedWords, packageMatches, plainNeeds, unreachableWords } from '../lib/marketplace';
 import { fetchIntoDocuments } from '../lib/marketplaceFetch';
 import { claimFirstOpenRefresh } from '../lib/marketplaceRefresh';
 import { whenWords } from '../lib/solutionPanel';
@@ -13,6 +13,15 @@ import FilterText from './FilterText.vue';
  * its name, summary, kind, version, what it needs in a few short plain lines (the full lines under a
  * Details expander, closed until asked), and whether this instance has it - and Refresh, which asks
  * the Host to read the catalog again.
+ *
+ * A CARD WEARS ITS KIND: a solution's edge and kind icon are `--os-kind-solution` (the accent), a
+ * plugin's `--os-kind-plugin`, set in every built-in theme (`os-tile-kind-*`, css/tiles.scss). When the
+ * catalog says what a package holds (`contents`), the card opens with it in bullets
+ * (`contentsLines`): a solution's plugins, members, skills, triggers and sites; a plugin's settings,
+ * keys and sign-ins, its events and skills, then the solutions that include it. A plugin's bullets
+ * say what it asks for, so its short needs lines give way to them; a catalog without `contents`
+ * shows the card as it was. ONE Documentation link opens the package's page on the catalog's own
+ * site (`page`, from the Host) in a new tab; the long description stays on that page.
  *
  * THE FILTER narrows the cards as you type, case-insensitively, by name, summary, description and
  * the words for what a package needs (`packageMatches`); it reads nothing again, and a filter that
@@ -118,20 +127,31 @@ async function get(pkg: MarketplacePackage) {
       <div v-if="shownPackages.length === 0" class="os-body os-text-muted" data-catalog-none-match>{{ noneMatchWords(filterText) }}</div>
 
       <div v-else class="os-tiles get-started-tiles">
-        <div v-for="pkg in shownPackages" :key="pkg.id" class="os-tile get-started-tile" :data-catalog-package="pkg.id">
+        <div
+          v-for="pkg in shownPackages"
+          :key="pkg.id"
+          class="os-tile get-started-tile"
+          :class="`os-tile-kind-${pkg.kind}`"
+          :data-catalog-package="pkg.id"
+        >
           <div class="os-tile-head">
-            <q-icon :name="pkg.kind === 'solution' ? 'apps' : 'extension'" size="18px" class="get-started-icon" aria-hidden="true" />
+            <q-icon :name="pkg.kind === 'solution' ? 'apps' : 'extension'" size="18px" class="os-tile-kind-icon" aria-hidden="true" data-package-kind-icon />
             <div class="row items-baseline no-wrap q-gutter-x-sm get-started-title">
               <div class="text-subtitle1 text-weight-medium ellipsis get-started-name" :title="pkg.name" data-package-name>{{ pkg.name }}</div>
               <div class="text-caption os-text-muted get-started-version" data-package-version>{{ pkg.version }}</div>
             </div>
           </div>
           <div class="os-tile-line os-text-muted" data-package-kind>{{ kindWords(pkg.kind) }}</div>
+          <ul v-if="contentsLines(pkg).length" class="os-tile-line get-started-text get-started-contents" data-package-contents>
+            <li v-for="(line, i) in contentsLines(pkg)" :key="i" data-package-content>{{ line }}</li>
+          </ul>
           <div class="os-tile-line get-started-text" data-package-summary>{{ pkg.summary }}</div>
-          <div v-if="plainNeeds(pkg.catalogNeeds).length" class="os-tile-line get-started-text" data-package-needs>
-            <div v-for="(need, i) in plainNeeds(pkg.catalogNeeds)" :key="i" data-package-need>{{ need }}</div>
-          </div>
-          <div v-else class="os-tile-line os-text-muted" data-package-needs>It needs nothing more.</div>
+          <template v-if="pkg.kind !== 'plugin' || !contentsLines(pkg).length">
+            <div v-if="plainNeeds(pkg.catalogNeeds).length" class="os-tile-line get-started-text" data-package-needs>
+              <div v-for="(need, i) in plainNeeds(pkg.catalogNeeds)" :key="i" data-package-need>{{ need }}</div>
+            </div>
+            <div v-else class="os-tile-line os-text-muted" data-package-needs>It needs nothing more.</div>
+          </template>
           <div v-if="pkg.needs.length" class="os-tile-line get-started-text">
             <q-btn
               flat
@@ -155,6 +175,15 @@ async function get(pkg: MarketplacePackage) {
           <div v-if="refused?.id === pkg.id" class="os-tile-line text-negative get-started-text" role="alert" data-package-refused>{{ refused.text }}</div>
 
           <div class="get-started-actions">
+            <a
+              v-if="pkg.page"
+              class="get-started-docs os-body"
+              :href="pkg.page"
+              target="_blank"
+              rel="noopener"
+              :aria-label="`Documentation for ${pkg.name} (opens in a new tab)`"
+              data-package-docs
+            >Documentation</a>
             <q-btn
               v-if="getLabel(pkg)"
               unelevated
@@ -190,8 +219,9 @@ async function get(pkg: MarketplacePackage) {
   overflow: hidden;
 }
 
-.get-started-icon {
-  color: var(--os-ink-muted);
+.get-started-contents {
+  margin: 4px 0;
+  padding-left: 1.1rem;
 }
 
 .get-started-title,
@@ -216,6 +246,15 @@ async function get(pkg: MarketplacePackage) {
   margin-top: auto;
   padding-top: 6px;
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 12px;
+}
+
+/* Ink, not the accent: link text holds 4.5:1 in every theme, the underline says it is a link. */
+.get-started-docs {
+  margin-right: auto;
+  color: var(--os-ink);
+  text-decoration: underline;
 }
 </style>

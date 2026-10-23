@@ -253,6 +253,8 @@ export function customTokens(theme: CustomTheme): Record<string, string> {
     ...(dark ? { '--q-dark': c.panels, '--q-dark-page': c.background } : {}),
     '--os-primary': c.accent,
     '--os-primary-hover': mix(c.accent, dark ? '#ffffff' : '#000000', 0.15),
+    // A solution's card wears the accent; a plugin's keeps the preset's violet.
+    '--os-kind-solution': c.accent,
     '--os-ink': c.text,
     '--os-ink-muted': muted,
     '--os-ink-faint': mix(c.panels, c.text, 0.55),

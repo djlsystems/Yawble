@@ -128,6 +128,13 @@
   --os-plugin-surface: #f3f0fc;
   --os-plugin-accent: #6a5acd;
 
+  // A PACKAGE'S KIND, on the Marketplace's cards: a solution in the accent, a plugin in the plugin
+  // violet, on the card's edge and its kind icon. Written out in every built-in theme block, each
+  // holding 3:1 on `--os-surface` (`appearance-presets.spec.ts`); a person's own theme sets the
+  // solution's from its accent (`lib/appearance.ts`).
+  --os-kind-solution: #e83b00;
+  --os-kind-plugin: #6a5acd;
+
   // THE MONITOR'S WALL PALETTE: its dark screen, in the normal view and in full screen alike, where
   // the glow its graph draws reads best. `MonitorView.vue` sets the `--os-monitor-*` tokens the
   // canvas and the legend read from these, whatever the theme. A state's ring is never here: it is
@@ -165,6 +172,8 @@
 body.body--dark {
   --os-plugin-surface: #221c33;
   --os-plugin-accent: #9d8fef;
+  --os-kind-solution: #e83b00;
+  --os-kind-plugin: #9d8fef;
   --os-ink: #ece7e3;
   --os-ink-muted: #b3aaa3;
   --os-ink-faint: #8a7f77;
@@ -265,6 +274,8 @@ body.os-theme-high-contrast-light {
   --os-stat-blocked: var(--os-state-blocked);
   --os-stat-failed: var(--os-state-failed);
   --os-stat-idle: #4d4d4d;
+  --os-kind-solution: #b32d00;
+  --os-kind-plugin: #4b3aa8;
 }
 
 // HIGH CONTRAST DARK: white on black, the same rules inverted.
@@ -305,6 +316,8 @@ body.body--dark.os-theme-high-contrast-dark {
   --os-stat-blocked: var(--os-state-blocked);
   --os-stat-failed: var(--os-state-failed);
   --os-stat-idle: #9a9a9a;
+  --os-kind-solution: #ff7a45;
+  --os-kind-plugin: #b8acff;
 }
 
 // SOFT DARK: lower glare for long evenings - warm greys a step lighter than Dark, ink a step down
@@ -346,6 +359,8 @@ body.body--dark.os-theme-soft-dark {
   --os-stat-blocked: var(--os-state-blocked);
   --os-stat-failed: var(--os-state-failed);
   --os-stat-idle: #4e4740;
+  --os-kind-solution: #f2703c;
+  --os-kind-plugin: #a99be6;
 }
 
 // The page itself takes the tokens, so a theme change repaints everything that has no ground of
