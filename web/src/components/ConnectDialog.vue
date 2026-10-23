@@ -2,7 +2,6 @@
 import FieldHelp from './FieldHelp.vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import {
-  getConnectionFlow,
   getConnectionNeeds,
   listConnectionProviders,
   listConnections,
@@ -30,7 +29,6 @@ import { currentOrigin, goTo } from '../lib/browserNavigation';
 import { copyText } from '../lib/clipboard';
 import {
   type CallbackOutcome,
-  countdown,
   googleClientIdProblem,
   guideLink,
   microsoftIdProblem,
@@ -44,6 +42,7 @@ import { productCli } from '../presentation/product';
 import { awaitProviderReturn, newSigninTag, signinTabAddress } from '../lib/providerReturn';
 import { mailboxHint, OutlookHint, setupTime } from '../lib/mailboxHints';
 import MailboxForm from './MailboxForm.vue';
+import CodeSignIn from './CodeSignIn.vue';
 import { letGoSignIns } from '../lib/letGoSignIns';
 
 /**
@@ -155,8 +154,7 @@ let opening = 0;
 
 watch(open, (showing) => {
   if (!showing) {
-    // Closing cancels nothing at the Host: it only stops reading the flow.
-    stopDevice();
+    // Closing cancels nothing at the Host: it only stops reading the flow (CodeSignIn, on `open`).
     stopWaiting();
     return;
   }
@@ -395,9 +393,6 @@ const twoCodes = computed(() => {
   return apis.length > 1;
 });
 
-/** Which of the two codes is shown: 1 or 2, or null for a single code or a sign-in picked back up. */
-const codeNumber = ref<1 | 2 | null>(null);
-
 /** From Admin, the installed plugins whose permissions the sign-in asks for, each once; empty from a slot. */
 const askingPlugins = computed(() => (props.need ? [] : [...new Set((needs.value?.scopes ?? []).flatMap((line) => line.plugins))]));
 
@@ -552,52 +547,28 @@ async function signIn() {
 
 // --- 3. Sign in with a code -----------------------------------------------------------------------
 
-/** How often the flow is read while it waits. The Host does the waiting at the provider. */
-const flowReadEvery = 3000;
-
+/** The code the Host gave; CodeSignIn shows it and reads the flow until it ends. */
 const device = ref<ConnectionDeviceStart | null>(null);
-const deviceRead = ref<ConnectionFlow | null>(null);
+/** How the flow ended; null while it waits. */
+const deviceEnded = ref<ConnectionFlow | null>(null);
 const deviceConnection = ref<Connection | null>(null);
-/** The Host's sentence when the code shown was replaced by a second one while waiting. */
-const deviceNotice = ref('');
 /** The waiting sign-in shown is one picked back up as the dialog opened, not one just started. */
 const resumed = ref(false);
-const now = ref(Date.now());
-let readTimer: ReturnType<typeof setTimeout> | null = null;
-let clock: ReturnType<typeof setInterval> | null = null;
 
-const waitingWords = computed(() =>
-  codeNumber.value === 1 ? 'Waiting for the first code…' : codeNumber.value === 2 ? 'Waiting for the second code…' : 'Waiting for you to sign in…');
-const deviceState = computed(() => deviceRead.value?.state ?? 'waiting');
-const deviceSentence = computed(() => refusalWords(deviceRead.value?.sentence));
-const deviceLeft = computed(() => (device.value ? countdown(device.value.expiresAt, now.value) : ''));
+const deviceState = computed(() => deviceEnded.value?.state ?? 'waiting');
 
-function stopDevice() {
-  deviceNotice.value = '';
-  if (readTimer !== null) clearTimeout(readTimer);
-  if (clock !== null) clearInterval(clock);
-  readTimer = null;
-  clock = null;
-}
-
-onBeforeUnmount(stopDevice);
-
-/** Asks the Host for a code (again, on Try again) and starts reading the flow. */
+/** Asks the Host for a code (again, on Try again); CodeSignIn starts reading the flow. */
 async function startDevice() {
   const chosen = provider.value;
   if (!chosen) return;
 
-  stopDevice();
   leaving.value = true;
   problem.value = '';
   resumed.value = false;
   try {
-    codeNumber.value = twoCodes.value ? 1 : null;
-    device.value = await startDeviceConnection({ provider: chosen.id, scopes: chosenScopes.value, flow: 'device' });
-    deviceRead.value = null;
-    now.value = Date.now();
-    clock = setInterval(() => (now.value = Date.now()), 1000);
-    readTimer = setTimeout(readFlow, flowReadEvery);
+    // A fresh object each time, so Try again starts over even on the same answer.
+    device.value = { ...(await startDeviceConnection({ provider: chosen.id, scopes: chosenScopes.value, flow: 'device' })) };
+    deviceEnded.value = null;
   } catch (cause) {
     problem.value = refusalWords(cause instanceof Error ? cause.message : String(cause));
   } finally {
@@ -607,17 +578,11 @@ async function startDevice() {
 
 /** A sign-in with a code the Host still holds, shown again as it was: its code, link and countdown. */
 function resumeDevice(flow: ConnectionOpenFlow) {
-  stopDevice();
   providerId.value = flow.provider;
   device.value = { flowId: flow.flowId, userCode: flow.userCode, verificationUri: flow.verificationUri, expiresAt: flow.expiresAt };
-  deviceRead.value = null;
+  deviceEnded.value = null;
   resumed.value = true;
-  codeNumber.value = null;
   step.value = 'signin';
-  now.value = Date.now();
-  clock = setInterval(() => (now.value = Date.now()), 1000);
-  // Read at once: the flow may have moved on while the dialog was closed.
-  readTimer = setTimeout(readFlow, 0);
 }
 
 /**
@@ -627,45 +592,15 @@ function resumeDevice(flow: ConnectionOpenFlow) {
 function back() {
   if (device.value && deviceState.value === 'waiting') letGoSignIns.add(device.value.flowId);
   resumed.value = false;
-  stopDevice();
   stopWaiting();
   tabUrl.value = null;
   device.value = null;
-  deviceRead.value = null;
+  deviceEnded.value = null;
   step.value = 'service';
 }
 
-async function readFlow() {
-  const flow = device.value;
-  readTimer = null;
-  if (!flow || !open.value) return;
-
-  let read: ConnectionFlow;
-  try {
-    read = await getConnectionFlow(flow.flowId);
-  } catch (cause) {
-    // A read that failed is not an ending: say so and read again.
-    problem.value = cause instanceof Error ? cause.message : String(cause);
-    if (device.value === flow && open.value) readTimer = setTimeout(readFlow, flowReadEvery);
-    return;
-  }
-  // Try again or a close while the read was out: this answer is for a flow no longer shown.
-  if (device.value !== flow || !open.value) return;
-
-  problem.value = '';
-  deviceRead.value = read;
-  if (read.state === 'waiting') {
-    // A SECOND CODE: the same flow, waiting on the code the Host now holds, with its sentence.
-    if (read.userCode && read.verificationUri && read.expiresAt && read.userCode !== flow.userCode) {
-      device.value = { flowId: flow.flowId, userCode: read.userCode, verificationUri: read.verificationUri, expiresAt: read.expiresAt };
-      deviceNotice.value = read.sentence;
-      codeNumber.value = 2;
-    }
-    readTimer = setTimeout(readFlow, flowReadEvery);
-    return;
-  }
-
-  stopDevice();
+function deviceDone(read: ConnectionFlow) {
+  deviceEnded.value = read;
   if (read.state === 'done') {
     deviceConnection.value = read.connection ?? null;
     resultName.value = '';
@@ -1116,40 +1051,16 @@ const stepLabels = computed(() => [
             <span class="text-caption os-text-muted">Set up the app: sign in through an app of your own instead.</span>
           </div>
         </template>
-        <div v-else :data-device-state="deviceState">
-          <template v-if="deviceState === 'waiting'">
-            <div v-if="resumed" class="q-mb-sm" data-device-resumed>
-              This is the {{ provider?.name ?? 'sign-in' }} sign-in you started earlier, still waiting for you.
-              Back lets it go and starts again.
-            </div>
-            <div v-if="codeNumber === 1" class="text-weight-medium" data-code-number="1">Code 1 of 2</div>
-            <template v-else-if="codeNumber === 2">
-              <div class="row items-center q-gutter-xs text-positive" data-first-code-done>
-                <q-icon name="check_circle" size="18px" />
-                <span>First code done: {{ provider.name }} approved the permissions.</span>
-              </div>
-              <div class="text-weight-medium" data-code-number="2">Code 2 of 2: one more code to finish</div>
-            </template>
-            <div v-else-if="deviceNotice" class="q-mb-sm" data-device-notice>{{ deviceNotice }}</div>
-            <div>
-              Open
-              <a :href="device.verificationUri" target="_blank" rel="noopener noreferrer" data-device-link>{{ device.verificationUri }}</a>
-              and enter this code:
-            </div>
-            <div class="row items-center q-gutter-sm q-my-sm">
-              <span class="mono connect-device-code" data-device-code>{{ device.userCode }}</span>
-              <q-btn flat round dense icon="content_copy" aria-label="Copy the code" @click="copy(device.userCode)" />
-            </div>
-            <div class="text-caption os-text-muted" data-device-countdown>
-              The code expires in {{ deviceLeft }}. Sign in there and agree; this step moves on by itself.
-            </div>
-            <div class="row items-center q-gutter-sm q-mt-sm os-text-muted">
-              <q-spinner size="16px" />
-              <span>{{ waitingWords }}</span>
-            </div>
-          </template>
-          <div v-else class="text-negative" data-device-sentence>{{ deviceSentence }}</div>
-        </div>
+        <CodeSignIn
+          v-else
+          :code="device"
+          :provider-name="provider.name"
+          :two-codes="twoCodes"
+          :resumed="resumed"
+          :reading="open"
+          @ended="deviceDone"
+          @problem="(text: string) => (problem = text)"
+        />
       </q-card-section>
 
       <!-- 3. SIGN IN -->
@@ -1335,13 +1246,6 @@ const stepLabels = computed(() => [
 
 .connect-audience-hint {
   margin-left: 30px;
-}
-
-.connect-device-code {
-  font-size: 2rem;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  user-select: all;
 }
 
 .connect-copy {

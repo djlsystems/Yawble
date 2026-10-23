@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import FieldHelp from './FieldHelp.vue';
-import { computed, ref } from 'vue';
-import { startConnection } from '../api/client';
-import type { Connection, ConnectionProvider, ConnectionSlot } from '../api/types';
+import { computed, ref, watch } from 'vue';
+import { listConnections, startConnection, startDeviceConnection } from '../api/client';
+import type { Connection, ConnectionDeviceStart, ConnectionFlow, ConnectionProvider, ConnectionSlot } from '../api/types';
 import { goTo } from '../lib/browserNavigation';
 import { refusedReconnect } from '../lib/slotBinding';
+import CodeSignIn from './CodeSignIn.vue';
 import SlotConnect from './SlotConnect.vue';
 import SlotReconnect from './SlotReconnect.vue';
 import {
@@ -29,6 +30,14 @@ import {
  * added and sends the browser there. The Host is still the check: it refuses the save in the same
  * words.
  *
+ * RECONNECT ON A MICROSOFT CONNECTION SIGNS IN WITH A CODE, as the Connections dialog's does:
+ * Microsoft has no consent page to send the browser to (its sign-in takes a code), so Reconnect -
+ * beside a chosen connection, or the one a refused binding offers, and with `reconnectInTab` too -
+ * asks the Host for a code (`flow: "device"`, the connection's ID, the scopes asked) and shows it
+ * here through CodeSignIn, the same component Add connection shows its code with. Once approved the
+ * connection is read again and bound as a connection made from this slot is (`connected`); a
+ * refused or expired code says so in the Host's sentence and binds nothing.
+ *
  * CONNECT <PROVIDER> comes first while nothing suitable is bound, given the slot's `plugin`: Add
  * connection, started from this slot. When its sign-in completes, `bind` (where the member exists)
  * binds the new connection through the member's settings route and the opener shows it bound; with
@@ -36,7 +45,7 @@ import {
  * Host refuses is shown in its words, with Reconnect when only scopes are missing.
  *
  * With `reconnectInTab` (the solution wizard, whose answers a trip away would lose) Reconnect opens
- * the provider in another tab and waits here; the reconnected connection comes back as `connected`
+ * the provider in another tab and waits here - a Microsoft one shows its code here, as everywhere; the reconnected connection comes back as `connected`
  * and stays the binding, and a sign-in that granted fewer scopes than asked says so.
  */
 const props = defineProps<{
@@ -101,6 +110,11 @@ function providerOf(connectionId: string): string {
   return connection ? providerName(connection.provider, props.providers) : 'the provider';
 }
 
+/** A connection's name, for the code's line. */
+function connectionName(connectionId: string): string {
+  return props.connections.find((candidate) => candidate.id === connectionId)?.name ?? 'the connection';
+}
+
 /** Reconnected in another tab: the lists are read again, and the binding stays the same connection. */
 function reconnectedHere(connection: Connection) {
   emit('connected', connection);
@@ -113,20 +127,67 @@ function reconnectedHere(connection: Connection) {
 const reconnecting = ref(false);
 const reconnectProblem = ref('');
 
+/** Microsoft's connections are made with a code, and reconnect with one: no redirect to come back by. */
+function withCode(connectionId: string): boolean {
+  return props.connections.find((connection) => connection.id === connectionId)?.providerKind === 'microsoft';
+}
+
 async function reconnect(asked?: { connectionId: string; scopes: string[] }) {
   const target = asked ?? (chosen.value ? { connectionId: chosen.value.id, scopes: missing.value } : null);
   if (!target || reconnecting.value) return;
 
   reconnecting.value = true;
   reconnectProblem.value = '';
+  reconnectDone.value = '';
 
   try {
+    if (withCode(target.connectionId)) {
+      // A fresh object each time, so pressing Reconnect again starts the code over.
+      const code = await startDeviceConnection({ reconnectId: target.connectionId, scopes: target.scopes, flow: 'device' });
+      reconnectCode.value = { connectionId: target.connectionId, code: { ...code } };
+      return;
+    }
     const flow = await startConnection({ reconnectId: target.connectionId, scopes: target.scopes });
     goTo(flow.authorizationUrl);
   } catch (cause) {
     reconnectProblem.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
     reconnecting.value = false;
+  }
+}
+
+// --- Reconnect with a code ------------------------------------------------------------------------
+
+/** The code shown for a Microsoft Reconnect, and the connection it is for; null when none is. */
+const reconnectCode = ref<{ connectionId: string; code: ConnectionDeviceStart } | null>(null);
+/** The code ended without a connection: the refused or expired code stays shown with its sentence. */
+const reconnectEnded = ref(false);
+/** "Reconnected Work (person@example.test).", once the code was approved and the connection read again. */
+const reconnectDone = ref('');
+
+watch(reconnectCode, () => (reconnectEnded.value = false));
+
+async function codeEnded(read: ConnectionFlow) {
+  const asked = reconnectCode.value;
+  if (!asked) return;
+  if (read.state !== 'done') {
+    reconnectEnded.value = true;
+    return;
+  }
+
+  reconnectCode.value = null;
+  try {
+    const id = read.connection?.id ?? asked.connectionId;
+    const connection = (await listConnections()).find((candidate) => candidate.id === id);
+    if (!connection) {
+      reconnectProblem.value = 'The sign-in came back, but the connection could not be found. Choose it again.';
+      return;
+    }
+    reconnectDone.value = `Reconnected ${connection.name} (${connection.account}).`;
+    // Bound as a connection made from this slot is: the Host checks the binding again.
+    await connected(connection);
+  } catch (cause) {
+    reconnectProblem.value = cause instanceof Error ? cause.message : String(cause);
   }
 }
 
@@ -221,7 +282,7 @@ async function connected(connection: Connection) {
     <div v-if="refusal" class="text-caption text-negative q-mt-xs row items-center q-gutter-x-sm" data-binding-refusal>
       <span>{{ refusal }}</span>
       <SlotReconnect
-        v-if="missing.length > 0 && chosen && reconnectInTab"
+        v-if="missing.length > 0 && chosen && reconnectInTab && !withCode(chosen.id)"
         :connection-id="chosen.id"
         :scopes="missing"
         :provider-name="providerOf(chosen.id)"
@@ -242,7 +303,7 @@ async function connected(connection: Connection) {
     <div v-if="bindRefusal" class="text-caption text-negative q-mt-xs row items-center q-gutter-x-sm" data-bind-refused>
       <span>{{ bindRefusal }}</span>
       <SlotReconnect
-        v-if="bindReconnect && reconnectInTab"
+        v-if="bindReconnect && reconnectInTab && !withCode(bindReconnect.connectionId)"
         :connection-id="bindReconnect.connectionId"
         :scopes="bindReconnect.scopes"
         :provider-name="providerOf(bindReconnect.connectionId)"
@@ -260,6 +321,19 @@ async function connected(connection: Connection) {
         @click="reconnect(bindReconnect)"
       />
     </div>
+    <!-- RECONNECT WITH A CODE: Microsoft's, shown here as Add connection shows it. -->
+    <div v-if="reconnectCode" class="q-mt-sm" data-reconnect-code>
+      <div v-if="!reconnectEnded" class="text-caption q-mb-xs">
+        Reconnect {{ connectionName(reconnectCode.connectionId) }} by signing in again at {{ providerOf(reconnectCode.connectionId) }} with this code.
+      </div>
+      <CodeSignIn
+        :code="reconnectCode.code"
+        :provider-name="providerOf(reconnectCode.connectionId)"
+        @ended="codeEnded"
+        @problem="(text: string) => (reconnectProblem = text)"
+      />
+    </div>
+    <div v-if="reconnectDone" class="text-caption text-positive q-mt-xs" data-reconnect-done>{{ reconnectDone }}</div>
     <div v-if="reconnectProblem" class="text-caption text-negative q-mt-xs" data-reconnect-problem>
       {{ reconnectProblem }}
     </div>
