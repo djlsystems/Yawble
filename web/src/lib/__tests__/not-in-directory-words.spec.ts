@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { AdminApprovalSentence, NotInDirectorySentence, refusalWords } from '../connections'
 
 describe('refusalWords for an account not in the directory', () => {
-  it.each(['AADSTS50020', 'AADSTS50034', 'AADSTS90072'])('reads %s as the sentence wherever it sits in the text', (code) => {
+  it.each(['AADSTS50020', 'AADSTS50034', 'AADSTS51004', 'AADSTS90072'])('reads %s as the sentence wherever it sits in the text', (code) => {
     expect(refusalWords(code)).toBe(NotInDirectorySentence)
     expect(refusalWords(`Microsoft refused the sign-in: invalid_grant: ${code}: words. Trace ID: 0000`)).toBe(NotInDirectorySentence)
     expect(refusalWords(`(${code})`)).toBe(NotInDirectorySentence)
   })
 
-  it.each(['AADSTS500200', 'AADSTS500341', 'AADSTS900720', 'AADSTS150020', 'XAADSTS50034', 'AADSTS50177', 'AADSTS51004'])(
+  it.each(['AADSTS500200', 'AADSTS500341', 'AADSTS900720', 'AADSTS150020', 'XAADSTS50034', 'AADSTS50177'])(
     'leaves %s, which is not a confirmed code, as it was said',
     (code) => {
       const text = `Microsoft refused the sign-in: ${code}: words.`

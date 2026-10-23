@@ -151,8 +151,8 @@ may be incorrect, the account is not in the directory the sign-in used: name tha
 sign in again.
 
 - When Microsoft refuses an account as not in the directory the sign-in used - `AADSTS50020`,
-  `AADSTS50034` or `AADSTS90072` in Microsoft's published Entra error list - the code sign-in, the
-  browser sign-in and the operator CLI's `connect` end `refused` with one sentence
+  `AADSTS50034`, `AADSTS51004` or `AADSTS90072` in Microsoft's published Entra error list - the code
+  sign-in, the browser sign-in and the operator CLI's `connect` end `refused` with one sentence
   (`ConnectionProviders.MicrosoftNotInDirectory`): the account was not found in that directory, a
   personal Microsoft account that owns an Azure subscription signs in through that subscription's
   directory (its ID under Directory), and a work account in that directory works too. Never the code

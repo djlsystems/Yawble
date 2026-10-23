@@ -30,7 +30,6 @@ public sealed partial class ConnectionsTests
     [InlineData("AADSTS150020")]
     [InlineData("XAADSTS50034")]
     [InlineData("AADSTS5003")]
-    [InlineData("AADSTS51004")]
     public void A_code_inside_a_longer_code_or_another_code_is_not_read_as_not_in_the_directory(string entra)
     {
         Assert.False(ConnectionProviders.NotInDirectory(entra, null));

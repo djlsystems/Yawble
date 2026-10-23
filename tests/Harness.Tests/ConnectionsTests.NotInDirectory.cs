@@ -16,7 +16,7 @@ namespace Harness.Tests;
 /// </summary>
 public sealed partial class ConnectionsTests
 {
-    public static TheoryData<string> NotInDirectoryCodes => ["AADSTS50020", "AADSTS50034", "AADSTS90072"];
+    public static TheoryData<string> NotInDirectoryCodes => ["AADSTS50020", "AADSTS50034", "AADSTS51004", "AADSTS90072"];
 
     [Theory]
     [MemberData(nameof(NotInDirectoryCodes))]

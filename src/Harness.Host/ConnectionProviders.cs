@@ -147,13 +147,15 @@ public static class ConnectionProviders
     /// The Entra codes that mean the account is not in the directory the sign-in used, as Microsoft's
     /// published list (learn.microsoft.com/entra/identity-platform/reference-error-codes) describes them:
     /// AADSTS50020 (UserUnauthorized: the account "does not exist in tenant"), AADSTS50034
-    /// (UserAccountNotFound: the account "isn't in the tenant") and AADSTS90072 (PassThroughUserMfaError:
-    /// the external account "doesn't exist on the tenant that they signed into"). AADSTS50177 (external
+    /// (UserAccountNotFound: the account "isn't in the tenant"), AADSTS51004 (UserAccountNotInDirectory:
+    /// the account "doesn't exist in the directory", the app "likely chose the wrong tenant") and
+    /// AADSTS90072 (PassThroughUserMfaError: the external account "doesn't exist on the tenant that they
+    /// signed into"). AADSTS50177 (external
     /// challenge not supported for passthrough users) is about MFA, not the directory, and AADSTS500200 is
     /// not in the list; neither is here. Whole codes only: AADSTS50020 is a prefix of AADSTS500200.
     /// </summary>
     private static readonly System.Text.RegularExpressions.Regex NotInDirectoryMarks =
-        new(@"\bAADSTS(50020|50034|90072)\b", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        new(@"\bAADSTS(50020|50034|51004|90072)\b", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     /// <summary>Whether Microsoft's refusal (<paramref name="error"/>, <paramref name="description"/>)
     /// is an account that is not in the directory the sign-in used.</summary>

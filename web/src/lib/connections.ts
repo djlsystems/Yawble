@@ -390,7 +390,7 @@ export const UsernameIncorrectHint =
   'If Microsoft says the username may be incorrect, the account is not in the directory the sign-in used: name that directory here and sign in again.';
 
 /** The Entra codes Microsoft's published list says mean the account is not in the directory signed in to. */
-const notInDirectoryMarks = /\bAADSTS(50020|50034|90072)\b/;
+const notInDirectoryMarks = /\bAADSTS(50020|50034|51004|90072)\b/;
 
 /**
  * A refusal as a person reads it: the admin-approval sentence, or the not-in-the-directory one, when
