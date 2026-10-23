@@ -112,6 +112,26 @@ describe('the theme tokens', () => {
     }
   });
 
+  /**
+   * A PACKAGE'S KIND on a Marketplace card: written out in every built-in theme block, never left to
+   * the block under it, so no preset paints a solution or plugin card in another theme's colour.
+   */
+  it('sets the solution and plugin kind tokens in every theme block', () => {
+    for (const selector of [
+      ':root',
+      'body.body--dark',
+      'body.os-theme-high-contrast-light',
+      'body.body--dark.os-theme-high-contrast-dark',
+      'body.body--dark.os-theme-soft-dark',
+    ]) {
+      const tokens = block(selector);
+      expect(tokens['--os-kind-solution'], `${selector} solution`).toMatch(/^#[0-9a-f]{6}$/);
+      expect(tokens['--os-kind-plugin'], `${selector} plugin`).toMatch(/^#[0-9a-f]{6}$/);
+    }
+    expect(light).toMatchObject({ '--os-kind-solution': '#e83b00', '--os-kind-plugin': '#6a5acd' });
+    expect(dark).toMatchObject({ '--os-kind-solution': '#e83b00', '--os-kind-plugin': '#9d8fef' });
+  });
+
   it('sets the dialog scale once, for both themes', () => {
     expect(light).toMatchObject({
       '--os-dialog-sm': '26rem',

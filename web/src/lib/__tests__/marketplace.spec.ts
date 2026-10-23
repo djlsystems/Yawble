@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import type { MarketplaceCatalog } from '../../api/types';
+import type { CatalogContents, MarketplaceCatalog, MarketplacePackage } from '../../api/types';
 import { installedRow } from '../../test/solutionFixtures';
 import { published } from '../../test/catalogFixtures';
-import { PROVIDER_WORDS, connectionWords, providerWords, updateFor } from '../marketplace';
+import { PROVIDER_WORDS, connectionWords, contentsLines, includedInWords, packageMatches, providerWords, updateFor } from '../marketplace';
 
 /**
  * Every provider id the Host knows, as `PluginConnectionSlot.Parse` takes them
@@ -42,5 +42,55 @@ describe('an installed package with a newer version in the catalog', () => {
   it('is matched by package id, not by the team it was installed on', () => {
     expect(updateFor(installedRow('acme-jobs', 'Acme jobs', '1.0.0', 'job-tracker'), catalog)?.version).toBe('1.1.0');
     expect(updateFor(installedRow('job-tracker', 'Job tracker', '1.0.0', 'other'), catalog)).toBeNull();
+  });
+});
+
+describe("a card's contents, in bullets", () => {
+  const none: CatalogContents = { plugins: [], members: [], skills: [], triggers: [], sites: [], settings: [], secrets: [], connections: [], events: [] };
+
+  it('says nothing without contents, so the card shows what it showed before', () => {
+    expect(contentsLines({ kind: 'solution', contents: undefined })).toEqual([]);
+    expect(contentsLines({ kind: 'plugin', contents: null })).toEqual([]);
+    expect(includedInWords({ kind: 'plugin', includedIn: undefined })).toBe('');
+  });
+
+  it("names a member by its role, Agent for an agent, and by name alone when it has neither", () => {
+    expect(contentsLines({
+      kind: 'solution',
+      contents: { ...none, members: [{ name: 'A', role: 'Reads', agent: false }, { name: 'B', role: 'ignored', agent: true }, { name: 'C', role: null, agent: false }] },
+    })).toEqual(['Member A: Reads', 'Member B: Agent', 'Member C']);
+  });
+
+  it('says a trigger in its words, or by its name when it has none; a setting or key by its label, or its name', () => {
+    expect(contentsLines({ kind: 'solution', contents: { ...none, triggers: [{ name: 'nightly', words: '' }] } })).toEqual(['Runs nightly']);
+    expect(contentsLines({
+      kind: 'plugin',
+      contents: {
+        ...none,
+        settings: [{ name: 'limit', label: '', kind: 'number', required: false, default: '20' }],
+        secrets: [{ name: 'TOKEN', label: '', required: false, masked: true }],
+        connections: [{ slot: '', providers: [], required: false }],
+        events: [{ type: 'thing.done', summary: '' }],
+      },
+    })).toEqual(['Setting: limit', 'Key: TOKEN', 'Sign-in: an account', 'Announces: thing.done']);
+  });
+
+  it("names a plugin's solutions on one line, and never on a solution's card", () => {
+    const includedIn = [{ id: 'one', name: 'One' }, { id: 'two', name: '' }];
+    expect(includedInWords({ kind: 'plugin', includedIn })).toBe('Included in One, two');
+    expect(includedInWords({ kind: 'solution', includedIn })).toBe('');
+  });
+
+  it('lets the filter find a package by what it holds and what includes it', () => {
+    const plugin = {
+      id: 'p', kind: 'plugin', name: 'P', summary: '', version: '1.0.0', needs: [],
+      catalogNeeds: { connections: [], secrets: [], inputs: [], runtimes: [] },
+      installed: false, installedVersion: null, installedOn: [], updateAvailable: false,
+      contents: { ...none, events: [{ type: 'x', summary: 'A parcel arrived' }] },
+      includedIn: [{ id: 's', name: 'Shipping desk' }],
+    } satisfies MarketplacePackage;
+    expect(packageMatches(plugin, 'parcel')).toBe(true);
+    expect(packageMatches(plugin, 'shipping')).toBe(true);
+    expect(packageMatches(plugin, 'nowhere')).toBe(false);
   });
 });

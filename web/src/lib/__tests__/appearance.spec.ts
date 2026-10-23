@@ -61,6 +61,7 @@ describe("a person's own theme", () => {
 
     expect(tokens['--os-ink']).toBe('#ffffff');
     expect(tokens['--os-primary']).toBe('#00a0ff');
+    expect(tokens['--os-kind-solution']).toBe('#00a0ff');
     expect(tokens['--q-primary']).toBe('#00a0ff');
     expect(tokens['--os-paper']).toBe(PRESETS.find((p) => p.id === 'soft-dark')!.colours.background);
     for (const value of Object.values(tokens)) expect(value).toMatch(/^#[0-9a-f]{6}$/);
