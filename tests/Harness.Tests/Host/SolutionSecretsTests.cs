@@ -173,14 +173,39 @@ public sealed class SolutionSecretsTests(HostFixture host) : IClassFixture<HostF
         }
     }
 
+    /// <summary>A neutral package whose one plugin member, Keeper, binds a masked `token` to a key
+    /// and has an unmasked `account`.</summary>
+    private string KeyedPackage()
+    {
+        var pluginId = $"pack-{Guid.NewGuid().ToString("N")[..8]}";
+        var folder = SolutionSamples.Neutral(
+            Path.Combine(Get<TeamDocuments>().EnsureFor(host.Alpha), "packages", Guid.NewGuid().ToString("N")), pluginId, [], []);
+
+        var solution = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Path.Combine(folder, "solution.json")))!;
+        solution["members"]![0]!["secrets"] = new System.Text.Json.Nodes.JsonObject { ["token"] = "FIXTURE_PACK_TOKEN" };
+        File.WriteAllText(Path.Combine(folder, "solution.json"), solution.ToJsonString());
+
+        var manifestPath = Path.Combine(folder, "plugins", pluginId, "plugin.json");
+        var manifest = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(manifestPath))!;
+        manifest["secrets"] = System.Text.Json.Nodes.JsonNode.Parse(
+            """
+            {
+              "token": { "description": "The service's token.", "required": true, "label": "Service token" },
+              "account": { "description": "The account's name.", "masked": false }
+            }
+            """);
+        File.WriteAllText(manifestPath, manifest.ToJsonString());
+
+        return folder;
+    }
+
     [Fact]
     public async Task A_value_typed_in_the_wizard_is_the_members_own_kept_with_its_hire_and_never_answered()
     {
-        var typed = $"typed-usajobs-{Guid.NewGuid():N}";
-        var agent = $"typed-agent-{Guid.NewGuid():N}";
+        var typed = $"typed-token-{Guid.NewGuid():N}";
         using var client = await host.PersonAsync();
         var person = new Recorded(client);
-        var folder = Package();
+        var folder = KeyedPackage();
 
         // A value that cannot be kept is refused naming the member and the field, and makes no team.
         var refusedName = Unique("Refused");
@@ -188,12 +213,11 @@ public sealed class SolutionSecretsTests(HostFixture host) : IClassFixture<HostF
         {
             folder,
             teamName = refusedName,
-            settings = Sources("sample", "usajobs"),
-            secretValues = new Dictionary<string, Dictionary<string, string>> { ["Scout"] = new() { ["usajobsApiKey"] = "abc" } },
+            secretValues = new Dictionary<string, Dictionary<string, string>> { ["Keeper"] = new() { ["token"] = "abc" } },
         }, Ct))
         {
             Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
-            Assert.Contains("'Scout': `usajobsApiKey`: the value is shorter than 4", await refused.Content.ReadAsStringAsync(Ct));
+            Assert.Contains("'Keeper': `token`: the value is shorter than 4", await refused.Content.ReadAsStringAsync(Ct));
         }
 
         Assert.Null(Get<TeamRegistry>().ExistingName(ContainerId.DeriveName(refusedName)!));
@@ -202,35 +226,26 @@ public sealed class SolutionSecretsTests(HostFixture host) : IClassFixture<HostF
         {
             folder,
             teamName = Unique("Typed"),
-            settings = Sources("sample", "usajobs"),
-            secretValues = new Dictionary<string, Dictionary<string, string>>
-            {
-                ["Scout"] = new() { ["usajobsApiKey"] = typed, ["usajobsUserAgent"] = agent },
-            },
+            secretValues = new Dictionary<string, Dictionary<string, string>> { ["Keeper"] = new() { ["token"] = typed } },
         });
         Assert.True(done.GetProperty("ok").GetBoolean(), done.ToString());
         var team = done.GetProperty("team").GetString()!;
 
-        // The member's own values, beside the package's key binding, which stays.
-        var scout = new ContainerId(team, "Scout");
-        var own = await Get<PluginMemberSecretStore>().ValuesAsync(scout, Ct);
-        Assert.Equal(typed, own["usajobsApiKey"]);
-        Assert.Equal(agent, own["usajobsUserAgent"]);
-        Assert.Equal("USAJOBS_API_KEY", (await Get<IPluginMemberSettingsStore>().ForAsync(scout, Ct)).Secrets["usajobsApiKey"]);
-        Assert.NotNull(await Get<ITenantLog>().FindLatestAsync(TenantActions.MemberSecretSet, $"{team}/Scout", Ct));
+        // The member's own value, beside the package's key binding, which stays.
+        var keeper = new ContainerId(team, "Keeper");
+        Assert.Equal(typed, (await Get<PluginMemberSecretStore>().ValuesAsync(keeper, Ct))["token"]);
+        Assert.Equal("FIXTURE_PACK_TOKEN", (await Get<IPluginMemberSettingsStore>().ForAsync(keeper, Ct)).Secrets["token"]);
+        Assert.NotNull(await Get<ITenantLog>().FindLatestAsync(TenantActions.MemberSecretSet, $"{team}/Keeper", Ct));
 
-        // The result says each is set from the member, and asks for neither.
+        // The result says it is set from the member, labelled, and asks for nothing.
         var result = ByKey(done.GetProperty("secrets"));
-        Assert.True(result["USAJOBS_API_KEY"].GetProperty("set").GetBoolean());
-        Assert.Equal("member", result["USAJOBS_API_KEY"].GetProperty("source").GetString());
-        Assert.DoesNotContain("USAJOBS_API_KEY", done.GetProperty("unset").EnumerateArray().Select(k => k.GetString()));
-        Assert.DoesNotContain("usajobsApiKey", done.GetProperty("unsetFields").EnumerateArray().Select(f => f.GetProperty("field").GetString()));
+        Assert.True(result["FIXTURE_PACK_TOKEN"].GetProperty("set").GetBoolean());
+        Assert.Equal("member", result["FIXTURE_PACK_TOKEN"].GetProperty("source").GetString());
+        Assert.Equal("Service token", result["FIXTURE_PACK_TOKEN"].GetProperty("label").GetString());
+        Assert.Empty(done.GetProperty("unset").EnumerateArray());
+        Assert.Empty(done.GetProperty("unsetFields").EnumerateArray());
 
-        Assert.All(person.Bodies, body =>
-        {
-            Assert.DoesNotContain(typed, body, StringComparison.Ordinal);
-            Assert.DoesNotContain(agent, body, StringComparison.Ordinal);
-        });
+        Assert.All(person.Bodies, body => Assert.DoesNotContain(typed, body, StringComparison.Ordinal));
     }
 
     [Fact]
