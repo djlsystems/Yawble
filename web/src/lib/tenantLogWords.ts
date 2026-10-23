@@ -567,6 +567,27 @@ const words: Record<string, Words> = {
         names(d, 'connections') && `connections ${names(d, 'connections')}`,
       ]),
   },
+  'member.secret-set': {
+    did: "set a plugin member's secret",
+    detail: (d) => sentence([`${text(d, 'field') ?? 'a secret'} set${text(d, 'member') ? ` for ${text(d, 'member')}` : ''}${onTeam(d)}`, text(d, 'plugin') && `plugin ${text(d, 'plugin')}`]),
+  },
+  'member.secret-replaced': {
+    did: "replaced a plugin member's secret",
+    detail: (d) => sentence([`${text(d, 'field') ?? 'a secret'} replaced${text(d, 'member') ? ` for ${text(d, 'member')}` : ''}${onTeam(d)}`, text(d, 'plugin') && `plugin ${text(d, 'plugin')}`]),
+  },
+  'member.secret-cleared': {
+    did: "cleared a plugin member's secret",
+    detail: (d) => sentence([`${text(d, 'field') ?? 'a secret'} cleared${text(d, 'member') ? ` for ${text(d, 'member')}` : ''}${onTeam(d)}`, text(d, 'plugin') && `plugin ${text(d, 'plugin')}`]),
+  },
+  'member.secrets-copied': {
+    did: "copied stored keys onto plugin members",
+    detail: (d) =>
+      sentence([
+        num(d, 'keys') !== null && `${count(num(d, 'keys')!, 'key')} copied`,
+        num(d, 'fields') !== null && `${count(num(d, 'fields')!, 'field')}`,
+        num(d, 'members') !== null && `${count(num(d, 'members')!, 'member')}`,
+      ]),
+  },
   'member.connections-changed': {
     did: "changed a member's connections",
     detail: (d) =>
