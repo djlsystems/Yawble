@@ -343,7 +343,7 @@ link. The Host names no catalog host: the origin is the one the operator configu
 
 Pinned by `PluginAdvancedSettingsTests`, `PluginFieldLabelsTests`,
 `MarketplaceTests.A_plugins_page_is_the_catalog_origin_and_its_id_when_the_catalog_lists_it_and_null_otherwise`
-and `PluginMemberSecretsTests.The_settings_read_answers_no_marketplace_page_when_no_catalog_lists_the_plugin`.
+and `PluginMemberSecretsTests.The_settings_read_answers_the_plugins_description_and_no_marketplace_page_when_no_catalog_lists_the_plugin`.
 
 ### Number bounds
 
