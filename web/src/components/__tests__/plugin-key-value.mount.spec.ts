@@ -97,6 +97,7 @@ const stored: PluginMemberSettings = hostSettings(sampleDns, {
   secrets: { apiKey: 'LEGACY_DNS_KEY' },
   secretStates: savedStates,
   marketplaceUrl: MarketplacePage,
+  description: sampleDns.description,
 });
 
 const dnsOne = {
@@ -302,10 +303,13 @@ describe('Member settings, a plugin member with secrets', () => {
     wrapper.unmount();
   });
 
-  it('shows a Documentation link opening the marketplace page in a new tab', async () => {
+  it("shows the description's first paragraph and a Documentation link opening the marketplace page in a new tab", async () => {
     const wrapper = await mountSettings();
 
-    const link = bodyFind('[data-member-plugin-settings] [data-plugin-documentation]') as HTMLAnchorElement | null;
+    const about = bodyFind('[data-member-plugin-settings] [data-plugin-about]')!;
+    expect(about.querySelector('[data-plugin-description]')?.textContent).toBe("Keeps a zone's records in step.");
+    expect(about.textContent).not.toContain('Setting it up');
+    const link = about.querySelector('[data-plugin-documentation]') as HTMLAnchorElement | null;
     expect(link?.textContent).toBe('Documentation');
     expect(link?.getAttribute('href')).toBe(MarketplacePage);
     expect(link?.getAttribute('target')).toBe('_blank');
@@ -313,15 +317,36 @@ describe('Member settings, a plugin member with secrets', () => {
     wrapper.unmount();
   });
 
-  it('shows no Documentation link when the catalog does not list the plugin', async () => {
+  it('shows the whole description and no Documentation link when the catalog does not list the plugin', async () => {
     getPluginSettings.mockResolvedValue({ ...structuredClone(stored), marketplaceUrl: null });
     const wrapper = await mountSettings();
 
-    expect(bodyFind('[data-member-plugin-settings]')).not.toBeNull();
+    const description = bodyFind('[data-member-plugin-settings] [data-plugin-description]')!;
+    expect(description.textContent).toContain("Keeps a zone's records in step.");
+    expect(description.textContent).toContain('Setting it up: create an account key, allow this address, then paste the key.');
     expect(bodyFind('[data-plugin-documentation]')).toBeNull();
     expect(bodyText()).not.toContain('Documentation');
 
     wrapper.unmount();
+  });
+
+  it('shows no description and no empty block when the plugin has none, and no link when the catalog does not list it', async () => {
+    getPluginSettings.mockResolvedValue({ ...structuredClone(stored), description: null });
+    const listed = await mountSettings();
+
+    expect(bodyFind('[data-member-plugin-settings] [data-plugin-description]')).toBeNull();
+    expect(bodyFind('[data-member-plugin-settings] [data-plugin-about]')?.textContent?.trim()).toBe('Documentation');
+    listed.unmount();
+    resetBody();
+
+    getPluginSettings.mockResolvedValue({ ...structuredClone(stored), description: null, marketplaceUrl: null });
+    const unlisted = await mountSettings();
+
+    expect(bodyFind('[data-member-plugin-settings]')).not.toBeNull();
+    expect(bodyFind('[data-plugin-about]')).toBeNull();
+    expect(bodyFind('[data-plugin-description]')).toBeNull();
+
+    unlisted.unmount();
   });
 
   it('says "Not set." under a field with no value, and holds Save while a required one has none', async () => {

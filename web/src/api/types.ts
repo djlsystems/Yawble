@@ -3056,6 +3056,8 @@ export interface PluginMemberSettings {
   secretStates?: PluginSecretState[]
   /** The plugin's marketplace page when the catalog lists it, else null. */
   marketplaceUrl?: string | null
+  /** The manifest's whole description, paragraphs split by a blank line; null when it has none. */
+  description?: string | null
 }
 
 /** Where a run would get a secret field's value now: the member's own value, its bound key (stored, or the Host's environment), or nowhere. */
@@ -3744,7 +3746,10 @@ export interface SolutionSecret {
 
 /** A needed secret field still without a value from any source, as an install's result names it. */
 export interface SolutionUnsetField {
+  /** The package's member name. */
   member: string
+  /** The container that member was hired as on the result's team: the `{member}` of the member routes. */
+  container?: string | null
   field: string
   label: string | null
 }

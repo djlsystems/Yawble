@@ -2,6 +2,7 @@
 import FieldHelp from './FieldHelp.vue';
 import ChipListInput from './ChipListInput.vue';
 import ConnectionPicker from './ConnectionPicker.vue';
+import MemberSettingsDialog from './MemberSettingsDialog.vue';
 import SetupSteps from './SetupSteps.vue';
 import SolutionPlanReview from './SolutionPlanReview.vue';
 import SlotReconnect from './SlotReconnect.vue';
@@ -29,6 +30,7 @@ import {
   type InstalledSolution,
   type SolutionCheck,
   type SolutionConnectionOption,
+  type ContainerSnapshot,
   type SolutionDiff,
   type SolutionDiffSection,
   type SolutionInstallResult,
@@ -94,7 +96,8 @@ import { useConsoleStore } from '../stores/console';
  *    field offers one box for that member's OWN value (a password box, or a text box for a field
  *    the manifest declares `masked: false`); what is typed rides Install (or Update) as
  *    `secretValues` and is that member's alone. The result lists each needed field still unset
- *    (`unsetFields`), to be set in the member's settings.
+ *    (`unsetFields`) under its member, whose "Settings" opens that member's settings - the
+ *    container it was hired as (`container`), never the package's member name.
  *    Skipping a required one is allowed; the team then shows as blocked, naming it, until provided.
  * 4. **Install**: nothing is written before the person presses Install. A failed step is named by
  *    its number and title, and the Host undid everything. After a success the chosen documents are
@@ -723,10 +726,40 @@ const missingProblem = ref('');
 
 const succeeded = computed(() => (result.value && result.value.ok ? result.value : null));
 
-/** Each needed secret field the result says has no value yet, by its label and member. */
-const unsetSecrets = computed(() =>
-  (succeeded.value?.unsetFields ?? []).map((entry) => ({ ...entry, label: fieldLabel(entry.field, entry) })),
-);
+/** Each needed secret field the result says has no value yet, by its label, grouped under its member. */
+const unsetMembers = computed(() => {
+  const groups: { member: string; container: string; labels: { field: string; label: string }[] }[] = [];
+  for (const entry of succeeded.value?.unsetFields ?? []) {
+    const container = entry.container || entry.member;
+    let group = groups.find((candidate) => candidate.container === container);
+    if (!group) groups.push((group = { member: entry.member, container, labels: [] }));
+    group.labels.push({ field: entry.field, label: fieldLabel(entry.field, entry) });
+  }
+  return groups;
+});
+
+/** Member settings for an unset field's member: the board's snapshot of the container it was hired as. */
+const settingsSnapshot = ref<ContainerSnapshot | null>(null);
+const settingsOpen = ref(false);
+const settingsProblem = ref('');
+
+async function openMemberSettings(container: string) {
+  const team = succeeded.value?.team;
+  if (!team) return;
+  settingsProblem.value = '';
+  const find = () => board.teams.find((candidate) => candidate.id === team)?.containers.find((member) => member.id === container);
+  let snapshot = find();
+  if (!snapshot) {
+    await board.refreshForTeamCreated(team);
+    snapshot = find();
+  }
+  if (!snapshot) {
+    settingsProblem.value = `${container} is not on the board yet, so its settings cannot be opened here.`;
+    return;
+  }
+  settingsSnapshot.value = snapshot;
+  settingsOpen.value = true;
+}
 /** Each schedule's first run, as the result names it: ran now, or when it first runs. */
 const firstRuns = computed(() =>
   (succeeded.value?.firstRuns ?? []).map((run) => ({ trigger: run.trigger, ranNow: run.ranNow, line: firstRunLine(run) + theirClock(run) })),
@@ -1276,16 +1309,25 @@ function next() {
                 </div>
               </div>
 
-              <div v-if="unsetSecrets.length > 0" class="q-mt-sm" data-unset-secrets>
+              <div v-if="unsetMembers.length > 0" class="q-mt-sm" data-unset-secrets>
                 <div>These are still not set. Each one's source fails until it is; set it in the member's settings:</div>
-                <div
-                  v-for="secret in unsetSecrets"
-                  :key="`${secret.member}/${secret.field}`"
-                  class="q-mb-xs"
-                  :data-unset-secret="`${secret.member}/${secret.field}`"
-                >
-                  {{ secret.label }} · {{ secret.member }}
+                <div v-for="group in unsetMembers" :key="group.container" class="q-mb-xs" :data-unset-member="group.container">
+                  <span class="text-weight-medium">{{ group.member }}</span>:
+                  <span v-for="(secret, index) in group.labels" :key="secret.field" :data-unset-secret="`${group.member}/${secret.field}`"
+                    >{{ index > 0 ? ', ' : '' }}{{ secret.label }}</span
+                  >
+                  <q-btn
+                    flat
+                    dense
+                    no-caps
+                    color="primary"
+                    label="Settings"
+                    class="q-ml-sm"
+                    :data-unset-settings="group.container"
+                    @click="openMemberSettings(group.container)"
+                  />
                 </div>
+                <div v-if="settingsProblem" class="text-negative" data-unset-settings-problem>{{ settingsProblem }}</div>
               </div>
             </template>
           </div>
@@ -1326,6 +1368,8 @@ function next() {
       </q-card-actions>
     </q-card>
   </q-dialog>
+
+  <MemberSettingsDialog v-if="settingsSnapshot" v-model="settingsOpen" :snapshot="settingsSnapshot" />
 </template>
 
 <style scoped>

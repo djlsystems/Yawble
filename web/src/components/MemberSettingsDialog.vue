@@ -61,8 +61,9 @@ import PluginSettingsForm from './PluginSettingsForm.vue';
  * validated by the Host exactly as a hire is, taking effect on the member's next run. Each secret is
  * one box for the member's own value (`secretStates` says whether it is set, by whom and when; a
  * masked value is never read); what is typed or cleared rides the same Save as `secretValues`. A
- * key binding is kept as stored and shown only in "As JSON". The plugin's Documentation link sits
- * above the settings when the catalog lists it (`marketplaceUrl`).
+ * key binding is kept as stored and shown only in "As JSON". Above the settings sits what the plugin
+ * is, as Add member shows it: its description's first paragraph and a Documentation link when the
+ * catalog lists it (`marketplaceUrl`), else the whole description.
  *
  * The Agent IS editable. The preset is resolved by name on every invocation, so a repoint is a
  * single write and takes effect on the member’s next wake, with no Host restart. The manager can be repointed like any other member.
@@ -161,6 +162,7 @@ const pluginStates = ref<PluginSecretState[]>([]);
 const pluginValues = ref<SecretValues>({});
 /** The plugin's marketplace page, or null when the catalog does not list it. */
 const pluginUrl = ref<string | null>(null);
+const pluginDescription = ref<string | null>(null);
 /** Slot -> connection id; saved with the settings, which replace the bindings whole. */
 const pluginConnections = ref<Record<string, string>>({});
 const pluginSaved = ref('');
@@ -226,6 +228,7 @@ async function loadPluginSettings() {
     pluginStates.value = settings.secretStates ?? [];
     pluginValues.value = {};
     pluginUrl.value = settings.marketplaceUrl ?? null;
+    pluginDescription.value = settings.description ?? null;
     pluginShape.value = { ...shape, stored: { config: pluginConfig.value, outOfRange: settings.outOfRange ?? {} } };
     pluginSaved.value = JSON.stringify(settingsBody(shape, pluginConfig.value, pluginSecrets.value, pluginConnections.value));
   } catch (cause) {
@@ -491,7 +494,7 @@ async function submit() {
              what is stored, one box per secret for this member's own value. -->
         <div v-if="isPlugin" class="q-gutter-sm" data-member-plugin-settings>
           <div class="text-subtitle2">Settings</div>
-          <PluginAbout v-if="pluginShape" description="" :url="pluginUrl" />
+          <PluginAbout v-if="pluginShape" :description="pluginDescription" :url="pluginUrl" />
           <PluginSettingsForm
             v-if="pluginShape"
             v-model:config="pluginConfig"

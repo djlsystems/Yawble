@@ -6,13 +6,15 @@
 // member's OWN value: a password box, or a text box for a field declared `masked: false`. What is
 // typed rides Install as `secretValues`; no key is written. A secret for a source the person leaves
 // off is not needed, and follows the person's choice. The result lists the fields still unset
-// (`unsetFields`), to be set in the member's settings.
+// (`unsetFields`) under each member, with a link to that member's settings by its container.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import type { VueWrapper } from '@vue/test-utils';
 import { QSelect } from 'quasar';
 
 import SolutionWizard from '../SolutionWizard.vue';
+import { useConsoleStore } from '../../stores/console';
+import { asMemberId, asTeamId, type ContainerSnapshot, type Team } from '../../api/types';
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
 import { button, field, settle, type } from '../../test/formProbe';
 import { Folder, fakeHost, hostSecrets, reply, steps, wizardRoutes, type Call } from '../../test/solutionFixtures';
@@ -40,10 +42,18 @@ beforeEach(() => {
                   steps: steps(8),
                   secrets: hostSecrets().map((secret) => ({ ...secret, needed: secret.key !== 'THEMUSE_API_KEY' })),
                   unset: ['USAJOBS_API_KEY'],
-                  unsetFields: [{ member: 'Scout', field: 'usajobsApiKey', label: 'USAJOBS API key' }],
+                  // The container differs from the package member name: only `container` is the address.
+                  unsetFields: [
+                    { member: 'Scout', container: 'scout-2', field: 'usajobsApiKey', label: 'USAJOBS API key' },
+                    { member: 'Scout', container: 'scout-2', field: 'contactEmail', label: null },
+                  ],
                 })
               : undefined,
           (call) => (call.url === '/api/teams/job-tracker/solution' ? reply(200, { team: 'job-tracker', missing: [] }) : undefined),
+          (call) =>
+            call.url === '/api/teams/job-tracker/members/scout-2/plugin-settings'
+              ? reply(200, { team: 'job-tracker', member: 'scout-2', plugin: 'job-scout', version: '1.0.0', config: {}, secrets: {}, fields: {}, secretFields: {} })
+              : undefined,
           ...wizardRoutes({ secrets: hostSecrets() }),
         ],
         calls,
@@ -146,16 +156,50 @@ describe('Solution wizard - secrets', () => {
     expect(install.body).not.toHaveProperty('secretValues');
   });
 
-  it('the result lists each needed field still unset by its label and member, never a key name', async () => {
+  it('the result lists each needed field still unset by its label under its member, never a key name', async () => {
     await yourPart();
     await installNow();
 
     const list = bodyFind('[data-unset-secrets]')!;
     expect(list).not.toBeNull();
     expect(list.textContent).toContain("set it in the member's settings");
-    const row = bodyFind('[data-unset-secret="Scout/usajobsApiKey"]')!;
-    expect(row.textContent).toContain('USAJOBS API key · Scout');
+    const group = bodyFind('[data-unset-member="scout-2"]')!;
+    expect(group.textContent).toContain('Scout');
+    expect(group.querySelector('[data-unset-secret="Scout/usajobsApiKey"]')?.textContent).toBe('USAJOBS API key');
+    // A field with no label is named in words.
+    expect(group.querySelector('[data-unset-secret="Scout/contactEmail"]')?.textContent).toBe(', Contact email');
     expect(list.textContent).not.toContain('USAJOBS_API_KEY');
     expect(bodyFind('[data-unset-secret="Scout/adzunaAppId"]')).toBeNull();
+  });
+
+  it("each unset member's Settings opens that member's settings by the container it was hired as", async () => {
+    await yourPart();
+    await installNow();
+
+    const scout = {
+      team: asTeamId('job-tracker'),
+      id: asMemberId('scout-2'),
+      name: 'Scout',
+      agent: 'plugin:job-scout',
+      kind: 'plugin',
+      state: 'Idle',
+      queueDepth: 0,
+      ceiling: 16,
+      subscribes: [],
+      currentCorrelation: null,
+      sinceSeq: 0,
+    } as unknown as ContainerSnapshot;
+    const board = useConsoleStore();
+    board.teams = [{ id: asTeamId('job-tracker'), name: 'Job Tracker', memberAgents: [], containers: [scout] } as unknown as Team];
+    board.managerName = asMemberId('Manager');
+
+    (bodyFind('[data-unset-settings="scout-2"]') as HTMLElement).click();
+    await settle();
+    await settle();
+
+    expect(bodyFind('[data-unset-settings-problem]')).toBeNull();
+    expect(calls.some((call) => call.url === '/api/teams/job-tracker/members/scout-2/plugin-settings')).toBe(true);
+    expect(calls.some((call) => call.url.includes('/members/Scout/'))).toBe(false);
+    expect(bodyFind('[data-member-plugin-settings]')).not.toBeNull();
   });
 });
