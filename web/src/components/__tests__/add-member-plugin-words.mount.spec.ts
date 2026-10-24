@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 //
 // WHAT THE ADD MEMBER DIALOG SAYS WHILE HIRING A PLUGIN, line by line: where the picker's choices
-// come from, the Agent install line (not for a plugin), whether a secret's key is set on the Host
-// and how to set it, and a connection slot's words - one sentence, and no red line while its picker
+// come from, the Agent install line (not for a plugin), whether a secret has a value yet, and a
+// connection slot's words - one sentence, and no red line while its picker
 // and Connect are right there in the form.
 //
 // THE MOCK IS OF `api/client`: no route is reached.
@@ -29,10 +29,9 @@ vi.mock('../../api/client', async (importOriginal) => ({
 
 import AddMemberDialog from '../AddMemberDialog.vue';
 import type { Agent, InstalledPlugin, SecretKeyState, TeamId } from '../../api/types';
-import { bodyFind, bodyText, helpTexts, mountDialog, resetBody } from '../../test/mountQuasar';
+import { bodyFind, bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
 import { hostList, hostPlugin, hostProvider, hostSecret, hostSlot } from '../../test/pluginFixtures';
 import { button, settle, type } from '../../test/formProbe';
-import { productCli } from '../../presentation/product';
 
 const headless = (name: string): Agent => ({ name, mode: 'Headless' });
 
@@ -93,12 +92,6 @@ async function choose(wrapper: Wrapper, value: string) {
   await settle();
 }
 
-/** Past the form's pause after typing, and the answer it asked for. */
-async function afterTyping() {
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  await settle();
-}
-
 describe('Add member, hiring a plugin: what each line says', () => {
   it("the Agent hint says Agents come from the team's allowlist and plugins from those installed", async () => {
     const wrapper = await mountDialog(AddMemberDialog, props);
@@ -126,33 +119,17 @@ describe('Add member, hiring a plugin: what each line says', () => {
     wrapper.unmount();
   });
 
-  it("says whether a secret's key is set on the Host, and how to set it when it is not", async () => {
+  it("says a secret is not set until a value is typed, and that the value is saved with Add member", async () => {
     const wrapper = await mountDialog(AddMemberDialog, props);
     await choose(wrapper, 'plugin:sample-echo-go');
 
-    await type('Secret token: key name', 'ECHO_TOKEN');
-    await afterTyping();
+    expect(bodyFind('[data-secret-field="token"]')?.textContent?.trim()).toBe('Not set.');
 
-    expect(getSecretKey).toHaveBeenCalledWith('ECHO_TOKEN');
-    expect(bodyFind('[data-secret-field="token"]')?.getAttribute('data-secret-key-state')).toBe('set');
-    expect(bodyFind('[data-secret-field="token"]')?.textContent?.trim()).toBe("Set in this Host's environment.");
+    await type('Token', 'token-value-1');
 
-    await type('Secret token: key name', 'ECHO_OTHER');
-    await afterTyping();
-
-    const unset = bodyFind('[data-secret-field="token"]');
-    expect(unset?.getAttribute('data-secret-key-state')).toBe('unset');
-    expect(unset?.textContent).toContain('Not set on this Host');
-    // The screen first - the value field above, saved by the dialog's own button - and the CLI
-    // second, behind the value field's info icon.
-    expect(unset?.textContent?.trim()).toBe(
-      'Not set on this Host: the plugin runs without it until it is. Type its value above and press Add member.',
-    );
-    const valueHelp = helpTexts(bodyFind('[data-secret-value="ECHO_OTHER"]')!).join(' ');
-    expect(valueHelp).toContain(`${productCli} secret set ECHO_OTHER`);
-    expect(valueHelp).toContain(`${productCli} up`);
-    // Asked by name only: the form sends the key and nothing else.
-    expect(getSecretKey.mock.calls.map((call) => call.length)).toEqual([1, 1]);
+    expect(bodyFind('[data-secret-field="token"]')?.textContent?.trim()).toBe('Saved when you press Add member.');
+    // Nothing is asked of the Host about a key: the value is the new member's own.
+    expect(getSecretKey).not.toHaveBeenCalled();
 
     wrapper.unmount();
   });

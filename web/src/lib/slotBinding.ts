@@ -1,13 +1,14 @@
 import { getPluginSettings, savePluginSettings } from '../api/client';
 import type { PluginMemberSettings } from '../api/types';
-import { initialConfig, initialSecrets, settingsBody, type PluginSettingsShape } from './pluginSettings';
+import { initialConfig, saveBody, type PluginSettingsShape } from './pluginSettings';
 
 /**
  * BINDS ONE SLOT OF A PLUGIN MEMBER through the member's settings route - the one a person's binding
  * uses, so the Host runs the same scope check and writes the same tenant row with it. The route
  * replaces the whole body, so the member's STORED settings are read and sent back as they are, with
- * only this slot changed: an edit not yet saved in an open form is not saved by it. A `null`
- * connection unbinds the slot.
+ * only this slot changed: an edit not yet saved in an open form is not saved by it. No `secrets` and
+ * no `secretValues`: the Host keeps the key bindings and the member's values. A `null` connection
+ * unbinds the slot.
  *
  * A refusal is thrown as the Host said it - its sentence, and `reconnect` on the body when only
  * scopes are missing. Answers the settings as now stored.
@@ -29,7 +30,7 @@ export async function bindSlot(
   return savePluginSettings(
     team,
     member,
-    settingsBody(shape, initialConfig(shape, stored.config), initialSecrets(shape, stored.secrets), connectionId ? { ...others, [slot]: connectionId } : others),
+    saveBody(shape, initialConfig(shape, stored.config), {}, connectionId ? { ...others, [slot]: connectionId } : others),
   );
 }
 
@@ -70,6 +71,6 @@ export async function saveSettingValues(
   return savePluginSettings(
     team,
     member,
-    settingsBody(shape, config, initialSecrets(shape, stored.secrets), { ...(stored.connections ?? {}) }),
+    saveBody(shape, config, {}, { ...(stored.connections ?? {}) }),
   );
 }

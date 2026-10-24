@@ -203,16 +203,16 @@ export function hostPlan(version = '1.1.0'): SolutionPlan {
 }
 
 /**
- * The preview's secrets, as the Host names them: by key, never a value. ADZUNA_APP_ID is set on the
- * Host, USAJOBS_API_KEY is not, and THEMUSE_API_KEY is needed only when the Scout's sources hold
+ * The preview's secrets, as the Host names them: by member and field, with the key the package binds
+ * and never a value. ADZUNA_APP_ID is set on the Host (and its field unmasked), USAJOBS_API_KEY is not, and THEMUSE_API_KEY is needed only when the Scout's sources hold
  * `other` - which waits on the person's answer, so the Host says `needed: null`.
  */
 export function hostSecrets(): SolutionSecret[] {
   const setWith = (key: string) => `the operator CLI's \`secret set ${key}\` (it prompts for the value), then its \`up\` to restart the Host`;
   return [
-    { member: 'Scout', field: 'adzunaAppId', key: 'ADZUNA_APP_ID', description: 'Your Adzuna application id.', required: false, when: null, set: true, needed: true, setWith: setWith('ADZUNA_APP_ID') },
-    { member: 'Scout', field: 'usajobsApiKey', key: 'USAJOBS_API_KEY', description: 'Your USAJOBS API key.', required: false, when: null, set: false, needed: true, setWith: setWith('USAJOBS_API_KEY') },
-    { member: 'Scout', field: 'themuseApiKey', key: 'THEMUSE_API_KEY', description: 'Your The Muse API key.', required: false, when: { setting: 'sources', value: 'other' }, set: false, needed: null, setWith: setWith('THEMUSE_API_KEY') },
+    { member: 'Scout', field: 'adzunaAppId', key: 'ADZUNA_APP_ID', description: 'Your Adzuna application id.', required: false, when: null, set: true, needed: true, setWith: setWith('ADZUNA_APP_ID'), label: null, masked: false, source: 'key' },
+    { member: 'Scout', field: 'usajobsApiKey', key: 'USAJOBS_API_KEY', description: 'Your USAJOBS API key.', required: false, when: null, set: false, needed: true, setWith: setWith('USAJOBS_API_KEY'), label: 'USAJOBS API key', masked: true, source: null },
+    { member: 'Scout', field: 'themuseApiKey', key: 'THEMUSE_API_KEY', description: 'Your The Muse API key.', required: false, when: { setting: 'sources', value: 'other' }, set: false, needed: null, setWith: setWith('THEMUSE_API_KEY'), label: null, masked: true, source: null },
   ];
 }
 

@@ -26,7 +26,7 @@ The instruction text is the input. Each instruction in one batch is handled in o
 ## What comes back
 
 `output` is the transformed lines, one per instruction, and `token length N` when the member has a
-`token` secret bound. Each run that completes also publishes `plugin.sample-echo-go.done`, carrying
+`token` value (typed by a person in this member's own settings, read from stdin). Each run that completes also publishes `plugin.sample-echo-go.done`, carrying
 `length` (the output's length), in the same workflow: a trigger on that type can wake another
 member with `{event.length}`.
 

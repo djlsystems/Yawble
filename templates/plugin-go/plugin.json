@@ -16,12 +16,15 @@
       "type": "string",
       "enum": ["upper", "reverse"],
       "default": "upper",
+      "label": "Mode",
       "description": "What to do to the text."
     }
   },
   "secrets": {
     "token": {
-      "description": "A demo credential. Only its length is ever reported, never the value.",
+      "description": "A demo credential, typed by a person in this member's own settings and read from stdin. Only its length is ever reported, never the value.",
+      "label": "Demo token",
+      "masked": true,
       "required": false
     }
   },

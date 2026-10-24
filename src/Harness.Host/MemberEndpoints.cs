@@ -154,7 +154,7 @@ internal static class MemberEndpoints
             CreateContainer request, TeamRegistry teams, ITeamStore teamStore, AgentCatalog catalog,
             TenantLogging audit, AgentInstallProbe probe, HttpContext context, ISecretStore secretStore,
             IPluginMemberSettingsStore pluginSettings, PluginCatalog plugins, IUserStore users,
-            Connections connections, CancellationToken ct) =>
+            Connections connections, PluginMemberSecretStore memberSecrets, MemberDeletion deletion, CancellationToken ct) =>
         {
             // `name` is free text here too, exactly as it is for a team: the identifier is derived inside
             // TeamRegistry and never asked for. A member called "Data Ingest" is `DataIngest` on disk.
@@ -249,6 +249,34 @@ internal static class MemberEndpoints
                     }
                 }
 
+                // A SECRET VALUE IS A PERSON'S TO TYPE. An agent's hire (a Manager's credential, or a
+                // Concierge's) never carries one: incoming content reaches an agent's context, and a value
+                // an agent handled is a value it could have been steered to. Refused rather than dropped,
+                // so the agent hears it; without values its hire waits for a person (PluginReadyNotice).
+                var values = request.SecretValues ?? new Dictionary<string, string>(StringComparer.Ordinal);
+                if (values.Count > 0)
+                {
+                    if (request.Agent is not { } valuedAgent || !MemberRef.IsPlugin(valuedAgent.Trim(), out var valuedPluginId))
+                    {
+                        return Results.BadRequest(new { error = "`secretValues` belong to a plugin member; an Agent takes its settings from its preset." });
+                    }
+
+                    if (hirer is { Kind: PrincipalKind.Container or PrincipalKind.Concierge or PrincipalKind.TenantConcierge })
+                    {
+                        return Results.BadRequest(new
+                        {
+                            error = "An agent's hire cannot carry a secret value; hire without it and a person sets it in the member's settings.",
+                        });
+                    }
+
+                    if (plugins.For(valuedPluginId) is { } valuedPlugin
+                        && PluginMemberSecretStore.ChangesRefusal(
+                            valuedPlugin.Manifest, values.ToDictionary(v => v.Key, v => (string?)(v.Value ?? ""), StringComparer.Ordinal)) is { } valueRefusal)
+                    {
+                        return Results.BadRequest(new { error = valueRefusal });
+                    }
+                }
+
                 // SETTINGS ONLY A PERSON CHOOSES. A manifest marks a field `"setBy": "person"` when it
                 // widens what the plugin does outward - a real send mode, an allowlist. An agent's hire (a
                 // Manager's credential, or a Concierge's) may leave such a field at its default and nothing
@@ -336,6 +364,9 @@ internal static class MemberEndpoints
                 var agentPluginHire = hirer is { Kind: PrincipalKind.Container or PrincipalKind.Concierge or PrincipalKind.TenantConcierge }
                     && request.Agent is { } agentPlugin && MemberRef.IsPlugin(agentPlugin.Trim(), out _);
 
+                IReadOnlySet<string> valued = values.Keys.ToHashSet(StringComparer.Ordinal);
+                var hiredPluginReference = request.Agent?.Trim();
+
                 var snapshot = await teams.HireMemberAsync(
                     // THE TEAM, never a name in code - the Agent half of the same rule its Prompt follows,
                     // and refused rather than defaulted when the team has chosen none.
@@ -365,7 +396,24 @@ internal static class MemberEndpoints
                     // THE HIRER wrote the member's own instructions: a Manager through the `member` tool,
                     // or a person.
                     promptSetBy: await SystemPromptSetters.ForAsync(context, users, ct),
-                    waitForPerson: agentPluginHire);
+                    waitForPerson: agentPluginHire,
+                    valued: valued,
+
+                    // THE MEMBER'S OWN VALUES land with its settings, the binding's row and a
+                    // `member.secret-set` row each, in ONE transaction - or the member is removed again.
+                    saveSettings: values.Count == 0 || !MemberRef.IsPlugin(hiredPluginReference ?? "", out var valuedId)
+                        ? null
+                        : (member, kept, token) => memberSecrets.SaveWithSettingsAsync(
+                            member, name, valuedId!, kept,
+                            request.Connections is { Count: > 0 } valuedBindings
+                                ? [TenantLogging.Row(
+                                    context, TenantActions.MemberConnectionsChanged, $"{member.Team}/{member.Name}", name,
+                                    PluginEndpoints.ConnectionsChangedDetail(
+                                        member, valuedId!, valuedBindings.Keys.Order(StringComparer.Ordinal), PluginMemberSettings.None,
+                                        PluginMemberSettings.None with { Connections = valuedBindings }))]
+                                : [],
+                            values.ToDictionary(v => v.Key, v => (string?)v.Value, StringComparer.Ordinal),
+                            PluginEndpoints.SecretActor(context), token));
 
                 // Said in the BODY as well as the header: the body is what the `member` tool hands the
                 // Manager, and a substitution said only in a header is never seen by anyone who hired.
@@ -411,7 +459,8 @@ internal static class MemberEndpoints
                             {
                                 Connections = request.Connections ?? new Dictionary<string, string>(StringComparer.Ordinal),
                             },
-                            secretStore);
+                            secretStore,
+                            valued);
                         if (missing.Count > 0)
                         {
                             obj["waitingForPerson"] = new JsonArray([.. missing.Select(m => (JsonNode)JsonValue.Create(m)!)]);
@@ -439,6 +488,12 @@ internal static class MemberEndpoints
             catch (PluginSettingsException exception)
             {
                 return Results.BadRequest(new { error = exception.Message });
+            }
+            catch (PluginSettingsNotKeptException exception)
+            {
+                // A HIRE WHOSE VALUES CANNOT BE KEPT MAKES NO MEMBER: the one just made goes again.
+                await deletion.DeleteAsync(exception.Member.Team, exception.Member.Name, CancellationToken.None);
+                return Results.Json(new { error = exception.Message }, statusCode: StatusCodes.Status500InternalServerError);
             }
             catch (FirehoseSubscriptionException exception)
             {

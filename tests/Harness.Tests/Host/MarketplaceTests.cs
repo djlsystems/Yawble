@@ -299,6 +299,34 @@ public sealed class MarketplaceTests : IDisposable
     }
 
     [Fact]
+    public async Task A_plugins_page_is_the_catalog_origin_and_its_id_when_the_catalog_lists_it_and_null_otherwise()
+    {
+        var feed = new FakeFeed();
+        feed.Catalog = Catalog(Entry("fixture-plugin", "plugin", "1.0.0", MailZip), Entry("mail", "solution", "2.0.3", MailZip));
+        var market = Market(feed);
+
+        // Before a read: nothing is guessed.
+        Assert.Null(market.PluginPage("fixture-plugin"));
+
+        await market.CheckAsync(Ct);
+
+        // The catalog address's own origin - scheme, host and port - never a name written in the Host.
+        Assert.Equal("https://example.test:8443/marketplace/fixture-plugin", market.PluginPage("fixture-plugin"));
+        Assert.Null(market.PluginPage("not-listed"));
+        Assert.Null(market.PluginPage("mail"));
+
+        // No catalog address: no page.
+        var none = Market(new FakeFeed(address: null));
+        await none.CheckAsync(Ct);
+        Assert.Null(none.PluginPage("fixture-plugin"));
+
+        // A read that failed: no page.
+        feed.Failure = new HttpRequestException("offline");
+        await market.CheckAsync(Ct);
+        Assert.Null(market.PluginPage("fixture-plugin"));
+    }
+
+    [Fact]
     public void A_connection_slot_named_account_is_not_said_twice()
     {
         using var entry = JsonDocument.Parse("""

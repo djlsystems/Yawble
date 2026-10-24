@@ -2,18 +2,18 @@
 //
 // A PLUGIN MEMBER'S SETTINGS, AFTER HIRE. Member settings shows a Settings section: the editor Add
 // member shows, generated from the manifest - text for a string, a number box, a toggle for a bool,
-// a dropdown for an enum, chips for a list - each with its description, its default, whether it is
-// required and "Set by a person only"; Reset to default per field; secrets as key names; a read-only
-// "as JSON" view; and a save that sends only the fields that differ from their default.
+// a dropdown for an enum, chips for a list - each labelled in words, its default as an empty box's
+// placeholder, Required printed, no info icon and no Default or "Set by a person only" line; Reset
+// to default per field; one value box per secret, no key name; a read-only "as JSON" view; and a
+// save that sends only the fields that differ from their default, and no key bindings.
 //
 // THE MOCK IS OF `api/client`: validation is the Host's and is pinned server-side.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
-const { getMember, getPluginSettings, getSecretKey, listCatalog, savePluginSettings, updateMember } = vi.hoisted(() => ({
+const { getMember, getPluginSettings, listCatalog, savePluginSettings, updateMember } = vi.hoisted(() => ({
   getMember: vi.fn(),
   getPluginSettings: vi.fn(),
-  getSecretKey: vi.fn(),
   listCatalog: vi.fn(),
   savePluginSettings: vi.fn(),
   updateMember: vi.fn(),
@@ -23,7 +23,6 @@ vi.mock('../../api/client', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getMember,
   getPluginSettings,
-  getSecretKey,
   listCatalog,
   savePluginSettings,
   updateMember,
@@ -64,7 +63,11 @@ const stored: PluginMemberSettings = hostSettings(sampleEcho, {
   team: 'alpha',
   member: 'Echo',
   config: { repeat: 3, recipients: ['ops'] },
-  secrets: { token: 'ECHO_TOKEN' },
+  secrets: {},
+  secretStates: [
+    { field: 'token', label: null, masked: true, required: true, needed: true, set: true, setBy: 'person@example.com', setAt: '2026-10-23T10:00:00Z', source: 'member', key: null },
+  ],
+  marketplaceUrl: null,
 });
 
 const echo = {
@@ -82,11 +85,10 @@ const echo = {
 } as unknown as ContainerSnapshot;
 
 beforeEach(() => {
-  for (const mock of [getMember, getPluginSettings, getSecretKey, listCatalog, savePluginSettings, updateMember]) mock.mockReset();
+  for (const mock of [getMember, getPluginSettings, listCatalog, savePluginSettings, updateMember]) mock.mockReset();
 
   listCatalog.mockResolvedValue({ agents: [{ name: 'claude', mode: 'Headless' }] });
   getPluginSettings.mockResolvedValue(structuredClone(stored));
-  getSecretKey.mockImplementation(async (key: string) => ({ key, set: true, refusal: null, setWith: '', setBy: null, setAt: null, source: 'environment' }));
   savePluginSettings.mockResolvedValue(undefined);
   updateMember.mockResolvedValue({ ...echo });
 });
@@ -129,15 +131,17 @@ describe('MemberSettingsDialog, a plugin member', () => {
     expect(getPluginSettings).toHaveBeenCalledWith('alpha', 'Echo');
     expect(bodyFind('[data-member-plugin-settings]')?.textContent).toContain('Settings');
 
-    // string: a text box at its default; number: a number box holding the stored value.
-    expect(field('greeting').getAttribute('type')).toBe('text');
-    expect(field('greeting').value).toBe('hello');
-    expect(field('repeat').getAttribute('type')).toBe('number');
-    expect(field('repeat').value).toBe('3');
+    // string: a text box, empty at its default, which is its placeholder; number: a number box
+    // holding the stored value.
+    expect(field('Greeting').getAttribute('type')).toBe('text');
+    expect(field('Greeting').value).toBe('');
+    expect(field('Greeting').getAttribute('placeholder')).toBe('hello');
+    expect(field('Repeat').getAttribute('type')).toBe('number');
+    expect(field('Repeat').value).toBe('3');
 
     // enum: a dropdown of its values; bool: a toggle.
-    expect(select(wrapper, 'mode').props('options')).toEqual(['upper', 'reverse']);
-    expect(select(wrapper, 'mode').props('modelValue')).toBe('upper');
+    expect(select(wrapper, 'Mode').props('options')).toEqual(['upper', 'reverse']);
+    expect(select(wrapper, 'Mode').props('modelValue')).toBe('upper');
     expect(setting('loud').querySelector('.q-toggle')).not.toBeNull();
 
     // list: chips - chosen from the enum where there is one, else added through the Add dialog.
@@ -145,10 +149,11 @@ describe('MemberSettingsDialog, a plugin member', () => {
     expect(chips('labels')).toEqual([]);
     expect(addButtonIn(setting('labels'))).not.toBeNull();
     expect(addButtonIn(setting('recipients'))).toBeNull();
-    expect(select(wrapper, 'recipients').props('options')).toEqual([{ label: 'dev', value: 'dev' }]);
+    expect(select(wrapper, 'Recipients').props('options')).toEqual([{ label: 'dev', value: 'dev' }]);
 
-    // Secrets as KEY NAMES, filled with the bound key.
-    expect(field('Secret token: key name').value).toBe('ECHO_TOKEN');
+    // A secret is one password box for its value, starting empty, saying it is saved.
+    expect(field('Token').getAttribute('type')).toBe('password');
+    expect(field('Token').value).toBe('');
 
     // No free-form JSON: nothing in the section is a text area.
     expect(bodyFind('[data-member-plugin-settings] textarea')).toBeNull();
@@ -156,21 +161,18 @@ describe('MemberSettingsDialog, a plugin member', () => {
     wrapper.unmount();
   });
 
-  it('shows each field with its description, default, required and person-only marks', async () => {
+  it('shows Required on a field, and no info icon, Default line or person-only line', async () => {
     const wrapper = await mountSettings();
 
-    expect(setting('greeting').querySelector('[data-help]')?.getAttribute('aria-label')).toBe('What it says first.');
-    expect(setting('greeting').querySelector('[data-default]')?.textContent).toBe('Default: hello');
-    expect(setting('mode').querySelector('[data-default]')?.textContent).toBe('Default: upper');
-    expect(setting('repeat').querySelector('[data-default]')?.textContent).toBe('Default: 1');
-    expect(setting('loud').querySelector('[data-default]')?.textContent).toBe('Default: off');
-    expect(setting('labels').querySelector('[data-default]')?.textContent).toBe('Default: none');
+    expect(bodyFind('[data-member-plugin-settings] [data-help]')).toBeNull();
+    expect(bodyFind('[data-member-plugin-settings] [data-default]')).toBeNull();
+    expect(bodyFind('[data-member-plugin-settings] [data-person-only]')).toBeNull();
+    expect(bodyFind('[data-member-plugin-settings]')!.textContent).not.toContain('Default:');
+    expect(bodyFind('[data-member-plugin-settings]')!.textContent).not.toContain('Set by a person only');
+    expect(field('Repeat').getAttribute('placeholder')).toBe('1');
 
     expect(setting('recipients').querySelector('[data-required]')?.textContent).toBe('Required');
     expect(setting('greeting').querySelector('[data-required]')).toBeNull();
-
-    expect(setting('mode').querySelector('[data-person-only]')?.textContent).toBe('Set by a person only');
-    expect(setting('greeting').querySelector('[data-person-only]')).toBeNull();
 
     wrapper.unmount();
   });
@@ -186,7 +188,7 @@ describe('MemberSettingsDialog, a plugin member', () => {
     expect(updateMember).not.toHaveBeenCalled();
 
     // An enum list has no free text: its values are chosen from the dropdown.
-    select(wrapper, 'recipients').vm.$emit('update:modelValue', ['ops', 'dev']);
+    select(wrapper, 'Recipients').vm.$emit('update:modelValue', ['ops', 'dev']);
     await settle();
     expect(chips('recipients')).toEqual(['ops', 'dev']);
 
@@ -229,8 +231,8 @@ describe('MemberSettingsDialog, a plugin member', () => {
   it('resets a field to its default', async () => {
     const wrapper = await mountSettings();
 
-    const reset = () => setting('repeat').querySelector('[aria-label="Reset repeat to default"]') as HTMLButtonElement;
-    const greetingReset = setting('greeting').querySelector('[aria-label="Reset greeting to default"]') as HTMLButtonElement;
+    const reset = () => setting('repeat').querySelector('[aria-label="Reset Repeat to default"]') as HTMLButtonElement;
+    const greetingReset = setting('greeting').querySelector('[aria-label="Reset Greeting to default"]') as HTMLButtonElement;
 
     // A field at its default has nothing to reset.
     expect(greetingReset.hasAttribute('disabled')).toBe(true);
@@ -239,15 +241,19 @@ describe('MemberSettingsDialog, a plugin member', () => {
     reset().click();
     await settle();
 
-    expect(field('repeat').value).toBe('1');
+    // Back to the default: the empty box, its placeholder saying what that is.
+    expect(field('Repeat').value).toBe('');
+    expect(field('Repeat').getAttribute('placeholder')).toBe('1');
     expect(reset().hasAttribute('disabled')).toBe(true);
 
     wrapper.unmount();
   });
 
-  it('shows exactly what will be stored as JSON, read-only', async () => {
+  it('shows exactly what is stored as JSON, read-only - the one place a bound key name shows', async () => {
+    getPluginSettings.mockResolvedValue({ ...structuredClone(stored), secrets: { token: 'ECHO_TOKEN' } });
     const wrapper = await mountSettings();
 
+    expect(bodyFind('[data-member-plugin-settings]')!.textContent).not.toContain('ECHO_TOKEN');
     expect(bodyFind('[data-settings-json]')).toBeNull();
     button('As JSON').click();
     await settle();
@@ -255,7 +261,7 @@ describe('MemberSettingsDialog, a plugin member', () => {
     expect(bodyFind('[data-settings-json]')?.tagName).toBe('PRE');
     expect(json()).toEqual({ config: { repeat: 3, recipients: ['ops'] }, secrets: { token: 'ECHO_TOKEN' } });
 
-    await type('greeting', 'hi');
+    await type('Greeting', 'hi');
     expect(json()).toEqual({ config: { greeting: 'hi', repeat: 3, recipients: ['ops'] }, secrets: { token: 'ECHO_TOKEN' } });
 
     wrapper.unmount();
@@ -264,11 +270,11 @@ describe('MemberSettingsDialog, a plugin member', () => {
   it('saves only the fields that differ from their default', async () => {
     const wrapper = await mountSettings();
 
-    await type('greeting', 'hi');
+    await type('Greeting', 'hi');
     // Back to the default: left out of what is saved.
-    (setting('repeat').querySelector('[aria-label="Reset repeat to default"]') as HTMLButtonElement).click();
+    (setting('repeat').querySelector('[aria-label="Reset Repeat to default"]') as HTMLButtonElement).click();
     await settle();
-    select(wrapper, 'mode').vm.$emit('update:modelValue', 'reverse');
+    select(wrapper, 'Mode').vm.$emit('update:modelValue', 'reverse');
     await settle();
     (setting('loud').querySelector('.q-toggle') as HTMLElement).click();
     await settle();
@@ -280,7 +286,8 @@ describe('MemberSettingsDialog, a plugin member', () => {
     expect(savePluginSettings.mock.calls[0]).toEqual([
       'alpha',
       'Echo',
-      { config: { greeting: 'hi', mode: 'reverse', loud: true, recipients: ['ops'] }, secrets: { token: 'ECHO_TOKEN' } },
+      // No `secrets`: the Host keeps the key bindings, which this form never edits.
+      { config: { greeting: 'hi', mode: 'reverse', loud: true, recipients: ['ops'] } },
     ]);
 
     wrapper.unmount();
@@ -318,13 +325,15 @@ describe('MemberSettingsDialog, a plugin member', () => {
     wrapper.unmount();
   });
 
-  it('holds Save while a required secret is empty', async () => {
+  it('holds Save while a required secret is cleared with nothing to fall back to', async () => {
     const wrapper = await mountSettings();
 
-    await type('Secret token: key name', '');
+    button('Clear').click();
+    await settle();
     expect(isDisabled('Save')).toBe(true);
 
-    await type('Secret token: key name', 'OTHER_KEY');
+    button('Keep').click();
+    await settle();
     expect(isDisabled('Save')).toBe(false);
 
     wrapper.unmount();
@@ -341,7 +350,7 @@ describe('MemberSettingsDialog, a plugin member', () => {
     await settle();
 
     expect(savePluginSettings).toHaveBeenCalledTimes(1);
-    expect(savePluginSettings.mock.calls[0]![2]).toEqual({ config: { repeat: 3 }, secrets: { token: 'ECHO_TOKEN' } });
+    expect(savePluginSettings.mock.calls[0]![2]).toEqual({ config: { repeat: 3 } });
 
     wrapper.unmount();
   });
@@ -350,7 +359,7 @@ describe('MemberSettingsDialog, a plugin member', () => {
     const wrapper = await mountSettings();
 
     savePluginSettings.mockRejectedValue(Object.assign(new Error("Config field 'greeting' is too long."), { status: 400 }));
-    await type('greeting', 'hi');
+    await type('Greeting', 'hi');
     button('Save').click();
     await settle();
 
@@ -365,7 +374,7 @@ describe('MemberSettingsDialog, a plugin member', () => {
 
     const sentence = "Plugin 'sample-echo' is not installed: its active version 0.2.0 has no folder.";
     savePluginSettings.mockRejectedValue(Object.assign(new Error(sentence), { status: 409 }));
-    await type('greeting', 'hi');
+    await type('Greeting', 'hi');
     button('Save').click();
     await settle();
 

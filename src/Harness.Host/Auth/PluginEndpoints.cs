@@ -17,8 +17,8 @@ public static class PluginEndpoints
 
     public static void Map(WebApplication app)
     {
-        app.MapGet("/api/plugins", (PluginCatalog plugins, TeamRegistry teams, HttpContext context) =>
-                Results.Ok(Listing(plugins, teams, context)))
+        app.MapGet("/api/plugins", (PluginCatalog plugins, TeamRegistry teams, Marketplace marketplace, HttpContext context) =>
+                Results.Ok(Listing(plugins, teams, marketplace, context)))
             .WithTags(Area)
             .RequirePermit(Permits.Read)
             .WithSummary("The installed plugins")
@@ -29,8 +29,9 @@ public static class PluginEndpoints
                 + "directories that were NOT loaded, each with the sentence saying which field is "
                 + "wrong. `versions` lists every version folder with `active` and a `verdict` "
                 + "(installed, refused with `reason`, or inactive). Each plugin carries `members` "
-                + "(team and member hired on it) for a person, `[]` for a machine caller. No disk "
-                + "path is disclosed.");
+                + "(team and member hired on it) for a person, `[]` for a machine caller, and "
+                + "`marketplaceUrl`: the plugin's page on the package catalog's origin when the catalog "
+                + "lists it, null otherwise. No disk path is disclosed.");
 
         app.MapGet("/api/plugins/{id}/{version}/manifest", (
             [Description("The plugin's id.")] string id,
@@ -141,21 +142,27 @@ public static class PluginEndpoints
         app.MapGet("/api/teams/{team}/members/{member}/plugin-settings", async (
             [Description(Describe.Team)] string team,
             [Description("The member, as addressed in its route.")] string member,
-            TeamRegistry teams, PluginCatalog plugins, IPluginMemberSettingsStore settings, CancellationToken ct) =>
+            TeamRegistry teams, PluginCatalog plugins, IPluginMemberSettingsStore settings, MemberSecretReads reads,
+            CancellationToken ct) =>
         {
             var (found, plugin, refusal) = await PluginMemberAsync(teams, plugins, team, member, ct);
             if (refusal is not null) return refusal;
 
             var id = new ContainerId(found!.Team, found.Name);
-            return Results.Ok(Settings(id, plugin!, await settings.ForAsync(id, ct)));
+            return Results.Ok(await SettingsAsync(id, plugin!, await settings.ForAsync(id, ct), reads, ct));
         })
             .WithTags("Members")
             .HumansOnly()
             .WithSummary("A plugin member's settings")
             .WithDescription(
-                "`{ team, member, plugin, version, config, secrets, fields, secretFields, outOfRange }`: what is stored "
-                + "for this plugin member - its configuration, and each secret's LOGICAL KEY (never a value) - "
-                + "with its plugin's declarations to build the form from, and `outOfRange` - each stored number "
+                "`{ team, member, plugin, version, description, config, secrets, secretStates, fields, secretFields, "
+                + "outOfRange, marketplaceUrl }`: what is stored for this plugin member - its configuration, each secret's bound "
+                + "LOGICAL KEY if any (`secrets`), and `secretStates`, each manifest secret field as "
+                + "`GET .../secrets` answers it (whether it is set, by whom, from which source; a value only for a "
+                + "field the manifest declares `masked: false`) - with its plugin's declarations to build the form "
+                + "from (each with its `label`, and a secret's `masked`), the plugin's `description` (its manifest's, "
+                + "whole; null when it has none), `marketplaceUrl` (the plugin's page on the "
+                + "package catalog's origin when the catalog lists it, else null), and `outOfRange` - each stored number "
                 + "outside its field's bounds, by field, with the sentence a write of it is refused with; never "
                 + "rewritten, `{}` when none. 404 for an unknown member, 400 "
                 + "for a member that is not a plugin, 409 when its plugin is not installed.");
@@ -164,27 +171,39 @@ public static class PluginEndpoints
             [Description(Describe.Team)] string team,
             [Description("The member, as addressed in its route.")] string member,
             PluginSettingsChange request, TeamRegistry teams, PluginCatalog plugins,
-            IPluginMemberSettingsStore settings, ISecretStore secrets, Connections connections, IMessageLog log, HttpContext context,
+            IPluginMemberSettingsStore settings, ISecretStore secrets, PluginMemberSecretStore memberSecrets, MemberSecretReads reads,
+            Connections connections, IMessageLog log, HttpContext context,
             CancellationToken ct) =>
         {
             var (found, plugin, refusal) = await PluginMemberAsync(teams, plugins, team, member, ct);
             if (refusal is not null) return refusal;
 
             var id = new ContainerId(found!.Team, found.Name);
+            var before = await settings.ForAsync(id, ct);
             var changed = new PluginMemberSettings(
                 request.Config ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal),
-                request.Secrets ?? new Dictionary<string, string>(StringComparer.Ordinal))
+
+                // OMITTED KEEPS what is bound, as for connections: the settings screen shows no key
+                // name, so its Save sends none and unbinds nothing; `{}` unbinds every key.
+                request.Secrets ?? before.Secrets)
             {
                 // OMITTED KEEPS what is bound, so a form that knows nothing of connections cannot unbind
                 // them by saving; `{}` unbinds every slot.
-                Connections = request.Connections ?? (await settings.ForAsync(id, ct)).Connections,
+                Connections = request.Connections ?? before.Connections,
             };
 
-            var before = await settings.ForAsync(id, ct);
+            // THE MEMBER'S OWN VALUES: a string sets or replaces, null clears, a field not named stays.
+            var values = request.SecretValues ?? new Dictionary<string, string?>(StringComparer.Ordinal);
+            if (PluginMemberSecretStore.ChangesRefusal(plugin!.Manifest, values) is { } valueRefusal)
+            {
+                return Results.BadRequest(new { error = valueRefusal });
+            }
+
+            var valued = await ValuedAfterAsync(memberSecrets, id, values, ct);
 
             // EXACTLY AS A HIRE: the same check the hire runs, against the active manifest - except
             // that a value already stored, sent back unchanged, is kept even outside its bounds.
-            if (PluginMemberRunner.SettingsRefusal(plugin!.Manifest, changed, secrets, stored: before) is { } invalid)
+            if (PluginMemberRunner.SettingsRefusal(plugin.Manifest, changed, secrets, stored: before, valued: valued) is { } invalid)
             {
                 return Results.BadRequest(new { error = invalid });
             }
@@ -198,12 +217,20 @@ public static class PluginEndpoints
 
             try
             {
-                await settings.SaveAsync(
-                    id, changed,
-                    PersonChangeRows(
-                        context.User.FindFirstValue(ClaimTypes.NameIdentifier), context.User.FindFirstValue(ClaimTypes.Email),
-                        id, found.Label ?? found.Name, plugin.Manifest.Id, before, changed),
-                    ct);
+                var rows = PersonChangeRows(
+                    context.User.FindFirstValue(ClaimTypes.NameIdentifier), context.User.FindFirstValue(ClaimTypes.Email),
+                    id, found.Label ?? found.Name, plugin.Manifest.Id, before, changed);
+
+                // The settings, their rows and every value with its own row land in ONE transaction.
+                if (values.Count > 0)
+                {
+                    await memberSecrets.SaveWithSettingsAsync(
+                        id, found.Label ?? found.Name, plugin.Manifest.Id, changed, rows, values, SecretActor(context), ct);
+                }
+                else
+                {
+                    await settings.SaveAsync(id, changed, rows, ct);
+                }
             }
             catch (SqliteException exception)
             {
@@ -214,17 +241,21 @@ public static class PluginEndpoints
 
             // A PERSON'S SAVE THAT LEAVES NOTHING MISSING tells the Manager in every workflow whose run
             // of this member failed needs-person. Best effort: the save stands whatever the notice does.
-            await NoticeIfReadyAsync(log, id, found.Label ?? found.Name, plugin.Manifest, changed, secrets, ct);
+            await NoticeIfReadyAsync(log, id, found.Label ?? found.Name, plugin.Manifest, changed, secrets, valued, ct);
 
-            return Results.Ok(Settings(id, plugin, changed));
+            return Results.Ok(await SettingsAsync(id, plugin, changed, reads, ct));
         })
             .WithTags("Members")
             .HumansOnly()
             .WithSummary("Change a plugin member's settings")
             .WithDescription(
-                "Body `{ config, secrets, connections? }` REPLACES the member's configuration and secret "
-                + "bindings, and its connection bindings (slot to connection id) when `connections` is given "
-                + "(omitted keeps them; `{}` unbinds every slot). A binding must name a connection that exists, "
+                "Body `{ config, secrets?, secretValues?, connections? }` REPLACES the member's configuration, its "
+                + "secret key bindings when `secrets` is given (omitted keeps them; `{}` unbinds every key), and its "
+                + "connection bindings (slot to connection id) when `connections` is given "
+                + "(omitted keeps them; `{}` unbinds every slot). `secretValues` sets the member's OWN value for each "
+                + "secret field named (null clears it; a field not named is left), checked as "
+                + "`PUT .../secrets/{field}` checks it, each with its `member.secret-*` row in the same transaction "
+                + "as the settings. A binding must name a connection that exists, "
                 + "of a provider the slot takes, granted every scope the slot asks for - refused 400 otherwise, "
                 + "with `reconnect: { connectionId, scopes }` when only scopes are missing; a change appends "
                 + "`member.connections-changed` in the same transaction. (send "
@@ -232,10 +263,127 @@ public static class PluginEndpoints
                 + "field names, types, `enum`, a number's `min`/`max`/`integer`, required fields and secrets, "
                 + "the logical key's form and that it is set - and refused 400 naming the field (and the bound), "
                 + "with nothing written. A value already stored outside bounds added later may be sent back "
-                + "unchanged: it is kept, and `outOfRange` names it. Secrets are "
-                + "logical keys only; a value is never taken or answered. Saved with a "
+                + "unchanged: it is kept, and `outOfRange` names it. A masked value is never answered. Saved with a "
                 + "`member.plugin-settings-changed` tenant row in the same transaction, and read by the "
                 + "member's next run. Answers as GET does.");
+
+        // EACH PLUGIN MEMBER OWNS ITS SECRETS: whether each of its manifest's secret fields is set, by
+        // whom, from which source - and, for a field the manifest declares `masked: false`, its value.
+        app.MapGet("/api/teams/{team}/members/{member}/secrets", async (
+            [Description(Describe.Team)] string team,
+            [Description("The member, as addressed in its route.")] string member,
+            TeamRegistry teams, PluginCatalog plugins, IPluginMemberSettingsStore settings, MemberSecretReads reads,
+            CancellationToken ct) =>
+        {
+            var (found, plugin, refusal) = await PluginMemberAsync(teams, plugins, team, member, ct);
+            if (refusal is not null) return refusal;
+
+            var id = new ContainerId(found!.Team, found.Name);
+            return Results.Ok(new
+            {
+                team = id.Team,
+                member = id.Name,
+                secrets = await reads.StatesAsync(id, plugin!.Manifest, await settings.ForAsync(id, ct), ct),
+            });
+        })
+            .WithTags("Members")
+            .HumansOnly()
+            .WithSummary("A plugin member's secret fields: whether each is set, by whom and from where")
+            .WithDescription(
+                "`{ team, member, secrets: [{ field, label, masked, required, needed, set, setBy, setAt, source, key, "
+                + "value? }] }`, one per manifest secret field in the manifest's order. `source` is `member` (the "
+                + "member's own value, typed by a person), `key` (the bound key, stored from the screen), `environment` "
+                + "(the bound key, from the Host's environment) or null; the member's own value wins. `key` is the bound "
+                + "key's name or null. `value` is answered only for a field the manifest declares `masked: false`; a "
+                + "masked value is never answered. 404 for an unknown member, 400 for a member that is not a plugin, "
+                + "409 when its plugin is not installed.");
+
+        app.MapPut("/api/teams/{team}/members/{member}/secrets/{field}", async (
+            [Description(Describe.Team)] string team,
+            [Description("The member, as addressed in its route.")] string member,
+            [Description("A secret field the member's plugin manifest declares.")] string field,
+            SecretSubmission body, TeamRegistry teams, PluginCatalog plugins, IPluginMemberSettingsStore settings,
+            PluginMemberSecretStore memberSecrets, MemberSecretReads reads, ISecretStore secrets, IMessageLog log,
+            HttpContext context, CancellationToken ct) =>
+        {
+            var (found, plugin, refusal) = await PluginMemberAsync(teams, plugins, team, member, ct);
+            if (refusal is not null) return refusal;
+
+            var id = new ContainerId(found!.Team, found.Name);
+            if (PluginMemberSecretStore.ChangesRefusal(plugin!.Manifest, new Dictionary<string, string?> { [field] = body.Value ?? "" }) is { } invalid)
+            {
+                return Results.BadRequest(new { error = invalid });
+            }
+
+            try
+            {
+                await memberSecrets.SetAsync(id, found.Label ?? found.Name, plugin.Manifest.Id, field, body.Value!, SecretActor(context), ct);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                return Results.Json(new { error = UnrecordedField(field, exception) }, statusCode: StatusCodes.Status500InternalServerError);
+            }
+
+            var bound = await settings.ForAsync(id, ct);
+            await NoticeIfReadyAsync(
+                log, id, found.Label ?? found.Name, plugin.Manifest, bound, secrets,
+                (await memberSecrets.StatesAsync(id, ct)).Keys.ToHashSet(StringComparer.Ordinal), ct);
+
+            return Results.Ok(await reads.StateAsync(id, plugin.Manifest, bound, field, ct));
+        })
+            .WithTags("Members")
+            .HumansOnly()
+            .WithSummary("Set or replace a plugin member's own value for one secret field")
+            .WithDescription(
+                "Body `{ \"value\": \"...\" }`: kept as THIS member's own value for the field, as Data Protection "
+                + "ciphertext, with a `member.secret-set` or `member.secret-replaced` tenant row (team, member, plugin, "
+                + "field - never the value) in the same transaction. No other member, of this plugin or another, on "
+                + "this team or another, reads or changes it. Read by the member's next run before any key binding. "
+                + "Answers the field's entry as `GET .../secrets` does. 400 with `error` for a field the manifest does "
+                + "not declare, or a value that is empty, multi-line, over 8192 characters, or - for a masked field - "
+                + "padded with white space or under 4 characters; the sentence never repeats the value. 500, with "
+                + "nothing stored, when the row cannot be written. A save that leaves nothing missing tells the "
+                + "Manager the member is ready.");
+
+        app.MapDelete("/api/teams/{team}/members/{member}/secrets/{field}", async (
+            [Description(Describe.Team)] string team,
+            [Description("The member, as addressed in its route.")] string member,
+            [Description("A secret field the member's plugin manifest declares.")] string field,
+            TeamRegistry teams, PluginCatalog plugins, IPluginMemberSettingsStore settings,
+            PluginMemberSecretStore memberSecrets, MemberSecretReads reads, HttpContext context, CancellationToken ct) =>
+        {
+            var (found, plugin, refusal) = await PluginMemberAsync(teams, plugins, team, member, ct);
+            if (refusal is not null) return refusal;
+
+            var id = new ContainerId(found!.Team, found.Name);
+            if (PluginMemberSecretStore.ChangesRefusal(plugin!.Manifest, new Dictionary<string, string?> { [field] = null }) is { } invalid)
+            {
+                return Results.BadRequest(new { error = invalid });
+            }
+
+            var bound = await settings.ForAsync(id, ct);
+
+            try
+            {
+                await memberSecrets.ClearAsync(id, found.Label ?? found.Name, plugin.Manifest.Id, field, SecretActor(context), ct);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                var kept = await reads.StateAsync(id, plugin.Manifest, bound, field, ct);
+                kept["error"] = UnrecordedField(field, exception);
+                return Results.Json(kept, statusCode: StatusCodes.Status500InternalServerError);
+            }
+
+            return Results.Ok(await reads.StateAsync(id, plugin.Manifest, bound, field, ct));
+        })
+            .WithTags("Members")
+            .HumansOnly()
+            .WithSummary("Clear a plugin member's own value for one secret field")
+            .WithDescription(
+                "Removes the member's own value with a `member.secret-cleared` row in the same transaction; the field "
+                + "then resolves through its bound key, if any (stored, then the Host's environment). Nothing stored "
+                + "answers the same and writes no row. Answers the field's entry as `GET .../secrets` does. 400 for a "
+                + "field the manifest does not declare; 500, with nothing cleared, when the row cannot be written.");
 
         // WHETHER A KEY IS SET, by its name only - what a solution's preview says of each secret it
         // binds (`set`, `setWith`), for the key a person types at a hire - and who set it from the
@@ -262,7 +410,7 @@ public static class PluginEndpoints
         app.MapPut("/api/secrets/{key}", async (
             [Description("The logical key, as in ACME_STORAGE_KEY.")] string key,
             SecretSubmission body, PluginSecretStore secrets, TeamRegistry teams, PluginCatalog plugins,
-            IPluginMemberSettingsStore settings, IMessageLog log, HttpContext context, CancellationToken ct) =>
+            IPluginMemberSettingsStore settings, PluginMemberSecretStore memberSecrets, IMessageLog log, HttpContext context, CancellationToken ct) =>
             {
                 if (EnvironmentSecretStore.Refusal(key) is { } refusal)
                 {
@@ -290,7 +438,9 @@ public static class PluginEndpoints
                     var id = new ContainerId(member.Team, member.Id);
                     var bound = await settings.ForAsync(id, ct);
                     if (!bound.Secrets.Values.Contains(key, StringComparer.Ordinal)) continue;
-                    await NoticeIfReadyAsync(log, id, member.Name, plugin.Manifest, bound, secrets, ct);
+                    await NoticeIfReadyAsync(
+                        log, id, member.Name, plugin.Manifest, bound, secrets,
+                        (await memberSecrets.StatesAsync(id, ct)).Keys.ToHashSet(StringComparer.Ordinal), ct);
                 }
 
                 return Results.Ok(SecretAnswer(key, secrets));
@@ -337,7 +487,7 @@ public static class PluginEndpoints
                 + "for a refused key; 500, with nothing cleared, when the row cannot be written.");
 
         app.MapPost("/api/plugins/rescan", async (
-            PluginCatalog plugins, TeamRegistry teams, TenantLogging audit, HttpContext context, CancellationToken ct) =>
+            PluginCatalog plugins, TeamRegistry teams, Marketplace marketplace, TenantLogging audit, HttpContext context, CancellationToken ct) =>
         {
             var scan = plugins.Rescan();
             Report(scan, Console.Out);
@@ -351,7 +501,7 @@ public static class PluginEndpoints
                 },
                 ct);
 
-            return Results.Ok(Listing(plugins, teams, context));
+            return Results.Ok(Listing(plugins, teams, marketplace, context));
         })
             .WithTags(Area)
             .HumansOnly()
@@ -446,9 +596,9 @@ public static class PluginEndpoints
     /// </summary>
     private static async Task NoticeIfReadyAsync(
         IMessageLog log, ContainerId id, string name, PluginManifest manifest, PluginMemberSettings bound, ISecretStore secrets,
-        CancellationToken ct)
+        IReadOnlySet<string>? valued, CancellationToken ct)
     {
-        if (PluginReadyNotice.Missing(manifest, bound, secrets).Count > 0) return;
+        if (PluginReadyNotice.Missing(manifest, bound, secrets, valued).Count > 0) return;
 
         try
         {
@@ -491,20 +641,38 @@ public static class PluginEndpoints
         return (found, plugin, null);
     }
 
-    private static object Settings(ContainerId id, InstalledPlugin plugin, PluginMemberSettings stored) => new
+    private static async Task<object> SettingsAsync(
+        ContainerId id, InstalledPlugin plugin, PluginMemberSettings stored, MemberSecretReads reads, CancellationToken ct) => new
     {
         team = id.Team,
         member = id.Name,
         plugin = plugin.Manifest.Id,
         version = plugin.Manifest.Version,
+        description = string.IsNullOrWhiteSpace(plugin.Manifest.Description) ? null : plugin.Manifest.Description,
         config = stored.Config,
         secrets = stored.Secrets,
+        secretStates = await reads.StatesAsync(id, plugin.Manifest, stored, ct),
         connections = stored.Connections,
         fields = Fields(plugin.Manifest),
         secretFields = SecretFields(plugin.Manifest),
         connectionFields = ConnectionFields(plugin.Manifest),
         outOfRange = PluginMemberRunner.OutOfRange(plugin.Manifest, stored),
+        marketplaceUrl = reads.MarketplacePage(plugin.Manifest.Id),
     };
+
+    /// <summary>The fields with a member value of their own once <paramref name="changes"/> are applied.</summary>
+    internal static async Task<IReadOnlySet<string>> ValuedAfterAsync(
+        PluginMemberSecretStore memberSecrets, ContainerId id, IReadOnlyDictionary<string, string?> changes, CancellationToken ct)
+    {
+        var valued = (await memberSecrets.StatesAsync(id, ct)).Keys.ToHashSet(StringComparer.Ordinal);
+        foreach (var (field, value) in changes)
+        {
+            if (value is null) valued.Remove(field);
+            else valued.Add(field);
+        }
+
+        return valued;
+    }
 
     private static Dictionary<string, object> Fields(PluginManifest manifest) => manifest.Config.ToDictionary(
         c => c.Key,
@@ -520,6 +688,7 @@ public static class PluginEndpoints
             max = c.Value.Max,
             integer = c.Value.Integer,
             advanced = c.Value.Advanced,
+            label = c.Value.Label,
         });
 
     /// <summary>Each connection slot, its scopes in the object form, the Plugins screen's line, and
@@ -541,9 +710,9 @@ public static class PluginEndpoints
 
     private static Dictionary<string, object> SecretFields(PluginManifest manifest) => manifest.Secrets.ToDictionary(
         s => s.Key,
-        s => (object)new { description = s.Value.Description, required = s.Value.Required });
+        s => (object)new { description = s.Value.Description, required = s.Value.Required, label = s.Value.Label, masked = s.Value.Masked });
 
-    private static object Listing(PluginCatalog plugins, TeamRegistry teams, HttpContext context)
+    private static object Listing(PluginCatalog plugins, TeamRegistry teams, Marketplace marketplace, HttpContext context)
     {
         // WHO IS HIRED ON EACH PLUGIN names members of every team: a person's answer only.
         var person = PrincipalClaims.From(context.User) is not { Kind: not PrincipalKind.User };
@@ -577,6 +746,7 @@ public static class PluginEndpoints
                 members = hired[p.Manifest.Id].Select(m => new { team = m.Team, member = m.Id }),
                 reserved = p.Manifest.Reserved.Keys,
                 ignored = p.Manifest.Ignored,
+                marketplaceUrl = marketplace.PluginPage(p.Manifest.Id),
             }),
             refused = plugins.Refused.Select(r => new { id = r.Id, reason = r.Reason }),
             versions = Versions(plugins),
@@ -664,10 +834,13 @@ public static class PluginEndpoints
         return answer;
     }
 
+    private static string UnrecordedField(string field, Exception exception) =>
+        $"`{field}` was not changed: its record could not be written ({exception.Message}).";
+
     private static string Unrecorded(string key, Exception exception) =>
         $"`{key}` was not changed: its record could not be written ({exception.Message}).";
 
-    private static CredentialActor SecretActor(HttpContext context) => new(
+    internal static CredentialActor SecretActor(HttpContext context) => new(
         context.User.FindFirstValue(ClaimTypes.NameIdentifier),
         context.User.FindFirstValue(ClaimTypes.Email) ?? "unknown");
 }
@@ -675,10 +848,13 @@ public static class PluginEndpoints
 /// <summary>Body of <c>POST /api/plugins/install</c>.</summary>
 public sealed record InstallPlugin(string? Path, bool Replace = false);
 
-/// <summary>Body of <c>PUT .../members/{member}/plugin-settings</c>: every map replaces what is stored.</summary>
+/// <summary>Body of <c>PUT .../members/{member}/plugin-settings</c>: <c>config</c> replaces what is
+/// stored; <c>secrets</c> and <c>connections</c> replace it when given and keep it when omitted;
+/// <c>secretValues</c> sets (a string) or clears (null) the member's own value of each field named.</summary>
 public sealed record PluginSettingsChange(
     Dictionary<string, JsonElement>? Config, Dictionary<string, string>? Secrets,
-    Dictionary<string, string>? Connections = null);
+    Dictionary<string, string>? Connections = null,
+    Dictionary<string, string?>? SecretValues = null);
 
 /// <summary>Body of <c>PUT /api/secrets/{key}</c>: the value, which no answer ever carries.</summary>
 public sealed record SecretSubmission(string? Value);

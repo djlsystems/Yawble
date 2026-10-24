@@ -271,15 +271,16 @@ describe("a plugin member's slot with nothing suitable bound", () => {
 
     expect(step()).toBe('result');
     expect(savePluginSettings).toHaveBeenCalledTimes(1);
-    expect(savePluginSettings).toHaveBeenCalledWith('alpha', 'Inbox', { config: {}, secrets: {}, connections: { mail: 'conn-new' } });
+    expect(savePluginSettings).toHaveBeenCalledWith('alpha', 'Inbox', { config: {}, connections: { mail: 'conn-new' } });
     // Bound: nothing suitable is missing any more, so Connect is no longer offered.
     expect(bodyFind('[data-connection-slot="mail"] [data-slot-connect]')).toBeNull();
 
     wrapper.unmount();
   });
 
-  it("keeps the member's stored settings and secret names when it binds the slot", async () => {
-    // The route replaces config and secrets with what it is sent: binding sends back what is stored.
+  it("keeps the member's stored settings when it binds the slot, and sends no key bindings, which the Host keeps", async () => {
+    // The route replaces config with what it is sent: binding sends back what is stored. A body with
+    // no `secrets` keeps the stored key bindings.
     const plugin = hostPlugin({
       id: 'mailer',
       name: 'Mailer',
@@ -298,7 +299,6 @@ describe("a plugin member's slot with nothing suitable bound", () => {
 
     expect(savePluginSettings).toHaveBeenCalledWith('alpha', 'Inbox', {
       config: { folder: 'Jobs', labels: ['urgent'] },
-      secrets: { signing: 'MAILER_SIGNING_KEY' },
       connections: { mail: 'conn-new' },
     });
 
@@ -402,7 +402,7 @@ describe("a Google slot's sign-in, in another tab", () => {
 
     expect(sent).toBe(googleFlow.authorizationUrl);
     expect(step()).toBe('result');
-    expect(savePluginSettings).toHaveBeenCalledWith('alpha', 'Inbox', { config: {}, secrets: {}, connections: { mail: 'conn-g' } });
+    expect(savePluginSettings).toHaveBeenCalledWith('alpha', 'Inbox', { config: {}, connections: { mail: 'conn-g' } });
 
     wrapper.unmount();
   });
@@ -427,7 +427,7 @@ describe("a Google slot's sign-in, in another tab", () => {
     // Its own comes back: that one is bound.
     await otherTab(link!.getAttribute('href')!, { outcome: 'connected', id: 'conn-g' });
     expect(savePluginSettings).toHaveBeenCalledTimes(1);
-    expect(savePluginSettings).toHaveBeenCalledWith('alpha', 'Inbox', { config: {}, secrets: {}, connections: { mail: 'conn-g' } });
+    expect(savePluginSettings).toHaveBeenCalledWith('alpha', 'Inbox', { config: {}, connections: { mail: 'conn-g' } });
 
     wrapper.unmount();
   });

@@ -36,7 +36,10 @@ public sealed class PluginSecretStore(string databasePath, IDataProtectionProvid
     /// <summary>The longest value accepted. A key or token is a few hundred bytes.</summary>
     public const int MaxValueLength = 8 * 1024;
 
-    private readonly IDataProtector _protector = protection.CreateProtector("Harness.PluginSecrets.v1");
+    /// <summary>The Data Protection purpose of a stored key's value.</summary>
+    public const string Purpose = "Harness.PluginSecrets.v1";
+
+    private readonly IDataProtector _protector = protection.CreateProtector(Purpose);
 
     private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 

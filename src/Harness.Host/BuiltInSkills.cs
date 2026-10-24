@@ -1362,8 +1362,8 @@ public static class BuiltInSkills
             The manifest names: `id` (stable forever; members name it `plugin:<id>`), `version`,
             `protocol` (`harness.member/1`), the executable, `timeoutSeconds` (an idle clock: this long
             with no progress ends the run), `config` fields (each with a type - string, number, bool
-            or list - and optionally an enum, a default and `required`), `secrets` by logical key
-            name, `connections` slots for OAuth accounts (see 3), `events.publishes` (each event's
+            or list - and optionally an enum, a default, `required` and a `label`), `secrets` by field
+            name (each optionally `masked` and `label`), `connections` slots for OAuth accounts (see 3), `events.publishes` (each event's
             suffix and fields), its skill files, and `requires`.
 
             A `list` setting is a list of strings, such as an allowlist of addresses or a set of
@@ -1453,23 +1453,37 @@ public static class BuiltInSkills
             ## 3. Settings and secrets
 
             Settings are per member, chosen when the member is hired, and checked against the manifest
-            then: a wrong type, a number outside its bounds or a missing required field is refused. Secrets are logical key names.
-            The person sets the value under the key's name in the member's settings screen, or with
-            the operator CLI's secret command on the machine that runs the platform. A spec, a manifest, a message or a backlog item names the key, never the
-            value. The value reaches the plugin only on its input when a run starts. The platform
-            redacts bound values from what a plugin writes, but that is a net, not a guarantee: the
-            plugin must never write a secret out.
+            then: a wrong type, a number outside its bounds or a missing required field is refused.
+            Every setting shows on the member's one settings screen, in the manifest's order; give a
+            field a `label` (a short line, at most 80 characters) when its name does not read well as
+            words.
 
-            Each run's request also carries `secretKeys`: every secret field the member binds, mapped
-            to the logical key NAME it is bound to (`{"accountSid": "TWILIO_ACCOUNT_SID_SHOP"}`), set
-            or not. `secrets` holds only the values that are set, so a field in `secretKeys` and not in
-            `secrets` is a bound key with no value. A key name is not a secret and is not redacted, so a
-            plugin can name the key when it needs one: point to the member's settings screen first and
-            the operator CLI second, as in "Set TWILIO_ACCOUNT_SID_SHOP in this member's settings, or
-            with the operator CLI's `secret set TWILIO_ACCOUNT_SID_SHOP` and its `up`." Name the key
-            from `secretKeys`, never a guess, and never write a value beside it.
+            Each plugin member owns its secrets. Any number of members may use one plugin, on one team
+            or several, with the same account or different ones, and none can read, change or clash
+            with another's values: a plugin never needs to tell its members apart, and a spec never
+            names a key for the person to type. The manifest declares each secret by field name
+            (`"apiKey": {"description": "...", "required": true, "label": "API key"}`); the person
+            types its value in that member's settings. `"masked": false` declares a value that is not
+            secret, such as an account name, which the screen then shows; every other secret is masked,
+            never shown and never answered. A spec, a manifest, a message or a backlog item never holds
+            a value. An agent's hire cannot carry one: the member waits for a person to type it.
 
-            A person can change a plugin member's settings and secret bindings after hire, in the
+            A plugin reads its values from its input when a run starts, under `secrets`, and never from
+            its environment. The platform redacts masked values from what a plugin writes, but that is
+            a net, not a guarantee: the plugin must never write a secret out.
+
+            Each run's request also carries `secretKeys`, naming each secret field: the logical key
+            NAME the member's settings bind it to (an operator may bind one, as in
+            `{"accountSid": "SHOP_ACCOUNT_SID"}`, and set it with the operator CLI), set or not, or the
+            field's own name when only the member's own value sets it. `secrets` holds only the values
+            there are, so a field in `secretKeys` and not in `secrets` has no value yet. A key name is
+            not a secret and is not redacted, so a plugin can say which value is missing: point to the
+            member's settings screen first and, for a bound key, the operator CLI second, as in "Set
+            SHOP_ACCOUNT_SID in this member's settings, or with the operator CLI's `secret set
+            SHOP_ACCOUNT_SID` and its `up`." Name what `secretKeys` gives, never a guess, and never
+            write a value beside it.
+
+            A person can change a plugin member's settings and secret values after hire, in the
             member's settings; the change is checked exactly as a hire is and takes effect on the
             member's next run. A Manager cannot change them after hire: to run a plugin with other
             settings, it hires another member.

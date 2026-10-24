@@ -187,6 +187,27 @@ public sealed partial class Marketplace(
             ? address.GetLeftPart(UriPartial.Authority) + DownloadPath
             : null;
 
+    /// <summary>The path on the catalog's origin a package's own page is at, followed by its id.</summary>
+    public const string PagePath = "/marketplace/";
+
+    /// <summary>
+    /// The marketplace page of plugin <paramref name="pluginId"/>: the catalog address's origin (its
+    /// scheme, host and port, never a name written here) followed by <see cref="PagePath"/> and the id,
+    /// when the catalog's last read lists a plugin of that id; null otherwise - no catalog, not read
+    /// yet, a read that failed, or not listed. Never a fresh read.
+    /// </summary>
+    public string? PluginPage(string pluginId)
+    {
+        if (feed.Address is not { Scheme: "https" or "http", UserInfo.Length: 0 } address) return null;
+        if (_last?.Packages is not { } packages
+            || !packages.Any(p => p.Kind == "plugin" && string.Equals(p.Id, pluginId, StringComparison.Ordinal)))
+        {
+            return null;
+        }
+
+        return address.GetLeftPart(UriPartial.Authority) + PagePath + Uri.EscapeDataString(pluginId);
+    }
+
     /// <summary>The last answer, never a fresh read.</summary>
     public MarketplaceStatus Status()
     {

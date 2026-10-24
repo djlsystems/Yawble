@@ -306,7 +306,6 @@ describe('the binding picker, in Member settings', () => {
 
     expect(savePluginSettings).toHaveBeenCalledWith('alpha', 'Inbox', {
       config: {},
-      secrets: {},
       connections: { mail: 'conn-work' },
     });
 

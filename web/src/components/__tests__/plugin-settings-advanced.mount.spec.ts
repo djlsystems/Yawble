@@ -1,8 +1,10 @@
 // @vitest-environment happy-dom
 //
-// A PLUGIN'S SETTINGS, EVERYDAY FIRST: the settings its manifest marks `advanced` sit behind one
-// "Advanced settings (n)" toggle, closed until a person opens it or one of them needs fixing; each
-// setting's description is behind its info icon, never printed under it.
+// A PLUGIN'S SETTINGS, ALL ON THE ONE SCREEN: every setting in the manifest's order, the ones its
+// manifest marks `advanced` included - the mark is accepted and ignored, so there is no toggle. No
+// info icon and no Default line under a field: a text or number box's default is its placeholder,
+// and Reset to default puts it back. What a person must see now - an out-of-range value, Required -
+// stays printed.
 import { afterEach, describe, expect, it } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import PluginSettingsForm from '../PluginSettingsForm.vue';
@@ -27,7 +29,7 @@ const shape: PluginSettingsShape = {
     dailySendCap: field({ type: 'number', default: 20, min: 1, max: 1000, integer: true, advanced: true, description: 'Real sends per day.' }),
     mode: field({ enum: ['dryRun', 'send'], default: 'dryRun', description: 'dryRun never sends.' }),
     footer: field({ type: 'bool', default: true, advanced: true, description: 'Adds Reply STOP.' }),
-    fromNumber: field({ description: 'The number texts come from.' }),
+    fromNumber: field({ description: 'The number texts come from.', required: true, label: 'Sending number' }),
   },
   secrets: {},
 };
@@ -35,62 +37,66 @@ const shape: PluginSettingsShape = {
 async function mountForm(config: Record<string, string | boolean | string[]> = {}) {
   const wrapper = mount(PluginSettingsForm, {
     attachTo: document.body,
-    props: { shape, config: { mode: 'dryRun', fromNumber: '', dailySendCap: '20', footer: true, ...config }, secrets: {} },
+    props: { shape, config: { mode: 'dryRun', fromNumber: '', dailySendCap: '', footer: true, ...config }, secrets: {} },
   });
   await flushPromises();
   return wrapper;
 }
 
 const shown = () => [...document.body.querySelectorAll('[data-setting]')].map((el) => el.getAttribute('data-setting'));
+const label = (name: string) => document.body.querySelector(`[data-setting="${name}"] .q-field__label, [data-setting="${name}"] .q-toggle__label`)?.textContent?.trim();
 
-describe('a plugin member\'s settings', () => {
-  it('shows the everyday settings first and keeps the advanced ones behind one toggle until it is opened', async () => {
+describe("a plugin member's settings", () => {
+  it("shows every setting in the manifest's order, the advanced ones included, with no toggle", async () => {
     const wrapper = await mountForm();
 
-    expect(shown()).toEqual(['mode', 'fromNumber']);
-    const toggle = document.body.querySelector<HTMLElement>('[data-advanced-toggle]')!;
-    expect(toggle.textContent).toContain('Advanced settings (2)');
-
-    toggle.click();
-    await flushPromises();
-
-    expect(shown()).toEqual(['mode', 'fromNumber', 'dailySendCap', 'footer']);
+    expect(shown()).toEqual(['dailySendCap', 'mode', 'footer', 'fromNumber']);
+    expect(document.body.querySelector('[data-advanced-toggle]')).toBeNull();
+    expect(document.body.textContent).not.toContain('Advanced settings');
 
     wrapper.unmount();
   });
 
-  it('opens Advanced by itself when an advanced setting needs fixing', async () => {
+  it("labels each by the manifest's label, else its name in words", async () => {
+    const wrapper = await mountForm();
+
+    expect(label('dailySendCap')).toBe('Daily send cap');
+    expect(label('fromNumber')).toBe('Sending number');
+    expect(label('footer')).toBe('Footer');
+
+    wrapper.unmount();
+  });
+
+  it('has no info icon and prints no description, Default line or person-only line', async () => {
+    const wrapper = await mountForm();
+
+    expect(helpTexts()).toEqual([]);
+    expect(document.body.querySelector('[data-help]')).toBeNull();
+    expect(document.body.textContent).not.toContain('Real sends per day.');
+    expect(document.body.textContent).not.toContain('Default:');
+
+    wrapper.unmount();
+  });
+
+  it("shows a box's default as its placeholder, and Reset to default empties a changed one", async () => {
+    const wrapper = await mountForm({ dailySendCap: '50' });
+
+    const box = document.body.querySelector<HTMLInputElement>('[data-setting="dailySendCap"] input')!;
+    expect(box.getAttribute('placeholder')).toBe('20');
+    expect(box.value).toBe('50');
+
+    document.body.querySelector<HTMLButtonElement>('[aria-label="Reset Daily send cap to default"]')!.click();
+    await flushPromises();
+    expect(wrapper.emitted('update:config')!.at(-1)![0]).toMatchObject({ dailySendCap: '' });
+
+    wrapper.unmount();
+  });
+
+  it('keeps an out-of-range value and Required printed', async () => {
     const wrapper = await mountForm({ dailySendCap: '5000' });
 
-    expect(shown()).toContain('dailySendCap');
-
-    wrapper.unmount();
-  });
-
-  it('puts each description, and a number\'s bounds, behind the info icon and prints none of it', async () => {
-    const wrapper = await mountForm();
-    document.body.querySelector<HTMLElement>('[data-advanced-toggle]')!.click();
-    await flushPromises();
-
-    expect(helpTexts()).toEqual([
-      'dryRun never sends.',
-      'The number texts come from.',
-      'Real sends per day. Between 1 and 1000, whole numbers only.',
-      'Adds Reply STOP.',
-    ]);
-    expect(document.body.textContent).not.toContain('Real sends per day.');
-
-    wrapper.unmount();
-  });
-
-  it('offers no Advanced toggle for a plugin with no advanced settings', async () => {
-    const wrapper = mount(PluginSettingsForm, {
-      attachTo: document.body,
-      props: { shape: { config: { mode: shape.config.mode! }, secrets: {} }, config: { mode: 'dryRun' }, secrets: {} },
-    });
-    await flushPromises();
-
-    expect(document.body.querySelector('[data-advanced-toggle]')).toBeNull();
+    expect(document.body.querySelector('[data-setting="dailySendCap"]')?.textContent).toContain('it must be at most 1000');
+    expect(document.body.querySelector('[data-setting="fromNumber"] [data-required]')?.textContent).toBe('Required');
 
     wrapper.unmount();
   });

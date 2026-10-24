@@ -1,34 +1,22 @@
 // @vitest-environment happy-dom
 //
-// A PLUGIN KEY'S VALUE, SET FROM THE SCREEN. Under each secret's key name, Add member (a hire) and
-// Member settings (after hire) offer the key's write-only value field: a password box with no
-// button of its own. What is typed is written when the person presses the dialog's own button (Add
-// member, Save), before the hire or the settings; Clear, for a key set here, is held the same way.
-// The box never shows or reads back a value, and what is said of the key is the Host's answer: set
-// by whom and when, or from the Host's environment.
+// A PLUGIN MEMBER'S SECRETS ARE ITS OWN, typed as values on its own settings screen. Add member (a
+// hire) and Member settings (after hire) show one box per secret field - a password box for a masked
+// field, a text box showing the saved value for one the manifest declares `masked: false` - labelled
+// by the manifest's `label` or the field's name in words, and never a key name (only "As JSON" shows
+// a bound one). Every setting is on the one screen in the manifest's order, with no Advanced toggle,
+// no info icon and no Default line; the plugin's description shows its first paragraph and a
+// Documentation link to its marketplace page, or the whole description and no link when the catalog
+// does not list it. A typed value rides the hire and the Save as `secretValues`.
 //
-// THE MOCK IS OF `api/client`: no route is reached.
+// THE MOCK IS OF `api/client`, in the Host's shapes (the member secret routes): no route is reached.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
-const {
-  listCatalog,
-  listPlugins,
-  addMember,
-  getSecretKey,
-  setSecretKey,
-  clearSecretKey,
-  getMember,
-  getPluginSettings,
-  savePluginSettings,
-  updateMember,
-} = vi.hoisted(() => ({
+const { listCatalog, listPlugins, addMember, getMember, getPluginSettings, savePluginSettings, updateMember } = vi.hoisted(() => ({
   listCatalog: vi.fn(),
   listPlugins: vi.fn(),
   addMember: vi.fn(),
-  getSecretKey: vi.fn(),
-  setSecretKey: vi.fn(),
-  clearSecretKey: vi.fn(),
   getMember: vi.fn(),
   getPluginSettings: vi.fn(),
   savePluginSettings: vi.fn(),
@@ -40,9 +28,6 @@ vi.mock('../../api/client', async (importOriginal) => ({
   listCatalog,
   listPlugins,
   addMember,
-  getSecretKey,
-  setSecretKey,
-  clearSecretKey,
   getMember,
   getPluginSettings,
   savePluginSettings,
@@ -51,264 +36,402 @@ vi.mock('../../api/client', async (importOriginal) => ({
 
 import AddMemberDialog from '../AddMemberDialog.vue';
 import MemberSettingsDialog from '../MemberSettingsDialog.vue';
-import { ActionRefused } from '../../api/client';
 import { useConsoleStore } from '../../stores/console';
-import { asMemberId, asTeamId, type ContainerSnapshot, type SecretKeyState, type Team, type TeamId } from '../../api/types';
+import {
+  asMemberId,
+  asTeamId,
+  type ContainerSnapshot,
+  type InstalledPlugin,
+  type PluginMemberSettings,
+  type PluginSecretState,
+  type Team,
+  type TeamId,
+} from '../../api/types';
 import { bodyFind, bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
 import { hostField, hostList, hostPlugin, hostSecret, hostSettings } from '../../test/pluginFixtures';
 import { button, field, isDisabled, settle, type } from '../../test/formProbe';
-import { localTime } from '../../lib/localTime';
 
-const Value = 'sk-live-0123456789abcdef';
-const SetAt = '2026-10-11T09:30:00Z';
-const SetAtWords = localTime(Date.parse(SetAt), { date: true });
+const MarketplacePage = 'https://catalog.example.test/marketplace/sample-dns';
 
-const sampleEcho = hostPlugin({
-  id: 'sample-echo',
-  name: 'Sample Echo',
-  secrets: { token: hostSecret({ description: 'A demo credential.' }) },
-  // An advanced setting, so the form has an Advanced toggle for the secret to come before.
-  config: { region: hostField({ type: 'string', default: 'eu', advanced: true, description: 'Where it runs.' }) },
+/** A generic fixture plugin: an enum, a number with a default, an `advanced` text field, a masked
+ *  secret with no label and an unmasked one with a label. */
+const sampleDns: InstalledPlugin = hostPlugin({
+  id: 'sample-dns',
+  name: 'Sample DNS',
+  description: "Keeps a zone's records in step.\n\nSetting it up: create an account key, allow this address, then paste the key.",
+  config: {
+    mode: hostField({ type: 'string', description: 'dryRun changes nothing.', default: 'dryRun', enum: ['dryRun', 'apply'], setBy: 'person' }),
+    ttl: hostField({ type: 'number', description: 'Seconds a record is cached.', default: 300 }),
+    clientIp: hostField({ type: 'string', description: 'The address the account allows.', advanced: true, required: true }),
+  },
+  secrets: {
+    apiKey: hostSecret({ description: "The account's key.", required: true }),
+    apiUser: hostSecret({ description: 'The account name.', required: true, label: 'Account user', masked: false }),
+  },
+  marketplaceUrl: MarketplacePage,
 });
 
-const state = (key: string, over: Partial<SecretKeyState> = {}): SecretKeyState => ({
-  key,
+const secretState = (over: Partial<PluginSecretState> & Pick<PluginSecretState, 'field'>): PluginSecretState => ({
+  label: null,
+  masked: true,
+  required: true,
+  needed: true,
   set: false,
-  refusal: null,
-  setWith: `the field on the screen, or the operator CLI's \`secret set ${key}\``,
   setBy: null,
   setAt: null,
   source: null,
+  key: null,
   ...over,
 });
 
-const stored = (key: string) => state(key, { set: true, setBy: 'dana@example.com', setAt: SetAt, source: 'stored' });
-const environment = (key: string) => state(key, { set: true, source: 'environment' });
+const savedStates: PluginSecretState[] = [
+  secretState({ field: 'apiKey', set: true, setBy: 'person@example.com', setAt: '2026-10-23T10:00:00Z', source: 'member', key: 'LEGACY_DNS_KEY' }),
+  secretState({ field: 'apiUser', label: 'Account user', masked: false, set: true, setBy: 'person@example.com', setAt: '2026-10-23T10:00:00Z', source: 'member', value: 'acct-one' }),
+];
 
-/** What the Host holds, by key: each write below changes it, as the routes would. */
-let host: Record<string, SecretKeyState> = {};
+/** The member's settings read: values set on the member, and a leftover key binding on apiKey. */
+const stored: PluginMemberSettings = hostSettings(sampleDns, {
+  team: 'alpha',
+  member: 'DnsOne',
+  config: { clientIp: '203.0.113.7' },
+  secrets: { apiKey: 'LEGACY_DNS_KEY' },
+  secretStates: savedStates,
+  marketplaceUrl: MarketplacePage,
+  description: sampleDns.description,
+});
+
+const dnsOne = {
+  team: asTeamId('alpha'),
+  id: asMemberId('DnsOne'),
+  name: 'DnsOne',
+  agent: 'plugin:sample-dns',
+  kind: 'plugin',
+  state: 'Idle',
+  queueDepth: 0,
+  ceiling: 16,
+  subscribes: [],
+  currentCorrelation: null,
+  sinceSeq: 0,
+} as unknown as ContainerSnapshot;
 
 beforeEach(() => {
-  for (const mock of [listCatalog, listPlugins, addMember, getSecretKey, setSecretKey, clearSecretKey, getMember, getPluginSettings, savePluginSettings, updateMember]) {
-    mock.mockReset();
-  }
-  host = { ECHO_TOKEN: state('ECHO_TOKEN'), ENV_TOKEN: environment('ENV_TOKEN') };
-
+  for (const mock of [listCatalog, listPlugins, addMember, getMember, getPluginSettings, savePluginSettings, updateMember]) mock.mockReset();
   listCatalog.mockResolvedValue({ agents: [{ name: 'claude', mode: 'Headless' }] });
-  listPlugins.mockResolvedValue(hostList([sampleEcho]));
-  addMember.mockResolvedValue({ name: 'Echo' });
-  getSecretKey.mockImplementation(async (key: string) => host[key] ?? state(key));
-  setSecretKey.mockImplementation(async (key: string) => (host[key] = stored(key)));
-  clearSecretKey.mockImplementation(async (key: string) => (host[key] = key === 'BOTH_TOKEN' ? environment(key) : state(key)));
+  listPlugins.mockResolvedValue(hostList([sampleDns]));
+  addMember.mockResolvedValue({ name: 'DnsOne' });
+  getPluginSettings.mockResolvedValue(structuredClone(stored));
+  savePluginSettings.mockResolvedValue(undefined);
+  updateMember.mockResolvedValue({ ...dnsOne });
 });
 
 afterEach(resetBody);
 
 type Select = { props: (name: string) => unknown; vm: { $emit: (event: string, value: unknown) => void } };
-type Wrapper = { findAllComponents: (s: { name: string }) => unknown[]; unmount: () => void };
 
-async function hireForm(key: string): Promise<Wrapper> {
-  const wrapper = (await mountDialog(AddMemberDialog, { team: 'alpha' as TeamId, teamName: 'Alpha', memberAgents: ['claude'] })) as unknown as Wrapper;
-  const agent = (wrapper.findAllComponents({ name: 'QSelect' }) as Select[]).find((s) => s.props('label') === 'Agent')!;
-  agent.vm.$emit('update:modelValue', 'plugin:sample-echo');
+function select(wrapper: { findAllComponents: (s: { name: string }) => unknown[] }, label: string): Select {
+  const found = (wrapper.findAllComponents({ name: 'QSelect' }) as Select[]).find((s) => s.props('label') === label);
+  if (!found) throw new Error(`no QSelect labelled "${label}"`);
+  return found;
+}
+
+async function mountHire() {
+  const wrapper = await mountDialog(AddMemberDialog, { team: 'alpha' as TeamId, teamName: 'Alpha', memberAgents: ['claude'] });
+  select(wrapper, 'Agent').vm.$emit('update:modelValue', 'plugin:sample-dns');
   await settle();
-  await type('Secret token: key name', key);
-  await afterTyping();
   return wrapper;
 }
 
-/** Past the form's pause after typing, and the answer it asked for. */
-async function afterTyping() {
-  await new Promise((resolve) => setTimeout(resolve, 300));
+async function mountSettings() {
+  setActivePinia(createPinia());
+  const board = useConsoleStore();
+  board.teams = [{ id: asTeamId('alpha'), name: 'Alpha', memberAgents: ['claude'], containers: [dnsOne] } as unknown as Team];
+  board.managerName = asMemberId('Manager');
+  const wrapper = await mountDialog(MemberSettingsDialog, { snapshot: dnsOne }, { pinia: false });
   await settle();
+  return wrapper;
 }
 
-const said = () => bodyFind('[data-secret-field="token"]')!;
-const valueBox = (key: string) => field(`Value for ${key}`) as HTMLInputElement;
+const settingsSection = (selector: string) => bodyFind(selector)!;
+const shownSettings = (within: HTMLElement) =>
+  [...within.querySelectorAll('[data-setting], [data-secret-setting]')].map(
+    (element) => element.getAttribute('data-setting') ?? element.getAttribute('data-secret-setting'),
+  );
+const secretLine = (name: string) => bodyFind(`[data-secret-field="${name}"]`)?.textContent?.trim();
 
-describe('A plugin key set from Add member', () => {
-  it('is write-only: a password box with no button of its own, written by Add member before the hire', async () => {
-    const wrapper = await hireForm('ECHO_TOKEN');
+/** What each screen must show of the form itself, whichever dialog holds it. */
+function expectOneScreen(section: HTMLElement) {
+  // Every setting, in the manifest's order, the `advanced` one included: no toggle.
+  expect(shownSettings(section)).toEqual(['mode', 'ttl', 'clientIp', 'apiKey', 'apiUser']);
+  expect(section.querySelector('[data-advanced-toggle]')).toBeNull();
+  expect(section.textContent).not.toContain('Advanced settings');
 
-    expect(said().textContent?.trim()).toBe(
-      'Not set on this Host: the plugin runs without it until it is. Type its value above and press Add member.',
-    );
-    expect(valueBox('ECHO_TOKEN').getAttribute('type')).toBe('password');
-    expect(valueBox('ECHO_TOKEN').getAttribute('autocomplete')).toBe('new-password');
-    expect(valueBox('ECHO_TOKEN').value).toBe('');
-    expect(() => button('Set')).toThrow();
-    expect(() => button('Replace')).toThrow();
-    expect(bodyFind('[data-secret-value-clear]')).toBeNull();
+  // No info icon, no Default line, no person-only line, and no field description printed.
+  expect(section.querySelector('[data-help]')).toBeNull();
+  expect(section.textContent).not.toContain('Default:');
+  expect(section.textContent).not.toContain('Set by a person only');
+  expect(section.textContent).not.toContain('Seconds a record is cached.');
 
-    await type('Value for ECHO_TOKEN', Value);
-    expect(said().textContent?.trim()).toBe('Saved when you press Add member.');
-    expect(setSecretKey).not.toHaveBeenCalled();
+  // A default is its box's placeholder; Reset to default stays; Required stays printed.
+  expect(field('TTL').getAttribute('placeholder')).toBe('300');
+  expect(section.querySelector('[aria-label="Reset TTL to default"]')).not.toBeNull();
+  expect(section.querySelector('[data-setting="clientIp"] [data-required]')?.textContent).toBe('Required');
+  expect(section.querySelector('[data-secret-setting="apiKey"] [data-required]')?.textContent).toBe('Required');
 
-    await type('Member name', 'Echo');
+  // Labelled by the manifest's label, else the field's name in words.
+  expect(field('Client IP')).toBeTruthy();
+  expect(field('API key')).toBeTruthy();
+  expect(field('Account user')).toBeTruthy();
+
+  // No key-name box and no key name: a masked field is a password box, an unmasked one a text box.
+  expect(field('API key').getAttribute('type')).toBe('password');
+  expect(field('Account user').getAttribute('type')).toBe('text');
+  expect(section.textContent).not.toContain('key name');
+  expect(section.textContent).not.toContain('LEGACY_DNS_KEY');
+}
+
+describe('Add member, a plugin with secrets', () => {
+  it('shows every setting on one screen, a password box for a masked secret and a text box for an unmasked one, and no key name', async () => {
+    const wrapper = await mountHire();
+
+    expectOneScreen(settingsSection('[data-plugin-hire]'));
+    expect(field('API key').value).toBe('');
+    expect(field('Account user').value).toBe('');
+    expect(secretLine('apiKey')).toBe('Not set.');
+
+    wrapper.unmount();
+  });
+
+  it("shows the description's first paragraph and a Documentation link opening the marketplace page in a new tab", async () => {
+    const wrapper = await mountHire();
+
+    const about = bodyFind('[data-plugin-about]')!;
+    expect(about.querySelector('[data-plugin-description]')?.textContent).toBe("Keeps a zone's records in step.");
+    expect(about.textContent).not.toContain('Setting it up');
+    const link = about.querySelector<HTMLAnchorElement>('[data-plugin-documentation]')!;
+    expect(link.textContent).toBe('Documentation');
+    expect(link.getAttribute('href')).toBe(MarketplacePage);
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toContain('noopener');
+
+    wrapper.unmount();
+  });
+
+  it('shows the whole description and no Documentation link when the catalog does not list the plugin', async () => {
+    listPlugins.mockResolvedValue(hostList([{ ...sampleDns, marketplaceUrl: null }]));
+    const wrapper = await mountHire();
+
+    const about = bodyFind('[data-plugin-about]')!;
+    expect(about.querySelector('[data-plugin-description]')?.textContent).toContain("Keeps a zone's records in step.");
+    expect(about.querySelector('[data-plugin-description]')?.textContent).toContain('Setting it up: create an account key');
+    expect(about.querySelector('[data-plugin-documentation]')).toBeNull();
+    expect(bodyText()).not.toContain('Documentation');
+
+    wrapper.unmount();
+  });
+
+  it('holds Add member until each required secret has a value, then sends the typed values with the hire', async () => {
+    const wrapper = await mountHire();
+
+    await type('Member name', 'DnsOne');
+    await type('Client IP', '203.0.113.7');
+    expect(isDisabled('Add member')).toBe(true);
+
+    await type('API key', 'key-for-account-one');
+    await type('Account user', 'acct-one');
+    expect(secretLine('apiKey')).toBe('Saved when you press Add member.');
+    expect(isDisabled('Add member')).toBe(false);
+
     button('Add member').click();
     await settle();
 
-    expect(setSecretKey).toHaveBeenCalledWith('ECHO_TOKEN', Value);
-    expect(setSecretKey.mock.invocationCallOrder[0]!).toBeLessThan(addMember.mock.invocationCallOrder[0]!);
-    // The hire binds the key by its name: the value is in nothing it sends.
     expect(addMember).toHaveBeenCalledTimes(1);
-    expect(JSON.stringify(addMember.mock.calls[0])).not.toContain(Value);
-    expect(JSON.stringify(addMember.mock.calls[0])).toContain('ECHO_TOKEN');
-    expect(bodyText()).not.toContain(Value);
+    expect(addMember.mock.calls[0]).toEqual([
+      'alpha',
+      'DnsOne',
+      'plugin:sample-dns',
+      {
+        config: { clientIp: '203.0.113.7' },
+        secrets: {},
+        secretValues: { apiKey: 'key-for-account-one', apiUser: 'acct-one' },
+      },
+    ]);
 
     wrapper.unmount();
   });
 
-  it('says who set a stored key and when, and offers Clear where Reset sits on a setting', async () => {
-    host.ECHO_TOKEN = stored('ECHO_TOKEN');
-    const wrapper = await hireForm('ECHO_TOKEN');
+  it("keeps a refused hire's sentence in the dialog, and never shows the value typed", async () => {
+    addMember.mockRejectedValue(Object.assign(new Error('`apiKey` is too short.'), { status: 400 }));
+    const wrapper = await mountHire();
 
-    expect(said().getAttribute('data-secret-key-state')).toBe('set');
-    expect(said().textContent?.trim()).toBe(`Set by dana@example.com on ${SetAtWords}.`);
-    expect(valueBox('ECHO_TOKEN').value).toBe('');
-    expect(valueBox('ECHO_TOKEN').getAttribute('placeholder')).toBe('•••••••• saved, never shown: type a new value to replace it');
-    expect(button('Clear')).toBeDefined();
-
-    wrapper.unmount();
-  });
-
-  it('Clear is held until Add member, Keep takes it back, and the cleared key is cleared before the hire', async () => {
-    host.ECHO_TOKEN = stored('ECHO_TOKEN');
-    const wrapper = await hireForm('ECHO_TOKEN');
-
-    button('Clear').click();
-    await settle();
-    expect(clearSecretKey).not.toHaveBeenCalled();
-    expect(said().textContent?.trim()).toBe('Cleared when you press Add member.');
-    expect(valueBox('ECHO_TOKEN').disabled).toBe(true);
-
-    button('Keep').click();
-    await settle();
-    expect(said().textContent?.trim()).toBe(`Set by dana@example.com on ${SetAtWords}.`);
-
-    button('Clear').click();
-    await settle();
-    await type('Member name', 'Echo');
-    button('Add member').click();
-    await settle();
-    expect(clearSecretKey).toHaveBeenCalledWith('ECHO_TOKEN');
-    expect(clearSecretKey.mock.invocationCallOrder[0]!).toBeLessThan(addMember.mock.invocationCallOrder[0]!);
-
-    wrapper.unmount();
-  });
-
-  it("says a key comes from the Host's environment and offers no Clear", async () => {
-    const wrapper = await hireForm('ENV_TOKEN');
-
-    expect(said().textContent?.trim()).toBe("Set in this Host's environment.");
-    expect(valueBox('ENV_TOKEN')).toBeDefined();
-    expect(bodyFind('[data-secret-value-clear]')).toBeNull();
-
-    wrapper.unmount();
-  });
-
-  it("shows the Host's refusal of a write in the dialog, hires nothing, and keeps the value out of it", async () => {
-    setSecretKey.mockRejectedValueOnce(
-      new ActionRefused('refused', { refusal: 'ECHO_TOKEN is kept for the platform.' }),
-    );
-    const wrapper = await hireForm('ECHO_TOKEN');
-
-    await type('Value for ECHO_TOKEN', Value);
-    await type('Member name', 'Echo');
+    await type('Member name', 'DnsOne');
+    await type('Client IP', '203.0.113.7');
+    await type('API key', 'k-1');
+    await type('Account user', 'acct-one');
     button('Add member').click();
     await settle();
 
-    expect(bodyText()).toContain('ECHO_TOKEN was not saved: ECHO_TOKEN is kept for the platform.');
-    expect(addMember).not.toHaveBeenCalled();
-    expect(said().getAttribute('data-secret-key-state')).toBe('unset');
-    expect(bodyText()).not.toContain(Value);
-
-    wrapper.unmount();
-  });
-
-  it('offers no value field for a key name the Host refuses', async () => {
-    host.HARNESS_TOKEN = state('HARNESS_TOKEN', { refusal: 'HARNESS_TOKEN is kept for the platform.' });
-    const wrapper = await hireForm('HARNESS_TOKEN');
-
-    expect(said().textContent?.trim()).toBe('HARNESS_TOKEN is kept for the platform.');
-    expect(bodyFind('[data-secret-value]')).toBeNull();
-
-    wrapper.unmount();
-  });
-
-  it('puts the secrets before the advanced settings, never under them', async () => {
-    const wrapper = await hireForm('ECHO_TOKEN');
-
-    const order = [...document.body.querySelectorAll('[data-setting], [data-secret-setting], [data-advanced-toggle]')]
-      .map((element) => element.getAttribute('data-secret-setting') ? 'secret' : element.hasAttribute('data-advanced-toggle') ? 'advanced' : 'setting');
-    expect(order).toEqual(['secret', 'advanced']);
+    expect(bodyFind('.q-banner')?.textContent).toContain('`apiKey` is too short.');
+    expect(bodyText()).not.toContain('k-1');
 
     wrapper.unmount();
   });
 });
 
-describe("A plugin key set from a plugin member's settings", () => {
-  const echo = {
-    team: asTeamId('alpha'),
-    id: asMemberId('Echo'),
-    name: 'Echo',
-    agent: 'plugin:sample-echo',
-    kind: 'plugin',
-    state: 'Idle',
-    queueDepth: 0,
-    ceiling: 16,
-    subscribes: [],
-    currentCorrelation: null,
-    sinceSeq: 0,
-  } as unknown as ContainerSnapshot;
-
-  async function mountSettings() {
-    getPluginSettings.mockResolvedValue(hostSettings(sampleEcho, { team: 'alpha', member: 'Echo', secrets: { token: 'ECHO_TOKEN' } }));
-    setActivePinia(createPinia());
-    const board = useConsoleStore();
-    board.teams = [{ id: asTeamId('alpha'), name: 'Alpha', memberAgents: ['claude'], containers: [echo] } as unknown as Team];
-    board.managerName = asMemberId('Manager');
-    const wrapper = await mountDialog(MemberSettingsDialog, { snapshot: echo }, { pinia: false });
-    await settle();
-    await afterTyping();
-    return wrapper;
-  }
-
-  it('asks of the bound key, and Save writes the typed value, never reading a value back', async () => {
+describe('Member settings, a plugin member with secrets', () => {
+  it('shows every setting on one screen, a password box for a masked secret and a text box for an unmasked one, and no key name', async () => {
     const wrapper = await mountSettings();
 
-    expect(getSecretKey).toHaveBeenCalledWith('ECHO_TOKEN');
-    expect(said().textContent?.trim()).toBe(
-      'Not set on this Host: the plugin runs without it until it is. Type its value above and press Save.',
-    );
-    expect(valueBox('ECHO_TOKEN').value).toBe('');
-    expect(() => button('Set')).toThrow();
+    expectOneScreen(settingsSection('[data-member-plugin-settings]'));
 
-    await type('Value for ECHO_TOKEN', Value);
-    expect(setSecretKey).not.toHaveBeenCalled();
-    button('Save').click();
-    await settle();
-
-    expect(setSecretKey).toHaveBeenCalledWith('ECHO_TOKEN', Value);
-    expect(bodyText()).not.toContain(Value);
-    // Setting a key is not a settings change: no settings were saved.
-    expect(savePluginSettings).not.toHaveBeenCalled();
+    // Masked: starts empty and says when it was saved and by whom - never the value.
+    expect(field('API key').value).toBe('');
+    expect(secretLine('apiKey')).toMatch(/^Saved by person@example\.com on /);
+    // Unmasked: the saved value, as text.
+    expect(field('Account user').value).toBe('acct-one');
 
     wrapper.unmount();
   });
 
-  it('a refused write keeps the dialog open with the sentence and saves nothing else', async () => {
-    setSecretKey.mockRejectedValueOnce(new ActionRefused('refused', { refusal: 'ECHO_TOKEN is kept for the platform.' }));
+  it('shows the bound key name only in As JSON', async () => {
     const wrapper = await mountSettings();
 
-    await type('Value for ECHO_TOKEN', Value);
+    expect(bodyText()).not.toContain('LEGACY_DNS_KEY');
+    button('As JSON').click();
+    await settle();
+    expect(bodyFind('[data-settings-json]')?.textContent).toContain('LEGACY_DNS_KEY');
+
+    wrapper.unmount();
+  });
+
+  it("shows the description's first paragraph and a Documentation link opening the marketplace page in a new tab", async () => {
+    const wrapper = await mountSettings();
+
+    const about = bodyFind('[data-member-plugin-settings] [data-plugin-about]')!;
+    expect(about.querySelector('[data-plugin-description]')?.textContent).toBe("Keeps a zone's records in step.");
+    expect(about.textContent).not.toContain('Setting it up');
+    const link = about.querySelector('[data-plugin-documentation]') as HTMLAnchorElement | null;
+    expect(link?.textContent).toBe('Documentation');
+    expect(link?.getAttribute('href')).toBe(MarketplacePage);
+    expect(link?.getAttribute('target')).toBe('_blank');
+
+    wrapper.unmount();
+  });
+
+  it('shows the whole description and no Documentation link when the catalog does not list the plugin', async () => {
+    getPluginSettings.mockResolvedValue({ ...structuredClone(stored), marketplaceUrl: null });
+    const wrapper = await mountSettings();
+
+    const description = bodyFind('[data-member-plugin-settings] [data-plugin-description]')!;
+    expect(description.textContent).toContain("Keeps a zone's records in step.");
+    expect(description.textContent).toContain('Setting it up: create an account key, allow this address, then paste the key.');
+    expect(bodyFind('[data-plugin-documentation]')).toBeNull();
+    expect(bodyText()).not.toContain('Documentation');
+
+    wrapper.unmount();
+  });
+
+  it('shows no description and no empty block when the plugin has none, and no link when the catalog does not list it', async () => {
+    getPluginSettings.mockResolvedValue({ ...structuredClone(stored), description: null });
+    const listed = await mountSettings();
+
+    expect(bodyFind('[data-member-plugin-settings] [data-plugin-description]')).toBeNull();
+    expect(bodyFind('[data-member-plugin-settings] [data-plugin-about]')?.textContent?.trim()).toBe('Documentation');
+    listed.unmount();
+    resetBody();
+
+    getPluginSettings.mockResolvedValue({ ...structuredClone(stored), description: null, marketplaceUrl: null });
+    const unlisted = await mountSettings();
+
+    expect(bodyFind('[data-member-plugin-settings]')).not.toBeNull();
+    expect(bodyFind('[data-plugin-about]')).toBeNull();
+    expect(bodyFind('[data-plugin-description]')).toBeNull();
+
+    unlisted.unmount();
+  });
+
+  it('says "Not set." under a field with no value, and holds Save while a required one has none', async () => {
+    getPluginSettings.mockResolvedValue({
+      ...structuredClone(stored),
+      secrets: {},
+      secretStates: [secretState({ field: 'apiKey' }), savedStates[1]!],
+    });
+    const wrapper = await mountSettings();
+
+    expect(secretLine('apiKey')).toBe('Not set.');
+    expect(bodyFind('[data-secret-field="apiKey"]')?.className).toContain('text-warning');
+    expect(isDisabled('Save')).toBe(true);
+
+    await type('API key', 'key-for-account-one');
+    expect(isDisabled('Save')).toBe(false);
+
+    wrapper.unmount();
+  });
+
+  it('sends a typed value with Save as the member\'s own, replacing the saved one, and says what the Host answered', async () => {
+    savePluginSettings.mockResolvedValue({
+      ...structuredClone(stored),
+      secretStates: [
+        secretState({ field: 'apiKey', set: true, setBy: 'other@example.com', setAt: '2026-10-23T12:00:00Z', source: 'member' }),
+        savedStates[1]!,
+      ],
+    });
+    const wrapper = await mountSettings();
+
+    await type('API key', 'key-for-account-two');
+    expect(secretLine('apiKey')).toBe('Saved when you press Save.');
+
     button('Save').click();
     await settle();
 
-    expect(bodyText()).toContain('ECHO_TOKEN was not saved: ECHO_TOKEN is kept for the platform.');
+    expect(savePluginSettings).toHaveBeenCalledTimes(1);
+    // No `secrets`: the Host keeps the key binding. The value rides the same request.
+    expect(savePluginSettings.mock.calls[0]).toEqual([
+      'alpha',
+      'DnsOne',
+      { config: { clientIp: '203.0.113.7' }, secretValues: { apiKey: 'key-for-account-two' } },
+    ]);
+
+    wrapper.unmount();
+  });
+
+  it('sends an edited unmasked value with Save, and nothing for one set back to what was saved', async () => {
+    const wrapper = await mountSettings();
+
+    await type('Account user', 'acct-two');
+    await type('Account user', 'acct-one');
+    button('Save').click();
+    await settle();
     expect(savePluginSettings).not.toHaveBeenCalled();
-    expect(updateMember).not.toHaveBeenCalled();
-    expect(bodyText()).not.toContain(Value);
+
+    wrapper.unmount();
+
+    const again = await mountSettings();
+    await type('Account user', 'acct-two');
+    button('Save').click();
+    await settle();
+    expect(savePluginSettings.mock.calls[0]![2]).toEqual({ config: { clientIp: '203.0.113.7' }, secretValues: { apiUser: 'acct-two' } });
+
+    again.unmount();
+  });
+
+  it('Clear removes the saved value on Save, and Keep takes it back', async () => {
+    const wrapper = await mountSettings();
+
+    button('Clear').click();
+    await settle();
+    expect(secretLine('apiKey')).toBe('Cleared when you press Save.');
+    button('Keep').click();
+    await settle();
+    expect(secretLine('apiKey')).toMatch(/^Saved by /);
+
+    // The leftover key binding is what a cleared value falls back to, so Save is not held.
+    button('Clear').click();
+    await settle();
+    expect(isDisabled('Save')).toBe(false);
+    button('Save').click();
+    await settle();
+
+    expect(savePluginSettings.mock.calls[0]![2]).toEqual({ config: { clientIp: '203.0.113.7' }, secretValues: { apiKey: null } });
 
     wrapper.unmount();
   });

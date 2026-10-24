@@ -1,15 +1,15 @@
 // @vitest-environment happy-dom
 //
 // HIRING A PLUGIN FROM THE ADD MEMBER DIALOG. Installed plugins are offered beside the Agent
-// presets; choosing one shows its manifest's config fields as inputs and its secrets BY NAME, and
-// the hire goes through the same `addMember` call with the config and the secret's LOGICAL KEY.
+// presets; choosing one shows its manifest's config fields as inputs and one box per secret for the
+// new member's own VALUE, and the hire goes through the same `addMember` call with the config and
+// the values as `secretValues` - no key name.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { listCatalog, listPlugins, addMember, getSecretKey } = vi.hoisted(() => ({
+const { listCatalog, listPlugins, addMember } = vi.hoisted(() => ({
   listCatalog: vi.fn(),
   listPlugins: vi.fn(),
   addMember: vi.fn(),
-  getSecretKey: vi.fn(),
 }));
 
 vi.mock('../../api/client', async (importOriginal) => ({
@@ -17,7 +17,6 @@ vi.mock('../../api/client', async (importOriginal) => ({
   listCatalog,
   listPlugins,
   addMember,
-  getSecretKey,
 }));
 
 import AddMemberDialog from '../AddMemberDialog.vue';
@@ -59,8 +58,6 @@ beforeEach(() => {
   listPlugins.mockResolvedValue(plugins);
   addMember.mockReset();
   addMember.mockResolvedValue({ name: 'Echo' });
-  getSecretKey.mockReset();
-  getSecretKey.mockImplementation(async (key: string) => ({ key, set: true, refusal: null, setWith: '' }));
 });
 
 afterEach(resetBody);
@@ -87,25 +84,27 @@ describe('AddMemberDialog, hiring a plugin', () => {
     wrapper.unmount();
   });
 
-  it('shows the manifest config fields and the secrets by name, with no value', async () => {
+  it('shows the manifest config fields and one empty value box per secret, with no key name and no info icon', async () => {
     const wrapper = await mountDialog(AddMemberDialog, baseProps);
 
     await choose(wrapper, 'Agent', 'plugin:sample-echo');
 
     expect(bodyText()).toContain("Deterministic test plugin: transforms each instruction's text.");
-    expect(selectLabelled(wrapper, 'mode').props('options')).toEqual(['upper', 'reverse']);
-    expect(selectLabelled(wrapper, 'mode').props('modelValue')).toBe('upper');
-    expect(field('repeat').value).toBe('');
+    expect(selectLabelled(wrapper, 'Mode').props('options')).toEqual(['upper', 'reverse']);
+    expect(selectLabelled(wrapper, 'Mode').props('modelValue')).toBe('upper');
+    expect(field('Repeat').value).toBe('');
 
-    // Secrets by NAME: each asks for the key, and starts empty - there is no value to show.
-    expect(field('Secret token: key name').value).toBe('');
-    expect(field('Secret signing: key name').value).toBe('');
-    expect(helpTexts().join(' ')).toContain('never its value');
+    // One box per secret for its VALUE, starting empty: no key name is asked for.
+    expect(field('Token').value).toBe('');
+    expect(field('Token').getAttribute('type')).toBe('password');
+    expect(field('Signing').value).toBe('');
+    expect(bodyText()).not.toContain('key name');
+    expect(helpTexts()).not.toContain('How to transform.');
 
     wrapper.unmount();
   });
 
-  it('holds Add member until a required secret has a key', async () => {
+  it('holds Add member until a required secret has a value', async () => {
     const wrapper = await mountDialog(AddMemberDialog, baseProps);
 
     await type('Member name', 'Echo');
@@ -113,22 +112,22 @@ describe('AddMemberDialog, hiring a plugin', () => {
 
     expect(isDisabled('Add member')).toBe(true);
 
-    await type('Secret signing: key name', 'ECHO_SIGNING_KEY');
+    await type('Signing', 'sign-value-1');
 
     expect(isDisabled('Add member')).toBe(false);
 
     wrapper.unmount();
   });
 
-  it('hires the plugin through addMember with its config and the secret keys', async () => {
+  it('hires the plugin through addMember with its config and the secret values typed', async () => {
     const wrapper = await mountDialog(AddMemberDialog, baseProps);
 
     await type('Member name', 'Echo');
     await choose(wrapper, 'Agent', 'plugin:sample-echo');
-    await choose(wrapper, 'mode', 'reverse');
-    await type('repeat', '3');
-    await type('Secret token: key name', ' SAMPLE_ECHO_TOKEN ');
-    await type('Secret signing: key name', 'ECHO_SIGNING_KEY');
+    await choose(wrapper, 'Mode', 'reverse');
+    await type('Repeat', '3');
+    await type('Token', 'token-value-1');
+    await type('Signing', 'sign-value-1');
 
     button('Add member').click();
     await settle();
@@ -140,26 +139,28 @@ describe('AddMemberDialog, hiring a plugin', () => {
       'plugin:sample-echo',
       {
         config: { mode: 'reverse', repeat: 3 },
-        secrets: { token: 'SAMPLE_ECHO_TOKEN', signing: 'ECHO_SIGNING_KEY' },
+        secrets: {},
+        secretValues: { token: 'token-value-1', signing: 'sign-value-1' },
       },
     ]);
 
     wrapper.unmount();
   });
 
-  it('leaves a field at its default, an empty optional field and an unnamed optional secret out of the hire', async () => {
+  it('leaves a field at its default, an empty optional field and an empty optional secret out of the hire', async () => {
     const wrapper = await mountDialog(AddMemberDialog, baseProps);
 
     await type('Member name', 'Echo');
     await choose(wrapper, 'Agent', 'plugin:sample-echo');
-    await type('Secret signing: key name', 'ECHO_SIGNING_KEY');
+    await type('Signing', 'sign-value-1');
 
     button('Add member').click();
     await settle();
 
     expect(addMember.mock.calls[0]?.[3]).toEqual({
       config: {},
-      secrets: { signing: 'ECHO_SIGNING_KEY' },
+      secrets: {},
+      secretValues: { signing: 'sign-value-1' },
     });
 
     wrapper.unmount();
@@ -174,12 +175,13 @@ describe('AddMemberDialog, hiring a plugin', () => {
 
     await type('Member name', 'Echo');
     await choose(wrapper, 'Agent', 'plugin:sample-echo');
-    await type('Secret signing: key name', 'ECHO_SIGNING_KEY');
+    await type('Signing', 'sign-value-1');
 
-    expect(document.body.querySelector('[data-setting="allow"] [data-person-only]')?.textContent).toBe('Set by a person only');
+    // No "Set by a person only" line: what a person must see now stays, nothing else.
+    expect(document.body.querySelector('[data-setting="allow"] [data-person-only]')).toBeNull();
 
     // An enum list is chosen from its values, as chips.
-    await choose(wrapper, 'allow', ['dev']);
+    await choose(wrapper, 'Allow', ['dev']);
     expect(document.body.querySelector('[data-setting="allow"] [data-chip="dev"]')).not.toBeNull();
     expect(addMember).not.toHaveBeenCalled();
 
@@ -188,7 +190,8 @@ describe('AddMemberDialog, hiring a plugin', () => {
 
     expect(addMember.mock.calls[0]?.[3]).toEqual({
       config: { allow: ['dev'] },
-      secrets: { signing: 'ECHO_SIGNING_KEY' },
+      secrets: {},
+      secretValues: { signing: 'sign-value-1' },
     });
 
     wrapper.unmount();

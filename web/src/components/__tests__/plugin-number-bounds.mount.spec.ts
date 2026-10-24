@@ -2,7 +2,7 @@
 //
 // A PLUGIN NUMBER SETTING'S BOUNDS, SAID FIRST. A manifest `number` field may declare
 // `min`, `max` and `integer`; the Host refuses a value outside them on every writer. Member settings
-// and Add member say the bounds in the field's hint and hold Save / Add member on an out-of-range or
+// and Add member say the bounds on the field's line and hold Save / Add member on an out-of-range or
 // non-whole value, with the sentence under the field - as they hold a missing required field. A value
 // ALREADY STORED out of range shows as out of range, unchanged. The Host's own refusal sentence still
 // shows when the server refuses. And a number box does not change on the mouse wheel, anywhere.
@@ -34,7 +34,7 @@ import AddMemberDialog from '../AddMemberDialog.vue';
 import MemberSettingsDialog from '../MemberSettingsDialog.vue';
 import { useConsoleStore } from '../../stores/console';
 import { asMemberId, asTeamId, type ContainerSnapshot, type PluginMemberSettings, type Team, type TeamId } from '../../api/types';
-import { bodyFind, bodyText, helpTexts, mountDialog, resetBody } from '../../test/mountQuasar';
+import { bodyFind, bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
 import { hostField, hostList, hostPlugin, hostSettings } from '../../test/pluginFixtures';
 import { button, field, hasError, isDisabled, settle, type } from '../../test/formProbe';
 import { guardNumberWheel } from '../../lib/numberWheel';
@@ -95,13 +95,13 @@ async function mountSettings() {
 const setting = (name: string) => bodyFind(`[data-setting="${name}"]`)!;
 
 describe('Member settings - a bounded number field', () => {
-  it('says its bounds in the hint', async () => {
+  it('says its bounds on the field\'s line', async () => {
     const wrapper = await mountSettings();
 
-    expect(helpTexts(setting('salaryMax')).join(' ')).toContain('At least 0.');
-    expect(helpTexts(setting('archiveAfterDays')).join(' ')).toContain('Between 1 and 365, whole numbers only.');
+    expect((setting('salaryMax').querySelector('[data-bounds]')?.textContent ?? '')).toContain('At least 0.');
+    expect((setting('archiveAfterDays').querySelector('[data-bounds]')?.textContent ?? '')).toContain('Between 1 and 365, whole numbers only.');
     // A field without bounds has no bounds hint.
-    expect(helpTexts(setting('note')).join(' ')).not.toContain('At least');
+    expect((setting('note').querySelector('[data-bounds]')?.textContent ?? '')).not.toContain('At least');
 
     wrapper.unmount();
   });
@@ -109,9 +109,9 @@ describe('Member settings - a bounded number field', () => {
   it('refuses an out-of-range value inline and holds Save, sending nothing', async () => {
     const wrapper = await mountSettings();
 
-    await type('salaryMax', '-2');
+    await type('Salary max', '-2');
 
-    expect(hasError('salaryMax')).toBe(true);
+    expect(hasError('Salary max')).toBe(true);
     expect(setting('salaryMax').textContent).toContain('-2 is out of range for salaryMax: it must be at least 0.');
     expect(isDisabled('Save')).toBe(true);
 
@@ -119,23 +119,23 @@ describe('Member settings - a bounded number field', () => {
     await settle();
     expect(savePluginSettings).not.toHaveBeenCalled();
 
-    await type('archiveAfterDays', '400');
+    await type('Archive after days', '400');
     expect(setting('archiveAfterDays').textContent).toContain('400 is out of range for archiveAfterDays: it must be at most 365.');
 
-    await type('archiveAfterDays', '2.5');
+    await type('Archive after days', '2.5');
     expect(setting('archiveAfterDays').textContent).toContain('archiveAfterDays takes whole numbers only; 2.5 is not one.');
 
     // Back in range: the message goes and Save sends the numbers.
-    await type('salaryMax', '120000');
-    await type('archiveAfterDays', '14');
-    expect(hasError('salaryMax')).toBe(false);
-    expect(hasError('archiveAfterDays')).toBe(false);
+    await type('Salary max', '120000');
+    await type('Archive after days', '14');
+    expect(hasError('Salary max')).toBe(false);
+    expect(hasError('Archive after days')).toBe(false);
     expect(isDisabled('Save')).toBe(false);
 
     button('Save').click();
     await settle();
     expect(savePluginSettings).toHaveBeenCalledTimes(1);
-    expect(savePluginSettings.mock.calls[0]![2]).toEqual({ config: { salaryMax: 120000, archiveAfterDays: 14 }, secrets: {} });
+    expect(savePluginSettings.mock.calls[0]![2]).toEqual({ config: { salaryMax: 120000, archiveAfterDays: 14 } });
 
     wrapper.unmount();
   });
@@ -145,8 +145,8 @@ describe('Member settings - a bounded number field', () => {
     const wrapper = await mountSettings();
 
     // As stored - never rewritten for the person - and said to be out of range, in the form's own words.
-    expect(field('salaryMax').value).toBe('-2');
-    expect(hasError('salaryMax')).toBe(true);
+    expect(field('Salary max').value).toBe('-2');
+    expect(hasError('Salary max')).toBe(true);
     expect(setting('salaryMax').textContent).toContain('-2 is out of range for salaryMax: it must be at least 0.');
     expect(savePluginSettings).not.toHaveBeenCalled();
 
@@ -160,20 +160,20 @@ describe('Member settings - a bounded number field', () => {
     const wrapper = await mountSettings();
 
     // The Host's sentence, not the form's own; the value as stored.
-    expect(field('salaryMax').value).toBe('-2');
-    expect(hasError('salaryMax')).toBe(true);
+    expect(field('Salary max').value).toBe('-2');
+    expect(hasError('Salary max')).toBe(true);
     expect(setting('salaryMax').textContent).toContain(hostSentence);
     expect(setting('salaryMax').textContent).not.toContain('is out of range for salaryMax');
 
     // The stored value, sent back unchanged, is kept by the Host: it does not hold the rest of the form.
     expect(isDisabled('Save')).toBe(false);
-    await type('note', 'remote only');
+    await type('Note', 'remote only');
     expect(isDisabled('Save')).toBe(false);
 
     button('Save').click();
     await settle();
     expect(savePluginSettings).toHaveBeenCalledTimes(1);
-    expect(savePluginSettings.mock.calls[0]![2]).toEqual({ config: { salaryMax: -2, note: 'remote only' }, secrets: {} });
+    expect(savePluginSettings.mock.calls[0]![2]).toEqual({ config: { salaryMax: -2, note: 'remote only' } });
 
     wrapper.unmount();
   });
@@ -183,8 +183,8 @@ describe('Member settings - a bounded number field', () => {
     getPluginSettings.mockResolvedValue({ ...stored({ salaryMax: -2 }), outOfRange: { salaryMax: hostSentence } });
     const wrapper = await mountSettings();
 
-    await type('salaryMax', '-5');
-    expect(hasError('salaryMax')).toBe(true);
+    await type('Salary max', '-5');
+    expect(hasError('Salary max')).toBe(true);
     expect(setting('salaryMax').textContent).toContain('-5 is out of range for salaryMax: it must be at least 0.');
     expect(isDisabled('Save')).toBe(true);
 
@@ -193,7 +193,7 @@ describe('Member settings - a bounded number field', () => {
     expect(savePluginSettings).not.toHaveBeenCalled();
 
     // Put back as stored: shown as out of range again, and no longer holding Save.
-    await type('salaryMax', '-2');
+    await type('Salary max', '-2');
     expect(setting('salaryMax').textContent).toContain(hostSentence);
     expect(isDisabled('Save')).toBe(false);
 
@@ -205,7 +205,7 @@ describe('Member settings - a bounded number field', () => {
     savePluginSettings.mockRejectedValue(Object.assign(new Error(sentence), { status: 400 }));
     const wrapper = await mountSettings();
 
-    await type('salaryMax', '5');
+    await type('Salary max', '5');
     button('Save').click();
     await settle();
 
@@ -230,15 +230,15 @@ describe('Add member - a bounded number field', () => {
     return wrapper;
   }
 
-  it('says the bounds in the hint, refuses an out-of-range value inline and holds Add member', async () => {
+  it('says the bounds on the field\'s line, refuses an out-of-range value inline and holds Add member', async () => {
     const wrapper = await hireFetcher();
 
-    expect(helpTexts(setting('salaryMax')).join(' ')).toContain('At least 0.');
-    expect(helpTexts(setting('archiveAfterDays')).join(' ')).toContain('Between 1 and 365, whole numbers only.');
+    expect((setting('salaryMax').querySelector('[data-bounds]')?.textContent ?? '')).toContain('At least 0.');
+    expect((setting('archiveAfterDays').querySelector('[data-bounds]')?.textContent ?? '')).toContain('Between 1 and 365, whole numbers only.');
     expect(isDisabled('Add member')).toBe(false);
 
-    await type('archiveAfterDays', '0');
-    expect(hasError('archiveAfterDays')).toBe(true);
+    await type('Archive after days', '0');
+    expect(hasError('Archive after days')).toBe(true);
     expect(setting('archiveAfterDays').textContent).toContain('0 is out of range for archiveAfterDays: it must be at least 1.');
     expect(isDisabled('Add member')).toBe(true);
 
@@ -246,8 +246,8 @@ describe('Add member - a bounded number field', () => {
     await settle();
     expect(addMember).not.toHaveBeenCalled();
 
-    await type('archiveAfterDays', '7');
-    expect(hasError('archiveAfterDays')).toBe(false);
+    await type('Archive after days', '7');
+    expect(hasError('Archive after days')).toBe(false);
     button('Add member').click();
     await settle();
     expect(addMember).toHaveBeenCalledTimes(1);
@@ -275,7 +275,7 @@ describe('A number box and the mouse wheel', () => {
     const unguard = guardNumberWheel(document);
     const wrapper = await mountSettings();
 
-    const box = field('salaryMax') as HTMLInputElement;
+    const box = field('Salary max') as HTMLInputElement;
     expect(box.type).toBe('number');
     box.focus();
     expect(document.activeElement).toBe(box);
@@ -289,7 +289,7 @@ describe('A number box and the mouse wheel', () => {
     expect(box.value).toBe('90000');
 
     // A text box, and a number box without focus, scroll the page as usual.
-    const text = field('note') as HTMLInputElement;
+    const text = field('Note') as HTMLInputElement;
     text.focus();
     const overText = new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true });
     text.dispatchEvent(overText);
