@@ -42,6 +42,8 @@ import LiveStatusControl from '../components/LiveStatusControl.vue';
 import ConnectionsDialog from '../components/ConnectionsDialog.vue';
 import FirstRunGuide from '../components/FirstRunGuide.vue';
 import CommandPalette from '../components/CommandPalette.vue';
+import LogoAnimationDialog from '../components/LogoAnimationDialog.vue';
+import { LogoClicks, nextClick, type ClickRun } from '../lib/logoAnimation';
 import { PaletteShortcut } from '../lib/palette';
 import { bundleBuild, releaseLabel } from '../lib/buildInfo';
 import { headerFit as fitHeader, keepThrough, nextGiveWay } from '../lib/headerFit';
@@ -385,6 +387,16 @@ const shortName = computed(() => session.user?.email.split('@')[0] ?? '');
 
 
 /** The logo's tooltip: the product and which build this is, the version the row no longer carries. */
+/** Clicks on the header's mark in quick succession open the logo animation. */
+const logoAnimationOpen = ref(false);
+let logoClicks: ClickRun = { count: 0, last: -Infinity };
+function onBrandClick() {
+  logoClicks = nextClick(logoClicks, Date.now());
+  if (logoClicks.count < LogoClicks) return;
+  logoClicks = { count: 0, last: -Infinity };
+  logoAnimationOpen.value = true;
+}
+
 const brandTooltip = `${productTitle} ${releaseLabel(bundleBuild.version)}`;
 
 /**
@@ -471,7 +483,7 @@ async function signOut() {
 
           <!-- The mark goes home. Which build this is lives in its tooltip, so the version needs no
                room on the bar. -->
-          <router-link to="/" class="brand-link" :aria-label="`${productTitle} home`" data-test="brand-link">
+          <router-link to="/" class="brand-link" :aria-label="`${productTitle} home`" data-test="brand-link" @click="onBrandClick">
             <!-- Short of room, the last step: the head mark alone; the name stays its alt and tooltip. -->
             <img v-if="headerFit.mark" :src="productMark" :alt="productTitle" width="128" height="128" data-test="brand-mark" />
             <img v-else :src="productLogoFor($q.dark.isActive)" :alt="productTitle" width="1066" height="365" />
@@ -710,6 +722,7 @@ async function signOut() {
     <ConnectionsDialog v-model="connectionsOpen" :notice="connectionNotice" />
     <LocalReposDialog v-model="repositoriesOpen" />
     <OutcomesDialog v-model="outcomesOpen" :outcome="outcomesAt" />
+    <LogoAnimationDialog v-model="logoAnimationOpen" />
     <CommandPalette v-if="session.user" v-model:open="paletteOpen" @action="onRibbonAction" @outcome="openOutcome" />
     <SitesDialog v-model="sitesOpen" :team="sitesTeam" />
     <!-- Guarded on there BEING an active team, because the dialog reads that team's members and
