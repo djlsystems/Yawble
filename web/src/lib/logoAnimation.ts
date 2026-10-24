@@ -48,7 +48,7 @@ export const LogoGraph: readonly LogoNodeSpec[] = [
   { id: 'saas', label: 'SaaS apps', kind: 'leaf', parent: 'projects', at: 3100, hue: ProjectsHue },
   { id: 'sites', label: 'Web sites', kind: 'leaf', parent: 'projects', at: 3100, hue: ProjectsHue },
   { id: 'plugins', label: 'Plugins', kind: 'leaf', parent: 'projects', at: 3100, hue: ProjectsHue },
-  { id: 'support', label: 'Customer Support', kind: 'leaf', parent: 'workflows', at: 3100, hue: WorkflowsHue },
+  { id: 'customer-support', label: 'Customer Support', kind: 'leaf', parent: 'workflows', at: 3100, hue: WorkflowsHue },
   { id: 'fulfillment', label: 'Fulfillment', kind: 'leaf', parent: 'workflows', at: 3100, hue: WorkflowsHue },
   { id: 'research', label: 'Research', kind: 'leaf', parent: 'workflows', at: 3100, hue: WorkflowsHue },
 ]
@@ -227,6 +227,14 @@ function alphaHex(colour: string, alpha: number): string {
   return colour + Math.round(Math.max(0, Math.min(1, alpha)) * 255).toString(16).padStart(2, '0')
 }
 
+/** A `#rrggbb` colour moved `share` of the way to white. */
+function towardWhite(hex: string, share: number): string {
+  return '#' + [1, 3, 5]
+    .map((i) => parseInt(hex.slice(i, i + 2), 16))
+    .map((part) => Math.round(part + (255 - part) * share).toString(16).padStart(2, '0'))
+    .join('')
+}
+
 function lerpFrame(a: { x: number; y: number; k: number }, b: { x: number; y: number; k: number }, p: number) {
   return { x: a.x + (b.x - a.x) * p, y: a.y + (b.y - a.y) * p, k: a.k + (b.k - a.k) * p }
 }
@@ -250,7 +258,8 @@ export class LogoStage {
   private readonly ctx: CanvasRenderingContext2D | null
   private readonly layout = logoLayout()
   private readonly nodes = new Map<string, StageNode>()
-  private wall: Wall = { ground: '#070b14', ink: '#e8eefc', inkDim: '#8a97b4', glow: '#5b8cff', running: '#7ee0a8' }
+  /** Nothing until `readWall` reads the tokens: every colour here is the theme's. */
+  private wall: Wall = { ground: '', ink: '', inkDim: '', glow: '', running: '' }
   private width = 800
   private height = 600
   private dpr = 1
@@ -281,9 +290,12 @@ export class LogoStage {
       ink: token('--os-monitor-wall-ink', this.wall.ink),
       inkDim: token('--os-monitor-wall-ink-dim', this.wall.inkDim),
       glow: token('--os-monitor-wall-tell', this.wall.glow),
-      running: solidHex(`color-mix(in srgb, ${css.getPropertyValue('--os-state-running').trim() || '#2e9e5b'} 60%, white)`) || this.wall.running,
+      running: this.wall.running,
     }
-    if (!/^#[0-9a-f]{6}$/i.test(this.wall.running)) this.wall.running = '#7ee0a8'
+    // The running ring is the running state's token lifted toward white for the dark ground, as the Monitor's is.
+    // Mixed here, not by `color-mix()`, which the browser hands back as `color(srgb ...)`, not hex.
+    const running = solidHex(css.getPropertyValue('--os-state-running').trim())
+    this.wall.running = /^#[0-9a-f]{6}$/i.test(running) ? towardWhite(running, 0.4) : this.wall.ink
   }
 
   resize(width: number, height: number, dpr = globalThis.devicePixelRatio || 1) {
@@ -551,7 +563,7 @@ export class LogoStage {
     const ring = coreRing(r)
     ctx.shadowColor = this.wall.running
     ctx.shadowBlur = 22 * (r / base)
-    ctx.fillStyle = '#fbf7f4'
+    ctx.fillStyle = this.wall.ink
     ctx.beginPath()
     ctx.arc(x, y, r, 0, Math.PI * 2)
     ctx.fill()

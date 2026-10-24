@@ -11,7 +11,7 @@ import { productAddress, productMarkLarge, productSignOff, productTitle } from '
 const open = defineModel<boolean>({ required: true });
 
 const canvas = ref<HTMLCanvasElement | null>(null);
-const stage = ref<HTMLElement | null>(null);
+const stage = ref<{ $el: HTMLElement } | null>(null);
 let scene: LogoStage | null = null;
 let observer: ResizeObserver | null = null;
 const closeShown = ref(false);
@@ -28,6 +28,7 @@ function loadMark(): HTMLImageElement | null {
 
 function begin() {
   if (!canvas.value || !stage.value) return;
+  const ground = stage.value.$el;
   const css = getComputedStyle(canvas.value);
   scene = new LogoStage(canvas.value, {
     fontFamily: css.fontFamily || 'sans-serif',
@@ -38,13 +39,13 @@ function begin() {
   });
   scene.readWall(canvas.value);
   const fit = () => {
-    if (!stage.value || !scene) return;
-    scene.resize(stage.value.clientWidth, stage.value.clientHeight);
+    if (!scene) return;
+    scene.resize(ground.clientWidth, ground.clientHeight);
   };
   fit();
   if (typeof ResizeObserver !== 'undefined') {
     observer = new ResizeObserver(fit);
-    observer.observe(stage.value);
+    observer.observe(ground);
   }
   scene.start();
 }
@@ -76,32 +77,42 @@ onBeforeUnmount(end);
   <!-- The mark that opens it is a link home, so the click that opens it also navigates: kept open across that. -->
   <q-dialog v-model="open" maximized no-route-dismiss transition-show="fade" transition-hide="fade" @show="shown" @hide="end">
     <!-- The pointer is hidden while the picture plays, and back with the close button. -->
-    <div ref="stage" class="logo-stage" :class="{ 'logo-stage--playing': !closeShown }" data-test="logo-animation">
+    <q-card
+      ref="stage"
+      class="logo-stage os-dialog-xl"
+      :class="{ 'logo-stage-full': true, 'logo-stage--playing': !closeShown }"
+      data-test="logo-animation"
+    >
       <canvas ref="canvas" class="logo-canvas" role="img" :aria-label="productTitle" />
-      <transition name="logo-close-fade">
-        <q-btn
-          v-if="closeShown"
-          class="logo-close"
-          flat
-          round
-          dense
-          icon="close"
-          aria-label="Close"
-          data-test="logo-animation-close"
-          @click="open = false"
-        />
-      </transition>
-    </div>
+      <q-btn
+        v-if="closeShown"
+        class="logo-close"
+        flat
+        round
+        dense
+        icon="close"
+        aria-label="Close"
+        data-test="logo-animation-close"
+        @click="open = false"
+      />
+    </q-card>
   </q-dialog>
 </template>
 
 <style scoped>
 .logo-stage {
   position: relative;
+  overflow: hidden;
+  border-radius: 0;
+  background: var(--os-monitor-wall-ground);
+}
+
+/* The whole screen. Not a width of the dialog's own: the scale's cap is for a dialog sitting on
+   the page, and a maximized one does not sit on anything. */
+.logo-stage.logo-stage-full {
   width: 100vw;
   height: 100vh;
-  overflow: hidden;
-  background: var(--os-monitor-wall-ground);
+  max-width: none;
 }
 
 .logo-stage--playing,
@@ -120,14 +131,13 @@ onBeforeUnmount(end);
   top: 12px;
   right: 12px;
   color: var(--os-monitor-wall-ink);
+  animation: logo-close-in 0.6s ease;
 }
 
-.logo-close-fade-enter-active {
-  transition: opacity 0.6s ease;
-}
-
-.logo-close-fade-enter-from {
-  opacity: 0;
+@keyframes logo-close-in {
+  from {
+    opacity: 0;
+  }
 }
 </style>
 
