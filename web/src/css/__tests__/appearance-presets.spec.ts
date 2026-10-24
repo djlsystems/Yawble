@@ -10,7 +10,8 @@ import { States } from '../../lib/states';
  * `:root` block, then Dark's block for a dark preset, then its own `os-theme-<id>` block, resolved
  * through every `var()` the way the browser would. Text holds 4.5:1 on every ground it is read
  * against (7:1, WCAG AAA, for the high-contrast pair); muted text 4.5:1 on panels; every state mark
- * 3:1 on `--os-chrome`, where the activity tile draws it. The swatches `lib/appearance.ts` shows,
+ * 3:1 on `--os-chrome`, where the activity tile draws it; the solution and plugin kind colours
+ * 3:1 on `--os-surface`, where a Marketplace card draws them. The swatches `lib/appearance.ts` shows,
  * and starts a person's theme from, are what the stylesheet paints.
  */
 const cssDirectory = join(import.meta.dirname, '..');
@@ -83,6 +84,15 @@ describe('every built-in theme', () => {
           ).toBeGreaterThanOrEqual(3);
         }
       }
+    });
+
+    it(`${preset.label}: the solution and plugin kind colours each hold 3:1 on --os-surface and differ`, () => {
+      for (const kind of ['solution', 'plugin']) {
+        expect(t(`--os-kind-${kind}`), kind).toMatch(/^#[0-9a-f]{6}$/);
+        expect(contrast(t(`--os-kind-${kind}`), t('--os-surface')), `${kind} on --os-surface`).toBeGreaterThanOrEqual(3);
+      }
+      expect(t('--os-kind-solution'), 'a solution wears the accent').toBe(preset.colours.accent);
+      expect(t('--os-kind-plugin')).not.toBe(t('--os-kind-solution'));
     });
 
     it(`${preset.label}: every state mark holds 3:1 on the tile`, () => {

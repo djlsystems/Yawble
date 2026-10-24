@@ -2938,6 +2938,18 @@ export interface PluginMemberRef {
   member: string
 }
 
+/** An installed solution team's need of a plugin: the team, its package and version, and the minimum. */
+export interface PluginSolutionNeed {
+  team: string
+  teamName: string
+  packageId: string
+  /** The package's name. */
+  package: string
+  version: string
+  /** The oldest version of the plugin the team needs: the package's `pluginMinimums`, else what it shipped. */
+  minimum: string
+}
+
 /** An event a plugin publishes: its full type (`plugin.<id>.<suffix>`), and the manifest's one line on it. */
 export interface PluginEvent {
   type: string
@@ -2969,6 +2981,12 @@ export interface InstalledPlugin {
   requires: string[]
   /** The members hired on it, team by team. Empty to a machine principal. */
   members: PluginMemberRef[]
+  /**
+   * Each installed solution team whose package ships it, with the oldest version of it that team
+   * needs: a version older than that is refused at install. Empty to a machine principal; absent
+   * from a Host older than plugin minimums.
+   */
+  solutions?: PluginSolutionNeed[]
   /** Its connection slots, by slot name; `{}` when the manifest declares none. Absent from a Host older than connections. */
   connections?: Record<string, ConnectionSlot>
   /** Its marketplace page when the catalog lists it, else null. */
@@ -3466,6 +3484,10 @@ export interface SolutionPlanPlugin {
   description: string
   folder: string
   events: string[]
+  /** The oldest version the team needs: `pluginMinimums`, else `version`. Absent from an older Host. */
+  minimum?: string | null
+  /** What the install does with it against the instance's active version, in words; null when unknown. */
+  onInstall?: string | null
 }
 
 export type SolutionWakeManager = 'always' | 'onHandbackOrFailure' | 'never'
@@ -4292,6 +4314,29 @@ export interface MarketplacePackage {
   installedOn: string[]
   /** The catalog's version is newer than the one installed. */
   updateAvailable: boolean
+  /** The package's page on the catalog's own site (`<origin of the catalog address>/marketplace/<id>`),
+   *  the card's Documentation link; null or absent without an address or from an older Host. */
+  page?: string | null
+  /** What the package holds and asks for, as the catalog writes it; null or absent when the catalog
+   *  has none, and the card then shows what it showed before. */
+  contents?: CatalogContents | null
+}
+
+/** A package's `contents` as the catalog writes it: a solution's plugins, members, skills, triggers
+ *  and sites; a plugin's settings, secrets by name, sign-ins and events. Every list may be empty. */
+export interface CatalogContents {
+  plugins: { id: string; version: string; minimum: string | null }[]
+  /** `agent` true for an agent member, which has no role. */
+  members: { name: string; role: string | null; agent: boolean }[]
+  skills: string[]
+  /** `words` is what starts it, as a person reads it. */
+  triggers: { name: string; words: string }[]
+  sites: string[]
+  settings: { name: string; label: string; kind: string; required: boolean; default: string | null }[]
+  /** By name and label only: no value is ever carried. */
+  secrets: { name: string; label: string; required: boolean; masked: boolean }[]
+  connections: { slot: string; providers: string[]; required: boolean }[]
+  events: { type: string; summary: string }[]
 }
 
 /** A package's `needs` as the catalog writes them, without their `why` texts. */

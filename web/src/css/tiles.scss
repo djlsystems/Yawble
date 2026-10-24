@@ -30,3 +30,22 @@
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
+
+// A PACKAGE TILE WEARS ITS KIND (the Marketplace's Browse and Installed): a solution's edge and kind
+// icon in `--os-kind-solution`, a plugin's in `--os-kind-plugin`, the tokens every theme block sets.
+.os-tile-kind-solution {
+  --os-tile-kind: var(--os-kind-solution);
+}
+
+.os-tile-kind-plugin {
+  --os-tile-kind: var(--os-kind-plugin);
+}
+
+.os-tile-kind-solution,
+.os-tile-kind-plugin {
+  border-left: 4px solid var(--os-tile-kind);
+}
+
+.os-tile-kind-icon {
+  color: var(--os-tile-kind, var(--os-ink-muted));
+}

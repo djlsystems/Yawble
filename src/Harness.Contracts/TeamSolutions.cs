@@ -34,6 +34,16 @@ public sealed record TeamSolutionRow(
     /// <summary>The person's answers when it was uninstalled, as <c>{"settings":{member:{setting:value}},
     /// "connections":{member:{slot:id}}}</c>, for the reinstall's wizard to prefill; null while installed.</summary>
     public string? Answers { get; init; }
+
+    /// <summary>Plugin id to the oldest version of it the team needs (<c>auth-029</c>): the package's
+    /// <c>pluginMinimums</c> entry, else the version it shipped. A plugin the map lacks - every row
+    /// from before the step - needs the version in <see cref="Plugins"/> (<see cref="MinimumFor"/>).</summary>
+    public IReadOnlyDictionary<string, string> PluginMinimums { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
+
+    /// <summary>The oldest version of plugin <paramref name="id"/> the team needs; null for a plugin
+    /// its package did not ship.</summary>
+    public string? MinimumFor(string id) =>
+        PluginMinimums.TryGetValue(id, out var minimum) ? minimum : Plugins.GetValueOrDefault(id);
 }
 
 /// <summary>The <c>team_solutions</c> table. Every write lands with its tenant row or not at all.</summary>

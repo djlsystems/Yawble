@@ -21,7 +21,8 @@ const (
 	nonce       = "n0nce"
 	execPrefix  = "podman exec -e HARNESS_WORKER_KEY= yawble sh -c "
 	prepareCall = execPrefix + cli.PluginPrepareScript + " sh /data/plugins "
-	placeCall   = execPrefix + cli.PluginPlaceScript + " sh /data/plugins "
+	pluginStage = "/data/plugins/.incoming/sample-echo-0.1.0"
+	stageCall   = execPrefix + cli.PluginStageScript + " sh " + pluginStage + " sample-echo"
 	requestCall = execPrefix + cli.PluginRequestScript + " sh /data/plugins " + nonce
 	layoutCall  = execPrefix + cli.PluginLayoutScript + " sh /data/plugins"
 	reportCall  = execPrefix + cli.PluginReportScript + " sh /data/plugins"
@@ -96,27 +97,39 @@ func callsContaining(s *engine.Scripted, part string) []string {
 	return found
 }
 
-func TestPluginInstallCopiesSetsTheModesMakesItActiveAndPrintsTheHostsVerdict(t *testing.T) {
+// directScript is a running instance whose Host answers the install request for the staging folder
+// with answers in turn; by default, sample-echo 0.1.0 installed.
+func directScript(t *testing.T, answers ...engine.Result) *engine.Scripted {
+	s := pluginScript(t)
+	if len(answers) == 0 {
+		answers = []engine.Result{installAnswer(nonce, 200, true, false, "")}
+	}
+	s.OnSequence(installReportCall, answers...)
+	return s
+}
+
+func TestPluginInstallCopiesToTheStageAndTheHostInstallsItAndPrintsItsVerdict(t *testing.T) {
 	folder := builtPlugin(t, nil)
 	if runtime.GOOS != "windows" {
 		if info, _ := os.Stat(filepath.Join(folder, "sample-echo")); info.Mode()&0o111 != 0 {
 			t.Fatal("the fixture's launcher must have no execute bit")
 		}
 	}
-	s := pluginScript(t)
+	s := directScript(t)
 	code, out, errOut := run(t, stubbed(s), "plugin", "install", folder)
 	if code != 0 {
 		t.Fatalf("exit %d: %s %s", code, out, errOut)
 	}
 
-	// In order: check the version is free, copy to a staging folder, give it the Host's modes and
-	// move it into place with active naming it, ask for a rescan, read the Host's answer.
+	// In order: check the version is free, copy to the staging folder, give it the Host's owner and
+	// modes, ask the Host's installer to install it from there, read its answer, take the stage away.
 	want := []string{
 		prepareCall + "sample-echo 0.1.0 0",
-		"podman cp " + folder + " yawble:/data/plugins/sample-echo/.incoming-0.1.0",
-		placeCall + "sample-echo 0.1.0 sample-echo",
-		requestCall,
-		reportCall,
+		"podman cp " + folder + " yawble:" + pluginStage,
+		stageCall,
+		installRequestFor(pluginStage, false),
+		installReportCall,
+		"podman exec -e HARNESS_WORKER_KEY= yawble rm -rf " + pluginStage,
 	}
 	at := 0
 	for _, c := range s.Calls {
@@ -128,25 +141,25 @@ func TestPluginInstallCopiesSetsTheModesMakesItActiveAndPrintsTheHostsVerdict(t 
 		t.Fatalf("missing, in order, %q\ncalls:\n%s", want[at], strings.Join(s.Calls, "\n"))
 	}
 
-	// The place script sets every mode itself, so a launcher copied without its execute bit
-	// (from Windows) is made executable; the Host would otherwise refuse it.
+	// The CLI never makes a version active itself: the Host's installer does, with every check.
+	for _, script := range []string{cli.PluginPrepareScript, cli.PluginStageScript} {
+		if strings.Contains(script, "active") {
+			t.Errorf("a script writes active itself:\n%s", script)
+		}
+	}
+	// The stage script sets every mode itself, so a launcher copied without its execute bit
+	// (from Windows) is executable, and the Host can read what root copied.
 	for _, line := range []string{
 		`chown -R -h harness:agent "$s"`,
 		`find "$s" -type d -exec chmod u=rwx,g=rx,o=,ug-s {} +`,
 		`find "$s" ! -type d ! -type l -exec chmod 0640 {} +`,
 		`for x in "$@"; do chmod 0750 "$s/$x"; done`,
-		`mv -f "$d/.active.tmp" "$d/active"`,
 	} {
-		if !strings.Contains(cli.PluginPlaceScript, line) {
-			t.Errorf("the place script lacks %q", line)
+		if !strings.Contains(cli.PluginStageScript, line) {
+			t.Errorf("the stage script lacks %q", line)
 		}
 	}
-	for _, line := range []string{"mkdir -p \"$1\"", "chown harness:agent \"$1\"", "chmod u=rwx,g=rx,o=,ug-s \"$1\""} {
-		if !strings.Contains(cli.PluginRequestScript, line) {
-			t.Errorf("the request script does not create /data/plugins as harness:agent 0750: lacks %q", line)
-		}
-	}
-	for _, want := range []string{"copied sample-echo 0.1.0 to /data/plugins/sample-echo/0.1.0", "the Host reports sample-echo 0.1.0 installed", "plugin:sample-echo"} {
+	for _, want := range []string{"copied sample-echo 0.1.0 into the instance", "the Host installed sample-echo 0.1.0 from " + folder + " and made it the active version", "plugin:sample-echo"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
@@ -155,7 +168,7 @@ func TestPluginInstallCopiesSetsTheModesMakesItActiveAndPrintsTheHostsVerdict(t 
 
 func TestPluginInstallRefusesAnInstalledVersionUnlessForced(t *testing.T) {
 	folder := builtPlugin(t, nil)
-	s := pluginScript(t)
+	s := directScript(t)
 	s.On(prepareCall+"sample-echo 0.1.0 0", engine.Result{Stdout: "exists\n"})
 	code, _, errOut := run(t, stubbed(s), "plugin", "install", folder)
 	if code != 1 || !strings.Contains(errOut, "already installed") || !strings.Contains(errOut, "--force") {
@@ -165,9 +178,10 @@ func TestPluginInstallRefusesAnInstalledVersionUnlessForced(t *testing.T) {
 		t.Errorf("copied although refused:\n%s", strings.Join(s.Calls, "\n"))
 	}
 
-	s = pluginScript(t)
+	s = directScript(t, installAnswer(nonce, 200, true, true, ""))
 	code, out, errOut := run(t, stubbed(s), "plugin", "install", folder, "--force")
-	if code != 0 || len(callsContaining(s, prepareCall+"sample-echo 0.1.0 1")) != 1 || len(callsContaining(s, "podman cp")) != 1 {
+	if code != 0 || len(callsContaining(s, prepareCall+"sample-echo 0.1.0 1")) != 1 || len(callsContaining(s, "podman cp")) != 1 ||
+		len(callsContaining(s, installRequestFor(pluginStage, true))) != 1 || !strings.Contains(out, "the Host replaced sample-echo 0.1.0") {
 		t.Errorf("--force: exit %d %s %s\n%s", code, out, errOut, strings.Join(s.Calls, "\n"))
 	}
 }
@@ -224,27 +238,48 @@ func TestPluginInstallRefusesAnExecutableThatResolvesOutsideTheFolder(t *testing
 	}
 }
 
+// The Host's refusal is printed in its words and exits 1, and the stage goes all the same: the
+// minimum an installed solution team needs, and a manifest the catalog refuses once written.
 func TestPluginInstallPrintsTheHostsRefusalAndExitsOne(t *testing.T) {
 	folder := builtPlugin(t, nil)
-	s := pluginScript(t, report("", `{"id":"sample-echo","reason":"its executable sample-echo is not executable (chmod +x it)."}`, ""))
-	code, _, errOut := run(t, stubbed(s), "plugin", "install", folder)
-	if code != 1 || !strings.Contains(errOut, "the Host refused sample-echo: its executable sample-echo is not executable") {
-		t.Errorf("exit %d stderr %q", code, errOut)
+	for name, c := range map[string]struct {
+		answer engine.Result
+		want   string
+	}{
+		"older than a solution team needs": {installAnswer(nonce, 409, false, false, "sample-echo 0.1.0 is older than what Fixture Pack 1.0.0 on team Inbox needs (0.2.0 or newer)."),
+			folder + " was not installed: sample-echo 0.1.0 is older than what Fixture Pack 1.0.0 on team Inbox needs (0.2.0 or newer)."},
+		"refused once written": {installAnswer(nonce, 200, false, false, "its executable sample-echo is not executable (chmod +x it)."),
+			"the Host wrote sample-echo 0.1.0 but refuses it: its executable sample-echo is not executable"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := directScript(t, c.answer)
+			code, _, errOut := run(t, stubbed(s), "plugin", "install", folder)
+			if code != 1 || !strings.Contains(errOut, c.want) {
+				t.Errorf("exit %d stderr %q, want %q", code, errOut, c.want)
+			}
+			if len(callsContaining(s, "rm -rf "+pluginStage)) != 1 {
+				t.Errorf("the stage was not taken away:\n%s", strings.Join(s.Calls, "\n"))
+			}
+		})
 	}
 }
 
-// The report must answer THIS request: an older report is not the Host's verdict on this install.
+// The report must answer THIS request: an older report is not the Host's verdict on this install,
+// and a request no Host answers is withdrawn.
 func TestPluginInstallWaitsForTheReportThatAnswersItsRequestAndSaysSoWhenNoneComes(t *testing.T) {
 	folder := builtPlugin(t, nil)
-	s := pluginScript(t, engine.Result{Stdout: `{"request":"older","plugins":[` + echoInstalled + `]}`})
+	s := directScript(t, installAnswer("older", 200, true, false, ""))
 	code, _, errOut := run(t, stubbed(s), "plugin", "install", folder)
-	if code != 1 || !strings.Contains(errOut, "did not answer the plugin rescan") {
+	if code != 1 || !strings.Contains(errOut, "did not answer the install request") {
 		t.Errorf("exit %d stderr %q", code, errOut)
 	}
+	if len(callsContaining(s, execPrefix+cli.PluginInstallWithdrawScript+" sh /data/plugins "+nonce)) != 1 || len(callsContaining(s, "rm -rf "+pluginStage)) != 1 {
+		t.Errorf("the request was not withdrawn, or the stage was left:\n%s", strings.Join(s.Calls, "\n"))
+	}
 
-	s = pluginScript(t, engine.Result{Stdout: `{"request":"older"}`}, engine.Result{}, report(echoInstalled, "", ""))
+	s = directScript(t, installAnswer("older", 200, true, false, ""), engine.Result{}, installAnswer(nonce, 200, true, false, ""))
 	code, out, errOut := run(t, stubbed(s), "plugin", "install", folder)
-	if code != 0 || len(callsContaining(s, reportCall)) != 3 || !strings.Contains(out, "installed") {
+	if code != 0 || len(callsContaining(s, installReportCall)) != 3 || !strings.Contains(out, "installed") {
 		t.Errorf("exit %d %s %s\n%s", code, out, errOut, strings.Join(s.Calls, "\n"))
 	}
 }
@@ -268,13 +303,13 @@ func TestPluginInstallOnDockerCopiesWithDocker(t *testing.T) {
 	s.On("docker version", engine.Result{Stdout: "27.1.0\n"})
 	s.On("docker container inspect", engine.Result{Stdout: "running|" + testImage + "|\n"})
 	s.On("docker exec -e HARNESS_WORKER_KEY= yawble sh -c "+cli.PluginPrepareScript, engine.Result{Stdout: "ready\n"})
-	s.On("docker exec -e HARNESS_WORKER_KEY= yawble sh -c "+cli.PluginReportScript, report(echoInstalled, "", ""))
+	s.On("docker exec -e HARNESS_WORKER_KEY= yawble sh -c "+cli.PluginInstallReportScript, installAnswer(nonce, 200, true, false, ""))
 	deps := stubbed(s)
 	env := map[string]string{"YAWBLE_IMAGE": testImage, "YAWBLE_ENGINE": "docker"}
 	deps.Env = func(k string) string { return env[k] }
 	deps.LookPath = lookPath("docker")
 	code, out, errOut := run(t, deps, "plugin", "install", folder)
-	if code != 0 || len(callsContaining(s, "docker cp "+folder+" yawble:/data/plugins/sample-echo/.incoming-0.1.0")) != 1 {
+	if code != 0 || len(callsContaining(s, "docker cp "+folder+" yawble:"+pluginStage)) != 1 {
 		t.Errorf("exit %d %s %s\n%s", code, out, errOut, strings.Join(s.Calls, "\n"))
 	}
 }
@@ -449,36 +484,40 @@ func TestPluginScriptsLayOutAVersionUnderSh(t *testing.T) {
 	}
 	// What `podman cp` does: the folder's contents become the staging folder, modes as they came.
 	folder := builtPlugin(t, nil)
-	must(t, os.CopyFS(filepath.Join(root, "sample-echo", ".incoming-0.1.0"), os.DirFS(folder)))
-	must(t, os.Chmod(filepath.Join(root, "sample-echo", ".incoming-0.1.0", "plugin.json"), 0o666))
-	runScript(cli.PluginPlaceScript, root, "sample-echo", "0.1.0", "sample-echo")
+	staged := filepath.Join(root, ".incoming", "sample-echo-0.1.0")
+	must(t, os.CopyFS(staged, os.DirFS(folder)))
+	must(t, os.Chmod(filepath.Join(staged, "plugin.json"), 0o666))
+	runScript(cli.PluginStageScript, staged, "sample-echo")
 
 	for rel, want := range map[string]os.FileMode{
-		".": 0o750, "sample-echo": 0o750, "sample-echo/0.1.0": 0o750, "sample-echo/0.1.0/skills": 0o750,
-		"sample-echo/0.1.0/plugin.json": 0o640, "sample-echo/0.1.0/lib/SampleEcho.dll": 0o640,
-		"sample-echo/0.1.0/sample-echo": 0o750, "sample-echo/active": 0o640,
+		".": 0o750, ".incoming": 0o750, ".incoming/sample-echo-0.1.0": 0o750, ".incoming/sample-echo-0.1.0/skills": 0o750,
+		".incoming/sample-echo-0.1.0/plugin.json": 0o640, ".incoming/sample-echo-0.1.0/lib/SampleEcho.dll": 0o640,
+		".incoming/sample-echo-0.1.0/sample-echo": 0o750,
 	} {
 		if got := mode(rel); got != want {
 			t.Errorf("%s is %o, want %o", rel, got, want)
 		}
 	}
-	if active, _ := os.ReadFile(filepath.Join(root, "sample-echo", "active")); string(active) != "0.1.0\n" {
-		t.Errorf("active %q", active)
-	}
-	if _, err := os.Stat(filepath.Join(root, "sample-echo", ".incoming-0.1.0")); !os.IsNotExist(err) {
-		t.Errorf("the staging folder is left: %v", err)
+	if _, err := os.Stat(filepath.Join(root, "sample-echo")); !os.IsNotExist(err) {
+		t.Errorf("the CLI laid out a version itself, which is the Host's to do: %v", err)
 	}
 
+	// The Host's installer lays the version out; a version that is there is refused without force,
+	// and its stage is cleared with it.
+	must(t, os.MkdirAll(filepath.Join(root, "sample-echo", "0.1.0"), 0o750))
 	if got := runScript(cli.PluginPrepareScript, root, "sample-echo", "0.1.0", "0"); strings.TrimSpace(got) != "exists" {
 		t.Errorf("an installed version: %q", got)
 	}
 	if got := runScript(cli.PluginPrepareScript, root, "sample-echo", "0.1.0", "1"); strings.TrimSpace(got) != "ready" {
 		t.Errorf("forced: %q", got)
 	}
+	if _, err := os.Stat(staged); !os.IsNotExist(err) {
+		t.Errorf("an earlier stage is left: %v", err)
+	}
 
-	// A second version: it becomes active, and the first is kept.
-	must(t, os.CopyFS(filepath.Join(root, "sample-echo", ".incoming-0.2.0"), os.DirFS(folder)))
-	runScript(cli.PluginPlaceScript, root, "sample-echo", "0.2.0", "sample-echo")
+	// The layout `plugin list` reads: the active line, then each version folder.
+	must(t, os.MkdirAll(filepath.Join(root, "sample-echo", "0.2.0"), 0o750))
+	must(t, os.WriteFile(filepath.Join(root, "sample-echo", "active"), []byte("0.2.0\n"), 0o640))
 	if got := runScript(cli.PluginLayoutScript, root); got != "sample-echo\t0.2.0\t0.1.0\t0.2.0\n" {
 		t.Errorf("layout %q", got)
 	}
@@ -535,7 +574,7 @@ func fromInstanceScript(t *testing.T, answers ...engine.Result) *engine.Scripted
 // No copy of the install in the CLI: no podman cp, no prepare/place scripts, no rescan of its own.
 func assertOnlyTheRequest(t *testing.T, s *engine.Scripted) {
 	t.Helper()
-	for _, part := range []string{"podman cp", cli.PluginPrepareScript, cli.PluginPlaceScript, cli.PluginRequestScript} {
+	for _, part := range []string{"podman cp", cli.PluginPrepareScript, cli.PluginStageScript, cli.PluginRequestScript} {
 		if c := callsContaining(s, part); len(c) != 0 {
 			t.Errorf("ran %q itself:\n%s", part, strings.Join(c, "\n"))
 		}

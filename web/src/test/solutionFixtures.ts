@@ -100,6 +100,8 @@ export function hostPlan(version = '1.1.0'): SolutionPlan {
         description: 'A stand-in job board.',
         folder: `${Folder}/plugins/job-board`,
         events: ['plugin.job-board.posting-found'],
+        minimum: '0.2.0',
+        onInstall: 'job-board 0.1.0 is active here, older than the 0.2.0 this team needs: 0.2.0 is installed and made active.',
       },
     ],
     triggers: [

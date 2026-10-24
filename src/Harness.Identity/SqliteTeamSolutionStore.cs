@@ -6,7 +6,7 @@ using Harness.Contracts;
 namespace Harness.Identity;
 
 /// <summary>
-/// <see cref="ITeamSolutionStore"/> over the one database (<c>auth-016</c>). A write commits with
+/// <see cref="ITeamSolutionStore"/> over the one database (<c>auth-016</c>, <c>auth-021</c>, <c>auth-029</c>). A write commits with
 /// its <c>tenant_events</c> row (<see cref="TenantAuditRow"/>) or not at all.
 /// </summary>
 public sealed class SqliteTeamSolutionStore(
@@ -17,7 +17,7 @@ public sealed class SqliteTeamSolutionStore(
     private const string Select =
         """
         SELECT team, package_id, name, version, folder, installed_at, installed_by, updated_at,
-               manifest, digests, members, triggers, plugins, uninstalled_at, answers
+               manifest, digests, members, triggers, plugins, uninstalled_at, answers, plugin_minimums
           FROM team_solutions
         """;
 
@@ -71,16 +71,17 @@ public sealed class SqliteTeamSolutionStore(
                 """
                 INSERT INTO team_solutions
                     (team, package_id, name, version, folder, installed_at, installed_by, updated_at,
-                     manifest, digests, members, triggers, plugins, uninstalled_at, answers)
+                     manifest, digests, members, triggers, plugins, uninstalled_at, answers, plugin_minimums)
                 VALUES ($team, $id, $name, $version, $folder, $installedAt, $installedBy, $updatedAt,
-                        $manifest, $digests, $members, $triggers, $plugins, $uninstalledAt, $answers)
+                        $manifest, $digests, $members, $triggers, $plugins, $uninstalledAt, $answers, $pluginMinimums)
                 ON CONFLICT(team) DO UPDATE SET
                     package_id = excluded.package_id, name = excluded.name, version = excluded.version,
                     folder = excluded.folder, installed_at = excluded.installed_at,
                     installed_by = excluded.installed_by, updated_at = excluded.updated_at,
                     manifest = excluded.manifest, digests = excluded.digests, members = excluded.members,
                     triggers = excluded.triggers, plugins = excluded.plugins,
-                    uninstalled_at = excluded.uninstalled_at, answers = excluded.answers
+                    uninstalled_at = excluded.uninstalled_at, answers = excluded.answers,
+                    plugin_minimums = excluded.plugin_minimums
                 """;
             command.Parameters.AddWithValue("$team", row.Team);
             command.Parameters.AddWithValue("$id", row.PackageId);
@@ -97,6 +98,7 @@ public sealed class SqliteTeamSolutionStore(
             command.Parameters.AddWithValue("$plugins", JsonSerializer.Serialize(row.Plugins));
             command.Parameters.AddWithValue("$uninstalledAt", row.UninstalledAt is { } uninstalled ? Instant.Stamp(uninstalled) : DBNull.Value);
             command.Parameters.AddWithValue("$answers", (object?)row.Answers ?? DBNull.Value);
+            command.Parameters.AddWithValue("$pluginMinimums", JsonSerializer.Serialize(row.PluginMinimums));
             await command.ExecuteNonQueryAsync(ct);
         }
 
@@ -149,6 +151,7 @@ public sealed class SqliteTeamSolutionStore(
             {
                 UninstalledAt = reader.IsDBNull(13) ? null : DateTimeOffset.Parse(reader.GetString(13), CultureInfo.InvariantCulture),
                 Answers = reader.IsDBNull(14) ? null : reader.GetString(14),
+                PluginMinimums = Map(reader.GetString(15)),
             });
         }
 

@@ -17,8 +17,9 @@ public static class PluginEndpoints
 
     public static void Map(WebApplication app)
     {
-        app.MapGet("/api/plugins", (PluginCatalog plugins, TeamRegistry teams, Marketplace marketplace, HttpContext context) =>
-                Results.Ok(Listing(plugins, teams, marketplace, context)))
+        app.MapGet("/api/plugins", async (PluginCatalog plugins, TeamRegistry teams, Marketplace marketplace, ITeamSolutionStore solutions,
+                HttpContext context, CancellationToken ct) =>
+                Results.Ok(Listing(plugins, teams, marketplace, await solutions.ListAsync(ct), context)))
             .WithTags(Area)
             .RequirePermit(Permits.Read)
             .WithSummary("The installed plugins")
@@ -31,7 +32,11 @@ public static class PluginEndpoints
                 + "(installed, refused with `reason`, or inactive). Each plugin carries `members` "
                 + "(team and member hired on it) for a person, `[]` for a machine caller, and "
                 + "`marketplaceUrl`: the plugin's page on the package catalog's origin when the catalog "
-                + "lists it, null otherwise. No disk path is disclosed.");
+                + "lists it, null otherwise. Each also carries "
+                + "`solutions`: each installed solution team whose package ships it (`team`, `teamName`, "
+                + "`packageId`, `package`, `version`) with the oldest version of it that team needs "
+                + "(`minimum`) - a version older than that is refused at install - for a person, `[]` "
+                + "for a machine caller. No disk path is disclosed.");
 
         app.MapGet("/api/plugins/{id}/{version}/manifest", (
             [Description("The plugin's id.")] string id,
@@ -487,7 +492,8 @@ public static class PluginEndpoints
                 + "for a refused key; 500, with nothing cleared, when the row cannot be written.");
 
         app.MapPost("/api/plugins/rescan", async (
-            PluginCatalog plugins, TeamRegistry teams, Marketplace marketplace, TenantLogging audit, HttpContext context, CancellationToken ct) =>
+            PluginCatalog plugins, TeamRegistry teams, Marketplace marketplace, ITeamSolutionStore solutions, TenantLogging audit,
+            HttpContext context, CancellationToken ct) =>
         {
             var scan = plugins.Rescan();
             Report(scan, Console.Out);
@@ -501,7 +507,7 @@ public static class PluginEndpoints
                 },
                 ct);
 
-            return Results.Ok(Listing(plugins, teams, marketplace, context));
+            return Results.Ok(Listing(plugins, teams, marketplace, await solutions.ListAsync(ct), context));
         })
             .WithTags(Area)
             .HumansOnly()
@@ -712,7 +718,8 @@ public static class PluginEndpoints
         s => s.Key,
         s => (object)new { description = s.Value.Description, required = s.Value.Required, label = s.Value.Label, masked = s.Value.Masked });
 
-    private static object Listing(PluginCatalog plugins, TeamRegistry teams, Marketplace marketplace, HttpContext context)
+    private static object Listing(
+        PluginCatalog plugins, TeamRegistry teams, Marketplace marketplace, IReadOnlyList<TeamSolutionRow> solutions, HttpContext context)
     {
         // WHO IS HIRED ON EACH PLUGIN names members of every team: a person's answer only.
         var person = PrincipalClaims.From(context.User) is not { Kind: not PrincipalKind.User };
@@ -744,6 +751,16 @@ public static class PluginEndpoints
                 skill = PluginSkills.SkillOf(p),
                 requires = p.Manifest.Requires,
                 members = hired[p.Manifest.Id].Select(m => new { team = m.Team, member = m.Id }),
+                solutions = person
+                    ? solutions
+                        .Where(row => row.MinimumFor(p.Manifest.Id) is not null)
+                        .Select(row => new
+                        {
+                            team = row.Team, teamName = teams.LabelFor(row.Team), packageId = row.PackageId,
+                            package = row.Name, version = row.Version, minimum = row.MinimumFor(p.Manifest.Id),
+                        })
+                        .ToList()
+                    : [],
                 reserved = p.Manifest.Reserved.Keys,
                 ignored = p.Manifest.Ignored,
                 marketplaceUrl = marketplace.PluginPage(p.Manifest.Id),

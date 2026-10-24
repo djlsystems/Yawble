@@ -672,5 +672,14 @@ public static class AuthSchema
                 FOREIGN KEY (team, name) REFERENCES team_members(team, name) ON DELETE CASCADE
             );
             """),
+        // THE OLDEST VERSION OF EACH PLUGIN AN INSTALLED SOLUTION TEAM NEEDS, as JSON plugin id to
+        // version: the package's `pluginMinimums`, else the version it shipped. `{}` is every row from
+        // before the step, whose minimum is then its `plugins` version. Making an older version
+        // active is refused while an installed team needs newer.
+        new MigrationStep(
+            "auth-029",
+            """
+            ALTER TABLE team_solutions ADD COLUMN plugin_minimums TEXT NOT NULL DEFAULT '{}';
+            """),
     ];
 }

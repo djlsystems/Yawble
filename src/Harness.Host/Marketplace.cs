@@ -86,7 +86,43 @@ public sealed class MarketplaceRefusal(string sentence, int status = StatusCodes
 /// the catalog's own needs fields beside them.</summary>
 public sealed record CatalogPackage(
     string Id, string Kind, string Name, string Summary, string Version, IReadOnlyList<string> Needs,
-    Uri DownloadUrl, string Sha256, long Bytes, CatalogNeeds CatalogNeeds, string Description = "");
+    Uri DownloadUrl, string Sha256, long Bytes, CatalogNeeds CatalogNeeds, string Description = "",
+    CatalogContents? Contents = null);
+
+/// <summary>
+/// What a package holds and asks for, as the catalog writes it (<c>contents</c>): a solution's
+/// plugins, members, skills, triggers and sites; a plugin's settings, secrets by name, connection
+/// slots and events. Optional in schema 1: a catalog without it reads as before, and each list is
+/// empty when the catalog leaves it out. Passed through to the console, which words it on the card.
+/// </summary>
+public sealed record CatalogContents(
+    IReadOnlyList<CatalogContentPlugin> Plugins,
+    IReadOnlyList<CatalogContentMember> Members,
+    IReadOnlyList<string> Skills,
+    IReadOnlyList<CatalogContentTrigger> Triggers,
+    IReadOnlyList<string> Sites,
+    IReadOnlyList<CatalogContentSetting> Settings,
+    IReadOnlyList<CatalogContentSecret> Secrets,
+    IReadOnlyList<CatalogConnection> Connections,
+    IReadOnlyList<CatalogContentEvent> Events);
+
+/// <summary>A plugin a solution ships, and the oldest version it works with (null when not said).</summary>
+public sealed record CatalogContentPlugin(string Id, string Version, string? Minimum);
+
+/// <summary>A member a solution hires: its role, or <paramref name="Agent"/> true for an agent member.</summary>
+public sealed record CatalogContentMember(string Name, string? Role, bool Agent);
+
+/// <summary>A trigger, with what starts it in a person's words.</summary>
+public sealed record CatalogContentTrigger(string Name, string Words);
+
+/// <summary>A setting a person sets: <paramref name="Default"/> is the manifest's default as text, or null.</summary>
+public sealed record CatalogContentSetting(string Name, string Label, string Kind, bool Required, string? Default);
+
+/// <summary>A secret, by name and label only: the catalog never carries a value.</summary>
+public sealed record CatalogContentSecret(string Name, string Label, bool Required, bool Masked);
+
+/// <summary>An event a plugin announces, with its one-line summary.</summary>
+public sealed record CatalogContentEvent(string Type, string Summary);
 
 /// <summary>
 /// A package's <c>needs</c> as the catalog writes them, without the <c>why</c> texts (those are in the
@@ -115,7 +151,8 @@ public sealed record CatalogInput(string Name, string Kind, bool Required);
 public sealed record MarketplacePackage(
     string Id, string Kind, string Name, string Summary, string Version, IReadOnlyList<string> Needs,
     bool Installed, string? InstalledVersion, IReadOnlyList<string> InstalledOn, bool UpdateAvailable,
-    CatalogNeeds CatalogNeeds, string Description = "");
+    CatalogNeeds CatalogNeeds, string Description = "",
+    string? Page = null, CatalogContents? Contents = null);
 
 /// <summary>What <c>GET /api/marketplace</c> and its refresh answer. <paramref name="Checked"/> false
 /// is "not known", never an empty catalog, and <paramref name="Reason"/> says why.</summary>
@@ -187,8 +224,16 @@ public sealed partial class Marketplace(
             ? address.GetLeftPart(UriPartial.Authority) + DownloadPath
             : null;
 
-    /// <summary>The path on the catalog's origin a package's own page is at, followed by its id.</summary>
+    /// <summary>The path on the catalog's origin a package's own page is at, before its id.</summary>
     public const string PagePath = "/marketplace/";
+
+    /// <summary>A package's page on the catalog's own site: the catalog address's origin (scheme,
+    /// host and port), <see cref="PagePath"/> and the id; null when the catalog has no address or one
+    /// with a user in it. The Host names no site: the address is whatever it was told.</summary>
+    public string? PageFor(string id) =>
+        feed.Address is { UserInfo.Length: 0 } address && address.Scheme is "https" or "http"
+            ? address.GetLeftPart(UriPartial.Authority) + PagePath + Uri.EscapeDataString(id)
+            : null;
 
     /// <summary>
     /// The marketplace page of plugin <paramref name="pluginId"/>: the catalog address's origin (its
@@ -478,7 +523,8 @@ public sealed partial class Marketplace(
             package.Id, package.Kind, package.Name, package.Summary, package.Version, package.Needs,
             version is not null, version, on,
             version is not null && ReleaseCheck.Compare(package.Version, version) > 0,
-            package.CatalogNeeds, package.Description);
+            package.CatalogNeeds, package.Description,
+            PageFor(package.Id), package.Contents);
     }
 
     private static MarketplaceStatus NotChecked(string reason, DateTimeOffset? at) => new(false, reason, at, []);
@@ -577,7 +623,65 @@ public sealed partial class Marketplace(
             // OPTIONAL: Marketplace > Browse's filter reads it; a catalog without one is not refused.
             entry.TryGetProperty("description", out var description) && description.ValueKind == JsonValueKind.String
                 ? description.GetString()!
-                : "");
+                : "",
+            Contents(entry));
+    }
+
+    private static IEnumerable<JsonElement> Objects(JsonElement from, string field) =>
+        from.ValueKind == JsonValueKind.Object && from.TryGetProperty(field, out var list) && list.ValueKind == JsonValueKind.Array
+            ? list.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.Object)
+            : [];
+
+    private static string? Text(JsonElement from, string field) =>
+        from.TryGetProperty(field, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    private static bool Flag(JsonElement from, string field, bool otherwise = false) =>
+        from.TryGetProperty(field, out var value) && value.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? value.GetBoolean()
+            : otherwise;
+
+    private static IReadOnlyList<string> Names(JsonElement from, string field) =>
+        from.ValueKind == JsonValueKind.Object && from.TryGetProperty(field, out var list) && list.ValueKind == JsonValueKind.Array
+            ? [.. list.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.String).Select(e => e.GetString()!)]
+            : [];
+
+    /// <summary>
+    /// The catalog's <c>contents</c> as written, or null when the package has none - the card then
+    /// shows what it showed before. OPTIONAL AND FORGIVING: a list left out is empty, an entry that is
+    /// not an object or has no name is skipped, and nothing in it refuses the catalog.
+    /// </summary>
+    public static CatalogContents? Contents(JsonElement entry)
+    {
+        if (!entry.TryGetProperty("contents", out var contents) || contents.ValueKind != JsonValueKind.Object) return null;
+
+        return new CatalogContents(
+            [.. Objects(contents, "plugins")
+                .Where(p => !string.IsNullOrWhiteSpace(Text(p, "id")))
+                .Select(p => new CatalogContentPlugin(Text(p, "id")!, Text(p, "version") ?? "", Text(p, "minimum")))],
+            [.. Objects(contents, "members")
+                .Where(m => !string.IsNullOrWhiteSpace(Text(m, "name")))
+                // An agent member is marked true, or by the agent's own name.
+                .Select(m => new CatalogContentMember(Text(m, "name")!, Text(m, "role"), Flag(m, "agent") || !string.IsNullOrWhiteSpace(Text(m, "agent"))))],
+            Names(contents, "skills"),
+            [.. Objects(contents, "triggers")
+                .Where(t => !string.IsNullOrWhiteSpace(Text(t, "name")))
+                .Select(t => new CatalogContentTrigger(Text(t, "name")!, Text(t, "words") ?? ""))],
+            Names(contents, "sites"),
+            [.. Objects(contents, "settings")
+                .Where(s => !string.IsNullOrWhiteSpace(Text(s, "name")))
+                .Select(s => new CatalogContentSetting(
+                    Text(s, "name")!, Text(s, "label") ?? "", Text(s, "kind") ?? "", Flag(s, "required"),
+                    s.TryGetProperty("default", out var value) && value.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined)
+                        ? value.ValueKind == JsonValueKind.String ? value.GetString() : value.GetRawText()
+                        : null))],
+            [.. Objects(contents, "secrets")
+                .Where(s => !string.IsNullOrWhiteSpace(Text(s, "name")))
+                .Select(s => new CatalogContentSecret(Text(s, "name")!, Text(s, "label") ?? "", Flag(s, "required"), Flag(s, "masked", otherwise: true)))],
+            [.. Objects(contents, "connections")
+                .Select(c => new CatalogConnection(Text(c, "slot") ?? "", Names(c, "providers"), Flag(c, "required")))],
+            [.. Objects(contents, "events")
+                .Where(e => !string.IsNullOrWhiteSpace(Text(e, "type")))
+                .Select(e => new CatalogContentEvent(Text(e, "type")!, Text(e, "summary") ?? ""))]);
     }
 
     /// <summary>The catalog's needs fields as written, each list empty when the catalog has none.</summary>
@@ -709,7 +813,13 @@ public static class MarketplaceEndpoints
             + "(sentences, as text), catalogNeeds (the catalog's needs fields without their `why`: "
             + "`{ connections: [{ slot, providers, required }], secrets: [{ key, when }], inputs: [{ name, kind, "
             + "required }], runtimes }`), installed, installedVersion, installedOn (the teams a solution is "
-            + "installed on), updateAvailable, description (the catalog's own, empty when it has none) }`; a solution matches by package id on each team, a plugin "
+            + "installed on), updateAvailable, description (the catalog's own, empty when it has none), page (the "
+            + "package's page on the catalog's own site: the catalog address's origin, `/marketplace/` and the id; "
+            + "null without an address), contents (the catalog's `contents` as written: `{ plugins: [{ id, version, "
+            + "minimum }], members: [{ name, role, agent }], skills, triggers: [{ name, words }], sites, settings: "
+            + "[{ name, label, kind, required, default }], secrets: [{ name, label, required, masked }], connections: "
+            + "[{ slot, providers, required }], events: [{ type, summary }] }`, null when the catalog has none) }`; "
+            + "a solution matches by package id on each team, a plugin "
             + "by id and its active version, and `updateAvailable` is true when the catalog's version is newer.";
 
         app.MapGet(Route, (Marketplace marketplace) => Results.Ok(marketplace.Status()))

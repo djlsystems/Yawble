@@ -1,4 +1,4 @@
-import type { CatalogNeeds, InstalledSolution, MarketplaceCatalog, MarketplacePackage } from '../api/types';
+import type { CatalogContents, CatalogNeeds, InstalledSolution, MarketplaceCatalog, MarketplacePackage } from '../api/types';
 import { filterWords, matchesWords } from './filterWords';
 import { compareVersions } from './solutions';
 
@@ -49,12 +49,22 @@ export function pluginUsedByWords(members: { team: string; member: string }[]): 
 }
 
 /**
+ * An installed solution team's need of a plugin, as a person reads it on the Installed tab:
+ * "Inbox (Fixture Mail 1.0.0) needs 2.3.0 or newer". An older version is refused while it is installed.
+ */
+export function pluginNeedWords(need: { teamName: string; package: string; version: string; minimum: string }): string {
+  return `${need.teamName} (${need.package} ${need.version}) needs ${need.minimum} or newer`;
+}
+
+/**
  * BROWSE'S FILTER: every word of `text` found, case-insensitively, in the package's name, summary,
  * description, or the words for what it needs - the card's short lines and the Host's full
  * sentences under Details. No words keeps every card.
  */
 export function packageMatches(pkg: MarketplacePackage, text: string): boolean {
-  return matchesWords(filterWords(text), pkg.name, pkg.summary, pkg.description, ...plainNeeds(pkg.catalogNeeds), ...pkg.needs);
+  return matchesWords(
+    filterWords(text), pkg.name, pkg.summary, pkg.description, ...plainNeeds(pkg.catalogNeeds), ...pkg.needs,
+    ...contentsLines(pkg));
 }
 
 /** A filter that kept no card, as a sentence naming what was typed. */
@@ -192,5 +202,48 @@ export function plainNeeds(needs: CatalogNeeds | undefined): string[] {
     lines.push(`Runs on ${joined(needs.runtimes.map((id) => (Object.hasOwn(RUNTIME_WORDS, id) ? RUNTIME_WORDS[id] : undefined) ?? id), 'and')}`);
   }
 
+  return lines;
+}
+
+/** Each thing a person sets, by its label, or its name when the catalog gives none. */
+function labelled(item: { name: string; label: string; required: boolean }): string {
+  return `${item.label.trim() || item.name}${item.required ? ' (required)' : ''}`;
+}
+
+/**
+ * A CARD'S CONTENTS, the bullets it opens with, from the catalog's `contents`; empty when the
+ * catalog has none, and the card then shows what it showed before. A SOLUTION says what it holds:
+ * each plugin with its version, each member with its role (or Agent), its skills, its triggers in
+ * words and its sites. A PLUGIN says first what a person sets up - each setting and key by its label,
+ * each sign-in by its slot and the accounts that fill it - then the events it announces and its
+ * skills. A list the catalog leaves empty says nothing.
+ */
+export function contentsLines(pkg: Pick<MarketplacePackage, 'kind' | 'contents'>): string[] {
+  const c: Partial<CatalogContents> | null | undefined = pkg.contents;
+  if (!c) return [];
+
+  const lines: string[] = [];
+  const skills = c.skills ?? [];
+
+  if (pkg.kind === 'solution') {
+    for (const plugin of c.plugins ?? []) lines.push(`Plugin ${plugin.id} ${plugin.version}`.trim());
+    for (const member of c.members ?? []) {
+      const as = member.agent ? 'Agent' : member.role?.trim();
+      lines.push(as ? `Member ${member.name}: ${as}` : `Member ${member.name}`);
+    }
+    if (skills.length) lines.push(`${skills.length === 1 ? 'Skill' : 'Skills'}: ${skills.join(', ')}`);
+    for (const trigger of c.triggers ?? []) lines.push(`Runs ${trigger.words.trim() || trigger.name}`);
+    for (const site of c.sites ?? []) lines.push(`Site ${site}`);
+    return lines;
+  }
+
+  for (const setting of c.settings ?? []) lines.push(`Setting: ${labelled(setting)}`);
+  for (const secret of c.secrets ?? []) lines.push(`Key: ${labelled(secret)}`);
+  for (const connection of c.connections ?? []) {
+    const through = connection.providers.length ? ` (${joined(connection.providers.map(providerWords), 'or')})` : '';
+    lines.push(`Sign-in: ${connection.slot.trim() || 'an account'}${through}${connection.required ? ' (required)' : ''}`);
+  }
+  for (const event of c.events ?? []) lines.push(`Announces: ${event.summary.trim() || event.type}`);
+  if (skills.length) lines.push(`${skills.length === 1 ? 'Skill' : 'Skills'}: ${skills.join(', ')}`);
   return lines;
 }

@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import { listPlugins, solutionsInstalled } from '../api/client';
 import type { InstalledPlugin, InstalledSolution, MarketplaceCatalog, MarketplacePackage, SolutionCheck, SolutionStateKind } from '../api/types';
-import { pluginUpdateFor, pluginUsedByWords, updateFor } from '../lib/marketplace';
+import { pluginNeedWords, pluginUpdateFor, pluginUsedByWords, updateFor } from '../lib/marketplace';
 import { fetchIntoDocuments } from '../lib/marketplaceFetch';
 import { solutionMatches, stateBadge, stateChoices, teamChoices, whenWords } from '../lib/solutionPanel';
 import { localInstants } from '../lib/localTime';
@@ -33,7 +33,8 @@ import SolutionWizard from './SolutionWizard.vue';
  * until the person presses Install there.
  *
  * BELOW THE SOLUTIONS, THE PLUGINS installed on the instance (`GET /api/plugins`), one tile each -
- * its name, version and who uses it - with Update when the catalog lists a newer version, which
+ * its name, version, who uses it, and each solution team that uses it with the oldest version that
+ * team needs (`solutions`; an older one is refused at install) - with Update when the catalog lists a newer version, which
  * fetches it and opens the plugin install dialog as Browse's Get does. Members are hired on a plugin
  * from Add member; Admin -> Plugins holds the rest.
  *
@@ -274,13 +275,13 @@ watch(() => pluginInstall.value.open, (showing, was) => {
             <div
               v-for="row in shownRows"
               :key="row.team"
-              class="os-tile solution-tile"
+              class="os-tile os-tile-kind-solution solution-tile"
               :data-solution-tile="row.team"
             >
               <!-- THE TITLE ROW DOES NOT WRAP: the shared head wraps, and on a wrapping line the name
                    would be as wide as its text and never cut. -->
               <div class="os-tile-head">
-                <q-icon name="apps" size="18px" class="solution-tile-icon" aria-hidden="true" />
+                <q-icon name="apps" size="18px" class="os-tile-kind-icon" aria-hidden="true" />
                 <div class="row items-baseline no-wrap q-gutter-x-sm solution-tile-title">
                   <div class="text-subtitle1 text-weight-medium ellipsis solution-tile-name" :title="row.name" data-tile-name>{{ row.name }}</div>
                   <div class="text-caption os-text-muted solution-tile-version" data-tile-version>{{ row.version }}</div>
@@ -371,15 +372,23 @@ watch(() => pluginInstall.value.open, (showing, was) => {
           No plugins are installed yet. Browse, the tab above, lists the published ones.
         </div>
         <div v-else class="os-tiles solutions-tiles">
-          <div v-for="plugin in plugins" :key="plugin.id" class="os-tile solution-tile" :data-plugin-tile="plugin.id">
+          <div v-for="plugin in plugins" :key="plugin.id" class="os-tile os-tile-kind-plugin solution-tile" :data-plugin-tile="plugin.id">
             <div class="os-tile-head">
-              <q-icon name="extension" size="18px" class="solution-tile-icon" aria-hidden="true" />
+              <q-icon name="extension" size="18px" class="os-tile-kind-icon" aria-hidden="true" />
               <div class="row items-baseline no-wrap q-gutter-x-sm solution-tile-title">
                 <div class="text-subtitle1 text-weight-medium ellipsis solution-tile-name" :title="plugin.name" data-tile-name>{{ plugin.name }}</div>
                 <div class="text-caption os-text-muted solution-tile-version" data-tile-version>{{ plugin.version }}</div>
               </div>
             </div>
             <div class="os-tile-line os-text-muted" data-plugin-used-by>{{ pluginUsedByWords(plugin.members) }}</div>
+            <!-- THE SOLUTION TEAMS THAT USE IT, each with the oldest version it needs: an older one is
+                 refused at install while the team is installed. -->
+            <div
+              v-for="need in plugin.solutions ?? []"
+              :key="need.team"
+              class="os-tile-line os-text-muted"
+              :data-plugin-solution="need.team"
+            >{{ pluginNeedWords(need) }}</div>
             <div v-if="pluginUpdateFor(plugin.id, catalog)" class="os-tile-line text-warning" data-tile-update-available>
               Update available: {{ pluginUpdateFor(plugin.id, catalog)?.version }}
             </div>
@@ -484,10 +493,6 @@ watch(() => pluginInstall.value.open, (showing, was) => {
 .solution-tile {
   min-width: 0;
   overflow: hidden;
-}
-
-.solution-tile-icon {
-  color: var(--os-ink-muted);
 }
 
 .solution-tile-title {
