@@ -95,8 +95,12 @@ public static class StoreGuard
     /// <paramref name="required"/>, each required interface not in <paramref name="registered"/>.</summary>
     public static void Check(IReadOnlyList<Type> required, IReadOnlyCollection<Type> registered)
     {
-        var missing = required.Where(type => !registered.Contains(type)).Select(type => type.Name).ToList();
+        var missing = Missing(required, registered);
 
         if (missing.Count > 0) throw new StoresMissingException(missing);
     }
+
+    /// <summary>The names <see cref="Check"/> would refuse with, in the same order; empty when none.</summary>
+    public static IReadOnlyList<string> Missing(IReadOnlyList<Type> required, IReadOnlyCollection<Type> registered) =>
+        [.. required.Where(type => !registered.Contains(type)).Select(type => type.Name)];
 }

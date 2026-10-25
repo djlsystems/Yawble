@@ -14,8 +14,8 @@ namespace Harness.SqlServer.Ledger;
 /// THE NEWEST LINK IS READ UNDER <c>UPDLOCK, HOLDLOCK</c> whenever a write follows from it
 /// (<see cref="CurrentAsync"/> with <c>forUpdate</c>): it holds the range of that correlation's rows,
 /// so a second writer deciding from the same link waits for the first to commit and then sees its
-/// row, as SQLite's one writer would. The root links in <see cref="OnAppendAsync"/> run under the
-/// log's append lock and need no more.
+/// row, as SQLite's one writer would. The root links in <see cref="OnAppendAsync"/> hold them too: the
+/// log's append lock serialises appends, but the outcome store's writes never take it.
 /// </para>
 /// </summary>
 public static class SqlServerOutcomeLinks
@@ -55,10 +55,14 @@ public static class SqlServerOutcomeLinks
             team = reader.GetString(2);
         }
 
-        if (await CurrentAsync(connection, transaction, stored.CorrelationId, ct) is not null) return;
+        // A ROOT LINK NEVER REPLACES ONE, and the fire may join a workflow a person is linking right
+        // now: the outcome is held first and then the workflow's newest link, the order the store's own
+        // link takes them, so the two writers decide one after the other and the person's link stays.
+        if (await ResolveLiveAsync(connection, transaction, outcome, ct) is not { } resolved) return;
+        if (await CurrentAsync(connection, transaction, stored.CorrelationId, ct, forUpdate: true) is not null) return;
 
-        await WriteLiveAsync(
-            connection, transaction, stored.CorrelationId, outcome, team, configuredBy,
+        await WriteAsync(
+            connection, transaction, stored.CorrelationId, resolved, team, configuredBy,
             OutcomeActorKind.Person, OutcomeLinkHow.Trigger, ct);
     }
 
@@ -78,23 +82,24 @@ public static class SqlServerOutcomeLinks
         }
 
         if (outcome is null) return;
+        if (await ResolveLiveAsync(connection, transaction, outcome, ct) is not { } resolved) return;
 
-        await WriteLiveAsync(
-            connection, transaction, dispatched.CorrelationId, outcome, team, dispatched.Source,
+        await WriteAsync(
+            connection, transaction, dispatched.CorrelationId, resolved, team, dispatched.Source,
             OutcomeActorKind.Person, OutcomeLinkHow.Dispatch, ct);
     }
 
-    /// <summary>Links to <paramref name="outcomeId"/> followed through <c>merged_into</c>, when that
-    /// outcome is live; a retired one, or one that is gone, links nothing.</summary>
-    private static async Task WriteLiveAsync(
-        SqlConnection connection, SqlTransaction transaction, long correlation, string outcomeId,
-        string? team, string setBy, string setByKind, string how, CancellationToken ct)
-    {
-        if (await ResolveAsync(connection, transaction, outcomeId, ct) is not { } resolved) return;
-        if (!OutcomeStatus.IsLive(resolved.Status)) return;
-
-        await WriteAsync(connection, transaction, correlation, resolved.Id, team, setBy, setByKind, how, ct);
-    }
+    /// <summary>
+    /// <paramref name="outcomeId"/> followed through <c>merged_into</c>, when that outcome is live; null
+    /// for a retired one or one that is gone. Held until the append commits, so a retire or merge
+    /// running beside it waits, and the link is never made to an outcome already taken out of use.
+    /// </summary>
+    private static async Task<string?> ResolveLiveAsync(
+        SqlConnection connection, SqlTransaction transaction, string outcomeId, CancellationToken ct) =>
+        await ResolveAsync(connection, transaction, outcomeId, ct, forUpdate: true) is { } resolved
+        && OutcomeStatus.IsLive(resolved.Status)
+            ? resolved.Id
+            : null;
 
     /// <summary>
     /// Appends one link row: the outcome's name and the team's name as they are now, which nothing

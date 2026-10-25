@@ -466,6 +466,48 @@ public abstract class OutcomeStoreContract : ProviderContract
         Assert.Equal(6, (await outcomes.ReadLinksAsync(Ct)).Count);
     }
 
+    /// <summary>
+    /// REVIEW FOCUS 2: A TRIGGER FIRES INTO A WORKFLOW WHILE A PERSON LINKS IT. A root link never
+    /// replaces one, so whichever lands first the person's link is the workflow's newest: the fire's
+    /// append reads the workflow's newest link and holds it, and the person's link holds it too.
+    /// The outcome store takes no append lock, so nothing else orders the two.
+    /// </summary>
+    [Fact]
+    public async Task A_trigger_fire_racing_a_persons_link_never_replaces_it()
+    {
+        var outcomes = await CreateAsync();
+        var stores = await StoresAsync();
+        var persons = (await outcomes.CreateAsync("Person's", new OutcomeEdit(), Person, Audit(TenantActions.OutcomeCreated), Ct)).Outcome!;
+        var triggers = (await outcomes.CreateAsync("Trigger's", new OutcomeEdit(), Person, Audit(TenantActions.OutcomeCreated), Ct)).Outcome!;
+        await stores.ExecuteAsync($"INSERT INTO teams (id, name, created_utc) VALUES ('Alpha', 'Alpha', '{At}')");
+        await TriggerAsync(stores, "t1", triggers.Id, "user-1", "configurer@example.test");
+        var dev = new ContainerId("Alpha", "Dev");
+
+        for (var round = 0; round < 25; round++)
+        {
+            var root = await stores.Log.AppendAsync(new NewMessage(MessageTypes.InstructionFor(dev), "{}", "console"), Ct);
+
+            using var start = new ManualResetEventSlim();
+            var link = Task.Run(async () =>
+            {
+                start.Wait(Ct);
+                return await outcomes.LinkAsync(root.CorrelationId, persons.Id, "Alpha", Person, OutcomeLinkHow.Person,
+                    agentRule: false, Audit(TenantActions.WorkflowOutcomeChanged), Ct);
+            }, Ct);
+            var fire = Task.Run(async () =>
+            {
+                start.Wait(Ct);
+                return await stores.Log.AppendAsync(new NewMessage(MessageTypes.InstructionFor(dev), "{}", "trigger:t1", root.Seq), Ct);
+            }, Ct);
+
+            start.Set();
+            Assert.True((await link).Ok);
+            await fire;
+
+            Assert.Equal(persons.Id, (await outcomes.CurrentLinkAsync(root.CorrelationId, Ct))!.OutcomeId);
+        }
+    }
+
     private static async Task<OutcomeWrite[]> RaceAsync(int writers, Func<Task<OutcomeWrite>> write)
     {
         using var start = new ManualResetEventSlim();
