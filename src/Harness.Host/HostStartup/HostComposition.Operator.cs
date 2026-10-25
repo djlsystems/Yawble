@@ -190,9 +190,11 @@ internal sealed partial class HostComposition
         // is printed and the host starts anyway - the backfill's own row is what marks it done, so the next
         // start tries again, and rows recovered then are keyed so none is counted twice.
         ledgerStart = null;
+        var (ledgerRows, outcomeRows) = StartRowsFor(databaseOptions.Provider, database);
+        if (ledgerRows is not null)
         try
         {
-            var ledger = ledgerStart = await new SqliteLedgerStartRows(database).RunAsync();
+            var ledger = ledgerStart = await ledgerRows.RunAsync();
 
             if (ledger.BackfilledRuns is { } recovered)
             {
@@ -211,7 +213,7 @@ internal sealed partial class HostComposition
         // link writer did it for them. One transaction; a failure leaves it to the next start.
         try
         {
-            if (await new SqliteOutcomeStartRows(database).RunAsync() is { } inherited)
+            if (outcomeRows is not null && await outcomeRows.RunAsync() is { } inherited)
             {
                 Console.WriteLine($"Backlog outcomes: {inherited} item(s) took the outcome their dispatch workflow serves.");
             }
@@ -223,4 +225,12 @@ internal sealed partial class HostComposition
 
         return true;
     }
+
+    // THE ONE PLACE THE PROVIDER CHOOSES THE START STEPS' ROWS. Only SQLite has them today. A sqlserver
+    // start answers none and skips both steps: the store guard refuses it right after, naming the missing
+    // stores, so a step that cannot run is not run against a file it was never meant for.
+    private static (ILedgerStartRows? Ledger, IOutcomeStartRows? Outcome) StartRowsFor(DatabaseProvider provider, string database) =>
+        provider == DatabaseProvider.Sqlite
+            ? (new SqliteLedgerStartRows(database), new SqliteOutcomeStartRows(database))
+            : (null, null);
 }
