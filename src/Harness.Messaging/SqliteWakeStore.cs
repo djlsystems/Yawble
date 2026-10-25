@@ -13,7 +13,7 @@ namespace Harness.Messaging;
 public sealed class SqliteWakeStore(string databasePath, SqliteDurability durability = SqliteDurability.SurvivesPowerLoss)
     : IWakeStore
 {
-    private const string Columns = "id, team, member, workflow, asked_seq, asked_at, due_at, note";
+    private const string Columns = WakeRows.Columns;
 
     private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 
@@ -41,7 +41,7 @@ public sealed class SqliteWakeStore(string databasePath, SqliteDurability durabi
     public Task<IReadOnlyList<PendingWake>> DueAsync(DateTimeOffset now, CancellationToken ct = default) =>
         ReadAsync(
             $"SELECT {Columns} FROM wakes WHERE due_at <= $now ORDER BY due_at, id",
-            command => command.Parameters.AddWithValue("$now", Instant(now)),
+            command => command.Parameters.AddWithValue("$now", WakeRows.Instant(now)),
             ct);
 
     public async Task<DateTimeOffset?> EarliestDueAsync(CancellationToken ct = default)
@@ -50,7 +50,7 @@ public sealed class SqliteWakeStore(string databasePath, SqliteDurability durabi
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT MIN(due_at) FROM wakes";
 
-        return await command.ExecuteScalarAsync(ct) is string text ? Parse(text) : null;
+        return await command.ExecuteScalarAsync(ct) is string text ? WakeRows.Parse(text) : null;
     }
 
     public async Task<int> DeleteForTeamAsync(string team, CancellationToken ct = default)
@@ -69,10 +69,10 @@ public sealed class SqliteWakeStore(string databasePath, SqliteDurability durabi
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = $"SELECT {Columns} FROM wakes WHERE team = $team AND member = $member ORDER BY due_at, id";
-        Add(command, "$team", member.Team);
-        Add(command, "$member", member.Name);
+        WakeRows.Add(command, "$team", member.Team);
+        WakeRows.Add(command, "$member", member.Name);
 
-        return await ReadAllAsync(command, ct);
+        return await WakeRows.ReadAllAsync(command, ct);
     }
 
     public async Task<PendingWake> InsertWithinAsync(
@@ -86,13 +86,13 @@ public sealed class SqliteWakeStore(string databasePath, SqliteDurability durabi
             VALUES ($team, $member, $workflow, $asked, $askedAt, $dueAt, $note)
             RETURNING id
             """;
-        Add(command, "$team", wake.Team);
-        Add(command, "$member", wake.Member);
-        Add(command, "$workflow", wake.Workflow);
-        Add(command, "$asked", wake.AskedSeq);
-        Add(command, "$askedAt", Instant(wake.AskedAt));
-        Add(command, "$dueAt", Instant(wake.DueAt));
-        Add(command, "$note", wake.Note);
+        WakeRows.Add(command, "$team", wake.Team);
+        WakeRows.Add(command, "$member", wake.Member);
+        WakeRows.Add(command, "$workflow", wake.Workflow);
+        WakeRows.Add(command, "$asked", wake.AskedSeq);
+        WakeRows.Add(command, "$askedAt", WakeRows.Instant(wake.AskedAt));
+        WakeRows.Add(command, "$dueAt", WakeRows.Instant(wake.DueAt));
+        WakeRows.Add(command, "$note", wake.Note);
 
         var id = Convert.ToInt64(await command.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
         return wake with { Id = id };
@@ -104,8 +104,8 @@ public sealed class SqliteWakeStore(string databasePath, SqliteDurability durabi
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = "UPDATE wakes SET asked_seq = $asked WHERE id = $id";
-        Add(command, "$asked", askedSeq);
-        Add(command, "$id", id);
+        WakeRows.Add(command, "$asked", askedSeq);
+        WakeRows.Add(command, "$id", id);
 
         await command.ExecuteNonQueryAsync(ct);
     }
@@ -116,9 +116,9 @@ public sealed class SqliteWakeStore(string databasePath, SqliteDurability durabi
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = $"DELETE FROM wakes WHERE id = $id RETURNING {Columns}";
-        Add(command, "$id", id);
+        WakeRows.Add(command, "$id", id);
 
-        return (await ReadAllAsync(command, ct)).FirstOrDefault();
+        return (await WakeRows.ReadAllAsync(command, ct)).FirstOrDefault();
     }
 
     private async Task<IReadOnlyList<PendingWake>> ReadAsync(
@@ -129,43 +129,8 @@ public sealed class SqliteWakeStore(string databasePath, SqliteDurability durabi
         command.CommandText = sql;
         bind(command);
 
-        return await ReadAllAsync(command, ct);
+        return await WakeRows.ReadAllAsync(command, ct);
     }
-
-    private static async Task<IReadOnlyList<PendingWake>> ReadAllAsync(DbCommand command, CancellationToken ct)
-    {
-        var rows = new List<PendingWake>();
-        await using var reader = await command.ExecuteReaderAsync(ct);
-
-        while (await reader.ReadAsync(ct))
-        {
-            rows.Add(new PendingWake(
-                reader.GetInt64(0),
-                reader.GetString(1),
-                reader.GetString(2),
-                reader.GetInt64(3),
-                reader.GetInt64(4),
-                Parse(reader.GetString(5)),
-                Parse(reader.GetString(6)),
-                reader.GetString(7)));
-        }
-
-        return rows;
-    }
-
-    private static void Add(DbCommand command, string name, object value)
-    {
-        var parameter = command.CreateParameter();
-        parameter.ParameterName = name;
-        parameter.Value = value;
-        command.Parameters.Add(parameter);
-    }
-
-    private static string Instant(DateTimeOffset at) =>
-        at.UtcDateTime.ToString("o", CultureInfo.InvariantCulture);
-
-    private static DateTimeOffset Parse(string text) =>
-        DateTimeOffset.Parse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
 
     private SqliteConnection Open()
     {

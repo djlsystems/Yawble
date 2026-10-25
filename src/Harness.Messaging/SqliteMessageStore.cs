@@ -78,8 +78,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
     /// </summary>
     public async Task<Message> AppendAsync(NewMessage message, CancellationToken ct = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(message.Type);
-        ArgumentException.ThrowIfNullOrWhiteSpace(message.Source);
+        MessageAppend.Validate(message);
 
         await using var connection = Open();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
@@ -108,8 +107,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         Message? stored = null;
         if (await before(connection, transaction, ct) is { } message)
         {
-            ArgumentException.ThrowIfNullOrWhiteSpace(message.Type);
-            ArgumentException.ThrowIfNullOrWhiteSpace(message.Source);
+            MessageAppend.Validate(message);
 
             stored = await InsertAsync(connection, transaction, message, ct);
             await after(connection, transaction, stored, ct);
@@ -127,9 +125,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
     private static async Task<Message> InsertAsync(
         SqliteConnection connection, SqliteTransaction transaction, NewMessage message, CancellationToken ct)
     {
-        // `?? message.Payload` only ever fires on a null the compiler cannot rule out: `RedactUserInfo`
-        // returns its argument unchanged when there is nothing to redact.
-        var payload = GitOutputRedaction.RedactUserInfo(message.Payload) ?? message.Payload;
+        var payload = MessageAppend.Redacted(message);
 
         long correlation = 0;
         var depth = 0;
@@ -145,14 +141,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
 
             await using var reader = await parent.ExecuteReaderAsync(ct);
 
-            if (!await reader.ReadAsync(ct))
-            {
-                // Refused rather than silently treated as a root. A dangling cause would report
-                // depth 0 for a message arbitrarily deep in a chain, which is precisely the value
-                // the loop bound depends on.
-                throw new InvalidOperationException(
-                    $"Message {cause} does not exist, so nothing can be caused by it.");
-            }
+            if (!await reader.ReadAsync(ct)) throw MessageAppend.NoSuchCause(cause);
 
             correlation = reader.GetInt64(0);
             depth = reader.GetInt32(1) + 1;
@@ -170,7 +159,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             """;
 
         insert.Parameters.AddWithValue("$type", message.Type);
-        insert.Parameters.AddWithValue("$payload", string.IsNullOrEmpty(payload) ? "{}" : payload);
+        insert.Parameters.AddWithValue("$payload", MessageAppend.RowPayload(payload));
         insert.Parameters.AddWithValue("$source", message.Source);
         insert.Parameters.AddWithValue("$correlation", correlation);
         insert.Parameters.AddWithValue("$causation", (object?)message.CausationSeq ?? DBNull.Value);
@@ -514,24 +503,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         var runs = new List<RunRow>();
 
         await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            var terminal = new Message(
-                reader.GetInt64(0),
-                reader.GetString(1),
-                reader.GetString(2),
-                reader.GetString(3),
-                reader.GetInt64(4),
-                reader.IsDBNull(5) ? null : reader.GetInt64(5),
-                reader.GetInt32(6),
-                MessageRows.ReadStamp(reader.GetString(7)));
-
-            runs.Add(new RunRow(
-                terminal,
-                reader.IsDBNull(8) ? null : MessageRows.ReadStamp(reader.GetString(8)),
-                reader.GetInt64(9) != 0,
-                reader.GetInt64(10) != 0));
-        }
+        while (await reader.ReadAsync(ct)) runs.Add(MessageRows.ReadRun(reader));
 
         return runs;
     }
@@ -649,22 +621,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         var rows = new List<ContainerUsageRow>();
         await using var reader = await command.ExecuteReaderAsync(ct);
 
-        while (await reader.ReadAsync(ct))
-        {
-            rows.Add(new ContainerUsageRow(
-                reader.GetString(0),
-                reader.GetInt64(1),
-                reader.GetInt64(2),
-                checked((int)reader.GetInt64(3)),
-                checked((int)reader.GetInt64(4)),
-                // NULL WHERE NO ROW CARRIED ONE, never 0. SUM over no matching rows is SQL NULL,
-                // which is exactly the distinction wanted here: a member that reported no combined
-                // figure has not reported a combined figure of nothing.
-                reader.IsDBNull(5) ? null : reader.GetInt64(5),
-                reader.GetInt64(6),
-                reader.GetInt64(7),
-                reader.GetInt64(8)));
-        }
+        while (await reader.ReadAsync(ct)) rows.Add(MessageRows.ReadUsage(reader));
 
         return rows;
     }
@@ -683,7 +640,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
 
         if (string.IsNullOrWhiteSpace(team))
         {
-            return Unavailable(serverNow, "No team was named.");
+            return WorkflowTimingFacts.Unavailable(serverNow, "No team was named.");
         }
 
         await using var connection = Open();
@@ -736,7 +693,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
 
         if (correlation == 0)
         {
-            return Unavailable(
+            return WorkflowTimingFacts.Unavailable(
                 serverNow,
                 "This team has published nothing since its members were created");
         }
@@ -752,7 +709,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
 
         if (string.IsNullOrWhiteSpace(team))
         {
-            return Unavailable(serverNow, "No team was named.");
+            return WorkflowTimingFacts.Unavailable(serverNow, "No team was named.");
         }
 
         await using var connection = Open();
@@ -782,8 +739,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         // See TeamSourcePattern's own doc comment for why this is built there and not by hand.
         var nested = NestedSourcePattern(team);
 
-        DateTimeOffset? startedAt = null;
-        DateTimeOffset? lastActivityAt = null;
+        var facts = new WorkflowTimingFacts(correlation);
 
         await using (var bounds = connection.CreateCommand())
         {
@@ -808,8 +764,8 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
 
             if (await reader.ReadAsync(ct) && !reader.IsDBNull(0))
             {
-                startedAt = MessageRows.ReadStamp(reader.GetString(0));
-                lastActivityAt = MessageRows.ReadStamp(reader.GetString(1));
+                facts.StartedAt = MessageRows.ReadStamp(reader.GetString(0));
+                facts.LastActivityAt = MessageRows.ReadStamp(reader.GetString(1));
             }
         }
 
@@ -817,9 +773,6 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         // settling rule above, so `seq = $correlation` IS the root row, unconditionally and without
         // a floor: a subject is a label, not an authority, and the row it names is what began this very
         // workflow whichever side of `sinceSeq` it happens to sit on.
-        string? subject = null;
-        WorkflowItem? item = null;
-
         await using (var root = connection.CreateCommand())
         {
             root.CommandText = "SELECT type, payload FROM messages WHERE seq = $correlation";
@@ -827,31 +780,9 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
 
             await using var reader = await root.ExecuteReaderAsync(ct);
 
-            if (await reader.ReadAsync(ct))
-            {
-                var type = reader.GetString(0);
-
-                // NULL FOR ANYTHING THAT IS NOT AN ADDRESSED INSTRUCTION. A workflow can be rooted
-                // in something else entirely - `TriggerSweep`'s scheduled wakes, the repositories
-                // instruction in `Teams.cs` - and none of those carry a subject to report.
-                if (type.StartsWith(MessageTypes.InstructionPrefix, StringComparison.Ordinal))
-                {
-                    subject = SubjectFrom(reader.IsDBNull(1) ? null : reader.GetString(1));
-                }
-
-                // A DISPATCH ROOT NAMES ITS ITEM, with the title it had when it was dispatched. The
-                // current title is the Host's to overlay (`WorkflowItems`): this store cannot read the
-                // backlog.
-                else if (type == MessageTypes.BacklogItemDispatched)
-                {
-                    item = ItemFrom(reader.IsDBNull(1) ? null : reader.GetString(1));
-                }
-            }
+            // An addressed instruction names a subject and a dispatch its item; see WorkflowTimingFacts.Root.
+            if (await reader.ReadAsync(ct)) facts.Root(reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1));
         }
-
-        var completed = false;
-        var closed = false;
-        DateTimeOffset? closedAt = null;
 
         await using (var declared = connection.CreateCommand())
         {
@@ -888,25 +819,13 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
 
             while (await reader.ReadAsync(ct))
             {
-                if (string.Equals(
-                        reader.GetString(0), MessageTypes.WorkflowCompleted, StringComparison.Ordinal))
-                {
-                    completed = true;
-                }
-                else
-                {
-                    if (!reader.IsDBNull(1))
-                    {
-                        closedAt = MessageRows.ReadStamp(reader.GetString(1));
-                    }
-                    closed = true;
-                }
+                facts.Declared(reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1));
             }
         }
 
         // Check if a closed workflow has been reopened by a proper re-opening event
         // (an instruction or kanban card event), not just any later row per WorkflowOpenSql.
-        if (closed && closedAt.HasValue)
+        if (facts.Closed && facts.ClosedAt.HasValue)
         {
             await using (var reopen = connection.CreateCommand())
             {
@@ -934,7 +853,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
 
                 if (hasReopen)
                 {
-                    closed = false;
+                    facts.Closed = false;
                 }
             }
         }
@@ -956,10 +875,6 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         // reading a window must not be told about a pause outside it - and, more to the point,
         // must not be told about a RESUME outside it either, which would be a pause that looks
         // still in force.
-        DateTimeOffset? pausedAt = null;
-        string? pausedReason = null;
-        long? pausedLimit = null;
-
         await using (var paused = connection.CreateCommand())
         {
             paused.CommandText =
@@ -987,20 +902,9 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
 
             if (await reader.ReadAsync(ct))
             {
-                pausedAt = MessageRows.ReadStamp(reader.GetString(0));
-                (pausedReason, pausedLimit) =
-                    PauseDetailFrom(reader.IsDBNull(1) ? null : reader.GetString(1));
+                facts.Paused(reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1));
             }
         }
-
-        var failedMembers = new List<string>();
-        string? blockedBy = null;
-        string? awaitingFrom = null;
-        var everyTerminalCompleted = true;
-        var terminals = 0;
-
-        // Track which members have any non-stopped failures
-        var membersWithRealFailures = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         await using (var last = connection.CreateCommand())
         {
@@ -1044,20 +948,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
 
             await using var reader = await last.ExecuteReaderAsync(ct);
 
-            while (await reader.ReadAsync(ct))
-            {
-                var member = NameOf(reader.GetString(0));
-                var type = reader.GetString(1);
-
-                terminals++;
-
-                if (type != MessageTypes.Completed) everyTerminalCompleted = false;
-
-                if (type == MessageTypes.Failed)
-                {
-                    membersWithRealFailures.Add(member);
-                }
-            }
+            while (await reader.ReadAsync(ct)) facts.LastOutcome(reader.GetString(0), reader.GetString(1));
         }
 
         // Check each member that has a Failed to see if it's a real failure
@@ -1090,43 +981,12 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
 
             await using var reader = await failureDetails.ExecuteReaderAsync(ct);
 
+            // A run stopped by a person is Awaiting, not Failed; see WorkflowTimingFacts.LastFailure.
             while (await reader.ReadAsync(ct))
             {
-                var member = NameOf(reader.GetString(0));
-                var payload = reader.IsDBNull(1) ? null : reader.GetString(1);
-
-                // Check if this failure was stopped by a person
-                var stoppedByPerson = false;
-                if (payload is not null)
-                {
-                    try
-                    {
-                        using var doc = JsonDocument.Parse(payload);
-                        if (doc.RootElement.TryGetProperty(PayloadFields.StoppedByPerson, out var value))
-                        {
-                            stoppedByPerson = value.GetBoolean();
-                        }
-                    }
-                    catch (Exception)
-                    {
-                        // If we can't parse the payload, treat it as a normal failure
-                    }
-                }
-
-                if (stoppedByPerson)
-                {
-                    // A run stopped by a person is Awaiting, not Failed
-                    awaitingFrom ??= member;
-                    // Remove from real failures list
-                    membersWithRealFailures.Remove(member);
-                    // The run was stopped on purpose, so not all runs completed successfully
-                    everyTerminalCompleted = false;
-                }
+                facts.LastFailure(reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1));
             }
         }
-
-        // Add members with real failures to failedMembers
-        failedMembers.AddRange(membersWithRealFailures);
 
         await using (var declarations = connection.CreateCommand())
         {
@@ -1164,25 +1024,10 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
 
             await using var reader = await declarations.ExecuteReaderAsync(ct);
 
-            while (await reader.ReadAsync(ct))
-            {
-                var member = NameOf(reader.GetString(0));
-                var type = reader.GetString(1);
-
-                // A MEMBER CARRYING A LIVE DECLARATION IS NOT ONE WHOSE RUNS SUCCEEDED, whatever
-                // its own run's outcome says. Without this the two answers disagree about one
-                // member: its outcome IS `completed`, which is precisely how these teams fell
-                // through to `Undeclared`. `UNDECLARED` and `AWAITING` are documented as mutually
-                // exclusive BY CONSTRUCTION, and this is the line that makes that true rather than
-                // vacuous.
-                everyTerminalCompleted = false;
-
-                if (type == MessageTypes.Blocked) blockedBy ??= member;
-                else awaitingFrom ??= member;
-            }
+            // A member carrying a live declaration is not one whose runs succeeded; see
+            // WorkflowTimingFacts.LiveDeclaration.
+            while (await reader.ReadAsync(ct)) facts.LiveDeclaration(reader.GetString(0), reader.GetString(1));
         }
-
-        var runsFailed = 0;
 
         await using (var failures = connection.CreateCommand())
         {
@@ -1208,11 +1053,9 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             failures.Parameters.AddWithValue("$team", team);
             failures.Parameters.AddWithValue("$nested", nested);
 
-            runsFailed = Convert.ToInt32(
+            facts.RunsFailed = Convert.ToInt32(
                 await failures.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
         }
-
-        var runs = new Dictionary<string, MemberRuns>(StringComparer.OrdinalIgnoreCase);
 
         await using (var pairs = connection.CreateCommand())
         {
@@ -1255,270 +1098,19 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
 
             while (await reader.ReadAsync(ct))
             {
-                var member = NameOf(reader.GetString(0));
-
-                if (!runs.TryGetValue(member, out var row))
-                {
-                    row = new MemberRuns();
-                    runs[member] = row;
-                }
-
-                row.Runs++;
-
-                if (reader.IsDBNull(2))
-                {
-                    row.Unfinished++;
-                    continue;
-                }
-
-                var from = MessageRows.ReadStamp(reader.GetString(1));
-                var to = MessageRows.ReadStamp(reader.GetString(2));
-
-                // Clamped at zero rather than allowed negative. Two rows a millisecond apart can
-                // round the wrong way, and a negative run time on a dialog is the kind of visible
-                // nonsense that gets reported as a pairing bug.
-                var seconds = (long)Math.Max(0, Math.Round((to - from).TotalSeconds));
-
-                row.Counted++;
-                row.Seconds += seconds;
+                facts.RunPair(reader.GetString(0), reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2));
             }
         }
 
-        var members = runs
-            .OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase)
-            .Select(entry => new MemberExecution(
-                entry.Key,
-                entry.Value.Runs,
-
-                // NULL, NOT ZERO, for a member whose every run was cut short. It spent real time
-                // and nothing here knows how much.
-                entry.Value.Counted > 0 ? entry.Value.Seconds : null,
-                entry.Value.Unfinished))
-            .ToList();
-
-        var counted = runs.Values.Sum(row => row.Counted);
-        var unfinished = runs.Values.Sum(row => row.Unfinished);
-        var execution = runs.Values.Sum(row => row.Seconds);
-
-        // THE RANKING, and every step of it is an argument rather than an ordering. A platform
-        // failure outranks an agent's decision to stop, which outranks an agent's decision to ask -
-        // because a run that died after asking did not get its question answered either. The tab
-        // chip orders these identically, or a chip and the card beneath it disagree about one
-        // member.
-        //
-        // `Running` here does NOT mean a member is running: the log cannot see a roster. It means
-        // the workflow is open and no member's last terminal fact says anything louder. The caller
-        // decides RUNNING from live containers, and it ranks first.
-        //
-        // `Closed` ranks above `Failed`/`Blocked`/`Awaiting`, because it is a
-        // person's declaration to stop counting a workflow. However, `Completed` still outranks
-        // `Closed`, because a declaration of delivery is louder than an administrative close.
-        //
-        // `Paused` SITS BETWEEN `Closed` AND `Failed`, and that placement is the argument.
-        // A paused workflow whose last member run also failed will not run again whatever the
-        // failure says - so telling a reader FAILED sends them to inspect a run when the reason
-        // nothing is moving is the budget, and the fix is on a different screen entirely.
-        // `Completed` and `Closed` still outrank it: a workflow paused and then closed is closed.
-        //
-        // DERIVED FROM `pausedAt` AND NOWHERE ELSE, so the word and the timestamp cannot
-        // disagree, and no client re-derives it - the same pairing `blockedBy`/`Blocked` and
-        // `awaitingFrom`/`Awaiting` already have.
-        var state =
-            completed ? "Completed"
-            : closed ? "Closed"
-            : pausedAt is not null ? "Paused"
-            : failedMembers.Count > 0 ? "Failed"
-            : blockedBy is not null ? "Blocked"
-            : awaitingFrom is not null ? "Awaiting"
-
-            // UNDECLARED CARRIES ONLY THE CLAUSES THE LOG CAN ANSWER: the workflow is open and every
-            // member that ran ended `completed`. Nothing Running, no queue depth and the grace
-            // period belong to the caller, which owns the roster and the clock - and there must go
-            // on being exactly one grace constant, which is in the SPA.
-            : terminals > 0 && everyTerminalCompleted ? "Undeclared"
-            : "Running";
-
-        // Per-workflow spend for budget checking. Null when there are no completed/failed runs.
+        // Per-workflow spend for budget checking, AND THE SAME MEASUREMENT OVER THE WINDOW THE BOUND
+        // ACTUALLY USES: the whole-workflow figure never comes back down, so a screen drawn from it
+        // alone goes on reading over-limit after a nudge or a resume has plainly released the
+        // workflow. Both are answered from here; WorkflowTimingFacts.Build returns both or neither.
         var spend = await GetWorkflowSpendAsync(correlation, ct);
-        var spendToReturn = correlation > 0 && (spend.RunsWithMeasuredUsage > 0 || spend.RunsWithoutUsage > 0) 
-            ? spend 
-            : null;
-
-        // AND THE SAME MEASUREMENT OVER THE WINDOW THE BOUND ACTUALLY USES.
-        //
-        // The figure above is the WHOLE workflow and never comes back down, so a screen drawn from
-        // it goes on reading over-limit after a nudge or a resume has plainly released the
-        // workflow - the display contradicting the decision. Both are answered here, from the same
-        // read, so nothing downstream has to choose between two routes to get the one it needs.
-        //
-        // NULL UNDER THE SAME CONDITION, deliberately: the two fields appear and disappear
-        // together, so a client cannot end up with one and not the other and quietly fall back to
-        // the wrong one.
         var sinceNudge = await GetSpendSinceNudgeAsync(correlation, ct);
-        var sinceNudgeToReturn = spendToReturn is null ? null : sinceNudge;
 
-        return new TeamWorkflowTiming(
-            true,
-            correlation,
-            state,
-            startedAt,
-
-            // NULL WHILE OPEN, and open is the ordinary case: `workflow.completed` is a manager's
-            // declaration and most workflows never get one.
-            //
-            // A CLOSED WORKFLOW HAS ENDED TOO, whatever word it wears. The reasoning above is about
-            // OPEN-ness, not about who declared it: `workflow.closed` is terminal for
-            // `WorkflowOpenSql`, so a closed workflow is not open and its clock must stop. A
-            // `completed`-only test would keep a closed workflow ticking forever on every surface.
-            completed || closed ? lastActivityAt : null,
-            serverNow,
-            execution,
-            unfinished > 0,
-            counted,
-            unfinished,
-            blockedBy,
-            runsFailed,
-            failedMembers,
-            null,
-            members,
-            lastActivityAt,
-            awaitingFrom,
-            subject,
-            spendToReturn,
-
-            // A PAUSED WORKFLOW IS STILL OPEN, which is why `EndedAt` above is untouched here.
-            // `WorkflowOpenSql` counts it open, `StatusCommand.IsOpen` and the SPA's
-            // `workflowOpen` both test `endedAt == null`, and a paused workflow that vanished
-            // from the open list would be one nobody could find in order to resume it.
-            pausedAt,
-            pausedReason,
-            pausedLimit,
-            sinceNudgeToReturn,
-            Item: item);
-    }
-
-    /// <summary>
-    /// A DISPATCH ROOT'S ITEM, out of its payload - <c>item</c> (the route number) and <c>title</c>
-    /// as `BacklogEndpoints` writes them - or null when either is missing or the payload is not
-    /// JSON. Nothing is made up for a missing title: an item with no words is the number alone,
-    /// which the reader already has.
-    /// </summary>
-    private static WorkflowItem? ItemFrom(string? payload)
-    {
-        if (string.IsNullOrEmpty(payload)) return null;
-
-        try
-        {
-            using var json = JsonDocument.Parse(payload);
-
-            if (json.RootElement.ValueKind is not JsonValueKind.Object) return null;
-
-            return json.RootElement.TryGetProperty("item", out var idField)
-                && idField.ValueKind is JsonValueKind.Number
-                && idField.TryGetInt64(out var id)
-                && json.RootElement.TryGetProperty("title", out var titleField)
-                && titleField.ValueKind is JsonValueKind.String
-                && titleField.GetString() is { Length: > 0 } title
-                    ? new WorkflowItem(id, title)
-                    : null;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// The sentence and the figure off a `workflow.paused` payload.
-    ///
-    /// BOTH OPTIONAL, INDEPENDENTLY. The log is append-only and replayed, so a row written by an
-    /// older or different writer may carry neither - and a pause with no reason is still a pause.
-    /// The STATE comes from the row's existence, never from these, which is why a parse failure
-    /// here is silent rather than a workflow that stops reading as paused.
-    /// </summary>
-    private static (string? Reason, long? Limit) PauseDetailFrom(string? payload)
-    {
-        if (string.IsNullOrEmpty(payload)) return (null, null);
-
-        try
-        {
-            using var json = JsonDocument.Parse(payload);
-
-            if (json.RootElement.ValueKind is not JsonValueKind.Object) return (null, null);
-
-            var reason =
-                json.RootElement.TryGetProperty(PayloadFields.Reason, out var reasonField)
-                && reasonField.ValueKind is JsonValueKind.String
-                && reasonField.GetString() is { Length: > 0 } text
-                    ? text
-                    : null;
-
-            var limit =
-                json.RootElement.TryGetProperty(PayloadFields.Limit, out var limitField)
-                && limitField.ValueKind is JsonValueKind.Number
-                && limitField.TryGetInt64(out var bound)
-                    ? bound
-                    : (long?)null;
-
-            return (reason, limit);
-        }
-        catch (JsonException)
-        {
-            return (null, null);
-        }
-    }
-
-    /// <summary>
-    /// A ROOT MESSAGE'S SUBJECT, out of its payload - or null. Two shapes, both live, for
-    /// <see cref="InstructionText"/>'s own reason: a row may carry `subject` (and `body`) beside
-    /// `instruction`, or `instruction` alone, and the log is APPEND-ONLY and REPLAYED, so both
-    /// shapes are met on the same team.
-    ///
-    /// READS, NEVER RE-DERIVES: an explicit `subject` field wins outright, exactly as
-    /// `KanbanProjector.ExtractTitleAndBody` reads the identical stored field for a card's title.
-    /// The fallback is `InstructionText.Split`, the ONE place that decides what a subject is - not a
-    /// clamp of its own, which would let this answer disagree with the card's title over the same
-    /// row.
-    /// </summary>
-    private static string? SubjectFrom(string? payload)
-    {
-        if (string.IsNullOrEmpty(payload))
-        {
-            return null;
-        }
-
-        try
-        {
-            using var json = JsonDocument.Parse(payload);
-
-            if (json.RootElement.ValueKind is not JsonValueKind.Object)
-            {
-                return null;
-            }
-
-            if (json.RootElement.TryGetProperty("subject", out var subjectField)
-                && subjectField.ValueKind is JsonValueKind.String
-                && subjectField.GetString() is { Length: > 0 } subject)
-            {
-                return subject;
-            }
-
-            if (json.RootElement.TryGetProperty("instruction", out var instructionField)
-                && instructionField.ValueKind is JsonValueKind.String)
-            {
-                var parts = InstructionText.Split(instructionField.GetString());
-                return parts.Subject.Length > 0 ? parts.Subject : null;
-            }
-
-            return null;
-        }
-        catch (JsonException)
-        {
-            // THE PAYLOAD IS OPAQUE TO THIS STORE, exactly as it is to `KanbanProjector`'s own
-            // `StringField`: nothing here may assume a row appended by some other caller is even
-            // JSON, and a subject nobody can read is the same answer as one nobody wrote.
-            return null;
-        }
+        // THE RANKING is WorkflowTimingFacts.Build's, shared with every provider's log.
+        return facts.Build(serverNow, spend, sinceNudge);
     }
 
     /// <summary>
@@ -1608,8 +1200,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
     public async Task<IReadOnlyDictionary<long, WorkflowStanding>> WorkflowStandingsAmongAsync(
         IReadOnlyDictionary<long, string> teams, CancellationToken ct = default)
     {
-        var standings = new Dictionary<long, WorkflowStanding>();
-        if (teams.Count == 0) return standings;
+        if (teams.Count == 0) return new Dictionary<long, WorkflowStanding>();
 
         await using var connection = Open();
         await using var command = connection.CreateCommand();
@@ -1671,81 +1262,15 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         command.Parameters.AddWithValue("$started", MessageTypes.Started);
         WorkflowOpenSql.Bind(command);
 
-        var known = new HashSet<long>();
-        var ends = new Dictionary<long, List<(long Seq, string Type, DateTimeOffset At, bool Woken)>>();
-        var pauses = new Dictionary<long, (long Paused, long Resumed)>();
-        var failed = new HashSet<long>();
-        var blocked = new HashSet<long>();
+        var rows = new WorkflowStandingRows(teams);
 
         await using (var reader = await command.ExecuteReaderAsync(ct))
         {
-            while (await reader.ReadAsync(ct))
-            {
-                var correlation = reader.GetInt64(1);
-
-                switch (reader.GetString(0))
-                {
-                    case "row":
-                        known.Add(correlation);
-                        break;
-
-                    case "end":
-                        if (!ends.TryGetValue(correlation, out var list)) ends[correlation] = list = [];
-                        list.Add((reader.GetInt64(6), reader.GetString(3), MessageRows.ReadStamp(reader.GetString(4)), reader.GetInt64(5) != 0));
-                        break;
-
-                    case "pause":
-                        var pause = pauses.GetValueOrDefault(correlation);
-                        pauses[correlation] = reader.GetString(3) == MessageTypes.WorkflowPaused
-                            ? pause with { Paused = reader.GetInt64(6) }
-                            : pause with { Resumed = reader.GetInt64(6) };
-                        break;
-
-                    case "last" when TeamOwn(teams[correlation], reader.GetString(2)):
-                        if (reader.GetString(3) == MessageTypes.Failed && reader.GetInt64(5) == 0) failed.Add(correlation);
-                        break;
-
-                    case "blocked" when TeamOwn(teams[correlation], reader.GetString(2)):
-                        blocked.Add(correlation);
-                        break;
-                }
-            }
+            await rows.ReadAsync(reader, ct);
         }
 
-        foreach (var correlation in known)
-        {
-            var rows = ends.GetValueOrDefault(correlation) ?? [];
-            var ending = rows.Where(r => !r.Woken).OrderBy(r => r.Seq).LastOrDefault();
-            var open = ending.Type is null;
-
-            var completed = rows.Any(r => r.Type == MessageTypes.WorkflowCompleted);
-            var closed = rows.Any(r => r.Type == MessageTypes.WorkflowClosed && !r.Woken);
-            var paused = pauses.TryGetValue(correlation, out var p) && p.Paused > p.Resumed;
-
-            var stuck = completed || closed || paused ? null
-                : failed.Contains(correlation) ? "Failed"
-                : blocked.Contains(correlation) ? "Blocked"
-                : null;
-
-            standings[correlation] = new WorkflowStanding(
-                correlation,
-                open,
-                ending.Type == MessageTypes.WorkflowCompleted ? ending.At : null,
-                stuck);
-        }
-
-        return standings;
+        return rows.Build();
     }
-
-    /// <summary>
-    /// Whether <paramref name="source"/> is one of <paramref name="team"/>'s own members - the C# form
-    /// of <see cref="TeamSourcePattern"/>'s pair: <c>Team/x</c>, case-insensitive, and not a nested
-    /// <c>Team/x/y</c>.
-    /// </summary>
-    private static bool TeamOwn(string team, string source) =>
-        source.Length > team.Length + 1
-        && source.StartsWith(team + "/", StringComparison.OrdinalIgnoreCase)
-        && source.IndexOf('/', team.Length + 1) < 0;
 
     /// <summary>
     /// EVERY WORKFLOW THIS TEAM HAS RUN SINCE ITS FLOOR, open and closed alike. See
@@ -1991,28 +1516,6 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             : null;
     }
 
-    /// <summary>Runs accumulated for one member while the pairing query is read.</summary>
-    private sealed class MemberRuns
-    {
-        public int Runs;
-        public int Counted;
-        public int Unfinished;
-        public long Seconds;
-    }
-
-    /// <summary>
-    /// The bare member name from a qualified source. Neither half of a ContainerId may contain a
-    /// `/`, so the last one is the separator - the same reading the SPA's own fold does.
-    /// </summary>
-    private static string NameOf(string source) => source[(source.LastIndexOf('/') + 1)..];
-
-    /// <summary>
-    /// A team with no workflow to report. AVAILABLE FALSE AND NOT A ZERO: zero is a measured
-    /// duration and this is an absent one, so the caller renders an em dash.
-    /// </summary>
-    private static TeamWorkflowTiming Unavailable(DateTimeOffset serverNow, string missing) =>
-        new(false, null, null, null, null, serverNow, 0, false, 0, 0, null, 0, [], missing, []);
-
     public async Task<ContainerMarks> LiveMarksForAsync(
         ContainerId member, long sinceSeq, CancellationToken ct = default)
     {
@@ -2103,40 +1606,18 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         await using var connection = Open();
         await using var command = connection.CreateCommand();
 
-        // The first row at or after $seq: rows are appended in time order, so whether it was written
-        // before `at` only ever turns from yes to no as $seq rises, gaps from deletion included.
+        // The first row at or after $seq; LogPosition halves the range over it.
         command.CommandText = "SELECT seq, occurred_at FROM messages WHERE seq >= $seq ORDER BY seq LIMIT 1";
         var seqParameter = command.Parameters.AddWithValue("$seq", 0L);
 
-        async Task<long?> FirstAtOrAfterAsync(long seq)
+        async Task<(long, string)?> FirstAtOrAfterAsync(long seq)
         {
             seqParameter.Value = seq;
             await using var reader = await command.ExecuteReaderAsync(ct);
-            if (!await reader.ReadAsync(ct)) return null;
-            return MessageRows.ReadStamp(reader.GetString(1)) < at ? reader.GetInt64(0) : null;
+            return await reader.ReadAsync(ct) ? (reader.GetInt64(0), reader.GetString(1)) : null;
         }
 
-        // The highest seq whose first row at or after it was written before `at`.
-        var low = 0L;
-        var high = await HighestSeqAsync(ct);
-        var found = 0L;
-
-        while (low <= high)
-        {
-            var mid = low + (high - low) / 2;
-
-            if (await FirstAtOrAfterAsync(mid) is { } before)
-            {
-                found = before;
-                low = before + 1;
-            }
-            else
-            {
-                high = mid - 1;
-            }
-        }
-
-        return found;
+        return await LogPosition.LastSeqBeforeAsync(FirstAtOrAfterAsync, await HighestSeqAsync(ct), at);
     }
 
     public async Task<Message?> FindAsync(long seq, CancellationToken ct = default)

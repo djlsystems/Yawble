@@ -61,7 +61,14 @@ public static class StoreContracts
 /// </summary>
 public static class SqlServerStoreRegistry
 {
-    public static IReadOnlyList<Type> Registered { get; } = [];
+    public static IReadOnlyList<Type> Registered { get; } =
+    [
+        typeof(IMessageLog),
+        typeof(ICursors),
+        typeof(ISubscriptions),
+        typeof(IPendingDeliveries),
+        typeof(IWakeStore),
+    ];
 }
 
 /// <summary>A start on SQL Server that lacks stores: the sentence names them.</summary>

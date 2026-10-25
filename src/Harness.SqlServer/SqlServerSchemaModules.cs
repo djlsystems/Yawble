@@ -1,4 +1,5 @@
 using Harness.Contracts;
+using Harness.SqlServer.Messaging;
 
 namespace Harness.SqlServer;
 
@@ -13,5 +14,5 @@ namespace Harness.SqlServer;
 /// </summary>
 public static class SqlServerSchemaModules
 {
-    public static IReadOnlyList<MigrationStep> All { get; } = [];
+    public static IReadOnlyList<MigrationStep> All { get; } = [.. SqlServerMessagingSchema.Steps];
 }

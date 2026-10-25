@@ -144,8 +144,7 @@ public sealed class SqlitePendingDeliveries : IPendingDeliveries
 
         while (await reader.ReadAsync(ct))
         {
-            rows.Add(new PendingDelivery(
-                reader.GetInt64(0), reader.GetInt64(1) != 0, reader.IsDBNull(2) ? null : reader.GetInt64(2)));
+            rows.Add(PendingRows.Read(reader));
         }
 
         return rows;
@@ -171,9 +170,7 @@ public sealed class SqlitePendingDeliveries : IPendingDeliveries
 
         while (await reader.ReadAsync(ct))
         {
-            rows.Add(new TeamPendingDelivery(
-                reader.GetString(0), reader.GetInt64(1), reader.GetInt64(2) != 0,
-                reader.IsDBNull(3) ? null : reader.GetInt64(3)));
+            rows.Add(PendingRows.ReadTeam(reader));
         }
 
         return rows;
@@ -193,9 +190,7 @@ public sealed class SqlitePendingDeliveries : IPendingDeliveries
 
         while (await reader.ReadAsync(ct))
         {
-            rows.Add(new TeamPendingDelivery(
-                reader.GetString(0), reader.GetInt64(1), reader.GetInt64(2) != 0,
-                reader.IsDBNull(3) ? null : reader.GetInt64(3)));
+            rows.Add(PendingRows.ReadTeam(reader));
         }
 
         return rows;
