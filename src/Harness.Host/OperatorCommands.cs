@@ -1,6 +1,11 @@
+using Harness.Contracts;
 using Harness.Identity;
 using Harness.Messaging;
 using Harness.Host.Solutions;
+using Harness.Host.SqlServer;
+using Harness.SqlServer;
+using Harness.SqlServer.Host;
+using Harness.SqlServer.Identity;
 
 namespace Harness.Host;
 
@@ -83,7 +88,7 @@ public static class OperatorCommands
     /// <summary>True when the arguments were an operator command and the host must not serve.</summary>
     public static async Task<OperatorOutcome> TryRunAsync(
         string[] args, string dataRoot, TextWriter output, CancellationToken ct = default,
-        BackupSettings? backups = null)
+        BackupSettings? backups = null, DatabaseOptions? database = null)
     {
         // The backups folder and retention Program.cs read from configuration, so a migration run
         // from here writes and prunes where the daily backup does, and --backup's manual copy and
@@ -105,8 +110,30 @@ public static class OperatorCommands
         // comment.
         if (key is null) return OperatorOutcome.NotAnOperatorCommand;
 
+        // ON SQL SERVER the database is the server's, named by HARNESS_DATABASE_CONNECTION, and no
+        // command here opens, creates or migrates `messages.db`: --backup and --restore refuse naming
+        // what backs that database up, the account commands go through the SQL Server stores, and
+        // the doctor reports the server's database.
+        var onSqlServer = database?.Provider == DatabaseProvider.SqlServer;
+
         switch (key)
         {
+            case "--backup" when onSqlServer:
+                return BackupElsewhere("No copy was written", output);
+
+            case "--restore" when onSqlServer:
+                return BackupElsewhere("Nothing was restored", output);
+
+            case "--reset-password" when onSqlServer:
+                return await ResetPasswordAsync(SqlServerUsers(database!.Connection!, output), SqlServerAccounts, value, output, ct)
+                    ? OperatorOutcome.Completed
+                    : OperatorOutcome.Refused;
+
+            case "--list-users" when onSqlServer:
+                return await ListUsersAsync(SqlServerUsers(database!.Connection!, output), output, ct)
+                    ? OperatorOutcome.Completed
+                    : OperatorOutcome.Refused;
+
             case "--backup":
                 return await BackUpAsync(Path.Combine(dataRoot, "messages.db"), backups.Directory, value, output, ct)
                     ? OperatorOutcome.Completed
@@ -118,17 +145,17 @@ public static class OperatorCommands
                     : OperatorOutcome.Refused;
 
             case "--reset-password":
-                return await ResetPasswordAsync(Path.Combine(dataRoot, "messages.db"), backups, value, output, ct)
+                return await ResetPasswordAsync(SqliteUsers(Path.Combine(dataRoot, "messages.db"), backups, output), SqliteAccounts, value, output, ct)
                     ? OperatorOutcome.Completed
                     : OperatorOutcome.Refused;
 
             case "--list-users":
-                return await ListUsersAsync(Path.Combine(dataRoot, "messages.db"), backups, output, ct)
+                return await ListUsersAsync(SqliteUsers(Path.Combine(dataRoot, "messages.db"), backups, output), output, ct)
                     ? OperatorOutcome.Completed
                     : OperatorOutcome.Refused;
 
             case "--doctor":
-                return await DoctorAsync(dataRoot, backups, output, ct)
+                return await DoctorAsync(dataRoot, backups, database, output, ct)
                     ? OperatorOutcome.Completed
                     : OperatorOutcome.Refused;
 
@@ -298,7 +325,8 @@ public static class OperatorCommands
     /// existing screen covers.
     /// </summary>
     private static async Task<bool> ResetPasswordAsync(
-        string database, BackupSettings backups, string? email, TextWriter output, CancellationToken ct)
+        Func<CancellationToken, Task<IUserStore?>> users, AccountsPlace place, string? email, TextWriter output,
+        CancellationToken ct)
     {
         if (email is null)
         {
@@ -310,14 +338,13 @@ public static class OperatorCommands
 
         // The schema first: this command's whole purpose is reaching a database whose owner cannot
         // start the host, and that database may predate the current shape.
-        await MigrateAsync(database, backups, output, ct);
+        if (await users(ct) is not { } store) return false;
 
-        var store = new SqliteUserStore(database);
         var user = await store.FindAsync(email, ct);
 
         if (user is null)
         {
-            await ListAccountsAsync(store, email, output, ct);
+            await ListAccountsAsync(store, place, email, output, ct);
             return false;
         }
 
@@ -345,11 +372,11 @@ public static class OperatorCommands
     /// being a switch, and the reason `OperatorCommands` is not a route either.
     /// </summary>
     private static async Task<bool> ListUsersAsync(
-        string database, BackupSettings backups, TextWriter output, CancellationToken ct)
+        Func<CancellationToken, Task<IUserStore?>> open, TextWriter output, CancellationToken ct)
     {
-        await MigrateAsync(database, backups, output, ct);
+        if (await open(ct) is not { } store) return false;
 
-        var users = await new SqliteUserStore(database).ListAsync(ct);
+        var users = await store.ListAsync(ct);
 
         if (users.Count == 0)
         {
@@ -407,9 +434,9 @@ public static class OperatorCommands
     }
 
     private static async Task<bool> DoctorAsync(
-        string dataRoot, BackupSettings backups, TextWriter output, CancellationToken ct)
+        string dataRoot, BackupSettings backups, DatabaseOptions? database, TextWriter output, CancellationToken ct)
     {
-        var report = await HostDoctor.ReportAsync(dataRoot, ct, backups);
+        var report = await HostDoctor.ReportAsync(dataRoot, ct, backups, database);
 
         output.WriteLine(HostDoctor.ToJson(report));
 
@@ -437,8 +464,70 @@ public static class OperatorCommands
         if (migrator.LastPrune is { } pruned) output.WriteLine(pruned.Describe());
     }
 
+    /// <summary>
+    /// The SQLite file's user store, its schema moved forward first by <see cref="MigrateAsync"/>, whose
+    /// refusals the Host prints.
+    /// </summary>
+    private static Func<CancellationToken, Task<IUserStore?>> SqliteUsers(
+        string database, BackupSettings backups, TextWriter output) =>
+        async ct =>
+        {
+            await MigrateAsync(database, backups, output, ct);
+            return new SqliteUserStore(database);
+        };
+
+    /// <summary>
+    /// The SQL Server database's user store, its schema moved forward first by its own migrator, as a
+    /// sqlserver start moves it. No copy is taken first, and that is said once when a step ran, in the
+    /// start's words. A database the Host would refuse - unreachable, unreadable, the wrong collation,
+    /// row versioning off, a newer build's steps, a failed step - is the start's one sentence and a
+    /// refusal, never a trace and never the connection string. Null when refused.
+    /// </summary>
+    private static Func<CancellationToken, Task<IUserStore?>> SqlServerUsers(string connection, TextWriter output) =>
+        async ct =>
+        {
+            var schema = new SqlServerMigrator(connection);
+
+            try
+            {
+                await schema.ApplyAsync(SqlServerSchemaModules.All, ct);
+            }
+            catch (Exception exception) when (SqlServerStartRefusal.Sentence(exception, connection) is { } sentence)
+            {
+                output.WriteLine(sentence);
+                return null;
+            }
+
+            if (schema.Applied > 0)
+            {
+                output.WriteLine($"Schema updated. No backup was taken first: {new SqlServerDatabaseMaintenance().BackupElsewhere}");
+            }
+
+            return new SqlServerUserStore(connection);
+        };
+
+    /// <summary>
+    /// --backup and --restore on SQL Server: refused, changing nothing, with the sentence every SQL
+    /// Server path says in place of a copy (<see cref="IDatabaseMaintenance.BackupElsewhere"/>). The
+    /// database is not a file this Host can copy or replace; the server's point-in-time restore is the
+    /// backup and the restore. A refusal, so the scripts wrapping these switches see a non-zero exit
+    /// rather than a copy that was never taken.
+    /// </summary>
+    private static OperatorOutcome BackupElsewhere(string nothing, TextWriter output)
+    {
+        output.WriteLine($"{nothing}: {new SqlServerDatabaseMaintenance().BackupElsewhere}");
+        return OperatorOutcome.Refused;
+    }
+
+    /// <summary>What a missing account's sentence calls the place it looked, and what to check.</summary>
+    private sealed record AccountsPlace(string Noun, string Check);
+
+    private static readonly AccountsPlace SqliteAccounts = new("data root", "Check the path.");
+
+    private static readonly AccountsPlace SqlServerAccounts = new("database", "Check HARNESS_DATABASE_CONNECTION.");
+
     private static async Task ListAccountsAsync(
-        SqliteUserStore store, string missing, TextWriter output, CancellationToken ct)
+        IUserStore store, AccountsPlace place, string missing, TextWriter output, CancellationToken ct)
     {
         var accounts = await store.ListAsync(ct);
 
@@ -449,9 +538,9 @@ public static class OperatorCommands
         if (accounts.Count == 0)
         {
             output.WriteLine(
-                $"There is no account for '{missing}' - this data root has no accounts at all.");
+                $"There is no account for '{missing}' - this {place.Noun} has no accounts at all.");
             output.WriteLine(
-                "That usually means the wrong data root, not a missing account. Check the path.");
+                $"That usually means the wrong {place.Noun}, not a missing account. {place.Check}");
 
             return;
         }

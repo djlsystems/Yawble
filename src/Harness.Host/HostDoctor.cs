@@ -1,6 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Harness.Host.SqlServer;
 using Harness.Messaging;
+using Harness.SqlServer;
+using Microsoft.Data.SqlClient;
 
 namespace Harness.Host;
 
@@ -12,12 +15,28 @@ public sealed record DoctorSchema(
     IReadOnlyList<string> Unknown,
     bool Accepted);
 
+/// <param name="Path">The SQLite file; on SQL Server <c>&lt;server&gt;/&lt;database&gt;</c>, the two names
+/// read from the connection string and nothing else of it.</param>
 /// <param name="Error">Why the schema could not be read when <paramref name="Exists"/> is true and
 /// <paramref name="Schema"/> is null: a file that is not a SQLite database, or one that cannot be
-/// opened. The doctor exists for exactly that state, so it is a field, not an exception.</param>
-public sealed record DoctorDatabase(string Path, bool Exists, DoctorSchema? Schema, string? Error = null);
+/// opened; on SQL Server a server that cannot be reached, or a database the Host would refuse. The
+/// doctor exists for exactly that state, so it is a field, not an exception.</param>
+/// <param name="Provider"><c>sqlserver</c> on SQL Server; absent from the JSON on SQLite, so the report
+/// a SQLite instance gives is the one it always gave.</param>
+/// <param name="Server">The SQL Server's name, from the connection string; absent on SQLite.</param>
+/// <param name="Name">The SQL Server database's name, from the connection string; absent on SQLite.</param>
+public sealed record DoctorDatabase(
+    string Path, bool Exists, DoctorSchema? Schema, string? Error = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Provider = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Server = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Name = null);
 
-public sealed record DoctorBackups(string Directory, int DailyCount, DateTimeOffset? NewestDailyAt);
+public sealed record DoctorBackups(string Directory, int DailyCount, DateTimeOffset? NewestDailyAt)
+{
+    /// <summary>No backups folder and no copies in it: what <see cref="DoctorReport.Backups"/> reads on
+    /// SQL Server, whose backups are the server's own.</summary>
+    public static DoctorBackups None { get; } = new("", 0, null);
+}
 
 /// <param name="CredentialVariable">The environment variable that signs this command in, from
 /// <c>auth-probes.json</c>, or null when the probe names none. The operator CLI prints it in its
@@ -52,18 +71,27 @@ public sealed record DoctorAgent(
     public bool? InstalledAsMeasured => MeasuredAt is null ? null : Installed;
 }
 
+/// <param name="BackupFiles">The backups folder and its daily copies, as <c>backups</c> in the JSON.
+/// Null on SQL Server: there is no file to copy, the daily backup takes none, and point-in-time restore
+/// is the backup, so the report has no backup-file rows rather than a folder that reads as empty.</param>
 public sealed record DoctorReport(
     DateTimeOffset At,
     DoctorDataRoot DataRoot,
     DoctorDatabase Database,
-    DoctorBackups Backups,
+    [property: JsonPropertyName("backups")] DoctorBackups? BackupFiles,
     DateTimeOffset? VersionsRecordedAt,
     IReadOnlyList<DoctorAgent> Agents,
     AgentLaunchRecord? AgentLaunch = null,
     AgentToolsRecord? AgentTools = null,
     DoctorWip? Wip = null,
     WorkersRecord? Workers = null,
-    ConciergeSessionsRecord? Concierge = null);
+    ConciergeSessionsRecord? Concierge = null)
+{
+    /// <summary>The backups section, <see cref="DoctorBackups.None"/> on SQL Server. Not in the JSON,
+    /// which carries <see cref="BackupFiles"/> as <c>backups</c>.</summary>
+    [JsonIgnore]
+    public DoctorBackups Backups => BackupFiles ?? DoctorBackups.None;
+}
 
 /// <summary>
 /// The doctor's <c>wip</c>: <c>GET /api/wip</c>'s <c>limit</c> and <c>runMemory</c>, as the running Host
@@ -85,6 +113,10 @@ public sealed record DoctorWip(DateTimeOffset At, WipRunLimit Limit, RunMemoryRe
 /// NOTHING IS WRITTEN. A missing database is reported, not created: <see cref="SchemaMigrator"/>
 /// opens with create, so it is not asked at all when the file is absent. Null means not measured,
 /// the rule every probe in this host follows.
+///
+/// ON SQL SERVER the database section says <c>provider: sqlserver</c> with the server's and the
+/// database's names and the steps applied there, read without creating the migrator's ledger; there
+/// are no backup files to report (<c>backups</c> is null), and no <c>messages.db</c> is looked for.
 /// </summary>
 public static class HostDoctor
 {
@@ -99,11 +131,16 @@ public static class HostDoctor
     /// The backups folder the Host uses (<c>Backups:Directory</c>, else <c>&lt;dataRoot&gt;/backups</c>),
     /// as Program.cs read it; the defaults when omitted.
     /// </param>
+    /// <param name="database">
+    /// The database the Host runs on, as Program.cs read it (<c>HARNESS_DATABASE</c>); SQLite's file in
+    /// the data root when omitted.
+    /// </param>
     public static async Task<DoctorReport> ReportAsync(
-        string dataRoot, CancellationToken ct = default, BackupSettings? backups = null)
+        string dataRoot, CancellationToken ct = default, BackupSettings? backups = null, DatabaseOptions? database = null)
     {
         backups ??= BackupSettings.Defaults(dataRoot);
-        var database = Path.Combine(dataRoot, "messages.db");
+        var file = Path.Combine(dataRoot, "messages.db");
+        var onSqlServer = database?.Provider == DatabaseProvider.SqlServer;
         var (recordedAt, versions) = await NewestVersionsAsync(dataRoot, ct);
         var history = await CliVersionHistory.In(dataRoot).ReadAsync(CliVersionHistory.MaxTake, ct);
         var launches = AgentLaunchChecksRecord.Read(dataRoot);
@@ -111,8 +148,10 @@ public static class HostDoctor
         return new DoctorReport(
             DateTimeOffset.UtcNow,
             DataRoot(dataRoot),
-            await DatabaseAsync(database, ct),
-            Backups(backups.DailyBackupFor(database)),
+            onSqlServer ? await SqlServerDatabaseAsync(database!.Connection!, ct) : await DatabaseAsync(file, ct),
+            // NO BACKUP-FILE ROWS ON SQL SERVER: its daily backup takes no copy, so a folder of none would
+            // read as a backup that is missing rather than one the server keeps.
+            onSqlServer ? null : Backups(backups.DailyBackupFor(file)),
             recordedAt,
             Agents(versions, history, launches, AgentAuthRecord.Read(dataRoot)),
             // Who the Host said, at its last start, agent children run as - and, when it
@@ -240,16 +279,61 @@ public static class HostDoctor
             return new DoctorDatabase(database, Exists: true, Schema: null, Error: exception.Message);
         }
 
-        var known = SchemaModules.All.Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
+        return new DoctorDatabase(database, Exists: true, SchemaOf(applied, SchemaModules.All));
+    }
+
+    /// <summary>
+    /// THE SQL SERVER DATABASE, read and never written: its applied steps against
+    /// <see cref="SqlServerSchemaModules.All"/>, by the migrator's own read that creates no ledger.
+    ///
+    /// <para>
+    /// NEVER THE CONNECTION STRING: it may hold a password. The server's and the database's names are
+    /// read from it and are all of it the report carries; a failure is the start's own one sentence
+    /// (<see cref="SqlServerStartRefusal"/>), which names the server and nothing else.
+    /// </para>
+    /// </summary>
+    private static async Task<DoctorDatabase> SqlServerDatabaseAsync(string connection, CancellationToken ct)
+    {
+        const string provider = "sqlserver";
+        string server, name;
+
+        try
+        {
+            var builder = new SqlConnectionStringBuilder(connection);
+            (server, name) = (builder.DataSource, builder.InitialCatalog);
+        }
+        catch (ArgumentException exception)
+        {
+            return new DoctorDatabase(
+                "(unreadable)", Exists: true, Schema: null, SqlServerStartRefusal.Sentence(exception, connection), provider);
+        }
+
+        var path = $"{server}/{name}";
+
+        IReadOnlyList<string> applied;
+        try
+        {
+            applied = await new SqlServerMigrator(connection).AppliedIfAnyAsync(ct);
+        }
+        catch (Exception exception) when (SqlServerStartRefusal.Sentence(exception, connection) is { } sentence)
+        {
+            // Unreachable, unopenable, the wrong collation, row versioning off: the report, not a trace.
+            return new DoctorDatabase(path, Exists: true, Schema: null, sentence, provider, server, name);
+        }
+
+        return new DoctorDatabase(path, Exists: true, SchemaOf(applied, SqlServerSchemaModules.All), Error: null, provider, server, name);
+    }
+
+    /// <summary>The migrator's own arithmetic: applied minus known is unknown, known minus applied is pending.</summary>
+    private static DoctorSchema SchemaOf(IReadOnlyList<string> applied, IReadOnlyList<Harness.Contracts.MigrationStep> steps)
+    {
+        var known = steps.Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
         var appliedSet = applied.ToHashSet(StringComparer.Ordinal);
 
         var unknown = applied.Where(id => !known.Contains(id)).Order(StringComparer.Ordinal).ToArray();
-        var pending = SchemaModules.All.Select(s => s.Id).Where(id => !appliedSet.Contains(id)).ToArray();
+        var pending = steps.Select(s => s.Id).Where(id => !appliedSet.Contains(id)).ToArray();
 
-        return new DoctorDatabase(
-            database,
-            Exists: true,
-            new DoctorSchema(applied, pending, unknown, Accepted: unknown.Length == 0));
+        return new DoctorSchema(applied, pending, unknown, Accepted: unknown.Length == 0);
     }
 
     private static DoctorBackups Backups(DailyBackup daily) =>

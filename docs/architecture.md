@@ -97,15 +97,24 @@ The product name, Yawble, lives in the web app's presentation layer
 
 ## Data
 
-- One data root (`--DataRoot`, else `HARNESS_DATA_ROOT`; `/data` in the container), one SQLite
-  database (`messages.db`), one control process. Workers open neither the database nor the key
-  ring; `all` is the single-process form, for tests and development.
-- Schema changes are append-only steps per store; a shipped step is never edited.
+- One data root (`--DataRoot`, else `HARNESS_DATA_ROOT`; `/data` in the container), one database,
+  one control process. Workers open neither the database nor the key ring; `all` is the
+  single-process form, for tests and development.
+- The database is SQLite (`messages.db` in the data root), the default and the reference, or SQL
+  Server 2022 or later or Azure SQL Database (`HARNESS_DATABASE=sqlserver` with
+  `HARNESS_DATABASE_CONNECTION`). Every store is an interface with one class per engine, and contract
+  tests run the same cases on both. On SQL Server the database needs the
+  `Latin1_General_100_BIN2_UTF8` collation and `READ_COMMITTED_SNAPSHOT` on, no `messages.db` is
+  created, and the server's own backups and point-in-time restore replace the Host's copies. One
+  control process per database; there is no move of an existing SQLite instance's data to SQL Server,
+  and PostgreSQL is not supported. See [ops/database.md](ops/database.md).
+- Schema changes are append-only steps per store; a shipped step is never edited. Each step is written
+  for both engines with the same id, after a SQL Server baseline per module (`SchemaParityTests`).
 - A team's activity view begins at its creation, or later where a person starts it from now
   (`PUT /api/teams/{team}/activity-from`). That instant narrows the team's activity chart and its
   token runs and nothing else: no ledger, hold or log row is changed, spend, caps and outcomes read
   every row, and clearing it shows all of the team's history again.
-- The Host takes a daily `VACUUM INTO` copy of the database and keeps seven. See
+- On SQLite the Host takes a daily `VACUUM INTO` copy of the database and keeps seven. See
   [ops/backups-logs-and-versions.md](ops/backups-logs-and-versions.md).
 
 ## Control and workers

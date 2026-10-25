@@ -278,9 +278,12 @@ public static class DiagnosticsMiddleware
                 // rather than an inference from exception types. This product's whole shape makes
                 // that the likeliest real database failure: one file, several writers, a WAL.
                 //
-                // Classified by a Messaging helper, because THE HOST NAMES NO
-                // `Microsoft.Data.Sqlite` TYPE - see SqliteTrouble for how that rule is kept.
-                var databaseKind = SqliteTrouble.KindOf(exception);
+                // Classified by the provider's own IDatabaseTrouble, because each engine says "busy" in
+                // its own numbers and the Host names neither driver here: SQLite's codes
+                // (SqliteTrouble) or SQL Server's deadlock and lock waits. A pipeline built without
+                // the stores (a test's) classifies as SQLite does, as it always has.
+                var databaseKind = (context.RequestServices.GetService<IDatabaseTrouble>() ?? SqliteDatabaseTrouble.Instance)
+                    .KindOf(exception);
 
                 // AWAITED, not fired and forgotten. A background write racing the end of the
                 // request is a write against a store whose scope may be gone, and the guarantee

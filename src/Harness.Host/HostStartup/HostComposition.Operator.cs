@@ -48,7 +48,7 @@ internal sealed partial class HostComposition
         // EARLIER than the catch that prevents it.
         try
         {
-            var outcome = await OperatorCommands.TryRunAsync(args, dataRoot, Console.Out, backups: backupSettings);
+            var outcome = await OperatorCommands.TryRunAsync(args, dataRoot, Console.Out, backups: backupSettings, database: databaseOptions);
 
             if (outcome != OperatorOutcome.NotAnOperatorCommand)
             {

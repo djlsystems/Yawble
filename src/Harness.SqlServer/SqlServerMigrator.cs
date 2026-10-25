@@ -135,6 +135,29 @@ public sealed class SqlServerMigrator(string connectionString)
         return [.. (await ReadAppliedAsync(connection, ct)).Order(StringComparer.Ordinal)];
     }
 
+    /// <summary>
+    /// Every step id this database has taken, ordered by id, WRITING NOTHING: an empty list where the
+    /// ledger does not exist yet, rather than creating it as <see cref="AppliedAsync"/> does. What the
+    /// doctor reads, which reports a database and never changes it. The collation and row versioning
+    /// are still checked first, so a database the Host would refuse is refused here with the same
+    /// sentence.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> AppliedIfAnyAsync(CancellationToken ct = default)
+    {
+        await using var connection = await OpenAsync(ct);
+
+        await EnsureCollationAsync(connection, ct);
+        await EnsureReadCommittedSnapshotAsync(connection, ct);
+
+        await using (var exists = connection.CreateCommand())
+        {
+            exists.CommandText = $"SELECT CASE WHEN OBJECT_ID(N'{Ledger}', N'U') IS NULL THEN 0 ELSE 1 END";
+            if (Convert.ToInt32(await exists.ExecuteScalarAsync(ct)) == 0) return [];
+        }
+
+        return [.. (await ReadAppliedAsync(connection, ct)).Order(StringComparer.Ordinal)];
+    }
+
     private async Task<SqlConnection> OpenAsync(CancellationToken ct)
     {
         var connection = new SqlConnection(SqlServerOpen.ConnectionString(connectionString));

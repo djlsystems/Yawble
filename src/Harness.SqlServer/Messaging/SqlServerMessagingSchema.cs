@@ -12,7 +12,7 @@ namespace Harness.SqlServer.Messaging;
 /// <para>
 /// NAMES AND THEIR CASE ARE SQLITE'S EXACTLY. Under the required binary collation identifiers are
 /// case-sensitive, so every store addresses these tables and columns in exactly these spellings, and
-/// <c>MessagingSchemaParityTests</c> holds the columns to SQLite's.
+/// <c>SchemaParityTests.Tables_match</c> holds the columns to SQLite's.
 /// </para>
 ///
 /// <para>

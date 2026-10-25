@@ -154,10 +154,12 @@ public static class DiagnosticKinds
     // ---- Anything that went wrong: the database -----------------------------------------------
 
     /// <summary>SQLite answered SQLITE_BUSY. The one database failure this product's shape makes
-    /// likely: one file, several writers, a WAL.</summary>
+    /// likely: one file, several writers, a WAL. On SQL Server, a deadlock victim (see
+    /// <see cref="IDatabaseTrouble"/>).</summary>
     public const string DatabaseBusy = "db.busy";
 
-    /// <summary>A connection waited out its `busy_timeout` and gave up. Distinct from
+    /// <summary>A connection waited out its `busy_timeout` and gave up (on SQL Server, a lock or
+    /// command timeout). Distinct from
     /// <see cref="DatabaseBusy"/> because the timeout expiring means the contention lasted seconds
     /// rather than milliseconds, which is a different problem with the same error code.</summary>
     public const string DatabaseBusyTimeoutExpired = "db.busy-timeout-expired";

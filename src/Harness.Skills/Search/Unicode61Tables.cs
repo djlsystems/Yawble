@@ -2,9 +2,9 @@ namespace Harness.Skills.Search;
 
 /// <summary>
 /// THE TABLES OF SQLITE'S <c>unicode61</c> TOKENIZER, copied number for number from SQLite's
-/// machine-generated, public-domain <c>ext/fts5/fts5_unicode2.c</c> (identical in 3.49 to 3.50.4 and on
-/// master), so a character folds, loses its diacritic and counts as a token character exactly as it does
-/// in the FTS5 index the SQLite store searches. Generated; do not edit by hand. See <see cref="Unicode61"/>.
+/// machine-generated, public-domain <c>ext/fts5/fts5_unicode2.c</c> (the bundled engine's, pinned by
+/// <c>SkillSearchPortTests</c>), so a character folds, loses its diacritic and counts as a token
+/// character exactly as it does in the FTS5 index the SQLite store searches. Generated; do not edit by hand. See <see cref="Unicode61"/>.
 /// </summary>
 internal static class Unicode61Tables
 {

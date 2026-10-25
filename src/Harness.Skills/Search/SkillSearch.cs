@@ -13,8 +13,8 @@ namespace Harness.Skills.Search;
 ///
 /// <para>
 /// WHERE IT CAN DIFFER FROM SQLITE: only where the SQLite build differs from the tables and stemmer
-/// ported here (SQLite 3.49 to 3.50.4 and master share them), and in one pointer-sized corner the stemmer
-/// comment names. Ranking does not arise: the stores order by id.
+/// ported here (those of the bundled engine, pinned by <c>SkillSearchPortTests</c>), and in one
+/// pointer-sized corner the stemmer comment names. Ranking does not arise: the stores order by id.
 /// </para>
 /// </summary>
 public sealed class SkillSearch

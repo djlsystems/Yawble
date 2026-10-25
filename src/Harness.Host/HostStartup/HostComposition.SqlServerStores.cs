@@ -119,6 +119,10 @@ internal sealed partial class HostComposition
         builder.Services.AddSingleton<IDatabaseHealth>(new SqlServerDatabaseHealth(connection));
         builder.Services.AddSingleton<IDatabaseMaintenance>(new SqlServerDatabaseMaintenance());
 
+        // A deadlock or a lock wait that ran out, reaching a request, is recorded as the busy database it
+        // is (db.busy, db.busy-timeout-expired), as SQLite's busy file is.
+        builder.Services.AddSingleton<IDatabaseTrouble>(new SqlServerTrouble());
+
         return true;
     }
 }

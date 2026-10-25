@@ -77,6 +77,7 @@ internal sealed partial class HostComposition
         // used to take a path now take one of these.
         builder.Services.AddSingleton<IDatabaseHealth>(new SqliteDatabaseHealth(database));
         builder.Services.AddSingleton<IDatabaseMaintenance>(new SqliteDatabaseMaintenance(database));
+        builder.Services.AddSingleton<IDatabaseTrouble>(SqliteDatabaseTrouble.Instance);
         builder.Services.AddSingleton<ILogRetention>(new SqliteLogRetention(database));
         builder.Services.AddSingleton<IPluginSecretRows>(new SqlitePluginSecretRows(database));
         builder.Services.AddSingleton<IPluginMemberSecretRows>(new SqlitePluginMemberSecretRows(database));
