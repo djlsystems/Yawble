@@ -472,6 +472,80 @@ public abstract class SkillStoreContract : IdentityContract
         Assert.Equal(["lit-one"], await NamesAsync(store, "[x]"));
     }
 
+    /// <summary>
+    /// THE CASES SQLITE'S FTS5 INDEX IS THE ORACLE FOR: a stem finds its other forms, a word is a whole
+    /// token (not a substring), case and a Latin diacritic fold, punctuation splits a word into a phrase,
+    /// a word of punctuation alone matches nothing, a token under 3 or over 64 bytes is not stemmed, and
+    /// the three columns are each searched.
+    /// </summary>
+    private static async Task<ISkillStore> IndexedAsync(ISkillStore store)
+    {
+        foreach (var (name, description, body) in new[]
+        {
+            ("alpha-one", "Steady.", "Before you run the suite, read this."),
+            ("beta-two", "Steady.", "Deploy skills to the worktree."),
+            ("gamma-three", "Steady.", "Order a café au lait. 1000 units."),
+            ("delta-four", "Steady.", "Use foo bar here."),
+            ("theta-five", "Steady.", "Use foo_bar there."),
+            ("epsilon-six", "Steady.", "Greek ΑΘΗΝΑ, German Straße and Bücher."),
+            ("zeta-seven", "Steady.", "ab " + new string('a', 61) + "ing"),
+            ("iota-eight", "Steady.", new string('a', 62) + "ing"),
+            ("eta-nine", "Says nothing more.", "Plain."),
+        })
+        {
+            await store.CreateCustomAsync(new SkillDraft(name, description, ["manager"], body), "p", Ct);
+        }
+
+        return store;
+    }
+
+    [Theory]
+    [InlineData("running", "alpha-one")]
+    [InlineData("RUN", "alpha-one")]
+    [InlineData("skill", "beta-two")]
+    [InlineData("deploying", "beta-two")]
+    [InlineData("work", "")]
+    [InlineData("100", "")]
+    [InlineData("1000", "gamma-three")]
+    [InlineData("cafe", "gamma-three")]
+    [InlineData("CaFÉ", "gamma-three")]
+    [InlineData("foo-bar", "delta-four theta-five")]
+    [InlineData("bar-foo", "")]
+    [InlineData("%%", "")]
+    [InlineData("%% running", "alpha-one")]
+    [InlineData("zanzibar suite", "alpha-one")]
+    [InlineData("ab", "zeta-seven")]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "zeta-seven")]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")]
+    [InlineData("αθηνα", "epsilon-six")]
+    [InlineData("STRASSE", "")]
+    [InlineData("straße", "epsilon-six")]
+    [InlineData("bucher", "epsilon-six")]
+    [InlineData("eta", "eta-nine")]
+    [InlineData("nothing", "eta-nine")]
+    [InlineData("seven", "zeta-seven")]
+    public async Task Search_matches_as_sqlites_full_text_index_does(string query, string expected)
+    {
+        var store = await IndexedAsync(await CreateAsync());
+
+        Assert.Equal(expected.Split(' ', StringSplitOptions.RemoveEmptyEntries).Order(StringComparer.Ordinal), await NamesAsync(store, query));
+    }
+
+    [Fact]
+    public async Task A_search_pages_newest_first_by_its_matches_alone()
+    {
+        var store = await CreateAsync();
+        for (var i = 0; i < 6; i++)
+        {
+            await store.CreateCustomAsync(new SkillDraft($"page-{i}", "Steady.", ["manager"], i % 2 == 0 ? "Deploying now." : "Nothing."), "p", Ct);
+        }
+
+        var page = await store.ListAsync(SkillKindFilter.All, "deploy", null, null, 2, Ct);
+        Assert.Equal(["page-4", "page-2"], page.Select(s => s.Name));
+        Assert.Equal(["page-0"], (await store.ListAsync(SkillKindFilter.All, "deploy", null, page[^1].Id, 2, Ct)).Select(s => s.Name));
+        Assert.Equal(["page-4"], (await store.ListOfferedAsync(SkillRoles.Manager, null, "deployed", 1, Ct)).Select(s => s.Name));
+    }
+
     private static async Task<IReadOnlyList<string>> NamesAsync(ISkillStore store, string query) =>
         [.. (await store.ListAsync(SkillKindFilter.All, query, null, null, 50, Ct)).Select(s => s.Name).Order(StringComparer.Ordinal)];
 

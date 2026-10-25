@@ -1,5 +1,6 @@
 using Harness.Contracts;
 using Harness.Skills;
+using Harness.Skills.Search;
 using Microsoft.Data.SqlClient;
 
 namespace Harness.SqlServer.Skills;
@@ -18,14 +19,13 @@ namespace Harness.SqlServer.Skills;
 /// </para>
 ///
 /// <para>
-/// SEARCH IS <c>LIKE</c>, NOT FULL-TEXT. SQLite matches a query's words against an FTS5 index of the name,
-/// the description and the body; SQL Server's full-text search is an optional component, so this store
-/// matches each word as text inside those three columns, ignoring ASCII case
-/// (<see cref="SqlServerSql.Like"/>) and taking <c>%</c>, <c>_</c> and <c>[</c> literally
-/// (<see cref="SqlServerSql.LikeLiteral"/>). Any word found is a match, as on SQLite. The two agree on a
-/// whole word in any case; they part where FTS5 is a word index with a stemmer: a word here also matches
-/// inside a longer one (<c>work</c> finds <c>worktree</c>), and a stemmed form does not find another
-/// (<c>running</c> does not find <c>run</c>).
+/// SEARCH IS SQLITE'S FTS5 SEARCH, IN CODE. SQLite matches a query's words against an FTS5 index of the
+/// name, the description and the body (<c>tokenize='porter unicode61'</c>); SQL Server's full-text search
+/// is an optional component with its own word breakers, so this store reads the candidate rows newest
+/// first, filtered in SQL by everything but the words, and keeps those <see cref="SkillSearch"/> matches
+/// until the page is full: the same tokenizer, stemmer and phrase rule, ported from SQLite, so
+/// <c>running</c> finds <c>run</c>, <c>cafe</c> finds it with an accent, and <c>work</c> does not find
+/// <c>worktree</c>, exactly as there. The words never become SQL or parameters.
 /// </para>
 ///
 /// <para>
@@ -166,7 +166,7 @@ public sealed class SqlServerSkillStore(string connectionString) : ISkillStore
                     command.Parameters.AddWithValue("@kind", stored);
                 }
 
-                if (Search(command, query) is { } search) where.Add(search);
+                var search = SkillSearch.For(query);
 
                 if (before is { } cursor)
                 {
@@ -190,6 +190,7 @@ public sealed class SqlServerSkillStore(string connectionString) : ISkillStore
                 {
                     var skill = SkillRules.Read(reader);
                     if (role is not null && !SkillRoles.Offers(skill.Roles, role)) continue;
+                    if (search is not null && !search.Matches(skill)) continue;
                     list.Add(skill);
                 }
 
@@ -211,7 +212,7 @@ public sealed class SqlServerSkillStore(string connectionString) : ISkillStore
                 var where = new List<string> { team is null ? "s.team IS NULL" : $"(s.team IS NULL OR {TeamMatch})" };
                 if (team is not null) command.Parameters.AddWithValue("@team", team);
 
-                if (Search(command, query) is { } search) where.Add(search);
+                var search = SkillSearch.For(query);
 
                 command.CommandText = $"SELECT {SkillRules.Columns} FROM skills s WHERE {string.Join(" AND ", where)} ORDER BY s.id DESC";
 
@@ -220,36 +221,12 @@ public sealed class SqlServerSkillStore(string connectionString) : ISkillStore
                 while (list.Count < take && await reader.ReadAsync(token))
                 {
                     var skill = SkillRules.Read(reader);
-                    if (SkillRoles.Offers(skill.Roles, role)) list.Add(skill);
+                    if (SkillRoles.Offers(skill.Roles, role) && (search is null || search.Matches(skill))) list.Add(skill);
                 }
 
                 return list;
             },
             ct);
-    }
-
-    /// <summary>
-    /// The search's condition, its words bound to <paramref name="command"/>; null for no search. Each
-    /// word is looked for in the name, the description and the body; any word found is a match.
-    /// </summary>
-    private static string? Search(SqlCommand command, string? query)
-    {
-        if (string.IsNullOrWhiteSpace(query)) return null;
-
-        var words = SkillRules.SearchWords(query);
-        var any = new List<string>();
-
-        for (var i = 0; i < words.Count; i++)
-        {
-            var parameter = $"@word{i}";
-            command.Parameters.AddWithValue(parameter, "%" + SqlServerSql.LikeLiteral(words[i]) + "%");
-
-            any.Add(string.Join(
-                " OR ",
-                new[] { "s.name", "s.description", "s.body" }.Select(column => $"{column} LIKE {parameter} {SqlServerSql.Like} ESCAPE '\\'")));
-        }
-
-        return any.Count == 0 ? "1 = 0" : "(" + string.Join(" OR ", any) + ")";
     }
 
     public async Task<Skill?> GetAsync(string name, CancellationToken ct = default)
