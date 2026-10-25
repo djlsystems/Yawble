@@ -26,10 +26,18 @@ namespace Harness.SqlServer.Identity;
 ///
 /// <para>
 /// A WRITE AND ITS TENANT ROWS ARE ONE TRANSACTION, through <see cref="SqlServerTenantAuditRow"/>: a
-/// change with no record of who made it does not land. LOCK ORDER: each write locks the one row it
-/// writes (a team, a member, a repository row or the settings row), then appends its
-/// <c>tenant_events</c> rows, which are inserts and read nothing; no write here locks two of the first
-/// kind, so no two writes can wait on each other in a cycle.
+/// change with no record of who made it does not land.
+/// </para>
+///
+/// <para>
+/// LOCK ORDER: THE <c>teams</c> ROW, THEN ITS CHILD ROW, THEN <c>tenant_events</c>. A team's deletion
+/// locks its row and then, through the cascades, every member and repository row of it; a write of a
+/// member or a repository row checks its team for the foreign key after locking its own key. Taken in
+/// those two orders, a deletion and a hire of the same team each hold what the other waits for. So
+/// every write of a child row first takes its team's row under <c>UPDLOCK, HOLDLOCK</c>
+/// (<see cref="TeamLock"/>) in its own transaction, and only then its own key: both orders are teams
+/// first. A write of a team row or the settings row locks that one row. <c>tenant_events</c> rows are
+/// inserts that read nothing, appended last.
 /// </para>
 /// </summary>
 public sealed class SqlServerTeamStore(string connectionString) : ITeamStore
@@ -44,14 +52,31 @@ public sealed class SqlServerTeamStore(string connectionString) : ITeamStore
     private Task<int> ExecuteAsync(string sql, Action<SqlCommand> bind, CancellationToken ct) =>
         SqlServerOpen.ExecuteAsync(_connectionString, sql, bind, ct);
 
-    /// <summary>One statement and its <c>tenant_events</c> rows, in one transaction; with no rows, the statement alone.</summary>
-    private Task WriteAsync(string sql, Action<SqlCommand> bind, IReadOnlyList<TriggerAudit> audits, CancellationToken ct) =>
-        audits.Count == 0
+    /// <summary>The team a child row belongs to, taken before the child's own key: see the lock order above.</summary>
+    private const string TeamLock = "SELECT COUNT(*) FROM teams WITH (UPDLOCK, HOLDLOCK) WHERE id = @lockTeam";
+
+    /// <summary>
+    /// One statement and its <c>tenant_events</c> rows, in one transaction; with no rows and no team to
+    /// lock, the statement alone. <paramref name="childOf"/> names the team of a child row the statement
+    /// writes, whose row is locked first.
+    /// </summary>
+    private Task WriteAsync(
+        string sql, Action<SqlCommand> bind, IReadOnlyList<TriggerAudit> audits, CancellationToken ct, string? childOf = null) =>
+        audits.Count == 0 && childOf is null
             ? ExecuteAsync(sql, bind, ct)
             : RunAsync(
                 async (connection, token) =>
                 {
                     await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+
+                    if (childOf is not null)
+                    {
+                        await using var hold = connection.CreateCommand();
+                        hold.Transaction = transaction;
+                        hold.CommandText = TeamLock;
+                        hold.Parameters.AddWithValue("@lockTeam", childOf);
+                        await hold.ExecuteScalarAsync(token);
+                    }
 
                     await using (var command = connection.CreateCommand())
                     {
@@ -67,8 +92,8 @@ public sealed class SqlServerTeamStore(string connectionString) : ITeamStore
                 },
                 ct);
 
-    private Task WriteAsync(string sql, Action<SqlCommand> bind, TriggerAudit? audit, CancellationToken ct) =>
-        WriteAsync(sql, bind, audit is null ? [] : [audit], ct);
+    private Task WriteAsync(string sql, Action<SqlCommand> bind, TriggerAudit? audit, CancellationToken ct, string? childOf = null) =>
+        WriteAsync(sql, bind, audit is null ? [] : [audit], ct, childOf);
 
     /// <summary>
     /// Upsert: created_utc is left alone on a match, and budget_tokens and paused are absent from both
@@ -231,10 +256,10 @@ public sealed class SqlServerTeamStore(string connectionString) : ITeamStore
             ct);
 
     public Task SaveMemberAsync(PersistedMember member, CancellationToken ct = default) =>
-        WriteAsync(MemberUpsert, command => BindMember(command, member), [], ct);
+        WriteAsync(MemberUpsert, command => BindMember(command, member), [], ct, childOf: member.Team);
 
     public Task SaveMemberAsync(PersistedMember member, IReadOnlyList<TriggerAudit> audits, CancellationToken ct = default) =>
-        WriteAsync(MemberUpsert, command => BindMember(command, member), audits, ct);
+        WriteAsync(MemberUpsert, command => BindMember(command, member), audits, ct, childOf: member.Team);
 
     /// <summary>Upsert: created_utc is left alone on a match, matching <see cref="SaveTeamAsync"/>.</summary>
     private const string MemberUpsert =
@@ -382,14 +407,15 @@ public sealed class SqlServerTeamStore(string connectionString) : ITeamStore
                 command.Parameters.AddWithValue("@branch", TeamRows.Text(branch));
             },
             audit,
-            ct);
+            ct,
+            childOf: team);
 
     public Task<IReadOnlyList<RepoContributor>> RepoContributorsAsync(CancellationToken ct = default) =>
         ReadAllAsync($"SELECT {TeamRows.ContributorColumns} FROM team_repo_contributors", TeamRows.ReadContributor, ct);
 
     /// <summary>Narrow: the settings columns only, so a recorded pull request survives a settings change.</summary>
     public Task SetRepoContributorAsync(RepoContributor settings, CancellationToken ct = default) =>
-        ExecuteAsync(
+        WriteAsync(
             """
             MERGE team_repo_contributors WITH (HOLDLOCK) AS c
             USING (SELECT @team AS team, @repo AS repo) AS n ON c.team = n.team AND c.repo = n.repo
@@ -407,11 +433,13 @@ public sealed class SqlServerTeamStore(string connectionString) : ITeamStore
                 command.Parameters.AddWithValue("@dco", settings.DcoSignOff ? 1L : 0L);
                 command.Parameters.AddWithValue("@cla", TeamRows.Text(settings.ClaSignedNote));
             },
-            ct);
+            [],
+            ct,
+            childOf: settings.Team);
 
     /// <summary>Narrow: the pull-request columns only, so recording one never changes a setting.</summary>
     public Task SetRepoPullRequestAsync(string team, string repo, RepoPullRequest? pullRequest, CancellationToken ct = default) =>
-        ExecuteAsync(
+        WriteAsync(
             """
             MERGE team_repo_contributors WITH (HOLDLOCK) AS c
             USING (SELECT @team AS team, @repo AS repo) AS n ON c.team = n.team AND c.repo = n.repo
@@ -429,7 +457,9 @@ public sealed class SqlServerTeamStore(string connectionString) : ITeamStore
                 command.Parameters.AddWithValue("@state", TeamRows.Text(pullRequest?.State));
                 command.Parameters.AddWithValue("@readAt", TeamRows.Stamp(pullRequest?.ReadAt));
             },
-            ct);
+            [],
+            ct,
+            childOf: team);
 
     private Task<IReadOnlyList<T>> ReadAllAsync<T>(string sql, Func<System.Data.Common.DbDataReader, T> read, CancellationToken ct) =>
         RunAsync<IReadOnlyList<T>>(

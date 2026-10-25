@@ -15,9 +15,17 @@ namespace Harness.SqlServer.Identity;
 /// otherwise both find no row and one would fail on the key, or both read one count and one attempt
 /// would be lost. The merge holds the path until it commits, so the second adds to the first's count.
 /// </para>
+///
+/// <para>
+/// A PATH IS FOUND BY ITS HASH AND DECIDED BY ITS TEXT: the key is <c>path_key</c>, the path's
+/// SHA-256 (see <c>SqlServerAuthSchema</c>), so every match is <see cref="Match"/>.
+/// </para>
 /// </summary>
 public sealed class SqlServerUnfinishedRemovals(string connectionString) : IUnfinishedRemovals
 {
+    /// <summary>The row whose path is <c>@path</c>, sought by the key and confirmed by the text.</summary>
+    private const string Match = "path_key = HASHBYTES('SHA2_256', @path) AND path = @path";
+
     private readonly string _connectionString = SqlServerOpen.ConnectionString(connectionString);
 
     public Task RecordAsync(UnfinishedRemoval removal, CancellationToken ct = default) =>
@@ -25,7 +33,7 @@ public sealed class SqlServerUnfinishedRemovals(string connectionString) : IUnfi
             _connectionString,
             """
             MERGE unfinished_removals WITH (HOLDLOCK) AS r
-            USING (SELECT @path AS path) AS n ON r.path = n.path
+            USING (SELECT @path AS path) AS n ON r.path_key = HASHBYTES('SHA2_256', n.path) AND r.path = n.path
             WHEN MATCHED THEN UPDATE SET
                 kind = @kind, team = @team, member = @member, remaining = @remaining,
                 attempts = r.attempts + 1, host_left = @hostLeft
@@ -48,12 +56,12 @@ public sealed class SqlServerUnfinishedRemovals(string connectionString) : IUnfi
         ReadAsync($"SELECT {UnfinishedRemovalRows.Columns} FROM unfinished_removals ORDER BY path", null, ct);
 
     public async Task<UnfinishedRemoval?> FindAsync(string path, CancellationToken ct = default) =>
-        (await ReadAsync($"SELECT {UnfinishedRemovalRows.Columns} FROM unfinished_removals WHERE path = @path", path, ct)).SingleOrDefault();
+        (await ReadAsync($"SELECT {UnfinishedRemovalRows.Columns} FROM unfinished_removals WHERE {Match}", path, ct)).SingleOrDefault();
 
     public Task ForgetAsync(string path, CancellationToken ct = default) =>
         SqlServerOpen.ExecuteAsync(
             _connectionString,
-            "DELETE FROM unfinished_removals WHERE path = @path",
+            $"DELETE FROM unfinished_removals WHERE {Match}",
             command => command.Parameters.AddWithValue("@path", path),
             ct);
 

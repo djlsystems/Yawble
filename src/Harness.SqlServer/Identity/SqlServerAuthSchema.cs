@@ -33,6 +33,15 @@ namespace Harness.SqlServer.Identity;
 /// newest first. The fresh volume's Concierge row is seeded as SQLite's <c>auth-003</c> leaves it,
 /// with no agent chosen.
 /// </para>
+///
+/// <para>
+/// <c>unfinished_removals.path</c> IS UNBOUNDED TEXT KEYED BY ITS HASH. A folder's absolute path has no
+/// length a key could hold, and a path the key refused would lose the record of a removal the Host
+/// had already half done, which SQLite keeps. So the column is NVARCHAR(MAX) and the key is
+/// <c>path_key</c>, its SHA-256, computed and persisted; every match names both
+/// (<c>path_key = HASHBYTES('SHA2_256', @path) AND path = @path</c>), so the key finds the row and the
+/// text decides it. <c>path_key</c> is the one column SQLite has no twin of.
+/// </para>
 /// </summary>
 public static class SqlServerAuthSchema
 {
@@ -161,7 +170,8 @@ public static class SqlServerAuthSchema
              );
 
              CREATE TABLE unfinished_removals (
-                 path        NVARCHAR(450) NOT NULL PRIMARY KEY,
+                 path        NVARCHAR(MAX) NOT NULL,
+                 path_key    AS CAST(HASHBYTES('SHA2_256', path) AS BINARY(32)) PERSISTED NOT NULL PRIMARY KEY,
                  kind        NVARCHAR(MAX) NOT NULL,
                  team        NVARCHAR(MAX) NOT NULL,
                  member      NVARCHAR(MAX) NULL,

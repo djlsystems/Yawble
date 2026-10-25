@@ -459,6 +459,54 @@ public abstract class TeamStoreContract : IdentityContract
             Assert.Equal(new RepoDefaultBranch("Alpha", repo, "main", "release"), Assert.Single(await store.RepoDefaultBranchesAsync(Ct), b => b.Repo == repo));
         }
     }
+
+    /// <summary>
+    /// REVIEW FOCUS 2: A TEAM IS DELETED WHILE ITS MEMBERS AND REPOSITORY ROWS ARE WRITTEN. Each write
+    /// either lands before the deletion (and goes with the team) or is refused by the foreign key after
+    /// it; none fails any other way, and no member or repository row outlives its team. The deletion
+    /// locks the team and then its children; each child write locks the team first too, so the two
+    /// cannot hold what the other waits for.
+    /// </summary>
+    [Fact]
+    public async Task A_team_deleted_while_its_members_and_branches_are_written_leaves_no_child_and_no_deadlock()
+    {
+        var store = await CreateAsync();
+
+        for (var round = 0; round < 12; round++)
+        {
+            var team = $"Doomed{round}";
+            await store.SaveTeamAsync(new PersistedTeam(team, null), Ct);
+            await store.SaveMemberAsync(Member(team, "Dev"), Ct);
+            await store.SetRemoteDefaultBranchAsync(team, "app", "main", Ct);
+
+            var outcomes = await RaceAsync(8, async i =>
+            {
+                try
+                {
+                    switch (i % 4)
+                    {
+                        case 0 when i == 0: await store.DeleteTeamAsync(team, Ct); break;
+                        case 0: await store.SetRepoContributorAsync(new RepoContributor(team, $"r{i}", null, null, false, null), Ct); break;
+                        case 1: await store.SaveMemberAsync(Member(team, $"M{i}", floor: i), [Audit(TenantActions.MemberAdded, $"{team}/M{i}")], Ct); break;
+                        case 2: await store.SetRemoteDefaultBranchAsync(team, "app", $"b{i}", Ct); break;
+                        default: await store.SetPersonDefaultBranchAsync(team, $"r{i}", "release", ct: Ct); break;
+                    }
+
+                    return null;
+                }
+                catch (System.Data.Common.DbException refused)
+                {
+                    return refused.Message;
+                }
+            });
+
+            Assert.All(outcomes, refusal => Assert.True(refusal is null || refusal.Contains("FOREIGN KEY", StringComparison.Ordinal), refusal));
+            Assert.DoesNotContain(await store.TeamsAsync(Ct), t => t.Id == team);
+            Assert.DoesNotContain(await store.MembersAsync(Ct), m => m.Team == team);
+            Assert.DoesNotContain(await store.RepoDefaultBranchesAsync(Ct), b => b.Team == team);
+            Assert.DoesNotContain(await store.RepoContributorsAsync(Ct), c => c.Team == team);
+        }
+    }
 }
 
 public sealed class SqliteTeamStoreTests : TeamStoreContract

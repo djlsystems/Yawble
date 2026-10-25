@@ -72,6 +72,31 @@ public abstract class UnfinishedRemovalsContract : IdentityContract
     }
 
     /// <summary>
+    /// A PATH LONGER THAN ANY INDEX KEY IS RECORDED, FOUND, COUNTED AND FORGOTTEN: a removal the Host
+    /// has half done is never lost to the length of its folder's path.
+    /// </summary>
+    [Fact]
+    public async Task A_removal_path_longer_than_an_index_key_is_recorded_and_found()
+    {
+        var store = await CreateAsync();
+        var path = "/data/teams/Alpha/workspaces/" + string.Concat(Enumerable.Repeat("nested-folder-été/", 70)) + "O'Brien";
+        var sibling = path + "-2";
+        Assert.True(path.Length > 1_000);
+
+        await store.RecordAsync(new UnfinishedRemoval(path, RemovalKinds.Workspace, "Alpha", "Dev", [path + "/left"], At, 1), Ct);
+        await store.RecordAsync(new UnfinishedRemoval(sibling, RemovalKinds.Workspace, "Alpha", "Dev", [], At, 1), Ct);
+        await store.RecordAsync(new UnfinishedRemoval(path, RemovalKinds.Workspace, "Alpha", "Dev", [path + "/left"], At, 1), Ct);
+
+        var found = (await store.FindAsync(path, Ct))!;
+        Assert.Equal((path, 2, path + "/left"), (found.Path, found.Attempts, found.Remaining[0]));
+        Assert.Equal([path, sibling], (await store.ListAsync(Ct)).Select(r => r.Path));
+
+        await store.ForgetAsync(path, Ct);
+        Assert.Null(await store.FindAsync(path, Ct));
+        Assert.Equal([sibling], (await store.ListAsync(Ct)).Select(r => r.Path));
+    }
+
+    /// <summary>
     /// REVIEW FOCUS 2: eight attempts at one folder recorded at once. Every record succeeds, one row
     /// stands, and it counts all eight: no attempt is lost to another's read of the count.
     /// </summary>

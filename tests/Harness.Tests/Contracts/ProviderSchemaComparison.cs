@@ -16,9 +16,22 @@ namespace Harness.Tests.Contracts;
 /// </para>
 ///
 /// <para>Types are not compared: they differ by design (see the SQL Server baseline steps).</para>
+///
+/// <para>
+/// A COMPUTED KEY COLUMN SQL SERVER ALONE HAS IS EXEMPT, BY NAME: <see cref="SqlServerOnlyKeys"/>. Each
+/// is the persisted hash a SQL Server key stands on where SQLite keys the text itself, so SQLite has
+/// no twin of it. Only the columns listed are left out, and each must be a computed column on SQL
+/// Server, or this fails naming it: an exemption cannot hide an ordinary column.
+/// </para>
 /// </summary>
 internal static class ProviderSchemaComparison
 {
+    /// <summary>SQL Server's computed key columns with no SQLite twin, as <c>table.column</c>.</summary>
+    internal static readonly IReadOnlySet<string> SqlServerOnlyKeys = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "unfinished_removals.path_key",
+    };
+
     public static async Task AssertSameColumnsAsync(
         string sqlitePath, string sqlServerConnection, IReadOnlyList<string> tables)
     {
@@ -28,6 +41,13 @@ internal static class ProviderSchemaComparison
         {
             var sqlite = await SqliteColumnsAsync(sqlitePath, table, ct);
             var sqlServer = await SqlServerColumnsAsync(sqlServerConnection, table, ct);
+
+            foreach (var exempt in SqlServerOnlyKeys.Where(key => key.StartsWith(table + ".", StringComparison.Ordinal)))
+            {
+                var column = exempt[(table.Length + 1)..];
+                Assert.True(await IsComputedAsync(sqlServerConnection, table, column, ct), $"SQL Server's {exempt} is exempt but is not a computed column.");
+                sqlServer = sqlServer.Where(c => c.Key != column).ToDictionary(c => c.Key, c => c.Value, StringComparer.Ordinal);
+            }
 
             Assert.True(sqlite.Count > 0, $"SQLite has no table '{table}'.");
             Assert.True(sqlServer.Count > 0, $"SQL Server has no table '{table}'.");
@@ -53,6 +73,17 @@ internal static class ProviderSchemaComparison
         while (await reader.ReadAsync(ct)) columns[reader.GetString(0)] = reader.GetInt64(1) == 0 && reader.GetInt64(2) == 0;
 
         return columns;
+    }
+
+    private static async Task<bool> IsComputedAsync(string connectionString, string table, string column, CancellationToken ct)
+    {
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM sys.computed_columns WHERE object_id = OBJECT_ID(@table) AND name = @column";
+        command.Parameters.AddWithValue("@table", table);
+        command.Parameters.AddWithValue("@column", column);
+        return (int)(await command.ExecuteScalarAsync(ct))! == 1;
     }
 
     private static async Task<IReadOnlyDictionary<string, bool>> SqlServerColumnsAsync(string connectionString, string table, CancellationToken ct)
