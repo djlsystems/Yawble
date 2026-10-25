@@ -16,7 +16,7 @@ namespace Harness.Messaging;
 /// (<c>SqliteMessageStore.SumUsageForTeamAsync</c>).
 /// </para>
 /// </summary>
-public sealed class LogSpend(string databasePath)
+public sealed class LogSpend(string databasePath) : ILogSpend
 {
     private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 

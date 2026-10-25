@@ -30,7 +30,7 @@ namespace Harness.Messaging;
 /// own rows - so a workflow it records goes whole when nothing else holds it.
 /// </para>
 /// </summary>
-public sealed class SqliteLogRetention(string databasePath)
+public sealed class SqliteLogRetention(string databasePath) : ILogRetention
 {
     private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 

@@ -33,12 +33,12 @@ public static class HealthEndpoints
 
     public sealed record Check(string Name, bool Ok, string Detail);
 
-    public static void Map(WebApplication app, string database, string dataRoot)
+    public static void Map(WebApplication app, string dataRoot)
     {
         // ANONYMOUS, because its caller is the container runtime's HEALTHCHECK (curl on loopback)
         // and it holds no credential. It says whether three things work and nothing else: no
         // paths, no counts, no team names - a stranger on the tunnel learns only "up" or "down".
-        app.MapGet(Route, async (PumpHeartbeat pump, CancellationToken ct) =>
+        app.MapGet(Route, async (IDatabaseHealth database, PumpHeartbeat pump, CancellationToken ct) =>
         {
             var checks = await ChecksAsync(database, dataRoot, pump, ct);
 
@@ -62,7 +62,7 @@ public static class HealthEndpoints
     /// The three checks, made one way: <c>/healthz</c> and the people's <c>/api/service-status</c>
     /// both read these, so neither can disagree with the other about whether the instance can serve.
     /// </summary>
-    public static async Task<Check[]> ChecksAsync(string database, string dataRoot, PumpHeartbeat pump, CancellationToken ct) =>
+    public static async Task<Check[]> ChecksAsync(IDatabaseHealth database, string dataRoot, PumpHeartbeat pump, CancellationToken ct) =>
     [
         await DatabaseAsync(database, ct),
         DataRootWritable(dataRoot),
@@ -71,27 +71,10 @@ public static class HealthEndpoints
             : new Check("pump", false, pump.LastBeat is null ? "not started" : "no pass for over a minute"),
     ];
 
-    private static async Task<Check> DatabaseAsync(string database, CancellationToken ct)
-    {
-        try
-        {
-            // ReadWrite, not the default ReadWriteCreate: a missing database is a failure to
-            // report, not a file for a health probe to create.
-            var connectionString = SqliteOpen.ConnectionString(database, readOnly: true);
-
-            await using var connection = new SqliteConnection(connectionString);
-            await connection.OpenAsync(ct);
-            await using var command = connection.CreateCommand();
-            command.CommandText = "SELECT count(*) FROM sqlite_master";
-            await command.ExecuteScalarAsync(ct);
-
-            return new Check("database", true, "open");
-        }
-        catch (Exception ex) when (ex is SqliteException or IOException or InvalidOperationException)
-        {
-            return new Check("database", false, "cannot open");
-        }
-    }
+    private static async Task<Check> DatabaseAsync(IDatabaseHealth database, CancellationToken ct) =>
+        await database.PingAsync(ct)
+            ? new Check("database", true, "open")
+            : new Check("database", false, "cannot open");
 
     /// <summary>Public because <c>--doctor</c> asks the same question and must not ask it a second
     /// way.</summary>
@@ -108,6 +91,34 @@ public static class HealthEndpoints
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return new Check("dataRoot", false, "not writable");
+        }
+    }
+}
+
+/// <summary>
+/// The SQLite version of <see cref="IDatabaseHealth"/>: the file opens and answers a query.
+/// </summary>
+public sealed class SqliteDatabaseHealth(string databasePath) : IDatabaseHealth
+{
+    public async Task<bool> PingAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            // ReadWrite, not the default ReadWriteCreate: a missing database is a failure to
+            // report, not a file for a health probe to create.
+            var connectionString = SqliteOpen.ConnectionString(databasePath, readOnly: true);
+
+            await using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync(ct);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT count(*) FROM sqlite_master";
+            await command.ExecuteScalarAsync(ct);
+
+            return true;
+        }
+        catch (Exception ex) when (ex is SqliteException or IOException or InvalidOperationException)
+        {
+            return false;
         }
     }
 }

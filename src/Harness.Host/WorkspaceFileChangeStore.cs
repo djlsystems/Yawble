@@ -33,7 +33,7 @@ public sealed record RecordedWorkspaceChange(
 /// (<see cref="DeleteForMembersAsync"/>).
 /// </para>
 /// </summary>
-public sealed class WorkspaceFileChangeStore(string databasePath)
+public sealed class WorkspaceFileChangeStore(string databasePath) : IWorkspaceFileChangeStore
 {
     private const string Columns = "id, team, member, repo, at, files_json, commits_json, more, correlation";
 

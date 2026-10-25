@@ -103,10 +103,28 @@ internal sealed partial class HostComposition
         builder.Services.AddSingleton<IWakeStore>(new SqliteWakeStore(database));
 
         // WHAT RUNNING MEMBERS' WORKTREES DID, recorded for the Monitor's replay. See WorkspaceFileChangeStore.
-        builder.Services.AddSingleton(new WorkspaceFileChangeStore(database));
+        // Registered as the class too: the Host's own tests resolve it by type. Consumers take the interface.
+        var workspaceFileChanges = new WorkspaceFileChangeStore(database);
+        builder.Services.AddSingleton(workspaceFileChanges);
+        builder.Services.AddSingleton<IWorkspaceFileChangeStore>(workspaceFileChanges);
 
         // WHAT RUNNING AGENTS DID, step by step, recorded for the Monitor. See AgentStepStore.
-        builder.Services.AddSingleton(new AgentStepStore(database));
+        var agentSteps = new AgentStepStore(database);
+        builder.Services.AddSingleton(agentSteps);
+        builder.Services.AddSingleton<IAgentStepStore>(agentSteps);
+
+        // THE REST OF WHAT TOUCHES THE FILE DIRECTLY, each behind its interface: the checks and sweeps that
+        // used to take a path now take one of these.
+        builder.Services.AddSingleton<IDatabaseHealth>(new SqliteDatabaseHealth(database));
+        builder.Services.AddSingleton<IDatabaseMaintenance>(new SqliteDatabaseMaintenance(database));
+        builder.Services.AddSingleton<ILogRetention>(new SqliteLogRetention(database));
+        builder.Services.AddSingleton<IPluginSecretRows>(new SqlitePluginSecretRows(database));
+        builder.Services.AddSingleton<IPluginMemberSecretRows>(new SqlitePluginMemberSecretRows(database));
+        builder.Services.AddSingleton<IPluginRemovalRows>(new SqlitePluginRemovalRows(database));
+
+        // OAuth and mailbox connections. Registered as the class too, for the same reason as above.
+        builder.Services.AddSingleton(sp => new ConnectionStore(database, sp.GetRequiredService<IDataProtectionProvider>()));
+        builder.Services.AddSingleton<IConnectionStore>(sp => sp.GetRequiredService<ConnectionStore>());
 
         // Order carries no schema obligation - SchemaMigrator above has already applied every step
         // and set journal_mode on the file. These are readers and writers over a database that exists.
@@ -158,7 +176,9 @@ internal sealed partial class HostComposition
         // INSTANCE-WIDE SETTINGS, read once here - rows over appsettings.json over built-in defaults -
         // and then held in memory. Every consumer below is handed a delegate onto this, never a number, so
         // a person's change applies at its next use with no restart. See `TenantSettings`.
-        tenantSettings = new TenantSettings(new SqliteTenantSettingsStore(database), builder.Configuration);
+        var tenantSettingsStore = new SqliteTenantSettingsStore(database);
+        builder.Services.AddSingleton<ITenantSettingsStore>(tenantSettingsStore);
+        tenantSettings = new TenantSettings(tenantSettingsStore, builder.Configuration);
         await tenantSettings.LoadAsync();
         builder.Services.AddSingleton(tenantSettings);
 

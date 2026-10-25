@@ -31,8 +31,14 @@ public sealed record CredentialActor(string? Id, string Email);
 /// keeps working and one set from the screen reaches the next run with no restart. A key
 /// <see cref="EnvironmentSecretStore.Refusal"/> refuses is never stored and never answered.
 /// </summary>
-public sealed class PluginSecretStore(string databasePath, IDataProtectionProvider protection, ISecretStore environment) : ISecretStore
+public sealed class PluginSecretStore(IPluginSecretRows rows, IDataProtectionProvider protection, ISecretStore environment) : ISecretStore
 {
+    /// <summary>The SQLite store over the database at <paramref name="databasePath"/>.</summary>
+    public PluginSecretStore(string databasePath, IDataProtectionProvider protection, ISecretStore environment)
+        : this(new SqlitePluginSecretRows(databasePath), protection, environment)
+    {
+    }
+
     /// <summary>The longest value accepted. A key or token is a few hundred bytes.</summary>
     public const int MaxValueLength = 8 * 1024;
 
@@ -40,8 +46,6 @@ public sealed class PluginSecretStore(string databasePath, IDataProtectionProvid
     public const string Purpose = "Harness.PluginSecrets.v1";
 
     private readonly IDataProtector _protector = protection.CreateProtector(Purpose);
-
-    private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 
     /// <summary>
     /// Why <paramref name="value"/> cannot be stored, or null. The sentence never repeats the value
@@ -71,17 +75,9 @@ public sealed class PluginSecretStore(string databasePath, IDataProtectionProvid
     {
         if (EnvironmentSecretStore.Refusal(logicalKey) is not null) return SecretStatus.NotSet;
 
-        using var connection = Open();
-        using var select = connection.CreateCommand();
-        select.CommandText = "SELECT value_protected, set_by, set_at FROM plugin_secrets WHERE key = $key";
-        select.Parameters.AddWithValue("$key", logicalKey);
-
-        using (var reader = select.ExecuteReader())
+        if (rows.Find(logicalKey) is { } row && Unprotect(row.ValueProtected) is not null)
         {
-            if (reader.Read() && Unprotect(reader.GetString(0)) is not null)
-            {
-                return new SecretStatus(true, reader.GetString(1), Time(reader.GetString(2)), SecretStatus.Stored);
-            }
+            return new SecretStatus(true, row.SetBy, row.SetAt, SecretStatus.Stored);
         }
 
         return environment.TryGet(logicalKey) is not null
@@ -100,6 +96,74 @@ public sealed class PluginSecretStore(string databasePath, IDataProtectionProvid
     {
         var at = DateTimeOffset.UtcNow;
 
+        await rows.SetAsync(
+            logicalKey, _protector.Protect(value), actor.Email, at,
+            existed => new TriggerAudit(
+                actor.Id, actor.Email, existed ? TenantActions.SecretReplaced : TenantActions.SecretSet,
+                logicalKey, logicalKey, JsonSerializer.Serialize(new { key = logicalKey })),
+            ct);
+
+        return new SecretStatus(true, actor.Email, at, SecretStatus.Stored);
+    }
+
+    /// <summary>
+    /// Clears the stored <paramref name="logicalKey"/> with its <see cref="TenantActions.SecretCleared"/>
+    /// row in the same transaction; a run then reads the Host's environment for it. Nothing stored
+    /// changes nothing and writes no row. Throws, clearing nothing, when the row cannot be written.
+    /// </summary>
+    public async Task ClearAsync(string logicalKey, CredentialActor actor, CancellationToken ct = default)
+    {
+        await rows.ClearAsync(
+            logicalKey,
+            new TriggerAudit(
+                actor.Id, actor.Email, TenantActions.SecretCleared,
+                logicalKey, logicalKey, JsonSerializer.Serialize(new { key = logicalKey })),
+            ct);
+    }
+
+    private string? Stored(string logicalKey) =>
+        rows.Find(logicalKey) is { } row ? Unprotect(row.ValueProtected) : null;
+
+    private string? Unprotect(string protectedValue)
+    {
+        try
+        {
+            return _protector.Unprotect(protectedValue);
+        }
+        catch (System.Security.Cryptography.CryptographicException)
+        {
+            // A key ring that lost its key: the value is gone, and says so as a missing one.
+            return null;
+        }
+    }
+}
+
+/// <summary>
+/// The SQLite version of <see cref="IPluginSecretRows"/>: <c>plugin_secrets</c> in the log's own file,
+/// each write with its tenant row in the same transaction.
+/// </summary>
+public sealed class SqlitePluginSecretRows(string databasePath) : IPluginSecretRows
+{
+    private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
+
+    public StoredSecret? Find(string logicalKey)
+    {
+        using var connection = Open();
+        using var select = connection.CreateCommand();
+        select.CommandText = "SELECT value_protected, set_by, set_at FROM plugin_secrets WHERE key = $key";
+        select.Parameters.AddWithValue("$key", logicalKey);
+
+        using var reader = select.ExecuteReader();
+
+        return reader.Read()
+            ? new StoredSecret(reader.GetString(0), reader.GetString(1), Instant.Parse(reader.GetString(2)))
+            : null;
+    }
+
+    public async Task SetAsync(
+        string logicalKey, string valueProtected, string setBy, DateTimeOffset at, Func<bool, TriggerAudit> audit,
+        CancellationToken ct = default)
+    {
         await using var connection = Open();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
 
@@ -125,27 +189,18 @@ public sealed class PluginSecretStore(string databasePath, IDataProtectionProvid
                     set_at = excluded.set_at
                 """;
             upsert.Parameters.AddWithValue("$key", logicalKey);
-            upsert.Parameters.AddWithValue("$value", _protector.Protect(value));
-            upsert.Parameters.AddWithValue("$by", actor.Email);
+            upsert.Parameters.AddWithValue("$value", valueProtected);
+            upsert.Parameters.AddWithValue("$by", setBy);
             upsert.Parameters.AddWithValue("$at", Instant.Stamp(at));
             await upsert.ExecuteNonQueryAsync(ct);
         }
 
-        await TenantAuditRow.AppendAsync(connection, transaction, new TriggerAudit(
-            actor.Id, actor.Email, existed ? TenantActions.SecretReplaced : TenantActions.SecretSet,
-            logicalKey, logicalKey, JsonSerializer.Serialize(new { key = logicalKey })), ct);
+        await TenantAuditRow.AppendAsync(connection, transaction, audit(existed), ct);
 
         await transaction.CommitAsync(ct);
-
-        return new SecretStatus(true, actor.Email, at, SecretStatus.Stored);
     }
 
-    /// <summary>
-    /// Clears the stored <paramref name="logicalKey"/> with its <see cref="TenantActions.SecretCleared"/>
-    /// row in the same transaction; a run then reads the Host's environment for it. Nothing stored
-    /// changes nothing and writes no row. Throws, clearing nothing, when the row cannot be written.
-    /// </summary>
-    public async Task ClearAsync(string logicalKey, CredentialActor actor, CancellationToken ct = default)
+    public async Task ClearAsync(string logicalKey, TriggerAudit audit, CancellationToken ct = default)
     {
         await using var connection = Open();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
@@ -163,37 +218,10 @@ public sealed class PluginSecretStore(string databasePath, IDataProtectionProvid
             }
         }
 
-        await TenantAuditRow.AppendAsync(connection, transaction, new TriggerAudit(
-            actor.Id, actor.Email, TenantActions.SecretCleared,
-            logicalKey, logicalKey, JsonSerializer.Serialize(new { key = logicalKey })), ct);
+        await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
 
         await transaction.CommitAsync(ct);
     }
-
-    private string? Stored(string logicalKey)
-    {
-        using var connection = Open();
-        using var select = connection.CreateCommand();
-        select.CommandText = "SELECT value_protected FROM plugin_secrets WHERE key = $key";
-        select.Parameters.AddWithValue("$key", logicalKey);
-
-        return select.ExecuteScalar() is string protectedValue ? Unprotect(protectedValue) : null;
-    }
-
-    private string? Unprotect(string protectedValue)
-    {
-        try
-        {
-            return _protector.Unprotect(protectedValue);
-        }
-        catch (System.Security.Cryptography.CryptographicException)
-        {
-            // A key ring that lost its key: the value is gone, and says so as a missing one.
-            return null;
-        }
-    }
-
-    private static DateTimeOffset Time(string text) => Instant.Parse(text);
 
     private SqliteConnection Open()
     {

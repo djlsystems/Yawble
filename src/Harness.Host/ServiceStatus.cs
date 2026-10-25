@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Harness.Contracts;
 using Harness.Host.Auth;
 
 namespace Harness.Host;
@@ -47,9 +48,9 @@ public static class ServiceStatusEndpoints
         }
     }
 
-    public static void Map(WebApplication app, string database, string dataRoot, Func<IReadOnlyList<WorkerSample>> workers)
+    public static void Map(WebApplication app, string dataRoot, Func<IReadOnlyList<WorkerSample>> workers)
     {
-        app.MapGet(Route, async (PumpHeartbeat pump, TimeProvider clock, CancellationToken ct) =>
+        app.MapGet(Route, async (IDatabaseHealth database, PumpHeartbeat pump, TimeProvider clock, CancellationToken ct) =>
         {
             var checks = await HealthEndpoints.ChecksAsync(database, dataRoot, pump, ct);
 

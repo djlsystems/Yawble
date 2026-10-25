@@ -46,7 +46,7 @@ public sealed record NewAgentStep(DateTimeOffset At, string Kind, string Label, 
 /// (<see cref="DeleteForMembersAsync"/>).
 /// </para>
 /// </summary>
-public sealed class AgentStepStore(string databasePath)
+public sealed class AgentStepStore(string databasePath) : IAgentStepStore
 {
     private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 

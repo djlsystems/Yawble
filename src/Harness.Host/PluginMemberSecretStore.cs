@@ -28,14 +28,18 @@ public interface IPluginMemberSecrets
 /// team, member, plugin and field, never the value) in the same transaction, or not at all. The rows
 /// go with the member's <c>team_members</c> row, by the foreign key.
 /// </summary>
-public sealed class PluginMemberSecretStore(string databasePath, IDataProtectionProvider protection) : IPluginMemberSecrets
+public sealed class PluginMemberSecretStore(IPluginMemberSecretRows rows, IDataProtectionProvider protection) : IPluginMemberSecrets
 {
+    /// <summary>The SQLite store over the database at <paramref name="databasePath"/>.</summary>
+    public PluginMemberSecretStore(string databasePath, IDataProtectionProvider protection)
+        : this(new SqlitePluginMemberSecretRows(databasePath), protection)
+    {
+    }
+
     /// <summary>The Data Protection purpose: its own, so no other store's ciphertext opens here.</summary>
     public const string Purpose = "Harness.PluginMemberSecrets.v1";
 
     private readonly IDataProtector _protector = protection.CreateProtector(Purpose);
-
-    private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 
     /// <summary>
     /// Why <paramref name="value"/> cannot be kept for <paramref name="field"/>, or null. The sentence
@@ -85,16 +89,9 @@ public sealed class PluginMemberSecretStore(string databasePath, IDataProtection
     {
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
 
-        await using var connection = Open();
-        await using var select = connection.CreateCommand();
-        select.CommandText = "SELECT field, value_protected FROM plugin_member_secrets WHERE team = $team AND name = $name";
-        select.Parameters.AddWithValue("$team", member.Team);
-        select.Parameters.AddWithValue("$name", member.Name);
-
-        await using var reader = await select.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
+        foreach (var row in await rows.RowsAsync(member, ct))
         {
-            if (Unprotect(reader.GetString(1)) is { } value) values[reader.GetString(0)] = value;
+            if (Unprotect(row.ValueProtected) is { } value) values[row.Field] = value;
         }
 
         return values;
@@ -106,19 +103,9 @@ public sealed class PluginMemberSecretStore(string databasePath, IDataProtection
     {
         var states = new Dictionary<string, MemberSecretState>(StringComparer.Ordinal);
 
-        await using var connection = Open();
-        await using var select = connection.CreateCommand();
-        select.CommandText = "SELECT field, value_protected, set_by, set_at FROM plugin_member_secrets WHERE team = $team AND name = $name";
-        select.Parameters.AddWithValue("$team", member.Team);
-        select.Parameters.AddWithValue("$name", member.Name);
-
-        await using var reader = await select.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
+        foreach (var row in await rows.RowsAsync(member, ct))
         {
-            if (Unprotect(reader.GetString(1)) is not null)
-            {
-                states[reader.GetString(0)] = new MemberSecretState(reader.GetString(2), Instant.Parse(reader.GetString(3)));
-            }
+            if (Unprotect(row.ValueProtected) is not null) states[row.Field] = new MemberSecretState(row.SetBy, row.SetAt);
         }
 
         return states;
@@ -135,35 +122,19 @@ public sealed class PluginMemberSecretStore(string databasePath, IDataProtection
         ChangeAsync(member, label, plugin, new Dictionary<string, string?> { [field] = null }, actor, ct);
 
     /// <summary>Every change (a value sets or replaces, null clears) and its rows, in one transaction.</summary>
-    public async Task ChangeAsync(
-        ContainerId member, string label, string plugin, IReadOnlyDictionary<string, string?> changes, CredentialActor actor, CancellationToken ct = default)
-    {
-        await using var connection = Open();
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
-
-        await ApplyAsync(connection, transaction, member, label, plugin, changes, actor, ct);
-
-        await transaction.CommitAsync(ct);
-    }
+    public Task ChangeAsync(
+        ContainerId member, string label, string plugin, IReadOnlyDictionary<string, string?> changes, CredentialActor actor, CancellationToken ct = default) =>
+        rows.ChangeAsync(member, Protect(changes), actor.Email, AuditFor(member, label, plugin, actor), ct);
 
     /// <summary>
     /// A SETTINGS SAVE AND ITS VALUES TOGETHER: the member's settings row, every given tenant row and
     /// every value change with its own row, in ONE transaction, or nothing. What a person's Save, a
     /// person's hire and a solution's install write.
     /// </summary>
-    public async Task SaveWithSettingsAsync(
+    public Task SaveWithSettingsAsync(
         ContainerId member, string label, string plugin, PluginMemberSettings settings, IReadOnlyList<TriggerAudit> audits,
-        IReadOnlyDictionary<string, string?> changes, CredentialActor actor, CancellationToken ct = default)
-    {
-        await using var connection = Open();
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
-
-        await SqlitePluginMemberSettings.UpsertAsync(connection, transaction, member, settings, ct);
-        foreach (var audit in audits) await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
-        await ApplyAsync(connection, transaction, member, label, plugin, changes, actor, ct);
-
-        await transaction.CommitAsync(ct);
-    }
+        IReadOnlyDictionary<string, string?> changes, CredentialActor actor, CancellationToken ct = default) =>
+        rows.SaveWithSettingsAsync(member, settings, audits, Protect(changes), actor.Email, AuditFor(member, label, plugin, actor), ct);
 
     /// <summary>
     /// THE ONE-TIME START STEP: for every plugin member whose secret field is bound to a key
@@ -174,163 +145,39 @@ public sealed class PluginMemberSecretStore(string databasePath, IDataProtection
     /// only in the Host's environment is never copied: the Host never moves an environment value into
     /// the database. Answers false, copying nothing, once the row is there.
     /// </summary>
-    public async Task<bool> CopyStoredKeysOnceAsync(IDataProtectionProvider keys, CancellationToken ct = default)
+    public Task<bool> CopyStoredKeysOnceAsync(IDataProtectionProvider keys, CancellationToken ct = default)
     {
         var keyProtector = keys.CreateProtector(PluginSecretStore.Purpose);
 
-        await using var connection = Open();
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
-
-        await using (var done = connection.CreateCommand())
-        {
-            done.Transaction = transaction;
-            done.CommandText = "SELECT COUNT(*) FROM tenant_events WHERE action = $action";
-            done.Parameters.AddWithValue("$action", TenantActions.MemberSecretsCopied);
-            if (Convert.ToInt64(await done.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) > 0)
-            {
-                await transaction.RollbackAsync(ct);
-                return false;
-            }
-        }
-
-        var stored = new Dictionary<string, (string Value, string SetBy)>(StringComparer.Ordinal);
-        await using (var select = connection.CreateCommand())
-        {
-            select.Transaction = transaction;
-            select.CommandText = "SELECT key, value_protected, set_by FROM plugin_secrets";
-            await using var reader = await select.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
+        return rows.CopyStoredKeysOnceAsync(
+            protectedKey =>
             {
                 try
                 {
-                    stored[reader.GetString(0)] = (keyProtector.Unprotect(reader.GetString(1)), reader.GetString(2));
+                    return keyProtector.Unprotect(protectedKey);
                 }
                 catch (System.Security.Cryptography.CryptographicException)
                 {
                     // A key ring that lost its key: nothing to copy for that key.
+                    return null;
                 }
-            }
-        }
-
-        var bindings = new List<(string Team, string Name, string Field, string Key)>();
-        await using (var select = connection.CreateCommand())
-        {
-            select.Transaction = transaction;
-            select.CommandText = "SELECT team, name, secrets_json FROM team_member_config";
-            await using var reader = await select.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
-            {
-                foreach (var (field, key) in JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(2)) ?? [])
-                {
-                    bindings.Add((reader.GetString(0), reader.GetString(1), field, key));
-                }
-            }
-        }
-
-        var members = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var keysCopied = new HashSet<string>(StringComparer.Ordinal);
-        var fields = 0;
-        var at = Instant.Stamp(DateTimeOffset.UtcNow);
-
-        foreach (var (team, name, field, key) in bindings)
-        {
-            if (!stored.TryGetValue(key, out var value)) continue;
-
-            await using var insert = connection.CreateCommand();
-            insert.Transaction = transaction;
-            insert.CommandText =
-                """
-                INSERT INTO plugin_member_secrets (team, name, field, value_protected, set_by, set_at)
-                VALUES ($team, $name, $field, $value, $by, $at)
-                ON CONFLICT (team, name, field) DO NOTHING
-                """;
-            insert.Parameters.AddWithValue("$team", team);
-            insert.Parameters.AddWithValue("$name", name);
-            insert.Parameters.AddWithValue("$field", field);
-            insert.Parameters.AddWithValue("$value", _protector.Protect(value.Value));
-            insert.Parameters.AddWithValue("$by", value.SetBy);
-            insert.Parameters.AddWithValue("$at", at);
-
-            if (await insert.ExecuteNonQueryAsync(ct) > 0)
-            {
-                fields++;
-                members.Add($"{team}/{name}");
-                keysCopied.Add(key);
-            }
-        }
-
-        await TenantAuditRow.AppendAsync(connection, transaction, new TriggerAudit(
-            null, null, TenantActions.MemberSecretsCopied, null, null,
-            JsonSerializer.Serialize(new { members = members.Count, fields, keys = keysCopied.Count })), ct);
-
-        await transaction.CommitAsync(ct);
-        return true;
+            },
+            _protector.Protect,
+            (members, fields, keyCount) => new TriggerAudit(
+                null, null, TenantActions.MemberSecretsCopied, null, null,
+                JsonSerializer.Serialize(new { members, fields, keys = keyCount })),
+            ct);
     }
 
-    private async Task ApplyAsync(
-        SqliteConnection connection, SqliteTransaction transaction, ContainerId member, string label, string plugin,
-        IReadOnlyDictionary<string, string?> changes, CredentialActor actor, CancellationToken ct)
-    {
-        var at = Instant.Stamp(DateTimeOffset.UtcNow);
+    /// <summary>Seals each value (null stays null, a clear) before it reaches the rows.</summary>
+    private Dictionary<string, string?> Protect(IReadOnlyDictionary<string, string?> changes) =>
+        changes.ToDictionary(c => c.Key, c => c.Value is null ? null : _protector.Protect(c.Value), StringComparer.Ordinal);
 
-        foreach (var (field, value) in changes.OrderBy(c => c.Key, StringComparer.Ordinal))
-        {
-            string action;
-
-            if (value is null)
-            {
-                await using var delete = connection.CreateCommand();
-                delete.Transaction = transaction;
-                delete.CommandText = "DELETE FROM plugin_member_secrets WHERE team = $team AND name = $name AND field = $field";
-                Bind(delete, member, field);
-
-                // Nothing stored: nothing changes and no row.
-                if (await delete.ExecuteNonQueryAsync(ct) == 0) continue;
-                action = TenantActions.MemberSecretCleared;
-            }
-            else
-            {
-                bool existed;
-                await using (var exists = connection.CreateCommand())
-                {
-                    exists.Transaction = transaction;
-                    exists.CommandText = "SELECT COUNT(*) FROM plugin_member_secrets WHERE team = $team AND name = $name AND field = $field";
-                    Bind(exists, member, field);
-                    existed = Convert.ToInt64(await exists.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) > 0;
-                }
-
-                await using var upsert = connection.CreateCommand();
-                upsert.Transaction = transaction;
-                upsert.CommandText =
-                    """
-                    INSERT INTO plugin_member_secrets (team, name, field, value_protected, set_by, set_at)
-                    VALUES ($team, $name, $field, $value, $by, $at)
-                    ON CONFLICT (team, name, field) DO UPDATE SET
-                        value_protected = excluded.value_protected,
-                        set_by = excluded.set_by,
-                        set_at = excluded.set_at
-                    """;
-                Bind(upsert, member, field);
-                upsert.Parameters.AddWithValue("$value", _protector.Protect(value));
-                upsert.Parameters.AddWithValue("$by", actor.Email);
-                upsert.Parameters.AddWithValue("$at", at);
-                await upsert.ExecuteNonQueryAsync(ct);
-
-                action = existed ? TenantActions.MemberSecretReplaced : TenantActions.MemberSecretSet;
-            }
-
-            await TenantAuditRow.AppendAsync(connection, transaction, new TriggerAudit(
-                actor.Id, actor.Email, action, $"{member.Team}/{member.Name}", label,
-                JsonSerializer.Serialize(new { team = member.Team, member = member.Name, plugin, field })), ct);
-        }
-    }
-
-    private static void Bind(SqliteCommand command, ContainerId member, string field)
-    {
-        command.Parameters.AddWithValue("$team", member.Team);
-        command.Parameters.AddWithValue("$name", member.Name);
-        command.Parameters.AddWithValue("$field", field);
-    }
+    /// <summary>The tenant row of one field's change: team, member, plugin and field, never the value.</summary>
+    private static Func<string, string, TriggerAudit> AuditFor(ContainerId member, string label, string plugin, CredentialActor actor) =>
+        (field, action) => new TriggerAudit(
+            actor.Id, actor.Email, action, $"{member.Team}/{member.Name}", label,
+            JsonSerializer.Serialize(new { team = member.Team, member = member.Name, plugin, field }));
 
     private string? Unprotect(string protectedValue)
     {
@@ -342,14 +189,6 @@ public sealed class PluginMemberSecretStore(string databasePath, IDataProtection
         {
             return null;
         }
-    }
-
-    private SqliteConnection Open()
-    {
-        var connection = new SqliteConnection(_connectionString);
-        connection.Open();
-        SqlitePragmas.Apply(connection);
-        return connection;
     }
 }
 
@@ -458,5 +297,217 @@ public sealed class MemberSecretReads(PluginMemberSecretStore members, PluginSec
             : manifest.Config.GetValueOrDefault(when.Setting)?.Default;
 
         return when.HoldsIn(current);
+    }
+}
+
+/// <summary>
+/// The SQLite version of <see cref="IPluginMemberSecretRows"/>: <c>plugin_member_secrets</c> in the
+/// log's own file, every change with its tenant rows in the same transaction.
+/// </summary>
+public sealed class SqlitePluginMemberSecretRows(string databasePath) : IPluginMemberSecretRows
+{
+    private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
+
+    public async Task<IReadOnlyList<MemberSecretRow>> RowsAsync(ContainerId member, CancellationToken ct = default)
+    {
+        var rows = new List<MemberSecretRow>();
+
+        await using var connection = Open();
+        await using var select = connection.CreateCommand();
+        select.CommandText = "SELECT field, value_protected, set_by, set_at FROM plugin_member_secrets WHERE team = $team AND name = $name";
+        select.Parameters.AddWithValue("$team", member.Team);
+        select.Parameters.AddWithValue("$name", member.Name);
+
+        await using var reader = await select.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(new MemberSecretRow(
+                reader.GetString(0), reader.GetString(1), reader.GetString(2), Instant.Parse(reader.GetString(3))));
+        }
+
+        return rows;
+    }
+
+    public async Task ChangeAsync(
+        ContainerId member, IReadOnlyDictionary<string, string?> protectedChanges, string setBy,
+        Func<string, string, TriggerAudit> audit, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        await ApplyAsync(connection, transaction, member, protectedChanges, setBy, audit, ct);
+
+        await transaction.CommitAsync(ct);
+    }
+
+    public async Task SaveWithSettingsAsync(
+        ContainerId member, PluginMemberSettings settings, IReadOnlyList<TriggerAudit> audits,
+        IReadOnlyDictionary<string, string?> protectedChanges, string setBy,
+        Func<string, string, TriggerAudit> audit, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        await SqlitePluginMemberSettings.UpsertAsync(connection, transaction, member, settings, ct);
+        foreach (var row in audits) await TenantAuditRow.AppendAsync(connection, transaction, row, ct);
+        await ApplyAsync(connection, transaction, member, protectedChanges, setBy, audit, ct);
+
+        await transaction.CommitAsync(ct);
+    }
+
+    public async Task<bool> CopyStoredKeysOnceAsync(
+        Func<string, string?> unprotectKey, Func<string, string> protectForMember,
+        Func<int, int, int, TriggerAudit> done, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        await using (var marked = connection.CreateCommand())
+        {
+            marked.Transaction = transaction;
+            marked.CommandText = "SELECT COUNT(*) FROM tenant_events WHERE action = $action";
+            marked.Parameters.AddWithValue("$action", TenantActions.MemberSecretsCopied);
+            if (Convert.ToInt64(await marked.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) > 0)
+            {
+                await transaction.RollbackAsync(ct);
+                return false;
+            }
+        }
+
+        var stored = new Dictionary<string, (string Value, string SetBy)>(StringComparer.Ordinal);
+        await using (var select = connection.CreateCommand())
+        {
+            select.Transaction = transaction;
+            select.CommandText = "SELECT key, value_protected, set_by FROM plugin_secrets";
+            await using var reader = await select.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                if (unprotectKey(reader.GetString(1)) is { } value) stored[reader.GetString(0)] = (value, reader.GetString(2));
+            }
+        }
+
+        var bindings = new List<(string Team, string Name, string Field, string Key)>();
+        await using (var select = connection.CreateCommand())
+        {
+            select.Transaction = transaction;
+            select.CommandText = "SELECT team, name, secrets_json FROM team_member_config";
+            await using var reader = await select.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                foreach (var (field, key) in JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(2)) ?? [])
+                {
+                    bindings.Add((reader.GetString(0), reader.GetString(1), field, key));
+                }
+            }
+        }
+
+        var members = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var keysCopied = new HashSet<string>(StringComparer.Ordinal);
+        var fields = 0;
+        var at = Instant.Stamp(DateTimeOffset.UtcNow);
+
+        foreach (var (team, name, field, key) in bindings)
+        {
+            if (!stored.TryGetValue(key, out var value)) continue;
+
+            await using var insert = connection.CreateCommand();
+            insert.Transaction = transaction;
+            insert.CommandText =
+                """
+                INSERT INTO plugin_member_secrets (team, name, field, value_protected, set_by, set_at)
+                VALUES ($team, $name, $field, $value, $by, $at)
+                ON CONFLICT (team, name, field) DO NOTHING
+                """;
+            insert.Parameters.AddWithValue("$team", team);
+            insert.Parameters.AddWithValue("$name", name);
+            insert.Parameters.AddWithValue("$field", field);
+            insert.Parameters.AddWithValue("$value", protectForMember(value.Value));
+            insert.Parameters.AddWithValue("$by", value.SetBy);
+            insert.Parameters.AddWithValue("$at", at);
+
+            if (await insert.ExecuteNonQueryAsync(ct) > 0)
+            {
+                fields++;
+                members.Add($"{team}/{name}");
+                keysCopied.Add(key);
+            }
+        }
+
+        await TenantAuditRow.AppendAsync(connection, transaction, done(members.Count, fields, keysCopied.Count), ct);
+
+        await transaction.CommitAsync(ct);
+        return true;
+    }
+
+    private static async Task ApplyAsync(
+        SqliteConnection connection, SqliteTransaction transaction, ContainerId member,
+        IReadOnlyDictionary<string, string?> protectedChanges, string setBy, Func<string, string, TriggerAudit> audit,
+        CancellationToken ct)
+    {
+        var at = Instant.Stamp(DateTimeOffset.UtcNow);
+
+        foreach (var (field, value) in protectedChanges.OrderBy(c => c.Key, StringComparer.Ordinal))
+        {
+            string action;
+
+            if (value is null)
+            {
+                await using var delete = connection.CreateCommand();
+                delete.Transaction = transaction;
+                delete.CommandText = "DELETE FROM plugin_member_secrets WHERE team = $team AND name = $name AND field = $field";
+                Bind(delete, member, field);
+
+                // Nothing stored: nothing changes and no row.
+                if (await delete.ExecuteNonQueryAsync(ct) == 0) continue;
+                action = TenantActions.MemberSecretCleared;
+            }
+            else
+            {
+                bool existed;
+                await using (var exists = connection.CreateCommand())
+                {
+                    exists.Transaction = transaction;
+                    exists.CommandText = "SELECT COUNT(*) FROM plugin_member_secrets WHERE team = $team AND name = $name AND field = $field";
+                    Bind(exists, member, field);
+                    existed = Convert.ToInt64(await exists.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) > 0;
+                }
+
+                await using var upsert = connection.CreateCommand();
+                upsert.Transaction = transaction;
+                upsert.CommandText =
+                    """
+                    INSERT INTO plugin_member_secrets (team, name, field, value_protected, set_by, set_at)
+                    VALUES ($team, $name, $field, $value, $by, $at)
+                    ON CONFLICT (team, name, field) DO UPDATE SET
+                        value_protected = excluded.value_protected,
+                        set_by = excluded.set_by,
+                        set_at = excluded.set_at
+                    """;
+                Bind(upsert, member, field);
+                upsert.Parameters.AddWithValue("$value", value);
+                upsert.Parameters.AddWithValue("$by", setBy);
+                upsert.Parameters.AddWithValue("$at", at);
+                await upsert.ExecuteNonQueryAsync(ct);
+
+                action = existed ? TenantActions.MemberSecretReplaced : TenantActions.MemberSecretSet;
+            }
+
+            await TenantAuditRow.AppendAsync(connection, transaction, audit(field, action), ct);
+        }
+    }
+
+    private static void Bind(SqliteCommand command, ContainerId member, string field)
+    {
+        command.Parameters.AddWithValue("$team", member.Team);
+        command.Parameters.AddWithValue("$name", member.Name);
+        command.Parameters.AddWithValue("$field", field);
+    }
+
+    private SqliteConnection Open()
+    {
+        var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+        SqlitePragmas.Apply(connection);
+        return connection;
     }
 }

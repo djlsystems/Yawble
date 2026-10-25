@@ -162,8 +162,8 @@ internal sealed partial class HostComposition
             sp.GetRequiredService<TeamSkills>(),
             sp.GetRequiredService<ITeamSolutionStore>(),
             wakes: sp.GetRequiredService<IWakeStore>(),
-            fileChanges: sp.GetRequiredService<WorkspaceFileChangeStore>(),
-            runSteps: sp.GetRequiredService<AgentStepStore>()));
+            fileChanges: sp.GetRequiredService<IWorkspaceFileChangeStore>(),
+            runSteps: sp.GetRequiredService<IAgentStepStore>()));
 
         // By hand for the reason TeamDeletion is: every dependency here is one a reset would silently skip
         // if it were optional. A TeamReset missing its pending-delivery store cannot tell a member that has
@@ -178,8 +178,8 @@ internal sealed partial class HostComposition
             sp.GetRequiredService<TeamPaths>(),
             sp.GetRequiredService<FolderRemoval>(),
             sp.GetRequiredService<RepositoryReset>(),
-            sp.GetRequiredService<WorkspaceFileChangeStore>(),
-            sp.GetRequiredService<AgentStepStore>(),
+            sp.GetRequiredService<IWorkspaceFileChangeStore>(),
+            sp.GetRequiredService<IAgentStepStore>(),
             purged: () =>
             {
                 sp.GetRequiredService<KanbanStore>().Invalidate();

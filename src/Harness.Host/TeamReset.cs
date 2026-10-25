@@ -170,8 +170,8 @@ public sealed class TeamReset(
     TeamPaths paths,
     FolderRemoval? removal = null,
     RepositoryReset? repositories = null,
-    WorkspaceFileChangeStore? fileChanges = null,
-    AgentStepStore? runSteps = null,
+    IWorkspaceFileChangeStore? fileChanges = null,
+    IAgentStepStore? runSteps = null,
     Action? purged = null)
 {
     private readonly FolderRemoval _removal = removal ?? new FolderRemoval();

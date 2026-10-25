@@ -65,7 +65,7 @@ internal sealed partial class HostComposition
         // REMOVING A PLUGIN OR ONE VERSION, from the web app: `plugin remove`'s rules, the installer's
         // gate, and its tenant row in the same transaction as the move.
         builder.Services.AddSingleton(sp => new PluginRemover(
-            pluginCatalog, sp.GetRequiredService<PluginInstaller>(), sp.GetRequiredService<TeamRegistry>(), database));
+            pluginCatalog, sp.GetRequiredService<PluginInstaller>(), sp.GetRequiredService<TeamRegistry>(), sp.GetRequiredService<IPluginRemovalRows>()));
 
         // THE EVENTS THE INSTALLED PLUGINS DECLARE join the platform's in every lookup - triggers, filters,
         // `{event.*}` tokens, the high-volume rule, `GET /api/events` - read off the catalog on each call,
@@ -76,7 +76,7 @@ internal sealed partial class HostComposition
         // resolved by logical key at each run: a key a person set from the screen (`plugin_secrets`, Data
         // Protection ciphertext) first, then the Host's own environment, where `secret set` values arrive.
         builder.Services.AddSingleton(sp => new PluginSecretStore(
-            database, sp.GetRequiredService<IDataProtectionProvider>(), new EnvironmentSecretStore()));
+            sp.GetRequiredService<IPluginSecretRows>(), sp.GetRequiredService<IDataProtectionProvider>(), new EnvironmentSecretStore()));
         builder.Services.AddSingleton<ISecretStore>(sp => sp.GetRequiredService<PluginSecretStore>());
         builder.Services.AddSingleton<IPluginMemberSettingsStore>(new SqlitePluginMemberSettings(database));
 
@@ -84,7 +84,7 @@ internal sealed partial class HostComposition
         // (`plugin_member_secrets`, Data Protection ciphertext under a purpose of its own), resolved
         // before any key binding. The start step copies each STORED key onto the members bound to it,
         // once, and never an environment value.
-        builder.Services.AddSingleton(sp => new PluginMemberSecretStore(database, sp.GetRequiredService<IDataProtectionProvider>()));
+        builder.Services.AddSingleton(sp => new PluginMemberSecretStore(sp.GetRequiredService<IPluginMemberSecretRows>(), sp.GetRequiredService<IDataProtectionProvider>()));
         builder.Services.AddSingleton<IPluginMemberSecrets>(sp => sp.GetRequiredService<PluginMemberSecretStore>());
         builder.Services.AddSingleton(sp => new MemberSecretReads(
             sp.GetRequiredService<PluginMemberSecretStore>(), sp.GetRequiredService<PluginSecretStore>(), sp.GetService<Marketplace>()));
@@ -95,7 +95,6 @@ internal sealed partial class HostComposition
         // CONNECTIONS: OAuth accounts the Host holds for plugins (see Connections). The client secret and
         // every token are Data Protection ciphertext under `<dataRoot>/keys`; the provider is reached only
         // through IOAuthEndpoints, which the tests replace.
-        builder.Services.AddSingleton(sp => new ConnectionStore(database, sp.GetRequiredService<IDataProtectionProvider>()));
         builder.Services.AddHttpClient(nameof(HttpOAuthEndpoints), client => client.Timeout = TimeSpan.FromSeconds(30));
 
         // THE RELEASE CHECK: whether a newer release is out, for the version chip. It reads the release
@@ -129,7 +128,7 @@ internal sealed partial class HostComposition
             id => sp.GetRequiredService<PluginCatalog>().For(id)?.Manifest.Version,
             sp.GetRequiredService<ILogger<Marketplace>>(),
             // A custom-<id> provider in the catalog's needs is said by the name a person gave it here.
-            async ct => (await sp.GetRequiredService<ConnectionStore>().ProvidersAsync(ct))
+            async ct => (await sp.GetRequiredService<IConnectionStore>().ProvidersAsync(ct))
                 .Where(p => !string.IsNullOrWhiteSpace(p.Name))
                 .ToDictionary(p => p.Id, p => p.Name!, StringComparer.Ordinal)));
         builder.Services.AddHostedService<MarketplaceLoop>();
@@ -139,7 +138,7 @@ internal sealed partial class HostComposition
         // one pointed at a fake server in the test process.
         builder.Services.AddSingleton<IMailLogin>(new SocketMailLogin());
         builder.Services.AddSingleton(sp => new Connections(
-            sp.GetRequiredService<ConnectionStore>(), sp.GetRequiredService<IOAuthEndpoints>(), sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<IConnectionStore>(), sp.GetRequiredService<IOAuthEndpoints>(), sp.GetRequiredService<TimeProvider>(),
             sp.GetRequiredService<IUserStore>(), mail: sp.GetRequiredService<IMailLogin>(),
             // THE INSTANCE'S MICROSOFT CLIENT: the public client the operator CLI names (Connections:MicrosoftClientId,
             // or HARNESS_MICROSOFT_CLIENT_ID), used while no Microsoft client is saved; with none, Microsoft

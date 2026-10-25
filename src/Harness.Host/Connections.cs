@@ -102,7 +102,7 @@ public sealed record ConnectionActor(string Id, string? Email)
 /// </list>
 /// </summary>
 public sealed class Connections(
-    ConnectionStore store, IOAuthEndpoints endpoints, TimeProvider clock, IUserStore? users = null,
+    IConnectionStore store, IOAuthEndpoints endpoints, TimeProvider clock, IUserStore? users = null,
     Func<TimeSpan, CancellationToken, Task>? delay = null, IMailLogin? mail = null, string? microsoftClientId = null) : IDisposable
 {
     /// <summary>
@@ -139,7 +139,7 @@ public sealed class Connections(
 
     private readonly Func<TimeSpan, CancellationToken, Task> _delay = delay ?? ((wait, ct) => Task.Delay(wait, clock, ct));
 
-    public ConnectionStore Store => store;
+    public IConnectionStore Store => store;
 
     public IOAuthEndpoints Endpoints => endpoints;
 

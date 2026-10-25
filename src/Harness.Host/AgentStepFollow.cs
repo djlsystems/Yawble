@@ -93,7 +93,7 @@ public sealed class AgentStepFollow
     private readonly Func<ContainerId, AgentStepRun?> _runOf;
     private readonly Func<ContainerId, ((IRunWorker Worker, RunId Run)? Placed, string? Why)> _place;
     private readonly WorkerStreams _streams;
-    private readonly AgentStepStore? _store;
+    private readonly IAgentStepStore? _store;
     private readonly Func<AgentStepsPush, CancellationToken, Task> _send;
     private readonly TimeProvider _clock;
     private readonly ILogger _logger;
@@ -107,7 +107,7 @@ public sealed class AgentStepFollow
         Func<ContainerId, AgentStepRun?> runOf,
         Func<ContainerId, ((IRunWorker Worker, RunId Run)? Placed, string? Why)> place,
         WorkerStreams streams,
-        AgentStepStore? store,
+        IAgentStepStore? store,
         Func<AgentStepsPush, CancellationToken, Task> send,
         TimeProvider? clock = null,
         ILogger<AgentStepFollow>? logger = null)

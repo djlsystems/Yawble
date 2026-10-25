@@ -118,7 +118,7 @@ public sealed class TenantSettings
         + "still queued or cited, the ledgers, spend, outcome figures, the tenant log, admission holds, "
         + "landed or backlog stats, and 0 turns it off.";
 
-    private readonly SqliteTenantSettingsStore _store;
+    private readonly ITenantSettingsStore _store;
     private readonly IConfiguration _configuration;
     private readonly SemaphoreSlim _writes = new(1, 1);
     private readonly Dictionary<string, TenantSettingDefinition> _definitions;
@@ -133,7 +133,7 @@ public sealed class TenantSettings
     /// <param name="memoryLimitMb">The container's memory limit in MB; null reads the cgroup, 0 is
     /// no limit.</param>
     public TenantSettings(
-        SqliteTenantSettingsStore store, IConfiguration configuration, int? cpuCount = null, long? memoryLimitMb = null)
+        ITenantSettingsStore store, IConfiguration configuration, int? cpuCount = null, long? memoryLimitMb = null)
     {
         _store = store;
         _configuration = configuration;

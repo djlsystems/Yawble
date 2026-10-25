@@ -48,9 +48,20 @@ public static class LedgerStart
     /// <summary>Who the tenant log says wrote these rows: the platform itself, at start.</summary>
     public const string Actor = "platform";
 
+    /// <summary>The SQLite start, kept as one call for the operator paths and tests that hold a path.</summary>
+    public static Task<LedgerStartResult> RunAsync(string databasePath, CancellationToken ct = default) =>
+        new SqliteLedgerStartRows(databasePath).RunAsync(ct);
+}
+
+/// <summary>
+/// The SQLite version of <see cref="ILedgerStartRows"/>: the start's SQL, moved here unchanged from
+/// <see cref="LedgerStart"/>, which keeps the names and the actor.
+/// </summary>
+public sealed class SqliteLedgerStartRows(string databasePath) : ILedgerStartRows
+{
     private const int Page = 500;
 
-    public static async Task<LedgerStartResult> RunAsync(string databasePath, CancellationToken ct = default)
+    public async Task<LedgerStartResult> RunAsync(CancellationToken ct = default)
     {
         await using var connection = new SqliteConnection(
             SqliteOpen.ConnectionString(databasePath));
@@ -61,25 +72,25 @@ public static class LedgerStart
 
         var now = Instant.Now();
 
-        var instanceId = await SettingAsync(connection, transaction, InstanceIdName, ct);
+        var instanceId = await SettingAsync(connection, transaction, LedgerStart.InstanceIdName, ct);
         if (instanceId is null)
         {
             instanceId = Guid.NewGuid().ToString("D");
-            await WriteSettingAsync(connection, transaction, InstanceIdName, instanceId, now, ct);
+            await WriteSettingAsync(connection, transaction, LedgerStart.InstanceIdName, instanceId, now, ct);
         }
 
         int? runs = null;
         int? workflows = null;
 
-        var startedAt = await SettingAsync(connection, transaction, LedgerStartedAtName, ct);
+        var startedAt = await SettingAsync(connection, transaction, LedgerStart.LedgerStartedAtName, ct);
         if (startedAt is null)
         {
             (runs, workflows) = await BackfillAsync(connection, transaction, ct);
 
             startedAt = now;
-            await WriteSettingAsync(connection, transaction, LedgerStartedAtName, now, now, ct);
+            await WriteSettingAsync(connection, transaction, LedgerStart.LedgerStartedAtName, now, now, ct);
             await WriteSettingAsync(
-                connection, transaction, LedgerBackfilledRunsName,
+                connection, transaction, LedgerStart.LedgerBackfilledRunsName,
                 runs.Value.ToString(CultureInfo.InvariantCulture), now, ct);
         }
 
@@ -172,14 +183,14 @@ public static class LedgerStart
             insert.Parameters.AddWithValue("$name", name);
             insert.Parameters.AddWithValue("$value", value);
             insert.Parameters.AddWithValue("$at", at);
-            insert.Parameters.AddWithValue("$by", Actor);
+            insert.Parameters.AddWithValue("$by", LedgerStart.Actor);
             await insert.ExecuteNonQueryAsync(ct);
         }
 
         await TenantAuditRow.AppendAtAsync(
             connection, transaction,
             new TriggerAudit(
-                null, Actor, TenantActions.TenantSettingChanged, name, name,
+                null, LedgerStart.Actor, TenantActions.TenantSettingChanged, name, name,
                 JsonSerializer.Serialize(new { setting = name, old = (string?)null, @new = value })), Instant.Parse(at), ct);
     }
 }

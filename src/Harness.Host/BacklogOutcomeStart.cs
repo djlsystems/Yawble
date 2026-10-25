@@ -21,8 +21,19 @@ public static class BacklogOutcomeStart
 {
     public const string DoneName = "backlog.outcomesInheritedAt";
 
+    /// <summary>The SQLite start, kept as one call for the operator paths and tests that hold a path.</summary>
+    public static Task<int?> RunAsync(string databasePath, CancellationToken ct = default) =>
+        new SqliteOutcomeStartRows(databasePath).RunAsync(ct);
+}
+
+/// <summary>
+/// The SQLite version of <see cref="IOutcomeStartRows"/>: the back-fill's SQL, moved here unchanged
+/// from <see cref="BacklogOutcomeStart"/>, which keeps the name of the row that marks it done.
+/// </summary>
+public sealed class SqliteOutcomeStartRows(string databasePath) : IOutcomeStartRows
+{
     /// <summary>How many items it filled, or null when it had already run.</summary>
-    public static async Task<int?> RunAsync(string databasePath, CancellationToken ct = default)
+    public async Task<int?> RunAsync(CancellationToken ct = default)
     {
         await using var connection = new SqliteConnection(
             SqliteOpen.ConnectionString(databasePath));
@@ -35,7 +46,7 @@ public static class BacklogOutcomeStart
         {
             done.Transaction = transaction;
             done.CommandText = "SELECT 1 FROM tenant_settings WHERE name = $name";
-            done.Parameters.AddWithValue("$name", DoneName);
+            done.Parameters.AddWithValue("$name", BacklogOutcomeStart.DoneName);
             if (await done.ExecuteScalarAsync(ct) is not null) return null;
         }
 
@@ -83,7 +94,7 @@ public static class BacklogOutcomeStart
             insert.Transaction = transaction;
             insert.CommandText =
                 "INSERT INTO tenant_settings (name, value, updated_at, updated_by) VALUES ($name, $value, $at, $by)";
-            insert.Parameters.AddWithValue("$name", DoneName);
+            insert.Parameters.AddWithValue("$name", BacklogOutcomeStart.DoneName);
             insert.Parameters.AddWithValue("$value", now);
             insert.Parameters.AddWithValue("$at", now);
             insert.Parameters.AddWithValue("$by", LedgerStart.Actor);
@@ -93,8 +104,8 @@ public static class BacklogOutcomeStart
         await TenantAuditRow.AppendAtAsync(
             connection, transaction,
             new TriggerAudit(
-                null, LedgerStart.Actor, TenantActions.TenantSettingChanged, DoneName, DoneName,
-                JsonSerializer.Serialize(new { setting = DoneName, old = (string?)null, @new = now, items = filled })), Instant.Parse(now), ct);
+                null, LedgerStart.Actor, TenantActions.TenantSettingChanged, BacklogOutcomeStart.DoneName, BacklogOutcomeStart.DoneName,
+                JsonSerializer.Serialize(new { setting = BacklogOutcomeStart.DoneName, old = (string?)null, @new = now, items = filled })), Instant.Parse(now), ct);
 
         await transaction.CommitAsync(ct);
         return filled;

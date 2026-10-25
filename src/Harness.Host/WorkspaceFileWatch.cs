@@ -266,7 +266,7 @@ public sealed class WorkspaceFileWatch(
     TeamPaths paths,
     Func<WorkspaceChange, CancellationToken, Task> send,
     TimeProvider? clock = null,
-    WorkspaceFileChangeStore? record = null,
+    IWorkspaceFileChangeStore? record = null,
     ILogger<WorkspaceFileWatch>? logger = null)
 {
     /// <summary>The hub group of people watching. Never a team group: a member's key can join those.</summary>

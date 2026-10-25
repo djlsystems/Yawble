@@ -40,7 +40,7 @@ public sealed record LogRetentionPass(
 /// </para>
 /// </summary>
 public sealed class LogRetention(
-    SqliteLogRetention rows,
+    ILogRetention rows,
     IMessageLog log,
     ITenantLog tenant,
     Func<int> retentionDays,

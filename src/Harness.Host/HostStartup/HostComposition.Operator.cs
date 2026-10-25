@@ -192,7 +192,7 @@ internal sealed partial class HostComposition
         ledgerStart = null;
         try
         {
-            var ledger = ledgerStart = await LedgerStart.RunAsync(database);
+            var ledger = ledgerStart = await new SqliteLedgerStartRows(database).RunAsync();
 
             if (ledger.BackfilledRuns is { } recovered)
             {
@@ -211,7 +211,7 @@ internal sealed partial class HostComposition
         // link writer did it for them. One transaction; a failure leaves it to the next start.
         try
         {
-            if (await BacklogOutcomeStart.RunAsync(database) is { } inherited)
+            if (await new SqliteOutcomeStartRows(database).RunAsync() is { } inherited)
             {
                 Console.WriteLine($"Backlog outcomes: {inherited} item(s) took the outcome their dispatch workflow serves.");
             }

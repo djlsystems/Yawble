@@ -57,7 +57,7 @@ public sealed record ConnectionUse(string Team, string Member, string Slot);
 /// Data Protection ciphertext under the instance's <c>&lt;dataRoot&gt;/keys</c>. Every write a person
 /// makes lands with its <c>tenant_events</c> row in the same transaction, or not at all.
 /// </summary>
-public sealed class ConnectionStore(string databasePath, IDataProtectionProvider protection)
+public sealed class ConnectionStore(string databasePath, IDataProtectionProvider protection) : IConnectionStore
 {
     private readonly IDataProtector _protector = protection.CreateProtector("Harness.Connections.v1");
 

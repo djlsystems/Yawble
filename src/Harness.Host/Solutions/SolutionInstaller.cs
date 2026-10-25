@@ -201,7 +201,7 @@ public sealed class SolutionInstaller(
     TenantLogging audit,
     Func<string?> defaultAgent,
     Connections? connections = null,
-    ConnectionStore? connectionStore = null,
+    IConnectionStore? connectionStore = null,
     IPluginMemberSettingsStore? pluginSettings = null,
     TeamAnnouncements? announce = null,
     int group = -1,

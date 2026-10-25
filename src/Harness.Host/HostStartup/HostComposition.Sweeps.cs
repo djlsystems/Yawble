@@ -91,7 +91,7 @@ internal sealed partial class HostComposition
                 () => tenantSettings.QuietWindow,
                 quietSweepInterval,
                 sp.GetRequiredService<ILogger<QuietTeamReaper>>(),
-                ct => SqliteMaintenance.CheckpointAsync(database, ct)));
+                sp.GetRequiredService<IDatabaseMaintenance>().CheckpointAsync));
         }
 
         // Written by scripts/ensure-agent-clis.sh at each container start, read by Diagnostics.
@@ -115,7 +115,7 @@ internal sealed partial class HostComposition
         // THE MESSAGE LOG KEEPS `log.retentionDays` OF FINISHED WORK: a pass shortly after start and then
         // daily removes the rest through the log's one delete, never on a request's path. See LogRetention.
         builder.Services.AddSingleton(sp => new LogRetention(
-            new SqliteLogRetention(database),
+            sp.GetRequiredService<ILogRetention>(),
             sp.GetRequiredService<IMessageLog>(),
             sp.GetRequiredService<ITenantLog>(),
             () => tenantSettings.LogRetentionDays,
@@ -237,7 +237,7 @@ internal sealed partial class HostComposition
             sp.GetRequiredService<TeamPaths>(),
             (change, ct) => sp.GetRequiredService<IHubContext<ContainerHub>>()
                 .Clients.Group(WorkspaceFileWatch.Group).SendAsync(WorkspaceFileWatch.Message, change, ct),
-            record: sp.GetRequiredService<WorkspaceFileChangeStore>(),
+            record: sp.GetRequiredService<IWorkspaceFileChangeStore>(),
             logger: sp.GetRequiredService<ILogger<WorkspaceFileWatch>>()));
         builder.Services.AddHostedService<WorkspaceFileWatchService>();
 
@@ -253,7 +253,7 @@ internal sealed partial class HostComposition
                 ? (null, why)
                 : (placed, null),
             sp.GetRequiredService<WorkerStreams>(),
-            sp.GetRequiredService<AgentStepStore>(),
+            sp.GetRequiredService<IAgentStepStore>(),
             (push, ct) => sp.GetRequiredService<IHubContext<ContainerHub>>()
                 .Clients.Group(WorkspaceFileWatch.Group).SendAsync(AgentStepFollow.Message, push, ct),
             logger: sp.GetRequiredService<ILogger<AgentStepFollow>>()));

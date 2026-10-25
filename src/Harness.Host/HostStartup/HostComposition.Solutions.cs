@@ -71,7 +71,7 @@ internal sealed partial class HostComposition
                 // THE AGENT a package's agent members run when it names none (SolutionDefaultAgent).
                 () => SolutionDefaultAgent.Of(agents, probe),
                 sp.GetRequiredService<Connections>(),
-                sp.GetRequiredService<ConnectionStore>(),
+                sp.GetRequiredService<IConnectionStore>(),
                 sp.GetRequiredService<IPluginMemberSettingsStore>(),
                 new TeamAnnouncements(
                     team => listPush.AnnounceCreatedAsync(team),

@@ -1,11 +1,13 @@
 using Harness.Contracts;
+using Harness.Identity;
+using Harness.Messaging;
 
 namespace Harness.Host;
 
 /// <summary>
 /// EVERY STORE INTERFACE THE HOST RESOLVES, the list a provider must cover before the Host will start
-/// on it. In Harness.Host rather than Contracts because one of them (`IPluginMemberSettingsStore`)
-/// lives here; the rest are in Contracts.
+/// on it. Each lives in the project whose types its signatures use: Contracts, Messaging, Identity or
+/// here in Harness.Host (`IPluginMemberSettingsStore`, `IAgentStepStore`, `IConnectionStore` and more).
 ///
 /// `ISecretStore` and `IPluginMemberSecrets` are absent on purpose: they encrypt and are shared by both
 /// providers over the rows stores. A new store interface belongs here the moment it exists.
@@ -35,6 +37,19 @@ public static class StoreContracts
         typeof(ILedger),
         typeof(ITeamSolutionStore),
         typeof(IPluginMemberSettingsStore),
+        typeof(ITenantSettingsStore),
+        typeof(IAgentStepStore),
+        typeof(IConnectionStore),
+        typeof(IPluginSecretRows),
+        typeof(IPluginMemberSecretRows),
+        typeof(IWorkspaceFileChangeStore),
+        typeof(ILogSpend),
+        typeof(ILogRetention),
+        typeof(IDatabaseMaintenance),
+        typeof(IDatabaseHealth),
+        typeof(IOutcomeStartRows),
+        typeof(ILedgerStartRows),
+        typeof(IPluginRemovalRows),
     ];
 }
 

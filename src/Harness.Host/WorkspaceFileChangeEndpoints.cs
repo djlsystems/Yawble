@@ -35,7 +35,7 @@ public static class WorkspaceFileChangeEndpoints
                 long? after,
                 [Description("How many to return. Default 200, clamped to 1..500.")]
                 int? take,
-                WorkspaceFileChangeStore store, IMessageLog log, TeamRegistry teams, ITeamStore teamStore,
+                IWorkspaceFileChangeStore store, IMessageLog log, TeamRegistry teams, ITeamStore teamStore,
                 TimeProvider clock, CancellationToken ct) =>
             {
                 if (from is { } f && to is { } t && f > t)

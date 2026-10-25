@@ -71,7 +71,7 @@ internal static class MemberEndpoints
             ITeamStore teamStore,
             AgentCatalog catalog,
             PluginCatalog plugins,
-            ConnectionStore connectionStore,
+            IConnectionStore connectionStore,
             CancellationToken ct) =>
         {
             if (!teams.Exists(team))

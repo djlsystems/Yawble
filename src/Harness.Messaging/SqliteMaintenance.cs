@@ -8,9 +8,19 @@ namespace Harness.Messaging;
 public readonly record struct CheckpointResult(bool Busy, long LogFrames, long CheckpointedFrames);
 
 /// <summary>
-/// Housekeeping on the database FILE rather than on any store's rows.
+/// Housekeeping on the database FILE rather than on any store's rows, kept as one static call for the
+/// tests and tools that hold a path. The work is <see cref="SqliteDatabaseMaintenance"/>'s.
 /// </summary>
 public static class SqliteMaintenance
+{
+    /// <summary>See <see cref="SqliteDatabaseMaintenance.CheckpointAsync"/>.</summary>
+    public static Task<CheckpointResult> CheckpointAsync(
+        string databasePath, CancellationToken ct = default) =>
+        new SqliteDatabaseMaintenance(databasePath).CheckpointAsync(ct);
+}
+
+/// <summary>The SQLite version of <see cref="IDatabaseMaintenance"/>, for one database file.</summary>
+public sealed class SqliteDatabaseMaintenance(string databasePath) : IDatabaseMaintenance
 {
     /// <summary>
     /// <c>PRAGMA wal_checkpoint(TRUNCATE)</c>: copy the -wal into the database and cut the -wal back
@@ -21,8 +31,7 @@ public static class SqliteMaintenance
     /// the checkpoint answer busy rather than fail; that is reported, not thrown, and the next sweep
     /// tries again.
     /// </summary>
-    public static async Task<CheckpointResult> CheckpointAsync(
-        string databasePath, CancellationToken ct = default)
+    public async Task<CheckpointResult> CheckpointAsync(CancellationToken ct = default)
     {
         // Unpooled, for the reason BackUpAsync gives: a one-shot connection whose handle must not
         // outlive the call.

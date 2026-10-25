@@ -23,7 +23,7 @@ public sealed record TenantSettingWritten(string Name, TenantSettingRow? Row);
 /// two land together or neither does - a setting that changed with no record of who changed it is
 /// the one outcome this table must not produce.
 /// </summary>
-public sealed class SqliteTenantSettingsStore(string databasePath)
+public sealed class SqliteTenantSettingsStore(string databasePath) : ITenantSettingsStore
 {
     private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 

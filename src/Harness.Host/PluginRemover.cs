@@ -41,9 +41,13 @@ public sealed record PluginRemoveResult(
 /// events. Deleting a team never comes here: a plugin is the instance's, not a team's.
 /// </para>
 /// </summary>
-public sealed class PluginRemover(PluginCatalog catalog, PluginInstaller installer, TeamRegistry teams, string databasePath)
+public sealed class PluginRemover(PluginCatalog catalog, PluginInstaller installer, TeamRegistry teams, IPluginRemovalRows rows)
 {
-    private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
+    /// <summary>The SQLite remover over the database at <paramref name="databasePath"/>.</summary>
+    public PluginRemover(PluginCatalog catalog, PluginInstaller installer, TeamRegistry teams, string databasePath)
+        : this(catalog, installer, teams, new SqlitePluginRemovalRows(databasePath))
+    {
+    }
 
     /// <summary>Removes plugin <paramref name="id"/>, or only its <paramref name="version"/>, recording
     /// <paramref name="audit"/>'s actor on a <see cref="TenantActions.PluginRemoved"/> row.</summary>
@@ -128,34 +132,31 @@ public sealed class PluginRemover(PluginCatalog catalog, PluginInstaller install
             Detail = JsonSerializer.Serialize(new { id, whole, versions = removed }),
         };
 
-        await using (var connection = new SqliteConnection(_connectionString))
-        {
-            await connection.OpenAsync(ct);
-            await SqlitePragmas.ApplyAsync(connection, ct: ct);
-            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+        // THE ROW AND THE MOVE ARE ONE UNIT: the rows append the tenant row, this moves the folder, and
+        // only then do the rows commit. A move that fails drops the row; a commit that fails moves the
+        // folder back.
+        PluginRemoveResult? moveFailure = null;
 
-            await TenantAuditRow.AppendAsync(connection, transaction, row, ct);
+        var recorded = await rows.RecordWhileAsync(
+            row,
+            () =>
+            {
+                try
+                {
+                    Directory.Move(target, aside);
+                    return true;
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    // No row for a removal that did not happen.
+                    moveFailure = PluginRemoveResult.Refused(500, $"{Path.GetFileName(target)} could not be removed: {exception.Message}", id, version);
+                    return false;
+                }
+            },
+            () => Directory.Move(aside, target),
+            ct);
 
-            try
-            {
-                Directory.Move(target, aside);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                // The transaction is disposed uncommitted: no row for a removal that did not happen.
-                return PluginRemoveResult.Refused(500, $"{Path.GetFileName(target)} could not be removed: {exception.Message}", id, version);
-            }
-
-            try
-            {
-                await transaction.CommitAsync(ct);
-            }
-            catch
-            {
-                Directory.Move(aside, target);
-                throw;
-            }
-        }
+        if (!recorded) return moveFailure!;
 
         TryDelete(aside);
 
@@ -186,5 +187,39 @@ public sealed class PluginRemover(PluginCatalog catalog, PluginInstaller install
         {
             Console.WriteLine($"WARNING: a removed plugin folder was left at {directory}: {exception.Message}");
         }
+    }
+}
+
+/// <summary>
+/// The SQLite version of <see cref="IPluginRemovalRows"/>: the tenant row in a transaction of the
+/// log's own file that stays open across the folder move.
+/// </summary>
+public sealed class SqlitePluginRemovalRows(string databasePath) : IPluginRemovalRows
+{
+    private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
+
+    public async Task<bool> RecordWhileAsync(TriggerAudit row, Func<bool> moveFiles, Action undoMove, CancellationToken ct = default)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(ct);
+        await SqlitePragmas.ApplyAsync(connection, ct: ct);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        await TenantAuditRow.AppendAsync(connection, transaction, row, ct);
+
+        // The transaction is disposed uncommitted when the move fails.
+        if (!moveFiles()) return false;
+
+        try
+        {
+            await transaction.CommitAsync(ct);
+        }
+        catch
+        {
+            undoMove();
+            throw;
+        }
+
+        return true;
     }
 }

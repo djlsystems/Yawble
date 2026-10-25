@@ -50,7 +50,7 @@ internal sealed partial class HostComposition
         WorkspaceFileChangeEndpoints.Map(app);
         AgentStepEndpoints.Map(app);
         OutcomeEndpoints.Map(app);
-        HealthEndpoints.Map(app, database, dataRoot);
+        HealthEndpoints.Map(app, dataRoot);
         VersionEndpoints.Map(app);
         ReleaseCheckEndpoints.Map(app);
         MarketplaceEndpoints.Map(app);
@@ -216,7 +216,7 @@ internal sealed partial class HostComposition
             worker => ConciergeSessionsView.TerminalsOn(
                 app.Services.GetRequiredService<ConciergeSessionStore>(), worker, app.Services.GetRequiredService<CapacitySampler>().Terminal));
         WorkerEndpoints.MapList(app, workersNow);
-        ServiceStatusEndpoints.Map(app, database, dataRoot, workersNow);
+        ServiceStatusEndpoints.Map(app, dataRoot, workersNow);
         app.Services.GetRequiredService<CapacitySampler>().Describe = workersNow;
         if (control)
         {

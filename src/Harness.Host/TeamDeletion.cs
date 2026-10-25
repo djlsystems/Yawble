@@ -175,8 +175,8 @@ public sealed class TeamDeletion(
     IWakeStore? wakes = null,
     string? agentHome = null,
     IReadOnlyList<string>? sessionFolders = null,
-    WorkspaceFileChangeStore? fileChanges = null,
-    AgentStepStore? runSteps = null)
+    IWorkspaceFileChangeStore? fileChanges = null,
+    IAgentStepStore? runSteps = null)
 {
     private readonly FolderRemoval _removal = removal ?? new FolderRemoval();
 
