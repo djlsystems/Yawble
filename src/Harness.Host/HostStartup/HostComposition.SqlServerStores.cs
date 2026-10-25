@@ -1,6 +1,8 @@
 using Harness.Contracts;
 using Harness.Messaging;
+using Harness.Identity;
 using Harness.SqlServer;
+using Harness.SqlServer.Identity;
 using Harness.SqlServer.Ledger;
 using Harness.SqlServer.Messaging;
 
@@ -50,6 +52,17 @@ internal sealed partial class HostComposition
         // the guard counts them and a later caller resolves the same provider's.
         builder.Services.AddSingleton<ILedgerStartRows>(new Harness.Host.SqlServer.SqlServerLedgerStartRows(connection));
         builder.Services.AddSingleton<IOutcomeStartRows>(new Harness.Host.SqlServer.SqlServerOutcomeStartRows(connection));
+
+        // THE ACCOUNTS, THE TEAMS AND THE TENANT'S OWN RECORDS: people and their password hashes, machine
+        // principals and their credential hashes (each the same text SQLite stores, so either verifies the
+        // other's), teams and members, the tenant log, the instance-wide settings rows and the folders a
+        // removal left. Every write that carries a tenant row lands with it in one transaction.
+        builder.Services.AddSingleton<IUserStore>(new SqlServerUserStore(connection));
+        builder.Services.AddSingleton<IPrincipalStore>(new SqlServerPrincipalStore(connection));
+        builder.Services.AddSingleton<ITeamStore>(new SqlServerTeamStore(connection));
+        builder.Services.AddSingleton<ITenantLog>(new SqlServerTenantLog(connection));
+        builder.Services.AddSingleton<ITenantSettingsStore>(new SqlServerTenantSettingsStore(connection));
+        builder.Services.AddSingleton<IUnfinishedRemovals>(new SqlServerUnfinishedRemovals(connection));
 
         StoreGuard.Check(StoreContracts.Required, SqlServerStoreRegistry.Registered);
     }

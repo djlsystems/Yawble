@@ -29,8 +29,8 @@ public sealed class SqliteTenantLog : ITenantLog
     /// <summary>Absence means the safe value. Only the test fixture asks for anything else.</summary>
     private readonly SqliteDurability _durability;
 
-    /// <summary>The last count taken, and the highest seq it was taken at.</summary>
-    private (long Highest, long Total) _counted = (-1, 0);
+    /// <summary>The last count taken, and the highest seq it was taken at. See <see cref="TenantLogTotal"/>.</summary>
+    private readonly TenantLogTotal _counted = new();
 
     public SqliteTenantLog(string databasePath, SqliteDurability durability = SqliteDurability.SurvivesPowerLoss)
     {
@@ -159,17 +159,16 @@ public sealed class SqliteTenantLog : ITenantLog
             highest = (long)(await top.ExecuteScalarAsync(ct) ?? 0L);
         }
 
-        var counted = _counted;
-        if (counted.Highest == highest)
+        if (_counted.At(highest) is { } counted)
         {
-            total = counted.Total;
+            total = counted;
         }
         else
         {
             await using var counting = connection.CreateCommand();
             counting.CommandText = "SELECT COUNT(*) FROM tenant_events";
             total = (long)(await counting.ExecuteScalarAsync(ct) ?? 0L);
-            _counted = (highest, total);
+            _counted.Counted(highest, total);
         }
 
         await using var command = connection.CreateCommand();
@@ -205,15 +204,5 @@ public sealed class SqliteTenantLog : ITenantLog
         return connection;
     }
 
-    private static TenantEvent ReadEvent(SqliteDataReader reader) =>
-        new(
-            reader.GetInt64(0),
-            Instant.Parse(
-                reader.GetString(1)),
-            reader.IsDBNull(2) ? null : reader.GetString(2),
-            reader.IsDBNull(3) ? null : reader.GetString(3),
-            reader.GetString(4),
-            reader.IsDBNull(5) ? null : reader.GetString(5),
-            reader.IsDBNull(6) ? null : reader.GetString(6),
-            reader.IsDBNull(7) ? null : reader.GetString(7));
+    private static TenantEvent ReadEvent(SqliteDataReader reader) => TenantEventRows.Read(reader);
 }

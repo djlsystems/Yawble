@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text.Json;
 using Harness.Contracts;
 using Microsoft.Data.Sqlite;
 
@@ -79,14 +78,7 @@ public sealed class SqliteTenantSettingsStore(string databasePath) : ITenantSett
                     if (await delete.ExecuteNonQueryAsync(ct) == 0) continue;
                 }
 
-                await AppendAuditAsync(connection, transaction, stamp, actorId, actorEmail,
-                    TenantActions.TenantSettingReset, change.Name, JsonSerializer.Serialize(new
-                    {
-                        setting = change.Name,
-                        old = change.OldValue,
-                        @new = (string?)null,
-                        change = "reset to default",
-                    }), ct);
+                await AppendAuditAsync(connection, transaction, stamp, change, actorId, actorEmail, ct);
 
                 written.Add(new TenantSettingWritten(change.Name, null));
                 continue;
@@ -109,13 +101,7 @@ public sealed class SqliteTenantSettingsStore(string databasePath) : ITenantSett
                 await upsert.ExecuteNonQueryAsync(ct);
             }
 
-            await AppendAuditAsync(connection, transaction, stamp, actorId, actorEmail,
-                TenantActions.TenantSettingChanged, change.Name, JsonSerializer.Serialize(new
-                {
-                    setting = change.Name,
-                    old = change.OldValue,
-                    @new = change.NewValue,
-                }), ct);
+            await AppendAuditAsync(connection, transaction, stamp, change, actorId, actorEmail, ct);
 
             written.Add(new TenantSettingWritten(
                 change.Name, new TenantSettingRow(change.Name, change.NewValue, at, actorEmail)));
@@ -125,11 +111,12 @@ public sealed class SqliteTenantSettingsStore(string databasePath) : ITenantSett
         return written;
     }
 
+    /// <summary>The change's tenant row (<see cref="TenantSettingAudits"/>), stamped as the change is.</summary>
     private static Task AppendAuditAsync(
-        SqliteConnection connection, SqliteTransaction transaction, string stamp, string? actorId,
-        string actorEmail, string action, string setting, string detail, CancellationToken ct) =>
+        SqliteConnection connection, SqliteTransaction transaction, string stamp, TenantSettingChange change,
+        string? actorId, string actorEmail, CancellationToken ct) =>
         TenantAuditRow.AppendAtAsync(
-            connection, transaction, new TriggerAudit(actorId, actorEmail, action, setting, setting, detail), Instant.Parse(stamp), ct);
+            connection, transaction, TenantSettingAudits.For(change, actorId, actorEmail), Instant.Parse(stamp), ct);
 
     private SqliteConnection Open()
     {

@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text.Json;
 using Harness.Contracts;
 using Microsoft.Data.Sqlite;
 
@@ -31,10 +30,9 @@ public sealed class SqliteUnfinishedRemovals(string databasePath) : IUnfinishedR
         command.Parameters.AddWithValue("$kind", removal.Kind);
         command.Parameters.AddWithValue("$team", removal.Team);
         command.Parameters.AddWithValue("$member", (object?)removal.Member ?? DBNull.Value);
-        command.Parameters.AddWithValue("$remaining", JsonSerializer.Serialize(removal.Remaining));
+        command.Parameters.AddWithValue("$remaining", UnfinishedRemovalRows.Remaining(removal));
         command.Parameters.AddWithValue("$at", Instant.Stamp(removal.RecordedAt));
-        command.Parameters.AddWithValue(
-            "$hostLeft", removal.HostLeft is { Count: > 0 } left ? JsonSerializer.Serialize(left) : DBNull.Value);
+        command.Parameters.AddWithValue("$hostLeft", UnfinishedRemovalRows.HostLeft(removal));
         await command.ExecuteNonQueryAsync(ct);
     }
 
@@ -73,18 +71,7 @@ public sealed class SqliteUnfinishedRemovals(string databasePath) : IUnfinishedR
         var rows = new List<UnfinishedRemoval>();
         await using var reader = await command.ExecuteReaderAsync(ct);
 
-        while (await reader.ReadAsync(ct))
-        {
-            rows.Add(new UnfinishedRemoval(
-                reader.GetString(0),
-                reader.GetString(1),
-                reader.GetString(2),
-                reader.IsDBNull(3) ? null : reader.GetString(3),
-                JsonSerializer.Deserialize<List<string>>(reader.GetString(4)) ?? [],
-                Instant.Parse(reader.GetString(5)),
-                reader.GetInt32(6),
-                reader.IsDBNull(7) ? null : JsonSerializer.Deserialize<Dictionary<string, long>>(reader.GetString(7))));
-        }
+        while (await reader.ReadAsync(ct)) rows.Add(UnfinishedRemovalRows.Read(reader));
 
         return rows;
     }

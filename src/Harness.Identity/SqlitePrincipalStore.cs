@@ -1,8 +1,3 @@
-using System.Collections.Concurrent;
-using System.Globalization;
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Harness.Contracts;
 
@@ -11,31 +6,23 @@ namespace Harness.Identity;
 /// <summary>
 /// Machine principals: containers and console sessions.
 ///
-/// A credential is 256 bits of CSPRNG output stored as a SHA-256 hash, and a FAST hash is correct
-/// here where a password hash would not be. There is no dictionary to attack and nothing for a work
-/// factor to slow down - while a password hash on this path would put a deliberate delay on every
-/// CLI call every agent makes.
+/// The credential, its hash and the reading back of a row are <see cref="PrincipalCredentials"/>',
+/// shared with the SQL Server store, so a credential either mints resolves on the other.
 /// </summary>
 public sealed class SqlitePrincipalStore : IPrincipalStore
 {
-    private const int PrefixLength = 8;
-
     private readonly string _connectionString;
 
     /// <summary>Absence means the safe value. Only the test fixture asks for anything else.</summary>
     private readonly SqliteDurability _durability;
 
     /// <summary>
-    /// How long a principal's <c>last_used_at</c> stands before another request writes it again.
-    /// Every authenticated request touched it under a synchronous write: a member's run makes
-    /// hundreds. The value is a signal that a credential is in use, not a clock of each call.
+    /// How long a principal's <c>last_used_at</c> stands before another request writes it again. See
+    /// <see cref="PrincipalTouches"/>.
     /// </summary>
-    public static readonly TimeSpan TouchInterval = TimeSpan.FromMinutes(1);
+    public static readonly TimeSpan TouchInterval = PrincipalTouches.Interval;
 
-    private readonly TimeProvider _clock;
-
-    /// <summary>When each principal's <c>last_used_at</c> was last written by this process.</summary>
-    private readonly ConcurrentDictionary<string, DateTimeOffset> _touched = new(StringComparer.Ordinal);
+    private readonly PrincipalTouches _touches;
 
     public SqlitePrincipalStore(
         string databasePath, SqliteDurability durability = SqliteDurability.SurvivesPowerLoss, TimeProvider? clock = null)
@@ -43,7 +30,7 @@ public sealed class SqlitePrincipalStore : IPrincipalStore
         _connectionString = SqliteOpen.ConnectionString(databasePath);
 
         _durability = durability;
-        _clock = clock ?? TimeProvider.System;
+        _touches = new PrincipalTouches(clock);
     }
 
     public async Task<string> MintAsync(
@@ -56,9 +43,7 @@ public sealed class SqlitePrincipalStore : IPrincipalStore
         string? label = null,
         CancellationToken ct = default)
     {
-        credential = string.IsNullOrWhiteSpace(credential)
-            ? Base64UrlEncode(RandomNumberGenerator.GetBytes(32))
-            : credential.Trim();
+        credential = PrincipalCredentials.Credential(credential);
 
         await using var connection = Open();
         await using var command = connection.CreateCommand();
@@ -92,11 +77,9 @@ public sealed class SqlitePrincipalStore : IPrincipalStore
         command.Parameters.AddWithValue("$id", id);
         command.Parameters.AddWithValue("$kind", kind.ToString());
         command.Parameters.AddWithValue("$team", (object?)team ?? DBNull.Value);
-        command.Parameters.AddWithValue("$hash", Hash(credential));
-        // Min() because a SUPPLIED credential may be shorter than the prefix a generated one has.
-        command.Parameters.AddWithValue(
-            "$prefix", credential[..Math.Min(PrefixLength, credential.Length)]);
-        command.Parameters.AddWithValue("$permits", JsonSerializer.Serialize(permits.ToArray()));
+        command.Parameters.AddWithValue("$hash", PrincipalCredentials.Hash(credential));
+        command.Parameters.AddWithValue("$prefix", PrincipalCredentials.Prefix(credential));
+        command.Parameters.AddWithValue("$permits", PrincipalCredentials.PermitsJson(permits));
         command.Parameters.AddWithValue("$at", Instant.Now());
         command.Parameters.AddWithValue("$owner", (object?)ownerUserId ?? DBNull.Value);
         command.Parameters.AddWithValue("$label", (object?)label ?? DBNull.Value);
@@ -114,7 +97,7 @@ public sealed class SqlitePrincipalStore : IPrincipalStore
         await using var command = connection.CreateCommand();
         command.CommandText =
             "SELECT id, kind, permits, owner_user_id FROM principals WHERE hash = $hash";
-        command.Parameters.AddWithValue("$hash", Hash(credential));
+        command.Parameters.AddWithValue("$hash", PrincipalCredentials.Hash(credential));
 
         string id;
         string kind;
@@ -131,44 +114,21 @@ public sealed class SqlitePrincipalStore : IPrincipalStore
             owner = reader.IsDBNull(3) ? null : reader.GetString(3);
         }
 
-        // A permits value we cannot read is a REFUSAL, never an assumption of freedom. Treating
-        // authority we cannot parse as unlimited is how one corrupt row becomes an escalation.
-        string[]? parsed;
-
-        try
-        {
-            parsed = JsonSerializer.Deserialize<string[]>(permits);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-
-        if (parsed is null) return null;
-
-        // A kind we cannot read is refused for the same reason, and as a REFUSAL rather than an
-        // unhandled exception. Enum.Parse threw, which reached the caller as a 500 - a fault,
-        // where "this credential is not usable" is the honest answer and the one the handler
-        // already knows how to give.
-        if (!Enum.TryParse<PrincipalKind>(kind, out var parsedKind)) return null;
+        // A row whose permits or kind cannot be read is refused (PrincipalCredentials.Read).
+        if (PrincipalCredentials.Read(id, kind, permits, owner) is not { } principal) return null;
 
         // AFTER both parses, never before. Stamped first, a row that could not be read still
         // recorded a successful use - and last_used_at is exactly the signal that tells a live
         // credential from an abandoned one in the credential roster.
         // ONCE A MINUTE, unless somebody read the value since: `CredentialUseRunner` reads it before
         // a run and compares after, so a read makes the next request write whatever the clock says.
-        var now = _clock.GetUtcNow();
-        if (!_touched.TryGetValue(id, out var last) || now - last >= TouchInterval)
+        if (_touches.Due(id) is { } now)
         {
             await TouchAsync(connection, id, now, ct);
-            _touched[id] = now;
+            _touches.Touched(id, now);
         }
 
-        return new Principal(
-            id,
-            parsedKind,
-            new HashSet<string>(parsed, StringComparer.Ordinal),
-            owner);
+        return principal;
     }
 
     public async Task<string?> TeamForAsync(string id, CancellationToken ct = default)
@@ -229,7 +189,7 @@ public sealed class SqlitePrincipalStore : IPrincipalStore
         await using var command = connection.CreateCommand();
 
         command.CommandText =
-            "SELECT id, label, prefix, owner_user_id, created_at, last_used_at "
+            $"SELECT {PrincipalCredentials.ApiKeyColumns} "
             + "FROM principals "
             + $"WHERE kind = 'ApiKey' AND owner_user_id IS NOT NULL {filter} "
             + "ORDER BY created_at DESC, id DESC";
@@ -240,18 +200,7 @@ public sealed class SqlitePrincipalStore : IPrincipalStore
 
         await using var reader = await command.ExecuteReaderAsync(ct);
 
-        while (await reader.ReadAsync(ct))
-        {
-            keys.Add(new ApiKeySummary(
-                reader.GetString(0),
-                reader.IsDBNull(1) ? null : reader.GetString(1),
-                reader.GetString(2),
-                reader.GetString(3),
-                DateTimeOffset.Parse(reader.GetString(4), CultureInfo.InvariantCulture),
-                reader.IsDBNull(5)
-                    ? null
-                    : DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture)));
-        }
+        while (await reader.ReadAsync(ct)) keys.Add(PrincipalCredentials.ReadApiKey(reader));
 
         return keys;
     }
@@ -278,7 +227,7 @@ public sealed class SqlitePrincipalStore : IPrincipalStore
     public async Task<DateTimeOffset?> LastUsedAtAsync(string id, CancellationToken ct = default)
     {
         // A reader is watching for the next use: it is written, not held for the interval.
-        _touched.TryRemove(id, out _);
+        _touches.Watched(id);
 
         await using var connection = Open();
         await using var command = connection.CreateCommand();
@@ -303,12 +252,6 @@ public sealed class SqlitePrincipalStore : IPrincipalStore
 
         await command.ExecuteNonQueryAsync(ct);
     }
-
-    private static string Hash(string credential) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(credential)));
-
-    private static string Base64UrlEncode(byte[] bytes) =>
-        Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
     private SqliteConnection Open()
     {

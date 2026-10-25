@@ -20,17 +20,8 @@ public sealed class SqlServerStartGuardTests
 
         await using var database = await SqlServerTestDatabase.CreateAsync(Ct);
 
-        // The two tables the ledger's start writes, so a start that ran its steps would leave rows here.
-        await ExecuteAsync(database.ConnectionString,
-            """
-            CREATE TABLE tenant_settings (
-                name NVARCHAR(450) NOT NULL PRIMARY KEY, value NVARCHAR(MAX) NOT NULL,
-                updated_at NVARCHAR(40) NOT NULL, updated_by NVARCHAR(MAX) NOT NULL);
-            CREATE TABLE tenant_events (
-                seq BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY, occurred_at NVARCHAR(40) NOT NULL,
-                actor_id NVARCHAR(MAX) NULL, actor_email NVARCHAR(MAX) NULL, action NVARCHAR(450) NOT NULL,
-                subject NVARCHAR(450) NULL, subject_name NVARCHAR(MAX) NULL, detail NVARCHAR(MAX) NULL);
-            """);
+        // The two tables the ledger's start writes (auth.sqlserver-baseline-1's), so a start that ran its
+        // steps would leave rows there.
 
         var dataRoot = Path.Combine(Path.GetTempPath(), $"harness-startguard-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dataRoot);
@@ -56,15 +47,6 @@ public sealed class SqlServerStartGuardTests
 
         Assert.Equal(0, await CountAsync(database.ConnectionString, "SELECT COUNT(*) FROM tenant_settings"));
         Assert.Equal(0, await CountAsync(database.ConnectionString, "SELECT COUNT(*) FROM tenant_events"));
-    }
-
-    private static async Task ExecuteAsync(string connectionString, string sql)
-    {
-        await using var connection = new SqlConnection(connectionString);
-        await connection.OpenAsync(Ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        await command.ExecuteNonQueryAsync(Ct);
     }
 
     private static async Task<int> CountAsync(string connectionString, string sql)

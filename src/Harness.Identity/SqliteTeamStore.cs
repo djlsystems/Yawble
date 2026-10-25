@@ -1,5 +1,3 @@
-using System.Globalization;
-using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Harness.Contracts;
 
@@ -67,25 +65,12 @@ public sealed class SqliteTeamStore : ITeamStore
 
         command.Parameters.AddWithValue("$id", team.Id);
         command.Parameters.AddWithValue("$name", (object?)team.Name ?? DBNull.Value);
-        command.Parameters.AddWithValue(
-            "$memberAgent",
-            team.MemberAgent is { } memberAgent
-                ? memberAgent
-                : team.MemberAgents?.FirstOrDefault() is { } first
-                    ? first
-                    : DBNull.Value);
-        command.Parameters.AddWithValue(
-            "$memberAgents",
-            team.MemberAgents is null ? DBNull.Value : JsonSerializer.Serialize(team.MemberAgents));
-        command.Parameters.AddWithValue(
-            "$instructions",
-            string.IsNullOrWhiteSpace(team.AdditionalInstructions) ? DBNull.Value : team.AdditionalInstructions);
+        command.Parameters.AddWithValue("$memberAgent", TeamRows.MemberAgent(team));
+        command.Parameters.AddWithValue("$memberAgents", TeamRows.MemberAgents(team.MemberAgents));
+        command.Parameters.AddWithValue("$instructions", TeamRows.Instructions(team.AdditionalInstructions));
         command.Parameters.AddWithValue("$root", (object?)team.Root ?? DBNull.Value);
-        command.Parameters.AddWithValue("$repos", JsonSerializer.Serialize(team.Repos ?? []));
-        command.Parameters.AddWithValue(
-            "$env",
-            JsonSerializer.Serialize(
-                team.Env ?? new Dictionary<string, string>(StringComparer.Ordinal)));
+        command.Parameters.AddWithValue("$repos", TeamRows.Repos(team.Repos));
+        command.Parameters.AddWithValue("$env", TeamRows.Env(team.Env));
         command.Parameters.AddWithValue("$createdUtc", Instant.Now());
 
         await command.ExecuteNonQueryAsync(ct);
@@ -168,8 +153,7 @@ public sealed class SqliteTeamStore : ITeamStore
             {
                 command.CommandText = "UPDATE teams SET additional_instructions = $text WHERE id = $id COLLATE NOCASE";
                 command.Parameters.AddWithValue("$id", team);
-                command.Parameters.AddWithValue(
-                    "$text", string.IsNullOrWhiteSpace(text) ? DBNull.Value : text.Trim());
+                command.Parameters.AddWithValue("$text", TeamRows.Instructions(text?.Trim()));
             },
             audit,
             ct);
@@ -185,7 +169,7 @@ public sealed class SqliteTeamStore : ITeamStore
                     "UPDATE teams SET member_agent = $memberAgent, member_agents = $memberAgents WHERE id = $id COLLATE NOCASE";
                 command.Parameters.AddWithValue("$id", team);
                 command.Parameters.AddWithValue("$memberAgent", (object?)memberAgents.FirstOrDefault() ?? DBNull.Value);
-                command.Parameters.AddWithValue("$memberAgents", JsonSerializer.Serialize(memberAgents));
+                command.Parameters.AddWithValue("$memberAgents", TeamRows.MemberAgents(memberAgents));
             },
             audit,
             ct);
@@ -195,7 +179,7 @@ public sealed class SqliteTeamStore : ITeamStore
             command =>
             {
                 command.CommandText = "UPDATE teams SET repos = $repos WHERE id = $id";
-                command.Parameters.AddWithValue("$repos", JsonSerializer.Serialize(repos));
+                command.Parameters.AddWithValue("$repos", TeamRows.Repos(repos));
                 command.Parameters.AddWithValue("$id", team);
             },
             audit,
@@ -210,7 +194,7 @@ public sealed class SqliteTeamStore : ITeamStore
             command =>
             {
                 command.CommandText = "UPDATE teams SET env = $env WHERE id = $id";
-                command.Parameters.AddWithValue("$env", JsonSerializer.Serialize(env));
+                command.Parameters.AddWithValue("$env", TeamRows.Env(env));
                 command.Parameters.AddWithValue("$id", team);
             },
             audit,
@@ -322,8 +306,8 @@ public sealed class SqliteTeamStore : ITeamStore
         command.Parameters.AddWithValue("$label", (object?)member.Label ?? DBNull.Value);
         command.Parameters.AddWithValue("$agent", member.Agent);
         command.Parameters.AddWithValue("$systemPrompt", (object?)member.SystemPrompt ?? DBNull.Value);
-        command.Parameters.AddWithValue("$subscribes", JsonSerializer.Serialize(member.Subscribes.ToArray()));
-        command.Parameters.AddWithValue("$permits", JsonSerializer.Serialize(member.Permits.ToArray()));
+        command.Parameters.AddWithValue("$subscribes", TeamRows.List(member.Subscribes));
+        command.Parameters.AddWithValue("$permits", TeamRows.List(member.Permits));
         command.Parameters.AddWithValue("$floorSeq", member.FloorSeq);
         command.Parameters.AddWithValue("$hiredFor", (object?)member.HiredFor ?? DBNull.Value);
         command.Parameters.AddWithValue("$setBy", (object?)member.SystemPromptSetBy?.By ?? DBNull.Value);
@@ -408,55 +392,17 @@ public sealed class SqliteTeamStore : ITeamStore
         await using var connection = Open();
         await using var command = connection.CreateCommand();
 
-        command.CommandText =
-            "SELECT id, name, member_agent, member_agents, additional_instructions, root, repos, env, paused, "
-            + "budget_tokens, archived_at, archived_by "
-            + "FROM teams";
+        command.CommandText = $"SELECT {TeamRows.TeamColumns} FROM teams";
 
         var teams = new List<PersistedTeam>();
         await using var reader = await command.ExecuteReaderAsync(ct);
 
-        while (await reader.ReadAsync(ct))
-        {
-            teams.Add(new PersistedTeam(
-                reader.GetString(0),
-                reader.IsDBNull(1) ? null : reader.GetString(1),
-                reader.IsDBNull(2) ? null : reader.GetString(2),
-                reader.IsDBNull(3)
-                    ? null
-                    : JsonSerializer.Deserialize<string[]>(reader.GetString(3)) ?? [],
-                reader.IsDBNull(4) ? null : reader.GetString(4),
-                reader.IsDBNull(5) ? null : reader.GetString(5),
-                reader.IsDBNull(6)
-                    ? []
-                    : JsonSerializer.Deserialize<string[]>(reader.GetString(6)) ?? [],
-                reader.IsDBNull(7)
-                    ? new Dictionary<string, string>(StringComparer.Ordinal)
-                    : JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(7))
-                      ?? new Dictionary<string, string>(StringComparer.Ordinal),
-                // `member_agent` IS NOT UNREAD: it is selected above and Teams.cs reads it back, so it
-                // is not a drop candidate.
-                !reader.IsDBNull(8) && reader.GetInt64(8) != 0,
-
-                // The budget is WRITTEN by a narrow setter that does not go through
-                // SaveTeamAsync, so a column missing from this SELECT is a setting that works all
-                // session and is gone at the next restart. NULL IS NOT 0: null means the team has
-                // chosen nothing, 0 means it chose unlimited.
-                reader.IsDBNull(9) ? null : reader.GetInt64(9),
-
-                // Written by the narrow archive setter only, so read here or lost at a restart.
-                reader.IsDBNull(10)
-                    ? null
-                    : Instant.Parse(reader.GetString(10)),
-                reader.IsDBNull(11) ? null : reader.GetString(11)));
-        }
+        while (await reader.ReadAsync(ct)) teams.Add(TeamRows.ReadTeam(reader));
 
         return teams;
     }
 
-    private const string MemberColumns =
-        "team, name, label, agent, system_prompt, subscribes, permits, floor_seq, hired_for, "
-        + "system_prompt_set_by, system_prompt_set_by_kind, system_prompt_set_at";
+    private const string MemberColumns = TeamRows.MemberColumns;
 
     public async Task<IReadOnlyList<PersistedMember>> MembersAsync(CancellationToken ct = default)
     {
@@ -487,20 +433,7 @@ public sealed class SqliteTeamStore : ITeamStore
         return await reader.ReadAsync(ct) ? ReadMember(reader) : null;
     }
 
-    private static PersistedMember ReadMember(SqliteDataReader reader) =>
-        new(
-            reader.GetString(0),
-            reader.GetString(1),
-            reader.IsDBNull(2) ? null : reader.GetString(2),
-            reader.GetString(3),
-            reader.IsDBNull(4) ? null : reader.GetString(4),
-            JsonSerializer.Deserialize<string[]>(reader.GetString(5)) ?? [],
-            JsonSerializer.Deserialize<string[]>(reader.GetString(6)) ?? [],
-            reader.GetInt64(7),
-            reader.IsDBNull(8) ? null : reader.GetString(8),
-            reader.IsDBNull(9) || reader.IsDBNull(10) || reader.IsDBNull(11)
-                ? null
-                : new SystemPromptSetter(reader.GetString(9), reader.GetString(10), Instant.Parse(reader.GetString(11))));
+    private static PersistedMember ReadMember(SqliteDataReader reader) => TeamRows.ReadMember(reader);
 
     public async Task DeleteTeamAsync(string team, CancellationToken ct = default)
     {
@@ -540,14 +473,7 @@ public sealed class SqliteTeamStore : ITeamStore
 
         var rows = new List<RepoDefaultBranch>();
         await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            rows.Add(new RepoDefaultBranch(
-                reader.GetString(0),
-                reader.GetString(1),
-                reader.IsDBNull(2) ? null : reader.GetString(2),
-                reader.IsDBNull(3) ? null : reader.GetString(3)));
-        }
+        while (await reader.ReadAsync(ct)) rows.Add(TeamRows.ReadDefaultBranch(reader));
 
         return rows;
     }
@@ -585,35 +511,11 @@ public sealed class SqliteTeamStore : ITeamStore
         await using var connection = Open();
         await using var command = connection.CreateCommand();
 
-        command.CommandText =
-            """
-            SELECT team, repo, upstream_url, fork_owner, dco_sign_off, cla_signed_note,
-                   pr_url, pr_number, pr_state, pr_read_at
-            FROM team_repo_contributors
-            """;
+        command.CommandText = $"SELECT {TeamRows.ContributorColumns} FROM team_repo_contributors";
 
         var rows = new List<RepoContributor>();
         await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            // A pull request is recorded whole or not at all.
-            var pullRequest = reader.IsDBNull(6) || reader.IsDBNull(7) || reader.IsDBNull(8) || reader.IsDBNull(9)
-                ? null
-                : new RepoPullRequest(
-                    reader.GetString(6),
-                    reader.GetInt32(7),
-                    reader.GetString(8),
-                    Instant.Parse(reader.GetString(9)));
-
-            rows.Add(new RepoContributor(
-                reader.GetString(0),
-                reader.GetString(1),
-                reader.IsDBNull(2) ? null : reader.GetString(2),
-                reader.IsDBNull(3) ? null : reader.GetString(3),
-                reader.GetInt64(4) != 0,
-                reader.IsDBNull(5) ? null : reader.GetString(5),
-                pullRequest));
-        }
+        while (await reader.ReadAsync(ct)) rows.Add(TeamRows.ReadContributor(reader));
 
         return rows;
     }

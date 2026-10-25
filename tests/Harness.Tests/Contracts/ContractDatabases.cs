@@ -63,14 +63,14 @@ internal sealed class SqlServerContractDatabase : IAsyncDisposable
 
     /// <summary>
     /// THE OTHER MODULES' TABLES THE LEDGER AND OUTCOME WRITERS READ, created when no SQL Server
-    /// schema module has created them yet: <c>teams</c>, <c>team_members</c>, <c>users</c>,
-    /// <c>tenant_events</c> and <c>tenant_settings</c> (identity), <c>triggers</c>, and
-    /// <c>backlog_items</c> and <c>backlog_dispatches</c> (backlog). Every append now writes its ledger
-    /// and outcome rows (<c>SqlServerAppendRows</c>), and those read a run's member, a team's name, a
-    /// trigger's outcome and an item's; until those modules' baselines exist, a test here would fail
-    /// on the first append. Their columns and nullability as SQLite's, so a test's raw insert reads
-    /// the same on both. Each is a no-op once the real table exists, and this goes when the last of
-    /// those baselines lands.
+    /// schema module has created them yet: <c>triggers</c>, and <c>backlog_items</c> and
+    /// <c>backlog_dispatches</c> (backlog). Every append now writes its ledger and outcome rows
+    /// (<c>SqlServerAppendRows</c>), and those read a trigger's outcome and an item's; until those
+    /// modules' baselines exist, a test here would fail on the first append. Their columns and
+    /// nullability as SQLite's, so a test's raw insert reads the same on both. Each is a no-op once the
+    /// real table exists, and this goes when the last of those baselines lands. The identity tables
+    /// (<c>teams</c>, <c>team_members</c>, <c>users</c>, <c>tenant_events</c>, <c>tenant_settings</c>)
+    /// are <c>auth.sqlserver-baseline-1</c>'s, and <c>IdentitySchemaParityTests</c> pins them.
     /// </summary>
     private async Task EnsureOtherModulesTablesAsync(CancellationToken ct)
     {
@@ -81,42 +81,6 @@ internal sealed class SqlServerContractDatabase : IAsyncDisposable
         await using var command = connection.CreateCommand();
         command.CommandText =
             $"""
-             IF OBJECT_ID(N'teams', N'U') IS NULL
-             CREATE TABLE teams (
-                 id NVARCHAR(200) COLLATE {ci} NOT NULL PRIMARY KEY, name NVARCHAR(MAX) NULL,
-                 member_agent NVARCHAR(MAX) NULL, member_agents NVARCHAR(MAX) NULL, member_prompt NVARCHAR(MAX) NULL,
-                 root NVARCHAR(MAX) NULL, repos NVARCHAR(MAX) NULL, env NVARCHAR(MAX) NULL,
-                 paused BIGINT NOT NULL DEFAULT 0, budget_tokens BIGINT NULL, created_utc NVARCHAR(40) NOT NULL,
-                 additional_instructions NVARCHAR(MAX) NULL, archived_at NVARCHAR(40) NULL, archived_by NVARCHAR(MAX) NULL,
-                 activity_from NVARCHAR(40) NULL, activity_from_by NVARCHAR(MAX) NULL);
-
-             IF OBJECT_ID(N'team_members', N'U') IS NULL
-             CREATE TABLE team_members (
-                 team NVARCHAR(200) COLLATE {ci} NOT NULL, name NVARCHAR(200) COLLATE {ci} NOT NULL,
-                 label NVARCHAR(MAX) NULL, agent NVARCHAR(MAX) NOT NULL, system_prompt NVARCHAR(MAX) NULL,
-                 prompt NVARCHAR(MAX) NULL, subscribes NVARCHAR(MAX) NOT NULL, permits NVARCHAR(MAX) NOT NULL,
-                 floor_seq BIGINT NOT NULL, hired_for NVARCHAR(MAX) NULL, created_utc NVARCHAR(40) NOT NULL,
-                 system_prompt_set_by NVARCHAR(MAX) NULL, system_prompt_set_by_kind NVARCHAR(MAX) NULL,
-                 system_prompt_set_at NVARCHAR(40) NULL,
-                 PRIMARY KEY (team, name));
-
-             IF OBJECT_ID(N'users', N'U') IS NULL
-             CREATE TABLE users (
-                 id NVARCHAR(450) NOT NULL PRIMARY KEY, email NVARCHAR(450) NOT NULL UNIQUE,
-                 password_hash NVARCHAR(MAX) NOT NULL, created_at NVARCHAR(40) NOT NULL,
-                 current_team NVARCHAR(200) NULL, appearance NVARCHAR(MAX) NULL);
-
-             IF OBJECT_ID(N'tenant_events', N'U') IS NULL
-             CREATE TABLE tenant_events (
-                 seq BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY, occurred_at NVARCHAR(40) NOT NULL,
-                 actor_id NVARCHAR(MAX) NULL, actor_email NVARCHAR(MAX) NULL, action NVARCHAR(450) NOT NULL,
-                 subject NVARCHAR(450) NULL, subject_name NVARCHAR(MAX) NULL, detail NVARCHAR(MAX) NULL);
-
-             IF OBJECT_ID(N'tenant_settings', N'U') IS NULL
-             CREATE TABLE tenant_settings (
-                 name NVARCHAR(450) NOT NULL PRIMARY KEY, value NVARCHAR(MAX) NOT NULL,
-                 updated_at NVARCHAR(40) NOT NULL, updated_by NVARCHAR(MAX) NOT NULL);
-
              IF OBJECT_ID(N'triggers', N'U') IS NULL
              CREATE TABLE triggers (
                  id NVARCHAR(450) NOT NULL PRIMARY KEY, team NVARCHAR(200) COLLATE {ci} NOT NULL,

@@ -78,6 +78,12 @@ public static class SqlServerStoreRegistry
         typeof(ILedgerStartRows),
         typeof(IOutcomeStartRows),
         typeof(ILogRetention),
+        typeof(IUserStore),
+        typeof(IPrincipalStore),
+        typeof(ITeamStore),
+        typeof(ITenantLog),
+        typeof(ITenantSettingsStore),
+        typeof(IUnfinishedRemovals),
     ];
 }
 

@@ -1,4 +1,5 @@
 using Harness.Contracts;
+using Harness.SqlServer.Identity;
 using Harness.SqlServer.Ledger;
 using Harness.SqlServer.Messaging;
 
@@ -15,5 +16,5 @@ namespace Harness.SqlServer;
 /// </summary>
 public static class SqlServerSchemaModules
 {
-    public static IReadOnlyList<MigrationStep> All { get; } = [.. SqlServerMessagingSchema.Steps, .. SqlServerOutcomeSchema.Steps];
+    public static IReadOnlyList<MigrationStep> All { get; } = [.. SqlServerMessagingSchema.Steps, .. SqlServerAuthSchema.Steps, .. SqlServerOutcomeSchema.Steps];
 }
