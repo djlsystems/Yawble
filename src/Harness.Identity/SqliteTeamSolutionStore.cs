@@ -1,5 +1,3 @@
-using System.Globalization;
-using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Harness.Contracts;
 
@@ -14,12 +12,7 @@ public sealed class SqliteTeamSolutionStore(
 {
     private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 
-    private const string Select =
-        """
-        SELECT team, package_id, name, version, folder, installed_at, installed_by, updated_at,
-               manifest, digests, members, triggers, plugins, uninstalled_at, answers, plugin_minimums
-          FROM team_solutions
-        """;
+    private const string Select = $"SELECT {TeamSolutionRows.Columns} FROM team_solutions";
 
     public async Task<TeamSolutionRow?> FindAsync(string team, CancellationToken ct = default)
     {
@@ -83,22 +76,7 @@ public sealed class SqliteTeamSolutionStore(
                     uninstalled_at = excluded.uninstalled_at, answers = excluded.answers,
                     plugin_minimums = excluded.plugin_minimums
                 """;
-            command.Parameters.AddWithValue("$team", row.Team);
-            command.Parameters.AddWithValue("$id", row.PackageId);
-            command.Parameters.AddWithValue("$name", row.Name);
-            command.Parameters.AddWithValue("$version", row.Version);
-            command.Parameters.AddWithValue("$folder", row.Folder);
-            command.Parameters.AddWithValue("$installedAt", Instant.Stamp(row.InstalledAt));
-            command.Parameters.AddWithValue("$installedBy", (object?)row.InstalledBy ?? DBNull.Value);
-            command.Parameters.AddWithValue("$updatedAt", row.UpdatedAt is { } updated ? Instant.Stamp(updated) : DBNull.Value);
-            command.Parameters.AddWithValue("$manifest", row.Manifest);
-            command.Parameters.AddWithValue("$digests", JsonSerializer.Serialize(row.Digests));
-            command.Parameters.AddWithValue("$members", JsonSerializer.Serialize(row.Members));
-            command.Parameters.AddWithValue("$triggers", JsonSerializer.Serialize(row.Triggers));
-            command.Parameters.AddWithValue("$plugins", JsonSerializer.Serialize(row.Plugins));
-            command.Parameters.AddWithValue("$uninstalledAt", row.UninstalledAt is { } uninstalled ? Instant.Stamp(uninstalled) : DBNull.Value);
-            command.Parameters.AddWithValue("$answers", (object?)row.Answers ?? DBNull.Value);
-            command.Parameters.AddWithValue("$pluginMinimums", JsonSerializer.Serialize(row.PluginMinimums));
+            foreach (var (name, value) in TeamSolutionRows.SaveValues(row)) command.Parameters.AddWithValue("$" + name, value);
             await command.ExecuteNonQueryAsync(ct);
         }
 
@@ -131,37 +109,9 @@ public sealed class SqliteTeamSolutionStore(
     {
         var rows = new List<TeamSolutionRow>();
         await using var reader = await command.ExecuteReaderAsync(ct);
-
-        while (await reader.ReadAsync(ct))
-        {
-            rows.Add(new TeamSolutionRow(
-                reader.GetString(0),
-                reader.GetString(1),
-                reader.GetString(2),
-                reader.GetString(3),
-                reader.GetString(4),
-                DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture),
-                reader.IsDBNull(6) ? null : reader.GetString(6),
-                reader.IsDBNull(7) ? null : DateTimeOffset.Parse(reader.GetString(7), CultureInfo.InvariantCulture),
-                reader.GetString(8),
-                Map(reader.GetString(9)),
-                Map(reader.GetString(10)),
-                Map(reader.GetString(11)),
-                Map(reader.GetString(12)))
-            {
-                UninstalledAt = reader.IsDBNull(13) ? null : DateTimeOffset.Parse(reader.GetString(13), CultureInfo.InvariantCulture),
-                Answers = reader.IsDBNull(14) ? null : reader.GetString(14),
-                PluginMinimums = Map(reader.GetString(15)),
-            });
-        }
-
+        while (await reader.ReadAsync(ct)) rows.Add(TeamSolutionRows.Read(reader));
         return rows;
     }
-
-    private static IReadOnlyDictionary<string, string> Map(string json) =>
-        JsonSerializer.Deserialize<Dictionary<string, string>>(json) is { } map
-            ? new Dictionary<string, string>(map, StringComparer.Ordinal)
-            : new Dictionary<string, string>(StringComparer.Ordinal);
 
     private SqliteConnection Open()
     {

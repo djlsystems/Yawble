@@ -84,6 +84,10 @@ public static class SqlServerStoreRegistry
         typeof(ITenantLog),
         typeof(ITenantSettingsStore),
         typeof(IUnfinishedRemovals),
+        typeof(ITriggerStore),
+        typeof(ISiteStore),
+        typeof(ITeamSolutionStore),
+        typeof(IDiagnosticsLog),
     ];
 }
 

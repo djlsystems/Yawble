@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text;
 using Microsoft.Data.Sqlite;
 using Harness.Contracts;
 
@@ -49,21 +48,11 @@ namespace Harness.Identity;
 /// </summary>
 public sealed class SqliteDiagnosticsLog : IDiagnosticsLog
 {
-    /// <summary>
-    /// How many writes pass between trims.
-    ///
-    /// A COUNTER RATHER THAN A CLOCK, because the cost being bounded is rows and a burst of ten
-    /// thousand 500s in a minute is exactly when the bound matters. Two hundred is far below any
-    /// retention bound - the floor is five thousand - so the table cannot overshoot meaningfully
-    /// between trims, and the DELETE it runs is two indexed predicates.
-    /// </summary>
-    private const int WritesBetweenTrims = 200;
-
     private readonly string _connectionString;
     private readonly SqliteDurability _durability;
     private readonly DiagnosticRetention _retention;
 
-    private int _writesSinceTrim;
+    private readonly DiagnosticTrimCount _trims = new();
 
     public SqliteDiagnosticsLog(
         string databasePath,
@@ -111,32 +100,18 @@ public sealed class SqliteDiagnosticsLog : IDiagnosticsLog
                             $message, $detail)
                     """;
 
-                // Round-trip ("O"), matching every other timestamp this codebase stores. A
-                // local-format string sorts wrong and parses differently on a machine with another
-                // culture - and this column is the age half of the retention bound, so sorting
-                // wrong would mean trimming the wrong rows.
-                command.Parameters.AddWithValue("$at", Instant.Now());
-                command.Parameters.AddWithValue("$severity", Name(severity));
-                command.Parameters.AddWithValue("$kind", kind);
-                command.Parameters.AddWithValue("$source", (object?)source ?? DBNull.Value);
-                command.Parameters.AddWithValue("$route", (object?)route ?? DBNull.Value);
-                command.Parameters.AddWithValue("$status", (object?)status ?? DBNull.Value);
-                command.Parameters.AddWithValue(
-                    "$exceptionType", (object?)exceptionType ?? DBNull.Value);
-
-                // REDACTED HERE. These two are the fields nobody controls - an exception composes
-                // its own message and routinely quotes the input that broke it.
-                command.Parameters.AddWithValue(
-                    "$message", (object?)DiagnosticRedaction.Redact(message) ?? DBNull.Value);
-                command.Parameters.AddWithValue(
-                    "$detail", (object?)DiagnosticRedaction.Redact(detail) ?? DBNull.Value);
+                // Round-trip time, the severity's stored name and the message and detail REDACTED:
+                // DiagnosticRows.WriteValues, one place for both providers.
+                foreach (var (name, value) in DiagnosticRows.WriteValues(
+                    severity, kind, source, route, status, exceptionType, message, detail))
+                {
+                    command.Parameters.AddWithValue("$" + name, value);
+                }
 
                 await command.ExecuteNonQueryAsync(ct);
             }
 
-            if (Interlocked.Increment(ref _writesSinceTrim) < WritesBetweenTrims) return;
-
-            Interlocked.Exchange(ref _writesSinceTrim, 0);
+            if (!_trims.Counted()) return;
 
             await TrimAsync(ct);
         }
@@ -162,10 +137,8 @@ public sealed class SqliteDiagnosticsLog : IDiagnosticsLog
 
         await using var connection = Open();
 
-        var where = new StringBuilder();
-        var parameters = new List<SqliteParameter>();
-
-        Narrow(filter, where, parameters);
+        var parameters = new List<(string Name, object Value)>();
+        var where = DiagnosticRows.Narrow(filter, "$", Pattern, Search, parameters);
 
         var clause = where.Length == 0 ? "" : $" WHERE {where}";
 
@@ -180,7 +153,7 @@ public sealed class SqliteDiagnosticsLog : IDiagnosticsLog
         await using (var counting = connection.CreateCommand())
         {
             counting.CommandText = $"SELECT COUNT(*) FROM diagnostic_events{clause}";
-            foreach (var parameter in parameters) counting.Parameters.Add(Copy(parameter));
+            foreach (var (name, value) in parameters) counting.Parameters.AddWithValue(name, value);
 
             total = (long)(await counting.ExecuteScalarAsync(ct) ?? 0L);
         }
@@ -192,27 +165,24 @@ public sealed class SqliteDiagnosticsLog : IDiagnosticsLog
         // thing that means "later" without argument. Under a storm of identical failures that is
         // the difference between a readable page and an arbitrary one.
         //
-        // THE CURSOR JOINS THE FILTER ON THE PAGE READ ONLY, never on the count above: the total
-        // is what matches, and a caption that shrank as somebody scrolled would be counting down
-        // rather than counting.
-        var cursor = before is null
-            ? clause
-            : clause.Length == 0 ? " WHERE seq < $before" : $"{clause} AND seq < $before";
+        // THE CURSOR JOINS THE FILTER ON THE PAGE READ ONLY, never on the count above
+        // (DiagnosticRows.Cursor).
+        var cursor = DiagnosticRows.Cursor(clause, before, "$");
 
         command.CommandText =
             "SELECT seq, occurred_at, severity, kind, source, route, status, exception_type, "
             + $"message, detail FROM diagnostic_events{cursor} "
             + "ORDER BY seq DESC LIMIT $take";
 
-        foreach (var parameter in parameters) command.Parameters.Add(Copy(parameter));
+        foreach (var (name, value) in parameters) command.Parameters.AddWithValue(name, value);
 
         if (before is { } seq) command.Parameters.AddWithValue("$before", seq);
-        command.Parameters.AddWithValue("$take", Math.Clamp(take, 1, IDiagnosticsLog.MaxTake));
+        command.Parameters.AddWithValue("$take", DiagnosticRows.Take(take));
 
         var events = new List<DiagnosticEvent>();
         await using var reader = await command.ExecuteReaderAsync(ct);
 
-        while (await reader.ReadAsync(ct)) events.Add(ReadEvent(reader));
+        while (await reader.ReadAsync(ct)) events.Add(DiagnosticRows.Read(reader));
 
         return new DiagnosticsPage(events, total);
     }
@@ -289,109 +259,24 @@ public sealed class SqliteDiagnosticsLog : IDiagnosticsLog
     }
 
     /// <summary>
-    /// Turns a filter into a WHERE clause and its parameters.
-    ///
-    /// Built by hand rather than with a query builder because there are five narrowings and each
-    /// one's spelling is a decision: the `IN` lists are expanded as parameters so a kind cannot be
-    /// injected, the time window is closed at both ends against the same round-trip string format
-    /// the writer uses, and the search is a case-insensitive LIKE over four columns.
+    /// The search text as SQLite's LIKE pattern. ESCAPE so a `%` or `_` typed into a search box is a
+    /// percent sign or an underscore - otherwise searching for a literal `%` or `_` matches everything,
+    /// silently.
     /// </summary>
-    private static void Narrow(
-        DiagnosticsFilter filter, StringBuilder where, List<SqliteParameter> parameters)
-    {
-        if (filter.Kinds is { Count: > 0 } kinds)
-        {
-            var names = new List<string>(kinds.Count);
+    private static string Pattern(string search) =>
+        "%"
+        + search
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal)
+        + "%";
 
-            foreach (var kind in kinds.Distinct(StringComparer.Ordinal))
-            {
-                var name = $"$kind{parameters.Count}";
-                names.Add(name);
-                parameters.Add(new SqliteParameter(name, kind));
-            }
-
-            Append(where, $"kind IN ({string.Join(", ", names)})");
-        }
-
-        if (filter.Severities is { Count: > 0 } severities)
-        {
-            var names = new List<string>(severities.Count);
-
-            foreach (var severity in severities.Distinct())
-            {
-                var name = $"$severity{parameters.Count}";
-                names.Add(name);
-                parameters.Add(new SqliteParameter(name, Name(severity)));
-            }
-
-            Append(where, $"severity IN ({string.Join(", ", names)})");
-        }
-
-        if (filter.From is { } from)
-        {
-            parameters.Add(new SqliteParameter("$from", Instant.Stamp(from)));
-            Append(where, "occurred_at >= $from");
-        }
-
-        if (filter.To is { } to)
-        {
-            parameters.Add(new SqliteParameter("$to", Instant.Stamp(to)));
-            Append(where, "occurred_at <= $to");
-        }
-
-        if (!string.IsNullOrWhiteSpace(filter.Search))
-        {
-            // The wildcards are added HERE rather than asked of the caller: a caller composing its
-            // own pattern is a caller that can write one, and `%` typed into a search box should be
-            // a percent sign. ESCAPE so it is - otherwise searching for a literal `%` or `_`
-            // matches everything, silently.
-            var pattern = "%"
-                + filter.Search.Trim()
-                    .Replace("\\", "\\\\", StringComparison.Ordinal)
-                    .Replace("%", "\\%", StringComparison.Ordinal)
-                    .Replace("_", "\\_", StringComparison.Ordinal)
-                + "%";
-
-            parameters.Add(new SqliteParameter("$search", pattern));
-
-            // NOCASE, because a person searching for `Timeout` means `timeout`. Not over `kind` or
-            // `severity`: both have typed filters of their own, and a free-text box that also
-            // matched them would make the two disagree about the same word.
-            Append(
-                where,
-                "(message LIKE $search ESCAPE '\\' COLLATE NOCASE "
-                + "OR detail LIKE $search ESCAPE '\\' COLLATE NOCASE "
-                + "OR route LIKE $search ESCAPE '\\' COLLATE NOCASE "
-                + "OR exception_type LIKE $search ESCAPE '\\' COLLATE NOCASE)");
-        }
-    }
-
-    private static void Append(StringBuilder where, string clause)
-    {
-        if (where.Length > 0) where.Append(" AND ");
-        where.Append(clause);
-    }
-
-    /// <summary>A parameter belongs to one command, so the count query and the page query cannot
-    /// share instances.</summary>
-    private static SqliteParameter Copy(SqliteParameter parameter) =>
-        new(parameter.ParameterName, parameter.Value);
-
-    /// <summary>The stored spelling of a severity. Lowercase names rather than the enum's numbers,
-    /// so the column stays readable when somebody renumbers - the rows outlive the enum.</summary>
-    private static string Name(DiagnosticSeverity severity) => severity switch
-    {
-        DiagnosticSeverity.Error => "error",
-        DiagnosticSeverity.Warning => "warning",
-        _ => "info",
-    };
-
-    private static DiagnosticSeverity Severity(string stored) => stored switch
-    {
-        "error" => DiagnosticSeverity.Error,
-        "warning" => DiagnosticSeverity.Warning,
-        _ => DiagnosticSeverity.Info,
-    };
+    /// <summary>NOCASE, because a person searching for `Timeout` means `timeout`.</summary>
+    private static string Search(string parameter) =>
+        $"(message LIKE {parameter} ESCAPE '\\' COLLATE NOCASE "
+        + $"OR detail LIKE {parameter} ESCAPE '\\' COLLATE NOCASE "
+        + $"OR route LIKE {parameter} ESCAPE '\\' COLLATE NOCASE "
+        + $"OR exception_type LIKE {parameter} ESCAPE '\\' COLLATE NOCASE)";
 
     private SqliteConnection Open()
     {
@@ -402,18 +287,4 @@ public sealed class SqliteDiagnosticsLog : IDiagnosticsLog
 
         return connection;
     }
-
-    private static DiagnosticEvent ReadEvent(SqliteDataReader reader) =>
-        new(
-            reader.GetInt64(0),
-            Instant.Parse(
-                reader.GetString(1)),
-            Severity(reader.GetString(2)),
-            reader.GetString(3),
-            reader.IsDBNull(4) ? null : reader.GetString(4),
-            reader.IsDBNull(5) ? null : reader.GetString(5),
-            reader.IsDBNull(6) ? null : reader.GetInt32(6),
-            reader.IsDBNull(7) ? null : reader.GetString(7),
-            reader.IsDBNull(8) ? null : reader.GetString(8),
-            reader.IsDBNull(9) ? null : reader.GetString(9));
 }

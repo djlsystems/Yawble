@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text;
 using Microsoft.Data.Sqlite;
 using Harness.Contracts;
 
@@ -54,8 +53,8 @@ public sealed class SqliteSiteStore : ISiteStore
         await using var command = connection.CreateCommand();
 
         command.CommandText =
-            """
-            SELECT version, published_at, published_by, source, files, bytes
+            $"""
+            SELECT {SiteRows.VersionColumns}
               FROM site_versions WHERE team = $team AND site = $site ORDER BY version DESC
             """;
         command.Parameters.AddWithValue("$team", team);
@@ -64,16 +63,7 @@ public sealed class SqliteSiteStore : ISiteStore
         var rows = new List<SiteVersionRow>();
         await using var reader = await command.ExecuteReaderAsync(ct);
 
-        while (await reader.ReadAsync(ct))
-        {
-            rows.Add(new SiteVersionRow(
-                reader.GetInt32(0),
-                DateTimeOffset.Parse(reader.GetString(1), CultureInfo.InvariantCulture),
-                reader.GetString(2),
-                reader.GetString(3),
-                reader.GetInt32(4),
-                reader.GetInt64(5)));
-        }
+        while (await reader.ReadAsync(ct)) rows.Add(SiteRows.ReadVersion(reader));
 
         return rows;
     }
@@ -286,12 +276,9 @@ public sealed class SqliteSiteStore : ISiteStore
         string team, string site, string collection, string id, string json, string by, DateTimeOffset at,
         CancellationToken ct = default)
     {
-        var bytes = Encoding.UTF8.GetByteCount(json);
+        var bytes = SiteRows.Bytes(json);
 
-        if (bytes > SiteRules.MaxDocumentBytes)
-        {
-            return SiteWriteOutcome.Refused(SiteRules.DocumentTooLarge(bytes), 413);
-        }
+        if (SiteRows.TooLarge(bytes) is { } tooLarge) return tooLarge;
 
         await using var connection = Open();
 
@@ -314,11 +301,10 @@ public sealed class SqliteSiteStore : ISiteStore
                 "SELECT COUNT(*) FROM site_documents WHERE team = $team AND site = $site AND collection = $collection");
             Bind(count, team, site, collection, null);
 
-            if (Convert.ToInt64(await count.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) >= SiteRules.MaxDocumentsPerCollection)
+            if (SiteRows.CollectionFull(
+                    collection, Convert.ToInt64(await count.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture)) is { } full)
             {
-                return SiteWriteOutcome.Refused(
-                    $"The collection \"{collection}\" already holds {SiteRules.MaxDocumentsPerCollection} documents, "
-                    + "the most one collection may hold. Delete some, or use another collection.", 413);
+                return full;
             }
         }
 
@@ -328,12 +314,7 @@ public sealed class SqliteSiteStore : ISiteStore
             Bind(total, team, site, null, null);
             var used = Convert.ToInt64(await total.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
 
-            if (used - (existing ?? 0) + bytes > SiteRules.MaxSiteDataBytes)
-            {
-                return SiteWriteOutcome.Refused(
-                    $"This write would take the site \"{site}\" past its limit of {SiteRules.MaxSiteDataBytes} bytes "
-                    + $"(50 MB) of data; it holds {used} bytes now. Delete documents it no longer needs.", 413);
-            }
+            if (SiteRows.SiteFull(site, used, existing, bytes) is { } full) return full;
         }
 
         await using (var write = Command(connection, transaction,
@@ -381,31 +362,18 @@ public sealed class SqliteSiteStore : ISiteStore
 
         await using var reader = await command.ExecuteReaderAsync(ct);
         await reader.ReadAsync(ct);
-        return new SiteDataUsage(reader.GetInt32(0), reader.GetInt64(1));
+        return SiteRows.ReadUsage(reader);
     }
 
-    private const string SelectSite =
-        "SELECT team, name, live_version, next_version, created_at, created_by FROM sites";
+    private const string SelectSite = $"SELECT {SiteRows.SiteColumns} FROM sites";
 
-    private const string SelectDocument =
-        "SELECT collection, id, doc, updated_at, updated_by FROM site_documents";
+    private const string SelectDocument = $"SELECT {SiteRows.DocumentColumns} FROM site_documents";
 
     private static async Task<IReadOnlyList<SiteRow>> ReadSitesAsync(SqliteCommand command, CancellationToken ct)
     {
         var rows = new List<SiteRow>();
         await using var reader = await command.ExecuteReaderAsync(ct);
-
-        while (await reader.ReadAsync(ct))
-        {
-            rows.Add(new SiteRow(
-                reader.GetString(0),
-                reader.GetString(1),
-                reader.IsDBNull(2) ? null : reader.GetInt32(2),
-                reader.GetInt32(3),
-                DateTimeOffset.Parse(reader.GetString(4), CultureInfo.InvariantCulture),
-                reader.GetString(5)));
-        }
-
+        while (await reader.ReadAsync(ct)) rows.Add(SiteRows.ReadSite(reader));
         return rows;
     }
 
@@ -413,17 +381,7 @@ public sealed class SqliteSiteStore : ISiteStore
     {
         var rows = new List<SiteDocument>();
         await using var reader = await command.ExecuteReaderAsync(ct);
-
-        while (await reader.ReadAsync(ct))
-        {
-            rows.Add(new SiteDocument(
-                reader.GetString(0),
-                reader.GetString(1),
-                reader.GetString(2),
-                DateTimeOffset.Parse(reader.GetString(3), CultureInfo.InvariantCulture),
-                reader.GetString(4)));
-        }
-
+        while (await reader.ReadAsync(ct)) rows.Add(SiteRows.ReadDocument(reader));
         return rows;
     }
 

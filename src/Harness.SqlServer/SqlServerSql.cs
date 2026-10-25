@@ -59,4 +59,19 @@ public static class SqlServerSql
             .Replace("%", "\\%", StringComparison.Ordinal)
             .Replace("_", "\\_", StringComparison.Ordinal)
             .Replace("[", "\\[", StringComparison.Ordinal);
+
+    /// <summary>
+    /// SQLITE'S <c>=</c> ON TEXT, WHICH A TRAILING SPACE DECIDES. SQL Server compares text padded with
+    /// spaces to the longer one's length, so <c>'t1' = 't1 '</c> holds here and not in SQLite; a lookup
+    /// by a value a person typed would then answer a row SQLite does not. Equal text of equal byte length
+    /// is the same text, so this adds the length to the comparison. It keeps the column's collation: a
+    /// case-insensitive column still folds case, and an index on <paramref name="column"/> still finds
+    /// the row.
+    /// </summary>
+    public static string Same(string column, string value) =>
+        $"({column} = {value} AND DATALENGTH({column}) = DATALENGTH({value}))";
+
+    /// <summary>SQLite's <c>a IS b</c> on text: <see cref="Same"/>, or both null.</summary>
+    public static string SameOrBothNull(string a, string b) =>
+        $"({a} = {b} AND DATALENGTH({a}) = DATALENGTH({b}) OR {a} IS NULL AND {b} IS NULL)";
 }

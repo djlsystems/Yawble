@@ -64,6 +64,16 @@ internal sealed partial class HostComposition
         builder.Services.AddSingleton<ITenantSettingsStore>(new SqlServerTenantSettingsStore(connection));
         builder.Services.AddSingleton<IUnfinishedRemovals>(new SqlServerUnfinishedRemovals(connection));
 
+        // A TEAM'S TRIGGERS, SITES AND SOLUTION ROW, AND THE DIAGNOSTICS LOG: each person's change with its
+        // tenant row, a site's data writes checked against its limits one at a time, and the diagnostics
+        // log bounded as on SQLite, by the data root's volume or the operator's settings.
+        builder.Services.AddSingleton<ITriggerStore>(new SqlServerTriggerStore(connection));
+        builder.Services.AddSingleton<ISiteStore>(new SqlServerSiteStore(connection));
+        builder.Services.AddSingleton<ITeamSolutionStore>(new SqlServerTeamSolutionStore(connection));
+
+        diagnosticsRetention = DiagnosticsRetention();
+        builder.Services.AddSingleton<IDiagnosticsLog>(new SqlServerDiagnosticsLog(connection, diagnosticsRetention));
+
         StoreGuard.Check(StoreContracts.Required, SqlServerStoreRegistry.Registered);
     }
 }

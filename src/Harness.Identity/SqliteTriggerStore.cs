@@ -121,14 +121,8 @@ public sealed class SqliteTriggerStore : ITriggerStore
         await using var command = connection.CreateCommand();
 
         command.CommandText =
-            """
-            SELECT id, team, container, name, instruction, kind, expression, timezone,
-                   interval_seconds, fire_at, idle_only, enabled, next_due_at, last_fired_at,
-                   last_outcome, last_seq, missed_count, created_at, created_by, event_type, filter,
-                   watch_root, watch_path, watch_glob, poll_seconds, quiet_seconds,
-                   min_interval_seconds, last_poll_at, last_poll_ms, last_poll_entries,
-                   last_poll_error, last_change_at, last_fingerprint, wake_manager, daily_token_cap,
-                   capped_skips_day, capped_skips, outcome_id, configured_by_email
+            $"""
+            SELECT {TriggerRows.Columns}
             FROM triggers
             WHERE team = $team COLLATE NOCASE
             ORDER BY created_at, id
@@ -144,14 +138,8 @@ public sealed class SqliteTriggerStore : ITriggerStore
         await using var command = connection.CreateCommand();
 
         command.CommandText =
-            """
-            SELECT id, team, container, name, instruction, kind, expression, timezone,
-                   interval_seconds, fire_at, idle_only, enabled, next_due_at, last_fired_at,
-                   last_outcome, last_seq, missed_count, created_at, created_by, event_type, filter,
-                   watch_root, watch_path, watch_glob, poll_seconds, quiet_seconds,
-                   min_interval_seconds, last_poll_at, last_poll_ms, last_poll_entries,
-                   last_poll_error, last_change_at, last_fingerprint, wake_manager, daily_token_cap,
-                   capped_skips_day, capped_skips, outcome_id, configured_by_email
+            $"""
+            SELECT {TriggerRows.Columns}
             FROM triggers
             WHERE id = $id
             """;
@@ -167,14 +155,8 @@ public sealed class SqliteTriggerStore : ITriggerStore
         await using var command = connection.CreateCommand();
 
         command.CommandText =
-            """
-            SELECT id, team, container, name, instruction, kind, expression, timezone,
-                   interval_seconds, fire_at, idle_only, enabled, next_due_at, last_fired_at,
-                   last_outcome, last_seq, missed_count, created_at, created_by, event_type, filter,
-                   watch_root, watch_path, watch_glob, poll_seconds, quiet_seconds,
-                   min_interval_seconds, last_poll_at, last_poll_ms, last_poll_entries,
-                   last_poll_error, last_change_at, last_fingerprint, wake_manager, daily_token_cap,
-                   capped_skips_day, capped_skips, outcome_id, configured_by_email
+            $"""
+            SELECT {TriggerRows.Columns}
             FROM triggers
             WHERE enabled = 1
               AND next_due_at IS NOT NULL
@@ -411,14 +393,8 @@ public sealed class SqliteTriggerStore : ITriggerStore
         await using var command = connection.CreateCommand();
 
         command.CommandText =
-            """
-            SELECT id, team, container, name, instruction, kind, expression, timezone,
-                   interval_seconds, fire_at, idle_only, enabled, next_due_at, last_fired_at,
-                   last_outcome, last_seq, missed_count, created_at, created_by, event_type, filter,
-                   watch_root, watch_path, watch_glob, poll_seconds, quiet_seconds,
-                   min_interval_seconds, last_poll_at, last_poll_ms, last_poll_entries,
-                   last_poll_error, last_change_at, last_fingerprint, wake_manager, daily_token_cap,
-                   capped_skips_day, capped_skips, outcome_id, configured_by_email
+            $"""
+            SELECT {TriggerRows.Columns}
             FROM triggers
             WHERE team = $team COLLATE NOCASE
               AND container = $container COLLATE NOCASE
@@ -452,12 +428,7 @@ public sealed class SqliteTriggerStore : ITriggerStore
 
         await using var reader = await command.ExecuteReaderAsync(ct);
 
-        return await reader.ReadAsync(ct)
-            ? new FolderWatchState(
-                ReadNullableString(reader, 0),
-                ReadNullableString(reader, 1),
-                ReadNullableDate(reader, 2))
-            : new FolderWatchState(null, null, null);
+        return await TriggerRows.ReadWatchStateAsync(reader, ct);
     }
 
     public async Task RecordPollAsync(string id, FolderPollRecord poll, CancellationToken ct = default)
@@ -482,17 +453,7 @@ public sealed class SqliteTriggerStore : ITriggerStore
             """;
 
         command.Parameters.AddWithValue("$id", id);
-        command.Parameters.AddWithValue("$polledAt", Instant.Stamp(poll.PolledAt));
-        command.Parameters.AddWithValue("$elapsedMs", poll.ElapsedMs);
-        command.Parameters.AddWithValue("$entries", (object?)poll.Entries ?? DBNull.Value);
-        command.Parameters.AddWithValue("$error", (object?)poll.Error ?? DBNull.Value);
-        command.Parameters.AddWithValue("$nextDueAt", ToDbValue(poll.NextDueAt));
-        command.Parameters.AddWithValue("$fingerprint", (object?)poll.Fingerprint ?? DBNull.Value);
-        command.Parameters.AddWithValue("$listing", (object?)poll.Listing ?? DBNull.Value);
-        command.Parameters.AddWithValue(
-            "$pendingFingerprint", (object?)poll.PendingFingerprint ?? DBNull.Value);
-        command.Parameters.AddWithValue("$pendingSince", ToDbValue(poll.PendingSince));
-        command.Parameters.AddWithValue("$changeAt", ToDbValue(poll.ChangeAt));
+        foreach (var (name, value) in TriggerRows.PollValues(poll)) command.Parameters.AddWithValue("$" + name, value);
 
         await command.ExecuteNonQueryAsync(ct);
     }
@@ -517,111 +478,16 @@ public sealed class SqliteTriggerStore : ITriggerStore
         var rows = new List<TriggerRow>();
         await using var reader = await command.ExecuteReaderAsync(ct);
 
-        while (await reader.ReadAsync(ct))
-        {
-            rows.Add(new TriggerRow(
-                reader.GetString(0),
-                reader.GetString(1),
-                reader.GetString(2),
-                reader.GetString(3),
-                reader.GetString(4),
-                reader.GetString(5),
-                ReadNullableString(reader, 6),
-                ReadNullableString(reader, 7),
-                ReadNullableInt(reader, 8),
-                ReadNullableDate(reader, 9),
-                reader.GetInt64(10) == 1,
-                reader.GetInt64(11) == 1,
-                ReadNullableDate(reader, 12),
-                ReadNullableDate(reader, 13),
-                ReadNullableString(reader, 14),
-                ReadNullableLong(reader, 15),
-                reader.GetInt32(16),
-                DateTimeOffset.Parse(reader.GetString(17), CultureInfo.InvariantCulture),
-                reader.GetString(18),
-                ReadNullableString(reader, 19),
-                ReadNullableString(reader, 20),
-                ReadNullableString(reader, 21),
-                ReadNullableString(reader, 22),
-                ReadNullableString(reader, 23),
-                ReadNullableInt(reader, 24),
-                ReadNullableInt(reader, 25),
-                ReadNullableInt(reader, 26),
-                ReadNullableDate(reader, 27),
-                ReadNullableInt(reader, 28),
-                ReadNullableInt(reader, 29),
-                ReadNullableString(reader, 30),
-                ReadNullableDate(reader, 31),
-                ReadNullableString(reader, 32),
-                reader.GetString(33),
-                ReadNullableLong(reader, 34),
-                ReadNullableDate(reader, 35),
-                reader.GetInt32(36))
-            {
-                OutcomeId = ReadNullableString(reader, 37),
-                ConfiguredByEmail = ReadNullableString(reader, 38),
-            });
-        }
+        while (await reader.ReadAsync(ct)) rows.Add(TriggerRows.Read(reader));
 
         return rows;
     }
 
     private static void BindSave(SqliteCommand command, TriggerRow row)
     {
-        command.Parameters.AddWithValue("$id", row.Id);
-        command.Parameters.AddWithValue("$team", row.Team);
-        command.Parameters.AddWithValue("$container", row.Container);
-        command.Parameters.AddWithValue("$name", row.Name);
-        command.Parameters.AddWithValue("$instruction", row.Instruction);
-        command.Parameters.AddWithValue("$kind", row.Kind);
-        command.Parameters.AddWithValue("$expression", (object?)row.Expression ?? DBNull.Value);
-        command.Parameters.AddWithValue("$timezone", (object?)row.Timezone ?? DBNull.Value);
-        command.Parameters.AddWithValue(
-            "$intervalSeconds",
-            row.IntervalSeconds is null ? DBNull.Value : row.IntervalSeconds.Value);
-        command.Parameters.AddWithValue("$fireAt", ToDbValue(row.FireAt));
-        command.Parameters.AddWithValue("$idleOnly", row.IdleOnly ? 1 : 0);
-        command.Parameters.AddWithValue("$enabled", row.Enabled ? 1 : 0);
-        command.Parameters.AddWithValue("$nextDueAt", ToDbValue(row.NextDueAt));
-        command.Parameters.AddWithValue("$lastFiredAt", ToDbValue(row.LastFiredAt));
-        command.Parameters.AddWithValue("$lastOutcome", (object?)row.LastOutcome ?? DBNull.Value);
-        command.Parameters.AddWithValue(
-            "$lastSeq", row.LastSeq is null ? DBNull.Value : row.LastSeq.Value);
-        command.Parameters.AddWithValue("$missedCount", row.MissedCount);
-        command.Parameters.AddWithValue("$createdAt", Instant.Stamp(row.CreatedAt));
-        command.Parameters.AddWithValue("$createdBy", row.CreatedBy);
-        command.Parameters.AddWithValue("$eventType", (object?)row.EventType ?? DBNull.Value);
-        command.Parameters.AddWithValue("$filter", (object?)row.Filter ?? DBNull.Value);
-        command.Parameters.AddWithValue("$watchRoot", (object?)row.WatchRoot ?? DBNull.Value);
-        command.Parameters.AddWithValue("$watchPath", (object?)row.WatchPath ?? DBNull.Value);
-        command.Parameters.AddWithValue("$watchGlob", (object?)row.WatchGlob ?? DBNull.Value);
-        command.Parameters.AddWithValue("$pollSeconds", (object?)row.PollSeconds ?? DBNull.Value);
-        command.Parameters.AddWithValue("$quietSeconds", (object?)row.QuietSeconds ?? DBNull.Value);
-        command.Parameters.AddWithValue(
-            "$minIntervalSeconds", (object?)row.MinIntervalSeconds ?? DBNull.Value);
-        command.Parameters.AddWithValue("$wakeManager", row.WakeManager);
-        command.Parameters.AddWithValue(
-            "$dailyTokenCap", row.DailyTokenCap is null ? DBNull.Value : row.DailyTokenCap.Value);
-        command.Parameters.AddWithValue("$outcomeId", (object?)row.OutcomeId ?? DBNull.Value);
-        command.Parameters.AddWithValue("$configuredByEmail", (object?)row.ConfiguredByEmail ?? DBNull.Value);
+        foreach (var (name, value) in TriggerRows.SaveValues(row)) command.Parameters.AddWithValue("$" + name, value);
     }
 
-    /// <summary>UTC, always: `next_due_at` is compared as TEXT, and a round-trip string with a local
-    /// offset (what a cron time in a trigger's timezone comes back as) sorts wrong.</summary>
-    private static object ToDbValue(DateTimeOffset? value) =>
-        value is null ? DBNull.Value : Instant.Stamp(value.Value);
-
-    private static string? ReadNullableString(SqliteDataReader reader, int index) =>
-        reader.IsDBNull(index) ? null : reader.GetString(index);
-
-    private static int? ReadNullableInt(SqliteDataReader reader, int index) =>
-        reader.IsDBNull(index) ? null : reader.GetInt32(index);
-
-    private static long? ReadNullableLong(SqliteDataReader reader, int index) =>
-        reader.IsDBNull(index) ? null : reader.GetInt64(index);
-
-    private static DateTimeOffset? ReadNullableDate(SqliteDataReader reader, int index) =>
-        reader.IsDBNull(index)
-            ? null
-            : DateTimeOffset.Parse(reader.GetString(index), CultureInfo.InvariantCulture);
+    /// <summary>UTC, always: see <see cref="TriggerRows.Stamp"/>.</summary>
+    private static object ToDbValue(DateTimeOffset? value) => TriggerRows.Stamp(value);
 }

@@ -33,6 +33,21 @@ public abstract class IdentityDatabase : IAsyncDisposable
 
     public abstract IUnfinishedRemovals Removals();
 
+    public abstract ITriggerStore Triggers();
+
+    public abstract ISiteStore Sites();
+
+    public abstract ITeamSolutionStore Solutions();
+
+    /// <summary>The diagnostics log under <paramref name="retention"/>, or a bound no test reaches.</summary>
+    public abstract IDiagnosticsLog Diagnostics(DiagnosticRetention? retention = null);
+
+    /// <summary>A bound no test's rows reach unless it asks for one.</summary>
+    protected static readonly DiagnosticRetention Unbounded = new(TimeSpan.FromDays(3650), 1_000_000);
+
+    /// <summary>An open connection of the provider's own kind, for a store call inside a caller's transaction.</summary>
+    public abstract Task<DbConnection> OpenConnectionAsync();
+
     /// <summary>A statement's affected rows.</summary>
     public abstract Task<int> ExecuteAsync(string sql);
 
@@ -103,6 +118,23 @@ public sealed class SqliteIdentityDatabase : IdentityDatabase
 
     public override IUnfinishedRemovals Removals() => new SqliteUnfinishedRemovals(_database.Path);
 
+    public override ITriggerStore Triggers() => new SqliteTriggerStore(_database.Path);
+
+    public override ISiteStore Sites() => new SqliteSiteStore(_database.Path);
+
+    public override ITeamSolutionStore Solutions() => new SqliteTeamSolutionStore(_database.Path);
+
+    public override IDiagnosticsLog Diagnostics(DiagnosticRetention? retention = null) =>
+        new SqliteDiagnosticsLog(_database.Path, retention ?? Unbounded);
+
+    public override async Task<DbConnection> OpenConnectionAsync()
+    {
+        var connection = new SqliteConnection($"Data Source={_database.Path};Pooling=False");
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        SqlitePragmas.Apply(connection);
+        return connection;
+    }
+
     private async Task<SqliteConnection> OpenAsync()
     {
         var connection = new SqliteConnection($"Data Source={_database.Path};Pooling=False");
@@ -147,6 +179,17 @@ public sealed class SqlServerIdentityDatabase : IdentityDatabase
     public override ITenantSettingsStore TenantSettings() => new SqlServerTenantSettingsStore(ConnectionString);
 
     public override IUnfinishedRemovals Removals() => new SqlServerUnfinishedRemovals(ConnectionString);
+
+    public override ITriggerStore Triggers() => new SqlServerTriggerStore(ConnectionString);
+
+    public override ISiteStore Sites() => new SqlServerSiteStore(ConnectionString);
+
+    public override ITeamSolutionStore Solutions() => new SqlServerTeamSolutionStore(ConnectionString);
+
+    public override IDiagnosticsLog Diagnostics(DiagnosticRetention? retention = null) =>
+        new SqlServerDiagnosticsLog(ConnectionString, retention ?? Unbounded);
+
+    public override async Task<DbConnection> OpenConnectionAsync() => await OpenAsync();
 
     private async Task<SqlConnection> OpenAsync()
     {

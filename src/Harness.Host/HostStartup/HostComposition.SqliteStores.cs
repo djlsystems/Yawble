@@ -206,10 +206,7 @@ internal sealed partial class HostComposition
         //
         // Constructed rather than resolved by type, like every other store above it: its parameters are a
         // path and a bound, neither of which is a service.
-        diagnosticsRetention = DiagnosticRetention.ForDataRoot(
-            dataRoot,
-            builder.Configuration.GetValue<int?>("Diagnostics:RetentionDays"),
-            builder.Configuration.GetValue<long?>("Diagnostics:MaxRows"));
+        diagnosticsRetention = DiagnosticsRetention();
 
         diagnostics = new SqliteDiagnosticsLog(database, diagnosticsRetention);
 
@@ -222,4 +219,12 @@ internal sealed partial class HostComposition
 
         return true;
     }
+
+    /// <summary>The diagnostics log's bound, declared or derived from the data root's volume, for either
+    /// database: see the remarks where the SQLite log is built.</summary>
+    private DiagnosticRetention DiagnosticsRetention() =>
+        DiagnosticRetention.ForDataRoot(
+            dataRoot,
+            builder.Configuration.GetValue<int?>("Diagnostics:RetentionDays"),
+            builder.Configuration.GetValue<long?>("Diagnostics:MaxRows"));
 }

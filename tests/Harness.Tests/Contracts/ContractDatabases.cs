@@ -63,14 +63,14 @@ internal sealed class SqlServerContractDatabase : IAsyncDisposable
 
     /// <summary>
     /// THE OTHER MODULES' TABLES THE LEDGER AND OUTCOME WRITERS READ, created when no SQL Server
-    /// schema module has created them yet: <c>triggers</c>, and <c>backlog_items</c> and
-    /// <c>backlog_dispatches</c> (backlog). Every append now writes its ledger and outcome rows
-    /// (<c>SqlServerAppendRows</c>), and those read a trigger's outcome and an item's; until those
-    /// modules' baselines exist, a test here would fail on the first append. Their columns and
-    /// nullability as SQLite's, so a test's raw insert reads the same on both. Each is a no-op once the
-    /// real table exists, and this goes when the last of those baselines lands. The identity tables
-    /// (<c>teams</c>, <c>team_members</c>, <c>users</c>, <c>tenant_events</c>, <c>tenant_settings</c>)
-    /// are <c>auth.sqlserver-baseline-1</c>'s, and <c>IdentitySchemaParityTests</c> pins them.
+    /// schema module has created them yet: <c>backlog_items</c> and <c>backlog_dispatches</c>
+    /// (backlog). Every append now writes its ledger and outcome rows (<c>SqlServerAppendRows</c>), and
+    /// those read an item's outcome; until the backlog's baseline exists, a test here would fail on the
+    /// first append. Their columns and nullability as SQLite's, so a test's raw insert reads the same
+    /// on both. Each is a no-op once the real table exists, and this goes when that baseline lands. The
+    /// identity tables (<c>teams</c>, <c>team_members</c>, <c>users</c>, <c>tenant_events</c>,
+    /// <c>tenant_settings</c>, and <c>triggers</c>, which a trigger's fire reads its outcome from) are
+    /// <c>auth.sqlserver-baseline-1</c>'s and <c>-2</c>'s, and <c>IdentitySchemaParityTests</c> pins them.
     /// </summary>
     private async Task EnsureOtherModulesTablesAsync(CancellationToken ct)
     {
@@ -81,26 +81,6 @@ internal sealed class SqlServerContractDatabase : IAsyncDisposable
         await using var command = connection.CreateCommand();
         command.CommandText =
             $"""
-             IF OBJECT_ID(N'triggers', N'U') IS NULL
-             CREATE TABLE triggers (
-                 id NVARCHAR(450) NOT NULL PRIMARY KEY, team NVARCHAR(200) COLLATE {ci} NOT NULL,
-                 container NVARCHAR(200) COLLATE {ci} NOT NULL, name NVARCHAR(MAX) NOT NULL,
-                 instruction NVARCHAR(MAX) NOT NULL, kind NVARCHAR(MAX) NOT NULL, expression NVARCHAR(MAX) NULL,
-                 timezone NVARCHAR(MAX) NULL, interval_seconds BIGINT NULL, fire_at NVARCHAR(40) NULL,
-                 event_type NVARCHAR(MAX) NULL, filter NVARCHAR(MAX) NULL, idle_only BIGINT NOT NULL,
-                 enabled BIGINT NOT NULL, next_due_at NVARCHAR(40) NULL, last_fired_at NVARCHAR(40) NULL,
-                 last_outcome NVARCHAR(MAX) NULL, last_seq BIGINT NULL, missed_count BIGINT NOT NULL,
-                 created_at NVARCHAR(40) NOT NULL, created_by NVARCHAR(450) NOT NULL,
-                 watch_root NVARCHAR(MAX) NULL, watch_path NVARCHAR(MAX) NULL, watch_glob NVARCHAR(MAX) NULL,
-                 poll_seconds BIGINT NULL, quiet_seconds BIGINT NULL, min_interval_seconds BIGINT NULL,
-                 last_fingerprint NVARCHAR(MAX) NULL, last_listing NVARCHAR(MAX) NULL,
-                 pending_fingerprint NVARCHAR(MAX) NULL, pending_since NVARCHAR(40) NULL,
-                 last_poll_at NVARCHAR(40) NULL, last_poll_ms BIGINT NULL, last_poll_entries BIGINT NULL,
-                 last_poll_error NVARCHAR(MAX) NULL, last_change_at NVARCHAR(40) NULL,
-                 wake_manager NVARCHAR(MAX) NOT NULL DEFAULT N'always', daily_token_cap BIGINT NULL,
-                 capped_skips_day NVARCHAR(MAX) NULL, capped_skips BIGINT NOT NULL DEFAULT 0,
-                 outcome_id NVARCHAR(450) NULL, configured_by_email NVARCHAR(MAX) NULL);
-
              IF OBJECT_ID(N'backlog_items', N'U') IS NULL
              CREATE TABLE backlog_items (
                  id NVARCHAR(450) NOT NULL PRIMARY KEY, team NVARCHAR(200) COLLATE {ci} NULL,
