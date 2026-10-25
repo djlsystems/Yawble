@@ -84,7 +84,7 @@ public sealed class AgentStepStore(string databasePath) : IAgentStepStore
 
             foreach (var step in added)
             {
-                at.Value = MessageSchema.FileChangeInstant(step.At);
+                at.Value = MonitorRows.Instant(step.At);
                 kind.Value = step.Kind;
                 label.Value = step.Label;
                 mcp.Value = (object?)step.McpTool ?? DBNull.Value;
@@ -134,7 +134,7 @@ public sealed class AgentStepStore(string databasePath) : IAgentStepStore
             if (i > 0) scope.Append(" OR ");
             scope.Append(CultureInfo.InvariantCulture, $"(s.team = $t{i} AND s.at >= $s{i})");
             command.Parameters.AddWithValue($"$t{i}", team);
-            command.Parameters.AddWithValue($"$s{i}", MessageSchema.FileChangeInstant(created));
+            command.Parameters.AddWithValue($"$s{i}", MonitorRows.Instant(created));
             i++;
         }
 
@@ -152,28 +152,15 @@ public sealed class AgentStepStore(string databasePath) : IAgentStepStore
              LIMIT $take
              """;
         command.Parameters.AddWithValue("$after", after);
-        command.Parameters.AddWithValue("$from", MessageSchema.FileChangeInstant(from));
-        command.Parameters.AddWithValue("$to", MessageSchema.FileChangeInstant(to));
+        command.Parameters.AddWithValue("$from", MonitorRows.Instant(from));
+        command.Parameters.AddWithValue("$to", MonitorRows.Instant(to));
         command.Parameters.AddWithValue("$take", take);
         command.Parameters.AddWithValue("$completed", MessageTypes.Completed);
         command.Parameters.AddWithValue("$failed", MessageTypes.Failed);
 
         var rows = new List<AgentStep>();
         await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            rows.Add(new AgentStep(
-                reader.GetInt64(0),
-                reader.GetString(1),
-                reader.GetString(2),
-                reader.GetInt64(3),
-                reader.IsDBNull(4) ? null : reader.GetInt64(4),
-                DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal),
-                reader.GetString(6),
-                reader.GetString(7),
-                reader.IsDBNull(8) ? null : reader.GetString(8),
-                reader.GetInt32(9)));
-        }
+        while (await reader.ReadAsync(ct)) rows.Add(MonitorRows.ReadStep(reader));
 
         return rows;
     }

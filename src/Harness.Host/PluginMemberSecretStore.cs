@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Globalization;
 using System.Text.Json;
 using Harness.Contracts;
@@ -206,7 +207,9 @@ public sealed class MemberSecretsCopyAtStart(
         {
             await store.CopyStoredKeysOnceAsync(keys, cancellationToken);
         }
-        catch (SqliteException exception)
+        // ANY PROVIDER'S DATABASE FAULT, not only SQLite's: `SqliteException` and SQL Server's `SqlException`
+        // are both a `DbException`, and either leaves the copy to the next start as before.
+        catch (DbException exception)
         {
             logger.LogWarning(exception, "The stored plugin keys were not copied onto their members; the next start tries again.");
         }
@@ -298,6 +301,29 @@ public sealed class MemberSecretReads(PluginMemberSecretStore members, PluginSec
 
         return when.HoldsIn(current);
     }
+}
+
+/// <summary>
+/// WHAT THE ONE-TIME COPY COUNTS, for every provider's <see cref="IPluginMemberSecretRows.CopyStoredKeysOnceAsync"/>:
+/// the members (a team and member in any case is one), the fields and the distinct keys a copy wrote,
+/// answered as the step's tenant row.
+/// </summary>
+public sealed class MemberSecretCopyTally
+{
+    private readonly HashSet<string> _members = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _keys = new(StringComparer.Ordinal);
+    private int _fields;
+
+    /// <summary>One field written for (<paramref name="team"/>, <paramref name="name"/>) from <paramref name="key"/>.</summary>
+    public void Copied(string team, string name, string key)
+    {
+        _fields++;
+        _members.Add($"{team}/{name}");
+        _keys.Add(key);
+    }
+
+    /// <summary>The step's tenant row, given the members, fields and keys counted.</summary>
+    public TriggerAudit Done(Func<int, int, int, TriggerAudit> done) => done(_members.Count, _fields, _keys.Count);
 }
 
 /// <summary>
@@ -394,16 +420,14 @@ public sealed class SqlitePluginMemberSecretRows(string databasePath) : IPluginM
             await using var reader = await select.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct))
             {
-                foreach (var (field, key) in JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(2)) ?? [])
+                foreach (var (field, key) in PluginMemberSettingsRows.SecretBindings(reader.GetString(2)))
                 {
                     bindings.Add((reader.GetString(0), reader.GetString(1), field, key));
                 }
             }
         }
 
-        var members = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var keysCopied = new HashSet<string>(StringComparer.Ordinal);
-        var fields = 0;
+        var tally = new MemberSecretCopyTally();
         var at = Instant.Stamp(DateTimeOffset.UtcNow);
 
         foreach (var (team, name, field, key) in bindings)
@@ -425,15 +449,10 @@ public sealed class SqlitePluginMemberSecretRows(string databasePath) : IPluginM
             insert.Parameters.AddWithValue("$by", value.SetBy);
             insert.Parameters.AddWithValue("$at", at);
 
-            if (await insert.ExecuteNonQueryAsync(ct) > 0)
-            {
-                fields++;
-                members.Add($"{team}/{name}");
-                keysCopied.Add(key);
-            }
+            if (await insert.ExecuteNonQueryAsync(ct) > 0) tally.Copied(team, name, key);
         }
 
-        await TenantAuditRow.AppendAsync(connection, transaction, done(members.Count, fields, keysCopied.Count), ct);
+        await TenantAuditRow.AppendAsync(connection, transaction, tally.Done(done), ct);
 
         await transaction.CommitAsync(ct);
         return true;

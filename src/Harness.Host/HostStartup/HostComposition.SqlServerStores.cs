@@ -1,8 +1,11 @@
 using Harness.Contracts;
+using Microsoft.AspNetCore.DataProtection;
 using Harness.Messaging;
 using Harness.Identity;
 using Harness.SqlServer;
+using Harness.Host.SqlServer;
 using Harness.SqlServer.Backlog;
+using Harness.SqlServer.Host;
 using Harness.SqlServer.Identity;
 using Harness.SqlServer.Ledger;
 using Harness.SqlServer.Messaging;
@@ -81,6 +84,25 @@ internal sealed partial class HostComposition
         // log's one insert, as on SQLite.
         builder.Services.AddSingleton<ISkillStore>(new SqlServerSkillStore(connection));
         builder.Services.AddSingleton<IBacklogStore>(new SqlServerBacklogStore(connection, audit: SqlServerTenantAuditRow.AppendAsync));
+
+        // THE HOST'S OWN ROWS: the Monitor's steps and file changes, a plugin member's settings and secret
+        // values, the plugin keys a person set, a plugin removal's tenant row, and the OAuth and mailbox
+        // connections. Every credential is the ciphertext the shared classes seal (`PluginSecretStore`,
+        // `PluginMemberSecretStore`, `ConnectionCipher`), stored as the same text SQLite holds, and every
+        // person's write lands with its tenant row in one transaction.
+        builder.Services.AddSingleton<IAgentStepStore>(new SqlServerAgentStepStore(connection));
+        builder.Services.AddSingleton<IWorkspaceFileChangeStore>(new SqlServerWorkspaceFileChangeStore(connection));
+        builder.Services.AddSingleton<IPluginMemberSettingsStore>(new SqlServerPluginMemberSettings(connection));
+        builder.Services.AddSingleton<IPluginMemberSecretRows>(new SqlServerPluginMemberSecretRows(connection));
+        builder.Services.AddSingleton<IPluginSecretRows>(new SqlServerPluginSecretRows(connection));
+        builder.Services.AddSingleton<IPluginRemovalRows>(new SqlServerPluginRemovalRows(connection));
+        builder.Services.AddSingleton<IConnectionStore>(sp => new SqlServerConnectionStore(connection, sp.GetRequiredService<IDataProtectionProvider>()));
+
+        // THE DATABASE ITSELF: whether it answers (`SELECT 1`), and the housekeeping SQLite's file needs,
+        // which here is nothing - the checkpoint is a no-op and the daily copy says that point-in-time
+        // restore is the backup instead.
+        builder.Services.AddSingleton<IDatabaseHealth>(new SqlServerDatabaseHealth(connection));
+        builder.Services.AddSingleton<IDatabaseMaintenance>(new SqlServerDatabaseMaintenance());
 
         StoreGuard.Check(StoreContracts.Required, SqlServerStoreRegistry.Registered);
     }

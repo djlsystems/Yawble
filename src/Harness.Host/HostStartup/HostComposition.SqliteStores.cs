@@ -123,6 +123,10 @@ internal sealed partial class HostComposition
         builder.Services.AddSingleton<IPluginMemberSecretRows>(new SqlitePluginMemberSecretRows(database));
         builder.Services.AddSingleton<IPluginRemovalRows>(new SqlitePluginRemovalRows(database));
 
+        // A plugin member's settings rows (`team_member_config`): the provider's own, so the plugin
+        // composition below takes whichever database the Host runs on.
+        builder.Services.AddSingleton<IPluginMemberSettingsStore>(new SqlitePluginMemberSettings(database));
+
         // OAuth and mailbox connections. Registered as the class too, for the same reason as above.
         builder.Services.AddSingleton(sp => new ConnectionStore(database, sp.GetRequiredService<IDataProtectionProvider>()));
         builder.Services.AddSingleton<IConnectionStore>(sp => sp.GetRequiredService<ConnectionStore>());

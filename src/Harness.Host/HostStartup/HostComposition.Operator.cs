@@ -226,21 +226,8 @@ internal sealed partial class HostComposition
         return true;
     }
 
-    // THE ONE PLACE THE PROVIDER CHOOSES THE START STEPS' ROWS: each provider's own, so `instance.id` and
-    // both back-fills run wherever the Host runs. SQL Server's are handed the configured connection string
-    // the chooser read (`DatabaseOptions`), not the SQLite file's path; a provider with neither answers
-    // none and both steps are skipped.
-    //
-    // NOT WHILE THE STORE GUARD WOULD REFUSE THE START. The guard runs later, with the stores; a sqlserver
-    // build missing any store must leave the database exactly as it found it, not write `instance.id` and
-    // back-fill rows into one it then refuses to serve. So the arm asks the guard's own question first.
+    // THE START STEPS' ROWS, the provider's own, and none while the store guard would refuse the start:
+    // see StartRows, which asks the guard's question of the registry the stores are registered from.
     private static (ILedgerStartRows? Ledger, IOutcomeStartRows? Outcome) StartRowsFor(DatabaseOptions options, string database) =>
-        options.Provider switch
-        {
-            DatabaseProvider.Sqlite => (new SqliteLedgerStartRows(database), new SqliteOutcomeStartRows(database)),
-            DatabaseProvider.SqlServer when options.Connection is { } connection
-                && StoreGuard.Missing(StoreContracts.Required, SqlServerStoreRegistry.Registered).Count == 0 =>
-                (new Harness.Host.SqlServer.SqlServerLedgerStartRows(connection), new Harness.Host.SqlServer.SqlServerOutcomeStartRows(connection)),
-            _ => (null, null),
-        };
+        StartRows.For(options, database, SqlServerStoreRegistry.Registered);
 }

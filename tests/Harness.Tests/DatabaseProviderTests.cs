@@ -87,10 +87,21 @@ public sealed class DatabaseProviderTests
         Assert.Contains(typeof(IPluginMemberSettingsStore), StoreContracts.Required);
     }
 
+    /// <summary>EVERY STORE THE HOST RESOLVES HAS A SQL SERVER VERSION: the guard's list is complete.</summary>
+    [Fact]
+    public void Every_required_store_has_a_sql_server_version()
+    {
+        Assert.Empty(StoreGuard.Missing(StoreContracts.Required, SqlServerStoreRegistry.Registered));
+        Assert.Equal(SqlServerStoreRegistry.Registered.Count, SqlServerStoreRegistry.Registered.Distinct().Count());
+        Assert.Empty(SqlServerStoreRegistry.Registered.Except(StoreContracts.Required));
+    }
+
     /// <summary>
-    /// The Host itself, started with <c>sqlserver</c>: it says which stores are missing and stops, and
-    /// the stores named are exactly the required ones SQL Server has not registered yet, computed here
-    /// so the test stays true as each store lands.
+    /// The Host itself, started with <c>sqlserver</c>: while any required store has no SQL Server version
+    /// it says which and stops, the stores named being exactly the required ones SQL Server has not
+    /// registered, computed here. Once every one has (the stores are complete), the guard passes and the
+    /// start is never refused for a missing store; whatever else a <c>sqlserver</c> start still lacks is
+    /// not this guard's to say.
     /// </summary>
     [Fact]
     public async Task A_missing_store_is_named_at_start()
@@ -103,11 +114,12 @@ public sealed class DatabaseProviderTests
             .Except(SqlServerStoreRegistry.Registered)
             .Select(type => type.Name)
             .ToArray();
-        Assert.NotEmpty(missing);
+        Assert.Equal(missing, StoreGuard.Missing(StoreContracts.Required, SqlServerStoreRegistry.Registered));
 
         var previous = Console.Error;
         var captured = new StringWriter();
         Console.SetError(captured);
+        Exception? failure;
 
         try
         {
@@ -118,22 +130,34 @@ public sealed class DatabaseProviderTests
                 .UseSetting("HARNESS_DATABASE", "sqlserver")
                 .UseSetting("HARNESS_DATABASE_CONNECTION", database.ConnectionString));
 
-            Assert.ThrowsAny<InvalidOperationException>(() => _ = factory.Services);
+            failure = Record.Exception(() => _ = factory.Services);
         }
         finally
         {
             Console.SetError(previous);
 
-            // The refusal sets a non-zero exit code, as it does for a real start; this process is a test run.
+            // A refusal sets a non-zero exit code, as it does for a real start; this process is a test run.
             Environment.ExitCode = 0;
             try { Directory.Delete(dataRoot, recursive: true); }
             catch (IOException) { }
         }
 
         var said = captured.ToString();
-        Assert.Contains(
-            "This build cannot run on SQL Server yet: these stores have no SQL Server version: "
-            + string.Join(", ", missing) + ".",
-            said);
+
+        if (missing.Length > 0)
+        {
+            Assert.IsAssignableFrom<InvalidOperationException>(failure);
+            Assert.Contains(
+                "This build cannot run on SQL Server yet: these stores have no SQL Server version: "
+                + string.Join(", ", missing) + ".",
+                said);
+            return;
+        }
+
+        // COMPLETE: the guard passes, and the start is not refused for a store. It may still stop later in
+        // the composition, which is not yet provider-aware throughout; that is no missing store.
+        StoreGuard.Check(StoreContracts.Required, SqlServerStoreRegistry.Registered);
+        Assert.DoesNotContain("these stores have no SQL Server version", said, StringComparison.Ordinal);
+        Assert.False(failure is StoresMissingException || failure?.InnerException is StoresMissingException, failure?.ToString());
     }
 }

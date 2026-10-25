@@ -90,6 +90,15 @@ public static class SqlServerStoreRegistry
         typeof(IDiagnosticsLog),
         typeof(ISkillStore),
         typeof(IBacklogStore),
+        typeof(IAgentStepStore),
+        typeof(IWorkspaceFileChangeStore),
+        typeof(IPluginMemberSettingsStore),
+        typeof(IPluginMemberSecretRows),
+        typeof(IPluginSecretRows),
+        typeof(IPluginRemovalRows),
+        typeof(IConnectionStore),
+        typeof(IDatabaseHealth),
+        typeof(IDatabaseMaintenance),
     ];
 }
 

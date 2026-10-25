@@ -1,60 +1,61 @@
 using Harness.Host;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.SqlClient;
+using Harness.Host.SqlServer;
 
 namespace Harness.Tests;
 
 /// <summary>
 /// A SQLSERVER START THE STORE GUARD REFUSES LEAVES THE DATABASE AS IT FOUND IT: the start steps
-/// (<c>instance.id</c>, the ledger's and the backlog's back-fills) run only once every store has a SQL
-/// Server version, so a build that cannot serve the database writes nothing into it first.
+/// (<c>instance.id</c>, the ledger's and the backlog's back-fills) are chosen by <see cref="StartRows"/>,
+/// which answers none for SQL Server while any required store lacks a SQL Server version, so a build that
+/// cannot serve the database runs no step that writes into it.
+///
+/// <para>
+/// Every store has a SQL Server version now, so the Host itself is never refused for one; the choice is
+/// asked of a registry with a store taken out, the state of a build the guard refuses.
+/// </para>
 /// </summary>
 public sealed class SqlServerStartGuardTests
 {
-    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+    private const string Connection = "Server=unused;Database=unused";
+
+    private static readonly DatabaseOptions SqlServer = new(DatabaseProvider.SqlServer, Connection);
 
     [Fact]
-    public async Task A_refused_sqlserver_start_writes_no_start_rows()
+    public void A_refused_sqlserver_start_writes_no_start_rows()
     {
-        Assert.NotEmpty(StoreGuard.Missing(StoreContracts.Required, SqlServerStoreRegistry.Registered));
+        var refused = SqlServerStoreRegistry.Registered.Where(type => type != typeof(IConnectionStore)).ToList();
+        Assert.Equal(["IConnectionStore"], StoreGuard.Missing(StoreContracts.Required, refused));
 
-        await using var database = await SqlServerTestDatabase.CreateAsync(Ct);
+        var (ledger, outcome) = StartRows.For(SqlServer, "unused.db", refused);
 
-        // The two tables the ledger's start writes (auth.sqlserver-baseline-1's), so a start that ran its
-        // steps would leave rows there.
-
-        var dataRoot = Path.Combine(Path.GetTempPath(), $"harness-startguard-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(dataRoot);
-
-        try
-        {
-            using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host => host
-                .UseSetting("DataRoot", dataRoot)
-                .UseSetting("Logging:LogLevel:Default", "Warning")
-                .UseSetting("ScheduleRunnerEnabled", "false")
-                .UseSetting("HARNESS_DATABASE", "sqlserver")
-                .UseSetting("HARNESS_DATABASE_CONNECTION", database.ConnectionString));
-
-            Assert.ThrowsAny<InvalidOperationException>(() => _ = factory.Services);
-        }
-        finally
-        {
-            // The refusal sets a non-zero exit code, as it does for a real start; this process is a test run.
-            Environment.ExitCode = 0;
-            try { Directory.Delete(dataRoot, recursive: true); }
-            catch (IOException) { }
-        }
-
-        Assert.Equal(0, await CountAsync(database.ConnectionString, "SELECT COUNT(*) FROM tenant_settings"));
-        Assert.Equal(0, await CountAsync(database.ConnectionString, "SELECT COUNT(*) FROM tenant_events"));
+        Assert.Null(ledger);
+        Assert.Null(outcome);
     }
 
-    private static async Task<int> CountAsync(string connectionString, string sql)
+    [Fact]
+    public void A_sqlserver_start_with_every_store_runs_the_sql_server_start_rows()
     {
-        await using var connection = new SqlConnection(connectionString);
-        await connection.OpenAsync(Ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        return Convert.ToInt32(await command.ExecuteScalarAsync(Ct));
+        var (ledger, outcome) = StartRows.For(SqlServer, "unused.db", SqlServerStoreRegistry.Registered);
+
+        Assert.IsType<SqlServerLedgerStartRows>(ledger);
+        Assert.IsType<SqlServerOutcomeStartRows>(outcome);
+    }
+
+    [Fact]
+    public void A_sqlite_start_runs_the_sqlite_start_rows_whatever_sql_server_lacks()
+    {
+        var (ledger, outcome) = StartRows.For(new DatabaseOptions(DatabaseProvider.Sqlite, null), "messages.db", []);
+
+        Assert.IsType<SqliteLedgerStartRows>(ledger);
+        Assert.IsType<SqliteOutcomeStartRows>(outcome);
+    }
+
+    [Fact]
+    public void A_sqlserver_start_with_no_connection_runs_none()
+    {
+        var (ledger, outcome) = StartRows.For(new DatabaseOptions(DatabaseProvider.SqlServer, null), "unused.db", SqlServerStoreRegistry.Registered);
+
+        Assert.Null(ledger);
+        Assert.Null(outcome);
     }
 }

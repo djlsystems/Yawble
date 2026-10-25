@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text;
-using System.Text.Json;
 using Harness.Contracts;
 using Harness.Messaging;
 using Microsoft.Data.Sqlite;
@@ -35,7 +34,7 @@ public sealed record RecordedWorkspaceChange(
 /// </summary>
 public sealed class WorkspaceFileChangeStore(string databasePath) : IWorkspaceFileChangeStore
 {
-    private const string Columns = "id, team, member, repo, at, files_json, commits_json, more, correlation";
+    private const string Columns = MonitorRows.ChangeColumns;
 
     private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 
@@ -51,10 +50,10 @@ public sealed class WorkspaceFileChangeStore(string databasePath) : IWorkspaceFi
         command.Parameters.AddWithValue("$team", change.Team);
         command.Parameters.AddWithValue("$member", change.Member);
         command.Parameters.AddWithValue("$repo", change.Repo);
-        command.Parameters.AddWithValue("$at", MessageSchema.FileChangeInstant(change.At));
+        command.Parameters.AddWithValue("$at", MonitorRows.Instant(change.At));
         command.Parameters.AddWithValue("$correlation", (object?)correlation ?? DBNull.Value);
-        command.Parameters.AddWithValue("$files", JsonSerializer.Serialize(change.Files, JsonSerializerOptions.Web));
-        command.Parameters.AddWithValue("$commits", JsonSerializer.Serialize(change.Commits, JsonSerializerOptions.Web));
+        command.Parameters.AddWithValue("$files", MonitorRows.FilesJson(change));
+        command.Parameters.AddWithValue("$commits", MonitorRows.CommitsJson(change));
         command.Parameters.AddWithValue("$more", change.More);
 
         await command.ExecuteNonQueryAsync(ct);
@@ -82,7 +81,7 @@ public sealed class WorkspaceFileChangeStore(string databasePath) : IWorkspaceFi
             if (i > 0) scope.Append(" OR ");
             scope.Append(CultureInfo.InvariantCulture, $"(team = $t{i} AND at >= $s{i})");
             command.Parameters.AddWithValue($"$t{i}", team);
-            command.Parameters.AddWithValue($"$s{i}", MessageSchema.FileChangeInstant(created));
+            command.Parameters.AddWithValue($"$s{i}", MonitorRows.Instant(created));
             i++;
         }
 
@@ -94,25 +93,13 @@ public sealed class WorkspaceFileChangeStore(string databasePath) : IWorkspaceFi
              LIMIT $take
              """;
         command.Parameters.AddWithValue("$after", after);
-        command.Parameters.AddWithValue("$from", MessageSchema.FileChangeInstant(from));
-        command.Parameters.AddWithValue("$to", MessageSchema.FileChangeInstant(to));
+        command.Parameters.AddWithValue("$from", MonitorRows.Instant(from));
+        command.Parameters.AddWithValue("$to", MonitorRows.Instant(to));
         command.Parameters.AddWithValue("$take", take);
 
         var rows = new List<RecordedWorkspaceChange>();
         await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            rows.Add(new RecordedWorkspaceChange(
-                reader.GetInt64(0),
-                reader.GetString(1),
-                reader.GetString(2),
-                reader.GetString(3),
-                DateTimeOffset.Parse(reader.GetString(4), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal),
-                JsonSerializer.Deserialize<List<WorkspaceFile>>(reader.GetString(5), JsonSerializerOptions.Web) ?? [],
-                JsonSerializer.Deserialize<List<WorkspaceCommit>>(reader.GetString(6), JsonSerializerOptions.Web) ?? [],
-                reader.GetInt32(7),
-                reader.IsDBNull(8) ? null : reader.GetInt64(8)));
-        }
+        while (await reader.ReadAsync(ct)) rows.Add(MonitorRows.ReadChange(reader));
 
         return rows;
     }

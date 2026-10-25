@@ -1,5 +1,3 @@
-using System.Globalization;
-using System.Text.Json;
 using Harness.Contracts;
 using Harness.Identity;
 using Microsoft.AspNetCore.DataProtection;
@@ -59,7 +57,7 @@ public sealed record ConnectionUse(string Team, string Member, string Slot);
 /// </summary>
 public sealed class ConnectionStore(string databasePath, IDataProtectionProvider protection) : IConnectionStore
 {
-    private readonly IDataProtector _protector = protection.CreateProtector("Harness.Connections.v1");
+    private readonly ConnectionCipher _cipher = new(protection);
 
     private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 
@@ -70,7 +68,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
         await using var connection = Open();
         await using var command = connection.CreateCommand();
         command.CommandText =
-            "SELECT id, kind, name, client_id, client_secret_protected IS NOT NULL, tenant, authorize_url, token_url, userinfo_url, default_scopes FROM oauth_providers ORDER BY id";
+            $"SELECT id, kind, name, client_id, client_secret_protected IS NOT NULL, {ConnectionRows.ProviderTail} FROM oauth_providers ORDER BY id";
 
         var list = new List<StoredProvider>();
         await using var reader = await command.ExecuteReaderAsync(ct);
@@ -83,17 +81,14 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
         await using var connection = Open();
         await using var command = connection.CreateCommand();
         command.CommandText =
-            "SELECT id, kind, name, client_id, client_secret_protected IS NOT NULL, tenant, authorize_url, token_url, userinfo_url, default_scopes FROM oauth_providers WHERE id = $id";
+            $"SELECT id, kind, name, client_id, client_secret_protected IS NOT NULL, {ConnectionRows.ProviderTail} FROM oauth_providers WHERE id = $id";
         command.Parameters.AddWithValue("$id", id);
 
         await using var reader = await command.ExecuteReaderAsync(ct);
         return await reader.ReadAsync(ct) ? ReadProvider(reader) : null;
     }
 
-    private static StoredProvider ReadProvider(SqliteDataReader reader) => new(
-        reader.GetString(0), reader.GetString(1), NullableText(reader, 2), NullableText(reader, 3),
-        reader.GetBoolean(4), NullableText(reader, 5), NullableText(reader, 6), NullableText(reader, 7),
-        NullableText(reader, 8), List(reader.GetString(9)));
+    private static StoredProvider ReadProvider(SqliteDataReader reader) => ConnectionRows.ReadProvider(reader);
 
     /// <summary>The client secret, decrypted, for a request to the provider. Null when none is set.</summary>
     public async Task<string?> ClientSecretAsync(string id, CancellationToken ct = default)
@@ -134,13 +129,13 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
             command.Parameters.AddWithValue("$kind", provider.Kind);
             command.Parameters.AddWithValue("$name", (object?)provider.Name ?? DBNull.Value);
             command.Parameters.AddWithValue("$clientId", (object?)provider.ClientId ?? DBNull.Value);
-            command.Parameters.AddWithValue("$secret", secret is { Length: > 0 } ? _protector.Protect(secret) : DBNull.Value);
+            command.Parameters.AddWithValue("$secret", _cipher.ProtectOrNull(secret));
             command.Parameters.AddWithValue("$keepSecret", secret is null);
             command.Parameters.AddWithValue("$tenant", (object?)provider.Tenant ?? DBNull.Value);
             command.Parameters.AddWithValue("$authorize", (object?)provider.AuthorizeUrl ?? DBNull.Value);
             command.Parameters.AddWithValue("$token", (object?)provider.TokenUrl ?? DBNull.Value);
             command.Parameters.AddWithValue("$userinfo", (object?)provider.UserinfoUrl ?? DBNull.Value);
-            command.Parameters.AddWithValue("$scopes", JsonSerializer.Serialize(provider.DefaultScopes));
+            command.Parameters.AddWithValue("$scopes", ConnectionRows.Scopes(provider.DefaultScopes));
             command.Parameters.AddWithValue("$at", Now());
             await command.ExecuteNonQueryAsync(ct);
         }
@@ -184,8 +179,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
 
     /// <summary>A connection and, for a mailbox, its servers - never its password, only whether one is set.</summary>
     private const string ConnectionSelect =
-        "SELECT c.id, c.name, c.provider, c.account, c.scopes, c.connected_at, c.refreshed_at, c.status, c.status_reason, "
-        + "m.username, m.imap_host, m.imap_port, m.imap_security, m.smtp_host, m.smtp_port, m.smtp_security, m.preset, "
+        "SELECT " + ConnectionRows.ConnectionHead + ", "
         + "m.password_protected IS NOT NULL, c.tenant "
         + "FROM connections c LEFT JOIN imap_connections m ON m.id = c.id";
 
@@ -217,16 +211,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
         return await reader.ReadAsync(ct) ? ReadConnection(reader) : null;
     }
 
-    private static ConnectionRecord ReadConnection(SqliteDataReader reader) => new(
-        reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), List(reader.GetString(4)),
-        Time(reader.GetString(5)), NullableText(reader, 6) is { } refreshed ? Time(refreshed) : null,
-        reader.GetString(7), NullableText(reader, 8),
-        reader.IsDBNull(9) ? null : new MailboxSettings(
-            reader.GetString(9),
-            new MailServer(reader.GetString(10), reader.GetInt32(11), reader.GetString(12)),
-            new MailServer(reader.GetString(13), reader.GetInt32(14), reader.GetString(15)),
-            NullableText(reader, 16), reader.GetBoolean(17)),
-        NullableText(reader, 18));
+    private static ConnectionRecord ReadConnection(SqliteDataReader reader) => ConnectionRows.ReadConnection(reader);
 
     /// <summary>The tokens, decrypted, for the Host's own refresh and run. Never answered by a route.</summary>
     public async Task<ConnectionTokens?> TokensAsync(string id, CancellationToken ct = default)
@@ -238,9 +223,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
         await using var reader = await command.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct)) return null;
 
-        return new ConnectionTokens(
-            Unprotect(NullableText(reader, 0)), Unprotect(NullableText(reader, 1)),
-            NullableText(reader, 2) is { } expires ? Time(expires) : null);
+        return ConnectionRows.ReadTokens(reader, _cipher);
     }
 
     public async Task InsertAsync(
@@ -262,7 +245,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
             command.Parameters.AddWithValue("$name", record.Name);
             command.Parameters.AddWithValue("$provider", record.Provider);
             command.Parameters.AddWithValue("$account", record.Account);
-            command.Parameters.AddWithValue("$scopes", JsonSerializer.Serialize(record.Scopes));
+            command.Parameters.AddWithValue("$scopes", ConnectionRows.Scopes(record.Scopes));
             AddTokens(command, tokens);
             command.Parameters.AddWithValue("$at", Instant.Stamp(record.ConnectedAt));
             command.Parameters.AddWithValue("$by", (object?)connectedBy ?? DBNull.Value);
@@ -299,7 +282,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
                 WHERE id = $id
                 """;
             command.Parameters.AddWithValue("$id", id);
-            command.Parameters.AddWithValue("$scopes", JsonSerializer.Serialize(scopes));
+            command.Parameters.AddWithValue("$scopes", ConnectionRows.Scopes(scopes));
             command.Parameters.AddWithValue("$tenant", (object?)tenant ?? DBNull.Value);
             command.Parameters.AddWithValue("$now", Now());
             AddTokens(command, tokens);
@@ -355,7 +338,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
             """;
         command.Parameters.AddWithValue("$id", id);
         command.Parameters.AddWithValue("$now", Now());
-        command.Parameters.AddWithValue("$refresh", refreshToken is { Length: > 0 } refresh ? _protector.Protect(refresh) : DBNull.Value);
+        command.Parameters.AddWithValue("$refresh", _cipher.ProtectOrNull(refreshToken));
         await command.ExecuteNonQueryAsync(ct);
     }
 
@@ -468,10 +451,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
         await using var reader = await command.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            foreach (var (slot, connectionId) in JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(2)) ?? [])
-            {
-                list.Add((connectionId, new ConnectionUse(reader.GetString(0), reader.GetString(1), slot)));
-            }
+            list.AddRange(ConnectionRows.Bindings(reader.GetString(0), reader.GetString(1), reader.GetString(2)));
         }
 
         return list;
@@ -500,7 +480,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
             command.Parameters.AddWithValue("$provider", MailboxSettings.Kind);
             command.Parameters.AddWithValue("$account", record.Account);
             command.Parameters.AddWithValue("$at", Instant.Stamp(record.ConnectedAt));
-            command.Parameters.AddWithValue("$verified", (record.RefreshedAt ?? record.ConnectedAt).ToString("O", CultureInfo.InvariantCulture));
+            command.Parameters.AddWithValue("$verified", ConnectionRows.MailboxVerified(record));
             command.Parameters.AddWithValue("$by", (object?)connectedBy ?? DBNull.Value);
             await command.ExecuteNonQueryAsync(ct);
         }
@@ -522,7 +502,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
             command.Parameters.AddWithValue("$smtpPort", settings.Smtp.Port);
             command.Parameters.AddWithValue("$smtpSecurity", settings.Smtp.Security);
             command.Parameters.AddWithValue("$preset", (object?)settings.Preset ?? DBNull.Value);
-            command.Parameters.AddWithValue("$password", _protector.Protect(password));
+            command.Parameters.AddWithValue("$password", _cipher.Protect(password));
             await command.ExecuteNonQueryAsync(ct);
         }
 
@@ -554,7 +534,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
             command.Transaction = transaction;
             command.CommandText = "UPDATE imap_connections SET password_protected = $password WHERE id = $id";
             command.Parameters.AddWithValue("$id", id);
-            command.Parameters.AddWithValue("$password", _protector.Protect(password));
+            command.Parameters.AddWithValue("$password", _cipher.Protect(password));
             if (await command.ExecuteNonQueryAsync(ct) == 0) return false;
         }
 
@@ -596,7 +576,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
         {
             sweep.Transaction = transaction;
             sweep.CommandText = "DELETE FROM connection_flows WHERE issued_at < $cutoff";
-            sweep.Parameters.AddWithValue("$cutoff", flow.IssuedAt.AddDays(-1).ToString("O", CultureInfo.InvariantCulture));
+            sweep.Parameters.AddWithValue("$cutoff", ConnectionRows.FlowCutoff(flow));
             await sweep.ExecuteNonQueryAsync(ct);
         }
 
@@ -611,12 +591,12 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
             command.Parameters.AddWithValue("$state", flow.State);
             command.Parameters.AddWithValue("$user", flow.UserId);
             command.Parameters.AddWithValue("$provider", flow.Provider);
-            command.Parameters.AddWithValue("$scopes", JsonSerializer.Serialize(flow.Scopes));
+            command.Parameters.AddWithValue("$scopes", ConnectionRows.Scopes(flow.Scopes));
             command.Parameters.AddWithValue("$name", (object?)flow.Name ?? DBNull.Value);
             command.Parameters.AddWithValue("$reconnect", (object?)flow.ReconnectId ?? DBNull.Value);
             command.Parameters.AddWithValue("$redirect", flow.RedirectUri);
             command.Parameters.AddWithValue("$loopback", flow.Loopback);
-            command.Parameters.AddWithValue("$verifier", _protector.Protect(flow.CodeVerifier));
+            command.Parameters.AddWithValue("$verifier", _cipher.Protect(flow.CodeVerifier));
             command.Parameters.AddWithValue("$at", Instant.Stamp(flow.IssuedAt));
             command.Parameters.AddWithValue("$tenant", (object?)flow.Tenant ?? DBNull.Value);
             await command.ExecuteNonQueryAsync(ct);
@@ -642,17 +622,10 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
         {
             read.Transaction = transaction;
             read.CommandText =
-                "SELECT state, user_id, provider, scopes, name, reconnect_id, redirect_uri, loopback, verifier_protected, issued_at, used_at, tenant FROM connection_flows WHERE state = $state";
+                $"SELECT {ConnectionRows.FlowColumns} FROM connection_flows WHERE state = $state";
             read.Parameters.AddWithValue("$state", state);
             await using var reader = await read.ExecuteReaderAsync(ct);
-            if (await reader.ReadAsync(ct))
-            {
-                flow = new ConnectionFlow(
-                    reader.GetString(0), reader.GetString(1), reader.GetString(2), List(reader.GetString(3)),
-                    NullableText(reader, 4), NullableText(reader, 5), reader.GetString(6), reader.GetBoolean(7),
-                    Unprotect(reader.GetString(8)) ?? "", Time(reader.GetString(9)),
-                    NullableText(reader, 10) is { } used ? Time(used) : null, NullableText(reader, 11));
-            }
+            if (await reader.ReadAsync(ct)) flow = ConnectionRows.ReadFlow(reader, _cipher.Unprotect);
         }
 
         if (flow is null || (userId is not null && !string.Equals(flow.UserId, userId, StringComparison.Ordinal))) return null;
@@ -675,31 +648,13 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
 
     private void AddTokens(SqliteCommand command, ConnectionTokens tokens)
     {
-        command.Parameters.AddWithValue("$refresh", tokens.RefreshToken is { Length: > 0 } refresh ? _protector.Protect(refresh) : DBNull.Value);
-        command.Parameters.AddWithValue("$access", tokens.AccessToken is { Length: > 0 } access ? _protector.Protect(access) : DBNull.Value);
-        command.Parameters.AddWithValue("$expires", tokens.AccessExpiresAt is { } expires ? Instant.Stamp(expires) : DBNull.Value);
+        var (refresh, access, expires) = ConnectionRows.Tokens(_cipher, tokens);
+        command.Parameters.AddWithValue("$refresh", refresh);
+        command.Parameters.AddWithValue("$access", access);
+        command.Parameters.AddWithValue("$expires", expires);
     }
 
-    private string? Unprotect(string? protectedValue)
-    {
-        if (string.IsNullOrEmpty(protectedValue)) return null;
-
-        try
-        {
-            return _protector.Unprotect(protectedValue);
-        }
-        catch (System.Security.Cryptography.CryptographicException)
-        {
-            // A key ring that lost its key: the credential is gone, and says so as a missing one.
-            return null;
-        }
-    }
-
-    private static string? NullableText(SqliteDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
-
-    private static IReadOnlyList<string> List(string json) => JsonSerializer.Deserialize<List<string>>(json) ?? [];
-
-    private static DateTimeOffset Time(string text) => Instant.Parse(text);
+    private string? Unprotect(string? protectedValue) => _cipher.Unprotect(protectedValue);
 
     private static string Now() => Instant.Now();
 

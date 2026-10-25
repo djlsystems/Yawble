@@ -1,12 +1,19 @@
 using System.Data.Common;
 using Harness.Backlog;
 using Harness.Contracts;
+using Harness.Host;
+using Harness.Host.SqlServer;
 using Harness.Identity;
+using Harness.Messaging;
 using Harness.Skills;
 using Harness.SqlServer;
 using Harness.SqlServer.Backlog;
+using Harness.SqlServer.Host;
 using Harness.SqlServer.Identity;
+using Harness.SqlServer.Ledger;
+using Harness.SqlServer.Messaging;
 using Harness.SqlServer.Skills;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Data.Sqlite;
 using Microsoft.Data.SqlClient;
 
@@ -58,6 +65,30 @@ public abstract class IdentityDatabase : IAsyncDisposable
     /// without a tenant row writer when it is null. <see cref="TenantRowAsync"/> is the provider's own.
     /// </summary>
     public abstract IBacklogStore Backlog(Func<DbConnection, DbTransaction, TriggerAudit, CancellationToken, Task>? audit);
+
+    /// <summary>The message log over the same database, for a behaviour that spans it and the Host's rows (the purge).</summary>
+    public abstract IMessageLog Log();
+
+    public abstract IAgentStepStore AgentSteps();
+
+    public abstract IWorkspaceFileChangeStore FileChanges();
+
+    public abstract IPluginMemberSettingsStore MemberSettings();
+
+    public abstract IPluginMemberSecretRows MemberSecretRows();
+
+    public abstract IPluginSecretRows SecretRows();
+
+    public abstract IPluginRemovalRows RemovalRows();
+
+    public abstract IConnectionStore Connections(IDataProtectionProvider protection);
+
+    public abstract IDatabaseHealth Health();
+
+    /// <summary>The health probe of a database that does not exist.</summary>
+    public abstract IDatabaseHealth MissingHealth();
+
+    public abstract IDatabaseMaintenance Maintenance();
 
     /// <summary>The provider's one insert into <c>tenant_events</c>, inside the caller's transaction.</summary>
     public abstract Task TenantRowAsync(DbConnection connection, DbTransaction transaction, TriggerAudit audit, CancellationToken ct);
@@ -149,6 +180,29 @@ public sealed class SqliteIdentityDatabase : IdentityDatabase
     public override IBacklogStore Backlog(Func<DbConnection, DbTransaction, TriggerAudit, CancellationToken, Task>? audit) =>
         new SqliteBacklogStore(_database.Path, audit: audit is null ? null : (connection, transaction, row, ct) => audit(connection, transaction, row, ct));
 
+    public override IMessageLog Log() => new SqliteMessageStore(_database.Path);
+
+    public override IAgentStepStore AgentSteps() => new AgentStepStore(_database.Path);
+
+    public override IWorkspaceFileChangeStore FileChanges() => new WorkspaceFileChangeStore(_database.Path);
+
+    public override IPluginMemberSettingsStore MemberSettings() => new SqlitePluginMemberSettings(_database.Path);
+
+    public override IPluginMemberSecretRows MemberSecretRows() => new SqlitePluginMemberSecretRows(_database.Path);
+
+    public override IPluginSecretRows SecretRows() => new SqlitePluginSecretRows(_database.Path);
+
+    public override IPluginRemovalRows RemovalRows() => new SqlitePluginRemovalRows(_database.Path);
+
+    public override IConnectionStore Connections(IDataProtectionProvider protection) => new ConnectionStore(_database.Path, protection);
+
+    public override IDatabaseHealth Health() => new SqliteDatabaseHealth(_database.Path);
+
+    public override IDatabaseHealth MissingHealth() =>
+        new SqliteDatabaseHealth(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(_database.Path)!, "missing", "messages.db"));
+
+    public override IDatabaseMaintenance Maintenance() => new SqliteDatabaseMaintenance(_database.Path);
+
     public override Task TenantRowAsync(DbConnection connection, DbTransaction transaction, TriggerAudit audit, CancellationToken ct) =>
         TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
 
@@ -218,6 +272,33 @@ public sealed class SqlServerIdentityDatabase : IdentityDatabase
 
     public override IBacklogStore Backlog(Func<DbConnection, DbTransaction, TriggerAudit, CancellationToken, Task>? audit) =>
         new SqlServerBacklogStore(ConnectionString, audit: audit is null ? null : (connection, transaction, row, ct) => audit(connection, transaction, row, ct));
+
+    public override IMessageLog Log() => new SqlServerMessageStore(ConnectionString, new SqlServerAppendRows());
+
+    public override IAgentStepStore AgentSteps() => new SqlServerAgentStepStore(ConnectionString);
+
+    public override IWorkspaceFileChangeStore FileChanges() => new SqlServerWorkspaceFileChangeStore(ConnectionString);
+
+    public override IPluginMemberSettingsStore MemberSettings() => new SqlServerPluginMemberSettings(ConnectionString);
+
+    public override IPluginMemberSecretRows MemberSecretRows() => new SqlServerPluginMemberSecretRows(ConnectionString);
+
+    public override IPluginSecretRows SecretRows() => new SqlServerPluginSecretRows(ConnectionString);
+
+    public override IPluginRemovalRows RemovalRows() => new SqlServerPluginRemovalRows(ConnectionString);
+
+    public override IConnectionStore Connections(IDataProtectionProvider protection) => new SqlServerConnectionStore(ConnectionString, protection);
+
+    public override IDatabaseHealth Health() => new SqlServerDatabaseHealth(ConnectionString);
+
+    public override IDatabaseHealth MissingHealth() =>
+        new SqlServerDatabaseHealth(new SqlConnectionStringBuilder(ConnectionString)
+        {
+            InitialCatalog = $"harness_missing_{Guid.NewGuid():N}",
+            ConnectTimeout = 5,
+        }.ConnectionString);
+
+    public override IDatabaseMaintenance Maintenance() => new SqlServerDatabaseMaintenance();
 
     public override Task TenantRowAsync(DbConnection connection, DbTransaction transaction, TriggerAudit audit, CancellationToken ct) =>
         SqlServerTenantAuditRow.AppendAsync(connection, transaction, audit, ct);

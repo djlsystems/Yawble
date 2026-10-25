@@ -78,7 +78,6 @@ internal sealed partial class HostComposition
         builder.Services.AddSingleton(sp => new PluginSecretStore(
             sp.GetRequiredService<IPluginSecretRows>(), sp.GetRequiredService<IDataProtectionProvider>(), new EnvironmentSecretStore()));
         builder.Services.AddSingleton<ISecretStore>(sp => sp.GetRequiredService<PluginSecretStore>());
-        builder.Services.AddSingleton<IPluginMemberSettingsStore>(new SqlitePluginMemberSettings(database));
 
         // EACH PLUGIN MEMBER OWNS ITS SECRETS: the values a person typed for one member's fields
         // (`plugin_member_secrets`, Data Protection ciphertext under a purpose of its own), resolved

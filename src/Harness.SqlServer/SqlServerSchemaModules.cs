@@ -18,5 +18,5 @@ namespace Harness.SqlServer;
 /// </summary>
 public static class SqlServerSchemaModules
 {
-    public static IReadOnlyList<MigrationStep> All { get; } = [.. SqlServerMessagingSchema.Steps, .. SqlServerAuthSchema.Steps, .. SqlServerAuthSchedulesSchema.Steps, .. SqlServerSkillSchema.Steps, .. SqlServerBacklogSchema.Steps, .. SqlServerOutcomeSchema.Steps];
+    public static IReadOnlyList<MigrationStep> All { get; } = [.. SqlServerMessagingSchema.Steps, .. SqlServerAuthSchema.Steps, .. SqlServerAuthSchedulesSchema.Steps, .. SqlServerAuthPluginsSchema.Steps, .. SqlServerSkillSchema.Steps, .. SqlServerBacklogSchema.Steps, .. SqlServerOutcomeSchema.Steps];
 }

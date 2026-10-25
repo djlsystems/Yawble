@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Harness.Contracts;
 using Harness.Identity;
 using Microsoft.Data.Sqlite;
@@ -47,12 +46,7 @@ public sealed class SqlitePluginMemberSettings(string databasePath) : IPluginMem
         await using var reader = await command.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct)) return PluginMemberSettings.None;
 
-        return new PluginMemberSettings(
-            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(reader.GetString(0)) ?? [],
-            JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(1)) ?? [])
-        {
-            Connections = JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(2)) ?? [],
-        };
+        return PluginMemberSettingsRows.Read(reader.GetString(0), reader.GetString(1), reader.GetString(2));
     }
 
     public async Task SaveAsync(ContainerId member, PluginMemberSettings settings, CancellationToken ct = default)
@@ -85,10 +79,7 @@ public sealed class SqlitePluginMemberSettings(string databasePath) : IPluginMem
 
         var ids = new HashSet<string>(StringComparer.Ordinal);
         await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            ids.UnionWith((JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(0)) ?? []).Values);
-        }
+        while (await reader.ReadAsync(ct)) ids.UnionWith(PluginMemberSettingsRows.Bound(reader.GetString(0)));
 
         return ids;
     }
@@ -109,9 +100,9 @@ public sealed class SqlitePluginMemberSettings(string databasePath) : IPluginMem
             """;
         command.Parameters.AddWithValue("$team", member.Team);
         command.Parameters.AddWithValue("$name", member.Name);
-        command.Parameters.AddWithValue("$config", JsonSerializer.Serialize(settings.Config));
-        command.Parameters.AddWithValue("$secrets", JsonSerializer.Serialize(settings.Secrets));
-        command.Parameters.AddWithValue("$connections", JsonSerializer.Serialize(settings.Connections));
+        command.Parameters.AddWithValue("$config", PluginMemberSettingsRows.ConfigJson(settings));
+        command.Parameters.AddWithValue("$secrets", PluginMemberSettingsRows.SecretsJson(settings));
+        command.Parameters.AddWithValue("$connections", PluginMemberSettingsRows.ConnectionsJson(settings));
         await command.ExecuteNonQueryAsync(ct);
     }
 
@@ -124,10 +115,7 @@ public sealed class SqlitePluginMemberSettings(string databasePath) : IPluginMem
 
         var keys = new HashSet<string>(StringComparer.Ordinal);
         await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            keys.UnionWith((JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(0)) ?? []).Values);
-        }
+        while (await reader.ReadAsync(ct)) keys.UnionWith(PluginMemberSettingsRows.Bound(reader.GetString(0)));
 
         return keys;
     }
