@@ -30,12 +30,17 @@ public static class SqlServerStartRefusal
             $"The SQL Server database at '{Server(connection)}' could not be reached or opened (SQL Server error {sql.Number}): "
             + "check the server, the network and the login that HARNESS_DATABASE_CONNECTION names, and start again.",
 
-        // SqlClient reads the string as it opens it; its sentence names the keyword, never a value.
-        ArgumentException argument =>
-            $"HARNESS_DATABASE_CONNECTION is not a connection string SQL Server can use ({argument.Message.TrimEnd('.')}): correct it and start again.",
+        // A FIXED SENTENCE, NO SQLCLIENT TEXT. SqlClient's message names the "keyword" it could not read,
+        // and in a mis-quoted string (a password holding `;x=`) that keyword is a piece of the password.
+        ArgumentException => Unreadable,
 
         _ => null,
     };
+
+    /// <summary>What an unreadable connection string is said as, wherever it is said: the start, the
+    /// operator switches and the doctor. Nothing of the string itself is in it.</summary>
+    public const string Unreadable =
+        "The SQL Server connection string (HARNESS_DATABASE_CONNECTION) could not be read; check its keywords and quoting.";
 
     /// <summary>Whether the failure is one the database itself answered, so a diagnostics row can be
     /// written to it as the SQLite start writes one: a step from a newer build, or a step that failed.</summary>

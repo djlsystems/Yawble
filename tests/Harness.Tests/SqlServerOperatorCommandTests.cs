@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Harness.Host;
+using Harness.Host.SqlServer;
 using Harness.SqlServer;
 using Harness.SqlServer.Host;
 using Harness.SqlServer.Identity;
@@ -45,9 +46,10 @@ public sealed class SqlServerOperatorCommandTests : IDisposable
         var destination = Path.Combine(_root, "copy.db");
         foreach (var args in new[] { new[] { "--backup" }, ["--backup", destination] })
         {
-            var (outcome, lines) = await RunAsync(args, options);
+            var (outcome, lines, errors) = await RunAsync(args, options);
             Assert.Equal(OperatorOutcome.Refused, outcome);
-            var line = Assert.Single(lines);
+            Assert.Empty(lines);
+            var line = Assert.Single(errors);
             Assert.EndsWith(SqlServerDatabaseMaintenance.PointInTimeRestore, line, StringComparison.Ordinal);
         }
 
@@ -58,9 +60,10 @@ public sealed class SqlServerOperatorCommandTests : IDisposable
         await File.WriteAllTextAsync(backup, "a copy", Ct);
         foreach (var args in new[] { new[] { "--restore", backup }, ["--restore"] })
         {
-            var (outcome, lines) = await RunAsync(args, options);
+            var (outcome, lines, errors) = await RunAsync(args, options);
             Assert.Equal(OperatorOutcome.Refused, outcome);
-            var line = Assert.Single(lines);
+            Assert.Empty(lines);
+            var line = Assert.Single(errors);
             Assert.EndsWith(SqlServerDatabaseMaintenance.PointInTimeRestore, line, StringComparison.Ordinal);
         }
 
@@ -71,7 +74,7 @@ public sealed class SqlServerOperatorCommandTests : IDisposable
         var users = new SqlServerUserStore(database.ConnectionString);
         await users.CreateAsync(Email, "the old password", Ct);
 
-        var (reset, said) = await RunAsync(["--reset-password", Email], options);
+        var (reset, said, _) = await RunAsync(["--reset-password", Email], options);
         Assert.Equal(OperatorOutcome.Completed, reset);
         Assert.Equal($"The password for {Email} is now:", said[^2]);
         Assert.NotNull(await users.VerifyAsync(Email, said[^1], Ct));
@@ -87,7 +90,7 @@ public sealed class SqlServerOperatorCommandTests : IDisposable
         var options = new DatabaseOptions(DatabaseProvider.SqlServer, database.ConnectionString);
 
         // The first command to reach the empty database migrates it, saying once that no copy was taken.
-        var (listed, lines) = await RunAsync(["--list-users"], options);
+        var (listed, lines, _) = await RunAsync(["--list-users"], options);
         Assert.Equal(OperatorOutcome.Completed, listed);
         Assert.Equal(
             [
@@ -100,7 +103,7 @@ public sealed class SqlServerOperatorCommandTests : IDisposable
             await new SqlServerMigrator(database.ConnectionString).AppliedAsync(Ct));
 
         // A reset for an account that is not there names the database, not a data root.
-        var (missing, said) = await RunAsync(["--reset-password", Email], options);
+        var (missing, said, _) = await RunAsync(["--reset-password", Email], options);
         Assert.Equal(OperatorOutcome.Refused, missing);
         Assert.Equal(
             [
@@ -115,7 +118,7 @@ public sealed class SqlServerOperatorCommandTests : IDisposable
         await users.CreateAsync("a@example.test", "pw-a-long-enough", Ct);
 
         Assert.Equal(["a@example.test", "b@example.test"], (await RunAsync(["--list-users"], options)).Lines);
-        var (refused, named) = await RunAsync(["--reset-password", Email], options);
+        var (refused, named, _) = await RunAsync(["--reset-password", Email], options);
         Assert.Equal(OperatorOutcome.Refused, refused);
         Assert.Equal($"There is no account for '{Email}'. The accounts here are:", named[0]);
         Assert.Equal(["  a@example.test", "  b@example.test"], named[1..].Order(StringComparer.Ordinal));
@@ -129,17 +132,19 @@ public sealed class SqlServerOperatorCommandTests : IDisposable
         // The wrong collation: the migrator's own sentence, and the database is left as found.
         await using (var database = await SqlServerTestDatabase.CreateAsync(Ct, collation: "SQL_Latin1_General_CP1_CI_AS", applyModules: false))
         {
-            var (outcome, lines) = await RunAsync(["--list-users"], new DatabaseOptions(DatabaseProvider.SqlServer, database.ConnectionString));
+            var (outcome, lines, errors) = await RunAsync(["--list-users"], new DatabaseOptions(DatabaseProvider.SqlServer, database.ConnectionString));
             Assert.Equal(OperatorOutcome.Refused, outcome);
-            Assert.Contains($"COLLATE {SqlServerMigrator.RequiredCollation}", Assert.Single(lines), StringComparison.Ordinal);
+            Assert.Empty(lines);
+            Assert.Contains($"COLLATE {SqlServerMigrator.RequiredCollation}", Assert.Single(errors), StringComparison.Ordinal);
         }
 
         // A server that is not there: named, the password never.
         var secret = $"operator-secret-{Guid.NewGuid():N}";
         var unreachable = $"Server=harness-no-such-server.invalid;Database=harness;User ID=someone;Password={secret};Connect Timeout=3;ConnectRetryCount=0;Encrypt=False";
-        var (refused, said) = await RunAsync(["--reset-password", Email], new DatabaseOptions(DatabaseProvider.SqlServer, unreachable));
+        var (refused, said, refusals) = await RunAsync(["--reset-password", Email], new DatabaseOptions(DatabaseProvider.SqlServer, unreachable));
         Assert.Equal(OperatorOutcome.Refused, refused);
-        var sentence = Assert.Single(said);
+        Assert.Empty(said);
+        var sentence = Assert.Single(refusals);
         Assert.Contains("harness-no-such-server.invalid", sentence, StringComparison.Ordinal);
         Assert.DoesNotContain(secret, sentence, StringComparison.Ordinal);
 
@@ -153,7 +158,7 @@ public sealed class SqlServerOperatorCommandTests : IDisposable
         var options = new DatabaseOptions(DatabaseProvider.SqlServer, "Server=harness-no-such-server.invalid;Database=harness;Connect Timeout=1;ConnectRetryCount=0");
         var folder = Directory.CreateDirectory(Path.Combine(_root, "package")).FullName;
 
-        var (outcome, lines) = await RunAsync(["--solution-check", folder], options);
+        var (outcome, lines, _) = await RunAsync(["--solution-check", folder], options);
 
         Assert.Equal(OperatorOutcome.Completed, outcome);
         using var _ = JsonDocument.Parse(lines[^1]);
@@ -167,7 +172,7 @@ public sealed class SqlServerOperatorCommandTests : IDisposable
         var options = new DatabaseOptions(DatabaseProvider.SqlServer, database.ConnectionString);
         var builder = new SqlConnectionStringBuilder(database.ConnectionString);
 
-        var (outcome, lines) = await RunAsync(["--doctor"], options);
+        var (outcome, lines, _) = await RunAsync(["--doctor"], options);
         Assert.Equal(OperatorOutcome.Completed, outcome);
 
         using var json = JsonDocument.Parse(lines[^1]);
@@ -198,7 +203,7 @@ public sealed class SqlServerOperatorCommandTests : IDisposable
         await using var database = await SqlServerTestDatabase.CreateAsync(Ct);
         var password = new SqlConnectionStringBuilder(database.ConnectionString).Password;
 
-        var (_, lines) = await RunAsync(["--doctor"], new DatabaseOptions(DatabaseProvider.SqlServer, database.ConnectionString));
+        var (_, lines, _) = await RunAsync(["--doctor"], new DatabaseOptions(DatabaseProvider.SqlServer, database.ConnectionString));
         var text = string.Join('\n', lines);
         Assert.DoesNotContain(database.ConnectionString, text, StringComparison.Ordinal);
         if (!string.IsNullOrEmpty(password)) Assert.DoesNotContain(password, text, StringComparison.Ordinal);
@@ -206,7 +211,7 @@ public sealed class SqlServerOperatorCommandTests : IDisposable
         // A database it cannot reach is the report's error, naming the server and never the password.
         var secret = $"doctor-secret-{Guid.NewGuid():N}";
         var unreachable = $"Server=harness-no-such-server.invalid;Database=harness;User ID=someone;Password={secret};Connect Timeout=3;ConnectRetryCount=0;Encrypt=False";
-        var (outcome, failed) = await RunAsync(["--doctor"], new DatabaseOptions(DatabaseProvider.SqlServer, unreachable));
+        var (outcome, failed, _) = await RunAsync(["--doctor"], new DatabaseOptions(DatabaseProvider.SqlServer, unreachable));
         Assert.Equal(OperatorOutcome.Completed, outcome);
         Assert.DoesNotContain(secret, string.Join('\n', failed), StringComparison.Ordinal);
 
@@ -217,9 +222,27 @@ public sealed class SqlServerOperatorCommandTests : IDisposable
         Assert.Equal(JsonValueKind.Null, reported.GetProperty("schema").ValueKind);
         Assert.Contains("harness-no-such-server.invalid", reported.GetProperty("error").GetString(), StringComparison.Ordinal);
 
-        // A string SqlClient cannot read at all names no value from it either.
-        var (_, unreadable) = await RunAsync(["--doctor"], new DatabaseOptions(DatabaseProvider.SqlServer, $"Server=x;Colour={secret}"));
-        Assert.DoesNotContain(secret, string.Join('\n', unreadable), StringComparison.Ordinal);
+        // A mis-quoted password: SqlClient would name the fragment after its `;` as the keyword it could
+        // not read. The doctor and the account switches say one fixed sentence instead, naming nothing of it.
+        foreach (var misquoted in new[]
+        {
+            $"Server=x;Database=harness;Password=pre;{secret}=post",
+            $"Server=x;Database=harness;Pwd=pre;{secret}=post",
+            $"Server=x;Database=harness;Authentication=Active Directory Default;User ID=pre;{secret}=post",
+        })
+        {
+            var options = new DatabaseOptions(DatabaseProvider.SqlServer, misquoted);
+
+            var (_, doctor, doctorErrors) = await RunAsync(["--doctor"], options);
+            Assert.DoesNotContain(secret, string.Join('\n', [.. doctor, .. doctorErrors]), StringComparison.Ordinal);
+            using var report = JsonDocument.Parse(doctor[^1]);
+            Assert.Equal(SqlServerStartRefusal.Unreadable, report.RootElement.GetProperty("database").GetProperty("error").GetString());
+
+            var (listed, users, usersErrors) = await RunAsync(["--list-users"], options);
+            Assert.Equal(OperatorOutcome.Refused, listed);
+            Assert.Empty(users);
+            Assert.Equal([SqlServerStartRefusal.Unreadable], usersErrors);
+        }
 
         Assert.False(HasSqliteFile);
     }
@@ -252,7 +275,7 @@ public sealed class SqlServerOperatorCommandTests : IDisposable
     public async Task The_doctor_on_sqlite_reports_as_it_always_has()
     {
         // No provider, server or name on SQLite: the report the operator CLI has always read, byte for byte.
-        var (outcome, lines) = await RunAsync(["--doctor"], new DatabaseOptions(DatabaseProvider.Sqlite, null));
+        var (outcome, lines, _) = await RunAsync(["--doctor"], new DatabaseOptions(DatabaseProvider.Sqlite, null));
         Assert.Equal(OperatorOutcome.Completed, outcome);
 
         using var json = JsonDocument.Parse(lines[^1]);
@@ -271,9 +294,9 @@ public sealed class SqlServerOperatorCommandTests : IDisposable
         // act on SQL Server, not on a messages.db beside the data root.
         await using var database = await SqlServerTestDatabase.CreateAsync(Ct);
 
-        var (backupExit, backupLines, _) = await RunHostAsync(database.ConnectionString, "--backup");
+        var (backupExit, _, backupErrors) = await RunHostAsync(database.ConnectionString, "--backup");
         Assert.Equal(1, backupExit);
-        Assert.Contains($"No copy was written: {SqlServerDatabaseMaintenance.PointInTimeRestore}", backupLines);
+        Assert.Contains($"No copy was written: {SqlServerDatabaseMaintenance.PointInTimeRestore}", backupErrors, StringComparison.Ordinal);
 
         var (doctorExit, doctorLines, doctorErrors) = await RunHostAsync(database.ConnectionString, "--doctor");
         Assert.True(doctorExit == 0, doctorErrors);
@@ -320,10 +343,14 @@ public sealed class SqlServerOperatorCommandTests : IDisposable
 
     private bool HasSqliteFile => Directory.GetFiles(_root, "messages.db*", SearchOption.AllDirectories).Length > 0;
 
-    private async Task<(OperatorOutcome Outcome, string[] Lines)> RunAsync(string[] args, DatabaseOptions options)
+    /// <summary>The switch's outcome, and what it wrote to stdout and to stderr, by line.</summary>
+    private async Task<(OperatorOutcome Outcome, string[] Lines, string[] Errors)> RunAsync(string[] args, DatabaseOptions options)
     {
         using var output = new StringWriter();
-        var outcome = await OperatorCommands.TryRunAsync(args, _root, output, Ct, database: options);
-        return (outcome, output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries));
+        using var errors = new StringWriter();
+        var outcome = await OperatorCommands.TryRunAsync(args, _root, output, Ct, database: options, errors: errors);
+        return (outcome, Split(output), Split(errors));
+
+        static string[] Split(StringWriter writer) => writer.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
     }
 }

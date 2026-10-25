@@ -88,8 +88,12 @@ public static class OperatorCommands
     /// <summary>True when the arguments were an operator command and the host must not serve.</summary>
     public static async Task<OperatorOutcome> TryRunAsync(
         string[] args, string dataRoot, TextWriter output, CancellationToken ct = default,
-        BackupSettings? backups = null, DatabaseOptions? database = null)
+        BackupSettings? backups = null, DatabaseOptions? database = null, TextWriter? errors = null)
     {
+        // WHERE A SQL SERVER REFUSAL IS SAID: stderr, as the start's refusals and the Host's catch of
+        // SQLite's are, so a script reading stdout sees no sentence where it expected a result.
+        errors ??= Console.Error;
+
         // The backups folder and retention Program.cs read from configuration, so a migration run
         // from here writes and prunes where the daily backup does, and --backup's manual copy and
         // --restore's before-restore copy land in that same folder, and --doctor reports on it.
@@ -119,18 +123,18 @@ public static class OperatorCommands
         switch (key)
         {
             case "--backup" when onSqlServer:
-                return BackupElsewhere("No copy was written", output);
+                return BackupElsewhere("No copy was written", errors);
 
             case "--restore" when onSqlServer:
-                return BackupElsewhere("Nothing was restored", output);
+                return BackupElsewhere("Nothing was restored", errors);
 
             case "--reset-password" when onSqlServer:
-                return await ResetPasswordAsync(SqlServerUsers(database!.Connection!, output), SqlServerAccounts, value, output, ct)
+                return await ResetPasswordAsync(SqlServerUsers(database!.Connection!, output, errors), SqlServerAccounts, value, output, ct)
                     ? OperatorOutcome.Completed
                     : OperatorOutcome.Refused;
 
             case "--list-users" when onSqlServer:
-                return await ListUsersAsync(SqlServerUsers(database!.Connection!, output), output, ct)
+                return await ListUsersAsync(SqlServerUsers(database!.Connection!, output, errors), output, ct)
                     ? OperatorOutcome.Completed
                     : OperatorOutcome.Refused;
 
@@ -483,7 +487,7 @@ public static class OperatorCommands
     /// row versioning off, a newer build's steps, a failed step - is the start's one sentence and a
     /// refusal, never a trace and never the connection string. Null when refused.
     /// </summary>
-    private static Func<CancellationToken, Task<IUserStore?>> SqlServerUsers(string connection, TextWriter output) =>
+    private static Func<CancellationToken, Task<IUserStore?>> SqlServerUsers(string connection, TextWriter output, TextWriter errors) =>
         async ct =>
         {
             var schema = new SqlServerMigrator(connection);
@@ -494,7 +498,7 @@ public static class OperatorCommands
             }
             catch (Exception exception) when (SqlServerStartRefusal.Sentence(exception, connection) is { } sentence)
             {
-                output.WriteLine(sentence);
+                errors.WriteLine(sentence);
                 return null;
             }
 
@@ -513,9 +517,9 @@ public static class OperatorCommands
     /// backup and the restore. A refusal, so the scripts wrapping these switches see a non-zero exit
     /// rather than a copy that was never taken.
     /// </summary>
-    private static OperatorOutcome BackupElsewhere(string nothing, TextWriter output)
+    private static OperatorOutcome BackupElsewhere(string nothing, TextWriter errors)
     {
-        output.WriteLine($"{nothing}: {new SqlServerDatabaseMaintenance().BackupElsewhere}");
+        errors.WriteLine($"{nothing}: {new SqlServerDatabaseMaintenance().BackupElsewhere}");
         return OperatorOutcome.Refused;
     }
 

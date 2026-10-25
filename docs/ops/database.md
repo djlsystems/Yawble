@@ -92,7 +92,9 @@ On SQL Server the database is not a file the Host can copy, so the backups are t
 
 The Host reads `HARNESS_DATABASE` for these switches as it does for a start, so run them with the same settings the instance uses. On SQL Server no switch creates `messages.db`.
 
-`yawble doctor` reads the `--doctor` report. On SQL Server its backups line says there is no daily copy in the data volume. That is expected, because the server keeps the backups.
+`yawble doctor` reads the `--doctor` report. On SQL Server its backups line is ok and says the backups are the SQL Server's own (point-in-time restore), since the Host takes no copy. A database it cannot read points at the server, `HARNESS_DATABASE_CONNECTION` and the server's point-in-time restore, not at `--restore`.
+
+On SQL Server a refusal is printed to stderr, as a refused start is, and the exit code is non-zero.
 
 ## How SQL Server differs from SQLite, and where it does not
 

@@ -488,6 +488,29 @@ func TestADatabaseSqliteRefusesFails(t *testing.T) {
 	}
 }
 
+// On SQL Server the backups are the server's own: no daily copy is expected, so none is warned about.
+func TestOnSqlServerTheBackupsRowNamesPointInTimeRestore(t *testing.T) {
+	r := sampleReport()
+	r.Database.Provider, r.Database.Path = "sqlserver", "sql.example/harness"
+	r.Backups.Directory, r.Backups.DailyCount, r.Backups.NewestDailyAt = "", 0, nil
+	c := find(t, doctor.InstanceChecks(r, nil, now), "backups")
+	if c.Verdict != doctor.OK || !strings.Contains(c.Detail, "point-in-time restore") || strings.Contains(c.Detail, "daily copy") {
+		t.Errorf("%+v", c)
+	}
+}
+
+// On SQL Server a database the Host cannot read points at the server and its point-in-time restore,
+// never at --restore, which refuses there.
+func TestOnSqlServerADatabaseErrorPointsAtPointInTimeRestore(t *testing.T) {
+	r := sampleReport()
+	r.Database.Provider, r.Database.Path = "sqlserver", "sql.example/harness"
+	r.Database.Schema, r.Database.Error = nil, strp("The SQL Server database at 'sql.example' could not be reached or opened (SQL Server error 53)")
+	c := find(t, doctor.InstanceChecks(r, nil, now), "database")
+	if c.Verdict != doctor.Fail || !strings.Contains(c.Detail, "could not be reached") || !strings.Contains(c.Fix, "point-in-time restore") || strings.Contains(c.Fix, "--restore") {
+		t.Errorf("%+v", c)
+	}
+}
+
 func TestNoBackupsAndOldBackupsWarn(t *testing.T) {
 	r := sampleReport()
 	r.Backups.DailyCount, r.Backups.NewestDailyAt = 0, nil

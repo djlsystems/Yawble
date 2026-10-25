@@ -454,6 +454,8 @@ func instanceChecks(r *HostReport, err error, now time.Time, details bool) []Che
 	switch {
 	case !r.Database.Exists:
 		checks = append(checks, Check{"database", Warn, "no database yet; the Host creates it on its first start", "yawble logs"})
+	case r.Database.Error != nil && r.OnSqlServer():
+		checks = append(checks, Check{"database", Fail, r.Database.Path + ": " + *r.Database.Error, "check the SQL Server and HARNESS_DATABASE_CONNECTION; if the database itself is damaged, use the server's point-in-time restore"})
 	case r.Database.Error != nil:
 		checks = append(checks, Check{"database", Fail, r.Database.Path + ": " + *r.Database.Error, "restore a backup from " + r.Backups.Directory + " with the Host's --restore switch"})
 	case r.Database.Schema == nil:
@@ -467,6 +469,9 @@ func instanceChecks(r *HostReport, err error, now time.Time, details bool) []Che
 	}
 
 	switch {
+	case r.OnSqlServer():
+		// The server's own backups: the Host takes no copy, so there is no folder of them to judge.
+		checks = append(checks, Check{"backups", OK, "the SQL Server's own backups (point-in-time restore); the Host takes no copy of a SQL Server database", ""})
 	case r.Backups.DailyCount == 0 || r.Backups.NewestDailyAt == nil:
 		checks = append(checks, Check{"backups", Warn, "no daily copy in the data volume yet (the Host writes one a day into " + r.Backups.Directory + ")", ""})
 	default:

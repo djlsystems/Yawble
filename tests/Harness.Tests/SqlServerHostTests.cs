@@ -204,12 +204,13 @@ public sealed class SqlServerHostTests
     [Fact]
     public async Task A_connection_string_sqlclient_cannot_read_is_one_sentence_and_a_non_zero_exit()
     {
-        var (said, exitCode, hadSqliteFile) = await RefusedStartAsync("Server=somewhere;Password=hunter2;Colour=blue");
+        // A mis-quoted password holding `;x=`: SqlClient would name the fragment after the `;` as the keyword.
+        var (said, exitCode, hadSqliteFile) = await RefusedStartAsync("Server=somewhere;Password=hunter2;leakfragment=rest");
 
         Assert.Equal(1, exitCode);
-        Assert.Contains("HARNESS_DATABASE_CONNECTION is not a connection string", said, StringComparison.Ordinal);
-        Assert.Contains("colour", said, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(Harness.Host.SqlServer.SqlServerStartRefusal.Unreadable, said.Trim());
         Assert.DoesNotContain("hunter2", said, StringComparison.Ordinal);
+        Assert.DoesNotContain("leakfragment", said, StringComparison.OrdinalIgnoreCase);
         AssertOneSentence(said);
         Assert.False(hadSqliteFile);
     }

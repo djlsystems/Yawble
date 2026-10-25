@@ -26,6 +26,9 @@ type HostReport struct {
 		Exists bool    `json:"exists"`
 		Schema *Schema `json:"schema"`
 		Error  *string `json:"error"`
+		// Provider is "sqlserver" when the Host runs on SQL Server. Absent on SQLite, and from an older
+		// Host, which is SQLite: see OnSqlServer.
+		Provider string `json:"provider,omitempty"`
 	} `json:"database"`
 	Backups struct {
 		Directory     string  `json:"directory"`
@@ -250,3 +253,8 @@ func ParseHostReport(stdout string) (HostReport, error) {
 	}
 	return r, ErrNoReport
 }
+
+// OnSqlServer says whether the Host's database is SQL Server, whose backups are the server's own
+// (point-in-time restore): the Host takes no daily copy and its --restore refuses. Anything else,
+// the field absent included, is SQLite.
+func (r *HostReport) OnSqlServer() bool { return r.Database.Provider == "sqlserver" }
