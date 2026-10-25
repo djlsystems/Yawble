@@ -27,6 +27,7 @@
     <ProjectReference Include="..\..\src\Harness.Containers\Harness.Containers.csproj" />
     <ProjectReference Include="..\..\src\Harness.Messaging\Harness.Messaging.csproj" />
     <ProjectReference Include="..\..\src\Harness.Host\Harness.Host.csproj" />
+    <ProjectReference Include="..\..\src\Harness.SqlServer\Harness.SqlServer.csproj" />
   </ItemGroup>
 
   <!-- The test plugin member (tests/Fixtures/Packages/sample-echo), BUILT with the tests but not referenced by them: PluginMemberEndToEndTests

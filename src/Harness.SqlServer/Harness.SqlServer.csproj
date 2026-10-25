@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Running the Host on SQL Server. The stores here sit behind the same interfaces as the SQLite
+       ones in the modules they mirror; nothing outside this project and the Host's composition
+       root knows which provider is in use. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.SqlClient" />
+    <PackageReference Include="System.Security.Cryptography.Pkcs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Harness.Contracts\Harness.Contracts.csproj" />
+    <ProjectReference Include="..\Harness.Messaging\Harness.Messaging.csproj" />
+    <ProjectReference Include="..\Harness.Identity\Harness.Identity.csproj" />
+    <ProjectReference Include="..\Harness.Backlog\Harness.Backlog.csproj" />
+    <ProjectReference Include="..\Harness.Skills\Harness.Skills.csproj" />
+  </ItemGroup>
+
+</Project>

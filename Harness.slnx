@@ -6,6 +6,7 @@
     <Project Path="src/Harness.Backlog/Harness.Backlog.csproj" />
     <Project Path="src/Harness.Kanban/Harness.Kanban.csproj" />
     <Project Path="src/Harness.Skills/Harness.Skills.csproj" />
+    <Project Path="src/Harness.SqlServer/Harness.SqlServer.csproj" />
     <Project Path="src/Harness.Streaming/Harness.Streaming.csproj" />
     <Project Path="src/Harness.Containers/Harness.Containers.csproj" />
     <Project Path="src/Harness.Pty.Abstractions/Harness.Pty.Abstractions.csproj" />
