@@ -47,15 +47,33 @@ public static class SqlServerOpen
         return builder.ConnectionString;
     }
 
+    /// <summary>The error number SQL Server gives a deadlock victim: its transaction was rolled back
+    /// and running the work again is the documented remedy.</summary>
+    private const int DeadlockVictim = 1205;
+
     /// <summary>
-    /// Runs <paramref name="work"/>, trying again when SQL Server answers with a fault it marks
-    /// transient (a failover in progress, a throttled or briefly unavailable database). Anything else,
-    /// and the last transient one, propagates unchanged.
+    /// Runs <paramref name="work"/>, trying again (three attempts in all) when SQL Server chose it as
+    /// a deadlock victim (error 1205) or answers with a fault the driver marks transient (a failover
+    /// in progress, a throttled or briefly unavailable database). Anything else, and the last
+    /// retryable one, propagates unchanged.
     ///
     /// Whole units of work only: the caller passes a call that opens its own connection and, if it
     /// writes, does so in one transaction, so running it again cannot apply half of it twice.
     /// </summary>
-    public static async Task<T> RetryAsync<T>(Func<CancellationToken, Task<T>> work, CancellationToken ct)
+    public static Task<T> RetryAsync<T>(Func<CancellationToken, Task<T>> work, CancellationToken ct) =>
+        RetryAsync(work, ct, Attempts, IsRetryable, TimeSpan.FromMilliseconds(200));
+
+    private static bool IsRetryable(Exception exception) =>
+        exception is SqlException { Number: DeadlockVictim } or SqlException { IsTransient: true };
+
+    /// <summary>
+    /// The loop with its policy as arguments, so a test can pin the attempt cap and the
+    /// give-up-at-once behaviour without waiting out real delays. The public overload is the only
+    /// caller outside tests and fixes all three.
+    /// </summary>
+    internal static async Task<T> RetryAsync<T>(
+        Func<CancellationToken, Task<T>> work, CancellationToken ct,
+        int attempts, Func<Exception, bool> retryable, TimeSpan delayStep)
     {
         for (var attempt = 1; ; attempt++)
         {
@@ -63,9 +81,9 @@ public static class SqlServerOpen
             {
                 return await work(ct);
             }
-            catch (SqlException exception) when (exception.IsTransient && attempt < Attempts)
+            catch (Exception exception) when (retryable(exception) && attempt < attempts)
             {
-                await Task.Delay(TimeSpan.FromMilliseconds(200 * attempt), ct);
+                await Task.Delay(delayStep * attempt, ct);
             }
         }
     }

@@ -42,6 +42,7 @@ if [ -z "${HARNESS_TEST_SQLSERVER:-}" ]; then
 
   podman network create "$sql_network" >/dev/null
   podman run -d --name "$sql_name" --network "$sql_network" \
+      --memory 3g -e MSSQL_MEMORY_LIMIT_MB=2048 \
       -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD="$sql_password" \
       mcr.microsoft.com/mssql/server:2022-latest >/dev/null
 

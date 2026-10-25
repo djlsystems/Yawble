@@ -119,4 +119,110 @@ public sealed class SqlServerMigratorTests
         Assert.Contains("Connect Retry Count=7", own);
         Assert.Contains("Pooling=False", own);
     }
+
+    [Fact]
+    public async Task A_deadlock_victim_is_retried_and_completes()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var database = await SqlServerTestDatabase.CreateAsync(ct);
+        await Execute(database.ConnectionString,
+            "CREATE TABLE d1 (x INT); INSERT INTO d1 VALUES (0); CREATE TABLE d2 (x INT); INSERT INTO d2 VALUES (0);", ct);
+
+        var aHolds = new TaskCompletionSource();
+        var bHolds = new TaskCompletionSource();
+        var attempts = 0;
+
+        // A locks d1 then wants d2. On its first attempt it waits until B holds d2, so the cycle is
+        // certain; on a retry nothing is waited for.
+        var a = SqlServerOpen.RetryAsync<int>(async token =>
+        {
+            var attempt = Interlocked.Increment(ref attempts);
+            await using var connection = new SqlConnection(database.ConnectionString);
+            await connection.OpenAsync(token);
+            await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+            await Run(connection, transaction, "UPDATE d1 SET x = x + 1", token);
+            if (attempt == 1)
+            {
+                aHolds.SetResult();
+                await bHolds.Task.WaitAsync(token);
+            }
+            await Run(connection, transaction, "UPDATE d2 SET x = x + 1", token);
+            await transaction.CommitAsync(token);
+            return attempt;
+        }, ct);
+
+        // B locks d2 then wants d1, and has the higher deadlock priority so A is the victim.
+        var b = Task.Run(async () =>
+        {
+            await using var connection = new SqlConnection(database.ConnectionString);
+            await connection.OpenAsync(ct);
+            await Execute(connection, "SET DEADLOCK_PRIORITY HIGH", ct);
+            await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(ct);
+            await Run(connection, transaction, "UPDATE d2 SET x = x + 10", ct);
+            bHolds.SetResult();
+            await aHolds.Task.WaitAsync(ct);
+            await Run(connection, transaction, "UPDATE d1 SET x = x + 10", ct);
+            await transaction.CommitAsync(ct);
+        }, ct);
+
+        await b;
+        Assert.Equal(2, await a);
+        Assert.Equal(2, attempts);
+    }
+
+    [Fact]
+    public async Task A_fault_that_is_not_retryable_is_thrown_at_once()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var database = await SqlServerTestDatabase.CreateAsync(ct, applyModules: false);
+        var calls = 0;
+
+        var failure = await Assert.ThrowsAsync<SqlException>(() => SqlServerOpen.RetryAsync<int>(async token =>
+        {
+            calls++;
+            await using var connection = new SqlConnection(database.ConnectionString);
+            await connection.OpenAsync(token);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT 1/0";
+            return Convert.ToInt32(await command.ExecuteScalarAsync(token));
+        }, ct));
+
+        Assert.Equal(8134, failure.Number);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public async Task A_retryable_fault_is_attempted_three_times_and_then_thrown()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var calls = 0;
+
+        await Assert.ThrowsAsync<TimeoutException>(() => SqlServerOpen.RetryAsync<int>(
+            _ => { calls++; throw new TimeoutException(); },
+            ct, attempts: 3, retryable: e => e is TimeoutException, delayStep: TimeSpan.Zero));
+
+        Assert.Equal(3, calls);
+    }
+
+    private static async Task Execute(string connectionString, string sql, CancellationToken ct)
+    {
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync(ct);
+        await Execute(connection, sql, ct);
+    }
+
+    private static async Task Execute(SqlConnection connection, string sql, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task Run(SqlConnection connection, SqlTransaction transaction, string sql, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync(ct);
+    }
 }
