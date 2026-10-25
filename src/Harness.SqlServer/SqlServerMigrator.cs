@@ -23,14 +23,35 @@ public sealed class WrongCollationException(string actual)
 }
 
 /// <summary>
+/// The database runs READ COMMITTED with locks, so a reader waits on a writer and two writers that
+/// read before they write can each wait on the other: the stores' concurrency was written and
+/// proven under row versioning (READ_COMMITTED_SNAPSHOT ON), which Azure SQL Database has on and a
+/// SQL Server installed on premises has off.
+///
+/// A type of its own beside <see cref="WrongCollationException"/> rather than a generalisation of it:
+/// the fix is a different statement, and the sentence has to name this database so the operator can
+/// run it as written.
+/// </summary>
+public sealed class ReadCommittedSnapshotOffException(string database)
+    : InvalidOperationException(
+        $"This database ('{database}') has READ_COMMITTED_SNAPSHOT off, but the Host needs it on: its "
+        + "stores are written for readers that never wait on a writer. Run "
+        + $"ALTER DATABASE [{database}] SET READ_COMMITTED_SNAPSHOT ON (it waits for other connections "
+        + "to the database to close) and start again. Nothing was changed in this one.")
+{
+    public string Database { get; } = database;
+}
+
+/// <summary>
 /// The one thing that moves a SQL Server database's schema forward, mirroring the SQLite
 /// <see cref="SchemaMigrator"/> step for step: an ordered list, a ledger of what has run, a refusal
 /// of a database that has run something this build does not know.
 ///
 /// Differences that follow from the engine, not from taste: there is no file to copy first, so no
 /// backup is taken here (a point-in-time restore is the backup, and <see cref="ApplyAsync"/> says so
-/// by returning null); and the database's collation is checked BEFORE the ledger exists, because the
-/// ledger's own primary key would otherwise be created under the wrong rules.
+/// by returning null); the database's collation is checked BEFORE the ledger exists, because the
+/// ledger's own primary key would otherwise be created under the wrong rules; and so is row
+/// versioning (READ_COMMITTED_SNAPSHOT), which every store's concurrency is written for.
 /// </summary>
 public sealed class SqlServerMigrator(string connectionString)
 {
@@ -62,6 +83,7 @@ public sealed class SqlServerMigrator(string connectionString)
         await using var connection = await OpenAsync(ct);
 
         await EnsureCollationAsync(connection, ct);
+        await EnsureReadCommittedSnapshotAsync(connection, ct);
         await EnsureLedgerAsync(connection, ct);
 
         var applied = await ReadAppliedAsync(connection, ct);
@@ -98,6 +120,7 @@ public sealed class SqlServerMigrator(string connectionString)
         await using var connection = await OpenAsync(ct);
 
         await EnsureCollationAsync(connection, ct);
+        await EnsureReadCommittedSnapshotAsync(connection, ct);
         await EnsureLedgerAsync(connection, ct);
 
         return [.. (await ReadAppliedAsync(connection, ct)).Order(StringComparer.Ordinal)];
@@ -131,6 +154,22 @@ public sealed class SqlServerMigrator(string connectionString)
         {
             throw new WrongCollationException(actual);
         }
+    }
+
+    /// <summary>
+    /// Refused BEFORE the ledger, as the collation is: a database the stores cannot run on correctly
+    /// is left exactly as it was found, so the operator's one statement is the whole fix.
+    /// </summary>
+    private static async Task EnsureReadCommittedSnapshotAsync(SqlConnection connection, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT DB_NAME(), CAST(is_read_committed_snapshot_on AS INT) FROM sys.databases WHERE database_id = DB_ID()";
+
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        await reader.ReadAsync(ct);
+
+        if (reader.GetInt32(1) == 0) throw new ReadCommittedSnapshotOffException(reader.GetString(0));
     }
 
     private static async Task EnsureLedgerAsync(SqlConnection connection, CancellationToken ct)

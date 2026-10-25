@@ -91,6 +91,21 @@ public sealed class SqlServerMigratorTests
     }
 
     [Fact]
+    public async Task A_database_without_read_committed_snapshot_is_refused()
+    {
+        await using var database = await SqlServerTestDatabase.CreateAsync(
+            TestContext.Current.CancellationToken, applyModules: false, readCommittedSnapshot: false);
+
+        var refusal = await Assert.ThrowsAsync<ReadCommittedSnapshotOffException>(
+            () => new SqlServerMigrator(database.ConnectionString).ApplyAsync([A], TestContext.Current.CancellationToken));
+
+        Assert.Contains("READ_COMMITTED_SNAPSHOT", refusal.Message);
+        Assert.Contains($"ALTER DATABASE [{database.Name}] SET READ_COMMITTED_SNAPSHOT ON", refusal.Message);
+        Assert.False(await TableExistsAsync(database.ConnectionString, "schema_steps"));
+        Assert.False(await TableExistsAsync(database.ConnectionString, "t1"));
+    }
+
+    [Fact]
     public async Task Two_names_differing_only_in_case_are_two_rows()
     {
         await using var database = await SqlServerTestDatabase.CreateAsync(TestContext.Current.CancellationToken);

@@ -29,15 +29,21 @@ internal sealed class SqlServerTestDatabase : IAsyncDisposable
     /// <summary>A connection string for the new database.</summary>
     public string ConnectionString { get; }
 
+    /// <summary>The database's generated name.</summary>
+    public string Name => _name;
+
     /// <summary>
     /// Creates the database and, unless <paramref name="applyModules"/> is false, applies every
     /// SQL Server schema module to it. <paramref name="collation"/> exists so the refusal of a
     /// case-insensitive database can be tested; every other caller takes the default.
+    /// <paramref name="readCommittedSnapshot"/> is on, as the migrator requires and Azure SQL Database
+    /// runs by default; off exists only so the migrator's refusal of it can be tested.
     /// </summary>
     public static async Task<SqlServerTestDatabase> CreateAsync(
         CancellationToken ct = default,
         string collation = SqlServerMigrator.RequiredCollation,
-        bool applyModules = true)
+        bool applyModules = true,
+        bool readCommittedSnapshot = true)
     {
         var master = Environment.GetEnvironmentVariable(Variable);
 
@@ -56,6 +62,13 @@ internal sealed class SqlServerTestDatabase : IAsyncDisposable
             // from a test, neither of which can carry a quote; DDL takes no parameters anyway.
             create.CommandText = $"CREATE DATABASE [{name}] COLLATE {collation}";
             await create.ExecuteNonQueryAsync(ct);
+
+            // Nothing is connected to the new database yet, so the change needs no rollback of others.
+            if (readCommittedSnapshot)
+            {
+                create.CommandText = $"ALTER DATABASE [{name}] SET READ_COMMITTED_SNAPSHOT ON";
+                await create.ExecuteNonQueryAsync(ct);
+            }
         }
 
         var builder = new SqlConnectionStringBuilder(master) { InitialCatalog = name };
