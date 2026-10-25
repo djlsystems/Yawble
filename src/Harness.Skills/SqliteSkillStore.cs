@@ -1,5 +1,3 @@
-using System.Globalization;
-using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 using Harness.Contracts;
 using Harness.Identity;
@@ -20,8 +18,6 @@ public sealed class SqliteSkillStore : ISkillStore
     /// <summary>Absence means the safe value. Only the test fixture asks for anything else.</summary>
     private readonly SqliteDurability _durability;
 
-    private static readonly Regex LegalName = new("^[a-z0-9][a-z0-9-]{0,47}$", RegexOptions.Compiled);
-
     public SqliteSkillStore(string databasePath, SqliteDurability durability = SqliteDurability.SurvivesPowerLoss)
     {
         _connectionString = SqliteOpen.ConnectionString(databasePath);
@@ -29,7 +25,7 @@ public sealed class SqliteSkillStore : ISkillStore
         _durability = durability;
     }
 
-    public static bool IsLegalName(string value) => LegalName.IsMatch(value);
+    public static bool IsLegalName(string value) => SkillRules.IsLegalName(value);
 
     public async Task<IReadOnlyList<string>> ReplaceBuiltInsAsync(
         IReadOnlyList<SkillDraft> builtIns, DateTimeOffset builtAt, CancellationToken ct = default)
@@ -65,7 +61,7 @@ public sealed class SqliteSkillStore : ISkillStore
                 rename.Parameters.AddWithValue("$to", free);
                 await rename.ExecuteNonQueryAsync(ct);
 
-                moved.Add($"{skill.Name} -> {free}");
+                moved.Add(SkillRules.Moved(skill.Name, free));
             }
 
             // A team skill holding it is moved the same way, per team.
@@ -81,7 +77,7 @@ public sealed class SqliteSkillStore : ISkillStore
                 rename.Parameters.AddWithValue("$team", team);
                 await rename.ExecuteNonQueryAsync(ct);
 
-                moved.Add($"{skill.Name} -> {free} (team {team})");
+                moved.Add(SkillRules.Moved(skill.Name, free, team));
             }
 
             await InsertAsync(connection, transaction, skill, "builtin", at, null, ct);
@@ -112,11 +108,7 @@ public sealed class SqliteSkillStore : ISkillStore
         {
             var skill = Validate(draft);
 
-            if (!PluginSkillNames.Belongs(skill.Name, source))
-            {
-                throw new ArgumentException(
-                    $"'{skill.Name}' is not a name plugin '{source}' may ship: it must be {PluginSkillNames.Main(source)} or begin {PluginSkillNames.Main(source)}-.");
-            }
+            SkillRules.RequireBelongs(skill.Name, source);
 
             switch (await KindOfAsync(connection, transaction, skill.Name, ct))
             {
@@ -133,13 +125,13 @@ public sealed class SqliteSkillStore : ISkillStore
                         await rename.ExecuteNonQueryAsync(ct);
                     }
 
-                    said.Add($"a custom skill held plugin '{source}''s skill name and was relabelled: {skill.Name} -> {free}.");
+                    said.Add(SkillRules.PluginRelabelled(source, skill.Name, free));
                     break;
 
                 case "builtin" or "plugin":
                     // `plugin-a-b` is plugin `a`'s skill `b` AND plugin `a-b`'s own: the first to
                     // hold it keeps it.
-                    said.Add($"plugin '{source}''s skill {skill.Name} was not indexed: another skill already holds that name.");
+                    said.Add(SkillRules.PluginNotIndexed(source, skill.Name));
                     continue;
             }
 
@@ -171,22 +163,17 @@ public sealed class SqliteSkillStore : ISkillStore
         CancellationToken ct = default)
     {
         var fts = string.IsNullOrWhiteSpace(query) ? null : ToInertFtsQuery(query);
-        take = Math.Clamp(take, 1, 200);
+        take = SkillRules.Take(take);
 
         await using var connection = Open();
         await using var command = connection.CreateCommand();
 
         var where = new List<string>();
 
-        if (kind != SkillKindFilter.All)
+        if (SkillRules.KindOf(kind) is { } stored)
         {
             where.Add("s.kind = $kind");
-            command.Parameters.AddWithValue("$kind", kind switch
-            {
-                SkillKindFilter.BuiltIn => "builtin",
-                SkillKindFilter.Plugin => "plugin",
-                _ => "custom",
-            });
+            command.Parameters.AddWithValue("$kind", stored);
         }
 
         if (fts is not null)
@@ -231,7 +218,7 @@ public sealed class SqliteSkillStore : ISkillStore
         string role, string? team, string? query, int take, CancellationToken ct = default)
     {
         var fts = string.IsNullOrWhiteSpace(query) ? null : ToInertFtsQuery(query);
-        take = Math.Clamp(take, 1, 200);
+        take = SkillRules.Take(take);
 
         await using var connection = Open();
         await using var command = connection.CreateCommand();
@@ -313,7 +300,7 @@ public sealed class SqliteSkillStore : ISkillStore
         var exists = await TeamHoldsAsync(connection, transaction, team, clean.Name, ct);
         if (exists && !replace)
         {
-            throw new SkillRefusedException($"Team {team} already has a skill named '{clean.Name}'.");
+            throw SkillRules.TeamHolds(team, clean.Name);
         }
 
         if (exists)
@@ -359,7 +346,7 @@ public sealed class SqliteSkillStore : ISkillStore
 
             if (await TeamHoldsAsync(connection, transaction, team, clean.Name, ct))
             {
-                throw new SkillRefusedException($"Team {team} already has a skill named '{clean.Name}'.");
+                throw SkillRules.TeamHolds(team, clean.Name);
             }
         }
 
@@ -444,13 +431,9 @@ public sealed class SqliteSkillStore : ISkillStore
         await using var connection = Open();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
 
-        switch (await KindOfAsync(connection, transaction, clean.Name, ct))
+        if (SkillRules.CustomNameRefusal(await KindOfAsync(connection, transaction, clean.Name, ct), clean.Name) is { } taken)
         {
-            case "builtin":
-                throw new SkillRefusedException(
-                    $"'{clean.Name}' is a built-in skill's name. A custom skill needs a name of its own.");
-            case "custom":
-                throw new SkillRefusedException($"A custom skill named '{clean.Name}' already exists.");
+            throw taken;
         }
 
         await RefuseTeamNameAsync(connection, transaction, clean.Name, ct);
@@ -473,25 +456,17 @@ public sealed class SqliteSkillStore : ISkillStore
         {
             case null:
                 return null;
-            case "builtin":
-                throw new SkillRefusedException(
-                    $"'{name}' is a built-in skill. Built-in skills change only with the product, "
-                    + "so it cannot be edited or relabelled here.");
-            case "plugin":
-                throw new SkillRefusedException(PluginSkillNames.Locked(name, "edited or relabelled"));
+            case { } kind when SkillRules.LockedRefusal(kind, name, "edited or relabelled", "edited or relabelled here") is { } locked:
+                throw locked;
         }
 
         if (!string.Equals(name, clean.Name, StringComparison.OrdinalIgnoreCase))
         {
             RefuseReserved(clean.Name);
 
-            switch (await KindOfAsync(connection, transaction, clean.Name, ct))
+            if (SkillRules.CustomNameRefusal(await KindOfAsync(connection, transaction, clean.Name, ct), clean.Name) is { } taken)
             {
-                case "builtin":
-                    throw new SkillRefusedException(
-                        $"'{clean.Name}' is a built-in skill's name. A custom skill needs a name of its own.");
-                case "custom":
-                    throw new SkillRefusedException($"A custom skill named '{clean.Name}' already exists.");
+                throw taken;
             }
 
             await RefuseTeamNameAsync(connection, transaction, clean.Name, ct);
@@ -527,12 +502,8 @@ public sealed class SqliteSkillStore : ISkillStore
         {
             case null:
                 return false;
-            case "builtin":
-                throw new SkillRefusedException(
-                    $"'{name}' is a built-in skill. Built-in skills change only with the product, "
-                    + "so it cannot be deleted.");
-            case "plugin":
-                throw new SkillRefusedException(PluginSkillNames.Locked(name, "deleted"));
+            case { } kind when SkillRules.LockedRefusal(kind, name, "deleted", "deleted") is { } locked:
+                throw locked;
         }
 
         await using (var delete = connection.CreateCommand())
@@ -547,57 +518,18 @@ public sealed class SqliteSkillStore : ISkillStore
         return true;
     }
 
-    private static SkillDraft Validate(SkillDraft draft)
-    {
-        var name = (draft.Name ?? "").Trim();
-        RequireLegalName(name);
-
-        var description = (draft.Description ?? "").Trim();
-        if (description.Length == 0)
-        {
-            throw new ArgumentException("A skill needs a one-line description.");
-        }
-
-        if (description.Contains('\n', StringComparison.Ordinal))
-        {
-            throw new ArgumentException("A skill's description is one line.");
-        }
-
-        var body = draft.Body ?? "";
-        if (string.IsNullOrWhiteSpace(body))
-        {
-            throw new ArgumentException("A skill needs a body.");
-        }
-
-        return new SkillDraft(name, description, SkillRoles.Normalise(draft.Roles), body);
-    }
+    private static SkillDraft Validate(SkillDraft draft) => SkillRules.Validate(draft);
 
     /// <summary>A custom skill may not take a name in the plugins' namespace, installed or not.</summary>
-    private static void RefuseReserved(string name)
-    {
-        if (PluginSkillNames.IsReserved(name))
-        {
-            throw new SkillRefusedException(
-                $"'{name}' begins '{PluginSkillNames.Prefix}', which is reserved for the skills installed plugins ship. "
-                + "A custom skill needs a name of its own.");
-        }
-    }
+    private static void RefuseReserved(string name) => SkillRules.RefuseReserved(name);
 
     /// <summary>A team skill may not take an instance-wide skill's name, of any kind.</summary>
     private static async Task RefuseInstanceNameAsync(
         SqliteConnection connection, SqliteTransaction transaction, string name, CancellationToken ct)
     {
-        switch (await KindOfAsync(connection, transaction, name, ct))
+        if (SkillRules.TeamNameRefusal(await KindOfAsync(connection, transaction, name, ct), name) is { } taken)
         {
-            case "builtin":
-                throw new SkillRefusedException(
-                    $"'{name}' is a built-in skill's name. A team skill needs a name of its own.");
-            case "custom":
-                throw new SkillRefusedException(
-                    $"'{name}' is an instance-wide custom skill's name. A team skill needs a name of its own.");
-            case "plugin":
-                throw new SkillRefusedException(
-                    $"'{name}' is a plugin's skill name. A team skill needs a name of its own.");
+            throw taken;
         }
     }
 
@@ -607,8 +539,7 @@ public sealed class SqliteSkillStore : ISkillStore
     {
         if ((await TeamsHoldingAsync(connection, transaction, name, ct)) is [var team, ..])
         {
-            throw new SkillRefusedException(
-                $"'{name}' is team {team}'s skill name. An instance-wide skill needs a name no team's skill holds.");
+            throw SkillRules.TeamHoldsInstanceName(team, name);
         }
     }
 
@@ -616,7 +547,7 @@ public sealed class SqliteSkillStore : ISkillStore
     {
         command.Parameters.AddWithValue("$to", clean.Name);
         command.Parameters.AddWithValue("$description", clean.Description);
-        command.Parameters.AddWithValue("$roles", string.Join(' ', clean.Roles));
+        command.Parameters.AddWithValue("$roles", SkillRules.StoredRoles(clean.Roles));
         command.Parameters.AddWithValue("$body", clean.Body);
         command.Parameters.AddWithValue("$at", Instant.Stamp(DateTimeOffset.UtcNow));
         command.Parameters.AddWithValue("$by", (object?)by ?? DBNull.Value);
@@ -650,7 +581,7 @@ public sealed class SqliteSkillStore : ISkillStore
         insert.Parameters.AddWithValue("$name", skill.Name);
         insert.Parameters.AddWithValue("$kind", kind);
         insert.Parameters.AddWithValue("$description", skill.Description);
-        insert.Parameters.AddWithValue("$roles", string.Join(' ', SkillRoles.Normalise(skill.Roles)));
+        insert.Parameters.AddWithValue("$roles", SkillRules.StoredRoles(SkillRoles.Normalise(skill.Roles)));
         insert.Parameters.AddWithValue("$body", skill.Body);
         insert.Parameters.AddWithValue("$at", at);
         insert.Parameters.AddWithValue("$by", (object?)by ?? DBNull.Value);
@@ -707,54 +638,26 @@ public sealed class SqliteSkillStore : ISkillStore
     private static async Task<string> FreeNameAsync(
         SqliteConnection connection, SqliteTransaction transaction, string preferred, CancellationToken ct)
     {
-        var candidate = preferred.Length > 48 ? preferred[..48] : preferred;
-
-        for (var suffix = 2; await AnyHoldsAsync(connection, transaction, candidate, ct); suffix++)
+        foreach (var candidate in SkillRules.FreeNames(preferred))
         {
-            var tail = $"-{suffix}";
-            candidate = (preferred.Length + tail.Length > 48 ? preferred[..(48 - tail.Length)] : preferred) + tail;
+            if (!await AnyHoldsAsync(connection, transaction, candidate, ct)) return candidate;
         }
 
-        return candidate;
+        throw new InvalidOperationException("Unreachable: FreeNames does not end.");
     }
 
-    private static Skill Read(SqliteDataReader reader) =>
-        new(
-            reader.GetInt64(0),
-            reader.GetString(1),
-            reader.GetString(2),
-            reader.GetString(3).Split(' ', StringSplitOptions.RemoveEmptyEntries),
-            reader.GetString(4) switch
-            {
-                "builtin" => SkillKind.BuiltIn,
-                "plugin" => SkillKind.Plugin,
-                _ => SkillKind.Custom,
-            },
-            reader.GetString(5),
-            DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture),
-            reader.IsDBNull(7) ? null : reader.GetString(7),
-            reader.IsDBNull(8) ? null : reader.GetString(8),
-            reader.IsDBNull(9) ? null : reader.GetString(9));
+    private static Skill Read(SqliteDataReader reader) => SkillRules.Read(reader);
 
-    private const string Columns =
-        "s.id, s.name, s.description, s.roles, s.kind, s.body, s.updated_at, s.updated_by, s.source, s.team";
-
+    private const string Columns = SkillRules.Columns;
 
     private static string ToInertFtsQuery(string query)
     {
-        var tokens = query.Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (tokens.Length == 0) return "";
+        var tokens = SkillRules.SearchWords(query);
+        if (tokens.Count == 0) return "";
         return string.Join(" OR ", tokens.Select(token => $"\"{token.Replace("\"", "\"\"", StringComparison.Ordinal)}\""));
     }
 
-    private static void RequireLegalName(string value)
-    {
-        if (!IsLegalName(value))
-        {
-            throw new ArgumentException(
-                $"'{value}' is not a legal skill name. Use lowercase kebab-case (letters, digits, '-') and 48 characters or fewer.");
-        }
-    }
+    private static void RequireLegalName(string value) => SkillRules.RequireLegalName(value);
 
     private SqliteConnection Open()
     {

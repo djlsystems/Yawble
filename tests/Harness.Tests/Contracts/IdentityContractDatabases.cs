@@ -1,7 +1,12 @@
 using System.Data.Common;
+using Harness.Backlog;
 using Harness.Contracts;
 using Harness.Identity;
+using Harness.Skills;
+using Harness.SqlServer;
+using Harness.SqlServer.Backlog;
 using Harness.SqlServer.Identity;
+using Harness.SqlServer.Skills;
 using Microsoft.Data.Sqlite;
 using Microsoft.Data.SqlClient;
 
@@ -10,7 +15,8 @@ namespace Harness.Tests.Contracts;
 /// <summary>
 /// ONE PROVIDER'S IDENTITY STORES OVER ONE FRESH DATABASE, for the identity contracts: the accounts,
 /// principals, teams, tenant log, tenant settings and unfinished removals, each the provider's real
-/// store. Several behaviours span two of them (a deleted user's keys, a team write and its tenant row),
+/// store; and the skill index and the backlog, whose writes land their tenant rows in the same
+/// database. Several behaviours span two of them (a deleted user's keys, a team write and its tenant row),
 /// so a contract asks for the database and takes the stores it needs from it.
 ///
 /// <para>
@@ -44,6 +50,17 @@ public abstract class IdentityDatabase : IAsyncDisposable
 
     /// <summary>A bound no test's rows reach unless it asks for one.</summary>
     protected static readonly DiagnosticRetention Unbounded = new(TimeSpan.FromDays(3650), 1_000_000);
+
+    public abstract ISkillStore Skills();
+
+    /// <summary>
+    /// The backlog store, its tenant rows appended through <paramref name="audit"/>, or a store made
+    /// without a tenant row writer when it is null. <see cref="TenantRowAsync"/> is the provider's own.
+    /// </summary>
+    public abstract IBacklogStore Backlog(Func<DbConnection, DbTransaction, TriggerAudit, CancellationToken, Task>? audit);
+
+    /// <summary>The provider's one insert into <c>tenant_events</c>, inside the caller's transaction.</summary>
+    public abstract Task TenantRowAsync(DbConnection connection, DbTransaction transaction, TriggerAudit audit, CancellationToken ct);
 
     /// <summary>An open connection of the provider's own kind, for a store call inside a caller's transaction.</summary>
     public abstract Task<DbConnection> OpenConnectionAsync();
@@ -127,6 +144,14 @@ public sealed class SqliteIdentityDatabase : IdentityDatabase
     public override IDiagnosticsLog Diagnostics(DiagnosticRetention? retention = null) =>
         new SqliteDiagnosticsLog(_database.Path, retention ?? Unbounded);
 
+    public override ISkillStore Skills() => new SqliteSkillStore(_database.Path);
+
+    public override IBacklogStore Backlog(Func<DbConnection, DbTransaction, TriggerAudit, CancellationToken, Task>? audit) =>
+        new SqliteBacklogStore(_database.Path, audit: audit is null ? null : (connection, transaction, row, ct) => audit(connection, transaction, row, ct));
+
+    public override Task TenantRowAsync(DbConnection connection, DbTransaction transaction, TriggerAudit audit, CancellationToken ct) =>
+        TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
+
     public override async Task<DbConnection> OpenConnectionAsync()
     {
         var connection = new SqliteConnection($"Data Source={_database.Path};Pooling=False");
@@ -188,6 +213,14 @@ public sealed class SqlServerIdentityDatabase : IdentityDatabase
 
     public override IDiagnosticsLog Diagnostics(DiagnosticRetention? retention = null) =>
         new SqlServerDiagnosticsLog(ConnectionString, retention ?? Unbounded);
+
+    public override ISkillStore Skills() => new SqlServerSkillStore(ConnectionString);
+
+    public override IBacklogStore Backlog(Func<DbConnection, DbTransaction, TriggerAudit, CancellationToken, Task>? audit) =>
+        new SqlServerBacklogStore(ConnectionString, audit: audit is null ? null : (connection, transaction, row, ct) => audit(connection, transaction, row, ct));
+
+    public override Task TenantRowAsync(DbConnection connection, DbTransaction transaction, TriggerAudit audit, CancellationToken ct) =>
+        SqlServerTenantAuditRow.AppendAsync(connection, transaction, audit, ct);
 
     public override async Task<DbConnection> OpenConnectionAsync() => await OpenAsync();
 

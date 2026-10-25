@@ -1,4 +1,3 @@
-using System.Text.Json.Nodes;
 using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Harness.Contracts;
@@ -21,12 +20,6 @@ public sealed class SqliteBacklogStore : IBacklogStore
     private readonly string _connectionString;
     private readonly SqliteDurability _durability;
     private readonly Func<SqliteConnection, SqliteTransaction, TriggerAudit, CancellationToken, Task>? _audit;
-
-    /// <summary>
-    /// The gap a fresh item is appended with. Integers by default, so the common case - append,
-    /// append, append - never needs a midpoint at all and the positions stay readable in a dump.
-    /// </summary>
-    private const double AppendGap = 1024d;
 
     /// <param name="audit">Appends one tenant row inside a transaction of this store's, for
     /// <see cref="EditAsync"/>; the tenant log is in the same file. Without it, an edit that carries
@@ -67,17 +60,8 @@ public sealed class SqliteBacklogStore : IBacklogStore
             while (await reader.ReadAsync(ct)) rows.Add(Read(reader));
         }
 
-        // FILTERED HERE RATHER THAN IN SQL, and that is a choice worth stating: the caller's
-        // effective teams are resolved per request and are a small set, while composing an IN clause
-        // from them is the shape that invites a caller-supplied fragment. At this scale the read is
-        // the cost and the filter is free.
-        if (teams is null) return rows;
-
-        return rows
-            .Where(item => item.Team is null
-                ? includeUnlinked
-                : teams.Contains(item.Team))
-            .ToList();
+        // FILTERED HERE RATHER THAN IN SQL: see BacklogRows.Visible.
+        return BacklogRows.Visible(rows, teams, includeUnlinked);
     }
 
     public async Task<IReadOnlyList<BacklogItem>> ListArchivedAsync(
@@ -91,15 +75,8 @@ public sealed class SqliteBacklogStore : IBacklogStore
 
         var archived = await ListAsync(teams, includeUnlinked, archived: true, ct);
 
-        // ORDERED ON THE NUMBER, IN MEMORY, never on the stored key in SQL. The key is a citation
-        // (`B001F`) that sorts by name only while it is four characters wide; past that, and for
-        // any row stored in another spelling, string order and id order part company, and a
-        // cursor compared as text would skip or repeat rows at exactly that seam.
-        return archived
-            .Where(item => before is not { } cursor || item.Id < cursor)
-            .OrderByDescending(item => item.Id)
-            .Take(take)
-            .ToList();
+        // ORDERED ON THE NUMBER, IN MEMORY: see BacklogRows.ArchivedPage.
+        return BacklogRows.ArchivedPage(archived, before, take);
     }
 
     public async Task<BacklogItem?> GetAsync(long id, CancellationToken ct = default)
@@ -147,7 +124,7 @@ public sealed class SqliteBacklogStore : IBacklogStore
     {
         if (audit is not null && _audit is null)
         {
-            throw new InvalidOperationException("This backlog store was made without a tenant row writer.");
+            throw BacklogRows.NoWriter();
         }
     }
 
@@ -169,8 +146,8 @@ public sealed class SqliteBacklogStore : IBacklogStore
 
             var max = await last.ExecuteScalarAsync(ct);
             position = max is null or DBNull
-                ? AppendGap
-                : Convert.ToDouble(max, CultureInfo.InvariantCulture) + AppendGap;
+                ? BacklogRows.AppendGap
+                : Convert.ToDouble(max, CultureInfo.InvariantCulture) + BacklogRows.AppendGap;
         }
 
         long id;
@@ -214,12 +191,7 @@ public sealed class SqliteBacklogStore : IBacklogStore
         return new BacklogItem(id, team, title, body, BacklogStates.Pending, position, null, now, now, createdBy);
     }
 
-    private static TriggerAudit Naming(TriggerAudit audit, long id)
-    {
-        var detail = audit.Detail is null ? new JsonObject() : JsonNode.Parse(audit.Detail) as JsonObject;
-        if (detail is not null && !detail.ContainsKey("id")) detail["id"] = id;
-        return audit with { Subject = audit.Subject ?? Key(id), Detail = detail?.ToJsonString() ?? audit.Detail };
-    }
+    private static TriggerAudit Naming(TriggerAudit audit, long id) => BacklogRows.Naming(audit, id);
 
     public async Task UpdateAsync(
         long id,
@@ -228,14 +200,8 @@ public sealed class SqliteBacklogStore : IBacklogStore
         string? state = null,
         CancellationToken ct = default)
     {
-        // NULL LEAVES A FIELD ALONE, so the SET list is composed from what was actually passed. The
-        // alternative - a whole-record save - is the change to refuse: it writes every other column
-        // back as the caller read them, so renaming a title silently reverts a concurrent body edit.
-        var sets = new List<string>();
-
-        if (title is not null) sets.Add("title = $title");
-        if (body is not null) sets.Add("body = $body");
-        if (state is not null) sets.Add("state = $state");
+        // NULL LEAVES A FIELD ALONE: see BacklogRows.Sets.
+        var sets = BacklogRows.Sets('$', title, body, state, setOutcome: false);
 
         if (sets.Count == 0) return;
 
@@ -267,12 +233,7 @@ public sealed class SqliteBacklogStore : IBacklogStore
     {
         if (audit.Count > 0) RequireWriterFor(audit[0]);
 
-        var sets = new List<string>();
-
-        if (title is not null) sets.Add("title = $title");
-        if (body is not null) sets.Add("body = $body");
-        if (state is not null) sets.Add("state = $state");
-        if (setOutcome) sets.Add("outcome_id = $outcome");
+        var sets = BacklogRows.Sets('$', title, body, state, setOutcome);
 
         await using var connection = Open();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
@@ -340,7 +301,7 @@ public sealed class SqliteBacklogStore : IBacklogStore
             write.Transaction = transaction;
             write.CommandText = "UPDATE backlog_items SET position = $position WHERE id = $id";
             write.Parameters.AddWithValue("$id", Key(ids[i]));
-            write.Parameters.AddWithValue("$position", (i + 1) * AppendGap);
+            write.Parameters.AddWithValue("$position", (i + 1) * BacklogRows.AppendGap);
             await write.ExecuteNonQueryAsync(ct);
         }
 
@@ -541,7 +502,7 @@ public sealed class SqliteBacklogStore : IBacklogStore
         await using var command = connection.CreateCommand();
 
         command.CommandText =
-            "SELECT " + string.Join(", ", DispatchColumns.Split(',').Select(column => "d." + column.Trim()))
+            "SELECT " + BacklogRows.DispatchColumnsOf("d")
             + ", i.title, i.state, i.archived_at"
             + " FROM backlog_dispatches d JOIN backlog_items i ON i.id = d.item"
             + " WHERE d.id IN (SELECT MAX(id) FROM backlog_dispatches GROUP BY item)"
@@ -552,17 +513,14 @@ public sealed class SqliteBacklogStore : IBacklogStore
         await using var reader = await command.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            rows.Add(new BacklogCurrentDispatch(
-                ReadDispatch(reader), reader.GetString(12), reader.GetString(13), !reader.IsDBNull(14)));
+            rows.Add(BacklogRows.ReadCurrent(reader));
         }
 
         return rows;
     }
 
     /// <summary>Every column <see cref="ReadDispatch"/> reads, in its order.</summary>
-    private const string DispatchColumns =
-        "id, item, team_id, team_name, correlation, dispatched_at, dispatched_by, frozen_at, frozen_stats,"
-        + " landed_at, landed_sha, landed_branch";
+    private const string DispatchColumns = BacklogRows.DispatchColumns;
 
     public async Task<BacklogDispatch?> DispatchForCorrelationAsync(
         long correlation, CancellationToken ct = default)
@@ -615,7 +573,7 @@ public sealed class SqliteBacklogStore : IBacklogStore
         await using var reader = await command.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            rows.Add(new BacklogDispatchTip(reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetString(3)));
+            rows.Add(BacklogRows.ReadTip(reader));
         }
 
         return rows;
@@ -659,9 +617,7 @@ public sealed class SqliteBacklogStore : IBacklogStore
         await using var reader = await command.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            rows.Add(new BacklogDispatchBase(
-                reader.GetInt64(0), reader.GetString(1), reader.GetString(2),
-                reader.IsDBNull(3) ? null : reader.GetString(3), reader.GetString(4)));
+            rows.Add(BacklogRows.ReadBase(reader));
         }
 
         return rows;
@@ -762,12 +718,7 @@ public sealed class SqliteBacklogStore : IBacklogStore
         await using var reader = await command.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            rows.Add(new BacklogDispatchMissedStart(
-                reader.GetInt64(0), reader.GetString(1), reader.GetString(2),
-                reader.IsDBNull(3) ? null : reader.GetString(3),
-                reader.IsDBNull(4) ? null : reader.GetString(4),
-                reader.IsDBNull(5) ? null : reader.GetString(5),
-                reader.GetString(6)));
+            rows.Add(BacklogRows.ReadMissed(reader));
         }
 
         return rows;
@@ -792,45 +743,14 @@ public sealed class SqliteBacklogStore : IBacklogStore
         return await command.ExecuteNonQueryAsync(ct) == 1;
     }
 
-    private static BacklogItem Read(SqliteDataReader reader) =>
-        new(
-            Id(reader.GetString(0)),
-            reader.IsDBNull(1) ? null : reader.GetString(1),
-            reader.GetString(2),
-            reader.GetString(3),
-            reader.GetString(4),
-            reader.GetDouble(5),
-            reader.IsDBNull(6) ? null : reader.GetString(6),
-            reader.GetString(7),
-            reader.GetString(8),
-            reader.GetString(9))
-        {
-            OutcomeId = reader.IsDBNull(10) ? null : reader.GetString(10),
-        };
+    private static BacklogItem Read(SqliteDataReader reader) => BacklogRows.Read(reader);
 
-    private static BacklogDispatch ReadDispatch(SqliteDataReader reader) =>
-        new(
-            reader.GetInt64(0),
-            Id(reader.GetString(1)),
-            reader.GetString(2),
-            reader.GetString(3),
-            reader.GetInt64(4),
-            reader.GetString(5),
-            reader.GetString(6),
-            reader.IsDBNull(7) ? null : reader.GetString(7),
-            reader.IsDBNull(8) ? null : reader.GetString(8),
-            reader.IsDBNull(9) ? null : reader.GetString(9),
-            reader.IsDBNull(10) ? null : reader.GetString(10),
-            reader.IsDBNull(11) ? null : reader.GetString(11));
+    private static BacklogDispatch ReadDispatch(SqliteDataReader reader) => BacklogRows.ReadDispatch(reader);
 
-    /// <summary>The stored key for an item: the citation itself, <c>B001F</c>. The contract
-    /// keeps the number, so the conversion lives here and nowhere else.</summary>
-    private static string Key(long id) => PlatformBacklogId.Format(id);
+    /// <summary>The stored key for an item: see <see cref="BacklogRows.Key"/>.</summary>
+    private static string Key(long id) => BacklogRows.Key(id);
 
-    private static long Id(string key) =>
-        PlatformBacklogId.TryParse(key, out var id)
-            ? id
-            : throw new InvalidOperationException($"Backlog key '{key}' is not a backlog id.");
+    private static long Id(string key) => BacklogRows.Id(key);
 
     private static string Now() => Instant.Now();
 

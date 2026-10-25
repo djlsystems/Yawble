@@ -2,9 +2,11 @@ using Harness.Contracts;
 using Harness.Messaging;
 using Harness.Identity;
 using Harness.SqlServer;
+using Harness.SqlServer.Backlog;
 using Harness.SqlServer.Identity;
 using Harness.SqlServer.Ledger;
 using Harness.SqlServer.Messaging;
+using Harness.SqlServer.Skills;
 
 namespace Harness.Host;
 
@@ -73,6 +75,12 @@ internal sealed partial class HostComposition
 
         diagnosticsRetention = DiagnosticsRetention();
         builder.Services.AddSingleton<IDiagnosticsLog>(new SqlServerDiagnosticsLog(connection, diagnosticsRetention));
+
+        // THE SKILL INDEX AND THE BACKLOG: a team skill's write and a person's backlog change each land with
+        // its tenant row in one transaction, the backlog's through the SQL Server spelling of the tenant
+        // log's one insert, as on SQLite.
+        builder.Services.AddSingleton<ISkillStore>(new SqlServerSkillStore(connection));
+        builder.Services.AddSingleton<IBacklogStore>(new SqlServerBacklogStore(connection, audit: SqlServerTenantAuditRow.AppendAsync));
 
         StoreGuard.Check(StoreContracts.Required, SqlServerStoreRegistry.Registered);
     }

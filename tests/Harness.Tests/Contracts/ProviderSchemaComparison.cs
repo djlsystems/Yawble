@@ -30,6 +30,9 @@ internal static class ProviderSchemaComparison
     internal static readonly IReadOnlySet<string> SqlServerOnlyKeys = new HashSet<string>(StringComparer.Ordinal)
     {
         "unfinished_removals.path_key",
+        "backlog_dispatch_tips.repo_key",
+        "backlog_dispatch_bases.repo_key",
+        "backlog_dispatch_missed_starts.repo_key",
     };
 
     public static async Task AssertSameColumnsAsync(

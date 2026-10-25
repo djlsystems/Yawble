@@ -88,6 +88,8 @@ public static class SqlServerStoreRegistry
         typeof(ISiteStore),
         typeof(ITeamSolutionStore),
         typeof(IDiagnosticsLog),
+        typeof(ISkillStore),
+        typeof(IBacklogStore),
     ];
 }
 
