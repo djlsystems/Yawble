@@ -47,7 +47,8 @@ internal static class MemberReportEndpoints
                 + "called `Manager` unless it has been relabelled.")]
             string name,
             Tell request, TeamRegistry teams, ContainerHost host,
-            IMessageLog log, IPendingDeliveries pending, IOutcomeStore outcomes, HttpContext context, CancellationToken ct) =>
+            IMessageLog log, IPendingDeliveries pending, IOutcomeStore outcomes, IOutcomeLinkRows linkRows, HttpContext context,
+            CancellationToken ct) =>
         {
             // The STORED spelling, so the id built here is the one the container was registered under
             // however the caller capitalised the team.
@@ -272,18 +273,12 @@ internal static class MemberReportEndpoints
                     (_, _, _) => Task.FromResult<NewMessage?>(instructionRow),
                     async (connection, transaction, stored, token) =>
                     {
-                        var sqlite = (Microsoft.Data.Sqlite.SqliteConnection)connection;
-                        var within = (Microsoft.Data.Sqlite.SqliteTransaction)transaction;
-
-                        await OutcomeLinks.WriteAsync(
-                            sqlite, within, stored.CorrelationId, rootOutcome.Id, container.Id.Team,
+                        var detail = new { team = container.Id.Team, workflow = stored.CorrelationId, how = OutcomeLinkHow.Tell };
+                        await linkRows.WriteWithinAsync(
+                            connection, transaction, stored.CorrelationId, rootOutcome.Id, container.Id.Team,
                             tellerIsPerson ? context.User.FindFirstValue(ClaimTypes.Email) ?? from : from,
                             tellerIsPerson ? OutcomeActorKind.Person : OutcomeActorKind.Member,
                             OutcomeLinkHow.Tell,
-                            token);
-
-                        var detail = new { team = container.Id.Team, workflow = stored.CorrelationId, how = OutcomeLinkHow.Tell };
-                        await TenantAuditRow.AppendAsync(sqlite, within,
                             tellerIsPerson
                                 ? TenantLogging.Row(context, TenantActions.WorkflowOutcomeChanged, rootOutcome.Id, rootOutcome.Name, detail)
                                 : new TriggerAudit(from, null, TenantActions.WorkflowOutcomeChanged, rootOutcome.Id, rootOutcome.Name,

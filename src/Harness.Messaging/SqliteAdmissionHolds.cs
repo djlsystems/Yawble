@@ -74,8 +74,8 @@ public sealed class SqliteAdmissionHolds(string databasePath) : IAdmissionHoldLe
         await using var connection = Open();
         await using var command = connection.CreateCommand();
         command.CommandText =
-            """
-            SELECT id, team_id, team_name, member, delivery_seq, held_at, released_at, reason_kind, reason, unfinished
+            $"""
+            SELECT {LedgerFacts.HoldColumns}
             FROM admission_holds
             WHERE team_id = $team AND held_at >= $since AND held_at < $to
               AND (released_at IS NULL OR released_at >= $from)
@@ -89,20 +89,7 @@ public sealed class SqliteAdmissionHolds(string databasePath) : IAdmissionHoldLe
         var rows = new List<AdmissionHoldRow>();
         await using var reader = await command.ExecuteReaderAsync(ct);
 
-        while (await reader.ReadAsync(ct))
-        {
-            rows.Add(new AdmissionHoldRow(
-                reader.GetInt64(0),
-                reader.GetString(1),
-                reader.IsDBNull(2) ? null : reader.GetString(2),
-                reader.GetString(3),
-                reader.IsDBNull(4) ? null : reader.GetInt64(4),
-                MessageRows.ReadStamp(reader.GetString(5)),
-                reader.IsDBNull(6) ? null : MessageRows.ReadStamp(reader.GetString(6)),
-                reader.GetString(7),
-                reader.GetString(8),
-                reader.GetInt64(9) != 0));
-        }
+        while (await reader.ReadAsync(ct)) rows.Add(LedgerFacts.ReadHold(reader));
 
         return rows;
     }

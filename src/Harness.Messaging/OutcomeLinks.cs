@@ -26,11 +26,7 @@ namespace Harness.Messaging;
 /// </summary>
 public static class OutcomeLinks
 {
-    private const string LinkColumns =
-        """
-        id, correlation, outcome_id, team_id, team_name_at_link, outcome_name_at_link, set_by,
-        set_by_kind, set_at, how
-        """;
+    private const string LinkColumns = OutcomeFacts.LinkColumns;
 
     /// <summary>The root links <paramref name="stored"/> makes, when it is a dispatch or a trigger's
     /// fire whose item or trigger names an outcome. Nothing otherwise.</summary>
@@ -43,15 +39,7 @@ public static class OutcomeLinks
             return;
         }
 
-        if (!stored.Type.StartsWith(MessageTypes.InstructionPrefix, StringComparison.Ordinal)) return;
-
-        var triggerId = stored.Source.StartsWith("schedule:", StringComparison.Ordinal)
-            ? stored.Source["schedule:".Length..]
-            : stored.Source.StartsWith("trigger:", StringComparison.Ordinal)
-                ? stored.Source["trigger:".Length..]
-                : null;
-
-        if (string.IsNullOrEmpty(triggerId)) return;
+        if (OutcomeFacts.TriggerIdOf(stored) is not { } triggerId) return;
 
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -85,20 +73,8 @@ public static class OutcomeLinks
     private static async Task DispatchAsync(
         SqliteConnection connection, SqliteTransaction transaction, Message dispatched, CancellationToken ct)
     {
-        long item;
-        string? team;
-
-        try
-        {
-            using var document = JsonDocument.Parse(dispatched.Payload);
-            var root = document.RootElement;
-            if (!root.TryGetProperty("item", out var itemElement) || !itemElement.TryGetInt64(out item)) return;
-            team = root.TryGetProperty("team", out var teamElement) ? teamElement.GetString() : null;
-        }
-        catch (JsonException)
-        {
-            return;
-        }
+        if (OutcomeFacts.DispatchOf(dispatched.Payload) is not { } dispatch) return;
+        var (item, team) = dispatch;
 
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -216,26 +192,11 @@ public static class OutcomeLinks
     /// person's row carries their email; an agent's or the platform's, its id.</summary>
     public static Task AppendInheritedRowAsync(
         SqliteConnection connection, SqliteTransaction transaction, string item, string title, string outcomeId,
-        string? outcomeName, long workflow, string by, string byKind, long? linkId, string? how, CancellationToken ct)
-    {
-        var person = byKind == OutcomeActorKind.Person;
-        return TenantAuditRow.AppendAsync(
+        string? outcomeName, long workflow, string by, string byKind, long? linkId, string? how, CancellationToken ct) =>
+        TenantAuditRow.AppendAsync(
             connection, transaction,
-            new TriggerAudit(
-                person ? null : by, person ? by : null, TenantActions.BacklogItemOutcomeInherited, item, title,
-                JsonSerializer.Serialize(new
-        {
-            outcomeId,
-            outcomeName,
-            workflow,
-            link = linkId,
-            how,
-            by,
-            byKind,
-        })),
+            OutcomeFacts.InheritedAudit(item, title, outcomeId, outcomeName, workflow, by, byKind, linkId, how),
             ct);
-    }
-
 
     /// <summary>The newest link of <paramref name="correlation"/>, or null.</summary>
     public static async Task<OutcomeLink?> CurrentAsync(
@@ -261,12 +222,9 @@ public static class OutcomeLinks
     /// figures now: its id and status, or null when there is no such outcome. A chain is bounded, so
     /// a hand-edited cycle ends rather than loops.
     /// </summary>
-    public static async Task<(string Id, string Status)?> ResolveAsync(
-        SqliteConnection connection, SqliteTransaction? transaction, string outcomeId, CancellationToken ct)
-    {
-        var id = outcomeId;
-
-        for (var hop = 0; hop < 64; hop++)
+    public static Task<(string Id, string Status)?> ResolveAsync(
+        SqliteConnection connection, SqliteTransaction? transaction, string outcomeId, CancellationToken ct) =>
+        OutcomeFacts.ResolveAsync(outcomeId, async id =>
         {
             await using var command = connection.CreateCommand();
             command.Transaction = transaction;
@@ -276,27 +234,10 @@ public static class OutcomeLinks
             await using var reader = await command.ExecuteReaderAsync(ct);
             if (!await reader.ReadAsync(ct)) return null;
 
-            var status = reader.GetString(0);
-            if (status != OutcomeStatus.Merged || reader.IsDBNull(1)) return (id, status);
+            return (reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1));
+        });
 
-            id = reader.GetString(1);
-        }
-
-        return null;
-    }
-
-    public static OutcomeLink Read(SqliteDataReader reader) =>
-        new(
-            reader.GetInt64(0),
-            reader.GetInt64(1),
-            reader.IsDBNull(2) ? null : reader.GetString(2),
-            reader.IsDBNull(3) ? null : reader.GetString(3),
-            reader.IsDBNull(4) ? null : reader.GetString(4),
-            reader.IsDBNull(5) ? null : reader.GetString(5),
-            reader.GetString(6),
-            reader.GetString(7),
-            MessageRows.ReadStamp(reader.GetString(8)),
-            reader.GetString(9));
+    public static OutcomeLink Read(SqliteDataReader reader) => OutcomeFacts.ReadLink(reader);
 
     public const string Columns = LinkColumns;
 }

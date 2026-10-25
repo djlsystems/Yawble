@@ -63,6 +63,36 @@ public static class SqlServerOpen
     public static Task<T> RetryAsync<T>(Func<CancellationToken, Task<T>> work, CancellationToken ct) =>
         RetryAsync(work, ct, Attempts, IsRetryable, TimeSpan.FromMilliseconds(200));
 
+    /// <summary>
+    /// ONE UNIT OF WORK ON ITS OWN POOLED CONNECTION, retried whole by <see cref="RetryAsync{T}(Func{CancellationToken, Task{T}}, CancellationToken)"/>:
+    /// the shape every SQL Server store's call takes, here once so no store keeps its own copy.
+    /// <paramref name="connectionString"/> is the store's, already through <see cref="ConnectionString"/>.
+    /// </summary>
+    public static Task<T> RunAsync<T>(
+        string connectionString, Func<SqlConnection, CancellationToken, Task<T>> work, CancellationToken ct) =>
+        RetryAsync(
+            async token =>
+            {
+                await using var connection = new SqlConnection(connectionString);
+                await connection.OpenAsync(token);
+                return await work(connection, token);
+            },
+            ct);
+
+    /// <summary>One statement as one unit of work: the rows it changed.</summary>
+    public static Task<int> ExecuteAsync(
+        string connectionString, string sql, Action<SqlCommand> bind, CancellationToken ct) =>
+        RunAsync(
+            connectionString,
+            async (connection, token) =>
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = sql;
+                bind(command);
+                return await command.ExecuteNonQueryAsync(token);
+            },
+            ct);
+
     private static bool IsRetryable(Exception exception) =>
         exception is SqlException { Number: DeadlockVictim } or SqlException { IsTransient: true };
 

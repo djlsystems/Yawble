@@ -11,18 +11,9 @@ public sealed class SqliteUsageLedger(string databasePath) : IUsageLedger
 {
     private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 
-    private const string RunColumns =
-        """
-        run_seq, correlation, team_id, team_name, member, member_kind, agent_preset, run_outcome,
-        queued_at, started_at, ended_at, measured, tokens_in, tokens_cached_in, tokens_cache_creation,
-        tokens_out, tokens_combined, billable, trigger_source, trigger_fired_at, backfilled
-        """;
+    private const string RunColumns = LedgerFacts.RunColumns;
 
-    private const string WorkflowColumns =
-        """
-        close_seq, correlation, team_id, team_name, root_at, closed_at, how_closed,
-        outcome_id_at_close, backfilled
-        """;
+    private const string WorkflowColumns = LedgerFacts.WorkflowColumns;
 
     private SqliteConnection Open()
     {
@@ -108,20 +99,7 @@ public sealed class SqliteUsageLedger(string databasePath) : IUsageLedger
         workflowsCommand.Parameters.AddWithValue("$take", take);
         var workflows = await ReadWorkflowsAsync(workflowsCommand, ct);
 
-        var page = runs.Select(r => r.RunSeq)
-            .Concat(workflows.Select(w => w.CloseSeq))
-            .OrderDescending()
-            .Take(take)
-            .ToList();
-
-        if (page.Count == 0) return new LedgerPage([], [], null);
-
-        var floor = page[^1];
-
-        return new LedgerPage(
-            [.. runs.Where(r => r.RunSeq >= floor)],
-            [.. workflows.Where(w => w.CloseSeq >= floor)],
-            page.Count == take ? floor : null);
+        return LedgerFacts.Page(runs, workflows, take);
     }
 
     public async Task<IReadOnlyList<ContainerUsageRow>> SumForTeamAsync(string team, long floorSeq, CancellationToken ct = default)
@@ -208,31 +186,13 @@ public sealed class SqliteUsageLedger(string databasePath) : IUsageLedger
         command.Parameters.AddWithValue("$from", start);
         command.Parameters.AddWithValue("$to", end);
 
-        var rows = new Dictionary<long, UsageLedgerRow>();
-        var edges = new List<UsageLedgerRow>();
+        var read = new List<(UsageLedgerRow, long)>();
         await using (var reader = await command.ExecuteReaderAsync(ct))
         {
-            while (await reader.ReadAsync(ct))
-            {
-                var row = ReadRun(reader);
-                if (reader.GetInt64(21) == 0)
-                {
-                    if ((row.QueuedAt ?? row.StartedAt ?? row.EndedAt) < to) rows[row.RunSeq] = row;
-                }
-                else
-                {
-                    edges.Add(row);
-                }
-            }
+            while (await reader.ReadAsync(ct)) read.Add((ReadRun(reader), reader.GetInt64(21)));
         }
 
-        var named = new HashSet<string>(members.Concat(rows.Values.Select(r => r.Member)), StringComparer.OrdinalIgnoreCase);
-        foreach (var row in edges)
-        {
-            if (named.Contains(row.Member)) rows.TryAdd(row.RunSeq, row);
-        }
-
-        return [.. rows.Values.OrderBy(r => r.RunSeq)];
+        return LedgerFacts.TeamRuns(read, to, members);
     }
 
     public async Task<IReadOnlyList<UsageLedgerRow>> ReadTeamRunsEndedAsync(
@@ -265,69 +225,11 @@ public sealed class SqliteUsageLedger(string databasePath) : IUsageLedger
     private static string Stamp(DateTimeOffset at) =>
         Instant.Stamp(at);
 
-    /// <summary>One row of <see cref="RunColumns"/>, by ordinal.</summary>
-    private static UsageLedgerRow ReadRun(SqliteDataReader reader) =>
-        new(
-            reader.GetInt64(0),
-            reader.GetInt64(1),
-            Text(reader, 2),
-            Text(reader, 3),
-            reader.GetString(4),
-            Text(reader, 5),
-            Text(reader, 6),
-            reader.GetString(7),
-            At(reader, 8),
-            At(reader, 9),
-            MessageRows.ReadStamp(reader.GetString(10)),
-            reader.GetInt64(11) != 0,
-            Long(reader, 12),
-            Long(reader, 13),
-            Long(reader, 14),
-            Long(reader, 15),
-            Long(reader, 16),
-            Long(reader, 17),
-            Text(reader, 18),
-            At(reader, 19),
-            reader.GetInt64(20) != 0);
+    private static UsageLedgerRow ReadRun(SqliteDataReader reader) => LedgerFacts.ReadRun(reader);
 
-    private static async Task<IReadOnlyList<UsageLedgerRow>> ReadRunsAsync(SqliteCommand command, CancellationToken ct)
-    {
-        var rows = new List<UsageLedgerRow>();
-        await using var reader = await command.ExecuteReaderAsync(ct);
+    private static Task<IReadOnlyList<UsageLedgerRow>> ReadRunsAsync(SqliteCommand command, CancellationToken ct) =>
+        LedgerFacts.ReadRunsAsync(command, ct);
 
-        while (await reader.ReadAsync(ct)) rows.Add(ReadRun(reader));
-
-        return rows;
-    }
-
-    private static async Task<IReadOnlyList<WorkflowLedgerRow>> ReadWorkflowsAsync(SqliteCommand command, CancellationToken ct)
-    {
-        var rows = new List<WorkflowLedgerRow>();
-        await using var reader = await command.ExecuteReaderAsync(ct);
-
-        while (await reader.ReadAsync(ct))
-        {
-            rows.Add(new WorkflowLedgerRow(
-                reader.GetInt64(0),
-                reader.GetInt64(1),
-                Text(reader, 2),
-                Text(reader, 3),
-                At(reader, 4),
-                MessageRows.ReadStamp(reader.GetString(5)),
-                reader.GetString(6),
-                Text(reader, 7),
-                reader.GetInt64(8) != 0));
-        }
-
-        return rows;
-    }
-
-    private static string? Text(SqliteDataReader reader, int ordinal) =>
-        reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
-
-    private static long? Long(SqliteDataReader reader, int ordinal) =>
-        reader.IsDBNull(ordinal) ? null : reader.GetInt64(ordinal);
-
-    private static DateTimeOffset? At(SqliteDataReader reader, int ordinal) =>
-        reader.IsDBNull(ordinal) ? null : MessageRows.ReadStamp(reader.GetString(ordinal));
+    private static Task<IReadOnlyList<WorkflowLedgerRow>> ReadWorkflowsAsync(SqliteCommand command, CancellationToken ct) =>
+        LedgerFacts.ReadWorkflowsAsync(command, ct);
 }

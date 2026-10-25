@@ -24,6 +24,15 @@ public static class BacklogOutcomeStart
     /// <summary>The SQLite start, kept as one call for the operator paths and tests that hold a path.</summary>
     public static Task<int?> RunAsync(string databasePath, CancellationToken ct = default) =>
         new SqliteOutcomeStartRows(databasePath).RunAsync(ct);
+
+    /// <summary>What the inherited item's tenant row says made the link it took.</summary>
+    public const string How = "start back-fill";
+
+    /// <summary>The tenant row the done row is written with, counting the items filled.</summary>
+    public static TriggerAudit DoneAudit(string now, int filled) =>
+        new(
+            null, LedgerStart.Actor, TenantActions.TenantSettingChanged, DoneName, DoneName,
+            JsonSerializer.Serialize(new { setting = DoneName, old = (string?)null, @new = now, items = filled }));
 }
 
 /// <summary>
@@ -83,7 +92,7 @@ public sealed class SqliteOutcomeStartRows(string databasePath) : IOutcomeStartR
 
             await OutcomeLinks.AppendInheritedRowAsync(
                 connection, transaction, id, title, resolved.Id, link.OutcomeNameAtLink, correlation,
-                LedgerStart.Actor, OutcomeActorKind.Platform, link.Id, "start back-fill", ct);
+                LedgerStart.Actor, OutcomeActorKind.Platform, link.Id, BacklogOutcomeStart.How, ct);
             filled++;
         }
 
@@ -102,10 +111,7 @@ public sealed class SqliteOutcomeStartRows(string databasePath) : IOutcomeStartR
         }
 
         await TenantAuditRow.AppendAtAsync(
-            connection, transaction,
-            new TriggerAudit(
-                null, LedgerStart.Actor, TenantActions.TenantSettingChanged, BacklogOutcomeStart.DoneName, BacklogOutcomeStart.DoneName,
-                JsonSerializer.Serialize(new { setting = BacklogOutcomeStart.DoneName, old = (string?)null, @new = now, items = filled })), Instant.Parse(now), ct);
+            connection, transaction, BacklogOutcomeStart.DoneAudit(now, filled), Instant.Parse(now), ct);
 
         await transaction.CommitAsync(ct);
         return filled;

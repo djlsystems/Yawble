@@ -28,11 +28,7 @@ public sealed class SqliteOutcomeStore(
 {
     private readonly string _connectionString = SqliteOpen.ConnectionString(databasePath);
 
-    private const string OutcomeColumns =
-        """
-        id, name, description, status, merged_into, source, target_metric, target_unit, target_value,
-        created_by, created_by_kind, created_at, updated_at, confirmed_by, confirmed_at, value_amount
-        """;
+    private const string OutcomeColumns = OutcomeFacts.OutcomeColumns;
 
     private SqliteConnection Open()
     {
@@ -84,10 +80,7 @@ public sealed class SqliteOutcomeStore(
         string name, OutcomeEdit fields, OutcomeActor person, TriggerAudit audit_, CancellationToken ct = default)
     {
         if (NameRefusal(name) is { } bad) return OutcomeWrite.Refused(400, bad);
-        if (!string.IsNullOrWhiteSpace(fields.Value) && OutcomeValue.Canonical(fields.Value) is null)
-        {
-            return OutcomeWrite.Refused(400, OutcomeValue.Refusal);
-        }
+        if (OutcomeRules.ValueRefusal(fields.Value) is { } badValue) return OutcomeWrite.Refused(400, badValue);
 
         await using var connection = Open();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
@@ -171,8 +164,7 @@ public sealed class SqliteOutcomeStore(
 
         if (!outcome.IsLive)
         {
-            return OutcomeWrite.Refused(409,
-                $"The outcome \"{outcome.Name}\" is {outcome.Status}; a workflow is linked only to an active or proposed outcome.");
+            return OutcomeWrite.Refused(409, OutcomeRules.NotLive(outcome));
         }
 
         var current = await OutcomeLinks.CurrentAsync(connection, transaction, correlation, ct);
@@ -199,7 +191,7 @@ public sealed class SqliteOutcomeStore(
 
         if (await OutcomeLinks.CurrentAsync(connection, transaction, correlation, ct) is not { IsUnlink: false } current)
         {
-            return OutcomeWrite.Refused(409, $"Workflow {correlation} serves no outcome; there is nothing to unlink.");
+            return OutcomeWrite.Refused(409, OutcomeRules.NothingToUnlink(correlation));
         }
 
         var link = await OutcomeLinks.WriteAsync(
@@ -211,7 +203,7 @@ public sealed class SqliteOutcomeStore(
         {
             Subject = current.OutcomeId,
             SubjectName = from?.Name ?? current.OutcomeNameAtLink,
-            Detail = JsonSerializer.Serialize(new { team, workflow = correlation, from = current.OutcomeId, to = (string?)null }),
+            Detail = OutcomeRules.UnlinkDetail(team, correlation, current.OutcomeId),
         }, ct);
         await transaction.CommitAsync(ct);
 
@@ -230,7 +222,7 @@ public sealed class SqliteOutcomeStore(
 
         if (outcome.Status == OutcomeStatus.Merged)
         {
-            return OutcomeWrite.Refused(409, $"\"{outcome.Name}\" was merged; edit the outcome it was merged into.");
+            return OutcomeWrite.Refused(409, OutcomeRules.MergedEdit(outcome));
         }
 
         var newName = edit.Name is null ? outcome.Name : OutcomeNames.Clean(edit.Name);
@@ -242,20 +234,9 @@ public sealed class SqliteOutcomeStore(
             return OutcomeWrite.Refused(409, Taken(taken));
         }
 
-        if (edit.Value is { } asked && !string.IsNullOrWhiteSpace(asked) && OutcomeValue.Canonical(asked) is null)
-        {
-            return OutcomeWrite.Refused(400, OutcomeValue.Refusal);
-        }
+        if (OutcomeRules.ValueRefusal(edit.Value) is { } badValue) return OutcomeWrite.Refused(400, badValue);
 
-        var next = outcome with
-        {
-            Name = newName,
-            Description = edit.Description?.Trim() ?? outcome.Description,
-            TargetMetric = Target(edit.TargetMetric, outcome.TargetMetric),
-            TargetUnit = Target(edit.TargetUnit, outcome.TargetUnit),
-            TargetValue = Target(edit.TargetValue, outcome.TargetValue),
-            Value = edit.Value is null ? outcome.Value : string.IsNullOrWhiteSpace(edit.Value) ? null : OutcomeValue.Canonical(edit.Value),
-        };
+        var next = OutcomeRules.Edited(outcome, edit);
 
         if (next == outcome)
         {
@@ -292,22 +273,13 @@ public sealed class SqliteOutcomeStore(
     }
 
     public Task<OutcomeWrite> ConfirmAsync(string id, OutcomeActor person, TriggerAudit audit_, CancellationToken ct = default) =>
-        TransitionAsync(id, audit_, ct, (outcome, _) => outcome.Status == OutcomeStatus.Proposed
-                ? null
-                : $"\"{outcome.Name}\" is {outcome.Status}; only a proposed outcome is confirmed.",
-            OutcomeStatus.Active, confirmedBy: person.Id);
+        TransitionAsync(id, audit_, ct, OutcomeRules.ConfirmRefusal, OutcomeStatus.Active, confirmedBy: person.Id);
 
     public Task<OutcomeWrite> RetireAsync(string id, TriggerAudit audit_, CancellationToken ct = default) =>
-        TransitionAsync(id, audit_, ct, (outcome, _) => outcome.IsLive
-                ? null
-                : $"\"{outcome.Name}\" is {outcome.Status}; only an active or proposed outcome is retired.",
-            OutcomeStatus.Retired);
+        TransitionAsync(id, audit_, ct, OutcomeRules.RetireRefusal, OutcomeStatus.Retired);
 
     public Task<OutcomeWrite> ReactivateAsync(string id, TriggerAudit audit_, CancellationToken ct = default) =>
-        TransitionAsync(id, audit_, ct, (outcome, taken) => outcome.Status != OutcomeStatus.Retired
-                ? $"\"{outcome.Name}\" is {outcome.Status}; only a retired outcome is reactivated."
-                : taken is not null ? Taken(taken) : null,
-            OutcomeStatus.Active);
+        TransitionAsync(id, audit_, ct, OutcomeRules.ReactivateRefusal, OutcomeStatus.Active);
 
     public async Task<OutcomeWrite> MergeAsync(string id, string into, TriggerAudit audit_, CancellationToken ct = default)
     {
@@ -338,18 +310,7 @@ public sealed class SqliteOutcomeStore(
 
     /// <summary>Why <paramref name="outcome"/> cannot be merged into <paramref name="target"/>, or null.
     /// The preview asks the same.</summary>
-    public static string? MergeRefusal(Outcome outcome, Outcome target)
-    {
-        if (outcome.Id == target.Id) return "An outcome cannot be merged into itself.";
-        if (!outcome.IsLive && outcome.Status != OutcomeStatus.Retired)
-        {
-            return $"\"{outcome.Name}\" is already merged.";
-        }
-
-        return target.IsLive
-            ? null
-            : $"\"{target.Name}\" is {target.Status}; an outcome is merged only into an active or proposed one.";
-    }
+    public static string? MergeRefusal(Outcome outcome, Outcome target) => OutcomeRules.MergeRefusal(outcome, target);
 
     public async Task<OutcomeWrite> RejectAsync(string id, TriggerAudit audit_, CancellationToken ct = default)
     {
@@ -360,8 +321,7 @@ public sealed class SqliteOutcomeStore(
 
         if (outcome.Status != OutcomeStatus.Proposed)
         {
-            return OutcomeWrite.Refused(409,
-                $"\"{outcome.Name}\" is {outcome.Status}; only a proposed outcome is rejected. Retire it instead.");
+            return OutcomeWrite.Refused(409, OutcomeRules.NotProposed(outcome));
         }
 
         var links = await CountAsync(connection, transaction,
@@ -371,10 +331,7 @@ public sealed class SqliteOutcomeStore(
 
         if (links > 0 || mergedIn > 0)
         {
-            return OutcomeWrite.Refused(409,
-                $"\"{outcome.Name}\" is linked to {links} workflow{(links == 1 ? "" : "s")}"
-                + (mergedIn > 0 ? $" and has {mergedIn} outcome{(mergedIn == 1 ? "" : "s")} merged into it" : "")
-                + ", so it is not rejected: a link is never rewritten. Merge it into another outcome, or retire it.");
+            return OutcomeWrite.Refused(409, OutcomeRules.StillNamed(outcome, links, mergedIn));
         }
 
         await using (var delete = connection.CreateCommand())
@@ -501,7 +458,7 @@ public sealed class SqliteOutcomeStore(
         }).ToList();
         command.CommandText =
             $"""
-            SELECT seq, occurred_at, actor_id, actor_email, action, subject, subject_name, detail
+            SELECT {OutcomeFacts.EventColumns}
             FROM tenant_events
             WHERE action LIKE 'outcome.%' AND subject IN ({string.Join(", ", parameters)})
             ORDER BY seq
@@ -509,12 +466,7 @@ public sealed class SqliteOutcomeStore(
 
         var rows = new List<TenantEvent>();
         await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            rows.Add(new TenantEvent(
-                reader.GetInt64(0), MessageRows.ReadStamp(reader.GetString(1)), Text(reader, 2), Text(reader, 3),
-                reader.GetString(4), Text(reader, 5), Text(reader, 6), Text(reader, 7)));
-        }
+        while (await reader.ReadAsync(ct)) rows.Add(OutcomeFacts.ReadEvent(reader));
 
         return rows;
     }
@@ -534,12 +486,7 @@ public sealed class SqliteOutcomeStore(
 
         var rows = new List<OutcomeBacklogItem>();
         await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-        {
-            rows.Add(new OutcomeBacklogItem(
-                reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetInt64(3) != 0,
-                Text(reader, 4), Text(reader, 5), Text(reader, 6), Long(reader, 7), At(reader, 8), At(reader, 9)));
-        }
+        while (await reader.ReadAsync(ct)) rows.Add(OutcomeFacts.ReadBacklogItem(reader));
 
         return rows;
     }
@@ -560,10 +507,8 @@ public sealed class SqliteOutcomeStore(
 
         await using var runs = connection.CreateCommand();
         runs.CommandText =
-            """
-            SELECT run_seq, correlation, team_id, team_name, member, member_kind, agent_preset, run_outcome,
-                   queued_at, started_at, ended_at, measured, tokens_in, tokens_cached_in, tokens_cache_creation,
-                   tokens_out, tokens_combined, billable, trigger_source, trigger_fired_at, backfilled
+            $"""
+            SELECT {LedgerFacts.RunColumns}
             FROM usage_ledger
             WHERE ended_at >= $from AND ended_at < $to
             ORDER BY run_seq
@@ -571,43 +516,20 @@ public sealed class SqliteOutcomeStore(
         runs.Parameters.AddWithValue("$from", Stamp(from ?? DateTimeOffset.MinValue));
         runs.Parameters.AddWithValue("$to", Stamp(to ?? DateTimeOffset.MaxValue));
 
-        var runRows = new List<UsageLedgerRow>();
-        await using (var reader = await runs.ExecuteReaderAsync(ct))
-        {
-            while (await reader.ReadAsync(ct))
-            {
-                runRows.Add(new UsageLedgerRow(
-                    reader.GetInt64(0), reader.GetInt64(1), Text(reader, 2), Text(reader, 3), reader.GetString(4),
-                    Text(reader, 5), Text(reader, 6), reader.GetString(7), At(reader, 8), At(reader, 9),
-                    MessageRows.ReadStamp(reader.GetString(10)), reader.GetInt64(11) != 0, Long(reader, 12),
-                    Long(reader, 13), Long(reader, 14), Long(reader, 15), Long(reader, 16), Long(reader, 17),
-                    Text(reader, 18), At(reader, 19), reader.GetInt64(20) != 0));
-            }
-        }
+        var runRows = await LedgerFacts.ReadRunsAsync(runs, ct);
 
         // EVERY WORKFLOW'S NEWEST CLOSE, whatever the window: whether a workflow is open or completed
         // is its state now.
         await using var closes = connection.CreateCommand();
         closes.CommandText =
-            """
-            SELECT close_seq, correlation, team_id, team_name, root_at, closed_at, how_closed,
-                   outcome_id_at_close, backfilled
+            $"""
+            SELECT {LedgerFacts.WorkflowColumns}
             FROM workflow_ledger w
             WHERE w.close_seq = (SELECT MAX(n.close_seq) FROM workflow_ledger n WHERE n.correlation = w.correlation)
             ORDER BY w.correlation
             """;
 
-        var closeRows = new List<WorkflowLedgerRow>();
-        await using (var reader = await closes.ExecuteReaderAsync(ct))
-        {
-            while (await reader.ReadAsync(ct))
-            {
-                closeRows.Add(new WorkflowLedgerRow(
-                    reader.GetInt64(0), reader.GetInt64(1), Text(reader, 2), Text(reader, 3), At(reader, 4),
-                    MessageRows.ReadStamp(reader.GetString(5)), reader.GetString(6), Text(reader, 7),
-                    reader.GetInt64(8) != 0));
-            }
-        }
+        var closeRows = await LedgerFacts.ReadWorkflowsAsync(closes, ct);
 
         await using var teams = connection.CreateCommand();
         teams.CommandText = "SELECT id, COALESCE(name, id) FROM teams";
@@ -682,8 +604,7 @@ public sealed class SqliteOutcomeStore(
         insert.Parameters.AddWithValue("$metric", (object?)Target(fields.TargetMetric, null) ?? DBNull.Value);
         insert.Parameters.AddWithValue("$unit", (object?)Target(fields.TargetUnit, null) ?? DBNull.Value);
         insert.Parameters.AddWithValue("$value", (object?)Target(fields.TargetValue, null) ?? DBNull.Value);
-        insert.Parameters.AddWithValue("$amount",
-            (object?)(string.IsNullOrWhiteSpace(fields.Value) ? null : OutcomeValue.Canonical(fields.Value)) ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$amount", (object?)OutcomeRules.NewValue(fields.Value) ?? DBNull.Value);
         insert.Parameters.AddWithValue("$by", actor.Id);
         insert.Parameters.AddWithValue("$kind", actor.Kind);
         insert.Parameters.AddWithValue("$at", now);
@@ -694,29 +615,15 @@ public sealed class SqliteOutcomeStore(
         return (await FindAsync(connection, transaction, id, ct))!;
     }
 
-    private static string? Target(string? edited, string? current) =>
-        edited is null ? current : string.IsNullOrWhiteSpace(edited) ? null : edited.Trim();
+    private static string? Target(string? edited, string? current) => OutcomeRules.Target(edited, current);
 
-    private static string? NameRefusal(string name)
-    {
-        if (string.IsNullOrWhiteSpace(name)) return "An outcome needs a name: the result it produces.";
-        return OutcomeNames.Clean(name).Length > OutcomeNames.MaxLength
-            ? $"An outcome's name is at most {OutcomeNames.MaxLength} characters."
-            : null;
-    }
+    private static string? NameRefusal(string name) => OutcomeRules.NameRefusal(name);
 
-    private static string Taken(Outcome taken) =>
-        $"An {taken.Status} outcome is already named \"{taken.Name}\" ({taken.Id}); names are unique among active and proposed outcomes.";
+    private static string Taken(Outcome taken) => OutcomeRules.Taken(taken);
 
-    private static string PersonsLink(long correlation, OutcomeLink current) =>
-        current.IsUnlink
-            ? $"Workflow {correlation} was set to no outcome by a person ({current.SetBy}); only a person "
-              + "links it again. A Manager may link a workflow no one has linked, or move one an agent linked."
-            : $"Workflow {correlation} is linked to \"{current.OutcomeNameAtLink}\" by a {current.How} "
-              + $"({current.SetBy}), which a person caused; only a person moves it. A Manager may link a workflow "
-              + "with no outcome, or move one an agent linked.";
+    private static string PersonsLink(long correlation, OutcomeLink current) => OutcomeRules.PersonsLink(correlation, current);
 
-    private static OutcomeWrite Missing(string id) => OutcomeWrite.Refused(404, $"No outcome '{id}'.");
+    private static OutcomeWrite Missing(string id) => OutcomeRules.Missing(id);
 
     private static async Task<Outcome?> FindAsync(
         SqliteConnection connection, SqliteTransaction? transaction, string id, CancellationToken ct)
@@ -751,40 +658,12 @@ public sealed class SqliteOutcomeStore(
         return (long)(await command.ExecuteScalarAsync(ct))!;
     }
 
-    private static async Task<IReadOnlyList<Outcome>> ReadOutcomesAsync(SqliteCommand command, CancellationToken ct)
-    {
-        var rows = new List<Outcome>();
-        await using var reader = await command.ExecuteReaderAsync(ct);
+    private static Task<IReadOnlyList<Outcome>> ReadOutcomesAsync(SqliteCommand command, CancellationToken ct) =>
+        OutcomeFacts.ReadOutcomesAsync(command, ct);
 
-        while (await reader.ReadAsync(ct))
-        {
-            rows.Add(new Outcome(
-                reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
-                Text(reader, 4), reader.GetString(5), Text(reader, 6), Text(reader, 7), Text(reader, 8),
-                reader.GetString(9), reader.GetString(10), MessageRows.ReadStamp(reader.GetString(11)),
-                MessageRows.ReadStamp(reader.GetString(12)), Text(reader, 13), At(reader, 14), Text(reader, 15)));
-        }
-
-        return rows;
-    }
-
-    private static async Task<IReadOnlyList<OutcomeLink>> ReadLinksAsync(SqliteCommand command, CancellationToken ct)
-    {
-        var rows = new List<OutcomeLink>();
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct)) rows.Add(OutcomeLinks.Read(reader));
-        return rows;
-    }
+    private static Task<IReadOnlyList<OutcomeLink>> ReadLinksAsync(SqliteCommand command, CancellationToken ct) =>
+        OutcomeFacts.ReadLinksAsync(command, ct);
 
     private static string Stamp(DateTimeOffset at) =>
         Instant.Stamp(at);
-
-    private static string? Text(SqliteDataReader reader, int ordinal) =>
-        reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
-
-    private static long? Long(SqliteDataReader reader, int ordinal) =>
-        reader.IsDBNull(ordinal) ? null : reader.GetInt64(ordinal);
-
-    private static DateTimeOffset? At(SqliteDataReader reader, int ordinal) =>
-        reader.IsDBNull(ordinal) ? null : MessageRows.ReadStamp(reader.GetString(ordinal));
 }

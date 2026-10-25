@@ -51,6 +51,12 @@ public static class LedgerStart
     /// <summary>The SQLite start, kept as one call for the operator paths and tests that hold a path.</summary>
     public static Task<LedgerStartResult> RunAsync(string databasePath, CancellationToken ct = default) =>
         new SqliteLedgerStartRows(databasePath).RunAsync(ct);
+
+    /// <summary>The tenant row a start setting is written with: a setting set from nothing, by the platform.</summary>
+    public static TriggerAudit SettingAudit(string name, string value) =>
+        new(
+            null, Actor, TenantActions.TenantSettingChanged, name, name,
+            JsonSerializer.Serialize(new { setting = name, old = (string?)null, @new = value }));
 }
 
 /// <summary>
@@ -188,9 +194,6 @@ public sealed class SqliteLedgerStartRows(string databasePath) : ILedgerStartRow
         }
 
         await TenantAuditRow.AppendAtAsync(
-            connection, transaction,
-            new TriggerAudit(
-                null, LedgerStart.Actor, TenantActions.TenantSettingChanged, name, name,
-                JsonSerializer.Serialize(new { setting = name, old = (string?)null, @new = value })), Instant.Parse(at), ct);
+            connection, transaction, LedgerStart.SettingAudit(name, value), Instant.Parse(at), ct);
     }
 }

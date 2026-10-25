@@ -142,12 +142,5 @@ public sealed class SqlServerWakeStore(string connectionString) : IWakeStore
             ct);
 
     private Task<T> RunAsync<T>(Func<SqlConnection, CancellationToken, Task<T>> work, CancellationToken ct) =>
-        SqlServerOpen.RetryAsync(
-            async token =>
-            {
-                await using var connection = new SqlConnection(_connectionString);
-                await connection.OpenAsync(token);
-                return await work(connection, token);
-            },
-            ct);
+        SqlServerOpen.RunAsync(_connectionString, work, ct);
 }

@@ -22,6 +22,7 @@ public static class StoreContracts
         typeof(IUsageLedger),
         typeof(IAdmissionHoldLedger),
         typeof(IOutcomeStore),
+        typeof(IOutcomeLinkRows),
         typeof(IPendingDeliveries),
         typeof(IWakeStore),
         typeof(IUserStore),
@@ -68,6 +69,15 @@ public static class SqlServerStoreRegistry
         typeof(ISubscriptions),
         typeof(IPendingDeliveries),
         typeof(IWakeStore),
+        typeof(ILedger),
+        typeof(IUsageLedger),
+        typeof(IAdmissionHoldLedger),
+        typeof(IOutcomeStore),
+        typeof(IOutcomeLinkRows),
+        typeof(ILogSpend),
+        typeof(ILedgerStartRows),
+        typeof(IOutcomeStartRows),
+        typeof(ILogRetention),
     ];
 }
 

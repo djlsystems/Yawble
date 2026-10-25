@@ -1,5 +1,6 @@
 using Harness.Contracts;
 using Harness.Messaging;
+using Harness.SqlServer.Ledger;
 using Harness.SqlServer.Messaging;
 
 namespace Harness.Tests.Contracts;
@@ -90,7 +91,7 @@ public sealed class SqlServerCursorsTests : CursorsContract
     private SqlServerContractDatabase? _database;
 
     protected override async Task<ICursors> CreateAsync() =>
-        new SqlServerMessageStore((_database = await SqlServerContractDatabase.CreateAsync(Ct)).ConnectionString);
+        new SqlServerMessageStore((_database = await SqlServerContractDatabase.CreateAsync(Ct)).ConnectionString, new SqlServerAppendRows());
 
     public override async ValueTask DisposeAsync()
     {

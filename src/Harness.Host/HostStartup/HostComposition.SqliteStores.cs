@@ -71,6 +71,7 @@ internal sealed partial class HostComposition
         var outcomeStore = new SqliteOutcomeStore(database, TenantAuditRow.AppendAsync);
         builder.Services.AddSingleton(outcomeStore);
         builder.Services.AddSingleton<IOutcomeStore>(outcomeStore);
+        builder.Services.AddSingleton<IOutcomeLinkRows>(new SqliteOutcomeLinkRows());
 
         // THE GATE, read through a delegate so a person's change applies to the next declaration.
         builder.Services.AddSingleton(sp => new OutcomeGate(

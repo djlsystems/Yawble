@@ -21,7 +21,7 @@ namespace Harness.SqlServer.Messaging;
 /// endings view reads <c>seq &gt; last</c> and moves past what it saw. SQL Server hands out an
 /// IDENTITY at insert and commits transactions in any order, so seq 11 could commit and be read and
 /// passed before seq 10 commits - and 10 would never be read by anyone. So every append takes one
-/// exclusive application lock, held until its transaction ends (<see cref="TakeAppendLockAsync"/>),
+/// exclusive application lock, held until its transaction ends (<see cref="SqlServerAppendLock"/>),
 /// before it inserts: the next append cannot take a seq until this one has committed or rolled back,
 /// which makes allocation order commit order. A rolled-back append leaves a gap no row will ever
 /// fill, which no reader can skip a row through.
@@ -34,50 +34,24 @@ namespace Harness.SqlServer.Messaging;
 /// </summary>
 public sealed class SqlServerMessageStore : IMessageLog, ICursors, ISubscriptions
 {
-    /// <summary>The one application lock every append takes; see the class remarks.</summary>
-    private const string AppendLock = "messages.append";
-
     private readonly string _connectionString;
     private readonly MessageWaitRegistry? _waits;
-    private readonly ISqlServerAppendRows? _appendRows;
+    private readonly ISqlServerAppendRows _appendRows;
 
-    /// <param name="appendRows">The ledger and outcome rows written in each append's transaction.</param>
-    public SqlServerMessageStore(string connectionString, MessageWaitRegistry? waits = null, ISqlServerAppendRows? appendRows = null)
+    /// <param name="appendRows">The ledger and outcome rows written in each append's transaction.
+    /// Required: an append without them would leave a run unbilled and a root unlinked.</param>
+    public SqlServerMessageStore(string connectionString, ISqlServerAppendRows appendRows, MessageWaitRegistry? waits = null)
     {
         _connectionString = SqlServerOpen.ConnectionString(connectionString);
+        _appendRows = appendRows ?? throw new ArgumentNullException(nameof(appendRows));
         _waits = waits;
-        _appendRows = appendRows;
     }
 
     private Task<T> RunAsync<T>(Func<SqlConnection, CancellationToken, Task<T>> work, CancellationToken ct) =>
-        SqlServerOpen.RetryAsync(
-            async token =>
-            {
-                await using var connection = new SqlConnection(_connectionString);
-                await connection.OpenAsync(token);
-                return await work(connection, token);
-            },
-            ct);
+        SqlServerOpen.RunAsync(_connectionString, work, ct);
 
-    /// <summary>
-    /// TAKES THE APPEND LOCK for the rest of <paramref name="transaction"/>. Re-entrant: a second take
-    /// in the same transaction is granted at once, so an insert can take it whether or not its caller
-    /// already has. It is the first lock an append takes, so a transaction waiting on it holds nothing
-    /// another could be waiting for, and it cannot be part of a deadlock.
-    /// </summary>
-    private static async Task TakeAppendLockAsync(SqlConnection connection, SqlTransaction transaction, CancellationToken ct)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText =
-            $"""
-            DECLARE @granted INT;
-            EXEC @granted = sp_getapplock @Resource = N'{AppendLock}', @LockMode = N'Exclusive', @LockOwner = N'Transaction';
-            IF @granted < 0 THROW 51000, N'The message log could not take its append lock.', 1;
-            """;
-
-        await command.ExecuteNonQueryAsync(ct);
-    }
+    private static Task TakeAppendLockAsync(SqlConnection connection, SqlTransaction transaction, CancellationToken ct) =>
+        SqlServerAppendLock.TakeAsync(connection, transaction, ct);
 
     public async Task<Message> AppendAsync(NewMessage message, CancellationToken ct = default)
     {
@@ -204,7 +178,7 @@ public sealed class SqlServerMessageStore : IMessageLog, ICursors, ISubscription
 
         // THE ACCOUNTING AND THE OUTCOME LINK, IN THIS SAME TRANSACTION, as SqliteMessageStore writes
         // its LedgerRows and OutcomeLinks: when either throws, the row is not stored either.
-        if (_appendRows is not null) await _appendRows.OnAppendAsync(connection, transaction, stored, ct);
+        await _appendRows.OnAppendAsync(connection, transaction, stored, ct);
 
         return stored;
     }
@@ -1330,6 +1304,12 @@ public sealed class SqlServerMessageStore : IMessageLog, ICursors, ISubscription
             async (connection, token) =>
             {
                 await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+
+                // UNDER THE APPEND LOCK, as SQLite's one writer is: an append citing a row this
+                // decides no one cites would otherwise commit beside the delete, and the cause's
+                // foreign key would fail one of the two instead of the row being retained.
+                await TakeAppendLockAsync(connection, transaction, token);
+
                 var purged = 0;
 
                 while (true)
@@ -1504,13 +1484,5 @@ public sealed class SqlServerMessageStore : IMessageLog, ICursors, ISubscription
             ct);
 
     private Task<int> ExecuteAsync(string sql, Action<SqlCommand> bind, CancellationToken ct) =>
-        RunAsync(
-            async (connection, token) =>
-            {
-                await using var command = connection.CreateCommand();
-                command.CommandText = sql;
-                bind(command);
-                return await command.ExecuteNonQueryAsync(token);
-            },
-            ct);
+        SqlServerOpen.ExecuteAsync(_connectionString, sql, bind, ct);
 }

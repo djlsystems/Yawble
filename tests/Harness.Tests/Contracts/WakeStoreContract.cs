@@ -1,5 +1,6 @@
 using Harness.Contracts;
 using Harness.Messaging;
+using Harness.SqlServer.Ledger;
 using Harness.SqlServer.Messaging;
 
 namespace Harness.Tests.Contracts;
@@ -139,7 +140,7 @@ public sealed class SqlServerWakeStoreTests : WakeStoreContract
     protected override async Task<IWakeStore> CreateAsync() =>
         new SqlServerWakeStore((_database = await SqlServerContractDatabase.CreateAsync(Ct)).ConnectionString);
 
-    protected override IMessageLog Log => new SqlServerMessageStore(_database!.ConnectionString);
+    protected override IMessageLog Log => new SqlServerMessageStore(_database!.ConnectionString, new SqlServerAppendRows());
 
     public override async ValueTask DisposeAsync()
     {

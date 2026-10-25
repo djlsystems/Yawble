@@ -190,7 +190,7 @@ internal sealed partial class HostComposition
         // is printed and the host starts anyway - the backfill's own row is what marks it done, so the next
         // start tries again, and rows recovered then are keyed so none is counted twice.
         ledgerStart = null;
-        var (ledgerRows, outcomeRows) = StartRowsFor(databaseOptions.Provider, database);
+        var (ledgerRows, outcomeRows) = StartRowsFor(databaseOptions, database);
         if (ledgerRows is not null)
         try
         {
@@ -226,11 +226,16 @@ internal sealed partial class HostComposition
         return true;
     }
 
-    // THE ONE PLACE THE PROVIDER CHOOSES THE START STEPS' ROWS. Only SQLite has them today. A sqlserver
-    // start answers none and skips both steps: the store guard refuses it right after, naming the missing
-    // stores, so a step that cannot run is not run against a file it was never meant for.
-    private static (ILedgerStartRows? Ledger, IOutcomeStartRows? Outcome) StartRowsFor(DatabaseProvider provider, string database) =>
-        provider == DatabaseProvider.Sqlite
-            ? (new SqliteLedgerStartRows(database), new SqliteOutcomeStartRows(database))
-            : (null, null);
+    // THE ONE PLACE THE PROVIDER CHOOSES THE START STEPS' ROWS: each provider's own, so `instance.id` and
+    // both back-fills run wherever the Host runs. SQL Server's are handed the configured connection string
+    // the chooser read (`DatabaseOptions`), not the SQLite file's path; a provider with neither answers
+    // none and both steps are skipped.
+    private static (ILedgerStartRows? Ledger, IOutcomeStartRows? Outcome) StartRowsFor(DatabaseOptions options, string database) =>
+        options.Provider switch
+        {
+            DatabaseProvider.Sqlite => (new SqliteLedgerStartRows(database), new SqliteOutcomeStartRows(database)),
+            DatabaseProvider.SqlServer when options.Connection is { } connection =>
+                (new Harness.Host.SqlServer.SqlServerLedgerStartRows(connection), new Harness.Host.SqlServer.SqlServerOutcomeStartRows(connection)),
+            _ => (null, null),
+        };
 }

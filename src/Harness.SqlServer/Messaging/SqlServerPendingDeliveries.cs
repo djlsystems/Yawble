@@ -19,25 +19,18 @@ namespace Harness.SqlServer.Messaging;
 public sealed class SqlServerPendingDeliveries : IPendingDeliveries
 {
     private readonly string _connectionString;
-    private readonly ISqlServerAppendRows? _appendRows;
+    private readonly ISqlServerAppendRows _appendRows;
 
     /// <param name="appendRows">Writes the delivery's ledger row in the same transaction, as
     /// <c>SqlitePendingDeliveries.AddAsync</c> writes <c>delivery_ledger</c>.</param>
-    public SqlServerPendingDeliveries(string connectionString, ISqlServerAppendRows? appendRows = null)
+    public SqlServerPendingDeliveries(string connectionString, ISqlServerAppendRows appendRows)
     {
         _connectionString = SqlServerOpen.ConnectionString(connectionString);
-        _appendRows = appendRows;
+        _appendRows = appendRows ?? throw new ArgumentNullException(nameof(appendRows));
     }
 
     private Task<T> RunAsync<T>(Func<SqlConnection, CancellationToken, Task<T>> work, CancellationToken ct) =>
-        SqlServerOpen.RetryAsync(
-            async token =>
-            {
-                await using var connection = new SqlConnection(_connectionString);
-                await connection.OpenAsync(token);
-                return await work(connection, token);
-            },
-            ct);
+        SqlServerOpen.RunAsync(_connectionString, work, ct);
 
     /// <summary>
     /// NOTHING on a delivery already recorded, so a re-offer of one in flight does not look
@@ -65,7 +58,7 @@ public sealed class SqlServerPendingDeliveries : IPendingDeliveries
                     await command.ExecuteNonQueryAsync(token);
                 }
 
-                if (_appendRows is not null) await _appendRows.OnDeliveryAsync(connection, transaction, seq, token);
+                await _appendRows.OnDeliveryAsync(connection, transaction, seq, token);
 
                 await transaction.CommitAsync(token);
                 return true;
@@ -180,13 +173,5 @@ public sealed class SqlServerPendingDeliveries : IPendingDeliveries
     }
 
     private Task<int> ExecuteAsync(string sql, Action<SqlCommand> bind, CancellationToken ct) =>
-        RunAsync(
-            async (connection, token) =>
-            {
-                await using var command = connection.CreateCommand();
-                command.CommandText = sql;
-                bind(command);
-                return await command.ExecuteNonQueryAsync(token);
-            },
-            ct);
+        SqlServerOpen.ExecuteAsync(_connectionString, sql, bind, ct);
 }

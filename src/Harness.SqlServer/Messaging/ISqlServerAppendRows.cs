@@ -16,9 +16,9 @@ namespace Harness.SqlServer.Messaging;
 /// </para>
 ///
 /// <para>
-/// OPTIONAL ON THE STORES, and absent means nothing is written beside the row. The Host only starts
-/// on SQL Server once every store interface has a SQL Server version, and the ledger's is the one
-/// that supplies this, so a running Host never appends without it.
+/// REQUIRED BY BOTH STORES: an append that skipped it would leave a run unbilled and a root unlinked,
+/// which SQLite's one insert path cannot do. The ledger module's <c>SqlServerAppendRows</c> is the
+/// implementation the Host passes.
 /// </para>
 /// </summary>
 public interface ISqlServerAppendRows

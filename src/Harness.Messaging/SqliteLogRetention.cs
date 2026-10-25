@@ -129,32 +129,15 @@ public sealed class SqliteLogRetention(string databasePath) : ILogRetention
              """;
         Bind(command, cutoff);
 
-        var chosen = new List<long>();
-        var workflow = new List<long>();
-        long? current = null;
-
-        void Close()
-        {
-            if (workflow.Count > 0 && chosen.Count + workflow.Count <= max) chosen.AddRange(workflow);
-            workflow.Clear();
-        }
+        var whole = new LedgerFacts.WholeWorkflows(max);
 
         await using var reader = await command.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            var correlation = reader.GetInt64(0);
-            if (correlation != current)
-            {
-                Close();
-                if (chosen.Count >= max) break;
-                current = correlation;
-            }
-
-            workflow.Add(reader.GetInt64(1));
+            if (!whole.Add(reader.GetInt64(0), reader.GetInt64(1))) break;
         }
 
-        Close();
-        return chosen;
+        return whole.Finish();
     }
 
     private static void Bind(SqliteCommand command, DateTimeOffset cutoff)

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Harness.Contracts;
 using Harness.Host;
 using Harness.Messaging;
+using Harness.SqlServer.Ledger;
 using Harness.SqlServer.Messaging;
 
 namespace Harness.Tests.Contracts;
@@ -734,8 +735,7 @@ public sealed class SqlServerMessageLogTests : MessageLogContract
     protected override async Task<IMessageLog> CreateAsync()
     {
         _database = await SqlServerContractDatabase.CreateAsync(Ct);
-        await _database.EnsureLedgerReadTablesAsync(Ct);
-        return new SqlServerMessageStore(_database.ConnectionString);
+        return new SqlServerMessageStore(_database.ConnectionString, new SqlServerAppendRows());
     }
 
     public override async ValueTask DisposeAsync()

@@ -1,7 +1,7 @@
-using System.Globalization;
 using System.Text.Json;
 using Harness.Contracts;
 using Microsoft.Data.Sqlite;
+using static Harness.Messaging.LedgerFacts;
 
 namespace Harness.Messaging;
 
@@ -91,13 +91,13 @@ public static class LedgerRows
     /// <summary>A `completed` or `failed` row that carries its run: not a batched run's extra row.</summary>
     public static bool IsRunTerminal(Message row) =>
         row.Type is MessageTypes.Completed or MessageTypes.Failed
-        && !HasField(row.Payload, PayloadFields.UsageCountedOn);
+        && !LedgerFacts.HasField(row.Payload, PayloadFields.UsageCountedOn);
 
     private static async Task<bool> WriteRunAsync(
         SqliteConnection connection, SqliteTransaction transaction, Message terminal, bool backfilled,
         CancellationToken ct)
     {
-        var (teamId, member) = Split(terminal.Source);
+        var (teamId, member) = LedgerFacts.Split(terminal.Source);
 
         // THE DELIVERY THIS ROW CLOSED: when it was queued and the trigger fire it answered, as
         // recorded when it was accepted. Only a delivery accepted before `outcome-003` has no record,
@@ -115,11 +115,8 @@ public static class LedgerRows
         // delivery, so another run's start can never be taken for this one's. None is NULL.
         var started = await StartedAsync(connection, transaction, terminal, ct);
 
-        var outcome = terminal.Type == MessageTypes.Failed
-            ? "failed"
-            : await BlockedAsync(connection, transaction, terminal, started?.Seq, ct)
-                ? "blocked"
-                : Bool(terminal.Payload, PayloadFields.Quiet) ? "quiet" : "completed";
+        var outcome = await LedgerFacts.RunOutcomeAsync(
+            terminal, () => BlockedAsync(connection, transaction, terminal, started?.Seq, ct));
 
         var agent = teamId is null ? null : await ScalarTextAsync(
             connection, transaction,
@@ -129,9 +126,7 @@ public static class LedgerRows
         var usage = Usage.Of(terminal.Payload);
 
         // A member no longer on the roster still has a kind when it ran no model.
-        var kind = agent is not null
-            ? MemberRef.KindOf(agent)
-            : usage.NoModel ? MemberRef.PluginKind : null;
+        var kind = LedgerFacts.MemberKind(agent, usage);
 
         await using var insert = connection.CreateCommand();
         insert.Transaction = transaction;
@@ -202,8 +197,7 @@ public static class LedgerRows
         insert.Parameters.AddWithValue("$team", (object?)teamId ?? DBNull.Value);
         insert.Parameters.AddWithValue("$rootAt", (object?)rootAt ?? DBNull.Value);
         insert.Parameters.AddWithValue("$closedAt", Instant.Stamp(close.OccurredAt));
-        insert.Parameters.AddWithValue(
-            "$how", close.Type == MessageTypes.WorkflowCompleted ? WorkflowLedgerRow.Completed : WorkflowLedgerRow.Closed);
+        insert.Parameters.AddWithValue("$how", LedgerFacts.HowClosed(close));
         insert.Parameters.AddWithValue("$outcome", (object?)outcome ?? DBNull.Value);
         insert.Parameters.AddWithValue("$backfilled", backfilled ? 1 : 0);
 
@@ -234,8 +228,6 @@ public static class LedgerRows
         return await insert.ExecuteNonQueryAsync(ct) > 0;
     }
 
-    private sealed record Attribution(string? QueuedAt, string? TriggerSource, string? TriggerFiredAt);
-
     private static async Task<Attribution?> RecordedDeliveryAsync(
         SqliteConnection connection, SqliteTransaction transaction, long deliverySeq, CancellationToken ct)
     {
@@ -264,34 +256,10 @@ public static class LedgerRows
         return new Attribution(delivery.OccurredAt, triggerSource, triggerFiredAt);
     }
 
-    /// <summary>
-    /// The trigger fire a delivery answers, in the ledger's two hops: the delivery itself is the fire,
-    /// or - for a Manager woken by another run - it is that run's `completed`, `failed` or `handback`
-    /// row and the fire is that row's own delivery. How a trigger's fire is traced to the runs it paid for.
-    /// </summary>
-    private static async Task<(string? Source, string? FiredAt)> TriggerOfAsync(
-        SqliteConnection connection, SqliteTransaction transaction, LinkedRow delivery, CancellationToken ct)
-    {
-        if (IsTriggerFire(delivery)) return (delivery.Source, delivery.OccurredAt);
-
-        if (delivery.Type is MessageTypes.Completed or MessageTypes.Failed or MessageTypes.Handback
-            && delivery.CausationSeq is { } upstream
-            && await RowAsync(connection, transaction, upstream, ct) is { } fire
-            && IsTriggerFire(fire))
-        {
-            return (fire.Source, fire.OccurredAt);
-        }
-
-        return (null, null);
-    }
-
-    private static bool IsTriggerFire(LinkedRow row) =>
-        row.Type.StartsWith(MessageTypes.InstructionPrefix, StringComparison.Ordinal)
-        && (row.Source.StartsWith("schedule:", StringComparison.Ordinal)
-            || row.Source.StartsWith("trigger:", StringComparison.Ordinal));
-
-    private sealed record LinkedRow(
-        long Seq, string Type, string Source, string OccurredAt, long? CausationSeq, long CorrelationId = 0);
+    /// <summary>The trigger fire a delivery answers: <see cref="LedgerFacts.TriggerOfAsync"/> over this database.</summary>
+    private static Task<(string? Source, string? FiredAt)> TriggerOfAsync(
+        SqliteConnection connection, SqliteTransaction transaction, LinkedRow delivery, CancellationToken ct) =>
+        LedgerFacts.TriggerOfAsync(delivery, seq => RowAsync(connection, transaction, seq, ct));
 
     private static async Task<LinkedRow?> RowAsync(
         SqliteConnection connection, SqliteTransaction transaction, long seq, CancellationToken ct)
@@ -373,45 +341,6 @@ public static class LedgerRows
         foreach (var (name, value) in parameters) command.Parameters.AddWithValue(name, value);
 
         return await command.ExecuteScalarAsync(ct) as string;
-    }
-
-    private static (string? Team, string Member) Split(string source)
-    {
-        var slash = source.IndexOf('/', StringComparison.Ordinal);
-        return slash > 0 && slash < source.Length - 1
-            ? (source[..slash], source[(slash + 1)..])
-            : (null, source);
-    }
-
-
-    private static bool HasField(string payload, string field)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(payload);
-            return document.RootElement.ValueKind == JsonValueKind.Object
-                && document.RootElement.TryGetProperty(field, out var value)
-                && value.ValueKind != JsonValueKind.Null;
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
-    }
-
-    private static bool Bool(string payload, string field)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(payload);
-            return document.RootElement.ValueKind == JsonValueKind.Object
-                && document.RootElement.TryGetProperty(field, out var value)
-                && value.ValueKind == JsonValueKind.True;
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
     }
 
     /// <summary>
