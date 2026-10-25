@@ -105,10 +105,9 @@ internal sealed partial class HostComposition
         var backupsEnabled = Intervals.Enabled(builder.Configuration, "Backups:Enabled");
         if (backupsEnabled)
         {
-            var dailyBackup = backupSettings.DailyBackupFor(database);
-            builder.Services.AddSingleton(dailyBackup);
+            builder.Services.AddSingleton(sp => backupSettings.DailyBackupFor(sp.GetRequiredService<IDatabaseMaintenance>()));
             builder.Services.AddSingleton<IHostedService>(sp => new DailyBackupRunner(
-                dailyBackup,
+                sp.GetRequiredService<DailyBackup>(),
                 TimeSpan.FromHours(1),
                 sp.GetRequiredService<ILogger<DailyBackupRunner>>()));
         }

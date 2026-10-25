@@ -55,4 +55,8 @@ public sealed record BackupSettings(
     /// <summary>The daily backup over the same folder, so its run prunes the migrator's copies.</summary>
     public DailyBackup DailyBackupFor(string database) =>
         new(database, Directory, Keep, KeepBeforeStep, KeepBeforeStepDays);
+
+    /// <summary>The daily backup of whichever database <paramref name="database"/> keeps, over the same folder.</summary>
+    public DailyBackup DailyBackupFor(IDatabaseMaintenance database) =>
+        new(database, Directory, Keep, KeepBeforeStep, KeepBeforeStepDays);
 }

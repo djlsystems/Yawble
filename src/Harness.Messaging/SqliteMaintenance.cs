@@ -22,6 +22,13 @@ public static class SqliteMaintenance
 /// <summary>The SQLite version of <see cref="IDatabaseMaintenance"/>, for one database file.</summary>
 public sealed class SqliteDatabaseMaintenance(string databasePath) : IDatabaseMaintenance
 {
+    /// <summary>None: the Host copies this file itself.</summary>
+    public string? BackupElsewhere => null;
+
+    /// <summary><see cref="SchemaMigrator.BackUpAsync"/> of this file, unchanged: <c>VACUUM INTO</c>.</summary>
+    public async Task<string?> CopyToAsync(string destination, CancellationToken ct = default) =>
+        await SchemaMigrator.BackUpAsync(databasePath, destination, ct);
+
     /// <summary>
     /// <c>PRAGMA wal_checkpoint(TRUNCATE)</c>: copy the -wal into the database and cut the -wal back
     /// to zero bytes.

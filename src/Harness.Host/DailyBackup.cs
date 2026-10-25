@@ -24,14 +24,34 @@ namespace Harness.Host;
 /// <b>DUE IS READ FROM THE DIRECTORY, NOT A CLOCK IN MEMORY.</b> A host restarted twice an hour
 /// would otherwise take a copy on every start and retention would keep seven hours, not seven days.
 /// </para>
+///
+/// <para>
+/// <b>THE COPY IS THE DATABASE'S OWN</b> (<see cref="IDatabaseMaintenance.CopyToAsync"/>): SQLite's
+/// <c>VACUUM INTO</c>. A database this Host does not copy (<see cref="Elsewhere"/> set) takes none, and
+/// the runner says what backs it up instead.
+/// </para>
 /// </summary>
 public sealed class DailyBackup(
-    string databasePath,
+    IDatabaseMaintenance database,
     string directory,
     int keep = DailyBackup.DefaultKeep,
     int keepBeforeStep = BeforeStepBackups.DefaultKeep,
     int keepBeforeStepDays = BeforeStepBackups.DefaultKeepDays)
 {
+    /// <summary>The daily backup of the SQLite file at <paramref name="databasePath"/>.</summary>
+    public DailyBackup(
+        string databasePath,
+        string directory,
+        int keep = DefaultKeep,
+        int keepBeforeStep = BeforeStepBackups.DefaultKeep,
+        int keepBeforeStepDays = BeforeStepBackups.DefaultKeepDays)
+        : this(new SqliteDatabaseMaintenance(databasePath), directory, keep, keepBeforeStep, keepBeforeStepDays)
+    {
+    }
+
+    /// <summary>Null when this Host copies the database; otherwise what backs it up instead.</summary>
+    public string? Elsewhere => database.BackupElsewhere;
+
     public const int DefaultKeep = 7;
 
     public static readonly TimeSpan Interval = TimeSpan.FromDays(1);
@@ -75,7 +95,7 @@ public sealed class DailyBackup(
         // a deployment, and the one already there is as good.
         if (!File.Exists(destination))
         {
-            await SchemaMigrator.BackUpAsync(databasePath, destination, ct);
+            await database.CopyToAsync(destination, ct);
         }
 
         Prune();
@@ -132,6 +152,13 @@ public sealed class DailyBackupRunner(
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // A DATABASE THIS HOST DOES NOT COPY: said once, and nothing is written or pruned.
+        if (backup.Elsewhere is { } elsewhere)
+        {
+            log.LogInformation("No daily database backup is taken: {Elsewhere}", elsewhere);
+            return;
+        }
+
         log.LogInformation(
             "Daily database backup into {Directory}, keeping the newest {Keep}.",
             backup.Directory,
