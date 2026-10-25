@@ -123,6 +123,21 @@ internal sealed partial class HostComposition
 
         database = Path.Combine(dataRoot, "messages.db");
 
+        // WHICH ENGINE, read once: `Database` / `HARNESS_DATABASE` (sqlite, the default, or sqlserver) and
+        // `DatabaseConnection` / `HARNESS_DATABASE_CONNECTION`. `database` above stays the SQLite file
+        // either way. A value it does not know is a sentence and a non-zero exit, for the reason every
+        // other refusal in this file is.
+        try
+        {
+            databaseOptions = DatabaseOptions.From(builder.Configuration);
+        }
+        catch (ArgumentException exception)
+        {
+            Console.Error.WriteLine(exception.Message);
+            Environment.ExitCode = 1;
+            return false;
+        }
+
         // THE PUBLISHED PREVIEW PORTS, listened on beside the Host's own address. A port taken on this
         // machine is skipped with a line here, because Kestrel refuses to start when any one of its
         // addresses cannot be bound - and a preview is never worth the instance. See PreviewPorts.

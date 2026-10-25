@@ -19,6 +19,7 @@
     <ProjectReference Include="..\Harness.Skills\Harness.Skills.csproj" />
     <ProjectReference Include="..\Harness.Kanban\Harness.Kanban.csproj" />
     <ProjectReference Include="..\Harness.Backlog\Harness.Backlog.csproj" />
+    <ProjectReference Include="..\Harness.SqlServer\Harness.SqlServer.csproj" />
     <ProjectReference Include="..\Harness.Worker\Harness.Worker.csproj" />
   </ItemGroup>
 

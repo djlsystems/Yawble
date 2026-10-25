@@ -41,6 +41,7 @@ internal sealed partial class HostComposition(string[] args, HostLog hostLog) : 
     private string dataRoot = default!;
     private string instance = default!;
     private string database = default!;
+    private DatabaseOptions databaseOptions = default!;
     private BackupSettings backupSettings = default!;
     private DataRootLock held = default!;
     private SchemaMigrator migrator = default!;
