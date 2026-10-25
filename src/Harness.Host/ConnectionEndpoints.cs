@@ -2,7 +2,7 @@ using System.ComponentModel;
 using System.Security.Claims;
 using Harness.Contracts;
 using Harness.Host.Auth;
-using Microsoft.Data.Sqlite;
+using System.Data.Common;
 
 namespace Harness.Host;
 
@@ -82,7 +82,7 @@ public static class ConnectionEndpoints
                     ? Results.BadRequest(new { error })
                     : Results.Ok(provider!.View(Guide(provider, [], plugins, context)));
             }
-            catch (SqliteException exception)
+            catch (DbException exception)
             {
                 return Unrecorded("The provider was not saved", exception);
             }
@@ -121,7 +121,7 @@ public static class ConnectionEndpoints
                     ? Results.NoContent()
                     : Results.Conflict(new { error = $"Provider '{id}' still has connections: {string.Join(", ", used)}. Disconnect them first." });
             }
-            catch (SqliteException exception)
+            catch (DbException exception)
             {
                 return Unrecorded("The provider was not removed", exception);
             }
@@ -162,7 +162,7 @@ public static class ConnectionEndpoints
             {
                 answer = await connections.AddMailboxAsync(Actor(context), request, ct);
             }
-            catch (SqliteException exception)
+            catch (DbException exception)
             {
                 return Unrecorded("The mailbox was not saved", exception);
             }
@@ -192,7 +192,7 @@ public static class ConnectionEndpoints
             {
                 answer = await connections.UpdateMailboxPasswordAsync(Actor(context), id, request.Password, ct);
             }
-            catch (SqliteException exception)
+            catch (DbException exception)
             {
                 return Unrecorded("The password was not updated", exception);
             }
@@ -290,11 +290,11 @@ public static class ConnectionEndpoints
                 (connection, reconnected, refusal) = await connections.CompleteAsync(
                     state, code, actor: null, viaCallback: true, error, error_description, ct);
             }
-            catch (SqliteException exception)
+            catch (DbException exception)
             {
                 // ALWAYS A REDIRECT: the person lands on the console with the reason, never a 500 page.
                 (connection, reconnected, refusal) = (null, false,
-                    $"The connection could not be stored ({exception.SqliteErrorCode}). Start again.");
+                    $"The connection could not be stored ({DatabaseFault.Code(exception)}). Start again.");
             }
 
             return Results.Redirect(refusal is not null
@@ -323,7 +323,7 @@ public static class ConnectionEndpoints
                 (connection, _, error) = await connections.CompleteAsync(
                     request.State, request.Code, Actor(context), viaCallback: false, ct: ct);
             }
-            catch (SqliteException exception)
+            catch (DbException exception)
             {
                 return Unrecorded("The connection was not stored", exception);
             }
@@ -358,7 +358,7 @@ public static class ConnectionEndpoints
                 await connections.Store.RenameAsync(
                     id, name, Actor(context).Row(TenantActions.ConnectionRenamed, id, name, new { connection = id, from = before.Name, to = name }), ct);
             }
-            catch (SqliteException exception)
+            catch (DbException exception)
             {
                 return Unrecorded("The connection was not renamed", exception);
             }
@@ -441,7 +441,7 @@ public static class ConnectionEndpoints
                     : (StatusCodes.Status404NotFound, new { error = $"There is no connection '{id}'." });
             }
         }
-        catch (SqliteException exception)
+        catch (DbException exception)
         {
             return (StatusCodes.Status500InternalServerError, new { error = $"The connection was not disconnected: its record could not be written ({exception.Message})." });
         }
@@ -462,7 +462,7 @@ public static class ConnectionEndpoints
                     TenantActions.ConnectionRevoked, id, connection.Name,
                     new { connection = id, provider = connection.Provider, account = connection.Account, revoke = result }), CancellationToken.None);
             }
-            catch (SqliteException)
+            catch (DbException)
             {
                 // The disconnect itself is recorded; only the revoke's result is lost.
             }
@@ -547,7 +547,7 @@ public static class ConnectionEndpoints
     /// <summary>The address the request came to, as the browser wrote it.</summary>
     private static string Origin(HttpContext context) => $"{context.Request.Scheme}://{context.Request.Host.Value}";
 
-    private static IResult Unrecorded(string what, SqliteException exception) => Results.Json(
+    private static IResult Unrecorded(string what, DbException exception) => Results.Json(
         new { error = $"{what}: its record could not be written ({exception.Message})." },
         statusCode: StatusCodes.Status500InternalServerError);
 }

@@ -253,6 +253,13 @@ public interface IOutcomeStore
     /// <summary>Rejects a proposed outcome that no link names: the row is removed.</summary>
     Task<OutcomeWrite> RejectAsync(string id, TriggerAudit audit, CancellationToken ct = default);
 
+    /// <summary>
+    /// Removes an outcome a failed solution install created, when nothing links to it: the install's
+    /// undo, with the install's own tenant row in the same transaction, and not a person's reject.
+    /// False, and nothing written, when a link names it or it is gone.
+    /// </summary>
+    Task<bool> UndoCreateAsync(string id, TriggerAudit audit, CancellationToken ct = default);
+
     /// <summary>The newest link of <paramref name="correlation"/>, or null. An unlink is a link
     /// (<see cref="OutcomeLink.IsUnlink"/>): the workflow serves no outcome.</summary>
     Task<OutcomeLink?> CurrentLinkAsync(long correlation, CancellationToken ct = default);

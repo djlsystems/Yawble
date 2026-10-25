@@ -105,6 +105,59 @@ internal sealed partial class HostComposition
         // refusal, an exception, or an ordinary shutdown after app.Run returns.
         held = taken;
 
+        // THE SCHEMA, moved forward by the provider's own migrator before any store is constructed: SQLite's
+        // file (`SqliteSchemaAsync`, below) or the SQL Server database (`SqlServerSchemaAsync`). A refusal
+        // has printed its sentence and set the exit code.
+        if (!await (databaseOptions.Provider == DatabaseProvider.SqlServer ? SqlServerSchemaAsync() : SqliteSchemaAsync()))
+        {
+            return false;
+        }
+
+        // THE LEDGER'S START AND THE INSTANCE'S ID, before anything appends: the one-time backfill of
+        // `usage_ledger` and `workflow_ledger` from the log, and `instance.id`. See LedgerStart. A failure
+        // is printed and the host starts anyway - the backfill's own row is what marks it done, so the next
+        // start tries again, and rows recovered then are keyed so none is counted twice.
+        ledgerStart = null;
+        var (ledgerRows, outcomeRows) = StartRowsFor(databaseOptions, database);
+        if (ledgerRows is not null)
+        try
+        {
+            var ledger = ledgerStart = await ledgerRows.RunAsync();
+
+            if (ledger.BackfilledRuns is { } recovered)
+            {
+                Console.WriteLine(
+                    $"Usage ledger started: {recovered} run(s) and {ledger.BackfilledWorkflows} workflow close(s) recovered from the log.");
+            }
+        }
+        // ANY FAILURE, not only SQLite's: a backfill that met a stamp it could not parse must not stop the
+        // Host from starting any more than a locked database does. Rows are keyed, so the retry counts none twice.
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Console.Error.WriteLine($"The usage ledger's start did not finish and is tried again at the next start: {exception.Message}");
+        }
+
+        // BACKLOG ITEMS TAKE THEIR DISPATCH WORKFLOW'S OUTCOME, once, for the items dispatched before the
+        // link writer did it for them. One transaction; a failure leaves it to the next start.
+        try
+        {
+            if (outcomeRows is not null && await outcomeRows.RunAsync() is { } inherited)
+            {
+                Console.WriteLine($"Backlog outcomes: {inherited} item(s) took the outcome their dispatch workflow serves.");
+            }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Console.Error.WriteLine($"The backlog outcome back-fill did not finish and is tried again at the next start: {exception.Message}");
+        }
+
+        return true;
+    }
+
+    // THE SQLITE FILE'S SCHEMA, moved here unchanged from OperatorAsync: the migration, its backup line and
+    // its refusals.
+    private async Task<bool> SqliteSchemaAsync()
+    {
         // BEFORE any store is constructed. No store constructor creates schema: an order set by the
         // declaration sequence below would work only while every statement was CREATE TABLE IF NOT
         // EXISTS, and a step that must run once could not live there.
@@ -183,44 +236,6 @@ internal sealed partial class HostComposition
             Environment.ExitCode = 1;
 
             return false;
-        }
-
-        // THE LEDGER'S START AND THE INSTANCE'S ID, before anything appends: the one-time backfill of
-        // `usage_ledger` and `workflow_ledger` from the log, and `instance.id`. See LedgerStart. A failure
-        // is printed and the host starts anyway - the backfill's own row is what marks it done, so the next
-        // start tries again, and rows recovered then are keyed so none is counted twice.
-        ledgerStart = null;
-        var (ledgerRows, outcomeRows) = StartRowsFor(databaseOptions, database);
-        if (ledgerRows is not null)
-        try
-        {
-            var ledger = ledgerStart = await ledgerRows.RunAsync();
-
-            if (ledger.BackfilledRuns is { } recovered)
-            {
-                Console.WriteLine(
-                    $"Usage ledger started: {recovered} run(s) and {ledger.BackfilledWorkflows} workflow close(s) recovered from the log.");
-            }
-        }
-        // ANY FAILURE, not only SQLite's: a backfill that met a stamp it could not parse must not stop the
-        // Host from starting any more than a locked database does. Rows are keyed, so the retry counts none twice.
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            Console.Error.WriteLine($"The usage ledger's start did not finish and is tried again at the next start: {exception.Message}");
-        }
-
-        // BACKLOG ITEMS TAKE THEIR DISPATCH WORKFLOW'S OUTCOME, once, for the items dispatched before the
-        // link writer did it for them. One transaction; a failure leaves it to the next start.
-        try
-        {
-            if (outcomeRows is not null && await outcomeRows.RunAsync() is { } inherited)
-            {
-                Console.WriteLine($"Backlog outcomes: {inherited} item(s) took the outcome their dispatch workflow serves.");
-            }
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            Console.Error.WriteLine($"The backlog outcome back-fill did not finish and is tried again at the next start: {exception.Message}");
         }
 
         return true;

@@ -16,8 +16,7 @@ internal sealed partial class HostComposition
 
         try
         {
-            SqlServerStores();
-            return true;
+            return await SqlServerStoresAsync();
         }
         catch (StoresMissingException exception)
         {

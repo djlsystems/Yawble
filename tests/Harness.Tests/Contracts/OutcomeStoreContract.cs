@@ -148,6 +148,30 @@ public abstract class OutcomeStoreContract : ProviderContract
         Assert.NotNull(await outcomes.FindAsync(linked.Id, Ct));
     }
 
+    /// <summary>
+    /// THE INSTALL'S UNDO (the solution installer's, through the interface on either provider): an
+    /// outcome the install created goes, with the install's tenant row, while no link names it; one a link
+    /// names, or one already gone, stays as it is and writes nothing.
+    /// </summary>
+    [Fact]
+    public async Task An_installs_undo_removes_its_outcome_only_while_no_link_names_it()
+    {
+        var outcomes = await CreateAsync();
+        var loose = (await outcomes.CreateAsync("Loose", new OutcomeEdit(), Person, Audit(TenantActions.OutcomeCreated), Ct)).Outcome!;
+        var linked = (await outcomes.ProposeAsync("Linked", null, Manager, 42, "Alpha", Audit(TenantActions.OutcomeCreated, Manager), Ct)).Outcome!;
+
+        Assert.False(await outcomes.UndoCreateAsync(linked.Id, Audit(TenantActions.OutcomeRejected), Ct));
+        Assert.True(await outcomes.UndoCreateAsync(loose.Id, Audit(TenantActions.OutcomeRejected), Ct));
+        Assert.False(await outcomes.UndoCreateAsync(loose.Id, Audit(TenantActions.OutcomeRejected), Ct));
+
+        Assert.Null(await outcomes.FindAsync(loose.Id, Ct));
+        Assert.NotNull(await outcomes.FindAsync(linked.Id, Ct));
+        Assert.Equal(
+            [TenantActions.OutcomeCreated, TenantActions.OutcomeRejected],
+            (await outcomes.ReadEventsAsync([loose.Id], Ct)).Select(e => e.Action));
+        Assert.Equal([TenantActions.OutcomeCreated], (await outcomes.ReadEventsAsync([linked.Id], Ct)).Select(e => e.Action));
+    }
+
     [Fact]
     public async Task Only_a_proposed_outcome_is_confirmed_and_a_confirmed_proposal_records_who()
     {

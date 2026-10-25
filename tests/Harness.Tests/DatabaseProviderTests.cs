@@ -2,6 +2,7 @@ using Harness.Contracts;
 using Harness.Host;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Harness.Tests;
 
@@ -10,6 +11,7 @@ namespace Harness.Tests;
 /// SQLite is the default and the reference; <c>sqlserver</c> is chosen by configuration and names every
 /// store that has no SQL Server version rather than starting half-way.
 /// </summary>
+[Collection(ProcessConsoleCollection.Name)]
 public sealed class DatabaseProviderTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
@@ -100,8 +102,7 @@ public sealed class DatabaseProviderTests
     /// The Host itself, started with <c>sqlserver</c>: while any required store has no SQL Server version
     /// it says which and stops, the stores named being exactly the required ones SQL Server has not
     /// registered, computed here. Once every one has (the stores are complete), the guard passes and the
-    /// start is never refused for a missing store; whatever else a <c>sqlserver</c> start still lacks is
-    /// not this guard's to say.
+    /// Host starts on SQL Server and serves from its stores.
     /// </summary>
     [Fact]
     public async Task A_missing_store_is_named_at_start()
@@ -120,6 +121,7 @@ public sealed class DatabaseProviderTests
         var captured = new StringWriter();
         Console.SetError(captured);
         Exception? failure;
+        Type? served = null;
 
         try
         {
@@ -130,7 +132,7 @@ public sealed class DatabaseProviderTests
                 .UseSetting("HARNESS_DATABASE", "sqlserver")
                 .UseSetting("HARNESS_DATABASE_CONNECTION", database.ConnectionString));
 
-            failure = Record.Exception(() => _ = factory.Services);
+            failure = Record.Exception(() => served = factory.Services.GetRequiredService<IMessageLog>().GetType());
         }
         finally
         {
@@ -154,10 +156,10 @@ public sealed class DatabaseProviderTests
             return;
         }
 
-        // COMPLETE: the guard passes, and the start is not refused for a store. It may still stop later in
-        // the composition, which is not yet provider-aware throughout; that is no missing store.
+        // COMPLETE: the guard passes, and the Host starts and serves the log from SQL Server.
         StoreGuard.Check(StoreContracts.Required, SqlServerStoreRegistry.Registered);
         Assert.DoesNotContain("these stores have no SQL Server version", said, StringComparison.Ordinal);
-        Assert.False(failure is StoresMissingException || failure?.InnerException is StoresMissingException, failure?.ToString());
+        Assert.Null(failure);
+        Assert.Equal(typeof(Harness.SqlServer.Messaging.SqlServerMessageStore), served);
     }
 }

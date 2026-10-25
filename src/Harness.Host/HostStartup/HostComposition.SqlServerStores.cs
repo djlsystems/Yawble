@@ -16,13 +16,17 @@ namespace Harness.Host;
 internal sealed partial class HostComposition
 {
     /// <summary>
-    /// THE SQL SERVER STORES, registered one module at a time as each is written. Each registration
-    /// adds its interface to <see cref="SqlServerStoreRegistry.Registered"/> beside its
-    /// `AddSingleton`; the guard at the end then refuses to start while any interface the Host
-    /// resolves (<see cref="StoreContracts.Required"/>) is still without one.
+    /// THE SQL SERVER STORES, registered one module at a time as each is written, and the services over
+    /// them that SQLite's stores get (the `HostComposition.StoreServices` helpers, each handed this
+    /// provider's store). Each registration adds its interface to
+    /// <see cref="SqlServerStoreRegistry.Registered"/> beside its `AddSingleton`; the guard, asked first,
+    /// refuses to start while any interface the Host resolves (<see cref="StoreContracts.Required"/>) is
+    /// still without one, before anything here writes a row.
     /// </summary>
-    private void SqlServerStores()
+    private async Task<bool> SqlServerStoresAsync()
     {
+        StoreGuard.Check(StoreContracts.Required, SqlServerStoreRegistry.Registered);
+
         var connection = databaseOptions.Connection!;
 
         // THE LOG, THE CURSORS AND THE SUBSCRIPTIONS: one instance behind the three, as on SQLite, with
@@ -38,46 +42,57 @@ internal sealed partial class HostComposition
         builder.Services.AddSingleton<ICursors>(messages);
         builder.Services.AddSingleton<ISubscriptions>(messages);
         builder.Services.AddSingleton(workflowWaits);
-        builder.Services.AddSingleton<IPendingDeliveries>(new SqlServerPendingDeliveries(connection, appendRows));
-        builder.Services.AddSingleton<IWakeStore>(new SqlServerWakeStore(connection));
 
         // THE ACCOUNTING AND THE OUTCOMES, over the same database: the ledger's reads, the admission
         // holds, the outcome store (each person's write with its tenant row, through the SQL Server
         // spelling of the tenant log's one insert), the log's old spend reads, the retention's choice,
         // and the ledger as a member's memory, which leaves out the installed plugins' high-volume events.
         builder.Services.AddSingleton<IUsageLedger>(new SqlServerUsageLedger(connection));
-        builder.Services.AddSingleton<IAdmissionHoldLedger>(new SqlServerAdmissionHolds(connection));
-        builder.Services.AddSingleton<IOutcomeStore>(new SqlServerOutcomeStore(connection, SqlServerTenantAuditRow.AppendAsync));
+        builder.Services.AddSingleton<ILedger>(sp => new SqlServerLedger(connection, sp.GetRequiredService<PluginCatalog>()));
+        await AdmissionHoldsAsync(new SqlServerAdmissionHolds(connection));
+
+        var outcomeStore = new SqlServerOutcomeStore(connection, SqlServerTenantAuditRow.AppendAsync);
+        builder.Services.AddSingleton<IOutcomeStore>(outcomeStore);
         builder.Services.AddSingleton<IOutcomeLinkRows>(new SqlServerOutcomeLinkRows());
+        OutcomesAndBoard(outcomeStore, messages);
+
         builder.Services.AddSingleton<ILogSpend>(new SqlServerLogSpend(connection));
         builder.Services.AddSingleton<ILogRetention>(new SqlServerLogRetention(connection));
-        builder.Services.AddSingleton<ILedger>(sp => new SqlServerLedger(connection, sp.GetRequiredService<PluginCatalog>()));
+
+        Deliveries(new SqlServerPendingDeliveries(connection, appendRows));
+        builder.Services.AddSingleton<IWakeStore>(new SqlServerWakeStore(connection));
 
         // THE START STEPS' ROWS, which the operator phase has already run (`StartRowsFor`); registered so
         // the guard counts them and a later caller resolves the same provider's.
-        builder.Services.AddSingleton<ILedgerStartRows>(new Harness.Host.SqlServer.SqlServerLedgerStartRows(connection));
-        builder.Services.AddSingleton<IOutcomeStartRows>(new Harness.Host.SqlServer.SqlServerOutcomeStartRows(connection));
+        builder.Services.AddSingleton<ILedgerStartRows>(new SqlServerLedgerStartRows(connection));
+        builder.Services.AddSingleton<IOutcomeStartRows>(new SqlServerOutcomeStartRows(connection));
 
         // THE ACCOUNTS, THE TEAMS AND THE TENANT'S OWN RECORDS: people and their password hashes, machine
         // principals and their credential hashes (each the same text SQLite stores, so either verifies the
-        // other's), teams and members, the tenant log, the instance-wide settings rows and the folders a
-        // removal left. Every write that carries a tenant row lands with it in one transaction.
+        // other's) and the worker key among them, teams and members, the tenant log, the instance-wide
+        // settings (loaded here, as on SQLite) and the folders a removal left. Every write that carries a
+        // tenant row lands with it in one transaction.
+        var principals = new SqlServerPrincipalStore(connection);
         builder.Services.AddSingleton<IUserStore>(new SqlServerUserStore(connection));
-        builder.Services.AddSingleton<IPrincipalStore>(new SqlServerPrincipalStore(connection));
+        builder.Services.AddSingleton<IPrincipalStore>(principals);
+
+        if (!WorkerKey(principals)) return false;
+
         builder.Services.AddSingleton<ITeamStore>(new SqlServerTeamStore(connection));
         builder.Services.AddSingleton<ITenantLog>(new SqlServerTenantLog(connection));
-        builder.Services.AddSingleton<ITenantSettingsStore>(new SqlServerTenantSettingsStore(connection));
         builder.Services.AddSingleton<IUnfinishedRemovals>(new SqlServerUnfinishedRemovals(connection));
+        await TenantSettingsAsync(new SqlServerTenantSettingsStore(connection));
 
-        // A TEAM'S TRIGGERS, SITES AND SOLUTION ROW, AND THE DIAGNOSTICS LOG: each person's change with its
-        // tenant row, a site's data writes checked against its limits one at a time, and the diagnostics
-        // log bounded as on SQLite, by the data root's volume or the operator's settings.
+        // A TEAM'S TRIGGERS, SITES AND SOLUTION ROWS, AND THE DIAGNOSTICS LOG: each person's change with
+        // its tenant row, a site's data writes checked against its limits one at a time, the rows the
+        // solutions phase loads its index over, and the diagnostics log bounded as on SQLite, by the data
+        // root's volume or the operator's settings.
         builder.Services.AddSingleton<ITriggerStore>(new SqlServerTriggerStore(connection));
-        builder.Services.AddSingleton<ISiteStore>(new SqlServerSiteStore(connection));
-        builder.Services.AddSingleton<ITeamSolutionStore>(new SqlServerTeamSolutionStore(connection));
+        Sites(new SqlServerSiteStore(connection));
+        teamSolutionRows = new SqlServerTeamSolutionStore(connection);
 
         diagnosticsRetention = DiagnosticsRetention();
-        builder.Services.AddSingleton<IDiagnosticsLog>(new SqlServerDiagnosticsLog(connection, diagnosticsRetention));
+        Records(new SqlServerDiagnosticsLog(connection, diagnosticsRetention));
 
         // THE SKILL INDEX AND THE BACKLOG: a team skill's write and a person's backlog change each land with
         // its tenant row in one transaction, the backlog's through the SQL Server spelling of the tenant
@@ -104,6 +119,6 @@ internal sealed partial class HostComposition
         builder.Services.AddSingleton<IDatabaseHealth>(new SqlServerDatabaseHealth(connection));
         builder.Services.AddSingleton<IDatabaseMaintenance>(new SqlServerDatabaseMaintenance());
 
-        StoreGuard.Check(StoreContracts.Required, SqlServerStoreRegistry.Registered);
+        return true;
     }
 }

@@ -207,7 +207,7 @@ public sealed class SolutionInstaller(
     int group = -1,
     ISecretStore? secretStore = null,
     TriggerSweep? sweep = null,
-    Harness.Messaging.SqliteOutcomeStore? outcomes = null,
+    IOutcomeStore? outcomes = null,
     FolderRemoval? removal = null,
     PluginMemberSecretStore? memberSecrets = null)
 {

@@ -362,6 +362,10 @@ internal sealed partial class HostComposition
         {
             var startup = app.Services.GetRequiredService<DiagnosticsRecorder>();
 
+            // ON SQL SERVER THERE IS NO FILE: the row names the provider, never the connection string,
+            // which may hold a password, and there is no journal mode to report.
+            var onSqlite = databaseOptions.Provider == DatabaseProvider.Sqlite;
+
             // FIRST, so the trim cannot remove the rows this boot is about to write, and so a host that
             // stays up for months is not the reason its own log is unbounded. The store trims from the
             // write path as well, throttled - this is the pass that happens even on a quiet instance.
@@ -376,7 +380,7 @@ internal sealed partial class HostComposition
                 {
                     instance,
                     dataRoot,
-                    database,
+                    database = onSqlite ? database : "sqlserver",
 
                     // THE PORT, by way of the address members are told to call - the same fact, and the one
                     // spelling of it that has ever been wrong in a way anybody noticed.
@@ -396,6 +400,7 @@ internal sealed partial class HostComposition
             //
             // NULL IS "NOT MEASURED" AND IS NOT A FAILURE, the distinction CredentialUseRunner makes about
             // a probe that could not see: a pragma that could not be read must not convict.
+            if (onSqlite)
             await startup.WriteAsync(
                 migrator.JournalMode is null ? DiagnosticSeverity.Info
                     : migrator.JournalMode.Equals("wal", StringComparison.OrdinalIgnoreCase)

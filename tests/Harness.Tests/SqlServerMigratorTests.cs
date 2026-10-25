@@ -38,6 +38,24 @@ public sealed class SqlServerMigratorTests
         Assert.Equal(["test.a", "test.b"], await migrator.AppliedAsync(TestContext.Current.CancellationToken));
     }
 
+    /// <summary>What the Host reads to say, once, that the schema moved: the count of steps the last
+    /// apply ran, none on a start with nothing pending.</summary>
+    [Fact]
+    public async Task Applied_counts_the_steps_the_last_apply_ran()
+    {
+        await using var database = await SqlServerTestDatabase.CreateAsync(TestContext.Current.CancellationToken, applyModules: false);
+        var migrator = new SqlServerMigrator(database.ConnectionString);
+
+        await migrator.ApplyAsync([A], TestContext.Current.CancellationToken);
+        Assert.Equal(1, migrator.Applied);
+
+        await migrator.ApplyAsync([A, B], TestContext.Current.CancellationToken);
+        Assert.Equal(1, migrator.Applied);
+
+        await migrator.ApplyAsync([A, B], TestContext.Current.CancellationToken);
+        Assert.Equal(0, migrator.Applied);
+    }
+
     [Fact]
     public async Task A_failed_step_rolls_back_and_is_not_recorded()
     {

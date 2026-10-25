@@ -36,7 +36,7 @@ internal sealed partial class HostComposition
         // WHICH SOLUTION PACKAGE EACH TEAM CAME FROM (`team_solutions`, auth-016), held in memory as well so
         // a team's summary reads it with no round trip. Written by the install and the update, swept by a
         // team's deletion.
-        var teamSolutions = new TeamSolutionIndex(new SqliteTeamSolutionStore(database));
+        var teamSolutions = new TeamSolutionIndex(teamSolutionRows);
         await teamSolutions.LoadAsync();
         builder.Services.AddSingleton(teamSolutions);
         builder.Services.AddSingleton<ITeamSolutionStore>(teamSolutions);
@@ -83,7 +83,7 @@ internal sealed partial class HostComposition
                 runAs.Switches ? runAs.Gid : -1,
                 sp.GetRequiredService<ISecretStore>(),
                 sp.GetRequiredService<TriggerSweep>(),
-                sp.GetRequiredService<SqliteOutcomeStore>(),
+                sp.GetRequiredService<IOutcomeStore>(),
                 sp.GetRequiredService<FolderRemoval>(),
                 sp.GetRequiredService<PluginMemberSecretStore>());
         });

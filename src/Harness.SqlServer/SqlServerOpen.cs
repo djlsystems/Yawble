@@ -47,6 +47,10 @@ public static class SqlServerOpen
         return builder.ConnectionString;
     }
 
+    /// <summary>SQL Server's own error number for <paramref name="exception"/>, or null when it is not a
+    /// SQL Server error: what a sentence naming a database fault says on this provider.</summary>
+    public static int? ErrorNumber(Exception exception) => exception is SqlException sql ? sql.Number : null;
+
     /// <summary>The error number SQL Server gives a deadlock victim: its transaction was rolled back
     /// and running the work again is the documented remedy.</summary>
     private const int DeadlockVictim = 1205;

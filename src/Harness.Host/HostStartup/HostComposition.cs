@@ -53,6 +53,7 @@ internal sealed partial class HostComposition(string[] args, HostLog hostLog) : 
     private TenantSettings tenantSettings = default!;
     private DiagnosticRetention diagnosticsRetention = default!;
     private SqliteDiagnosticsLog diagnostics = default!;
+    private ITeamSolutionStore teamSolutionRows = default!;
     private AuthorizationPolicy policy = default!;
     private TeamPaths teamPaths = default!;
     private FileBrowserPolicy fileBrowser = default!;

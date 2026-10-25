@@ -2,7 +2,7 @@ using System.ComponentModel;
 using System.Security.Claims;
 using System.Text.Json;
 using Harness.Contracts;
-using Microsoft.Data.Sqlite;
+using System.Data.Common;
 
 namespace Harness.Host.Auth;
 
@@ -237,7 +237,7 @@ public static class PluginEndpoints
                     await settings.SaveAsync(id, changed, rows, ct);
                 }
             }
-            catch (SqliteException exception)
+            catch (DbException exception)
             {
                 return Results.Json(
                     new { error = $"The settings were not saved: their record could not be written ({exception.Message})." },

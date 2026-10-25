@@ -127,10 +127,7 @@ internal sealed partial class HostComposition
 
         builder.Services.AddSingleton(fileBrowser);
 
-        // The ledger reads the same file the store writes. A second READER, never a second writer - which
-        // is what makes it impossible for the ledger to disagree with the log about what happened. The
-        // installed plugins' high-volume events stay out of it, as `agentContainer.progress` does.
-        builder.Services.AddSingleton<ILedger>(sp => new SqliteLedger(database, sp.GetRequiredService<PluginCatalog>()));
+        // The ledger (`ILedger`) is the provider's, registered with its stores.
         builder.Services.AddSingleton<ITranscriptStore>(new FileTranscriptStore(teamPaths));
         builder.Services.AddSingleton<IContextBuilder>(sp =>
             new OutcomeNudge(

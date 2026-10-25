@@ -759,8 +759,8 @@ public sealed class Connections(
         }
         catch (Exception exception)
         {
-            flow.Settle(Refused, exception is Microsoft.Data.Sqlite.SqliteException sqlite
-                ? $"The connection could not be stored ({sqlite.SqliteErrorCode}). Try again."
+            flow.Settle(Refused, exception is System.Data.Common.DbException fault
+                ? $"The connection could not be stored ({DatabaseFault.Code(fault)}). Try again."
                 : $"The sign-in could not be finished ({exception.GetType().Name}). Try again.");
         }
     }
@@ -948,7 +948,7 @@ public sealed class Connections(
             {
                 await store.StoreRefreshAsync(connection.Id, refreshed, ct);
             }
-            catch (Microsoft.Data.Sqlite.SqliteException exception)
+            catch (System.Data.Common.DbException exception)
             {
                 throw new RefreshNotStoredException(exception);
             }
@@ -1033,7 +1033,7 @@ public sealed class Connections(
             {
                 await store.StoreRotatedRefreshAsync(connection.Id, answer.RefreshToken, ct);
             }
-            catch (Microsoft.Data.Sqlite.SqliteException exception)
+            catch (System.Data.Common.DbException exception)
             {
                 throw new RefreshNotStoredException(exception);
             }
@@ -1453,10 +1453,11 @@ public sealed class Connections(
 
 /// <summary>A refresh the provider answered whose tokens could not be stored: the access token is
 /// not handed out, since a rotated refresh token lost here would strand the connection.</summary>
-public sealed class RefreshNotStoredException(Microsoft.Data.Sqlite.SqliteException inner)
+public sealed class RefreshNotStoredException(System.Data.Common.DbException inner)
     : Exception("A refreshed token could not be stored.", inner)
 {
-    public int SqliteErrorCode => inner.SqliteErrorCode;
+    /// <summary>The engine's own number for the fault (<see cref="DatabaseFault.Code"/>).</summary>
+    public int Code => DatabaseFault.Code(inner);
 }
 
 /// <summary>Body of <c>PUT /api/connections/providers/{id}</c>.</summary>

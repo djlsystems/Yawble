@@ -80,6 +80,8 @@ public sealed class SqlServerMigrator(string connectionString)
     /// </summary>
     public async Task<string?> ApplyAsync(IReadOnlyList<MigrationStep> steps, CancellationToken ct = default)
     {
+        Applied = 0;
+
         await using var connection = await OpenAsync(ct);
 
         await EnsureCollationAsync(connection, ct);
@@ -103,6 +105,7 @@ public sealed class SqlServerMigrator(string connectionString)
             try
             {
                 await ApplyOneAsync(connection, step, ct);
+                Applied++;
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -112,6 +115,12 @@ public sealed class SqlServerMigrator(string connectionString)
 
         return null;
     }
+
+    /// <summary>
+    /// How many steps the last <see cref="ApplyAsync"/> applied: what the Host reads, since there is no
+    /// backup path to tell it whether the schema moved, to say so once when it did.
+    /// </summary>
+    public int Applied { get; private set; }
 
     /// <summary>Every step id this database has taken, ordered by id so a caller comparing two
     /// databases is not reading insertion order.</summary>

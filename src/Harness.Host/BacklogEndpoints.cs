@@ -4,7 +4,7 @@ using Harness.Containers;
 using Harness.Contracts;
 using Harness.Kanban;
 using Harness.Host.Auth;
-using Microsoft.Data.Sqlite;
+using System.Data.Common;
 
 namespace Harness.Host;
 
@@ -434,7 +434,7 @@ public static class BacklogEndpoints
                     audit: await AuditRowAsync(
                         context, principal, users, TenantActions.BacklogItemCreated, null, request.Title.Trim(), new { team = stored }, ct));
             }
-            catch (Exception exception) when (exception is SqliteException or IOException)
+            catch (Exception exception) when (exception is DbException or IOException)
             {
                 return Results.Json(
                     new { error = $"The item was not created: its tenant log row could not be written ({exception.Message})." },
@@ -524,7 +524,7 @@ public static class BacklogEndpoints
                 await backlog.EditAsync(
                     id, request.Title, request.Body, request.State, request.OutcomeId is not null, outcomeId, rows, ct);
             }
-            catch (SqliteException exception)
+            catch (DbException exception)
             {
                 return Results.Json(
                     new
@@ -668,7 +668,7 @@ public static class BacklogEndpoints
                 await backlog.DeleteAsync(id, ct, audit: await AuditRowAsync(
                     context, principal, users, TenantActions.BacklogItemDeleted, PlatformBacklogId.Format(id), item.Title, new { id }, ct));
             }
-            catch (Exception exception) when (exception is SqliteException or IOException)
+            catch (Exception exception) when (exception is DbException or IOException)
             {
                 return Results.Json(
                     new { error = $"{PlatformBacklogId.Format(id)} was not deleted: its tenant log row could not be written ({exception.Message})." },
@@ -1246,7 +1246,7 @@ public static class BacklogEndpoints
                     archived ? TenantActions.BacklogItemArchived : TenantActions.BacklogItemRestored,
                     PlatformBacklogId.Format(id), item.Title, new { id }, ct));
         }
-        catch (Exception exception) when (exception is SqliteException or IOException)
+        catch (Exception exception) when (exception is DbException or IOException)
         {
             return Results.Json(
                 new { error = $"{PlatformBacklogId.Format(id)} was not {(archived ? "archived" : "restored")}: its tenant log row could not be written ({exception.Message})." },
