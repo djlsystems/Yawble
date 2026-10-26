@@ -123,8 +123,8 @@ internal sealed partial class HostComposition
 
         database = Path.Combine(dataRoot, "messages.db");
 
-        // WHICH ENGINE, read once: `Database` / `HARNESS_DATABASE` (sqlite, the default, or sqlserver) and
-        // `DatabaseConnection` / `HARNESS_DATABASE_CONNECTION`. `database` above stays the SQLite file
+        // WHICH ENGINE, read once: `HARNESS_DATABASE`, then `Database:Provider` (sqlite, the default, or
+        // sqlserver), and `HARNESS_DATABASE_CONNECTION`, then `Database:Connection`. `database` above stays the SQLite file
         // either way. A value it does not know is a sentence and a non-zero exit, for the reason every
         // other refusal in this file is.
         try

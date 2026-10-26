@@ -31,15 +31,62 @@ public sealed class DatabaseProviderTests
     }
 
     [Theory]
-    [InlineData("Database")]
+    [InlineData("Database:Provider")]
     [InlineData("HARNESS_DATABASE")]
     public void The_provider_is_read_from_either_key_in_any_case(string key)
     {
-        var options = DatabaseOptions.From(Config((key, "SqlServer"), ("DatabaseConnection", "Server=x")));
+        var options = DatabaseOptions.From(Config((key, "SqlServer"), ("Database:Connection", "Server=x")));
 
         Assert.Equal(DatabaseProvider.SqlServer, options.Provider);
         Assert.Equal("Server=x", options.Connection);
         Assert.Equal(DatabaseProvider.Sqlite, DatabaseOptions.From(Config((key, "SQLITE"))).Provider);
+    }
+
+    /// <summary>
+    /// AN UNRELATED <c>DATABASE</c> VARIABLE LEAVES SQLITE ALONE. Environment variables are configuration
+    /// keys, compared without case, so a bare <c>Database</c> key read <c>DATABASE=mydb</c> and refused a
+    /// SQLite start. Neither it nor a bare <c>DatabaseConnection</c> is read.
+    /// </summary>
+    [Fact]
+    public void An_unrelated_DATABASE_variable_leaves_sqlite_alone()
+    {
+        var options = DatabaseOptions.From(Config(("DATABASE", "mydb"), ("DATABASECONNECTION", "Server=elsewhere")));
+
+        Assert.Equal(DatabaseProvider.Sqlite, options.Provider);
+        Assert.Null(options.Connection);
+    }
+
+    [Fact]
+    public void The_prefixed_keys_win_over_the_section_keys()
+    {
+        var options = DatabaseOptions.From(Config(
+            ("HARNESS_DATABASE", "sqlite"), ("Database:Provider", "sqlserver"),
+            ("HARNESS_DATABASE_CONNECTION", "Server=prefixed"), ("Database:Connection", "Server=section")));
+
+        Assert.Equal(DatabaseProvider.Sqlite, options.Provider);
+        Assert.Equal("Server=prefixed", options.Connection);
+    }
+
+    [Fact]
+    public void A_blank_value_falls_through_to_the_next_key()
+    {
+        var options = DatabaseOptions.From(Config(
+            ("HARNESS_DATABASE", "  "), ("Database:Provider", "sqlserver"),
+            ("HARNESS_DATABASE_CONNECTION", " "), ("Database:Connection", "Server=section")));
+
+        Assert.Equal(DatabaseProvider.SqlServer, options.Provider);
+        Assert.Equal("Server=section", options.Connection);
+    }
+
+    [Theory]
+    [InlineData("HARNESS_DATABASE")]
+    [InlineData("Database:Provider")]
+    public void The_refusal_names_the_key_it_read(string key)
+    {
+        var refused = Assert.Throws<ArgumentException>(() => DatabaseOptions.From(Config((key, "postgres"))));
+
+        Assert.Contains($"(from {key})", refused.Message);
+        Assert.Contains($"set {key} to", refused.Message);
     }
 
     [Fact]

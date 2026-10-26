@@ -16,12 +16,14 @@ Everything else still lives in the data root on either engine: keys, team folder
 
 ## The two settings
 
-| Setting | Environment variable | Value |
+| Environment variable | Or the setting | Value |
 |---|---|---|
-| `Database` | `HARNESS_DATABASE` | `sqlite` (the default) or `sqlserver`. Any other value stops the Host with a sentence naming it. |
-| `DatabaseConnection` | `HARNESS_DATABASE_CONNECTION` | A SqlClient connection string. Required with `sqlserver`; without one the Host does not start. |
+| `HARNESS_DATABASE` | `Database:Provider` | `sqlite` (the default) or `sqlserver`. Any other value stops the Host with a sentence naming it and the key it was read from. |
+| `HARNESS_DATABASE_CONNECTION` | `Database:Connection` | A SqlClient connection string. Required with `sqlserver`; without one the Host does not start. |
 
-Set them where the control Host reads its settings: its environment, or `appsettings.json`. Workers open no database and need neither.
+Set them where the control Host reads its settings: its environment, or `appsettings.json` (a `Database` section with `Provider` and `Connection`, or `Database__Provider` and `Database__Connection` in the environment). The environment variable wins when both are set, and a blank value counts as unset. Workers open no database and need neither.
+
+A bare `Database` or `DatabaseConnection` key is not read. Every environment variable is a setting and names compare without case, so a bare key would pick up an unrelated `DATABASE=...` that another tool set and stop a SQLite Host that was never asked to change. A value set under one of those keys is ignored, and the Host starts on SQLite: move it to `HARNESS_DATABASE` or `Database:Provider`, and to `HARNESS_DATABASE_CONNECTION` or `Database:Connection`.
 
 For example:
 
