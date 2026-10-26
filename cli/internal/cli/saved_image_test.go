@@ -165,3 +165,37 @@ func TestVersionShowsTheSavedImageWhenItDiffersFromThePin(t *testing.T) {
 		t.Errorf("out %q", out)
 	}
 }
+
+// A digest has no worker image to derive, so update stops with that error; the sentence saying
+// the saved setting holds the instance still comes first, and nothing is moved or rewritten.
+func TestUpdateSaysASavedDigestImageHoldsTheInstanceBeforeItsWorkerImageError(t *testing.T) {
+	sum := "@sha256:" + strings.Repeat("ab", 32)
+	for _, saved := range []string{"ghcr.io/djlsystems/yawble" + sum, "ghcr.io/djlsystems/yawble:2026.09.24.1" + sum} {
+		t.Run(saved, func(t *testing.T) {
+			pinBuild(t)
+			server := fakeReleaseServer(t, "v0.2.0", []byte("same"))
+			s := engine.NewScripted()
+			s.On("podman container inspect", engine.Result{Stdout: "running|" + saved + "|" + labelFor(saved) + "\n"})
+			deps := stubbed(s)
+			deps.Env = func(string) string { return "" }
+			deps.HTTP, deps.ReleaseBaseURL = server.Client(), server.URL
+			deps.ConfigDir = t.TempDir()
+			seedWorkerKey(t, deps.ConfigDir)
+			writeConfig(t, deps.ConfigDir, "image = \""+saved+"\"\n")
+			before, _ := os.ReadFile(filepath.Join(deps.ConfigDir, config.FileName))
+
+			_, out, errOut := run(t, deps, "update", "--instance")
+			if after, _ := os.ReadFile(filepath.Join(deps.ConfigDir, config.FileName)); string(after) != string(before) {
+				t.Errorf("config changed:\n%s", after)
+			}
+			noMoves(t, "podman", s.Calls)
+			want := "the saved setting image in config.toml holds the instance on " + saved + ", not " + pinned
+			if !strings.Contains(out, want) || !strings.Contains(out, "yawble config set image") {
+				t.Errorf("out lacks %q and the command:\n%s\nstderr:\n%s", want, out, errOut)
+			}
+			if strings.Contains(out+errOut, "nothing to update") {
+				t.Errorf("said nothing to update while a saved setting holds it:\n%s", out)
+			}
+		})
+	}
+}

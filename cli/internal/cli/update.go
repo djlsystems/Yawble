@@ -107,6 +107,9 @@ func updateInstance(cmd *cobra.Command, deps Deps) error {
 	if err != nil {
 		return err
 	}
+	for _, h := range held { // before anything below can refuse, e.g. a digest with no worker image to derive
+		fmt.Fprintln(out, h)
+	}
 	e, s, notes, _, err := prepareMeasured(deps)
 	if err != nil {
 		return err
@@ -124,9 +127,6 @@ func updateInstance(cmd *cobra.Command, deps Deps) error {
 	current, err := workersCurrent(cmd, e, s)
 	if err != nil {
 		return err
-	}
-	for _, h := range held {
-		fmt.Fprintln(out, h)
 	}
 	if info.State != engine.StateAbsent && info.Image == s.Image && len(instance.Changes(info.Label, s)) == 0 && current {
 		if len(held) > 0 {
