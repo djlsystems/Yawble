@@ -35,7 +35,7 @@ public sealed class SqlServerMigratorTests
         // CREATE TABLE t1 would throw if it ran again.
         Assert.Null(await migrator.ApplyAsync([A, B], TestContext.Current.CancellationToken));
 
-        Assert.Equal(["test.a", "test.b"], await migrator.AppliedAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(["test.a", "test.b"], await migrator.AppliedIfAnyAsync(TestContext.Current.CancellationToken));
     }
 
     /// <summary>What the Host reads to say, once, that the schema moved: the count of steps the last
@@ -56,6 +56,31 @@ public sealed class SqlServerMigratorTests
         Assert.Equal(0, migrator.Applied);
     }
 
+    /// <summary>
+    /// TWO APPLIES AT ONCE ON A FRESH DATABASE - a Host start and an operator command - both succeed and
+    /// every step runs once: the second waits for the first's migrate lock and then finds the steps
+    /// applied. Without it both read an empty ledger, and the second's step or record failed on the
+    /// first's.
+    /// </summary>
+    [Fact]
+    public async Task Two_applies_at_once_on_a_fresh_database_each_run_every_step_once()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var database = await SqlServerTestDatabase.CreateAsync(ct, applyModules: false);
+        MigrationStep slow = new("test.slow", "WAITFOR DELAY '00:00:02'; CREATE TABLE slow_t (x INT);");
+
+        var first = new SqlServerMigrator(database.ConnectionString);
+        var second = new SqlServerMigrator(database.ConnectionString);
+
+        var running = first.ApplyAsync([slow, A], ct);
+        await Task.Delay(500, ct);
+        await second.ApplyAsync([slow, A], ct);
+        await running;
+
+        Assert.Equal(2, first.Applied + second.Applied);
+        Assert.Equal(["test.a", "test.slow"], await first.AppliedIfAnyAsync(ct));
+    }
+
     [Fact]
     public async Task A_failed_step_rolls_back_and_is_not_recorded()
     {
@@ -67,7 +92,7 @@ public sealed class SqlServerMigratorTests
 
         Assert.Equal("test.bad", failure.StepId);
         Assert.False(await TableExistsAsync(database.ConnectionString, "t2"));
-        Assert.Equal(["test.a"], await migrator.AppliedAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(["test.a"], await migrator.AppliedIfAnyAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -92,7 +117,7 @@ public sealed class SqlServerMigratorTests
         await migrator.ApplyAsync([skipped], TestContext.Current.CancellationToken);
 
         Assert.False(await TableExistsAsync(database.ConnectionString, "never"));
-        Assert.Equal(["test.skip"], await migrator.AppliedAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(["test.skip"], await migrator.AppliedIfAnyAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]

@@ -100,7 +100,7 @@ public sealed class SqlServerOperatorCommandTests : IDisposable
             lines);
         Assert.Equal(
             SqlServerSchemaModules.All.Select(s => s.Id).Order(StringComparer.Ordinal),
-            await new SqlServerMigrator(database.ConnectionString).AppliedAsync(Ct));
+            await new SqlServerMigrator(database.ConnectionString).AppliedIfAnyAsync(Ct));
 
         // A reset for an account that is not there names the database, not a data root.
         var (missing, said, _) = await RunAsync(["--reset-password", Email], options);

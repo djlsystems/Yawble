@@ -66,7 +66,7 @@ On a sqlserver start the Host:
 
 1. reads the two settings, and stops with a sentence if `sqlserver` has no connection string or the string cannot be read;
 2. takes the database's control lock (see [One control process per database](#one-control-process-per-database)), and stops with a sentence if another Host holds it;
-3. checks the collation and `READ_COMMITTED_SNAPSHOT`, then applies every schema step the database has not taken. When a step ran it says once: `Schema updated. No backup was taken first: point-in-time restore is the backup on SQL Server.`;
+3. checks the collation and `READ_COMMITTED_SNAPSHOT`, then applies every schema step the database has not taken. When a step ran it says once: `Schema updated. No backup was taken first: point-in-time restore is the backup on SQL Server.` One apply runs at a time: a start and an operator command that both find steps to apply take turns on the `schema.migrate` application lock, and the second finds the steps applied;
 4. serves.
 
 It never creates, opens or migrates `messages.db`. A server it cannot reach, a database from a newer build, or a step that failed is one sentence and a non-zero exit, and nothing is served.
@@ -80,7 +80,7 @@ On SQL Server the database is not a file the Host can copy, so the backups are t
 - The daily copy takes none, and logs that point-in-time restore is the backup.
 - No copy is taken before a schema step. Restore to a point in time before the start if a step has to be undone.
 - `--backup` and `--restore` change nothing and exit non-zero: `No copy was written: point-in-time restore is the backup on SQL Server.` and `Nothing was restored: point-in-time restore is the backup on SQL Server.`
-- `yawble backup` still archives the data root (keys, team folders, documents and the rest), but the database is not in it. Back up both: the server's backups for the database, `yawble backup` for the volume. Restore them to the same point.
+- `yawble backup` still archives the data root (keys, team folders, documents and the rest), but the database is not in it, and it says so in one line: `the database is on SQL Server and is not in this backup: its backups are the SQL Server's own (point-in-time restore)`. It reads the provider from the running instance's doctor, or from the `HARNESS_DATABASE` it hands a stopped one. Back up both: the server's backups for the database, `yawble backup` for the volume. Restore them to the same point.
 
 ## Operator commands
 
@@ -131,6 +131,8 @@ Two instances must not share a SQL Server database: nothing in the schema separa
 ## Writing a schema step for both engines
 
 A schema change is a new step, never an edit to one that has shipped (see `AGENTS.md`). It is written for both engines, with the same id.
+
+SQL Server code has two homes. A store whose interface lives in Contracts, Messaging, Identity, Backlog or Skills has its SQL Server class in `src/Harness.SqlServer/`. A store whose interface the Host owns has its class in `src/Harness.Host/SqlServer/`, since `Harness.SqlServer` cannot reference the Host without a cycle.
 
 SQL Server does not replay SQLite's history. Each module has a SQL Server baseline step (`<module>.sqlserver-baseline-1`, and for auth `-2` and `-3`) that creates its tables as they stand after the SQLite steps at the time the baselines were cut. From there the two lists grow together:
 

@@ -43,6 +43,15 @@ public sealed class ReadCommittedSnapshotOffException(string database)
 }
 
 /// <summary>
+/// Another start or operator command held this database's migrate lock for longer than one apply may
+/// wait. Its own type so the start and the operator commands say it as one sentence.
+/// </summary>
+public sealed class SchemaBusyException()
+    : InvalidOperationException(
+        "Another start or operator command has been moving this database's schema forward for longer than "
+        + "this one will wait. Let it finish, or stop it, and start again. Nothing was changed by this one.");
+
+/// <summary>
 /// The one thing that moves a SQL Server database's schema forward, mirroring the SQLite
 /// <see cref="SchemaMigrator"/> step for step: an ordered list, a ledger of what has run, a refusal
 /// of a database that has run something this build does not know.
@@ -65,6 +74,12 @@ public sealed class SqlServerMigrator(string connectionString)
     // must be addressed by exactly these spellings everywhere.
     private const string Ledger = "schema_steps";
 
+    /// <summary>The application lock one apply holds from before the ledger to its last step.</summary>
+    public const string MigrateLock = "schema.migrate";
+
+    // Long enough for any real apply to finish; a wait past it is a stuck holder, said as a sentence.
+    private const int MigrateLockWaitMilliseconds = 5 * 60 * 1000;
+
     /// <summary>
     /// Applies every step not already recorded, in the order given. Always returns null: there is no
     /// file to copy before a migration, so no backup path exists to hand back.
@@ -86,6 +101,26 @@ public sealed class SqlServerMigrator(string connectionString)
 
         await EnsureCollationAsync(connection, ct);
         await EnsureReadCommittedSnapshotAsync(connection, ct);
+
+        // ONE APPLY AT A TIME, from before the ledger is created to the last step: a Host start and an
+        // operator command on a fresh database would otherwise both read an empty ledger, and the second
+        // fail on the first's table or record. The second waits, then reads the ledger the first wrote.
+        await TakeMigrateLockAsync(connection, ct);
+
+        try
+        {
+            await ApplyHeldAsync(connection, steps, ct);
+        }
+        finally
+        {
+            await ReleaseMigrateLockAsync(connection);
+        }
+
+        return null;
+    }
+
+    private async Task ApplyHeldAsync(SqlConnection connection, IReadOnlyList<MigrationStep> steps, CancellationToken ct)
+    {
         await EnsureLedgerAsync(connection, ct);
 
         var applied = await ReadAppliedAsync(connection, ct);
@@ -112,8 +147,6 @@ public sealed class SqlServerMigrator(string connectionString)
                 throw new MigrationFailedException(step.Id, exception);
             }
         }
-
-        return null;
     }
 
     /// <summary>
@@ -122,23 +155,9 @@ public sealed class SqlServerMigrator(string connectionString)
     /// </summary>
     public int Applied { get; private set; }
 
-    /// <summary>Every step id this database has taken, ordered by id so a caller comparing two
-    /// databases is not reading insertion order.</summary>
-    public async Task<IReadOnlyList<string>> AppliedAsync(CancellationToken ct = default)
-    {
-        await using var connection = await OpenAsync(ct);
-
-        await EnsureCollationAsync(connection, ct);
-        await EnsureReadCommittedSnapshotAsync(connection, ct);
-        await EnsureLedgerAsync(connection, ct);
-
-        return [.. (await ReadAppliedAsync(connection, ct)).Order(StringComparer.Ordinal)];
-    }
-
     /// <summary>
     /// Every step id this database has taken, ordered by id, WRITING NOTHING: an empty list where the
-    /// ledger does not exist yet, rather than creating it as <see cref="AppliedAsync"/> does. What the
-    /// doctor reads, which reports a database and never changes it. The collation and row versioning
+    /// ledger does not exist yet, rather than creating it. What the doctor reads, which reports a database and never changes it. The collation and row versioning
     /// are still checked first, so a database the Host would refuse is refused here with the same
     /// sentence.
     /// </summary>
@@ -202,6 +221,42 @@ public sealed class SqlServerMigrator(string connectionString)
         await reader.ReadAsync(ct);
 
         if (reader.GetInt32(1) == 0) throw new ReadCommittedSnapshotOffException(reader.GetString(0));
+    }
+
+    /// <summary>
+    /// Owned by the session, not a transaction, because each step commits in a transaction of its own
+    /// and the lock must outlive them all. Released explicitly: the connection is pooled, and a pooled
+    /// session that is only closed keeps its locks until the pool reuses it.
+    /// </summary>
+    private static async Task TakeMigrateLockAsync(SqlConnection connection, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandTimeout = 0;
+        command.CommandText =
+            $"""
+            DECLARE @granted INT;
+            EXEC @granted = sp_getapplock @Resource = N'{MigrateLock}', @LockMode = N'Exclusive', @LockOwner = N'Session', @LockTimeout = {MigrateLockWaitMilliseconds};
+            SELECT @granted;
+            """;
+
+        var granted = Convert.ToInt32(await command.ExecuteScalarAsync(ct));
+
+        if (granted == -1) throw new SchemaBusyException();
+        if (granted < 0) throw new InvalidOperationException($"The schema's migrate lock could not be taken (sp_getapplock answered {granted}).");
+    }
+
+    private static async Task ReleaseMigrateLockAsync(SqlConnection connection)
+    {
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"EXEC sp_releaseapplock @Resource = N'{MigrateLock}', @LockOwner = N'Session';";
+            await command.ExecuteNonQueryAsync();
+        }
+        catch (Exception exception) when (exception is SqlException or InvalidOperationException)
+        {
+            // A connection that broke took its session, and the lock, with it.
+        }
     }
 
     private static async Task EnsureLedgerAsync(SqlConnection connection, CancellationToken ct)

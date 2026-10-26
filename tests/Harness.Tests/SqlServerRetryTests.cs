@@ -1,5 +1,8 @@
 using System.Reflection;
+using Harness.Contracts;
 using Harness.SqlServer;
+using Harness.SqlServer.Ledger;
+using Harness.SqlServer.Messaging;
 using Microsoft.Data.SqlClient;
 
 namespace Harness.Tests;
@@ -158,6 +161,34 @@ public sealed class SqlServerRetryTests
 
         Assert.Equal(1, calls);
         Assert.Equal(1, await CountAsync(database.ConnectionString));
+    }
+
+    /// <summary>
+    /// WHAT <see cref="IMessageLog.AppendWithinAsync"/> WARNS ITS CALLERS OF: a deadlock victim runs the
+    /// whole unit again, both callbacks with it, after rolling back what the first attempt wrote - so
+    /// the message is appended once and each callback ran twice.
+    /// </summary>
+    [Fact]
+    public async Task An_append_within_chosen_as_a_deadlock_victim_runs_its_callbacks_again_and_appends_once()
+    {
+        await using var database = await SqlServerTestDatabase.CreateAsync(Ct);
+        var log = new SqlServerMessageStore(database.ConnectionString, new SqlServerAppendRows());
+        var befores = 0;
+        var afters = 0;
+
+        var appended = await log.AppendWithinAsync(
+            (_, _, _) =>
+            {
+                befores++;
+                return Task.FromResult<NewMessage?>(new NewMessage(MessageTypes.Progress, """{"status":"once"}""", "console"));
+            },
+            (_, _, _, _) => ++afters == 1 ? throw Fault(1205) : Task.CompletedTask,
+            Ct);
+
+        Assert.Equal(2, befores);
+        Assert.Equal(2, afters);
+        var stored = await log.ReadAfterAsync(0, [MessageTypes.Progress], 10, Ct);
+        Assert.Equal(appended!.Seq, Assert.Single(stored).Seq);
     }
 
     /// <summary>

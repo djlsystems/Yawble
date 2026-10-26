@@ -26,7 +26,8 @@ public static class SqlServerStartRefusal
             or MigrationFailedException
             or WrongCollationException
             or ReadCommittedSnapshotOffException
-            or ControlInUseException => exception.Message,
+            or ControlInUseException
+            or SchemaBusyException => exception.Message,
 
         SqlException sql =>
             $"The SQL Server database at '{Server(connection)}' could not be reached or opened (SQL Server error {sql.Number}): "

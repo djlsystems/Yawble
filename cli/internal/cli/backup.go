@@ -15,12 +15,17 @@ import (
 	"github.com/djlsystems/yawble/cli/internal/backup"
 	"github.com/djlsystems/yawble/cli/internal/buildinfo"
 	"github.com/djlsystems/yawble/cli/internal/config"
+	"github.com/djlsystems/yawble/cli/internal/doctor"
 	"github.com/djlsystems/yawble/cli/internal/engine"
 	"github.com/djlsystems/yawble/cli/internal/instance"
 )
 
 // secretsNote is said once by every command that writes a backup.
 const secretsNote = "The backup holds secrets (sign-in keys, agent logins, tokens in clones): it is readable by you only; keep it that way."
+
+// sqlServerNote is said, and recorded in the manifest, when the instance's database is on SQL Server:
+// the database is not on the volume, so it is not in the archive, and its backups are the server's.
+const sqlServerNote = "the database is on SQL Server and is not in this backup: its backups are the SQL Server's own (point-in-time restore)"
 
 // schemaQuery lists the database's applied schema steps. immutable=1 opens it on the read-only
 // mount without the -shm file a WAL database otherwise needs; the instance is stopped, so the
@@ -89,6 +94,8 @@ func runBackup(ctx context.Context, deps Deps, e engine.Engine, s instance.Setti
 		return err
 	}
 	running := info.State == engine.StateRunning
+	// Asked before anything is stopped: the doctor answers only from a running instance.
+	onSQLServer := databaseOnSQLServer(ctx, deps, e, running)
 	if running {
 		if agents := agentProcesses(listAgentProcesses(ctx, e)); len(agents) > 0 {
 			fmt.Fprintf(out, "backup stops %s while it writes the archive, then starts it again: this stops %s\n", instance.ContainerName, strings.Join(agents, ", "))
@@ -120,7 +127,7 @@ func runBackup(ctx context.Context, deps Deps, e engine.Engine, s instance.Setti
 		fmt.Fprintf(out, "%s is not running; it stays stopped\n", instance.ContainerName)
 	}
 
-	_, werr := writeBackup(ctx, deps, e, image, path, full, out)
+	_, werr := writeBackup(ctx, deps, e, image, path, full, onSQLServer, out)
 	if running {
 		fmt.Fprintf(out, "starting %s again\n", instance.ContainerName)
 		if err := e.Start(ctx, instance.ContainerName); err != nil {
@@ -158,9 +165,24 @@ func helperImage(ctx context.Context, e engine.Engine, info engine.ContainerInfo
 	return image, nil
 }
 
+// databaseOnSQLServer says whether the instance's database is on SQL Server: what a running
+// instance's doctor reports, and otherwise the HARNESS_DATABASE that yawble hands the container.
+// Anything else, a doctor that cannot answer included, is SQLite, which backs up as it always has.
+func databaseOnSQLServer(ctx context.Context, deps Deps, e engine.Engine, running bool) bool {
+	if running {
+		if r, err := doctor.FetchHostReport(ctx, e, true); err == nil {
+			return r.OnSqlServer()
+		}
+	}
+	v, _, _ := config.SecretValue(deps.ConfigDir, "HARNESS_DATABASE")
+	return strings.EqualFold(strings.TrimSpace(v), "sqlserver")
+}
+
 // writeBackup reads the volume through a helper container into path and says what it wrote. The
-// instance must not be running.
-func writeBackup(ctx context.Context, deps Deps, e engine.Engine, image, path string, full bool, out io.Writer) (backup.Manifest, error) {
+// instance must not be running. On SQL Server there is no database file to read schema steps from,
+// so none are read, and the archive says the database is not in it rather than that it could not
+// be read.
+func writeBackup(ctx context.Context, deps Deps, e engine.Engine, image, path string, full, onSQLServer bool, out io.Writer) (backup.Manifest, error) {
 	m := backup.Manifest{
 		YawbleVersion: buildinfo.Version,
 		Image:         image,
@@ -179,8 +201,9 @@ func writeBackup(ctx context.Context, deps Deps, e engine.Engine, image, path st
 	if names, err := config.SecretNames(deps.ConfigDir); err == nil {
 		m.Providers = names
 	}
-	res, err := e.RunHelper(ctx, engine.HelperSpec{Image: image, Volume: instance.VolumeName, Target: "/data", ReadOnly: true, Entrypoint: "sqlite3", Args: schemaQuery})
-	if err != nil {
+	if onSQLServer {
+		m.SchemaNote = sqlServerNote
+	} else if res, err := e.RunHelper(ctx, engine.HelperSpec{Image: image, Volume: instance.VolumeName, Target: "/data", ReadOnly: true, Entrypoint: "sqlite3", Args: schemaQuery}); err != nil {
 		m.SchemaNote = "the database's schema steps could not be read: " + err.Error()
 	} else {
 		for _, line := range strings.Split(res.Stdout, "\n") {
@@ -189,7 +212,7 @@ func writeBackup(ctx context.Context, deps Deps, e engine.Engine, image, path st
 			}
 		}
 	}
-	m, err = backup.Write(path, m, func(w io.Writer) error {
+	m, err := backup.Write(path, m, func(w io.Writer) error {
 		_, err := e.RunHelper(ctx, engine.HelperSpec{Image: image, Volume: instance.VolumeName, Target: "/data", ReadOnly: true, Entrypoint: "tar", Args: backup.TarArgs("/data", full), Stdout: w})
 		return err
 	})
@@ -202,6 +225,9 @@ func writeBackup(ctx context.Context, deps Deps, e engine.Engine, image, path st
 		left = "everything included"
 	}
 	fmt.Fprintf(out, "wrote %s: %d files, %s of data; %s\n", path, m.Bytes.Files, humanBytes(m.Bytes.Data), left)
+	if onSQLServer {
+		fmt.Fprintln(out, sqlServerNote)
+	}
 	fmt.Fprintln(out, secretsNote)
 	return m, nil
 }
@@ -338,7 +364,7 @@ func runRestore(cmd *cobra.Command, deps Deps, path string, replace, yes bool) e
 	}
 	if holdsData {
 		fmt.Fprintf(out, "writing a backup of the current volume first: %s\n", safety)
-		if _, err := writeBackup(ctx, deps, e, s.Image, safety, false, out); err != nil {
+		if _, err := writeBackup(ctx, deps, e, s.Image, safety, false, databaseOnSQLServer(ctx, deps, e, false), out); err != nil {
 			return fmt.Errorf("%w; nothing was replaced", err)
 		}
 		if _, err := e.RunHelper(ctx, onVolume(false, "find", "/data", "-mindepth", "1", "-maxdepth", "1", "-exec", "rm", "-rf", "{}", "+")); err != nil {

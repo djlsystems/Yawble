@@ -22,6 +22,14 @@ public interface IMessageLog
     /// commits, or none of it does. <paramref name="before"/> runs first and answers the message to
     /// append, or null to append nothing (its writes still commit); <paramref name="after"/> runs
     /// with the row as stored. Answers the appended message, or null.
+    ///
+    /// <para>
+    /// <paramref name="before"/> AND <paramref name="after"/> MAY RUN MORE THAN ONCE. A provider that
+    /// retries a transaction chosen as a deadlock victim (SQL Server) runs the whole unit again, the
+    /// two callbacks with it, after rolling back what they wrote. So they write only through the
+    /// connection and transaction they are handed and keep outside side effects (a message published,
+    /// a file written, a counter bumped) out: those would happen once per attempt.
+    /// </para>
     /// </summary>
     Task<Message?> AppendWithinAsync(
         Func<DbConnection, DbTransaction, CancellationToken, Task<NewMessage?>> before,
