@@ -192,6 +192,16 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         var (resolvedSecrets, secretKeys, secretRefusal) = ResolveSecrets(manifest, bound, own);
         if (secretRefusal is not null) return MemberResult.NotRun(secretRefusal, FailureClasses.NeedsPerson);
 
+        // THE MEMBER'S NAMED SECRETS, only for a plugin that declares the block; a value that is a name
+        // the run is told would ride on stdin unredacted, so it is refused here, as a key's is.
+        IReadOnlyDictionary<string, string>? named = manifest.NamedSecrets is null
+            ? null
+            : memberSecrets is null ? new Dictionary<string, string>(StringComparer.Ordinal) : await memberSecrets.NamedValuesAsync(invocation.Member, ct);
+        if (named is not null && NamedValueIsAName(named, secretKeys, resolvedSecrets, manifest) is { } namedRefusal)
+        {
+            return MemberResult.NotRun(namedRefusal, FailureClasses.NeedsPerson);
+        }
+
         var (grants, connectionRefusal) = await GrantConnectionsAsync(manifest, bound, ct);
         if (connectionRefusal is not null) return MemberResult.NotRun(connectionRefusal, FailureClasses.NeedsPerson);
 
@@ -201,10 +211,11 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         [
             .. resolvedSecrets.Where(s => manifest.Secrets.GetValueOrDefault(s.Key)?.Masked != false).Select(s => s.Value),
             .. grants.Values.SelectMany(g => g.Secrets),
+            .. named?.Values ?? [],
         ];
 
         var siteFiles = await SiteFilesAsync(invocation.Member, ct);
-        var request = Request(invocation, manifest, config, resolvedSecrets, grants, new JsonArray(), siteFiles, secretKeys);
+        var request = Request(invocation, manifest, config, resolvedSecrets, grants, new JsonArray(), siteFiles, secretKeys, named);
 
         StartRun Start(string stdin) => new(
             RunId.For(invocation.Member),
@@ -236,7 +247,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         if (manifest.Reads.Count > 0)
         {
             var (read, delivery) = await ReadSitesAsync(invocation.Member, manifest, FramedBytes(Start(request)), ct);
-            request = Request(invocation, manifest, config, resolvedSecrets, grants, read, siteFiles, secretKeys);
+            request = Request(invocation, manifest, config, resolvedSecrets, grants, read, siteFiles, secretKeys, named);
 
             foreach (var row in (string?[])[delivery.CutRow, delivery.MissingRow])
             {
@@ -353,7 +364,8 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         MemberInvocation invocation, PluginManifest manifest,
         IReadOnlyDictionary<string, JsonNode?> config, IReadOnlyDictionary<string, string> resolvedSecrets,
         IReadOnlyDictionary<string, ConnectionGrant>? grants = null, JsonArray? sites = null,
-        JsonArray? siteFiles = null, IReadOnlyDictionary<string, string>? secretKeys = null)
+        JsonArray? siteFiles = null, IReadOnlyDictionary<string, string>? secretKeys = null,
+        IReadOnlyDictionary<string, string>? namedSecrets = null)
     {
         var work = new JsonArray();
 
@@ -437,10 +449,20 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             // Cloned: the request is built twice when reads are measured, and a node has one parent.
             ["siteFiles"] = siteFiles?.DeepClone() ?? new JsonArray(),
 
-            // THE DECLARED READS of the member's own team's sites (see ReadSitesAsync); [] for none.
-            // Last, so what is measured before it is the whole rest of the request.
-            ["sites"] = sites ?? new JsonArray(),
         };
+
+        // THE MEMBER'S NAMED SECRETS, name to value, and the names alone, sorted - only for a plugin whose
+        // manifest declares a `namedSecrets` block: every other plugin's request is byte for byte what it was.
+        if (manifest.NamedSecrets is not null)
+        {
+            var names = (namedSecrets ?? new Dictionary<string, string>()).Keys.Order(StringComparer.Ordinal).ToList();
+            document["namedSecrets"] = new JsonObject(names.Select(n => KeyValuePair.Create(n, (JsonNode?)JsonValue.Create(namedSecrets![n]))));
+            document["namedSecretNames"] = new JsonArray([.. names.Select(n => (JsonNode?)JsonValue.Create(n))]);
+        }
+
+        // THE DECLARED READS of the member's own team's sites (see ReadSitesAsync); [] for none.
+        // Last, so what is measured before it is the whole rest of the request.
+        document["sites"] = sites ?? new JsonArray();
 
         return document.ToJsonString() + "\n";
     }
@@ -810,6 +832,38 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         if (NameIsAValue(keys, resolved, own, manifest) is { } named) return (resolved, keys, named);
 
         return (resolved, keys, null);
+    }
+
+    /// <summary>
+    /// Why a named secret's value is a name this run hands on stdin unredacted - one of the member's
+    /// named secrets or a <c>secretKeys</c> name - or why a field's masked value is one of the member's
+    /// secret names, or null. The sentence names the secret or field, never the value.
+    /// </summary>
+    private static string? NamedValueIsAName(
+        IReadOnlyDictionary<string, string> named, IReadOnlyDictionary<string, string> keys,
+        IReadOnlyDictionary<string, string> resolved, PluginManifest manifest)
+    {
+        var names = named.Keys.Concat(keys.Values).ToHashSet(StringComparer.Ordinal);
+
+        foreach (var (name, value) in named.OrderBy(n => n.Key, StringComparer.Ordinal))
+        {
+            if (names.Contains(value))
+            {
+                return $"The value of this member's secret `{name}` is the name of a secret its plugin is told, and names "
+                    + "are not secret. A person types the real value in the member's settings.";
+            }
+        }
+
+        foreach (var (field, value) in resolved)
+        {
+            if (manifest.Secrets.GetValueOrDefault(field)?.Masked != false && named.ContainsKey(value))
+            {
+                return $"The value handed for `{field}` is the name of one of this member's named secrets, and names are not "
+                    + "secret. Set a real value in the member's settings.";
+            }
+        }
+
+        return null;
     }
 
     /// <summary>Why a name handed on stdin as <c>secretKeys</c> is itself a masked value this run is

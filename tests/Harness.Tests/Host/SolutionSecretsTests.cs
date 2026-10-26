@@ -175,11 +175,11 @@ public sealed class SolutionSecretsTests(HostFixture host) : IClassFixture<HostF
 
     /// <summary>A neutral package whose one plugin member, Keeper, binds a masked `token` to a key
     /// and has an unmasked `account`.</summary>
-    private string KeyedPackage()
+    private string KeyedPackage(bool namedSecrets = false, string? pluginId = null, string version = "1.0.0")
     {
-        var pluginId = $"pack-{Guid.NewGuid().ToString("N")[..8]}";
+        pluginId ??= $"pack-{Guid.NewGuid().ToString("N")[..8]}";
         var folder = SolutionSamples.Neutral(
-            Path.Combine(Get<TeamDocuments>().EnsureFor(host.Alpha), "packages", Guid.NewGuid().ToString("N")), pluginId, [], []);
+            Path.Combine(Get<TeamDocuments>().EnsureFor(host.Alpha), "packages", Guid.NewGuid().ToString("N")), pluginId, [], [], version);
 
         var solution = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Path.Combine(folder, "solution.json")))!;
         solution["members"]![0]!["secrets"] = new System.Text.Json.Nodes.JsonObject { ["token"] = "FIXTURE_PACK_TOKEN" };
@@ -194,6 +194,7 @@ public sealed class SolutionSecretsTests(HostFixture host) : IClassFixture<HostF
               "account": { "description": "The account's name.", "masked": false }
             }
             """);
+        if (namedSecrets) manifest["namedSecrets"] = new System.Text.Json.Nodes.JsonObject { ["label"] = "App secrets" };
         File.WriteAllText(manifestPath, manifest.ToJsonString());
 
         return folder;
@@ -245,6 +246,103 @@ public sealed class SolutionSecretsTests(HostFixture host) : IClassFixture<HostF
         Assert.Empty(done.GetProperty("unset").EnumerateArray());
         Assert.Empty(done.GetProperty("unsetFields").EnumerateArray());
 
+        Assert.All(person.Bodies, body => Assert.DoesNotContain(typed, body, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_named_secret_typed_in_the_wizard_is_kept_with_the_hire_and_a_refused_one_makes_no_team()
+    {
+        var typed = $"named-secret-{Guid.NewGuid():N}";
+        using var client = await host.PersonAsync();
+        var person = new Recorded(client);
+        var folder = KeyedPackage(namedSecrets: true);
+
+        var refusedName = Unique("RefusedNamed");
+        using (var refused = await client.PostAsJsonAsync("/api/solutions/install", new
+        {
+            folder,
+            teamName = refusedName,
+            namedSecretValues = new Dictionary<string, Dictionary<string, string>> { ["Keeper"] = new() { ["Token"] = typed } },
+        }, Ct))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+            var body = await refused.Content.ReadAsStringAsync(Ct);
+            Assert.Contains("'Keeper': `Token` is the name of the plugin's secret field `token`", body);
+            Assert.DoesNotContain(typed, body);
+        }
+
+        Assert.Null(Get<TeamRegistry>().ExistingName(ContainerId.DeriveName(refusedName)!));
+
+        var done = await person.PostAsync("/api/solutions/install", new
+        {
+            folder,
+            teamName = Unique("Named"),
+            namedSecretValues = new Dictionary<string, Dictionary<string, string>> { ["Keeper"] = new() { ["ApiKey"] = typed } },
+        });
+        Assert.True(done.GetProperty("ok").GetBoolean(), done.ToString());
+        var team = done.GetProperty("team").GetString()!;
+
+        Assert.Equal(typed, (await Get<PluginMemberSecretStore>().NamedValuesAsync(new ContainerId(team, "Keeper"), Ct))["ApiKey"]);
+        Assert.NotNull(await Get<ITenantLog>().FindLatestAsync(TenantActions.MemberNamedSecretSet, $"{team}/Keeper", Ct));
+        Assert.All(person.Bodies, body => Assert.DoesNotContain(typed, body, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task The_plan_carries_each_plugins_named_secrets_block_and_null_for_one_with_none()
+    {
+        using var client = await host.PersonAsync();
+        var person = new Recorded(client);
+
+        var named = Assert.Single((await person.PostAsync("/api/solutions/preview", new { folder = KeyedPackage(namedSecrets: true) }))
+            .GetProperty("plan").GetProperty("plugins").EnumerateArray());
+        Assert.Equal("App secrets", named.GetProperty("namedSecrets").GetProperty("label").GetString());
+        Assert.Equal(PluginNamedSecrets.DefaultMax, named.GetProperty("namedSecrets").GetProperty("max").GetInt32());
+
+        var none = Assert.Single((await person.PostAsync("/api/solutions/preview", new { folder = KeyedPackage() }))
+            .GetProperty("plan").GetProperty("plugins").EnumerateArray());
+        Assert.True(!none.TryGetProperty("namedSecrets", out var absent) || absent.ValueKind == JsonValueKind.Null, none.ToString());
+    }
+
+    [Fact]
+    public async Task A_named_secret_typed_in_change_setup_is_kept_by_the_update_and_a_refused_one_changes_nothing()
+    {
+        var typed = $"named-update-{Guid.NewGuid():N}";
+        var pluginId = $"pack-{Guid.NewGuid().ToString("N")[..8]}";
+        using var client = await host.PersonAsync();
+        var person = new Recorded(client);
+
+        var installed = await person.PostAsync("/api/solutions/install", new { folder = KeyedPackage(namedSecrets: true, pluginId), teamName = Unique("NamedUpdate") });
+        Assert.True(installed.GetProperty("ok").GetBoolean(), installed.ToString());
+        var team = installed.GetProperty("team").GetString()!;
+        var keeper = new ContainerId(team, "Keeper");
+        var newer = KeyedPackage(namedSecrets: true, pluginId, "1.1.0");
+
+        using (var refused = await client.PostAsJsonAsync("/api/solutions/update", new
+        {
+            folder = newer,
+            team,
+            namedSecretValues = new Dictionary<string, Dictionary<string, string>> { ["Keeper"] = new() { ["9bad"] = typed } },
+        }, Ct))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+            var body = await refused.Content.ReadAsStringAsync(Ct);
+            Assert.Contains("9bad", body);
+            Assert.DoesNotContain(typed, body);
+        }
+
+        Assert.Equal("1.0.0", (await Get<ITeamSolutionStore>().FindAsync(team, Ct))!.Version);
+        Assert.Empty(await Get<PluginMemberSecretStore>().NamedValuesAsync(keeper, Ct));
+
+        var done = await person.PostAsync("/api/solutions/update", new
+        {
+            folder = newer,
+            team,
+            namedSecretValues = new Dictionary<string, Dictionary<string, string>> { ["Keeper"] = new() { ["ApiKey"] = typed } },
+        });
+        Assert.True(done.GetProperty("ok").GetBoolean(), done.ToString());
+
+        Assert.Equal(typed, (await Get<PluginMemberSecretStore>().NamedValuesAsync(keeper, Ct))["ApiKey"]);
+        Assert.NotNull(await Get<ITenantLog>().FindLatestAsync(TenantActions.MemberNamedSecretSet, $"{team}/Keeper", Ct));
         Assert.All(person.Bodies, body => Assert.DoesNotContain(typed, body, StringComparison.Ordinal));
     }
 

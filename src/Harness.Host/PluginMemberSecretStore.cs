@@ -16,6 +16,11 @@ public interface IPluginMemberSecrets
     /// <summary>Each field the member has its own value for, to that value. A value that no longer
     /// decrypts (a lost key ring) is absent, as a missing one.</summary>
     Task<IReadOnlyDictionary<string, string>> ValuesAsync(ContainerId member, CancellationToken ct = default);
+
+    /// <summary>Each named secret the member holds, by the name a person gave it, to its value. A value
+    /// that no longer decrypts is absent, as a missing one. None unless the store keeps named secrets.</summary>
+    Task<IReadOnlyDictionary<string, string>> NamedValuesAsync(ContainerId member, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyDictionary<string, string>>(new Dictionary<string, string>(StringComparer.Ordinal));
 }
 
 /// <summary>
@@ -41,6 +46,12 @@ public sealed class PluginMemberSecretStore(IPluginMemberSecretRows rows, IDataP
     public const string Purpose = "Harness.PluginMemberSecrets.v1";
 
     private readonly IDataProtector _protector = protection.CreateProtector(Purpose);
+
+    /// <summary>The named secrets' Data Protection purpose: their own, so neither a field value's nor
+    /// any other store's ciphertext opens as a named secret, nor the reverse.</summary>
+    public const string NamedPurpose = "Harness.PluginMemberNamedSecrets.v1";
+
+    private readonly IDataProtector _namedProtector = protection.CreateProtector(NamedPurpose);
 
     /// <summary>
     /// Why <paramref name="value"/> cannot be kept for <paramref name="field"/>, or null. The sentence
@@ -170,6 +181,58 @@ public sealed class PluginMemberSecretStore(IPluginMemberSecretRows rows, IDataP
             ct);
     }
 
+    public async Task<IReadOnlyDictionary<string, string>> NamedValuesAsync(ContainerId member, CancellationToken ct = default)
+    {
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var row in await rows.NamedRowsAsync(member, ct))
+        {
+            if (Unprotect(_namedProtector, row.ValueProtected) is { } value) values[row.Field] = value;
+        }
+
+        return values;
+    }
+
+    /// <summary>Each named secret the member holds, by name, with who set it and when, in name order
+    /// (ignoring case). Never a value; a value that no longer decrypts reads as not held.</summary>
+    public async Task<IReadOnlyList<NamedSecretState>> NamedStatesAsync(ContainerId member, CancellationToken ct = default) =>
+    [
+        .. (await rows.NamedRowsAsync(member, ct))
+            .Where(row => Unprotect(_namedProtector, row.ValueProtected) is not null)
+            .OrderBy(row => row.Field, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(row => row.Field, StringComparer.Ordinal)
+            .Select(row => new NamedSecretState(row.Field, row.SetBy, row.SetAt)),
+    ];
+
+    /// <summary>Every named-secret change (a value sets or replaces, null removes) with its
+    /// <c>member.named-secret-*</c> row, in one transaction. The caller has checked them
+    /// (<see cref="NamedSecretRules.ChangesRefusal"/>).</summary>
+    public Task ChangeNamedAsync(
+        ContainerId member, string label, string plugin, IReadOnlyDictionary<string, string?> changes, CredentialActor actor, CancellationToken ct = default) =>
+        rows.ChangeNamedAsync(member, ProtectNamed(member, label, plugin, changes, actor), actor.Email, ct);
+
+    /// <summary>
+    /// A SETTINGS SAVE, ITS FIELD VALUES AND ITS NAMED SECRETS TOGETHER, each change with its own row, in
+    /// ONE transaction, or nothing.
+    /// </summary>
+    public Task SaveWithSettingsAsync(
+        ContainerId member, string label, string plugin, PluginMemberSettings settings, IReadOnlyList<TriggerAudit> audits,
+        IReadOnlyDictionary<string, string?> changes, IReadOnlyDictionary<string, string?> namedChanges, CredentialActor actor,
+        CancellationToken ct = default) =>
+        rows.SaveWithSettingsAsync(
+            member, settings, audits, Protect(changes), actor.Email, AuditFor(member, label, plugin, actor), ct,
+            namedChanges.Count == 0 ? null : ProtectNamed(member, label, plugin, namedChanges, actor));
+
+    /// <summary>Seals each named value under its own purpose, with the tenant row of each change: team,
+    /// member, plugin and name, never the value.</summary>
+    private ProtectedNamedChanges ProtectNamed(
+        ContainerId member, string label, string plugin, IReadOnlyDictionary<string, string?> changes, CredentialActor actor) =>
+        new(
+            changes.ToDictionary(c => c.Key, c => c.Value is null ? null : _namedProtector.Protect(c.Value), StringComparer.Ordinal),
+            (name, action) => new TriggerAudit(
+                actor.Id, actor.Email, action, $"{member.Team}/{member.Name}", label,
+                JsonSerializer.Serialize(new { team = member.Team, member = member.Name, plugin, name })));
+
     /// <summary>Seals each value (null stays null, a clear) before it reaches the rows.</summary>
     private Dictionary<string, string?> Protect(IReadOnlyDictionary<string, string?> changes) =>
         changes.ToDictionary(c => c.Key, c => c.Value is null ? null : _protector.Protect(c.Value), StringComparer.Ordinal);
@@ -180,11 +243,13 @@ public sealed class PluginMemberSecretStore(IPluginMemberSecretRows rows, IDataP
             actor.Id, actor.Email, action, $"{member.Team}/{member.Name}", label,
             JsonSerializer.Serialize(new { team = member.Team, member = member.Name, plugin, field }));
 
-    private string? Unprotect(string protectedValue)
+    private string? Unprotect(string protectedValue) => Unprotect(_protector, protectedValue);
+
+    private static string? Unprotect(IDataProtector protector, string protectedValue)
     {
         try
         {
-            return _protector.Unprotect(protectedValue);
+            return protector.Unprotect(protectedValue);
         }
         catch (System.Security.Cryptography.CryptographicException)
         {
@@ -232,6 +297,9 @@ public sealed class MemberSecretReads(PluginMemberSecretStore members, PluginSec
     public const string Environment = SecretStatus.Environment;
 
     public string? MarketplacePage(string pluginId) => marketplace?.PluginPage(pluginId);
+
+    /// <summary>Each named secret the member holds, who set it and when; never a value.</summary>
+    public Task<IReadOnlyList<NamedSecretState>> NamedStatesAsync(ContainerId id, CancellationToken ct) => members.NamedStatesAsync(id, ct);
 
     public async Task<IReadOnlyList<Dictionary<string, object?>>> StatesAsync(
         ContainerId id, PluginManifest manifest, PluginMemberSettings stored, CancellationToken ct)
@@ -327,6 +395,23 @@ public sealed class MemberSecretCopyTally
 }
 
 /// <summary>
+/// One of a member's two secret tables, as both providers' rows write it: its name, the column naming a
+/// row within the member, and the tenant action of a set, a replace and a clear or removal.
+/// </summary>
+public sealed record MemberSecretTable(string Name, string Column, string Set, string Replaced, string Cleared)
+{
+    /// <summary><c>plugin_member_secrets</c> (auth-028): a member's own value for a manifest field.</summary>
+    public static readonly MemberSecretTable Fields = new(
+        "plugin_member_secrets", "field",
+        TenantActions.MemberSecretSet, TenantActions.MemberSecretReplaced, TenantActions.MemberSecretCleared);
+
+    /// <summary><c>plugin_member_named_secrets</c> (auth-030): a secret a person named, matched ignoring case.</summary>
+    public static readonly MemberSecretTable Named = new(
+        "plugin_member_named_secrets", "secret",
+        TenantActions.MemberNamedSecretSet, TenantActions.MemberNamedSecretReplaced, TenantActions.MemberNamedSecretRemoved);
+}
+
+/// <summary>
 /// The SQLite version of <see cref="IPluginMemberSecretRows"/>: <c>plugin_member_secrets</c> in the
 /// log's own file, every change with its tenant rows in the same transaction.
 /// </summary>
@@ -361,7 +446,7 @@ public sealed class SqlitePluginMemberSecretRows(string databasePath) : IPluginM
         await using var connection = Open();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
 
-        await ApplyAsync(connection, transaction, member, protectedChanges, setBy, audit, ct);
+        await ApplyAsync(connection, transaction, member, MemberSecretTable.Fields, protectedChanges, setBy, audit, ct);
 
         await transaction.CommitAsync(ct);
     }
@@ -369,14 +454,45 @@ public sealed class SqlitePluginMemberSecretRows(string databasePath) : IPluginM
     public async Task SaveWithSettingsAsync(
         ContainerId member, PluginMemberSettings settings, IReadOnlyList<TriggerAudit> audits,
         IReadOnlyDictionary<string, string?> protectedChanges, string setBy,
-        Func<string, string, TriggerAudit> audit, CancellationToken ct = default)
+        Func<string, string, TriggerAudit> audit, CancellationToken ct = default, ProtectedNamedChanges? named = null)
     {
         await using var connection = Open();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
 
         await SqlitePluginMemberSettings.UpsertAsync(connection, transaction, member, settings, ct);
         foreach (var row in audits) await TenantAuditRow.AppendAsync(connection, transaction, row, ct);
-        await ApplyAsync(connection, transaction, member, protectedChanges, setBy, audit, ct);
+        await ApplyAsync(connection, transaction, member, MemberSecretTable.Fields, protectedChanges, setBy, audit, ct);
+        if (named is not null) await ApplyAsync(connection, transaction, member, MemberSecretTable.Named, named.Changes, setBy, named.Audit, ct);
+
+        await transaction.CommitAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<MemberSecretRow>> NamedRowsAsync(ContainerId member, CancellationToken ct = default)
+    {
+        var rows = new List<MemberSecretRow>();
+
+        await using var connection = Open();
+        await using var select = connection.CreateCommand();
+        select.CommandText = "SELECT secret, value_protected, set_by, set_at FROM plugin_member_named_secrets WHERE team = $team AND name = $name";
+        select.Parameters.AddWithValue("$team", member.Team);
+        select.Parameters.AddWithValue("$name", member.Name);
+
+        await using var reader = await select.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(new MemberSecretRow(
+                reader.GetString(0), reader.GetString(1), reader.GetString(2), Instant.Parse(reader.GetString(3))));
+        }
+
+        return rows;
+    }
+
+    public async Task ChangeNamedAsync(ContainerId member, ProtectedNamedChanges named, string setBy, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        await ApplyAsync(connection, transaction, member, MemberSecretTable.Named, named.Changes, setBy, named.Audit, ct);
 
         await transaction.CommitAsync(ct);
     }
@@ -459,11 +575,12 @@ public sealed class SqlitePluginMemberSecretRows(string databasePath) : IPluginM
     }
 
     private static async Task ApplyAsync(
-        SqliteConnection connection, SqliteTransaction transaction, ContainerId member,
+        SqliteConnection connection, SqliteTransaction transaction, ContainerId member, MemberSecretTable table,
         IReadOnlyDictionary<string, string?> protectedChanges, string setBy, Func<string, string, TriggerAudit> audit,
         CancellationToken ct)
     {
         var at = Instant.Stamp(DateTimeOffset.UtcNow);
+        var match = $"team = $team AND name = $name AND {table.Column} = $field";
 
         foreach (var (field, value) in protectedChanges.OrderBy(c => c.Key, StringComparer.Ordinal))
         {
@@ -473,12 +590,12 @@ public sealed class SqlitePluginMemberSecretRows(string databasePath) : IPluginM
             {
                 await using var delete = connection.CreateCommand();
                 delete.Transaction = transaction;
-                delete.CommandText = "DELETE FROM plugin_member_secrets WHERE team = $team AND name = $name AND field = $field";
+                delete.CommandText = $"DELETE FROM {table.Name} WHERE {match}";
                 Bind(delete, member, field);
 
                 // Nothing stored: nothing changes and no row.
                 if (await delete.ExecuteNonQueryAsync(ct) == 0) continue;
-                action = TenantActions.MemberSecretCleared;
+                action = table.Cleared;
             }
             else
             {
@@ -486,7 +603,7 @@ public sealed class SqlitePluginMemberSecretRows(string databasePath) : IPluginM
                 await using (var exists = connection.CreateCommand())
                 {
                     exists.Transaction = transaction;
-                    exists.CommandText = "SELECT COUNT(*) FROM plugin_member_secrets WHERE team = $team AND name = $name AND field = $field";
+                    exists.CommandText = $"SELECT COUNT(*) FROM {table.Name} WHERE {match}";
                     Bind(exists, member, field);
                     existed = Convert.ToInt64(await exists.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) > 0;
                 }
@@ -494,10 +611,10 @@ public sealed class SqlitePluginMemberSecretRows(string databasePath) : IPluginM
                 await using var upsert = connection.CreateCommand();
                 upsert.Transaction = transaction;
                 upsert.CommandText =
-                    """
-                    INSERT INTO plugin_member_secrets (team, name, field, value_protected, set_by, set_at)
+                    $"""
+                    INSERT INTO {table.Name} (team, name, {table.Column}, value_protected, set_by, set_at)
                     VALUES ($team, $name, $field, $value, $by, $at)
-                    ON CONFLICT (team, name, field) DO UPDATE SET
+                    ON CONFLICT (team, name, {table.Column}) DO UPDATE SET
                         value_protected = excluded.value_protected,
                         set_by = excluded.set_by,
                         set_at = excluded.set_at
@@ -508,7 +625,7 @@ public sealed class SqlitePluginMemberSecretRows(string databasePath) : IPluginM
                 upsert.Parameters.AddWithValue("$at", at);
                 await upsert.ExecuteNonQueryAsync(ct);
 
-                action = existed ? TenantActions.MemberSecretReplaced : TenantActions.MemberSecretSet;
+                action = existed ? table.Replaced : table.Set;
             }
 
             await TenantAuditRow.AppendAsync(connection, transaction, audit(field, action), ct);

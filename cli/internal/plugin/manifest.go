@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf16"
 )
 
 const (
@@ -27,8 +28,9 @@ const (
 // executable. Everything else is the Host's to read.
 type Manifest struct {
 	ID, Name, Version string
-	// Ignored is what the Host would ignore and name rather than refuse: for now, a key inside an
-	// event's monitor hint that it does not know, as events.publishes.<type>.monitor.<key>.
+	// Ignored is what the Host would ignore and name rather than refuse: a key inside an event's
+	// monitor hint that it does not know, as events.publishes.<type>.monitor.<key>, then one inside
+	// the namedSecrets block, as namedSecrets.<key>.
 	Ignored []string
 	// Executables are executable.path and every platforms entry, relative to the folder. The Host
 	// runs one of them, chosen by the container's processor, so the install marks them all.
@@ -298,7 +300,55 @@ func parse(root map[string]any) (Manifest, []string, string) {
 			return m, nil, reason
 		}
 	}
+	var ignoredInBlock []string
+	if n, present := root["namedSecrets"]; present && n != nil {
+		if r := namedSecrets(n, &ignoredInBlock); r != "" {
+			return m, nil, r
+		}
+	}
+	ignored = append(ignored, ignoredInBlock...)
 	return Manifest{ID: id, Name: name, Version: version, Ignored: ignored, Executables: executables}, skills, ""
+}
+
+// Named secrets' bounds: PluginNamedSecrets.DefaultMax and MostMax.
+const (
+	NamedSecretsDefaultMax = 20
+	NamedSecretsMostMax    = 50
+	maxLabelLength         = 80
+)
+
+// namedSecrets checks the `namedSecrets` block as PluginNamedSecrets.Parse does: an object whose
+// label is a field label, whose description is text and whose max is a whole number from 1 to
+// NamedSecretsMostMax. A key it does not know is named in ignored, never refused.
+func namedSecrets(value any, ignored *[]string) string {
+	block, ok := value.(map[string]any)
+	if !ok {
+		return "`namedSecrets` must be an object of `label`, `description` and `max`."
+	}
+	if label, present := block["label"]; present {
+		text, ok := label.(string)
+		if !ok || strings.TrimSpace(text) == "" || len(utf16.Encode([]rune(text))) > maxLabelLength || strings.IndexFunc(text, unicode.IsControl) >= 0 {
+			return fmt.Sprintf("`namedSecrets.label` must be a short piece of text (1 to %d characters, one line).", maxLabelLength)
+		}
+	}
+	if description, present := block["description"]; present && description != nil {
+		if _, ok := description.(string); !ok {
+			return "`namedSecrets.description` must be text."
+		}
+	}
+	if max, present := block["max"]; present && max != nil {
+		num, ok := max.(json.Number)
+		v, err := num.Int64()
+		if !ok || err != nil || v < 1 || v > NamedSecretsMostMax {
+			return fmt.Sprintf("`namedSecrets.max` must be a whole number from 1 to %d.", NamedSecretsMostMax)
+		}
+	}
+	for _, key := range orderedKeys(block) {
+		if key != "label" && key != "description" && key != "max" {
+			*ignored = append(*ignored, "namedSecrets."+key)
+		}
+	}
+	return ""
 }
 
 func validSlug(name string) bool { return len(name) <= 63 && slug.MatchString(name) }

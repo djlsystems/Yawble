@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -173,6 +174,65 @@ func TestReadsFirstFaultWins(t *testing.T) {
 
 func TestReadsAbsentOrNull(t *testing.T) {
 	for _, extra := range []string{"", `,"reads":null`, `,"reads":[]`} {
+		if _, _, err := Parse(readsManifest(extra)); err != nil {
+			t.Errorf("%s: %v", extra, err)
+		}
+	}
+}
+
+// namedSecretsCases is tests/Fixtures/PluginNamedSecrets/cases.json, which the Host's
+// PluginNamedSecretsManifestTests reads too: both accept and refuse the same blocks, in the same sentences.
+type namedSecretsCases struct {
+	Accepted []struct {
+		Block   json.RawMessage `json:"block"`
+		Ignored []string        `json:"ignored"`
+	} `json:"accepted"`
+	Refused []struct {
+		Block json.RawMessage `json:"block"`
+		Says  string          `json:"says"`
+	} `json:"refused"`
+}
+
+func readNamedSecretsCases(t *testing.T) namedSecretsCases {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "tests", "Fixtures", "PluginNamedSecrets", "cases.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases namedSecretsCases
+	if err := json.Unmarshal(raw, &cases); err != nil {
+		t.Fatal(err)
+	}
+	if len(cases.Accepted) == 0 || len(cases.Refused) == 0 {
+		t.Fatal("cases.json holds no cases")
+	}
+	return cases
+}
+
+func TestEachSharedNamedSecretsBlockIsAcceptedNamingWhatItIgnores(t *testing.T) {
+	for _, c := range readNamedSecretsCases(t).Accepted {
+		m, _, err := Parse(readsManifest(`,"namedSecrets":` + string(c.Block)))
+		if err != nil {
+			t.Errorf("%s: %v", c.Block, err)
+			continue
+		}
+		if strings.Join(m.Ignored, ",") != strings.Join(c.Ignored, ",") {
+			t.Errorf("%s: ignored %v, want %v", c.Block, m.Ignored, c.Ignored)
+		}
+	}
+}
+
+func TestEachSharedNamedSecretsFaultIsRefusedNamingTheField(t *testing.T) {
+	for _, c := range readNamedSecretsCases(t).Refused {
+		_, _, err := Parse(readsManifest(`,"namedSecrets":` + string(c.Block)))
+		if err == nil || err.Error() != c.Says {
+			t.Errorf("%s: got %v, want %q", c.Block, err, c.Says)
+		}
+	}
+}
+
+func TestANullOrAbsentNamedSecretsBlockIsNone(t *testing.T) {
+	for _, extra := range []string{"", `,"namedSecrets":null`} {
 		if _, _, err := Parse(readsManifest(extra)); err != nil {
 			t.Errorf("%s: %v", extra, err)
 		}

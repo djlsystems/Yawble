@@ -541,6 +541,69 @@ name. The install checks the same before it writes. When control and workers run
 image carries no runtime, so a runtime is the workers' to have: control does not look it up on its
 own `PATH`, and a run on a worker without it fails at launch.
 
+### Named secrets: `namedSecrets`
+
+A plugin that hands secrets on to something it makes - an app it deploys, a service it configures -
+cannot know in advance how many there are or what they are for. Fixed numbered fields (`appSecret1`
+to `appSecret8`) leave a person telling the team in a message that slot 1 is the Microsoft client
+secret, and nothing on screen says what a slot holds. A manifest may instead declare ONE
+`namedSecrets` block beside `secrets`: a person gives each secret a NAME they choose and types its
+value masked beside it, per member, and the team refers to it by that name.
+
+```json
+"namedSecrets": {
+  "label": "App secrets",
+  "description": "The name is how the team refers to the secret.",
+  "max": 20
+}
+```
+
+- **The block.** `label` follows a field's label rules (1 to 80 characters, one line); `description`
+  is text; `max` is a whole number from 1 to 50, 20 when omitted. A key it does not know is ignored
+  and named (`namedSecrets.<key>`, in the plugin's `ignored`); anything else malformed refuses the
+  manifest naming the field, as the operator CLI's check (`cli/internal/plugin`) does in the same
+  words. `GET /api/plugins` answers it as `namedSecrets` (`{ label, description, max }` or null), the
+  settings read (`GET .../plugin-settings`) as `namedSecrets` too.
+- **A name** is a letter, then letters, digits and underscores, at most 64 characters
+  (`^[A-Za-z][A-Za-z0-9_]{0,63}$`), unique per member ignoring case, and never one of the manifest's
+  `secrets` field names. **A value** is held to a masked field's rules: not empty, one line, at most
+  8192 characters, not padded with white space, at least 4 characters - and never one of the names
+  the plugin is told. A refused name or value is 400 with one sentence naming the name, never the
+  value, and nothing is stored; one more than `max` is refused naming the limit.
+- **Kept** per member in `plugin_member_named_secrets` (schema step `auth-030`) as Data Protection
+  ciphertext under `<dataRoot>/keys` (purpose `Harness.PluginMemberNamedSecrets.v1`), with who set it
+  and when, exactly as a member's own field values: removing the member or deleting its team removes
+  them, a member hired again under the same name holds none, and a clone copies none.
+- **The routes**, each `HumansOnly`: `GET /api/teams/{team}/members/{member}/named-secrets` answers
+  `{ team, member, label, description, max, namedSecrets: [{ name, setBy, setAt }] }` in name order,
+  never a value; `PUT .../named-secrets/{name}` with `{ "value": "..." }` sets or replaces one;
+  `DELETE .../named-secrets/{name}` removes one (matched ignoring case; a name not held writes
+  nothing). Each answers as `GET` does. A person's hire and the settings save carry
+  `namedSecretValues` (name to value; on the save, null removes and a name not sent is left), in one
+  transaction with the settings. Each set, replace and removal writes its `member.named-secret-set`,
+  `member.named-secret-replaced` or `member.named-secret-removed` tenant row (team, member, plugin
+  and name, never the value) in the same transaction, or nothing changes (500 with a sentence). An
+  agent's hire carrying `namedSecretValues` is refused 400, as `secretValues` is: a person types
+  every value. The settings read answers each name held as `namedSecretStates`.
+- **A solution** carries them too. Its plan's `plugins[]` entries carry the block as `namedSecrets`
+  (left out for a plugin with none), and `POST /api/solutions/install` and `/api/solutions/update` take
+  `namedSecretValues: { <package member>: { <name>: value } }`, beside `secretValues`, under the
+  same name and value rules and the same rows, refused to a machine principal or agent as those
+  routes are. An update sets them on a member the team already has, checked against the names it
+  holds before anything changes, and puts back what each name held if the update is undone.
+- **A run** receives them on stdin as `namedSecrets` and `namedSecretNames` (below).
+- **The team sees the names.** `GET /api/teams/{team}/named-secret-names` (any principal of the team,
+  names only, never a value or who set it) answers each plugin member whose plugin declares the block
+  with its names, and the `status` tool lists them, so a Manager can ask a person to add a secret
+  named `X` on the member's settings screen and then see that it is there.
+
+Pinned by `PluginNamedSecretsManifestTests` and `cli/internal/plugin/manifest_test.go` (one shared
+`tests/Fixtures/PluginNamedSecrets/cases.json`), `PluginNamedSecretsTests` (every route, hire and
+save, refusal, transaction, the no-leak scan, the lifecycle and the names `status` reads),
+`PluginMemberNamedSecretRowsContract` (both providers), `FreshVolumeTests` and
+`SqlServerNamedSecretsStepTests` (the step on an empty and an existing volume), and
+`PluginMemberRunnerTests.A_plugin_without_the_named_secrets_block_gets_a_byte_identical_request_and_one_with_it_only_the_two_members`.
+
 ## Protocol `harness.member/1`
 
 **Launch.**
@@ -611,6 +674,13 @@ own `PATH`, and a run on a worker without it fails at launch.
   is never beside a name it was not given for; and a value that is itself one of the names is
   refused, at binding and before every run, because it would ride on stdin unredacted. How a plugin words a key that is not set is under
   [Configuration and secrets](#configuration-and-secrets).
+- **`namedSecrets`** and **`namedSecretNames`** come only to a plugin whose manifest declares a
+  [`namedSecrets` block](#named-secrets-namedsecrets): the member's named secrets, name to value,
+  and the names alone, sorted (`{}` and `[]` when it holds none), just before `sites`. Every value
+  joins the run's redaction set; a name is not a secret and is not redacted. A value that is one of
+  the member's names or a `secretKeys` name is refused before the run (it fails needs-person), since
+  it would ride on stdin unredacted. A plugin that declares no block receives neither, and its request
+  is byte for byte what it was.
 - **`connections`** holds one entry per slot this member has bound: the provider, the account name,
   a fresh access token, when it expires and the scopes it was granted. The Host refreshes the token
   before the run when it would expire within 5 minutes, so a run always starts with at least that

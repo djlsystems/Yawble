@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Harness.Contracts;
 
 namespace Harness.Host.Solutions;
@@ -63,6 +64,7 @@ public sealed record SolutionPlan(
             {
                 Minimum = package.Minimum(p.Id),
                 OnInstall = activeVersion is null ? null : OnInstall(p.Id, p.Manifest.Version, package.Minimum(p.Id)!, activeVersion(p.Id)),
+                NamedSecrets = p.Manifest.NamedSecrets,
             })],
             [.. manifest.Triggers.Select(t => new SolutionPlanTrigger(
                 t.Name, t.Kind, t.PlatformKind.ToString(), t.Member, t.Instruction, t.WakeManager, t.DailyTokenCap, t.IdleOnly,
@@ -184,6 +186,12 @@ public sealed record SolutionPlanPlugin(string Id, string Name, string Version, 
     /// <summary>What the install does with it on this instance (<see cref="SolutionPlan.OnInstall"/>);
     /// null when the plan was read with no instance.</summary>
     public string? OnInstall { get; init; }
+
+    /// <summary>Its manifest's <c>namedSecrets</c> block (label, description, max), null when it
+    /// declares none, and then left out of the plan so a plan without the block reads as before:
+    /// the wizard and Change setup show the named-secrets table from it.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PluginNamedSecrets? NamedSecrets { get; init; }
 }
 
 /// <param name="Kind">The package's word: schedule, event or folder.</param>

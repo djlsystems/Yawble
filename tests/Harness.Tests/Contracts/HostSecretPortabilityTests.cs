@@ -5,8 +5,8 @@ using Microsoft.AspNetCore.DataProtection;
 namespace Harness.Tests.Contracts;
 
 /// <summary>
-/// A SECRET SEALED ON ONE PROVIDER OPENS ON THE OTHER, BYTE FOR BYTE: a plugin key, a member's own value,
-/// and a connection's tokens, client secret, mailbox password and PKCE verifier are Data Protection
+/// A SECRET SEALED ON ONE PROVIDER OPENS ON THE OTHER, BYTE FOR BYTE: a plugin key, a member's own value
+/// and its named secrets, and a connection's tokens, client secret, mailbox password and PKCE verifier are Data Protection
 /// ciphertext the shared classes seal (<see cref="PluginSecretStore"/>, <see cref="PluginMemberSecretStore"/>,
 /// <see cref="ConnectionCipher"/>), and each provider's rows keep that text exactly as given. Each row is
 /// written through one provider's store, copied raw, column for column, into the other's tables past the
@@ -24,6 +24,7 @@ public sealed class HostSecretPortabilityTests
     [
         ("plugin_secrets", "[key], value_protected, set_by, set_at"),
         ("plugin_member_secrets", "team, name, field, value_protected, set_by, set_at"),
+        ("plugin_member_named_secrets", "team, name, secret, value_protected, set_by, set_at"),
         ("oauth_providers", "id, kind, name, client_id, client_secret_protected, tenant, authorize_url, token_url, userinfo_url, default_scopes, updated_at"),
         ("connections", "id, name, provider, account, scopes, refresh_token_protected, access_token_protected, access_expires_at, connected_at, refreshed_at, status, status_reason, connected_by, tenant"),
         ("imap_connections", "id, username, imap_host, imap_port, imap_security, smtp_host, smtp_port, smtp_security, preset, password_protected"),
@@ -61,6 +62,8 @@ public sealed class HostSecretPortabilityTests
         // SEALED ON ONE.
         await new PluginSecretStore(from.SecretRows(), keys, new NoEnvironment()).SetAsync("ACME_KEY", "plugin-key-value-1234", Person, Ct);
         await new PluginMemberSecretStore(from.MemberSecretRows(), keys).SetAsync(member, "Dev", "fixture", "token", "member-value-1234", Person, Ct);
+        await new PluginMemberSecretStore(from.MemberSecretRows(), keys).ChangeNamedAsync(
+            member, "Dev", "fixture", new Dictionary<string, string?> { ["ApiKey"] = "named-value-1234" }, Person, Ct);
         var connections = from.Connections(keys);
         await connections.SaveProviderAsync(
             new StoredProvider("custom-acme", "custom", "Acme", "client", false, null, "https://auth.example.test/a", "https://auth.example.test/t", null, ["openid"]),
@@ -95,6 +98,7 @@ public sealed class HostSecretPortabilityTests
         Assert.Equal("plugin-key-value-1234", new PluginSecretStore(to.SecretRows(), keys, new NoEnvironment()).TryGet("ACME_KEY"));
         Assert.Equal(from.SecretRows().Find("ACME_KEY"), to.SecretRows().Find("ACME_KEY"));
         Assert.Equal("member-value-1234", (await new PluginMemberSecretStore(to.MemberSecretRows(), keys).ValuesAsync(member, Ct))["token"]);
+        Assert.Equal("named-value-1234", (await new PluginMemberSecretStore(to.MemberSecretRows(), keys).NamedValuesAsync(member, Ct))["ApiKey"]);
         var other = to.Connections(keys);
         Assert.Equal("client-secret-1234", await other.ClientSecretAsync("custom-acme", Ct));
         Assert.Equal(new ConnectionTokens("refresh-token-1234", "access-token-1234", At.AddHours(1)), await other.TokensAsync("conn-a", Ct));
