@@ -2,11 +2,13 @@ import type {
   ConnectionSlot,
   PluginConfigField,
   PluginHire,
+  PluginNamedSecrets,
   PluginSecretField,
   PluginSecretState,
   PluginSettingValue,
 } from '../api/types';
 import { bindingsBody } from './connections';
+import { namedSecretValuesBody, type NamedSecretsDraft } from './namedSecrets';
 import { boundsHint, boundsProblem } from './numberBounds';
 import { localTime, wireInstant } from './localTime';
 
@@ -28,6 +30,8 @@ export interface PluginSettingsShape {
   secrets: Record<string, PluginSecretField>;
   /** Its connection slots. Absent or `{}` for a plugin that declares none. */
   connections?: Record<string, ConnectionSlot>;
+  /** Its `namedSecrets` block (`NamedSecretsTable`). Absent or null for a plugin that declares none. */
+  namedSecrets?: PluginNamedSecrets | null;
   /**
    * What the settings read found stored, for the member being edited (absent on a hire): the values
    * as loaded, and the Host's `outOfRange` sentences for the stored numbers outside their bounds.
@@ -389,8 +393,14 @@ export function saveBody(
   config: PluginFieldValues,
   values: SecretValues,
   connections: Record<string, string> = {},
+  named?: NamedSecretsDraft,
 ): PluginHire {
   const { secrets: _bindings, ...settings } = settingsBody(shape, config, {}, connections);
   const typed = secretValuesBody(values);
-  return typed ? { ...settings, secretValues: typed } : settings;
+  const namedTyped = shape.namedSecrets && named ? namedSecretValuesBody(named) : undefined;
+  return {
+    ...settings,
+    ...(typed ? { secretValues: typed } : {}),
+    ...(namedTyped ? { namedSecretValues: namedTyped } : {}),
+  };
 }

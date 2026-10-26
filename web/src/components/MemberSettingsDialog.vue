@@ -4,7 +4,7 @@ import { memberStateOf } from '../lib/memberState';
 import FieldHelp from './FieldHelp.vue';
 import { computed, ref, watch } from 'vue';
 import { useQuasar, type QForm } from 'quasar';
-import { getMember, getPluginSettings, listCatalog, savePluginSettings, updateMember } from '../api/client';
+import { getMember, getNamedSecrets, getPluginSettings, listCatalog, savePluginSettings, updateMember } from '../api/client';
 import {
   agentsForMode,
   isManagerContainer,
@@ -12,6 +12,7 @@ import {
   type ContainerSnapshot,
   type MemberDetail,
   type PluginHire,
+  type PluginNamedSecretState,
   type PluginSecretState,
 } from '../api/types';
 import { allowedAgentOptions, allowlistIncludes, normalizeAllowlist } from '../lib/memberAllowlist';
@@ -41,6 +42,7 @@ import {
 } from '../lib/pluginSettings';
 import { bindingsBody, initialBindings } from '../lib/connections';
 import { bindSlot } from '../lib/slotBinding';
+import { emptyNamedSecretsDraft, namedSecretValuesBody, namedSecretsHeld, type NamedSecretsDraft } from '../lib/namedSecrets';
 import PluginAbout from './PluginAbout.vue';
 import PluginSettingsForm from './PluginSettingsForm.vue';
 
@@ -160,6 +162,10 @@ const pluginSecrets = ref<Record<string, string>>({});
 /** Each secret field's state as read, and the values typed or cleared since. */
 const pluginStates = ref<PluginSecretState[]>([]);
 const pluginValues = ref<SecretValues>({});
+/** The named secrets the member holds (names only, never a value), and those added, replaced or removed since. */
+const pluginNamedStates = ref<PluginNamedSecretState[]>([]);
+const pluginNamed = ref<NamedSecretsDraft>(emptyNamedSecretsDraft());
+const pluginNamedProblem = ref<string | null>(null);
 /** The plugin's marketplace page, or null when the catalog does not list it. */
 const pluginUrl = ref<string | null>(null);
 const pluginDescription = ref<string | null>(null);
@@ -187,6 +193,12 @@ const pluginMissing = computed(() =>
     ? missingRequired(pluginShape.value, pluginConfig.value, secretsSet(pluginShape.value, pluginStates.value, pluginValues.value))
     : [],
 );
+/** A named secret added without a value, or a name the Host would refuse: held like a missing field. */
+const pluginNamedHeld = computed(() =>
+  pluginShape.value
+    ? namedSecretsHeld(pluginShape.value.namedSecrets, pluginNamedStates.value, pluginNamed.value, Object.keys(pluginShape.value.secrets))
+    : false,
+);
 /**
  * Number fields outside their manifest bounds: held like a missing required field; the Host refuses
  * them too. A stored out-of-range value left as it was is not held - the Host keeps it.
@@ -199,12 +211,27 @@ const pluginBody = computed(() =>
   pluginShape.value ? settingsBody(pluginShape.value, pluginConfig.value, pluginSecrets.value, pluginConnections.value) : null,
 );
 
-/** Moved settings, or a secret value typed or cleared: either is a Save of the settings. */
-const pluginChanged = computed(
-  () =>
-    pluginBody.value !== null
-    && (JSON.stringify(pluginBody.value) !== pluginSaved.value || saveBody(pluginShape.value!, {}, pluginValues.value).secretValues !== undefined),
-);
+/** Moved settings, or a secret value or named secret typed or removed: any is a Save of the settings. */
+const pluginChanged = computed(() => {
+  if (pluginBody.value === null) return false;
+  const typed = saveBody(pluginShape.value!, {}, pluginValues.value, {}, pluginNamed.value);
+  return JSON.stringify(pluginBody.value) !== pluginSaved.value || typed.secretValues !== undefined || typed.namedSecretValues !== undefined;
+});
+
+/**
+ * The names the member holds, read when its plugin declares the block and not otherwise. A failed
+ * read is said under the form; the rest of the settings stay usable.
+ */
+async function loadNamedSecrets(declared: boolean) {
+  pluginNamedStates.value = [];
+  pluginNamedProblem.value = null;
+  if (!declared) return;
+  try {
+    pluginNamedStates.value = await getNamedSecrets(props.snapshot.team, props.snapshot.id);
+  } catch (cause) {
+    pluginNamedProblem.value = `Could not read this member's named secrets: ${cause instanceof Error ? cause.message : String(cause)}`;
+  }
+}
 
 async function loadPluginSettings() {
   pluginShape.value = null;
@@ -220,8 +247,11 @@ async function loadPluginSettings() {
       config: settings.fields,
       secrets: settings.secretFields,
       connections: settings.connectionFields ?? {},
+      namedSecrets: settings.namedSecrets ?? null,
     };
 
+    pluginNamed.value = emptyNamedSecretsDraft();
+    await loadNamedSecrets(shape.namedSecrets != null);
     pluginConfig.value = initialConfig(shape, settings.config);
     pluginSecrets.value = initialSecrets(shape, settings.secrets);
     pluginConnections.value = initialBindings(shape.connections, settings.connections ?? {});
@@ -243,7 +273,7 @@ const valid = computed(
     // A plugin member kept on its plugin is not held to the team's Agent allowlist - a person may
     // hire any installed plugin, and editing its settings is not a repoint.
     ((isPlugin.value && agent.value === props.snapshot.agent) || allowlistIncludes(teamAllowlist.value, agent.value)) &&
-    pluginMissing.value.length === 0 && pluginOutOfRange.value.length === 0,
+    pluginMissing.value.length === 0 && pluginOutOfRange.value.length === 0 && !pluginNamedHeld.value,
 );
 
 /** Why the Agent picker cannot be used, as its own error state. Null while it has choices. */
@@ -330,10 +360,14 @@ async function submit() {
       const answer = await savePluginSettings(
         props.snapshot.team,
         props.snapshot.id,
-        saveBody(pluginShape.value, pluginConfig.value, pluginValues.value, pluginConnections.value),
+        saveBody(pluginShape.value, pluginConfig.value, pluginValues.value, pluginConnections.value, pluginNamed.value),
       );
       pluginSaved.value = JSON.stringify(pluginBody.value);
       pluginValues.value = {};
+      if (namedSecretValuesBody(pluginNamed.value)) {
+        pluginNamed.value = emptyNamedSecretsDraft();
+        await loadNamedSecrets(true);
+      }
       if (answer) {
         pluginShape.value = { ...pluginShape.value, stored: { config: pluginConfig.value, outOfRange: answer.outOfRange ?? {} } };
         if (answer.secretStates) pluginStates.value = answer.secretStates;
@@ -500,12 +534,15 @@ async function submit() {
             v-model:config="pluginConfig"
             v-model:secrets="pluginSecrets"
             v-model:values="pluginValues"
+            v-model:named="pluginNamed"
             v-model:connections="pluginConnections"
             :shape="pluginShape"
             :states="pluginStates"
+            :named-states="pluginNamedStates"
             :plugin="pluginId"
             :bind-slot="bindPluginSlot"
           />
+          <div v-if="pluginShape && pluginNamedProblem" class="text-negative text-caption" data-named-secrets-problem>{{ pluginNamedProblem }}</div>
           <div v-else-if="pluginProblem" class="text-negative text-caption">{{ pluginProblem }}</div>
           <div v-else class="text-caption os-text-muted">Reading its settings…</div>
           <div class="text-caption os-text-muted">A change takes effect on the member's next run.</div>

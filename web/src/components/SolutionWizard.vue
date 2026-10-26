@@ -6,6 +6,7 @@ import MemberSettingsDialog from './MemberSettingsDialog.vue';
 import SetupSteps from './SetupSteps.vue';
 import SolutionPlanReview from './SolutionPlanReview.vue';
 import SlotReconnect from './SlotReconnect.vue';
+import NamedSecretsTable from './NamedSecretsTable.vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import {
   checkSolution,
@@ -75,6 +76,7 @@ import {
 import { clockWords, sameZone, browserZone, zoneWords } from '../lib/scheduleWords';
 import { boundsHint, boundsProblem } from '../lib/numberBounds';
 import { useConsoleStore } from '../stores/console';
+import { emptyNamedSecretsDraft, namedSecretValuesBody, namedSecretsHeld, type NamedSecretsDraft } from '../lib/namedSecrets';
 
 /**
  * INSTALL A SOLUTION PACKAGE: a whole team from one folder, in four steps a person walks through.
@@ -615,6 +617,48 @@ function secretValuesBody(): Record<string, Record<string, string>> | undefined 
   return Object.keys(body).length > 0 ? body : undefined;
 }
 
+/**
+ * NAMED SECRETS, BY MEMBER: one table (`NamedSecretsTable`) for each plugin member whose plugin
+ * declares a `namedSecrets` block - on an update, only the members it adds, since a member the team
+ * already has keeps its names and changes them in its own settings. Sent with Install or Update as
+ * `namedSecretValues`: package member -> name -> value, each that member's own.
+ */
+const namedMembers = computed(() => {
+  const current = plan.value;
+  if (!current) return [];
+  const added = diff.value?.members.added;
+  return current.members.flatMap((member) => {
+    if (member.kind !== 'plugin') return [];
+    if (added && !added.includes(member.name)) return [];
+    const plugin = current.plugins.find((entry) => entry.id === member.pluginId);
+    if (!plugin?.namedSecrets) return [];
+    const fields = [...new Set(secrets.value.filter((secret) => secret.member === member.name).map((secret) => secret.field))];
+    return [{ member: member.name, block: plugin.namedSecrets, fields }];
+  });
+});
+
+/** What is added on each member's named-secrets table, by package member name. */
+const namedTyped = ref<Record<string, NamedSecretsDraft>>({});
+const namedDraft = (member: string) => namedTyped.value[member] ?? emptyNamedSecretsDraft();
+
+/** A named secret added without a value, or a name the Host would refuse: holds Next and Install. */
+const namedHeld = computed(() =>
+  namedMembers.value.some((entry) => namedSecretsHeld(entry.block, [], namedDraft(entry.member), entry.fields)),
+);
+
+/** `namedSecretValues` for the install: package member -> name -> value. */
+function namedSecretValuesFor(): Record<string, Record<string, string>> | undefined {
+  const body: Record<string, Record<string, string>> = {};
+  for (const entry of namedMembers.value) {
+    const typed = namedSecretValuesBody(namedDraft(entry.member));
+    if (!typed) continue;
+    // Nothing is saved for a member not made yet, so nothing can be removed: only values ride.
+    const values = Object.fromEntries(Object.entries(typed).filter((pair): pair is [string, string] => pair[1] !== null));
+    if (Object.keys(values).length > 0) body[entry.member] = values;
+  }
+  return Object.keys(body).length > 0 ? body : undefined;
+}
+
 const secretRows = computed(() =>
   secrets.value.map((secret) => {
     const state = secretState(secret, secretNeeded(secret, secretSettingValue(secret)));
@@ -670,7 +714,8 @@ const nothingToProvide = computed(() => {
     current.personSettings.length === 0 &&
     current.inputs.connections.length === 0 &&
     current.inputs.documents.length === 0 &&
-    secrets.value.length === 0
+    secrets.value.length === 0 &&
+    namedMembers.value.length === 0
   );
 });
 
@@ -801,7 +846,7 @@ const installLine = computed(() => {
 });
 
 async function install() {
-  if (installing.value || succeeded.value || !plan.value || !settingsInRange.value) return;
+  if (installing.value || succeeded.value || !plan.value || !settingsInRange.value || namedHeld.value) return;
 
   installing.value = true;
   result.value = null;
@@ -815,17 +860,26 @@ async function install() {
   // THE SECRET VALUES TYPED IN YOUR PART RIDE THE INSTALL: each becomes that member's own value at
   // its hire, in the same transaction; a refusal names the member and field, never the value.
   const secretValues = secretValuesBody();
+  const namedSecretValues = namedSecretValuesFor();
 
   try {
     result.value =
       updatePreview.value
-        ? await updateSolution({ folder: props.folder, team: updatePreview.value.team, settings, connections, ...(secretValues ? { secretValues } : {}) })
+        ? await updateSolution({
+            folder: props.folder,
+            team: updatePreview.value.team,
+            settings,
+            connections,
+            ...(secretValues ? { secretValues } : {}),
+            ...(namedSecretValues ? { namedSecretValues } : {}),
+          })
         : await installSolution({
             folder: props.folder,
             teamName: teamName.value.trim(),
             settings,
             connections,
             ...(secretValues ? { secretValues } : {}),
+            ...(namedSecretValues ? { namedSecretValues } : {}),
           });
   } catch (cause) {
     // A 409 (the name was taken meanwhile) or a 400 (the folder refused): the Host's sentence.
@@ -1235,6 +1289,24 @@ function next() {
               </div>
             </section>
 
+            <section v-if="namedMembers.length > 0" data-named-secrets-step>
+              <div
+                v-for="entry in namedMembers"
+                :key="`named-${entry.member}`"
+                class="q-mb-sm"
+                :data-named-secrets-member="entry.member"
+              >
+                <div class="os-text-muted text-caption">{{ entry.member }}</div>
+                <NamedSecretsTable
+                  :model-value="namedDraft(entry.member)"
+                  :block="entry.block"
+                  :fields="entry.fields"
+                  :save-label="updatePreview ? 'Update' : 'Install'"
+                  @update:model-value="(draft: NamedSecretsDraft) => (namedTyped = { ...namedTyped, [entry.member]: draft })"
+                />
+              </div>
+            </section>
+
             <q-banner v-if="skippedRequired.length > 0" dense class="os-bg-tint-warn" data-skipped-required>
               <template #avatar><q-icon name="warning" /></template>
               You can install without {{ skippedRequired.join(', ') }}. Until it is provided, the team
@@ -1343,7 +1415,7 @@ function next() {
           color="primary"
           no-caps
           label="Next"
-          :disable="(step === 'team' && !teamCanAdvance) || (step === 'inputs' && !settingsInRange)"
+          :disable="(step === 'team' && !teamCanAdvance) || (step === 'inputs' && (!settingsInRange || namedHeld))"
           :loading="step === 'team' && previewing"
           @click="next"
         />

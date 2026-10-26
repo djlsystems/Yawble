@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { listConnectionProviders, listConnections } from '../api/client';
-import type { Connection, ConnectionProvider, PluginSecretState } from '../api/types';
+import type { Connection, ConnectionProvider, PluginNamedSecretState, PluginSecretState } from '../api/types';
+import { emptyNamedSecretsDraft, type NamedSecretsDraft } from '../lib/namedSecrets';
 import {
   defaultValue,
   fieldBoundsHint,
@@ -22,6 +23,7 @@ import {
 } from '../lib/pluginSettings';
 import ChipListInput from './ChipListInput.vue';
 import ConnectionPicker from './ConnectionPicker.vue';
+import NamedSecretsTable from './NamedSecretsTable.vue';
 
 /**
  * A PLUGIN MEMBER'S SETTINGS, GENERATED FROM ITS MANIFEST. The one editor Add member (a hire),
@@ -48,6 +50,11 @@ import ConnectionPicker from './ConnectionPicker.vue';
  * old binding, still honoured by the Host) is never on the screen: only "As JSON" shows it. Connection
  * slots are one picker each (`ConnectionPicker`), storing a connection's id, never a token.
  *
+ * A PLUGIN THAT DECLARES A `namedSecrets` BLOCK gets one table after its secret fields
+ * (`NamedSecretsTable`): names a person chooses, each value typed masked beside it, waiting in
+ * `named` for the dialog's button, which sends them as `namedSecretValues`. A plugin without the
+ * block shows nothing of it.
+ *
  * The "as JSON" view is read-only, and it is exactly `settingsBody` - the settings and key bindings
  * stored - for checking, never for editing. It never shows a value.
  */
@@ -59,6 +66,8 @@ const props = defineProps<{
   bindSlot?: ((slot: string, connectionId: string) => Promise<void>) | undefined;
   /** Each secret field's state on the member being edited. Absent at hire: nothing is set yet. */
   states?: PluginSecretState[] | undefined;
+  /** The named secrets the member being edited holds. Absent at hire: it holds none. */
+  namedStates?: PluginNamedSecretState[] | undefined;
   /** The dialog's button that saves the form, named in what a typed value says. */
   saveLabel?: string | undefined;
 }>();
@@ -68,6 +77,8 @@ const config = defineModel<PluginFieldValues>('config', { required: true });
 const secrets = defineModel<Record<string, string>>('secrets', { required: true });
 /** The secret values typed or cleared, waiting for the dialog's button. */
 const values = defineModel<SecretValues>('values', { default: () => ({}) });
+/** Named secrets added, replaced or removed, waiting for the dialog's button. */
+const named = defineModel<NamedSecretsDraft>('named', { default: () => emptyNamedSecretsDraft() });
 /** Slot -> the chosen connection's id. Only a plugin that declares slots has any. */
 const connections = defineModel<Record<string, string>>('connections', { default: () => ({}) });
 
@@ -172,11 +183,13 @@ function secretUnset(name: string): boolean {
 type Row =
   | { kind: 'config'; name: string }
   | { kind: 'secret'; name: string }
+  | { kind: 'named' }
   | { kind: 'slots' };
 
 const rows = computed<Row[]>(() => [
   ...Object.keys(props.shape.config).map((name): Row => ({ kind: 'config', name })),
   ...Object.keys(props.shape.secrets).map((name): Row => ({ kind: 'secret', name })),
+  ...(props.shape.namedSecrets ? [{ kind: 'named' } as Row] : []),
   ...(hasSlots(props.shape) ? [{ kind: 'slots' } as Row] : []),
 ]);
 
@@ -329,6 +342,16 @@ function text(name: string): string {
           />
         </div>
       </div>
+
+      <!-- NAMED SECRETS: one table, the plugin's `namedSecrets` block, after its secret fields. -->
+      <NamedSecretsTable
+        v-else-if="row.kind === 'named' && shape.namedSecrets"
+        v-model="named"
+        :block="shape.namedSecrets"
+        :states="namedStates"
+        :fields="Object.keys(shape.secrets)"
+        :save-label="button"
+      />
 
       <!-- CONNECTION SLOTS: one picker each, listing connections of an allowed provider. The member
            stores the connection's id, never a token. -->

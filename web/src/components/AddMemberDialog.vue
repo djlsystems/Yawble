@@ -22,6 +22,7 @@ import {
   type SecretValues,
 } from '../lib/pluginSettings';
 import { initialBindings } from '../lib/connections';
+import { emptyNamedSecretsDraft, namedSecretValuesBody, namedSecretsHeld, type NamedSecretsDraft } from '../lib/namedSecrets';
 import PluginAbout from './PluginAbout.vue';
 import PluginSettingsForm from './PluginSettingsForm.vue';
 import { MemberInstructionsHint, MemberInstructionsLabel } from '../lib/memberInstructions';
@@ -83,7 +84,7 @@ const valid = computed(
     passes(agent.value, agentRules) &&
     (plugin.value
       // The server refuses every hire on a team with an empty allowlist, a plugin's included.
-      ? normalizeAllowlist(props.memberAgents).length > 0 && pluginMissing.value.length === 0 && pluginOutOfRange.value.length === 0
+      ? normalizeAllowlist(props.memberAgents).length > 0 && pluginMissing.value.length === 0 && pluginOutOfRange.value.length === 0 && !pluginNamedHeld.value
       : allowlistIncludes(props.memberAgents, agent.value ?? '')),
 );
 
@@ -127,6 +128,8 @@ const pluginConfig = ref<PluginFieldValues>({});
 /** No key binding at hire: the member's values are its own. Kept for the form's "As JSON". */
 const pluginSecrets = ref<Record<string, string>>({});
 const pluginValues = ref<SecretValues>({});
+/** Named secrets added on the form: sent with the hire as `namedSecretValues`. */
+const pluginNamed = ref<NamedSecretsDraft>(emptyNamedSecretsDraft());
 /** Slot -> connection id, for a plugin that declares connection slots. */
 const pluginConnections = ref<Record<string, string>>({});
 
@@ -134,8 +137,14 @@ watch(plugin, (chosen) => {
   pluginConfig.value = chosen ? initialConfig(chosen) : {};
   pluginSecrets.value = chosen ? initialSecrets(chosen) : {};
   pluginValues.value = {};
+  pluginNamed.value = emptyNamedSecretsDraft();
   pluginConnections.value = chosen ? initialBindings(chosen.connections) : {};
 });
+
+/** A named secret added without a value, or a name the Host would refuse: held like a missing field. */
+const pluginNamedHeld = computed(() =>
+  plugin.value ? namedSecretsHeld(plugin.value.namedSecrets, [], pluginNamed.value, Object.keys(plugin.value.secrets)) : false,
+);
 
 const pluginMissing = computed(() =>
   plugin.value ? missingRequired(plugin.value, pluginConfig.value, secretsSet(plugin.value, undefined, pluginValues.value)) : [],
@@ -249,10 +258,12 @@ async function submit() {
     // THE SECRET VALUES RIDE THE HIRE: kept with the member in one transaction, so a value the
     // Host refuses (named by field, never repeated) makes no member.
     const typed = plugin.value ? secretValuesBody(pluginValues.value) : undefined;
+    const named = plugin.value?.namedSecrets ? namedSecretValuesBody(pluginNamed.value) : undefined;
     const created = plugin.value
       ? await addMember(props.team, name.value.trim(), agent.value!, {
           ...settingsBody(plugin.value, pluginConfig.value, pluginSecrets.value, pluginConnections.value),
           ...(typed ? { secretValues: typed } : {}),
+          ...(named ? { namedSecretValues: named } : {}),
         })
       : await addMember(props.team, name.value.trim(), agent.value!, undefined, instructions.value.trim() || undefined);
 
@@ -361,6 +372,7 @@ async function submit() {
             v-model:config="pluginConfig"
             v-model:secrets="pluginSecrets"
             v-model:values="pluginValues"
+            v-model:named="pluginNamed"
             v-model:connections="pluginConnections"
             :shape="plugin"
             :plugin="plugin.id"
