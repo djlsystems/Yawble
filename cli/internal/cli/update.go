@@ -25,7 +25,9 @@ func newUpdateCommand(deps Deps) *cobra.Command {
 			"checksum, replaces this binary, and runs the new one to move the instance: each yawble pins " +
 			"the Yawble image it was released with, so only the new binary knows the new image. " +
 			"When this yawble is the latest, or the release cannot be read, it moves the instance to the " +
-			"image this yawble pins. Moving the instance recreates the container on the same volume, so " +
+			"image this yawble pins. A saved image or workerImage naming an older release is rewritten to " +
+			"this yawble's pin first and said; one naming anything else (a local build, another registry) " +
+			"is left, and update says that setting holds the instance and how to change it. Moving the instance recreates the container on the same volume, so " +
 			"nothing is lost; the Host migrates its database on start. --cli replaces yawble only; " +
 			"--instance moves the instance only and never looks for a release. It takes the newest " +
 			"regular release; --prerelease takes the newest release, a pre-release included. It never " +
@@ -100,6 +102,11 @@ func updateInstance(cmd *cobra.Command, deps Deps) error {
 	if err := startStoppedMachine(cmd, deps); err != nil {
 		return err
 	}
+	out := cmd.OutOrStdout()
+	held, err := reconcileSavedImages(deps, out)
+	if err != nil {
+		return err
+	}
 	e, s, notes, _, err := prepareMeasured(deps)
 	if err != nil {
 		return err
@@ -107,7 +114,6 @@ func updateInstance(cmd *cobra.Command, deps Deps) error {
 	if s.Image == "" {
 		return instance.ErrNoImage
 	}
-	out := cmd.OutOrStdout()
 	if s, err = withWorkerKey(deps, s, out); err != nil {
 		return err
 	}
@@ -119,7 +125,13 @@ func updateInstance(cmd *cobra.Command, deps Deps) error {
 	if err != nil {
 		return err
 	}
+	for _, h := range held {
+		fmt.Fprintln(out, h)
+	}
 	if info.State != engine.StateAbsent && info.Image == s.Image && len(instance.Changes(info.Label, s)) == 0 && current {
+		if len(held) > 0 {
+			return nil // a saved setting, not the release, is what keeps it where it is: said above
+		}
 		fmt.Fprintf(out, "already on %s; nothing to update (yawble up starts it if it is stopped)\n", s.Image)
 		return nil
 	}

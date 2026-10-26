@@ -36,6 +36,7 @@ func newVersionCommand(deps Deps) *cobra.Command {
 			} else {
 				fmt.Fprintln(out, "image   no image pinned (a dev build; choose one with: yawble config set image <reference>)")
 			}
+			sayVersionSavedImages(deps, out)
 			sayIfNewer(cmd.Context(), deps, out)
 			return nil
 		},
