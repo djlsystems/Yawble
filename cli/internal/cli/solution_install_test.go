@@ -253,6 +253,36 @@ func TestSolutionInstallWithTeamNamingAnInstalledTeamShowsTheDiffAndUpdates(t *t
 	}
 }
 
+func TestSolutionInstallUpdateNamesAMemberMovedToAnotherPluginAndAHandMadeTriggerThatStops(t *testing.T) {
+	for _, program := range programs {
+		t.Run(program, func(t *testing.T) {
+			s := installScript(t, program,
+				hostReport(t, "n2", 200, routeBody(t, "solution-preview-update.json", func(b map[string]any) {
+					diff := b["diff"].(map[string]any)
+					diff["moves"] = []any{map[string]any{
+						"member": "Scout", "from": "job-board", "to": "job-board-plugin",
+						"line": "Scout moves from plugin job-board to job-board-plugin",
+					}}
+					diff["noLongerFire"] = []any{map[string]any{
+						"trigger": "My postings", "eventType": "plugin.job-board.posting-found",
+						"line": "Trigger My postings, made by hand on plugin.job-board.posting-found, will no longer fire",
+					}}
+				})),
+				hostReport(t, "n3", 200, routeBody(t, "solution-update-done.json", nil)),
+			)
+			code, out, errOut := run(t, installDeps(s, program, "\n\n\ny\n"), "solution", "install", solutionPackage(t), "--team", "Job Tracker")
+			if code != 0 {
+				t.Fatalf("exit %d: %s %s", code, out, errOut)
+			}
+			containsAll(t, "stdout", out,
+				"Updating team Job Tracker from job-tracker 1.0.0 to 1.1.0:",
+				"  Scout moves from plugin job-board to job-board-plugin.\n",
+				"  Trigger My postings, made by hand on plugin.job-board.posting-found, will no longer fire.\n",
+			)
+		})
+	}
+}
+
 func TestSolutionInstallUpdateShowsWhatItKeepsInsteadOfAskingAgain(t *testing.T) {
 	for _, program := range programs {
 		t.Run(program, func(t *testing.T) {
