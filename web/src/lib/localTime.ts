@@ -91,6 +91,18 @@ export function localDay(iso: string | null | undefined): string {
   return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`
 }
 
+/**
+ * The full date and time of a wire instant, for the tooltip over a `localDay`: the day is what the
+ * cell shows, the moment is what hovering gives. Empty for nothing, or for what is not a time.
+ */
+export function localDayTitle(iso: string | null | undefined): string {
+  if (!iso) return ''
+
+  const ms = wireInstant(iso)
+
+  return Number.isNaN(ms) ? '' : localTime(ms, { date: true })
+}
+
 /** An ISO-8601 instant inside text: a date, `T`, a time to the minute or finer, and its zone. */
 const IsoInstant = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})(?![\w:])/g
 

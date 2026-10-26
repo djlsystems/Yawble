@@ -35,7 +35,7 @@ vi.mock('../../lib/useAgentInstallations', () => ({
 
 import RibbonBar from '../RibbonBar.vue';
 import RibbonMobileMenu from '../RibbonMobileMenu.vue';
-import { DocumentsAction, TeamDocumentsAction } from '../../lib/ribbon';
+import { DocumentsAction } from '../../lib/ribbon';
 import { useConsoleStore } from '../../stores/console';
 import { asTeamId } from '../../api/types';
 // Importing this module is what installs the Quasar plugin - it registers a `beforeAll` hook at
@@ -89,11 +89,7 @@ function documentsControls(wrapper: VueWrapper, type: string) {
   return wrapper.findAllComponents({ name: type }).filter((candidate) => candidate.text().includes('Documents'));
 }
 
-/**
- * PROJECTS › DOCUMENTS, the last of the two. Active Team › Documents comes first on both surfaces
- * (the Active Team block is before Projects); it is the shortcut to the active team's folder, and
- * the cases below it are about the door to every folder.
- */
+/** PROJECTS › DOCUMENTS, the one Documents control on the ribbon. */
 function documentsControl(wrapper: VueWrapper, type: string) {
   const found = documentsControls(wrapper, type).at(-1);
 
@@ -147,28 +143,23 @@ describe.each(Surfaces)('%s, with no active team', (_name, component, type) => {
    * call the ribbon makes would reach happy-dom's real socket, and this is the assertion that says
    * it must not.
    */
-  /**
-   * THE SHORTCUT IS GATED; THE DOOR IS NOT. Active Team › Documents opens the active team's own
-   * folder, so with no active team it is disabled - and Projects › Documents beside it is not.
-   */
-  it('disables Active Team › Documents with no active team, and enables it with one', async () => {
+  /** ONE Documents control: Active Team has none, and the one here is enabled with or without a team. */
+  it('renders one Documents control, enabled with no active team and with one', async () => {
     const without = await render(component);
-    const controls = documentsControls(without, type);
-    expect(controls).toHaveLength(2);
-    expect(controls[0]!.props('disable')).toBe(true);
-    expect(controls[1]!.props('disable')).toBe(false);
+    expect(documentsControls(without, type)).toHaveLength(1);
     without.unmount();
 
     const board = useConsoleStore();
     board.teams = [{ id: 'alpha', name: 'Alpha' }] as never;
     board.activeTeamId = asTeamId('alpha');
     const withTeam = await render(component);
-    const shortcut = documentsControls(withTeam, type)[0]!;
-    expect(shortcut.props('disable')).toBe(false);
+    const controls = documentsControls(withTeam, type);
+    expect(controls).toHaveLength(1);
+    expect(controls[0]!.props('disable')).toBe(false);
 
-    await shortcut.trigger('click');
+    await controls[0]!.trigger('click');
     await flushPromises();
-    expect(withTeam.emitted('action')).toEqual([[TeamDocumentsAction]]);
+    expect(withTeam.emitted('action')).toEqual([[DocumentsAction]]);
   });
 
   it('makes no request of its own to draw the item', async () => {

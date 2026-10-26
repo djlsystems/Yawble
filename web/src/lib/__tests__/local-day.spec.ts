@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { localDay } from '../localTime'
+import { localDay, localDayTitle, localTime, wireInstant } from '../localTime'
 
 /**
  * A DAY IS THE PERSON'S DAY. The wire carries UTC, and its first ten characters are the UTC date:
@@ -27,5 +27,19 @@ describe('a calendar day', () => {
     expect(localDay(null)).toBe('')
     expect(localDay(undefined)).toBe('')
     expect(localDay('not a time')).toBe('')
+  })
+})
+
+describe("a calendar day's tooltip", () => {
+  it('is the full date and time in the browser zone, the same moment the day was read from', () => {
+    const at = '2026-10-07T03:34:00Z'
+    expect(localDayTitle(at)).toBe(localTime(wireInstant(at), { date: true }))
+    expect(localDayTitle(at)).toContain(':34')
+  })
+
+  it('is empty for nothing or for what is not a time', () => {
+    expect(localDayTitle(null)).toBe('')
+    expect(localDayTitle(undefined)).toBe('')
+    expect(localDayTitle('not a time')).toBe('')
   })
 })

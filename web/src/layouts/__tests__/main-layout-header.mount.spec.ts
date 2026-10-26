@@ -97,11 +97,19 @@ describe('the one header row', () => {
     wrapper.unmount();
   });
 
-  it('carries the logo at its start and the live chip, Needs you, gauge and account menu at its end, in that order', async () => {
+  it('carries the logo and the update notice at its start and the live chip, Needs you, gauge and account menu at its end, in that order', async () => {
     const wrapper = await mountShell();
     const row = wrapper.find('.q-header .ribbon');
 
     expect(row.find('.ribbon-start [data-test="brand-link"]').exists()).toBe(true);
+    // The update notice is an icon beside the logo, never on the right.
+    expect(row.find('.ribbon-start').findComponent(UpdateNotice).props('word')).toBe(false);
+    expect(row.find('.ribbon-end').findComponent(UpdateNotice).exists()).toBe(false);
+
+    // The four tools are one size: the same class on each.
+    for (const tool of ['[data-test="live-chip"]', '.needs-you', '[data-test="capacity-gauge"]', '.user-menu']) {
+      expect(row.find(`.ribbon-end ${tool}`).classes(), tool).toContain('header-tool');
+    }
 
     const cluster = row.find('.ribbon-end');
     const order = [
@@ -123,14 +131,14 @@ describe('the one header row', () => {
     wrapper.unmount();
   });
 
-  it('says live or offline on the chip, in words', async () => {
+  it('says live or offline on the chip, in words, as its label and tooltip', async () => {
     const wrapper = await mountShell();
     const chip = () => wrapper.find('[data-test="live-chip"]');
 
-    expect(chip().text()).toContain('offline');
+    expect(chip().attributes('aria-label')).toBe('offline');
     useConsoleStore().connected = true;
     await flushPromises();
-    expect(chip().text()).toContain('live');
+    expect(chip().attributes('aria-label')).toBe('live');
 
     wrapper.unmount();
   });
@@ -155,9 +163,9 @@ describe('the one header row', () => {
 
   /**
    * SHORT OF ROOM, THE ROW GIVES WAY IN ITS ORDER: each fitting that keeps fewer than New Team
-   * through Backlog takes one step - "Update available" is its icon, the version leaves the row, the live chip is a dot, the account
-   * menu is its icon, Needs you is its count pill, the commands' padding halves, and last the logo
-   * is the head mark - and a fitting that keeps enough takes none. The ribbon's labels stay.
+   * through Backlog takes one step - the version leaves the row, the commands' padding halves, and
+   * last the logo is the head mark - and a fitting that keeps enough takes none. The ribbon's labels
+   * stay.
    */
   it('gives way in order, one step per fitting that keeps too few, and none while enough show', async () => {
     const wrapper = await mountShell();
@@ -174,11 +182,7 @@ describe('the one header row', () => {
     };
     /** What has given way, in the order of `GiveWaySteps`. */
     const taken = () => [
-      cluster().findComponent(UpdateNotice).props('word') === false,
       !cluster().find('.version-tag').exists(),
-      cluster().find('[data-test="live-chip"]').classes().includes('live-chip-dot'),
-      !cluster().find('[data-test="account-name"]').exists(),
-      !cluster().find('[data-test="needs-you-word"]').exists(),
       ribbon.props('tight') === true,
       wrapper.find('[data-test="brand-mark"]').exists(),
     ];
@@ -255,8 +259,6 @@ describe('the one header row', () => {
     expect(wrapper.find('[data-test="brand-mark"]').exists()).toBe(false);
     expect(ribbon.props('tight')).toBe(false);
     expect(wrapper.find('.q-header .ribbon-end .version-tag').exists()).toBe(true);
-    expect(wrapper.find('[data-test="account-name"]').exists()).toBe(true);
-    expect(cluster(wrapper).findComponent(UpdateNotice).props('word')).toBe(true);
 
     wrapper.unmount();
   });
@@ -279,7 +281,7 @@ describe('the one header row', () => {
 
     ribbon.vm.$emit('fit', keep - 1);
     await flushPromises();
-    expect(cluster(wrapper).findComponent(UpdateNotice).props('word')).toBe(false);
+    expect(cluster(wrapper).find('.version-tag').exists()).toBe(false);
     // The manual fitting, then the ribbon's own one the step asked for.
     expect(fits()).toBe(before + 3);
 

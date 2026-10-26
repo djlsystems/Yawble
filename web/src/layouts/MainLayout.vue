@@ -5,7 +5,8 @@ import { useQuasar } from 'quasar';
 import { useRouter } from 'vue-router';
 import { useConsoleStore } from '../stores/console';
 import { useWorkflowNavStore } from '../stores/workflowNav';
-import { asDocumentsFolderKey, type DocumentsFolderKey, type TeamId } from '../api/types';
+import { asDocumentsFolderKey, type DocumentsFolderKey, type TeamId, type TeamRepoStatus } from '../api/types';
+import { getRepoStatus } from '../api/client';
 import { useSessionStore } from '../stores/session';
 import { useTerminalDisplayStore } from '../stores/terminalDisplay';
 import { useAppearanceStore } from '../stores/appearance';
@@ -53,7 +54,6 @@ import { goTo } from '../lib/browserNavigation';
 import {
   ConnectionsAction,
   DocumentsAction,
-  TeamDocumentsAction,
   OutcomesAction,
   PluginsAction,
   RepositoriesAction,
@@ -121,11 +121,47 @@ const documentsStart = ref<DocumentsFolderKey | null>(null);
 const usersOpen = ref(false);
 const agentsOpen = ref(false);
 
+/** The team the Teams list's row menu opened a team dialog on; null is the active team. */
+const commandTeamId = ref<TeamId | null>(null);
+
+/** The team Git, Settings and Reset act on: the row menu's, else the active team. */
+const dialogTeam = computed(
+  () => (commandTeamId.value ? board.teams.find((candidate) => candidate.id === commandTeamId.value) : null)
+    ?? board.activeWorkTeam,
+);
+
+/**
+ * Repository status for a team that is not the active one. The store holds the active team's only
+ * (the board's repository card reads it), so a row menu's Git reads its own.
+ */
+const commandRepoStatus = ref<TeamRepoStatus | null>(null);
+const commandRepoStatusTeam = ref<TeamId | ''>('');
+
+const gitRepoStatus = computed(() => {
+  const teamId = dialogTeam.value?.id;
+  if (!teamId) return null;
+  if (teamId === board.activeWorkTeamId) return board.repoStatusTeam === teamId ? board.repoStatus : null;
+  return commandRepoStatusTeam.value === teamId ? commandRepoStatus.value : null;
+});
+
+async function rereadGitStatus() {
+  const teamId = dialogTeam.value?.id;
+  if (!teamId) return;
+  if (teamId === board.activeWorkTeamId) {
+    await board.pullRepoStatus();
+    return;
+  }
+  const status = await getRepoStatus(teamId);
+  if (dialogTeam.value?.id !== teamId) return;
+  commandRepoStatus.value = status;
+  commandRepoStatusTeam.value = teamId;
+}
+
 watch(
   gitOpen,
   (isOpen) => {
     if (isOpen) {
-      void board.pullRepoStatus();
+      void rereadGitStatus();
     }
   },
 );
@@ -193,7 +229,7 @@ const sitesTeam = ref<TeamId | null>(null);
 const resetOpen = ref(false);
 /** The Backlog dialog is the nav store's, so a workflow's item chip anywhere opens it on that item. */
 const workflowNav = useWorkflowNavStore();
-const { backlogOpen, backlogItem } = storeToRefs(workflowNav);
+const { backlogOpen, backlogItem, backlogTeam } = storeToRefs(workflowNav);
 /** The Git dialog asked for from elsewhere (Needs you's merge row): the store made the team active. */
 watch(
   () => workflowNav.gitAsks,
@@ -305,7 +341,10 @@ const teamSettingsTabs: Record<string, 'general' | 'members'> = {
  * one thing and needs no argument, which is why it is optional rather than a second parameter
  * every branch has to thread.
  */
-function onRibbonAction(action: string) {
+function onRibbonAction(action: string, team: TeamId | null = null) {
+  // THE TEAM A TEAM DIALOG IS FOR: the Teams list's row menu names one, the ribbon acts on the active team.
+  commandTeamId.value = team;
+
   // CHOOSING ANOTHER COMMAND MINIMIZES THE CONCIERGE. The panel's shell sits at z-index 7000, above
   // every QDialog (6000), so a dialog opened from the ribbon with the panel open painted BEHIND the
   // terminal - and, being modal, took the keyboard from it, so neither could be used. Minimizing keeps
@@ -334,10 +373,11 @@ function onRibbonAction(action: string) {
   else if (action === 'team-reset') resetOpen.value = true;
   else if (action === TeamSitesAction) openSites(board.activeWorkTeamId || null);
   // UNPREFIXED, deliberately, and for the same reasons as `backlog` below - see `lib/ribbon.ts`.
-  // Documents live under one tenant root, so this needs no active team.
-  else if (action === DocumentsAction) openDocuments(null);
-  // The same explorer, opened at the active team's own folder rather than the root.
-  else if (action === TeamDocumentsAction) openDocuments(board.activeWorkTeamId ? asDocumentsFolderKey(board.activeWorkTeamId) : null);
+  // Documents live under one tenant root, so this needs no active team: it opens at the team whose
+  // board is showing, else the root (and the dialog falls back to the root when that team has no folder).
+  else if (action === DocumentsAction) {
+    openDocuments(board.view === 'board' && board.activeWorkTeamId ? asDocumentsFolderKey(board.activeWorkTeamId) : null);
+  }
   // NOT A DIALOG - this action selects the permanent Teams tab, the same door `IndexPage`'s own
   // Teams tab click uses.
   else if (action === 'admin-teams') board.showTeamsView();
@@ -366,6 +406,27 @@ function onRibbonAction(action: string) {
   else if (action === SolutionsAction) void router.push('/solutions');
 }
 
+/**
+ * A command from the Teams list's row menu, on that row's team. Board opens its board; every other
+ * command opens its dialog on that team over the Teams list, and the active team does not change.
+ */
+watch(
+  () => workflowNav.teamCommandAsks,
+  () => {
+    const command = workflowNav.teamCommand;
+    if (!command) return;
+    const { team, action } = command;
+    conciergeOpen.value = false;
+
+    if (action === TeamSitesAction) openSites(team);
+    else if (action === DocumentsAction) openDocuments(asDocumentsFolderKey(team));
+    else if (action === 'backlog') workflowNav.openBacklogFor(team);
+    else if (action === TeamBoardAction) workflowNav.openBoard(team);
+    // Git, Settings and Reset open on the row's team over the Teams list, without opening its board.
+    else onRibbonAction(action, team);
+  },
+);
+
 /** The documents explorer, at the root or at one team's folder. */
 function openDocuments(start: DocumentsFolderKey | null) {
   documentsStart.value = start;
@@ -378,12 +439,6 @@ function openSites(team: TeamId | null) {
   sitesOpen.value = true;
 }
 
-/**
- * The local part of the address. A whole email does not fit a phone's toolbar beside the live chip,
- * and the domain is the same for everyone on a single-tenant instance - so it is the half that
- * carries no information. The full address is in the menu, where there is room for it.
- */
-const shortName = computed(() => session.user?.email.split('@')[0] ?? '');
 
 
 /** The logo's tooltip: the product and which build this is, the version the row no longer carries. */
@@ -406,9 +461,7 @@ const brandTooltip = `${productTitle} ${releaseLabel(bundleBuild.version)}`;
  */
 const giveWay = ref(0);
 const mustKeep = keepThrough(Ribbon);
-/** An update is pending, so the notice is on the row (UpdateNotice says). */
-const updatePending = ref(false);
-const headerFit = computed(() => fitHeader(giveWay.value, $q.screen.lt.sm, updatePending.value));
+const headerFit = computed(() => fitHeader(giveWay.value, $q.screen.lt.sm));
 
 function onRibbonFit(shown: number) {
   giveWay.value = nextGiveWay(giveWay.value, shown, mustKeep);
@@ -489,15 +542,15 @@ async function signOut() {
             <img v-else :src="productLogoFor($q.dark.isActive)" :alt="productTitle" width="1066" height="365" />
             <q-tooltip anchor="bottom left" self="top left" :offset="[0, 6]">{{ brandTooltip }}</q-tooltip>
           </router-link>
+          <!-- BESIDE THE LOGO: a release badge when the release check found a newer release, nothing
+               otherwise. The words are its tooltip and aria-label; a click opens Updates. -->
+          <UpdateNotice :word="false" />
         </template>
 
         <template #end>
           <!-- Which build this is. The second thing to leave the row when it is short of room: it
                is under the logo's tooltip and in the account menu as well. -->
           <VersionTag v-if="headerFit.version" class="header-version" />
-          <!-- "Update available" when the release check found a newer release; nothing otherwise. The
-               first thing to give way: its icon alone, the words its tooltip and aria-label. -->
-          <UpdateNotice :word="headerFit.updateWord" @pending="(pending) => (updatePending = pending)" />
 
           <!--
             Live or not, stated. A board that has quietly stopped receiving pushes looks exactly
@@ -506,13 +559,13 @@ async function signOut() {
             behind a click. Green while live, grey when not; a click opens the service's state.
             Short of room it is the icon alone, the word in its tooltip.
           -->
-          <LiveStatusControl :word="headerFit.liveWord" />
+          <LiveStatusControl class="header-tool" :word="false" />
 
           <!-- What is waiting on a person, as one count, left of the gauge. People only, as its route is. -->
-          <NeedsYouControl v-if="session.user" :word="headerFit.needsYouWord" />
+          <NeedsYouControl v-if="session.user" class="header-tool" :word="false" />
           <!-- The activity monitor: the instance's load as one gauge, its figures a click away.
                People only, as its route is. -->
-          <CapacityMonitor v-if="session.user" />
+          <CapacityMonitor v-if="session.user" class="header-tool" />
 
             <!-- One control, not a name beside a logout icon. The account is a place you go rather
                  than a label with a button next to it, and the profile has nowhere else to live. -->
@@ -521,16 +574,14 @@ async function signOut() {
               flat
               dense
               no-caps
-              class="user-menu"
+              class="user-menu header-tool"
               content-class="above-concierge"
               :aria-label="`Account: ${session.user.email}`"
             >
               <template #label>
+                <!-- THE ICON ALONE, like the other tools on the row: the address is the menu's first line
+                     and the button's aria-label. -->
                 <q-icon name="account_circle" size="20px" />
-                <!-- The name hides below 600px, and on a row short of room (`lib/headerFit.ts`), so the
-                     toolbar does not crowd; the icon and the caret remain, which is still a full tap
-                     target, and the name is the menu's first line. -->
-                <span v-if="headerFit.accountName" class="gt-xs q-ml-xs" data-test="account-name">{{ shortName }}</span>
               </template>
 
               <q-list>
@@ -700,13 +751,14 @@ async function signOut() {
     <BoardDisplayDialog v-model="boardDisplayOpen" />
     <ThemesDialog v-model="themesOpen" />
     <CreateTeamDialog v-model="creatingTeam" @created="teamCreated" />
-    <TeamSettingsDialog v-model="teamSettingsOpen" :initial-tab="teamSettingsTab" />
+    <TeamSettingsDialog v-model="teamSettingsOpen" :initial-tab="teamSettingsTab" :team-id="dialogTeam?.id ?? null" />
     <TeamGitDialog
-      v-if="board.activeWorkTeam"
+      v-if="dialogTeam"
       v-model="gitOpen"
-      :repo-status="board.repoStatusTeam === board.activeWorkTeam.id ? board.repoStatus : null"
-      :team-id="board.activeWorkTeam.id"
-      :any-member-running="board.activeWorkTeam.containers.some((c) => c.state === 'Running')"
+      :repo-status="gitRepoStatus"
+      :team-id="dialogTeam.id"
+      :any-member-running="dialogTeam.containers.some((c) => c.state === 'Running')"
+      :reread="rereadGitStatus"
     />
     <DocumentsDialog v-model="documentsOpen" v-model:full-screen="documentsFullScreen" :start="documentsStart" />
     <UsersDialog v-model="usersOpen" />
@@ -730,8 +782,8 @@ async function signOut() {
          backstop rather than the way anyone meets the rule - but the prop is non-nullable and a
          `team-reset` reaching here with nothing selected would be a render error rather than a
          no-op. -->
-    <ResetTeamDialog v-if="board.activeWorkTeam" v-model="resetOpen" :team="board.activeWorkTeam" />
-  <BacklogDialog v-model="backlogOpen" :item="backlogItem" />
+    <ResetTeamDialog v-if="dialogTeam" v-model="resetOpen" :team="dialogTeam" />
+  <BacklogDialog v-model="backlogOpen" :item="backlogItem" :team="backlogTeam" />
     <TenantLogDialog v-model="tenantLogOpen" />
     <DiagnosticsDialog v-model="diagnosticsOpen" />
   </q-layout>
@@ -778,8 +830,33 @@ async function signOut() {
   flex: 0 1 auto;
 }
 
-.user-menu {
-  max-width: 12rem;
+/*
+ * THE TOOLS ON THE RIGHT ARE ONE SIZE: live, Needs you, the activity gauge and the account, each a
+ * 32px round target holding a 1.25rem (20px) glyph, 4px apart. Set here on each component's root (a scoped
+ * class reaches a child's root element), so the four stay alike whoever edits one of them.
+ */
+.header-tool {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  margin-left: 4px;
+  border-radius: 50%;
+}
+
+.header-tool :deep(.q-btn__content) {
+  flex-wrap: nowrap;
+  justify-content: center;
+}
+
+.header-tool :deep(.q-icon) {
+  font-size: 1.25rem;
+}
+
+/* The account is a tool like the others: its menu opens on a click, with no caret beside it. */
+.user-menu :deep(.q-btn-dropdown__arrow) {
+  display: none;
 }
 
 .ribbon-menu-drawer {

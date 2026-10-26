@@ -165,13 +165,13 @@ describe('an archived row', () => {
     await tick('archived');
 
     expect(row('beta').querySelector('[data-col-status]')?.textContent?.trim()).toBe('ARCHIVED');
-    expect(actionsOf('beta')).toEqual(['Unarchive', 'Clone this team', 'Delete this team']);
+    expect(actionsOf('beta')).toEqual(['Unarchive', 'Clone this team', 'Delete this team', 'Team commands']);
   });
 
   it('offers Archive beside Delete on an active row', async () => {
     await mountView();
 
-    expect(actionsOf('alpha')).toEqual(['Pause', 'Clone this team', 'Archive this team', 'Delete this team']);
+    expect(actionsOf('alpha')).toEqual(['Pause', 'Clone this team', 'Archive this team', 'Delete this team', 'Team commands']);
   });
 
   it('unarchives through the route and says the team comes back paused', async () => {

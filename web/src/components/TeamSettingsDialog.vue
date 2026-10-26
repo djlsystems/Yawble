@@ -98,7 +98,11 @@ const open = defineModel<boolean>({ required: true });
  *  would have to live in a module of its own for the sake of one union that both ends already
  *  state. */
 const props = withDefaults(
-  defineProps<{ initialTab?: 'general' | 'members' | 'instructions' | 'skills' | 'repos' | 'env' }>(),
+  defineProps<{
+    initialTab?: 'general' | 'members' | 'instructions' | 'skills' | 'repos' | 'env';
+    /** The team to show; the active team when not given (the Teams list's row menu names one). */
+    teamId?: string | null;
+  }>(),
   { initialTab: 'general' },
 );
 
@@ -112,7 +116,7 @@ const TeamInstructionsTab = 'Team instructions';
 
 const tab = ref<'general' | 'members' | 'instructions' | 'skills' | 'repos' | 'env'>(props.initialTab);
 
-const team = computed(() => board.activeTeam);
+const team = computed(() => (props.teamId ? board.teams.find((candidate) => candidate.id === props.teamId) : null) ?? board.activeTeam);
 const containers = computed(() => team.value?.containers ?? []);
 
 /**

@@ -10,7 +10,7 @@ import {
   SitesAction,
   TeamBoardAction,
   TeamSitesAction,
-  TeamDocumentsAction,
+  TeamMenu,
   TenantSettingsAction,
   commandRoom,
   fitCount,
@@ -43,13 +43,13 @@ describe('the ribbon', () => {
 
   /**
    * THE RIBBON ACTS ON THE TEAM; THE STRIP CHOOSES THE VIEW. Active Team is Board, Git, Sites,
-   * Documents, Settings, Reset - in that order, every one gated by `team-` - and no Kanban: the
+   * Settings, Reset - in that order, every one gated by `team-` - and no Kanban: the
    * console strip's Kanban tab is the one door to it, opening it filtered to the active team.
    */
-  it('lists Board, Git, Sites, Documents, Settings, Reset under Active Team, and no Kanban', () => {
+  it('lists Board, Git, Sites, Settings, Reset under Active Team, and no Kanban', () => {
     const active = Ribbon.tabs.find((tab) => tab.id === 'active')!
 
-    expect(active.items.map((item) => item.label)).toEqual(['Board', 'Git', 'Sites', 'Documents', 'Settings', 'Reset'])
+    expect(active.items.map((item) => item.label)).toEqual(['Board', 'Git', 'Sites', 'Settings', 'Reset'])
     expect(active.items[0]!.action).toBe(TeamBoardAction)
     expect(active.items.every((item) => item.action?.startsWith('team-'))).toBe(true)
 
@@ -134,16 +134,13 @@ describe('the ribbon', () => {
   })
 
   /**
-   * THE SECOND WAY IN, AND ONLY A SHORTCUT. Active Team > Documents opens the same explorer at the
-   * active team's folder, so it needs an active team and is gated by the prefix like every other
-   * `team-` action. Projects > Documents stays the ungated door to every folder.
+   * THE TEAMS LIST'S ROW MENU: the Active Team commands with Documents and Backlog, in that order,
+   * each a command the layout already handles.
    */
-  it('offers Active Team > Documents, gated by an active team', () => {
-    const active = Ribbon.tabs.find((tab) => tab.id === 'active')!.items.map((item) => item.action)
-
-    expect(active).toContain(TeamDocumentsAction)
-    expect(needsActiveWorkTeam(TeamDocumentsAction, undefined)).toBe(true)
-    expect(needsActiveWorkTeam(TeamDocumentsAction, 'alpha')).toBe(false)
+  it('lists Board, Git, Sites, Documents, Settings, Reset and Backlog in the Teams row menu', () => {
+    expect(TeamMenu.map((item) => item.label)).toEqual(['Board', 'Git', 'Sites', 'Documents', 'Settings', 'Reset', 'Backlog'])
+    expect(TeamMenu.find((item) => item.label === 'Documents')!.action).toBe(DocumentsAction)
+    expect(TeamMenu.find((item) => item.label === 'Backlog')!.action).toBe('backlog')
   })
 
   /**

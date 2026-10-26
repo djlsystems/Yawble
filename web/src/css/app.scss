@@ -63,6 +63,12 @@
   // `--os-surface`, 5.26:1 on `--os-chrome`. Dark lifts it to `--os-warn`.
   --os-warn-ink: #8a5a00;
 
+  // ATTENTION: the header's Needs you count while anything waits - a solid yellow badge with dark ink,
+  // so it catches the eye on a light and a dark header alike. One pair for every theme: the ink on the
+  // fill is 14:1, and the fill is a badge, not text on the chrome.
+  --os-attention: #ffc400;
+  --os-attention-ink: #1f1a00;
+
   // THE ACTIVITY TILE'S LANES: each state a mark of at least 3:1 on `--os-chrome`, the tile it is
   // drawn on (`statistics-tile-contrast.spec.ts` measures both themes). Idle is a pale empty track
   // on purpose, each theme's own strong rule.
@@ -840,6 +846,39 @@ body.body--dark {
 html:not(.icons-ready) .material-symbols-outlined {
   color: transparent !important;
   overflow: hidden;
+}
+
+// EVERY TABLE KEEPS ITS HEADER ROW IN VIEW AS IT SCROLLS. Quasar gives `.q-markup-table`
+// `overflow: auto`, which makes the wrapper the scroll box a sticky header holds against - and the
+// wrapper never scrolls (it has no height), so the header scrolled away with the rows. Visible, the
+// header holds against what does scroll: the dialog's card, a section with its own overflow, the page.
+// The virtual-scroll tables (Diagnostics, the tenant log) and the Kanban keep their own rules.
+.q-markup-table {
+  overflow: visible;
+}
+
+.q-markup-table > table > thead > tr > th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--os-surface);
+}
+
+// A card section that scrolls holds its sticky header 16px down, its top padding, and rows showed
+// through above it. When a table opens the section, the padding becomes the table's margin: the
+// same space at rest, and when the section scrolls the header sits flush at its top.
+.q-card__section:has(> .q-markup-table:first-child) {
+  padding-top: 0;
+}
+
+.q-card__section > .q-markup-table:first-child {
+  margin-top: 16px;
+}
+
+// On a page (the Teams list) the window scrolls under the fixed one-row header, so the row sticks
+// below it. A dialog is teleported outside the page container and keeps `top: 0`.
+.q-page-container .q-markup-table > table > thead > tr > th {
+  top: 44px;
 }
 
 // RESIZABLE TABLE COLUMNS (`lib/resizableColumns.ts`). The handle sits on the right edge of each

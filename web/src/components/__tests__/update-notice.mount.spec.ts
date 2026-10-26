@@ -144,7 +144,7 @@ describe('the update notice', () => {
 
     expect(notice.find('[data-test="update-word"]').exists()).toBe(false);
     expect(notice.text()).not.toContain('Update available');
-    expect(notice.findComponent({ name: 'QIcon' }).props('name')).toBe('upgrade');
+    expect(notice.findComponent({ name: 'QIcon' }).props('name')).toBe('release_alert');
     expect(notice.attributes('aria-label')).toMatch(/^Update available: v2026\.10\.08\.1\./);
 
     const tooltip = notice.findComponent({ name: 'QTooltip' });

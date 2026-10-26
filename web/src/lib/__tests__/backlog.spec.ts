@@ -20,6 +20,7 @@ import {
   linkTitle,
   neighboursFor,
   newTeamNameFor,
+  nextBacklogSort,
   numbered,
   reviewCaption,
   teamLabel,
@@ -183,6 +184,29 @@ describe('numbered', () => {
 
     expect(rows.map((r) => r.id)).toEqual([5, 9, 2])
     expect(rows.map((r) => r.index)).toEqual([1, 2, 3])
+  })
+})
+
+describe('sorting by a date', () => {
+  /**
+   * AS INSTANTS, NOT TEXT. A whole second sorts before the same second with a fraction, and a time
+   * with seven fractional digits beside one with none was misordered by a string compare.
+   */
+  it('orders times as instants whatever their fractions', () => {
+    const items = [
+      item({ id: 1, createdAt: '2026-10-26T14:52:24.3488198+00:00' }),
+      item({ id: 2, createdAt: '2026-10-26T14:52:24+00:00' }),
+      item({ id: 3, createdAt: '2026-10-26T09:00:00Z' }),
+    ]
+
+    expect(numbered(items, { by: 'created', descending: false }).map((r) => r.id)).toEqual([3, 2, 1])
+    expect(numbered(items, { by: 'created', descending: true }).map((r) => r.id)).toEqual([1, 2, 3])
+  })
+
+  it('flips direction on the same heading and starts ascending on another', () => {
+    expect(nextBacklogSort({ by: 'created', descending: false }, 'created')).toEqual({ by: 'created', descending: true })
+    expect(nextBacklogSort({ by: 'created', descending: true }, 'created')).toEqual({ by: 'created', descending: false })
+    expect(nextBacklogSort({ by: 'created', descending: true }, 'updated')).toEqual({ by: 'updated', descending: false })
   })
 })
 

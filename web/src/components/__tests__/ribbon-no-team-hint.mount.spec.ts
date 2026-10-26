@@ -65,8 +65,8 @@ function wrapIndex(wrapper: VueWrapper, label: string, nth = 0): number {
 }
 
 describe('a greyed ribbon command with no team chosen', () => {
-  it('there are six of them, so the hint is not tested on an empty list', () => {
-    expect(TeamCommands).toHaveLength(6);
+  it('there are five of them, so the hint is not tested on an empty list', () => {
+    expect(TeamCommands).toHaveLength(5);
   });
 
   it('says to pick or create a team, on hover, on every one of them', async () => {

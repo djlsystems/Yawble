@@ -1,7 +1,7 @@
 import type { BacklogItemView } from '../api/client'
 import type { BacklogInFlight, BacklogLanded, BacklogStranded } from '../api/types'
 import { MAXIMUM_BACKLOG_TITLE_LENGTH } from './rules'
-import { localTime } from './localTime'
+import { localTime, wireInstant } from './localTime'
 
 /**
  * The sortable columns on the backlog table.
@@ -538,6 +538,25 @@ export function numbered(
   return sorted.map((item) => ({ ...item, index: byPosition.get(item.id) ?? 0 }))
 }
 
+/** Two wire times in time order; one that is missing or not a time sorts after every time. */
+function instantOrder(left: string | null | undefined, right: string | null | undefined): number {
+  const a = left ? wireInstant(left) : NaN
+  const b = right ? wireInstant(right) : NaN
+
+  if (Number.isNaN(a)) return Number.isNaN(b) ? 0 : 1
+  if (Number.isNaN(b)) return -1
+
+  return a - b
+}
+
+/**
+ * What clicking a column heading does: the same column flips direction, another one starts
+ * ascending - the rule every sortable table here follows (`nextSort`).
+ */
+export function nextBacklogSort(current: BacklogSortState, by: BacklogSort): BacklogSortState {
+  return { by, descending: current.by === by ? !current.descending : false }
+}
+
 function compare(left: BacklogItemView, right: BacklogItemView, by: BacklogSort): number {
   switch (by) {
     case 'id':
@@ -550,14 +569,16 @@ function compare(left: BacklogItemView, right: BacklogItemView, by: BacklogSort)
       return dispatchedTeamLabel(left).localeCompare(dispatchedTeamLabel(right))
     case 'state':
       return left.state.localeCompare(right.state)
+    // AS INSTANTS, NOT TEXT. The wire's times carry their fractions to differing lengths
+    // ("…:24+00:00" beside "…:24.3488198+00:00"), and a string order is not a time order across them.
     case 'created':
-      return left.createdAt.localeCompare(right.createdAt)
+      return instantOrder(left.createdAt, right.createdAt)
     case 'updated':
-      return left.updatedAt.localeCompare(right.updatedAt)
+      return instantOrder(left.updatedAt, right.updatedAt)
     case 'archived':
       // Null sorts last rather than throwing the row to the top. On the Archived tab it is never
       // null, so this arm only ever runs for a list that should not have been sorted by it.
-      return (left.archivedAt ?? '').localeCompare(right.archivedAt ?? '')
+      return instantOrder(left.archivedAt, right.archivedAt)
     case 'position':
     default:
       // ALREADY IN POSITION ORDER - the server returns it that way, and re-deriving it from a

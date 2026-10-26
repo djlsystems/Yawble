@@ -71,6 +71,7 @@ import {
   linkTitle,
   neighboursFor,
   newTeamNameFor,
+  nextBacklogSort,
   numbered,
   reviewCaption,
   teamLabel,
@@ -81,7 +82,7 @@ import {
   type BacklogSort,
 } from '../lib/backlog';
 import { vResizableColumns } from '../lib/resizableColumns';
-import { localDay } from '../lib/localTime';
+import { localDay, localDayTitle } from '../lib/localTime';
 import { solutionNotice, type SolutionNoticeView } from '../lib/solutionNotice';
 import { workflowRow } from '../lib/workflowNumber';
 import WorkflowName from './WorkflowName.vue';
@@ -107,7 +108,7 @@ import { useWorkflowNavStore } from '../stores/workflowNav';
 const open = defineModel<boolean>({ required: true });
 
 /** An item to open at, by the number the backlog routes take - the Outcomes dialog's way in. */
-const props = defineProps<{ item?: number | null }>();
+const props = defineProps<{ item?: number | null; team?: string | null }>();
 
 /** Copied once because `QBtnToggle` declares its `options` mutable; the source of truth is `lib/`. */
 const reviewOptions = [...REVIEW_OPTIONS];
@@ -427,6 +428,38 @@ async function saveSettings() {
 const sort = computed(() => ({ by: sortBy.value, descending: descending.value }));
 
 /**
+ * The sortable headings, in order. Team says which team in its tooltip, because the row shows two:
+ * the dispatched team, and the small link marker under a title saying who may SEE the item.
+ */
+const sortHeadings = computed(() => [
+  { by: 'position' as const, label: '#', title: undefined },
+  { by: 'id' as const, label: 'Id', title: undefined },
+  { by: 'title' as const, label: 'Title', title: undefined },
+  {
+    by: 'team' as const,
+    label: 'Team',
+    title: 'The team this item was dispatched to. The small link marker under a title is the other fact - who may SEE the item - and the two can differ.',
+  },
+  { by: 'state' as const, label: 'Status', title: undefined },
+  { by: 'created' as const, label: 'Added', title: undefined },
+  { by: 'updated' as const, label: 'Modified', title: undefined },
+  ...(tab.value === 'archived' ? [{ by: 'archived' as const, label: 'Archived', title: undefined }] : []),
+]);
+
+/** A heading click: the same column flips direction, another starts ascending. */
+function sortOn(by: BacklogSort) {
+  const next = nextBacklogSort(sort.value, by);
+  sortBy.value = next.by;
+  descending.value = next.descending;
+}
+
+/** The `aria-sort` on a sortable heading: `none` on every heading that is not the sort. */
+function ariaSortOf(by: BacklogSort): 'ascending' | 'descending' | 'none' {
+  if (sortBy.value !== by) return 'none';
+  return descending.value ? 'descending' : 'ascending';
+}
+
+/**
  * THE TEAMS THIS PERSON REACHES, which is what both the filter and the create picker are built
  * from. It NARROWS what the server already allows and can never widen it - the same property
  * `/api/kanban/board`'s filter has, and the reason that route is safe.
@@ -552,6 +585,11 @@ watch(open, async (isOpen) => {
   }
 
   await load();
+  // OPENED FOR ONE TEAM (the Teams list's menu): its dispatched items, or All when it has none.
+  if (props.team) {
+    tab.value = 'backlog';
+    teamFilter.value = filterOptions.value.some((option) => option.value === props.team) ? props.team : undefined;
+  }
   if (props.item !== null && props.item !== undefined) {
     try {
       selected.value = await backlogItem(props.item);
@@ -1116,20 +1154,27 @@ function down(index: number) {
         <q-markup-table v-resizable-columns="'backlog'" dense flat class="backlog-table">
           <thead>
             <tr>
-              <th class="text-left backlog-index" @click="sortBy = 'position'">#</th>
-              <th class="text-left" @click="sortBy = 'id'">Id</th>
-              <th class="text-left" @click="sortBy = 'title'">Title</th>
-              <!-- WHICH TEAM THIS IS, said in the header, because the row shows two. -->
               <th
-                class="text-left"
-                title="The team this item was dispatched to. The small link marker under a title is
-                       the other fact - who may SEE the item - and the two can differ."
-                @click="sortBy = 'team'"
-              >Team</th>
-              <th class="text-left" @click="sortBy = 'state'">Status</th>
-              <th class="text-left" @click="sortBy = 'created'">Added</th>
-              <th class="text-left" @click="sortBy = 'updated'">Modified</th>
-              <th v-if="tab === 'archived'" class="text-left" @click="sortBy = 'archived'">Archived</th>
+                v-for="heading in sortHeadings"
+                :key="heading.by"
+                :class="['text-left', 'backlog-sortable', heading.by === 'position' ? 'backlog-index' : '']"
+                :title="heading.title"
+                :aria-sort="ariaSortOf(heading.by)"
+                :data-sort="heading.by"
+                :data-col="heading.label"
+                @click="sortOn(heading.by)"
+              >
+                {{ heading.label }}
+                <!-- Material SYMBOLS names, as the Teams table's arrow. The arrow is text (its
+                     ligature), so `data-col` names the column for its stored width: by the label,
+                     the key it was stored under before the arrow existed. -->
+                <q-icon
+                  v-if="sortBy === heading.by"
+                  :name="descending ? 'arrow_downward' : 'arrow_upward'"
+                  size="14px"
+                  class="backlog-sort-arrow"
+                />
+              </th>
               <th class="text-right">Actions</th>
             </tr>
           </thead>
@@ -1251,9 +1296,9 @@ function down(index: number) {
                   {{ whyDispatchDisabled(row) }}
                 </span>
               </td>
-              <td class="backlog-when">{{ localDay(row.createdAt) }}</td>
-              <td class="backlog-when">{{ localDay(row.updatedAt) }}</td>
-              <td v-if="tab === 'archived'" class="backlog-when">
+              <td class="backlog-when" :title="localDayTitle(row.createdAt)">{{ localDay(row.createdAt) }}</td>
+              <td class="backlog-when" :title="localDayTitle(row.updatedAt)">{{ localDay(row.updatedAt) }}</td>
+              <td v-if="tab === 'archived'" class="backlog-when" :title="localDayTitle(row.archivedAt)">
                 {{ localDay(row.archivedAt) }}
               </td>
               <td class="text-right" @click.stop>
@@ -1458,7 +1503,7 @@ function down(index: number) {
 
         <div v-if="selected.implementedBy" class="q-mt-md text-caption os-text-muted backlog-implemented-by">
           Marked implemented by {{ selected.implementedBy.by }}<span v-if="selected.implementedBy.viaConcierge">
-          (through the Concierge)</span>, {{ localDay(selected.implementedBy.at) }}
+          (through the Concierge)</span>, <span :title="localDayTitle(selected.implementedBy.at)">{{ localDay(selected.implementedBy.at) }}</span>
         </div>
 
         <div v-if="selected.dispatches.length > 0" class="q-mt-md">
@@ -2052,6 +2097,16 @@ function down(index: number) {
 /* The review toggle sits in a row of dense controls and must not grow it. */
 .backlog-review {
   font-size: 0.75rem;
+}
+
+.backlog-sortable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.backlog-sort-arrow {
+  margin-left: 4px;
 }
 
 .backlog-index {

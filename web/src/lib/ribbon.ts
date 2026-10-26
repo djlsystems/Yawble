@@ -78,13 +78,6 @@ export const OutcomesAction = 'admin-outcomes';
 export const SitesAction = 'admin-sites';
 
 /**
- * Active Team > Documents: the same explorer as Projects > Documents, opened at the active team's
- * own folder instead of the root. `team-`, so it needs one. Projects > Documents stays unprefixed
- * and ungated - every folder, gone teams' included, is reachable from there.
- */
-export const TeamDocumentsAction = 'team-documents';
-
-/**
  * Active Team > Board: the active team's board, the member cards its console tab shows. It was
  * "Members" and opened the same team; it is named for what it is.
  *
@@ -137,11 +130,10 @@ export const Ribbon: RibbonSpec = {
       items: [{ kind: 'team-switcher', label: 'Choose Team', icon: 'groups', size: 'large' }],
     },
     /**
-     * Board, Git, Sites, Documents, Settings, Reset - in that order, every one `team-`.
+     * Board, Git, Sites, Settings, Reset - in that order, every one `team-`.
      *
-     * THE DOCUMENTS PAIR IS DELIBERATE. This Documents opens the explorer at the active team's
-     * folder and needs a team; Projects > Documents below opens the root and needs none, so every
-     * folder - a gone team's included - stays reachable. A shortcut and the door, not a duplicate.
+     * NO DOCUMENTS HERE. Projects > Documents is the one Documents button: it opens at the open
+     * board's team folder, else the root, so every folder - a gone team's included - stays reachable.
      */
     {
       id: 'active',
@@ -152,7 +144,6 @@ export const Ribbon: RibbonSpec = {
         { kind: 'button', action: TeamBoardAction, label: 'Board', icon: 'groups', size: 'small' },
         { kind: 'button', action: 'team-git', label: 'Git', icon: 'account_tree', size: 'small' },
         { kind: 'button', action: TeamSitesAction, label: 'Sites', icon: 'public', size: 'small' },
-        { kind: 'button', action: TeamDocumentsAction, label: 'Documents', icon: 'folder_open', size: 'small' },
         { kind: 'button', action: 'team-settings', label: 'Settings', icon: 'settings', size: 'small' },
         { kind: 'button', action: 'team-reset', label: 'Reset', icon: 'restart_alt', size: 'small' },
       ],
@@ -239,14 +230,35 @@ export const Ribbon: RibbonSpec = {
  * documents root is the TENANT's, holding a folder per team; the screen names which team's folder
  * it is showing. Requiring an active team to open it would make the folders of every OTHER team
  * unreachable, including the ones whose team is gone - which is the case that matters
- * most. SO IT IS DELIBERATELY NOT `team-documents`. That name belongs to the second way in, under
- * Active Team, which opens the same explorer at the active team's folder and is gated like every
- * other `team-` action - a shortcut, never the only door.
+ * most. SO IT IS DELIBERATELY NOT `team-...`: it opens at the open board's team folder when a board
+ * is showing, and at the root otherwise, and is never disabled.
  *
  * DO NOT NAME EITHER OF THEM `projects-...`. A prefix that names the TAB rather than a REQUIREMENT
  * breaks the rule `team-` rests on - the prefix IS the rule - and the next reader would reasonably
  * expect a `projects-` predicate to exist.
  */
+
+/**
+ * The Teams list's per-row menu: the Active Team commands, Documents and Backlog, in that order,
+ * each acting on the row's team rather than the active one. Labels and icons are the ribbon's.
+ */
+export interface TeamMenuItem {
+  action: string;
+  label: string;
+  icon: string;
+  /** An archived team has no board, so nothing that opens or needs one. */
+  needsBoard: boolean;
+}
+
+export const TeamMenu: readonly TeamMenuItem[] = [
+  { action: TeamBoardAction, label: 'Board', icon: 'groups', needsBoard: true },
+  { action: 'team-git', label: 'Git', icon: 'account_tree', needsBoard: true },
+  { action: TeamSitesAction, label: 'Sites', icon: 'public', needsBoard: false },
+  { action: DocumentsAction, label: 'Documents', icon: 'folder_open', needsBoard: false },
+  { action: 'team-settings', label: 'Settings', icon: 'settings', needsBoard: true },
+  { action: 'team-reset', label: 'Reset', icon: 'restart_alt', needsBoard: true },
+  { action: 'backlog', label: 'Backlog', icon: 'checklist', needsBoard: false },
+];
 
 /** What a disabled `team-` command says on hover, and on a phone under its row. */
 export const NoTeamHint = 'Pick or create a team first';

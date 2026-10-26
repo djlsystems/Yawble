@@ -39,6 +39,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
 import TeamsView from '../TeamsView.vue';
 import { TeamDeletionConfirmationRequired } from '../../api/client';
 import { useConsoleStore } from '../../stores/console';
+import { useWorkflowNavStore } from '../../stores/workflowNav';
 import type { Team, TeamId } from '../../api/types';
 import { bodyText, resetBody } from '../../test/mountQuasar';
 
@@ -94,6 +95,48 @@ beforeEach(() => {
 });
 
 afterEach(resetBody);
+
+describe("the row's team command menu", () => {
+  function menuItems(): HTMLElement[] {
+    return [...document.body.querySelectorAll<HTMLElement>('[data-team-command]')];
+  }
+
+  it("is the last action on the row and lists the team's commands in order", async () => {
+    await mountView([aTeam('alpha')]);
+    const actions = document.body.querySelector('[data-col-actions]')!;
+    expect(actions.lastElementChild!.getAttribute('aria-label')).toBe('Team commands');
+
+    await click('Team commands');
+    expect(menuItems().map((item) => item.querySelector('.q-item__section--main')?.textContent?.trim()))
+      .toEqual(['Board', 'Git', 'Sites', 'Documents', 'Settings', 'Reset', 'Backlog']);
+  });
+
+  it("asks the layout to run the chosen command on the row's team, and leaves the team inactive", async () => {
+    await mountView([aTeam('alpha'), aTeam('beta')]);
+    const nav = useWorkflowNavStore();
+    const run = vi.spyOn(nav, 'runTeamCommand');
+
+    const rows = document.body.querySelectorAll('[data-col-actions]');
+    (rows[1]!.querySelector('[data-team-menu]') as HTMLButtonElement).click();
+    await flushPromises();
+    (document.body.querySelector('[data-team-command="documents-manage"]') as HTMLElement).click();
+    await flushPromises();
+
+    expect(run).toHaveBeenCalledWith('beta', 'documents-manage');
+    expect(board.activeTeamId).toBe('');
+  });
+
+  it('offers an archived team only what needs no board', async () => {
+    // An archived team is listed only with Show archived ticked.
+    localStorage.setItem('harness.teamsShown', JSON.stringify({ active: true, archived: true }));
+    await mountView([{ ...aTeam('alpha'), archived: true } as Team]);
+    localStorage.removeItem('harness.teamsShown');
+    (document.body.querySelector('[data-team-menu]') as HTMLButtonElement).click();
+    await flushPromises();
+    const disabled = menuItems().filter((item) => item.classList.contains('disabled')).map((item) => item.dataset.teamCommand);
+    expect(disabled).toEqual(['team-board', 'team-git', 'team-settings', 'team-reset']);
+  });
+});
 
 describe('the team clone dialog', () => {
   it('lists the source settings the clone carries', async () => {

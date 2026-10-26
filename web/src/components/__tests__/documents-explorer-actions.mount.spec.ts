@@ -408,6 +408,13 @@ describe('the keyboard map', () => {
     expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([false]);
   });
 
+  it('Escape closes the dialog with focus outside its window, as every other dialog does', async () => {
+    const wrapper = await openExplorer('alpha');
+
+    await press('Escape', {}, document.body);
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([false]);
+  });
+
   it('every keyboard action leaves the server alone when nothing applies', async () => {
     await openExplorer();
     await press('Delete');

@@ -117,7 +117,7 @@ function open(target: NeedsYouOpen) {
     flat
     dense
     no-caps
-    class="needs-you q-ml-sm"
+    class="needs-you"
     :class="waiting ? 'needs-you--waiting' : 'needs-you--muted'"
     data-test="needs-you"
     :data-state="waiting ? 'needs-you' : 'muted'"
@@ -198,15 +198,29 @@ function open(target: NeedsYouOpen) {
   color: var(--os-ink-muted);
 }
 
+/* THE COUNT IS THE ICON: a 20px badge, the size of the other tools' glyphs. Muted it is an outline;
+   while anything waits it is solid yellow (`--os-attention`) with dark ink, to catch the eye. */
 .needs-you-count {
-  margin-left: 6px;
-  min-width: 1.4em;
+  box-sizing: border-box;
+  min-width: 20px;
+  height: 20px;
   padding: 0 5px;
-  border: 1px solid currentColor;
-  border-radius: 9px;
-  font-weight: 600;
-  line-height: 1.3;
+  border: 1.5px solid currentColor;
+  border-radius: 10px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 17px;
   text-align: center;
+}
+
+span + .needs-you-count {
+  margin-left: 6px;
+}
+
+.needs-you--waiting .needs-you-count {
+  border-color: var(--os-attention);
+  background: var(--os-attention);
+  color: var(--os-attention-ink);
 }
 
 .needs-you-panel {

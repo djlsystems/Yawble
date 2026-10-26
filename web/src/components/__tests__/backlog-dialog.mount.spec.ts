@@ -45,6 +45,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
 }));
 
 import BacklogDialog from '../BacklogDialog.vue';
+import { localDay, localTime, wireInstant } from '../../lib/localTime';
 import { useConsoleStore } from '../../stores/console';
 import { useSessionStore } from '../../stores/session';
 import { bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
@@ -285,6 +286,64 @@ describe('BacklogDialog readiness', () => {
 
     expect(document.querySelector('[data-backlog-item-dialog] .backlog-detail')).toBeNull();
     expect(document.querySelector('.backlog-card')).not.toBeNull();
+  });
+
+  it('shows each date as its day and gives its full date and time on hover', async () => {
+    await openWith('ready');
+
+    const cells = [...document.querySelectorAll<HTMLElement>('td.backlog-when')];
+    expect(cells.map((cell) => cell.textContent?.trim())).toEqual([localDay('2026-09-01T00:00:00Z'), localDay('2026-09-02T00:00:00Z')]);
+    expect(cells.map((cell) => cell.title)).toEqual([
+      localTime(wireInstant('2026-09-01T00:00:00Z'), { date: true }),
+      localTime(wireInstant('2026-09-02T00:00:00Z'), { date: true }),
+    ]);
+  });
+
+  it('sorts by a heading, reverses on a second click, and marks the sorted heading', async () => {
+    setActivePinia(createPinia());
+    useSessionStore().user = { email: 'admin@example.com' } as never;
+    backlogItems.mockResolvedValue([
+      item({ id: 1, title: 'older', createdAt: '2026-09-01T00:00:00Z' }),
+      item({ id: 2, title: 'newer', createdAt: '2026-09-05T00:00:00Z' }),
+    ]);
+    await mountDialog(BacklogDialog, {}, { pinia: false });
+    await flushPromises();
+
+    const titles = () => [...document.querySelectorAll('.backlog-table tbody tr')]
+      .map((row) => (row.textContent ?? '').includes('newer') ? 'newer' : 'older');
+    const added = () => document.querySelector<HTMLElement>('th[data-sort="created"]')!;
+
+    added().click();
+    await flushPromises();
+    expect(titles()).toEqual(['older', 'newer']);
+    expect(added().getAttribute('aria-sort')).toBe('ascending');
+
+    added().click();
+    await flushPromises();
+    expect(titles()).toEqual(['newer', 'older']);
+    expect(added().getAttribute('aria-sort')).toBe('descending');
+    expect(added().textContent).toContain('arrow_downward');
+  });
+
+  it('keeps a column at the width the person set when it becomes the sort', async () => {
+    localStorage.setItem('harness.columns.backlog', JSON.stringify({ Title: 300 }));
+    try {
+      setActivePinia(createPinia());
+      useSessionStore().user = { email: 'admin@example.com' } as never;
+      backlogItems.mockResolvedValue([item({ id: 1, title: 'only' })]);
+      await mountDialog(BacklogDialog, {}, { pinia: false });
+      await flushPromises();
+
+      const title = () => document.querySelector<HTMLElement>('th[data-sort="title"]')!;
+      expect(title().dataset.colWidth).toBe('300');
+
+      title().click();
+      await flushPromises();
+      expect(title().textContent).toContain('arrow_upward');
+      expect(title().dataset.colWidth).toBe('300');
+    } finally {
+      localStorage.removeItem('harness.columns.backlog');
+    }
   });
 
   it('leaves Dispatch live on a ready item', async () => {
@@ -861,7 +920,7 @@ describe('BacklogDialog', () => {
     expect(bodyText()).toContain('The oldest archived item.');
 
     // No reorder control on the archive, whatever the sort.
-    expect(bodyText()).not.toContain('arrow_upward');
+    expect(document.querySelector('.backlog-table tbody')?.textContent).not.toContain('arrow_upward');
   });
 });
 

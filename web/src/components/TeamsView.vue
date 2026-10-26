@@ -44,6 +44,7 @@ import TeamStatusIcon from './TeamStatusIcon.vue';
 import { vResizableColumns } from '../lib/resizableColumns';
 import { itemLabel } from '../lib/backlog';
 import { useWorkflowNavStore } from '../stores/workflowNav';
+import { TeamMenu } from '../lib/ribbon';
 import { boardHref } from '../lib/consoleLinks';
 import { ActivityStates, stateWords } from '../lib/teamActivity';
 
@@ -887,6 +888,27 @@ async function setPaused(team: Team | null, paused: boolean) {
             >
               <q-tooltip>Delete this team permanently</q-tooltip>
             </q-btn>
+            <!-- THE TEAM'S COMMANDS, as the ribbon's Active Team block has them plus Documents and
+                 Backlog, acting on this row's team. An archived team has no board: only what does
+                 not need one is offered. -->
+            <q-btn flat dense round icon="more_vert" aria-label="Team commands" data-team-menu @click.stop>
+              <q-tooltip>Board, Git, Sites, Documents, Settings, Reset and Backlog for this team</q-tooltip>
+              <q-menu auto-close anchor="bottom right" self="top right">
+                <q-list dense class="teams-command-menu">
+                  <q-item
+                    v-for="command in TeamMenu"
+                    :key="command.action"
+                    clickable
+                    :disable="command.needsBoard && teamFor(row)?.archived === true"
+                    :data-team-command="command.action"
+                    @click="workflowNav.runTeamCommand(row.id, command.action)"
+                  >
+                    <q-item-section avatar><q-icon :name="command.icon" /></q-item-section>
+                    <q-item-section>{{ command.label }}</q-item-section>
+                  </q-item>
+                </q-list>
+              </q-menu>
+            </q-btn>
           </td>
         </tr>
       </tbody>
@@ -1238,4 +1260,7 @@ async function setPaused(team: Team | null, paused: boolean) {
   margin-left: 4px;
 }
 
+.teams-command-menu {
+  min-width: 10rem;
+}
 </style>

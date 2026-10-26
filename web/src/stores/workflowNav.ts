@@ -16,25 +16,46 @@ export const useWorkflowNavStore = defineStore('workflowNav', {
     /** The Backlog dialog, the layout's, and the item it opens on (null: the list). */
     backlogOpen: false,
     backlogItem: null as number | null,
+    /** A team to filter the Backlog to when it opens (the Teams list's menu); null leaves it. */
+    backlogTeam: null as string | null,
     /** The team whose Workflows dialog is asked for and not yet opened. */
     workflowsTeam: null as string | null,
     /** Counts asks, so asking for the same team twice is still a change the strip sees. */
     workflowsAsks: 0,
     /** Counts asks for the active team's Git dialog, which the layout opens (Needs you's merge). */
     gitAsks: 0,
+    /** A command from the Teams list's row menu, for the layout to carry out on that team. */
+    teamCommand: null as { team: TeamId; action: string } | null,
+    /** Counts asks, so the same command on the same team twice is still a change the layout sees. */
+    teamCommandAsks: 0,
   }),
 
   actions: {
     /** Opens the Backlog dialog on one item. */
     openItem(id: number) {
+      this.backlogTeam = null
       this.backlogItem = id
       this.backlogOpen = true
     },
 
     /** Opens the Backlog dialog on its list. */
     openBacklog() {
+      this.backlogTeam = null
       this.backlogItem = null
       this.backlogOpen = true
+    },
+
+    /** Opens the Backlog dialog on its list, filtered to the items dispatched to one team. */
+    openBacklogFor(team: TeamId) {
+      this.backlogTeam = team
+      this.backlogItem = null
+      this.backlogOpen = true
+    },
+
+    /** Asks the layout to run a ribbon command on a team other than (or as well as) the active one. */
+    runTeamCommand(team: TeamId, action: string) {
+      this.teamCommand = { team, action }
+      this.teamCommandAsks += 1
     },
 
     /**

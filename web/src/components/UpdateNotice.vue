@@ -68,7 +68,9 @@ onBeforeUnmount(() => {
       data-update-notice
       @click="open = true"
     >
-      <q-icon name="upgrade" size="16px" aria-hidden="true" />
+      <!-- Beside the logo it is the icon alone: a release badge, which reads as "something new" where
+           an upward arrow read as a direction. -->
+      <q-icon :name="word ? 'upgrade' : 'release_alert'" :size="word ? '16px' : '20px'" aria-hidden="true" />
       <span v-if="word" class="update-word" data-test="update-word">Update available</span>
       <q-tooltip v-else>Update available: v{{ status.latest }}</q-tooltip>
     </button>
@@ -101,8 +103,15 @@ onBeforeUnmount(() => {
   gap: 4px;
 }
 
+/* THE ICON BESIDE THE LOGO: no pill, a round target the size of the header's tool buttons. */
 .update-link--icon {
-  padding: 1px 4px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  margin-left: 4px;
+  border: 0;
+  border-radius: 50%;
+  justify-content: center;
 }
 
 .update-link:hover,

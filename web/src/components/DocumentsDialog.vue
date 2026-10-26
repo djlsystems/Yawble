@@ -1017,6 +1017,8 @@ function onWindowKeydown(event: KeyboardEvent) {
   if (event.key !== 'Escape') return;
   if (drag.active.value) return;
   if (renaming.value) return;
+  // A question or a name box over the explorer closes itself first.
+  if (asking.value || namingOpen.value) return;
 
   event.preventDefault();
   if (selection.value.keys.length > 0) selection.value = clearSelection(selection.value);
@@ -1095,7 +1097,20 @@ const Views: { view: DocumentsView; icon: string; label: string }[] = [
   { view: 'tiles', icon: 'grid_view', label: 'Tiles' },
 ];
 
-onBeforeUnmount(() => drag.end());
+/**
+ * ON THE DOCUMENT, NOT THE CARD. Escape is heard wherever focus is while the explorer is open - just
+ * after it opens focus is often outside the card, and a key the card never saw left the dialog open
+ * (`no-esc-dismiss` is kept so Escape clears a selection before it closes).
+ */
+watch(open, (isOpen) => {
+  if (isOpen) document.addEventListener('keydown', onWindowKeydown);
+  else document.removeEventListener('keydown', onWindowKeydown);
+}, { immediate: true });
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onWindowKeydown);
+  drag.end();
+});
 </script>
 
 <template>
@@ -1104,7 +1119,6 @@ onBeforeUnmount(() => drag.end());
       class="documents-window os-dialog-lg column no-wrap"
       :class="{ 'documents-window-placed': windowed && placed !== null, 'documents-window-full': !windowed }"
       :style="frame.style.value"
-      @keydown="onWindowKeydown"
       @dragleave="onWindowDragLeave"
       @dragend="drag.end()"
     >

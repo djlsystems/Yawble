@@ -67,7 +67,7 @@ import SitesDialog from '../../components/SitesDialog.vue';
 import TeamGitDialog from '../../components/TeamGitDialog.vue';
 import TeamSettingsDialog from '../../components/TeamSettingsDialog.vue';
 import { useWorkflowNavStore } from '../../stores/workflowNav';
-import { Ribbon, SitesAction, TeamBoardAction, TeamSitesAction, needsActiveWorkTeam } from '../../lib/ribbon';
+import { DocumentsAction, Ribbon, SitesAction, TeamBoardAction, TeamSitesAction, needsActiveWorkTeam } from '../../lib/ribbon';
 import type { Team, TeamId } from '../../api/types';
 import { resetBody } from '../../test/mountQuasar';
 
@@ -408,6 +408,75 @@ describe('MainLayout ribbon actions', () => {
 
     expect(sites.props('modelValue')).toBe(true);
     expect(sites.props('team')).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  /** The one Documents button opens at the team whose board is showing, and at the root otherwise. */
+  it("opens Documents at the open board's team folder, and at the root from the Teams list", async () => {
+    const { wrapper } = await ribbonAction(DocumentsAction);
+    const documents = wrapper.findComponent({ name: 'DocumentsDialog' });
+    expect(documents.props('modelValue')).toBe(true);
+    expect(documents.props('start')).toBe('alpha');
+
+    await documents.vm.$emit('update:modelValue', false);
+    useConsoleStore().$patch({ view: 'teams', activeTeamId: '' });
+    wrapper.findComponent(RibbonBar).vm.$emit('action', DocumentsAction);
+    await flushPromises();
+
+    expect(documents.props('modelValue')).toBe(true);
+    expect(documents.props('start')).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  /**
+   * The Teams list's row menu acts on its row's team: Documents, Sites, Backlog, Git, Settings and
+   * Reset open on it without leaving the list or changing the active team.
+   */
+  it("runs a Teams row menu command on that row's team", async () => {
+    const wrapper = await mountShell([team, beta], '');
+    vi.spyOn(useConsoleStore(), 'pullRepoStatus').mockResolvedValue();
+    useConsoleStore().$patch({ view: 'teams' });
+    const nav = useWorkflowNavStore();
+
+    nav.runTeamCommand(beta.id, DocumentsAction);
+    await flushPromises();
+    const documents = wrapper.findComponent({ name: 'DocumentsDialog' });
+    expect(documents.props('modelValue')).toBe(true);
+    expect(documents.props('start')).toBe('beta');
+    expect(useConsoleStore().view).toBe('teams');
+
+    nav.runTeamCommand(beta.id, TeamSitesAction);
+    await flushPromises();
+    expect(wrapper.findComponent(SitesDialog).props('team')).toBe('beta');
+
+    nav.runTeamCommand(beta.id, 'backlog');
+    await flushPromises();
+    expect(nav.backlogOpen).toBe(true);
+    expect(nav.backlogTeam).toBe('beta');
+
+    // Git, Settings and Reset open on the row's team over the Teams list: no board, no team switch.
+    nav.runTeamCommand(beta.id, 'team-git');
+    await flushPromises();
+    const git = wrapper.findComponent(TeamGitDialog);
+    expect(git.props('modelValue')).toBe(true);
+    expect(git.props('teamId')).toBe('beta');
+
+    nav.runTeamCommand(beta.id, 'team-settings');
+    await flushPromises();
+    const settings = wrapper.findComponent(TeamSettingsDialog);
+    expect(settings.props('modelValue')).toBe(true);
+    expect(settings.props('teamId')).toBe('beta');
+
+    nav.runTeamCommand(beta.id, 'team-reset');
+    await flushPromises();
+    const reset = wrapper.findComponent({ name: 'ResetTeamDialog' });
+    expect(reset.props('modelValue')).toBe(true);
+    expect(reset.props('team')).toMatchObject({ id: 'beta' });
+
+    expect(useConsoleStore().view).toBe('teams');
+    expect(useConsoleStore().activeTeamId).toBe('');
 
     wrapper.unmount();
   });

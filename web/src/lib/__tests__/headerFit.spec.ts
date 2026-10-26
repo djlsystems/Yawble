@@ -14,29 +14,18 @@ describe('the one header row gives way in one order', () => {
 
   /** Each step's field on `HeaderFit`, and what that field reads before the step is taken. */
   const StepField = {
-    'update-word': ['updateWord', true],
     version: ['version', true],
-    'live-word': ['liveWord', true],
-    'account-name': ['accountName', true],
-    'needs-you-word': ['needsYouWord', true],
     tight: ['tight', false],
     mark: ['mark', false],
   } as const;
 
-  it('names seven steps, in the ruled order, the update notice first', () => {
-    expect(GiveWaySteps).toEqual(['update-word', 'version', 'live-word', 'account-name', 'needs-you-word', 'tight', 'mark']);
+  /** The tools on the right are glyphs at every width, so only these three give way. */
+  it('names three steps, in the ruled order: the version, the tight ribbon, the mark', () => {
+    expect(GiveWaySteps).toEqual(['version', 'tight', 'mark']);
   });
 
-  it('gives nothing way at no steps: update words, version, live word, account name, Needs you word, full padding, full logo', () => {
-    expect(headerFit(0, false)).toEqual({
-      updateWord: true,
-      version: true,
-      liveWord: true,
-      accountName: true,
-      needsYouWord: true,
-      tight: false,
-      mark: false,
-    });
+  it('gives nothing way at no steps: the version, full padding, the full logo', () => {
+    expect(headerFit(0, false)).toEqual({ version: true, tight: false, mark: false });
   });
 
   it('takes exactly one more thing at each step, the next in the order, and keeps the earlier ones taken', () => {
@@ -52,25 +41,8 @@ describe('the one header row gives way in one order', () => {
     });
   });
 
-  /** A phone row carries neither the version nor the account name nor the Needs you word, as before,
-   *  nor the update notice's words, which pushed the account menu off a 390px row. */
-  it('never carries the version, the account name, the Needs you word or the update words on a phone row', () => {
-    expect(headerFit(0, true)).toEqual({
-      updateWord: false,
-      version: false,
-      liveWord: true,
-      accountName: false,
-      needsYouWord: false,
-      tight: false,
-      mark: false,
-    });
-  });
-
-  /** The phone row's one give: with an update pending, its icon takes the live word's room. */
-  it('shows the live chip as its dot on a phone row only while an update is pending', () => {
-    expect(headerFit(0, true, false).liveWord).toBe(true);
-    expect(headerFit(0, true, true).liveWord).toBe(false);
-    expect(headerFit(0, false, true).liveWord).toBe(true);
+  it('never carries the version on a phone row', () => {
+    expect(headerFit(0, true)).toEqual({ version: false, tight: false, mark: false });
   });
 
   it('steps once per fitting that keeps too few, and stops at the last step', () => {

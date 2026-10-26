@@ -31,6 +31,9 @@ const props = defineProps<{
 
   /** Whether any member is Running, which the actions refuse to run against. */
   anyMemberRunning: boolean;
+
+  /** Re-reads this team's status after an action; the active team's store read when not given. */
+  reread?: () => Promise<void>;
 }>();
 
 const open = defineModel<boolean>({ required: true });
@@ -48,13 +51,13 @@ const findings = computed(() =>
 async function handleActionFailed() {
   // After a failed merge-to-main or bring-current, re-read the repo status
   // because the server already ran git fetch even though the action failed
-  await board.pullRepoStatus();
+  await (props.reread ? props.reread() : board.pullRepoStatus());
 }
 
 async function handleActionSucceeded() {
   // After a successful merge-to-main or bring-current, re-read the repo status
   // because the server ran git fetch and the repo state has changed
-  await board.pullRepoStatus();
+  await (props.reread ? props.reread() : board.pullRepoStatus());
 }
 </script>
 
