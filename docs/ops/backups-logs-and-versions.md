@@ -2,8 +2,6 @@
 
 Operations notes for the instance `yawble up` runs: the control container `yawble`, which runs the host and keeps the database, the worker containers `yawble-worker-<n>`, which run the agents, the control image (`<image>` below; `yawble status` names it), and the volume `yawble-data` that all of them mount at `/data`.
 
-The database copies on this page are SQLite's, the default database. On SQL Server the server's own backups and point-in-time restore take their place, and `--backup` and `--restore` refuse; see [database.md](database.md).
-
 The engine commands below use `podman`. With Docker, `docker` takes the same arguments for `exec`, `stop`, `start` and `run`. `yawble backup` and `yawble restore` work the same on both engines.
 
 ## What is backed up, and how

@@ -20,7 +20,6 @@ Start with the [README](../README.md) to install and start Yawble. These pages c
 |---|---|
 | [../cli/README.md](../cli/README.md) | The `yawble` operator CLI: every command. |
 | [ops/backups-logs-and-versions.md](ops/backups-logs-and-versions.md) | Daily database copies, full-volume backups, restoring either, logs, and agent CLI versions. |
-| [ops/database.md](ops/database.md) | The database: SQLite (the default) or SQL Server, the two settings, creating a SQL Server database, backups on each, operator commands, the differences and limits, and writing a schema step for both. |
 | [ops/releases-and-updates.md](ops/releases-and-updates.md) | Updating an instance, and how a release is cut. |
 | [ops/cli-releases-and-install.md](ops/cli-releases-and-install.md) | Installing the `yawble` operator CLI, and how its releases are built. |
 
