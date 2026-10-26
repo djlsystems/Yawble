@@ -91,7 +91,8 @@ public static class SolutionEndpoints
             Answer(await installer.InstallAsync(
                 new SolutionInstallRequest(
                     request.Folder, request.TeamName, request.Agent, request.LocalRepository,
-                    new SolutionAnswers(request.Settings, request.Connections, SecretValues: request.SecretValues)),
+                    new SolutionAnswers(
+                        request.Settings, request.Connections, SecretValues: request.SecretValues, NamedSecretValues: request.NamedSecretValues)),
                 ActorOf(context), ct)))
             .WithTags(Area)
             .HumansOnly()
@@ -99,7 +100,9 @@ public static class SolutionEndpoints
             .WithDescription(
                 "Body `{ folder, teamName?, agent?, localRepository?, settings?: { <member>: { <setting>: "
                 + "value } }, connections?: { <member>: { <slot>: <connection id> } }, secretValues?: { <member>: "
-                + "{ <field>: value } } }`; each secret value is that member's own, kept with its hire. In order: installs "
+                + "{ <field>: value } }, namedSecretValues?: { <member>: { <name>: value } } }`; each secret value is that "
+                + "member's own, and each named secret one a person named for a member whose plugin declares a "
+                + "`namedSecrets` block, kept with its hire. In order: installs "
                 + "the package's plugins, creates the team (with no repository; a new local "
                 + "repository only with `localRepository: true`), hires the members, registers the team skills, copies `tools/` "
                 + "to the team's `solution` folder, publishes the sites, creates the triggers and records "
@@ -118,7 +121,8 @@ public static class SolutionEndpoints
         app.MapPost("/api/solutions/update", async (
             SolutionUpdateBody request, SolutionInstaller installer, HttpContext context, CancellationToken ct) =>
             Answer(await installer.UpdateAsync(
-                new SolutionUpdateRequest(request.Folder, request.Team, new SolutionAnswers(request.Settings, request.Connections, SecretValues: request.SecretValues)),
+                new SolutionUpdateRequest(request.Folder, request.Team, new SolutionAnswers(
+                    request.Settings, request.Connections, SecretValues: request.SecretValues, NamedSecretValues: request.NamedSecretValues)),
                 ActorOf(context), ct)))
             .WithTags(Area)
             .HumansOnly()
@@ -235,7 +239,9 @@ public sealed record SolutionInstallBody(
     [property: Description("Package member name to slot to connection id, as the package's inputs ask.")]
     Dictionary<string, Dictionary<string, string>>? Connections = null,
     [property: Description("Package member name to secret field to the value a person typed: that member's own value, kept with its hire.")]
-    Dictionary<string, Dictionary<string, string>>? SecretValues = null);
+    Dictionary<string, Dictionary<string, string>>? SecretValues = null,
+    [property: Description("Package member name to the name a person gave a secret to its value, for a member whose plugin declares a `namedSecrets` block: kept with its hire.")]
+    Dictionary<string, Dictionary<string, string>>? NamedSecretValues = null);
 
 /// <summary>Body of <c>POST /api/solutions/update</c>.</summary>
 public sealed record SolutionUpdateBody(
@@ -248,7 +254,9 @@ public sealed record SolutionUpdateBody(
     [property: Description("Package member name to slot to connection id, for members the update adds.")]
     Dictionary<string, Dictionary<string, string>>? Connections = null,
     [property: Description("Package member name to secret field to the value a person typed, for members the update adds.")]
-    Dictionary<string, Dictionary<string, string>>? SecretValues = null);
+    Dictionary<string, Dictionary<string, string>>? SecretValues = null,
+    [property: Description("Package member name to the name a person gave a secret to its value, for members the update adds.")]
+    Dictionary<string, Dictionary<string, string>>? NamedSecretValues = null);
 
 /// <summary>Body of <c>POST /api/teams/{team}/solution/uninstall</c>.</summary>
 public sealed record SolutionUninstallBody(

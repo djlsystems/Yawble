@@ -33,11 +33,15 @@ public sealed record SolutionActor(string? UserId, string? Email)
 /// through the documents route instead.</param>
 /// <param name="SecretValues">Package member name to secret field to the value a person typed: kept as
 /// that member's own value at its hire.</param>
+/// <param name="NamedSecretValues">Package member name to the name a person gave a secret to its value,
+/// for a member whose plugin declares a <c>namedSecrets</c> block: kept as that member's named secret
+/// at its hire.</param>
 public sealed record SolutionAnswers(
     IReadOnlyDictionary<string, Dictionary<string, JsonElement>>? Settings = null,
     IReadOnlyDictionary<string, Dictionary<string, string>>? Connections = null,
     IReadOnlyDictionary<string, List<string>>? Documents = null,
-    IReadOnlyDictionary<string, Dictionary<string, string>>? SecretValues = null);
+    IReadOnlyDictionary<string, Dictionary<string, string>>? SecretValues = null,
+    IReadOnlyDictionary<string, Dictionary<string, string>>? NamedSecretValues = null);
 
 /// <summary>A new team from a package.</summary>
 public sealed record SolutionInstallRequest(
@@ -1703,6 +1707,8 @@ public sealed class SolutionInstaller(
 
             var bindings = new Dictionary<string, string>(AnswersFor(answers.Connections, member.Name), StringComparer.Ordinal);
             var values = AnswersFor(answers.SecretValues, member.Name);
+            var named = AnswersFor(answers.NamedSecretValues, member.Name)
+                .ToDictionary(v => v.Key, v => (string?)v.Value, StringComparer.Ordinal);
             var settings = new PluginMemberSettings(config, new Dictionary<string, string>(member.Secrets, StringComparer.Ordinal)) { Connections = bindings };
 
             try
@@ -1724,7 +1730,7 @@ public sealed class SolutionInstaller(
 
                     // A VALUE THE PERSON TYPED IN THE WIZARD is the member's own, kept with its settings and
                     // its `member.secret-set` row in one transaction.
-                    saveSettings: values.Count == 0 || memberSecrets is null
+                    saveSettings: values.Count == 0 && named.Count == 0 || memberSecrets is null
                         ? null
                         : (id, kept, token) => memberSecrets.SaveWithSettingsAsync(
                             id, member.Name, member.PluginId!, kept,
@@ -1733,6 +1739,7 @@ public sealed class SolutionInstaller(
                                 : [actor.Row(TenantActions.MemberConnectionsChanged, $"{id.Team}/{id.Name}", member.Name,
                                     new { plugin = member.PluginId, slots = bindings.Keys.Order(StringComparer.Ordinal) })],
                             values.ToDictionary(v => v.Key, v => (string?)v.Value, StringComparer.Ordinal),
+                            named,
                             new CredentialActor(actor.UserId, actor.Label), token));
             }
             catch (PluginSettingsNotKeptException notKept)
@@ -2115,6 +2122,21 @@ public sealed class SolutionInstaller(
 
             if (PluginMemberSecretStore.ChangesRefusal(
                     valuedPlugin.Manifest, values.ToDictionary(v => v.Key, v => (string?)(v.Value ?? ""), StringComparer.Ordinal)) is { } refused)
+            {
+                return $"'{memberName}': {refused}";
+            }
+        }
+
+        foreach (var (memberName, values) in answers.NamedSecretValues ?? new Dictionary<string, Dictionary<string, string>>())
+        {
+            if (manifest.Member(memberName) is not { Kind: MemberRef.PluginKind } namedMember
+                || package.Plugin(namedMember.PluginId) is not { } namedPlugin)
+            {
+                return $"The package has no plugin member '{memberName}' to keep named secrets for.";
+            }
+
+            if (NamedSecretRules.ChangesRefusal(
+                    namedPlugin.Manifest, [], values.ToDictionary(v => v.Key, v => (string?)(v.Value ?? ""), StringComparer.Ordinal)) is { } refused)
             {
                 return $"'{memberName}': {refused}";
             }
