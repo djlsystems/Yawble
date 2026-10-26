@@ -6,7 +6,9 @@
 // since" note; the always-shown No outcome assigned tile; the rate editor writing its three settings;
 // and an outcome opened: its money row, its backlog columns, its value edited, and the actions -
 // confirm, retire and reactivate send their routes, Merge into… shows the route's preview before it
-// merges, Reject is offered only with no links, and Move sends the link route.
+// merges, Reject is offered only with no links, and Move sends the link route. Retired & merged is a
+// table - sortable, rows selectable one by one or all shown at once - whose Delete shows the route's
+// preview of what goes before it deletes the ids picked.
 //
 // THE MOCK IS OF `api/outcomes` and the settings save: what the Host does is pinned server-side
 // (OutcomeTests, OutcomeDashboardTests).
@@ -22,6 +24,8 @@ const api = vi.hoisted(() => ({
   mergeOutcome: vi.fn(),
   rejectOutcome: vi.fn(),
   linkWorkflowOutcome: vi.fn(),
+  previewDeleteOutcomes: vi.fn(),
+  deleteOutcomes: vi.fn(),
 }));
 
 vi.mock('../../api/outcomes', () => api);
@@ -36,6 +40,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
 import OutcomesDialog from '../OutcomesDialog.vue';
 import type { Outcome, OutcomeDetail, OutcomeFigures, OutcomeList } from '../../api/outcomes';
 import { bodyFind, bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
+import { localStamp, wireInstant } from '../../lib/localTime';
 import { button, settle, type } from '../../test/formProbe';
 import type { VueWrapper } from '@vue/test-utils';
 
@@ -678,5 +683,161 @@ describe('Manage Outcomes: an outcome opened', () => {
 
     expect(api.createOutcome).toHaveBeenCalledWith({ name: 'Current job pipeline', description: '' });
     expect(bodyText()).toContain('Current job pipeline');
+  });
+});
+
+describe('Manage Outcomes: Retired & merged as a table', () => {
+  const older = outcome('o-6', 'Abandoned idea', 'retired', { workflowCount: 7, endedAt: '2026-09-10T08:00:00Z' });
+  const ended = [
+    outcome('o-3', 'Old goal', 'retired', { workflowCount: 3, endedAt: '2026-09-20T08:00:00Z' }),
+    outcome('o-4', 'Duplicate goal', 'merged', { mergedInto: 'o-1', workflowCount: 0, endedAt: '2026-09-25T08:00:00Z' }),
+    older,
+  ];
+
+  beforeEach(() => {
+    api.listOutcomes.mockResolvedValue(listing({ outcomes: [pipeline, proposal, ...ended] }));
+  });
+
+  const names = () => [...document.body.querySelectorAll('[data-outcome-ended-table] tbody [data-outcome-open]')]
+    .map((a) => a.textContent?.trim());
+
+  async function ended_() {
+    const wrapper = await open();
+    await click('[data-outcome-tab="ended"]');
+    return wrapper;
+  }
+
+  const pickBox = (id: string) => bodyFind(`[data-outcome-pick="${id}"]`) as HTMLElement;
+  const ticked = (element: Element | null) => element?.getAttribute('aria-checked');
+
+  it('lays ended outcomes out as a table of name, status, workflows and ended, the header row the app\'s sticky one', async () => {
+    await ended_();
+
+    const table = bodyFind('[data-outcome-ended-table]');
+    expect(table).not.toBeNull();
+    expect(bodyFind('[data-outcome-tiles]')).toBeNull();
+    const headings = [...table!.querySelectorAll('thead th[data-col]')]
+      .map((th) => th.textContent?.replace(/arrow_(up|down)ward/, '').trim());
+    expect(headings).toEqual(['Name', 'Status', 'Workflows', 'Ended']);
+    // The app-wide rule that keeps a header row in view is `.q-markup-table > table > thead > tr > th`.
+    expect(document.body.querySelectorAll('[data-outcome-ended-table].q-markup-table > table > thead > tr > th')).toHaveLength(5);
+    expect(bodyFind('[data-outcome-ended-table] thead [data-outcome-pick-all]')).not.toBeNull();
+
+    const row = bodyFind('[data-outcome-row="o-4"]')!;
+    expect(row.querySelector('[data-outcome-ended-status]')?.textContent?.trim()).toBe('Merged into Current job pipeline');
+    expect(row.querySelector('[data-outcome-ended-workflows]')?.textContent?.trim()).toBe('0');
+    expect(row.querySelector('[data-outcome-ended-at]')?.textContent?.trim()).toBe(localStamp(wireInstant('2026-09-25T08:00:00Z')));
+    expect(bodyFind('[data-outcome-row="o-3"] [data-outcome-ended-status]')?.textContent?.trim()).toBe('Retired');
+    expect(bodyFind('[data-outcome-row="o-1"]')).toBeNull();
+  });
+
+  it('sorts by each column, newest ended first by default, and flips on a second click', async () => {
+    await ended_();
+    expect(names()).toEqual(['Duplicate goal', 'Old goal', 'Abandoned idea']);
+    expect(bodyFind('th[data-col="ended"]')?.getAttribute('aria-sort')).toBe('descending');
+
+    await click('[data-outcome-sort="name"]');
+    expect(names()).toEqual(['Abandoned idea', 'Duplicate goal', 'Old goal']);
+    expect(bodyFind('th[data-col="name"]')?.getAttribute('aria-sort')).toBe('ascending');
+    expect(bodyFind('th[data-col="ended"]')?.getAttribute('aria-sort')).toBe('none');
+
+    await click('[data-outcome-sort="name"]');
+    expect(names()).toEqual(['Old goal', 'Duplicate goal', 'Abandoned idea']);
+
+    await click('[data-outcome-sort="workflows"]');
+    expect(names()).toEqual(['Duplicate goal', 'Old goal', 'Abandoned idea']);
+
+    await click('[data-outcome-sort="status"]');
+    expect(names()).toEqual(['Duplicate goal', 'Abandoned idea', 'Old goal']);
+
+    await click('[data-outcome-sort="ended"]');
+    expect(names()).toEqual(['Abandoned idea', 'Old goal', 'Duplicate goal']);
+  });
+
+  it('selects rows by their checkbox, and the header box selects every row shown', async () => {
+    const wrapper = await ended_();
+    expect(bodyFind('[data-outcome-delete]')).toBeNull();
+    expect(bodyFind('[data-outcome-picked]')).toBeNull();
+
+    pickBox('o-3').click();
+    await settle();
+    expect(ticked(pickBox('o-3'))).toBe('true');
+    expect(bodyFind('[data-outcome-picked]')?.textContent).toContain('1 selected');
+    expect(ticked(bodyFind('[data-outcome-pick-all]'))).toBe('mixed');
+    expect(api.getOutcome).not.toHaveBeenCalled();
+
+    (bodyFind('[data-outcome-pick-all]') as HTMLElement).click();
+    await settle();
+    expect(bodyFind('[data-outcome-picked]')?.textContent).toContain('3 selected');
+    expect(ticked(bodyFind('[data-outcome-pick-all]'))).toBe('true');
+
+    (bodyFind('[data-outcome-pick-all]') as HTMLElement).click();
+    await settle();
+    expect(bodyFind('[data-outcome-delete]')).toBeNull();
+
+    // Select-all takes the rows shown: a filter that hides one leaves it out.
+    const filter = wrapper.findAllComponents({ name: 'QInput' }).find((c) => c.props('label') === 'Filter')!;
+    filter.vm.$emit('update:modelValue', 'goal');
+    await settle();
+    (bodyFind('[data-outcome-pick-all]') as HTMLElement).click();
+    await settle();
+    expect(bodyFind('[data-outcome-picked]')?.textContent).toContain('2 selected');
+    expect(ticked(pickBox('o-6'))).toBeUndefined();
+  });
+
+  it('shows the route\'s preview, with the merged-in outcome that goes too, then deletes the ids sent', async () => {
+    api.previewDeleteOutcomes.mockResolvedValue({
+      outcomes: [
+        { id: 'o-3', name: 'Old goal', status: 'retired', mergedInto: null, cascadedFrom: null },
+        { id: 'o-9', name: 'Folded goal', status: 'merged', mergedInto: 'o-3', cascadedFrom: 'o-3' },
+      ],
+      workflowsUnlinked: 4,
+      backlogItemsCleared: 2,
+      triggersCleared: 1,
+    });
+    api.deleteOutcomes.mockResolvedValue(undefined);
+    const wrapper = await ended_();
+
+    pickBox('o-3').click();
+    await settle();
+    await click('[data-outcome-delete]');
+
+    expect(api.previewDeleteOutcomes).toHaveBeenCalledWith(['o-3']);
+    expect(api.deleteOutcomes).not.toHaveBeenCalled();
+    const list = bodyFind('[data-outcome-delete-list]')!.textContent!;
+    expect(list).toContain('Old goal (retired)');
+    expect(list).toContain('Folded goal (merged into Old goal; goes with Old goal)');
+    expect(bodyFind('[data-outcome-delete-workflows]')?.textContent).toContain('4 workflows will count under No outcome');
+    expect(bodyFind('[data-outcome-delete-items]')?.textContent).toContain('2 backlog items lose their outcome');
+    expect(bodyFind('[data-outcome-delete-triggers]')?.textContent).toContain('1 trigger loses its outcome');
+
+    api.listOutcomes.mockClear();
+    await click('[data-outcome-delete-confirm]');
+    expect(api.deleteOutcomes).toHaveBeenCalledWith(['o-3']);
+    expect(api.listOutcomes).toHaveBeenCalledTimes(1);
+    expect(wrapper.emitted('changed')).toHaveLength(1);
+    expect(bodyFind('[data-outcome-delete]')).toBeNull();
+  });
+
+  it('shows a refusal\'s sentence and deletes nothing', async () => {
+    api.previewDeleteOutcomes.mockRejectedValue(new Error('"Current job pipeline" is active: retire it before deleting it.'));
+    await ended_();
+
+    pickBox('o-4').click();
+    await settle();
+    await click('[data-outcome-delete]');
+
+    expect(bodyFind('[data-outcome-delete-problem]')?.textContent).toContain('is active: retire it before deleting it.');
+    expect(bodyFind('[data-outcome-delete-confirm]')?.hasAttribute('disabled')).toBe(true);
+    expect(api.deleteOutcomes).not.toHaveBeenCalled();
+  });
+
+  it('opens an outcome\'s detail from its name, as before', async () => {
+    await ended_();
+
+    await click('[data-outcome-open="o-3"]');
+
+    expect(api.getOutcome).toHaveBeenCalledWith('o-3');
+    expect(bodyFind('[data-outcome-detail]')?.getAttribute('data-outcome-id')).toBe('o-3');
   });
 });
