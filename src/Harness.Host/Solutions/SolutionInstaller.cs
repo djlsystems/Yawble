@@ -66,7 +66,40 @@ public sealed record SolutionDiff(
     SolutionDiffSection Skills,
     SolutionDiffSection Sites,
     SolutionDiffSection Tools,
-    SolutionDiffSection Plugins);
+    SolutionDiffSection Plugins)
+{
+    /// <summary>Each kept plugin member the update moves onto the plugin the package now names.</summary>
+    public IReadOnlyList<SolutionMemberMove> Moves { get; init; } = [];
+
+    /// <summary>Each trigger a person made by hand on a moved-from plugin's events: not rewritten,
+    /// so it will no longer fire.</summary>
+    public IReadOnlyList<SolutionStrandedTrigger> NoLongerFire { get; init; } = [];
+}
+
+/// <summary>
+/// A KEPT PLUGIN MEMBER MOVED ONTO ANOTHER PLUGIN: the installed member runs <c>plugin:From</c> and
+/// the package's member of the same name runs <c>plugin:To</c>. The package's member is the truth -
+/// there is no rename table. <see cref="Line"/> is the sentence the wizard's Review and the CLI print.
+/// </summary>
+public sealed record SolutionMemberMove(string Member, string From, string To)
+{
+    public string Line => $"{Member} moves from plugin {From} to {To}";
+}
+
+/// <summary>
+/// A TRIGGER A PERSON MADE BY HAND on <paramref name="EventType"/>, an event of plugin
+/// <paramref name="From"/> that a moved member no longer runs. The update does not rewrite it - it is
+/// the person's - so the preview names it. <paramref name="Member"/> is the member it wakes.
+/// </summary>
+public sealed record SolutionStrandedTrigger(string Trigger, string Id, string Member, string EventType, string From, string To)
+{
+    public string Line =>
+        $"Trigger {Trigger}, made by hand on {EventType}, will no longer fire once the team moves off plugin {From}; "
+        + $"the update does not change it - point it at {EventsOf(To)}{EventType[EventsOf(From).Length..]} to keep it";
+
+    /// <summary>The prefix of every event type plugin <paramref name="plugin"/> publishes.</summary>
+    public static string EventsOf(string plugin) => $"plugin.{plugin}.";
+}
 
 /// <summary>
 /// The outcome of an install or update. <see cref="Status"/> is the HTTP status the route answers
@@ -401,7 +434,7 @@ public sealed class SolutionInstaller(
                 from = row!.Version,
                 to = package.Manifest.Version,
                 plan,
-                diff = Diff(row, package),
+                diff = await DiffAsync(stored, row, package, ct),
                 connections = available,
                 kept = await KeptAsync(stored, row, package, ct),
                 secrets = await SecretsAfterUpdateAsync(stored, row, package, ct),
@@ -1270,7 +1303,7 @@ public sealed class SolutionInstaller(
         var (old, _) = SolutionManifest.Parse(row!.Manifest);
         if (old is null) return new(409, new { error = $"The record of what '{teams.LabelFor(stored)}' was installed from cannot be read; it cannot be updated." });
 
-        var diff = Diff(row, package);
+        var diff = await DiffAsync(stored, row, package, ct);
         var run = new Run(actor, afterStep);
         var memberIds = new Dictionary<string, string>(row.Members, StringComparer.OrdinalIgnoreCase);
         var triggerIds = new Dictionary<string, string>(row.Triggers, StringComparer.Ordinal);
@@ -1297,6 +1330,12 @@ public sealed class SolutionInstaller(
 
                     if (member.Kind == MemberRef.PluginKind)
                     {
+                        // MOVED FIRST, so its secrets are re-bound against the plugin it now runs.
+                        if (diff.Moves.FirstOrDefault(m => string.Equals(m.Member, member.Name, StringComparison.OrdinalIgnoreCase)) is { } move)
+                        {
+                            await MoveAsync(stored, id, move, manifest, actor, run, ct);
+                        }
+
                         await RebindSecretsAsync(stored, id, old.Member(member.Name), member, package, actor, run, ct);
                         continue;
                     }
@@ -1479,6 +1518,50 @@ public sealed class SolutionInstaller(
         {
             Secrets = await InstalledSecretsAsync(stored, memberIds, package, ct),
         });
+    }
+
+    /// <summary>
+    /// <see cref="Diff"/>, with what only the team itself can say: each kept plugin member whose
+    /// stored agent is not the plugin the package's member names (it moves), and each trigger a
+    /// person made by hand on a moved-from plugin's events (it will no longer fire, and is not
+    /// rewritten). A member stored as an Agent is never moved: that is not a repoint, but a new hire.
+    /// </summary>
+    public async Task<SolutionDiff> DiffAsync(string team, TeamSolutionRow row, SolutionPackage package, CancellationToken ct = default)
+    {
+        var moves = new List<SolutionMemberMove>();
+
+        foreach (var member in package.Manifest.Members.Where(m => m.Kind == MemberRef.PluginKind && m.PluginId is not null))
+        {
+            if (!row.Members.TryGetValue(member.Name, out var id) || !MemberExists(team, id)) continue;
+
+            var stored = (await teams.MemberAsync(team, id, ct)).Agent;
+            if (MemberRef.IsPlugin(stored, out var from)
+                && !string.Equals(stored, MemberRef.ForPlugin(member.PluginId!), StringComparison.OrdinalIgnoreCase))
+            {
+                moves.Add(new SolutionMemberMove(member.Name, from, member.PluginId!));
+            }
+        }
+
+        var stranded = new List<SolutionStrandedTrigger>();
+
+        if (moves.Count > 0)
+        {
+            // THE PACKAGE'S OWN TRIGGERS follow the new plugin's events when the triggers step
+            // rewrites them; only a trigger the record does not name is a person's.
+            var packaged = row.Triggers.Values.ToHashSet(StringComparer.Ordinal);
+
+            foreach (var trigger in await triggers.ListForTeamAsync(team, ct))
+            {
+                if (packaged.Contains(trigger.Id) || trigger.EventType is not { } type) continue;
+
+                if (moves.FirstOrDefault(m => type.StartsWith(SolutionStrandedTrigger.EventsOf(m.From), StringComparison.Ordinal)) is { } move)
+                {
+                    stranded.Add(new SolutionStrandedTrigger(trigger.Name, trigger.Id, trigger.Container, type, move.From, move.To));
+                }
+            }
+        }
+
+        return Diff(row, package) with { Moves = moves, NoLongerFire = stranded };
     }
 
     /// <summary>What changed from the team's installed version to <paramref name="package"/>.</summary>
@@ -1676,6 +1759,44 @@ public sealed class SolutionInstaller(
             }, ct);
 
         return snapshot.Id;
+    }
+
+    /// <summary>
+    /// A KEPT PLUGIN MEMBER MOVED ONTO THE PLUGIN THE PACKAGE NOW NAMES: one repoint of its stored
+    /// agent, with its <c>member.changed</c> row naming both plugins in the same transaction. Its
+    /// settings and its own secret values are keyed by team and member, so they stay as they are.
+    /// The old plugin stays installed - another team may run it. Undone back to the old plugin.
+    /// </summary>
+    private async Task MoveAsync(
+        string team, string id, SolutionMemberMove move, SolutionManifest manifest, SolutionActor actor, Run run, CancellationToken ct)
+    {
+        try
+        {
+            await teams.UpdateMemberAsync(
+                team, id, null, null, MemberRef.ForPlugin(move.To), actor.PromptSetter, ct,
+                change => [actor.Row(TenantActions.MemberChanged, $"{team}/{id}", move.Member, new
+                {
+                    from = MemberRef.ForPlugin(move.From),
+                    to = MemberRef.ForPlugin(move.To),
+                    solution = manifest.Id,
+                    version = manifest.Version,
+                })]);
+        }
+        catch (NoSuchAgentException refused)
+        {
+            throw new SolutionStepException($"{move.Member}: {refused.Message}");
+        }
+
+        // THE UNDO SAYS SO TOO: the log keeps the move's row, so the move back writes its own.
+        run.Made($"member {move.Member} (moved to plugin {move.To})", () => teams.UpdateMemberAsync(
+            team, id, null, null, MemberRef.ForPlugin(move.From), actor.PromptSetter, CancellationToken.None,
+            change => [actor.Row(TenantActions.MemberChanged, $"{team}/{id}", move.Member, new
+            {
+                from = MemberRef.ForPlugin(move.To),
+                to = MemberRef.ForPlugin(move.From),
+                solution = manifest.Id,
+                undone = true,
+            })]));
     }
 
     /// <summary>

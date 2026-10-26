@@ -179,6 +179,15 @@ type solutionDiff struct {
 	Sites    diffSection `json:"sites"`
 	Tools    diffSection `json:"tools"`
 	Plugins  diffSection `json:"plugins"`
+	// Moves is each kept plugin member the update moves onto the plugin the package now names.
+	Moves []diffLine `json:"moves"`
+	// NoLongerFire is each trigger a person made by hand on a moved-from plugin's events.
+	NoLongerFire []diffLine `json:"noLongerFire"`
+}
+
+// diffLine is one of the diff's sentences, worded by the Host.
+type diffLine struct {
+	Line string `json:"line"`
 }
 
 type connectionRow struct {
@@ -257,6 +266,10 @@ func renderDiff(out io.Writer, p previewBody) {
 				listed = true
 			}
 		}
+	}
+	for _, l := range append(append([]diffLine{}, p.Diff.Moves...), p.Diff.NoLongerFire...) {
+		fmt.Fprintf(out, "  %s.\n", l.Line)
+		listed = true
 	}
 	if !listed {
 		fmt.Fprintln(out, "  nothing is added, changed or removed")

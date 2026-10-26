@@ -32,7 +32,6 @@ import {
   type SolutionConnectionOption,
   type ContainerSnapshot,
   type SolutionDiff,
-  type SolutionDiffSection,
   type SolutionInstallResult,
   type SolutionKept,
   type SolutionMissing,
@@ -50,6 +49,7 @@ import { fieldLabel } from '../lib/pluginSettings';
 import { refusedReconnect } from '../lib/slotBinding';
 import {
   SolutionStepTitles,
+  type SolutionDiffSectionKey,
   diffMark,
   failureSentence,
   isBlank,
@@ -402,8 +402,8 @@ async function nextFromTeam() {
 const plan = computed<SolutionPlan | null>(() => okPreview.value?.plan ?? checkPlan.value);
 const diff = computed<SolutionDiff | null>(() => updatePreview.value?.diff ?? null);
 
-function mark(section: keyof SolutionDiff, name: string) {
-  return diffMark(diff.value?.[section] as SolutionDiffSection | undefined, name);
+function mark(section: SolutionDiffSectionKey, name: string) {
+  return diffMark(diff.value?.[section], name);
 }
 
 // WHAT AN UPDATE CHANGES, OLD AND NEW SIDE BY SIDE: the team's triggers and agent members as they

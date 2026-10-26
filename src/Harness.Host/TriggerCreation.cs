@@ -67,6 +67,8 @@ public sealed class TriggerCreation(
 
     public Task<TriggerRow?> FindAsync(string id, CancellationToken ct = default) => schedules.FindAsync(id, ct);
 
+    public Task<IReadOnlyList<TriggerRow>> ListForTeamAsync(string team, CancellationToken ct = default) => schedules.ListForTeamAsync(team, ct);
+
     /// <summary>
     /// Puts <paramref name="row"/> back as it was, with its tenant row, and recomputes what wakes its
     /// member and the member it was moved to - what undoing <see cref="ReplaceAsync"/> needs.
