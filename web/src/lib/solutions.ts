@@ -155,9 +155,12 @@ export function diffMark(section: SolutionDiffSection | undefined, name: string)
   return null;
 }
 
+/** The name-list sections of an update's diff. */
+export type SolutionDiffSectionKey = 'members' | 'triggers' | 'skills' | 'sites' | 'tools' | 'plugins';
+
 /** Every removed item across the diff, as "Members: Scout". */
 export function removedItems(diff: SolutionDiff): string[] {
-  const labels: Record<keyof SolutionDiff, string> = {
+  const labels: Record<SolutionDiffSectionKey, string> = {
     members: 'Member',
     triggers: 'Trigger',
     skills: 'Skill',
@@ -165,7 +168,7 @@ export function removedItems(diff: SolutionDiff): string[] {
     tools: 'Tool',
     plugins: 'Plugin',
   };
-  return (Object.keys(labels) as (keyof SolutionDiff)[]).flatMap((key) =>
+  return (Object.keys(labels) as SolutionDiffSectionKey[]).flatMap((key) =>
     (diff[key]?.removed ?? []).map((name) => `${labels[key]}: ${name}`),
   );
 }

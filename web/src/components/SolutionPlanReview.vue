@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import type { SolutionDiff, SolutionDiffSection, SolutionPlan, SolutionPlanMember, SolutionPlanTrigger } from '../api/types';
-import { capWords, diffMark, removedItems, triggerSource, wakeWords, type ValueChange } from '../lib/solutions';
+import type { SolutionDiff, SolutionPlan, SolutionPlanMember, SolutionPlanTrigger } from '../api/types';
+import { capWords, diffMark, removedItems, triggerSource, wakeWords, type SolutionDiffSectionKey, type ValueChange } from '../lib/solutions';
 import { rawCron } from '../lib/scheduleWords';
 
 /**
@@ -18,9 +18,11 @@ const props = defineProps<{
 }>();
 
 const removed = computed(() => (props.diff ? removedItems(props.diff) : []));
+const moves = computed(() => props.diff?.moves ?? []);
+const noLongerFire = computed(() => props.diff?.noLongerFire ?? []);
 
-function mark(section: keyof SolutionDiff, name: string) {
-  return diffMark(props.diff?.[section] as SolutionDiffSection | undefined, name);
+function mark(section: SolutionDiffSectionKey, name: string) {
+  return diffMark(props.diff?.[section], name);
 }
 
 const memberChanges = (member: SolutionPlanMember) => props.memberWas?.(member) ?? [];
@@ -159,6 +161,21 @@ function memberKindLine(member: SolutionPlanMember) {
           The team needs {{ plugin.minimum }} or newer; an older version is refused while it is installed.
         </div>
         <div v-if="plugin.onInstall" class="os-text-muted q-ml-md" data-plugin-on-install>{{ plugin.onInstall }}</div>
+      </div>
+    </section>
+
+    <!-- A KEPT PLUGIN MEMBER MOVED ONTO ANOTHER PLUGIN, and each trigger a person made by hand on the
+         old plugin's events: the update does not rewrite those, so each says it will no longer fire. -->
+    <section v-if="moves.length > 0" class="q-mb-md" data-moves>
+      <div class="solution-heading">Members moving to another plugin</div>
+      <div v-for="move in moves" :key="move.member" :data-move="move.member">{{ move.line }}</div>
+      <div
+        v-for="stranded in noLongerFire"
+        :key="stranded.id"
+        class="text-warning q-mt-xs"
+        :data-no-longer-fires="stranded.trigger"
+      >
+        <q-icon name="warning" class="q-mr-xs" /><span data-line>{{ stranded.line }}</span>
       </div>
     </section>
 

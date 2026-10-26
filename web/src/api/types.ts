@@ -3738,6 +3738,29 @@ export interface SolutionDiff {
   sites: SolutionDiffSection
   tools: SolutionDiffSection
   plugins: SolutionDiffSection
+  /** Each kept plugin member the update moves onto the plugin its package now names. */
+  moves?: SolutionMemberMove[]
+  /** Each trigger a person made by hand on a moved-from plugin's events: not rewritten, so it stops firing. */
+  noLongerFire?: SolutionStrandedTrigger[]
+}
+
+/** A kept plugin member moved from plugin `from` to `to`; `line` is the sentence Review prints. */
+export interface SolutionMemberMove {
+  member: string
+  from: string
+  to: string
+  line: string
+}
+
+/** A hand-made trigger on `eventType`, an event of plugin `from`; `line` says it will no longer fire. */
+export interface SolutionStrandedTrigger {
+  trigger: string
+  id: string
+  member: string
+  eventType: string
+  from: string
+  to: string
+  line: string
 }
 
 /**
