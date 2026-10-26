@@ -41,7 +41,7 @@ public sealed class PluginMemberRunnerTests : IDisposable
 
     private async Task<(ContainerTestBed Bed, MemberRuntime Member, Message Row)> RunAsync(
         string script, Action<JsonObject>? manifest = null, string instruction = "hello",
-        IPluginMemberSettings? settings = null, ISecretStore? secrets = null)
+        IPluginMemberSettings? settings = null, ISecretStore? secrets = null, IPluginMemberSecrets? memberSecrets = null)
     {
         PluginInstall.Write(_dataRoot, "fixture", script: script, manifest: PluginInstall.Manifest("fixture", edit: manifest));
 
@@ -52,7 +52,8 @@ public sealed class PluginMemberRunnerTests : IDisposable
 
         var bed = new ContainerTestBed();
         var heartbeat = new RunHeartbeat();
-        var plugins = new PluginMemberRunner(catalog, new MemberReports(bed.Host, bed.Store, heartbeat), heartbeat, null, settings, secrets);
+        var plugins = new PluginMemberRunner(
+            catalog, new MemberReports(bed.Host, bed.Store, heartbeat), heartbeat, null, settings, secrets, memberSecrets: memberSecrets);
 
         var member = await bed.Host.AddAsync(
             ContainerTestBed.Definition(Plug) with { Agent = "plugin:fixture", WorkingDirectory = _dataRoot },
@@ -363,6 +364,61 @@ public sealed class PluginMemberRunnerTests : IDisposable
         Assert.Equal(golden, stdin.Replace(added, "", StringComparison.Ordinal));
 
         static int CountOf(string text, string part) => (text.Length - text.Replace(part, "", StringComparison.Ordinal).Length) / part.Length;
+    }
+
+    /// <summary>
+    /// Golden: a plugin that declares no <c>namedSecrets</c> block receives neither <c>namedSecrets</c>
+    /// nor <c>namedSecretNames</c> even when its member holds some - stdin is byte for byte the request
+    /// before named secrets; one that declares the block receives exactly those two members more, the
+    /// names sorted, just before <c>sites</c>, and nothing else changes.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_plugin_without_the_named_secrets_block_gets_a_byte_identical_request_and_one_with_it_only_the_two_members(bool declares)
+    {
+        var held = new Named(new() { ["Webhook"] = "hook-value-77aa", ["ApiKey"] = "api-value-88bb" });
+
+        var (bed, _, _) = await RunAsync(
+            """cat > stdin.json; echo '{"t":"result","ok":true,"output":"read"}'""",
+            manifest: m =>
+            {
+                m["secrets"] = JsonNode.Parse("""{"token":{"required":true}}""");
+                if (declares) m["namedSecrets"] = JsonNode.Parse("""{"label":"App secrets"}""");
+            },
+            settings: new Settings(new PluginMemberSettings(
+                new Dictionary<string, JsonElement>(), new Dictionary<string, string> { ["token"] = "FIXTURE_TOKEN" })),
+            secrets: new Secrets(new() { ["FIXTURE_TOKEN"] = "s3cr3t-value-9f2" }),
+            memberSecrets: held);
+        await using var _ = bed;
+
+        var stdin = await File.ReadAllTextAsync(Path.Combine(_dataRoot, "stdin.json"), Ct);
+        var request = JsonNode.Parse(stdin)!;
+        var seq = (long)request["causation"]!;
+        var correlation = request["correlation"]!.ToJsonString();
+        var named = declares
+            ? "\"namedSecrets\":{\"ApiKey\":\"api-value-88bb\",\"Webhook\":\"hook-value-77aa\"},\"namedSecretNames\":[\"ApiKey\",\"Webhook\"],"
+            : "";
+        var golden =
+            "{\"protocol\":\"harness.member/1\",\"plugin\":{\"id\":\"fixture\",\"version\":\"0.1.0\"},"
+            + "\"member\":{\"id\":\"alpha/plug\",\"team\":\"alpha\",\"name\":\"plug\"},"
+            + $"\"causation\":{seq},\"correlation\":{correlation},"
+            + $"\"work\":[{{\"seq\":{seq},\"type\":\"{MessageTypes.InstructionFor(Plug)}\",\"source\":\"alpha/manager\",\"correlation\":{correlation},"
+            + "\"payload\":{\"instruction\":\"hello\"},\"instruction\":\"hello\"}],"
+            + "\"config\":{},\"secrets\":{\"token\":\"s3cr3t-value-9f2\"},\"secretKeys\":{\"token\":\"FIXTURE_TOKEN\"},"
+            + $"\"workingDirectory\":{JsonSerializer.Serialize(_dataRoot)},\"worktrees\":[],"
+            + "\"connections\":{},\"siteFiles\":[]," + named + "\"sites\":[]}\n";
+
+        Assert.Equal(golden, stdin);
+    }
+
+    private sealed class Named(Dictionary<string, string> values) : IPluginMemberSecrets
+    {
+        public Task<IReadOnlyDictionary<string, string>> ValuesAsync(ContainerId member, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyDictionary<string, string>>(new Dictionary<string, string>());
+
+        public Task<IReadOnlyDictionary<string, string>> NamedValuesAsync(ContainerId member, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyDictionary<string, string>>(values);
     }
 
     /// <summary>a value is only ever beside the field, and so the key name, it was bound to -
