@@ -681,5 +681,27 @@ public static class AuthSchema
             """
             ALTER TABLE team_solutions ADD COLUMN plugin_minimums TEXT NOT NULL DEFAULT '{}';
             """),
+
+        // A PLUGIN MEMBER'S NAMED SECRETS, one row per name a person gave a secret (`ApiKey`), for a
+        // plugin whose manifest declares a `namedSecrets` block. `secret` folds case, so a member holds
+        // one `ApiKey` whatever its spelling. `value_protected` is Data Protection ciphertext under the
+        // instance's `<dataRoot>/keys` and a purpose of its own; no column holds the value or any part
+        // of it. The rows die with the member's `team_members` row (a removal, a team deletion), so a
+        // same-name successor inherits none. Beside `tenant_events`, so every set, replace and removal
+        // lands with its row or not at all.
+        new MigrationStep(
+            "auth-030",
+            """
+            CREATE TABLE plugin_member_named_secrets (
+                team            TEXT NOT NULL COLLATE NOCASE,
+                name            TEXT NOT NULL COLLATE NOCASE,
+                secret          TEXT NOT NULL COLLATE NOCASE,
+                value_protected TEXT NOT NULL,
+                set_by          TEXT NOT NULL,
+                set_at          TEXT NOT NULL,
+                PRIMARY KEY (team, name, secret),
+                FOREIGN KEY (team, name) REFERENCES team_members(team, name) ON DELETE CASCADE
+            );
+            """),
     ];
 }

@@ -37,8 +37,8 @@ public sealed class SqlServerPluginMemberSecretRows(string connectionString) : I
     /// <summary>The copy's lock, taken by nothing else.</summary>
     public const string CopyLock = "plugin-member-secrets.copy";
 
-    private static readonly string FieldMatch =
-        $"{SqlServerPluginMemberSettings.MemberMatch} AND {SqlServerSql.Same("field", "@field")}";
+    private static string FieldMatch(MemberSecretTable table) =>
+        $"{SqlServerPluginMemberSettings.MemberMatch} AND {SqlServerSql.Same(table.Column, "@field")}";
 
     private readonly string _connectionString = SqlServerOpen.ConnectionString(connectionString);
 
@@ -74,7 +74,7 @@ public sealed class SqlServerPluginMemberSecretRows(string connectionString) : I
                 await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 await SqlServerPluginMemberSettings.LockMemberAsync(connection, transaction, member, token);
-                await ApplyAsync(connection, transaction, member, protectedChanges, setBy, audit, token);
+                await ApplyAsync(connection, transaction, member, MemberSecretTable.Fields, protectedChanges, setBy, audit, token);
 
                 await SqlServerOpen.CommitAsync(transaction, token);
                 return true;
@@ -84,7 +84,7 @@ public sealed class SqlServerPluginMemberSecretRows(string connectionString) : I
     public Task SaveWithSettingsAsync(
         ContainerId member, PluginMemberSettings settings, IReadOnlyList<TriggerAudit> audits,
         IReadOnlyDictionary<string, string?> protectedChanges, string setBy,
-        Func<string, string, TriggerAudit> audit, CancellationToken ct = default) =>
+        Func<string, string, TriggerAudit> audit, CancellationToken ct = default, ProtectedNamedChanges? named = null) =>
         SqlServerOpen.RunAsync(
             _connectionString,
             async (connection, token) =>
@@ -94,7 +94,48 @@ public sealed class SqlServerPluginMemberSecretRows(string connectionString) : I
                 await SqlServerPluginMemberSettings.LockMemberAsync(connection, transaction, member, token);
                 await SqlServerPluginMemberSettings.UpsertAsync(connection, transaction, member, settings, token);
                 foreach (var row in audits) await SqlServerTenantAuditRow.AppendAsync(connection, transaction, row, token);
-                await ApplyAsync(connection, transaction, member, protectedChanges, setBy, audit, token);
+                await ApplyAsync(connection, transaction, member, MemberSecretTable.Fields, protectedChanges, setBy, audit, token);
+                if (named is not null)
+                {
+                    await ApplyAsync(connection, transaction, member, MemberSecretTable.Named, named.Changes, setBy, named.Audit, token);
+                }
+
+                await SqlServerOpen.CommitAsync(transaction, token);
+                return true;
+            },
+            ct);
+
+    public Task<IReadOnlyList<MemberSecretRow>> NamedRowsAsync(ContainerId member, CancellationToken ct = default) =>
+        SqlServerOpen.RunAsync<IReadOnlyList<MemberSecretRow>>(
+            _connectionString,
+            async (connection, token) =>
+            {
+                await using var select = connection.CreateCommand();
+                select.CommandText =
+                    $"SELECT secret, value_protected, set_by, set_at FROM plugin_member_named_secrets WHERE {SqlServerPluginMemberSettings.MemberMatch}";
+                SqlServerPluginMemberSettings.BindMember(select, member);
+
+                var rows = new List<MemberSecretRow>();
+                await using var reader = await select.ExecuteReaderAsync(token);
+                while (await reader.ReadAsync(token))
+                {
+                    rows.Add(new MemberSecretRow(
+                        reader.GetString(0), reader.GetString(1), reader.GetString(2), Instant.Parse(reader.GetString(3))));
+                }
+
+                return rows;
+            },
+            ct);
+
+    public Task ChangeNamedAsync(ContainerId member, ProtectedNamedChanges named, string setBy, CancellationToken ct = default) =>
+        SqlServerOpen.RunAsync(
+            _connectionString,
+            async (connection, token) =>
+            {
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
+
+                await SqlServerPluginMemberSettings.LockMemberAsync(connection, transaction, member, token);
+                await ApplyAsync(connection, transaction, member, MemberSecretTable.Named, named.Changes, setBy, named.Audit, token);
 
                 await SqlServerOpen.CommitAsync(transaction, token);
                 return true;
@@ -199,11 +240,12 @@ public sealed class SqlServerPluginMemberSecretRows(string connectionString) : I
             ct);
 
     private static async Task ApplyAsync(
-        SqlConnection connection, SqlTransaction transaction, ContainerId member,
+        SqlConnection connection, SqlTransaction transaction, ContainerId member, MemberSecretTable table,
         IReadOnlyDictionary<string, string?> protectedChanges, string setBy, Func<string, string, TriggerAudit> audit,
         CancellationToken ct)
     {
         var at = Instant.Stamp(DateTimeOffset.UtcNow);
+        var match = FieldMatch(table);
 
         foreach (var (field, value) in protectedChanges.OrderBy(c => c.Key, StringComparer.Ordinal))
         {
@@ -213,12 +255,12 @@ public sealed class SqlServerPluginMemberSecretRows(string connectionString) : I
             {
                 await using var delete = connection.CreateCommand();
                 delete.Transaction = transaction;
-                delete.CommandText = $"DELETE FROM plugin_member_secrets WHERE {FieldMatch}";
+                delete.CommandText = $"DELETE FROM {table.Name} WHERE {match}";
                 Bind(delete, member, field);
 
                 // Nothing stored: nothing changes and no row.
                 if (await delete.ExecuteNonQueryAsync(ct) == 0) continue;
-                action = TenantActions.MemberSecretCleared;
+                action = table.Cleared;
             }
             else
             {
@@ -226,7 +268,7 @@ public sealed class SqlServerPluginMemberSecretRows(string connectionString) : I
                 await using (var exists = connection.CreateCommand())
                 {
                     exists.Transaction = transaction;
-                    exists.CommandText = $"SELECT COUNT(*) FROM plugin_member_secrets WITH (UPDLOCK, HOLDLOCK) WHERE {FieldMatch}";
+                    exists.CommandText = $"SELECT COUNT(*) FROM {table.Name} WITH (UPDLOCK, HOLDLOCK) WHERE {match}";
                     Bind(exists, member, field);
                     existed = (int)(await exists.ExecuteScalarAsync(ct))! > 0;
                 }
@@ -234,18 +276,18 @@ public sealed class SqlServerPluginMemberSecretRows(string connectionString) : I
                 await using var write = connection.CreateCommand();
                 write.Transaction = transaction;
                 write.CommandText = existed
-                    ? $"UPDATE plugin_member_secrets SET value_protected = @value, set_by = @by, set_at = @at WHERE {FieldMatch}"
-                    : """
-                      INSERT INTO plugin_member_secrets (team, name, field, value_protected, set_by, set_at)
-                      VALUES (@team, @name, @field, @value, @by, @at)
-                      """;
+                    ? $"UPDATE {table.Name} SET value_protected = @value, set_by = @by, set_at = @at WHERE {match}"
+                    : $"""
+                       INSERT INTO {table.Name} (team, name, {table.Column}, value_protected, set_by, set_at)
+                       VALUES (@team, @name, @field, @value, @by, @at)
+                       """;
                 Bind(write, member, field);
                 write.Parameters.AddWithValue("@value", value);
                 write.Parameters.AddWithValue("@by", setBy);
                 write.Parameters.AddWithValue("@at", at);
                 await write.ExecuteNonQueryAsync(ct);
 
-                action = existed ? TenantActions.MemberSecretReplaced : TenantActions.MemberSecretSet;
+                action = existed ? table.Replaced : table.Set;
             }
 
             await SqlServerTenantAuditRow.AppendAsync(connection, transaction, audit(field, action), ct);

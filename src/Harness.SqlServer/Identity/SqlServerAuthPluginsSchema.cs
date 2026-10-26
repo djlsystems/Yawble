@@ -140,5 +140,25 @@ public static class SqlServerAuthPluginsSchema
                  password_protected NVARCHAR(MAX) NOT NULL
              );
              """),
+
+        // `AuthSchema`'s auth-030: a plugin member's named secrets. `secret` is NVARCHAR(64) and folds
+        // case: a name is at most 64 characters (`PluginNamedSecrets.IsName`, checked before every
+        // write), and one member holds one `ApiKey` whatever its spelling. The key is 928 bytes, so
+        // NONCLUSTERED, as plugin_member_secrets'.
+        new MigrationStep(
+            "auth-030",
+            $"""
+             CREATE TABLE plugin_member_named_secrets (
+                 team            NVARCHAR(200) COLLATE {SqlServerSql.NoCase} NOT NULL,
+                 name            NVARCHAR(200) COLLATE {SqlServerSql.NoCase} NOT NULL,
+                 secret          NVARCHAR(64)  COLLATE {SqlServerSql.NoCase} NOT NULL,
+                 value_protected NVARCHAR(MAX) NOT NULL,
+                 set_by          NVARCHAR(MAX) NOT NULL,
+                 set_at          NVARCHAR(40)  NOT NULL,
+                 CONSTRAINT pk_plugin_member_named_secrets PRIMARY KEY NONCLUSTERED (team, name, secret),
+                 CONSTRAINT fk_plugin_member_named_secrets_member FOREIGN KEY (team, name)
+                     REFERENCES team_members(team, name) ON DELETE CASCADE
+             );
+             """),
     ];
 }

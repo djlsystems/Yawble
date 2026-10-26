@@ -161,7 +161,9 @@ public static class PluginEndpoints
             .WithSummary("A plugin member's settings")
             .WithDescription(
                 "`{ team, member, plugin, version, description, config, secrets, secretStates, fields, secretFields, "
-                + "outOfRange, marketplaceUrl }`: what is stored for this plugin member - its configuration, each secret's bound "
+                + "namedSecretsField, namedSecretStates, outOfRange, marketplaceUrl }`: `namedSecretsField` is the manifest's "
+                + "`namedSecrets` block (`label`, `description`, `max`) or null, and `namedSecretStates` each named secret the "
+                + "member holds (`name`, `setBy`, `setAt`; never a value). What is stored for this plugin member - its configuration, each secret's bound "
                 + "LOGICAL KEY if any (`secrets`), and `secretStates`, each manifest secret field as "
                 + "`GET .../secrets` answers it (whether it is set, by whom, from which source; a value only for a "
                 + "field the manifest declares `masked: false`) - with its plugin's declarations to build the form "
@@ -204,6 +206,13 @@ public static class PluginEndpoints
                 return Results.BadRequest(new { error = valueRefusal });
             }
 
+            // THE MEMBER'S NAMED SECRETS: a value sets or replaces, null removes, a name not sent stays.
+            var named = request.NamedSecretValues ?? new Dictionary<string, string?>(StringComparer.Ordinal);
+            if (named.Count > 0 && await NamedRefusalAsync(memberSecrets, id, plugin.Manifest, named, ct) is { } namedRefusal)
+            {
+                return Results.BadRequest(new { error = namedRefusal });
+            }
+
             var valued = await ValuedAfterAsync(memberSecrets, id, values, ct);
 
             // EXACTLY AS A HIRE: the same check the hire runs, against the active manifest - except
@@ -227,10 +236,10 @@ public static class PluginEndpoints
                     id, found.Label ?? found.Name, plugin.Manifest.Id, before, changed);
 
                 // The settings, their rows and every value with its own row land in ONE transaction.
-                if (values.Count > 0)
+                if (values.Count > 0 || named.Count > 0)
                 {
                     await memberSecrets.SaveWithSettingsAsync(
-                        id, found.Label ?? found.Name, plugin.Manifest.Id, changed, rows, values, SecretActor(context), ct);
+                        id, found.Label ?? found.Name, plugin.Manifest.Id, changed, rows, values, named, SecretActor(context), ct);
                 }
                 else
                 {
@@ -254,13 +263,16 @@ public static class PluginEndpoints
             .HumansOnly()
             .WithSummary("Change a plugin member's settings")
             .WithDescription(
-                "Body `{ config, secrets?, secretValues?, connections? }` REPLACES the member's configuration, its "
+                "Body `{ config, secrets?, secretValues?, namedSecretValues?, connections? }` REPLACES the member's configuration, its "
                 + "secret key bindings when `secrets` is given (omitted keeps them; `{}` unbinds every key), and its "
                 + "connection bindings (slot to connection id) when `connections` is given "
                 + "(omitted keeps them; `{}` unbinds every slot). `secretValues` sets the member's OWN value for each "
                 + "secret field named (null clears it; a field not named is left), checked as "
                 + "`PUT .../secrets/{field}` checks it, each with its `member.secret-*` row in the same transaction "
-                + "as the settings. A binding must name a connection that exists, "
+                + "as the settings. `namedSecretValues` sets or replaces each NAMED secret given (null removes it; a "
+                + "name not given is left), for a plugin whose manifest declares `namedSecrets`, checked as "
+                + "`PUT .../named-secrets/{name}` checks it, each with its `member.named-secret-*` row in the same "
+                + "transaction. A binding must name a connection that exists, "
                 + "of a provider the slot takes, granted every scope the slot asks for - refused 400 otherwise, "
                 + "with `reconnect: { connectionId, scopes }` when only scopes are missing; a change appends "
                 + "`member.connections-changed` in the same transaction. (send "
@@ -389,6 +401,105 @@ public static class PluginEndpoints
                 + "then resolves through its bound key, if any (stored, then the Host's environment). Nothing stored "
                 + "answers the same and writes no row. Answers the field's entry as `GET .../secrets` does. 400 for a "
                 + "field the manifest does not declare; 500, with nothing cleared, when the row cannot be written.");
+
+        // A PLUGIN MEMBER'S NAMED SECRETS: each name a person gave a secret, who set it and when -
+        // never a value - for a plugin whose manifest declares a `namedSecrets` block.
+        app.MapGet("/api/teams/{team}/members/{member}/named-secrets", async (
+            [Description(Describe.Team)] string team,
+            [Description("The member, as addressed in its route.")] string member,
+            TeamRegistry teams, PluginCatalog plugins, PluginMemberSecretStore memberSecrets, CancellationToken ct) =>
+        {
+            var (found, manifest, refusal) = await NamedSecretsMemberAsync(teams, plugins, team, member, ct);
+            if (refusal is not null) return refusal;
+
+            return Results.Ok(await NamedSecretsAnswerAsync(new ContainerId(found!.Team, found.Name), manifest!.NamedSecrets!, memberSecrets, ct));
+        })
+            .WithTags("Members")
+            .HumansOnly()
+            .WithSummary("A plugin member's named secrets: each name, who set it and when")
+            .WithDescription(
+                "`{ team, member, label, description, max, namedSecrets: [{ name, setBy, setAt }] }`, in name order: "
+                + "the manifest's `namedSecrets` block and each secret a person named on this member. Never a value. "
+                + "404 for an unknown member, 400 for a member that is not a plugin or whose plugin declares no "
+                + "`namedSecrets` block, 409 when its plugin is not installed.");
+
+        app.MapPut("/api/teams/{team}/members/{member}/named-secrets/{name}", async (
+            [Description(Describe.Team)] string team,
+            [Description("The member, as addressed in its route.")] string member,
+            [Description("The secret's name: a letter, then letters, digits and underscores, at most 64.")] string name,
+            SecretSubmission body, TeamRegistry teams, PluginCatalog plugins, PluginMemberSecretStore memberSecrets,
+            HttpContext context, CancellationToken ct) =>
+        {
+            var (found, manifest, refusal) = await NamedSecretsMemberAsync(teams, plugins, team, member, ct);
+            if (refusal is not null) return refusal;
+
+            var id = new ContainerId(found!.Team, found.Name);
+            var change = new Dictionary<string, string?>(StringComparer.Ordinal) { [name] = body.Value ?? "" };
+            if (await NamedRefusalAsync(memberSecrets, id, manifest!, change, ct) is { } invalid)
+            {
+                return Results.BadRequest(new { error = invalid });
+            }
+
+            try
+            {
+                await memberSecrets.ChangeNamedAsync(id, found.Label ?? found.Name, manifest!.Id, change, SecretActor(context), ct);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                return Results.Json(new { error = UnrecordedName(name, exception) }, statusCode: StatusCodes.Status500InternalServerError);
+            }
+
+            return Results.Ok(await NamedSecretsAnswerAsync(id, manifest.NamedSecrets!, memberSecrets, ct));
+        })
+            .WithTags("Members")
+            .HumansOnly()
+            .WithSummary("Set or replace one of a plugin member's named secrets")
+            .WithDescription(
+                "Body `{ \"value\": \"...\" }`: kept as THIS member's secret under `{name}`, as Data Protection "
+                + "ciphertext, with a `member.named-secret-set` or `member.named-secret-replaced` tenant row (team, member, "
+                + "plugin, name - never the value) in the same transaction. Read by the member's next run as "
+                + "`namedSecrets` on stdin. Answers as `GET .../named-secrets` does. 400 with `error` naming the name, "
+                + "never the value: a name that is not a letter then letters, digits and underscores (at most 64), one "
+                + "the member holds in another case, one equal to a manifest `secrets` field, one past the block's `max`, "
+                + "or a value that is empty, multi-line, over 8192 characters, padded with white space, under 4 "
+                + "characters or equal to a name the plugin is told. 500, with nothing stored, when the row cannot be written.");
+
+        app.MapDelete("/api/teams/{team}/members/{member}/named-secrets/{name}", async (
+            [Description(Describe.Team)] string team,
+            [Description("The member, as addressed in its route.")] string member,
+            [Description("The secret's name, in any case.")] string name,
+            TeamRegistry teams, PluginCatalog plugins, PluginMemberSecretStore memberSecrets,
+            HttpContext context, CancellationToken ct) =>
+        {
+            var (found, manifest, refusal) = await NamedSecretsMemberAsync(teams, plugins, team, member, ct);
+            if (refusal is not null) return refusal;
+
+            var id = new ContainerId(found!.Team, found.Name);
+            var change = new Dictionary<string, string?>(StringComparer.Ordinal) { [name] = null };
+            if (await NamedRefusalAsync(memberSecrets, id, manifest!, change, ct) is { } invalid)
+            {
+                return Results.BadRequest(new { error = invalid });
+            }
+
+            try
+            {
+                await memberSecrets.ChangeNamedAsync(id, found.Label ?? found.Name, manifest!.Id, change, SecretActor(context), ct);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                return Results.Json(new { error = UnrecordedName(name, exception) }, statusCode: StatusCodes.Status500InternalServerError);
+            }
+
+            return Results.Ok(await NamedSecretsAnswerAsync(id, manifest.NamedSecrets!, memberSecrets, ct));
+        })
+            .WithTags("Members")
+            .HumansOnly()
+            .WithSummary("Remove one of a plugin member's named secrets")
+            .WithDescription(
+                "Removes the member's secret named `{name}` (matched ignoring case) with a `member.named-secret-removed` "
+                + "row in the same transaction. A name not held answers the same and writes no row. Answers as "
+                + "`GET .../named-secrets` does. 400 for a name that is not usable; 500, with nothing removed, when the "
+                + "row cannot be written.");
 
         // WHETHER A KEY IS SET, by its name only - what a solution's preview says of each secret it
         // binds (`set`, `setWith`), for the key a person types at a hire - and who set it from the
@@ -661,6 +772,8 @@ public static class PluginEndpoints
         connections = stored.Connections,
         fields = Fields(plugin.Manifest),
         secretFields = SecretFields(plugin.Manifest),
+        namedSecretsField = NamedSecretsField(plugin.Manifest),
+        namedSecretStates = plugin.Manifest.NamedSecrets is null ? [] : await reads.NamedStatesAsync(id, ct),
         connectionFields = ConnectionFields(plugin.Manifest),
         outOfRange = PluginMemberRunner.OutOfRange(plugin.Manifest, stored),
         marketplaceUrl = reads.MarketplacePage(plugin.Manifest.Id),
@@ -714,6 +827,30 @@ public static class PluginEndpoints
                 : null,
         });
 
+    /// <summary>The manifest's <c>namedSecrets</c> block as every answer carries it, or null.</summary>
+    private static object? NamedSecretsField(PluginManifest manifest) => manifest.NamedSecrets is { } block
+        ? new { label = block.Label, description = block.Description, max = block.Max }
+        : null;
+
+    /// <summary>Why <paramref name="changes"/> to the member's named secrets cannot be kept, or null.</summary>
+    internal static async Task<string?> NamedRefusalAsync(
+        PluginMemberSecretStore memberSecrets, ContainerId id, PluginManifest manifest,
+        IReadOnlyDictionary<string, string?> changes, CancellationToken ct) =>
+        NamedSecretRules.ChangesRefusal(
+            manifest, [.. (await memberSecrets.NamedStatesAsync(id, ct)).Select(s => s.Name)], changes);
+
+    /// <summary>The one answer of every named-secrets route: the block, and each name held. Never a value.</summary>
+    private static async Task<object> NamedSecretsAnswerAsync(
+        ContainerId id, PluginNamedSecrets block, PluginMemberSecretStore memberSecrets, CancellationToken ct) => new
+    {
+        team = id.Team,
+        member = id.Name,
+        label = block.Label,
+        description = block.Description,
+        max = block.Max,
+        namedSecrets = (await memberSecrets.NamedStatesAsync(id, ct)).Select(s => new { name = s.Name, setBy = s.SetBy, setAt = s.SetAt }),
+    };
+
     private static Dictionary<string, object> SecretFields(PluginManifest manifest) => manifest.Secrets.ToDictionary(
         s => s.Key,
         s => (object)new { description = s.Value.Description, required = s.Value.Required, label = s.Value.Label, masked = s.Value.Masked });
@@ -745,6 +882,7 @@ public static class PluginEndpoints
                 timeoutSeconds = p.Manifest.TimeoutSeconds,
                 config = Fields(p.Manifest),
                 secrets = SecretFields(p.Manifest),
+                namedSecrets = NamedSecretsField(p.Manifest),
                 connections = ConnectionFields(p.Manifest),
                 publishes = p.Manifest.Publishes.Select(e => new { type = $"plugin.{p.Manifest.Id}.{e.Type}", summary = e.Summary }),
                 skills = p.Manifest.Skills,
@@ -851,6 +989,28 @@ public static class PluginEndpoints
         return answer;
     }
 
+    private static string UnrecordedName(string name, Exception exception) =>
+        $"The secret `{name}` was not changed: its record could not be written ({exception.Message}).";
+
+    /// <summary>The plugin member and its manifest, which declares a <c>namedSecrets</c> block, or the
+    /// answer saying why there is none.</summary>
+    private static async Task<(PersistedMember? Member, PluginManifest? Manifest, IResult? Refusal)> NamedSecretsMemberAsync(
+        TeamRegistry teams, PluginCatalog plugins, string team, string member, CancellationToken ct)
+    {
+        var (found, plugin, refusal) = await PluginMemberAsync(teams, plugins, team, member, ct);
+        if (refusal is not null) return (found, null, refusal);
+
+        if (plugin!.Manifest.NamedSecrets is null)
+        {
+            return (found, null, Results.BadRequest(new
+            {
+                error = $"Plugin '{plugin.Manifest.Id}' declares no named secrets; its secrets are the fields its manifest names.",
+            }));
+        }
+
+        return (found, plugin.Manifest, null);
+    }
+
     private static string UnrecordedField(string field, Exception exception) =>
         $"`{field}` was not changed: its record could not be written ({exception.Message}).";
 
@@ -867,11 +1027,13 @@ public sealed record InstallPlugin(string? Path, bool Replace = false);
 
 /// <summary>Body of <c>PUT .../members/{member}/plugin-settings</c>: <c>config</c> replaces what is
 /// stored; <c>secrets</c> and <c>connections</c> replace it when given and keep it when omitted;
-/// <c>secretValues</c> sets (a string) or clears (null) the member's own value of each field named.</summary>
+/// <c>secretValues</c> sets (a string) or clears (null) the member's own value of each field named;
+/// <c>namedSecretValues</c> sets (a string) or removes (null) each named secret given.</summary>
 public sealed record PluginSettingsChange(
     Dictionary<string, JsonElement>? Config, Dictionary<string, string>? Secrets,
     Dictionary<string, string>? Connections = null,
-    Dictionary<string, string?>? SecretValues = null);
+    Dictionary<string, string?>? SecretValues = null,
+    Dictionary<string, string?>? NamedSecretValues = null);
 
 /// <summary>Body of <c>PUT /api/secrets/{key}</c>: the value, which no answer ever carries.</summary>
 public sealed record SecretSubmission(string? Value);

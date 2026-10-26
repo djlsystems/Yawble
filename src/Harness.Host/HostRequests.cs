@@ -449,7 +449,13 @@ internal sealed record CreateContainer(
         + "`member.secret-set` row each, in one transaction; a hire whose values cannot be kept makes no "
         + "member. Refused for an agent's hire (a Manager's, a Concierge's): a person sets them in the "
         + "member's settings. Refused for an Agent.")]
-    Dictionary<string, string>? SecretValues = null);
+    Dictionary<string, string>? SecretValues = null,
+    [property: Description(
+        "A PLUGIN member's NAMED secrets, typed by a person, for a plugin whose manifest declares a "
+        + "`namedSecrets` block: each name a person chose, to the value. Kept for this member only, as "
+        + "ciphertext, with the member's settings and a `member.named-secret-set` row each, in one "
+        + "transaction. Refused for an agent's hire, as `secretValues` is, and for an Agent.")]
+    Dictionary<string, string>? NamedSecretValues = null);
 
 /// <summary>A repository's contributor settings. See the route.</summary>
 internal sealed record SetRepoContributor(
