@@ -160,7 +160,7 @@ const overMax = computed(() => (count.value > max.value ? `This member may hold 
         <!-- AN ADDED ROW: a box for the name and a password box for its value, sent on the button.
              Remove drops it at once: nothing of it is saved yet. -->
         <tr v-for="(row, index) in draft.added" :key="`added-${row.key}`" data-named-secret-added>
-          <td class="named-secret-name">
+          <td class="named-secret-name named-secret-name-typed">
             <q-input
               :model-value="row.name"
               outlined
@@ -253,7 +253,7 @@ const overMax = computed(() => (count.value > max.value ? `This member may hold 
   word-break: break-all;
 }
 
-.named-secret-name:has(.q-field) {
+.named-secret-name-typed {
   padding-top: 2px;
 }
 
