@@ -73,3 +73,17 @@ describe('every action the Host writes reads in words', () => {
     }
   });
 });
+
+describe("a named secret's row", () => {
+  const detail = JSON.stringify({ team: 'Ops', member: 'Azure', plugin: 'azure-plugin', name: 'DEPLOY_KEY' });
+
+  it.each([
+    ['member.named-secret-set', 'DEPLOY_KEY set for Azure'],
+    ['member.named-secret-replaced', 'DEPLOY_KEY replaced for Azure'],
+    ['member.named-secret-removed', 'DEPLOY_KEY removed for Azure'],
+  ])('%s names the member and the secret', (action, words) => {
+    const sentence = detailWords({ action, detail });
+    expect(sentence).toContain(words);
+    expect(sentence).toContain('azure-plugin');
+  });
+});

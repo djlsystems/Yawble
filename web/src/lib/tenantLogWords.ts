@@ -579,6 +579,18 @@ const words: Record<string, Words> = {
     did: "cleared a plugin member's secret",
     detail: (d) => sentence([`${text(d, 'field') ?? 'a secret'} cleared${text(d, 'member') ? ` for ${text(d, 'member')}` : ''}${onTeam(d)}`, text(d, 'plugin') && `plugin ${text(d, 'plugin')}`]),
   },
+  'member.named-secret-set': {
+    did: "set a plugin member's named secret",
+    detail: (d) => sentence([`${text(d, 'name') ?? 'a named secret'} set${text(d, 'member') ? ` for ${text(d, 'member')}` : ''}${onTeam(d)}`, text(d, 'plugin') && `plugin ${text(d, 'plugin')}`]),
+  },
+  'member.named-secret-replaced': {
+    did: "replaced a plugin member's named secret",
+    detail: (d) => sentence([`${text(d, 'name') ?? 'a named secret'} replaced${text(d, 'member') ? ` for ${text(d, 'member')}` : ''}${onTeam(d)}`, text(d, 'plugin') && `plugin ${text(d, 'plugin')}`]),
+  },
+  'member.named-secret-removed': {
+    did: "removed a plugin member's named secret",
+    detail: (d) => sentence([`${text(d, 'name') ?? 'a named secret'} removed${text(d, 'member') ? ` for ${text(d, 'member')}` : ''}${onTeam(d)}`, text(d, 'plugin') && `plugin ${text(d, 'plugin')}`]),
+  },
   'member.secrets-copied': {
     did: "copied stored keys onto plugin members",
     detail: (d) =>
