@@ -362,6 +362,40 @@ public sealed class PluginNamedSecretsTests : IAsyncLifetime
         Assert.Contains("`namedSecretValues` belong to a plugin member", await agent.Content.ReadAsStringAsync(Ct));
     }
 
+    [Fact]
+    public async Task A_manager_reads_each_plugin_members_secret_names_and_never_a_value_and_status_lists_them()
+    {
+        var value = Value("held");
+        await HireAsync("Named", new() { ["Webhook"] = Value("hook"), ["ApiKey"] = value });
+        await HireAsync("Bare", new());
+        var plain = await _person.PostAsJsonAsync($"/api/teams/{_team}/containers", new { name = "Plain", agent = "plugin:plain" }, Ct);
+        Assert.Equal(HttpStatusCode.OK, plain.StatusCode);
+
+        using var manager = _factory.CreateClient();
+        manager.DefaultRequestHeaders.Add(ApiKeyAuthenticationHandler.Header, await Services.GetRequiredService<IPrincipalStore>().MintAsync(
+            new ContainerId(_team, TeamRegistry.DefaultManagerName).ToString(), PrincipalKind.Container,
+            _team, TeamRegistry.ManagerPermits, ct: Ct));
+
+        using var response = await manager.GetAsync($"/api/teams/{_team}/named-secret-names", Ct);
+        var body = await response.Content.ReadAsStringAsync(Ct);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, body);
+        Assert.DoesNotContain(value, body, StringComparison.Ordinal);
+        Assert.DoesNotContain(Email, body, StringComparison.Ordinal);
+
+        var members = Json(body).GetProperty("members").EnumerateArray().ToList();
+        Assert.Equal(["Bare", "Named"], members.Select(m => m.GetProperty("member").GetString()));
+        Assert.Equal(["ApiKey", "Webhook"], members[1].GetProperty("names").EnumerateArray().Select(n => n.GetString()));
+
+        var lines = PlatformMcpTools.NamedSecretLines("HTTP 200" + Environment.NewLine + body, null)!;
+        Assert.Contains("- Named (Named, plugin named): ApiKey, Webhook", lines);
+        Assert.Contains("- Bare (Bare, plugin named): none", lines);
+        Assert.DoesNotContain("Plain", lines);
+        Assert.Equal(
+            ["- Named (Named, plugin named): ApiKey, Webhook"],
+            PlatformMcpTools.NamedSecretLines("HTTP 200" + Environment.NewLine + body, "named")!.Split(Environment.NewLine).Skip(1));
+        Assert.Null(PlatformMcpTools.NamedSecretLines("HTTP 403" + Environment.NewLine + "{}", null));
+    }
+
     /// <summary>The member holds <c>ApiKey</c> and <c>Second</c> of at most 3.</summary>
     [Theory]
     [InlineData("1Key", "real-value-1234", "`1Key` is not a usable secret name")]

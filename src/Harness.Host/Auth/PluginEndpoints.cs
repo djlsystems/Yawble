@@ -402,6 +402,38 @@ public static class PluginEndpoints
                 + "answers the same and writes no row. Answers the field's entry as `GET .../secrets` does. 400 for a "
                 + "field the manifest does not declare; 500, with nothing cleared, when the row cannot be written.");
 
+        // THE NAMES, NEVER A VALUE, OF EVERY PLUGIN MEMBER'S NAMED SECRETS ON A TEAM, for whoever reads
+        // the team's plugin members - the Manager's and the Concierge's `status` - so an agent can say
+        // "add a secret named X" and check it is there. A name is not a secret; the values stay behind
+        // the HumansOnly routes below.
+        app.MapGet("/api/teams/{team}/named-secret-names", async (
+            [Description(Describe.Team)] string team,
+            TeamRegistry teams, PluginCatalog plugins, PluginMemberSecretStore memberSecrets, CancellationToken ct) =>
+        {
+            if (teams.All().FirstOrDefault(t => string.Equals(t.Id, team, StringComparison.OrdinalIgnoreCase)) is not { } found)
+            {
+                return Refusals.NoTeam(team);
+            }
+
+            var members = new List<object>();
+            foreach (var member in found.Containers.OrderBy(c => c.Id, StringComparer.Ordinal))
+            {
+                if (!MemberRef.IsPlugin(member.Agent, out var pluginId) || plugins.For(pluginId!)?.Manifest.NamedSecrets is null) continue;
+
+                var names = await memberSecrets.NamedStatesAsync(new ContainerId(member.Team, member.Id), ct);
+                members.Add(new { member = member.Id, name = member.Name, plugin = pluginId, names = names.Select(n => n.Name) });
+            }
+
+            return Results.Ok(new { team = found.Id, members });
+        })
+            .WithTags("Members")
+            .RequirePermit(Permits.Read)
+            .WithSummary("The names of each plugin member's named secrets on a team, never a value")
+            .WithDescription(
+                "`{ team, members: [{ member, name, plugin, names }] }`: each member of the team whose plugin declares "
+                + "a `namedSecrets` block, with the names of the secrets a person gave it, in name order. Never a "
+                + "value, and never who set one. 404 for an unknown team.");
+
         // A PLUGIN MEMBER'S NAMED SECRETS: each name a person gave a secret, who set it and when -
         // never a value - for a plugin whose manifest declares a `namedSecrets` block.
         app.MapGet("/api/teams/{team}/members/{member}/named-secrets", async (
