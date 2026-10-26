@@ -43,9 +43,9 @@ public sealed class SqlServerOutcomeStore(
         RunAsync(
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
                 var write = await work(connection, transaction, token);
-                if (write.Ok) await transaction.CommitAsync(token);
+                if (write.Ok) await SqlServerOpen.CommitAsync(transaction, token);
                 return write;
             },
             ct);
@@ -357,7 +357,7 @@ public sealed class SqlServerOutcomeStore(
         RunAsync(
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 if (await CountAsync(connection, transaction,
                         $"SELECT COUNT_BIG(*) FROM workflow_outcome_links {Locked} WHERE outcome_id = @id", id, token) > 0)
@@ -368,7 +368,7 @@ public sealed class SqlServerOutcomeStore(
                 if (await DeleteAsync(connection, transaction, id, token) == 0) return false;
 
                 await audit(connection, transaction, audit_ with { Subject = id }, token);
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return true;
             },
             ct);

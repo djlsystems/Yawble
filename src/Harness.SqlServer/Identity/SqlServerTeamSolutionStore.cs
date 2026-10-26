@@ -53,7 +53,7 @@ public sealed class SqlServerTeamSolutionStore(string connectionString) : ITeamS
             _connectionString,
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 await using (var command = connection.CreateCommand())
                 {
@@ -81,7 +81,7 @@ public sealed class SqlServerTeamSolutionStore(string connectionString) : ITeamS
                 }
 
                 await SqlServerTenantAuditRow.AppendAsync(connection, transaction, audit, token);
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return 0;
             },
             ct);
@@ -91,7 +91,7 @@ public sealed class SqlServerTeamSolutionStore(string connectionString) : ITeamS
             _connectionString,
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 int deleted;
 
@@ -104,7 +104,7 @@ public sealed class SqlServerTeamSolutionStore(string connectionString) : ITeamS
                 }
 
                 if (deleted > 0 && audit is not null) await SqlServerTenantAuditRow.AppendAsync(connection, transaction, audit, token);
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
 
                 return deleted > 0;
             },

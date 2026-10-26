@@ -177,7 +177,7 @@ public sealed class SqlServerBacklogStore : IBacklogStore
             async (connection, token) =>
             {
                 var now = Instant.Now();
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 double position;
 
@@ -219,7 +219,7 @@ public sealed class SqlServerBacklogStore : IBacklogStore
                 }
 
                 if (audit is not null) await _audit!(connection, transaction, BacklogRows.Naming(audit, id), token);
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
 
                 return new BacklogItem(id, team, title, body, BacklogStates.Pending, position, null, now, now, createdBy);
             },
@@ -262,7 +262,7 @@ public sealed class SqlServerBacklogStore : IBacklogStore
         return RunAsync(
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 if (sets.Count > 0)
                 {
@@ -275,7 +275,7 @@ public sealed class SqlServerBacklogStore : IBacklogStore
 
                 foreach (var row in audit) await _audit!(connection, transaction, row, token);
 
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return 0;
             },
             ct);
@@ -313,7 +313,7 @@ public sealed class SqlServerBacklogStore : IBacklogStore
         RunAsync<IReadOnlyList<BacklogItem>>(
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 await using (var write = Command(
                     connection, transaction,
@@ -335,7 +335,7 @@ public sealed class SqlServerBacklogStore : IBacklogStore
                     while (await reader.ReadAsync(token)) all.Add(BacklogRows.Read(reader));
                 }
 
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return all;
             },
             ct);
@@ -347,7 +347,7 @@ public sealed class SqlServerBacklogStore : IBacklogStore
         return RunAsync(
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 await using (var command = Command(
                     connection, transaction,
@@ -360,7 +360,7 @@ public sealed class SqlServerBacklogStore : IBacklogStore
                 }
 
                 if (audit is not null) await _audit!(connection, transaction, audit, token);
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return 0;
             },
             ct);
@@ -377,7 +377,7 @@ public sealed class SqlServerBacklogStore : IBacklogStore
         return RunAsync(
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 foreach (var sql in new[]
                 {
@@ -396,7 +396,7 @@ public sealed class SqlServerBacklogStore : IBacklogStore
                 }
 
                 if (audit is not null) await _audit!(connection, transaction, audit, token);
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return 0;
             },
             ct);
@@ -423,7 +423,7 @@ public sealed class SqlServerBacklogStore : IBacklogStore
             async (connection, token) =>
             {
                 var now = Instant.Now();
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 long id;
 
@@ -446,7 +446,7 @@ public sealed class SqlServerBacklogStore : IBacklogStore
                 }
 
                 if (audit is not null) await _audit!(connection, transaction, audit, token);
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
 
                 return new BacklogDispatch(id, item, teamId, teamName, correlation, now, dispatchedBy, null, null);
             },

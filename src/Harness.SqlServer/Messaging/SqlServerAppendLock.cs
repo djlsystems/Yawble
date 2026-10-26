@@ -27,6 +27,7 @@ public static class SqlServerAppendLock
             $"""
             DECLARE @granted INT;
             EXEC @granted = sp_getapplock @Resource = N'{Resource}', @LockMode = N'Exclusive', @LockOwner = N'Transaction';
+            IF @granted = -3 THROW {SqlServerOpen.LockDeadlockVictim}, N'The message log append lock request was chosen as a deadlock victim.', 1;
             IF @granted < 0 THROW 51000, N'The message log could not take its append lock.', 1;
             """;
 

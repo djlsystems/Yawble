@@ -32,7 +32,7 @@ public sealed class SqlServerLedgerStartRows(string connectionString) : ILedgerS
             _connectionString,
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
                 await SqlServerAppendLock.TakeAsync(connection, transaction, token);
 
                 var now = Instant.Now();
@@ -59,7 +59,7 @@ public sealed class SqlServerLedgerStartRows(string connectionString) : ILedgerS
                         runs.Value.ToString(System.Globalization.CultureInfo.InvariantCulture), now, token);
                 }
 
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
 
                 return new LedgerStartResult(runs, workflows, instanceId, startedAt);
             },

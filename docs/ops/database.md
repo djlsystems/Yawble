@@ -32,7 +32,7 @@ HARNESS_DATABASE_CONNECTION=Server=tcp:sql.example.net,1433;Database=yawble;User
 
 Managed identity is the connection string's own setting: `Authentication=Active Directory Managed Identity` (or `Active Directory Default`) and no password. Yawble reads no credential of its own.
 
-The Host adds `ConnectRetryCount=3` and `Pooling=true` when the string does not set them, so a pooled connection that died in a failover is reopened. A value the string sets is kept.
+The Host adds `ConnectRetryCount=3` and `Pooling=true` when the string does not set them, so a pooled connection that died in a failover is reopened. A value the string sets is kept. Which faults the Host itself runs again is under [How SQL Server differs from SQLite](#how-sql-server-differs-from-sqlite-and-where-it-does-not).
 
 The Host never prints or records the connection string. A sentence about the database names the server and nothing else of it, and `--doctor` reports the server's and the database's names only.
 
@@ -107,6 +107,7 @@ The SQL Server stores keep SQLite's meaning column by column.
 - **Timestamps** stay round-trip text, so they sort and parse identically. `INTEGER` is `BIGINT`, booleans stay integers and JSON stays text.
 - **Skill search** is SQLite's full-text search (FTS5 with `porter unicode61`) ported to code. SQL Server's full-text search is an optional component a server may not have, so the SQL Server store matches a query the way the FTS5 index does: the same tokenizer tables, the same stemmer, the same phrases. `SkillSearchPortTests` holds the port to the bundled SQLite over a corpus.
 - **Two writers at once** are serialised by SQLite. On SQL Server every read-then-write runs in one transaction that holds what it read, and a deadlock victim is run again, up to three attempts in all. One that still fails, or a lock or command that waited out its timeout, is recorded in diagnostics as `db.busy` or `db.busy-timeout-expired`, as SQLite's busy file is.
+- **A transient fault** (a failover or reconfiguration, throttling, a dropped connection: Azure SQL's documented transient errors 4060, 4221, 10928, 10929, 40197, 40501, 40613, 49918, 49919 and 49920, and the network errors 64, 233, 10053, 10054 and 10060) is run again, up to three attempts in all, only where nothing can have committed: while the connection opens, or inside a transaction whose commit has not been sent. A fault on the commit itself, or after a statement that commits on its own, reaches the request: the write may have landed, and running it again would store it twice. A command or lock timeout is not retried.
 
 ## Limits
 

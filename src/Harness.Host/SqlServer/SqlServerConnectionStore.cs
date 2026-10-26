@@ -68,12 +68,12 @@ public sealed class SqlServerConnectionStore(string connectionString, IDataProte
         RunAsync(
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 if (!await write(connection, transaction, token)) return false;
                 if (audit is not null) await SqlServerTenantAuditRow.AppendAsync(connection, transaction, audit, token);
 
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return true;
             },
             ct);
@@ -546,7 +546,7 @@ public sealed class SqlServerConnectionStore(string connectionString, IDataProte
         RunAsync(
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
                 var match = SqlServerSql.Same("state", "@state");
 
                 ConnectionFlow? flow = null;
@@ -569,7 +569,7 @@ public sealed class SqlServerConnectionStore(string connectionString, IDataProte
                     if (await mark.ExecuteNonQueryAsync(token) == 0) flow = flow with { UsedAt = now };
                 }
 
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return flow;
             },
             ct);

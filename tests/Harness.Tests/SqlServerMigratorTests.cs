@@ -232,7 +232,7 @@ public sealed class SqlServerMigratorTests
 
         await Assert.ThrowsAsync<TimeoutException>(() => SqlServerOpen.RetryAsync<int>(
             _ => { calls++; throw new TimeoutException(); },
-            ct, attempts: 3, retryable: e => e is TimeoutException, delayStep: TimeSpan.Zero));
+            ct, attempts: 3, retryable: (e, _) => e is TimeoutException, delayStep: TimeSpan.Zero));
 
         Assert.Equal(3, calls);
     }

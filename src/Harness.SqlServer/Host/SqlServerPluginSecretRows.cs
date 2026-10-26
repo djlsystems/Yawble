@@ -55,7 +55,7 @@ public sealed class SqlServerPluginSecretRows(string connectionString) : IPlugin
             _connectionString,
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 bool existed;
                 await using (var exists = connection.CreateCommand())
@@ -81,7 +81,7 @@ public sealed class SqlServerPluginSecretRows(string connectionString) : IPlugin
 
                 await SqlServerTenantAuditRow.AppendAsync(connection, transaction, audit(existed), token);
 
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return true;
             },
             ct);
@@ -91,7 +91,7 @@ public sealed class SqlServerPluginSecretRows(string connectionString) : IPlugin
             _connectionString,
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 await using (var delete = connection.CreateCommand())
                 {
@@ -109,7 +109,7 @@ public sealed class SqlServerPluginSecretRows(string connectionString) : IPlugin
 
                 await SqlServerTenantAuditRow.AppendAsync(connection, transaction, audit, token);
 
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return true;
             },
             ct);

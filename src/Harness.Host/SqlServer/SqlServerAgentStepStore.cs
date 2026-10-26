@@ -36,7 +36,7 @@ public sealed class SqlServerAgentStepStore(string connectionString) : IAgentSte
             _connectionString,
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 await using (var insert = connection.CreateCommand())
                 {
@@ -83,7 +83,7 @@ public sealed class SqlServerAgentStepStore(string connectionString) : IAgentSte
                     }
                 }
 
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return true;
             },
             ct);
@@ -161,7 +161,7 @@ public sealed class SqlServerAgentStepStore(string connectionString) : IAgentSte
             connectionString,
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
                 await using var command = connection.CreateCommand();
                 command.Transaction = transaction;
                 command.CommandText =
@@ -176,7 +176,7 @@ public sealed class SqlServerAgentStepStore(string connectionString) : IAgentSte
                     removed += await command.ExecuteNonQueryAsync(token);
                 }
 
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return removed;
             },
             ct);

@@ -238,7 +238,7 @@ public sealed class SqlServerMigrator(string connectionString)
     private static async Task ApplyOneAsync(SqlConnection connection, MigrationStep step, CancellationToken ct)
     {
         // Disposed without a commit means rolled back, which is what a failing statement relies on.
-        await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(ct);
+        await using var transaction = await SqlServerOpen.BeginAsync(connection, ct);
 
         if (!await AlreadyDoneAsync(connection, transaction, step, ct))
         {
@@ -258,7 +258,7 @@ public sealed class SqlServerMigrator(string connectionString)
 
         await record.ExecuteNonQueryAsync(ct);
 
-        await transaction.CommitAsync(ct);
+        await SqlServerOpen.CommitAsync(transaction, ct);
     }
 
     private static async Task<bool> AlreadyDoneAsync(

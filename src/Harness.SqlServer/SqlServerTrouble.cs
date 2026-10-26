@@ -8,7 +8,8 @@ namespace Harness.SqlServer;
 ///
 /// <para>
 /// A DEADLOCK IS THE BUSY DATABASE: two writers each holding what the other needs, one chosen as the
-/// victim (1205). The stores already retry a victim (<see cref="SqlServerOpen.RetryAsync{T}(Func{CancellationToken, Task{T}}, CancellationToken)"/>),
+/// victim (1205, or an application lock's victim, <see cref="SqlServerOpen.LockDeadlockVictim"/>). The
+/// stores already retry a victim (<see cref="SqlServerOpen.RetryAsync{T}(Func{CancellationToken, Task{T}}, CancellationToken)"/>),
 /// so one that reaches a request is contention that outlasted the retries.
 /// </para>
 ///
@@ -38,7 +39,7 @@ public sealed class SqlServerTrouble : IDatabaseTrouble
             if (current is not SqlException sql) continue;
 
             if (sql.Number is LockTimeout or CommandTimeout) return DiagnosticKinds.DatabaseBusyTimeoutExpired;
-            if (sql.Number == Deadlock) return DiagnosticKinds.DatabaseBusy;
+            if (sql.Number is Deadlock or SqlServerOpen.LockDeadlockVictim) return DiagnosticKinds.DatabaseBusy;
         }
 
         return null;

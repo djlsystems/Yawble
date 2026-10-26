@@ -31,7 +31,7 @@ public sealed class SqlServerOutcomeStartRows(string connectionString) : IOutcom
             _connectionString,
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 await using (var done = connection.CreateCommand())
                 {
@@ -95,7 +95,7 @@ public sealed class SqlServerOutcomeStartRows(string connectionString) : IOutcom
                 await SqlServerTenantAuditRow.AppendAtAsync(
                     connection, transaction, BacklogOutcomeStart.DoneAudit(now, filled), Instant.Parse(now), token);
 
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return filled;
             },
             ct);

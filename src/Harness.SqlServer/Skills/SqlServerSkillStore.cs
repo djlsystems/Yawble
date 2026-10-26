@@ -661,9 +661,9 @@ public sealed class SqlServerSkillStore(string connectionString) : ISkillStore
         RunAsync(
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
                 var result = await work(connection, transaction, token);
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return result;
             },
             ct);

@@ -41,7 +41,7 @@ public sealed class SqlServerPendingDeliveries : IPendingDeliveries
         RunAsync(
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 await using (var command = connection.CreateCommand())
                 {
@@ -60,7 +60,7 @@ public sealed class SqlServerPendingDeliveries : IPendingDeliveries
 
                 await _appendRows.OnDeliveryAsync(connection, transaction, seq, token);
 
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return true;
             },
             ct);

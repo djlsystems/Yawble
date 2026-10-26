@@ -130,7 +130,7 @@ public sealed class SqlServerTriggerStore(string connectionString) : ITriggerSto
             _connectionString,
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 await using (var hold = Command(connection, transaction, TeamLock))
                 {
@@ -145,7 +145,7 @@ public sealed class SqlServerTriggerStore(string connectionString) : ITriggerSto
                 }
 
                 if (audit is not null) await SqlServerTenantAuditRow.AppendAsync(connection, transaction, audit, token);
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return 0;
             },
             ct);
@@ -241,9 +241,9 @@ public sealed class SqlServerTriggerStore(string connectionString) : ITriggerSto
             _connectionString,
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
                 var count = await CountCappedSkipAsync(connection, transaction, id, dayStart, rearm, nextDueAt, token);
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return count;
             },
             ct);
@@ -282,9 +282,9 @@ public sealed class SqlServerTriggerStore(string connectionString) : ITriggerSto
             _connectionString,
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
                 await RecordCappedSkipAsync(connection, transaction, id, seq, audit, token);
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return 0;
             },
             ct);
@@ -314,7 +314,7 @@ public sealed class SqlServerTriggerStore(string connectionString) : ITriggerSto
             _connectionString,
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 await using (var command = Command(connection, transaction, $"DELETE FROM triggers WHERE {IdMatch}"))
                 {
@@ -323,7 +323,7 @@ public sealed class SqlServerTriggerStore(string connectionString) : ITriggerSto
                 }
 
                 await SqlServerTenantAuditRow.AppendAsync(connection, transaction, audit, token);
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return 0;
             },
             ct);

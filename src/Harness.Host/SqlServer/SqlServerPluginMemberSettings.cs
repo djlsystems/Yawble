@@ -61,14 +61,14 @@ public sealed class SqlServerPluginMemberSettings(string connectionString) : IPl
             _connectionString,
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 await LockMemberAsync(connection, transaction, member, token);
                 await UpsertAsync(connection, transaction, member, settings, token);
 
                 foreach (var audit in audits) await SqlServerTenantAuditRow.AppendAsync(connection, transaction, audit, token);
 
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return true;
             },
             ct);

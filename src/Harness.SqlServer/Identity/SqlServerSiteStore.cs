@@ -85,7 +85,7 @@ public sealed class SqlServerSiteStore(string connectionString) : ISiteStore
             _connectionString,
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 await using (var command = Command(connection, transaction,
                     """
@@ -102,7 +102,7 @@ public sealed class SqlServerSiteStore(string connectionString) : ISiteStore
                 }
 
                 await SqlServerTenantAuditRow.AppendAsync(connection, transaction, audit, token);
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return true;
             },
             ct);
@@ -114,7 +114,7 @@ public sealed class SqlServerSiteStore(string connectionString) : ISiteStore
             _connectionString,
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 // The site row first (the lock order), taking the next number past this one: SQLite's
                 // MAX(next_version, version + 1).
@@ -161,7 +161,7 @@ public sealed class SqlServerSiteStore(string connectionString) : ISiteStore
                 }
 
                 await SqlServerTenantAuditRow.AppendAsync(connection, transaction, audit, token);
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return 0;
             },
             ct);
@@ -171,7 +171,7 @@ public sealed class SqlServerSiteStore(string connectionString) : ISiteStore
             _connectionString,
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 await using (var command = Command(connection, transaction, $"UPDATE sites SET live_version = @version WHERE {SiteMatch}"))
                 {
@@ -181,7 +181,7 @@ public sealed class SqlServerSiteStore(string connectionString) : ISiteStore
                 }
 
                 await SqlServerTenantAuditRow.AppendAsync(connection, transaction, audit, token);
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return 0;
             },
             ct);
@@ -191,12 +191,12 @@ public sealed class SqlServerSiteStore(string connectionString) : ISiteStore
             _connectionString,
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 if (await DeleteSiteRowsAsync(connection, transaction, team, name, token) == 0) return false;
 
                 await SqlServerTenantAuditRow.AppendAsync(connection, transaction, audit, token);
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return true;
             },
             ct);
@@ -207,7 +207,7 @@ public sealed class SqlServerSiteStore(string connectionString) : ISiteStore
             _connectionString,
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 // The team's sites, held as a key range until the end: a site created meanwhile waits,
                 // rather than landing between the list and the sweep below and losing its data to it.
@@ -235,7 +235,7 @@ public sealed class SqlServerSiteStore(string connectionString) : ISiteStore
                     await command.ExecuteNonQueryAsync(token);
                 }
 
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return names;
             },
             ct);
@@ -297,7 +297,7 @@ public sealed class SqlServerSiteStore(string connectionString) : ISiteStore
             _connectionString,
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 await using (var hold = Command(connection, transaction, SiteLock))
                 {
@@ -355,7 +355,7 @@ public sealed class SqlServerSiteStore(string connectionString) : ISiteStore
                     await write.ExecuteNonQueryAsync(token);
                 }
 
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return SiteWriteOutcome.Ok;
             },
             ct);

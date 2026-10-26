@@ -67,7 +67,7 @@ public sealed class SqlServerTeamStore(string connectionString) : ITeamStore
             : RunAsync(
                 async (connection, token) =>
                 {
-                    await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                    await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                     if (childOf is not null)
                     {
@@ -87,7 +87,7 @@ public sealed class SqlServerTeamStore(string connectionString) : ITeamStore
                     }
 
                     foreach (var audit in audits) await SqlServerTenantAuditRow.AppendAsync(connection, transaction, audit, token);
-                    await transaction.CommitAsync(token);
+                    await SqlServerOpen.CommitAsync(transaction, token);
                     return 0;
                 },
                 ct);

@@ -62,7 +62,7 @@ public sealed class SqlServerTenantSettingsStore(string connectionString) : ITen
             async (connection, token) =>
             {
                 var written = new List<TenantSettingWritten>(changes.Count);
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 foreach (var name in changes.Select(c => c.Name).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal))
                 {
@@ -106,7 +106,7 @@ public sealed class SqlServerTenantSettingsStore(string connectionString) : ITen
                         change.Name, new TenantSettingRow(change.Name, change.NewValue, at, actorEmail)));
                 }
 
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return written;
             },
             ct);

@@ -29,7 +29,9 @@ namespace Harness.SqlServer.Messaging;
 ///
 /// <para>
 /// Every call is one unit of work on its own pooled connection, run through
-/// <see cref="SqlServerOpen.RetryAsync"/> so a deadlock victim or a transient fault runs again whole.
+/// <see cref="SqlServerOpen.RunAsync"/>: a deadlock victim runs again whole, and so does a transient
+/// fault (a failover, throttling, a dropped connection) met before the commit was sent. One met on
+/// the commit is thrown, since the append may have landed and running it again would store it twice.
 /// </para>
 /// </summary>
 public sealed class SqlServerMessageStore : IMessageLog, ICursors, ISubscriptions
@@ -60,9 +62,9 @@ public sealed class SqlServerMessageStore : IMessageLog, ICursors, ISubscription
         var stored = await RunAsync(
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
                 var row = await InsertAsync(connection, transaction, message, token);
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return row;
             },
             ct);
@@ -86,7 +88,7 @@ public sealed class SqlServerMessageStore : IMessageLog, ICursors, ISubscription
         var stored = await RunAsync(
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
                 await TakeAppendLockAsync(connection, transaction, token);
 
                 Message? row = null;
@@ -98,7 +100,7 @@ public sealed class SqlServerMessageStore : IMessageLog, ICursors, ISubscription
                     await after(connection, transaction, row, token);
                 }
 
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return row;
             },
             ct);
@@ -1303,7 +1305,7 @@ public sealed class SqlServerMessageStore : IMessageLog, ICursors, ISubscription
         return await RunAsync(
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 // UNDER THE APPEND LOCK, as SQLite's one writer is: an append citing a row this
                 // decides no one cites would otherwise commit beside the delete, and the cause's
@@ -1349,7 +1351,7 @@ public sealed class SqlServerMessageStore : IMessageLog, ICursors, ISubscription
                     runSteps = await prune.ExecuteNonQueryAsync(token);
                 }
 
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
 
                 return new PurgeReport(purged, seqs.Count - purged, fileChanges, runSteps);
             },
@@ -1420,7 +1422,7 @@ public sealed class SqlServerMessageStore : IMessageLog, ICursors, ISubscription
         RunAsync(
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
                 var key = subscriber.ToString();
 
                 await using (var clear = connection.CreateCommand())
@@ -1445,7 +1447,7 @@ public sealed class SqlServerMessageStore : IMessageLog, ICursors, ISubscription
                     await add.ExecuteNonQueryAsync(token);
                 }
 
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return true;
             },
             ct);

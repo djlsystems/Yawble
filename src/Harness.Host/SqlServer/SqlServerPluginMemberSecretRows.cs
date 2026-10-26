@@ -71,12 +71,12 @@ public sealed class SqlServerPluginMemberSecretRows(string connectionString) : I
             _connectionString,
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 await SqlServerPluginMemberSettings.LockMemberAsync(connection, transaction, member, token);
                 await ApplyAsync(connection, transaction, member, protectedChanges, setBy, audit, token);
 
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return true;
             },
             ct);
@@ -89,14 +89,14 @@ public sealed class SqlServerPluginMemberSecretRows(string connectionString) : I
             _connectionString,
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 await SqlServerPluginMemberSettings.LockMemberAsync(connection, transaction, member, token);
                 await SqlServerPluginMemberSettings.UpsertAsync(connection, transaction, member, settings, token);
                 foreach (var row in audits) await SqlServerTenantAuditRow.AppendAsync(connection, transaction, row, token);
                 await ApplyAsync(connection, transaction, member, protectedChanges, setBy, audit, token);
 
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return true;
             },
             ct);
@@ -108,7 +108,7 @@ public sealed class SqlServerPluginMemberSecretRows(string connectionString) : I
             _connectionString,
             async (connection, token) =>
             {
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(token);
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
 
                 await using (var take = connection.CreateCommand())
                 {
@@ -117,6 +117,7 @@ public sealed class SqlServerPluginMemberSecretRows(string connectionString) : I
                         $"""
                         DECLARE @granted INT;
                         EXEC @granted = sp_getapplock @Resource = N'{CopyLock}', @LockMode = N'Exclusive', @LockOwner = N'Transaction';
+                        IF @granted = -3 THROW {SqlServerOpen.LockDeadlockVictim}, N'The member secrets copy lock request was chosen as a deadlock victim.', 1;
                         IF @granted < 0 THROW 51000, N'The member secrets copy could not take its lock.', 1;
                         """;
                     await take.ExecuteNonQueryAsync(token);
@@ -192,7 +193,7 @@ public sealed class SqlServerPluginMemberSecretRows(string connectionString) : I
 
                 await SqlServerTenantAuditRow.AppendAsync(connection, transaction, tally.Done(done), token);
 
-                await transaction.CommitAsync(token);
+                await SqlServerOpen.CommitAsync(transaction, token);
                 return true;
             },
             ct);

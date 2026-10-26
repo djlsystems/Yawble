@@ -23,7 +23,7 @@ public sealed class SqlServerPluginRemovalRows(string connectionString) : IPlugi
     {
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync(ct);
-        await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(ct);
+        await using var transaction = await SqlServerOpen.BeginAsync(connection, ct);
 
         await SqlServerTenantAuditRow.AppendAsync(connection, transaction, row, ct);
 
@@ -32,7 +32,7 @@ public sealed class SqlServerPluginRemovalRows(string connectionString) : IPlugi
 
         try
         {
-            await transaction.CommitAsync(ct);
+            await SqlServerOpen.CommitAsync(transaction, ct);
         }
         catch
         {
