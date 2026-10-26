@@ -496,7 +496,7 @@ async function cancel(wake: PendingWake) {
           class="q-ml-xs"
           :label="failureClassLabel(mark.failureClass, snapshot.kind) ?? ''"
         />
-        <div class="text-caption os-text-muted q-mt-xs">{{ mark.reason }}</div>
+        <div class="text-caption os-text-muted q-mt-xs container-mark-reason" tabindex="0">{{ mark.reason }}</div>
         <div
           v-if="failureClassWords(mark.failureClass, snapshot.kind) !== null"
           class="text-caption os-text-muted q-mt-xs"
@@ -515,7 +515,7 @@ async function cancel(wake: PendingWake) {
 
       <div v-else-if="mark?.kind === 'blocked'" class="q-mt-xs">
         <q-badge class="os-state-pill os-state-pill--blocked" label="stopped without finishing" />
-        <div class="text-caption os-text-muted q-mt-xs">{{ mark.reason }}</div>
+        <div class="text-caption os-text-muted q-mt-xs container-mark-reason" tabindex="0">{{ mark.reason }}</div>
       </div>
 
       <!-- STOPPED ON PURPOSE, AND ASKING. The same mechanism as the mark above and deliberately
@@ -539,7 +539,7 @@ async function cancel(wake: PendingWake) {
       <div v-else-if="mark?.kind === 'needs-decision'" class="q-mt-xs">
         <q-badge class="os-state-pill os-state-pill--needs-you" label="needs you" />
         <DiscussWithConcierge v-if="decision" :decision="decision" class="q-ml-xs" />
-        <div class="text-caption os-text-muted q-mt-xs">{{ mark.reason }}</div>
+        <div class="text-caption os-text-muted q-mt-xs container-mark-reason" tabindex="0">{{ mark.reason }}</div>
       </div>
 
       <!-- A WAKE IS SET: this member is not running, and it will be woken once, at that time, in the
@@ -676,5 +676,14 @@ async function cancel(wake: PendingWake) {
    member, a running workflow and a running team read as one fact. */
 .container-running-dot {
   background: var(--os-state-pill);
+}
+
+/* A failure's, a block's or a question's own words, which can run to a page: held to a few lines
+   that scroll in place, so the header never grows past the card's height and the feed keeps its
+   room. Focusable so the keyboard can scroll it too. */
+.container-mark-reason {
+  max-height: 7.5em;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
 }
 </style>
