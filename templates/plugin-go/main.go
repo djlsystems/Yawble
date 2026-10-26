@@ -48,6 +48,13 @@ type request struct {
 	Secrets struct {
 		Token *string `json:"token"`
 	} `json:"secrets"`
+	// NamedSecrets and NamedSecretNames come only when the manifest declares a `namedSecrets` block
+	// (this sample declares none): each secret a person NAMED in this member's settings, name to
+	// value, and the names alone, sorted. Read a value by the name the team gives you; refuse a name
+	// the member does not hold by naming it and asking for it on the member's settings screen. Never
+	// write a value out.
+	NamedSecrets     map[string]string `json:"namedSecrets"`
+	NamedSecretNames []string          `json:"namedSecretNames"`
 	// Sites are the collections of this team's own sites the manifest declares in `reads`, newest
 	// first; this sample declares none. Cut and Missing are sentences when set.
 	Sites []struct {

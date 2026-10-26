@@ -1493,6 +1493,19 @@ public static class BuiltInSkills
             SHOP_ACCOUNT_SID` and its `up`." Name what `secretKeys` gives, never a guess, and never
             write a value beside it.
 
+            A plugin that hands secrets on to something it makes (an app it deploys, a service it
+            configures) cannot know how many there are or what they are for, so it does not declare
+            numbered fields. Its manifest declares one `namedSecrets` block beside `secrets`
+            (`"namedSecrets": {"label": "App secrets", "description": "...", "max": 20}`): a person
+            gives each secret a name they choose (a letter, then letters, digits and underscores) and
+            types its value beside it in that member's settings, and the team refers to it by that
+            name. A run receives them as `namedSecrets` (name to value) and `namedSecretNames` (the
+            names, sorted); a plugin without the block receives neither. The `status` tool lists each
+            member's names, never a value. To have one added, ask the person to add a secret named
+            `<name>` on the member's settings screen, then check `status` shows it; never ask for a
+            value in a message. A spec says which names the plugin expects and what each is for, and
+            a plugin refuses a name the member does not hold by naming it and pointing to that screen.
+
             A person can change a plugin member's settings and secret values after hire, in the
             member's settings; the change is checked exactly as a hire is and takes effect on the
             member's next run. A Manager cannot change them after hire: to run a plugin with other
