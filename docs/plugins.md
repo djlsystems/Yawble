@@ -586,7 +586,7 @@ value masked beside it, per member, and the team refers to it by that name.
   agent's hire carrying `namedSecretValues` is refused 400, as `secretValues` is: a person types
   every value. The settings read answers each name held as `namedSecretStates`.
 - **A solution** carries them too. Its plan's `plugins[]` entries carry the block as `namedSecrets`
-  (null for a plugin with none), and `POST /api/solutions/install` and `/api/solutions/update` take
+  (left out for a plugin with none), and `POST /api/solutions/install` and `/api/solutions/update` take
   `namedSecretValues: { <package member>: { <name>: value } }`, beside `secretValues`, under the
   same name and value rules and the same rows, refused to a machine principal or agent as those
   routes are. An update sets them on a member the team already has, checked against the names it

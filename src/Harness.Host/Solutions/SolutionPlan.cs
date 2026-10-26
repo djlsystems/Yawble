@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Harness.Contracts;
 
 namespace Harness.Host.Solutions;
@@ -187,7 +188,9 @@ public sealed record SolutionPlanPlugin(string Id, string Name, string Version, 
     public string? OnInstall { get; init; }
 
     /// <summary>Its manifest's <c>namedSecrets</c> block (label, description, max), null when it
-    /// declares none: the wizard and Change setup show the named-secrets table from it.</summary>
+    /// declares none, and then left out of the plan so a plan without the block reads as before:
+    /// the wizard and Change setup show the named-secrets table from it.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public PluginNamedSecrets? NamedSecrets { get; init; }
 }
 
