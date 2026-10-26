@@ -1,5 +1,6 @@
 using Harness.Messaging;
 using Harness.SqlServer;
+using Harness.SqlServer.Host;
 using Microsoft.Data.SqlClient;
 
 namespace Harness.Host.SqlServer;
@@ -24,7 +25,8 @@ public static class SqlServerStartRefusal
         SchemaFromTheFutureException
             or MigrationFailedException
             or WrongCollationException
-            or ReadCommittedSnapshotOffException => exception.Message,
+            or ReadCommittedSnapshotOffException
+            or ControlInUseException => exception.Message,
 
         SqlException sql =>
             $"The SQL Server database at '{Server(connection)}' could not be reached or opened (SQL Server error {sql.Number}): "

@@ -34,5 +34,12 @@ internal sealed partial class HostComposition
     internal void Build()
     {
         app = builder.Build();
+
+        // A CONTROL LOCK LOST BEFORE THE APP EXISTED stops it as soon as it starts: the lock's callback
+        // had no app to stop, and a Host that another took the database from must not go on serving.
+        app.Lifetime.ApplicationStarted.Register(() =>
+        {
+            if (controlLost) app.Lifetime.StopApplication();
+        });
     }
 }

@@ -44,6 +44,8 @@ internal sealed partial class HostComposition(string[] args, HostLog hostLog) : 
     private DatabaseOptions databaseOptions = default!;
     private BackupSettings backupSettings = default!;
     private DataRootLock held = default!;
+    private Harness.SqlServer.Host.SqlServerControlLock? controlLock;
+    private volatile bool controlLost;
     private SchemaMigrator migrator = default!;
     private LedgerStartResult? ledgerStart = default!;
     private SqliteMessageStore store = default!;
@@ -81,8 +83,13 @@ internal sealed partial class HostComposition(string[] args, HostLog hostLog) : 
         hostLog.Dispose();
     }
 
-    /// <summary>The data root's lock, held from the operator phase until the Host is gone.</summary>
-    public void Dispose() => held?.Dispose();
+    /// <summary>The data root's lock, and on SQL Server the database's control lock, held from the
+    /// operator phase until the Host is gone.</summary>
+    public void Dispose()
+    {
+        controlLock?.Dispose();
+        held?.Dispose();
+    }
 
     // SignalR has its OWN serialiser and does not read ConfigureHttpJsonOptions below. Configuring only
     // that one would let /api/overview answer `"state": "Idle"` while every containerChanged push

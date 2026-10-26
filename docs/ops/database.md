@@ -63,8 +63,9 @@ The login needs to create and change tables in that database, because the Host m
 On a sqlserver start the Host:
 
 1. reads the two settings, and stops with a sentence if `sqlserver` has no connection string or the string cannot be read;
-2. checks the collation and `READ_COMMITTED_SNAPSHOT`, then applies every schema step the database has not taken. When a step ran it says once: `Schema updated. No backup was taken first: point-in-time restore is the backup on SQL Server.`;
-3. serves.
+2. takes the database's control lock (see [One control process per database](#one-control-process-per-database)), and stops with a sentence if another Host holds it;
+3. checks the collation and `READ_COMMITTED_SNAPSHOT`, then applies every schema step the database has not taken. When a step ran it says once: `Schema updated. No backup was taken first: point-in-time restore is the backup on SQL Server.`;
+4. serves.
 
 It never creates, opens or migrates `messages.db`. A server it cannot reach, a database from a newer build, or a step that failed is one sentence and a non-zero exit, and nothing is served.
 
@@ -109,9 +110,19 @@ The SQL Server stores keep SQLite's meaning column by column.
 - **Two writers at once** are serialised by SQLite. On SQL Server every read-then-write runs in one transaction that holds what it read, and a deadlock victim is run again, up to three attempts in all. One that still fails, or a lock or command that waited out its timeout, is recorded in diagnostics as `db.busy` or `db.busy-timeout-expired`, as SQLite's busy file is.
 - **A transient fault** (a failover or reconfiguration, throttling, a dropped connection: Azure SQL's documented transient errors 4060, 4221, 10928, 10929, 40197, 40501, 40613, 49918, 49919 and 49920, and the network errors 64, 233, 10053, 10054 and 10060) is run again, up to three attempts in all, only where nothing can have committed: while the connection opens, or inside a transaction whose commit has not been sent. A fault on the commit itself, or after a statement that commits on its own, reaches the request: the write may have landed, and running it again would store it twice. A command or lock timeout is not retried.
 
+## One control process per database
+
+Two instances must not share a SQL Server database: nothing in the schema separates one instance's rows from another's, and two control Hosts would each run the delivery pump, the sweeps, the wakes and retention over the same rows. On SQLite the data root's lock refuses a second Host. On SQL Server the data roots can differ, so the database itself holds the lock:
+
+- A serving Host holds an exclusive application lock, `host.control`, owned by a session on a connection of its own for as long as it runs.
+- A second Host on the same database is refused before it changes anything, with one sentence naming the server and database: `Another control Host is already running on the SQL Server database '<server>/<database>': ...`. The first goes on serving.
+- The lock belongs to the session, so a Host that is killed releases it with its session, and the next start is not refused by a lock nobody holds.
+- Every 10 seconds the Host checks that its session still holds the lock. When the connection has dropped (a failover, a network break), it says so and takes the lock again on a new connection, and keeps trying while the server cannot be reached. If another Host took the lock in the meantime, this Host says so and stops with a non-zero exit, so two Hosts never go on serving one database.
+- Operator commands (`--reset-password`, `--list-users`, `--doctor` and the rest) never take the lock, just as they never take the data root's lock on SQLite. They run beside a live Host.
+
 ## Limits
 
-- **One control process per database.** Two instances must not share a SQL Server database. Nothing in the schema separates one instance's rows from another's.
+- **One control process per database.** Enforced as described above.
 - **No move from SQLite to SQL Server.** An instance that has run on SQLite cannot carry its data over. A SQL Server instance starts from an empty database.
 - **PostgreSQL is not supported.** The code shared by the two engines holds no T-SQL, so a third engine stays possible, but none exists.
 

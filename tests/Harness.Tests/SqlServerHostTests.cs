@@ -185,6 +185,46 @@ public sealed class SqlServerHostTests
         [typeof(AgentStepStore)] = "the SQLite IAgentStepStore, registered as its class for the SQLite tests that resolve it",
     };
 
+    /// <summary>
+    /// ONE CONTROL PROCESS PER DATABASE: a second Host on its own data root but the first's database is
+    /// refused by one sentence naming the database and nothing secret, and the first goes on serving.
+    /// Two would each run the pump and the sweeps over the same rows. Once the first is gone, its
+    /// session's lock goes with it and a Host starts there again.
+    /// </summary>
+    [Fact]
+    public async Task A_second_host_on_the_same_database_is_refused_and_the_first_keeps_serving()
+    {
+        await using var database = await SqlServerTestDatabase.CreateAsync(Ct, applyModules: false);
+        using var firstRoot = new TempRoot();
+
+        var first = Host(firstRoot.Path, ("HARNESS_DATABASE", "sqlserver"), ("HARNESS_DATABASE_CONNECTION", database.ConnectionString));
+        await using (first)
+        {
+            using var person = first.CreateClient();
+            await JsonAsync(await person.GetAsync("/api/auth/state", Ct));
+
+            var (said, exitCode, hadSqliteFile) = await RefusedStartAsync(database.ConnectionString);
+
+            Assert.Equal(1, exitCode);
+            Assert.Contains("Another control Host is already running", said, StringComparison.Ordinal);
+            Assert.Contains(database.Name, said, StringComparison.Ordinal);
+            if (new SqlConnectionStringBuilder(database.ConnectionString).Password is { Length: > 0 } password)
+            {
+                Assert.DoesNotContain(password, said, StringComparison.Ordinal);
+            }
+            AssertOneSentence(said);
+            Assert.False(hadSqliteFile);
+
+            // THE FIRST KEEPS SERVING, and holds the lock still.
+            Assert.True((await JsonAsync(await person.GetAsync("/api/auth/state", Ct))).GetProperty("needsAdmin").GetBoolean());
+        }
+
+        using var againRoot = new TempRoot();
+        await using var again = Host(againRoot.Path, ("HARNESS_DATABASE", "sqlserver"), ("HARNESS_DATABASE_CONNECTION", database.ConnectionString));
+        using var client = again.CreateClient();
+        await JsonAsync(await client.GetAsync("/api/auth/state", Ct));
+    }
+
     [Fact]
     public async Task An_unreachable_server_is_one_sentence_and_a_non_zero_exit()
     {

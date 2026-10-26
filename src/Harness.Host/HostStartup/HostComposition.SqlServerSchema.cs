@@ -41,6 +41,29 @@ internal sealed partial class HostComposition
             return false;
         }
 
+        // ONE CONTROL PROCESS PER DATABASE, taken here as the data root's lock is taken before the SQLite
+        // migration: after the operator commands, which never take it, and before the schema moves, so a
+        // second Host never migrates underneath a serving one. See SqlServerControlLock.
+        try
+        {
+            controlLock = await SqlServerControlLock.AcquireAsync(
+                connection,
+                say: line => Console.Error.WriteLine(line),
+                lost: sentence =>
+                {
+                    Console.Error.WriteLine(sentence);
+                    Environment.ExitCode = 1;
+                    controlLost = true;
+                    app?.Lifetime.StopApplication();
+                });
+        }
+        catch (Exception exception) when (SqlServerStartRefusal.Sentence(exception, connection) is { } sentence)
+        {
+            Console.Error.WriteLine(sentence);
+            Environment.ExitCode = 1;
+            return false;
+        }
+
         var schema = new SqlServerMigrator(connection);
 
         try
