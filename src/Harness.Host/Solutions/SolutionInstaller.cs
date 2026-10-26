@@ -1304,6 +1304,8 @@ public sealed class SolutionInstaller(
 
         if (await BindingsRefusalAsync(package, answers, "press Update again", ct) is { } bindingRefusal) return new(400, bindingRefusal.Body());
 
+        if (await HeldNamedRefusalAsync(stored, row!, package, answers, ct) is { } heldRefusal) return new(400, new { error = heldRefusal });
+
         var (old, _) = SolutionManifest.Parse(row!.Manifest);
         if (old is null) return new(409, new { error = $"The record of what '{teams.LabelFor(stored)}' was installed from cannot be read; it cannot be updated." });
 
@@ -1341,6 +1343,7 @@ public sealed class SolutionInstaller(
                         }
 
                         await RebindSecretsAsync(stored, id, old.Member(member.Name), member, package, actor, run, ct);
+                        await ChangeNamedSecretsAsync(stored, id, member, package, answers, actor, run, ct);
                         continue;
                     }
 
@@ -1836,6 +1839,59 @@ public sealed class SolutionInstaller(
             ct);
 
         run.Made($"member {member.Name} (secrets)", () => pluginSettings.SaveAsync(memberId, before, CancellationToken.None));
+    }
+
+    /// <summary>
+    /// Why the named secrets Change setup gives a plugin member the team already has cannot be kept
+    /// beside the names it holds (a name differing only in case, or past the plugin's max), or null.
+    /// The wizard's own check knows only the package; this one asks the store before anything changes.
+    /// </summary>
+    private async Task<string?> HeldNamedRefusalAsync(
+        string team, TeamSolutionRow row, SolutionPackage package, SolutionAnswers answers, CancellationToken ct)
+    {
+        if (memberSecrets is null) return null;
+
+        foreach (var (memberName, values) in answers.NamedSecretValues ?? new Dictionary<string, Dictionary<string, string>>())
+        {
+            if (values.Count == 0
+                || row.Members.FirstOrDefault(m => Same(m.Key, memberName)).Value is not { } id
+                || !MemberExists(team, id)
+                || package.Plugin(package.Manifest.Member(memberName)?.PluginId) is not { } plugin)
+            {
+                continue;
+            }
+
+            var changes = values.ToDictionary(v => v.Key, v => (string?)(v.Value ?? ""), StringComparer.Ordinal);
+            if (await PluginEndpoints.NamedRefusalAsync(memberSecrets, new ContainerId(team, id), plugin.Manifest, changes, ct) is { } refused)
+            {
+                return $"'{memberName}': {refused}";
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// THE NAMED SECRETS CHANGE SETUP GAVE A MEMBER THE TEAM ALREADY HAS, kept with their
+    /// <c>member.named-secret-*</c> rows in one transaction; undone by putting back what each name held.
+    /// </summary>
+    private async Task ChangeNamedSecretsAsync(
+        string team, string id, SolutionMember member, SolutionPackage package, SolutionAnswers answers,
+        SolutionActor actor, Run run, CancellationToken ct)
+    {
+        var values = AnswersFor(answers.NamedSecretValues, member.Name);
+        if (memberSecrets is null || values.Count == 0 || package.Plugin(member.PluginId) is not { } plugin) return;
+
+        var memberId = new ContainerId(team, id);
+        var credentialActor = new CredentialActor(actor.UserId, actor.Label);
+        var before = await memberSecrets.NamedValuesAsync(memberId, ct);
+        var changes = values.ToDictionary(v => v.Key, v => (string?)v.Value, StringComparer.Ordinal);
+
+        await memberSecrets.ChangeNamedAsync(memberId, member.Name, plugin.Id, changes, credentialActor, ct);
+
+        var undo = changes.Keys.ToDictionary(name => name, name => before.GetValueOrDefault(name), StringComparer.Ordinal);
+        run.Made($"member {member.Name} (named secrets)", () =>
+            memberSecrets.ChangeNamedAsync(memberId, member.Name, plugin.Id, undo, credentialActor, CancellationToken.None));
     }
 
     private async Task RegisterSkillAsync(string team, SolutionSkill skill, SolutionActor actor, Run run, CancellationToken ct)

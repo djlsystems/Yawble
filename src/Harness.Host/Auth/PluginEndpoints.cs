@@ -161,7 +161,7 @@ public static class PluginEndpoints
             .WithSummary("A plugin member's settings")
             .WithDescription(
                 "`{ team, member, plugin, version, description, config, secrets, secretStates, fields, secretFields, "
-                + "namedSecretsField, namedSecretStates, outOfRange, marketplaceUrl }`: `namedSecretsField` is the manifest's "
+                + "namedSecrets, namedSecretStates, outOfRange, marketplaceUrl }`: `namedSecrets` is the manifest's "
                 + "`namedSecrets` block (`label`, `description`, `max`) or null, and `namedSecretStates` each named secret the "
                 + "member holds (`name`, `setBy`, `setAt`; never a value). What is stored for this plugin member - its configuration, each secret's bound "
                 + "LOGICAL KEY if any (`secrets`), and `secretStates`, each manifest secret field as "
@@ -804,7 +804,7 @@ public static class PluginEndpoints
         connections = stored.Connections,
         fields = Fields(plugin.Manifest),
         secretFields = SecretFields(plugin.Manifest),
-        namedSecretsField = NamedSecretsField(plugin.Manifest),
+        namedSecrets = NamedSecretsField(plugin.Manifest),
         namedSecretStates = plugin.Manifest.NamedSecrets is null ? [] : await reads.NamedStatesAsync(id, ct),
         connectionFields = ConnectionFields(plugin.Manifest),
         outOfRange = PluginMemberRunner.OutOfRange(plugin.Manifest, stored),

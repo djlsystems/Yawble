@@ -144,7 +144,7 @@ public sealed class PluginNamedSecretsTests : IAsyncLifetime
         Assert.Empty(await ColumnAsync("SELECT secret FROM plugin_member_named_secrets", ""));
 
         var settings = await GetAsync($"/api/teams/{_team}/members/Plain/plugin-settings");
-        Assert.Equal(JsonValueKind.Null, settings.GetProperty("namedSecretsField").ValueKind);
+        Assert.Equal(JsonValueKind.Null, settings.GetProperty("namedSecrets").ValueKind);
         Assert.Empty(settings.GetProperty("namedSecretStates").EnumerateArray());
         var plain = (await GetAsync("/api/plugins")).GetProperty("plugins").EnumerateArray().Single(p => p.GetProperty("id").GetString() == "plain");
         Assert.Equal(JsonValueKind.Null, plain.GetProperty("namedSecrets").ValueKind);
@@ -170,8 +170,8 @@ public sealed class PluginNamedSecretsTests : IAsyncLifetime
         });
 
         var settings = await GetAsync($"/api/teams/{_team}/members/Reader/plugin-settings");
-        Assert.Equal(3, settings.GetProperty("namedSecretsField").GetProperty("max").GetInt32());
-        Assert.Equal("App secrets", settings.GetProperty("namedSecretsField").GetProperty("label").GetString());
+        Assert.Equal(3, settings.GetProperty("namedSecrets").GetProperty("max").GetInt32());
+        Assert.Equal("App secrets", settings.GetProperty("namedSecrets").GetProperty("label").GetString());
         Assert.Equal(["ApiKey", "Webhook"], settings.GetProperty("namedSecretStates").EnumerateArray().Select(n => n.GetProperty("name").GetString()));
         var plugin = (await GetAsync("/api/plugins")).GetProperty("plugins").EnumerateArray().Single(p => p.GetProperty("id").GetString() == "named");
         Assert.Equal("App secrets", plugin.GetProperty("namedSecrets").GetProperty("label").GetString());

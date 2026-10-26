@@ -563,7 +563,7 @@ value masked beside it, per member, and the team refers to it by that name.
   and named (`namedSecrets.<key>`, in the plugin's `ignored`); anything else malformed refuses the
   manifest naming the field, as the operator CLI's check (`cli/internal/plugin`) does in the same
   words. `GET /api/plugins` answers it as `namedSecrets` (`{ label, description, max }` or null), the
-  settings read as `namedSecretsField`.
+  settings read (`GET .../plugin-settings`) as `namedSecrets` too.
 - **A name** is a letter, then letters, digits and underscores, at most 64 characters
   (`^[A-Za-z][A-Za-z0-9_]{0,63}$`), unique per member ignoring case, and never one of the manifest's
   `secrets` field names. **A value** is held to a masked field's rules: not empty, one line, at most
@@ -585,6 +585,12 @@ value masked beside it, per member, and the team refers to it by that name.
   and name, never the value) in the same transaction, or nothing changes (500 with a sentence). An
   agent's hire carrying `namedSecretValues` is refused 400, as `secretValues` is: a person types
   every value. The settings read answers each name held as `namedSecretStates`.
+- **A solution** carries them too. Its plan's `plugins[]` entries carry the block as `namedSecrets`
+  (null for a plugin with none), and `POST /api/solutions/install` and `/api/solutions/update` take
+  `namedSecretValues: { <package member>: { <name>: value } }`, beside `secretValues`, under the
+  same name and value rules and the same rows, refused to a machine principal or agent as those
+  routes are. An update sets them on a member the team already has, checked against the names it
+  holds before anything changes, and puts back what each name held if the update is undone.
 - **A run** receives them on stdin as `namedSecrets` and `namedSecretNames` (below).
 - **The team sees the names.** `GET /api/teams/{team}/named-secret-names` (any principal of the team,
   names only, never a value or who set it) answers each plugin member whose plugin declares the block
