@@ -239,8 +239,12 @@ const runNowOutcome: Record<string, string> = {
 /** What a row says: a phrase for Did, and the Detail as a sentence. */
 interface Words {
   did: string;
-  detail: (detail: Detail) => string;
+  /** `row` is the whole row, for the few sentences that name the row's own subject. */
+  detail: (detail: Detail, row: LogRow) => string;
 }
+
+/** What the words read from a row; `subjectName` is optional so a bare action and detail still read. */
+type LogRow = Pick<TenantEvent, 'action' | 'detail'> & Partial<Pick<TenantEvent, 'subjectName'>>;
 
 const fields = (did: string): Words => ({ did, detail: fieldsInWords });
 
@@ -954,6 +958,21 @@ const words: Record<string, Words> = {
     detail: (d) => sentence([`merged into ${text(d, 'intoName') ?? text(d, 'into') ?? 'another outcome'}`]),
   },
   'outcome.retired': { did: 'retired an outcome', detail: () => 'Retired.' },
+  'outcome.deleted': {
+    did: 'deleted an outcome',
+    detail: (d, row) => {
+      const from = text(d, 'cascadedFromName') ?? text(d, 'cascadedFrom');
+      const unlinked = num(d, 'workflowsUnlinked') ?? 0;
+      const items = num(d, 'backlogItems') ?? 0;
+      const triggers = num(d, 'triggers') ?? 0;
+      return sentence([
+        `deleted ${row.subjectName || 'the outcome'}${from ? ` along with ${from}, which it had been merged into` : ''}`,
+        unlinked > 0 && `${count(unlinked, 'workflow')} now under No outcome`,
+        items > 0 && `${count(items, 'backlog item')} lost ${items === 1 ? 'its' : 'their'} outcome`,
+        triggers > 0 && `${count(triggers, 'trigger')} lost ${triggers === 1 ? 'its' : 'their'} outcome`,
+      ]);
+    },
+  },
   'outcome.reactivated': { did: 'reactivated an outcome', detail: () => 'Reactivated.' },
   'outcome.rejected': { did: 'rejected an outcome', detail: (d) => sentence([`rejected${text(d, 'reason') ? `: ${text(d, 'reason')}` : ''}`]) },
   'workflow.outcome-changed': {
@@ -1078,8 +1097,8 @@ export function didWords(row: Pick<TenantEvent, 'action' | 'detail'>): string | 
 }
 
 /** The Detail column's sentence for a row, or null when these words do not know the row. */
-export function detailWords(row: Pick<TenantEvent, 'action' | 'detail'>): string | null {
+export function detailWords(row: LogRow): string | null {
   const detail = parse(row.detail);
   const known = words[row.action];
-  return detail && known ? known.detail(detail) : null;
+  return detail && known ? known.detail(detail, row) : null;
 }
