@@ -254,6 +254,19 @@ public interface IOutcomeStore
     Task<OutcomeWrite> RejectAsync(string id, TriggerAudit audit, CancellationToken ct = default);
 
     /// <summary>
+    /// A PERSON'S DELETE OF ENDED OUTCOMES (retired or merged): each one's row goes, with every outcome
+    /// merged into it; every workflow whose newest link, followed through <c>merged_into</c>, reaches
+    /// one gets an unlink row (as <see cref="UnlinkAsync"/> writes it, <c>how: person</c>); each backlog
+    /// item and trigger naming one has its outcome cleared. One <paramref name="deleted"/> row per
+    /// outcome and one <paramref name="unlinked"/> row per workflow, all in ONE transaction: when a row
+    /// cannot be written nothing changes. A live or unknown id refuses the whole request. With
+    /// <paramref name="preview"/> the same answer is worked out and nothing is written.
+    /// </summary>
+    Task<OutcomeDeletion> DeleteAsync(
+        IReadOnlyCollection<string> ids, OutcomeActor person, bool preview, TriggerAudit deleted, TriggerAudit unlinked,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Removes an outcome a failed solution install created, when nothing links to it: the install's
     /// undo, with the install's own tenant row in the same transaction, and not a person's reject.
     /// False, and nothing written, when a link names it or it is gone.
@@ -286,6 +299,36 @@ public interface IOutcomeStore
     /// <summary>Every backlog item with its outcome and its newest dispatch: what an outcome's
     /// Not started, In progress and Achieved are counted from.</summary>
     Task<IReadOnlyList<OutcomeBacklogItem>> ReadBacklogAsync(CancellationToken ct = default);
+}
+
+/// <summary>One outcome a delete removes: as it was, the outcome it came with when it was merged into
+/// one asked for (<paramref name="CascadedFrom"/>, null for an id asked for), and what it took with
+/// it.</summary>
+public sealed record DeletedOutcome(
+    string Id,
+    string Name,
+    string Status,
+    string? MergedInto,
+    string? CascadedFrom,
+    int WorkflowsUnlinked,
+    IReadOnlyList<string> BacklogItemsCleared,
+    IReadOnlyList<string> TriggersCleared);
+
+/// <summary>A delete's answer, or its preview's: every outcome it removes and the totals, or a
+/// refusal sentence and its status.</summary>
+public sealed record OutcomeDeletion(
+    IReadOnlyList<DeletedOutcome> Outcomes, bool Preview, string? Refusal = null, int Status = 200)
+{
+    public bool Ok => Refusal is null;
+
+    public int WorkflowsUnlinked => Outcomes.Sum(o => o.WorkflowsUnlinked);
+
+    public int BacklogItemsCleared => Outcomes.Sum(o => o.BacklogItemsCleared.Count);
+
+    public int TriggersCleared => Outcomes.Sum(o => o.TriggersCleared.Count);
+
+    public static OutcomeDeletion Refused(int status, string sentence, bool preview) =>
+        new([], preview, sentence, status);
 }
 
 /// <summary>One backlog item as the outcome figures see it: its own outcome (as stored, not yet

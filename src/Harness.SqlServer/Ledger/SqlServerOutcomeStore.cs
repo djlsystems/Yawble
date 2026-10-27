@@ -350,6 +350,108 @@ public sealed class SqlServerOutcomeStore(
             ct);
 
     /// <summary>
+    /// A PERSON'S DELETE OF ENDED OUTCOMES: SQLite's <c>SqliteOutcomeStore.DeleteAsync</c>, plan for
+    /// plan (<see cref="OutcomeDeletions.Make"/>). Every read it decides from is held until the end,
+    /// so a link, a merge or an edit racing it waits and then sees what it wrote.
+    /// </summary>
+    public Task<OutcomeDeletion> DeleteAsync(
+        IReadOnlyCollection<string> ids, OutcomeActor person, bool preview, TriggerAudit deleted, TriggerAudit unlinked,
+        CancellationToken ct = default) =>
+        RunAsync(
+            async (connection, token) =>
+            {
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
+
+                List<Outcome> all;
+                await using (var outcomes = connection.CreateCommand())
+                {
+                    outcomes.Transaction = transaction;
+                    outcomes.CommandText = $"SELECT {OutcomeColumns} FROM outcomes {Locked} ORDER BY created_at, id";
+                    all = [.. await OutcomeFacts.ReadOutcomesAsync(outcomes, token)];
+                }
+
+                IReadOnlyList<OutcomeLink> current;
+                await using (var links = connection.CreateCommand())
+                {
+                    links.Transaction = transaction;
+                    links.CommandText =
+                        $"""
+                         SELECT {OutcomeFacts.LinkColumns} FROM workflow_outcome_links l {Locked}
+                         WHERE l.id = (SELECT MAX(n.id) FROM workflow_outcome_links n {Locked} WHERE n.correlation = l.correlation)
+                         ORDER BY l.correlation
+                         """;
+                    current = await OutcomeFacts.ReadLinksAsync(links, token);
+                }
+
+                var items = await NamedAsync(connection, transaction,
+                    $"SELECT id, outcome_id FROM backlog_items {Locked} WHERE outcome_id IS NOT NULL", token);
+                var triggers = await NamedAsync(connection, transaction,
+                    $"SELECT id, outcome_id FROM triggers {Locked} WHERE outcome_id IS NOT NULL", token);
+
+                var (plan, refusal, status) = OutcomeDeletions.Make(ids, all, current, items, triggers);
+                if (plan is null) return OutcomeDeletion.Refused(status, refusal!, preview);
+
+                var answer = plan.Answer(preview);
+                if (preview) return answer;
+
+                var names = all.ToDictionary(o => o.Id, o => o.Name, StringComparer.Ordinal);
+
+                foreach (var unlink in plan.Unlinks)
+                {
+                    var link = unlink.Current;
+                    await SqlServerOutcomeLinks.WriteAsync(
+                        connection, transaction, link.Correlation, null, link.TeamId, person.Id, person.Kind, OutcomeLinkHow.Person, token);
+                    await audit(connection, transaction, unlinked with
+                    {
+                        Subject = link.OutcomeId,
+                        SubjectName = names.GetValueOrDefault(link.OutcomeId!) ?? link.OutcomeNameAtLink,
+                        Detail = OutcomeRules.UnlinkDetail(link.TeamId, link.Correlation, link.OutcomeId),
+                    }, token);
+                }
+
+                foreach (var (table, rows) in new[] { ("backlog_items", plan.Items), ("triggers", plan.Triggers) })
+                {
+                    foreach (var (id, outcome) in rows)
+                    {
+                        await using var clear = connection.CreateCommand();
+                        clear.Transaction = transaction;
+                        clear.CommandText = $"UPDATE {table} SET outcome_id = NULL WHERE id = @id AND outcome_id = @outcome";
+                        clear.Parameters.AddWithValue("@id", id);
+                        clear.Parameters.AddWithValue("@outcome", outcome);
+                        await clear.ExecuteNonQueryAsync(token);
+                    }
+                }
+
+                foreach (var gone in answer.Outcomes)
+                {
+                    await DeleteAsync(connection, transaction, gone.Id, token);
+                    await audit(connection, transaction, deleted with
+                    {
+                        Subject = gone.Id,
+                        SubjectName = gone.Name,
+                        Detail = OutcomeDeletions.DeletedDetail(gone, names),
+                    }, token);
+                }
+
+                await SqlServerOpen.CommitAsync(transaction, token);
+                return answer;
+            },
+            ct);
+
+    private static async Task<IReadOnlyList<(string Id, string Outcome)>> NamedAsync(
+        SqlConnection connection, SqlTransaction transaction, string sql, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = sql;
+
+        var rows = new List<(string, string)>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct)) rows.Add((reader.GetString(0), reader.GetString(1)));
+        return rows;
+    }
+
+    /// <summary>
     /// Removes an outcome a failed solution install created, when nothing links to it: SQLite's
     /// <c>SqliteOutcomeStore.UndoCreateAsync</c>, the install's undo with its own tenant row.
     /// </summary>

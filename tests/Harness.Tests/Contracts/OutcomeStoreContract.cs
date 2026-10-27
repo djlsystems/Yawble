@@ -491,6 +491,85 @@ public abstract class OutcomeStoreContract : ProviderContract
     }
 
     /// <summary>
+    /// A PERSON'S DELETE OF ENDED OUTCOMES (<c>OutcomeDeleteTests</c> on the Host): the outcomes merged
+    /// into one go with it, each workflow reaching one gets an unlink row while its old link stays, the
+    /// item and trigger naming one are cleared, a live id refuses everything, a preview writes nothing,
+    /// and with its tenant row unwritable nothing changes.
+    /// </summary>
+    [Fact]
+    public async Task A_delete_takes_the_merged_in_outcomes_unlinks_their_workflows_and_clears_their_items_and_triggers()
+    {
+        var outcomes = await CreateAsync();
+        var stores = await StoresAsync();
+        var holder = (await outcomes.CreateAsync("Holder", new OutcomeEdit(), Person, Audit(TenantActions.OutcomeCreated), Ct)).Outcome!;
+        var merged = (await outcomes.CreateAsync("Merged", new OutcomeEdit(), Person, Audit(TenantActions.OutcomeCreated), Ct)).Outcome!;
+        var live = (await outcomes.CreateAsync("Live", new OutcomeEdit(), Person, Audit(TenantActions.OutcomeCreated), Ct)).Outcome!;
+
+        await outcomes.LinkAsync(10, holder.Id, "Alpha", Person, OutcomeLinkHow.Person, agentRule: false, Audit(TenantActions.WorkflowOutcomeChanged), Ct);
+        await outcomes.LinkAsync(20, merged.Id, "Alpha", Person, OutcomeLinkHow.Person, agentRule: false, Audit(TenantActions.WorkflowOutcomeChanged), Ct);
+        await outcomes.LinkAsync(30, live.Id, "Alpha", Person, OutcomeLinkHow.Person, agentRule: false, Audit(TenantActions.WorkflowOutcomeChanged), Ct);
+        await ItemAsync(stores, "item-1", merged.Id);
+        await ItemAsync(stores, "item-2", live.Id);
+        await stores.ExecuteAsync($"INSERT INTO teams (id, name, created_utc) VALUES ('Alpha', 'Alpha', '{At}')");
+        await TriggerAsync(stores, "t1", holder.Id, "user-1", Email);
+
+        await outcomes.MergeAsync(merged.Id, holder.Id, Audit(TenantActions.OutcomeMerged), Ct);
+        await outcomes.RetireAsync(holder.Id, Audit(TenantActions.OutcomeRetired), Ct);
+        var links = await outcomes.ReadLinksAsync(Ct);
+
+        var refused = await outcomes.DeleteAsync([holder.Id, live.Id], Person, preview: false,
+            Audit(TenantActions.OutcomeDeleted), Audit(TenantActions.WorkflowOutcomeChanged), Ct);
+        Assert.Equal(409, refused.Status);
+        Assert.Contains("\"Live\" is active", refused.Refusal);
+
+        var preview = await outcomes.DeleteAsync([holder.Id], Person, preview: true,
+            Audit(TenantActions.OutcomeDeleted), Audit(TenantActions.WorkflowOutcomeChanged), Ct);
+        Assert.Equal([(holder.Id, (string?)null), (merged.Id, holder.Id)], preview.Outcomes.Select(o => (o.Id, o.CascadedFrom)));
+        Assert.Equal((2, 1, 1), (preview.WorkflowsUnlinked, preview.BacklogItemsCleared, preview.TriggersCleared));
+        Assert.Equal(links, await outcomes.ReadLinksAsync(Ct));
+        Assert.Equal(3, (await outcomes.ListAsync(Ct)).Count);
+
+        var deleted = await outcomes.DeleteAsync([holder.Id], Person, preview: false,
+            Audit(TenantActions.OutcomeDeleted), Audit(TenantActions.WorkflowOutcomeChanged), Ct);
+        Assert.False(deleted.Preview);
+        Assert.Equal(preview.Outcomes.Select(o => (o.Id, o.CascadedFrom, o.WorkflowsUnlinked)), deleted.Outcomes.Select(o => (o.Id, o.CascadedFrom, o.WorkflowsUnlinked)));
+        Assert.Equal((2, 1, 1), (deleted.WorkflowsUnlinked, deleted.BacklogItemsCleared, deleted.TriggersCleared));
+        Assert.Equal([live.Id], (await outcomes.ListAsync(Ct)).Select(o => o.Id));
+
+        var after = await outcomes.ReadLinksAsync(Ct);
+        Assert.Equal(links, after.Take(links.Count));
+        Assert.Equal([10L, 20L], after.Skip(links.Count).Where(l => l.IsUnlink && l.How == OutcomeLinkHow.Person).Select(l => l.Correlation));
+        Assert.Equal(live.Id, (await outcomes.CurrentLinkAsync(30, Ct))!.OutcomeId);
+        Assert.Null(await stores.TextAsync("SELECT outcome_id FROM backlog_items WHERE id = 'item-1'"));
+        Assert.Equal(live.Id, await stores.TextAsync("SELECT outcome_id FROM backlog_items WHERE id = 'item-2'"));
+        Assert.Null(await stores.TextAsync("SELECT outcome_id FROM triggers WHERE id = 't1'"));
+        Assert.Equal(2, await stores.LongAsync($"SELECT COUNT(*) FROM tenant_events WHERE action = '{TenantActions.OutcomeDeleted}'"));
+    }
+
+    [Fact]
+    public async Task A_delete_whose_tenant_row_cannot_be_written_changes_nothing()
+    {
+        var outcomes = await CreateAsync();
+        var stores = await StoresAsync();
+        var a = (await outcomes.CreateAsync("A", new OutcomeEdit(), Person, Audit(TenantActions.OutcomeCreated), Ct)).Outcome!;
+        await outcomes.LinkAsync(10, a.Id, "Alpha", Person, OutcomeLinkHow.Person, agentRule: false, Audit(TenantActions.WorkflowOutcomeChanged), Ct);
+        await ItemAsync(stores, "item-1", a.Id);
+        await stores.ExecuteAsync($"INSERT INTO teams (id, name, created_utc) VALUES ('Alpha', 'Alpha', '{At}')");
+        await TriggerAsync(stores, "t1", a.Id, "user-1", Email);
+        await outcomes.RetireAsync(a.Id, Audit(TenantActions.OutcomeRetired), Ct);
+        var links = await outcomes.ReadLinksAsync(Ct);
+
+        await stores.ExecuteAsync("DROP TABLE tenant_events");
+        await Assert.ThrowsAnyAsync<Exception>(() => outcomes.DeleteAsync([a.Id], Person, preview: false,
+            Audit(TenantActions.OutcomeDeleted), Audit(TenantActions.WorkflowOutcomeChanged), Ct));
+
+        Assert.Equal(links, await outcomes.ReadLinksAsync(Ct));
+        Assert.Equal(OutcomeStatus.Retired, (await outcomes.FindAsync(a.Id, Ct))?.Status);
+        Assert.Equal(a.Id, await stores.TextAsync("SELECT outcome_id FROM backlog_items WHERE id = 'item-1'"));
+        Assert.Equal(a.Id, await stores.TextAsync("SELECT outcome_id FROM triggers WHERE id = 't1'"));
+    }
+
+    /// <summary>
     /// REVIEW FOCUS 2: A TRIGGER FIRES INTO A WORKFLOW WHILE A PERSON LINKS IT. A root link never
     /// replaces one, so whichever lands first the person's link is the workflow's newest: the fire's
     /// append reads the workflow's newest link and holds it, and the person's link holds it too.
