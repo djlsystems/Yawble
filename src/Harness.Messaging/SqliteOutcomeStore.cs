@@ -349,6 +349,112 @@ public sealed class SqliteOutcomeStore(
     }
 
     /// <summary>
+    /// A PERSON'S DELETE OF ENDED OUTCOMES: read and decided inside one transaction
+    /// (<see cref="OutcomeDeletions.Make"/>), then every unlink row, cleared item and trigger, removed
+    /// outcome and tenant row written in it. A preview answers the same plan and writes nothing. No
+    /// link row is updated or deleted: the unlink rows are what take the workflows off.
+    /// </summary>
+    public async Task<OutcomeDeletion> DeleteAsync(
+        IReadOnlyCollection<string> ids, OutcomeActor person, bool preview, TriggerAudit deleted, TriggerAudit unlinked,
+        CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        List<Outcome> all;
+        await using (var outcomes = connection.CreateCommand())
+        {
+            outcomes.Transaction = transaction;
+            outcomes.CommandText = $"SELECT {OutcomeColumns} FROM outcomes ORDER BY created_at, id";
+            all = [.. await ReadOutcomesAsync(outcomes, ct)];
+        }
+
+        IReadOnlyList<OutcomeLink> current;
+        await using (var links = connection.CreateCommand())
+        {
+            links.Transaction = transaction;
+            links.CommandText =
+                $"""
+                 SELECT {OutcomeLinks.Columns} FROM workflow_outcome_links l
+                 WHERE l.id = (SELECT MAX(n.id) FROM workflow_outcome_links n WHERE n.correlation = l.correlation)
+                 ORDER BY l.correlation
+                 """;
+            current = await ReadLinksAsync(links, ct);
+        }
+
+        var items = await NamedAsync(connection, transaction, "SELECT id, outcome_id FROM backlog_items WHERE outcome_id IS NOT NULL", ct);
+        var triggers = await NamedAsync(connection, transaction, "SELECT id, outcome_id FROM triggers WHERE outcome_id IS NOT NULL", ct);
+
+        var (plan, refusal, status) = OutcomeDeletions.Make(ids, all, current, items, triggers);
+        if (plan is null) return OutcomeDeletion.Refused(status, refusal!, preview);
+
+        var answer = plan.Answer(preview);
+        if (preview) return answer;
+
+        var names = all.ToDictionary(o => o.Id, o => o.Name, StringComparer.Ordinal);
+
+        foreach (var unlink in plan.Unlinks)
+        {
+            var link = unlink.Current;
+            await OutcomeLinks.WriteAsync(
+                connection, transaction, link.Correlation, null, link.TeamId, person.Id, person.Kind, OutcomeLinkHow.Person, ct);
+            await audit(connection, transaction, unlinked with
+            {
+                Subject = link.OutcomeId,
+                SubjectName = names.GetValueOrDefault(link.OutcomeId!) ?? link.OutcomeNameAtLink,
+                Detail = OutcomeRules.UnlinkDetail(link.TeamId, link.Correlation, link.OutcomeId),
+            }, ct);
+        }
+
+        foreach (var (table, rows) in new[] { ("backlog_items", plan.Items), ("triggers", plan.Triggers) })
+        {
+            foreach (var (id, outcome) in rows)
+            {
+                await using var clear = connection.CreateCommand();
+                clear.Transaction = transaction;
+                clear.CommandText = $"UPDATE {table} SET outcome_id = NULL WHERE id = $id AND outcome_id = $outcome";
+                clear.Parameters.AddWithValue("$id", id);
+                clear.Parameters.AddWithValue("$outcome", outcome);
+                await clear.ExecuteNonQueryAsync(ct);
+            }
+        }
+
+        foreach (var gone in answer.Outcomes)
+        {
+            await using (var delete = connection.CreateCommand())
+            {
+                delete.Transaction = transaction;
+                delete.CommandText = "DELETE FROM outcomes WHERE id = $id";
+                delete.Parameters.AddWithValue("$id", gone.Id);
+                await delete.ExecuteNonQueryAsync(ct);
+            }
+
+            await audit(connection, transaction, deleted with
+            {
+                Subject = gone.Id,
+                SubjectName = gone.Name,
+                Detail = OutcomeDeletions.DeletedDetail(gone, names),
+            }, ct);
+        }
+
+        await transaction.CommitAsync(ct);
+        return answer;
+    }
+
+    private static async Task<IReadOnlyList<(string Id, string Outcome)>> NamedAsync(
+        SqliteConnection connection, SqliteTransaction transaction, string sql, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = sql;
+
+        var rows = new List<(string, string)>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct)) rows.Add((reader.GetString(0), reader.GetString(1)));
+        return rows;
+    }
+
+    /// <summary>
     /// Removes an outcome a failed solution install created, when nothing links to it. The install's
     /// undo, with the install's own tenant row; not a person's reject.
     /// </summary>
