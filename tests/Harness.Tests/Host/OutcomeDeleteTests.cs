@@ -166,6 +166,7 @@ public sealed class OutcomeDeleteTests(HostFixture host) : IClassFixture<HostFix
         var ended = Find(await ListAsync(person, "merged"), merged.Id)!.Value;
         Assert.Equal(2, ended.GetProperty("linkedWorkflows").GetInt32());
         Assert.Equal(JsonValueKind.String, ended.GetProperty("endedAt").ValueKind);
+        var noneBefore = NoOutcomeTotal(await ListAsync(person));
 
         var deleted = await DeleteAsync(person, preview: false, merged.Id);
         Assert.Equal(HttpStatusCode.OK, deleted.StatusCode);
@@ -180,6 +181,9 @@ public sealed class OutcomeDeleteTests(HostFixture host) : IClassFixture<HostFix
 
         foreach (var workflow in mine) Assert.True((await Outcomes.CurrentLinkAsync(workflow, Ct))!.IsUnlink);
         Assert.Equal(into.Id, (await Outcomes.CurrentLinkAsync(kept, Ct))!.OutcomeId);
+
+        // THE TWO UNLINKED WORKFLOWS NOW COUNT UNDER NO OUTCOME.
+        Assert.Equal(noneBefore + mine.Length, NoOutcomeTotal(await ListAsync(person)));
     }
 
     [Fact]
@@ -221,6 +225,13 @@ public sealed class OutcomeDeleteTests(HostFixture host) : IClassFixture<HostFix
         var retired = await CreateAsync(person, Unique("Retired"));
         var workflow = NextCorrelation();
         await LinkAsync(workflow, retired.Id, host.Alpha);
+        var item = (await JsonAsync(await person.PostAsJsonAsync("/api/backlog", new { title = "Previewed item", body = "spec" }, Ct)))
+            .GetProperty("id").GetInt64();
+        await person.PatchAsJsonAsync($"/api/backlog/{item}", new { outcomeId = retired.Id }, Ct);
+        var trigger = (await JsonAsync(await person.PostAsJsonAsync($"/api/teams/{host.Alpha}/triggers", new
+        {
+            name = Unique("previewed"), kind = "every", intervalSeconds = 3600, instruction = "crawl", idleOnly = false, outcomeId = retired.Id,
+        }, Ct))).GetProperty("id").GetString()!;
         await RetireAsync(person, retired);
         var active = await CreateAsync(person, Unique("Still active"));
         var proposed = (await Outcomes.ProposeAsync(Unique("Proposed"), null, new OutcomeActor("Alpha/Manager", OutcomeActorKind.Member),
@@ -233,10 +244,14 @@ public sealed class OutcomeDeleteTests(HostFixture host) : IClassFixture<HostFix
         // THE PREVIEW ANSWERS AND CHANGES NOTHING.
         var preview = await DeleteAsync(person, preview: true, retired.Id);
         Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
-        Assert.Equal(1, (await JsonAsync(preview)).GetProperty("workflowsUnlinked").GetInt32());
+        var previewed = await JsonAsync(preview);
+        Assert.Equal((1, 1, 1), (previewed.GetProperty("workflowsUnlinked").GetInt32(),
+            previewed.GetProperty("backlogItemsCleared").GetInt32(), previewed.GetProperty("triggersCleared").GetInt32()));
         Assert.Equal(links, await Outcomes.ReadLinksAsync(Ct));
         Assert.Equal(outcomes, await Outcomes.ListAsync(Ct));
         Assert.Empty(await TenantRowsAsync(head));
+        Assert.Equal(retired.Id, await ColumnAsync("backlog_items", PlatformBacklogId.Format(item)));
+        Assert.Equal(retired.Id, await ColumnAsync("triggers", trigger));
 
         // A LIVE ID REFUSES THE WHOLE REQUEST, BY NAME, AND THE RETIRED ONE BESIDE IT STAYS.
         foreach (var (live, word) in new[] { (active, "active"), (proposed, "proposed") })
@@ -273,6 +288,8 @@ public sealed class OutcomeDeleteTests(HostFixture host) : IClassFixture<HostFix
         Assert.Equal(links, await Outcomes.ReadLinksAsync(Ct));
         Assert.Equal(outcomes, await Outcomes.ListAsync(Ct));
         Assert.Empty(await TenantRowsAsync(head));
+        Assert.Equal(retired.Id, await ColumnAsync("backlog_items", PlatformBacklogId.Format(item)));
+        Assert.Equal(retired.Id, await ColumnAsync("triggers", trigger));
     }
 
     [Fact]
