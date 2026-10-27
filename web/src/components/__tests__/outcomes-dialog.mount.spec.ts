@@ -687,10 +687,10 @@ describe('Manage Outcomes: an outcome opened', () => {
 });
 
 describe('Manage Outcomes: Retired & merged as a table', () => {
-  const older = outcome('o-6', 'Abandoned idea', 'retired', { workflowCount: 7, endedAt: '2026-09-10T08:00:00Z' });
+  const older = outcome('o-6', 'Abandoned idea', 'retired', { linkedWorkflows: 7, endedAt: '2026-09-10T08:00:00Z' });
   const ended = [
-    outcome('o-3', 'Old goal', 'retired', { workflowCount: 3, endedAt: '2026-09-20T08:00:00Z' }),
-    outcome('o-4', 'Duplicate goal', 'merged', { mergedInto: 'o-1', workflowCount: 0, endedAt: '2026-09-25T08:00:00Z' }),
+    outcome('o-3', 'Old goal', 'retired', { linkedWorkflows: 3, endedAt: '2026-09-20T08:00:00Z' }),
+    outcome('o-4', 'Duplicate goal', 'merged', { mergedInto: 'o-1', linkedWorkflows: 0, endedAt: '2026-09-25T08:00:00Z' }),
     older,
   ];
 
@@ -787,9 +787,10 @@ describe('Manage Outcomes: Retired & merged as a table', () => {
 
   it('shows the route\'s preview, with the merged-in outcome that goes too, then deletes the ids sent', async () => {
     api.previewDeleteOutcomes.mockResolvedValue({
+      preview: true,
       outcomes: [
-        { id: 'o-3', name: 'Old goal', status: 'retired', mergedInto: null, cascadedFrom: null },
-        { id: 'o-9', name: 'Folded goal', status: 'merged', mergedInto: 'o-3', cascadedFrom: 'o-3' },
+        { id: 'o-3', name: 'Old goal', status: 'retired', mergedInto: null, cascadedFrom: null, workflowsUnlinked: 3, backlogItemsCleared: 2, triggersCleared: 1 },
+        { id: 'o-9', name: 'Folded goal', status: 'merged', mergedInto: 'o-3', cascadedFrom: 'o-3', workflowsUnlinked: 1, backlogItemsCleared: 0, triggersCleared: 0 },
       ],
       workflowsUnlinked: 4,
       backlogItemsCleared: 2,
@@ -830,6 +831,43 @@ describe('Manage Outcomes: Retired & merged as a table', () => {
     expect(bodyFind('[data-outcome-delete-problem]')?.textContent).toContain('is active: retire it before deleting it.');
     expect(bodyFind('[data-outcome-delete-confirm]')?.hasAttribute('disabled')).toBe(true);
     expect(api.deleteOutcomes).not.toHaveBeenCalled();
+  });
+
+  it('shows a conflict\'s sentence as the route words it', async () => {
+    const sentence = 'Outcome "Current job pipeline" is active; only a retired or merged outcome can be deleted.';
+    api.previewDeleteOutcomes.mockRejectedValue(Object.assign(new Error(sentence), { status: 409 }));
+    await ended_();
+
+    pickBox('o-3').click();
+    await settle();
+    await click('[data-outcome-delete]');
+
+    expect(bodyFind('[data-outcome-delete-problem]')?.textContent?.trim()).toBe(sentence);
+    expect(bodyFind('[data-outcome-delete-confirm]')?.hasAttribute('disabled')).toBe(true);
+    expect(api.deleteOutcomes).not.toHaveBeenCalled();
+  });
+
+  it('keeps the confirmation open with the sentence when the delete fails to write', async () => {
+    const sentence = 'The outcomes could not be deleted: the database is locked.';
+    api.previewDeleteOutcomes.mockResolvedValue({
+      preview: true,
+      outcomes: [{ id: 'o-3', name: 'Old goal', status: 'retired', mergedInto: null, cascadedFrom: null, workflowsUnlinked: 0, backlogItemsCleared: 0, triggersCleared: 0 }],
+      workflowsUnlinked: 0,
+      backlogItemsCleared: 0,
+      triggersCleared: 0,
+    });
+    api.deleteOutcomes.mockRejectedValue(Object.assign(new Error(sentence), { status: 500 }));
+    const wrapper = await ended_();
+
+    pickBox('o-3').click();
+    await settle();
+    await click('[data-outcome-delete]');
+    await click('[data-outcome-delete-confirm]');
+
+    expect(api.deleteOutcomes).toHaveBeenCalledWith(['o-3']);
+    expect(bodyFind('[data-outcome-delete-problem]')?.textContent?.trim()).toBe(sentence);
+    expect(bodyFind('[data-outcome-delete-dialog]')).not.toBeNull();
+    expect(wrapper.emitted('changed')).toBeUndefined();
   });
 
   it('opens an outcome\'s detail from its name, as before', async () => {

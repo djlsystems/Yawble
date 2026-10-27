@@ -504,7 +504,7 @@ function endedText(o: Outcome) {
 }
 
 function workflowsText(o: Outcome) {
-  return typeof o.workflowCount === 'number' ? String(o.workflowCount) : '—';
+  return typeof o.linkedWorkflows === 'number' ? String(o.linkedWorkflows) : '—';
 }
 
 /** A missing figure sorts below every real one, whichever way the column runs. */
@@ -516,7 +516,7 @@ function compareEnded(a: Outcome, b: Outcome, column: EndedColumn): number {
     case 'status':
       return endedStatusText(a).localeCompare(endedStatusText(b));
     case 'workflows':
-      return byNumber(a.workflowCount ?? null, b.workflowCount ?? null);
+      return byNumber(a.linkedWorkflows ?? null, b.linkedWorkflows ?? null);
     case 'ended':
       return byNumber(endedInstant(a), endedInstant(b));
   }

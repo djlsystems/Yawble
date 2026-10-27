@@ -114,8 +114,8 @@ export interface Outcome {
   confirmedBy: string | null
   confirmedAt: string | null
   teamWorkflows?: number | null
-  /** How many workflows are linked to it now; absent when the route does not send it. */
-  workflowCount?: number | null
+  /** How many workflows' current link reaches it, through any outcome merged into it. */
+  linkedWorkflows?: number | null
   /** When it was retired or merged; null while it is live, absent when the route does not send it. */
   endedAt?: string | null
   figures: OutcomeFigures
@@ -217,12 +217,18 @@ export interface DeletedOutcome {
   name: string
   status: OutcomeStatus
   mergedInto: string | null
-  /** The asked-for outcome this one was merged into and is deleted with; null when it was asked for. */
+  /** The outcome being deleted that this one was merged into and goes with; null when it was asked for. */
   cascadedFrom: string | null
+  /** This outcome's own share of the totals below. */
+  workflowsUnlinked: number
+  backlogItemsCleared: number
+  triggersCleared: number
 }
 
 /** What deleting `ids` would do, before anything changes. */
 export interface DeletePreview {
+  /** True for the preview; the delete itself answers the same shape with false. */
+  preview: boolean
   outcomes: DeletedOutcome[]
   /** Workflows that will count under No outcome afterwards. */
   workflowsUnlinked: number
