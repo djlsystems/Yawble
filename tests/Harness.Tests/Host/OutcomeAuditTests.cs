@@ -136,6 +136,58 @@ public sealed class OutcomeAuditTests : IAsyncLifetime
         Assert.Equal(linked, await Outcomes.CurrentLinkAsync(workflow, Ct));
     }
 
+    [Fact]
+    public async Task A_delete_whose_tenant_row_cannot_be_written_deletes_unlinks_and_clears_nothing()
+    {
+        var person = _factory.CreateClient();
+        (await person.PostAsJsonAsync("/api/auth/login", new { email = Email, password = HostFixture.Password }, Ct)).EnsureSuccessStatusCode();
+
+        var outcome = (await (await person.PostAsJsonAsync("/api/outcomes", new { name = "Ending" }, Ct))
+            .Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("id").GetString()!;
+        var told = await person.PostAsJsonAsync($"/api/teams/{_team}/containers/Manager/tell", new { instruction = "look", outcome }, Ct);
+        var workflow = (await told.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("correlationId").GetInt64();
+
+        var item = (await (await person.PostAsJsonAsync("/api/backlog", new { title = "Item", body = "spec" }, Ct))
+            .Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("id").GetInt64();
+        (await person.PatchAsJsonAsync($"/api/backlog/{item}", new { outcomeId = outcome }, Ct)).EnsureSuccessStatusCode();
+        var trigger = (await (await person.PostAsJsonAsync($"/api/teams/{_team}/triggers", new
+        {
+            name = "crawl", kind = "every", intervalSeconds = 3600, instruction = "crawl", idleOnly = false, outcomeId = outcome,
+        }, Ct)).Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("id").GetString()!;
+
+        (await person.PostAsync($"/api/outcomes/{outcome}/retire", null, Ct)).EnsureSuccessStatusCode();
+        var links = await Outcomes.ReadLinksAsync(Ct);
+
+        await using (var connection = new SqliteConnection($"Data Source={Path.Combine(_dataRoot, "messages.db")};Pooling=false"))
+        {
+            await connection.OpenAsync(Ct);
+            await using var drop = connection.CreateCommand();
+            drop.CommandText = "DROP TABLE tenant_events";
+            await drop.ExecuteNonQueryAsync(Ct);
+        }
+
+        var refused = await person.PostAsJsonAsync("/api/outcomes/delete", new { ids = new[] { outcome } }, Ct);
+        Assert.Equal(System.Net.HttpStatusCode.InternalServerError, refused.StatusCode);
+        Assert.Contains("nothing was changed",
+            (await refused.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("error").GetString(), StringComparison.Ordinal);
+
+        Assert.Equal(OutcomeStatus.Retired, (await Outcomes.FindAsync(outcome, Ct))?.Status);
+        Assert.Equal(links, await Outcomes.ReadLinksAsync(Ct));
+        Assert.Equal(outcome, (await Outcomes.CurrentLinkAsync(workflow, Ct))?.OutcomeId);
+        Assert.Equal(outcome, await OutcomeOfAsync("backlog_items", PlatformBacklogId.Format(item)));
+        Assert.Equal(outcome, await OutcomeOfAsync("triggers", trigger));
+    }
+
+    private async Task<string?> OutcomeOfAsync(string table, string id)
+    {
+        await using var connection = new SqliteConnection($"Data Source={Path.Combine(_dataRoot, "messages.db")};Pooling=false");
+        await connection.OpenAsync(Ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT outcome_id FROM {table} WHERE id = $id";
+        command.Parameters.AddWithValue("$id", id);
+        return await command.ExecuteScalarAsync(Ct) as string;
+    }
+
     private async Task<long> RowsSayingAsync(string text)
     {
         await using var connection = new SqliteConnection($"Data Source={Path.Combine(_dataRoot, "messages.db")};Pooling=false");

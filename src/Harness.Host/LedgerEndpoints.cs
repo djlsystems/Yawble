@@ -31,6 +31,8 @@ public static class LedgerEndpoints
                 // THE OUTCOMES AND EVERY LINK, whole, on the first page only: they are definitions and
                 // an append-only history, not rows of the seq cursor the pages walk.
                 var first = before is null;
+                var all = first ? await outcomes.ListAsync(ct) : null;
+                var links = first ? await outcomes.ReadLinksAsync(ct) : null;
 
                 return Results.Ok(new
                 {
@@ -38,8 +40,9 @@ public static class LedgerEndpoints
                     ledgerStartedAt = identity.LedgerStartedAt,
                     runs = page.Runs,
                     workflows = page.Workflows,
-                    outcomes = first ? await outcomes.ListAsync(ct) : null,
-                    links = first ? await outcomes.ReadLinksAsync(ct) : null,
+                    outcomes = all,
+                    links,
+                    deletedOutcomes = first ? DeletedOutcomes(all!, links!, page.Workflows) : null,
                     nextBefore = page.NextBefore,
                 });
             })
@@ -63,6 +66,24 @@ public static class LedgerEndpoints
                 + "`mergedInto`, and `links`, every workflow-to-outcome link oldest first: a workflow's "
                 + "outcome is its newest link, and a workflow's `outcomeIdAtClose` is the outcome it served "
                 + "when it closed. Later pages carry null for both.\n\n"
+                + "An outcome a person deleted has no entry in `outcomes`; the first page's `deletedOutcomes` "
+                + "names each id a link or a workflow's `outcomeIdAtClose` still carries (`id`, and `name`: the "
+                + "name its newest link was made under, with \" (deleted)\"). Such a workflow counts under No "
+                + "outcome.\n\n"
                 + "**A person's action.**");
+    }
+
+    /// <summary>Each outcome id the links or these closes name that no outcome has any more, named
+    /// as its newest link was made under, marked deleted.</summary>
+    private static IReadOnlyList<object> DeletedOutcomes(
+        IReadOnlyList<Outcome> outcomes, IReadOnlyList<OutcomeLink> links, IReadOnlyList<WorkflowLedgerRow> closes)
+    {
+        var known = outcomes.Select(o => o.Id).ToHashSet(StringComparer.Ordinal);
+        var named = new Dictionary<string, string?>(StringComparer.Ordinal);
+
+        foreach (var link in links.Where(l => l.OutcomeId is { } id && !known.Contains(id))) named[link.OutcomeId!] = link.OutcomeNameAtLink;
+        foreach (var close in closes.Where(c => c.OutcomeIdAtClose is { } id && !known.Contains(id))) named.TryAdd(close.OutcomeIdAtClose!, null);
+
+        return named.Select(e => (object)new { id = e.Key, name = OutcomeFigures.DeletedName(e.Value, e.Key) }).ToList();
     }
 }

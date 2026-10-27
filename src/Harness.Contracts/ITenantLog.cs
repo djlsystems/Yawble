@@ -442,6 +442,11 @@ public static class TenantActions
     /// <summary>A person rejected a proposed outcome no workflow was linked to; its row is gone.</summary>
     public const string OutcomeRejected = "outcome.rejected";
 
+    /// <summary>A person deleted an ended outcome; its row is gone. Subject is its id and the subject
+    /// name its name; detail carries its status, <c>mergedInto</c>, <c>cascadedFrom</c> (the outcome it
+    /// went with), <c>workflowsUnlinked</c>, and the <c>backlogItems</c> and <c>triggers</c> cleared.</summary>
+    public const string OutcomeDeleted = "outcome.deleted";
+
     /// <summary>A workflow was linked to an outcome, or moved to another: by a person, or by a
     /// Manager's or the Concierge's <c>outcome</c> set or propose (actor the member). Subject is the
     /// outcome's id; detail names the workflow.</summary>

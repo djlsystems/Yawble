@@ -269,3 +269,118 @@ public static class OutcomeRules
     public static string UnlinkDetail(string? team, long correlation, string? from) =>
         JsonSerializer.Serialize(new { team, workflow = correlation, from, to = (string?)null });
 }
+
+/// <summary>
+/// WHAT A PERSON'S DELETE OF ENDED OUTCOMES TAKES, decided once for every provider from what the
+/// store read inside its transaction: the outcomes asked for and every outcome merged into one of
+/// them (they are read-only and count through it), the workflows whose newest link reaches one
+/// through <c>merged_into</c>, and the backlog items and triggers that name one. A store writes
+/// exactly this plan, or - previewing - only answers it.
+/// </summary>
+public static class OutcomeDeletions
+{
+    /// <summary>One workflow taken off a deleted outcome: its newest link, and the deleted outcome
+    /// that link reached first.</summary>
+    public sealed record Unlink(OutcomeLink Current, string Deleted);
+
+    public sealed record Plan(
+        IReadOnlyList<(Outcome Outcome, string? CascadedFrom)> Outcomes,
+        IReadOnlyList<Unlink> Unlinks,
+        IReadOnlyList<(string Id, string Outcome)> Items,
+        IReadOnlyList<(string Id, string Outcome)> Triggers)
+    {
+        /// <summary>The answer this plan gives, as the route returns it.</summary>
+        public OutcomeDeletion Answer(bool preview) =>
+            new(
+                Outcomes.Select(o => new DeletedOutcome(
+                    o.Outcome.Id, o.Outcome.Name, o.Outcome.Status, o.Outcome.MergedInto, o.CascadedFrom,
+                    Unlinks.Count(u => u.Deleted == o.Outcome.Id),
+                    Items.Where(i => i.Outcome == o.Outcome.Id).Select(i => i.Id).ToList(),
+                    Triggers.Where(t => t.Outcome == o.Outcome.Id).Select(t => t.Id).ToList())).ToList(),
+                preview);
+    }
+
+    /// <summary>
+    /// The plan for <paramref name="ids"/>, or the refusal of the whole request: no id given (400), an
+    /// id no outcome has (404), or an active or proposed one (409), each sentence naming it.
+    /// </summary>
+    public static (Plan? Plan, string? Refusal, int Status) Make(
+        IReadOnlyCollection<string> ids,
+        IReadOnlyList<Outcome> all,
+        IReadOnlyList<OutcomeLink> currentLinks,
+        IReadOnlyList<(string Id, string Outcome)> items,
+        IReadOnlyList<(string Id, string Outcome)> triggers)
+    {
+        var asked = ids.Select(i => i.Trim()).Where(i => i.Length > 0).Distinct(StringComparer.Ordinal).ToList();
+        if (asked.Count == 0) return (null, "Say which outcomes to delete (`ids`): retired or merged outcomes' ids.", 400);
+
+        var byId = all.ToDictionary(o => o.Id, StringComparer.Ordinal);
+
+        var missing = asked.Where(i => !byId.ContainsKey(i)).ToList();
+        if (missing.Count > 0)
+        {
+            return (null, $"No outcome {string.Join(", ", missing.Select(i => $"'{i}'"))}; nothing was deleted.", 404);
+        }
+
+        var live = asked.Select(i => byId[i]).Where(o => o.IsLive).ToList();
+        if (live.Count > 0)
+        {
+            return (null, string.Join(" ", live.Select(LiveRefusal)) + " Nothing was deleted.", 409);
+        }
+
+        // THE CASCADE: every outcome merged into one going goes with it, however deep the chain.
+        var going = new List<(Outcome Outcome, string? CascadedFrom)>(asked.Select(i => (byId[i], (string?)null)));
+        var seen = asked.ToHashSet(StringComparer.Ordinal);
+        for (var next = 0; next < going.Count; next++)
+        {
+            var holder = going[next].Outcome.Id;
+            foreach (var merged in all.Where(o => o.Status == OutcomeStatus.Merged && o.MergedInto == holder && seen.Add(o.Id)))
+            {
+                going.Add((merged, holder));
+            }
+        }
+
+        // A WORKFLOW GOES TO NO OUTCOME when its newest link, followed through merged_into, reaches
+        // an outcome that is going: the first one on its chain is the one it is counted against.
+        var unlinks = new List<Unlink>();
+        foreach (var link in currentLinks.Where(l => !l.IsUnlink).OrderBy(l => l.Correlation))
+        {
+            var id = link.OutcomeId;
+            for (var hop = 0; id is not null && hop < OutcomeFacts.MaxHops; hop++)
+            {
+                if (seen.Contains(id))
+                {
+                    unlinks.Add(new Unlink(link, id));
+                    break;
+                }
+
+                id = byId.TryGetValue(id, out var at) && at.Status == OutcomeStatus.Merged ? at.MergedInto : null;
+            }
+        }
+
+        return (new Plan(
+            going,
+            unlinks,
+            items.Where(i => seen.Contains(i.Outcome)).OrderBy(i => i.Id, StringComparer.Ordinal).ToList(),
+            triggers.Where(t => seen.Contains(t.Outcome)).OrderBy(t => t.Id, StringComparer.Ordinal).ToList()), null, 200);
+    }
+
+    public static string LiveRefusal(Outcome outcome) =>
+        outcome.Status == OutcomeStatus.Proposed
+            ? $"\"{outcome.Name}\" is proposed; only a retired or merged outcome is deleted. Reject it instead."
+            : $"\"{outcome.Name}\" is {outcome.Status}; only a retired or merged outcome is deleted. Retire it first.";
+
+    /// <summary>The <c>outcome.deleted</c> row's detail.</summary>
+    public static string DeletedDetail(DeletedOutcome deleted, IReadOnlyDictionary<string, string> names) =>
+        JsonSerializer.Serialize(new
+        {
+            status = deleted.Status,
+            mergedInto = deleted.MergedInto,
+            mergedIntoName = deleted.MergedInto is { } into ? names.GetValueOrDefault(into) : null,
+            cascadedFrom = deleted.CascadedFrom,
+            cascadedFromName = deleted.CascadedFrom is { } from ? names.GetValueOrDefault(from) : null,
+            workflowsUnlinked = deleted.WorkflowsUnlinked,
+            backlogItems = deleted.BacklogItemsCleared,
+            triggers = deleted.TriggersCleared,
+        });
+}

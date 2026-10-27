@@ -47,12 +47,39 @@ public static class OutcomeFigures
     }
 
     /// <summary>Each workflow's outcome now: its newest link's outcome, resolved. A workflow whose
-    /// newest link is an unlink is absent: it counts under No outcome.</summary>
+    /// newest link is an unlink is absent: it counts under No outcome. So is one whose link names an
+    /// outcome that no longer exists - a deleted one - which is never an error.</summary>
     public static IReadOnlyDictionary<long, string> CurrentOutcomes(
         IReadOnlyList<OutcomeLink> currentLinks, IReadOnlyDictionary<string, string> resolution) =>
-        currentLinks.Where(l => l.OutcomeId is not null).ToDictionary(
+        currentLinks.Where(l => l.OutcomeId is not null && resolution.ContainsKey(l.OutcomeId)).ToDictionary(
             l => l.Correlation,
-            l => resolution.GetValueOrDefault(l.OutcomeId!, l.OutcomeId!));
+            l => resolution[l.OutcomeId!]);
+
+    /// <summary>
+    /// How many workflows reach each outcome now: those whose newest link names it, or names one
+    /// merged into it however deep. What a delete of that outcome would unlink.
+    /// </summary>
+    public static IReadOnlyDictionary<string, int> LinkedWorkflows(IReadOnlyList<OutcomeLink> currentLinks, IReadOnlyList<Outcome> outcomes)
+    {
+        var byId = outcomes.ToDictionary(o => o.Id, StringComparer.Ordinal);
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        foreach (var link in currentLinks)
+        {
+            var id = link.OutcomeId;
+            for (var hop = 0; id is not null && byId.TryGetValue(id, out var at) && hop < 64; hop++)
+            {
+                counts[id] = counts.GetValueOrDefault(id) + 1;
+                id = at.Status == OutcomeStatus.Merged ? at.MergedInto : null;
+            }
+        }
+
+        return counts;
+    }
+
+    /// <summary>The name a reader shows for an outcome id no outcome has any more: the name a link
+    /// was made under, marked deleted.</summary>
+    public static string DeletedName(string? nameAtLink, string id) => $"{nameAtLink ?? id} (deleted)";
 
     /// <summary>One outcome's (or the unlinked workflows') figures.</summary>
     public sealed record Figures(
@@ -222,7 +249,7 @@ public static class OutcomeFigures
     public static IEnumerable<OutcomeBacklogItem> ItemsOf(
         IReadOnlyList<OutcomeBacklogItem> items, string? outcome, IReadOnlyDictionary<string, string> resolution) =>
         items.Where(i => outcome is null
-            ? i.OutcomeId is null
+            ? i.OutcomeId is null || !resolution.ContainsKey(i.OutcomeId)
             : i.OutcomeId is { } id && resolution.GetValueOrDefault(id, id) == outcome);
 
     public sealed record WorkflowCounts(int Open, int Completed, int Closed, int Total);

@@ -38,7 +38,7 @@ public sealed class OutcomeNudge(IContextBuilder inner, IOutcomeStore outcomes) 
     }
 
     /// <summary>The line for <paramref name="correlation"/>: the outcome its newest link names,
-    /// followed through a merge, or <see cref="NoOutcome"/>.</summary>
+    /// followed through a merge, or <see cref="NoOutcome"/> - also when that outcome was deleted.</summary>
     public async Task<string> LineAsync(long correlation, CancellationToken ct = default)
     {
         if (await outcomes.CurrentLinkAsync(correlation, ct) is not { OutcomeId: { } linked } link) return NoOutcome;
@@ -47,8 +47,7 @@ public sealed class OutcomeNudge(IContextBuilder inner, IOutcomeStore outcomes) 
         var holder = OutcomeFigures.Resolution(all).GetValueOrDefault(linked, linked);
         var outcome = all.FirstOrDefault(o => o.Id == holder);
 
-        return outcome is null
-            ? $"This workflow serves the outcome \"{link.OutcomeNameAtLink}\"."
-            : Serves(outcome);
+        // AN OUTCOME THAT IS GONE - a person deleted it - is no outcome.
+        return outcome is null ? NoOutcome : Serves(outcome);
     }
 }

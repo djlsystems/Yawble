@@ -32,6 +32,9 @@ internal sealed record ProposeOutcome(
     [property: Description("The team whose workflow is linked. A member's credential may name only its own team.")] string? Team = null,
     [property: Description("The workflow to link: its correlation, or any of its rows' seq. Omit to propose without linking.")] long? Correlation = null);
 
+internal sealed record DeleteOutcomes(
+    [property: Description("The ids of the retired or merged outcomes to delete. Every outcome merged into one goes with it.")] IReadOnlyList<string>? Ids);
+
 internal sealed record SetWorkflowOutcome(
     [property: Description("An active or proposed outcome's id, or its exact name.")] string? Outcome);
 
@@ -81,6 +84,11 @@ public static class OutcomeEndpoints
                         .GroupBy(id => id)
                         .ToDictionary(g => g.Key, g => g.Count());
 
+                // AN ENDED OUTCOME'S ROW: how many workflows reach it now, and when it was retired or
+                // merged - its newest such tenant row, else its last change.
+                var linked = OutcomeFigures.LinkedWorkflows(book.Rows.CurrentLinks, all);
+                var ended = await EndedAtAsync(outcomes, [.. shown.Where(o => !o.IsLive)], ct);
+
                 var list = shown
                     .Select(o => new
                     {
@@ -90,7 +98,10 @@ public static class OutcomeEndpoints
                     .OrderByDescending(e => e.teamWorkflows > 0)
                     .ThenByDescending(e => e.teamWorkflows)
                     .ThenBy(e => e.outcome.Name, StringComparer.OrdinalIgnoreCase)
-                    .Select(e => Shape(e.outcome, dashboard.Figures(OutcomeFigures.For(book, e.outcome.Id, open), e.outcome.Id), team is null ? null : e.teamWorkflows))
+                    .Select(e => Shape(
+                        e.outcome, dashboard.Figures(OutcomeFigures.For(book, e.outcome.Id, open), e.outcome.Id),
+                        team is null ? null : e.teamWorkflows,
+                        linked.GetValueOrDefault(e.outcome.Id), ended.GetValueOrDefault(e.outcome.Id)))
                     .ToList();
 
                 return Results.Ok(new
@@ -123,7 +134,10 @@ public static class OutcomeEndpoints
                 + "null when no rate is set). `money` names the currency, the rate and `declaredCountsAs`. "
                 + "A workflow counts toward the outcome its newest link names, "
                 + "followed through `mergedInto`. `noOutcome` carries every workflow with no link. "
-                + "`ledgerStartedAt` is when the ledger began: work before it was recovered from the log.\n\n"
+                + "`ledgerStartedAt` is when the ledger began: work before it was recovered from the log. "
+                + "Each outcome also carries `linkedWorkflows` (how many workflows reach it now, through "
+                + "`mergedInto`, whatever the window: what a delete would unlink) and `endedAt` (when a retired "
+                + "or merged outcome was retired or merged; null for an active or proposed one).\n\n"
                 + "With `team`, the outcomes that team's workflows serve come first, each with "
                 + "`teamWorkflows`.");
 
@@ -186,7 +200,10 @@ public static class OutcomeEndpoints
 
                 return Results.Ok(new
                 {
-                    outcome = Shape(outcome, dashboard.Figures(OutcomeFigures.For(book, holder, open), holder), null),
+                    outcome = Shape(
+                        outcome, dashboard.Figures(OutcomeFigures.For(book, holder, open), holder), null,
+                        OutcomeFigures.LinkedWorkflows(book.Rows.CurrentLinks, all).GetValueOrDefault(outcome.Id),
+                        (await EndedAtAsync(outcomes, outcome.IsLive ? [] : [outcome], ct)).GetValueOrDefault(outcome.Id)),
                     money = dashboard.Money,
                     backlogItems = OutcomeFigures.ItemsOf(items, holder, resolution)
                         .Select(i => new
@@ -353,6 +370,55 @@ public static class OutcomeEndpoints
             .WithDescription(
                 "Removes a proposed outcome no workflow was ever linked to. 409 while any link names "
                 + "it: a link is never rewritten, so merge or retire it instead. Appends `outcome.rejected`.");
+
+        app.MapPost("/api/outcomes/delete", async (
+                [Description("true answers what would be deleted and changes nothing.")] bool? preview,
+                DeleteOutcomes request, HttpContext context, IOutcomeStore outcomes, CancellationToken ct) =>
+            {
+                var deletion = await outcomes.DeleteAsync(
+                    request.Ids ?? [], PersonOf(context), preview == true,
+                    TenantLogging.Row(context, TenantActions.OutcomeDeleted, null, null, null),
+                    TenantLogging.Row(context, TenantActions.WorkflowOutcomeChanged, null, null, null),
+                    ct);
+
+                if (!deletion.Ok) return Results.Json(new { error = deletion.Refusal }, statusCode: deletion.Status);
+
+                return Results.Ok(new
+                {
+                    preview = deletion.Preview,
+                    outcomes = deletion.Outcomes.Select(o => new
+                    {
+                        o.Id,
+                        o.Name,
+                        o.Status,
+                        o.MergedInto,
+                        o.CascadedFrom,
+                        o.WorkflowsUnlinked,
+                        backlogItemsCleared = o.BacklogItemsCleared.Count,
+                        triggersCleared = o.TriggersCleared.Count,
+                    }),
+                    workflowsUnlinked = deletion.WorkflowsUnlinked,
+                    backlogItemsCleared = deletion.BacklogItemsCleared,
+                    triggersCleared = deletion.TriggersCleared,
+                });
+            })
+            .AddEndpointFilter(DeleteFailure)
+            .WithTags("Outcomes")
+            .HumansOnly()
+            .WithSummary("Delete retired and merged outcomes")
+            .WithDescription(
+                "A person's only. Each of `ids` must be retired or merged: an active or proposed one, or an "
+                + "unknown one, refuses the whole request with a sentence naming it, and nothing changes. "
+                + "Every outcome merged into one asked for is deleted with it (`cascadedFrom` names the "
+                + "outcome it went with). Every workflow whose outcome now, followed through `mergedInto`, is "
+                + "one deleted gets an unlink row (`how: person`) and counts under No outcome afterwards; no "
+                + "link is rewritten or removed. Each backlog item and trigger naming one loses its outcome. "
+                + "The answer lists each outcome deleted (`id`, `name`, `status`, `mergedInto`, `cascadedFrom`, "
+                + "`workflowsUnlinked`, `backlogItemsCleared`, `triggersCleared`) and the totals "
+                + "`workflowsUnlinked`, `backlogItemsCleared` and `triggersCleared`. With `?preview=true` "
+                + "the same answer is given and nothing changes. Appends one `outcome.deleted` per outcome "
+                + "and one `workflow.outcome-changed` (`to: null`) per workflow unlinked, in one transaction "
+                + "with the deletes: when a row cannot be written nothing is deleted (500, with a sentence).");
 
         app.MapPost("/api/outcomes/propose", async (
                 ProposeOutcome request, HttpContext context, IOutcomeStore outcomes, TeamRegistry teams,
@@ -576,10 +642,45 @@ public static class OutcomeEndpoints
             OutcomeFigures.Dashboard(figures, Whole, outcome, Items, Resolution, Blocked, Pricing, Now);
     }
 
+    /// <summary>A delete that failed part way changed nothing - it is one transaction - and says so.</summary>
+    private static async ValueTask<object?> DeleteFailure(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+    {
+        try
+        {
+            return await next(context);
+        }
+        catch (Exception failure) when (failure is not OperationCanceledException)
+        {
+            context.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>()
+                .CreateLogger(typeof(OutcomeEndpoints)).LogError(failure, "An outcome delete failed and was rolled back");
+            return Results.Json(
+                new { error = "The outcomes could not be deleted, and nothing was changed: a row of the delete could not be written." },
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
+
     private static IResult Refusal(OutcomeWrite write) =>
         Results.Json(new { error = write.Refusal }, statusCode: write.Status);
 
-    private static object Shape(Outcome outcome, OutcomeFigures.Figures figures, int? teamWorkflows) => new
+    /// <summary>When each of <paramref name="ended"/> was retired or merged: its newest
+    /// <c>outcome.retired</c> or <c>outcome.merged</c> row, else - ended before any row recorded it -
+    /// its last change.</summary>
+    private static async Task<IReadOnlyDictionary<string, DateTimeOffset>> EndedAtAsync(
+        IOutcomeStore outcomes, IReadOnlyList<Outcome> ended, CancellationToken ct)
+    {
+        if (ended.Count == 0) return new Dictionary<string, DateTimeOffset>();
+
+        var rows = await outcomes.ReadEventsAsync([.. ended.Select(o => o.Id)], ct);
+        return ended.ToDictionary(
+            o => o.Id,
+            o => rows.LastOrDefault(e => e.Subject == o.Id
+                && e.Action == (o.Status == OutcomeStatus.Merged ? TenantActions.OutcomeMerged : TenantActions.OutcomeRetired))
+                ?.OccurredAt ?? o.UpdatedAt,
+            StringComparer.Ordinal);
+    }
+
+    private static object Shape(
+        Outcome outcome, OutcomeFigures.Figures figures, int? teamWorkflows, int linkedWorkflows, DateTimeOffset? endedAt) => new
     {
         outcome.Id,
         outcome.Name,
@@ -598,6 +699,8 @@ public static class OutcomeEndpoints
         outcome.ConfirmedBy,
         outcome.ConfirmedAt,
         teamWorkflows,
+        linkedWorkflows,
+        endedAt = outcome.IsLive ? null : endedAt,
         figures,
     };
 }
