@@ -73,3 +73,34 @@ describe('every action the Host writes reads in words', () => {
     }
   });
 });
+
+describe('a deleted outcome', () => {
+  const detail = (cascade: { id: string; name: string } | null) =>
+    JSON.stringify({
+      status: 'Merged',
+      mergedInto: 'o-2',
+      mergedIntoName: 'Faster onboarding',
+      cascadedFrom: cascade?.id ?? null,
+      cascadedFromName: cascade?.name ?? null,
+      workflowsUnlinked: 3,
+      backlogItems: 1,
+      triggers: 2,
+    });
+
+  it('names the deleted outcome from the row, with what it cleared', () => {
+    const words = detailWords({ action: 'outcome.deleted', detail: detail(null), subjectName: 'Ship weekly' });
+    expect(words).toBe('Deleted Ship weekly; 3 workflows now under No outcome; 1 backlog item lost its outcome; 2 triggers lost their outcome.');
+  });
+
+  it('names the outcome it went with when it was deleted along with the one it was merged into', () => {
+    const words = detailWords({ action: 'outcome.deleted', detail: detail({ id: 'o-2', name: 'Faster onboarding' }), subjectName: 'Ship weekly' });
+    expect(words).toContain('Ship weekly');
+    expect(words).toContain('along with Faster onboarding, which it had been merged into');
+  });
+
+  it('reads without a name, never as JSON, when the row has no subject name', () => {
+    const words = detailWords({ action: 'outcome.deleted', detail: detail(null) });
+    expect(words).toMatch(/^Deleted the outcome; /);
+    expect(looksLikeJson(words!)).toBe(false);
+  });
+});
