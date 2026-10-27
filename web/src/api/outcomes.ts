@@ -21,6 +21,7 @@ import { json, send } from './client'
  * | confirm, retire, reactivate | `POST /api/outcomes/{id}/{verb}` |
  * | merge (and its preview) | `POST /api/outcomes/{id}/merge[?preview=true]` |
  * | reject | `DELETE /api/outcomes/{id}` |
+ * | delete ended outcomes (and its preview) | `POST /api/outcomes/delete[?preview=true]` |
  * | move a workflow | `PUT /api/teams/{team}/workflows/{correlation}/outcome` |
  */
 
@@ -113,6 +114,10 @@ export interface Outcome {
   confirmedBy: string | null
   confirmedAt: string | null
   teamWorkflows?: number | null
+  /** How many workflows' current link reaches it, through any outcome merged into it. */
+  linkedWorkflows?: number | null
+  /** When it was retired or merged; null while it is live, absent when the route does not send it. */
+  endedAt?: string | null
   figures: OutcomeFigures
 }
 
@@ -206,6 +211,31 @@ export interface MergePreview {
   moves: { links: number; figures: OutcomeFigures }
 }
 
+/** One outcome a delete would remove: one asked for, or one merged into it that goes with it. */
+export interface DeletedOutcome {
+  id: string
+  name: string
+  status: OutcomeStatus
+  mergedInto: string | null
+  /** The outcome being deleted that this one was merged into and goes with; null when it was asked for. */
+  cascadedFrom: string | null
+  /** This outcome's own share of the totals below. */
+  workflowsUnlinked: number
+  backlogItemsCleared: number
+  triggersCleared: number
+}
+
+/** What deleting `ids` would do, before anything changes. */
+export interface DeletePreview {
+  /** True for the preview; the delete itself answers the same shape with false. */
+  preview: boolean
+  outcomes: DeletedOutcome[]
+  /** Workflows that will count under No outcome afterwards. */
+  workflowsUnlinked: number
+  backlogItemsCleared: number
+  triggersCleared: number
+}
+
 export interface OutcomeListQuery {
   status?: OutcomeStatus[]
   from?: string | null
@@ -250,6 +280,15 @@ export const mergeOutcome = (id: string, into: string) =>
 
 export const rejectOutcome = async (id: string): Promise<void> => {
   await send(at(id), { method: 'DELETE' })
+}
+
+/** What deleting these ended outcomes would remove; a refused id refuses the whole request. */
+export const previewDeleteOutcomes = (ids: string[]) =>
+  json<DeletePreview>('/api/outcomes/delete?preview=true', { method: 'POST', ...body({ ids }) })
+
+/** Deletes these ended outcomes, and every outcome merged into one of them, for real. */
+export const deleteOutcomes = async (ids: string[]): Promise<void> => {
+  await send('/api/outcomes/delete', { method: 'POST', ...body({ ids }) })
 }
 
 /** A person's link: the workflow now serves `outcome` (an id), `how: person`. */

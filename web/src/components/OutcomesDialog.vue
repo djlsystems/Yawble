@@ -3,15 +3,19 @@ import FieldHelp from './FieldHelp.vue';
 import { computed, ref, watch } from 'vue';
 import {
   createOutcome,
+  deleteOutcomes,
   editOutcome,
   getOutcome,
   linkWorkflowOutcome,
   listOutcomes,
   mergeOutcome,
+  previewDeleteOutcomes,
   previewMerge,
   rejectOutcome,
   transitionOutcome,
+  type DeletePreview,
   type MergePreview,
+  type Outcome,
   type OutcomeBacklogItem,
   type OutcomeBucket,
   type OutcomeDetail,
@@ -57,6 +61,8 @@ import { vResizableColumns } from '../lib/resizableColumns';
 import BacklogDialog from './BacklogDialog.vue';
 import { WORKFLOW_NUMBER_HINT, workflowNumberTitle } from '../lib/workflowNumber';
 import DialogTabs from './DialogTabs.vue';
+import { ariaSort, nextSort, type TableSort } from '../lib/tableSort';
+import { localStamp, wireInstant } from '../lib/localTime';
 
 /**
  * OUTCOMES, AS A PRODUCT OWNER READS THEM: a tile per outcome - what it has cost against what it is
@@ -83,7 +89,7 @@ const props = defineProps<{
 }>();
 
 /**
- * `changed` after a person's write succeeds - a confirm, merge, retire, reject, edit or move - so
+ * `changed` after a person's write succeeds - a confirm, merge, retire, reject, delete, edit or move - so
  * the board's Needs You can reread the proposed outcomes it lists.
  */
 const emit = defineEmits<{ changed: [] }>();
@@ -470,6 +476,139 @@ async function confirmCreate() {
   }
 }
 
+// --- Retired & merged: a table of ended outcomes, and deleting them --------------------------------
+
+type EndedColumn = 'name' | 'status' | 'workflows' | 'ended';
+
+const EndedHeadings: { key: EndedColumn; label: string; align: 'left' | 'right' }[] = [
+  { key: 'name', label: 'Name', align: 'left' },
+  { key: 'status', label: 'Status', align: 'left' },
+  { key: 'workflows', label: 'Workflows', align: 'right' },
+  { key: 'ended', label: 'Ended', align: 'left' },
+];
+
+const endedSort = ref<TableSort<EndedColumn>>({ column: 'ended', descending: true });
+
+function endedStatusText(o: Outcome) {
+  return o.status === 'merged' ? `Merged into ${outcomeName(o.mergedInto)}` : StatusLabel[o.status];
+}
+
+function endedInstant(o: Outcome) {
+  const at = o.endedAt ? wireInstant(o.endedAt) : NaN;
+  return Number.isNaN(at) ? null : at;
+}
+
+function endedText(o: Outcome) {
+  const at = endedInstant(o);
+  return at === null ? '—' : localStamp(at);
+}
+
+function workflowsText(o: Outcome) {
+  return typeof o.linkedWorkflows === 'number' ? String(o.linkedWorkflows) : '—';
+}
+
+/** A missing figure sorts below every real one, whichever way the column runs. */
+function compareEnded(a: Outcome, b: Outcome, column: EndedColumn): number {
+  const byNumber = (x: number | null, y: number | null) => (x === null ? (y === null ? 0 : -1) : y === null ? 1 : x - y);
+  switch (column) {
+    case 'name':
+      return a.name.localeCompare(b.name);
+    case 'status':
+      return endedStatusText(a).localeCompare(endedStatusText(b));
+    case 'workflows':
+      return byNumber(a.linkedWorkflows ?? null, b.linkedWorkflows ?? null);
+    case 'ended':
+      return byNumber(endedInstant(a), endedInstant(b));
+  }
+}
+
+const endedRows = computed(() => {
+  if (tab.value !== 'ended') return [];
+  const { column, descending } = endedSort.value;
+  return [...shown.value].sort((a, b) => {
+    const order = compareEnded(a, b, column) || a.name.localeCompare(b.name);
+    return descending ? -order : order;
+  });
+});
+
+function sortEnded(column: EndedColumn) {
+  endedSort.value = nextSort(endedSort.value, column);
+}
+
+/** The ids ticked. Only ever rows the table shows: a filter or a reload drops what it hides. */
+const picked = ref<string[]>([]);
+
+watch(endedRows, (rows) => {
+  const showing = new Set(rows.map((o) => o.id));
+  if (picked.value.some((id) => !showing.has(id))) picked.value = picked.value.filter((id) => showing.has(id));
+});
+
+function togglePick(id: string, on: boolean) {
+  picked.value = on ? [...picked.value.filter((p) => p !== id), id] : picked.value.filter((p) => p !== id);
+}
+
+/** The header's box: ticked when every shown row is, part-ticked (null) when some are. */
+const allPicked = computed<boolean | null>(() => {
+  if (picked.value.length === 0) return false;
+  return picked.value.length === endedRows.value.length ? true : null;
+});
+
+function pickAll(on: boolean) {
+  picked.value = on ? endedRows.value.map((o) => o.id) : [];
+}
+
+const deletePreview = ref<DeletePreview | null>(null);
+const deleteProblem = ref('');
+const deleting = ref(false);
+
+/** The confirmation's list: the outcomes asked for, then those merged into one and going with it. */
+function deletedLine(o: DeletePreview['outcomes'][number]) {
+  const how = o.status === 'merged' ? `merged into ${outcomeName(o.mergedInto)}` : StatusLabel[o.status].toLowerCase();
+  return o.cascadedFrom ? `${o.name} (${how}; goes with ${deletePreview.value?.outcomes.find((d) => d.id === o.cascadedFrom)?.name ?? outcomeName(o.cascadedFrom)})` : `${o.name} (${how})`;
+}
+
+function plural(count: number, one: string, many: string) {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
+async function askDelete() {
+  const ids = [...picked.value];
+  if (ids.length === 0 || busy.value) return;
+
+  busy.value = true;
+  deletePreview.value = null;
+  deleteProblem.value = '';
+  deleting.value = true;
+
+  try {
+    deletePreview.value = await previewDeleteOutcomes(ids);
+  } catch (cause) {
+    deleteProblem.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function confirmDelete() {
+  const ids = [...picked.value];
+  if (!deletePreview.value || ids.length === 0 || busy.value) return;
+
+  busy.value = true;
+  deleteProblem.value = '';
+
+  try {
+    await deleteOutcomes(ids);
+    deleting.value = false;
+    picked.value = [];
+    emit('changed');
+    await load();
+  } catch (cause) {
+    deleteProblem.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    busy.value = false;
+  }
+}
+
 // --- History ----------------------------------------------------------------------------------
 
 interface HistoryLine {
@@ -743,6 +882,89 @@ const history = computed<HistoryLine[]>(() => {
 
           <div v-if="error" class="os-body text-negative q-mt-sm">Could not list the outcomes: {{ error }}</div>
 
+          <!-- RETIRED & MERGED: a table, so many ended outcomes can be read, sorted and deleted at once.
+               The name opens the outcome as a tile does; the checkbox only selects. -->
+          <template v-else-if="tab === 'ended'">
+            <div class="row items-center q-gutter-sm q-mt-sm outcome-ended-bar">
+              <template v-if="picked.length">
+                <span class="os-body" data-outcome-picked>{{ picked.length }} selected</span>
+                <q-btn
+                  outline
+                  dense
+                  no-caps
+                  color="negative"
+                  icon="delete"
+                  label="Delete"
+                  :loading="busy && !deleting"
+                  data-outcome-delete
+                  @click="askDelete"
+                />
+              </template>
+            </div>
+
+            <div v-if="endedRows.length === 0" class="os-text-muted q-mt-sm">No outcomes here.</div>
+            <q-markup-table v-else v-resizable-columns="'outcome-ended'" flat bordered dense class="q-mt-xs" data-outcome-ended-table>
+              <thead>
+                <tr>
+                  <th class="outcome-pick">
+                    <q-checkbox
+                      dense
+                      :model-value="allPicked"
+                      toggle-indeterminate
+                      aria-label="Select every outcome shown"
+                      data-outcome-pick-all
+                      @update:model-value="() => pickAll(allPicked !== true)"
+                    />
+                  </th>
+                  <th
+                    v-for="heading in EndedHeadings"
+                    :key="heading.key"
+                    :class="`text-${heading.align}`"
+                    :data-col="heading.key"
+                    :aria-sort="ariaSort(endedSort, heading.key)"
+                  >
+                    <q-btn
+                      flat
+                      dense
+                      no-caps
+                      class="outcome-sort"
+                      :aria-label="`Sort by ${heading.label}`"
+                      :data-outcome-sort="heading.key"
+                      @click="sortEnded(heading.key)"
+                    >
+                      {{ heading.label }}
+                      <!-- Material SYMBOLS names, as the Teams table's arrow. -->
+                      <q-icon
+                        v-if="endedSort.column === heading.key"
+                        :name="endedSort.descending ? 'arrow_downward' : 'arrow_upward'"
+                        size="14px"
+                      />
+                    </q-btn>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="o in endedRows" :key="o.id" :data-outcome-row="o.id">
+                  <td class="outcome-pick">
+                    <q-checkbox
+                      dense
+                      :model-value="picked.includes(o.id)"
+                      :aria-label="`Select ${o.name}`"
+                      :data-outcome-pick="o.id"
+                      @update:model-value="(on: boolean) => togglePick(o.id, on)"
+                    />
+                  </td>
+                  <td class="text-left">
+                    <a href="#" class="outcome-link outcome-tile__name" :data-outcome-open="o.id" @click.prevent="select(o.id)">{{ o.name }}</a>
+                  </td>
+                  <td class="text-left" data-outcome-ended-status>{{ endedStatusText(o) }}</td>
+                  <td class="text-right" data-outcome-ended-workflows>{{ workflowsText(o) }}</td>
+                  <td class="text-left" data-outcome-ended-at>{{ endedText(o) }}</td>
+                </tr>
+              </tbody>
+            </q-markup-table>
+          </template>
+
           <div v-else class="os-tiles outcome-tiles q-mt-sm" data-outcome-tiles>
             <div
               v-for="o in shown"
@@ -808,7 +1030,7 @@ const history = computed<HistoryLine[]>(() => {
               <div v-if="o.description" class="os-tile-line os-text-muted outcome-tile__description">{{ firstLine(o.description) }}</div>
             </div>
 
-            <div v-if="shown.length === 0 && tab !== 'active'" class="os-text-muted">No outcomes here.</div>
+            <div v-if="shown.length === 0 && tab === 'proposed'" class="os-text-muted">No outcomes here.</div>
 
             <!-- ALWAYS SHOWN, closing Active: the work no outcome names, with the same figures. -->
             <div
@@ -1088,6 +1310,44 @@ const history = computed<HistoryLine[]>(() => {
     </q-card>
   </q-dialog>
 
+  <!-- DELETE: the route's preview of everything that goes, then the delete, which cannot be undone. -->
+  <q-dialog :model-value="deleting" @update:model-value="(showing) => (deleting = showing)">
+    <q-card class="os-dialog-md" data-outcome-delete-dialog>
+      <q-card-section>
+        <div class="os-dialog-title">Delete {{ plural(picked.length, 'outcome', 'outcomes') }}</div>
+        <div v-if="!deletePreview && !deleteProblem" class="os-body os-text-muted q-mt-sm">Reading what would go…</div>
+        <template v-if="deletePreview">
+          <div class="os-body q-mt-sm">These go for good, with their names:</div>
+          <ul class="outcome-history" data-outcome-delete-list>
+            <li v-for="o in deletePreview.outcomes" :key="o.id" :data-outcome-deleted="o.id" :data-cascaded="o.cascadedFrom ? 'yes' : null">
+              {{ deletedLine(o) }}
+            </li>
+          </ul>
+          <ul class="outcome-history q-mt-sm" data-outcome-delete-counts>
+            <li data-outcome-delete-workflows>{{ plural(deletePreview.workflowsUnlinked, 'workflow', 'workflows') }} will count under No outcome</li>
+            <li data-outcome-delete-items>{{ plural(deletePreview.backlogItemsCleared, 'backlog item loses its', 'backlog items lose their') }} outcome</li>
+            <li data-outcome-delete-triggers>{{ plural(deletePreview.triggersCleared, 'trigger loses its', 'triggers lose their') }} outcome</li>
+          </ul>
+          <div class="os-body os-text-muted q-mt-sm">Their old links stay in each workflow's history.</div>
+        </template>
+        <div v-if="deleteProblem" class="os-body text-negative q-mt-sm" data-outcome-delete-problem>{{ deleteProblem }}</div>
+      </q-card-section>
+      <q-card-actions align="right">
+        <q-btn flat no-caps label="Cancel" @click="deleting = false" />
+        <q-btn
+          unelevated
+          no-caps
+          color="negative"
+          label="Delete"
+          :disable="!deletePreview"
+          :loading="busy"
+          data-outcome-delete-confirm
+          @click="confirmDelete"
+        />
+      </q-card-actions>
+    </q-card>
+  </q-dialog>
+
   <!-- NEW OUTCOME: a person's, active at once. -->
   <q-dialog :model-value="creating" @update:model-value="(showing) => (creating = showing)">
     <q-card class="os-dialog-sm" data-outcome-create>
@@ -1331,6 +1591,18 @@ const history = computed<HistoryLine[]>(() => {
   flex-direction: column;
   gap: 8px;
   max-width: 40rem;
+}
+
+.outcome-pick {
+  width: 1%;
+}
+
+.outcome-sort {
+  font-weight: inherit;
+}
+
+.outcome-ended-bar {
+  min-height: 32px;
 }
 
 .outcome-period {
