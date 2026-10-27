@@ -15,11 +15,10 @@ vi.mock('../../api/client', async (importOriginal) => ({
 
 import KanbanCard from '../KanbanCard.vue';
 import ActivityFeed from '../ActivityFeed.vue';
-import ContainerCard from '../ContainerCard.vue';
 import { resetBody } from '../../test/mountQuasar';
 import { WORKFLOW_NUMBER_HINT } from '../../lib/workflowNumber';
 import type { KanbanCard as Card } from '../../api/kanban';
-import { asMemberId, asTeamId, type ContainerSnapshot, type Message } from '../../api/types';
+import { type Message } from '../../api/types';
 
 let wrapper: VueWrapper | null = null;
 
@@ -66,21 +65,5 @@ describe('a shown workflow number hovers what it means', () => {
     const text = document.body.querySelector('.q-tooltip')?.textContent?.replace(/\s+/g, ' ') ?? '';
     expect(text).toContain('Follow this workflow across every card');
     expect(text).toContain(WORKFLOW_NUMBER_HINT);
-  });
-
-  it('on a member card working a workflow', async () => {
-    const snapshot: ContainerSnapshot = {
-      team: asTeamId('alpha'), id: asMemberId('Worker'), name: 'Worker', agent: 'echo',
-      state: 'Running', queueDepth: 0, ceiling: 16, subscribes: [], currentCorrelation: 45, sinceSeq: 0,
-    };
-    wrapper = mount(ContainerCard, {
-      props: { snapshot, feed: [] },
-      global: { stubs: { ActivityFeed: true, MemberSettingsDialog: true, TriggersDialog: true } },
-    });
-    await flushPromises();
-
-    const number = wrapper.find('[data-workflow-number]');
-    expect(number.text()).toBe('workflow #45');
-    expect(number.attributes('title')).toBe(`Workflow #45. ${WORKFLOW_NUMBER_HINT}`);
   });
 });

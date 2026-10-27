@@ -181,39 +181,31 @@ function inkOf(message: Message): string {
         </q-item-label>
       </q-item-section>
 
-      <!-- The workflow this message belongs to. A BUTTON rather than a label, because its job is to
-           be clicked: following one lights up every message of that job on every card, which is the
+      <!-- The workflow this message belongs to, by its NUMBER alone: every row of a member's feed
+           mostly shares one workflow, so its name repeated on each row only crowded the summary out;
+           the opened message names it. A BUTTON rather than a label, because its job is to be
+           clicked: following one lights up every message of that job on every card, which is the
            only way a person sees a hop as one thing rather than as two unrelated rows. -->
-      <!-- NAMED BY ITS WORK: the item chip and the words before the number, from the team's
-           workflows payload; the number stays the Follow button it always was. -->
-      <q-item-section side top class="feed-workflow-name">
-        <WorkflowName
-          :number="message.correlationId"
-          :item="workflowOf(message.correlationId)?.item"
-          :subject="workflowOf(message.correlationId)?.subject"
-          :team="team"
+      <q-item-section side top>
+        <q-btn
+          flat
+          dense
+          no-caps
+          size="sm"
+          class="feed-workflow mono"
+          :class="{ 'feed-workflow-on': board.highlightedWorkflow === message.correlationId }"
+          :label="`#${message.correlationId}`"
+          :aria-label="`Follow workflow ${message.correlationId}`"
+          data-feed-workflow
+          @click.stop="board.toggleWorkflow(message.correlationId)"
         >
-          <template #number>
-            <q-btn
-              flat
-              dense
-              no-caps
-              size="sm"
-              class="feed-workflow mono"
-              :class="{ 'feed-workflow-on': board.highlightedWorkflow === message.correlationId }"
-              :label="`#${message.correlationId}`"
-              :aria-label="`Follow workflow ${message.correlationId}`"
-              @click.stop="board.toggleWorkflow(message.correlationId)"
-            >
-              <q-tooltip>
-                {{ board.highlightedWorkflow === message.correlationId
-                  ? 'Stop following this workflow'
-                  : 'Follow this workflow across every card' }}
-                <div class="q-mt-xs" data-workflow-number-hint>{{ WORKFLOW_NUMBER_HINT }}</div>
-              </q-tooltip>
-            </q-btn>
-          </template>
-        </WorkflowName>
+          <q-tooltip>
+            {{ board.highlightedWorkflow === message.correlationId
+              ? 'Stop following this workflow'
+              : 'Follow this workflow across every card' }}
+            <div class="q-mt-xs" data-workflow-number-hint>{{ WORKFLOW_NUMBER_HINT }}</div>
+          </q-tooltip>
+        </q-btn>
       </q-item-section>
 
       <!-- Absolute wall-clock, so a row can be lined up against what the console
@@ -324,12 +316,6 @@ function inkOf(message: Message): string {
 
 .feed-dimmed {
   opacity: 0.38;
-}
-
-/* The name gives way before the summary does: at most half the row, the words with an ellipsis. */
-.feed-workflow-name {
-  max-width: 45%;
-  min-width: 0;
 }
 
 .feed-workflow {

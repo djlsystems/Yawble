@@ -204,9 +204,9 @@ describe('where the name shows', () => {
     wrapper = mount(ActivityFeed, { props: { feed: [message], team }, attachTo: document.body });
     await flushPromises();
 
-    const name = wrapper.find('.feed-workflow-name');
-    expect(name.find('[data-workflow-words]').text()).toBe('Build the component');
-    expect(name.find('.feed-workflow').text()).toBe(`#${WORKFLOW}`);
+    expect(wrapper.find('[data-feed-workflow]').text()).toBe(`#${WORKFLOW}`);
+    expect(wrapper.find('[data-workflow-words]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain('Build the component');
   });
 
   it('puts the item chip in front of the subject on a Workflows dialog row', async () => {
