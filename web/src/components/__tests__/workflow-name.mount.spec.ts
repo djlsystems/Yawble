@@ -178,7 +178,7 @@ describe('WorkflowName', () => {
 });
 
 describe('where the name shows', () => {
-  it('names the member card\'s workflow from the team\'s workflows payload', async () => {
+  it('shows no workflow line on the member card: the feed already names it', async () => {
     useConsoleStore().$patch({ workflows: { [team]: payload([timing()]) } });
     const snapshot: ContainerSnapshot = {
       team, id: asMemberId('Worker'), name: 'Worker', agent: 'echo',
@@ -190,22 +190,8 @@ describe('where the name shows', () => {
     });
     await flushPromises();
 
-    expect(text(wrapper.element, '[data-member-workflow]')).toBe(`${itemLabel(ITEM)} ${TITLE} #${WORKFLOW}`);
-  });
-
-  it('shows the member card\'s number alone for a workflow outside the payload\'s rows', async () => {
-    useConsoleStore().$patch({ workflows: { [team]: payload([timing({ correlation: 17000 })]) } });
-    const snapshot: ContainerSnapshot = {
-      team, id: asMemberId('Worker'), name: 'Worker', agent: 'echo',
-      state: 'Running', queueDepth: 0, ceiling: 16, subscribes: [], currentCorrelation: WORKFLOW, sinceSeq: 0,
-    };
-    wrapper = mount(ContainerCard, {
-      props: { snapshot, feed: [] },
-      global: { stubs: { ActivityFeed: true, MemberSettingsDialog: true, TriggersDialog: true } },
-    });
-    await flushPromises();
-
-    expect(text(wrapper.element, '[data-member-workflow]')).toBe(`workflow #${WORKFLOW}`);
+    expect(wrapper.find('[data-member-workflow]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain(TITLE);
   });
 
   it('names a feed row\'s workflow, its number still the Follow button', async () => {

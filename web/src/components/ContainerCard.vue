@@ -13,9 +13,6 @@ import TriggersDialog from './TriggersDialog.vue';
 import WakeLines from './WakeLines.vue';
 import DiscussWithConcierge from './DiscussWithConcierge.vue';
 import { askForMember } from '../lib/conciergeDecision';
-import { workflowRow } from '../lib/workflowNumber';
-import { useConsoleStore } from '../stores/console';
-import WorkflowName from './WorkflowName.vue';
 import CardSizeGrips from './CardSizeGrips.vue';
 import CardArrangeHandle from './CardArrangeHandle.vue';
 import MemberAvatar from './MemberAvatar.vue';
@@ -29,11 +26,6 @@ const props = defineProps<{
   carried?: { x: number; y: number } | null;
   feed: Message[];
 }>();
-
-/** The workflow this member works, as the team's workflows payload carries it, or null. */
-const board = useConsoleStore();
-const currentWorkflow = computed(() =>
-  workflowRow(board.workflowsFor(props.snapshot.team), props.snapshot.currentCorrelation));
 
 /**
  * The way into `MemberSettingsDialog`, nested here rather than hoisted to the layout - it needs
@@ -263,7 +255,7 @@ async function cancel(wake: PendingWake) {
     flat
     bordered
     class="container-window"
-    :class="{ 'container-window-plugin': isPlugin, 'os-flash': highlight.flashing === key, 'board-card--dragging': !!carried }"
+    :class="{ 'container-window-plugin': isPlugin, 'container-window-running': running, 'os-flash': highlight.flashing === key, 'board-card--dragging': !!carried }"
     :style="carried ? { transform: `translate(${carried.x}px, ${carried.y}px)` } : undefined"
     :data-member-card="key"
   >
@@ -555,23 +547,6 @@ async function cancel(wake: PendingWake) {
       />
       <div v-if="wakeError" class="os-body text-warning q-mt-xs" data-test="wake-error">{{ wakeError }}</div>
 
-      <!-- The thread a human follows. M3 makes this the point of the screen, so it
-           is surfaced from the start rather than added when it matters. -->
-      <!-- NAMED BY ITS WORK: the item and subject from the team's workflows payload the board
-           already holds; outside its fifty rows the number stands alone, as it always did. -->
-      <div
-        v-if="snapshot.currentCorrelation !== null"
-        class="text-caption text-primary q-mt-xs container-workflow"
-        data-member-workflow
-      >
-        <WorkflowName
-          :number="snapshot.currentCorrelation"
-          :item="currentWorkflow?.item"
-          :subject="currentWorkflow?.subject"
-          :team="snapshot.team"
-          noun="workflow"
-        />
-      </div>
     </q-card-section>
 
     <q-separator />
@@ -627,6 +602,31 @@ async function cancel(wake: PendingWake) {
 .container-window.container-window-plugin {
   background: var(--os-plugin-surface);
   border-left: 4px solid var(--os-plugin-accent);
+}
+
+/* A RUNNING MEMBER'S TILE BREATHES: a ring in the running state's token, drawn as a shadow so it
+   takes no layout and sits beside a plugin's violet edge. Still under reduced motion. */
+.container-window.container-window-running {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--os-state-running) 55%, transparent);
+  animation: container-running-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes container-running-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--os-state-running) 35%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--os-state-running) 75%, transparent),
+      0 0 8px 1px color-mix(in srgb, var(--os-state-running) 30%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .container-window.container-window-running {
+    animation: none;
+  }
 }
 
 .container-window-feed {
