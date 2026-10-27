@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import {
+  getNamedSecrets,
   getPluginSettings,
   listConnectionProviders,
   listConnections,
@@ -26,6 +27,7 @@ import {
   type SolutionPanelRun,
   type SolutionPanelTrigger,
   type SolutionUninstallResult,
+  type PluginNamedSecretState,
   type PluginSecretState,
 } from '../api/types';
 import {
@@ -59,6 +61,7 @@ import {
 import { spentTodayLine } from '../lib/triggers';
 import ConnectionPicker from './ConnectionPicker.vue';
 import { bindSlot } from '../lib/slotBinding';
+import { emptyNamedSecretsDraft, namedSecretValuesBody, namedSecretsHeld, type NamedSecretsDraft } from '../lib/namedSecrets';
 import { guidedProviders } from '../lib/connections';
 import InstallFromFolderDialog from './InstallFromFolderDialog.vue';
 import PluginSettingsForm from './PluginSettingsForm.vue';
@@ -329,6 +332,9 @@ interface MemberSettings {
   /** Each secret field's state as read, and the member's own values typed or cleared since. */
   states: PluginSecretState[];
   values: SecretValues;
+  /** The named secrets it holds (names only, never a value), and those added, replaced or removed since. */
+  namedStates: PluginNamedSecretState[];
+  named: NamedSecretsDraft;
   connections: Record<string, string>;
   /** The plugin it runs, for a slot's Connect; empty when its settings could not be read. */
   plugin: string;
@@ -353,14 +359,18 @@ async function loadSettings(read: SolutionPanel) {
           config: stored.fields,
           secrets: stored.secretFields,
           connections: stored.connectionFields ?? {},
+          namedSecrets: stored.namedSecrets ?? null,
         };
         const config = initialConfig(shape, stored.config);
+        const namedStates = shape.namedSecrets ? await getNamedSecrets(read.team, member) : [];
         next[member] = {
           shape: { ...shape, stored: { config, outOfRange: stored.outOfRange ?? {} } },
           config,
           secrets: initialSecrets(shape, stored.secrets),
           states: stored.secretStates ?? [],
           values: {},
+          namedStates,
+          named: emptyNamedSecretsDraft(),
           connections: { ...(stored.connections ?? {}) },
           plugin: stored.plugin,
           problem: '',
@@ -373,6 +383,8 @@ async function loadSettings(read: SolutionPanel) {
           secrets: {},
           states: [],
           values: {},
+          namedStates: [],
+          named: emptyNamedSecretsDraft(),
           connections: {},
           plugin: '',
           problem: `The settings could not be read: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -437,12 +449,20 @@ async function saveSettings(member: string) {
     state.problem = bounds.join(' ');
     return;
   }
+  if (namedSecretsHeld(state.shape.namedSecrets, state.namedStates, state.named, Object.keys(state.shape.secrets))) {
+    state.problem = 'Give each new named secret a name it can have and a value, or remove it.';
+    return;
+  }
   busy.value = `settings:${member}`;
   try {
     // The member's own secret values ride the Save; no `secrets`, so the Host keeps the key bindings.
-    const answer = await savePluginSettings(props.team, member, saveBody(state.shape, state.config, state.values, state.connections));
+    const answer = await savePluginSettings(props.team, member, saveBody(state.shape, state.config, state.values, state.connections, state.named));
     state.saved = true;
     state.values = {};
+    if (namedSecretValuesBody(state.named)) {
+      state.named = emptyNamedSecretsDraft();
+      state.namedStates = await getNamedSecrets(props.team, member);
+    }
     if (answer) {
       state.shape = { ...state.shape, stored: { config: { ...state.config }, outOfRange: answer.outOfRange ?? {} } };
       if (answer.secretStates) state.states = answer.secretStates;
@@ -871,9 +891,11 @@ function closeUninstall() {
                   v-model:config="settings[member.member]!.config"
                   v-model:secrets="settings[member.member]!.secrets"
                   v-model:values="settings[member.member]!.values"
+                  v-model:named="settings[member.member]!.named"
                   v-model:connections="settings[member.member]!.connections"
                   :shape="settings[member.member]!.shape"
                   :states="settings[member.member]!.states"
+                  :named-states="settings[member.member]!.namedStates"
                   :plugin="settings[member.member]!.plugin || undefined"
                   :bind-slot="(slot: string, id: string) => bindConnected(member.member, slot, id)"
                 />

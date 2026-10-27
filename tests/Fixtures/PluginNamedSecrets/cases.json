@@ -1,0 +1,23 @@
+{
+  "_": "namedSecrets blocks the Host (PluginNamedSecretsManifestTests) and the CLI (cli/internal/plugin/manifest_test.go) both read. Each `accepted` block must parse to `max` and name exactly `ignored`; each `refused` block must refuse the manifest with exactly `says`.",
+  "accepted": [
+    { "block": { "label": "App secrets", "description": "The name is how the team refers to it." }, "max": 20, "ignored": [] },
+    { "block": {}, "max": 20, "ignored": [] },
+    { "block": { "max": 1 }, "max": 1, "ignored": [] },
+    { "block": { "max": 50, "description": null }, "max": 50, "ignored": [] },
+    { "block": { "label": "Keys", "colour": "blue" }, "max": 20, "ignored": [ "namedSecrets.colour" ] }
+  ],
+  "refused": [
+    { "block": [], "says": "`namedSecrets` must be an object of `label`, `description` and `max`." },
+    { "block": "App secrets", "says": "`namedSecrets` must be an object of `label`, `description` and `max`." },
+    { "block": { "max": 0 }, "says": "`namedSecrets.max` must be a whole number from 1 to 50." },
+    { "block": { "max": 51 }, "says": "`namedSecrets.max` must be a whole number from 1 to 50." },
+    { "block": { "max": 2.5 }, "says": "`namedSecrets.max` must be a whole number from 1 to 50." },
+    { "block": { "max": "20" }, "says": "`namedSecrets.max` must be a whole number from 1 to 50." },
+    { "block": { "description": 7 }, "says": "`namedSecrets.description` must be text." },
+    { "block": { "label": "" }, "says": "`namedSecrets.label` must be a short piece of text (1 to 80 characters, one line)." },
+    { "block": { "label": "two\nlines" }, "says": "`namedSecrets.label` must be a short piece of text (1 to 80 characters, one line)." },
+    { "block": { "label": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" }, "says": "`namedSecrets.label` must be a short piece of text (1 to 80 characters, one line)." },
+    { "block": { "label": 3 }, "says": "`namedSecrets.label` must be a short piece of text (1 to 80 characters, one line)." }
+  ]
+}

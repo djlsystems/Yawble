@@ -194,6 +194,16 @@ public static class TenantActions
     /// bound key, if any. Detail as for a set.</summary>
     public const string MemberSecretCleared = "member.secret-cleared";
 
+    /// <summary>A person gave a plugin member a NAMED secret it did not hold (its manifest's
+    /// <c>namedSecrets</c> block). Detail: team, member, plugin and name - never the value.</summary>
+    public const string MemberNamedSecretSet = "member.named-secret-set";
+
+    /// <summary>A person replaced the value of a named secret a plugin member holds. Detail as for a set.</summary>
+    public const string MemberNamedSecretReplaced = "member.named-secret-replaced";
+
+    /// <summary>A person removed a named secret from a plugin member. Detail as for a set.</summary>
+    public const string MemberNamedSecretRemoved = "member.named-secret-removed";
+
     /// <summary>The one-time start step copied each stored plugin key onto every plugin member bound
     /// to it, as that member's own value. Detail: counts only - members, fields and keys.</summary>
     public const string MemberSecretsCopied = "member.secrets-copied";

@@ -65,6 +65,7 @@ import type {
   PluginInstallResult,
   PluginRemoveResult,
   PluginMemberSettings,
+  PluginNamedSecretList,
   SecretKeyState,
   ContainerSnapshot,
   MemberDeleted,
@@ -1463,6 +1464,7 @@ export const addMember = (
             secrets: plugin.secrets ?? {},
             ...(plugin.connections ? { connections: plugin.connections } : {}),
             ...(plugin.secretValues && Object.keys(plugin.secretValues).length > 0 ? { secretValues: plugin.secretValues } : {}),
+            ...(plugin.namedSecretValues && Object.keys(plugin.namedSecretValues).length > 0 ? { namedSecretValues: plugin.namedSecretValues } : {}),
           }
         : systemPrompt
           ? { name, agent, systemPrompt }
@@ -1538,6 +1540,15 @@ const pluginSettingsPath = (team: string, member: string) =>
 /** A plugin member's stored settings, each secret field's state (never a masked value) and its key bindings. */
 export const getPluginSettings = (team: string, member: string) =>
   json<PluginMemberSettings>(pluginSettingsPath(team, member))
+
+/**
+ * A plugin member's named secrets: each name with who saved its value and when - never a value. A
+ * person's.
+ */
+export const getNamedSecrets = (team: string, member: string) =>
+  json<PluginNamedSecretList>(
+    `/api/teams/${encodeURIComponent(team)}/members/${encodeURIComponent(member)}/named-secrets`,
+  ).then((answer) => answer.namedSecrets ?? [])
 
 /**
  * Replaces a plugin member's settings, and sets or clears the member's own secret values named in

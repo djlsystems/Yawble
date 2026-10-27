@@ -277,6 +277,31 @@ internal static class MemberEndpoints
                     }
                 }
 
+                // A NAMED SECRET IS A VALUE TOO, and a person's to type, exactly as `secretValues` above.
+                var namedValues = (request.NamedSecretValues ?? new Dictionary<string, string>(StringComparer.Ordinal))
+                    .ToDictionary(v => v.Key, v => (string?)(v.Value ?? ""), StringComparer.Ordinal);
+                if (namedValues.Count > 0)
+                {
+                    if (request.Agent is not { } namedAgent || !MemberRef.IsPlugin(namedAgent.Trim(), out var namedPluginId))
+                    {
+                        return Results.BadRequest(new { error = "`namedSecretValues` belong to a plugin member; an Agent takes its settings from its preset." });
+                    }
+
+                    if (hirer is { Kind: PrincipalKind.Container or PrincipalKind.Concierge or PrincipalKind.TenantConcierge })
+                    {
+                        return Results.BadRequest(new
+                        {
+                            error = "An agent's hire cannot carry a secret value; hire without it and a person adds each named secret in the member's settings.",
+                        });
+                    }
+
+                    if (plugins.For(namedPluginId) is { } namedPlugin
+                        && NamedSecretRules.ChangesRefusal(namedPlugin.Manifest, [], namedValues) is { } namedRefusal)
+                    {
+                        return Results.BadRequest(new { error = namedRefusal });
+                    }
+                }
+
                 // SETTINGS ONLY A PERSON CHOOSES. A manifest marks a field `"setBy": "person"` when it
                 // widens what the plugin does outward - a real send mode, an allowlist. An agent's hire (a
                 // Manager's credential, or a Concierge's) may leave such a field at its default and nothing
@@ -399,9 +424,10 @@ internal static class MemberEndpoints
                     waitForPerson: agentPluginHire,
                     valued: valued,
 
-                    // THE MEMBER'S OWN VALUES land with its settings, the binding's row and a
-                    // `member.secret-set` row each, in ONE transaction - or the member is removed again.
-                    saveSettings: values.Count == 0 || !MemberRef.IsPlugin(hiredPluginReference ?? "", out var valuedId)
+                    // THE MEMBER'S OWN VALUES AND NAMED SECRETS land with its settings, the binding's row
+                    // and a `member.secret-set` or `member.named-secret-set` row each, in ONE transaction -
+                    // or the member is removed again.
+                    saveSettings: values.Count == 0 && namedValues.Count == 0 || !MemberRef.IsPlugin(hiredPluginReference ?? "", out var valuedId)
                         ? null
                         : (member, kept, token) => memberSecrets.SaveWithSettingsAsync(
                             member, name, valuedId!, kept,
@@ -413,6 +439,7 @@ internal static class MemberEndpoints
                                         PluginMemberSettings.None with { Connections = valuedBindings }))]
                                 : [],
                             values.ToDictionary(v => v.Key, v => (string?)v.Value, StringComparer.Ordinal),
+                            namedValues,
                             PluginEndpoints.SecretActor(context), token));
 
                 // Said in the BODY as well as the header: the body is what the `member` tool hands the

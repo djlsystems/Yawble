@@ -17,6 +17,17 @@ database, a queue or mail from here: see "Choosing a language" in `docs/plugins.
   the Host runs the one for its own processor.
 - **No `requires`.** A static Go binary needs no runtime from the image.
 
+- **Secrets a person names.** A plugin that hands secrets on to something it makes declares a
+  `namedSecrets` block beside `secrets` instead of numbered fields:
+
+  ```json
+  "namedSecrets": { "label": "App secrets", "description": "The name is how the team refers to it.", "max": 20 }
+  ```
+
+  A person names each secret and types its value in the member's settings; a run receives
+  `namedSecrets` (name to value) and `namedSecretNames` (sorted), which `main.go`'s `request` reads.
+  The sample declares no block, so it receives neither. See "Named secrets" in `docs/plugins.md`.
+
 Build a version folder and install it:
 
 ```sh

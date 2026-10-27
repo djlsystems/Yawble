@@ -11,7 +11,7 @@ namespace Harness.Host;
 /// REQUIRED NOW: <c>schemaVersion</c>, <c>id</c>, <c>name</c>, <c>description</c>, <c>version</c>,
 /// <c>protocol</c>, <c>executable</c>. OPTIONAL NOW: <c>timeoutSeconds</c>, <c>config</c>,
 /// <c>secrets</c>, <c>events.publishes</c>, <c>skills</c>, <c>platforms</c>, <c>requires</c>,
-/// <c>connections</c>, <c>reads</c>.
+/// <c>connections</c>, <c>reads</c>, <c>namedSecrets</c>.
 /// RESERVED - kept as raw JSON, validated by nothing, acted on by nothing yet: <c>actions</c>,
 /// <c>consumes</c>, <c>health</c>, <c>signature</c>, <c>publisher</c>, <c>minHostVersion</c>,
 /// <c>permits</c>. A key this version does not know is IGNORED and named in
@@ -49,6 +49,11 @@ public sealed record PluginManifest(
     /// run receives them on stdin as <c>sites</c>. Empty when the manifest has no <c>reads</c>.</summary>
     public IReadOnlyList<PluginSiteRead> Reads { get; init; } = [];
 
+    /// <summary>The manifest's <c>namedSecrets</c> block: secrets a person names and types per member,
+    /// which a run receives as <c>namedSecrets</c> and <c>namedSecretNames</c>. Null when the manifest
+    /// declares none, and then a run receives neither.</summary>
+    public PluginNamedSecrets? NamedSecrets { get; init; }
+
     /// <summary>The most collections one plugin may declare in <c>reads</c>. A sanity bound: it also
     /// bounds what the run's request spends on their envelopes.</summary>
     public const int MaxReads = 32;
@@ -79,7 +84,7 @@ public sealed record PluginManifest(
     {
         "schemaVersion", "id", "name", "description", "version", "protocol", "executable",
         "timeoutSeconds", "config", "secrets", "events", "skills", "platforms", "requires", "connections",
-        "reads",
+        "reads", "namedSecrets",
     };
 
     /// <summary>This machine's platform key, as the <c>platforms</c> map names it.</summary>
@@ -427,6 +432,16 @@ public sealed record PluginManifest(
                 reads.AddRange(parsed);
             }
 
+            var ignoredInBlock = new List<string>();
+            PluginNamedSecrets? namedSecrets = null;
+
+            if (root.TryGetProperty("namedSecrets", out var namedElement) && namedElement.ValueKind != JsonValueKind.Null)
+            {
+                var (parsed, refusal) = PluginNamedSecrets.Parse(namedElement, ignoredInBlock);
+                if (refusal is not null) return (null, refusal);
+                namedSecrets = parsed;
+            }
+
             var reserved = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
             var ignored = new List<string>();
 
@@ -443,10 +458,11 @@ public sealed record PluginManifest(
             }
 
             ignored.AddRange(ignoredInEvents);
+            ignored.AddRange(ignoredInBlock);
 
             return (new PluginManifest(
                 id, name, description, version, protocol, path, arguments, timeout, config, secrets,
-                publishes, skills, platforms, reserved, ignored) { Requires = requires, Connections = connections, Reads = reads }, null);
+                publishes, skills, platforms, reserved, ignored) { Requires = requires, Connections = connections, Reads = reads, NamedSecrets = namedSecrets }, null);
         }
     }
 
@@ -721,6 +737,69 @@ public sealed record PluginSecret(string Description, bool Required)
 
     /// <summary>The manifest's <c>label</c>, or null.</summary>
     public string? Label { get; init; }
+}
+
+/// <summary>
+/// THE <c>namedSecrets</c> BLOCK: a plugin that hands secrets on to something it makes lets a person
+/// NAME each secret and type its value beside it, per member, so the team refers to it by that name.
+/// <c>{ "label", "description", "max" }</c>: the label follows a field's label rules
+/// (<see cref="PluginManifest.Label"/>), the description is text, <c>max</c> is a whole number from 1
+/// to <see cref="MostMax"/> (<see cref="DefaultMax"/> when omitted). A key it does not know is ignored
+/// and named as <c>namedSecrets.&lt;key&gt;</c>; anything else malformed refuses the manifest naming
+/// the field, in the same words as the operator CLI's check (cli/internal/plugin).
+/// </summary>
+public sealed partial record PluginNamedSecrets(string? Label, string Description, int Max)
+{
+    public const int DefaultMax = 20;
+
+    public const int MostMax = 50;
+
+    private static readonly IReadOnlySet<string> KnownKeys = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "label", "description", "max",
+    };
+
+    /// <summary>A name a person may give a secret: a letter, then letters, digits and underscores, at
+    /// most 64 characters.</summary>
+    public static bool IsName(string? name) => name is not null && NamePattern().IsMatch(name);
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\A[A-Za-z][A-Za-z0-9_]{0,63}\z")]
+    private static partial System.Text.RegularExpressions.Regex NamePattern();
+
+    /// <summary>The block, or the sentence refusing it. Unknown keys are added to <paramref name="ignored"/>.</summary>
+    public static (PluginNamedSecrets? Block, string? Refusal) Parse(JsonElement element, List<string> ignored)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return (null, "`namedSecrets` must be an object of `label`, `description` and `max`.");
+        }
+
+        var (label, labelRefusal) = PluginManifest.Label("namedSecrets", element);
+        if (labelRefusal is not null) return (null, labelRefusal);
+
+        var description = "";
+        if (element.TryGetProperty("description", out var described) && described.ValueKind != JsonValueKind.Null)
+        {
+            if (described.ValueKind != JsonValueKind.String) return (null, "`namedSecrets.description` must be text.");
+            description = described.GetString()!.Trim();
+        }
+
+        var max = DefaultMax;
+        if (element.TryGetProperty("max", out var maxElement) && maxElement.ValueKind != JsonValueKind.Null)
+        {
+            if (maxElement.ValueKind != JsonValueKind.Number || !maxElement.TryGetInt32(out max) || max is < 1 or > MostMax)
+            {
+                return (null, $"`namedSecrets.max` must be a whole number from 1 to {MostMax}.");
+            }
+        }
+
+        foreach (var property in element.EnumerateObject())
+        {
+            if (!KnownKeys.Contains(property.Name)) ignored.Add($"namedSecrets.{property.Name}");
+        }
+
+        return (new PluginNamedSecrets(label, description, max), null);
+    }
 }
 
 /// <summary>

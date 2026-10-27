@@ -303,6 +303,13 @@ public sealed partial class PlatformMcpTools(
             cancellationToken);
 
         roster += Environment.NewLine + Environment.NewLine + OpenWorkflowLines(board);
+
+        // THE NAMES OF EACH PLUGIN MEMBER'S NAMED SECRETS, never a value, so the agent can ask a person
+        // to add a secret named X and see that it is there.
+        var named = await SendAsync(
+            HttpMethod.Get, "/api/teams/" + Uri.EscapeDataString(resolved) + "/named-secret-names", null, cancellationToken);
+        if (NamedSecretLines(named, member) is { } namedLines) roster += Environment.NewLine + Environment.NewLine + namedLines;
+
         if (string.IsNullOrWhiteSpace(member)) return roster;
 
         var tail = await SendAsync(
@@ -356,6 +363,43 @@ public sealed partial class PlatformMcpTools(
         }
 
         return lines.Count == 0 ? null : "Archived teams:" + Environment.NewLine + string.Join(Environment.NewLine, lines);
+    }
+
+    /// <summary>
+    /// One line per plugin member whose plugin takes named secrets (only <paramref name="member"/> when
+    /// one is named): its name and the names of the secrets a person gave it, never a value. Null when
+    /// there is none or the read did not answer 200.
+    /// </summary>
+    public static string? NamedSecretLines(string answer, string? member)
+    {
+        var split = answer.Split(Environment.NewLine, 2);
+        if (split.Length != 2 || split[0] != "HTTP 200") return null;
+
+        var lines = new List<string>();
+        try
+        {
+            using var document = JsonDocument.Parse(split[1]);
+            if (!document.RootElement.TryGetProperty("members", out var members) || members.ValueKind != JsonValueKind.Array) return null;
+
+            foreach (var entry in members.EnumerateArray())
+            {
+                var id = entry.GetProperty("member").GetString();
+                if (!string.IsNullOrWhiteSpace(member) && !string.Equals(id, member.Trim(), StringComparison.OrdinalIgnoreCase)) continue;
+
+                var names = entry.GetProperty("names").EnumerateArray().Select(n => n.GetString()).ToList();
+                lines.Add($"- {entry.GetProperty("name").GetString()} ({id}, plugin {entry.GetProperty("plugin").GetString()}): "
+                    + (names.Count == 0 ? "none" : string.Join(", ", names)));
+            }
+        }
+        catch (Exception exception) when (exception is JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            return null;
+        }
+
+        return lines.Count == 0
+            ? null
+            : "Named secrets each plugin member holds (names only; a person adds one in the member's settings - never ask for a value in a message):"
+                + Environment.NewLine + string.Join(Environment.NewLine, lines);
     }
 
     internal static string OpenWorkflowLines(string board)

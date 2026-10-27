@@ -2932,6 +2932,34 @@ export interface PluginSecretField {
   masked?: boolean
 }
 
+/**
+ * A manifest's `namedSecrets` block: a table of secrets a person names, each value typed masked
+ * beside its name. `max` is how many one member may hold (the Host's default 20 when the manifest
+ * gives none).
+ */
+export interface PluginNamedSecrets {
+  label: string
+  description: string
+  max: number
+}
+
+/**
+ * One named secret a plugin member holds, as `GET .../named-secrets` answers it: its name, who saved
+ * its value and when - never the value.
+ */
+export interface PluginNamedSecretState {
+  name: string
+  setBy: string | null
+  setAt: string | null
+}
+
+/** `GET /api/teams/{team}/members/{member}/named-secrets`. */
+export interface PluginNamedSecretList {
+  team: string
+  member: string
+  namedSecrets: PluginNamedSecretState[]
+}
+
 /** A member hired on a plugin, as the plugins list names it. */
 export interface PluginMemberRef {
   team: string
@@ -2989,6 +3017,8 @@ export interface InstalledPlugin {
   solutions?: PluginSolutionNeed[]
   /** Its connection slots, by slot name; `{}` when the manifest declares none. Absent from a Host older than connections. */
   connections?: Record<string, ConnectionSlot>
+  /** Its `namedSecrets` block; null or absent when the manifest declares none. */
+  namedSecrets?: PluginNamedSecrets | null
   /** Its marketplace page when the catalog lists it, else null. */
   marketplaceUrl?: string | null
   /** Manifest keys reserved for a later Host, and unknown keys it ignored. */
@@ -3065,6 +3095,8 @@ export interface PluginMemberSettings {
   connections?: Record<string, string>
   /** The manifest's connection slots, as `GET /api/plugins` lists them. */
   connectionFields?: Record<string, ConnectionSlot>
+  /** The manifest's `namedSecrets` block of the version the member runs; null or absent when it declares none. */
+  namedSecrets?: PluginNamedSecrets | null
   /**
    * Each STORED number outside its manifest bounds (bounds added after it was saved), with the
    * Host's sentence. Always present on the read and the PUT answer; `{}` when none is.
@@ -3111,6 +3143,8 @@ export interface PluginHire {
   config: Record<string, PluginSettingValue>
   secrets?: Record<string, string>
   secretValues?: Record<string, string | null>
+  /** Named secrets typed or removed on the form, the member's own: name -> value, null removes. */
+  namedSecretValues?: Record<string, string | null>
   /** Slot -> connection id. Sent only for a plugin that declares slots; `{}` unbinds every slot. */
   connections?: Record<string, string>
 }
@@ -3488,6 +3522,8 @@ export interface SolutionPlanPlugin {
   minimum?: string | null
   /** What the install does with it against the instance's active version, in words; null when unknown. */
   onInstall?: string | null
+  /** Its manifest's `namedSecrets` block; null or absent when it declares none. */
+  namedSecrets?: PluginNamedSecrets | null
 }
 
 export type SolutionWakeManager = 'always' | 'onHandbackOrFailure' | 'never'
@@ -3899,6 +3935,8 @@ export interface SolutionInstallInputs {
   connections?: Record<string, Record<string, string>>
   /** Package member -> field -> the value typed: that member's own. */
   secretValues?: Record<string, Record<string, string>>
+  /** Package member -> name -> the value typed: that member's own named secrets. */
+  namedSecretValues?: Record<string, Record<string, string>>
 }
 
 export interface SolutionInstallRequest extends SolutionInstallInputs {

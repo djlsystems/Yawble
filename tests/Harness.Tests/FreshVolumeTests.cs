@@ -35,13 +35,13 @@ public sealed class FreshVolumeTests : IDisposable
     /// `auth-006` is the per-repository default branch; `auth-007` is the per-repository contributor
     /// settings; `auth-008` is a plugin member's configuration and secret bindings; `auth-009` is who
     /// last set a member's own instructions, and when; `auth-010` is a trigger's wake choice and daily
-    /// token cap; `auth-011` is how many fires the cap skipped today; `auth-012` is the folders whose removal did not finish; `auth-013` is what a removal retry's own deletes left on the directories it judged unwritten; `auth-014` is connections: OAuth providers, connected accounts, pending flows and a plugin member's slot bindings; `auth-015` is a team's sites, their versions and their data; `auth-016` is which solution package each team came from; `skill-004` is team skills; `messages-002` is the run a deferred batch item was deferred from, on its pending delivery; `messages-003` is the wakes members asked for that have not fired (`wakes`); `messages-004` is what running members' worktrees did, recorded for the Monitor's replay (`file_changes`); `messages-005` is what running agents did, step by step, recorded for the Monitor (`run_steps`), and an index on the log's causation; `outcome-001` is the usage ledger (`usage_ledger`, `workflow_ledger`); `outcome-002` is the outcomes and their append-only workflow links; `outcome-003` is a delivery's attribution and each nudge, recorded at delivery (`delivery_ledger`, `nudge_ledger`); `outcome-004` makes a link's outcome nullable, for a person's unlink; `outcome-005` indexes `usage_ledger` by team and end time, for the team activity read; `outcome-006` is every admission hold (`admission_holds`), append-only but for its one close; `outcome-007` is an outcome's value; `auth-017` is the outcome a trigger's fires serve; `backlog-002` is a dispatch's recorded tips, where it started and its stored landed; `backlog-003` is the outcome a backlog item serves; `backlog-004` is a dispatch's start that could not be recorded, retried while its branch is unchanged; `auth-018` is the email of the person who last configured a trigger; `auth-019` is a per-command agent credential table that `auth-026` drops; `auth-020` is a mailbox connection's servers, username and encrypted app password; `auth-021` keeps an uninstalled package's `team_solutions` row, marked uninstalled, with the person's answers; `auth-022` is when a team was archived and by whom; `auth-023` is how the app looks to each person; `auth-024` is where a team's activity view begins and who said so; `auth-025` is the plugin keys a person sets from the screen; `auth-026` drops `agent_credentials` and the `agents.credentialSource` setting row, so every agent signs in through the shared home; `auth-027` is a Microsoft connection's own directory (`connections.tenant`), carried by a browser sign-in's `connection_flows` row; `auth-028` is a plugin member's own secret values (`plugin_member_secrets`), one row per field, as ciphertext; `auth-029` is the oldest version of each plugin an installed solution team needs (`team_solutions.plugin_minimums`).
+    /// token cap; `auth-011` is how many fires the cap skipped today; `auth-012` is the folders whose removal did not finish; `auth-013` is what a removal retry's own deletes left on the directories it judged unwritten; `auth-014` is connections: OAuth providers, connected accounts, pending flows and a plugin member's slot bindings; `auth-015` is a team's sites, their versions and their data; `auth-016` is which solution package each team came from; `skill-004` is team skills; `messages-002` is the run a deferred batch item was deferred from, on its pending delivery; `messages-003` is the wakes members asked for that have not fired (`wakes`); `messages-004` is what running members' worktrees did, recorded for the Monitor's replay (`file_changes`); `messages-005` is what running agents did, step by step, recorded for the Monitor (`run_steps`), and an index on the log's causation; `outcome-001` is the usage ledger (`usage_ledger`, `workflow_ledger`); `outcome-002` is the outcomes and their append-only workflow links; `outcome-003` is a delivery's attribution and each nudge, recorded at delivery (`delivery_ledger`, `nudge_ledger`); `outcome-004` makes a link's outcome nullable, for a person's unlink; `outcome-005` indexes `usage_ledger` by team and end time, for the team activity read; `outcome-006` is every admission hold (`admission_holds`), append-only but for its one close; `outcome-007` is an outcome's value; `auth-017` is the outcome a trigger's fires serve; `backlog-002` is a dispatch's recorded tips, where it started and its stored landed; `backlog-003` is the outcome a backlog item serves; `backlog-004` is a dispatch's start that could not be recorded, retried while its branch is unchanged; `auth-018` is the email of the person who last configured a trigger; `auth-019` is a per-command agent credential table that `auth-026` drops; `auth-020` is a mailbox connection's servers, username and encrypted app password; `auth-021` keeps an uninstalled package's `team_solutions` row, marked uninstalled, with the person's answers; `auth-022` is when a team was archived and by whom; `auth-023` is how the app looks to each person; `auth-024` is where a team's activity view begins and who said so; `auth-025` is the plugin keys a person sets from the screen; `auth-026` drops `agent_credentials` and the `agents.credentialSource` setting row, so every agent signs in through the shared home; `auth-027` is a Microsoft connection's own directory (`connections.tenant`), carried by a browser sign-in's `connection_flows` row; `auth-028` is a plugin member's own secret values (`plugin_member_secrets`), one row per field, as ciphertext; `auth-029` is the oldest version of each plugin an installed solution team needs (`team_solutions.plugin_minimums`); `auth-030` is a plugin member's named secrets (`plugin_member_named_secrets`), one row per name a person gave, as ciphertext.
     /// </summary>
     [Fact]
     public void The_steps_are_the_squash_and_the_steps_added_after_it()
     {
         Assert.Equal(
-            ["messages-001", "messages-002", "messages-003", "messages-004", "messages-005", "messages-006", "auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "auth-014", "auth-015", "auth-016", "auth-017", "auth-018", "auth-019", "auth-020", "auth-021", "auth-022", "auth-023", "auth-024", "auth-025", "auth-026", "auth-027", "auth-028", "auth-029", "skill-001", "skill-002", "skill-003", "skill-004", "backlog-001", "backlog-002", "backlog-003", "backlog-004", "outcome-001", "outcome-002", "outcome-003", "outcome-004", "outcome-005", "outcome-006", "outcome-007"],
+            ["messages-001", "messages-002", "messages-003", "messages-004", "messages-005", "messages-006", "auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "auth-014", "auth-015", "auth-016", "auth-017", "auth-018", "auth-019", "auth-020", "auth-021", "auth-022", "auth-023", "auth-024", "auth-025", "auth-026", "auth-027", "auth-028", "auth-029", "auth-030", "skill-001", "skill-002", "skill-003", "skill-004", "backlog-001", "backlog-002", "backlog-003", "backlog-004", "outcome-001", "outcome-002", "outcome-003", "outcome-004", "outcome-005", "outcome-006", "outcome-007"],
             SchemaModules.All.Select(s => s.Id));
     }
 
@@ -53,7 +53,7 @@ public sealed class FreshVolumeTests : IDisposable
         await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
 
         Assert.Equal(
-            ["auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "auth-014", "auth-015", "auth-016", "auth-017", "auth-018", "auth-019", "auth-020", "auth-021", "auth-022", "auth-023", "auth-024", "auth-025", "auth-026", "auth-027", "auth-028", "auth-029", "backlog-001", "backlog-002", "backlog-003", "backlog-004", "messages-001", "messages-002", "messages-003", "messages-004", "messages-005", "messages-006", "outcome-001", "outcome-002", "outcome-003", "outcome-004", "outcome-005", "outcome-006", "outcome-007", "skill-001", "skill-002", "skill-003", "skill-004"],
+            ["auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "auth-014", "auth-015", "auth-016", "auth-017", "auth-018", "auth-019", "auth-020", "auth-021", "auth-022", "auth-023", "auth-024", "auth-025", "auth-026", "auth-027", "auth-028", "auth-029", "auth-030", "backlog-001", "backlog-002", "backlog-003", "backlog-004", "messages-001", "messages-002", "messages-003", "messages-004", "messages-005", "messages-006", "outcome-001", "outcome-002", "outcome-003", "outcome-004", "outcome-005", "outcome-006", "outcome-007", "skill-001", "skill-002", "skill-003", "skill-004"],
             await migrator.AppliedAsync(ct: Ct));
 
         // Nothing pending on the second start, so no backup and no change.
@@ -540,6 +540,46 @@ public sealed class FreshVolumeTests : IDisposable
         File.Delete(Database);
         await new SchemaMigrator(Database).ApplyAsync(SchemaModules.All, ct: Ct);
         Assert.Contains("plugin_member_secrets", await ColumnAsync("SELECT name FROM sqlite_master WHERE type = 'table'"));
+    }
+
+    /// <summary>
+    /// `auth-030` applies to a volume with a team and a member, which stay, and to an empty one; a
+    /// member's named secret is kept as ciphertext, one per name ignoring case, and goes with the member's row.
+    /// </summary>
+    [Fact]
+    public async Task The_plugin_member_named_secrets_step_applies_to_an_empty_and_an_existing_volume()
+    {
+        var migrator = new SchemaMigrator(Database);
+        await migrator.ApplyAsync([.. SchemaModules.All.Where(s => s.Id != "auth-030")], ct: Ct);
+        Assert.DoesNotContain("plugin_member_named_secrets", await ColumnAsync("SELECT name FROM sqlite_master WHERE type = 'table'"));
+
+        await new SqliteTeamStore(Database).SaveTeamAsync(new PersistedTeam("kept-team", null), Ct);
+        await ExecuteAsync(
+            "INSERT INTO team_members (team, name, agent, subscribes, permits, floor_seq, created_utc) "
+            + "VALUES ('kept-team', 'Keeper', 'plugin:fixture', '[]', '[]', 0, '2026-10-01T00:00:00Z')");
+
+        await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
+
+        Assert.Contains("auth-030", await migrator.AppliedAsync(ct: Ct));
+        Assert.Contains("Keeper", await ColumnAsync("SELECT name FROM team_members"));
+
+        var store = new PluginMemberSecretStore(Database, new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider());
+        var keeper = new ContainerId("kept-team", "Keeper");
+        var person = new CredentialActor(null, "person@example.test");
+        await store.ChangeNamedAsync(keeper, "Keeper", "fixture", new Dictionary<string, string?> { ["ApiKey"] = "own-value-1234" }, person, Ct);
+        await store.ChangeNamedAsync(keeper, "Keeper", "fixture", new Dictionary<string, string?> { ["APIKEY"] = "new-value-1234" }, person, Ct);
+        Assert.Equal("new-value-1234", (await store.NamedValuesAsync(keeper, Ct))["ApiKey"]);
+        Assert.DoesNotContain("value-1234", Assert.Single(await ColumnAsync("SELECT value_protected FROM plugin_member_named_secrets")));
+
+        // The row goes with the member's.
+        await ExecuteAsync("PRAGMA foreign_keys = ON; DELETE FROM team_members WHERE name = 'Keeper'");
+        Assert.Empty(await ColumnAsync("SELECT secret FROM plugin_member_named_secrets"));
+
+        // And an empty volume, from nothing.
+        SqliteConnection.ClearAllPools();
+        File.Delete(Database);
+        await new SchemaMigrator(Database).ApplyAsync(SchemaModules.All, ct: Ct);
+        Assert.Contains("plugin_member_named_secrets", await ColumnAsync("SELECT name FROM sqlite_master WHERE type = 'table'"));
     }
 
     private async Task PluginSecretRoundTripAsync()

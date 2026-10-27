@@ -379,6 +379,27 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
     }
 
     /// <summary>
+    /// The plugin skill says how a plugin that hands secrets on declares a `namedSecrets` block instead
+    /// of numbered fields, what a run receives, that `status` lists the names, and that an agent asks a
+    /// person to add a secret by name on the settings screen - never a value in a message. The Go
+    /// template's README and request describe the block too.
+    /// </summary>
+    [Fact]
+    public void The_plugin_skill_and_the_go_template_describe_named_secrets_and_never_ask_for_a_value_in_a_message()
+    {
+        var plugins = Flat(BuiltInSkills.Find("authoring-plugins")!.Body);
+
+        Assert.Contains("Its manifest declares one `namedSecrets` block beside `secrets`", plugins, StringComparison.Ordinal);
+        Assert.Contains("A run receives them as `namedSecrets` (name to value) and `namedSecretNames` (the names, sorted); a plugin without the block receives neither.", plugins, StringComparison.Ordinal);
+        Assert.Contains("The `status` tool lists each member's names, never a value.", plugins, StringComparison.Ordinal);
+        Assert.Contains("ask the person to add a secret named `<name>` on the member's settings screen, then check `status` shows it; never ask for a value in a message.", plugins, StringComparison.Ordinal);
+
+        var template = Path.Combine(SolutionSamples.RepoRoot(), "templates", "plugin-go");
+        Assert.Contains("\"namedSecrets\": { \"label\": \"App secrets\"", File.ReadAllText(Path.Combine(template, "README.md")), StringComparison.Ordinal);
+        Assert.Contains("`json:\"namedSecretNames\"`", File.ReadAllText(Path.Combine(template, "main.go")), StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The plugin skill says when an event declares a monitor hint - something the plugin created,
     /// changed or deleted outside the platform - and that a read, a list, a check or a refusal never
     /// does, with the icon, one event per resource, highVolume and the label's limits beside it.
