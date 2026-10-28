@@ -46,6 +46,13 @@
 # setuid/setgid and gain group read, so every start puts back a hand-made change. Only a person
 # writes it, by copying into the container as root; nothing an agent runs can. It is created when
 # missing.
+# google-chrome holds the sign-in page's browser (install-google-chrome.sh, run as worker). It is
+# worker's and readable by agent, never writable by it: worker:agent all the way down, directories
+# 0750, files lose group write, other and setuid/setgid and gain group read, the execute bits kept.
+# An agent that could write here could replace the browser every person signs in through.
+# sign-in-profiles holds one browser profile per plugin member's table row (the sign-in page's): a
+# signed-in session of a person's, so worker's alone - worker:worker, directories 0700 and files
+# without group or other bits, all the way down. Both are created when missing.
 # tmp holds each member's TMPDIR (MemberTemp), on the volume so an engine's tmpfs /tmp never holds
 # a member's temporary files in memory. It is created when missing and is agent's like the rest.
 # Every other top-level entry - teams, documents, agent-home, npm-global, bin, the tool caches, the
@@ -88,6 +95,8 @@ host_uid="${HARNESS_HOST_UID:-10001}"
 host_gid="${HARNESS_HOST_GID:-10001}"
 agent_uid="${HARNESS_AGENT_UID:-10002}"
 agent_gid="${HARNESS_AGENT_GID:-10002}"
+worker_uid="${HARNESS_WORKER_UID:-10003}"
+worker_gid="${HARNESS_WORKER_GID:-10003}"
 
 log() { echo "volume: $*"; }
 
@@ -126,6 +135,18 @@ own_repos() { # path
   set_owner "$1" "$host_uid" "$agent_gid"
   find "$1" -type d ! -perm 2750 -print -exec chmod u=rwx,g=rxs,o=,u-s {} +
   find "$1" ! -type d ! -type l \( -perm /6027 -o ! -perm -040 \) -print -exec chmod g+r,g-w,o=,ug-s {} +
+}
+
+own_browser() { # path
+  set_owner "$1" "$worker_uid" "$agent_gid"
+  find "$1" -type d ! -perm 750 -print -exec chmod u=rwx,g=rx,o=,ug-s {} +
+  find "$1" ! -type d ! -type l \( -perm /6027 -o ! -perm -440 \) -print -exec chmod u+r,g+r,g-w,o=,ug-s {} +
+}
+
+own_worker() { # path
+  set_owner "$1" "$worker_uid" "$worker_gid"
+  find "$1" -type d ! -perm 700 -print -exec chmod u=rwx,go=,ug-s {} +
+  find "$1" ! -type d ! -type l -perm /6077 -print -exec chmod go=,ug-s {} +
 }
 
 own_agent() { # path
@@ -184,6 +205,8 @@ ownership() {
       [ -e "$root/repos" ] || [ -L "$root/repos" ] || { mkdir "$root/repos"; echo "$root/repos"; }
       [ -e "$root/reference" ] || [ -L "$root/reference" ] || { mkdir "$root/reference"; echo "$root/reference"; }
       [ -e "$root/tmp" ] || [ -L "$root/tmp" ] || { mkdir "$root/tmp"; echo "$root/tmp"; }
+      [ -e "$root/google-chrome" ] || [ -L "$root/google-chrome" ] || { mkdir "$root/google-chrome"; echo "$root/google-chrome"; }
+      [ -e "$root/sign-in-profiles" ] || [ -L "$root/sign-in-profiles" ] || { mkdir "$root/sign-in-profiles"; echo "$root/sign-in-profiles"; }
 
       for path in "$root"/* "$root"/.[!.]* "$root"/..?*; do
         [ -e "$path" ] || [ -L "$path" ] || continue
@@ -191,6 +214,8 @@ ownership() {
         if is_host_entry "$name"; then own_host "$path"
         elif [ "$name" = plugins ]; then own_plugins "$path"
         elif [ "$name" = repos ] || [ "$name" = reference ]; then own_repos "$path"
+        elif [ "$name" = google-chrome ]; then own_browser "$path"
+        elif [ "$name" = sign-in-profiles ]; then own_worker "$path"
         else own_agent "$path"; fi
       done
 

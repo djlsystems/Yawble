@@ -65,7 +65,7 @@ public sealed class ContainerImageTests
         Assert.Contains("ARG NODE_VERSION\nARG GO_VERSION", text);
 
         Assert.Equal(
-            ["/opt/harness/container-entrypoint.sh", "/opt/harness/ensure-agent-clis.sh", "/opt/harness/npm-torn-install.sh", "/opt/harness/prepare-volume.sh"],
+            ["/opt/harness/container-entrypoint.sh", "/opt/harness/ensure-agent-clis.sh", "/opt/harness/install-google-chrome.sh", "/opt/harness/npm-torn-install.sh", "/opt/harness/prepare-volume.sh"],
             Copied(worker).Order(StringComparer.Ordinal));
         Assert.Equal("/data/npm-global", Env(worker, "NPM_CONFIG_PREFIX"));
         Assert.Equal("1", Env(worker, "IS_SANDBOX"));

@@ -229,7 +229,7 @@ public sealed class PrepareVolumeTests : IDisposable
         Assert.Contains("ownership set: 0 change(s)", Run("ownership", new Dictionary<string, string>
         {
             ["HARNESS_HOST_UID"] = Id("-u"), ["HARNESS_HOST_GID"] = Id("-g"),
-            ["HARNESS_AGENT_UID"] = Id("-u"), ["HARNESS_AGENT_GID"] = Id("-g"), ["HARNESS_CHOWN"] = "chown",
+            ["HARNESS_AGENT_UID"] = Id("-u"), ["HARNESS_AGENT_GID"] = Id("-g"), ["HARNESS_WORKER_UID"] = Id("-u"), ["HARNESS_WORKER_GID"] = Id("-g"), ["HARNESS_CHOWN"] = "chown",
         }));
     }
 
@@ -274,7 +274,7 @@ public sealed class PrepareVolumeTests : IDisposable
         Assert.Contains("ownership set: 0 change(s)", Run("ownership", new Dictionary<string, string>
         {
             ["HARNESS_HOST_UID"] = Id("-u"), ["HARNESS_HOST_GID"] = Id("-g"),
-            ["HARNESS_AGENT_UID"] = Id("-u"), ["HARNESS_AGENT_GID"] = Id("-g"), ["HARNESS_CHOWN"] = "chown",
+            ["HARNESS_AGENT_UID"] = Id("-u"), ["HARNESS_AGENT_GID"] = Id("-g"), ["HARNESS_WORKER_UID"] = Id("-u"), ["HARNESS_WORKER_GID"] = Id("-g"), ["HARNESS_CHOWN"] = "chown",
         }));
     }
 
@@ -320,7 +320,7 @@ public sealed class PrepareVolumeTests : IDisposable
         Assert.Contains("ownership set: 0 change(s)", Run("ownership", new Dictionary<string, string>
         {
             ["HARNESS_HOST_UID"] = Id("-u"), ["HARNESS_HOST_GID"] = Id("-g"),
-            ["HARNESS_AGENT_UID"] = Id("-u"), ["HARNESS_AGENT_GID"] = Id("-g"), ["HARNESS_CHOWN"] = "chown",
+            ["HARNESS_AGENT_UID"] = Id("-u"), ["HARNESS_AGENT_GID"] = Id("-g"), ["HARNESS_WORKER_UID"] = Id("-u"), ["HARNESS_WORKER_GID"] = Id("-g"), ["HARNESS_CHOWN"] = "chown",
         }));
     }
 
@@ -379,7 +379,7 @@ public sealed class PrepareVolumeTests : IDisposable
             : new Dictionary<string, string>
             {
                 ["HARNESS_HOST_UID"] = Id("-u"), ["HARNESS_HOST_GID"] = Id("-g"),
-                ["HARNESS_AGENT_UID"] = Id("-u"), ["HARNESS_AGENT_GID"] = Id("-g"),
+                ["HARNESS_AGENT_UID"] = Id("-u"), ["HARNESS_AGENT_GID"] = Id("-g"), ["HARNESS_WORKER_UID"] = Id("-u"), ["HARNESS_WORKER_GID"] = Id("-g"),
             };
         environment["HARNESS_CHOWN"] = "chown";
 
@@ -1033,6 +1033,74 @@ public sealed class PrepareVolumeTests : IDisposable
     /// A worker's start installs only the CLIs that are missing, one worker at a time: the CLIs are on
     /// the shared volume, and another worker may be running members from them.
     /// </summary>
+    [Fact]
+    public void The_sign_in_browser_is_workers_readable_by_agent_with_its_executable_kept_and_nothing_writable_by_agent()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "A POSIX shell script.");
+        var version = Path.Combine(_data, "google-chrome", "156.0.8078.73");
+        Directory.CreateDirectory(Path.Combine(version, "locales"));
+        File.WriteAllText(Path.Combine(version, "chrome"), "#!/bin/sh\n");
+        File.WriteAllText(Path.Combine(version, "locales", "de.pak"), "x");
+        File.SetUnixFileMode(Path.Combine(version, "chrome"), (UnixFileMode)Convert.ToInt32("4777", 8));
+        File.SetUnixFileMode(Path.Combine(version, "locales"), (UnixFileMode)Convert.ToInt32("2777", 8));
+        File.SetUnixFileMode(Path.Combine(version, "locales", "de.pak"), (UnixFileMode)Convert.ToInt32("666", 8));
+
+        var output = Run("ownership");
+
+        var chowned = ChownedPaths();
+        foreach (var path in new[] { "google-chrome", "google-chrome/156.0.8078.73/chrome", "google-chrome/156.0.8078.73/locales/de.pak" })
+        {
+            Assert.True(chowned.TryGetValue(Path.Combine(_data, path), out var owner), $"{path} was not handed over. {output}");
+            Assert.Equal("10003:10002", owner);
+        }
+
+        Assert.Equal("750", Mode("google-chrome"));
+        Assert.Equal("750", Mode("google-chrome/156.0.8078.73/locales"));
+        Assert.Equal("640", Mode("google-chrome/156.0.8078.73/locales/de.pak"));
+        // The browser keeps its execute bits and loses setuid and the write bits.
+        Assert.Equal("750", Mode("google-chrome/156.0.8078.73/chrome"));
+    }
+
+    [Fact]
+    public void Sign_in_profiles_are_the_worker_users_alone_all_the_way_down()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "A POSIX shell script.");
+        var row = Path.Combine(_data, "sign-in-profiles", "m0", "r0", "Default");
+        Directory.CreateDirectory(row);
+        File.WriteAllText(Path.Combine(row, "Cookies"), "x");
+        File.SetUnixFileMode(Path.Combine(row, "Cookies"), (UnixFileMode)Convert.ToInt32("664", 8));
+        File.SetUnixFileMode(row, (UnixFileMode)Convert.ToInt32("2775", 8));
+
+        var output = Run("ownership");
+
+        var chowned = ChownedPaths();
+        foreach (var path in new[] { "sign-in-profiles", "sign-in-profiles/m0/r0/Default/Cookies" })
+        {
+            Assert.True(chowned.TryGetValue(Path.Combine(_data, path), out var owner), $"{path} was not handed over. {output}");
+            Assert.Equal("10003:10003", owner);
+        }
+
+        Assert.Equal("700", Mode("sign-in-profiles"));
+        Assert.Equal("700", Mode("sign-in-profiles/m0/r0/Default"));
+        Assert.Equal("600", Mode("sign-in-profiles/m0/r0/Default/Cookies"));
+    }
+
+    [Fact]
+    public void The_worker_installs_google_chrome_as_the_worker_user_under_its_own_lock()
+    {
+        foreach (var role in new[] { "worker", "all" })
+        {
+            var branch = Branches(File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "container-entrypoint.sh")))[role]
+                .Replace("\\\n", " ", StringComparison.Ordinal);
+            var step = Assert.Single(branch.Split('\n'), line => line.Contains("/opt/harness/install-google-chrome.sh", StringComparison.Ordinal));
+            step = System.Text.RegularExpressions.Regex.Replace(step, @"\s+", " ");
+
+            Assert.Matches(@"exec /usr/bin/flock /data/tmp/\.google-chrome-install\.lock /usr/bin/setpriv --reuid=worker --regid=worker --init-groups --inh-caps=-all --ambient-caps=-all -- /bin/sh /opt/harness/install-google-chrome\.sh \)", step);
+        }
+
+        Assert.Contains("scripts/install-google-chrome.sh", File.ReadAllText(Path.Combine(RepoRoot(), "Containerfile")));
+    }
+
     [Fact]
     public void The_worker_installs_missing_clis_only_under_the_volume_lock()
     {

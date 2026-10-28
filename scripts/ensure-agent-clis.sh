@@ -177,6 +177,12 @@ record_versions() {
   else
     line="$line,\"chromium\":null"
   fi
+  chrome=$(ls -d "${HARNESS_SIGN_IN_CHROME:-/data/google-chrome}"/[0-9]*/ 2>/dev/null | sed 's#/$##; s#.*/##' | sort -V | tail -n 1)
+  if [ -n "$chrome" ]; then
+    line="$line,\"googleChrome\":\"$(printf '%s' "$chrome" | tr -d '"\\')\""
+  else
+    line="$line,\"googleChrome\":null"
+  fi
   line="$line}}"
 
   printf '%s\n' "$line" >> "$file"

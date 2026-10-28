@@ -70,7 +70,8 @@ tool_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/loc
 prepare_volume() {
   mkdir -p /data/agent-home /data/keys /data/logs /data/steering /data/bin /data/npm-global \
       /data/nuget /data/go /data/go-cache /data/npm-cache /data/pip-cache /data/ms-playwright \
-      /data/teams /data/documents /data/skill-drafts /data/tenant-interactive-agent-workspaces
+      /data/teams /data/documents /data/skill-drafts /data/tenant-interactive-agent-workspaces \
+      /data/google-chrome /data/sign-in-profiles
   touch /data/cli-versions.jsonl
   /bin/sh /opt/harness/prepare-volume.sh ownership
 }
@@ -158,6 +159,12 @@ case "$role" in
         /usr/bin/setpriv --reuid=agent --regid=agent --init-groups --inh-caps=-all --ambient-caps=-all \
         -- /bin/sh /opt/harness/ensure-agent-clis.sh ) \
       || echo "agent cli: setup hit an error; starting the host anyway"
+    # Google Chrome for the sign-in page, as the `worker` user that runs it, into the folder that is
+    # that user's and no agent's (install-google-chrome.sh, prepare-volume.sh).
+    ( umask 027 && unset GIT_CONFIG_GLOBAL PYTHONNOUSERSITE && exec /usr/bin/flock /data/tmp/.google-chrome-install.lock \
+        /usr/bin/setpriv --reuid=worker --regid=worker --init-groups --inh-caps=-all --ambient-caps=-all \
+        -- /bin/sh /opt/harness/install-google-chrome.sh ) \
+      || echo "google chrome: setup hit an error; starting the host anyway"
     # The worker's own state - its run process groups, its health and drain files - in the container,
     # not on the volume, and the worker user's alone.
     mkdir -p /var/lib/harness-worker
@@ -185,6 +192,12 @@ case "$role" in
         && unset GIT_CONFIG_GLOBAL PYTHONNOUSERSITE && exec /usr/bin/setpriv --reuid=agent --regid=agent --init-groups --inh-caps=-all --ambient-caps=-all \
         -- /bin/sh /opt/harness/ensure-agent-clis.sh ) \
       || echo "agent cli: setup hit an error; starting the host anyway"
+    # Google Chrome for the sign-in page, as the `worker` user that runs it, into the folder that is
+    # that user's and no agent's (install-google-chrome.sh, prepare-volume.sh).
+    ( umask 027 && unset GIT_CONFIG_GLOBAL PYTHONNOUSERSITE && exec /usr/bin/flock /data/tmp/.google-chrome-install.lock \
+        /usr/bin/setpriv --reuid=worker --regid=worker --init-groups --inh-caps=-all --ambient-caps=-all \
+        -- /bin/sh /opt/harness/install-google-chrome.sh ) \
+      || echo "google chrome: setup hit an error; starting the host anyway"
     # The worker image sets no listen address (a worker dials out); `all` serves the board on 8080.
     export ASPNETCORE_URLS="${ASPNETCORE_URLS:-http://0.0.0.0:8080}"
     export PATH="$tool_path" HOME=/data/agent-home NPM_CONFIG_PREFIX=/data/npm-global

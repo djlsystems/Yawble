@@ -196,8 +196,8 @@ RUN apt-get update \
 RUN npx -y playwright install-deps chromium \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out .
-COPY scripts/container-entrypoint.sh scripts/ensure-agent-clis.sh scripts/npm-torn-install.sh scripts/prepare-volume.sh /opt/harness/
-RUN chmod +x /opt/harness/container-entrypoint.sh /opt/harness/ensure-agent-clis.sh /opt/harness/npm-torn-install.sh /opt/harness/prepare-volume.sh \
+COPY scripts/container-entrypoint.sh scripts/ensure-agent-clis.sh scripts/install-google-chrome.sh scripts/npm-torn-install.sh scripts/prepare-volume.sh /opt/harness/
+RUN chmod +x /opt/harness/container-entrypoint.sh /opt/harness/ensure-agent-clis.sh /opt/harness/install-google-chrome.sh /opt/harness/npm-torn-install.sh /opt/harness/prepare-volume.sh \
     && ln -sf /opt/harness/container-entrypoint.sh /entrypoint.sh
 # IS_SANDBOX: Claude Code refuses --dangerously-skip-permissions when it runs as root unless it is
 # told it is inside a sandbox. This container is that sandbox. Every agent child inherits it; a
