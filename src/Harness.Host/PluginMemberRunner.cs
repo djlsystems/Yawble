@@ -207,15 +207,19 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
 
         // THE REDACTION SET: every bound secret AND every access token and app password this run is handed.
         // A field the manifest declares `"masked": false` is not secret, and is not redacted.
+        // EACH TABLE'S SECRET CELLS, by row and column, for the rows the member has; a masked one is redacted.
+        var (cells, maskedCells) = TableSecrets(manifest, bound, own);
+
         IReadOnlyList<string> redacted =
         [
             .. resolvedSecrets.Where(s => manifest.Secrets.GetValueOrDefault(s.Key)?.Masked != false).Select(s => s.Value),
             .. grants.Values.SelectMany(g => g.Secrets),
             .. named?.Values ?? [],
+            .. maskedCells,
         ];
 
         var siteFiles = await SiteFilesAsync(invocation.Member, ct);
-        var request = Request(invocation, manifest, config, resolvedSecrets, grants, new JsonArray(), siteFiles, secretKeys, named);
+        var request = Request(invocation, manifest, config, resolvedSecrets, grants, new JsonArray(), siteFiles, secretKeys, named, cells);
 
         StartRun Start(string stdin) => new(
             RunId.For(invocation.Member),
@@ -247,7 +251,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         if (manifest.Reads.Count > 0)
         {
             var (read, delivery) = await ReadSitesAsync(invocation.Member, manifest, FramedBytes(Start(request)), ct);
-            request = Request(invocation, manifest, config, resolvedSecrets, grants, read, siteFiles, secretKeys, named);
+            request = Request(invocation, manifest, config, resolvedSecrets, grants, read, siteFiles, secretKeys, named, cells);
 
             foreach (var row in (string?[])[delivery.CutRow, delivery.MissingRow])
             {
@@ -365,7 +369,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         IReadOnlyDictionary<string, JsonNode?> config, IReadOnlyDictionary<string, string> resolvedSecrets,
         IReadOnlyDictionary<string, ConnectionGrant>? grants = null, JsonArray? sites = null,
         JsonArray? siteFiles = null, IReadOnlyDictionary<string, string>? secretKeys = null,
-        IReadOnlyDictionary<string, string>? namedSecrets = null)
+        IReadOnlyDictionary<string, string>? namedSecrets = null, JsonObject? tableSecrets = null)
     {
         var work = new JsonArray();
 
@@ -421,7 +425,10 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             ["correlation"] = invocation.Work[0].CorrelationId,
             ["work"] = work,
             ["config"] = new JsonObject(config.Select(c => KeyValuePair.Create(c.Key, c.Value?.DeepClone()))),
-            ["secrets"] = new JsonObject(resolvedSecrets.Select(s => KeyValuePair.Create(s.Key, (JsonNode?)JsonValue.Create(s.Value)))),
+            // A TABLE'S SECRET CELLS sit beside the fields, as `secrets.<table>.<row>.<column>` - never in
+            // `config`. Only a plugin declaring a table with a secret column has any.
+            ["secrets"] = new JsonObject(resolvedSecrets.Select(s => KeyValuePair.Create(s.Key, (JsonNode?)JsonValue.Create(s.Value)))
+                .Concat((tableSecrets ?? []).Select(t => KeyValuePair.Create(t.Key, t.Value?.DeepClone())))),
 
             // EACH SECRET FIELD'S NAME FOR IT - the bound logical key, set or not, or the field's own
             // name for a field set only by the member's own value - a name, never a value, and not
@@ -678,7 +685,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             if (bound.Config.TryGetValue(name, out var value))
             {
                 if (field.Refusal(name, value, bounds: false) is { } refusal) return (config, $"This member's configuration is invalid: {refusal}");
-                config[name] = JsonNode.Parse(value.GetRawText());
+                config[name] = field.Table is { } table ? table.ForRun(value) : JsonNode.Parse(value.GetRawText());
             }
             else if (field.Default is { } fallback)
             {
@@ -1045,11 +1052,156 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
                 await SiteRecordAsync(member, record!, gathered, secretValues, ct);
                 break;
 
+            case "row.status":
+                await RowStatusAsync(member, manifest, record!, gathered, secretValues, ct);
+                break;
+
             default:
                 // NOT A RECORD, OR NOT ONE THIS VERSION KNOWS: kept as text, never an error.
                 if (gathered.Text.Length > 0) gathered.Text.Append('\n');
                 gathered.Text.Append(line);
                 break;
+        }
+    }
+
+    /// <summary>
+    /// EACH TABLE'S SECRET CELLS AS A RUN RECEIVES THEM: table to row (as the member's settings spell it)
+    /// to column to value, for every table with a secret column - `{}` for one whose cells are all
+    /// empty - and the masked values, which join the run's redaction set. A cell is the member's own
+    /// value under <see cref="PluginMemberSecretStore.CellField"/>, so it is in <paramref name="own"/>.
+    /// </summary>
+    internal static (JsonObject Cells, IReadOnlyList<string> Masked) TableSecrets(
+        PluginManifest manifest, PluginMemberSettings bound, IReadOnlyDictionary<string, string> own)
+    {
+        var cells = new JsonObject();
+        var masked = new List<string>();
+
+        foreach (var (name, field) in manifest.Config)
+        {
+            if (field.Table is not { } table || !table.SecretColumns.Any()) continue;
+
+            var rows = new JsonObject();
+            foreach (var row in table.RowNames(bound.Config.TryGetValue(name, out var stored) ? stored : null))
+            {
+                var values = new JsonObject();
+                foreach (var column in table.SecretColumns)
+                {
+                    if (!own.TryGetValue(PluginMemberSecretStore.CellField(name, row, column.Name), out var value)) continue;
+                    values[column.Name] = value;
+                    if (column.Masked) masked.Add(value);
+                }
+
+                if (values.Count > 0) rows[row] = values;
+            }
+
+            cells[name] = rows;
+        }
+
+        return (cells, masked);
+    }
+
+    /// <summary>
+    /// A <c>row.status</c> record: <c>{"t":"row.status","field":"&lt;table&gt;","row":"&lt;key&gt;","values":{...}}</c>.
+    ///
+    /// <list type="bullet">
+    /// <item>WRITES ONLY THE ROW'S READ-ONLY COLUMNS - the plugin's status cells - of a row the member
+    /// already has (its key matched ignoring case). A row a person has not added is never made.</item>
+    /// <item>An unknown table, row or column is dropped with a warning; a column a person writes, and a
+    /// secret column, is ignored with a warning; a cell not of its column's type is dropped with a
+    /// warning. One warning row per sentence per run.</item>
+    /// <item>A string cell is redacted like everything else the plugin writes. The rest of the member's
+    /// settings - every row, every cell a person wrote - is left exactly as it is.</item>
+    /// </list>
+    /// </summary>
+    private async Task RowStatusAsync(
+        ContainerId member, PluginManifest manifest, JsonObject record, Gathered gathered, IEnumerable<string> secretValues, CancellationToken ct)
+    {
+        var name = Words(record, "field");
+        var rowName = Words(record, "row");
+
+        if (name is null || !manifest.Config.TryGetValue(name, out var field) || field.Table is not { } table)
+        {
+            await WarnAsync($"A `row.status` was dropped: `{name ?? "(no field)"}` is not a table of plugin '{manifest.Id}'.");
+            return;
+        }
+
+        if (settings is not IPluginMemberSettingsStore store)
+        {
+            await WarnAsync("A `row.status` was dropped: this Host keeps no member settings.");
+            return;
+        }
+
+        if (record["values"] is not JsonObject values)
+        {
+            await WarnAsync($"A `row.status` of `{name}` was dropped: its `values` is not a JSON object.");
+            return;
+        }
+
+        if (rowName is null || table.Row((await store.ForAsync(member, ct)).Config.TryGetValue(name, out var current) ? current : null, rowName) is null)
+        {
+            await WarnAsync($"A `row.status` of `{name}` was dropped: there is no row '{rowName ?? "(no row)"}'. Only a person adds a row.");
+            return;
+        }
+
+        var accepted = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+
+        foreach (var (column, node) in values)
+        {
+            var declared = table.Column(column);
+            var why = declared switch
+            {
+                null => $"`{name}` has no column `{column}`; it was dropped.",
+                { IsSecret: true } => $"`{name}.{column}` is a secret column; a status never writes one, so it was ignored.",
+                { ReadOnly: false } => $"`{name}.{column}` is written only by a person; it was ignored.",
+                _ => null,
+            };
+
+            if (why is null)
+            {
+                var cell = node?.GetValueKind() == JsonValueKind.String
+                    ? JsonSerializer.SerializeToElement(Redact((string)node!, secretValues))
+                    : JsonSerializer.SerializeToElement(node);
+                why = declared!.CellRefusal($"{name}.{column}", cell) is { } refusal ? $"{refusal} It was dropped." : null;
+                if (why is null) accepted[column] = cell;
+            }
+
+            if (why is not null) await WarnAsync($"A `row.status` cell was not written: {why}");
+        }
+
+        if (accepted.Count == 0) return;
+
+        await using (await PluginTableWrites.LockAsync(member, ct))
+        {
+            var bound = await store.ForAsync(member, ct);
+            var stored = bound.Config.TryGetValue(name, out var rows) ? rows : (JsonElement?)null;
+
+            // A PERSON MAY HAVE DELETED THE ROW since: then there is nothing to write.
+            if (table.Row(stored, rowName) is null) return;
+
+            var updated = new JsonArray();
+            foreach (var row in stored!.Value.EnumerateArray())
+            {
+                var node = JsonNode.Parse(row.GetRawText())!;
+                if (string.Equals(table.RowName(row), rowName, StringComparison.OrdinalIgnoreCase) && node is JsonObject cells)
+                {
+                    foreach (var (column, value) in accepted) cells[column] = JsonNode.Parse(value.GetRawText());
+                }
+
+                updated.Add(node);
+            }
+
+            var config = new Dictionary<string, JsonElement>(bound.Config, StringComparer.Ordinal)
+            {
+                [name] = JsonSerializer.SerializeToElement(updated),
+            };
+
+            await store.SaveAsync(member, bound with { Config = config }, ct);
+        }
+
+        async Task WarnAsync(string sentence)
+        {
+            if (!gathered.Dropped.Add("row.status " + sentence)) return;
+            await reports.ProgressAsync(member, Redact(sentence, secretValues), ct);
         }
     }
 

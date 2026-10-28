@@ -106,7 +106,7 @@ public sealed class PluginManifestListAndRequiresTests : IDisposable
     {
         var (field, refusal) = PluginConfigField.Parse("x", Value("""{"type":"object"}"""));
         Assert.Null(field);
-        Assert.Equal("`config.x.type` must be string, number, bool or list - v1 has no nested configuration.", refusal);
+        Assert.Equal("`config.x.type` must be string, number, bool, list or table.", refusal);
     }
 
     [Fact]

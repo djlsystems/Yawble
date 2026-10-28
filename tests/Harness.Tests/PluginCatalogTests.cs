@@ -155,7 +155,7 @@ public sealed class PluginCatalogTests : IDisposable
         Assert.Contains("must be one of: upper, reverse",
             RefusalFor(PluginInstall.Manifest(edit: m => m["config"] = JsonNode.Parse(
                 """{"mode":{"type":"string","enum":["upper","reverse"],"default":"sideways"}}"""))));
-        Assert.Contains("v1 has no nested configuration",
+        Assert.Contains("must be string, number, bool, list or table",
             RefusalFor(PluginInstall.Manifest(edit: m => m["config"] = JsonNode.Parse("""{"nested":{"type":"object"}}"""))));
     }
 

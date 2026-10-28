@@ -71,12 +71,16 @@ func TestListSettingsAndRequires(t *testing.T) {
 			"executable":{"path":"run"}` + extra + `}`)
 	}
 	for extra, want := range map[string]string{
-		`,"config":{"allow":{"type":"list","default":[]}}`:                     "",
-		`,"config":{"allow":{"type":"list","enum":["a","b"],"default":["b"]}}`: "",
-		`,"config":{"allow":{"type":"list","enum":["a","b"],"default":["c"]}}`: "`allow` holds 'c'; each item must be one of: a, b.",
-		`,"config":{"allow":{"type":"list","default":"a"}}`:                    "`allow` must be a list of strings.",
-		`,"config":{"allow":{"type":"map"}}`:                                   "`config.allow.type` must be string, number, bool or list - v1 has no nested configuration.",
-		`,"requires":["dotnet","node","python3"]`:                              "",
+		`,"config":{"allow":{"type":"list","default":[]}}`:                                                                    "",
+		`,"config":{"allow":{"type":"list","enum":["a","b"],"default":["b"]}}`:                                                "",
+		`,"config":{"allow":{"type":"list","enum":["a","b"],"default":["c"]}}`:                                                "`allow` holds 'c'; each item must be one of: a, b.",
+		`,"config":{"allow":{"type":"list","default":"a"}}`:                                                                   "`allow` must be a list of strings.",
+		`,"config":{"allow":{"type":"map"}}`:                                                                                  "`config.allow.type` must be string, number, bool, list or table.",
+		`,"config":{"entries":{"type":"table","key":"name","columns":[{"name":"name"},{"name":"password","type":"secret"}]}}`: "",
+		`,"config":{"entries":{"type":"table","key":"name","columns":[]}}`:                                                    "`config.entries.columns` must be a non-empty array of columns.",
+		`,"config":{"entries":{"type":"table","key":"other","columns":[{"name":"name"}]}}`:                                    "`config.entries.key` names `other`, which is not one of its columns.",
+		`,"config":{"entries":{"type":"table","key":"name","columns":[{"name":"name","type":"map"}]}}`:                        "`config.entries.columns.name.type` must be string, number, bool, enum or secret.",
+		`,"requires":["dotnet","node","python3"]`:                                                                             "",
 		`,"requires":null`:     "",
 		`,"requires":["ruby"]`: "`requires` names 'ruby', which is not a runtime this Host knows (dotnet, node, python3).",
 		`,"requires":"dotnet"`: "`requires` must be an array of runtime names.",

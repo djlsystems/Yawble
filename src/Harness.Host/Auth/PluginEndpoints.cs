@@ -186,9 +186,24 @@ public static class PluginEndpoints
             if (refusal is not null) return refusal;
 
             var id = new ContainerId(found!.Team, found.Name);
+
+            // ONE WRITER OF THE MEMBER'S TABLES AT A TIME: a plugin's row.status waits for this save.
+            await using var tableWrite = await PluginTableWrites.LockAsync(id, ct);
+
             var before = await settings.ForAsync(id, ct);
+            var sent = new Dictionary<string, JsonElement>(request.Config ?? [], StringComparer.Ordinal);
+
+            // A TABLE'S READ-ONLY CELLS ARE THE PLUGIN'S: whatever the body says, each row keeps what is stored.
+            foreach (var (name, field) in plugin!.Manifest.Config)
+            {
+                if (field.Table is { } table && sent.TryGetValue(name, out var rows))
+                {
+                    sent[name] = table.Merge(rows, before.Config.TryGetValue(name, out var kept) ? kept : null);
+                }
+            }
+
             var changed = new PluginMemberSettings(
-                request.Config ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal),
+                sent,
 
                 // OMITTED KEEPS what is bound, as for connections: the settings screen shows no key
                 // name, so its Save sends none and unbinds nothing; `{}` unbinds every key.
@@ -201,7 +216,7 @@ public static class PluginEndpoints
 
             // THE MEMBER'S OWN VALUES: a string sets or replaces, null clears, a field not named stays.
             var values = request.SecretValues ?? new Dictionary<string, string?>(StringComparer.Ordinal);
-            if (PluginMemberSecretStore.ChangesRefusal(plugin!.Manifest, values) is { } valueRefusal)
+            if (PluginMemberSecretStore.ChangesRefusal(plugin.Manifest, values) is { } valueRefusal)
             {
                 return Results.BadRequest(new { error = valueRefusal });
             }
@@ -222,6 +237,38 @@ public static class PluginEndpoints
                 return Results.BadRequest(new { error = invalid });
             }
 
+            // A TABLE'S SECRET CELLS: a value sets or replaces, null clears, a cell not sent stays; a row
+            // the save removes takes its cells with it. Checked against the rows as saved, so a row added
+            // in this save takes its secrets in the same save.
+            var cells = new List<TableCellChange>();
+            foreach (var (table, rowValues) in request.TableSecretValues ?? [])
+            {
+                foreach (var (row, columnValues) in rowValues ?? [])
+                {
+                    foreach (var (column, value) in columnValues ?? [])
+                    {
+                        if (PluginMemberSecretStore.CellRefusal(plugin.Manifest, changed, table, row, column, value) is { } cellRefusal)
+                        {
+                            return Results.BadRequest(new { error = cellRefusal });
+                        }
+
+                        cells.Add(new TableCellChange(table, row, column, value));
+                    }
+                }
+            }
+
+            foreach (var (name, field) in plugin.Manifest.Config)
+            {
+                if (field.Table is not { } table) continue;
+
+                var removed = table.Removed(
+                    before.Config.TryGetValue(name, out var was) ? was : null, changed.Config.TryGetValue(name, out var now) ? now : null);
+                foreach (var row in removed)
+                {
+                    cells.AddRange(table.SecretColumns.Select(column => new TableCellChange(name, row, column.Name, null)));
+                }
+            }
+
             // A PERSON BINDS: this route is HumansOnly, so any connection may be named - but it must
             // exist, suit the slot's providers and hold every scope the slot asks for.
             if (await connections.BindingRefusalAsync(plugin.Manifest, changed.Connections, boundOnTeam: null, ct) is { } bindingRefusal)
@@ -236,7 +283,12 @@ public static class PluginEndpoints
                     id, found.Label ?? found.Name, plugin.Manifest.Id, before, changed);
 
                 // The settings, their rows and every value with its own row land in ONE transaction.
-                if (values.Count > 0 || named.Count > 0)
+                if (cells.Count > 0)
+                {
+                    await memberSecrets.SaveWithSettingsAsync(
+                        id, found.Label ?? found.Name, plugin.Manifest.Id, changed, rows, values, named, cells, SecretActor(context), ct);
+                }
+                else if (values.Count > 0 || named.Count > 0)
                 {
                     await memberSecrets.SaveWithSettingsAsync(
                         id, found.Label ?? found.Name, plugin.Manifest.Id, changed, rows, values, named, SecretActor(context), ct);
@@ -263,7 +315,7 @@ public static class PluginEndpoints
             .HumansOnly()
             .WithSummary("Change a plugin member's settings")
             .WithDescription(
-                "Body `{ config, secrets?, secretValues?, namedSecretValues?, connections? }` REPLACES the member's configuration, its "
+                "Body `{ config, secrets?, secretValues?, namedSecretValues?, tableSecretValues?, connections? }` REPLACES the member's configuration, its "
                 + "secret key bindings when `secrets` is given (omitted keeps them; `{}` unbinds every key), and its "
                 + "connection bindings (slot to connection id) when `connections` is given "
                 + "(omitted keeps them; `{}` unbinds every slot). `secretValues` sets the member's OWN value for each "
@@ -272,7 +324,11 @@ public static class PluginEndpoints
                 + "as the settings. `namedSecretValues` sets or replaces each NAMED secret given (null removes it; a "
                 + "name not given is left), for a plugin whose manifest declares `namedSecrets`, checked as "
                 + "`PUT .../named-secrets/{name}` checks it, each with its `member.named-secret-*` row in the same "
-                + "transaction. A binding must name a connection that exists, "
+                + "transaction. A `table` field's value is its rows (every cell but a secret one); a read-only cell "
+                + "sent is ignored and the stored one kept. `tableSecretValues` (`{ <table>: { <row>: { <column>: value } } }`) "
+                + "sets or replaces each secret cell given (null clears it; a cell not given is left), each with its "
+                + "`member.secret-*` row naming the table, row and column, in the same transaction; a row the save "
+                + "removes clears its cells. A secret cell is never in `config` and never answered. A binding must name a connection that exists, "
                 + "of a provider the slot takes, granted every scope the slot asks for - refused 400 otherwise, "
                 + "with `reconnect: { connectionId, scopes }` when only scopes are missing; a change appends "
                 + "`member.connections-changed` in the same transaction. (send "
@@ -806,6 +862,9 @@ public static class PluginEndpoints
         secretFields = SecretFields(plugin.Manifest),
         namedSecrets = NamedSecretsField(plugin.Manifest),
         namedSecretStates = plugin.Manifest.NamedSecrets is null ? [] : await reads.NamedStatesAsync(id, ct),
+
+        // EACH TABLE'S SECRET CELLS THAT HOLD A VALUE: who set each and when; a value only for an unmasked column.
+        tableSecretStates = await reads.TableStatesAsync(id, plugin.Manifest, stored, ct),
         connectionFields = ConnectionFields(plugin.Manifest),
         outOfRange = PluginMemberRunner.OutOfRange(plugin.Manifest, stored),
         marketplaceUrl = reads.MarketplacePage(plugin.Manifest.Id),
@@ -840,6 +899,7 @@ public static class PluginEndpoints
             integer = c.Value.Integer,
             advanced = c.Value.Advanced,
             label = c.Value.Label,
+            table = c.Value.Table?.Describe(),
         });
 
     /// <summary>Each connection slot, its scopes in the object form, the Plugins screen's line, and
@@ -1060,12 +1120,14 @@ public sealed record InstallPlugin(string? Path, bool Replace = false);
 /// <summary>Body of <c>PUT .../members/{member}/plugin-settings</c>: <c>config</c> replaces what is
 /// stored; <c>secrets</c> and <c>connections</c> replace it when given and keep it when omitted;
 /// <c>secretValues</c> sets (a string) or clears (null) the member's own value of each field named;
-/// <c>namedSecretValues</c> sets (a string) or removes (null) each named secret given.</summary>
+/// <c>namedSecretValues</c> sets (a string) or removes (null) each named secret given;
+/// <c>tableSecretValues</c> sets (a string) or clears (null) each table secret cell given.</summary>
 public sealed record PluginSettingsChange(
     Dictionary<string, JsonElement>? Config, Dictionary<string, string>? Secrets,
     Dictionary<string, string>? Connections = null,
     Dictionary<string, string?>? SecretValues = null,
-    Dictionary<string, string?>? NamedSecretValues = null);
+    Dictionary<string, string?>? NamedSecretValues = null,
+    Dictionary<string, Dictionary<string, Dictionary<string, string?>>>? TableSecretValues = null);
 
 /// <summary>Body of <c>PUT /api/secrets/{key}</c>: the value, which no answer ever carries.</summary>
 public sealed record SecretSubmission(string? Value);
