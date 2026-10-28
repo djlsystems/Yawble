@@ -39,6 +39,13 @@ function dialogCards(template: string): string[] {
 
 const Scale = /\bos-dialog-(sm|md|lg|xl)\b/g;
 
+/**
+ * A card that picks its step - `:class="wide ? 'os-dialog-xl' : 'os-dialog-md'"` - carries one of
+ * the two at a time, so the choice counts once.
+ */
+const ChosenScale = /\?\s*'(os-dialog-(?:sm|md|lg|xl))'\s*:\s*'os-dialog-(?:sm|md|lg|xl)'/g;
+const oneScalePerChoice = (card: string) => card.replace(ChosenScale, "? '$1'");
+
 describe('the dialog scale', () => {
   const withDialogs = components.filter(({ source }) => source.includes('<q-dialog'));
 
@@ -63,7 +70,7 @@ describe('the dialog scale', () => {
 
       expect(cards.length).toBeGreaterThan(0);
       for (const card of cards) {
-        expect([...card.matchAll(Scale)].length, card).toBe(1);
+        expect([...oneScalePerChoice(card).matchAll(Scale)].length, card).toBe(1);
       }
     });
 

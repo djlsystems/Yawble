@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import type { PluginConfigField, PluginTableColumn, PluginTableRow } from '../api/types';
 import { localTime, wireInstant } from '../lib/localTime';
+import FieldHelp from './FieldHelp.vue';
 import { boundsHint } from '../lib/numberBounds';
 import {
   cellState,
@@ -292,12 +293,13 @@ function href(action: string, row: PluginTableRow): string | null {
               :model-value="draft[column.name] ?? null"
               :options="column.enum ?? []"
               :label="columnLabel(column) + (column.required ? ' *' : '')"
-              :hint="column.description || undefined"
               :error="!!draftProblems[column.name]"
               :error-message="draftProblems[column.name] ?? ''"
               :data-editor-cell="column.name"
               @update:model-value="(value: string) => setCell(column.name, value)"
-            />
+            >
+              <template #append><FieldHelp :text="column.description" /></template>
+            </q-select>
             <q-input
               v-else
               outlined
@@ -307,14 +309,15 @@ function href(action: string, row: PluginTableRow): string | null {
               :type="column.type === 'number' ? 'number' : 'text'"
               :label="columnLabel(column) + (column.required ? ' *' : '')"
               :placeholder="column.default !== null ? String(column.default) : undefined"
-              :hint="hintFor(column)"
               :disable="column.name === shape.key && draftSaved"
               :error="!!draftProblems[column.name]"
               :error-message="draftProblems[column.name] ?? ''"
               spellcheck="false"
               :data-editor-cell="column.name"
               @update:model-value="(value) => setCell(column.name, value === null ? '' : String(value))"
-            />
+            >
+              <template #append><FieldHelp :text="hintFor(column)" /></template>
+            </q-input>
           </template>
 
           <div v-for="column in typedSecretColumns(shape)" :key="column.name" :data-editor-secret="column.name">
