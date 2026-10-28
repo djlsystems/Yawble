@@ -39,13 +39,13 @@ function onKey(event: KeyboardEvent) {
     type="button"
     class="card-arrange-handle"
     :aria-label="`Move ${name}'s card`"
-    title="Drag to move this card; the arrow keys move it a place, Home and End to the ends"
     data-test="card-arrange-handle"
     @pointerdown="board.start($event, member)"
     @keydown="onKey"
     @click.stop
   >
     <slot />
+    <q-tooltip>Drag to move this card.</q-tooltip>
   </button>
   <span v-else class="card-arrange-still"><slot /></span>
 </template>
