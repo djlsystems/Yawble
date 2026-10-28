@@ -12,7 +12,8 @@ namespace Harness.Contracts;
 // needs: who the worker is and whether control takes it, which command was applied, which events
 // control has handled, and a keep-alive.
 //
-// A run's secrets - the redaction set on its start, the set the worker applied, and a terminal's environment -
+// A run's secrets - the redaction set on its start, the set the worker applied, a terminal's environment,
+// and a sign-in browser's saved storage state -
 // are never in a frame in the clear. They travel SEALED: AES-256-GCM under a key made for this one
 // connection from the worker key and both sides' nonces (WorkerFrameCodec.Key), so only a holder of
 // the worker key on this connection can open them.
@@ -213,6 +214,14 @@ public sealed class WorkerFrameCodec
                     Sealed = Seal(new Secrets(applied.Redaction)),
                 };
                 break;
+
+            case EventFrame { Envelope.Event: SignInBrowserSaved { State: not null } saved } @event:
+                frame = @event with
+                {
+                    Envelope = @event.Envelope with { Event = saved with { State = null } },
+                    Sealed = Seal(new Secrets(null, StorageState: saved.State.Json)),
+                };
+                break;
         }
 
         var text = JsonSerializer.Serialize(frame, Json);
@@ -261,6 +270,17 @@ public sealed class WorkerFrameCodec
             case EventFrame { Sealed: { } blob, Envelope.Event: RunCredentialApplied applied } @event:
                 var forEvent = Open(blob);
                 return @event with { Envelope = @event.Envelope with { Event = applied with { Redaction = forEvent.Redaction } }, Sealed = null };
+
+            case EventFrame { Sealed: { } blob, Envelope.Event: SignInBrowserSaved saved } @event:
+                var forSave = Open(blob);
+                return @event with
+                {
+                    Envelope = @event.Envelope with
+                    {
+                        Event = saved with { State = forSave.StorageState is { } state ? new SignInStorageState(state) : null },
+                    },
+                    Sealed = null,
+                };
 
             case CommandFrame { Sealed: not null } or EventFrame { Sealed: not null }:
                 throw new InvalidDataException(UnsealableText);
@@ -318,9 +338,11 @@ public sealed class WorkerFrameCodec
 
     /// <summary>
     /// A run's secrets, written by hand: a redaction set may never be written as JSON by a serializer.
-    /// <see cref="Environment"/> is a terminal's whole environment, which holds its session's key.
+    /// <see cref="Environment"/> is a terminal's whole environment, which holds its session's key;
+    /// <see cref="StorageState"/> a sign-in browser's saved session.
     /// </summary>
-    private sealed record Secrets(ValueRedactor? Redaction, IReadOnlyDictionary<string, string>? Environment = null)
+    private sealed record Secrets(
+        ValueRedactor? Redaction, IReadOnlyDictionary<string, string>? Environment = null, string? StorageState = null)
     {
         public byte[] ToJson()
         {
@@ -335,6 +357,8 @@ public sealed class WorkerFrameCodec
                     foreach (var (name, value) in environment) writer.WriteString(name, value);
                     writer.WriteEndObject();
                 }
+
+                if (StorageState is { } state) writer.WriteString("storageState", state);
 
                 writer.WriteEndObject();
             }
@@ -355,7 +379,9 @@ public sealed class WorkerFrameCodec
                 ? t.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString()!, StringComparer.Ordinal)
                 : null;
 
-            return new Secrets(redaction, environment);
+            var state = root.TryGetProperty("storageState", out var s) ? s.GetString() : null;
+
+            return new Secrets(redaction, environment, state);
         }
 
         private static void Strings(Utf8JsonWriter writer, string name, IEnumerable<string> values)

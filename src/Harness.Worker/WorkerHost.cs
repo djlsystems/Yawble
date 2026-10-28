@@ -41,6 +41,7 @@ public sealed class WorkerHost
     private readonly ILogger? _log;
     private readonly WorkerTerminals? _terminals;
     private readonly WorkerTranscripts? _transcripts;
+    private readonly WorkerSignInBrowsers? _browsers;
 
     private readonly SemaphoreSlim _publish = new(1, 1);
     private long _seq;
@@ -80,6 +81,7 @@ public sealed class WorkerHost
             _terminals = new WorkerTerminals(streaming.Sink, streaming.Pty, streaming.RunAs, e => PublishAsync(e), log, _clock);
             _transcripts = new WorkerTranscripts(
                 streaming.Sink, streaming.RunAs, e => PublishAsync(e), RunEnded, streaming.Environment, log, _clock);
+            _browsers = new WorkerSignInBrowsers(streaming.Sink, e => PublishAsync(e), streaming.BrowsersPath, streaming.SignInProfiles, log);
         }
     }
 
@@ -147,6 +149,10 @@ public sealed class WorkerHost
                 await ApplyAsync(command);
                 break;
 
+            case SignInBrowserCommand command:
+                Apply(command);
+                break;
+
             default:
                 throw new NotSupportedException($"A worker does not take {message.GetType().Name}.");
         }
@@ -194,8 +200,38 @@ public sealed class WorkerHost
         }
     }
 
-    /// <summary>A person's keystrokes for a terminal on this worker, typed as they arrive.</summary>
-    public void Input(StreamInput input) => _terminals?.Input(input);
+    /// <summary>
+    /// A sign-in browser's command. Each runs on its own task: a start answers with frames and an end,
+    /// a save with its event, and nothing behind them waits.
+    /// </summary>
+    private void Apply(SignInBrowserCommand command)
+    {
+        var browsers = _browsers ?? throw new NotSupportedException($"This worker runs no sign-in browsers ({command.GetType().Name}).");
+        switch (command)
+        {
+            case StartSignInBrowser start:
+                browsers.Start(start);
+                break;
+
+            case SaveSignInBrowser save:
+                browsers.Save(save);
+                break;
+
+            case StopSignInBrowser stop:
+                _ = Task.Run(() => browsers.StopAsync(stop.Session), CancellationToken.None);
+                break;
+
+            default:
+                throw new NotSupportedException($"A worker does not take {command.GetType().Name}.");
+        }
+    }
+
+    /// <summary>A person's keystrokes for a terminal on this worker, or their input to a sign-in browser, as they arrive.</summary>
+    public void Input(StreamInput input)
+    {
+        if (_browsers?.Input(input) == true) return;
+        _terminals?.Input(input);
+    }
 
     /// <summary>The terminals open on this worker.</summary>
     public IReadOnlyCollection<string> Terminals => _terminals?.Sessions ?? [];
@@ -205,6 +241,7 @@ public sealed class WorkerHost
     {
         _transcripts?.StopAll();
         if (_terminals is not null) await _terminals.StopAllAsync();
+        if (_browsers is not null) await _browsers.StopAllAsync();
     }
 
     /// <summary>
@@ -435,9 +472,15 @@ public sealed class WorkerHost
 }
 
 /// <summary>
-/// What a worker needs for terminals and the agent's files: where its stream chunks go, the engine a
-/// terminal is spawned with, who the agent runs as, and (for a test) the environment its own
-/// credential variables are read from.
+/// What a worker needs for terminals, the agent's files and sign-in browsers: where its stream chunks
+/// go, the engine a terminal is spawned with, who the agent runs as, (for a test) the environment its
+/// own credential variables are read from, and where Chromium is and its profiles go (null: Playwright's
+/// PLAYWRIGHT_BROWSERS_PATH, and <see cref="WorkerSignInBrowsers.DefaultProfileRoot"/>).
 /// </summary>
 public sealed record WorkerStreaming(
-    IRunStreamSink Sink, IPtyEngine Pty, AgentLaunchUser? RunAs, Func<IDictionary<string, string?>>? Environment = null);
+    IRunStreamSink Sink,
+    IPtyEngine Pty,
+    AgentLaunchUser? RunAs,
+    Func<IDictionary<string, string?>>? Environment = null,
+    string? BrowsersPath = null,
+    string? SignInProfiles = null);

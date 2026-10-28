@@ -57,6 +57,9 @@ public sealed record RunId(ContainerId Member, string Nonce)
 [JsonDerivedType(typeof(FollowTranscript), "followTranscript")]
 [JsonDerivedType(typeof(StopStream), "stopStream")]
 [JsonDerivedType(typeof(ReadAgentFile), "readAgentFile")]
+[JsonDerivedType(typeof(StartSignInBrowser), "startSignInBrowser")]
+[JsonDerivedType(typeof(SaveSignInBrowser), "saveSignInBrowser")]
+[JsonDerivedType(typeof(StopSignInBrowser), "stopSignInBrowser")]
 public abstract record ControlMessage;
 
 /// <summary>A command about one run.</summary>
@@ -215,6 +218,8 @@ public sealed record WorkerEnvelope(WorkerId Worker, long Seq, WorkerEvent Event
 [JsonDerivedType(typeof(TerminalEnded), "terminalEnded")]
 [JsonDerivedType(typeof(TerminalMeasured), "terminalMeasured")]
 [JsonDerivedType(typeof(AgentFileRead), "agentFileRead")]
+[JsonDerivedType(typeof(SignInBrowserSaved), "signInBrowserSaved")]
+[JsonDerivedType(typeof(SignInBrowserEnded), "signInBrowserEnded")]
 public abstract record WorkerEvent;
 
 /// <summary>An event about one run.</summary>
