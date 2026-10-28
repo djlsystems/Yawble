@@ -17,13 +17,14 @@ const where = { team: param('team'), member: param('member'), field: param('fiel
 type State = 'connecting' | 'live' | 'saving' | 'over';
 const state = ref<State>('connecting');
 const size = ref({ width: 1280, height: 800 });
-const frame = ref<string | null>(null);
+const shown = ref(false);
 const address = ref('');
 const title = ref('');
 const notes = ref<string[]>([]);
 const outcome = ref('');
 const error = ref('');
 const screen = ref<HTMLElement | null>(null);
+const canvas = ref<HTMLCanvasElement | null>(null);
 
 let socket: SignInSocket | null = null;
 
@@ -65,10 +66,34 @@ function onMessage(message: SignInMessage) {
   }
 }
 
-function onFrame(jpeg: Blob) {
-  const previous = frame.value;
-  frame.value = URL.createObjectURL(jpeg);
-  if (previous) URL.revokeObjectURL(previous);
+/**
+ * Each frame is decoded and DRAWN ON A CANVAS, never shown through a `blob:` URL: the page's
+ * Content-Security-Policy allows images from 'self' only, and needs no exception for this. A frame
+ * decoded after a newer one is dropped.
+ */
+let framesIn = 0;
+let framesDrawn = 0;
+async function onFrame(jpeg: Blob) {
+  const n = ++framesIn;
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(jpeg);
+  } catch {
+    return;
+  }
+  const target = canvas.value;
+  if (n < framesDrawn || !target) {
+    bitmap.close?.();
+    return;
+  }
+  framesDrawn = n;
+  if (target.width !== bitmap.width || target.height !== bitmap.height) {
+    target.width = bitmap.width;
+    target.height = bitmap.height;
+  }
+  target.getContext('2d')?.drawImage(bitmap, 0, 0);
+  bitmap.close?.();
+  shown.value = true;
 }
 
 function rect() {
@@ -126,7 +151,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   socket?.dispose();
-  if (frame.value) URL.revokeObjectURL(frame.value);
 });
 </script>
 
@@ -182,8 +206,8 @@ onBeforeUnmount(() => {
       @paste="paste"
       @contextmenu.prevent
     >
-      <img v-if="frame" :src="frame" alt="The sign-in browser" draggable="false" />
-      <div v-else class="sign-in-waiting flex flex-center">Starting the browser…</div>
+      <canvas v-show="shown" ref="canvas" class="sign-in-frame" role="img" aria-label="The sign-in browser" />
+      <div v-if="!shown" class="sign-in-waiting flex flex-center">Starting the browser…</div>
     </div>
   </div>
 </template>
@@ -208,7 +232,7 @@ onBeforeUnmount(() => {
   outline: 2px solid var(--q-primary);
 }
 
-.sign-in-screen img {
+.sign-in-screen canvas {
   display: block;
   width: 100%;
   height: 100%;
