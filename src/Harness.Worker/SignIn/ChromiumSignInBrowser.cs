@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Channels;
 using Harness.Contracts;
 
 namespace Harness.Host;
@@ -41,12 +42,24 @@ public sealed class ChromiumSignInBrowser : IAsyncDisposable
     private Task? _disposing;
     private long _n;
 
+    /// <summary>
+    /// Chunks leave in the order they are numbered: control drops a chunk numbered below one it has
+    /// already taken, so a notice overtaken by a frame would be lost.
+    /// </summary>
+    private readonly Channel<StreamChunk> _outbox = Channel.CreateUnbounded<StreamChunk>();
+    private readonly Lock _outboxGate = new();
+    private readonly Task _sending;
+
+    /// <summary>Frames waiting beyond this are dropped: the next frame shows the screen as it is.</summary>
+    private const int MaxWaiting = 8;
+
     private ChromiumSignInBrowser(string session, SignInBrowserLaunch launch, Func<StreamChunk, Task<bool>> send)
     {
         _session = session;
         _launch = launch;
         _hosts = new SignInHosts(launch.Hosts.Append(new Uri(launch.StartUrl).Host));
         _send = send;
+        _sending = Task.Run(SendAllAsync);
     }
 
     /// <summary>The hosts this browser may go to, and the providers it has admitted so far.</summary>
@@ -331,11 +344,16 @@ public sealed class ChromiumSignInBrowser : IAsyncDisposable
                 if (Active() == navigated) Notice(PageNotice(navigated));
                 break;
 
+            case "Page.loadEventFired":
+                // Chromium does not always tell a title that came with the page: ask once it has loaded.
+                if (_pages.Values.FirstOrDefault(pg => pg.Session == session) is { } loaded) _ = RetitleAsync(loaded);
+                break;
+
             case "Page.screencastFrame":
                 _cdp?.Post("Page.screencastFrameAck", new { sessionId = p.GetProperty("sessionId").GetInt32() }, session);
                 if (Active() is { } top && top.Session == session)
                 {
-                    _ = Send(new StreamChunk(_session, Interlocked.Increment(ref _n), Bytes: Convert.FromBase64String(p.GetProperty("data").GetString()!)));
+                    Enqueue(Convert.FromBase64String(p.GetProperty("data").GetString()!), null);
                 }
 
                 break;
@@ -438,29 +456,61 @@ public sealed class ChromiumSignInBrowser : IAsyncDisposable
         if (string.IsNullOrEmpty(title)) return null;
 
         var bare = url.Contains("://", StringComparison.Ordinal) ? url[(url.IndexOf("://", StringComparison.Ordinal) + 3)..] : url;
-        return title == url || title == bare || url.EndsWith(title, StringComparison.Ordinal) ? null : title;
+        // Chromium's own title for an untitled page is its address, scheme dropped, often cut short.
+        return title == url || bare.StartsWith(title, StringComparison.Ordinal) || url.EndsWith(title, StringComparison.Ordinal) ? null : title;
+    }
+
+    private async Task RetitleAsync(Page page)
+    {
+        if (_cdp is not { } cdp) return;
+        try
+        {
+            using var bound = new CancellationTokenSource(CloseBound);
+            var info = await cdp.SendAsync("Target.getTargetInfo", new { targetId = page.Target }, ct: bound.Token);
+            var title = Title(info.GetProperty("targetInfo"));
+            if (title == page.Title) return;
+
+            page.Title = title;
+            if (Active() == page) Notice(PageNotice(page));
+        }
+        catch (Exception exception) when (exception is IOException or CdpException or OperationCanceledException or KeyNotFoundException)
+        {
+        }
     }
 
     private static SignInBrowserNotice PageNotice(Page page) =>
         new("page", page.Url is { Scheme: "http" or "https" } url ? url.GetLeftPart(UriPartial.Path) : null, page.Title);
 
     private void Notice(SignInBrowserNotice notice) =>
-        _ = Send(new StreamChunk(_session, Interlocked.Increment(ref _n), Text: JsonSerializer.Serialize(notice, NoticeJson)));
+        Enqueue(null, JsonSerializer.Serialize(notice, NoticeJson));
 
     private static readonly JsonSerializerOptions NoticeJson = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
     };
 
-    /// <summary>A frame or notice that cannot be sent now is dropped: the next frame shows the screen as it is.</summary>
-    private async Task Send(StreamChunk chunk)
+    /// <summary>Numbers a frame or notice and queues it. A frame is dropped while too many wait; a notice never is.</summary>
+    private void Enqueue(byte[]? frame, string? text)
     {
-        try
+        lock (_outboxGate)
         {
-            await _send(chunk);
+            if (frame is not null && _outbox.Reader.Count >= MaxWaiting) return;
+            _outbox.Writer.TryWrite(new StreamChunk(_session, ++_n, Text: text, Bytes: frame));
         }
-        catch (Exception)
+    }
+
+    /// <summary>Sends each chunk in turn. One that cannot be sent is dropped: the next frame shows the screen as it is.</summary>
+    private async Task SendAllAsync()
+    {
+        await foreach (var chunk in _outbox.Reader.ReadAllAsync())
         {
+            try
+            {
+                await _send(chunk);
+            }
+            catch (Exception)
+            {
+            }
         }
     }
 
@@ -475,6 +525,7 @@ public sealed class ChromiumSignInBrowser : IAsyncDisposable
 
     private async Task DisposeOnceAsync()
     {
+        _outbox.Writer.TryComplete();
         if (_cdp is { } cdp)
         {
             try
@@ -515,6 +566,14 @@ public sealed class ChromiumSignInBrowser : IAsyncDisposable
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
             }
+        }
+
+        try
+        {
+            await _sending.WaitAsync(CloseBound);
+        }
+        catch (TimeoutException)
+        {
         }
 
         End("The browser closed.");

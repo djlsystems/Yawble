@@ -190,7 +190,8 @@ public sealed class SignInPageTests : IAsyncLifetime
 
         var started = await Until("started");
         Assert.Equal(_rows.SiteUrl, started.GetProperty("site").GetString());
-        await Until("page");
+        // The site's own title: the page has loaded, so its cookie and local storage are set.
+        while ((await Until("page")).TryGetProperty("title", out var title) is false || title.GetString() != "Site") { }
         while (frames == 0) await Next();
 
         await socket.SendAsync(Encoding.UTF8.GetBytes("""{"type":"mouse","event":"mouseMoved","x":10,"y":10}"""), WebSocketMessageType.Text, true, Ct);
