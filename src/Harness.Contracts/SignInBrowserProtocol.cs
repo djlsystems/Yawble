@@ -209,14 +209,21 @@ public static class SignInSessionValue
         return (state.GetRawText(), identity);
     }
 
-    /// <summary>The shortest part of a session that is redacted on its own: shorter ones are words like <c>true</c> or <c>dark</c>.</summary>
+    /// <summary>
+    /// The shortest whole cookie or local-storage value that is redacted on its own: a short code or PIN
+    /// is a secret, while values of 1-3 characters (<c>1</c>, <c>yes</c>) would mangle every output.
+    /// </summary>
+    public const int MinimumValueLength = 4;
+
+    /// <summary>The shortest string inside a local-storage value that is JSON that is redacted on its own: shorter ones are words like <c>dark</c>.</summary>
     public const int MinimumPartLength = 8;
 
     /// <summary>
     /// THE SECRET PARTS OF A SAVED SESSION, each redacted on its own as well as the whole value: every
-    /// cookie's value (and its URL-decoded form), every local-storage value, and every string inside
-    /// a local-storage value that is JSON - a plugin that prints one cookie must not leak it. Parts
-    /// shorter than <see cref="MinimumPartLength"/> are left out. Nothing for a value that is not a session.
+    /// cookie's value and every local-storage value (and their URL-decoded forms) of at least
+    /// <see cref="MinimumValueLength"/> characters, and every string inside a local-storage value that
+    /// is JSON of at least <see cref="MinimumPartLength"/> - a plugin that prints one cookie must not
+    /// leak it. Nothing for a value that is not a session.
     /// </summary>
     public static IReadOnlyList<string> SecretParts(string value)
     {
@@ -231,14 +238,14 @@ public static class SignInSessionValue
         }
 
         var parts = new List<string>();
-        void Add(string? part)
+        void Add(string? part, int minimum)
         {
-            if (part is not { Length: >= MinimumPartLength }) return;
+            if (part is null || part.Length < minimum) return;
             parts.Add(part);
             try
             {
                 var decoded = Uri.UnescapeDataString(part.Replace('+', ' '));
-                if (decoded != part && decoded.Length >= MinimumPartLength) parts.Add(decoded);
+                if (decoded != part && decoded.Length >= minimum) parts.Add(decoded);
             }
             catch (UriFormatException)
             {
@@ -250,7 +257,7 @@ public static class SignInSessionValue
             switch (element.ValueKind)
             {
                 case JsonValueKind.String:
-                    Add(element.GetString());
+                    Add(element.GetString(), MinimumPartLength);
                     break;
                 case JsonValueKind.Object:
                     foreach (var property in element.EnumerateObject()) Leaves(property.Value);
@@ -267,7 +274,7 @@ public static class SignInSessionValue
         {
             foreach (var cookie in cookies.EnumerateArray())
             {
-                if (cookie.ValueKind == JsonValueKind.Object && cookie.TryGetProperty("value", out var v) && v.ValueKind == JsonValueKind.String) Add(v.GetString());
+                if (cookie.ValueKind == JsonValueKind.Object && cookie.TryGetProperty("value", out var v) && v.ValueKind == JsonValueKind.String) Add(v.GetString(), MinimumValueLength);
             }
         }
 
@@ -280,7 +287,7 @@ public static class SignInSessionValue
                 {
                     if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty("value", out var v) || v.ValueKind != JsonValueKind.String) continue;
                     var text = v.GetString()!;
-                    Add(text);
+                    Add(text, MinimumValueLength);
                     if (text.Length > 0 && text[0] is '{' or '[')
                     {
                         try
