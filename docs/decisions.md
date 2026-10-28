@@ -81,7 +81,7 @@ own sandbox on.
 - **The display is private.** Each browser gets its own Xvfb (`-nolisten tcp`), which accepts only
   the holder of a fresh cookie kept in the browser's 0700 folder, so no agent can watch or type.
 - **One profile per row**, `/data/sign-in-profiles/<member hash>/<row hash>/`, `worker:worker` 0700
-  all the way down; reused on every sign-in for the row, one browser at a time (a file lock beside
+  all the way down (`harness:harness` in the one-container `all` role, whose host runs the browsers); reused on every sign-in for the row, one browser at a time (a file lock beside
   it), and removed with the row, the member or its team (`DeleteSignInProfiles`, sent to every
   connected worker).
 

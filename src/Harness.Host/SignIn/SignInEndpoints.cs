@@ -11,7 +11,7 @@ namespace Harness.Host;
 
 /// <summary>
 /// THE SIGN-IN PAGE'S ONE SOCKET. A row's Sign in link opens the page, and the page opens this: the
-/// platform starts a sandboxed headless Chromium for that member's row on a worker and relays it - its
+/// platform starts a sandboxed Google Chrome for that member's row on a worker and relays it - its
 /// screen as binary JPEG frames, notices as JSON text - while the person's mouse and keys come back as
 /// JSON text, with <c>{"type":"done"}</c> to save and close and <c>{"type":"cancel"}</c> to close.
 /// </summary>

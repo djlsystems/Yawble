@@ -1,5 +1,5 @@
 /**
- * THE SIGN-IN PAGE'S SOCKET: a member's table row signed in to by the person, in a headless Chromium
+ * THE SIGN-IN PAGE'S SOCKET: a member's table row signed in to by the person, in a Google Chrome
  * the platform runs (see `SignInEndpoints`). The screen arrives as binary JPEG frames and notices as
  * JSON text; the person's mouse and keys go back as JSON text, `{"type":"done"}` to keep the session
  * and close, `{"type":"cancel"}` to close. The session itself never crosses this socket: a save

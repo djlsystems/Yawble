@@ -51,8 +51,9 @@
 # 0750, files lose group write, other and setuid/setgid and gain group read, the execute bits kept.
 # An agent that could write here could replace the browser every person signs in through.
 # sign-in-profiles holds one browser profile per plugin member's table row (the sign-in page's): a
-# signed-in session of a person's, so worker's alone - worker:worker, directories 0700 and files
-# without group or other bits, all the way down. Both are created when missing.
+# signed-in session of a person's, so the browsers' user's alone - worker:worker (harness:harness in
+# `all`, where the host runs them), directories 0700 and files without group or other bits, all the
+# way down. Both are created when missing.
 # tmp holds each member's TMPDIR (MemberTemp), on the volume so an engine's tmpfs /tmp never holds
 # a member's temporary files in memory. It is created when missing and is agent's like the rest.
 # Every other top-level entry - teams, documents, agent-home, npm-global, bin, the tool caches, the
@@ -97,6 +98,10 @@ agent_uid="${HARNESS_AGENT_UID:-10002}"
 agent_gid="${HARNESS_AGENT_GID:-10002}"
 worker_uid="${HARNESS_WORKER_UID:-10003}"
 worker_gid="${HARNESS_WORKER_GID:-10003}"
+# Who runs the sign-in browsers, and so owns their profiles: a worker's user, or in `all` the host's
+# own (its worker is in-process), which the entrypoint says.
+sign_in_uid="${HARNESS_SIGN_IN_UID:-$worker_uid}"
+sign_in_gid="${HARNESS_SIGN_IN_GID:-$worker_gid}"
 
 log() { echo "volume: $*"; }
 
@@ -144,7 +149,7 @@ own_browser() { # path
 }
 
 own_worker() { # path
-  set_owner "$1" "$worker_uid" "$worker_gid"
+  set_owner "$1" "$sign_in_uid" "$sign_in_gid"
   find "$1" -type d ! -perm 700 -print -exec chmod u=rwx,go=,ug-s {} +
   find "$1" ! -type d ! -type l -perm /6077 -print -exec chmod go=,ug-s {} +
 }

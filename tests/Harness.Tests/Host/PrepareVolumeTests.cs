@@ -1083,6 +1083,14 @@ public sealed class PrepareVolumeTests : IDisposable
         Assert.Equal("700", Mode("sign-in-profiles"));
         Assert.Equal("700", Mode("sign-in-profiles/m0/r0/Default"));
         Assert.Equal("600", Mode("sign-in-profiles/m0/r0/Default/Cookies"));
+
+        // In `all` the host runs the browsers itself, and the entrypoint says so: they are the host's.
+        File.Delete(_chownLog);
+        Run("ownership", new Dictionary<string, string> { ["HARNESS_SIGN_IN_UID"] = "10001", ["HARNESS_SIGN_IN_GID"] = "10001" });
+        Assert.Equal("10001:10001", ChownedPaths()[Path.Combine(_data, "sign-in-profiles/m0/r0/Default/Cookies")]);
+        var all = Branches(File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "container-entrypoint.sh")))["all"].Split('\n').Select(l => l.Trim()).ToList();
+        var said = all.IndexOf("export HARNESS_SIGN_IN_UID=\"${HARNESS_HOST_UID:-10001}\" HARNESS_SIGN_IN_GID=\"${HARNESS_HOST_GID:-10001}\"");
+        Assert.True(said >= 0 && said < all.IndexOf("prepare_volume"), string.Join('\n', all));
     }
 
     [Fact]

@@ -179,6 +179,8 @@ case "$role" in
         -- /usr/bin/dotnet /app/Harness.Host.dll
     ;;
   *)
+    # The sign-in browsers run in this host, as harness: their profiles are harness's (prepare-volume.sh).
+    export HARNESS_SIGN_IN_UID="${HARNESS_HOST_UID:-10001}" HARNESS_SIGN_IN_GID="${HARNESS_HOST_GID:-10001}"
     prepare_volume
     # As root, before anything drops privileges: agents cannot apt-get, this is where a person's list is
     # installed. The package lists are fetched per start and removed again so the layer stays small.

@@ -5,7 +5,7 @@ import { connectSignIn, keyInput, mouseInput, pointAt, type SignInMessage, type 
 
 /**
  * THE SIGN-IN PAGE, `#/teams/<team>/members/<member>/sign-in/<field>/<row>`: a table row's Sign in
- * link opens it. The platform runs a headless Chromium for that row, starting at the entry's Site
+ * link opens it. The platform runs a Google Chrome for that row, starting at the entry's Site
  * URL, and this page shows its screen and sends it the person's mouse and keys. Done keeps the
  * browser's session as the row's masked secret and closes the browser; Cancel or leaving the page
  * closes it and keeps nothing. The session is never shown here.
