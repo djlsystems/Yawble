@@ -220,7 +220,7 @@ function href(action: string, row: PluginTableRow): string | null {
           <thead>
             <tr>
               <th v-for="column in shown" :key="column.name" scope="col">{{ columnLabel(column) }}</th>
-              <th scope="col"><span class="sr-only">Actions</span></th>
+              <th scope="col" class="plugin-table-actions"><span class="sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody>
@@ -241,7 +241,7 @@ function href(action: string, row: PluginTableRow): string | null {
                   @update:model-value="(value: boolean) => toggle(index, column.name, value)"
                 />
                 <span v-else-if="column.type === 'secret'" class="os-text-muted" data-table-secret-cell>{{ secretCell(row, column) }}</span>
-                <span v-else class="plugin-table-text" :title="cellText(row[column.name])">{{ cellText(row[column.name]) }}</span>
+                <span v-else class="plugin-table-text" :title="cellText(row[column.name] ?? column.default)">{{ cellText(row[column.name] ?? column.default) }}</span>
               </td>
               <td class="plugin-table-actions" data-label="">
                 <template v-for="action in rowActionsFor(shape, row, isSaved(row))" :key="action.action">
@@ -291,7 +291,7 @@ function href(action: string, row: PluginTableRow): string | null {
               dense
               :model-value="draft[column.name] ?? null"
               :options="column.enum ?? []"
-              :label="columnLabel(column)"
+              :label="columnLabel(column) + (column.required ? ' *' : '')"
               :hint="column.description || undefined"
               :error="!!draftProblems[column.name]"
               :error-message="draftProblems[column.name] ?? ''"
@@ -410,6 +410,14 @@ function href(action: string, row: PluginTableRow): string | null {
   text-align: right;
 }
 
+/* WIDE: the row's buttons stay in view however far a wide table scrolls. */
+.plugin-table-grid .plugin-table-actions {
+  position: sticky;
+  right: 0;
+  background: var(--os-surface);
+  box-shadow: -6px 0 6px -6px rgb(0 0 0 / 25%);
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -459,7 +467,9 @@ function href(action: string, row: PluginTableRow): string | null {
     word-break: break-word;
   }
 
-  .plugin-table-actions {
+  .plugin-table-grid .plugin-table-actions {
+    position: static;
+    box-shadow: none;
     justify-content: flex-end;
   }
 
