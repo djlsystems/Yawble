@@ -53,19 +53,24 @@ public static partial class SignInEndpoints
             }
 
             var (found, _, refusal) = await PluginEndpoints.PluginMemberAsync(teams, plugins, team, member, ct);
+            if (refusal is IStatusCodeHttpResult { StatusCode: StatusCodes.Status404NotFound } && context.WebSockets.IsWebSocketRequest)
+            {
+                // A member the team does not have (a stale link) is told so on the page's socket, as a missing row is.
+                await RefuseAsync(context, NoSuchMemberText(team, member), ct);
+                return Results.Empty;
+            }
+
             if (refusal is not null) return refusal;
 
             var id = new ContainerId(found!.Team, found.Name);
             if (await rows.EntryAsync(id, field, row, ct) is not { } entry)
             {
                 // A row that is there but cannot be signed in to (inactive, not interactive, no Site URL),
-                // or one the settings no longer have (a stale link): the page is told why on its socket,
-                // and no browser starts. Anything but the socket is still answered 404.
+                // or a row or table the settings no longer have (a stale link): the page is told why on its
+                // socket, and no browser starts. Anything but the socket is still answered 404.
                 if (await rows.RefusalAsync(id, field, row, ct) is { } why && context.WebSockets.IsWebSocketRequest)
                 {
-                    using var refused = await context.WebSockets.AcceptWebSocketAsync();
-                    await SendAsync(refused, new { kind = "ended", cause = "refused", reason = why }, ct);
-                    await CloseAsync(refused);
+                    await RefuseAsync(context, why, ct);
                     return Results.Empty;
                 }
 
@@ -95,6 +100,18 @@ public static partial class SignInEndpoints
             .ExcludeFromDescription()
             .HumansOnly();
     }
+
+    /// <summary>Accepts the page's socket only to say why no browser starts, then closes it.</summary>
+    private static async Task RefuseAsync(HttpContext context, string why, CancellationToken ct)
+    {
+        using var refused = await context.WebSockets.AcceptWebSocketAsync();
+        await SendAsync(refused, new { kind = "ended", cause = "refused", reason = why }, ct);
+        await CloseAsync(refused);
+    }
+
+    /// <summary>What a link to a member the team does not have is told.</summary>
+    public static string NoSuchMemberText(string team, string member) =>
+        $"Team '{team}' has no member '{member}': it may have been renamed or removed. Open Sign in again from the member's settings.";
 
     /// <summary>
     /// The person's languages, as the page sends them (<c>?lang=</c>, its <c>navigator.languages</c>

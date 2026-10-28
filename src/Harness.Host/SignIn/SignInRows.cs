@@ -26,8 +26,8 @@ public interface ISignInRows
 
     /// <summary>
     /// Why <paramref name="row"/> of a sign-in table is not an entry - inactive, not <c>interactive</c>,
-    /// no http(s) Site URL - as a sentence for the person; null when it is one, or when there is no
-    /// such row or table to say anything about.
+    /// no http(s) Site URL, or no such row or sign-in table (a stale link) - as a sentence for the
+    /// person; null when it is one.
     /// </summary>
     Task<string?> RefusalAsync(ContainerId member, string field, string row, CancellationToken ct = default) =>
         Task.FromResult<string?>(null);
@@ -68,6 +68,10 @@ public sealed class PluginSignInRows(
     public static string NoSuchRowText(string row) =>
         $"This member's settings have no row '{row}': it may have been renamed or removed. Open Sign in again from the member's settings.";
 
+    /// <summary>What a link to a table the member's settings do not have (or that has no sign-in) is told.</summary>
+    public static string NoSuchTableText(string field) =>
+        $"This member's settings have no sign-in table '{field}': it may have been renamed or removed. Open Sign in again from the member's settings.";
+
     public async Task<SignInEntry?> EntryAsync(ContainerId member, string field, string row, CancellationToken ct = default)
     {
         if (await ManifestAsync(member, ct) is not { } found) return null;
@@ -107,12 +111,12 @@ public sealed class PluginSignInRows(
 
     /// <summary>
     /// The sign-in entry <paramref name="row"/>, or why that row of a sign-in table is not one - also
-    /// when the table has no such row (a stale link). Both are null when there is no such sign-in table.
+    /// when the table has no such row, or there is no such sign-in table (a stale link).
     /// </summary>
     private static (SignInEntry? Entry, string? Refusal) Find(PluginManifest manifest, PluginMemberSettings stored, string field, string row)
     {
-        if (!manifest.Config.TryGetValue(field, out var declared) || declared.Table is not { } table) return (null, null);
-        if (table.RowActions.FirstOrDefault(a => a.Action == "sign-in") is not { } action) return (null, null);
+        if (!manifest.Config.TryGetValue(field, out var declared) || declared.Table is not { } table) return (null, NoSuchTableText(field));
+        if (table.RowActions.FirstOrDefault(a => a.Action == "sign-in") is not { } action) return (null, NoSuchTableText(field));
         if (table.Row(stored.Config.TryGetValue(field, out var rows) ? rows : null, row) is not { } found) return (null, NoSuchRowText(row));
 
         var name = Text(found, table.Key) is { Length: > 0 } named ? named : row;

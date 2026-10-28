@@ -218,6 +218,44 @@ public sealed class SignInRowsTests : IAsyncLifetime
         Assert.Null(Services.GetRequiredService<SignInSessions>().Of(person));
     }
 
+    [Theory]
+    [InlineData("NoSuchMember", "entries")]
+    [InlineData("Creds", "nosuchtable")]
+    public async Task Opening_a_member_or_table_that_is_not_there_says_so_plainly_and_starts_no_browser(string member, string field)
+    {
+        // A stale or mistyped link: the member or its table was renamed or removed (D15).
+        using var login = _factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false, AllowAutoRedirect = false });
+        var answer = await login.PostAsJsonAsync("/api/auth/login", new { email = Email, password = Password }, Ct);
+        answer.EnsureSuccessStatusCode();
+        var cookie = string.Join("; ", answer.Headers.GetValues("Set-Cookie").Select(c => c.Split(';')[0]));
+        var path = $"/api/teams/{_team}/members/{member}/sign-in/{field}/site-admin";
+
+        var client = _factory.Server.CreateWebSocketClient();
+        client.ConfigureRequest = request => request.Headers.Cookie = cookie;
+        using var socket = await client.ConnectAsync(new Uri(_factory.Server.BaseAddress, path), Ct);
+
+        var buffer = new byte[64 * 1024];
+        var first = await socket.ReceiveAsync(buffer, Ct);
+        Assert.Equal(WebSocketMessageType.Text, first.MessageType);
+        var ended = JsonDocument.Parse(Encoding.UTF8.GetString(buffer, 0, first.Count)).RootElement;
+        Assert.Equal("ended", ended.GetProperty("kind").GetString());
+        Assert.Equal("refused", ended.GetProperty("cause").GetString());
+        Assert.Equal(
+            member == "Creds" ? PluginSignInRows.NoSuchTableText(field) : SignInEndpoints.NoSuchMemberText(_team, member),
+            ended.GetProperty("reason").GetString());
+        Assert.Equal(WebSocketMessageType.Close, (await socket.ReceiveAsync(buffer, Ct)).MessageType);
+
+        // No browser: no session was started for the person.
+        var person = (await Services.GetRequiredService<IUserStore>().FindAsync(Email, Ct))!.Id;
+        Assert.Null(Services.GetRequiredService<SignInSessions>().Of(person));
+
+        // Plain HTTP is still a 404, as documented.
+        Assert.Equal(HttpStatusCode.NotFound, (await login.SendAsync(new HttpRequestMessage(HttpMethod.Get, path)
+        {
+            Headers = { { "Cookie", cookie } },
+        }, Ct)).StatusCode);
+    }
+
     [Fact]
     public async Task A_kept_session_is_the_rows_masked_secret_cell_never_answered_and_reaches_the_next_run_redacted()
     {
