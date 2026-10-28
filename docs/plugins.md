@@ -1116,17 +1116,30 @@ other secret cell.
   removes the row cannot cross it. A person's save can only clear the cell.
 
 - **Where it may go.** Top-level navigation reaches the entry's own hosts, and other hosts only as a
-  sign-in flow passes through them (an OAuth-, OpenID- or SAML-shaped step, then that provider's own
-  pages); each such host is recorded as a provider. Anything else is refused and the page says so.
-  What is saved is pruned to the entry's hosts plus the providers the person actually passed through.
+  sign-in flow that STARTS ON THE ENTRY passes through them: an OAuth-, OpenID-, SAML- or
+  WS-Federation-shaped step from an entry host (a link, a form or the entry server's redirect), then
+  that provider's server redirects in the same chain. Each such host is recorded as a provider. A link
+  or a redirect the person sets off from a provider's page to a host not yet admitted is refused like
+  any other host; a provider that hops between hosts of its own that way needs them in the row's
+  `hosts`. A refused page is not opened: the browser stays on the page it was on, alive, and the page
+  says why. What is saved is pruned to the entry's hosts plus the providers the person actually passed
+  through: their cookies, and the local storage of each such origin the person visited, not only the
+  one open at Done.
+- **Redacted part by part.** Besides the whole value, each cookie value, each local-storage value and
+  each string inside a JSON local-storage value (8 characters or more) joins the run's redaction set,
+  so a plugin that prints one cookie does not leak it.
 - **Limits.** 10 minutes without input closes the browser with nothing saved. One live sign-in per
   person: opening another **replaces** the first, whose page says it was closed. The page's socket
   (`/api/teams/{team}/members/{member}/sign-in/{field}/{row}`) is humans-only, like every route that
   sets a member's secret; an agent's, a Manager's or the Concierge's key is refused before anything
-  starts. A row that is missing, inactive or not `interactive` answers 404.
+  starts. A row that is missing, inactive or not `interactive` answers 404, and the table shows no
+  Sign in link for one that is inactive or has no `http(s)` Site URL. The page is told why a browser
+  closed (replaced, idle, saved) before its socket closes.
 - **Never shown.** The saved state crosses from the worker to control only sealed, is never sent to
   the page (a save answers the hosts kept and the providers among them) and never logged. Page
   addresses are reported by origin and path only.
+- **Shown on a canvas.** Each JPEG frame is decoded and drawn on a `<canvas>`, so the page's
+  Content-Security-Policy (`img-src 'self'`) needs no `blob:` exception.
 - **The browser is a person's Chrome, as the site sees it.** Google Chrome stable (not a test or
   headless build), run headed on a virtual screen of its own on a worker, with its own sandbox on:
   nothing says Headless, `navigator.webdriver` is not true, there is no automation bar, the user
