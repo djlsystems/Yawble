@@ -29,11 +29,35 @@ export interface SignInSocket {
   dispose: () => void;
 }
 
-/** The socket's address for a member's row: `/api/teams/<team>/members/<member>/sign-in/<field>/<row>`. */
-export function signInSocketUrl(team: string, member: string, field: string, row: string, href: string): URL {
+/** The person's own locale, which the sign-in browser takes so the site sees it: languages and IANA time zone. */
+export interface SignInLocale {
+  languages: readonly string[];
+  timeZone: string;
+}
+
+/** This browser's locale: `navigator.languages` and the `Intl` time zone. */
+export function personLocale(): SignInLocale {
+  const languages = navigator.languages?.length ? navigator.languages : [navigator.language].filter(Boolean);
+  return { languages, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone ?? '' };
+}
+
+/**
+ * The socket's address for a member's row: `/api/teams/<team>/members/<member>/sign-in/<field>/<row>`,
+ * with the person's languages (`lang`, comma-joined) and time zone (`tz`) when given.
+ */
+export function signInSocketUrl(
+  team: string,
+  member: string,
+  field: string,
+  row: string,
+  href: string,
+  locale?: SignInLocale,
+): URL {
   const path = [team, 'members', member, 'sign-in', field, row].map(encodeURIComponent).join('/');
   const url = new URL(`/api/teams/${path}`, href);
   url.protocol = url.protocol.replace('http', 'ws');
+  if (locale?.languages.length) url.searchParams.set('lang', locale.languages.slice(0, 10).join(','));
+  if (locale?.timeZone) url.searchParams.set('tz', locale.timeZone);
   return url;
 }
 
@@ -41,7 +65,9 @@ export function connectSignIn(
   where: { team: string; member: string; field: string; row: string },
   handlers: SignInHandlers,
 ): SignInSocket {
-  const socket = new WebSocket(signInSocketUrl(where.team, where.member, where.field, where.row, window.location.href));
+  const socket = new WebSocket(
+    signInSocketUrl(where.team, where.member, where.field, where.row, window.location.href, personLocale()),
+  );
   socket.binaryType = 'blob';
 
   socket.addEventListener('message', (event: MessageEvent<Blob | string>) => {

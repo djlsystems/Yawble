@@ -44,6 +44,26 @@ describe('the sign-in socket', () => {
     expect(signInSocketUrl('a b', 'm', 'f', 'r', 'http://h/').pathname).toBe('/api/teams/a%20b/members/m/sign-in/f/r');
   });
 
+  it('carries the person’s languages and time zone, so the browser the site sees has their locale', () => {
+    const url = signInSocketUrl('T', 'M', 'entries', 'r1', 'https://h/', {
+      languages: ['de-DE', 'de', 'en-US'],
+      timeZone: 'Europe/Berlin',
+    });
+    expect(url.searchParams.get('lang')).toBe('de-DE,de,en-US');
+    expect(url.searchParams.get('tz')).toBe('Europe/Berlin');
+  });
+
+  it('opens the socket with this browser’s own languages and time zone', () => {
+    connectSignIn({ team: 'T', member: 'M', field: 'entries', row: 'r1' }, {
+      onMessage: () => {},
+      onFrame: () => {},
+      onClose: () => {},
+    });
+    const url = FakeSocket.opened[0]!.url;
+    expect(url.searchParams.get('lang')).toBe(navigator.languages.join(','));
+    expect(url.searchParams.get('tz')).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  });
+
   it('hands frames and notices apart, and sends done and cancel as commands', () => {
     const messages: unknown[] = [];
     const frames: unknown[] = [];
