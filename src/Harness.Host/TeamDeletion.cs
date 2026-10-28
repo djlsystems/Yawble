@@ -176,7 +176,8 @@ public sealed class TeamDeletion(
     string? agentHome = null,
     IReadOnlyList<string>? sessionFolders = null,
     IWorkspaceFileChangeStore? fileChanges = null,
-    IAgentStepStore? runSteps = null)
+    IAgentStepStore? runSteps = null,
+    SignInProfileCleanup? signInProfiles = null)
 {
     private readonly FolderRemoval _removal = removal ?? new FolderRemoval();
 
@@ -270,6 +271,9 @@ public sealed class TeamDeletion(
                 // AgentEnvironment, which mints with `id.ToString()`. A live credential for a
                 // container nobody can see must not outlive the team.
                 await principals.RevokeAsync(id.ToString(), ct);
+
+                // A plugin member's sign-in browser profiles, on the workers: each holds a person's session.
+                if (signInProfiles is not null) await signInProfiles.ForgetMemberAsync(id, ct);
             }
             catch (Exception ex)
             {

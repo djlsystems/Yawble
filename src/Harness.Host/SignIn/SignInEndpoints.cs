@@ -67,7 +67,7 @@ public static partial class SignInEndpoints
             SignInSession session;
             try
             {
-                session = await sessions.StartAsync(caller.Id, id, field, row, entry, ct);
+                session = await sessions.StartAsync(caller.Id, id, field, row, entry, ct, Languages(context), TimeZone(context));
             }
             catch (InvalidOperationException exception)
             {
@@ -84,6 +84,22 @@ public static partial class SignInEndpoints
             .ExcludeFromDescription()
             .HumansOnly();
     }
+
+    /// <summary>
+    /// The person's languages, as the page sends them (<c>?lang=</c>, its <c>navigator.languages</c>
+    /// joined by commas): language tags only, at most 10. The worker checks them again.
+    /// </summary>
+    public static IReadOnlyList<string> Languages(HttpContext context) =>
+        [.. (context.Request.Query["lang"].ToString() ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(l => l.Length <= 35 && LanguageTag().IsMatch(l))
+            .Take(10)];
+
+    /// <summary>The person's IANA time zone, as the page sends it (<c>?tz=</c>), or null when it is not one.</summary>
+    public static string? TimeZone(HttpContext context) =>
+        context.Request.Query["tz"].ToString() is { Length: > 0 and <= 64 } zone && ZoneName().IsMatch(zone) && !zone.Contains("..", StringComparison.Ordinal)
+            ? zone
+            : null;
 
     /// <summary>The screen to the page and the page's input to the browser, until either side ends.</summary>
     private static async Task PumpAsync(WebSocket socket, SignInSession session, CredentialActor actor, CancellationToken ct)
@@ -229,4 +245,10 @@ public static partial class SignInEndpoints
 
     [GeneratedRegex("^[A-Za-z0-9_-]{1,64}$")]
     private static partial Regex Name();
+
+    [GeneratedRegex("^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$")]
+    private static partial Regex LanguageTag();
+
+    [GeneratedRegex("^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$")]
+    private static partial Regex ZoneName();
 }

@@ -179,7 +179,7 @@ public static class PluginEndpoints
             [Description("The member, as addressed in its route.")] string member,
             PluginSettingsChange request, TeamRegistry teams, PluginCatalog plugins,
             IPluginMemberSettingsStore settings, ISecretStore secrets, PluginMemberSecretStore memberSecrets, MemberSecretReads reads,
-            Connections connections, IMessageLog log, HttpContext context,
+            Connections connections, IMessageLog log, SignInProfileCleanup signInProfiles, HttpContext context,
             CancellationToken ct) =>
         {
             var (found, plugin, refusal) = await PluginMemberAsync(teams, plugins, team, member, ct);
@@ -241,6 +241,7 @@ public static class PluginEndpoints
             // the save removes takes its cells with it. Checked against the rows as saved, so a row added
             // in this save takes its secrets in the same save.
             var cells = new List<TableCellChange>();
+            var removedRows = new List<(string Table, string Row)>();
             foreach (var (table, rowValues) in request.TableSecretValues ?? [])
             {
                 foreach (var (row, columnValues) in rowValues ?? [])
@@ -265,6 +266,7 @@ public static class PluginEndpoints
                     before.Config.TryGetValue(name, out var was) ? was : null, changed.Config.TryGetValue(name, out var now) ? now : null);
                 foreach (var row in removed)
                 {
+                    removedRows.Add((name, row));
                     cells.AddRange(table.SecretColumns.Select(column => new TableCellChange(name, row, column.Name, null)));
                 }
             }
@@ -304,6 +306,9 @@ public static class PluginEndpoints
                     new { error = $"The settings were not saved: their record could not be written ({exception.Message})." },
                     statusCode: StatusCodes.Status500InternalServerError);
             }
+
+            // A REMOVED ROW'S SIGN-IN BROWSER PROFILE goes with it, on every worker.
+            foreach (var (table, row) in removedRows) await signInProfiles.ForgetRowAsync(id, table, row, ct);
 
             // A PERSON'S SAVE THAT LEAVES NOTHING MISSING tells the Manager in every workflow whose run
             // of this member failed needs-person. Best effort: the save stands whatever the notice does.

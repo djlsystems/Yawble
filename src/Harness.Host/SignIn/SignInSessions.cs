@@ -42,6 +42,7 @@ public sealed class SignInSessions(
     public const string SavedText = "Signed in: the session was saved and the browser closed.";
     public const string CancelledText = "The browser was closed. Nothing was saved.";
     public const string NoWorkerText = "No worker is connected, so no browser can start. Try again once one is.";
+    public const string RowInUseText = "Someone else is signing in to this entry right now. Try again once they are done.";
 
     private readonly ConcurrentDictionary<string, SignInSession> _byPerson = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, TaskCompletionSource<SignInBrowserSaved>> _saves = new(StringComparer.Ordinal);
@@ -51,13 +52,19 @@ public sealed class SignInSessions(
     public SignInSession? Of(string person) => _byPerson.GetValueOrDefault(person);
 
     /// <summary>
-    /// Starts a browser for <paramref name="person"/> on <paramref name="member"/>'s row, replacing
-    /// any session that person has open. Throws <see cref="InvalidOperationException"/> with a
-    /// sentence when no worker can take it.
+    /// Starts a browser for <paramref name="person"/> on <paramref name="member"/>'s row, in the row's
+    /// own profile and with the person's <paramref name="languages"/> and <paramref name="timeZone"/>,
+    /// replacing any session that person has open. Throws <see cref="InvalidOperationException"/> with
+    /// a sentence when no worker can take it, or another person is signing in to the same row: the
+    /// row has one profile, and one browser at a time.
     /// </summary>
     public async Task<SignInSession> StartAsync(
-        string person, ContainerId member, string field, string row, SignInEntry entry, CancellationToken ct = default)
+        string person, ContainerId member, string field, string row, SignInEntry entry, CancellationToken ct = default,
+        IReadOnlyList<string>? languages = null, string? timeZone = null)
     {
+        var profile = SignInProfileKey.Row(member, field, row);
+        if (_byPerson.Values.Any(s => s.Person != person && s.Profile == profile)) throw new InvalidOperationException(RowInUseText);
+
         IRunWorker worker;
         try
         {
@@ -70,7 +77,7 @@ public sealed class SignInSessions(
 
         var id = "sign-in:" + Guid.NewGuid().ToString("N");
         var stream = streams.Open(id, worker, whole: false);
-        var session = new SignInSession(this, id, person, member, field, row, entry, worker, stream);
+        var session = new SignInSession(this, id, person, member, field, row, entry, worker, stream) { Profile = profile };
 
         if (_byPerson.TryGetValue(person, out var previous)) await previous.StopAsync(ReplacedText);
         _byPerson[person] = session;
@@ -78,7 +85,7 @@ public sealed class SignInSessions(
         try
         {
             await worker.SendAsync(
-                new StartSignInBrowser(id, new SignInBrowserLaunch(entry.SiteUrl, entry.Hosts, Width, Height)), ct);
+                new StartSignInBrowser(id, new SignInBrowserLaunch(entry.SiteUrl, entry.Hosts, Width, Height, profile, languages, timeZone)), ct);
         }
         catch
         {
@@ -172,6 +179,9 @@ public sealed class SignInSession
     public string Row { get; }
 
     public SignInEntry Entry { get; }
+
+    /// <summary>The row's browser profile on the workers (<see cref="SignInProfileKey"/>).</summary>
+    public string Profile { get; init; } = "";
 
     public IRunWorker Worker { get; }
 

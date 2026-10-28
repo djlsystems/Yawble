@@ -8,22 +8,23 @@ namespace Harness.Host;
 /// <summary>
 /// THE SIGN-IN BROWSERS ON THIS WORKER, by session: started, typed into, saved and stopped as control
 /// says. Each browser's screen is a stream of its session's id; its end is one sequenced event,
-/// published once, after its last frame was offered. A save answers with the storage state, which the
-/// connection seals; nothing here logs it, or anything the browser showed.
+/// published once, after its last frame was offered. A save answers with the session - the storage
+/// state and the browser's identity, in the v2 envelope - which the connection seals; nothing here
+/// logs it, or anything the browser showed.
 /// </summary>
 public sealed class WorkerSignInBrowsers(
     IRunStreamSink sink,
     Func<WorkerEvent, Task> publish,
-    string? browsersPath = null,
+    string? chromePath = null,
     string? profileRoot = null,
     ILogger? log = null)
 {
-    /// <summary>What a worker with no Chromium on its volume says.</summary>
+    /// <summary>What a worker with no Google Chrome on its volume says.</summary>
     public const string NoChromiumText =
-        "This worker has no headless Chromium installed (Playwright's chrome-headless-shell under PLAYWRIGHT_BROWSERS_PATH).";
+        "This worker has no Google Chrome installed for signing in (scripts/install-google-chrome.sh puts it in google-chrome on the volume).";
 
     private readonly ConcurrentDictionary<string, Open> _open = new(StringComparer.Ordinal);
-    private readonly Lazy<string> _profileRoot = new(() => profileRoot ?? DefaultProfileRoot());
+    private readonly Lazy<string> _profileRoot = new(() => profileRoot ?? SignInProfiles.Root(DefaultProfileRoot()));
 
     /// <summary>The sessions open on this worker.</summary>
     public IReadOnlyCollection<string> Sessions => [.. _open.Keys];
@@ -56,7 +57,7 @@ public sealed class WorkerSignInBrowsers(
     {
         if (_open.ContainsKey(start.Session)) return;
 
-        var open = new Open();
+        var open = new Open { Profile = start.Launch.Profile };
         if (!_open.TryAdd(start.Session, open)) return;
 
         _ = Task.Run(async () =>
@@ -64,7 +65,7 @@ public sealed class WorkerSignInBrowsers(
             string reason;
             try
             {
-                var chromium = ChromiumSignInBrowser.Find(browsersPath ?? Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH"))
+                var chromium = (chromePath is null ? ChromiumSignInBrowser.Find() : File.Exists(chromePath) ? chromePath : null)
                     ?? throw new InvalidOperationException(NoChromiumText);
 
                 open.Browser = await ChromiumSignInBrowser.StartAsync(start.Session, start.Launch, chromium, _profileRoot.Value, SendAsync);
@@ -116,10 +117,13 @@ public sealed class WorkerSignInBrowsers(
                 {
                     using var bound = new CancellationTokenSource(TimeSpan.FromSeconds(30));
                     var state = await browser.CaptureAsync(bound.Token);
+                    var identity = await browser.IdentityAsync(bound.Token);
                     answer = new SignInBrowserSaved(
-                        save.Session, save.Request, new SignInStorageState(state), browser.Hosts.Kept, browser.Hosts.Providers, null);
+                        save.Session, save.Request, new SignInStorageState(SignInSessionValue.Write(state, identity)),
+                        browser.Hosts.Kept, browser.Hosts.Providers, null);
                 }
-                catch (Exception exception) when (exception is IOException or CdpException or OperationCanceledException or JsonException)
+                catch (Exception exception) when (
+                    exception is IOException or CdpException or OperationCanceledException or JsonException or InvalidOperationException or KeyNotFoundException)
                 {
                     answer = new SignInBrowserSaved(save.Session, save.Request, null, [], [], "The browser's session could not be read.");
                 }
@@ -135,6 +139,25 @@ public sealed class WorkerSignInBrowsers(
 
         open.Stopping = true;
         if (open.Browser is { } browser) await browser.DisposeAsync();
+    }
+
+    /// <summary>
+    /// Removes the profiles of a deleted row or member, stopping first any browser open on one of them.
+    /// A key that is not one is ignored.
+    /// </summary>
+    public async Task DeleteProfilesAsync(string key)
+    {
+        if (!SignInProfiles.IsMemberOrRowKey(key)) return;
+
+        foreach (var (session, open) in _open)
+        {
+            if (open.Profile is { } profile && (profile == key || profile.StartsWith(key + "/", StringComparison.Ordinal)))
+            {
+                await StopAsync(session);
+            }
+        }
+
+        SignInProfiles.Delete(_profileRoot.Value, key);
     }
 
     /// <summary>Stops every browser: the worker is stopping.</summary>
@@ -162,5 +185,7 @@ public sealed class WorkerSignInBrowsers(
         public volatile ChromiumSignInBrowser? Browser;
 
         public volatile bool Stopping;
+
+        public string? Profile { get; init; }
     }
 }

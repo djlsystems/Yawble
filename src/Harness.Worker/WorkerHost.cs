@@ -81,7 +81,7 @@ public sealed class WorkerHost
             _terminals = new WorkerTerminals(streaming.Sink, streaming.Pty, streaming.RunAs, e => PublishAsync(e), log, _clock);
             _transcripts = new WorkerTranscripts(
                 streaming.Sink, streaming.RunAs, e => PublishAsync(e), RunEnded, streaming.Environment, log, _clock);
-            _browsers = new WorkerSignInBrowsers(streaming.Sink, e => PublishAsync(e), streaming.BrowsersPath, streaming.SignInProfiles, log);
+            _browsers = new WorkerSignInBrowsers(streaming.Sink, e => PublishAsync(e), streaming.ChromePath, streaming.SignInProfiles, log);
         }
     }
 
@@ -219,6 +219,10 @@ public sealed class WorkerHost
 
             case StopSignInBrowser stop:
                 _ = Task.Run(() => browsers.StopAsync(stop.Session), CancellationToken.None);
+                break;
+
+            case DeleteSignInProfiles delete:
+                _ = Task.Run(() => browsers.DeleteProfilesAsync(delete.Profile), CancellationToken.None);
                 break;
 
             default:
@@ -474,13 +478,14 @@ public sealed class WorkerHost
 /// <summary>
 /// What a worker needs for terminals, the agent's files and sign-in browsers: where its stream chunks
 /// go, the engine a terminal is spawned with, who the agent runs as, (for a test) the environment its
-/// own credential variables are read from, and where Chromium is and its profiles go (null: Playwright's
-/// PLAYWRIGHT_BROWSERS_PATH, and <see cref="WorkerSignInBrowsers.DefaultProfileRoot"/>).
+/// own credential variables are read from, and the sign-in browser's Chrome program and where its
+/// profiles go (null: the newest under <c>google-chrome</c> on the volume, <see cref="ChromiumSignInBrowser.Find"/>,
+/// and <see cref="SignInProfiles.Root"/>).
 /// </summary>
 public sealed record WorkerStreaming(
     IRunStreamSink Sink,
     IPtyEngine Pty,
     AgentLaunchUser? RunAs,
     Func<IDictionary<string, string?>>? Environment = null,
-    string? BrowsersPath = null,
+    string? ChromePath = null,
     string? SignInProfiles = null);

@@ -204,6 +204,9 @@ internal sealed partial class HostComposition
         builder.Services.AddSingleton(sp => new SignInSessions(
             () => sp.GetRequiredService<WorkerPool>().Worker(null), sp.GetRequiredService<WorkerStreams>(),
             sp.GetRequiredService<ISignInRows>(), log: sp.GetRequiredService<ILogger<SignInSessions>>()));
+        // A row's (or a member's) sign-in browser profiles go with it, on every worker.
+        builder.Services.AddSingleton(sp => new SignInProfileCleanup(
+            () => sp.GetRequiredService<WorkerPool>().Connected(), sp.GetRequiredService<ILogger<SignInProfileCleanup>>()));
         // THE AGENT'S FILES, read on a worker as the agent: a finished run's transcript and a run's tool check.
         builder.Services.AddSingleton(sp => new WorkerReads(
             WorkersOf(sp), sp.GetRequiredService<WorkerStreams>()));

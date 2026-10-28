@@ -90,7 +90,10 @@ public sealed class MemberDeletion(
     IMessageLog log,
     string gitExecutable = "git",
     AgentLaunchUser? runAs = null,
-    FolderRemoval? removal = null)
+    FolderRemoval? removal = null,
+
+    // A plugin member's sign-in browser profiles, on the workers. None in a test that has no workers.
+    SignInProfileCleanup? signInProfiles = null)
 {
     private readonly FolderRemoval _removal = removal ?? new FolderRemoval(runAs);
 
@@ -147,6 +150,9 @@ public sealed class MemberDeletion(
             // with `id.ToString()`. A live credential for a container nobody can see must not
             // outlive it.
             await principals.RevokeAsync(id.ToString(), ct);
+
+            // The browser profiles its table rows signed in with: each holds a person's session.
+            if (signInProfiles is not null) await signInProfiles.ForgetMemberAsync(id, ct);
         }
         catch (Exception ex)
         {

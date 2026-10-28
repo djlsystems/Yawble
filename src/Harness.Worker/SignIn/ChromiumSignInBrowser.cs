@@ -8,20 +8,28 @@ using Harness.Contracts;
 namespace Harness.Host;
 
 /// <summary>
-/// ONE PERSON'S SIGN-IN BROWSER: a headless Chromium (Playwright's <c>chrome-headless-shell</c> on the
-/// data volume) with its OWN SANDBOX ON - never <c>--no-sandbox</c>, so it will not start as root - and
-/// driven over its pipe (<see cref="CdpPipe"/>), never a port. Every top-level navigation of every page
-/// is paused and judged by <see cref="SignInHosts"/>; the page on top is screencast as JPEG frames; the
-/// person's input is dispatched to it; a save reads the cookies and local storage and prunes them.
+/// ONE PERSON'S SIGN-IN BROWSER: Google Chrome (stable, from the volume: <see cref="Find"/>) run HEADED
+/// on its own virtual screen (<see cref="SignInDisplay"/>), so a site sees the browser a person uses
+/// themselves - no "Headless" anywhere, no automation flag, a real window, WebGL, the person's
+/// languages and time zone - with its OWN SANDBOX ON (never <c>--no-sandbox</c>, so it will not start
+/// as root), driven over its pipe (<see cref="CdpPipe"/>), never a port. Each row has its own
+/// profile, reused on every sign-in, so the site sees the same browser come back. Every top-level
+/// navigation of every page is paused and judged by <see cref="SignInHosts"/>; the page on top is
+/// screencast as JPEG frames; the person's input is dispatched to it; a save reads the cookies and
+/// local storage, prunes them, and says which browser it was (<see cref="IdentityAsync"/>).
 /// </summary>
 /// <remarks>
 /// NOTHING THE BROWSER SEES IS LOGGED. A notice names a page by its origin and path only (an OAuth
-/// redirect carries its code in the query), and Chromium's stderr goes to /dev/null.
+/// redirect carries its code in the query), and Chrome's stderr goes to /dev/null. Nothing is run in
+/// the page's own world: the identity is read in an isolated one, invisible to the page's scripts.
 /// </remarks>
-public sealed class ChromiumSignInBrowser : IAsyncDisposable
+public sealed partial class ChromiumSignInBrowser : IAsyncDisposable
 {
-    /// <summary>Where Playwright puts its browsers on the volume when nothing says otherwise.</summary>
-    public const string DefaultBrowsersPath = "/data/ms-playwright";
+    /// <summary>Where Google Chrome is on the volume when nothing says otherwise: one folder per version.</summary>
+    public const string DefaultChromeFolder = "google-chrome";
+
+    /// <summary>The screen every sign-in browser's display has: the commonest desktop screen.</summary>
+    public const int ScreenWidth = 1920, ScreenHeight = 1080;
 
     /// <summary>How long a stop waits for Chromium to close before it is killed.</summary>
     public static readonly TimeSpan CloseBound = TimeSpan.FromSeconds(3);
@@ -36,7 +44,10 @@ public sealed class ChromiumSignInBrowser : IAsyncDisposable
     private readonly TaskCompletionSource<string> _ended = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Process? _process;
     private CdpPipe? _cdp;
-    private string? _profile;
+    private SignInDisplay? _display;
+    private FileStream? _lock;
+    private string? _folder;
+    private bool _fresh;
     private string? _active;
     private bool _home;
     private Task? _disposing;
@@ -69,35 +80,40 @@ public sealed class ChromiumSignInBrowser : IAsyncDisposable
     public Task<string> Ended => _ended.Task;
 
     /// <summary>
-    /// The newest <c>chrome-headless-shell</c> under <paramref name="browsersPath"/> (Playwright's
-    /// <c>PLAYWRIGHT_BROWSERS_PATH</c>), or null when none is installed.
+    /// The newest Google Chrome under <paramref name="root"/> (<c>&lt;root&gt;/&lt;version&gt;/chrome</c>, as
+    /// <c>scripts/install-google-chrome.sh</c> lays it out), or null when none is installed. The root is
+    /// <c>HARNESS_SIGN_IN_CHROME</c>, else <c>google-chrome</c> in the data root.
     /// </summary>
-    public static string? Find(string? browsersPath)
+    public static string? Find(string? root = null)
     {
-        var root = string.IsNullOrWhiteSpace(browsersPath) ? DefaultBrowsersPath : browsersPath;
+        root ??= Environment.GetEnvironmentVariable("HARNESS_SIGN_IN_CHROME") is { Length: > 0 } set
+            ? set
+            : Path.Combine(Environment.GetEnvironmentVariable("HARNESS_DATA_ROOT") is { Length: > 0 } data ? data : "/data", DefaultChromeFolder);
         if (!Directory.Exists(root)) return null;
 
-        return Directory.EnumerateDirectories(root, "chromium_headless_shell-*")
-            .OrderByDescending(d => int.TryParse(Path.GetFileName(d).Split('-').Last(), out var revision) ? revision : 0)
-            .SelectMany(d => Directory.EnumerateDirectories(d, "chrome-headless-shell-*"))
-            .Select(d => Path.Combine(d, "chrome-headless-shell"))
+        return Directory.EnumerateDirectories(root)
+            .Select(d => (Path: d, Version: System.Version.TryParse(Path.GetFileName(d), out var v) ? v : null))
+            .Where(d => d.Version is not null)
+            .OrderByDescending(d => d.Version)
+            .Select(d => Path.Combine(d.Path, "chrome"))
             .FirstOrDefault(File.Exists);
     }
 
     /// <summary>
-    /// Starts Chromium at <paramref name="chromium"/> with a fresh profile inside
-    /// <paramref name="profileRoot"/>, and opens the entry's Site URL. Throws, with nothing left
-    /// running, when it cannot. <paramref name="extra"/> is more of Chromium's arguments, for a test
-    /// (a host resolver rule that sends its made-up hosts to its own site).
+    /// Starts Chrome at <paramref name="chrome"/> on a display of its own, with the row's profile under
+    /// <paramref name="profileRoot"/> (or a fresh one), and opens the entry's Site URL. Throws, with
+    /// nothing left running, when it cannot. <paramref name="extra"/> is more of Chrome's arguments,
+    /// for a test (a host resolver rule that sends its made-up hosts to its own site).
     /// </summary>
     public static async Task<ChromiumSignInBrowser> StartAsync(
-        string session, SignInBrowserLaunch launch, string chromium, string profileRoot,
-        Func<StreamChunk, Task<bool>> send, IReadOnlyList<string>? extra = null, CancellationToken ct = default)
+        string session, SignInBrowserLaunch launch, string chrome, string profileRoot,
+        Func<StreamChunk, Task<bool>> send, IReadOnlyList<string>? extra = null, CancellationToken ct = default,
+        string xvfb = SignInDisplay.DefaultXvfb)
     {
         var browser = new ChromiumSignInBrowser(session, launch, send);
         try
         {
-            await browser.LaunchAsync(chromium, profileRoot, extra ?? [], ct);
+            await browser.LaunchAsync(chrome, profileRoot, extra ?? [], xvfb, ct);
             return browser;
         }
         catch
@@ -107,15 +123,45 @@ public sealed class ChromiumSignInBrowser : IAsyncDisposable
         }
     }
 
-    private async Task LaunchAsync(string chromium, string profileRoot, IReadOnlyList<string> extra, CancellationToken ct)
-    {
-        Directory.CreateDirectory(profileRoot);
-        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(profileRoot, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        _profile = Path.Combine(profileRoot, "profile-" + Guid.NewGuid().ToString("N"));
-        var created = Directory.CreateDirectory(_profile);
-        if (!OperatingSystem.IsWindows()) created.UnixFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+    /// <summary>What the person sees when the row's browser is already open on another sign-in.</summary>
+    public const string InUseText = "This entry's browser is already open for another sign-in. Try again once that one has closed.";
 
-        // fd 3 is what Chromium reads commands from, fd 4 where it writes; the shell hands it this
+    private async Task LaunchAsync(string chrome, string profileRoot, IReadOnlyList<string> extra, string xvfb, CancellationToken ct)
+    {
+        SignInProfiles.MakePrivate(profileRoot);
+        if (_launch.Profile is { } key)
+        {
+            if (!SignInProfiles.IsKey(key)) throw new InvalidOperationException("That is not a sign-in profile's name.");
+            _folder = SignInProfiles.Folder(profileRoot, key);
+            SignInProfiles.MakePrivate(Path.GetDirectoryName(_folder)!);
+            try
+            {
+                _lock = SignInProfiles.Lock(_folder);
+            }
+            catch (IOException)
+            {
+                throw new InvalidOperationException(InUseText);
+            }
+        }
+        else
+        {
+            _fresh = true;
+            _folder = Path.Combine(profileRoot, "profile-" + Guid.NewGuid().ToString("N"));
+        }
+
+        SignInProfiles.MakePrivate(_folder);
+        var data = Path.Combine(_folder, "chrome");
+        var home = Path.Combine(_folder, "home");
+        var run = Path.Combine(_folder, "run");
+        foreach (var folder in new[] { data, home, run }) SignInProfiles.MakePrivate(folder);
+
+        var languages = Languages(_launch.Languages);
+        SignInProfiles.Prepare(data, languages);
+
+        var screen = (Width: Math.Max(ScreenWidth, _launch.Width + 200), Height: Math.Max(ScreenHeight, _launch.Height + 200));
+        _display = await SignInDisplay.StartAsync(run, screen.Width, screen.Height, xvfb, ct);
+
+        // fd 3 is what Chrome reads commands from, fd 4 where it writes; the shell hands it this
         // process's stdin and stdout as those, then shuts its own stdio. The worker's environment -
         // its key among it - is not the browser's.
         var start = new ProcessStartInfo("/bin/sh")
@@ -124,18 +170,24 @@ public sealed class ChromiumSignInBrowser : IAsyncDisposable
             RedirectStandardOutput = true,
             RedirectStandardError = false,
             UseShellExecute = false,
-            WorkingDirectory = _profile,
+            WorkingDirectory = home,
         };
         start.ArgumentList.Add("-c");
         start.ArgumentList.Add("exec \"$0\" \"$@\" 3<&0 4>&1 0</dev/null 1>/dev/null 2>/dev/null");
-        start.ArgumentList.Add(chromium);
-        foreach (var argument in extra.Concat(Arguments(_profile, _launch.Width, _launch.Height))) start.ArgumentList.Add(argument);
+        start.ArgumentList.Add(chrome);
+        var window = (Width: _launch.Width, Height: _launch.Height + WindowChrome);
+        var at = ((screen.Width - window.Width) / 2, (screen.Height - window.Height) / 2);
+        foreach (var argument in extra.Concat(Arguments(data, window, at, languages[0]))) start.ArgumentList.Add(argument);
         start.Environment.Clear();
         start.Environment["PATH"] = "/usr/local/bin:/usr/bin:/bin";
-        start.Environment["HOME"] = _profile;
+        start.Environment["HOME"] = home;
+        start.Environment["DISPLAY"] = _display.Display;
+        start.Environment["XAUTHORITY"] = _display.Authority;
         start.Environment["LANG"] = "en_US.UTF-8";
+        start.Environment["LANGUAGE"] = languages[0].Replace('-', '_');
+        start.Environment["TZ"] = TimeZone(_launch.TimeZone);
 
-        _process = Process.Start(start) ?? throw new InvalidOperationException("Chromium did not start.");
+        _process = Process.Start(start) ?? throw new InvalidOperationException("Chrome did not start.");
         _process.EnableRaisingEvents = true;
         _process.Exited += (_, _) => End("The browser closed.");
 
@@ -149,7 +201,7 @@ public sealed class ChromiumSignInBrowser : IAsyncDisposable
         await _cdp.SendAsync("Target.setDiscoverTargets", new { discover = true }, ct: bound.Token);
         await _cdp.SendAsync("Target.setAutoAttach", new { autoAttach = true, waitForDebuggerOnStart = true, flatten = true }, ct: bound.Token);
 
-        // The page Chromium opened at launch was there before auto-attach: attach it as any other.
+        // The page Chrome opened at launch was there before auto-attach: attach it as any other.
         var targets = await _cdp.SendAsync("Target.getTargets", ct: bound.Token);
         foreach (var target in targets.GetProperty("targetInfos").EnumerateArray())
         {
@@ -160,28 +212,66 @@ public sealed class ChromiumSignInBrowser : IAsyncDisposable
         }
     }
 
-    /// <summary>Chromium's arguments: headless, its own sandbox on, no first-run, sync, extensions or background traffic.</summary>
-    public static IReadOnlyList<string> Arguments(string profile, int width, int height) =>
+    /// <summary>
+    /// How much taller a window is than its page: tabs and the address bar. A first guess, made exact
+    /// once the page is up (<see cref="FitAsync"/>), so the viewport is the size the person's page shows.
+    /// </summary>
+    private const int WindowChrome = 87;
+
+    /// <summary>
+    /// Chrome's arguments. ONLY WHAT A SITE CANNOT SEE, AND WHAT MAKES IT AN ORDINARY BROWSER:
+    /// <list type="bullet">
+    /// <item><c>--disable-blink-features=AutomationControlled</c>: a browser with a DevTools pipe says
+    /// <c>navigator.webdriver = true</c>; a person's does not.</item>
+    /// <item><c>--test-type</c>: no warning bar about that flag, which would take height from the page.</item>
+    /// <item><c>--use-angle=gl --ignore-gpu-blocklist</c>: WebGL through the machine's own OpenGL (Mesa),
+    /// as on a Linux desktop without a graphics card, rather than none at all.</item>
+    /// </list>
+    /// Never <c>--headless</c>, <c>--enable-automation</c>, <c>--no-sandbox</c> or a fixed device metric.
+    /// </summary>
+    public static IReadOnlyList<string> Arguments(string profile, (int Width, int Height) window, (int X, int Y) at, string language) =>
     [
         "--remote-debugging-pipe",
         "--user-data-dir=" + profile,
         "--no-first-run",
         "--no-default-browser-check",
-        "--disable-background-networking",
-        "--disable-component-update",
-        "--disable-default-apps",
-        "--disable-extensions",
-        "--disable-sync",
+        "--disable-blink-features=AutomationControlled",
+        "--test-type",
+        "--use-angle=gl",
+        "--ignore-gpu-blocklist",
         "--disable-breakpad",
-        "--metrics-recording-only",
+        "--disable-sync",
         "--password-store=basic",
-        "--use-mock-keychain",
         "--disable-dev-shm-usage",
-        "--hide-scrollbars",
-        "--mute-audio",
-        $"--window-size={width},{height}",
+        "--lang=" + language,
+        $"--window-size={window.Width},{window.Height}",
+        $"--window-position={at.X},{at.Y}",
         "about:blank",
     ];
+
+    /// <summary>The person's languages as the browser takes them: language tags only, at most 10, en-US when none is.</summary>
+    public static IReadOnlyList<string> Languages(IReadOnlyList<string>? languages)
+    {
+        var kept = (languages ?? [])
+            .Where(l => l is { Length: > 0 and <= 35 } && LanguageTag().IsMatch(l))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
+        return kept.Count > 0 ? kept : ["en-US", "en"];
+    }
+
+    /// <summary>The person's IANA time zone when this machine knows it, else UTC.</summary>
+    public static string TimeZone(string? zone)
+    {
+        if (zone is not { Length: > 0 and <= 64 } || !ZoneName().IsMatch(zone) || zone.Contains("..", StringComparison.Ordinal)) return "UTC";
+        return File.Exists(Path.Combine("/usr/share/zoneinfo", zone)) ? zone : "UTC";
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex("^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$")]
+    private static partial System.Text.RegularExpressions.Regex LanguageTag();
+
+    [System.Text.RegularExpressions.GeneratedRegex("^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$")]
+    private static partial System.Text.RegularExpressions.Regex ZoneName();
 
     /// <summary>Applies one thing the person did to the page on top. Anything not understood is dropped.</summary>
     public void Input(SignInBrowserInput input)
@@ -233,7 +323,7 @@ public sealed class ChromiumSignInBrowser : IAsyncDisposable
                 break;
 
             case "back":
-                _cdp.Post("Runtime.evaluate", new { expression = "history.back()" }, page.Session);
+                _ = BackAsync(page);
                 break;
 
             case "reload":
@@ -367,9 +457,6 @@ public sealed class ChromiumSignInBrowser : IAsyncDisposable
         {
             await cdp.SendAsync("Page.enable", session: page.Session);
             await cdp.SendAsync("Fetch.enable", new { patterns = new[] { new { urlPattern = "*", requestStage = "Request" } } }, page.Session);
-            await cdp.SendAsync(
-                "Emulation.setDeviceMetricsOverride",
-                new { width = _launch.Width, height = _launch.Height, deviceScaleFactor = 1, mobile = false }, page.Session);
             await cdp.SendAsync("Runtime.runIfWaitingForDebugger", session: page.Session);
 
             Activate(page.Target);
@@ -381,13 +468,117 @@ public sealed class ChromiumSignInBrowser : IAsyncDisposable
                 _home = true;
             }
 
-            if (first) await cdp.SendAsync("Page.navigate", new { url = _launch.StartUrl }, page.Session);
+            if (!first) return;
+
+            await FitAsync(page);
+            await cdp.SendAsync("Page.navigate", new { url = _launch.StartUrl }, page.Session);
         }
         catch (Exception exception) when (exception is IOException or CdpException or OperationCanceledException)
         {
             // A page that closed while it was being set up is simply gone.
         }
     }
+
+    /// <summary>
+    /// Sizes the first page's window so its viewport is the launch's: the window keeps its tabs and
+    /// address bar, as a person's does, and the page is exactly what the person's screen shows.
+    /// </summary>
+    private async Task FitAsync(Page page)
+    {
+        var cdp = _cdp!;
+        using var bound = new CancellationTokenSource(CloseBound);
+        var window = await cdp.SendAsync("Browser.getWindowForTarget", new { targetId = page.Target }, ct: bound.Token);
+        var bounds = window.GetProperty("bounds");
+        var metrics = await cdp.SendAsync("Page.getLayoutMetrics", session: page.Session, ct: bound.Token);
+        var viewport = metrics.GetProperty("cssLayoutViewport");
+        var width = bounds.GetProperty("width").GetInt32() + _launch.Width - viewport.GetProperty("clientWidth").GetInt32();
+        var height = bounds.GetProperty("height").GetInt32() + _launch.Height - viewport.GetProperty("clientHeight").GetInt32();
+        if (width == bounds.GetProperty("width").GetInt32() && height == bounds.GetProperty("height").GetInt32()) return;
+
+        await cdp.SendAsync(
+            "Browser.setWindowBounds",
+            new { windowId = window.GetProperty("windowId").GetInt32(), bounds = new { width, height } }, ct: bound.Token);
+    }
+
+    /// <summary>Back one page in the page's own history, without running anything in the page.</summary>
+    private async Task BackAsync(Page page)
+    {
+        if (_cdp is not { } cdp) return;
+        try
+        {
+            using var bound = new CancellationTokenSource(CloseBound);
+            var history = await cdp.SendAsync("Page.getNavigationHistory", session: page.Session, ct: bound.Token);
+            var current = history.GetProperty("currentIndex").GetInt32();
+            if (current <= 0) return;
+
+            var entry = history.GetProperty("entries")[current - 1].GetProperty("id").GetInt32();
+            await cdp.SendAsync("Page.navigateToHistoryEntry", new { entryId = entry }, page.Session, bound.Token);
+        }
+        catch (Exception exception) when (exception is IOException or CdpException or OperationCanceledException or KeyNotFoundException or IndexOutOfRangeException)
+        {
+        }
+    }
+
+    /// <summary>
+    /// THE BROWSER THE SITE SEES, read from Chrome itself: its version and user agent, its client
+    /// hints with their high-entropy values, the screen, the viewport and the scale, read in an
+    /// isolated world of the page on top - the page's own scripts never see it run.
+    /// </summary>
+    public async Task<SignInBrowserIdentity> IdentityAsync(CancellationToken ct = default)
+    {
+        var cdp = _cdp ?? throw new InvalidOperationException("The browser is not running.");
+        var page = Active() ?? throw new InvalidOperationException("The browser has no page open.");
+
+        var version = await cdp.SendAsync("Browser.getVersion", ct: ct);
+        var world = await cdp.SendAsync(
+            "Page.createIsolatedWorld", new { frameId = page.Target, worldName = "sign-in-identity", grantUniveralAccess = false }, page.Session, ct);
+        var read = await cdp.SendAsync(
+            "Runtime.evaluate",
+            new
+            {
+                expression = IdentityScript,
+                contextId = world.GetProperty("executionContextId").GetInt32(),
+                awaitPromise = true,
+                returnByValue = true,
+            },
+            page.Session, ct);
+        var seen = read.GetProperty("result").GetProperty("value");
+
+        var product = version.GetProperty("product").GetString() ?? "";
+        var hints = seen.GetProperty("hints");
+        List<SignInBrowserBrand> Brands(string name) =>
+        [
+            .. hints.GetProperty(name).EnumerateArray()
+                .Select(b => new SignInBrowserBrand(b.GetProperty("brand").GetString() ?? "", b.GetProperty("version").GetString() ?? "")),
+        ];
+        var brands = Brands("brands");
+        string Hint(string name) => hints.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString()! : "";
+
+        var languages = Languages(_launch.Languages);
+        return new SignInBrowserIdentity(
+            brands.Any(b => b.Brand == "Google Chrome") ? "chrome" : "chromium",
+            product.Contains('/', StringComparison.Ordinal) ? product[(product.IndexOf('/', StringComparison.Ordinal) + 1)..] : product,
+            version.GetProperty("userAgent").GetString() ?? "",
+            new SignInUserAgentMetadata(
+                brands, Brands("fullVersionList"), Hint("platform"), Hint("platformVersion"), Hint("architecture"), Hint("model"),
+                hints.TryGetProperty("mobile", out var mobile) && mobile.ValueKind == JsonValueKind.True, Hint("bitness")),
+            languages[0],
+            languages,
+            seen.GetProperty("timeZone").GetString() ?? "UTC",
+            new SignInBrowserSize(seen.GetProperty("screenWidth").GetInt32(), seen.GetProperty("screenHeight").GetInt32()),
+            new SignInBrowserSize(seen.GetProperty("width").GetInt32(), seen.GetProperty("height").GetInt32()),
+            seen.GetProperty("scale").GetDouble());
+    }
+
+    private const string IdentityScript = """
+        (async () => ({
+          hints: await navigator.userAgentData.getHighEntropyValues(
+            ['architecture', 'bitness', 'model', 'platformVersion', 'fullVersionList']),
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          screenWidth: screen.width, screenHeight: screen.height,
+          width: innerWidth, height: innerHeight, scale: devicePixelRatio,
+        }))()
+        """;
 
     /// <summary>Puts <paramref name="target"/> on top: its screen is the one the person sees.</summary>
     private void Activate(string target)
@@ -555,18 +746,16 @@ public sealed class ChromiumSignInBrowser : IAsyncDisposable
         }
 
         if (_cdp is { } pipe) await pipe.DisposeAsync();
+        if (_display is { } display) await display.DisposeAsync();
 
-        if (_profile is { } profile && Directory.Exists(profile))
+        if (_folder is { } folder)
         {
-            try
-            {
-                // RECURSIVE DELETE REVIEWED: agents cannot write here. A sign-in browser's profile: the worker makes it 0700 as itself, inside a 0700 folder of its own.
-                Directory.Delete(profile, recursive: true);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-            }
+            // The row's profile stays for its next sign-in; its run folder (the display's cookie) and a
+            // fresh profile do not.
+            SignInProfiles.Remove(_fresh ? folder : Path.Combine(folder, "run"));
         }
+
+        _lock?.Dispose();
 
         try
         {

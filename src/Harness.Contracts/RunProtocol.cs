@@ -60,6 +60,7 @@ public sealed record RunId(ContainerId Member, string Nonce)
 [JsonDerivedType(typeof(StartSignInBrowser), "startSignInBrowser")]
 [JsonDerivedType(typeof(SaveSignInBrowser), "saveSignInBrowser")]
 [JsonDerivedType(typeof(StopSignInBrowser), "stopSignInBrowser")]
+[JsonDerivedType(typeof(DeleteSignInProfiles), "deleteSignInProfiles")]
 public abstract record ControlMessage;
 
 /// <summary>A command about one run.</summary>
