@@ -250,10 +250,16 @@ function end() {
   closeRun();
 }
 
-watch(open, (showing) => {
-  if (showing) begin();
-  else end();
-});
+// IMMEDIATE: a dialog mounted already open (the Monitor's Open member mounts it so) begins at once;
+// otherwise it would sit on "Not running" until it was closed and opened again.
+watch(
+  open,
+  (showing) => {
+    if (showing) begin();
+    else end();
+  },
+  { immediate: true },
+);
 
 /**
  * THE MEMBER STARTS OR STOPS WHILE THE DIALOG IS OPEN. Starting is followed: the top switches from

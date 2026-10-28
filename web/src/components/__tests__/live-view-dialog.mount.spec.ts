@@ -4,7 +4,8 @@
 // bottom until the person scrolls up, the end of the run is said and the lines kept, and a member
 // with nothing to watch shows the server's sentence rather than a spinner.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { flushPromises } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
 import LiveViewDialog from '../LiveViewDialog.vue';
 import { localStamp } from '../../lib/localTime';
 import { asMemberId, asTeamId } from '../../api/types';
@@ -115,6 +116,16 @@ describe('the live view dialog', () => {
     } finally {
       setAvatarSheet(null, 0, 0);
     }
+  });
+
+  it('mounted already open on a running member, watches its run at once (the Monitor mounts it so)', async () => {
+    const fetch = stubApi({ live: liveStream().response });
+    setActivePinia(createPinia());
+    mount(LiveViewDialog, { props: { ...props, modelValue: true } });
+    await flushPromises();
+
+    expect(fetch).toHaveBeenCalledWith('/api/teams/alpha/members/Builder/live', expect.anything());
+    expect(bodyText()).not.toContain('Not running');
   });
 
   it('asks the live route for this member', async () => {
