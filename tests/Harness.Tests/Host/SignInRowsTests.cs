@@ -256,6 +256,67 @@ public sealed class SignInRowsTests : IAsyncLifetime
         }, Ct)).StatusCode);
     }
 
+    [Theory]
+    [InlineData("not-a-plugin")]
+    [InlineData("plugin-not-installed")]
+    public async Task Opening_a_member_that_runs_no_plugin_this_host_has_says_so_plainly_and_starts_no_browser(string kind)
+    {
+        // A kept link to a member whose agent was changed away from the plugin, or whose plugin is gone (D16).
+        string member, reason;
+        HttpStatusCode plain;
+        if (kind == "not-a-plugin")
+        {
+            member = "Plain";
+            var hired = await _person.PostAsJsonAsync($"/api/teams/{_team}/containers", new { name = member, agent = "claude-headless" }, Ct);
+            Assert.True(hired.IsSuccessStatusCode, await hired.Content.ReadAsStringAsync(Ct));
+            reason = SignInEndpoints.NotAPluginText(member, "claude-headless");
+            plain = HttpStatusCode.BadRequest;
+        }
+        else
+        {
+            member = "Orphan";
+            PluginInstall.Write(_dataRoot, "gonecreds");
+            var catalog = Services.GetRequiredService<PluginCatalog>();
+            await catalog.RescanAsync(Ct);
+            var hired = await _person.PostAsJsonAsync($"/api/teams/{_team}/containers", new { name = member, agent = "plugin:gonecreds" }, Ct);
+            Assert.True(hired.IsSuccessStatusCode, await hired.Content.ReadAsStringAsync(Ct));
+            Directory.Delete(Path.Combine(PluginInstall.PluginsRoot(_dataRoot), "gonecreds"), recursive: true);
+            await catalog.RescanAsync(Ct);
+            reason = SignInEndpoints.PluginMissingText(member, catalog.RefusalFor("gonecreds")!);
+            plain = HttpStatusCode.Conflict;
+        }
+
+        using var login = _factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false, AllowAutoRedirect = false });
+        var answer = await login.PostAsJsonAsync("/api/auth/login", new { email = Email, password = Password }, Ct);
+        answer.EnsureSuccessStatusCode();
+        var cookie = string.Join("; ", answer.Headers.GetValues("Set-Cookie").Select(c => c.Split(';')[0]));
+        var path = $"/api/teams/{_team}/members/{member}/sign-in/entries/site-admin";
+
+        var client = _factory.Server.CreateWebSocketClient();
+        client.ConfigureRequest = request => request.Headers.Cookie = cookie;
+        using var socket = await client.ConnectAsync(new Uri(_factory.Server.BaseAddress, path), Ct);
+
+        var buffer = new byte[64 * 1024];
+        var first = await socket.ReceiveAsync(buffer, Ct);
+        Assert.Equal(WebSocketMessageType.Text, first.MessageType);
+        var ended = JsonDocument.Parse(Encoding.UTF8.GetString(buffer, 0, first.Count)).RootElement;
+        Assert.Equal("ended", ended.GetProperty("kind").GetString());
+        Assert.Equal("refused", ended.GetProperty("cause").GetString());
+        Assert.Equal(reason, ended.GetProperty("reason").GetString());
+        Assert.Contains(member, reason, StringComparison.Ordinal);
+        Assert.Equal(WebSocketMessageType.Close, (await socket.ReceiveAsync(buffer, Ct)).MessageType);
+
+        // No browser: no session was started for the person.
+        var person = (await Services.GetRequiredService<IUserStore>().FindAsync(Email, Ct))!.Id;
+        Assert.Null(Services.GetRequiredService<SignInSessions>().Of(person));
+
+        // Plain HTTP keeps its status code.
+        Assert.Equal(plain, (await login.SendAsync(new HttpRequestMessage(HttpMethod.Get, path)
+        {
+            Headers = { { "Cookie", cookie } },
+        }, Ct)).StatusCode);
+    }
+
     [Fact]
     public async Task A_kept_session_is_the_rows_masked_secret_cell_never_answered_and_reaches_the_next_run_redacted()
     {

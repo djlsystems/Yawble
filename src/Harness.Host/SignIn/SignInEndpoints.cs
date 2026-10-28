@@ -53,10 +53,15 @@ public static partial class SignInEndpoints
             }
 
             var (found, _, refusal) = await PluginEndpoints.PluginMemberAsync(teams, plugins, team, member, ct);
-            if (refusal is IStatusCodeHttpResult { StatusCode: StatusCodes.Status404NotFound } && context.WebSockets.IsWebSocketRequest)
+            if (refusal is not null && context.WebSockets.IsWebSocketRequest)
             {
-                // A member the team does not have (a stale link) is told so on the page's socket, as a missing row is.
-                await RefuseAsync(context, NoSuchMemberText(team, member), ct);
+                // A member the team does not have, or one that no longer runs a plugin this Host has (a stale
+                // link), is told so on the page's socket, as a missing row is. Plain HTTP keeps its 404/400/409.
+                await RefuseAsync(context, found is null
+                    ? NoSuchMemberText(team, member)
+                    : MemberRef.IsPlugin(found.Agent, out var plugin)
+                        ? PluginMissingText(member, plugins.RefusalFor(plugin!) ?? "")
+                        : NotAPluginText(member, found.Agent), ct);
                 return Results.Empty;
             }
 
@@ -112,6 +117,14 @@ public static partial class SignInEndpoints
     /// <summary>What a link to a member the team does not have is told.</summary>
     public static string NoSuchMemberText(string team, string member) =>
         $"Team '{team}' has no member '{member}': it may have been renamed or removed. Open Sign in again from the member's settings.";
+
+    /// <summary>What a link to a member that does not run a plugin (its agent was changed) is told.</summary>
+    public static string NotAPluginText(string member, string agent) =>
+        $"'{member}' runs {agent}, not a plugin; only a plugin member has sign-in settings. Open Sign in again from the member's settings.";
+
+    /// <summary>What a link to a plugin member whose plugin this Host does not have (or refused) is told.</summary>
+    public static string PluginMissingText(string member, string why) =>
+        $"'{member}' runs a plugin this Host can't run now, so it can't be signed in to: {why}";
 
     /// <summary>
     /// The person's languages, as the page sends them (<c>?lang=</c>, its <c>navigator.languages</c>

@@ -1146,11 +1146,15 @@ other secret cell.
   (`/api/teams/{team}/members/{member}/sign-in/{field}/{row}`) is humans-only, like every route that
   sets a member's secret; an agent's, a Manager's or the Concierge's key is refused before anything
   starts. A row that is there but cannot be signed in to (inactive, not `interactive`, no `http(s)`
-  Site URL), or a row, sign-in table or member that is not there (a stale link), starts no browser:
-  the socket sends `{"kind":"ended","cause":"refused","reason":...}` saying which ("This member's
-  settings have no row '...'", "... have no sign-in table '...'", "Team '...' has no member '...'"),
-  and closes, and the page shows that sentence with "No browser was started". A request for a missing
-  row, table or member that is not a WebSocket still answers 404. The table shows no Sign in link for
+  Site URL), a row, sign-in table or member that is not there, or a member that no longer runs a
+  plugin this Host has (a stale link), starts no browser: the socket sends
+  `{"kind":"ended","cause":"refused","reason":...}` saying which ("This member's settings have no
+  row '...'", "... have no sign-in table '...'", "Team '...' has no member '...'", "'...' runs ...,
+  not a plugin; only a plugin member has sign-in settings", "'...' runs a plugin this Host can't run
+  now, ..." with the catalog's reason), and closes, and the page shows that sentence with "No browser
+  was started". A request that is not a WebSocket keeps its status: 404 for a missing row, table or
+  member, 400 for a member that runs no plugin, 409 for a plugin that is not installed or was
+  refused. The table shows no Sign in link for
   such a row. The page is told why a browser closed
   (replaced, idle, saved) before its socket closes. Above the browser the page shows one note at a
   time (the latest refusal or provider, which the person can dismiss), so the browser stays on a
