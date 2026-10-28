@@ -114,7 +114,7 @@ public static partial class SignInEndpoints
                     }
                 }
             }
-            catch (Exception exception) when (exception is OperationCanceledException or WebSocketException)
+            catch (Exception exception) when (exception is OperationCanceledException or WebSocketException or IOException)
             {
             }
         });
@@ -169,7 +169,7 @@ public static partial class SignInEndpoints
                     }
                 }
             }
-            catch (Exception exception) when (exception is OperationCanceledException or WebSocketException or InvalidDataException)
+            catch (Exception exception) when (exception is OperationCanceledException or WebSocketException or IOException or InvalidDataException)
             {
             }
         });
