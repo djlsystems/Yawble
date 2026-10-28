@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { listConnectionProviders, listConnections } from '../api/client';
-import type { Connection, ConnectionProvider, PluginNamedSecretState, PluginSecretState } from '../api/types';
+import type { Connection, ConnectionProvider, PluginNamedSecretState, PluginSecretState, PluginTableRow } from '../api/types';
+import { tableRows, type TableSecretStates, type TableSecretsDraft } from '../lib/pluginTable';
 import { emptyNamedSecretsDraft, type NamedSecretsDraft } from '../lib/namedSecrets';
 import {
   defaultValue,
@@ -11,6 +12,7 @@ import {
   hasSlots,
   isDefault,
   isUnmasked,
+  listValue,
   missingRequired,
   outOfRange,
   placeholderOf,
@@ -24,6 +26,7 @@ import {
 import ChipListInput from './ChipListInput.vue';
 import ConnectionPicker from './ConnectionPicker.vue';
 import NamedSecretsTable from './NamedSecretsTable.vue';
+import PluginTableField from './PluginTableField.vue';
 
 /**
  * A PLUGIN MEMBER'S SETTINGS, GENERATED FROM ITS MANIFEST. The one editor Add member (a hire),
@@ -55,6 +58,11 @@ import NamedSecretsTable from './NamedSecretsTable.vue';
  * `named` for the dialog's button, which sends them as `namedSecretValues`. A plugin without the
  * block shows nothing of it.
  *
+ * A `table` SETTING is its own editor (`PluginTableField`): rows added, edited, duplicated and
+ * deleted, bool columns toggled inline, each secret cell a password box whose value waits in
+ * `tableSecrets` for the dialog's button, sent as `tableSecretValues`. Only Member settings edits one
+ * (`tableStates` given); at hire it says the rows are added after hire.
+ *
  * The "as JSON" view is read-only, and it is exactly `settingsBody` - the settings and key bindings
  * stored - for checking, never for editing. It never shows a value.
  */
@@ -70,6 +78,12 @@ const props = defineProps<{
   namedStates?: PluginNamedSecretState[] | undefined;
   /** The dialog's button that saves the form, named in what a typed value says. */
   saveLabel?: string | undefined;
+  /** Each table's secret cells saved on the member being edited. Absent at hire: a table is not edited then. */
+  tableStates?: TableSecretStates | undefined;
+  /** Each table's rows as saved, by key. */
+  savedTableRows?: Record<string, string[]> | undefined;
+  /** The member being edited, for a table row action's link. */
+  memberContext?: { team: string; member: string } | undefined;
 }>();
 
 const config = defineModel<PluginFieldValues>('config', { required: true });
@@ -79,6 +93,8 @@ const secrets = defineModel<Record<string, string>>('secrets', { required: true 
 const values = defineModel<SecretValues>('values', { default: () => ({}) });
 /** Named secrets added, replaced or removed, waiting for the dialog's button. */
 const named = defineModel<NamedSecretsDraft>('named', { default: () => emptyNamedSecretsDraft() });
+/** Each table's secret cells typed or cleared, waiting for the dialog's button. */
+const tableSecrets = defineModel<TableSecretsDraft>('tableSecrets', { default: () => ({}) });
 /** Slot -> the chosen connection's id. Only a plugin that declares slots has any. */
 const connections = defineModel<Record<string, string>>('connections', { default: () => ({}) });
 
@@ -204,7 +220,7 @@ const rowKey = (row: Row) => ('name' in row ? `${row.kind}-${row.name}` : row.ki
 const showJson = ref(false);
 const json = computed(() => JSON.stringify(body.value, null, 2));
 
-function set(name: string, value: string | boolean | string[]) {
+function set(name: string, value: string | boolean | string[] | PluginTableRow[]) {
   config.value = { ...config.value, [name]: value };
 }
 
@@ -216,8 +232,7 @@ function reset(name: string) {
 }
 
 function listOf(name: string): string[] {
-  const value = config.value[name];
-  return Array.isArray(value) ? value : [];
+  return listValue(config.value[name]);
 }
 
 function text(name: string): string {
@@ -237,7 +252,22 @@ function text(name: string): string {
         class="plugin-setting"
         :data-setting="row.name"
       >
-        <div v-if="shape.config[row.name]!.type === 'bool'" class="row items-center no-wrap q-gutter-x-xs">
+        <PluginTableField
+          v-if="shape.config[row.name]!.type === 'table' && shape.config[row.name]!.table"
+          v-model:secrets="tableSecrets"
+          :model-value="tableRows(config[row.name])"
+          :name="row.name"
+          :field="shape.config[row.name]!"
+          :label="labelOf(row.name)"
+          :states="tableStates"
+          :saved-rows="savedTableRows?.[row.name]"
+          :context="memberContext"
+          :editable="tableStates !== undefined"
+          :save-label="button"
+          @update:model-value="(value: PluginTableRow[]) => set(row.name, value)"
+        />
+
+        <div v-else-if="shape.config[row.name]!.type === 'bool'" class="row items-center no-wrap q-gutter-x-xs">
           <q-toggle
             :model-value="config[row.name] === true"
             dense
@@ -280,7 +310,7 @@ function text(name: string): string {
           @update:model-value="(value) => set(row.name, value === null ? '' : String(value))"
         />
 
-        <div class="plugin-setting-marks text-caption os-text-muted row items-center q-gutter-x-sm">
+        <div v-if="shape.config[row.name]!.type !== 'table'" class="plugin-setting-marks text-caption os-text-muted row items-center q-gutter-x-sm">
           <span v-if="shape.config[row.name]!.required" class="text-weight-medium" data-required>Required</span>
           <span v-if="fieldBoundsHint(shape.config[row.name]!)" data-bounds>{{ fieldBoundsHint(shape.config[row.name]!) }}</span>
           <q-space />

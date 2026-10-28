@@ -45,6 +45,7 @@ import { bindSlot } from '../lib/slotBinding';
 import { emptyNamedSecretsDraft, namedSecretValuesBody, namedSecretsHeld, type NamedSecretsDraft } from '../lib/namedSecrets';
 import PluginAbout from './PluginAbout.vue';
 import PluginSettingsForm from './PluginSettingsForm.vue';
+import { rowName, tableProblem, tableRows, type TableSecretStates, type TableSecretsDraft } from '../lib/pluginTable';
 
 
 /**
@@ -166,6 +167,28 @@ const pluginValues = ref<SecretValues>({});
 const pluginNamedStates = ref<PluginNamedSecretState[]>([]);
 const pluginNamed = ref<NamedSecretsDraft>(emptyNamedSecretsDraft());
 const pluginNamedProblem = ref<string | null>(null);
+/** Each table's secret cells saved (never a masked value), and those typed or cleared since. */
+const pluginTableStates = ref<TableSecretStates>({});
+const pluginTableSecrets = ref<TableSecretsDraft>({});
+/** Each table's rows as saved, by key: a saved row keeps its name and shows its row actions. */
+const pluginSavedRows = computed<Record<string, string[]>>(() => {
+  const shape = pluginShape.value;
+  if (!shape) return {};
+  return Object.fromEntries(
+    Object.entries(shape.config)
+      .filter(([, field]) => field.table)
+      .map(([name, field]) => [name, tableRows(shape.stored?.config[name]).map((row) => rowName(field.table!, row))]),
+  );
+});
+/** A plugin with a table setting gets the wide dialog: a table needs the room. */
+const pluginHasTable = computed(() => Object.values(pluginShape.value?.config ?? {}).some((field) => field.type === 'table'));
+/** A table with a row the Host would refuse: held like a missing field. */
+const pluginTableHeld = computed(() =>
+  Object.entries(pluginShape.value?.config ?? {}).some(
+    ([name, field]) => field.table && tableProblem(field.table, tableRows(pluginConfig.value[name])) !== null,
+  ),
+);
+const memberContext = computed(() => ({ team: props.snapshot.team, member: props.snapshot.id }));
 /** The plugin's marketplace page, or null when the catalog does not list it. */
 const pluginUrl = ref<string | null>(null);
 const pluginDescription = ref<string | null>(null);
@@ -214,8 +237,9 @@ const pluginBody = computed(() =>
 /** Moved settings, or a secret value or named secret typed or removed: any is a Save of the settings. */
 const pluginChanged = computed(() => {
   if (pluginBody.value === null) return false;
-  const typed = saveBody(pluginShape.value!, {}, pluginValues.value, {}, pluginNamed.value);
-  return JSON.stringify(pluginBody.value) !== pluginSaved.value || typed.secretValues !== undefined || typed.namedSecretValues !== undefined;
+  const typed = saveBody(pluginShape.value!, {}, pluginValues.value, {}, pluginNamed.value, pluginTableSecrets.value);
+  return JSON.stringify(pluginBody.value) !== pluginSaved.value || typed.secretValues !== undefined
+    || typed.namedSecretValues !== undefined || typed.tableSecretValues !== undefined;
 });
 
 /**
@@ -257,6 +281,8 @@ async function loadPluginSettings() {
     pluginConnections.value = initialBindings(shape.connections, settings.connections ?? {});
     pluginStates.value = settings.secretStates ?? [];
     pluginValues.value = {};
+    pluginTableStates.value = settings.tableSecretStates ?? {};
+    pluginTableSecrets.value = {};
     pluginUrl.value = settings.marketplaceUrl ?? null;
     pluginDescription.value = settings.description ?? null;
     pluginShape.value = { ...shape, stored: { config: pluginConfig.value, outOfRange: settings.outOfRange ?? {} } };
@@ -273,7 +299,7 @@ const valid = computed(
     // A plugin member kept on its plugin is not held to the team's Agent allowlist - a person may
     // hire any installed plugin, and editing its settings is not a repoint.
     ((isPlugin.value && agent.value === props.snapshot.agent) || allowlistIncludes(teamAllowlist.value, agent.value)) &&
-    pluginMissing.value.length === 0 && pluginOutOfRange.value.length === 0 && !pluginNamedHeld.value,
+    pluginMissing.value.length === 0 && pluginOutOfRange.value.length === 0 && !pluginNamedHeld.value && !pluginTableHeld.value,
 );
 
 /** Why the Agent picker cannot be used, as its own error state. Null while it has choices. */
@@ -360,10 +386,11 @@ async function submit() {
       const answer = await savePluginSettings(
         props.snapshot.team,
         props.snapshot.id,
-        saveBody(pluginShape.value, pluginConfig.value, pluginValues.value, pluginConnections.value, pluginNamed.value),
+        saveBody(pluginShape.value, pluginConfig.value, pluginValues.value, pluginConnections.value, pluginNamed.value, pluginTableSecrets.value),
       );
       pluginSaved.value = JSON.stringify(pluginBody.value);
       pluginValues.value = {};
+      pluginTableSecrets.value = {};
       if (namedSecretValuesBody(pluginNamed.value)) {
         pluginNamed.value = emptyNamedSecretsDraft();
         await loadNamedSecrets(true);
@@ -371,6 +398,7 @@ async function submit() {
       if (answer) {
         pluginShape.value = { ...pluginShape.value, stored: { config: pluginConfig.value, outOfRange: answer.outOfRange ?? {} } };
         if (answer.secretStates) pluginStates.value = answer.secretStates;
+        if (answer.tableSecretStates) pluginTableStates.value = answer.tableSecretStates;
       }
     }
 
@@ -436,7 +464,7 @@ async function submit() {
   <!-- Stays open on a route change: the Console changes its address under open dialogs, and a
        slot's Add connection inside this one would close with it, losing what was typed. -->
   <q-dialog v-model="open" no-route-dismiss>
-    <q-card class="member-settings-card os-dialog-md">
+    <q-card class="member-settings-card" :class="pluginHasTable ? 'os-dialog-xl' : 'os-dialog-md'">
       <q-form ref="form" @submit="submit" @keydown="onEnter">
       <q-card-section class="row items-center no-wrap">
         <MemberAvatar
@@ -536,9 +564,13 @@ async function submit() {
             v-model:values="pluginValues"
             v-model:named="pluginNamed"
             v-model:connections="pluginConnections"
+            v-model:table-secrets="pluginTableSecrets"
             :shape="pluginShape"
             :states="pluginStates"
             :named-states="pluginNamedStates"
+            :table-states="pluginTableStates"
+            :saved-table-rows="pluginSavedRows"
+            :member-context="memberContext"
             :plugin="pluginId"
             :bind-slot="bindPluginSlot"
           />

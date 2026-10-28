@@ -695,6 +695,12 @@ public sealed record PluginConfigField(
     {
         if (!PersonOnly || (Default is { } fallback && JsonElement.DeepEquals(fallback, value))) return null;
 
+        if (Table is not null)
+        {
+            return $"`{name}` is a table only a person fills: an agent's hire, a Manager or a package may leave it empty ([]) "
+                + "or omit it. A person adds, edits and deletes its rows in the member's settings.";
+        }
+
         var keep = Default is { } d ? $"leave it at its default ({d.GetRawText()}) or omit it" : "hire this plugin yourself";
         return $"`{name}` is set by a person only: an agent's hire may {keep}. A person sets it when hiring, "
             + "in the Add member dialog.";

@@ -6,11 +6,13 @@ import type {
   PluginSecretField,
   PluginSecretState,
   PluginSettingValue,
+  PluginTableRow,
 } from '../api/types';
 import { bindingsBody } from './connections';
 import { namedSecretValuesBody, type NamedSecretsDraft } from './namedSecrets';
 import { boundsHint, boundsProblem } from './numberBounds';
 import { localTime, wireInstant } from './localTime';
+import { tableBody, tableRows, tableSecretValuesBody, type TableSecretsDraft } from './pluginTable';
 
 /**
  * A PLUGIN MEMBER'S SETTINGS, AS A FORM: what each manifest field starts as, whether it is still at
@@ -50,9 +52,13 @@ export const hasSlots = (shape: PluginSettingsShape) => Object.keys(shape.connec
 
 /**
  * What a person has typed or chosen, per field: text for a string or number box, a boolean for a
- * toggle, the chips for a list.
+ * toggle, the chips for a list, the rows of a table (`pluginTable`).
  */
-export type PluginFieldValue = string | boolean | string[];
+export type PluginFieldValue = string | boolean | string[] | PluginTableRow[];
+
+/** A list field's chips: the strings of its value, none for anything else. */
+export const listValue = (value: PluginFieldValue | undefined): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 export type PluginFieldValues = Record<string, PluginFieldValue>;
 
 /**
@@ -67,6 +73,7 @@ const emptyIsDefault = (field: PluginConfigField) =>
 export function defaultValue(field: PluginConfigField): PluginFieldValue {
   const fallback = field.default;
 
+  if (field.type === 'table') return [];
   if (field.type === 'list') return Array.isArray(fallback) ? fallback.map(String) : [];
   if (field.type === 'bool') return fallback === true;
   if (emptyIsDefault(field)) return '';
@@ -118,6 +125,7 @@ export function fieldLabel(name: string, field: { label?: string | null | undefi
 
 /** A stored value, in the form's own terms. */
 function asFormValue(field: PluginConfigField, stored: PluginSettingValue): PluginFieldValue {
+  if (field.type === 'table') return tableRows(stored).map((row) => ({ ...row }));
   if (field.type === 'list') return Array.isArray(stored) ? stored.map(String) : [String(stored)];
   if (field.type === 'bool') return stored === true || stored === 'true';
 
@@ -220,8 +228,10 @@ function asNumber(text: string): number | null {
 export function isDefault(field: PluginConfigField, value: PluginFieldValue | undefined): boolean {
   const fallback = defaultValue(field);
 
+  if (field.type === 'table') return tableRows(value).length === 0;
+
   if (field.type === 'list') {
-    const list = Array.isArray(value) ? value : [];
+    const list = listValue(value);
     const defaults = fallback as string[];
     return list.length === defaults.length && list.every((item, index) => item === defaults[index]);
   }
@@ -246,6 +256,7 @@ export function isDefault(field: PluginConfigField, value: PluginFieldValue | un
 export function defaultLabel(field: PluginConfigField): string | null {
   const fallback = field.default;
 
+  if (field.type === 'table') return null;
   if (field.type === 'list') {
     const list = Array.isArray(fallback) ? fallback : [];
     return `Default: ${list.length > 0 ? list.join(', ') : 'none'}`;
@@ -275,7 +286,7 @@ export function missingRequired(
   const missing: string[] = [];
 
   for (const [name, field] of Object.entries(shape.config)) {
-    if (!field.required || field.type === 'bool' || field.type === 'list') continue;
+    if (!field.required || field.type === 'bool' || field.type === 'list' || field.type === 'table') continue;
 
     const value = config[name];
     if ((typeof value !== 'string' || value.trim() === '') && placeholderOf(field) === undefined) missing.push(name);
@@ -351,8 +362,13 @@ export function settingsBody(
 
     if (isDefault(field, value)) continue;
 
+    if (field.type === 'table' && field.table) {
+      body.config[name] = tableBody(field.table, tableRows(value));
+      continue;
+    }
+
     if (field.type === 'list') {
-      body.config[name] = Array.isArray(value) ? [...value] : [];
+      body.config[name] = listValue(value);
       continue;
     }
 
@@ -394,13 +410,16 @@ export function saveBody(
   values: SecretValues,
   connections: Record<string, string> = {},
   named?: NamedSecretsDraft,
+  tableSecrets?: TableSecretsDraft,
 ): PluginHire {
   const { secrets: _bindings, ...settings } = settingsBody(shape, config, {}, connections);
   const typed = secretValuesBody(values);
   const namedTyped = shape.namedSecrets && named ? namedSecretValuesBody(named) : undefined;
+  const cellsTyped = tableSecrets ? tableSecretValuesBody(tableSecrets) : undefined;
   return {
     ...settings,
     ...(typed ? { secretValues: typed } : {}),
     ...(namedTyped ? { namedSecretValues: namedTyped } : {}),
+    ...(cellsTyped ? { tableSecretValues: cellsTyped } : {}),
   };
 }
