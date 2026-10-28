@@ -1105,6 +1105,16 @@ included) and presses **Done**: the browser's storage state (cookies and local s
 closing the tab, closes it and keeps nothing. The plugin receives the session on its next run like any
 other secret cell.
 
+- **Which rows.** The link is the table's `sign-in` row action (`rowActionLinks['sign-in']` in
+  `web/src/lib/pluginTable.ts`). The page (`PluginSignInRows`) takes a saved row as an entry when it
+  holds the action's `when` value (`method` = `interactive`), a bool `active` column is not off, its
+  `siteUrl` cell is an `http(s)` URL, and the table has a masked `readOnly` secret column to keep the
+  session in: `session`, or the table's only such column. A `hosts` string cell lists the entry's
+  other hosts, by name or URL, separated by commas or spaces.
+- **Kept** through `PluginMemberSecretStore` (see Table settings above): `CellRefusal(..., byPerson:
+  false, maxLength: 1 MiB)`, then `SetCellAsync`, under the table write lock, so a settings save that
+  removes the row cannot cross it. A person's save can only clear the cell.
+
 - **Where it may go.** Top-level navigation reaches the entry's own hosts, and other hosts only as a
   sign-in flow passes through them (an OAuth-, OpenID- or SAML-shaped step, then that provider's own
   pages); each such host is recorded as a provider. Anything else is refused and the page says so.
