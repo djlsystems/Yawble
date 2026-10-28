@@ -21,8 +21,8 @@ using Microsoft.Extensions.Logging;
 namespace Harness.Tests.Host;
 
 /// <summary>
-/// THE SIGN-IN PAGE'S SOCKET ON THE REAL HOST, with its own in-process worker running Playwright's
-/// headless Chromium against a local site. Refused to anyone but a person; a person's Done keeps the
+/// THE SIGN-IN PAGE'S SOCKET ON THE REAL HOST, with its own in-process worker running Google Chrome
+/// against a local site. Refused to anyone but a person; a person's Done keeps the
 /// browser's session through the row seam and the socket never carries it; nothing under the data
 /// root holds it.
 /// </summary>
@@ -137,9 +137,7 @@ public sealed class SignInPageTests : IAsyncLifetime
     [Fact]
     public async Task Done_keeps_the_session_through_the_row_and_the_socket_never_carries_it()
     {
-        Assert.SkipWhen(
-            ChromiumSignInBrowser.Find(Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH")) is null,
-            "No headless Chromium is installed (PLAYWRIGHT_BROWSERS_PATH).");
+        Assert.SkipWhen(SignInBrowserChromiumTests.Chromium() is null, SignInBrowserChromiumTests.NoChrome);
 
         var cookie = await LoginCookieAsync();
         var client = _factory.Server.CreateWebSocketClient();
