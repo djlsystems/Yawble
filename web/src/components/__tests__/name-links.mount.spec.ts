@@ -7,6 +7,7 @@
 // line; the Backlog's in-flight mark to the board and its dispatch line's workflow to that team's
 // Workflows dialog. Every link is a hash link over `/console` or a store call the tabs make.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import LiveViewDialog from '../LiveViewDialog.vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import type { Message, TeamId } from '../../api/types';
@@ -256,13 +257,31 @@ describe('the Monitor', () => {
     await flushPromises();
   }
 
-  it('offers Open member on a picked member, linking to its card on its board', async () => {
+  it("offers Open member on a picked member, opening the watch dialog the board's eye opens over the Monitor", async () => {
     const { view } = await mountMonitor();
     await pick({ kind: 'member', key: 'Alpha/Developer' });
 
     const open = view.find('[data-monitor-open-member]');
     expect(open.exists()).toBe(true);
-    expect(open.attributes('href')).toBe('#/console?team=Alpha&member=Developer');
+    expect(open.attributes('href'), 'it is not a link away from the Monitor').toBeUndefined();
+    expect(view.findComponent(LiveViewDialog).exists()).toBe(false);
+
+    await open.trigger('click');
+    await flushPromises();
+
+    const dialog = view.findComponent(LiveViewDialog);
+    expect(dialog.exists()).toBe(true);
+    expect(dialog.props('team')).toBe('Alpha');
+    expect(dialog.props('member')).toBe('Developer');
+    expect(useConsoleStore().view).toBe('monitor');
+  });
+
+  it('keeps Open member a link to the card when the board does not hold the member', async () => {
+    const { view } = await mountMonitor();
+    useConsoleStore().teams[0]!.containers = [] as never;
+    await pick({ kind: 'member', key: 'Alpha/Developer' });
+
+    expect(view.find('[data-monitor-open-member]').attributes('href')).toBe('#/console?team=Alpha&member=Developer');
   });
 
   it('offers Open workflows on a picked workflow with no item, opening that team\'s Workflows dialog', async () => {

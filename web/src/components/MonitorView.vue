@@ -33,6 +33,7 @@ import { MonitorScene, readPalette, type HoverInfo } from '../lib/monitor/scene'
 import { readClearedAfter, windowAfter, writeClearedAfter } from '../lib/monitor/cleared'
 import { loadAvatarSheet } from '../lib/avatars'
 import MemberAvatar from './MemberAvatar.vue'
+import LiveViewDialog from './LiveViewDialog.vue'
 import type { MemberState } from '../lib/memberState'
 import {
   SecondsMax,
@@ -393,6 +394,35 @@ const pickedMemberHref = computed(() => {
   const [team, ...rest] = ref.key.split('/')
   return team && liveTeams.value.has(team) ? memberHref(team, rest.join('/')) : null
 })
+
+/**
+ * The picked member's snapshot on the board, when the board holds it: "Open member" then opens the
+ * watch dialog the board's eye opens, over the Monitor, which stays as it is. A member the board does
+ * not hold keeps the link to its card.
+ */
+const pickedMemberSnapshot = computed(() => {
+  const ref = picked.value
+  if (ref?.kind !== 'member' || !pickedMemberHref.value) return null
+  const [team, ...rest] = ref.key.split('/')
+  const member = rest.join('/')
+  return board.teams.find((entry) => entry.id === team)?.containers?.find((c) => c.id === member) ?? null
+})
+
+/** The member whose dialog is open, kept apart from the pick, so picking another closes nothing. */
+const watched = ref<{ team: string; member: string } | null>(null)
+const watchedSnapshot = computed(() => {
+  const at = watched.value
+  return at ? board.teams.find((entry) => entry.id === at.team)?.containers?.find((c) => c.id === at.member) ?? null : null
+})
+const watchOpen = computed({
+  get: () => watchedSnapshot.value !== null,
+  set: (open: boolean) => { if (!open) watched.value = null },
+})
+
+function watchPicked() {
+  const snapshot = pickedMemberSnapshot.value
+  if (snapshot) watched.value = { team: String(snapshot.team), member: String(snapshot.id) }
+}
 
 /** A picked workflow with no item, on a live team: "Open workflows", that team's Workflows dialog. */
 const pickedWorkflowsTeam = computed(() => {
@@ -1203,8 +1233,9 @@ onUnmounted(() => {
             no-caps
             size="sm"
             label="Open member"
-            :href="pickedMemberHref"
+            :href="pickedMemberSnapshot ? undefined : pickedMemberHref"
             data-monitor-open-member
+            @click="watchPicked"
           />
           <q-btn flat dense round size="sm" icon="close" aria-label="Show every team" @click="picked = null" />
         </span>
@@ -1287,6 +1318,15 @@ onUnmounted(() => {
       </ol>
       <div v-if="shownTicker.length === 0" class="monitor-empty">No activity in view.</div>
     </aside>
+    <LiveViewDialog
+      v-if="watchedSnapshot"
+      v-model="watchOpen"
+      :team="watchedSnapshot.team"
+      :member="watchedSnapshot.id"
+      :name="watchedSnapshot.name"
+      :running="watchedSnapshot.state === 'Running'"
+      :plugin="watchedSnapshot.kind === 'plugin'"
+    />
   </section>
 </template>
 
