@@ -110,19 +110,23 @@ public static partial class SignInEndpoints
         // Done ends the session before the page is told what was kept: the answer still goes first.
         var saving = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        // A CANCELLED SOCKET CALL ABORTS THE SOCKET (Kestrel's), and then the page never hears why it
+        // ended: the screen stops on its own token, never cancelling a send, and the read is only
+        // cancelled once the page has been told and the close sent.
+        using var screenGone = new CancellationTokenSource();
         var screen = Task.Run(async () =>
         {
             try
             {
-                await foreach (var chunk in session.Stream.Reader.ReadAllAsync(gone.Token))
+                await foreach (var chunk in session.Stream.Reader.ReadAllAsync(screenGone.Token))
                 {
                     if (chunk.End) break;
 
-                    await send.WaitAsync(gone.Token);
+                    await send.WaitAsync(screenGone.Token);
                     try
                     {
-                        if (chunk.Bytes is { Length: > 0 } frame) await socket.SendAsync(frame, WebSocketMessageType.Binary, true, gone.Token);
-                        else if (chunk.Text is { } notice) await socket.SendAsync(Encoding.UTF8.GetBytes(notice), WebSocketMessageType.Text, true, gone.Token);
+                        if (chunk.Bytes is { Length: > 0 } frame) await socket.SendAsync(frame, WebSocketMessageType.Binary, true, CancellationToken.None);
+                        else if (chunk.Text is { } notice) await socket.SendAsync(Encoding.UTF8.GetBytes(notice), WebSocketMessageType.Text, true, CancellationToken.None);
                     }
                     finally
                     {
@@ -166,7 +170,7 @@ public static partial class SignInEndpoints
                             {
                                 await SendAsync(socket, saved.Saved
                                     ? new { kind = "saved", hosts = saved.Hosts, providers = saved.Providers }
-                                    : (object)new { kind = "error", error = saved.Error }, gone.Token);
+                                    : (object)new { kind = "error", error = saved.Error }, CancellationToken.None);
                             }
                             finally
                             {
@@ -195,18 +199,34 @@ public static partial class SignInEndpoints
         await session.StopAsync();
         var reason = await session.Over;
 
-        await gone.CancelAsync();
-        await Task.WhenAll(screen, reading);
+        await screenGone.CancelAsync();
+        await screen;
+        await send.WaitAsync(CancellationToken.None);
         try
         {
             await SendAsync(socket, new { kind = "ended", reason }, CancellationToken.None);
+            if (socket.State == WebSocketState.Open)
+            {
+                await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "ended", CancellationToken.None);
+            }
         }
         catch (Exception exception) when (exception is WebSocketException or IOException or ObjectDisposedException)
         {
         }
+        finally
+        {
+            send.Release();
+        }
 
+        // The page answers the close, which ends the read; one that does not is not waited for long.
+        await Task.WhenAny(reading, Task.Delay(CloseWait, CancellationToken.None));
+        await gone.CancelAsync();
+        await reading;
         await CloseAsync(socket);
     }
+
+    /// <summary>How long a page is given to answer the socket's close.</summary>
+    private static readonly TimeSpan CloseWait = TimeSpan.FromSeconds(5);
 
     /// <summary><c>done</c> or <c>cancel</c> when the message is that command; null for an input.</summary>
     private static string? Command(byte[] message)
