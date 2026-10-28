@@ -18,7 +18,7 @@ namespace Harness.Tests;
 /// local fake site whose made-up hosts (site.test, idp.test, evil.test) Chromium resolves to it. The
 /// entry is site.test; idp.test is reached only through an OAuth-shaped link, which admits it as a
 /// provider; evil.test is refused as a page, and its cookie is pruned from the save.
-/// Skipped where no Google Chrome (or no Xvfb) is installed.
+/// Skipped where no Google Chrome (or no Xvfb) is installed, and as root, where Chrome's sandbox will not start.
 /// </summary>
 public sealed class SignInBrowserChromiumTests : IAsyncLifetime
 {
@@ -28,11 +28,15 @@ public sealed class SignInBrowserChromiumTests : IAsyncLifetime
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    /// <summary>Google Chrome as the worker finds it (<c>HARNESS_SIGN_IN_CHROME</c>, else the volume), or null with no Xvfb to run it on.</summary>
+    /// <summary>
+    /// Google Chrome as the worker finds it (<c>HARNESS_SIGN_IN_CHROME</c>, else the volume), or null with no Xvfb to
+    /// run it on, or as root: Chrome's own sandbox refuses root, and the browser never runs without it (the release
+    /// runs this suite as root inside the image; the worker runs Chrome as its own user).
+    /// </summary>
     internal static string? Chromium() =>
-        File.Exists(SignInDisplay.DefaultXvfb) ? ChromiumSignInBrowser.Find() : null;
+        Environment.UserName != "root" && File.Exists(SignInDisplay.DefaultXvfb) ? ChromiumSignInBrowser.Find() : null;
 
-    internal const string NoChrome = "No Google Chrome (HARNESS_SIGN_IN_CHROME or google-chrome on the volume) or no Xvfb is installed.";
+    internal const string NoChrome = "No Google Chrome (HARNESS_SIGN_IN_CHROME or google-chrome on the volume) or no Xvfb is installed, or the suite runs as root, where Chrome's own sandbox will not start.";
 
     public async ValueTask InitializeAsync()
     {

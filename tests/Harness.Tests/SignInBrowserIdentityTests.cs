@@ -19,7 +19,7 @@ namespace Harness.Tests;
 /// keeps the headers it was sent. Nothing may say Headless, nothing may say automation, the headers
 /// must agree with the script, the locale must be the person's, and the row's profile must come back
 /// on the next sign-in. On <c>localhost</c>, which Chrome treats as secure, so the client hints are sent
-/// as on any https site. Skipped where no Google Chrome (or no Xvfb) is installed.
+/// as on any https site. Skipped where no Google Chrome (or no Xvfb) is installed, and as root.
 /// </summary>
 public sealed class SignInBrowserIdentityTests : IAsyncLifetime
 {
