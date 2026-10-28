@@ -33,6 +33,8 @@ public sealed class RecursiveDeleteInvariantTests
             "A removed plugin set aside inside the plugins folder, which is the Host's (harness:agent, directories 0750, no group write) by prepare-volume.sh."),
         new("src/Harness.Host/LocalRepos.cs",
             "A failed create's .creating- folder: the Host makes it as itself under the repos folder, which agents only read (harness:agent, directories 2750, no group write, by prepare-volume.sh), and it has never been a repository a team could clone."),
+        new("src/Harness.Worker/SignIn/ChromiumSignInBrowser.cs",
+            "A sign-in browser's profile: the worker makes it 0700 as itself, inside a 0700 folder of its own."),
     ];
 
     [Fact]

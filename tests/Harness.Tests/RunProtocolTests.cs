@@ -58,6 +58,9 @@ public sealed class RunProtocolTests
         new FollowTranscript("live:l1", Run, "/home/agent/t.jsonl", LiveViewNames.ClaudeJsonl),
         new StopStream("live:l1"),
         new ReadAgentFile("r2", "/home/agent/t.jsonl", ["ANTHROPIC_API_KEY"], true, AsTranscript: true),
+        new StartSignInBrowser("sign-in:1", new SignInBrowserLaunch("https://site.example/", ["www.site.example"], 1280, 800)),
+        new SaveSignInBrowser("sign-in:1", "r5"),
+        new StopSignInBrowser("sign-in:1"),
     ];
 
     private static readonly DateTimeOffset At = new(2026, 10, 2, 12, 0, 0, TimeSpan.Zero);
@@ -92,6 +95,9 @@ public sealed class RunProtocolTests
         new TerminalEnded("terminal:t1", 0),
         new TerminalMeasured("terminal:t1", 4343, 2, 2048, 17, At),
         new AgentFileRead("r2", AgentFileRead.Ok, null, 3),
+        // A save's state crosses only sealed (SignInSessionTests); as plain JSON a save carries none.
+        new SignInBrowserSaved("sign-in:1", "r5", null, ["site.example"], [], "Nothing to save."),
+        new SignInBrowserEnded("sign-in:1", "The browser closed."),
     ];
 
     [Fact]
