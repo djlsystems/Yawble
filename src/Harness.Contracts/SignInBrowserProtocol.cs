@@ -209,6 +209,96 @@ public static class SignInSessionValue
         return (state.GetRawText(), identity);
     }
 
+    /// <summary>The shortest part of a session that is redacted on its own: shorter ones are words like <c>true</c> or <c>dark</c>.</summary>
+    public const int MinimumPartLength = 8;
+
+    /// <summary>
+    /// THE SECRET PARTS OF A SAVED SESSION, each redacted on its own as well as the whole value: every
+    /// cookie's value (and its URL-decoded form), every local-storage value, and every string inside
+    /// a local-storage value that is JSON - a plugin that prints one cookie must not leak it. Parts
+    /// shorter than <see cref="MinimumPartLength"/> are left out. Nothing for a value that is not a session.
+    /// </summary>
+    public static IReadOnlyList<string> SecretParts(string value)
+    {
+        string state;
+        try
+        {
+            state = Read(value).StorageState;
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException)
+        {
+            return [];
+        }
+
+        var parts = new List<string>();
+        void Add(string? part)
+        {
+            if (part is not { Length: >= MinimumPartLength }) return;
+            parts.Add(part);
+            try
+            {
+                var decoded = Uri.UnescapeDataString(part.Replace('+', ' '));
+                if (decoded != part && decoded.Length >= MinimumPartLength) parts.Add(decoded);
+            }
+            catch (UriFormatException)
+            {
+            }
+        }
+
+        void Leaves(JsonElement element)
+        {
+            switch (element.ValueKind)
+            {
+                case JsonValueKind.String:
+                    Add(element.GetString());
+                    break;
+                case JsonValueKind.Object:
+                    foreach (var property in element.EnumerateObject()) Leaves(property.Value);
+                    break;
+                case JsonValueKind.Array:
+                    foreach (var item in element.EnumerateArray()) Leaves(item);
+                    break;
+            }
+        }
+
+        using var document = JsonDocument.Parse(state);
+        var root = document.RootElement;
+        if (root.TryGetProperty("cookies", out var cookies) && cookies.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var cookie in cookies.EnumerateArray())
+            {
+                if (cookie.ValueKind == JsonValueKind.Object && cookie.TryGetProperty("value", out var v) && v.ValueKind == JsonValueKind.String) Add(v.GetString());
+            }
+        }
+
+        if (root.TryGetProperty("origins", out var origins) && origins.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var origin in origins.EnumerateArray())
+            {
+                if (origin.ValueKind != JsonValueKind.Object || !origin.TryGetProperty("localStorage", out var items) || items.ValueKind != JsonValueKind.Array) continue;
+                foreach (var item in items.EnumerateArray())
+                {
+                    if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty("value", out var v) || v.ValueKind != JsonValueKind.String) continue;
+                    var text = v.GetString()!;
+                    Add(text);
+                    if (text.Length > 0 && text[0] is '{' or '[')
+                    {
+                        try
+                        {
+                            using var inner = JsonDocument.Parse(text);
+                            Leaves(inner.RootElement);
+                        }
+                        catch (JsonException)
+                        {
+                        }
+                    }
+                }
+            }
+        }
+
+        return [.. parts.Distinct(StringComparer.Ordinal)];
+    }
+
     /// <summary>The v2 envelope of <paramref name="storageState"/> (JSON) and <paramref name="identity"/>.</summary>
     public static string Write(string storageState, SignInBrowserIdentity identity)
     {

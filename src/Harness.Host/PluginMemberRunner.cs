@@ -1088,7 +1088,10 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
                 {
                     if (!own.TryGetValue(PluginMemberSecretStore.CellField(name, row, column.Name), out var value)) continue;
                     values[column.Name] = value;
-                    if (column.Masked) masked.Add(value);
+                    if (!column.Masked) continue;
+                    masked.Add(value);
+                    // A saved sign-in session is redacted part by part too: one cookie printed alone.
+                    masked.AddRange(SignInSessionValue.SecretParts(value));
                 }
 
                 if (values.Count > 0) rows[row] = values;

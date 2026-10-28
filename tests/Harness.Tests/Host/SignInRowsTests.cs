@@ -89,8 +89,9 @@ public sealed class SignInRowsTests : IAsyncLifetime
         Directory.CreateDirectory(_dataRoot);
         Directory.CreateDirectory(_outside);
 
-        // ECHOES its request, so a kept session's way into the run (and out of its output) is seen.
-        var script = $"req=$(cat); printf '%s\\n' \"$req\" >> '{Requests}'; printf '%s\\n' \"$req\"; echo '{{\"t\":\"result\",\"ok\":true,\"output\":\"checked\"}}'";
+        // ECHOES its request, so a kept session's way into the run (and out of its output) is seen, and
+        // prints each `piece-` value it finds on its own, as a plugin printing one cookie would.
+        var script = $"req=$(cat); printf '%s\\n' \"$req\" >> '{Requests}'; printf '%s\\n' \"$req\"; printf '%s' \"$req\" | grep -o '[a-z]*piece-[0-9a-f]*' | sed 's/^/part: /'; echo '{{\"t\":\"result\",\"ok\":true,\"output\":\"checked\"}}'";
         PluginInstall.Write(_dataRoot, "webcreds", script: script, manifest: PluginInstall.Manifest("webcreds", edit: m =>
             m["config"] = new JsonObject { ["entries"] = JsonNode.Parse(Entries) }));
 
@@ -243,6 +244,31 @@ public sealed class SignInRowsTests : IAsyncLifetime
         await TellAndAwaitAsync("Creds");
         var request = File.ReadAllLines(Requests).Where(l => l.Length > 0).Select(l => JsonNode.Parse(l)!).Last();
         Assert.Equal(envelope, (string?)request["secrets"]!["entries"]!["site-admin"]!["session"]);
+    }
+
+    [Fact]
+    public async Task A_plugin_printing_one_cookie_or_local_storage_value_of_a_session_has_it_redacted()
+    {
+        var hex = Guid.NewGuid().ToString("N");
+        var (cookie, local, inner) = ("cpiece-" + hex, "lpiece-" + hex, "jpiece-" + hex);
+        var json = JsonSerializer.Serialize(new { token = inner, theme = "dark" });
+        var state = JsonSerializer.Serialize(new
+        {
+            cookies = new[] { new { name = "sid", value = cookie, domain = "app.example.test", path = "/" } },
+            origins = new[] { new { origin = "https://app.example.test", localStorage = new[] { new { name = "t", value = local }, new { name = "j", value = json } } } },
+        });
+        var identity = new SignInBrowserIdentity(
+            "chrome", "156.0.8078.73", "Mozilla/5.0", new SignInUserAgentMetadata([], [], "Linux", "", "x86", "", false, "64"),
+            "en-US", ["en-US"], "UTC", new SignInBrowserSize(1920, 1080), new SignInBrowserSize(1280, 800), 1);
+        await Services.GetRequiredService<ISignInRows>().SaveSessionAsync(
+            Creds, "entries", "site-admin", "session", new SignInStorageState(SignInSessionValue.Write(state, identity)), new CredentialActor("u1", Email), Ct);
+
+        var run = await TellAndAwaitAsync("Creds");
+
+        // The plugin printed each value alone (its `part:` lines); every one is redacted.
+        Assert.Contains("part: ", run.Payload, StringComparison.Ordinal);
+        foreach (var part in new[] { cookie, local, inner }) Assert.DoesNotContain(part, run.Payload, StringComparison.Ordinal);
+        Assert.Contains(DiagnosticRedaction.Placeholder, run.Payload, StringComparison.Ordinal);
     }
 
     [Fact]
