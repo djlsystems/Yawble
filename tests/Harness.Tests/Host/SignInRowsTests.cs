@@ -192,6 +192,33 @@ public sealed class SignInRowsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Opening_a_row_that_is_not_in_the_settings_says_there_is_no_such_row_and_starts_no_browser()
+    {
+        // A stale link: the row was renamed or removed (D14).
+        using var login = _factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false, AllowAutoRedirect = false });
+        var answer = await login.PostAsJsonAsync("/api/auth/login", new { email = Email, password = Password }, Ct);
+        answer.EnsureSuccessStatusCode();
+        var cookie = string.Join("; ", answer.Headers.GetValues("Set-Cookie").Select(c => c.Split(';')[0]));
+
+        var client = _factory.Server.CreateWebSocketClient();
+        client.ConfigureRequest = request => request.Headers.Cookie = cookie;
+        using var socket = await client.ConnectAsync(new Uri(_factory.Server.BaseAddress, $"/api/teams/{_team}/members/Creds/sign-in/entries/nosuchrow"), Ct);
+
+        var buffer = new byte[64 * 1024];
+        var first = await socket.ReceiveAsync(buffer, Ct);
+        Assert.Equal(WebSocketMessageType.Text, first.MessageType);
+        var ended = JsonDocument.Parse(Encoding.UTF8.GetString(buffer, 0, first.Count)).RootElement;
+        Assert.Equal("ended", ended.GetProperty("kind").GetString());
+        Assert.Equal("refused", ended.GetProperty("cause").GetString());
+        Assert.Equal(PluginSignInRows.NoSuchRowText("nosuchrow"), ended.GetProperty("reason").GetString());
+        Assert.Equal(WebSocketMessageType.Close, (await socket.ReceiveAsync(buffer, Ct)).MessageType);
+
+        // No browser: no session was started for the person.
+        var person = (await Services.GetRequiredService<IUserStore>().FindAsync(Email, Ct))!.Id;
+        Assert.Null(Services.GetRequiredService<SignInSessions>().Of(person));
+    }
+
+    [Fact]
     public async Task A_kept_session_is_the_rows_masked_secret_cell_never_answered_and_reaches_the_next_run_redacted()
     {
         var state = $$"""{"cookies":[{"name":"sid","value":"{{Guid.NewGuid():N}}","domain":"app.example.test"}],"origins":[]}""";

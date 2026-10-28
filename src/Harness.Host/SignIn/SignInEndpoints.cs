@@ -58,8 +58,9 @@ public static partial class SignInEndpoints
             var id = new ContainerId(found!.Team, found.Name);
             if (await rows.EntryAsync(id, field, row, ct) is not { } entry)
             {
-                // A row that is there but cannot be signed in to (inactive, not interactive, no Site URL):
-                // the page is told why on its socket, and no browser starts.
+                // A row that is there but cannot be signed in to (inactive, not interactive, no Site URL),
+                // or one the settings no longer have (a stale link): the page is told why on its socket,
+                // and no browser starts. Anything but the socket is still answered 404.
                 if (await rows.RefusalAsync(id, field, row, ct) is { } why && context.WebSockets.IsWebSocketRequest)
                 {
                     using var refused = await context.WebSockets.AcceptWebSocketAsync();

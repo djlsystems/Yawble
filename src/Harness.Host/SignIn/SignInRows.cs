@@ -64,6 +64,10 @@ public sealed class PluginSignInRows(
     /// <summary>The longest storage state kept: Playwright's state for a few hosts is tens of kilobytes.</summary>
     public const int MaxSessionLength = 1024 * 1024;
 
+    /// <summary>What a stale sign-in link is told: the member's settings have no row by that name.</summary>
+    public static string NoSuchRowText(string row) =>
+        $"This member's settings have no row '{row}': it may have been renamed or removed. Open Sign in again from the member's settings.";
+
     public async Task<SignInEntry?> EntryAsync(ContainerId member, string field, string row, CancellationToken ct = default)
     {
         if (await ManifestAsync(member, ct) is not { } found) return null;
@@ -102,14 +106,14 @@ public sealed class PluginSignInRows(
         Find(manifest, stored, field, row).Entry;
 
     /// <summary>
-    /// The sign-in entry <paramref name="row"/>, or why that row of a sign-in table is not one. Both are
-    /// null when there is no such table or row.
+    /// The sign-in entry <paramref name="row"/>, or why that row of a sign-in table is not one - also
+    /// when the table has no such row (a stale link). Both are null when there is no such sign-in table.
     /// </summary>
     private static (SignInEntry? Entry, string? Refusal) Find(PluginManifest manifest, PluginMemberSettings stored, string field, string row)
     {
         if (!manifest.Config.TryGetValue(field, out var declared) || declared.Table is not { } table) return (null, null);
         if (table.RowActions.FirstOrDefault(a => a.Action == "sign-in") is not { } action) return (null, null);
-        if (table.Row(stored.Config.TryGetValue(field, out var rows) ? rows : null, row) is not { } found) return (null, null);
+        if (table.Row(stored.Config.TryGetValue(field, out var rows) ? rows : null, row) is not { } found) return (null, NoSuchRowText(row));
 
         var name = Text(found, table.Key) is { Length: > 0 } named ? named : row;
         if (Text(found, action.Column) is var method && method != action.EqualTo)

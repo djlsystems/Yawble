@@ -1145,10 +1145,11 @@ other secret cell.
   person: opening another **replaces** the first, whose page says it was closed. The page's socket
   (`/api/teams/{team}/members/{member}/sign-in/{field}/{row}`) is humans-only, like every route that
   sets a member's secret; an agent's, a Manager's or the Concierge's key is refused before anything
-  starts. A row that is missing answers 404. A row that is there but cannot be signed in to (inactive,
-  not `interactive`, no `http(s)` Site URL) starts no browser: the socket sends
-  `{"kind":"ended","cause":"refused","reason":...}` saying which, and closes, and the page shows that
-  sentence. The table shows no Sign in link for such a row. The page is told why a browser closed
+  starts. A row that is there but cannot be signed in to (inactive, not `interactive`, no `http(s)`
+  Site URL), or a row the member's settings no longer have (a stale link), starts no browser: the
+  socket sends `{"kind":"ended","cause":"refused","reason":...}` saying which ("This member's settings
+  have no row '...'" for a missing one), and closes, and the page shows that sentence. A request for
+  a missing row that is not a WebSocket still answers 404, as does a member or table that is not there. The table shows no Sign in link for such a row. The page is told why a browser closed
   (replaced, idle, saved) before its socket closes. Above the browser the page shows one note at a
   time (the latest refusal or provider, which the person can dismiss), so the browser stays on a
   phone's screen.
