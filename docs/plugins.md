@@ -1136,9 +1136,13 @@ other secret cell.
   person: opening another **replaces** the first, whose page says it was closed. The page's socket
   (`/api/teams/{team}/members/{member}/sign-in/{field}/{row}`) is humans-only, like every route that
   sets a member's secret; an agent's, a Manager's or the Concierge's key is refused before anything
-  starts. A row that is missing, inactive or not `interactive` answers 404, and the table shows no
-  Sign in link for one that is inactive or has no `http(s)` Site URL. The page is told why a browser
-  closed (replaced, idle, saved) before its socket closes.
+  starts. A row that is missing answers 404. A row that is there but cannot be signed in to (inactive,
+  not `interactive`, no `http(s)` Site URL) starts no browser: the socket sends
+  `{"kind":"ended","cause":"refused","reason":...}` saying which, and closes, and the page shows that
+  sentence. The table shows no Sign in link for such a row. The page is told why a browser closed
+  (replaced, idle, saved) before its socket closes. Above the browser the page shows one note at a
+  time (the latest refusal or provider, which the person can dismiss), so the browser stays on a
+  phone's screen.
 - **Never shown.** The saved state crosses from the worker to control only sealed, is never sent to
   the page (a save answers the hosts kept and the providers among them) and never logged. Page
   addresses are reported by origin and path only.

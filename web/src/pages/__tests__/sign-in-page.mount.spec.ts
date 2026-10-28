@@ -138,4 +138,38 @@ describe('the sign-in page', () => {
 
     expect(document.body.textContent).toContain('evil.example is not this entry');
   });
+
+  it('shows one note at a time: a repeated refusal is not repeated, a newer note replaces it, and it can be dismissed', async () => {
+    const socket = await open();
+    socket.say({ kind: 'started', width: 1280, height: 800, site: 'https://site.example' });
+    socket.say({ kind: 'refused', host: 'evil.example' });
+    socket.say({ kind: 'refused', host: 'evil.example' });
+    socket.say({ kind: 'refused', host: 'evil.example' });
+    await settle();
+
+    expect(document.body.querySelectorAll('.sign-in-note')).toHaveLength(1);
+
+    socket.say({ kind: 'provider', host: 'accounts.example' });
+    socket.say({ kind: 'refused', host: 'far.example' });
+    await settle();
+    const notes = document.body.querySelectorAll('.sign-in-note');
+    expect(notes).toHaveLength(1);
+    expect(notes[0]!.textContent).toContain('far.example is not this entry');
+    expect(document.body.textContent).not.toContain('evil.example');
+
+    button('Dismiss').click();
+    await settle();
+    expect(document.body.querySelectorAll('.sign-in-note')).toHaveLength(0);
+  });
+
+  it('says plainly why a row can’t be signed in to, without “Starting the browser…”', async () => {
+    const socket = await open();
+    socket.say({ kind: 'ended', cause: 'refused', reason: "'site-admin' can't be signed in to: it is switched off. Turn Active on in the member's settings first." });
+    for (const listener of socket.listeners.close ?? []) listener({});
+    await settle();
+
+    expect(document.body.textContent).toContain("can't be signed in to: it is switched off");
+    expect(document.body.textContent).not.toContain('Starting the browser');
+    expect(document.body.textContent).not.toContain('Nothing was saved');
+  });
 });

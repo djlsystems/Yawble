@@ -20,8 +20,10 @@ const size = ref({ width: 1280, height: 800 });
 const shown = ref(false);
 const address = ref('');
 const title = ref('');
-const notes = ref<string[]>([]);
+const note = ref('');
 const outcome = ref('');
+/** The row can't be signed in to (inactive, not interactive, no Site URL): no browser was started. */
+const refused = ref(false);
 const error = ref('');
 const screen = ref<HTMLElement | null>(null);
 const canvas = ref<HTMLCanvasElement | null>(null);
@@ -30,8 +32,13 @@ let socket: SignInSocket | null = null;
 
 const live = computed(() => state.value === 'live');
 
-function note(text: string) {
-  notes.value = [...notes.value.slice(-4), text];
+/**
+ * ONE NOTE AT A TIME above the browser: the latest refusal or provider replaces the one before (a
+ * repeated refusal is the same note), and the person may dismiss it. A list would push the browser
+ * off a phone's screen.
+ */
+function tell(text: string) {
+  note.value = text;
 }
 
 function onMessage(message: SignInMessage) {
@@ -47,10 +54,10 @@ function onMessage(message: SignInMessage) {
       title.value = message.title ?? '';
       break;
     case 'refused':
-      note(`${message.host} is not this entry's site or a sign-in provider it passed through, so it was not opened.`);
+      tell(`${message.host} is not this entry's site or a sign-in provider it passed through, so it was not opened.`);
       break;
     case 'provider':
-      note(`Signing in through ${message.host}.`);
+      tell(`Signing in through ${message.host}.`);
       break;
     case 'saved':
       outcome.value = `Saved the session for ${message.hosts.join(', ')}.`;
@@ -61,6 +68,7 @@ function onMessage(message: SignInMessage) {
       break;
     case 'ended':
       if (!outcome.value) outcome.value = message.reason;
+      if (message.cause === 'refused') refused.value = true;
       state.value = 'over';
       break;
   }
@@ -159,7 +167,9 @@ onBeforeUnmount(() => {
     <div class="row items-center q-gutter-sm q-mb-sm">
       <div class="col">
         <div class="text-subtitle1">Sign in: {{ where.row }}</div>
-        <div class="text-caption ellipsis sign-in-address" :title="address">{{ title || address || 'Starting the browser…' }}</div>
+        <div class="text-caption ellipsis sign-in-address" :title="address">
+          {{ title || address || (state === 'over' ? '' : 'Starting the browser…') }}
+        </div>
       </div>
       <q-btn
         v-if="state !== 'over'"
@@ -184,11 +194,14 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-if="error" class="sign-in-error text-negative q-mb-sm">{{ error }}</div>
-    <div v-for="(text, i) in notes" :key="i" class="sign-in-note text-caption q-mb-xs">{{ text }}</div>
+    <div v-if="note && state !== 'over'" class="sign-in-note row items-center no-wrap text-caption q-mb-xs">
+      <div class="col">{{ note }}</div>
+      <q-btn flat dense no-caps size="sm" label="Dismiss" @click="note = ''" />
+    </div>
 
     <div v-if="state === 'over'" class="sign-in-outcome q-pa-lg text-center">
       <div class="text-body1">{{ outcome }}</div>
-      <div class="text-caption q-mt-sm">You can close this tab.</div>
+      <div class="text-caption q-mt-sm">{{ refused ? 'No browser was started. You can close this tab.' : 'You can close this tab.' }}</div>
     </div>
 
     <div

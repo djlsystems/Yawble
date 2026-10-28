@@ -14,7 +14,7 @@ export type SignInMessage =
   | { kind: 'provider'; host: string }
   | { kind: 'saved'; hosts: string[]; providers: string[] }
   | { kind: 'error'; error: string }
-  | { kind: 'ended'; reason: string };
+  | { kind: 'ended'; reason: string; cause?: 'refused' };
 
 export interface SignInHandlers {
   onMessage: (message: SignInMessage) => void;
