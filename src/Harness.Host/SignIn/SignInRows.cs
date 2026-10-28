@@ -25,6 +25,14 @@ public interface ISignInRows
     Task<SignInEntry?> EntryAsync(ContainerId member, string field, string row, CancellationToken ct = default);
 
     /// <summary>
+    /// Why <paramref name="row"/> of a sign-in table is not an entry - inactive, not <c>interactive</c>,
+    /// no http(s) Site URL - as a sentence for the person; null when it is one, or when there is no
+    /// such row or table to say anything about.
+    /// </summary>
+    Task<string?> RefusalAsync(ContainerId member, string field, string row, CancellationToken ct = default) =>
+        Task.FromResult<string?>(null);
+
+    /// <summary>
     /// Keeps <paramref name="state"/> as the masked secret cell <paramref name="column"/> of
     /// <paramref name="row"/> in <paramref name="member"/>'s table field <paramref name="field"/>,
     /// replacing what was there, recorded as set by <paramref name="actor"/>. Throws when it cannot.
@@ -62,6 +70,12 @@ public sealed class PluginSignInRows(
         return Entry(found.Manifest, await settings.ForAsync(member, ct), field, row);
     }
 
+    public async Task<string?> RefusalAsync(ContainerId member, string field, string row, CancellationToken ct = default)
+    {
+        if (await ManifestAsync(member, ct) is not { } found) return null;
+        return Find(found.Manifest, await settings.ForAsync(member, ct), field, row).Refusal;
+    }
+
     public async Task SaveSessionAsync(
         ContainerId member, string field, string row, string column, SignInStorageState state, CredentialActor actor, CancellationToken ct = default)
     {
@@ -84,27 +98,44 @@ public sealed class PluginSignInRows(
     }
 
     /// <summary>The sign-in entry <paramref name="row"/> of <paramref name="field"/> in <paramref name="stored"/>, or null.</summary>
-    public static SignInEntry? Entry(PluginManifest manifest, PluginMemberSettings stored, string field, string row)
-    {
-        if (!manifest.Config.TryGetValue(field, out var declared) || declared.Table is not { } table) return null;
-        if (table.RowActions.FirstOrDefault(a => a.Action == "sign-in") is not { } action) return null;
-        if (table.Row(stored.Config.TryGetValue(field, out var rows) ? rows : null, row) is not { } found) return null;
+    public static SignInEntry? Entry(PluginManifest manifest, PluginMemberSettings stored, string field, string row) =>
+        Find(manifest, stored, field, row).Entry;
 
-        if (Text(found, action.Column) != action.EqualTo) return null;
+    /// <summary>
+    /// The sign-in entry <paramref name="row"/>, or why that row of a sign-in table is not one. Both are
+    /// null when there is no such table or row.
+    /// </summary>
+    private static (SignInEntry? Entry, string? Refusal) Find(PluginManifest manifest, PluginMemberSettings stored, string field, string row)
+    {
+        if (!manifest.Config.TryGetValue(field, out var declared) || declared.Table is not { } table) return (null, null);
+        if (table.RowActions.FirstOrDefault(a => a.Action == "sign-in") is not { } action) return (null, null);
+        if (table.Row(stored.Config.TryGetValue(field, out var rows) ? rows : null, row) is not { } found) return (null, null);
+
+        var name = Text(found, table.Key) is { Length: > 0 } named ? named : row;
+        if (Text(found, action.Column) is var method && method != action.EqualTo)
+        {
+            return (null, $"'{name}' can't be signed in to here: its {action.Column} is {(string.IsNullOrEmpty(method) ? "not set" : $"'{method}'")}, not {action.EqualTo}.");
+        }
 
         if (table.Column(Active) is { Type: "bool" } active)
         {
             var on = found.TryGetProperty(Active, out var cell) ? cell : active.Default;
-            if (on is { ValueKind: JsonValueKind.False }) return null;
+            if (on is { ValueKind: JsonValueKind.False })
+            {
+                return (null, $"'{name}' can't be signed in to: it is switched off. Turn Active on in the member's settings first.");
+            }
         }
 
-        if (!Uri.TryCreate(Text(found, SiteUrl), UriKind.Absolute, out var site) || site.Scheme is not ("https" or "http")) return null;
+        if (!Uri.TryCreate(Text(found, SiteUrl), UriKind.Absolute, out var site) || site.Scheme is not ("https" or "http"))
+        {
+            return (null, $"'{name}' can't be signed in to: it has no http(s) Site URL to open. Add one in the member's settings first.");
+        }
 
         var keep = table.SecretColumns.Where(c => c.ReadOnly && c.Masked).ToList();
         var session = keep.FirstOrDefault(c => c.Name == Session) ?? (keep.Count == 1 ? keep[0] : null);
-        if (session is null) return null;
+        if (session is null) return (null, $"'{name}' can't be signed in to: the plugin's table has no column to keep a session in.");
 
-        return new SignInEntry(site.ToString(), Hosts(Text(found, HostsColumn)), session.Name);
+        return (new SignInEntry(site.ToString(), Hosts(Text(found, HostsColumn)), session.Name), null);
     }
 
     /// <summary>Each host of a hosts cell, by name or as a URL's host, lower case, once each; nothing else.</summary>

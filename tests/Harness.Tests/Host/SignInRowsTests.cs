@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -154,6 +155,39 @@ public sealed class SignInRowsTests : IAsyncLifetime
 
         Assert.Null(await rows.EntryAsync(Creds, "password", "site-admin", Ct));
         Assert.Null(await rows.EntryAsync(new ContainerId(_team, "Nobody"), "entries", "site-admin", Ct));
+    }
+
+    [Theory]
+    [InlineData("off", "switched off")]
+    [InlineData("pw", "not interactive")]
+    [InlineData("nowhere", "no http(s) Site URL")]
+    public async Task Opening_a_row_that_cannot_be_signed_in_to_tells_the_person_why_and_starts_no_browser(string row, string why)
+    {
+        using var login = _factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false, AllowAutoRedirect = false });
+        var answer = await login.PostAsJsonAsync("/api/auth/login", new { email = Email, password = Password }, Ct);
+        answer.EnsureSuccessStatusCode();
+        var cookie = string.Join("; ", answer.Headers.GetValues("Set-Cookie").Select(c => c.Split(';')[0]));
+
+        var client = _factory.Server.CreateWebSocketClient();
+        client.ConfigureRequest = request => request.Headers.Cookie = cookie;
+        using var socket = await client.ConnectAsync(new Uri(_factory.Server.BaseAddress, $"/api/teams/{_team}/members/Creds/sign-in/entries/{row}"), Ct);
+
+        var buffer = new byte[64 * 1024];
+        var first = await socket.ReceiveAsync(buffer, Ct);
+        Assert.Equal(WebSocketMessageType.Text, first.MessageType);
+        var ended = JsonDocument.Parse(Encoding.UTF8.GetString(buffer, 0, first.Count)).RootElement;
+        Assert.Equal("ended", ended.GetProperty("kind").GetString());
+        Assert.Equal("refused", ended.GetProperty("cause").GetString());
+        var reason = ended.GetProperty("reason").GetString()!;
+        Assert.Contains(row, reason, StringComparison.Ordinal);
+        Assert.Contains(why, reason, StringComparison.Ordinal);
+        Assert.Equal(WebSocketMessageType.Close, (await socket.ReceiveAsync(buffer, Ct)).MessageType);
+
+        // A row that is not there at all is still not found.
+        Assert.Equal(HttpStatusCode.NotFound, (await login.SendAsync(new HttpRequestMessage(HttpMethod.Get, $"/api/teams/{_team}/members/Creds/sign-in/entries/ghost")
+        {
+            Headers = { { "Cookie", cookie } },
+        }, Ct)).StatusCode);
     }
 
     [Fact]

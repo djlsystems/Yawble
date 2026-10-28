@@ -58,6 +58,16 @@ public static partial class SignInEndpoints
             var id = new ContainerId(found!.Team, found.Name);
             if (await rows.EntryAsync(id, field, row, ct) is not { } entry)
             {
+                // A row that is there but cannot be signed in to (inactive, not interactive, no Site URL):
+                // the page is told why on its socket, and no browser starts.
+                if (await rows.RefusalAsync(id, field, row, ct) is { } why && context.WebSockets.IsWebSocketRequest)
+                {
+                    using var refused = await context.WebSockets.AcceptWebSocketAsync();
+                    await SendAsync(refused, new { kind = "ended", cause = "refused", reason = why }, ct);
+                    await CloseAsync(refused);
+                    return Results.Empty;
+                }
+
                 return Results.NotFound(new { error = $"'{member}' has no active interactive entry '{row}' in '{field}' to sign in to." });
             }
 
