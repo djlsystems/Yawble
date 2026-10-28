@@ -73,6 +73,9 @@ public sealed partial class ChromiumSignInBrowser : IAsyncDisposable
         _sending = Task.Run(SendAllAsync);
     }
 
+    /// <summary>Chrome's own process id while it runs: what a test walks to see its renderers sandboxed.</summary>
+    public int? ProcessId => _process is { HasExited: false } process ? process.Id : null;
+
     /// <summary>The hosts this browser may go to, and the providers it has admitted so far.</summary>
     public SignInHosts Hosts => _hosts;
 

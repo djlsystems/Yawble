@@ -14,11 +14,11 @@ using Microsoft.Extensions.Logging;
 namespace Harness.Tests;
 
 /// <summary>
-/// THE SIGN-IN BROWSER, FOR REAL: Playwright's headless Chromium from the volume, sandboxed, against a
+/// THE SIGN-IN BROWSER, FOR REAL: Google Chrome from the volume, headed on its own display and sandboxed, against a
 /// local fake site whose made-up hosts (site.test, idp.test, evil.test) Chromium resolves to it. The
 /// entry is site.test; idp.test is reached only through an OAuth-shaped link, which admits it as a
 /// provider; evil.test is refused as a page, and its cookie is pruned from the save.
-/// Skipped where no Chromium is installed.
+/// Skipped where no Google Chrome (or no Xvfb) is installed.
 /// </summary>
 public sealed class SignInBrowserChromiumTests : IAsyncLifetime
 {
@@ -28,8 +28,11 @@ public sealed class SignInBrowserChromiumTests : IAsyncLifetime
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    private static string? Chromium() =>
-        ChromiumSignInBrowser.Find(Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH"));
+    /// <summary>Google Chrome as the worker finds it (<c>HARNESS_SIGN_IN_CHROME</c>, else the volume), or null with no Xvfb to run it on.</summary>
+    internal static string? Chromium() =>
+        File.Exists(SignInDisplay.DefaultXvfb) ? ChromiumSignInBrowser.Find() : null;
+
+    internal const string NoChrome = "No Google Chrome (HARNESS_SIGN_IN_CHROME or google-chrome on the volume) or no Xvfb is installed.";
 
     public async ValueTask InitializeAsync()
     {
@@ -115,7 +118,7 @@ public sealed class SignInBrowserChromiumTests : IAsyncLifetime
     [Fact]
     public async Task A_page_on_another_host_is_refused_and_the_screen_is_streamed()
     {
-        Assert.SkipWhen(Chromium() is null, "No headless Chromium is installed (PLAYWRIGHT_BROWSERS_PATH).");
+        Assert.SkipWhen(Chromium() is null, NoChrome);
 
         var (browser, chunks) = await StartAsync(Url("site.test", "/?go=" + Uri.EscapeDataString(Url("evil.test"))));
         await using (browser)
@@ -138,7 +141,7 @@ public sealed class SignInBrowserChromiumTests : IAsyncLifetime
     [Fact]
     public async Task An_oauth_step_admits_its_provider_and_the_save_is_pruned_to_the_entry_and_the_provider()
     {
-        Assert.SkipWhen(Chromium() is null, "No headless Chromium is installed (PLAYWRIGHT_BROWSERS_PATH).");
+        Assert.SkipWhen(Chromium() is null, NoChrome);
 
         var authorize = Url("idp.test", "/authorize?client_id=app&response_type=code&redirect_uri=" + Uri.EscapeDataString(Url("site.test", "/cb")));
         var (browser, chunks) = await StartAsync(Url("site.test", "/?go=" + Uri.EscapeDataString(authorize)));
