@@ -197,7 +197,11 @@ export default defineConfig((ctx) => {
       // Dark is here for the same reason Notify is: unregistered, `Dark.set` and `$q.dark` still
       // type-check and do nothing, so the theme toggle would be a menu item that changes nothing.
       // The viewer's choice is applied by App.vue, which watches `theme` on `stores/display.ts`.
-      plugins: ['Notify', 'Dark']
+      //
+      // AppFullscreen is here so a dialog opened in the Monitor's full screen shows in it: the plugin
+      // hears the browser's own fullscreenchange and moves Quasar's dialogs, menus and tooltips into
+      // the full-screen element. Unregistered, they stay under <body>, which full screen hides.
+      plugins: ['Notify', 'Dark', 'AppFullscreen']
     },
 
     // animations: 'all', // --- includes all animations
