@@ -313,7 +313,7 @@ Content-Type: application/json
 | `protocol` | required | `harness.member/1`, the only protocol this Host speaks. |
 | `executable.path`, `executable.args` | required / optional | A relative path inside the version directory. `args` is a fixed argv with no substitution. |
 | `timeoutSeconds` | optional | An **idle** clock: this long with no `progress` record ends the run. Default 300. |
-| `config` | optional | Name → `{type: string, number, bool or list (string when absent); enum; default; required; setBy: "person" or "anyone"; advanced; label; description}`. `label` - a short line of text, 1 to 80 characters - is what a settings screen names the field; anything else refuses the manifest naming the field. A name starts with a letter and holds letters, digits, `_` and `-`, at most 64 characters. `"advanced"` (true or false, nothing else) is accepted and no screen hides a field behind it (see [Every setting on one screen](#every-setting-on-one-screen)); a `number` may add `min`, `max` and `integer` (see [Number bounds](#number-bounds)). Flat in v1. A `list` is a list of strings, default `[]`. See [List settings](#list-settings). |
+| `config` | optional | Name → `{type: string, number, bool or list (string when absent); enum; default; required; setBy: "person" or "anyone"; advanced; label; description}`. `label` - a short line of text, 1 to 80 characters - is what a settings screen names the field; anything else refuses the manifest naming the field. A name starts with a letter and holds letters, digits, `_` and `-`, at most 64 characters. `"advanced"` (true or false, nothing else) is accepted and no screen hides a field behind it (see [Every setting on one screen](#every-setting-on-one-screen)); a `number` may add `min`, `max` and `integer` (see [Number bounds](#number-bounds)). A `list` is a list of strings, default `[]`. See [List settings](#list-settings). A `table` is rows of typed columns a person edits; see [Table settings](#table-settings-type-table). |
 | `secrets` | optional | Name → `{description, required, label?, masked?, when?}`. A `value` key is refused. `masked` (default `true`; `true` or `false`, anything else refuses the manifest naming the field) says the value is secret: never answered, never shown, redacted from what the plugin writes. `"masked": false` declares a value that is not secret (an account name): the settings screen shows it in a plain text box and the read answers it. `label` is as for `config`. `when` - `{"<config field>": "<value>"}`, one pair - says the secret is needed only while that list or choice setting holds that value (`{"sources": "adzuna"}`); the field must be declared and the value one of its `enum`. A solution install uses it to say a secret for a setting the person left off is not needed. |
 | `connections` | optional | Slot name → `{description, providers, scopes, required}`: an OAuth account the plugin acts on, which the Host holds and refreshes. See [Connections](#connections-oauth-accounts). |
 | `reads` | optional | A list of `{site, collection}`, at most 32: the collections of the plugin's OWN team's sites it reads, delivered on stdin at each run. See [Reading site data](#reading-site-data-reads). |
@@ -604,6 +604,97 @@ save, refusal, transaction, the no-leak scan, the lifecycle and the names `statu
 `SqlServerNamedSecretsStepTests` (the step on an empty and an existing volume), and
 `PluginMemberRunnerTests.A_plugin_without_the_named_secrets_block_gets_a_byte_identical_request_and_one_with_it_only_the_two_members`.
 
+### Table settings: `type: table`
+
+A plugin that keeps a LIST OF THINGS a person manages - site logins, accounts, endpoints - declares
+one `config` field of `"type": "table"`: rows a person adds, edits, duplicates and deletes on the
+member's settings screen, each of typed columns, and secret columns kept as the member's own
+secrets.
+
+```json
+"config": {
+  "entries": {
+    "type": "table",
+    "label": "Entries",
+    "key": "name",
+    "maxRows": 100,
+    "columns": [
+      { "name": "name", "type": "string", "required": true, "label": "Name" },
+      { "name": "method", "type": "enum", "enum": ["password", "token", "interactive"], "required": true },
+      { "name": "verifyEvery", "type": "number", "min": 1, "integer": true, "default": 24 },
+      { "name": "active", "type": "bool", "default": true },
+      { "name": "password", "type": "secret" },
+      { "name": "session", "type": "secret", "readOnly": true },
+      { "name": "status", "type": "string", "readOnly": true }
+    ],
+    "rowActions": [
+      { "action": "sign-in", "label": "Sign in", "when": { "column": "method", "equals": "interactive" } }
+    ]
+  }
+}
+```
+
+- **Columns.** `type` is `string` (the default), `number` (with `min`, `max`, `integer`), `bool`,
+  `enum` (its `enum` list) or `secret` (masked unless it says `"masked": false`). Each may have
+  `label`, `description`, `required` and `default` (not a secret column; a secret column is never
+  `required` - whether a row needs one is the plugin's to say). Any column may be `"readOnly": true`:
+  a person never writes it - the plugin does, with `row.status`, or for a secret column the platform
+  does. A column is never both `required` and `readOnly`.
+- **The key** (`key`) names the string column a person writes that names each row: 1 to 64
+  letters, digits, `-` and `_`, starting with a letter or digit, unique per member ignoring case. A
+  secret cell is stored under its row's key, so a saved row keeps its name (the screen offers
+  Duplicate for another name; a row saved under a new name starts with no secrets).
+- **The field** has no `default` (it starts as `[]`), `maxRows` from 1 to 500 (100 when omitted),
+  and is ALWAYS person-only: `setBy` may be omitted or `"person"`, nothing else. A `secrets` field
+  may not take a table's name. `GET /api/plugins` and the settings read answer a table field with
+  `table: { key, maxRows, columns, rowActions }`.
+- **Rows are checked as a hire is**, by the same rules and in the same sentences, naming the
+  field, the row and the column (`` `entries[prod].verifyEvery` ``): each row an object, a usable and
+  unique key, only declared columns, every `required` column a person writes, each cell of its
+  column's type and inside its bounds, a text cell one line of at most 2048 characters, and NO secret
+  cell - a secret column's value is never part of `config`.
+- **Only a person fills a table.** An agent's hire (a Manager's or a Concierge's), a package's
+  `settings` and a solution's `inputs.settings` may leave it empty and nothing else; the settings
+  route (`PUT .../plugin-settings`) is `HumansOnly`, so a Manager, a command or a page's content
+  cannot add a row, flip a bool such as Active, or set a secret cell.
+- **Saving.** The settings save sends the rows as the field's value; a read-only cell in the body
+  is ignored and the stored one kept, so a person's save never forges or loses the plugin's
+  status. `tableSecretValues: { <table>: { <row>: { <column>: value } } }` sets or replaces each
+  secret cell given and null clears it; a cell not sent keeps its value; a row the save removes
+  takes its cells with it. Each change writes its `member.secret-set`, `-replaced` or `-cleared`
+  tenant row naming the table, row and column (never the value) in the same transaction as the
+  settings. The settings read answers `tableSecretStates: { <table>: { <row>: { <column>: { set,
+  setBy, setAt } } } }` - and `value` only for a `masked: false` column. A masked value is never
+  answered once saved.
+- **Kept** as the member's own secret values (`plugin_member_secrets`, the same Data Protection
+  purpose), each under the stored name `cell:` + 40 hex digits of SHA-256 over the table, the row's
+  key in lower case and the column - a name no manifest field can have. Removing the member or its
+  team removes them, as any member value.
+- **A run** receives the rows in `config.<table>` - every cell but a secret one, each column's
+  default filled in - and the secret cells under `secrets.<table>.<row>.<column>` (row as the
+  settings spell it; `{}` for a table whose cells are all empty), never in `config`. Every masked
+  cell joins the run's redaction set.
+- **The plugin writes its status** with the `row.status` record (see [Records](#protocol-harnessmember1)).
+- **Row actions.** `rowActions` puts a link on each SAVED row whose `when.column` (a string or enum
+  column) holds `when.equals`. `action` is one the platform knows - `sign-in`, the interactive
+  sign-in page. The screen shows the link once the page is registered in the web app's
+  `rowActionLinks` (`web/src/lib/pluginTable.ts`).
+- **The platform's own row secret.** A platform feature keeps a value against a member's row (the
+  interactive sign-in page's saved session) through `PluginMemberSecretStore`: `CellRefusal(manifest,
+  stored, table, row, column, value, byPerson: false, maxLength)` checks it, then
+  `SetCellAsync(member, label, plugin, table, row, column, value, actor)` /
+  `ClearCellAsync(...)` / `CellValueAsync(member, table, row, column)` keep, clear and read it,
+  with the same rows and redaction as a person's cell. Declare such a column `secret` and `readOnly`.
+- **The screen** shows the table with Edit, Duplicate and Delete on each row, a bool column a person
+  writes as a toggle in the table, a read-only column as text, and a secret column as "Saved" or
+  "Not set". Add and Edit open a row editor holding the row to the same rules before Save. Narrow
+  (below 40rem), each row stacks as a card. At hire the table is not offered: a person adds rows in
+  Member settings once the member exists.
+
+Pinned by `PluginTableManifestTests` (declarations, row rules, merge, run shape, cell names),
+`PluginTableSettingsTests` (the request shape, the no-leak scan, keep and clear, refusals, person-only
+rows, `row.status`), `cli/internal/plugin/manifest_test.go` and `web/src/lib/__tests__/pluginTable.spec.ts`.
+
 ## Protocol `harness.member/1`
 
 **Launch.**
@@ -741,6 +832,7 @@ save, refusal, transaction, the no-leak scan, the lifecycle and the names `statu
 | `{"t":"publish","type":"…","payload":{…}}` | Publishes one of the events the manifest declares. See [Events](#events). |
 | `{"t":"site.put","site":"…","collection":"…","id":"…","doc":…}` | Writes one document to a site of the plugin's OWN team (see [sites.md](sites.md)). The document is redacted like every other record; a limit, a name, another team or a missing site drops the record with one progress warning per kind per run. A page's Delete or Archive is best kept in site data the plugin reads (for example a `status` on the document, with the collection in [`reads`](#reading-site-data-reads)), rather than in a second store of the plugin's own, so a run never brings back what a person removed. |
 | `{"t":"site.delete","site":"…","collection":"…","id":"…"}` | Deletes one document from a site of the plugin's own team. |
+| `{"t":"row.status","field":"…","row":"…","values":{…}}` | Writes the READ-ONLY cells of one row of the member's own [table setting](#table-settings-type-table) - the plugin's status columns. The row is matched by its key ignoring case and must already exist: a plugin never adds a row. An unknown table, row or column is dropped, a column a person writes or a secret column is ignored, and a cell not of its column's type is dropped, each with one progress warning per sentence per run; the rest of the record is written. A string cell is redacted like every other record. |
 
 - **Same path as agents.** The first four records go through the same code as an agent's MCP tools
   (`MemberReports`). A plugin's report and an agent's report are therefore the same row, the same
