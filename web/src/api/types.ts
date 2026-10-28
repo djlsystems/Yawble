@@ -2902,8 +2902,11 @@ export interface MemberRunsPage {
  * route list it (`PluginEndpoints.Fields`). Every key is always sent.
  */
 export interface PluginConfigField {
-  /** `list` is a list of strings, default `[]`, its values limited by `enum` when one is given. */
-  type: 'string' | 'number' | 'bool' | 'list'
+  /**
+   * `list` is a list of strings, default `[]`, its values limited by `enum` when one is given.
+   * `table` is rows of typed columns (`table`), default `[]`, always set by a person.
+   */
+  type: 'string' | 'number' | 'bool' | 'list' | 'table'
   description: string
   required: boolean
   /** The manifest's default, as JSON. A list with none is sent as `[]`. */
@@ -2920,6 +2923,54 @@ export interface PluginConfigField {
   advanced?: boolean
   /** The manifest's short label for the field; the form says the field's name in words without one. */
   label?: string | null
+  /** A `table` field's columns, key and row actions; null or absent for any other type. */
+  table?: PluginTableShape | null
+}
+
+/** One column of a `table` field. A `secret` column's value is never in `config` and never answered once saved. */
+export interface PluginTableColumn {
+  name: string
+  type: 'string' | 'number' | 'bool' | 'enum' | 'secret'
+  label: string | null
+  description: string
+  required: boolean
+  default: string | number | boolean | null
+  enum: string[] | null
+  min: number | null
+  max: number | null
+  integer: boolean
+  /** Written only by the plugin (`row.status`), or for a secret column by the platform: shown, never edited. */
+  readOnly: boolean
+  /** A secret column's mask; null for any other column. */
+  masked: boolean | null
+}
+
+/** A link shown on each saved row whose `column` holds `equals`, such as Sign in on an `interactive` row. */
+export interface PluginTableRowAction {
+  action: string
+  label: string
+  column: string
+  equals: string
+}
+
+/** A `table` field's declaration, as `GET /api/plugins` and the settings read carry it. */
+export interface PluginTableShape {
+  /** The string column that names each row, unique per member ignoring case. */
+  key: string
+  maxRows: number
+  columns: PluginTableColumn[]
+  rowActions: PluginTableRowAction[]
+}
+
+/** One row of a table: every cell but a secret one. */
+export type PluginTableRow = Record<string, string | number | boolean | null>
+
+/** A table secret cell that holds a value: who set it and when, and `value` only for an unmasked column. */
+export interface PluginTableCellState {
+  set: true
+  setBy: string
+  setAt: string
+  value?: string
 }
 
 /** One secret a plugin's manifest names: its declaration, never a value. */
@@ -3075,7 +3126,7 @@ export interface PluginRemoveResult {
 }
 
 /** One stored setting value: a string, number or bool, or a `list` field's strings. */
-export type PluginSettingValue = string | number | boolean | string[]
+export type PluginSettingValue = string | number | boolean | string[] | PluginTableRow[]
 
 /**
  * `GET /api/teams/{team}/members/{member}/plugin-settings`: the member's stored settings (only
@@ -3104,6 +3155,8 @@ export interface PluginMemberSettings {
   outOfRange?: Record<string, string>
   /** Each secret field's state on this member, in the manifest's order. Absent from a Host older than member values. */
   secretStates?: PluginSecretState[]
+  /** Each table field -> row -> secret column that holds a value. Never a masked value. */
+  tableSecretStates?: Record<string, Record<string, Record<string, PluginTableCellState>>>
   /** The plugin's marketplace page when the catalog lists it, else null. */
   marketplaceUrl?: string | null
   /** The manifest's whole description, paragraphs split by a blank line; null when it has none. */
@@ -3147,6 +3200,8 @@ export interface PluginHire {
   namedSecretValues?: Record<string, string | null>
   /** Slot -> connection id. Sent only for a plugin that declares slots; `{}` unbinds every slot. */
   connections?: Record<string, string>
+  /** Table -> row -> secret column -> value typed (null clears). A cell not here keeps what is saved. */
+  tableSecretValues?: Record<string, Record<string, Record<string, string | null>>>
 }
 
 /**

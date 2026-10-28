@@ -478,8 +478,11 @@ func configField(name string, value any) string {
 	if t, ok := field["type"].(string); ok {
 		typ = t
 	}
-	if typ != "string" && typ != "number" && typ != "bool" && typ != "list" {
-		return fmt.Sprintf("`config.%s.type` must be string, number, bool or list - v1 has no nested configuration.", name)
+	if typ != "string" && typ != "number" && typ != "bool" && typ != "list" && typ != "table" {
+		return fmt.Sprintf("`config.%s.type` must be string, number, bool, list or table.", name)
+	}
+	if typ == "table" {
+		return tableProblem(name, field)
 	}
 	var choices []string
 	if e, present := field["enum"]; present {
@@ -519,6 +522,50 @@ func configField(name string, value any) string {
 	}
 	if s, ok := d.(string); ok && choices != nil && !slices.Contains(choices, s) {
 		return fmt.Sprintf("`%s` must be one of: %s.", name, strings.Join(choices, ", "))
+	}
+	return ""
+}
+
+// tableProblem checks a `table` field's outline - a default it may not have, its columns and its key -
+// in the Host's words (PluginTable.Parse); the Host checks every column's own rules when it loads it.
+func tableProblem(name string, field map[string]any) string {
+	at := "config." + name
+	if _, present := field["default"]; present {
+		return fmt.Sprintf("`%s.default` is not allowed: a table starts with no rows.", at)
+	}
+	columns, ok := field["columns"].([]any)
+	if !ok || len(columns) == 0 {
+		return fmt.Sprintf("`%s.columns` must be a non-empty array of columns.", at)
+	}
+	types := []string{"string", "number", "bool", "enum", "secret"}
+	names := map[string]string{}
+	for i, c := range columns {
+		column, ok := c.(map[string]any)
+		if !ok {
+			return fmt.Sprintf("`%s.columns[%d]` must be an object.", at, i)
+		}
+		columnName, ok := column["name"].(string)
+		if !ok || !configName.MatchString(columnName) {
+			return fmt.Sprintf("`%s.columns[%d].name` must be a letter, then letters, digits, `-` and `_`, at most 64 characters.", at, i)
+		}
+		if _, twice := names[columnName]; twice {
+			return fmt.Sprintf("`%s.columns` names `%s` twice.", at, columnName)
+		}
+		typ := "string"
+		if t, ok := column["type"].(string); ok {
+			typ = t
+		}
+		if !slices.Contains(types, typ) {
+			return fmt.Sprintf("`%s.columns.%s.type` must be string, number, bool, enum or secret.", at, columnName)
+		}
+		names[columnName] = typ
+	}
+	key, ok := field["key"].(string)
+	if !ok {
+		return fmt.Sprintf("`%s.key` must name the column that names each row, such as \"name\".", at)
+	}
+	if _, found := names[key]; !found {
+		return fmt.Sprintf("`%s.key` names `%s`, which is not one of its columns.", at, key)
 	}
 	return ""
 }

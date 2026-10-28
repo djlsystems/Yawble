@@ -607,6 +607,10 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
             {
                 refusals.Add(new(SolutionManifest.FileName, at, $"`{at}`: plugin {plugin.Id} has no setting '{input.Setting}'."));
             }
+            else if (config.Table is not null)
+            {
+                refusals.Add(new(SolutionManifest.FileName, at, $"`{at}` '{input.Setting}' is a table; a person adds its rows in the member's settings after install, not at install."));
+            }
             else if (!config.PersonOnly)
             {
                 refusals.Add(new(SolutionManifest.FileName, at, $"`{at}` '{input.Setting}' is not a person-only setting (`\"setBy\": \"person\"`); set it under the member's `settings`."));

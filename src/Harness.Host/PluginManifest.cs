@@ -217,6 +217,13 @@ public sealed record PluginManifest(
                 foreach (var secret in secretsElement.EnumerateObject())
                 {
                     if (!IsConfigName(secret.Name)) return (null, $"`secrets.{secret.Name}` is not a usable name.");
+
+                    // A TABLE'S SECRET CELLS RIDE UNDER `secrets.<table>`, so no secret field may take its name.
+                    if (config.TryGetValue(secret.Name, out var sameName) && sameName.Table is not null)
+                    {
+                        return (null, $"`secrets.{secret.Name}` has the name of the table `config.{secret.Name}`, whose secret cells a run "
+                            + $"receives as `secrets.{secret.Name}`. Rename one of them.");
+                    }
                     if (secret.Value.ValueKind != JsonValueKind.Object) return (null, $"`secrets.{secret.Name}` must be an object.");
 
                     // A VALUE IS NEVER HERE. A manifest ships with a package; a credential in it would
@@ -507,8 +514,9 @@ public sealed record PluginManifest(
     };
 }
 
-/// <summary>One ordinary configuration field. Flat in v1: string, number, bool, or list (a list of
-/// strings, default <c>[]</c>, whose optional <c>enum</c> limits each item).</summary>
+/// <summary>One ordinary configuration field: string, number, bool, list (a list of strings, default
+/// <c>[]</c>, whose optional <c>enum</c> limits each item), or table (<see cref="PluginTable"/>: rows of
+/// typed columns a person edits, default <c>[]</c>, always person-only).</summary>
 /// <param name="PersonOnly">
 /// <c>"setBy": "person"</c> in the manifest: only a person's hire may set this field to anything but
 /// its default. It is how a plugin that acts outward (sends, posts, pays) keeps its real mode and its
@@ -543,6 +551,9 @@ public sealed record PluginConfigField(
     /// form's Advanced section. It changes nothing about who may set it or how it is checked.</summary>
     public bool Advanced { get; init; }
 
+    /// <summary>A <c>table</c> field's columns, key and row actions; null for every other type.</summary>
+    public PluginTable? Table { get; init; }
+
     public static (PluginConfigField? Field, string? Refusal) Parse(string name, JsonElement element)
     {
         if (!PluginManifest.IsConfigName(name)) return (null, $"`config.{name}` is not a usable name.");
@@ -550,9 +561,33 @@ public sealed record PluginConfigField(
 
         var type = element.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString()! : "string";
 
-        if (type is not ("string" or "number" or "bool" or "list"))
+        if (type is not ("string" or "number" or "bool" or "list" or "table"))
         {
-            return (null, $"`config.{name}.type` must be string, number, bool or list - v1 has no nested configuration.");
+            return (null, $"`config.{name}.type` must be string, number, bool, list or table.");
+        }
+
+        // A TABLE IS ITS OWN SHAPE: always a person's, starting empty. Its columns carry their own types.
+        if (type == "table")
+        {
+            if (element.TryGetProperty("enum", out _)) return (null, $"`config.{name}.enum` does not apply to a table; give an enum column instead.");
+
+            var (table, tableRefusal) = PluginTable.Parse(name, element);
+            if (tableRefusal is not null) return (null, tableRefusal);
+
+            var (tableLabel, tableLabelRefusal) = PluginManifest.Label($"config.{name}", element);
+            if (tableLabelRefusal is not null) return (null, tableLabelRefusal);
+
+            return (new PluginConfigField(
+                type,
+                element.TryGetProperty("description", out var tableDescription) && tableDescription.ValueKind == JsonValueKind.String ? tableDescription.GetString()! : "",
+                false,
+                EmptyList,
+                null,
+                PersonOnly: true)
+            {
+                Label = tableLabel,
+                Table = table,
+            }, null);
         }
 
         IReadOnlyList<string>? choices = null;
@@ -660,6 +695,12 @@ public sealed record PluginConfigField(
     {
         if (!PersonOnly || (Default is { } fallback && JsonElement.DeepEquals(fallback, value))) return null;
 
+        if (Table is not null)
+        {
+            return $"`{name}` is a table only a person fills: an agent's hire, a Manager or a package may leave it empty ([]) "
+                + "or omit it. A person adds, edits and deletes its rows in the member's settings.";
+        }
+
         var keep = Default is { } d ? $"leave it at its default ({d.GetRawText()}) or omit it" : "hire this plugin yourself";
         return $"`{name}` is set by a person only: an agent's hire may {keep}. A person sets it when hiring, "
             + "in the Add member dialog.";
@@ -675,8 +716,11 @@ public sealed record PluginConfigField(
             "number" => value.ValueKind == JsonValueKind.Number,
             "bool" => value.ValueKind is JsonValueKind.True or JsonValueKind.False,
             "list" => value.ValueKind == JsonValueKind.Array && value.EnumerateArray().All(v => v.ValueKind == JsonValueKind.String),
+            "table" => true,
             _ => false,
         };
+
+        if (Table is { } table) return table.Refusal(name, value, bounds);
 
         if (!fits) return Type == "list" ? $"`{name}` must be a list of strings." : $"`{name}` must be a {Type}.";
 
@@ -709,6 +753,9 @@ public sealed record PluginConfigField(
     /// </summary>
     public string? BoundsRefusal(string name, JsonElement value)
     {
+        // A TABLE'S BOUNDS ARE ITS NUMBER CELLS', checked with the rest of the table.
+        if (Table is { } table) return table.Refusal(name, value, bounds: true);
+
         if (Type != "number" || value.ValueKind != JsonValueKind.Number) return null;
 
         var number = value.GetDouble();

@@ -10,6 +10,14 @@ namespace Harness.Host;
 /// <summary>Who set a member's own value for a secret field, and when. Never the value.</summary>
 public sealed record MemberSecretState(string SetBy, DateTimeOffset SetAt);
 
+/// <summary>One change to a table's secret cell: the table field, the row's key, the column, and the
+/// value (null clears). See <see cref="PluginMemberSecretStore.SetCellAsync"/>.</summary>
+public sealed record TableCellChange(string Table, string Row, string Column, string? Value);
+
+/// <summary>A table's secret cell that holds a value: who set it and when, and the value only for a
+/// column declared <c>masked: false</c>.</summary>
+public sealed record TableCellState(string SetBy, DateTimeOffset SetAt, string? Value);
+
 /// <summary>A plugin member's own secret values, read by the runner at each run.</summary>
 public interface IPluginMemberSecrets
 {
@@ -223,6 +231,176 @@ public sealed class PluginMemberSecretStore(IPluginMemberSecretRows rows, IDataP
             member, settings, audits, Protect(changes), actor.Email, AuditFor(member, label, plugin, actor), ct,
             namedChanges.Count == 0 ? null : ProtectNamed(member, label, plugin, namedChanges, actor));
 
+    // ---------------------------------------------------------------------------------------------
+    // A TABLE'S SECRET CELLS. Each is one of the member's own secrets, in these same rows under this
+    // same purpose, so it is stored, masked, redacted and removed with the member exactly as a field
+    // value is. Its row's `field` is CellField(table, row, column), a name no manifest field can have.
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>The prefix of every cell's stored name: a colon, which no manifest field name holds.</summary>
+    public const string CellPrefix = "cell:";
+
+    /// <summary>
+    /// The name a table's secret cell is stored under for its member: <see cref="CellPrefix"/> and 40 hex
+    /// digits of SHA-256 over the table field, the row's key IN LOWER CASE (a row's key is unique
+    /// ignoring case) and the column. Fixed length, so a long row key fits every provider's column.
+    /// </summary>
+    public static string CellField(string table, string row, string column) =>
+        CellPrefix + Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes($"{table}\n{row.ToLowerInvariant()}\n{column}")))[..40];
+
+    /// <summary>
+    /// Why <paramref name="value"/> (null clears) cannot be kept for the secret cell
+    /// (<paramref name="table"/>, <paramref name="row"/>, <paramref name="column"/>) of a member whose
+    /// settings are <paramref name="stored"/>, or null: the table and the column must be declared, the
+    /// column secret, the row one the member has (ignoring case), and a value held to a masked field's
+    /// rules (an unmasked column's when the manifest says <c>masked: false</c>) with
+    /// <paramref name="maxLength"/> in place of the ordinary limit. A person's save refuses a read-only
+    /// column (<paramref name="byPerson"/>): only the platform writes one. Never repeats the value.
+    /// </summary>
+    public static string? CellRefusal(
+        PluginManifest manifest, PluginMemberSettings stored, string table, string row, string column, string? value,
+        bool byPerson = true, int maxLength = PluginSecretStore.MaxValueLength)
+    {
+        if (!manifest.Config.TryGetValue(table, out var field) || field.Table is not { } declared)
+        {
+            return $"`{table}` is not a table of plugin '{manifest.Id}'.";
+        }
+
+        if (declared.Column(column) is not { IsSecret: true } secret)
+        {
+            return $"`{table}.{column}` is not a secret column of the table. Its secret columns: "
+                + (declared.SecretColumns.Any() ? string.Join(", ", declared.SecretColumns.Select(c => c.Name)) : "none") + ".";
+        }
+
+        if (declared.Row(stored.Config.TryGetValue(table, out var rows) ? rows : null, row) is null)
+        {
+            return $"`{table}` has no row '{row}'.";
+        }
+
+        if (byPerson && secret.ReadOnly && value is not null)
+        {
+            return $"`{table}[{row}].{column}` is written only by the platform; a person may clear it, not set it.";
+        }
+
+        if (value is null) return null;
+
+        var at = $"{table}[{row}].{column}";
+        if (string.IsNullOrWhiteSpace(value)) return $"`{at}`: the value is empty.";
+        if (value.Length > maxLength) return $"`{at}`: the value is longer than {maxLength} characters.";
+        if (value.Any(c => c is '\r' or '\n' or '\0')) return $"`{at}`: the value holds a line break or a NUL; it must be one line.";
+
+        if (secret.Masked)
+        {
+            if (value != value.Trim()) return $"`{at}`: the value begins or ends with white space.";
+            if (value.Length < PluginMemberRunner.MinimumSecretLength)
+            {
+                return $"`{at}`: the value is shorter than {PluginMemberRunner.MinimumSecretLength} characters, too short to redact from a plugin's output.";
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The value of one secret cell, or null when it has none (or no longer decrypts).</summary>
+    public async Task<string?> CellValueAsync(ContainerId member, string table, string row, string column, CancellationToken ct = default)
+    {
+        var name = CellField(table, row, column);
+        var found = (await rows.RowsAsync(member, ct)).FirstOrDefault(r => r.Field == name);
+        return found is null ? null : Unprotect(found.ValueProtected);
+    }
+
+    /// <summary>Each secret cell of <paramref name="table"/> that holds a value, by row (as
+    /// <paramref name="rowNames"/> spells it) and column: who set it and when, and its value ONLY for a
+    /// column the manifest declares <c>masked: false</c>. Never a masked value.</summary>
+    public async Task<IReadOnlyDictionary<string, IReadOnlyDictionary<string, TableCellState>>> CellStatesAsync(
+        ContainerId member, string table, PluginTable declared, IEnumerable<string> rowNames, CancellationToken ct = default)
+    {
+        var held = (await rows.RowsAsync(member, ct)).ToDictionary(r => r.Field, StringComparer.Ordinal);
+        var states = new Dictionary<string, IReadOnlyDictionary<string, TableCellState>>(StringComparer.Ordinal);
+
+        foreach (var row in rowNames)
+        {
+            var cells = new Dictionary<string, TableCellState>(StringComparer.Ordinal);
+            foreach (var column in declared.SecretColumns)
+            {
+                if (held.TryGetValue(CellField(table, row, column.Name), out var found) && Unprotect(found.ValueProtected) is { } value)
+                {
+                    cells[column.Name] = new TableCellState(found.SetBy, found.SetAt, column.Masked ? null : value);
+                }
+            }
+
+            if (cells.Count > 0) states[row] = cells;
+        }
+
+        return states;
+    }
+
+    /// <summary>
+    /// SETS OR REPLACES ONE SECRET CELL with its <c>member.secret-set</c> or <c>-replaced</c> row (team,
+    /// member, plugin, table, row, column - never the value) in one transaction. The caller has checked
+    /// it with <see cref="CellRefusal"/>. What the interactive sign-in page keeps a row's session with.
+    /// </summary>
+    public Task SetCellAsync(
+        ContainerId member, string label, string plugin, string table, string row, string column, string value,
+        CredentialActor actor, CancellationToken ct = default) =>
+        ChangeCellsAsync(member, label, plugin, [new TableCellChange(table, row, column, value)], actor, ct);
+
+    /// <summary>Clears one secret cell with its <c>member.secret-cleared</c> row; nothing stored writes no row.</summary>
+    public Task ClearCellAsync(
+        ContainerId member, string label, string plugin, string table, string row, string column,
+        CredentialActor actor, CancellationToken ct = default) =>
+        ChangeCellsAsync(member, label, plugin, [new TableCellChange(table, row, column, null)], actor, ct);
+
+    /// <summary>Every cell change (a value sets or replaces, null clears) with its row, in one transaction.</summary>
+    public Task ChangeCellsAsync(
+        ContainerId member, string label, string plugin, IReadOnlyList<TableCellChange> cells, CredentialActor actor, CancellationToken ct = default)
+    {
+        var (protectedCells, audit) = ProtectCells(member, label, plugin, cells, actor, AuditFor(member, label, plugin, actor));
+        return rows.ChangeAsync(member, protectedCells, actor.Email, audit, ct);
+    }
+
+    /// <summary>
+    /// A SETTINGS SAVE WITH ITS FIELD VALUES, NAMED SECRETS AND TABLE CELLS, each change with its own
+    /// row, in ONE transaction, or nothing: what a person's Save of a table writes.
+    /// </summary>
+    public Task SaveWithSettingsAsync(
+        ContainerId member, string label, string plugin, PluginMemberSettings settings, IReadOnlyList<TriggerAudit> audits,
+        IReadOnlyDictionary<string, string?> changes, IReadOnlyDictionary<string, string?> namedChanges,
+        IReadOnlyList<TableCellChange> cells, CredentialActor actor, CancellationToken ct = default)
+    {
+        var fieldAudit = AuditFor(member, label, plugin, actor);
+        var (protectedCells, audit) = ProtectCells(member, label, plugin, cells, actor, fieldAudit);
+        foreach (var (field, value) in Protect(changes)) protectedCells[field] = value;
+
+        return rows.SaveWithSettingsAsync(
+            member, settings, audits, protectedCells, actor.Email, audit, ct,
+            namedChanges.Count == 0 ? null : ProtectNamed(member, label, plugin, namedChanges, actor));
+    }
+
+    /// <summary>Seals each cell's value under the member purpose by its stored name, with an audit that
+    /// names a cell's table, row and column (and falls back to <paramref name="fieldAudit"/> for a field).</summary>
+    private (Dictionary<string, string?> Protected, Func<string, string, TriggerAudit> Audit) ProtectCells(
+        ContainerId member, string label, string plugin, IReadOnlyList<TableCellChange> cells, CredentialActor actor,
+        Func<string, string, TriggerAudit> fieldAudit)
+    {
+        var named = new Dictionary<string, TableCellChange>(StringComparer.Ordinal);
+        var sealedCells = new Dictionary<string, string?>(StringComparer.Ordinal);
+
+        foreach (var cell in cells)
+        {
+            var name = CellField(cell.Table, cell.Row, cell.Column);
+            named[name] = cell;
+            sealedCells[name] = cell.Value is null ? null : _protector.Protect(cell.Value);
+        }
+
+        return (sealedCells, (field, action) => named.TryGetValue(field, out var cell)
+            ? new TriggerAudit(
+                actor.Id, actor.Email, action, $"{member.Team}/{member.Name}", label,
+                JsonSerializer.Serialize(new { team = member.Team, member = member.Name, plugin, field = cell.Table, row = cell.Row, column = cell.Column }))
+            : fieldAudit(field, action));
+    }
+
     /// <summary>Seals each named value under its own purpose, with the tenant row of each change: team,
     /// member, plugin and name, never the value.</summary>
     private ProtectedNamedChanges ProtectNamed(
@@ -300,6 +478,31 @@ public sealed class MemberSecretReads(PluginMemberSecretStore members, PluginSec
 
     /// <summary>Each named secret the member holds, who set it and when; never a value.</summary>
     public Task<IReadOnlyList<NamedSecretState>> NamedStatesAsync(ContainerId id, CancellationToken ct) => members.NamedStatesAsync(id, ct);
+
+    /// <summary>Each table field to its rows' secret cells that hold a value (<see cref="PluginMemberSecretStore.CellStatesAsync"/>):
+    /// <c>{ set, setBy, setAt }</c>, and <c>value</c> only for an unmasked column. <c>{}</c> for a plugin with no table.</summary>
+    public async Task<Dictionary<string, object>> TableStatesAsync(ContainerId id, PluginManifest manifest, PluginMemberSettings stored, CancellationToken ct)
+    {
+        var tables = new Dictionary<string, object>(StringComparer.Ordinal);
+
+        foreach (var (name, field) in manifest.Config)
+        {
+            if (field.Table is not { } table) continue;
+
+            var states = await members.CellStatesAsync(id, name, table, table.RowNames(stored.Config.TryGetValue(name, out var rows) ? rows : null), ct);
+            tables[name] = states.ToDictionary(
+                r => r.Key,
+                r => r.Value.ToDictionary(
+                    c => c.Key,
+                    c => c.Value.Value is null
+                        ? (object)new { set = true, setBy = c.Value.SetBy, setAt = c.Value.SetAt }
+                        : new { set = true, setBy = c.Value.SetBy, setAt = c.Value.SetAt, value = c.Value.Value },
+                    StringComparer.Ordinal),
+                StringComparer.Ordinal);
+        }
+
+        return tables;
+    }
 
     public async Task<IReadOnlyList<Dictionary<string, object?>>> StatesAsync(
         ContainerId id, PluginManifest manifest, PluginMemberSettings stored, CancellationToken ct)
