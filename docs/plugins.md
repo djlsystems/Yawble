@@ -1097,11 +1097,11 @@ chosen there; it is not a refusal, because the picker and Connect are right besi
 ### Signing in to a site: the interactive sign-in page
 
 An `interactive` row of a plugin member's table has a **Sign in** link to
-`#/teams/<team>/members/<member>/sign-in/<field>/<row>`. The page shows a headless Chromium the
-platform runs for that row, live: its screen as a screencast, the person's mouse, keys and paste sent
-to it. It opens at the entry's Site URL. The person signs in (OAuth, two-step codes and CAPTCHAs
-included) and presses **Done**: the browser's storage state (cookies and local storage, Playwright's
-`storageState` shape) is kept as the row's masked secret cell, and the browser closes. **Cancel**, or
+`#/teams/<team>/members/<member>/sign-in/<field>/<row>`. The page shows a Google Chrome the platform
+runs for that row, live: its screen as a screencast, the person's mouse, keys and paste sent to it.
+It opens at the entry's Site URL. The person signs in (OAuth, two-step codes and CAPTCHAs included)
+and presses **Done**: the session (cookies and local storage, with the browser's identity: see
+"The saved session" below) is kept as the row's masked secret cell, and the browser closes. **Cancel**, or
 closing the tab, closes it and keeps nothing. The plugin receives the session on its next run like any
 other secret cell.
 
@@ -1125,10 +1125,58 @@ other secret cell.
   sets a member's secret; an agent's, a Manager's or the Concierge's key is refused before anything
   starts. A row that is missing, inactive or not `interactive` answers 404.
 - **Never shown.** The saved state crosses from the worker to control only sealed, is never sent to
-  the page (a save answers the hosts kept and the providers among them), never logged, and Chromium's
-  profile is removed when it closes. Page addresses are reported by origin and path only.
-- **The browser** is Playwright's `chrome-headless-shell` from the data volume, run on a worker with
-  its own sandbox on; see `decisions.md`.
+  the page (a save answers the hosts kept and the providers among them) and never logged. Page
+  addresses are reported by origin and path only.
+- **The browser is a person's Chrome, as the site sees it.** Google Chrome stable (not a test or
+  headless build), run headed on a virtual screen of its own on a worker, with its own sandbox on:
+  nothing says Headless, `navigator.webdriver` is not true, there is no automation bar, the user
+  agent, client hints and `Sec-CH-UA*` headers agree (Google Chrome on Linux x86_64, as the fonts and
+  WebGL say), and the screen is 1920x1080 with a real window around a 1280x800 page. The person's
+  page sends its `navigator.languages` and time zone when it opens (`?lang=` and `?tz=` on the
+  socket), and the browser takes them: `navigator.languages`, `Accept-Language` and the time zone are
+  the person's. Which build, and how it stays current: `decisions.md`.
+- **One profile per row.** Each row has its own browser profile on the worker's volume
+  (`sign-in-profiles`, the worker user's alone, named by hashes), reused on every sign-in for that row,
+  so the site sees the same browser come back. One browser uses it at a time: while one person signs
+  in to a row, another is refused. Deleting the row (a settings save without it), the member or its
+  team removes the profile.
+
+#### The saved session
+
+The row's `session` cell holds this envelope (version 2), and a plugin can rely on it:
+
+```json
+{
+  "v": 2,
+  "storageState": { "cookies": [ ... ], "origins": [ { "origin": "...", "localStorage": [ { "name": "...", "value": "..." } ] } ] },
+  "identity": {
+    "browser": "chrome",
+    "version": "156.0.8078.73",
+    "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+    "userAgentMetadata": {
+      "brands": [ { "brand": "Google Chrome", "version": "156" }, ... ],
+      "fullVersionList": [ { "brand": "Google Chrome", "version": "156.0.8078.73" }, ... ],
+      "platform": "Linux", "platformVersion": "", "architecture": "x86", "model": "", "mobile": false, "bitness": "64"
+    },
+    "locale": "de-DE",
+    "languages": [ "de-DE", "de", "en-US", "en" ],
+    "timezoneId": "Europe/Berlin",
+    "screen": { "width": 1920, "height": 1080 },
+    "viewport": { "width": 1280, "height": 800 },
+    "deviceScaleFactor": 1
+  }
+}
+```
+
+- `storageState` is Playwright's `storageState`, pruned as above: pass it to `browser.newContext({ storageState })`.
+- `identity` is the browser the site saw, read from Chrome itself when the person pressed Done. To
+  present the same browser, use Chrome (Playwright's `channel: 'chrome'` when `browser` is `chrome`),
+  and give the context `userAgent`, `locale`, `timezoneId`, `viewport`, `screen` and
+  `deviceScaleFactor`; set the client hints with CDP's `Emulation.setUserAgentOverride`
+  (`userAgent`, `acceptLanguage` from `languages`, `userAgentMetadata` as it is here).
+- A value without `"v"` is a bare storage state saved before the envelope (version 1, no identity);
+  read both. A `"v"` other than 2 is a newer format: refuse it rather than guess. (`SignInSessionValue`
+  in `Harness.Contracts` reads and writes it.)
 
 ## Skills
 
