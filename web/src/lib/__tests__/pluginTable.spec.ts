@@ -119,4 +119,19 @@ describe('duplicate and row actions', () => {
     expect(rowActionHref('sign-in', { team: 't 1', member: 'Creds', table: 'entries', row: 'site-admin' }))
       .toBe('#/teams/t%201/members/Creds/sign-in/entries/site-admin');
   });
+
+  it('links sign-in only for a row the sign-in page takes: active, with an http(s) site URL', () => {
+    const context = { team: 't', member: 'Creds', table: 'entries', row: 'a', shape: table };
+    const row = { name: 'a', method: 'interactive', siteUrl: 'https://app.example.test/' };
+
+    expect(rowActionHref('sign-in', { ...context, cells: row })).toBe('#/teams/t/members/Creds/sign-in/entries/a');
+    expect(rowActionHref('sign-in', { ...context, cells: { ...row, active: true } })).not.toBeNull();
+    // Switched off, it 404s on the Host, so it has no link here.
+    expect(rowActionHref('sign-in', { ...context, cells: { ...row, active: false } })).toBeNull();
+    expect(rowActionHref('sign-in', { ...context, cells: { ...row, siteUrl: null } })).toBeNull();
+    expect(rowActionHref('sign-in', { ...context, cells: { ...row, siteUrl: 'ftp://app.example.test/' } })).toBeNull();
+    // An empty active cell takes the column's default.
+    const off = { ...table, columns: table.columns.map((c) => (c.name === 'active' ? { ...c, default: false } : c)) };
+    expect(rowActionHref('sign-in', { ...context, shape: off, cells: row })).toBeNull();
+  });
 });

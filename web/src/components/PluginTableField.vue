@@ -184,7 +184,7 @@ const savedCell = (column: PluginTableColumn) =>
 
 function href(action: string, row: PluginTableRow): string | null {
   if (!props.context) return null;
-  return rowActionHref(action, { ...props.context, table: props.name, row: rowName(shape.value, row) });
+  return rowActionHref(action, { ...props.context, table: props.name, row: rowName(shape.value, row), cells: row, shape: shape.value });
 }
 </script>
 

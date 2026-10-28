@@ -176,30 +176,50 @@ export function rowActionsFor(shape: PluginTableShape, row: PluginTableRow, save
   return shape.rowActions.filter((action) => row[action.column] === action.equals);
 }
 
-/** Where a row action's link leads, for one member's row. */
+/** Where a row action's link leads, for one member's row: with its cells and table, when known. */
 export interface RowActionContext {
   team: string;
   member: string;
   table: string;
   row: string;
+  cells?: PluginTableRow;
+  shape?: PluginTableShape;
 }
 
 /**
- * THE ROW ACTION HOOK: action id -> the link for a row. The settings screen shows a row action's link
- * only when its action is registered here, so an action whose page is not built yet shows nothing.
- * The interactive sign-in page registers `sign-in`.
+ * THE ROW ACTION HOOK: action id -> the link for a row, or null when that row has none. The settings
+ * screen shows a row action's link only when its action is registered here, so an action whose page
+ * is not built yet shows nothing. The interactive sign-in page registers `sign-in`.
  */
-export const rowActionLinks: Record<string, (context: RowActionContext) => string> = {};
+export const rowActionLinks: Record<string, (context: RowActionContext) => string | null> = {};
 
-/** The interactive sign-in page for a row (SignInPage.vue): a live browser the person signs in with. */
-export function signInHref({ team, member, table, row }: RowActionContext): string {
+/**
+ * Whether a row is one the sign-in page takes, as the Host's `PluginSignInRows` decides: not switched
+ * off in a bool `active` column (its default when the cell is empty), with an http(s) `siteUrl`. The
+ * `method` match is the row action's own `when`.
+ */
+export function isSignInEntry(shape: PluginTableShape, cells: PluginTableRow): boolean {
+  const active = shape.columns.find((c) => c.name === 'active' && c.type === 'bool');
+  if (active && (cells.active ?? active.default) === false) return false;
+  const site = cells.siteUrl;
+  if (typeof site !== 'string') return false;
+  try {
+    return ['http:', 'https:'].includes(new URL(site).protocol);
+  } catch {
+    return false;
+  }
+}
+
+/** The interactive sign-in page for a row (SignInPage.vue): a live browser the person signs in with. None for a row it does not take. */
+export function signInHref({ team, member, table, row, cells, shape }: RowActionContext): string | null {
+  if (cells && shape && !isSignInEntry(shape, cells)) return null;
   const part = encodeURIComponent;
   return `#/teams/${part(team)}/members/${part(member)}/sign-in/${part(table)}/${part(row)}`;
 }
 
 rowActionLinks['sign-in'] = signInHref;
 
-/** The link for a row action, or null while no page is registered for it. */
+/** The link for a row action, or null while no page is registered for it or the row has none. */
 export function rowActionHref(action: string, context: RowActionContext): string | null {
   const link = rowActionLinks[action];
   return link ? link(context) : null;
