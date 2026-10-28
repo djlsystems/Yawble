@@ -604,28 +604,35 @@ async function cancel(wake: PendingWake) {
   border-left: 4px solid var(--os-plugin-accent);
 }
 
-/* A RUNNING MEMBER'S TILE BREATHES: a ring in the running state's token, drawn as a shadow so it
-   takes no layout and sits beside a plugin's violet edge. Still under reduced motion. */
-.container-window.container-window-running {
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--os-state-running) 55%, transparent);
+/* A RUNNING MEMBER'S TILE BREATHES: a ring in the running state's token over the card's own border,
+   taking no layout and sitting beside a plugin's violet edge. Drawn on a pseudo-element, NOT the
+   card's box-shadow: the card carries Quasar's `no-shadow`, whose `box-shadow: none !important`
+   beats a rule and its keyframes alike, so a shadow ring never showed. Still under reduced motion. */
+.container-window.container-window-running::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border: 2px solid var(--os-state-running);
+  border-radius: inherit;
+  box-shadow: 0 0 10px 1px color-mix(in srgb, var(--os-state-running) 45%, transparent);
+  pointer-events: none;
   animation: container-running-pulse 2.4s ease-in-out infinite;
 }
 
 @keyframes container-running-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--os-state-running) 35%, transparent);
+    opacity: 0.35;
   }
   50% {
-    box-shadow:
-      0 0 0 1px color-mix(in srgb, var(--os-state-running) 75%, transparent),
-      0 0 8px 1px color-mix(in srgb, var(--os-state-running) 30%, transparent);
+    opacity: 1;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .container-window.container-window-running {
+  .container-window.container-window-running::after {
     animation: none;
+    opacity: 0.7;
   }
 }
 
