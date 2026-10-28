@@ -148,7 +148,7 @@ public sealed class SignInSessionTests
     {
         var bed = new Bed();
         var first = await bed.Sessions.StartAsync(Person, Member, "entries", "site-admin", Entry, Ct);
-        var someoneElse = await bed.Sessions.StartAsync("user-2", Member, "entries", "site-admin", Entry, Ct);
+        var someoneElse = await bed.Sessions.StartAsync("user-2", Member, "entries", "third-row", Entry, Ct);
 
         var second = await bed.Sessions.StartAsync(Person, Member, "entries", "other-row", Entry, Ct);
 
@@ -158,6 +158,42 @@ public sealed class SignInSessionTests
         Assert.False(second.Over.IsCompleted);
         Assert.Same(someoneElse, bed.Sessions.Of("user-2"));
         Assert.False(someoneElse.Over.IsCompleted);
+    }
+
+    [Fact]
+    public async Task A_row_has_one_browser_so_another_person_is_refused_while_the_same_person_replaces_their_own()
+    {
+        var bed = new Bed();
+        var first = await bed.Sessions.StartAsync(Person, Member, "entries", "site-admin", Entry, Ct);
+
+        var refused = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => bed.Sessions.StartAsync("user-2", Member, "entries", "SITE-ADMIN", Entry, Ct));
+        Assert.Equal(SignInSessions.RowInUseText, refused.Message);
+        Assert.False(first.Over.IsCompleted);
+
+        var again = await bed.Sessions.StartAsync(Person, Member, "entries", "site-admin", Entry, Ct);
+        Assert.Equal(SignInSessions.ReplacedText, await first.Over);
+        Assert.Same(again, bed.Sessions.Of(Person));
+    }
+
+    [Fact]
+    public async Task The_browser_starts_in_the_rows_own_profile_with_the_persons_languages_and_time_zone()
+    {
+        var bed = new Bed();
+        await bed.Sessions.StartAsync(Person, Member, "entries", "site-admin", Entry, Ct, ["de-DE", "de"], "Europe/Berlin");
+        await bed.Sessions.StartAsync(Person, Member, "entries", "Site-Admin", Entry, Ct);
+
+        var launches = bed.Worker.Sent.OfType<StartSignInBrowser>().Select(s => s.Launch).ToList();
+        Assert.Equal(["de-DE", "de"], launches[0].Languages);
+        Assert.Equal("Europe/Berlin", launches[0].TimeZone);
+        Assert.Equal(SignInProfileKey.Row(Member, "entries", "site-admin"), launches[0].Profile);
+        Assert.Matches("^[0-9a-f]{32}/[0-9a-f]{32}$", launches[0].Profile!);
+
+        // The same row, however its name is cased, is the same profile; another row or member is not.
+        Assert.Equal(launches[0].Profile, launches[1].Profile);
+        Assert.NotEqual(launches[0].Profile, SignInProfileKey.Row(Member, "entries", "other-row"));
+        Assert.NotEqual(launches[0].Profile, SignInProfileKey.Row(new ContainerId(Member.Team, "Other"), "entries", "site-admin"));
+        Assert.StartsWith(SignInProfileKey.Member(Member) + "/", launches[0].Profile);
     }
 
     [Fact]

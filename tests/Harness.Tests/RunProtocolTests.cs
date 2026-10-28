@@ -58,9 +58,11 @@ public sealed class RunProtocolTests
         new FollowTranscript("live:l1", Run, "/home/agent/t.jsonl", LiveViewNames.ClaudeJsonl),
         new StopStream("live:l1"),
         new ReadAgentFile("r2", "/home/agent/t.jsonl", ["ANTHROPIC_API_KEY"], true, AsTranscript: true),
-        new StartSignInBrowser("sign-in:1", new SignInBrowserLaunch("https://site.example/", ["www.site.example"], 1280, 800)),
         new SaveSignInBrowser("sign-in:1", "r5"),
         new StopSignInBrowser("sign-in:1"),
+        new StartSignInBrowser("sign-in:1", new SignInBrowserLaunch(
+            "https://site.example/", ["www.site.example"], 1280, 800, "0123456789abcdef0123456789abcdef/fedcba9876543210fedcba9876543210", ["de-DE", "de"], "Europe/Berlin")),
+        new DeleteSignInProfiles("0123456789abcdef0123456789abcdef"),
     ];
 
     private static readonly DateTimeOffset At = new(2026, 10, 2, 12, 0, 0, TimeSpan.Zero);

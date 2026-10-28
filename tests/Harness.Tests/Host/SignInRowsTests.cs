@@ -57,6 +57,23 @@ public sealed class SignInRowsTests : IAsyncLifetime
     private readonly string _dataRoot = Path.Combine(Path.GetTempPath(), $"harness-sign-in-rows-{Guid.NewGuid():N}");
     private readonly string _outside = Path.Combine(Path.GetTempPath(), $"harness-sign-in-rows-out-{Guid.NewGuid():N}");
     private readonly List<string> _responses = [];
+    private readonly ToldWorker _workers = new();
+
+    /// <summary>A worker that only listens: what control told it about sign-in profiles.</summary>
+    private sealed class ToldWorker : IRunWorker
+    {
+        public System.Collections.Concurrent.ConcurrentQueue<ControlMessage> Sent { get; } = new();
+
+        public WorkerId Id { get; } = new("w-told");
+
+        public Task Closed { get; } = new TaskCompletionSource().Task;
+
+        public Task SendAsync(ControlMessage message, CancellationToken ct = default)
+        {
+            Sent.Enqueue(message);
+            return Task.CompletedTask;
+        }
+    }
     private WebApplicationFactory<Program> _factory = null!;
     private HttpClient _person = null!;
     private string _team = "";
@@ -80,7 +97,11 @@ public sealed class SignInRowsTests : IAsyncLifetime
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host => host
             .UseSetting("DataRoot", _dataRoot)
             .UseSetting("Logging:LogLevel:Default", "Warning")
-            .ConfigureTestServices(services => services.AddSingleton<IAgentRunner>(new FakeAgent())));
+            .ConfigureTestServices(services =>
+            {
+                services.AddSingleton<IAgentRunner>(new FakeAgent());
+                services.AddSingleton(new SignInProfileCleanup(() => [_workers]));
+            }));
 
         _team = (await Services.GetRequiredService<TeamRegistry>()
             .CreateAsync("Signers", "claude-headless", memberAgent: "claude-headless", ct: Ct)).Id;
@@ -179,6 +200,78 @@ public sealed class SignInRowsTests : IAsyncLifetime
 
             Assert.True(bytes.AsSpan().IndexOf(Encoding.UTF8.GetBytes(marker)) < 0, $"A sign-in session is in {Path.GetRelativePath(_dataRoot, file)}.");
         }
+    }
+
+    [Fact]
+    public async Task A_v2_session_with_its_browser_identity_is_kept_whole_never_answered_and_reaches_the_plugin()
+    {
+        var cookie = Guid.NewGuid().ToString("N");
+        var identity = new SignInBrowserIdentity(
+            "chrome", "156.0.8078.73", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+            new SignInUserAgentMetadata(
+                [new("Not:A-Brand", "8"), new("Chromium", "156"), new("Google Chrome", "156")],
+                [new("Not:A-Brand", "8.0.0.0"), new("Chromium", "156.0.8078.73"), new("Google Chrome", "156.0.8078.73")],
+                "Linux", "", "x86", "", false, "64"),
+            "de-DE", ["de-DE", "de"], "Europe/Berlin", new SignInBrowserSize(1920, 1080), new SignInBrowserSize(1280, 800), 1);
+        var envelope = SignInSessionValue.Write($$"""{"cookies":[{"name":"sid","value":"{{cookie}}","domain":"app.example.test"}],"origins":[]}""", identity);
+
+        await Services.GetRequiredService<ISignInRows>().SaveSessionAsync(
+            Creds, "entries", "site-admin", "session", new SignInStorageState(envelope), new CredentialActor("u1", Email), Ct);
+
+        // Through the real store, whole, and it reads back as the envelope it was.
+        var kept = await Services.GetRequiredService<PluginMemberSecretStore>().CellValueAsync(Creds, "entries", "site-admin", "session", Ct);
+        Assert.Equal(envelope, kept);
+        var (state, read) = SignInSessionValue.Read(kept!);
+        Assert.Equal(identity with { Languages = read!.Languages, UserAgentMetadata = read.UserAgentMetadata }, read);
+        Assert.Equal(identity.Languages, read.Languages);
+        Assert.Equal(identity.UserAgentMetadata.FullVersionList, read.UserAgentMetadata.FullVersionList);
+        Assert.Contains(cookie, state);
+        using (var parsed = JsonDocument.Parse(kept!))
+        {
+            Assert.Equal(2, parsed.RootElement.GetProperty("v").GetInt32());
+            Assert.Equal("Europe/Berlin", parsed.RootElement.GetProperty("identity").GetProperty("timezoneId").GetString());
+            Assert.Equal("Google Chrome", parsed.RootElement.GetProperty("identity").GetProperty("userAgentMetadata").GetProperty("brands")[2].GetProperty("brand").GetString());
+        }
+
+        // No settings, secrets or plugins answer carries it.
+        await GetAsync($"/api/teams/{_team}/members/Creds/plugin-settings");
+        await GetAsync($"/api/teams/{_team}/members/Creds/secrets");
+        await GetAsync("/api/plugins");
+        Assert.All(_responses, body => Assert.DoesNotContain(cookie, body, StringComparison.Ordinal));
+
+        // The plugin's next run has the whole envelope, identity and all.
+        await TellAndAwaitAsync("Creds");
+        var request = File.ReadAllLines(Requests).Where(l => l.Length > 0).Select(l => JsonNode.Parse(l)!).Last();
+        Assert.Equal(envelope, (string?)request["secrets"]!["entries"]!["site-admin"]!["session"]);
+    }
+
+    [Fact]
+    public void A_bare_storage_state_saved_before_the_envelope_still_reads_without_an_identity()
+    {
+        var (state, identity) = SignInSessionValue.Read("""{"cookies":[{"name":"sid","value":"x","domain":"a.test"}],"origins":[]}""");
+        Assert.Null(identity);
+        Assert.Contains("\"sid\"", state);
+        Assert.Throws<JsonException>(() => SignInSessionValue.Read("""{"v":3,"storageState":{}}"""));
+        Assert.Throws<JsonException>(() => SignInSessionValue.Read("""["not","a","session"]"""));
+    }
+
+    [Fact]
+    public async Task A_row_removed_by_a_settings_save_takes_its_sign_in_profile_and_a_deleted_member_takes_all_of_its()
+    {
+        var kept = JsonNode.Parse(Rows)!.AsArray();
+        kept.RemoveAt(0);
+        var saved = await SendAsync(HttpMethod.Put, $"/api/teams/{_team}/members/Creds/plugin-settings", new
+        {
+            config = new Dictionary<string, JsonElement> { ["entries"] = JsonDocument.Parse(kept.ToJsonString()).RootElement.Clone() },
+        });
+        Assert.True(saved.Status == HttpStatusCode.OK, saved.Body);
+
+        var row = SignInProfileKey.Row(Creds, "entries", "site-admin");
+        Assert.Equal([row], _workers.Sent.OfType<DeleteSignInProfiles>().Select(d => d.Profile));
+
+        var deleted = await _person.DeleteAsync($"/api/teams/{_team}/containers/Creds", Ct);
+        Assert.True(deleted.IsSuccessStatusCode, await deleted.Content.ReadAsStringAsync(Ct));
+        Assert.Contains(_workers.Sent.OfType<DeleteSignInProfiles>(), d => d.Profile == SignInProfileKey.Member(Creds));
     }
 
     [Fact]
