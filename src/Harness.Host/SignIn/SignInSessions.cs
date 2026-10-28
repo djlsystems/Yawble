@@ -139,6 +139,7 @@ public sealed class SignInSession
     private readonly SignInSessions _owner;
     private readonly Lock _gate = new();
     private readonly TaskCompletionSource<string> _ended = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _over;
     private ITimer? _idle;
     private int _stopping;
 
@@ -253,9 +254,11 @@ public sealed class SignInSession
 
     private void Ended(string reason)
     {
-        if (!_ended.TrySetResult(reason)) return;
+        if (Interlocked.Exchange(ref _over, 1) == 1) return;
 
+        // Gone from the person before Over completes, so whoever awaits it can start the next one.
         lock (_gate) _idle?.Dispose();
         _owner.Forget(this);
+        _ended.TrySetResult(reason);
     }
 }
