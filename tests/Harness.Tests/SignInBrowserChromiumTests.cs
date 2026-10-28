@@ -46,12 +46,14 @@ public sealed class SignInBrowserChromiumTests : IAsyncLifetime
 
         // site.test: the entry. Its page sets a cookie and local storage, shows an image from evil.test
         // (which tries a cookie of its own), and goes where ?go= says.
-        _site.MapGet("/", (HttpContext context, string? go) =>
+        // ?then= is where it goes a while later: a page still alive after ?go= was refused gets there.
+        _site.MapGet("/", (HttpContext context, string? go, string? then) =>
         {
             var host = context.Request.Host.Host;
             context.Response.Cookies.Append(host + "_sid", "cookie-of-" + host);
             var script = $"localStorage.setItem('token', 'local-of-{host}');"
-                + (go is null ? "" : $"setTimeout(() => location.href = {JsonSerializer.Serialize(go)}, 50);");
+                + (go is null ? "" : $"setTimeout(() => location.href = {JsonSerializer.Serialize(go)}, 50);")
+                + (then is null ? "" : $"setTimeout(() => location.href = {JsonSerializer.Serialize(then)}, 1500);");
             return Results.Content(
                 $"<html><head><title>{host}</title></head><body><img src='http://evil.test:{_port}/pixel'>"
                 + $"<script>{script}</script></body></html>", "text/html");
@@ -63,6 +65,9 @@ public sealed class SignInBrowserChromiumTests : IAsyncLifetime
             context.Response.Cookies.Append("idp_sid", "cookie-of-idp");
             return Results.Redirect(redirect_uri + "?code=oauth-code");
         });
+
+        // Any host: a server redirect to ?to=.
+        _site.MapGet("/bounce", (string to) => Results.Redirect(to));
 
         _site.MapGet("/cb", (HttpContext context) =>
         {
@@ -167,6 +172,81 @@ public sealed class SignInBrowserChromiumTests : IAsyncLifetime
                 .ToDictionary(o => o.GetProperty("origin").GetString()!, o => o.GetProperty("localStorage")[0].GetProperty("value").GetString());
             Assert.Equal("local-of-site.test", origins[Url("site.test").TrimEnd('/')]);
             Assert.DoesNotContain(origins.Keys, o => o.Contains("evil.test", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public async Task A_refused_page_leaves_the_browser_on_the_last_allowed_page_alive()
+    {
+        Assert.SkipWhen(Chromium() is null, NoChrome);
+
+        var start = Url("site.test", "/?go=" + Uri.EscapeDataString(Url("evil.test")) + "&then=" + Uri.EscapeDataString(Url("site.test", "/cb")));
+        var (browser, chunks) = await StartAsync(start);
+        await using (browser)
+        {
+            await Until(() => Notices(chunks).Any(n => n.Kind == "refused"), "the refusal");
+            // The page that tried to leave is still there, its script still running: it goes on to /cb.
+            await Until(() => Notices(chunks).Any(n => n.Kind == "page" && n.Url == Url("site.test", "/cb")), "the next allowed page");
+
+            Assert.DoesNotContain(Notices(chunks), n => n.Kind == "page" && n.Url is not null && !n.Url.StartsWith(Url("site.test", ""), StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public async Task From_a_providers_page_a_link_or_its_redirect_to_another_host_is_refused_and_nothing_of_it_kept()
+    {
+        Assert.SkipWhen(Chromium() is null, NoChrome);
+
+        // On the provider's page: first a redirect it serves to far.test, later a plain link there.
+        var provider = Url("idp.test", "/?client_id=app&redirect_uri=" + Uri.EscapeDataString(Url("site.test", "/cb"))
+            + "&go=" + Uri.EscapeDataString(Url("idp.test", "/bounce?to=" + Uri.EscapeDataString(Url("far.test"))))
+            + "&then=" + Uri.EscapeDataString(Url("far.test", "/?x=1")));
+        var (browser, chunks) = await StartAsync(Url("site.test", "/?go=" + Uri.EscapeDataString(provider)));
+        await using (browser)
+        {
+            await Until(() => Notices(chunks).Count(n => n is { Kind: "refused", Host: "far.test" }) >= 2, "both ways to far.test refused");
+
+            Assert.Equal(["idp.test"], browser.Hosts.Providers);
+            Assert.DoesNotContain(Notices(chunks), n => n is { Kind: "provider", Host: "far.test" });
+
+            using var state = JsonDocument.Parse(await browser.CaptureAsync(Ct));
+            Assert.DoesNotContain(state.RootElement.GetProperty("cookies").EnumerateArray(), c => c.GetProperty("domain").GetString() == "far.test");
+            Assert.DoesNotContain(state.RootElement.GetProperty("origins").EnumerateArray(), o => o.GetProperty("origin").GetString()!.Contains("far.test", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public async Task A_providers_redirect_in_a_chain_started_on_the_entry_admits_its_next_host()
+    {
+        Assert.SkipWhen(Chromium() is null, NoChrome);
+
+        var next = Url("idp2.test", "/");
+        var bounce = Url("idp.test", "/bounce?client_id=app&redirect_uri=x&to=" + Uri.EscapeDataString(next));
+        var (browser, chunks) = await StartAsync(Url("site.test", "/?go=" + Uri.EscapeDataString(bounce)));
+        await using (browser)
+        {
+            await Until(() => Notices(chunks).Any(n => n.Kind == "page" && n.Url == next), "the provider's next host");
+            Assert.Equal(["idp.test", "idp2.test"], browser.Hosts.Providers);
+        }
+    }
+
+    [Fact]
+    public async Task Local_storage_of_every_kept_origin_passed_through_is_saved_not_only_the_one_open_at_done()
+    {
+        Assert.SkipWhen(Chromium() is null, NoChrome);
+
+        // site.test, then the provider's own page (which sets its local storage), then back to site.test.
+        var provider = Url("idp.test", "/?client_id=app&redirect_uri=x&go=" + Uri.EscapeDataString(Url("site.test", "/cb")));
+        var (browser, chunks) = await StartAsync(Url("site.test", "/?go=" + Uri.EscapeDataString(provider)));
+        await using (browser)
+        {
+            await Until(() => Notices(chunks).Any(n => n.Kind == "page" && n.Url == Url("site.test", "/cb")), "the way back from the provider");
+
+            using var state = JsonDocument.Parse(await browser.CaptureAsync(Ct));
+            var origins = state.RootElement.GetProperty("origins").EnumerateArray()
+                .ToDictionary(o => o.GetProperty("origin").GetString()!, o => o.GetProperty("localStorage")[0].GetProperty("value").GetString());
+            Assert.Equal("local-of-site.test", origins[Url("site.test").TrimEnd('/')]);
+            Assert.Equal("local-of-idp.test", origins[Url("idp.test").TrimEnd('/')]);
         }
     }
 }

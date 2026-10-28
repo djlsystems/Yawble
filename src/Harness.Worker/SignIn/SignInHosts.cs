@@ -5,14 +5,20 @@ namespace Harness.Host;
 
 /// <summary>
 /// WHERE A SIGN-IN BROWSER MAY GO, and what of it is kept. The entry's own hosts are always allowed.
-/// Another host is reached only as a sign-in flow goes there: a top-level navigation from an allowed
-/// page that is OAuth-, OpenID- or SAML-shaped, or any top-level navigation a provider's own page makes
-/// (its sign-in steps hop between its hosts). Each host admitted that way is a provider, recorded in
-/// the order it was first reached. Everything else is refused. A private or loopback address is never
-/// a provider unless an entry host is one too (a local test site). Requests a page makes for its parts
-/// - scripts, images, a CAPTCHA's frame - are not limited by host, only kept off private addresses;
-/// what is SAVED is pruned to the entry's hosts and the providers (<see cref="KeepsCookie"/>,
-/// <see cref="KeepsOrigin"/>).
+/// Another host is reached only as a sign-in flow goes there, and ONLY A FLOW THAT STARTS ON THE
+/// ENTRY'S SITE admits one:
+/// <list type="bullet">
+/// <item>a top-level navigation from an entry host - a link, a form, or the entry server's redirect -
+/// that is OAuth-, OpenID-, SAML- or WS-Federation-shaped; or</item>
+/// <item>a provider's server redirect to another of its hosts, in a redirect chain the person
+/// started on an entry page.</item>
+/// </list>
+/// Each host admitted that way is a provider, recorded in the order it was first reached. Everything
+/// else is refused - a link the person follows from a provider's page to a host not yet admitted
+/// among it, however it is shaped. A private or loopback address is never a provider unless an entry
+/// host is one too (a local test site). Requests a page makes for its parts - scripts, images, a
+/// CAPTCHA's frame - are not limited by host, only kept off private addresses; what is SAVED is pruned
+/// to the entry's hosts and the providers (<see cref="KeepsCookie"/>, <see cref="KeepsOrigin"/>).
 /// </summary>
 public sealed class SignInHosts
 {
@@ -59,9 +65,11 @@ public sealed class SignInHosts
     /// <summary>
     /// A top-level navigation to <paramref name="url"/>, made while the page showed
     /// <paramref name="fromHost"/> (null for a new page with nothing on it yet, which takes its
-    /// opener's host). <paramref name="form"/> is the posted body, if any, as the page sent it.
+    /// opener's host). <paramref name="form"/> is the posted body, if any, as the page sent it. For a
+    /// server's redirect, <paramref name="redirectFrom"/> is the host that answered with it; the
+    /// chain was started on <paramref name="fromHost"/>.
     /// </summary>
-    public Verdict TopLevel(Uri url, string? fromHost, string? form = null)
+    public Verdict TopLevel(Uri url, string? fromHost, string? form = null, string? redirectFrom = null)
     {
         if (url.Scheme is not ("http" or "https")) return url.AbsoluteUri == "about:blank" ? Verdict.Allow : Verdict.Refuse;
 
@@ -73,10 +81,11 @@ public sealed class SignInHosts
             if (_providers.Contains(host)) return Verdict.Allow;
             if (IsPrivate(host) && !_entryIsPrivate) return Verdict.Refuse;
 
-            var from = fromHost is null ? null : Normalize(fromHost);
-            var fromProvider = from is not null && _providers.Contains(from);
-            var fromEntry = from is not null && _entry.Contains(from);
-            if (!fromProvider && !(fromEntry && SignInShaped(url, form))) return Verdict.Refuse;
+            var started = fromHost is null ? null : Normalize(fromHost);
+            var hop = redirectFrom is null ? started : Normalize(redirectFrom);
+            var fromEntry = hop is not null && _entry.Contains(hop) && SignInShaped(url, form);
+            var providersHop = redirectFrom is not null && hop is not null && _providers.Contains(hop) && started is not null && _entry.Contains(started);
+            if (!fromEntry && !providersHop) return Verdict.Refuse;
 
             _providers.Add(host);
             return Verdict.Admit;

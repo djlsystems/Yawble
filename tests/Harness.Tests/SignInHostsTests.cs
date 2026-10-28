@@ -4,8 +4,8 @@ namespace Harness.Tests;
 
 /// <summary>
 /// WHERE A SIGN-IN BROWSER MAY GO. The entry's hosts always; another host only as a sign-in flow
-/// reaches it (an OAuth, OpenID, SAML or WS-Federation step from an allowed page, then anything that
-/// provider's pages do), recorded as a provider; everything else refused. What a save keeps is the
+/// reaches it (an OAuth, OpenID, SAML or WS-Federation step from an entry page, then that provider's
+/// server redirects in a chain started there), recorded as a provider; everything else refused. What a save keeps is the
 /// entry's hosts and those providers.
 /// </summary>
 public sealed class SignInHostsTests
@@ -29,19 +29,51 @@ public sealed class SignInHostsTests
     }
 
     [Fact]
-    public void An_oauth_step_from_an_allowed_page_admits_its_provider_whose_own_hops_follow()
+    public void An_oauth_step_from_an_entry_page_admits_its_provider_whose_own_redirects_follow()
     {
         var hosts = Hosts();
         var authorize = U("https://accounts.idp.example/o/oauth2/auth?client_id=abc&redirect_uri=https%3A%2F%2Fsite.example%2Fcb&response_type=code");
 
         Assert.Equal(SignInHosts.Verdict.Admit, hosts.TopLevel(authorize, "site.example"));
         Assert.Equal(SignInHosts.Verdict.Allow, hosts.TopLevel(U("https://accounts.idp.example/signin/challenge"), "accounts.idp.example"));
-        // The provider's own next host (a second step of its sign-in) is reached from a provider page.
-        Assert.Equal(SignInHosts.Verdict.Admit, hosts.TopLevel(U("https://login.idp-cdn.example/mfa"), "accounts.idp.example"));
+        // The provider's server sends the chain the person started on the entry page to its next host.
+        Assert.Equal(SignInHosts.Verdict.Admit, hosts.TopLevel(U("https://login.idp-cdn.example/mfa"), "site.example", redirectFrom: "accounts.idp.example"));
         Assert.Equal(SignInHosts.Verdict.Allow, hosts.TopLevel(U("https://site.example/cb?code=x"), "accounts.idp.example"));
 
         Assert.Equal(["accounts.idp.example", "login.idp-cdn.example"], hosts.Providers);
         Assert.Equal(["site.example", "www.site.example", "accounts.idp.example", "login.idp-cdn.example"], hosts.Kept);
+    }
+
+    [Fact]
+    public void From_a_providers_page_a_link_or_a_redirect_to_a_host_not_yet_admitted_is_refused()
+    {
+        var hosts = Hosts();
+        hosts.TopLevel(U("https://accounts.idp.example/auth?client_id=a&redirect_uri=https%3A%2F%2Fsite.example%2Fcb"), "site.example");
+
+        // A plain link on the provider's page, and one shaped like a sign-in step.
+        Assert.Equal(SignInHosts.Verdict.Refuse, hosts.TopLevel(U("http://far.example/"), "accounts.idp.example"));
+        Assert.Equal(SignInHosts.Verdict.Refuse, hosts.TopLevel(U("https://other-idp.example/auth?client_id=a&redirect_uri=b"), "accounts.idp.example"));
+        // A chain the person started on the provider's page, redirected by it elsewhere.
+        Assert.Equal(SignInHosts.Verdict.Refuse, hosts.TopLevel(U("https://far.example/"), "accounts.idp.example", redirectFrom: "accounts.idp.example"));
+        // The entry's own server redirecting to a host with no sign-in shape.
+        Assert.Equal(SignInHosts.Verdict.Refuse, hosts.TopLevel(U("https://tracker.example/"), "site.example", redirectFrom: "site.example"));
+        // A redirect from a host that is neither.
+        Assert.Equal(SignInHosts.Verdict.Refuse, hosts.TopLevel(U("https://far.example/"), "site.example", redirectFrom: "unrelated.example"));
+
+        Assert.Equal(["accounts.idp.example"], hosts.Providers);
+        Assert.False(hosts.KeepsCookie("far.example"));
+        Assert.False(hosts.KeepsCookie(".other-idp.example"));
+    }
+
+    [Fact]
+    public void The_entry_servers_redirect_to_a_providers_sign_in_step_admits_it()
+    {
+        var hosts = Hosts();
+
+        Assert.Equal(
+            SignInHosts.Verdict.Admit,
+            hosts.TopLevel(U("https://accounts.idp.example/auth?client_id=a&response_type=code"), "site.example", redirectFrom: "site.example"));
+        Assert.Equal(["accounts.idp.example"], hosts.Providers);
     }
 
     [Fact]

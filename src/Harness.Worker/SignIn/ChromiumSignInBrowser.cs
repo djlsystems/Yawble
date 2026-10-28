@@ -39,7 +39,17 @@ public sealed partial class ChromiumSignInBrowser : IAsyncDisposable
     private readonly SignInHosts _hosts;
     private readonly Func<StreamChunk, Task<bool>> _send;
     private readonly ConcurrentDictionary<string, Page> _pages = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, byte> _origins = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// EACH ORIGIN'S LOCAL STORAGE AS LAST SEEN, kept from the moment a page loads it and through every
+    /// change the page makes: Chrome reads an origin's storage only through a page that is on it, so
+    /// an origin the person has passed through and left would otherwise be lost at Done.
+    /// </summary>
+    private readonly Dictionary<string, Dictionary<string, string>> _storage = new(StringComparer.Ordinal);
+    private readonly Lock _storageGate = new();
+
+    /// <summary>A top-level request's host, by its request id and its network id: where a redirect it was answered with came from.</summary>
+    private readonly ConcurrentDictionary<string, string> _hops = new(StringComparer.Ordinal);
     private readonly Lock _gate = new();
     private readonly TaskCompletionSource<string> _ended = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Process? _process;
@@ -344,27 +354,67 @@ public sealed partial class ChromiumSignInBrowser : IAsyncDisposable
         var cdp = _cdp ?? throw new InvalidOperationException("The browser is not running.");
         var cookies = await cdp.SendAsync("Storage.getCookies", ct: ct);
 
-        var origins = new List<SignInStorage.Origin>();
-        if (Active() is { } page)
+        // Every page open now is read afresh; an origin left earlier is as it was last seen.
+        foreach (var page in _pages.Values) await SnapshotAsync(page, ct);
+
+        List<SignInStorage.Origin> origins;
+        lock (_storageGate)
         {
-            await cdp.SendAsync("DOMStorage.enable", session: page.Session, ct: ct);
-            foreach (var origin in _origins.Keys.Where(_hosts.KeepsOrigin))
-            {
-                try
-                {
-                    var items = await cdp.SendAsync(
-                        "DOMStorage.getDOMStorageItems", new { storageId = new { securityOrigin = origin, isLocalStorage = true } }, page.Session, ct);
-                    origins.Add(new SignInStorage.Origin(origin, [.. items.GetProperty("entries").EnumerateArray()
-                        .Select(e => new KeyValuePair<string, string>(e[0].GetString() ?? "", e[1].GetString() ?? ""))]));
-                }
-                catch (CdpException)
-                {
-                    // An origin whose storage Chromium no longer has is simply not kept.
-                }
-            }
+            origins = [.. _storage.Where(o => _hosts.KeepsOrigin(o.Key)).Select(o => new SignInStorage.Origin(o.Key, [.. o.Value]))];
         }
 
         return SignInStorage.Build(_hosts, cookies.GetProperty("cookies").EnumerateArray(), origins);
+    }
+
+    /// <summary>Reads the local storage of the origin <paramref name="page"/> is on, through that page, into what is kept.</summary>
+    private async Task SnapshotAsync(Page page, CancellationToken ct = default)
+    {
+        if (_cdp is not { } cdp || page.Url is not { Scheme: "http" or "https" } url) return;
+
+        var origin = url.GetLeftPart(UriPartial.Authority);
+        try
+        {
+            using var bound = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            bound.CancelAfter(CloseBound);
+            var items = await cdp.SendAsync(
+                "DOMStorage.getDOMStorageItems", new { storageId = new { securityOrigin = origin, isLocalStorage = true } }, page.Session, bound.Token);
+            var read = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var entry in items.GetProperty("entries").EnumerateArray()) read[entry[0].GetString() ?? ""] = entry[1].GetString() ?? "";
+            lock (_storageGate) _storage[origin] = read;
+        }
+        catch (Exception exception) when (exception is IOException or CdpException or OperationCanceledException or KeyNotFoundException or InvalidOperationException)
+        {
+            // A page that moved on or closed meanwhile: its origin is as last seen.
+        }
+    }
+
+    /// <summary>A change a page made to an origin's local storage (a <c>DOMStorage</c> event).</summary>
+    private void StorageChanged(string method, JsonElement p)
+    {
+        if (!p.TryGetProperty("storageId", out var id) || !id.TryGetProperty("isLocalStorage", out var local) || local.ValueKind != JsonValueKind.True) return;
+        var origin = id.TryGetProperty("securityOrigin", out var so) && so.GetString() is { Length: > 0 } named
+            ? named
+            : id.TryGetProperty("storageKey", out var sk) && sk.GetString() is { Length: > 0 } key ? key.Split('^')[0].TrimEnd('/') : null;
+        if (origin is null) return;
+
+        string? Text(string name) => p.TryGetProperty(name, out var v) ? v.GetString() : null;
+        lock (_storageGate)
+        {
+            if (!_storage.TryGetValue(origin, out var items)) _storage[origin] = items = new Dictionary<string, string>(StringComparer.Ordinal);
+            switch (method)
+            {
+                case "DOMStorage.domStorageItemAdded":
+                case "DOMStorage.domStorageItemUpdated":
+                    if (Text("key") is { } added) items[added] = Text("newValue") ?? "";
+                    break;
+                case "DOMStorage.domStorageItemRemoved":
+                    if (Text("key") is { } removed) items.Remove(removed);
+                    break;
+                case "DOMStorage.domStorageItemsCleared":
+                    items.Clear();
+                    break;
+            }
+        }
     }
 
     private Page? Active()
@@ -433,13 +483,21 @@ public sealed partial class ChromiumSignInBrowser : IAsyncDisposable
                 if (!Uri.TryCreate(frame.GetProperty("url").GetString(), UriKind.Absolute, out var url)) break;
 
                 navigated.Url = url;
-                if (url.Scheme is "http" or "https") _origins.TryAdd(url.GetLeftPart(UriPartial.Authority), 0);
                 if (Active() == navigated) Notice(PageNotice(navigated));
                 break;
 
             case "Page.loadEventFired":
                 // Chromium does not always tell a title that came with the page: ask once it has loaded.
-                if (_pages.Values.FirstOrDefault(pg => pg.Session == session) is { } loaded) _ = RetitleAsync(loaded);
+                if (_pages.Values.FirstOrDefault(pg => pg.Session == session) is { } loaded)
+                {
+                    _ = RetitleAsync(loaded);
+                    _ = SnapshotAsync(loaded);
+                }
+
+                break;
+
+            case "DOMStorage.domStorageItemAdded" or "DOMStorage.domStorageItemUpdated" or "DOMStorage.domStorageItemRemoved" or "DOMStorage.domStorageItemsCleared":
+                StorageChanged(method, p);
                 break;
 
             case "Page.screencastFrame":
@@ -459,6 +517,7 @@ public sealed partial class ChromiumSignInBrowser : IAsyncDisposable
         try
         {
             await cdp.SendAsync("Page.enable", session: page.Session);
+            await cdp.SendAsync("DOMStorage.enable", session: page.Session);
             await cdp.SendAsync("Fetch.enable", new { patterns = new[] { new { urlPattern = "*", requestStage = "Request" } } }, page.Session);
             await cdp.SendAsync("Runtime.runIfWaitingForDebugger", session: page.Session);
 
@@ -607,7 +666,7 @@ public sealed partial class ChromiumSignInBrowser : IAsyncDisposable
 
     private void Paused(JsonElement p, string? session)
     {
-        var id = p.GetProperty("requestId").GetString();
+        var id = p.GetProperty("requestId").GetString()!;
         var request = p.GetProperty("request");
         var page = _pages.Values.FirstOrDefault(pg => pg.Session == session);
         if (page is null || !Uri.TryCreate(request.GetProperty("url").GetString(), UriKind.Absolute, out var url))
@@ -617,16 +676,36 @@ public sealed partial class ChromiumSignInBrowser : IAsyncDisposable
         }
 
         var topLevel = p.GetProperty("resourceType").GetString() == "Document" && p.GetProperty("frameId").GetString() == page.Target;
-        var verdict = topLevel
-            ? _hosts.TopLevel(url, From(page), request.TryGetProperty("postData", out var form) ? form.GetString() : null)
-            : _hosts.Part(url);
-
-        if (verdict == SignInHosts.Verdict.Refuse)
+        if (!topLevel)
         {
-            _cdp?.Post("Fetch.failRequest", new { requestId = id, errorReason = "BlockedByClient" }, session);
-            if (topLevel) Notice(new SignInBrowserNotice("refused", Host: url.Host));
+            if (_hosts.Part(url) == SignInHosts.Verdict.Refuse) _cdp?.Post("Fetch.failRequest", new { requestId = id, errorReason = "BlockedByClient" }, session);
+            else _cdp?.Post("Fetch.continueRequest", new { requestId = id }, session);
             return;
         }
+
+        // A server's redirect: the host that answered it, by the request it answered (or its network id).
+        var network = p.TryGetProperty("networkId", out var n) ? n.GetString() : null;
+        var redirectFrom = p.TryGetProperty("redirectedRequestId", out var r) && r.GetString() is { } previous && _hops.TryGetValue(previous, out var was)
+            ? was
+            : network is not null && _hops.TryGetValue("n:" + network, out var seen) ? seen : null;
+
+        var verdict = _hosts.TopLevel(url, From(page), request.TryGetProperty("postData", out var form) ? form.GetString() : null, redirectFrom);
+        if (verdict == SignInHosts.Verdict.Refuse)
+        {
+            if (network is not null) _hops.TryRemove("n:" + network, out _);
+
+            // NO CONTENT, NOT AN ERROR: a navigation answered 204 does not happen, so the page stays on
+            // the last allowed page, alive, rather than becoming Chrome's error page. A new page that
+            // had nothing allowed on it yet is closed, back to its opener.
+            _cdp?.Post("Fetch.fulfillRequest", new { requestId = id, responseCode = 204, responseHeaders = Array.Empty<object>(), body = "" }, session);
+            Notice(new SignInBrowserNotice("refused", Host: url.Host));
+            if (page.Url is not { Scheme: "http" or "https" } && page.Opener is not null) _cdp?.Post("Target.closeTarget", new { targetId = page.Target });
+            return;
+        }
+
+        if (_hops.Count > 512) _hops.Clear();
+        _hops[id] = url.Host;
+        if (network is not null) _hops["n:" + network] = url.Host;
 
         _cdp?.Post("Fetch.continueRequest", new { requestId = id }, session);
         if (verdict == SignInHosts.Verdict.Admit) Notice(new SignInBrowserNotice("provider", Host: url.Host));
