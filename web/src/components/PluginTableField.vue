@@ -278,14 +278,17 @@ function href(action: string, row: PluginTableRow): string | null {
         </q-card-section>
         <q-card-section class="q-gutter-sm">
           <template v-for="column in writableColumns(shape)" :key="column.name">
-            <q-toggle
-              v-if="column.type === 'bool'"
-              dense
-              :model-value="draft[column.name] === true"
-              :label="columnLabel(column)"
-              :data-editor-cell="column.name"
-              @update:model-value="(value: boolean) => setCell(column.name, value)"
-            />
+            <!-- The help sits beside the switch, not in its label, so a tap on the icon never flips it. -->
+            <div v-if="column.type === 'bool'" class="row items-center no-wrap q-gutter-x-xs" :data-editor-bool="column.name">
+              <q-toggle
+                dense
+                :model-value="draft[column.name] === true"
+                :label="columnLabel(column)"
+                :data-editor-cell="column.name"
+                @update:model-value="(value: boolean) => setCell(column.name, value)"
+              />
+              <FieldHelp :text="column.description" />
+            </div>
             <q-select
               v-else-if="column.type === 'enum'"
               outlined
