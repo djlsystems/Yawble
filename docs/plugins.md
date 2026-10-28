@@ -1126,12 +1126,21 @@ other secret cell.
   through: their cookies, and the local storage of each such origin the person visited, not only the
   one open at Done.
 - **Redacted part by part.** Besides the whole value, each WHOLE cookie value and each WHOLE
-  local-storage value of 4 characters or more joins the run's redaction set on its own (with its
-  URL-decoded form), so a plugin that prints one cookie, a short code or a PIN does not leak it. Each
-  string inside a local-storage value that is JSON joins it when it is 8 characters or more. Values of
-  1-3 characters (`1`, `yes`) are left out, so they do not mangle the run's output; a 4-character value
-  such as `true` is redacted wherever it appears. A plugin that redacts its own output should use the
-  same rule.
+  local-storage value joins the run's redaction set on its own, with its URL-decoded form, so a plugin
+  that prints one cookie, a short code or a PIN does not leak it:
+  - **8 characters or more:** redacted wherever it appears, in any case, inside other words too. So is
+    each string of 8 characters or more inside a local-storage value that is JSON; shorter strings
+    inside JSON are left out.
+  - **4-7 characters:** redacted only as a WHOLE TOKEN, in any case: where no letter or digit is right
+    before or after it. `flag=code123;`, `mid k9x4z` and `"k9x4z"` are redacted; `trueness` and
+    `code1234x` are left as they are. An escape right before it (`\u0022` as JSON writes a quote,
+    `\n`, `%3D`) counts as no letter, so an escaped copy is still caught.
+  - **1-3 characters** (`1`, `ok`): left out, so they do not mangle the run's output.
+  - **Never redacted:** a value (or a string inside JSON) that is one of `true`, `false`, `null`,
+    `none`, `undefined`, `yes`, `no`, `on`, `off`, `dark`, `light`, `auto`, `default`, compared
+    ignoring case. These are settings, not secrets.
+
+  A plugin that redacts its own output should use the same rule.
 - **Limits.** 10 minutes without input closes the browser with nothing saved. One live sign-in per
   person: opening another **replaces** the first, whose page says it was closed. The page's socket
   (`/api/teams/{team}/members/{member}/sign-in/{field}/{row}`) is humans-only, like every route that

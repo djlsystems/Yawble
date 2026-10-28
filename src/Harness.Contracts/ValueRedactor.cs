@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Text.Json.Serialization;
 using Harness.Contracts;
 
@@ -23,6 +24,12 @@ namespace Harness.Host;
 /// comes back as the same instance. A writer that transforms a value otherwise - reversed, base64,
 /// split - defeats this.
 ///
+/// A WHOLE-TOKEN value (<see cref="For(IEnumerable{string?}, IEnumerable{string?})"/>) is replaced only
+/// where no letter or digit is next to it (an escape such as <c>\u0022</c> or <c>%3D</c> just before it
+/// counts as none): a short session value such as <c>k9x4z</c> is caught in <c>x=k9x4z;</c> and in
+/// <c>\u0022k9x4z\u0022</c>, but left in a longer word. Whole-token values never cross a connection
+/// (<see cref="Forms"/> lists only the match-anywhere ones); a plugin run's set stays in the Host.
+///
 /// In the contracts because a run's set travels to the worker with its start, which applies it; like
 /// the run's credential, it is never written as JSON.
 /// </summary>
@@ -40,20 +47,48 @@ public sealed class ValueRedactor
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
-    private ValueRedactor(IReadOnlyList<string> forms) => Forms = forms;
+    private ValueRedactor(IReadOnlyList<string> forms, IReadOnlyList<string>? tokenForms = null)
+    {
+        Forms = forms;
+        TokenForms = tokenForms ?? [];
+        _applied = [.. forms.Select(f => (f, false)).Concat(TokenForms.Select(f => (f, true))).OrderByDescending(f => f.Item1.Length).ThenBy(f => f.Item2)];
+    }
 
-    /// <summary>Every spelling that <see cref="Apply"/> replaces, longest first.</summary>
+    private readonly IReadOnlyList<(string Form, bool WholeToken)> _applied;
+
+    /// <summary>
+    /// Where a whole token may start: after no letter or digit, or right after an escape that ends in
+    /// one - <c>\u0022</c> as JSON writes a quote, <c>\n</c>, <c>%3D</c> - so an escaped copy is caught.
+    /// </summary>
+    private const string TokenStart = @"(?:(?<![\p{L}\p{N}])|(?<=\\u[0-9A-Fa-f]{4})|(?<=\\[nrtbf])|(?<=%[0-9A-Fa-f]{2}))";
+
+    /// <summary>Every spelling that <see cref="Apply"/> replaces anywhere, longest first.</summary>
     public IReadOnlyList<string> Forms { get; }
+
+    /// <summary>Every spelling that <see cref="Apply"/> replaces only as a whole token, longest first.</summary>
+    public IReadOnlyList<string> TokenForms { get; }
 
     /// <summary>A redactor for <paramref name="values"/>; values shorter than <see cref="MinimumLength"/> are left out.</summary>
     public static ValueRedactor For(IEnumerable<string?> values)
     {
-        var forms = values
-            .OfType<string>()
-            .Where(v => v.Length >= MinimumLength)
-            .SelectMany(v => new[] { v, JsonBody(v, null), JsonBody(v, Relaxed), JsonBody(v, Relaxed).Replace("/", "\\/", StringComparison.Ordinal) });
-        return Ordered(forms);
+        return Ordered(Spellings(values));
     }
+
+    /// <summary>
+    /// A redactor for <paramref name="values"/>, replaced anywhere, and <paramref name="wholeTokens"/>,
+    /// replaced only where no letter or digit is next to them; values shorter than <see cref="MinimumLength"/> are left out.
+    /// </summary>
+    public static ValueRedactor For(IEnumerable<string?> values, IEnumerable<string?> wholeTokens)
+    {
+        var forms = Ordered(Spellings(values));
+        var tokens = Spellings(wholeTokens).Distinct(StringComparer.OrdinalIgnoreCase).Except(forms.Forms, StringComparer.OrdinalIgnoreCase);
+        return forms.With(new ValueRedactor([], OrderedList(tokens)));
+    }
+
+    private static IEnumerable<string> Spellings(IEnumerable<string?> values) => values
+        .OfType<string>()
+        .Where(v => v.Length >= MinimumLength)
+        .SelectMany(v => new[] { v, JsonBody(v, null), JsonBody(v, Relaxed), JsonBody(v, Relaxed).Replace("/", "\\/", StringComparison.Ordinal) });
 
     /// <summary>
     /// The set of a run whose child is given <paramref name="environment"/>: the value of every
@@ -69,18 +104,27 @@ public sealed class ValueRedactor
     internal static ValueRedactor FromForms(IEnumerable<string> forms) => Ordered(forms);
 
     /// <summary>This set together with <paramref name="other"/>'s.</summary>
-    public ValueRedactor With(ValueRedactor other) =>
-        other.Forms.Count == 0 ? this : Forms.Count == 0 ? other : Ordered(Forms.Concat(other.Forms));
+    public ValueRedactor With(ValueRedactor other)
+    {
+        if (other.Forms.Count == 0 && other.TokenForms.Count == 0) return this;
+        if (Forms.Count == 0 && TokenForms.Count == 0) return other;
+        var forms = OrderedList(Forms.Concat(other.Forms));
+        return new ValueRedactor(forms, OrderedList(TokenForms.Concat(other.TokenForms).Except(forms, StringComparer.OrdinalIgnoreCase)));
+    }
 
     /// <summary><paramref name="text"/> with each form replaced; the same instance when nothing matched.</summary>
     public string Apply(string text)
     {
-        foreach (var form in Forms)
+        foreach (var (form, wholeToken) in _applied)
         {
-            if (text.Contains(form, StringComparison.OrdinalIgnoreCase))
-            {
-                text = text.Replace(form, DiagnosticRedaction.Placeholder, StringComparison.OrdinalIgnoreCase);
-            }
+            if (!text.Contains(form, StringComparison.OrdinalIgnoreCase)) continue;
+            text = wholeToken
+                ? Regex.Replace(
+                    text,
+                    $@"{TokenStart}{Regex.Escape(form)}(?![\p{{L}}\p{{N}}])",
+                    DiagnosticRedaction.Placeholder.Replace("$", "$$", StringComparison.Ordinal),
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+                : text.Replace(form, DiagnosticRedaction.Placeholder, StringComparison.OrdinalIgnoreCase);
         }
 
         return text;
@@ -91,13 +135,15 @@ public sealed class ValueRedactor
 
     private static ValueRedactor Ordered(IEnumerable<string> forms)
     {
-        var ordered = forms
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderByDescending(f => f.Length)
-            .ThenBy(f => f, StringComparer.Ordinal)
-            .ToList();
+        var ordered = OrderedList(forms);
         return ordered.Count == 0 ? Empty : new ValueRedactor(ordered);
     }
+
+    private static List<string> OrderedList(IEnumerable<string> forms) => forms
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderByDescending(f => f.Length)
+        .ThenBy(f => f, StringComparer.Ordinal)
+        .ToList();
 
     /// <summary>A value as it appears between the quotes of a JSON string.</summary>
     private static string JsonBody(string value, JsonSerializerOptions? options) =>

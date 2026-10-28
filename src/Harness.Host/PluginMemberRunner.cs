@@ -208,15 +208,17 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         // THE REDACTION SET: every bound secret AND every access token and app password this run is handed.
         // A field the manifest declares `"masked": false` is not secret, and is not redacted.
         // EACH TABLE'S SECRET CELLS, by row and column, for the rows the member has; a masked one is redacted.
-        var (cells, maskedCells) = TableSecrets(manifest, bound, own);
+        // A short part of a saved sign-in session is redacted only as a whole token (SignInSessionValue.SecretParts).
+        var (cells, maskedCells, maskedTokens) = TableSecrets(manifest, bound, own);
 
-        IReadOnlyList<string> redacted =
-        [
-            .. resolvedSecrets.Where(s => manifest.Secrets.GetValueOrDefault(s.Key)?.Masked != false).Select(s => s.Value),
-            .. grants.Values.SelectMany(g => g.Secrets),
-            .. named?.Values ?? [],
-            .. maskedCells,
-        ];
+        var redacted = ValueRedactor.For(
+            [
+                .. resolvedSecrets.Where(s => manifest.Secrets.GetValueOrDefault(s.Key)?.Masked != false).Select(s => s.Value),
+                .. grants.Values.SelectMany(g => g.Secrets),
+                .. named?.Values ?? [],
+                .. maskedCells,
+            ],
+            maskedTokens);
 
         var siteFiles = await SiteFilesAsync(invocation.Member, ct);
         var request = Request(invocation, manifest, config, resolvedSecrets, grants, new JsonArray(), siteFiles, secretKeys, named, cells);
@@ -996,7 +998,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
 
     private async Task OnLineAsync(
         ContainerId member, PluginManifest manifest, ArtifactLimits limits, string line, Gathered gathered,
-        IEnumerable<string> secretValues, CancellationToken ct)
+        ValueRedactor secretValues, CancellationToken ct)
     {
         var trimmed = line.Trim();
 
@@ -1069,12 +1071,14 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
     /// to column to value, for every table with a secret column - `{}` for one whose cells are all
     /// empty - and the masked values, which join the run's redaction set. A cell is the member's own
     /// value under <see cref="PluginMemberSecretStore.CellField"/>, so it is in <paramref name="own"/>.
+    /// A saved sign-in session's short parts are in <c>MaskedTokens</c>, redacted only as whole tokens.
     /// </summary>
-    internal static (JsonObject Cells, IReadOnlyList<string> Masked) TableSecrets(
+    internal static (JsonObject Cells, IReadOnlyList<string> Masked, IReadOnlyList<string> MaskedTokens) TableSecrets(
         PluginManifest manifest, PluginMemberSettings bound, IReadOnlyDictionary<string, string> own)
     {
         var cells = new JsonObject();
         var masked = new List<string>();
+        var maskedTokens = new List<string>();
 
         foreach (var (name, field) in manifest.Config)
         {
@@ -1091,7 +1095,9 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
                     if (!column.Masked) continue;
                     masked.Add(value);
                     // A saved sign-in session is redacted part by part too: one cookie printed alone.
-                    masked.AddRange(SignInSessionValue.SecretParts(value));
+                    var parts = SignInSessionValue.SecretParts(value);
+                    masked.AddRange(parts.Anywhere);
+                    maskedTokens.AddRange(parts.WholeTokens);
                 }
 
                 if (values.Count > 0) rows[row] = values;
@@ -1100,7 +1106,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             cells[name] = rows;
         }
 
-        return (cells, masked);
+        return (cells, masked, maskedTokens);
     }
 
     /// <summary>
@@ -1117,7 +1123,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
     /// </list>
     /// </summary>
     private async Task RowStatusAsync(
-        ContainerId member, PluginManifest manifest, JsonObject record, Gathered gathered, IEnumerable<string> secretValues, CancellationToken ct)
+        ContainerId member, PluginManifest manifest, JsonObject record, Gathered gathered, ValueRedactor secretValues, CancellationToken ct)
     {
         var name = Words(record, "field");
         var rowName = Words(record, "row");
@@ -1224,7 +1230,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
     /// </summary>
     private async Task PublishAsync(
         ContainerId member, PluginManifest manifest, ArtifactLimits limits, JsonObject record, Gathered gathered,
-        IEnumerable<string> secretValues, CancellationToken ct)
+        ValueRedactor secretValues, CancellationToken ct)
     {
         var named = Words(record, "type") ?? "(no type)";
         var own = EventCatalog.PluginType(manifest.Id, "");
@@ -1286,7 +1292,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
     /// </list>
     /// </summary>
     private async Task SiteRecordAsync(
-        ContainerId member, JsonObject record, Gathered gathered, IEnumerable<string> secretValues, CancellationToken ct)
+        ContainerId member, JsonObject record, Gathered gathered, ValueRedactor secretValues, CancellationToken ct)
     {
         var kind = (string)record["t"]!;
 
@@ -1372,7 +1378,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
     /// </list>
     /// The reason names neither the key nor the value.
     /// </summary>
-    private static string? RedactPayload(JsonNode? node, IEnumerable<string> secretValues)
+    private static string? RedactPayload(JsonNode? node, ValueRedactor secretValues)
     {
         switch (node)
         {
@@ -1415,11 +1421,11 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
     /// which the text match would also catch as <c>-20261234</c>). A number outside decimal's range
     /// cannot equal a secret that is inside it.
     /// </summary>
-    private static bool EqualsASecretNumber(JsonValue scalar, IEnumerable<string> secretValues)
+    private static bool EqualsASecretNumber(JsonValue scalar, ValueRedactor secretValues)
     {
         if (scalar.GetValueKind() != JsonValueKind.Number || !scalar.TryGetValue<decimal>(out var value)) return false;
 
-        foreach (var secret in secretValues)
+        foreach (var secret in secretValues.Forms.Concat(secretValues.TokenForms))
         {
             if (decimal.TryParse(secret, NumberStyles.Float, CultureInfo.InvariantCulture, out var number)
                 && decimal.Abs(value) == decimal.Abs(number))
@@ -1443,8 +1449,11 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
     /// <see cref="DiagnosticRedaction"/>'s named-value and credential-shape rules, unbounded, since
     /// this is output and not a diagnostic.
     /// </summary>
-    internal static string Redact(string text, IEnumerable<string> values) =>
-        DiagnosticRedaction.RedactWithoutLimit(ValueRedactor.For(values).Apply(text)) ?? text;
+    internal static string Redact(string text, IEnumerable<string> values) => Redact(text, ValueRedactor.For(values));
+
+    /// <inheritdoc cref="Redact(string, IEnumerable{string})"/>
+    internal static string Redact(string text, ValueRedactor values) =>
+        DiagnosticRedaction.RedactWithoutLimit(values.Apply(text)) ?? text;
 
     /// <summary>Every spelling of the bound values that <see cref="Redact"/> replaces, longest first.</summary>
     internal static IReadOnlyList<string> RedactedForms(IEnumerable<string> values) => ValueRedactor.For(values).Forms;

@@ -215,17 +215,32 @@ public static class SignInSessionValue
     /// </summary>
     public const int MinimumValueLength = 4;
 
-    /// <summary>The shortest string inside a local-storage value that is JSON that is redacted on its own: shorter ones are words like <c>dark</c>.</summary>
+    /// <summary>
+    /// The shortest string inside a local-storage value that is JSON that is redacted on its own, and the
+    /// shortest whole value that is redacted anywhere; a shorter whole value only as a whole token.
+    /// </summary>
     public const int MinimumPartLength = 8;
 
+    /// <summary>Whole values that are never redacted, in any case: settings words, not secrets.</summary>
+    public static readonly IReadOnlySet<string> CommonWords = new HashSet<string>(
+        ["true", "false", "null", "none", "undefined", "yes", "no", "on", "off", "dark", "light", "auto", "default"],
+        StringComparer.OrdinalIgnoreCase);
+
     /// <summary>
-    /// THE SECRET PARTS OF A SAVED SESSION, each redacted on its own as well as the whole value: every
-    /// cookie's value and every local-storage value (and their URL-decoded forms) of at least
-    /// <see cref="MinimumValueLength"/> characters, and every string inside a local-storage value that
-    /// is JSON of at least <see cref="MinimumPartLength"/> - a plugin that prints one cookie must not
-    /// leak it. Nothing for a value that is not a session.
+    /// THE SECRET PARTS OF A SAVED SESSION, each redacted on its own as well as the whole value - a
+    /// plugin that prints one cookie must not leak it. For every cookie's value and every local-storage
+    /// value, and each one's URL-decoded form:
+    /// <list type="bullet">
+    /// <item><see cref="MinimumPartLength"/> characters or more: redacted ANYWHERE (<see cref="SignInSecretParts.Anywhere"/>);</item>
+    /// <item><see cref="MinimumValueLength"/> to 7: redacted only as a WHOLE TOKEN, with no letter or digit
+    /// next to it (<see cref="SignInSecretParts.WholeTokens"/>);</item>
+    /// <item>shorter: not redacted.</item>
+    /// </list>
+    /// Every string inside a local-storage value that is JSON is redacted anywhere at
+    /// <see cref="MinimumPartLength"/> or more, and not when shorter. A value or string that is one of
+    /// <see cref="CommonWords"/> (<c>undefined</c> is 9 characters) is never redacted. Nothing for a value that is not a session.
     /// </summary>
-    public static IReadOnlyList<string> SecretParts(string value)
+    public static SignInSecretParts SecretParts(string value)
     {
         string state;
         try
@@ -234,18 +249,26 @@ public static class SignInSessionValue
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException)
         {
-            return [];
+            return SignInSecretParts.None;
         }
 
         var parts = new List<string>();
-        void Add(string? part, int minimum)
+        var tokens = new List<string>();
+        void One(string part, bool whole)
         {
-            if (part is null || part.Length < minimum) return;
-            parts.Add(part);
+            if (CommonWords.Contains(part)) return;
+            if (part.Length >= MinimumPartLength) parts.Add(part);
+            else if (whole && part.Length >= MinimumValueLength) tokens.Add(part);
+        }
+
+        void Add(string? part, bool whole)
+        {
+            if (part is null) return;
+            One(part, whole);
             try
             {
                 var decoded = Uri.UnescapeDataString(part.Replace('+', ' '));
-                if (decoded != part && decoded.Length >= minimum) parts.Add(decoded);
+                if (decoded != part) One(decoded, whole);
             }
             catch (UriFormatException)
             {
@@ -257,7 +280,7 @@ public static class SignInSessionValue
             switch (element.ValueKind)
             {
                 case JsonValueKind.String:
-                    Add(element.GetString(), MinimumPartLength);
+                    Add(element.GetString(), whole: false);
                     break;
                 case JsonValueKind.Object:
                     foreach (var property in element.EnumerateObject()) Leaves(property.Value);
@@ -274,7 +297,7 @@ public static class SignInSessionValue
         {
             foreach (var cookie in cookies.EnumerateArray())
             {
-                if (cookie.ValueKind == JsonValueKind.Object && cookie.TryGetProperty("value", out var v) && v.ValueKind == JsonValueKind.String) Add(v.GetString(), MinimumValueLength);
+                if (cookie.ValueKind == JsonValueKind.Object && cookie.TryGetProperty("value", out var v) && v.ValueKind == JsonValueKind.String) Add(v.GetString(), whole: true);
             }
         }
 
@@ -287,7 +310,7 @@ public static class SignInSessionValue
                 {
                     if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty("value", out var v) || v.ValueKind != JsonValueKind.String) continue;
                     var text = v.GetString()!;
-                    Add(text, MinimumValueLength);
+                    Add(text, whole: true);
                     if (text.Length > 0 && text[0] is '{' or '[')
                     {
                         try
@@ -303,7 +326,7 @@ public static class SignInSessionValue
             }
         }
 
-        return [.. parts.Distinct(StringComparer.Ordinal)];
+        return new([.. parts.Distinct(StringComparer.Ordinal)], [.. tokens.Distinct(StringComparer.Ordinal)]);
     }
 
     /// <summary>The v2 envelope of <paramref name="storageState"/> (JSON) and <paramref name="identity"/>.</summary>
@@ -324,4 +347,14 @@ public static class SignInSessionValue
 
         return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
     }
+}
+
+/// <summary>
+/// A saved session's secret parts: <paramref name="Anywhere"/> are redacted wherever they appear,
+/// <paramref name="WholeTokens"/> only where no letter or digit is next to them.
+/// </summary>
+public sealed record SignInSecretParts(IReadOnlyList<string> Anywhere, IReadOnlyList<string> WholeTokens)
+{
+    /// <summary>No parts: a value that is not a session.</summary>
+    public static readonly SignInSecretParts None = new([], []);
 }

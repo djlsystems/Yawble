@@ -91,8 +91,9 @@ public sealed class SignInRowsTests : IAsyncLifetime
         Directory.CreateDirectory(_outside);
 
         // ECHOES its request, so a kept session's way into the run (and out of its output) is seen, and
-        // prints each `piece-` value and each `value` field it finds on its own, as a plugin printing one cookie would.
-        var script = $"req=$(cat); printf '%s\\n' \"$req\" >> '{Requests}'; printf '%s\\n' \"$req\"; printf '%s' \"$req\" | grep -o '[a-z]*piece-[0-9a-f]*' | sed 's/^/part: /'; printf '%s' \"$req\" | grep -o 'value[^,}}]*' | sed 's/^/value: /'; echo '{{\"t\":\"result\",\"ok\":true,\"output\":\"checked\"}}'";
+        // prints each `piece-` value and each `value` field it finds on its own, as a plugin printing one cookie would,
+        // then a fixed sentence of its own (`said:`) with short values as whole tokens and inside words.
+        var script = $"req=$(cat); printf '%s\\n' \"$req\" >> '{Requests}'; printf '%s\\n' \"$req\"; printf '%s' \"$req\" | grep -o '[a-z]*piece-[0-9a-f]*' | sed 's/^/part: /'; printf '%s' \"$req\" | grep -o 'value[^,}}]*' | sed 's/^/value: /'; echo 'said: the check is true, trueness, True; mid k9x4z; x=k9x4z; abk9x4zcd; flag=code123;'; echo '{{\"t\":\"result\",\"ok\":true,\"output\":\"checked\"}}'";
         PluginInstall.Write(_dataRoot, "webcreds", script: script, manifest: PluginInstall.Manifest("webcreds", edit: m =>
             m["config"] = new JsonObject { ["entries"] = JsonNode.Parse(Entries) }));
 
@@ -330,7 +331,53 @@ public sealed class SignInRowsTests : IAsyncLifetime
     }
 
     [Fact]
-    public void A_whole_cookie_or_local_storage_value_of_four_or_more_characters_is_a_secret_part_and_a_string_inside_json_of_eight_or_more()
+    public async Task A_short_session_value_is_redacted_only_as_a_whole_token_and_a_common_word_never()
+    {
+        // consent=true (a common word), a 5-character cookie and a 7-character code: D13.
+        var state = JsonSerializer.Serialize(new
+        {
+            cookies = new[]
+            {
+                new { name = "mid", value = "k9x4z", domain = "app.example.test", path = "/" },
+                new { name = "oauth_done", value = "code123", domain = "app.example.test", path = "/" },
+            },
+            origins = new[] { new { origin = "https://app.example.test", localStorage = new[] { new { name = "consent", value = "true" } } } },
+        });
+        var identity = new SignInBrowserIdentity(
+            "chrome", "156.0.8078.73", "Mozilla/5.0", new SignInUserAgentMetadata([], [], "Linux", "", "x86", "", false, "64"),
+            "en-US", ["en-US"], "UTC", new SignInBrowserSize(1920, 1080), new SignInBrowserSize(1280, 800), 1);
+        await Services.GetRequiredService<ISignInRows>().SaveSessionAsync(
+            Creds, "entries", "site-admin", "session", new SignInStorageState(SignInSessionValue.Write(state, identity)), new CredentialActor("u1", Email), Ct);
+
+        var run = await TellAndAwaitAsync("Creds");
+
+        var said = ((string)JsonNode.Parse(run.Payload)!["output"]!).Split('\n').Single(l => l.StartsWith("said: ", StringComparison.Ordinal));
+        var placeholder = DiagnosticRedaction.Placeholder;
+        // (a) `true` is a common word: never redacted, as a word, inside one, or in another case.
+        Assert.Contains("the check is true, trueness, True;", said, StringComparison.Ordinal);
+        // (b) a 5-character value as a whole token is redacted; (d) inside a longer word it is not.
+        Assert.Contains($"mid {placeholder};", said, StringComparison.Ordinal);
+        Assert.Contains($"x={placeholder};", said, StringComparison.Ordinal);
+        Assert.Contains("abk9x4zcd;", said, StringComparison.Ordinal);
+        // (c) a 7-character code is still redacted.
+        Assert.Contains($"flag={placeholder};", said, StringComparison.Ordinal);
+        Assert.DoesNotContain("code123", run.Payload, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void A_short_value_matches_only_as_a_whole_token_and_a_long_one_anywhere()
+    {
+        var redactor = ValueRedactor.For(["longsecret1"], ["k9x4z"]);
+        var p = DiagnosticRedaction.Placeholder;
+
+        Assert.Equal($"mid {p}; x={p}; abk9x4zcd; {p}_ {p}", redactor.Apply("mid k9x4z; x=k9x4z; abk9x4zcd; K9X4Z_ k9x4z"));
+        Assert.Equal($"a{p}b", redactor.Apply("aLONGSECRET1b"));
+        // An escape just before it is no word: JSON's quote, a newline, a percent-encoding.
+        Assert.Equal($"\\u0022{p}\\u0022 \\n{p} %3D{p} ab\\{p} uk9x4z", redactor.Apply("\\u0022k9x4z\\u0022 \\nk9x4z %3Dk9x4z ab\\k9x4z uk9x4z"));
+    }
+
+    [Fact]
+    public void A_whole_value_of_eight_or_more_is_redacted_anywhere_four_to_seven_as_a_whole_token_and_a_common_word_never()
     {
         var json = JsonSerializer.Serialize(new { code = "abc1234", token = "tok-12345678" });
         var state = JsonSerializer.Serialize(new
@@ -338,15 +385,20 @@ public sealed class SignInRowsTests : IAsyncLifetime
             cookies = new[]
             {
                 new { name = "a", value = "1" }, new { name = "b", value = "abc" }, new { name = "c", value = "abcd" }, new { name = "d", value = "a%20b" },
+                new { name = "e", value = "code123" }, new { name = "f", value = "longcode1" }, new { name = "g", value = "TRUE" }, new { name = "h", value = "Dark" },
             },
-            origins = new[] { new { origin = "https://a.test", localStorage = new[] { new { name = "x", value = "yes" }, new { name = "y", value = "Vb3Rn" }, new { name = "j", value = json } } } },
+            origins = new[] { new { origin = "https://a.test", localStorage = new[] { new { name = "x", value = "yes" }, new { name = "y", value = "Vb3Rn" }, new { name = "z", value = "undefined" }, new { name = "j", value = json } } } },
         });
 
         var parts = SignInSessionValue.SecretParts(state);
 
-        foreach (var part in new[] { "abcd", "a%20b", "Vb3Rn", json, "tok-12345678" }) Assert.Contains(part, parts);
-        // 1-3 characters stay out, a decoded form under 4 stays out, and a string inside JSON under 8 stays out.
-        foreach (var part in new[] { "1", "abc", "yes", "a b", "abc1234" }) Assert.DoesNotContain(part, parts);
+        // 8 or more, whole or inside JSON: anywhere. 4-7 whole (and a decoded form of 4-7): whole token only.
+        foreach (var part in new[] { "longcode1", json, "tok-12345678" }) Assert.Contains(part, parts.Anywhere);
+        foreach (var part in new[] { "abcd", "a%20b", "code123", "Vb3Rn" }) Assert.Contains(part, parts.WholeTokens);
+        // 1-3 characters stay out, a decoded form under 4 stays out, a string inside JSON under 8 stays out,
+        // and a common word never goes in, in any case and at any length.
+        var all = parts.Anywhere.Concat(parts.WholeTokens).ToList();
+        foreach (var part in new[] { "1", "abc", "yes", "a b", "abc1234", "TRUE", "Dark", "undefined" }) Assert.DoesNotContain(part, all);
     }
 
     [Fact]
