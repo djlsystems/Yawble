@@ -50,6 +50,7 @@ internal sealed partial class HostComposition
         WorkspaceFileChangeEndpoints.Map(app);
         AgentStepEndpoints.Map(app);
         OutcomeEndpoints.Map(app);
+        SignInEndpoints.Map(app);
         HealthEndpoints.Map(app, dataRoot);
         VersionEndpoints.Map(app);
         ReleaseCheckEndpoints.Map(app);
@@ -69,6 +70,7 @@ internal sealed partial class HostComposition
                 }
 
                 await app.Services.GetRequiredService<WorkerStreams>().HandleAsync(envelope, ct);
+                if (envelope.Event is SignInBrowserSaved) await app.Services.GetRequiredService<SignInSessions>().HandleAsync(envelope, ct);
             },
             worker => app.Services.GetRequiredService<RunDirectory>().OpenOn(worker),
             workerKey,

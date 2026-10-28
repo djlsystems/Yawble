@@ -86,6 +86,7 @@ public sealed class WorkerStreams
         @event switch
         {
             TerminalEnded ended => ended.Session,
+            SignInBrowserEnded ended => ended.Session,
             AgentFileRead read => ReadAgentFile.StreamOf(read.Request),
             _ => null,
         };

@@ -759,7 +759,7 @@ public static class PluginEndpoints
         }
     }
 
-    private static async Task<(PersistedMember? Member, InstalledPlugin? Plugin, IResult? Refusal)> PluginMemberAsync(
+    internal static async Task<(PersistedMember? Member, InstalledPlugin? Plugin, IResult? Refusal)> PluginMemberAsync(
         TeamRegistry teams, PluginCatalog plugins, string team, string member, CancellationToken ct)
     {
         PersistedMember found;

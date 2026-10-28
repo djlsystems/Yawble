@@ -53,6 +53,7 @@ internal sealed partial class HostComposition
                 }
 
                 await sp.GetRequiredService<WorkerStreams>().HandleAsync(envelope, ct);
+                if (envelope.Event is SignInBrowserSaved) await sp.GetRequiredService<SignInSessions>().HandleAsync(envelope, ct);
             },
             sp.GetRequiredService<ILogger<ProcessAgentRunner>>(),
             sp.GetRequiredService<ILogger<RunAllowances>>(),
