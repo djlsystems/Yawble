@@ -48,22 +48,7 @@ public sealed class SignInDisplay : IAsyncDisposable
         var authority = Path.Combine(folder, "Xauthority");
         WriteAuthority(authority, RandomNumberGenerator.GetBytes(16));
 
-        // -displayfd 1: Xvfb picks a free display and writes its number on stdout once it is ready.
-        var start = new ProcessStartInfo(xvfb)
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            RedirectStandardInput = true,
-            UseShellExecute = false,
-            WorkingDirectory = folder,
-        };
-        foreach (var argument in new[] { "-displayfd", "1", "-screen", "0", $"{width}x{height}x24", "-nolisten", "tcp", "-auth", authority, "-nocursor" })
-        {
-            start.ArgumentList.Add(argument);
-        }
-
-        start.Environment.Clear();
-        start.Environment["PATH"] = "/usr/local/bin:/usr/bin:/bin";
+        var start = StartInfo(xvfb, folder, width, height, authority);
         var process = Process.Start(start) ?? throw new InvalidOperationException("Xvfb did not start.");
         _ = process.StandardError.ReadToEndAsync(CancellationToken.None);
 
@@ -81,6 +66,39 @@ public sealed class SignInDisplay : IAsyncDisposable
             process.Dispose();
             throw;
         }
+    }
+
+    /// <summary>
+    /// How Xvfb is started: a <paramref name="width"/> by <paramref name="height"/> screen, no TCP, the
+    /// cookie in <paramref name="authority"/>. <c>-displayfd 1</c>: Xvfb picks a free display and writes
+    /// its number on stdout once it is ready.
+    ///
+    /// UNDER A SHELL THAT ENDS IT WITH ITS OWNER: Xvfb does not notice its parent going, and Chrome
+    /// does (its pipe closes), so a worker killed while a browser was open left the screen running as
+    /// an orphan. The shell reads its stdin - the owner's pipe - until it closes, however the owner
+    /// ended, then stops Xvfb. Disposing kills the shell and Xvfb together, as one process tree.
+    /// </summary>
+    public static ProcessStartInfo StartInfo(string xvfb, string folder, int width, int height, string authority)
+    {
+        var start = new ProcessStartInfo("/bin/sh")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            RedirectStandardInput = true,
+            UseShellExecute = false,
+            WorkingDirectory = folder,
+        };
+        start.ArgumentList.Add("-c");
+        start.ArgumentList.Add("\"$0\" \"$@\" </dev/null & x=$!; cat >/dev/null; kill $x 2>/dev/null; wait $x");
+        start.ArgumentList.Add(xvfb);
+        foreach (var argument in new[] { "-displayfd", "1", "-screen", "0", $"{width}x{height}x24", "-nolisten", "tcp", "-auth", authority, "-nocursor" })
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        start.Environment.Clear();
+        start.Environment["PATH"] = "/usr/local/bin:/usr/bin:/bin";
+        return start;
     }
 
     /// <summary>
