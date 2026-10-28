@@ -23,7 +23,7 @@ public sealed class WorkerSignInBrowsers(
         "This worker has no headless Chromium installed (Playwright's chrome-headless-shell under PLAYWRIGHT_BROWSERS_PATH).";
 
     private readonly ConcurrentDictionary<string, Open> _open = new(StringComparer.Ordinal);
-    private readonly string _profileRoot = profileRoot ?? DefaultProfileRoot();
+    private readonly Lazy<string> _profileRoot = new(() => profileRoot ?? DefaultProfileRoot());
 
     /// <summary>The sessions open on this worker.</summary>
     public IReadOnlyCollection<string> Sessions => [.. _open.Keys];
@@ -32,10 +32,24 @@ public sealed class WorkerSignInBrowsers(
     /// Where profiles go: the worker's own state folder when it has one (in the container, agents
     /// cannot reach it), else a folder of this user's own in the temp folder.
     /// </summary>
-    public static string DefaultProfileRoot() =>
-        Environment.GetEnvironmentVariable("HARNESS_WORKER_STATE_DIR") is { Length: > 0 } state
-            ? Path.Combine(state, "sign-in")
-            : Path.Combine(Path.GetTempPath(), "harness-sign-in-" + Environment.UserName);
+    public static string DefaultProfileRoot()
+    {
+        if (Environment.GetEnvironmentVariable("HARNESS_WORKER_STATE_DIR") is { Length: > 0 } state)
+        {
+            var inside = Path.Combine(state, "sign-in");
+            try
+            {
+                Directory.CreateDirectory(inside);
+                return inside;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // Not this process's to write (a Host run as another user than the worker's): the temp folder.
+            }
+        }
+
+        return Path.Combine(Path.GetTempPath(), "harness-sign-in-" + Environment.UserName);
+    }
 
     /// <summary>Starts a browser on its own task; a start that fails ends the session with a sentence.</summary>
     public void Start(StartSignInBrowser start)
@@ -53,7 +67,7 @@ public sealed class WorkerSignInBrowsers(
                 var chromium = ChromiumSignInBrowser.Find(browsersPath ?? Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH"))
                     ?? throw new InvalidOperationException(NoChromiumText);
 
-                open.Browser = await ChromiumSignInBrowser.StartAsync(start.Session, start.Launch, chromium, _profileRoot, SendAsync);
+                open.Browser = await ChromiumSignInBrowser.StartAsync(start.Session, start.Launch, chromium, _profileRoot.Value, SendAsync);
                 if (open.Stopping) await open.Browser.DisposeAsync();
                 reason = await open.Browser.Ended;
             }

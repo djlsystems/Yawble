@@ -91,6 +91,9 @@ public static partial class SignInEndpoints
         using var gone = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var send = new SemaphoreSlim(1, 1);
 
+        // Done ends the session before the page is told what was kept: the answer still goes first.
+        var saving = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
         var screen = Task.Run(async () =>
         {
             try
@@ -140,6 +143,7 @@ public static partial class SignInEndpoints
                     switch (Command(message))
                     {
                         case "done":
+                            saving.TrySetResult();
                             var saved = await session.SaveAsync(actor, gone.Token);
                             await send.WaitAsync(gone.Token);
                             try
@@ -171,6 +175,7 @@ public static partial class SignInEndpoints
         });
 
         await Task.WhenAny(reading, session.Over);
+        if (saving.Task.IsCompleted) await Task.WhenAny(reading, Task.Delay(SignInSessions.SaveBound, CancellationToken.None));
         await session.StopAsync();
         var reason = await session.Over;
 
@@ -180,7 +185,7 @@ public static partial class SignInEndpoints
         {
             await SendAsync(socket, new { kind = "ended", reason }, CancellationToken.None);
         }
-        catch (WebSocketException)
+        catch (Exception exception) when (exception is WebSocketException or IOException or ObjectDisposedException)
         {
         }
 
@@ -216,8 +221,9 @@ public static partial class SignInEndpoints
                 await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "ended", CancellationToken.None);
             }
         }
-        catch (WebSocketException)
+        catch (Exception exception) when (exception is WebSocketException or IOException or ObjectDisposedException)
         {
+            // The page went first: there is nobody left to tell.
         }
     }
 
