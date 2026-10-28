@@ -74,16 +74,17 @@ public sealed class ChromiumSignInBrowser : IAsyncDisposable
     /// <summary>
     /// Starts Chromium at <paramref name="chromium"/> with a fresh profile inside
     /// <paramref name="profileRoot"/>, and opens the entry's Site URL. Throws, with nothing left
-    /// running, when it cannot.
+    /// running, when it cannot. <paramref name="extra"/> is more of Chromium's arguments, for a test
+    /// (a host resolver rule that sends its made-up hosts to its own site).
     /// </summary>
     public static async Task<ChromiumSignInBrowser> StartAsync(
         string session, SignInBrowserLaunch launch, string chromium, string profileRoot,
-        Func<StreamChunk, Task<bool>> send, CancellationToken ct = default)
+        Func<StreamChunk, Task<bool>> send, IReadOnlyList<string>? extra = null, CancellationToken ct = default)
     {
         var browser = new ChromiumSignInBrowser(session, launch, send);
         try
         {
-            await browser.LaunchAsync(chromium, profileRoot, ct);
+            await browser.LaunchAsync(chromium, profileRoot, extra ?? [], ct);
             return browser;
         }
         catch
@@ -93,7 +94,7 @@ public sealed class ChromiumSignInBrowser : IAsyncDisposable
         }
     }
 
-    private async Task LaunchAsync(string chromium, string profileRoot, CancellationToken ct)
+    private async Task LaunchAsync(string chromium, string profileRoot, IReadOnlyList<string> extra, CancellationToken ct)
     {
         Directory.CreateDirectory(profileRoot);
         if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(profileRoot, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -115,7 +116,7 @@ public sealed class ChromiumSignInBrowser : IAsyncDisposable
         start.ArgumentList.Add("-c");
         start.ArgumentList.Add("exec \"$0\" \"$@\" 3<&0 4>&1 0</dev/null 1>/dev/null 2>/dev/null");
         start.ArgumentList.Add(chromium);
-        foreach (var argument in Arguments(_profile, _launch.Width, _launch.Height)) start.ArgumentList.Add(argument);
+        foreach (var argument in extra.Concat(Arguments(_profile, _launch.Width, _launch.Height))) start.ArgumentList.Add(argument);
         start.Environment.Clear();
         start.Environment["PATH"] = "/usr/local/bin:/usr/bin:/bin";
         start.Environment["HOME"] = _profile;
@@ -309,7 +310,7 @@ public sealed class ChromiumSignInBrowser : IAsyncDisposable
                 var changed = p.GetProperty("targetInfo");
                 if (_pages.TryGetValue(changed.GetProperty("targetId").GetString()!, out var titled))
                 {
-                    titled.Title = changed.TryGetProperty("title", out var title) ? title.GetString() : null;
+                    titled.Title = Title(changed);
                     if (Active() == titled) Notice(PageNotice(titled));
                 }
 
@@ -424,6 +425,20 @@ public sealed class ChromiumSignInBrowser : IAsyncDisposable
     {
         if (page.Url is { Scheme: "http" or "https" } url) return url.Host;
         return page.Opener is { } opener && _pages.TryGetValue(opener, out var parent) && parent.Url is { Scheme: "http" or "https" } at ? at.Host : null;
+    }
+
+    /// <summary>
+    /// A page's title, or null while it has none: Chromium then titles it by its address, whose query
+    /// may carry an OAuth code.
+    /// </summary>
+    private static string? Title(JsonElement info)
+    {
+        var title = info.TryGetProperty("title", out var t) ? t.GetString() : null;
+        var url = info.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
+        if (string.IsNullOrEmpty(title)) return null;
+
+        var bare = url.Contains("://", StringComparison.Ordinal) ? url[(url.IndexOf("://", StringComparison.Ordinal) + 3)..] : url;
+        return title == url || title == bare || url.EndsWith(title, StringComparison.Ordinal) ? null : title;
     }
 
     private static SignInBrowserNotice PageNotice(Page page) =>
