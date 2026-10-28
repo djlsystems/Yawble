@@ -191,6 +191,14 @@ export interface RowActionContext {
  */
 export const rowActionLinks: Record<string, (context: RowActionContext) => string> = {};
 
+/** The interactive sign-in page for a row (SignInPage.vue): a live browser the person signs in with. */
+export function signInHref({ team, member, table, row }: RowActionContext): string {
+  const part = encodeURIComponent;
+  return `#/teams/${part(team)}/members/${part(member)}/sign-in/${part(table)}/${part(row)}`;
+}
+
+rowActionLinks['sign-in'] = signInHref;
+
 /** The link for a row action, or null while no page is registered for it. */
 export function rowActionHref(action: string, context: RowActionContext): string | null {
   const link = rowActionLinks[action];

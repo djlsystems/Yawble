@@ -198,8 +198,9 @@ internal sealed partial class HostComposition
         // WHAT WORKERS STREAM TO CONTROL - a terminal's output, a followed transcript, a file's text - in
         // both roles: in one process the Host's own worker hands its chunks over by direct call.
         builder.Services.AddSingleton<WorkerStreams>();
-        // A PERSON'S SIGN-IN BROWSER, run on a worker and kept by control; its rows come from the table setting type.
-        builder.Services.AddSingleton<ISignInRows, NoSignInRows>();
+        // A PERSON'S SIGN-IN BROWSER, run on a worker and kept by control; its rows are the table setting type's,
+        // its session the row's secret cell in the member's own secret store.
+        builder.Services.AddSingleton<ISignInRows, PluginSignInRows>();
         builder.Services.AddSingleton(sp => new SignInSessions(
             () => sp.GetRequiredService<WorkerPool>().Worker(null), sp.GetRequiredService<WorkerStreams>(),
             sp.GetRequiredService<ISignInRows>(), log: sp.GetRequiredService<ILogger<SignInSessions>>()));

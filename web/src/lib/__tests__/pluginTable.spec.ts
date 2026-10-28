@@ -106,12 +106,17 @@ describe('duplicate and row actions', () => {
     expect(rowActionsFor(table, row, true).map((a) => a.action)).toEqual(['sign-in']);
 
     const context = { team: 't', member: 'm', table: 'entries', row: 'a' };
-    expect(rowActionHref('sign-in', context)).toBeNull();
-    rowActionLinks['sign-in'] = (c) => `/sign-in/${c.team}/${c.member}/${c.table}/${c.row}`;
+    expect(rowActionHref('unbuilt', context)).toBeNull();
+    rowActionLinks['unbuilt'] = (c) => `/unbuilt/${c.team}/${c.member}/${c.table}/${c.row}`;
     try {
-      expect(rowActionHref('sign-in', context)).toBe('/sign-in/t/m/entries/a');
+      expect(rowActionHref('unbuilt', context)).toBe('/unbuilt/t/m/entries/a');
     } finally {
-      delete rowActionLinks['sign-in'];
+      delete rowActionLinks['unbuilt'];
     }
+  });
+
+  it('links sign-in to the interactive sign-in page for the row, each part encoded', () => {
+    expect(rowActionHref('sign-in', { team: 't 1', member: 'Creds', table: 'entries', row: 'site-admin' }))
+      .toBe('#/teams/t%201/members/Creds/sign-in/entries/site-admin');
   });
 });
