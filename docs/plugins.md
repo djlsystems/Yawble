@@ -1002,6 +1002,32 @@ chosen there; it is not a refusal, because the picker and Connect are right besi
 - Both routes are humans-only. A Manager cannot change a member's settings after hire, as it cannot
   change a member's instructions.
 
+### Signing in to a site: the interactive sign-in page
+
+An `interactive` row of a plugin member's table has a **Sign in** link to
+`#/teams/<team>/members/<member>/sign-in/<field>/<row>`. The page shows a headless Chromium the
+platform runs for that row, live: its screen as a screencast, the person's mouse, keys and paste sent
+to it. It opens at the entry's Site URL. The person signs in (OAuth, two-step codes and CAPTCHAs
+included) and presses **Done**: the browser's storage state (cookies and local storage, Playwright's
+`storageState` shape) is kept as the row's masked secret cell, and the browser closes. **Cancel**, or
+closing the tab, closes it and keeps nothing. The plugin receives the session on its next run like any
+other secret cell.
+
+- **Where it may go.** Top-level navigation reaches the entry's own hosts, and other hosts only as a
+  sign-in flow passes through them (an OAuth-, OpenID- or SAML-shaped step, then that provider's own
+  pages); each such host is recorded as a provider. Anything else is refused and the page says so.
+  What is saved is pruned to the entry's hosts plus the providers the person actually passed through.
+- **Limits.** 10 minutes without input closes the browser with nothing saved. One live sign-in per
+  person: opening another **replaces** the first, whose page says it was closed. The page's socket
+  (`/api/teams/{team}/members/{member}/sign-in/{field}/{row}`) is humans-only, like every route that
+  sets a member's secret; an agent's, a Manager's or the Concierge's key is refused before anything
+  starts. A row that is missing, inactive or not `interactive` answers 404.
+- **Never shown.** The saved state crosses from the worker to control only sealed, is never sent to
+  the page (a save answers the hosts kept and the providers among them), never logged, and Chromium's
+  profile is removed when it closes. Page addresses are reported by origin and path only.
+- **The browser** is Playwright's `chrome-headless-shell` from the data volume, run on a worker with
+  its own sandbox on; see `decisions.md`.
+
 ## Skills
 
 A plugin's `skills` files tell a Manager how to use it. They are indexed whenever the plugins are
