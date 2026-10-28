@@ -69,6 +69,14 @@ const routes: RouteRecordRaw[] = [
     redirect: '/console',
   },
 
+  // A TABLE ROW'S SIGN IN LINK: a browser the platform runs for that member's row, shown live (see
+  // SignInPage.vue). Gated like the Console; the Host refuses its socket to anyone but a person.
+  {
+    path: '/teams/:team/members/:member/sign-in/:field/:row',
+    component: () => import('@/pages/SignInPage.vue'),
+    meta: { title: 'Sign in to a site' },
+  },
+
   // Always leave this as last one.
   {
     path: '/:catchAll(.*)*',
