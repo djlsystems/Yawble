@@ -390,8 +390,6 @@ function openOutcomes(id: string | null = null) {
         aria-label="Board layout"
         @update:model-value="(value: KanbanView) => kanban.setView(value)"
       />
-
-      <q-spinner v-if="kanban.loading" size="18px" color="primary" />
     </div>
 
     <q-banner v-if="kanban.error" dense rounded class="bg-negative text-white q-mb-sm">
