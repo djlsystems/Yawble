@@ -82,7 +82,7 @@ describe('the ribbon\'s Marketplace', () => {
       .filter((button) => button.text().includes('Marketplace'));
     expect(onRow, 'Marketplace is not on the row at a desktop width').toHaveLength(1);
 
-    await onRow[0].trigger('click');
+    await onRow[0]!.trigger('click');
     await flushPromises();
 
     expect(r.currentRoute.value.path).toBe('/solutions');
