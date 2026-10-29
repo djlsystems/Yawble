@@ -185,3 +185,17 @@ describe('pasted text, cleaned before xterm sends it', () => {
     expect(sent()).toEqual(['Grüße 👩\u200d💻\rzweite Zeile']);
   });
 });
+
+describe('Ctrl+V off a Mac', () => {
+  it('sends no 0x16 and leaves the keydown to the browser, which pastes', async () => {
+    Object.defineProperty(navigator, 'platform', { value: 'Linux x86_64', configurable: true });
+    await openPanel();
+
+    const event = new KeyboardEvent('keydown', { key: 'v', code: 'KeyV', keyCode: 86, ctrlKey: true, bubbles: true, cancelable: true });
+    document.querySelector('.concierge-host textarea')!.dispatchEvent(event);
+    await flushPromises();
+
+    expect(sent()).toEqual([]);
+    expect(event.defaultPrevented).toBe(false);
+  });
+});

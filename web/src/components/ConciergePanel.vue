@@ -10,7 +10,7 @@ import {
   UnsentTextSentence,
 } from '../lib/conciergeDecision';
 import { conciergeKeyAction } from '../lib/conciergeKeystroke';
-import { normalisePaste } from '../lib/conciergePaste';
+import { isBrowserPasteChord, normalisePaste } from '../lib/conciergePaste';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { Terminal } from '@xterm/xterm';
@@ -896,6 +896,10 @@ async function attach() {
       void onImagePasteChord({ key: event.key, shiftKey: event.shiftKey });
       return false;
     }
+
+    // Ctrl+V off a Mac: kept from xterm, NOT cancelled, so the browser pastes and
+    // `onTerminalPaste` receives it - see `isBrowserPasteChord`.
+    if (isBrowserPasteChord(event, xtermSeesMac(navigator.platform))) return false;
 
     const action = conciergeKeyAction(event, conciergeNewline());
 

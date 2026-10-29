@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalisePaste } from '../conciergePaste';
+import { isBrowserPasteChord, normalisePaste } from '../conciergePaste';
 
 describe('normalisePaste', () => {
   it('turns CRLF and lone CR line endings into one newline each', () => {
@@ -46,5 +46,44 @@ describe('normalisePaste', () => {
     expect(normalisePaste('\x1b[200~Summarise\u00a0this:\r\n- item one\u200b\r\n- item two\r\n\x1b[201~')).toBe(
       'Summarise this:\n- item one\n- item two\n',
     );
+  });
+});
+
+describe('isBrowserPasteChord', () => {
+  const key = (over: Partial<Parameters<typeof isBrowserPasteChord>[0]> = {}) => ({
+    type: 'keydown',
+    key: 'v',
+    code: 'KeyV',
+    ctrlKey: true,
+    shiftKey: false,
+    altKey: false,
+    metaKey: false,
+    ...over,
+  });
+
+  it('is Ctrl+V on Linux and Windows, so the browser pastes instead of xterm sending 0x16', () => {
+    expect(isBrowserPasteChord(key(), false)).toBe(true);
+    expect(isBrowserPasteChord(key({ key: 'V' }), false)).toBe(true);
+  });
+
+  it('is not Ctrl+V on a Mac, where Cmd+V pastes and Ctrl+V stays the terminal\'s', () => {
+    expect(isBrowserPasteChord(key(), true)).toBe(false);
+  });
+
+  it('is only the keydown, and only Ctrl alone', () => {
+    expect(isBrowserPasteChord(key({ type: 'keypress' }), false)).toBe(false);
+    expect(isBrowserPasteChord(key({ shiftKey: true }), false)).toBe(false);
+    expect(isBrowserPasteChord(key({ altKey: true }), false)).toBe(false);
+    expect(isBrowserPasteChord(key({ metaKey: true }), false)).toBe(false);
+    expect(isBrowserPasteChord(key({ ctrlKey: false }), false)).toBe(false);
+  });
+
+  it('follows the letter typed, and the physical key only where the layout types no Latin letter', () => {
+    // Dvorak: the key where QWERTY has V types k, and Ctrl+K is the terminal's.
+    expect(isBrowserPasteChord(key({ key: 'k', code: 'KeyV' }), false)).toBe(false);
+    // Dvorak's own v sits on QWERTY's period.
+    expect(isBrowserPasteChord(key({ key: 'v', code: 'Period' }), false)).toBe(true);
+    // Russian: the V key types м.
+    expect(isBrowserPasteChord(key({ key: 'м', code: 'KeyV' }), false)).toBe(true);
   });
 });
