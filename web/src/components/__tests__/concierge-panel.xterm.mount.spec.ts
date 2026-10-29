@@ -154,3 +154,34 @@ describe('Alt and the key where QWERTY has V', () => {
     delete (navigator as { clipboard?: unknown }).clipboard;
   });
 });
+
+describe('pasted text, cleaned before xterm sends it', () => {
+  function pasteText(text: string): ClipboardEvent {
+    const event = new ClipboardEvent('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { types: ['text/plain'], files: [], items: [], getData: (type: string) => (type === 'text/plain' ? text : '') },
+    });
+    document.querySelector('.concierge-host textarea')!.dispatchEvent(event);
+    return event;
+  }
+
+  it('sends a CRLF paste as one bracketed block of CR-separated lines, with no stray characters', async () => {
+    await openPanel();
+    await cliPrints('\x1b[?2004h');
+
+    const event = pasteText('\x1b[200~first\u00a0line\r\nsecond\u200b line\r\n\x1b[201~');
+    await flushPromises();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(sent()).toEqual(['\x1b[200~first line\rsecond line\r\x1b[201~']);
+  });
+
+  it('keeps Unicode text and its newlines', async () => {
+    await openPanel();
+
+    pasteText('Grüße 👩\u200d💻\nzweite Zeile');
+    await flushPromises();
+
+    expect(sent()).toEqual(['Grüße 👩\u200d💻\rzweite Zeile']);
+  });
+});

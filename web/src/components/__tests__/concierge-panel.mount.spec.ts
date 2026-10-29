@@ -851,10 +851,11 @@ describe('attaching an image', () => {
   it('leaves a paste carrying text to the terminal, even with a picture beside it', async () => {
     await openPanel();
 
-    const event = paste(transfer([png()], 'A1\tB1'));
+    paste(transfer([png()], 'A1\tB1'));
     await flushPromises();
 
-    expect(event.defaultPrevented).toBe(false);
+    // Pasted as text, through xterm's own paste once cleaned (see `lib/conciergePaste.ts`).
+    expect(sent()).toEqual(['A1\tB1']);
     expect(uploadConciergeAttachment).not.toHaveBeenCalled();
   });
 

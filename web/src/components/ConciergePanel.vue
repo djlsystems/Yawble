@@ -10,6 +10,7 @@ import {
   UnsentTextSentence,
 } from '../lib/conciergeDecision';
 import { conciergeKeyAction } from '../lib/conciergeKeystroke';
+import { normalisePaste } from '../lib/conciergePaste';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import { Terminal } from '@xterm/xterm';
@@ -521,15 +522,26 @@ async function attachImages(files: File[], target: AttachTarget = defaultAttachT
 
 /**
  * A paste into the terminal. CAPTURE PHASE on the host, so it runs before xterm's own listener on
- * its textarea - which would forward the text half and drop the image. A text paste is left alone.
+ * its textarea - which would forward the text half and drop the image. A text paste is cleaned by
+ * `normalisePaste` (see that file for the second Enter it cost on Fedora) and pasted through xterm's
+ * own `paste`, so it is bracketed exactly when xterm would have bracketed it.
  */
 function onTerminalPaste(event: ClipboardEvent) {
   const image = pastedImage(event.clipboardData);
-  if (!image) return;
+
+  if (image) {
+    event.preventDefault();
+    event.stopPropagation();
+    void attachImages([image], 'terminal');
+    return;
+  }
+
+  const text = event.clipboardData?.getData('text/plain') ?? '';
+  if (!text || !terminal) return;
 
   event.preventDefault();
   event.stopPropagation();
-  void attachImages([image], 'terminal');
+  terminal.paste(normalisePaste(text));
 }
 
 /**
