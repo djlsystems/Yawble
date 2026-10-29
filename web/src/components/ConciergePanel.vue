@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { aDialogIsOpen, dismissesPanelOnEscape } from '../lib/escapeDismiss';
+import { focusAfterConcierge, keepsEscape, keepsFocus } from '../lib/conciergeFocus';
 import { ConciergeSubmit, conciergeNewline } from '../lib/conciergeNewline';
 import {
   decisionRequest,
@@ -990,8 +991,16 @@ function updateBodyOverflow() {
   document.body.style.overflow = shouldLock ? 'hidden' : '';
 }
 
+/**
+ * WHAT HAD FOCUS WHEN THE PANEL OPENED, given back when it closes - see `lib/conciergeFocus.ts`.
+ * Opening takes the keyboard for the terminal, over any dialog behind, except on a touch device,
+ * where focusing it would throw up the on-screen keyboard unasked.
+ */
+let focusBeforeOpen: Element | null = null;
+
 watch(open, async (isOpen) => {
   if (isOpen) {
+    focusBeforeOpen = document.activeElement;
     updateBodyOverflow();
     // Initialize window geometry from viewport if needed
     const viewportW = window.visualViewport?.width ?? window.innerWidth;
@@ -1001,10 +1010,20 @@ watch(open, async (isOpen) => {
     void loadConciergePresets();
     await nextTick();
     await attach();
+    if (open.value && !$q.platform.has.touch) terminal?.focus();
   } else {
     document.body.style.overflow = '';
     document.removeEventListener('keydown', onKeydown);
     detach();
+
+    // The shell is gone after this tick, and focus inside it would be left on nothing.
+    const previous = focusBeforeOpen;
+    focusBeforeOpen = null;
+    await nextTick();
+    const active = document.activeElement;
+    if (active === null || active === document.body || !active.isConnected) {
+      focusAfterConcierge(previous)?.focus({ preventScroll: true });
+    }
   }
 });
 
@@ -1041,6 +1060,8 @@ onBeforeUnmount(() => {
       :class="{ 'is-windowed': isWindowed }"
       @dragover="onShellDragOver"
       @drop="onShellDrop"
+      @focusin="keepsFocus"
+      @keyup="keepsEscape"
       :style="
         isWindowed
           ? {
