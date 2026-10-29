@@ -839,9 +839,13 @@ public static class BuiltInSkills
               on an outside system on their behalf. Delivered as a package the person reviews and
               installs; one team builds it, and the install creates another team that runs it. Load the
               `packaging-solutions` skill.
-            - **A plugin, always inside a package** - deterministic code that talks to one outside
-              system, paired with agent members that reason about what it brings back. It is never
-              delivered alone. Load the `authoring-plugins` skill for when a plugin fits.
+            - **A plugin, alone or inside a package** - deterministic code that talks to one outside
+              system, paired with agent members that reason about what it brings back. When the
+              person wants it on a team they already have, deliver the plugin alone: they install it
+              (Marketplace, or Admin > Plugins > Install from a folder) and add it to that team with
+              Add member, and that team's agents work with it. When it needs a new team with members,
+              triggers or a page around it, deliver it inside a solution package. Load the
+              `authoring-plugins` skill for when a plugin fits.
             - **Neither** - a question, a report, a document: a team answers or writes it, and no code
               is delivered.
 
@@ -851,6 +855,7 @@ public static class BuiltInSkills
             | "every morning ...", "when this happens ...", "watch this folder" | A solution package with triggers |
             | "a page I can use here" | A solution package with a site |
             | "connect to my mail, or a service's API, and do this regularly" | A plugin and agent members, in a solution package |
+            | "add this service to my team", "I only want the plugin" | A plugin alone |
             | "find out ...", "write up ...", "compare ..." | Neither |
 
             ### Ask when it could be either
@@ -997,9 +1002,10 @@ public static class BuiltInSkills
               the person has turned on `concierge.mayMerge`.
             - Merging: see "Merging finished work" below.
             - Planning work that includes a plugin, a site or triggers: choose its shape by
-              "Choosing the delivery shape" above - it is a solution package - and load the
-              `packaging-solutions` skill. The delivery is a package the person installs in one
-              pass, and when it is ready you hand them its link.
+              "Choosing the delivery shape" above - a solution package, or a plugin alone when the
+              person wants it on a team they already have - and load the `packaging-solutions`
+              skill for a package. A package is installed in one pass, and when it is ready you hand
+              them its link.
             - Asked about a solution already installed - how it is doing, pausing it, running it
               now, its results, updating or uninstalling it: point the person to Marketplace
               (`$HARNESS_PUBLIC_URL/#/solutions`, the ribbon's Marketplace button) and that
@@ -1195,12 +1201,15 @@ public static class BuiltInSkills
             There may be no current team, and that is ordinary. Never pick a team on the person's
             behalf.
 
-            Which shape the work takes - repository work, a solution package, a plugin inside one, or
-            neither - is chosen by "Choosing the delivery shape" in the `concierge` skill.
+            Which shape the work takes - repository work, a solution package, a plugin alone or
+            inside a package, or neither - is chosen by "Choosing the delivery shape" in the
+            `concierge` skill.
 
             A team that will build a plugin, a site or triggers for the person is a build team: what
             it delivers is a solution package, and installing that package creates the team that
-            runs it. Load the `packaging-solutions` skill before you write its spec.
+            runs it - or, for a plugin the person wants on a team they already have, the plugin
+            alone, which they install and add to that team. Load the `packaging-solutions` skill
+            before you write a package's spec.
             """),
         new(
             "team-setup",
@@ -1348,6 +1357,11 @@ public static class BuiltInSkills
             A plugin is delivered inside a solution package, with the members, triggers and skills
             that use it, so a person installs the whole team in one pass. Load the
             `packaging-solutions` skill for the package's folder, its Done-when and the hand-off.
+            When the person wants the plugin on a team they already have, it is delivered alone: its
+            folder (`plugin.json` and what it runs), which the person installs from the Marketplace
+            or Admin > Plugins > Install from a folder, then adds to that team with Add member. Its
+            Done-when then names the folder and that it installs; the hand-off says where it is and
+            those two steps.
 
             ## 1. A plugin or an agent member
 
@@ -2121,7 +2135,8 @@ public static class BuiltInSkills
             when the work could be either, and the backlog item states that shape in its first lines.
 
             When a spec includes a plugin, a site or triggers, the delivery is a package, not a list
-            of steps for a person. The team writes it to its documents folder, in a folder named
+            of steps for a person - unless the person wants a plugin alone for a team they already
+            have, which the `authoring-plugins` skill covers. The team writes it to its documents folder, in a folder named
             after the package's id and version:
 
                 <team documents>/<id>-<version>/solution.json

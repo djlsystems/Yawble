@@ -1029,7 +1029,7 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
 
     /// <summary>
     /// The `concierge` skill, as served to the Concierge, says which of four shapes the work is
-    /// delivered in - repository work, a solution package, a plugin inside one, or neither - each
+    /// delivered in - repository work, a solution package, a plugin alone or inside one, or neither - each
     /// with what it obliges, and maps typical requests to them in a table.
     /// </summary>
     [Fact]
@@ -1047,8 +1047,10 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
             ("a package runs inside the platform", "runs inside this platform"),
             ("the person reviews and installs a package", "the person reviews and installs"),
             ("a package is built by one team and run by another", "one team builds it"),
-            ("a plugin is a shape", "**A plugin, always inside a package**"),
-            ("a plugin is never delivered alone", "It is never delivered alone"),
+            ("a plugin is a shape", "**A plugin, alone or inside a package**"),
+            ("a plugin for a team the person has is delivered alone", "deliver the plugin alone"),
+            ("a lone plugin is installed and added with Add member", "add it to that team with Add member"),
+            ("a plugin needing a new team goes in a package", "deliver it inside a solution package"),
             ("a plugin points to its skill", "`authoring-plugins`"),
             ("neither is a shape", "**Neither**"),
             ("neither delivers no code", "no code is delivered"),
@@ -1071,6 +1073,7 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
             ("a request maps to a package with triggers", new[] { "solution package", "triggers" }),
             ("a request maps to a package with a site", new[] { "solution package", "site" }),
             ("a request maps to a plugin in a package", new[] { "plugin", "package" }),
+            ("a request maps to a plugin alone", new[] { "A plugin alone" }),
         })
         {
             Assert.True(

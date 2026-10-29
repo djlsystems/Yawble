@@ -336,6 +336,22 @@ const budgetBarState = computed(() => {
   return budgetBar(spend.spent, effectiveWorkflowBudget.value);
 });
 
+/**
+ * EACH ROW OF THE WORKFLOWS DIALOG, MEASURED AGAINST THE SAME BUDGET IN FORCE as the tile, open and
+ * closed rows alike: the dialog is where a finished workflow's spend is read back. The line and the
+ * bar come from `budgetLine` and `budgetBar`, so a row says what the tile would have said; no
+ * budget (or a plugin-only team) draws neither, and unmeasured spend gets the line and no bar.
+ */
+function rowBudget(row: WorkflowRow) {
+  if (pluginOnly.value) return null;
+
+  const line = budgetLine(row.spentTokens, effectiveWorkflowBudget.value);
+
+  if (line === null) return null;
+
+  return { line, bar: budgetBar(row.spentTokens, effectiveWorkflowBudget.value) };
+}
+
 const formatToken = (value: number | null) => (value === null ? '(unknown)' : value.toLocaleString());
 
 
@@ -853,6 +869,28 @@ function showThread(row: WorkflowRow) {
               Outcome: {{ row.outcome }}
             </div>
 
+            <!-- TOKENS AGAINST THE BUDGET IN FORCE for one workflow, as the tile's bar and line say
+                 it. Absent with no budget; unmeasured spend names the limit and draws no bar. -->
+            <div v-if="rowBudget(row)" class="workflow-row-budget q-mt-xs" data-workflow-budget>
+              <div
+                v-if="rowBudget(row)!.bar"
+                class="workflow-row-budget-bar"
+                :class="{ 'workflow-row-budget-bar--near': rowBudget(row)!.bar!.near }"
+                aria-hidden="true"
+              >
+                <div
+                  class="workflow-row-budget-bar__fill"
+                  :style="{ width: `${rowBudget(row)!.bar!.fraction * 100}%` }"
+                />
+              </div>
+              <div
+                class="text-caption mono workflow-row-budget-text"
+                :class="{ 'team-kpi-budget--over': rowBudget(row)!.line.over }"
+              >
+                Tokens: {{ rowBudget(row)!.line.text }}
+              </div>
+            </div>
+
             <!-- WHO RAN IN IT, AND WHAT THE ROW IS WAITING FOR. NOT `ellipsis`, which is on the
                  subject line above by design: on an AWAITING row this line is the half that says
                  who is waiting and on what, and clipping it to one line hides exactly the sentence
@@ -1282,6 +1320,27 @@ function showThread(row: WorkflowRow) {
 /* The workflow row's outcome: a proposed one is italic, as the board's tag says it in words. */
 .workflow-row-outcome--proposed {
   font-style: italic;
+}
+
+/* A row's tokens against the budget: the tile's bar, inline under the outcome. */
+.workflow-row-budget-bar {
+  height: 4px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--os-rule);
+}
+
+.workflow-row-budget-bar__fill {
+  height: 100%;
+  background: var(--q-primary);
+}
+
+.workflow-row-budget-bar--near .workflow-row-budget-bar__fill {
+  background: var(--q-negative);
+}
+
+.workflow-row-budget-text {
+  color: var(--os-ink-faint);
 }
 
 /* THE STRIP SIZES ITSELF. This component has two root nodes (the strip and the
