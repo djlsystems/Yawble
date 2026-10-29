@@ -136,6 +136,19 @@ describe("the row's team command menu", () => {
     const disabled = menuItems().filter((item) => item.classList.contains('disabled')).map((item) => item.dataset.teamCommand);
     expect(disabled).toEqual(['team-board', 'team-git', 'team-settings', 'team-reset']);
   });
+
+  it("says an archived team's row has no board to open, and opens none", async () => {
+    localStorage.setItem('harness.teamsShown', JSON.stringify({ active: true, archived: true }));
+    await mountView([{ ...aTeam('alpha'), archived: true } as Team]);
+    localStorage.removeItem('harness.teamsShown');
+    const open = vi.spyOn(board, 'openTeam');
+
+    (document.body.querySelector('[data-col-actions]')!.closest('tr') as HTMLElement).click();
+    await flushPromises();
+
+    expect(open).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledWith(expect.objectContaining({ message: 'Alpha is archived. Unarchive it to open its board.' }));
+  });
 });
 
 describe('the team clone dialog', () => {

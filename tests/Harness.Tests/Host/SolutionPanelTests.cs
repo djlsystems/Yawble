@@ -283,7 +283,7 @@ public sealed class SolutionPanelTests(HostFixture host) : IClassFixture<HostFix
         Assert.NotNull(row);
         Assert.Contains("jb-uninstall", row!.Detail);
         Assert.Equal(HttpStatusCode.NotFound, (await person.GetAsync($"/api/teams/{team}/solution/panel", Ct)).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await person.GetAsync($"/api/teams/{team}/solution", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await person.GetAsync($"/api/teams/{team}/solution", Ct)).StatusCode);
         Assert.DoesNotContain((await JsonAsync(await person.GetAsync("/api/solutions/installed", Ct))).EnumerateArray(),
             t => t.GetProperty("team").GetString() == team);
         Assert.Equal(HttpStatusCode.NotFound, (await person.PostAsJsonAsync($"/api/teams/{team}/solution/uninstall", new { }, Ct)).StatusCode);

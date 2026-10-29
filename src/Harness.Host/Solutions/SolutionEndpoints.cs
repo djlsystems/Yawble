@@ -139,11 +139,15 @@ public static class SolutionEndpoints
             [Description(Describe.Team)] string team, SolutionInstaller installer, SolutionWait waiting, TeamRegistry teams, CancellationToken ct) =>
         {
             // Read through the wait as well, so a wait this read finds over ends its marks.
-            if (teams.ExistingName(team) is { } stored) await waiting.WaitingForAsync(stored, ct);
+            var stored = teams.ExistingName(team);
+            if (stored is not null) await waiting.WaitingForAsync(stored, ct);
 
+            // A team made by hand is not an error: 204, so a browser opening its board logs nothing.
             return await installer.DescribeAsync(team, ct) is { } described
                 ? Results.Ok(described)
-                : Results.NotFound(new { error = $"'{team}' was not installed from a solution package." });
+                : stored is not null
+                    ? Results.NoContent()
+                    : Results.NotFound(new { error = $"No team '{team}'." });
         })
             .WithTags(Area)
             .RequirePermit(Permits.Read)
@@ -152,7 +156,7 @@ public static class SolutionEndpoints
                 "200 `{ team, teamName, id, name, version, installedAt, updatedAt, installedBy, plugins, "
                 + "missing: [{ kind, name, member, description }] }`. A team with anything `missing` is "
                 + "blocked on it: a required document folder with no file in it, or a required connection "
-                + "slot with none bound. 404 for a team not installed from a package, or no such team.");
+                + "slot with none bound. 204 with no body for a team not installed from a package; 404 for no such team.");
 
         app.MapGet("/api/teams/{team}/solution/panel", async (
             [Description(Describe.Team)] string team, SolutionPanels panels, CancellationToken ct) =>

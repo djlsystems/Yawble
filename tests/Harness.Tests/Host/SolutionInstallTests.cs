@@ -379,7 +379,8 @@ public sealed class SolutionInstallTests(HostFixture host) : IClassFixture<HostF
 
         var provided = await JsonAsync(await person.GetAsync($"/api/teams/{team}/solution", Ct));
         Assert.Empty(provided.GetProperty("missing").EnumerateArray());
-        Assert.Equal(HttpStatusCode.NotFound, (await person.GetAsync($"/api/teams/{host.Alpha}/solution", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await person.GetAsync($"/api/teams/{host.Alpha}/solution", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await person.GetAsync("/api/teams/no-such-team/solution", Ct)).StatusCode);
     }
 
     [Fact]
