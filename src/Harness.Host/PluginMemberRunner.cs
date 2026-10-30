@@ -365,6 +365,52 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             Quiet: reason is null && gathered.Result is { Quiet: true });
     }
 
+    /// <summary>The request's <c>connections</c>: each slot's grant by slot name, or for a multiple slot
+    /// (<see cref="PluginConnectionSlot.Multiple"/>) an array of its grants, keyed in
+    /// <paramref name="grants"/> by binding key (<c>&lt;slot&gt;</c>, <c>&lt;slot&gt;#2</c>...).</summary>
+    private static JsonObject ConnectionsNode(PluginManifest manifest, IReadOnlyDictionary<string, ConnectionGrant> grants)
+    {
+        var node = new JsonObject();
+
+        foreach (var (key, grant) in grants)
+        {
+            var (slot, _) = PluginConnectionSlot.BindingKey(key) ?? (key, 1);
+
+            if (manifest.Connections.GetValueOrDefault(slot)?.Multiple != true)
+            {
+                node[key] = ConnectionNode(grant);
+                continue;
+            }
+
+            if (node[slot] is not JsonArray list) node[slot] = list = new JsonArray();
+            list.Add(ConnectionNode(grant));
+        }
+
+        return node;
+    }
+
+    private static JsonNode? ConnectionNode(ConnectionGrant grant) =>
+        grant.Mailbox is { } mailbox
+            ? new JsonObject
+            {
+                ["kind"] = MailboxSettings.Kind,
+                ["account"] = grant.Account,
+                ["username"] = mailbox.Username,
+                ["password"] = mailbox.Password,
+                ["imap"] = new JsonObject { ["host"] = mailbox.Imap.Host, ["port"] = mailbox.Imap.Port, ["security"] = mailbox.Imap.Security },
+                ["smtp"] = new JsonObject { ["host"] = mailbox.Smtp.Host, ["port"] = mailbox.Smtp.Port, ["security"] = mailbox.Smtp.Security },
+            }
+            : grant.Credential is { } credential
+                // A WEBSITE, AN API KEY, A USERNAME AND PASSWORD: each field by name, its value as stored.
+                ? new JsonObject
+                {
+                    ["kind"] = credential.Kind,
+                    ["account"] = grant.Account,
+                    ["preset"] = credential.Preset,
+                    ["fields"] = new JsonObject(credential.Values.Select(v => KeyValuePair.Create(v.Key, (JsonNode?)JsonValue.Create(v.Value)))),
+                }
+                : Grant(grant);
+
     /// <summary>The request document: protocol v1's whole input, one JSON object on stdin.</summary>
     internal static string Request(
         MemberInvocation invocation, PluginManifest manifest,
@@ -441,27 +487,9 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
 
             // EACH BOUND SLOT'S FRESH ACCESS TOKEN - never the refresh token, never the client secret -
             // or a mailbox's servers and app password.
-            ["connections"] = new JsonObject((grants ?? new Dictionary<string, ConnectionGrant>()).Select(g => KeyValuePair.Create(g.Key, (JsonNode?)(
-                g.Value.Mailbox is { } mailbox
-                    ? new JsonObject
-                    {
-                        ["kind"] = MailboxSettings.Kind,
-                        ["account"] = g.Value.Account,
-                        ["username"] = mailbox.Username,
-                        ["password"] = mailbox.Password,
-                        ["imap"] = new JsonObject { ["host"] = mailbox.Imap.Host, ["port"] = mailbox.Imap.Port, ["security"] = mailbox.Imap.Security },
-                        ["smtp"] = new JsonObject { ["host"] = mailbox.Smtp.Host, ["port"] = mailbox.Smtp.Port, ["security"] = mailbox.Smtp.Security },
-                    }
-                    : g.Value.Credential is { } credential
-                        // A WEBSITE, AN API KEY, A USERNAME AND PASSWORD: each field by name, its value as stored.
-                        ? new JsonObject
-                        {
-                            ["kind"] = credential.Kind,
-                            ["account"] = g.Value.Account,
-                            ["preset"] = credential.Preset,
-                            ["fields"] = new JsonObject(credential.Values.Select(v => KeyValuePair.Create(v.Key, (JsonNode?)JsonValue.Create(v.Value)))),
-                        }
-                        : Grant(g.Value))))),
+            // A SLOT DECLARED `"multiple": true` is handed an ARRAY of them, one per connection bound to
+            // it in binding order; any other slot its one object, as before.
+            ["connections"] = ConnectionsNode(manifest, grants ?? new Dictionary<string, ConnectionGrant>()),
 
             // EACH OF THE MEMBER'S OWN TEAM'S SITES' FILES FOLDER (see SiteFilesAsync); [] for none.
             // Cloned: the request is built twice when reads are measured, and a node has one parent.
@@ -777,7 +805,8 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
 
         if (KeyNamedByAValue(settings.Secrets, secrets) is { } named) return named;
 
-        foreach (var (name, secret) in manifest.Secrets.Where(s => s.Value.Required))
+        // A FIELD MOVED TO A SLOT (`movedTo`, CON 7) is required of its slot, not of the member's values.
+        foreach (var (name, secret) in manifest.Secrets.Where(s => s.Value.Required && s.Value.MovedTo is null))
         {
             // THE MEMBER'S OWN VALUE satisfies the field, whatever is bound.
             if (valued?.Contains(name) == true) continue;
@@ -838,7 +867,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             {
                 resolved[name] = value;
             }
-            else if (secret.Required)
+            else if (secret.Required && secret.MovedTo is null)
             {
                 return (resolved, keys, key is null
                     ? $"This member has no value for the plugin's required secret `{name}`. A person types it in the member's settings."
@@ -946,7 +975,18 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
 
         foreach (var (slot, declared) in manifest.Connections)
         {
-            if (!bound.Connections.TryGetValue(slot, out var connectionId))
+            // A MULTIPLE SLOT GRANTS EVERY CONNECTION BOUND TO IT, keyed here by its binding key
+            // (`<slot>`, `<slot>#2`...) in that order; Request hands them on as one array.
+            var keys = declared.Multiple
+                ? bound.Connections.Keys
+                    .Select(k => (Key: k, Bound: PluginConnectionSlot.BindingKey(k)))
+                    .Where(k => k.Bound?.Slot == slot)
+                    .OrderBy(k => k.Bound!.Value.Index)
+                    .Select(k => k.Key)
+                    .ToList()
+                : bound.Connections.ContainsKey(slot) ? [slot] : [];
+
+            if (keys.Count == 0)
             {
                 if (declared.Required)
                 {
@@ -957,40 +997,45 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
                 continue;
             }
 
-            if (connections is null)
+            foreach (var key in keys)
             {
-                return (grants, $"This Host holds no connections, so slot `{slot}` could not be given its account.");
-            }
+                var connectionId = bound.Connections[key];
 
-            var record = await connections.Store.GetAsync(connectionId, ct);
-            if (record is not null && Connections.ScopeRefusal(slot, declared, record, retry: null) is { } scopeRefusal)
-            {
-                return (grants, scopeRefusal.Error);
-            }
+                if (connections is null)
+                {
+                    return (grants, $"This Host holds no connections, so slot `{slot}` could not be given its account.");
+                }
 
-            ConnectionGrant? grant;
-            string? refusal;
+                var record = await connections.Store.GetAsync(connectionId, ct);
+                if (record is not null && Connections.ScopeRefusal(slot, declared, record, retry: null) is { } scopeRefusal)
+                {
+                    return (grants, scopeRefusal.Error);
+                }
 
-            try
-            {
-                (grant, refusal) = await connections.GrantAsync(connectionId, slot, ct, record?.Provider is { } provider && declared.ScopesFor(provider) is { Count: > 0 } asked ? asked : null);
-            }
-            catch (RefreshNotStoredException exception)
-            {
-                // A REFRESHED TOKEN THAT COULD NOT BE STORED IS NOT HANDED OUT: a rotated refresh token
-                // lost here would strand the connection, so the run does not start.
-                return (grants, $"The connection bound for slot `{slot}` was refreshed but could not be stored "
-                    + $"({exception.Code}), so this run did not start. The next run tries again.");
-            }
-            catch (System.Data.Common.DbException exception)
-            {
-                return (grants, $"The connection bound for slot `{slot}` could not be read or updated "
-                    + $"({DatabaseFault.Code(exception)}), so this run did not start. The next run tries again.");
-            }
+                ConnectionGrant? grant;
+                string? refusal;
 
-            if (refusal is not null) return (grants, refusal);
+                try
+                {
+                    (grant, refusal) = await connections.GrantAsync(connectionId, slot, ct, record?.Provider is { } provider && declared.ScopesFor(provider) is { Count: > 0 } asked ? asked : null);
+                }
+                catch (RefreshNotStoredException exception)
+                {
+                    // A REFRESHED TOKEN THAT COULD NOT BE STORED IS NOT HANDED OUT: a rotated refresh token
+                    // lost here would strand the connection, so the run does not start.
+                    return (grants, $"The connection bound for slot `{slot}` was refreshed but could not be stored "
+                        + $"({exception.Code}), so this run did not start. The next run tries again.");
+                }
+                catch (System.Data.Common.DbException exception)
+                {
+                    return (grants, $"The connection bound for slot `{slot}` could not be read or updated "
+                        + $"({DatabaseFault.Code(exception)}), so this run did not start. The next run tries again.");
+                }
 
-            grants[slot] = grant!;
+                if (refusal is not null) return (grants, refusal);
+
+                grants[key] = grant!;
+            }
         }
 
         return (grants, null);

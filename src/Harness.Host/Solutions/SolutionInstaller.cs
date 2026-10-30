@@ -246,7 +246,8 @@ public sealed class SolutionInstaller(
     TriggerSweep? sweep = null,
     IOutcomeStore? outcomes = null,
     FolderRemoval? removal = null,
-    PluginMemberSecretStore? memberSecrets = null)
+    PluginMemberSecretStore? memberSecrets = null,
+    PluginSecretMoves? secretMoves = null)
 {
     private readonly FolderRemoval _removal = removal ?? new FolderRemoval();
 
@@ -1037,6 +1038,7 @@ public sealed class SolutionInstaller(
             return await FailedAsync(run, exception, manifest, teamName);
         }
 
+        await MoveSecretsAsync(package, actor, ct);
         await CopyDocumentsAsync(stored!, answers, actor, ct);
 
         // THE FIRST RUNS, only now that the last step has succeeded and the documents are in: a
@@ -1516,6 +1518,7 @@ public sealed class SolutionInstaller(
             return await FailedAsync(run, exception, manifest, teams.LabelFor(stored));
         }
 
+        await MoveSecretsAsync(package, actor, ct);
         await CopyDocumentsAsync(stored, answers, actor, ct);
         var saved = (await store.FindAsync(stored, ct))!;
 
@@ -1616,6 +1619,18 @@ public sealed class SolutionInstaller(
     private static string Json(object value) => JsonSerializer.Serialize(value);
 
     // ------------------------------------------------------------------ steps
+
+    /// <summary>
+    /// A PLUGIN VERSION DECLARING <c>movedTo</c> moves each member's own values into connections (CON 7),
+    /// for every member hired on it, on every team. Only once the run has succeeded: a failed step undoes
+    /// the version made active, and the version before it reads the member's own values, not the slot.
+    /// </summary>
+    private async Task MoveSecretsAsync(SolutionPackage package, SolutionActor actor, CancellationToken ct)
+    {
+        if (secretMoves is null) return;
+
+        foreach (var plugin in package.Plugins) await secretMoves.MoveAsync(plugin.Id, actor, ct);
+    }
 
     private async Task InstallPluginAsync(SolutionPlugin plugin, Run run, CancellationToken ct)
     {

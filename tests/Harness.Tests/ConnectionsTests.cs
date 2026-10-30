@@ -74,6 +74,12 @@ public sealed partial class ConnectionsTests : IAsyncLifetime
             manifest: PluginInstall.Manifest("keeper", edit: m => m["connections"] = JsonNode.Parse(
                 """{"login":{"description":"The account.","providers":["login","apikey"],"required":true}}""")));
 
+        // A PLUGIN WHOSE ONE SLOT TAKES SEVERAL API KEYS (`"multiple": true`), writing its request alike.
+        PluginInstall.Write(_dataRoot, "vault",
+            script: $"req=$(cat); printf '%s\\n' \"$req\" >> '{Requests}'; echo '{{\"t\":\"result\",\"ok\":true,\"output\":\"held\"}}'",
+            manifest: PluginInstall.Manifest("vault", edit: m => m["connections"] = JsonNode.Parse(
+                """{"keys":{"description":"The app secrets.","providers":["apikey"],"required":true,"multiple":true}}""")));
+
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host => host
             .UseSetting("DataRoot", _dataRoot)
             .UseSetting("Logging:LogLevel:Default", "Warning")

@@ -242,3 +242,50 @@ func TestANullOrAbsentNamedSecretsBlockIsNone(t *testing.T) {
 		}
 	}
 }
+
+// connectionMovesCases is tests/Fixtures/PluginConnectionMoves/cases.json, which the Host's
+// PluginConnectionMovesManifestTests reads too: `movedTo` on a secret field and `multiple` on a slot.
+type connectionMovesCases struct {
+	Accepted []struct {
+		Secrets     json.RawMessage `json:"secrets"`
+		Connections json.RawMessage `json:"connections"`
+	} `json:"accepted"`
+	Refused []struct {
+		Secrets     json.RawMessage `json:"secrets"`
+		Connections json.RawMessage `json:"connections"`
+		Says        string          `json:"says"`
+	} `json:"refused"`
+}
+
+func readConnectionMovesCases(t *testing.T) connectionMovesCases {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "tests", "Fixtures", "PluginConnectionMoves", "cases.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases connectionMovesCases
+	if err := json.Unmarshal(raw, &cases); err != nil {
+		t.Fatal(err)
+	}
+	if len(cases.Accepted) == 0 || len(cases.Refused) == 0 {
+		t.Fatal("cases.json holds no cases")
+	}
+	return cases
+}
+
+func TestEachSharedConnectionMoveIsAccepted(t *testing.T) {
+	for n, c := range readConnectionMovesCases(t).Accepted {
+		if _, _, err := Parse(readsManifest(`,"secrets":` + string(c.Secrets) + `,"connections":` + string(c.Connections))); err != nil {
+			t.Errorf("accepted[%d]: %v", n, err)
+		}
+	}
+}
+
+func TestEachSharedConnectionMoveFaultIsRefusedInTheHostsWords(t *testing.T) {
+	for n, c := range readConnectionMovesCases(t).Refused {
+		_, _, err := Parse(readsManifest(`,"secrets":` + string(c.Secrets) + `,"connections":` + string(c.Connections)))
+		if err == nil || err.Error() != c.Says {
+			t.Errorf("refused[%d]: got %v, want %q", n, err, c.Says)
+		}
+	}
+}

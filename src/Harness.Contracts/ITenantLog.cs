@@ -208,6 +208,19 @@ public static class TenantActions
     /// to it, as that member's own value. Detail: counts only - members, fields and keys.</summary>
     public const string MemberSecretsCopied = "member.secrets-copied";
 
+    /// <summary>A plugin update moved a member's own value for a field into an API-key connection bound
+    /// to the slot the field's <c>movedTo</c> names, and removed the own value, in the move's
+    /// transaction. Detail: team, member, plugin, field, slot, binding key, connection - never the value.</summary>
+    public const string MemberSecretMoved = "member.secret-moved";
+
+    /// <summary>A plugin update did not move a member's own values into a slot that takes one connection
+    /// and already had one: the binding stands and the member keeps its values. Detail names the fields.</summary>
+    public const string MemberSecretMoveKept = "member.secret-move-kept";
+
+    /// <summary>A plugin update's move of a member's own values failed and was rolled back: the member
+    /// keeps them. Detail names the fields and the reason - never a value.</summary>
+    public const string MemberSecretMoveFailed = "member.secret-move-failed";
+
     /// <summary>A plugin member's connection bindings were set or changed (at hire, in its settings,
     /// or carried by a clone). Detail names the slots and connection ids - never a token.</summary>
     public const string MemberConnectionsChanged = "member.connections-changed";
