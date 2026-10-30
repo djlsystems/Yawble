@@ -542,6 +542,7 @@ public sealed class Connections(
                         (true, false) => new { connection = existing.Id, provider = provider.Id, account, fromAccount = existing.Account, tenant = directory, scopes, wasNeedingReconnect },
                     }), ct,
                     directory, otherAccount ? account : null);
+                await HealthChangedAsync(existing.Id, ct);
 
                 return (await store.GetAsync(existing.Id, ct), true, null);
             }
@@ -1122,8 +1123,65 @@ public sealed class Connections(
         await store.MarkNeedsReconnectAsync(connection.Id, reason, new TriggerAudit(
             null, null, TenantActions.ConnectionNeedsReconnect, connection.Id, connection.Name,
             JsonSerializer.Serialize(new { connection = connection.Id, provider = connection.Provider, account = connection.Account, reason })), ct);
+        await HealthChangedAsync(connection.Id, ct);
 
         return NeedsReconnect(connection, reason);
+    }
+
+    /// <summary>
+    /// WHEN A CONNECTION'S HEALTH MAY HAVE MOVED - marked <c>needs-reconnect</c> by a run or a test, or
+    /// cleared by a Reconnect, an edit, a new password or a passing test - this is told its id, after
+    /// the write. The Host sets it to <see cref="PluginSetup.ConnectionChangedAsync"/>: every member
+    /// using the connection reads Needs you, or stops reading it and its Manager is told. Best effort:
+    /// the write stands whatever this does.
+    /// </summary>
+    public Func<string, CancellationToken, Task>? HealthChanged { get; set; }
+
+    private async Task HealthChangedAsync(string id, CancellationToken ct)
+    {
+        if (HealthChanged is not { } changed) return;
+
+        try
+        {
+            await changed(id, ct);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // The connection's own write is done; the marks are read again at the next change or restart.
+        }
+    }
+
+    /// <summary>
+    /// A PLUGIN'S RUN REPORTED THE CONNECTION IT WAS HANDED <c>refused</c> or <c>sign-in</c>
+    /// (<see cref="RunConnectionFailures"/>): the connection is marked <c>needs-reconnect</c> with
+    /// <paramref name="sentence"/>, with a <c>connections.needs-reconnect</c> row naming the member, the
+    /// slot and the kind, and every member using it reads Needs you. Never a value: the sentence was
+    /// redacted by the run. Under the connection's gate, as a refresh's own mark is.
+    /// </summary>
+    public async Task MarkFromRunAsync(
+        string connectionId, string sentence, string kind, ContainerId member, string slot, CancellationToken ct = default)
+    {
+        var gate = Gate(connectionId);
+        await gate.WaitAsync(ct);
+
+        try
+        {
+            if (await store.GetAsync(connectionId, ct) is not { } connection) return;
+
+            ForgetApis(connection.Id);
+            await store.MarkNeedsReconnectAsync(connection.Id, sentence, new TriggerAudit(
+                null, null, TenantActions.ConnectionNeedsReconnect, connection.Id, connection.Name,
+                JsonSerializer.Serialize(new
+                {
+                    connection = connection.Id, provider = connection.Provider, account = connection.Account, reason = sentence,
+                    team = member.Team, member = member.Name, slot, kind,
+                })), ct);
+            await HealthChangedAsync(connection.Id, ct);
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     public static string NeedsReconnect(ConnectionRecord connection, string? reason) => connection.Mailbox is not null
@@ -1248,6 +1306,7 @@ public sealed class Connections(
             var updated = await store.UpdateMailboxPasswordAsync(id, password!, clock.GetUtcNow(), actor.Row(
                 TenantActions.ConnectionPasswordUpdated, id, connection.Name,
                 new { connection = id, provider = MailboxSettings.Kind, account = connection.Account, wasNeedingReconnect = connection.Status == ConnectionRecord.NeedsReconnect }), ct);
+            if (updated) await HealthChangedAsync(id, ct);
 
             return updated
                 ? new MailboxAnswer(StatusCodes.Status200OK, login.Sentence, null, await store.GetAsync(id, ct))
@@ -1314,6 +1373,7 @@ public sealed class Connections(
                     connection = id, kind = MailboxSettings.Kind, account, changed,
                     wasNeedingReconnect = connection.Status == ConnectionRecord.NeedsReconnect,
                 }), ct);
+            if (updated) await HealthChangedAsync(id, ct);
 
             return updated
                 ? new MailboxAnswer(StatusCodes.Status200OK, login.Sentence, null, await store.GetAsync(id, ct))
@@ -1415,6 +1475,7 @@ public sealed class Connections(
             var updated = await store.UpdateCredentialAsync(id, account, settings!, secrets!, actor.Row(
                 TenantActions.ConnectionCredentialsChanged, id, connection.Name,
                 new { connection = id, kind = connection.Kind, preset = preset.Id, account, changed }), ct);
+            if (updated) await HealthChangedAsync(id, ct);
 
             return updated
                 ? new MailboxAnswer(StatusCodes.Status200OK, null, null, await store.GetAsync(id, ct))
@@ -1528,6 +1589,7 @@ public sealed class Connections(
             await store.RecordTestAsync(id, ok ? null : sentence, clock.GetUtcNow(), actor.Row(
                 TenantActions.ConnectionTested, id, connection.Name,
                 new { connection = id, kind = connection.Kind, provider = connection.Provider, outcome, sentence }), ct);
+            await HealthChangedAsync(id, ct);
 
             return new ConnectionTestAnswer(StatusCodes.Status200OK, ok ? ConnectionRecord.Ok : ConnectionRecord.NeedsReconnect, sentence, null, await store.GetAsync(id, ct));
         }

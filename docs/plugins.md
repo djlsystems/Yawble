@@ -835,7 +835,7 @@ rows, `row.status`), `cli/internal/plugin/manifest_test.go` and `web/src/lib/__t
 | `{"t":"blocked","reason":"…"}` | Marks the member blocked. With `"item": n` (1-based) only that batch item is blocked. |
 | `{"t":"needsDecision","question":"…"}` | Marks the member as waiting for a decision. |
 | `{"t":"handback","delivered":"…"}` | Hands the work back and wakes the Manager once. |
-| `{"t":"result","ok":true,"output":"…"}` | The run's result. Send exactly one, last. `ok:false` with `"error"` is a failure in those words. Add `"quiet":true` to finish without waking anyone; see [Quiet runs](#quiet-runs). |
+| `{"t":"result","ok":true,"output":"…"}` | The run's result. Send exactly one, last. `ok:false` with `"error"` is a failure in those words. Add `"quiet":true` to finish without waking anyone; see [Quiet runs](#quiet-runs). A failure caused by a connection names it: `"connection"` (the slot) and `"connectionFailure"` (`refused`, `unreachable` or `sign-in`); see [When a connection fails the run](#when-a-connection-fails-the-run). |
 | `{"t":"publish","type":"…","payload":{…}}` | Publishes one of the events the manifest declares. See [Events](#events). |
 | `{"t":"site.put","site":"…","collection":"…","id":"…","doc":…}` | Writes one document to a site of the plugin's OWN team (see [sites.md](sites.md)). The document is redacted like every other record; a limit, a name, another team or a missing site drops the record with one progress warning per kind per run. A page's Delete or Archive is best kept in site data the plugin reads (for example a `status` on the document, with the collection in [`reads`](#reading-site-data-reads)), rather than in a second store of the plugin's own, so a run never brings back what a person removed. |
 | `{"t":"site.delete","site":"…","collection":"…","id":"…"}` | Deletes one document from a site of the plugin's own team. |
@@ -876,6 +876,39 @@ anyone needs to be woken for. It is for a plugin that polls on a schedule: witho
 
 Pinned by `PluginQuietRunTests` and
 `PluginHostProbes.A_quiet_answer_to_the_managers_own_instruction_still_wakes_the_manager`.
+
+### When a connection fails the run
+
+A run that was handed a connection, and failed because of it, says so on its result record with two
+additive fields of `harness.member/1`:
+
+```json
+{"t":"result","ok":false,"error":"Stripe refused the key (HTTP 401).","connection":"billing","connectionFailure":"refused"}
+```
+
+- **`connection`** is the slot, as the manifest declares it.
+- **`connectionFailure`** is exactly one of:
+
+| Kind | When | What the platform does |
+|---|---|---|
+| `refused` | The service refused what the connection holds: a wrong password, a revoked token, an expired session, a key it refuses. | Marks the connection **needs reconnect** with the `error` sentence. Every member using it, on every team, reads **Needs you**, and Needs you lists the connection **once**, naming the teams and members it holds up. Their later runs wait, as a connection needing reconnecting always made them. |
+| `sign-in` | The service asks for a sign-in only a person can complete (a challenge, a device approval). | The same mark. Its sentence says a person signs in themselves: the `error` when it already says so (it says *sign in* and *yourself* or *themselves*), else a fixed sentence that does, followed by the `error`. |
+| `unreachable` | The service was not reached: down, a timeout. | The run fails with the `error`. The connection stays `ok`, and nothing else is marked. |
+
+- **The kind is the plugin's to say.** The platform never infers it from the sentence. A result with no
+  `connectionFailure`, a kind not in the table, or a `connection` naming a slot this run was not handed
+  fails the run exactly as before, in the plugin's words, and marks nothing.
+- **The run is still a failure.** It is not relabelled a wait. Its `failed` row carries
+  `heldByConnection` (the connection's id), as does each later run of a member the mark kept from
+  starting. A workflow whose last run of a member is such a row stays open, as a needs-person wait's
+  does, so the notice below has somewhere to land.
+- **Putting it right clears it everywhere.** An edit, a Reconnect, a new password or a Test connection
+  that passes clears the mark on every member and the one Needs you row, and tells each affected
+  team's Manager once, in each still-open workflow a run of its member was held in (the same notice a
+  person's save sends when a plugin member is ready). A workflow that has already ended is not woken.
+- **Nothing checks connections on a schedule.** A mark stands until a person puts it right.
+
+Pinned by `RunConnectionFailureTests`.
 
 ### Poll with plugins, spend models only when something happened
 

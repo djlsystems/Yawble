@@ -570,6 +570,26 @@ run of a member bound to it is blocked with a sentence naming the connection and
 it from Admin → Connections. **Reconnect** there, or `yawble connect <provider> --name <name>` again,
 clears it, and the next run goes ahead.
 
+**A plugin's run can mark it too.** A run handed a connection that fails because of it names the slot
+and the kind on its result record - `"connection": "<slot>"` and `"connectionFailure"`, exactly
+`refused`, `unreachable` or `sign-in` (see [plugins.md](plugins.md#when-a-connection-fails-the-run)):
+
+- **`refused`** (a wrong password, a revoked token, an expired session, a key the service refuses) marks
+  the connection `needs reconnect` with the run's sentence, and a `connections.needs-reconnect` row names
+  the team, member, slot and kind.
+- **`sign-in`** (the service asks for a challenge or a device approval) is the same mark, with a sentence
+  that says the person signs in themselves. The Sign in action is a later release's.
+- **`unreachable`** (the service is down, a timeout) fails only the run; the connection stays `ok`.
+- A result naming no kind, or a slot the run was not handed, fails the run and marks nothing. The
+  platform never reads the kind from the sentence.
+
+**Whatever marked it, the connection holds up every member using it.** Each reads **Needs you** where its
+status shows, on every team, and the header's **Needs you** lists the connection once (kind
+`connection`), naming the teams and members it holds up and opening Admin → Connections; those members'
+own failures are not listed beside it. An edit, a Reconnect, a new password or a Test connection that
+passes clears it everywhere at once and tells each affected team's Manager, once, in each still-open
+workflow one of its members' runs was held in, to send the work again. Pinned by `RunConnectionFailureTests`.
+
 ## Which teams may use a connection
 
 A connection is set up once and used by as many teams as a person chooses. **Which teams may use it is a

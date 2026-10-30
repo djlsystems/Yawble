@@ -1303,7 +1303,7 @@ public sealed class TeamRegistry(
                     // failed, and a person's binding still clears it (PluginSetup, read after this).
                     // Any other class is left off, as it always was.
                     var needsPerson = marks.FailureClass == FailureClasses.NeedsPerson ? FailureClasses.NeedsPerson : null;
-                    if (marks.FailureReason is { } failure) container.MarkFailed(failure, needsPerson);
+                    if (marks.FailureReason is { } failure) container.MarkFailed(failure, needsPerson, marks.HeldByConnection);
                     if (marks.BlockedReason is { } reason)
                     {
                         container.MarkBlocked(reason, marks.BlockedClass == FailureClasses.NeedsPerson ? FailureClasses.NeedsPerson : null);

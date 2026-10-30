@@ -147,7 +147,11 @@ internal sealed partial class HostComposition
 
         // A PLUGIN MEMBER STILL WAITING FOR A PERSON reads Needs you again after a restart: the mark is
         // read from its settings, never stored.
-        await app.Services.GetRequiredService<PluginSetup>().RefreshAllAsync();
+        // A CONNECTION THAT NEEDS A PERSON holds up every member using it, the same way, and its fix
+        // clears them and tells their Managers: every change to a connection's health is read here.
+        var pluginSetup = app.Services.GetRequiredService<PluginSetup>();
+        app.Services.GetRequiredService<Connections>().HealthChanged = pluginSetup.ConnectionChangedAsync;
+        await pluginSetup.RefreshAllAsync();
 
         // A PLACED TEAM WHOSE VOLUME IS NOT THERE. Said out loud for the reason the blocked moves above
         // are, and it is the louder of the two - but NOT an exit: exiting 1 would take every OTHER team

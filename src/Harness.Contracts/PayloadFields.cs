@@ -190,6 +190,15 @@ public static class PayloadFields
     public const string FailureClass = "failureClass";
 
     /// <summary>
+    /// THE CONNECTION A FAILED RUN WAS HELD UP BY, by its id, on an <c>agentContainer.failed</c> row
+    /// only: a plugin's run that reported its connection <c>refused</c> or <c>sign-in</c>, and each
+    /// later run that did not start because that connection still needs a person. Absent on every
+    /// other row. What the notice reads when the connection is put right (it tells the Manager in
+    /// these workflows), and what keeps such a workflow open until it is (UndeclarableWorkflows).
+    /// </summary>
+    public const string HeldByConnection = "heldByConnection";
+
+    /// <summary>
     /// WHEN the provider said to come back, as an ISO-8601 instant - null whenever the provider did
     /// not say, which is most failures and every class but quota and rate.
     ///

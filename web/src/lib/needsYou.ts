@@ -12,6 +12,7 @@ import { itemLabel } from './backlog'
 /** The groups in the order a person meets them: deciding first, tidying up last. */
 export const NeedsYouKindOrder = [
   'decision',
+  'connection',
   'blocked',
   'failed',
   'waiting-input',
@@ -23,6 +24,7 @@ export const NeedsYouKindOrder = [
 /** Each group's heading. A kind this browser does not know is headed by its own wire word. */
 export const NeedsYouKindWords: Readonly<Record<string, string>> = {
   decision: 'Decisions',
+  connection: 'Connections to put right',
   blocked: 'Blocked',
   failed: 'Failed',
   'waiting-input': 'Waiting for an input',
@@ -52,8 +54,21 @@ export function groupNeedsYou(items: readonly NeedsYouItem[]): NeedsYouGroup[] {
   return kinds.map((kind) => ({ kind, words: NeedsYouKindWords[kind] ?? kind, items: byKind.get(kind) ?? [] }))
 }
 
-/** Who or what the row is about, after its team: the member, else the item's citation and title. */
+/** Who or what a row is about first: a connection row its connection's name, any other its team. */
+export function needsYouLead(item: NeedsYouItem): string {
+  if (item.connection) return item.connection.name || item.connection.id
+  return item.team.name || item.team.id
+}
+
+/**
+ * Who or what the row is about, after its lead: whom a connection holds up (each team, its members),
+ * else the member, else the item's citation and title.
+ */
 export function needsYouSubject(item: NeedsYouItem): string {
+  if (item.connection) {
+    const held = item.connection.holds.map((h) => `${h.team.name || h.team.id}: ${h.members.join(', ')}`)
+    return held.length ? `holds up ${held.join('; ')}` : ''
+  }
   if (item.member) return item.member
   if (item.item) return `${itemLabel(item.item.id)} ${item.item.title}`
   return ''
@@ -85,6 +100,7 @@ export type NeedsYouOpen =
   | { to: 'git'; team: string }
   | { to: 'solution'; team: string }
   | { to: 'removals' }
+  | { to: 'connections' }
 
 export function needsYouOpen(item: NeedsYouItem): NeedsYouOpen | null {
   const { where } = item
@@ -108,6 +124,8 @@ export function needsYouOpen(item: NeedsYouItem): NeedsYouOpen | null {
       return { to: 'solution', team }
     case 'removals':
       return { to: 'removals' }
+    case 'connections':
+      return { to: 'connections' }
     default:
       return null
   }
@@ -130,5 +148,7 @@ export function needsYouOpenWords(open: NeedsYouOpen): string {
       return "Open this solution's panel"
     case 'removals':
       return 'Open the Teams view, where unfinished removals are listed'
+    case 'connections':
+      return 'Open Admin → Connections, to edit, reconnect or test this connection'
   }
 }

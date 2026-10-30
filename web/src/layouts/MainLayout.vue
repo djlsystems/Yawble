@@ -178,6 +178,12 @@ const connectionsOpen = ref(false);
 /** What the provider's round trip came back with, shown once in the Connections dialog. */
 const connectionNotice = ref<CallbackOutcome | null>(null);
 
+/** Admin > Connections with nothing to say: the ribbon's action, and a Needs you connection row's Open. */
+function openConnections() {
+  connectionNotice.value = null;
+  connectionsOpen.value = true;
+}
+
 /**
  * BACK FROM A PROVIDER'S CONSENT PAGE. The Host's callback answers a redirect to
  * `/console?connection=…`; the Connections dialog opens with what it says, and the query is taken
@@ -390,10 +396,7 @@ function onRibbonAction(action: string, team: TeamId | null = null) {
   else if (action === 'admin-agents') agentsOpen.value = true;
   else if (action === 'admin-skills') skillsOpen.value = true;
   else if (action === PluginsAction) pluginsOpen.value = true;
-  else if (action === ConnectionsAction) {
-    connectionNotice.value = null;
-    connectionsOpen.value = true;
-  }
+  else if (action === ConnectionsAction) openConnections();
   else if (action === RepositoriesAction) repositoriesOpen.value = true;
   else if (action === OutcomesAction) {
     outcomesAt.value = null;
@@ -562,7 +565,7 @@ async function signOut() {
           <LiveStatusControl class="header-tool" :word="false" />
 
           <!-- What is waiting on a person, as one count, left of the gauge. People only, as its route is. -->
-          <NeedsYouControl v-if="session.user" class="header-tool" :word="false" />
+          <NeedsYouControl v-if="session.user" class="header-tool" :word="false" @open-connections="openConnections" />
           <!-- The activity monitor: the instance's load as one gauge, its figures a click away.
                People only, as its route is. -->
           <CapacityMonitor v-if="session.user" class="header-tool" />

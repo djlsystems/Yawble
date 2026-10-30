@@ -64,7 +64,13 @@ public sealed record ContainerMarks(Message? Blocked, Message? NeedsDecision, Me
     /// blocked the member for a person to set something - or null for an agent's own give-up.</summary>
     public string? BlockedClass => ClassOf(Blocked);
 
-    private static string? ClassOf(Message? message)
+    /// <summary>The live <c>failed</c> row's <see cref="PayloadFields.HeldByConnection"/>: the connection
+    /// that held the run up, or null.</summary>
+    public string? HeldByConnection => StringOf(Failed, PayloadFields.HeldByConnection);
+
+    private static string? ClassOf(Message? message) => StringOf(message, PayloadFields.FailureClass);
+
+    private static string? StringOf(Message? message, string field)
     {
         if (message is null) return null;
 
@@ -72,7 +78,7 @@ public sealed record ContainerMarks(Message? Blocked, Message? NeedsDecision, Me
         {
             using var payload = JsonDocument.Parse(message.Payload);
             return payload.RootElement.ValueKind == JsonValueKind.Object
-                && payload.RootElement.TryGetProperty(PayloadFields.FailureClass, out var value)
+                && payload.RootElement.TryGetProperty(field, out var value)
                 && value.ValueKind == JsonValueKind.String
                 ? value.GetString()
                 : null;
