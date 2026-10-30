@@ -140,7 +140,7 @@ describe('MemberSettingsDialog, a plugin member', () => {
     expect(field('Repeat').value).toBe('3');
 
     // enum: a dropdown of its values; bool: a toggle.
-    expect(select(wrapper, 'Mode').props('options')).toEqual(['upper', 'reverse']);
+    expect(select(wrapper, 'Mode').props('options')).toEqual([{ label: 'upper', value: 'upper' }, { label: 'reverse', value: 'reverse' }]);
     expect(select(wrapper, 'Mode').props('modelValue')).toBe('upper');
     expect(setting('loud').querySelector('.q-toggle')).not.toBeNull();
 

@@ -90,7 +90,7 @@ describe('AddMemberDialog, hiring a plugin', () => {
     await choose(wrapper, 'Agent', 'plugin:sample-echo');
 
     expect(bodyText()).toContain("Deterministic test plugin: transforms each instruction's text.");
-    expect(selectLabelled(wrapper, 'Mode').props('options')).toEqual(['upper', 'reverse']);
+    expect(selectLabelled(wrapper, 'Mode').props('options')).toEqual([{ label: 'upper', value: 'upper' }, { label: 'reverse', value: 'reverse' }]);
     expect(selectLabelled(wrapper, 'Mode').props('modelValue')).toBe('upper');
     expect(field('Repeat').value).toBe('');
 

@@ -305,7 +305,7 @@ function text(name: string): string {
         no-caps
         align="left"
         class="plugin-settings-advanced"
-        :icon="showAdvanced ? 'expand_less' : 'expand_more'"
+        :icon="showAdvanced ? 'keyboard_arrow_up' : 'keyboard_arrow_down'"
         label="Advanced"
         :aria-expanded="showAdvanced ? 'true' : 'false'"
         :disable="advancedNeedsYou"
