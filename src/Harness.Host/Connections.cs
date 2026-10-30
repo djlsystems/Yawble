@@ -47,6 +47,10 @@ public sealed record MailboxGrant(string Username, string Password, MailServer I
 /// connection when it was saved.</summary>
 public sealed record MailboxAnswer(int Status, string? Sentence, string? Error, ConnectionRecord? Connection);
 
+/// <summary>A Test connection's answer: the health it recorded (<c>ok</c> or <c>needs-reconnect</c>) and
+/// its sentence, or a status and <see cref="Error"/> when nothing was recorded.</summary>
+public sealed record ConnectionTestAnswer(int Status, string? Health, string? Sentence, string? Error, ConnectionRecord? Connection);
+
 /// <summary>A binding refused, with what the web offers: Reconnect with these scopes.</summary>
 public sealed record BindingRefusal(string Error, string? ReconnectId = null, IReadOnlyList<string>? ReconnectScopes = null)
 {
@@ -1124,6 +1128,8 @@ public sealed class Connections(
 
     public static string NeedsReconnect(ConnectionRecord connection, string? reason) => connection.Mailbox is not null
         ? $"Connection {connection.Named} needs a new app password: {reason ?? "the server refused the password."} Update its password in {Where}."
+        : connection.Credential is not null
+        ? $"Connection {connection.Named} needs you: {reason ?? "its test was refused."} Edit it in {Where}, then test it again."
         : $"Connection {connection.Named} needs to be reconnected: the provider refused to refresh it ({reason ?? "no reason given"}). "
             + $"Reconnect it from {Where}.";
 
@@ -1441,6 +1447,156 @@ public sealed class Connections(
     }
 
     private static MailboxAnswer Refusal400(string error) => new(StatusCodes.Status400BadRequest, null, error, null);
+
+    // ---- Test connection ----------------------------------------------------------------------------
+
+    /// <summary>How long a test may take on its worker: a mailbox's IMAP login and SMTP authentication each have 20 s.</summary>
+    public static readonly TimeSpan TestBound = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Whether a connection has a test: every sign-in and every mailbox; a website, API key or username
+    /// and password when its preset declares one and the connection has what it names. A website has none.
+    /// </summary>
+    public static bool Testable(ConnectionRecord connection) =>
+        connection.Mailbox is not null
+        || (connection.Credential is { } credential ? CredentialPresets.Testable(connection.Kind, credential) : connection.Kind == ConnectionKinds.OAuth);
+
+    /// <summary>
+    /// TEST CONNECTION: what the connection holds sent to one worker as a sealed probe - a mailbox's
+    /// login, a sign-in's refresh and one read of the profile, a preset's one harmless request - and its
+    /// answer recorded as the connection's health with a <c>connections.tested</c> row, in one
+    /// transaction: ok, or <c>needs-reconnect</c> with the answer's sentence. A sign-in's rotated refresh
+    /// token is stored first. A test no worker ran records nothing. Under the connection's gate, so a
+    /// run's refresh and a test never race.
+    /// </summary>
+    public async Task<ConnectionTestAnswer> TestAsync(ConnectionActor actor, string id, WorkerAsks asks, CancellationToken ct = default)
+    {
+        var gate = Gate(id);
+        await gate.WaitAsync(ct);
+
+        try
+        {
+            if (await store.GetAsync(id, ct) is not { } connection)
+            {
+                return new ConnectionTestAnswer(StatusCodes.Status404NotFound, null, null, $"There is no connection '{id}'.", null);
+            }
+
+            if (!Testable(connection))
+            {
+                return new ConnectionTestAnswer(StatusCodes.Status400BadRequest, null, null, NoTest(connection), null);
+            }
+
+            var (probe, secrets, needsYou, unrecorded) = await ProbeAsync(connection, ct);
+
+            string outcome, sentence;
+            if (probe is not null)
+            {
+                var asked = await asks.AskAsync<ConnectionTested>(new TestConnection(WorkerAsks.NewRequest(), probe.Seal()), TestBound, ct);
+                if (asked.Answer is not { } tested)
+                {
+                    return new ConnectionTestAnswer(StatusCodes.Status503ServiceUnavailable, null, null,
+                        $"The test did not run: {asked.Why} Nothing was recorded; try again.", null);
+                }
+
+                // STORED FIRST: a rotated refresh token is the one that works now, whatever the test said.
+                if (tested.RefreshToken is { } rotated)
+                {
+                    try
+                    {
+                        await store.StoreRotatedRefreshAsync(id, rotated.Value, ct);
+                    }
+                    catch (System.Data.Common.DbException exception)
+                    {
+                        throw new RefreshNotStoredException(exception);
+                    }
+                }
+
+                (outcome, sentence) = (tested.Outcome, ConnectionTester.Redact(tested.Sentence, secrets));
+            }
+            else if (needsYou is not null)
+            {
+                (outcome, sentence) = (ConnectionTested.Refused, needsYou);
+            }
+            else
+            {
+                return new ConnectionTestAnswer(StatusCodes.Status422UnprocessableEntity, null, null, unrecorded, null);
+            }
+
+            var ok = outcome == ConnectionTested.Ok;
+            if (!ok) ForgetApis(id);
+
+            await store.RecordTestAsync(id, ok ? null : sentence, clock.GetUtcNow(), actor.Row(
+                TenantActions.ConnectionTested, id, connection.Name,
+                new { connection = id, kind = connection.Kind, provider = connection.Provider, outcome, sentence }), ct);
+
+            return new ConnectionTestAnswer(StatusCodes.Status200OK, ok ? ConnectionRecord.Ok : ConnectionRecord.NeedsReconnect, sentence, null, await store.GetAsync(id, ct));
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    public static string NoTest(ConnectionRecord connection) => connection.Kind switch
+    {
+        ConnectionKinds.Website => $"Connection {connection.Named} is a website: its test is its own sign-in, which is not here yet.",
+        ConnectionKinds.Login => $"Connection {connection.Named} names no URL to sign in to, so there is nothing to test.",
+        _ => $"Connection {connection.Named} has no test: its service declares no request to try it with.",
+    };
+
+    /// <summary>The probe a connection's test sends and the values no sentence may carry; or, with
+    /// none, the sentence its health records (<c>NeedsYou</c>) or the one only answered (<c>Unrecorded</c>).</summary>
+    private async Task<(ConnectionProbe? Probe, IReadOnlyList<string> Secrets, string? NeedsYou, string? Unrecorded)> ProbeAsync(
+        ConnectionRecord connection, CancellationToken ct)
+    {
+        if (connection.Mailbox is { } mailbox)
+        {
+            if (await store.MailboxPasswordAsync(connection.Id, ct) is not { } password)
+            {
+                return (null, [], null, $"The app password of connection {connection.Named} could not be read on this Host. Update its password in {Where}.");
+            }
+
+            return (new MailboxProbe(
+                connection.Account, mailbox.Username,
+                new ProbeServer(mailbox.Imap.Host, mailbox.Imap.Port, mailbox.Imap.Security),
+                new ProbeServer(mailbox.Smtp.Host, mailbox.Smtp.Port, mailbox.Smtp.Security), mailbox.Preset, password), [password], null, null);
+        }
+
+        if (connection.Credential is { } credential)
+        {
+            var secrets = await store.CredentialSecretsAsync(connection.Id, ct) ?? new Dictionary<string, string>();
+            var probe = CredentialPresets.For(connection.Kind, credential.Preset)?.Test is { } test
+                ? test.Probe(CredentialPresets.For(connection.Kind, credential.Preset)!, credential, secrets)
+                : null;
+
+            return probe is null
+                ? (null, [], null, $"A value connection {connection.Named} is tested with could not be read on this Host. Edit the connection in {Where}.")
+                : (probe, probe.Secrets, null, null);
+        }
+
+        var tokens = await store.TokensAsync(connection.Id, ct);
+        if (tokens?.RefreshToken is not { } refresh)
+        {
+            return (null, [], "The provider issued no refresh token, so the sign-in cannot be renewed. Reconnect it.", null);
+        }
+
+        if (await ProviderAsync(connection.Provider, ct) is not { Configured: true } found)
+        {
+            return (null, [], null, $"Connection {connection.Named} could not be tested: its provider '{connection.Provider}' has no OAuth client on this Host. Set it in {Where}.");
+        }
+
+        var provider = ConnectionProviders.InDirectory(found, connection.Tenant);
+        var secret = await ClientSecretAsync(provider, ct);
+
+        // MICROSOFT answers one API's token per refresh: the sign-in's own scopes give the token its
+        // profile endpoint reads, whatever APIs the connection holds.
+        IReadOnlyList<string>? scopes = provider.Kind == ConnectionProviders.Microsoft
+            ? [.. provider.DefaultScopes.Where(ConnectionProviders.IdentityScopes.Contains).Union(["offline_access"], StringComparer.Ordinal)]
+            : null;
+
+        return (new OAuthProbe(provider.Name, provider.TokenUrl, provider.ClientId ?? "", secret, refresh, scopes, provider.UserinfoUrl),
+            [refresh, .. secret is null ? Array.Empty<string>() : [secret]], null, null);
+    }
 
     private static MailServer Server(MailServerRequest request) =>
         new(request.Host!.Trim().ToLowerInvariant(), request.Port!.Value, request.Security!.Trim().ToUpperInvariant());

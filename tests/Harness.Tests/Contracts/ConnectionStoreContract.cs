@@ -415,6 +415,23 @@ public abstract class ConnectionStoreContract : HostStoreContract
     }
 
     [Fact]
+    public async Task A_refused_test_needs_a_person_with_its_sentence_and_a_passed_one_clears_it()
+    {
+        var store = await StoreAsync();
+        await InsertAsync(store, "conn-a", "Work", new ConnectionTokens("refresh-1", "access-1", At.AddHours(1)));
+
+        await store.RecordTestAsync("conn-a", "Stripe refused the secret key (HTTP 401).", At.AddDays(1), Row(TenantActions.ConnectionTested, "conn-a"), Ct);
+        var refused = (await store.GetAsync("conn-a", Ct))!;
+        Assert.Equal((ConnectionRecord.NeedsReconnect, "Stripe refused the secret key (HTTP 401)."), (refused.Status, refused.StatusReason));
+        Assert.Equal(new ConnectionTokens("refresh-1", null, null), await store.TokensAsync("conn-a", Ct));
+
+        await store.RecordTestAsync("conn-a", null, At.AddDays(2), Row(TenantActions.ConnectionTested, "conn-a"), Ct);
+        var passed = (await store.GetAsync("conn-a", Ct))!;
+        Assert.Equal((ConnectionRecord.Ok, null, At.AddDays(2)), (passed.Status, passed.StatusReason, passed.RefreshedAt));
+        Assert.Equal("refresh-1", (await store.TokensAsync("conn-a", Ct))!.RefreshToken);
+    }
+
+    [Fact]
     public async Task A_flow_is_consumed_once_by_its_own_person_and_old_flows_go_as_new_ones_arrive()
     {
         var database = await DatabaseAsync();
@@ -452,6 +469,7 @@ public abstract class ConnectionStoreContract : HostStoreContract
         await Assert.ThrowsAnyAsync<DbException>(() => store.DeleteAsync("conn-a", Row(TenantActions.ConnectionDisconnected, "conn-a"), Ct));
         await Assert.ThrowsAnyAsync<DbException>(() => store.SaveProviderAsync(Provider("google"), "secret", Row(TenantActions.ConnectionProviderSaved, "google"), Ct));
         await Assert.ThrowsAnyAsync<DbException>(() => store.MarkNeedsReconnectAsync("conn-a", "x", Row(TenantActions.ConnectionNeedsReconnect, "conn-a"), Ct));
+        await Assert.ThrowsAnyAsync<DbException>(() => store.RecordTestAsync("conn-a", "refused", At, Row(TenantActions.ConnectionTested, "conn-a"), Ct));
 
         Assert.Equal([("conn-a", "Kept", ConnectionRecord.Ok)], (await store.ListAsync(Ct)).Select(c => (c.Id, c.Name, c.Status)));
         Assert.Empty(await store.ProvidersAsync(Ct));

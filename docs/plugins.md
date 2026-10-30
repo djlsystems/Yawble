@@ -794,7 +794,7 @@ rows, `row.status`), `cli/internal/plugin/manifest_test.go` and `web/src/lib/__t
   (iCloud). A slot bound to a **username and password** (`login`) or an **API key** (`apikey`) holds
   `{ "kind", "account", "preset", "fields": { "<name>": "<value>" } }` - a login's `username`,
   `password` and `url` when set; an API key's preset fields (Stripe `key`; Namecheap `apiUser`,
-  `apiKey`; Twilio `accountSid`, `apiKeySid`, `apiKeySecret`) or Other's own - and every masked value
+  `apiKey`, `clientIp`; Twilio `accountSid`, `apiKeySid`, `apiKeySecret`) or Other's own - and every masked value
   is redacted from everything the plugin writes.
 - **`siteFiles`** names the files folder of every site of the member's OWN team, by name, as an
   absolute path; `[]` when the team has none. A file the plugin makes for a site's page goes under

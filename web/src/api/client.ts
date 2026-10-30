@@ -49,6 +49,7 @@ import type {
   MemberRunsPage,
   PluginHire,
   Connection,
+  ConnectionTested,
   TeamConnectionEntry,
   TeamConnections,
   CredentialAddRequest,
@@ -1726,6 +1727,13 @@ export const editCredentialConnection = (id: string, fields: CredentialFieldValu
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ fields }),
   })
+
+/**
+ * Test connection: a worker tries what the connection holds, and its health follows - ok, or
+ * needs-reconnect with the test's sentence. A test no worker ran answers an error and records nothing.
+ */
+export const testConnection = (id: string) =>
+  json<ConnectionTested>(`/api/connections/${encodeURIComponent(id)}/test`, { method: 'POST' })
 
 /** Changes a mailbox's account, username, servers or password; the Host logs in with the result first. */
 export const editMailbox = (id: string, body: MailboxEditRequest) =>

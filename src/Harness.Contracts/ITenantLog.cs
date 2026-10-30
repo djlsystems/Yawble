@@ -237,6 +237,10 @@ public static class TenantActions
     /// <summary>The provider refused a refresh; the connection needs a person to reconnect it.</summary>
     public const string ConnectionNeedsReconnect = "connections.needs-reconnect";
 
+    /// <summary>A person tested a connection: detail says the outcome (ok, refused or failed) and its
+    /// sentence, never a value. A refusal leaves the connection <c>needs-reconnect</c> with that sentence.</summary>
+    public const string ConnectionTested = "connections.tested";
+
     /// <summary>A person gave a mailbox connection a new app password after a successful login,
     /// clearing <c>needs-reconnect</c>. Never the password.</summary>
     public const string ConnectionPasswordUpdated = "connections.password-updated";
