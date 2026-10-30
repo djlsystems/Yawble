@@ -354,12 +354,8 @@ const shownTicker = computed(() => {
   if (!ref) return ticker.value
   if (ref.kind === 'team') return ticker.value.filter((entry) => entry.team === ref.id)
   if (ref.kind === 'workflow') return ticker.value.filter((entry) => entry.workflow === ref.id)
-  if (ref.kind === 'member') {
-    const [team, ...rest] = ref.key.split('/')
-    const id = rest.join('/')
-    const name = model.members.get(ref.key)?.name ?? id
-    return ticker.value.filter((entry) => entry.team === team && entry.member === name)
-  }
+  // By the member's key, not its name: a row read before the snapshot named the member holds its id.
+  if (ref.kind === 'member') return ticker.value.filter((entry) => entry.memberKey === ref.key)
   return ticker.value
 })
 

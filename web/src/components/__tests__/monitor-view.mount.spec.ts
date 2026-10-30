@@ -23,6 +23,19 @@ vi.mock('../../lib/monitor/font', async (importOriginal) => ({
   loadMonitorSymbols: () => Promise.resolve(null),
 }))
 
+// The Monitor's scene, as it is, with the pick it is handed kept so a spec can pick a node.
+const picks: ((picked: unknown) => void)[] = []
+vi.mock('../../lib/monitor/scene', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../../lib/monitor/scene')>()
+  class PickableScene extends real.MonitorScene {
+    constructor(...args: ConstructorParameters<typeof real.MonitorScene>) {
+      super(...args)
+      picks.push(args[1].onPick as (picked: unknown) => void)
+    }
+  }
+  return { ...real, MonitorScene: PickableScene }
+})
+
 import MonitorView from '../MonitorView.vue'
 import { useConsoleStore } from '../../stores/console'
 import { MonitorModel } from '../../lib/monitor/model'
@@ -35,18 +48,18 @@ function row(type: string, source: string, payload: Record<string, unknown>, at:
   return { seq, type, source, payload: JSON.stringify(payload), correlationId: 1, causationSeq: null, depth: 0, occurredAt: at }
 }
 
-const snapshot = (id: string, state: 'Idle' | 'Running' = 'Idle') => ({
-  team: 'Alpha', id, name: id, agent: 'claude', state, queueDepth: 0, ceiling: 1, subscribes: [],
+const snapshot = (id: string, state: 'Idle' | 'Running' = 'Idle', name = id) => ({
+  team: 'Alpha', id, name, agent: 'claude', state, queueDepth: 0, ceiling: 1, subscribes: [],
   currentCorrelation: null, sinceSeq: 0,
 })
 
 let wrapper: VueWrapper | null = null
 
-async function mountMonitor(rows: Message[]) {
+async function mountMonitor(rows: Message[], developerName = 'Developer') {
   getMessages.mockResolvedValue(rows)
   const board = useConsoleStore()
   board.$patch({
-    teams: [{ id: 'Alpha', name: 'Alpha', containers: [snapshot('Manager', 'Running'), snapshot('Developer')] }] as never,
+    teams: [{ id: 'Alpha', name: 'Alpha', containers: [snapshot('Manager', 'Running'), snapshot('Developer', 'Idle', developerName)] }] as never,
     managerName: 'Manager' as never,
   })
   board.view = 'monitor'
@@ -58,6 +71,7 @@ async function mountMonitor(rows: Message[]) {
 beforeEach(() => {
   setActivePinia(createPinia())
   seq = 0
+  picks.length = 0
   listEvents.mockResolvedValue([])
   getFileChanges.mockResolvedValue({ changes: [], next: null })
 })
@@ -196,6 +210,22 @@ describe('the Monitor', () => {
     expect(wrapper.find('.monitor-row-verb').text()).toBe('sqlCreated')
     expect(wrapper.find('[data-monitor-resource]').exists()).toBe(false)
     expect(wrapper.find('.monitor-overlay--error').exists()).toBe(false)
+  })
+})
+
+describe('the Monitor and a picked member', () => {
+  it('lists that member\'s rows when its name is not its id, the rows read before its snapshot named it', async () => {
+    const { wrapper } = await mountMonitor([
+      row('agentContainer.instruction.Alpha/Developer', 'Alpha/Manager', { instruction: 'Write the skeleton', subject: 'Write the skeleton' }, '2026-10-15T10:00:00Z'),
+      row('agentContainer.started', 'Alpha/Developer', {}, '2026-10-15T10:00:01Z'),
+      row('agentContainer.started', 'Alpha/Manager', {}, '2026-10-15T10:00:02Z'),
+    ], 'Developer Quinn')
+
+    picks.at(-1)!({ kind: 'member', key: 'Alpha/Developer' })
+    await flushPromises()
+
+    const rows = wrapper.findAll('.monitor-row')
+    expect(rows.map((found) => found.find('.monitor-row-verb').text())).toEqual(['started', 'told'])
   })
 })
 
