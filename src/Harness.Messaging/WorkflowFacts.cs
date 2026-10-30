@@ -154,6 +154,34 @@ public static class WorkflowPayloads
             return false;
         }
     }
+
+    /// <summary>
+    /// Whether a `failed` row is a run that ended waiting for a person
+    /// (<see cref="FailureClasses.NeedsPerson"/>): a wait, never an error. A payload nobody can parse
+    /// is a normal failure.
+    /// </summary>
+    public static bool NeedsPerson(string? payload)
+    {
+        if (payload is null) return false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            return doc.RootElement.TryGetProperty(PayloadFields.FailureClass, out var value)
+                && value.ValueKind is JsonValueKind.String
+                && value.GetString() == FailureClasses.NeedsPerson;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether a `failed` row is not a failure for the workflow's state or its count of failed runs:
+    /// a person stopped it, or it is waiting for a person. Both read Awaiting.
+    /// </summary>
+    public static bool NotAFailure(string? payload) => StoppedByPerson(payload) || NeedsPerson(payload);
 }
 
 /// <summary>Who a qualified source is, as the workflow projection reads it.</summary>
@@ -259,14 +287,17 @@ public sealed class WorkflowTimingFacts(long correlation)
         if (type == MessageTypes.Failed && _membersWithRealFailures.Add(member)) _failedOrder.Add(member);
     }
 
-    /// <summary>One member's last `failed` row, read for whether a person stopped the run.</summary>
+    /// <summary>
+    /// One member's last `failed` row, read for whether a person stopped the run or the run is
+    /// waiting for a person (`needs-person`).
+    /// </summary>
     public void LastFailure(string source, string? payload)
     {
         var member = TeamSources.NameOf(source);
 
-        if (!WorkflowPayloads.StoppedByPerson(payload)) return;
+        if (!WorkflowPayloads.NotAFailure(payload)) return;
 
-        // A run stopped by a person is Awaiting, not Failed
+        // A run stopped by a person, or waiting for one, is Awaiting, not Failed
         AwaitingFrom ??= member;
         // Remove from real failures list
         if (_membersWithRealFailures.Remove(member)) _failedOrder.Remove(member);
@@ -458,8 +489,8 @@ public sealed class WorkflowTimingFacts(long correlation)
 ///
 /// <para>
 /// THE LADDER IS <see cref="WorkflowTimingFacts.Build"/>'S: Completed (any completion), Closed (a close
-/// nothing woke), Paused, then Failed (a member whose last outcome failed, not stopped by a person),
-/// then Blocked. Only the last two are answered, as <see cref="WorkflowStanding.Stuck"/>.
+/// nothing woke), Paused, then Failed (a member whose last outcome failed, not stopped by a person
+/// and not waiting for one), then Blocked. Only the last two are answered, as <see cref="WorkflowStanding.Stuck"/>.
 /// </para>
 /// </summary>
 public sealed class WorkflowStandingRows(IReadOnlyDictionary<long, string> teams)

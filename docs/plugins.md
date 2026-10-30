@@ -1363,7 +1363,11 @@ working it: nobody running, nothing pending or undelivered, not paused, and no u
 `workflow.completed` row is the owner's, with `declaredByPlatform: true`. A failed or stopped run
 leaves the workflow open for a person, and so does a member whose last run in it failed
 `needs-person`: it waits for a person's save, which tells the Manager in that workflow to send the
-instruction again, and only an open workflow is told. An agent owner is unchanged: it declares for
+instruction again, and only an open workflow is told. That open workflow reads **Awaiting**, never
+Failed: like a run a person stopped, a `needs-person` failure is left out of `failedMembers` and
+`runsFailed` (`WorkflowPayloads.NotAFailure`, pinned by
+`MessageLogContract.A_run_waiting_for_a_person_is_an_awaiting_workflow_and_not_a_failed_one`). A
+failure of any other class still reads Failed. An agent owner is unchanged: it declares for
 itself (`UndeclarableWorkflows`). Pinned by
 `PluginMemberEndToEndTests.E1_A_workflow_a_person_starts_by_telling_a_plugin_ends_completed` and
 `PluginNeedsPersonTests.A_run_waiting_for_a_person_fails_needs_person_and_a_persons_save_tells_the_manager_in_that_workflow_once`.

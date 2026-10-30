@@ -109,6 +109,9 @@ public sealed class PluginNeedsPersonTests : IAsyncLifetime
         await ManagerRanAsync(failed);
         Assert.Contains(failed.CorrelationId, await Services.GetRequiredService<IMessageLog>().OpenWorkflowsAmongAsync([failed.CorrelationId], Ct));
 
+        // AND THE WAIT IS NOT AN ERROR on the workflow either: the screen's tab and tile read this word.
+        await AssertWaitingNotFailedAsync(failed.CorrelationId);
+
         // The person sets a key and binds it on the member, from the screen.
         var key = $"NEEDS_PERSON_TEST_{Guid.NewGuid():N}".ToUpperInvariant();
         Assert.Equal(HttpStatusCode.OK, (await _person.PutAsJsonAsync($"/api/secrets/{key}", new { value = $"value-{Guid.NewGuid():N}" }, Ct)).StatusCode);
@@ -122,6 +125,7 @@ public sealed class PluginNeedsPersonTests : IAsyncLifetime
         Assert.Equal(failed.Seq, notice.CausationSeq);
         Assert.Contains("Keyed is ready now", notice.Payload);
         Assert.Contains("send it the same instruction again", notice.Payload);
+        await AssertWaitingNotFailedAsync(failed.CorrelationId);
 
         // A second save says nothing more: the workflow was already told.
         var again = await _person.PutAsJsonAsync(
@@ -224,6 +228,20 @@ public sealed class PluginNeedsPersonTests : IAsyncLifetime
         }
 
         Assert.Fail("The Manager was not woken by the needs-person failure, or its run did not end.");
+    }
+
+    /// <summary>
+    /// The workflow as the screen reads it: open, Awaiting the plugin member, with no failed member and
+    /// no failed run counted.
+    /// </summary>
+    private async Task AssertWaitingNotFailedAsync(long correlation)
+    {
+        var workflows = await _person.GetFromJsonAsync<JsonObject>($"/api/teams/{_team}/workflows", Ct);
+        var workflow = workflows!["workflows"]!.AsArray().Single(w => (long)w!["correlation"]! == correlation)!;
+        Assert.Equal("Awaiting", (string?)workflow["state"]);
+        Assert.Empty(workflow["failedMembers"]!.AsArray());
+        Assert.Equal(0, (int)workflow["runsFailed"]!);
+        Assert.Null(workflow["endedAt"]);
     }
 
     private async Task<IReadOnlyList<Message>> NoticesAsync()
