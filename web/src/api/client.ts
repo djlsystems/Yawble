@@ -49,6 +49,10 @@ import type {
   MemberRunsPage,
   PluginHire,
   Connection,
+  CredentialAddRequest,
+  CredentialFieldValue,
+  CredentialPreset,
+  MailboxEditRequest,
   ConnectionProvider,
   ConnectionNeeds,
   ConnectionProviderSave,
@@ -1662,9 +1666,40 @@ export const renameConnection = (id: string, name: string) =>
     body: JSON.stringify({ name }),
   })
 
-/** Refused (409, naming the members in `usedBy`) while any member binds it. */
-export const disconnectConnection = (id: string) =>
-  send(`/api/connections/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(() => undefined)
+/**
+ * Deletes a connection. Without `unbind`, one a member uses is refused (409, naming the members in
+ * `usedBy`) so the person is asked first; with it, every member's binding of it goes too, and each
+ * such member needs a person until another is chosen.
+ */
+export const disconnectConnection = (id: string, unbind = false) =>
+  send(`/api/connections/${encodeURIComponent(id)}${unbind ? '?unbind=true' : ''}`, { method: 'DELETE' }).then(() => undefined)
+
+/** The forms of a website, API key (Stripe, Namecheap, Twilio, Other) and username and password connection. */
+export const listCredentialPresets = () => json<CredentialPreset[]>('/api/connections/credentials/presets')
+
+/** Adds a website, API key or username and password connection. 409 when the name is taken. */
+export const addCredentialConnection = (body: CredentialAddRequest) =>
+  json<{ connection: Connection }>('/api/connections/credentials', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+/** Changes what is behind a credential connection's name: each field given replaces its value. */
+export const editCredentialConnection = (id: string, fields: CredentialFieldValue[]) =>
+  json<{ connection: Connection }>(`/api/connections/${encodeURIComponent(id)}/credentials`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ fields }),
+  })
+
+/** Changes a mailbox's account, username, servers or password; the Host logs in with the result first. */
+export const editMailbox = (id: string, body: MailboxEditRequest) =>
+  json<MailboxSaved>(`/api/connections/${encodeURIComponent(id)}/mailbox`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
 
 /**
  * The STORED row behind a member - its label, its own instructions and who last set them.

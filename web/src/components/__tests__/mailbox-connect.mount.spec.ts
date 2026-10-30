@@ -98,11 +98,13 @@ function select(wrapper: { findAllComponents: (s: { name: string }) => unknown[]
   return found;
 }
 
-/** Opens Add connection from Admin, Connections. */
+/** Opens Add connection from Admin, Connections, and chooses Mailbox. */
 async function openAdd() {
   const wrapper = await mountDialog(ConnectionsDialog);
   await settle();
   button('Add connection').click();
+  await settle();
+  bodyFind('[data-connection-kind="imap"]')!.click();
   await settle();
   return wrapper;
 }
@@ -221,6 +223,8 @@ describe('Add connection, a mailbox with an app password', () => {
 
     // Opened again, the field starts empty.
     button('Add connection').click();
+    await settle();
+    bodyFind('[data-connection-kind="imap"]')!.click();
     await settle();
     await choosePreset('gmail');
     expect(field('App password').value).toBe('');

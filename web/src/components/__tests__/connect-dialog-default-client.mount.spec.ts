@@ -137,6 +137,7 @@ async function chooseMicrosoft() {
   await mountDialog(ConnectionsDialog, {});
   await settle();
   await click(button('Add connection'));
+  await click(bodyFind('[data-connection-kind="oauth"]'));
   await click(bodyFind('[data-connect-service="microsoft"]'));
   await click(button('Next'));
 }
@@ -169,6 +170,7 @@ describe("Microsoft with the instance's own app", () => {
     await mountDialog(ConnectionsDialog, {});
     await settle();
     await click(button('Add connection'));
+    await click(bodyFind('[data-connection-kind="oauth"]'));
     expect(bodyFind('[data-connect-own-app-service]')).toBeNull();
 
     await click(bodyFind('[data-connect-service="microsoft"]'));

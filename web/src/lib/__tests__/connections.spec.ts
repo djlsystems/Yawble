@@ -12,6 +12,10 @@ import {
   redirectUriWarning,
   slotHint,
   slotSummary,
+  slotKinds,
+  kindLabel,
+  credentialRows,
+  named,
 } from '../connections'
 import { hostConnection, hostProvider, hostSlot } from '../../test/pluginFixtures'
 
@@ -125,5 +129,47 @@ describe('permissionsOf', () => {
 
   it('from a Host without words, is the scopes as themselves, once each', () => {
     expect(permissionsOf({ scopes: ['openid', 'email', 'openid'] })).toEqual(['openid', 'email'])
+  })
+})
+
+describe('connection kinds', () => {
+  it('reads a slot as the kinds Add connection offers: its OAuth providers are one Sign-in', () => {
+    expect(slotKinds(['google', 'microsoft'])).toEqual(['oauth'])
+    expect(slotKinds(['microsoft', 'imap', 'login'])).toEqual(['oauth', 'imap', 'login'])
+    expect(slotKinds(['apikey'])).toEqual(['apikey'])
+    expect(slotKinds(['custom'])).toEqual([])
+  })
+
+  it('names a kind, and an older Host with no kind is a sign-in', () => {
+    expect(kindLabel({ kind: 'apikey' })).toBe('API key')
+    expect(kindLabel({ kind: 'login' })).toBe('Username and password')
+    expect(kindLabel({})).toBe('Sign-in')
+  })
+
+  it("builds a preset's rows, an unmasked value filled and a masked one never, and Other's from the connection", () => {
+    const login = {
+      kind: 'login' as const, id: null, name: 'Username and password', namedFields: false,
+      fields: [
+        { name: 'username', label: 'Username', masked: false, required: true },
+        { name: 'password', label: 'Password', masked: true, required: true },
+      ],
+    }
+    const rows = credentialRows(login, {
+      fields: [
+        { name: 'username', label: 'Username', masked: false, value: 'admin', set: true },
+        { name: 'password', label: 'Password', masked: true, value: null, set: true },
+      ],
+    })
+    expect(rows.map((row) => [row.name, row.value, row.set])).toEqual([['username', 'admin', true], ['password', '', true]])
+
+    const other = { kind: 'apikey' as const, id: 'other', name: 'Other', namedFields: true, fields: [] }
+    expect(credentialRows(other)).toEqual([])
+    expect(credentialRows(other, { fields: [{ name: 'token', label: 'token', masked: true, value: null, set: true }] })
+      .map((row) => [row.name, row.masked, row.named, row.value])).toEqual([['token', true, true, '']])
+  })
+
+  it('names a connection with no account by its name alone, as the Host does', () => {
+    expect(named({ name: 'Supplier portal', account: '' })).toBe("'Supplier portal'")
+    expect(named({ name: 'Router', account: 'admin' })).toBe("'Router' (admin)")
   })
 })

@@ -9,6 +9,8 @@ import {
   getConnectionNeeds,
   listConnectionProviders,
   listConnections,
+  listCredentialPresets,
+  listMailboxPresets,
   renameConnection,
   saveConnectionProvider,
   startConnection,
@@ -22,16 +24,22 @@ import type {
   ConnectionProvider,
   ConnectionProviderSave,
   ConnectionUse,
+  CredentialPreset,
+  MailboxPreset,
 } from '../api/types';
 import { appPasswordWarning } from '../lib/appPasswordShape';
 import { currentOrigin, goTo } from '../lib/browserNavigation';
 import { productCli } from '../presentation/product';
 import ConnectDialog from './ConnectDialog.vue';
+import CredentialForm from './CredentialForm.vue';
+import MailboxForm from './MailboxForm.vue';
 import DialogTabs from './DialogTabs.vue';
 import DirectoryField from './DirectoryField.vue';
 import {
   countdown,
   directoryRefusal,
+  kindLabel,
+  kindOf,
   mailServerLabel,
   parseScopes,
   permissionsOf,
@@ -53,10 +61,19 @@ import {
 /**
  * ADMIN > CONNECTIONS: the OAuth accounts the Host holds for plugins, and each provider's client.
  *
- * Each connection shows its provider, account, granted scopes, when it was connected and last
- * refreshed, its status (`ok`, or `needs reconnect` with the provider's reason) and the members
- * using it, with Reconnect, Rename and Disconnect. Disconnect is refused by the Host while a member
- * uses it; the refusal names them. The granted scopes show as the Host words them, once each.
+ * EVERY CONNECTION, ONE STORE: each shows its kind (Sign-in, Mailbox, Website, API key, Username and
+ * password), its provider or service, account, what it holds (a sign-in's granted scopes as the Host
+ * words them, once each; a mailbox's servers; a credential's fields, a masked one only as set), when
+ * it was connected and last refreshed, its health (`ok`, or `needs reconnect` with the reason) and,
+ * read only, the teams and members using it. Nothing here assigns it to a team.
+ *
+ * EDIT changes what is behind the name - a key, a password, a username, a mailbox's servers - and the
+ * name and id stay, so every team and member using it gets the new value at its next run. A sign-in
+ * changes account by Reconnect, which may sign in as another account under the same name.
+ *
+ * DELETE ASKS FIRST, listing each team and member using the connection and saying their runs stop
+ * until another is chosen; confirmed, the Host deletes it and unbinds them in one transaction, and
+ * each such member shows in Needs you.
  *
  * RECONNECT first says, in a short dialog, what it will ask the provider for - the scopes already
  * granted and, when an installed plugin's slot needs more of that provider, that it adds those - and
@@ -406,6 +423,36 @@ async function readCode(connection: Connection) {
 
 const isMailbox = (connection: Connection) => connection.kind === 'imap' || connection.providerKind === 'imap';
 
+/** A website, an API key or a username and password: edited, never reconnected. */
+const isCredential = (connection: Connection) => ['website', 'apikey', 'login'].includes(kindOf(connection));
+
+// --- Edit: what is behind a name ------------------------------------------------------------------
+
+const editing = ref<Connection | null>(null);
+const credentialPresets = ref<CredentialPreset[]>([]);
+const mailboxPresets = ref<MailboxPreset[]>([]);
+const credentialForm = ref<InstanceType<typeof CredentialForm> | null>(null);
+const mailboxEditForm = ref<InstanceType<typeof MailboxForm> | null>(null);
+
+async function startEdit(connection: Connection) {
+  editing.value = connection;
+  try {
+    if (isCredential(connection) && credentialPresets.value.length === 0) credentialPresets.value = await listCredentialPresets();
+    if (isMailbox(connection) && mailboxPresets.value.length === 0) mailboxPresets.value = await listMailboxPresets();
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+  }
+}
+
+async function edited(connection: Connection, sentence?: string) {
+  editing.value = null;
+  rowNotice.value = {
+    ...rowNotice.value,
+    [connection.id]: sentence ?? 'Saved. Every team and member using it gets the new value at its next run.',
+  };
+  await load();
+}
+
 /** The login's sentence after a password update, on the mailbox's tile. */
 const rowNotice = ref<Record<string, string>>({});
 
@@ -474,17 +521,18 @@ async function rename() {
   }
 }
 
-// --- Disconnect -----------------------------------------------------------------------------------
+// --- Delete ---------------------------------------------------------------------------------------
 
 const disconnecting = ref<Connection | null>(null);
 const disconnectProblem = ref('');
+/** Who uses it, listed before the person confirms: from the list, then from the Host's refusal. */
 const disconnectUsers = ref<string[]>([]);
 const disconnectBusy = ref(false);
 
 function startDisconnect(connection: Connection) {
   disconnecting.value = connection;
   disconnectProblem.value = '';
-  disconnectUsers.value = [];
+  disconnectUsers.value = usedByLabels(connection);
 }
 
 async function disconnect() {
@@ -493,13 +541,13 @@ async function disconnect() {
 
   disconnectBusy.value = true;
   disconnectProblem.value = '';
-  disconnectUsers.value = [];
   try {
-    await disconnectConnection(connection.id);
+    // CONFIRMED FOR THE USERS LISTED: with none listed, a member bound meanwhile refuses it, and is listed.
+    await disconnectConnection(connection.id, disconnectUsers.value.length > 0);
     disconnecting.value = null;
     await load();
   } catch (cause) {
-    // A 409 while members use it: the Host's sentence names them, and `usedBy` lists them.
+    // A 409: someone bound it since the list was read. The Host's sentence names them, and `usedBy` lists them.
     disconnectProblem.value = cause instanceof Error ? cause.message : String(cause);
     const usedBy = cause instanceof ActionRefused ? cause.body.usedBy : undefined;
     if (Array.isArray(usedBy)) disconnectUsers.value = usedByLabels({ usedBy: usedBy as ConnectionUse[] });
@@ -669,6 +717,7 @@ async function removeProvider(provider: ConnectionProvider) {
               <div class="conn-tile-head">
                 <q-icon name="link" size="18px" aria-hidden="true" />
                 <span class="text-weight-medium" data-connection-name>{{ connection.name }}</span>
+                <q-badge outline color="grey-7" :label="kindLabel(connection)" data-connection-kind />
                 <q-space />
                 <q-badge
                   :color="connection.status === 'ok' ? 'positive' : 'negative'"
@@ -678,7 +727,9 @@ async function removeProvider(provider: ConnectionProvider) {
               </div>
               <div class="conn-tile-line">
                 <span class="os-text-muted" data-connection-provider>{{ nameOf(connection.provider) }}</span>
-                · <span class="mono" data-connection-account>{{ connection.account }}</span>
+                <template v-if="connection.account !== ''">
+                  · <span class="mono" data-connection-account>{{ connection.account }}</span>
+                </template>
               </div>
               <div v-if="connection.tenant" class="conn-tile-line os-text-muted" data-connection-directory>
                 Directory <span class="mono">{{ connection.tenant }}</span>
@@ -707,6 +758,14 @@ async function removeProvider(provider: ConnectionProvider) {
                   <dd class="mono" data-connection-username>{{ connection.username ?? connection.account }}</dd>
                   <dt>App password</dt>
                   <dd data-connection-password>{{ connection.passwordSet ? 'set' : 'not set' }}</dd>
+                </template>
+                <template v-else-if="isCredential(connection)">
+                  <template v-for="field in connection.fields ?? []" :key="field.name">
+                    <dt>{{ field.label }}</dt>
+                    <dd :class="{ mono: !field.masked }" :data-connection-field="field.name">
+                      {{ field.masked ? (field.set ? 'set' : 'not set') : field.value ?? 'not set' }}
+                    </dd>
+                  </template>
                 </template>
                 <template v-else>
                   <dt>Allows</dt>
@@ -740,7 +799,18 @@ async function removeProvider(provider: ConnectionProvider) {
                   />
                   <q-tooltip>Update password: a new app password, tried before it is kept</q-tooltip>
                 </span>
-                <span v-else class="row-btn-wrap">
+                <span v-if="isMailbox(connection) || isCredential(connection)" class="row-btn-wrap">
+                  <q-btn
+                    dense
+                    flat
+                    round
+                    icon="tune"
+                    :aria-label="`Edit ${connection.name}`"
+                    @click="startEdit(connection)"
+                  />
+                  <q-tooltip>Edit: a new value for every team and member using it</q-tooltip>
+                </span>
+                <span v-if="!isMailbox(connection) && !isCredential(connection)" class="row-btn-wrap">
                   <q-btn
                     dense
                     flat
@@ -770,10 +840,10 @@ async function removeProvider(provider: ConnectionProvider) {
                     round
                     color="negative"
                     icon="link_off"
-                    :aria-label="`Disconnect ${connection.name}`"
+                    :aria-label="`Delete ${connection.name}`"
                     @click="startDisconnect(connection)"
                   />
-                  <q-tooltip>Disconnect</q-tooltip>
+                  <q-tooltip>Delete</q-tooltip>
                 </span>
               </div>
             </div>
@@ -1176,25 +1246,78 @@ async function removeProvider(provider: ConnectionProvider) {
     </q-card>
   </q-dialog>
 
-  <!-- DISCONNECT -->
+  <!-- EDIT: what is behind the name -->
+  <q-dialog :model-value="editing !== null" @update:model-value="(value: boolean) => { if (!value) editing = null; }">
+    <q-card class="os-dialog-md" data-edit-dialog>
+      <q-card-section>
+        <div class="os-dialog-title">Edit {{ editing?.name }}</div>
+        <div class="text-caption os-text-muted">
+          The name stays. Every team and member using it gets what is saved here at its next run.
+        </div>
+      </q-card-section>
+      <q-card-section v-if="editing && isCredential(editing)">
+        <CredentialForm
+          ref="credentialForm"
+          :presets="credentialPresets"
+          :kind="kindOf(editing) as 'website' | 'apikey' | 'login'"
+          :connection="editing"
+          @saved="(saved) => edited(saved)"
+        />
+      </q-card-section>
+      <q-card-section v-else-if="editing && isMailbox(editing) && mailboxPresets.length > 0">
+        <MailboxForm
+          ref="mailboxEditForm"
+          :presets="mailboxPresets"
+          :preset="editing.preset ?? 'other'"
+          :chooser="false"
+          :connection="editing"
+          @saved="(saved, sentence) => edited(saved, sentence)"
+        />
+      </q-card-section>
+      <q-card-actions align="right">
+        <q-btn flat no-caps label="Cancel" @click="editing = null" />
+        <q-btn
+          color="primary"
+          no-caps
+          label="Save"
+          data-edit-save
+          :loading="(credentialForm?.busy ?? false) || (mailboxEditForm?.busy ?? false)"
+          :disable="!((credentialForm?.ready ?? false) || (mailboxEditForm?.ready ?? false))"
+          @click="credentialForm ? credentialForm.save() : mailboxEditForm?.save()"
+        />
+      </q-card-actions>
+    </q-card>
+  </q-dialog>
+
+  <!-- DELETE: asks first, naming who uses it -->
   <q-dialog :model-value="disconnecting !== null" @update:model-value="(value: boolean) => { if (!value) disconnecting = null; }">
     <q-card class="os-dialog-sm" data-disconnect-dialog>
       <q-card-section>
-        <div class="os-dialog-title">Disconnect {{ disconnecting?.name }}?</div>
+        <div class="os-dialog-title">Delete {{ disconnecting?.name }}?</div>
         <div class="text-caption os-text-muted">
-          The Host deletes its tokens{{ disconnecting && providers.find((p) => p.id === disconnecting!.provider)?.revokes ? ' and revokes the grant at the provider' : '' }}.
-          A member that uses it must be unbound first.
+          The Host deletes what it holds for it{{ disconnecting && providers.find((p) => p.id === disconnecting!.provider)?.revokes ? ' and revokes the grant at the provider' : '' }}.
         </div>
+      </q-card-section>
+      <q-card-section v-if="disconnectUsers.length > 0" data-disconnect-users>
+        <div>Used by:</div>
+        <ul class="q-my-xs">
+          <li v-for="label in disconnectUsers" :key="label">{{ label }}</li>
+        </ul>
+        <div>Their runs stop until another connection is chosen for them.</div>
       </q-card-section>
       <q-card-section v-if="disconnectProblem" class="text-negative" data-disconnect-refusal>
         <div>{{ disconnectProblem }}</div>
-        <ul v-if="disconnectUsers.length > 0" class="q-my-xs">
-          <li v-for="label in disconnectUsers" :key="label">{{ label }}</li>
-        </ul>
       </q-card-section>
       <q-card-actions align="right">
         <q-btn flat no-caps label="Cancel" @click="disconnecting = null" />
-        <q-btn color="negative" no-caps label="Disconnect" :loading="disconnectBusy" @click="disconnect" />
+        <q-btn
+          color="negative"
+          no-caps
+          :label="disconnectUsers.length > 0 ? 'Delete and unbind' : 'Delete'"
+          data-disconnect-confirm
+          :loading="disconnectBusy"
+          @click="disconnect"
+        />
       </q-card-actions>
     </q-card>
   </q-dialog>

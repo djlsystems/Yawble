@@ -424,15 +424,36 @@ describe('ConnectionsDialog, on a connection', () => {
     wrapper.unmount();
   });
 
-  it("shows the Host's refusal to disconnect, naming the members that use it", async () => {
+  it('asks first, naming each member that uses it and saying their runs stop, then deletes it and unbinds them', async () => {
+    const wrapper = await mountConnections();
+    disconnectConnection.mockResolvedValue(undefined);
+
+    buttonIn(row('conn-work'), 'Delete').click();
+    await settle();
+
+    const users = bodyFind('[data-disconnect-users]')!.textContent;
+    expect(users).toContain('mail-team / Inbox (mail)');
+    expect(users).toContain('Their runs stop until another connection is chosen for them.');
+    expect(disconnectConnection).not.toHaveBeenCalled();
+
+    buttonIn(bodyFind('[data-disconnect-dialog]')!, 'Delete and unbind').click();
+    await settle();
+
+    expect(disconnectConnection).toHaveBeenCalledWith('conn-work', true);
+    expect(bodyFind('[data-disconnect-dialog]')).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it("lists a member the Host names when one was bound since the list was read, and confirming then unbinds it", async () => {
     const wrapper = await mountConnections();
 
-    disconnectConnection.mockRejectedValue(
+    disconnectConnection.mockRejectedValueOnce(
       Object.assign(
         new ActionRefused(
-          "Connection 'Work mail' is used by mail-team/Inbox (slot mail). Unbind it from those members first.",
+          "Connection 'Outlook' is used by mail-team/Inbox (slot mail). Deleting it stops their runs until another is chosen; confirm to delete it and unbind them.",
           {
-            error: "Connection 'Work mail' is used by mail-team/Inbox (slot mail). Unbind it from those members first.",
+            error: "Connection 'Outlook' is used by mail-team/Inbox (slot mail). Deleting it stops their runs until another is chosen; confirm to delete it and unbind them.",
             usedBy: workMail.usedBy,
           },
         ),
@@ -440,29 +461,34 @@ describe('ConnectionsDialog, on a connection', () => {
       ),
     );
 
-    buttonIn(row('conn-work'), 'Disconnect').click();
+    buttonIn(row('conn-outlook'), 'Delete').click();
     await settle();
-    buttonIn(bodyFind('[data-disconnect-dialog]')!, 'Disconnect').click();
+    expect(bodyFind('[data-disconnect-users]')).toBeNull();
+    buttonIn(bodyFind('[data-disconnect-dialog]')!, 'Delete').click();
     await settle();
 
-    const refusal = bodyFind('[data-disconnect-refusal]')!.textContent;
-    expect(refusal).toContain("Connection 'Work mail' is used by mail-team/Inbox (slot mail).");
-    expect(refusal).toContain('mail-team / Inbox (mail)');
-    expect(disconnectConnection).toHaveBeenCalledWith('conn-work');
+    expect(disconnectConnection).toHaveBeenCalledWith('conn-outlook', false);
+    expect(bodyFind('[data-disconnect-refusal]')!.textContent).toContain('is used by mail-team/Inbox (slot mail)');
+    expect(bodyFind('[data-disconnect-users]')!.textContent).toContain('mail-team / Inbox (mail)');
+
+    disconnectConnection.mockResolvedValueOnce(undefined);
+    buttonIn(bodyFind('[data-disconnect-dialog]')!, 'Delete and unbind').click();
+    await settle();
+    expect(disconnectConnection).toHaveBeenLastCalledWith('conn-outlook', true);
 
     wrapper.unmount();
   });
 
-  it('disconnects one no member uses', async () => {
+  it('deletes one no member uses', async () => {
     const wrapper = await mountConnections();
 
     disconnectConnection.mockResolvedValue(undefined);
-    buttonIn(row('conn-outlook'), 'Disconnect').click();
+    buttonIn(row('conn-outlook'), 'Delete').click();
     await settle();
-    buttonIn(bodyFind('[data-disconnect-dialog]')!, 'Disconnect').click();
+    buttonIn(bodyFind('[data-disconnect-dialog]')!, 'Delete').click();
     await settle();
 
-    expect(disconnectConnection).toHaveBeenCalledWith('conn-outlook');
+    expect(disconnectConnection).toHaveBeenCalledWith('conn-outlook', false);
     expect(bodyFind('[data-disconnect-refusal]')).toBeNull();
 
     wrapper.unmount();

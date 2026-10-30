@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import FieldHelp from './FieldHelp.vue';
 import { computed, ref, watch } from 'vue';
-import { addMailbox } from '../api/client';
+import { addMailbox, editMailbox } from '../api/client';
 import type { Connection, MailboxPreset, MailSecurity, MailServer } from '../api/types';
 import { appPasswordWarning } from '../lib/appPasswordShape';
 import { mailboxHint } from '../lib/mailboxHints';
@@ -25,6 +25,11 @@ import { mailboxHint } from '../lib/mailboxHints';
  * THE APP PASSWORD IS WRITE-ONLY: typed, sent once, cleared once saved, never filled from anything.
  * A saved mailbox says only that its password is set. One not shaped like the provider's app password
  * gets a plain warning under the field; Save stays allowed (`appPasswordWarning`).
+ *
+ * EDITING (`connection`): the same form, filled from the mailbox - its address, login and servers,
+ * never its password - for Admin -> Connections' Edit. Save logs in with what is shown and, only when
+ * that works, stores it under the same name, so every team and member using it gets it at its next
+ * run. The app password left empty keeps the stored one; the name is renamed elsewhere.
  */
 const props = withDefaults(defineProps<{
   presets: MailboxPreset[];
@@ -43,7 +48,9 @@ const props = withDefaults(defineProps<{
    * the form instead, Microsoft's among them, so there is one row to choose from (`false` there).
    */
   chooser?: boolean;
-}>(), { advanced: false, servers: true, chooser: true });
+  /** Editing: the mailbox whose settings are changed. */
+  connection?: Connection | null;
+}>(), { advanced: false, servers: true, chooser: true, connection: null });
 const emit = defineEmits<{
   /** Gmail through a Google app of one's own, instead. */
   advanced: [];
@@ -91,6 +98,22 @@ function fill(id: string) {
 
 watch(() => props.preset, fill, { immediate: true });
 
+const editing = computed(() => props.connection !== null);
+
+/** Editing: the mailbox's own address, login and servers over the preset's. */
+watch(
+  () => props.connection?.id,
+  () => {
+    const mailbox = props.connection;
+    if (!mailbox) return;
+    account.value = mailbox.account;
+    username.value = mailbox.username && mailbox.username !== mailbox.account ? mailbox.username : '';
+    if (mailbox.imap) [imapHost.value, imapPort.value, imapSecurity.value] = [mailbox.imap.host, String(mailbox.imap.port), mailbox.imap.security];
+    if (mailbox.smtp) [smtpHost.value, smtpPort.value, smtpSecurity.value] = [mailbox.smtp.host, String(mailbox.smtp.port), mailbox.smtp.security];
+  },
+  { immediate: true },
+);
+
 function server(host: string, port: string, security: MailSecurity): MailServer {
   return { host: host.trim(), port: Number(port.trim()), security };
 }
@@ -100,7 +123,7 @@ const portProblem = (port: string) => (port.trim() === '' || /^\d{1,5}$/.test(po
 const ready = computed(
   () =>
     account.value.trim() !== ''
-    && password.value !== ''
+    && (password.value !== '' || editing.value)
     && imapHost.value.trim() !== ''
     && smtpHost.value.trim() !== ''
     && /^\d{1,5}$/.test(imapPort.value.trim())
@@ -113,15 +136,25 @@ async function save() {
   busy.value = true;
   sentence.value = '';
   try {
-    const answer = await addMailbox({
-      preset: presetId.value,
-      name: name.value.trim() || null,
-      account: account.value.trim(),
-      username: username.value.trim() || null,
-      password: password.value,
-      imap: server(imapHost.value, imapPort.value, imapSecurity.value),
-      smtp: server(smtpHost.value, smtpPort.value, smtpSecurity.value),
-    });
+    const imap = server(imapHost.value, imapPort.value, imapSecurity.value);
+    const smtp = server(smtpHost.value, smtpPort.value, smtpSecurity.value);
+    const answer = editing.value
+      ? await editMailbox(props.connection!.id, {
+        account: account.value.trim(),
+        username: username.value.trim() || account.value.trim(),
+        ...(password.value === '' ? {} : { password: password.value }),
+        imap,
+        smtp,
+      })
+      : await addMailbox({
+        preset: presetId.value,
+        name: name.value.trim() || null,
+        account: account.value.trim(),
+        username: username.value.trim() || null,
+        password: password.value,
+        imap,
+        smtp,
+      });
     password.value = '';
     connected.value = true;
     sentence.value = answer.sentence;
@@ -190,6 +223,7 @@ defineExpose({ save, ready, busy, connected, typed, presetId });
         label="App password"
         autocomplete="new-password"
         spellcheck="false"
+        :hint="editing ? 'Set. Leave empty to keep it, or type a new one to replace it.' : undefined"
       >
         <template #append><FieldHelp text="Stored encrypted and never shown again." /></template>
       </q-input>
@@ -229,7 +263,7 @@ defineExpose({ save, ready, busy, connected, typed, presetId });
       </div>
 
       <q-input
-        v-if="servers"
+        v-if="servers && !editing"
         v-model="name"
         outlined
         dense

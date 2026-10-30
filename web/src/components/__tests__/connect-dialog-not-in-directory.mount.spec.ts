@@ -138,6 +138,7 @@ async function chooseMicrosoft() {
   await mountDialog(ConnectionsDialog, {});
   await settle();
   await click(button('Add connection'));
+  await click(bodyFind('[data-connection-kind="oauth"]'));
   await click(bodyFind('[data-connect-service="microsoft"]'));
   await click(button('Next'));
 }

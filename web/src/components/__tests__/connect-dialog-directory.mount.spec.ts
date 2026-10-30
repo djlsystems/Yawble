@@ -108,6 +108,7 @@ async function click(element: Element | null) {
 /** Add connection, then Microsoft, then Next: with the instance's app, straight to Sign in. */
 async function microsoftSignIn() {
   await click(button('Add connection'));
+  await click(bodyFind('[data-connection-kind="oauth"]'));
   await click(bodyFind('[data-connect-service="microsoft"]'));
   await click(button('Next'));
   expect(bodyFind('[data-connect-step]')?.getAttribute('data-connect-step')).toBe('signin');

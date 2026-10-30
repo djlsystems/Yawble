@@ -198,20 +198,32 @@ const ticked = (scope: string) => scopeLine(scope).querySelector('[role="checkbo
 /** Add connection, then Google: the first step with Google's needs read. */
 async function chooseGoogle() {
   await click(button('Add connection'));
+  await click(bodyFind('[data-connection-kind="oauth"]'));
   await click(bodyFind('[data-connect-service="google"]'));
 }
 
 describe('Add connection', () => {
-  it('sits at the top of Admin > Connections and opens the guided dialog at its first step', async () => {
+  it('sits at the top of Admin > Connections and opens the guided dialog at its first step, the kind', async () => {
     const wrapper = await mountConnections();
 
     expect(bodyFind('[data-guided-connect]')).toBeNull();
     await click(button('Add connection'));
 
     expect(bodyFind('[data-guided-connect]')).not.toBeNull();
+    expect(step()).toBe('kind');
+    expect([...document.body.querySelectorAll('[data-connection-kind]')].map((tile) => tile.getAttribute('data-connection-kind')))
+      .toEqual(['oauth', 'imap', 'website', 'apikey', 'login']);
+
+    // A sign-in: only Microsoft and Google, no mailbox.
+    await click(bodyFind('[data-connection-kind="oauth"]'));
     expect(step()).toBe('service');
     expect(bodyFind('[data-connect-service="google"]')!.textContent).toContain('Google');
     expect(bodyFind('[data-connect-service="microsoft"]')!.textContent).toContain('Microsoft');
+    expect(bodyFind('[data-mailbox-preset]')).toBeNull();
+
+    // Back to the kinds.
+    await click(button('Back'));
+    expect(step()).toBe('kind');
 
     wrapper.unmount();
   });

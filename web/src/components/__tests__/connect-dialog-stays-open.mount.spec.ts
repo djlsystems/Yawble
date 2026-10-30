@@ -56,11 +56,13 @@ beforeEach(async () => {
 
 afterEach(resetBody);
 
-/** Admin, Connections, then Add connection, Gmail, with an address and part of the app password typed. */
+/** Admin, Connections, then Add connection, Mailbox, Gmail, with an address and part of the app password typed. */
 async function typing() {
   const wrapper = await mountDialog(ConnectionsDialog, {}, { global: { plugins: [router] } });
   await settle();
   button('Add connection').click();
+  await settle();
+  bodyFind('[data-connection-kind="imap"]')!.click();
   await settle();
   bodyFind('[data-mailbox-preset="gmail"]')!.click();
   await settle();
@@ -107,6 +109,8 @@ describe('Add connection, while a person types', () => {
     const wrapper = await mountDialog(ConnectionsDialog, {}, { global: { plugins: [router] } });
     await settle();
     button('Add connection').click();
+    await settle();
+    bodyFind('[data-connection-kind="imap"]')!.click();
     await settle();
     bodyFind('[data-mailbox-preset="gmail"]')!.click();
     await settle();

@@ -166,6 +166,7 @@ async function click(element: Element | null) {
 
 async function choose(service: 'microsoft' | 'google') {
   await click(button('Add connection'));
+  await click(bodyFind('[data-connection-kind="oauth"]'));
   await click(bodyFind(`[data-connect-service="${service}"]`));
 }
 

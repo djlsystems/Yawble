@@ -203,6 +203,7 @@ const audience = (value: string) => bodyFind(`[data-audience="${value}"]`);
 /** Add connection, then Microsoft, then Next: the set-up step when its client is not set up. */
 async function chooseMicrosoft() {
   await click(button('Add connection'));
+  await click(bodyFind('[data-connection-kind="oauth"]'));
   await click(bodyFind('[data-connect-service="microsoft"]'));
   await click(button('Next'));
 }
@@ -229,6 +230,7 @@ describe('Microsoft in Add connection', () => {
   it('is guided like Google, not handed to Advanced', async () => {
     const wrapper = await mountConnections();
     await click(button('Add connection'));
+    await click(bodyFind('[data-connection-kind="oauth"]'));
     await click(bodyFind('[data-connect-service="microsoft"]'));
 
     expect(bodyFind('[data-guided-connect]')).not.toBeNull();
@@ -514,7 +516,7 @@ describe("Microsoft's sign-in step", () => {
     wrapper.unmount();
   });
 
-  it('says a sign-in picked back up was started earlier, and Back lets it go so the dialog opens on the service', async () => {
+  it('says a sign-in picked back up was started earlier, and Back lets it go so the dialog opens at its first step', async () => {
     const wrapper = await mountConnections();
     pinClock();
     listOpenConnectionFlows.mockResolvedValue([
@@ -529,9 +531,9 @@ describe("Microsoft's sign-in step", () => {
     expect(step()).toBe('service');
     await click(bodyFind('[data-guided-connect] button[aria-label="Close"]'));
 
-    // The Host still lists it as waiting; it is not picked up again.
+    // The Host still lists it as waiting; it is not picked up again: Add connection opens at its first step.
     await click(button('Add connection'));
-    expect(step()).toBe('service');
+    expect(step()).toBe('kind');
     expect(bodyFind('[data-device-resumed]')).toBeNull();
 
     wrapper.unmount();

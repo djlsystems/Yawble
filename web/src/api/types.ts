@@ -3329,9 +3329,14 @@ export interface Connection {
   name: string
   provider: string
   /** `imap` for a mailbox with an app password; its `provider` is `imap` too. */
-  providerKind: ConnectionProviderKind | 'imap'
-  /** Absent from a Host older than mailbox connections, which held OAuth accounts only. */
-  kind?: 'oauth' | 'imap'
+  providerKind: ConnectionProviderKind | 'imap' | 'website' | 'apikey' | 'login'
+  /**
+   * `oauth` (a sign-in at Google, Microsoft or a custom provider), `imap` (a mailbox with an app
+   * password), `website`, `apikey` or `login` (a username and password). Absent from a Host older
+   * than mailbox connections, which held OAuth accounts only.
+   */
+  kind?: ConnectionKind
+  /** What the connection signs in as: a login's username, an API key's first unmasked field; empty for a website. */
   account: string
   scopes: string[]
   /**
@@ -3350,8 +3355,10 @@ export interface Connection {
   username?: string | null
   imap?: MailServer | null
   smtp?: MailServer | null
-  /** The preset it was added with (`gmail`, `icloud`, `yahoo`, `other`), or null. */
+  /** The preset it was added with: a mailbox's (`gmail`, `icloud`, `yahoo`, `other`) or an API key's (`stripe`, ...), or null. */
   preset?: string | null
+  /** A website's, API key's or login's fields. A masked one says only whether it is `set`, never its value. */
+  fields?: CredentialField[] | null
   /** A mailbox says only whether its app password is set. No route ever answers the password. */
   passwordSet?: boolean | null
   /**
@@ -3359,6 +3366,62 @@ export interface Connection {
    * the provider's. Absent from a Host older than it.
    */
   tenant?: string | null
+}
+
+/** What a connection is, as the wizard's first step offers it. */
+export type ConnectionKind = 'oauth' | 'imap' | 'website' | 'apikey' | 'login'
+
+/** One field of a website, API key or login connection, as every answer shows it. */
+export interface CredentialField {
+  name: string
+  label: string
+  masked: boolean
+  /** An unmasked field's value; always null for a masked one. */
+  value: string | null
+  set: boolean
+}
+
+/** A field a credential preset names. */
+export interface CredentialPresetField {
+  name: string
+  label: string
+  masked: boolean
+  required: boolean
+}
+
+/** `GET /api/connections/credentials/presets`: the forms a website, API key or login is made from. */
+export interface CredentialPreset {
+  kind: 'website' | 'apikey' | 'login'
+  /** An API key's service (`stripe`, `namecheap`, `twilio`, `other`); null for a kind with one form. */
+  id: string | null
+  name: string
+  /** API key's Other: the person names each field and whether it is masked. */
+  namedFields: boolean
+  fields: CredentialPresetField[]
+}
+
+/** A field as a credential write sends it. On an edit a null `value` keeps the stored one. */
+export interface CredentialFieldValue {
+  name: string
+  value: string | null
+  masked?: boolean
+}
+
+/** `POST /api/connections/credentials`. Masked values are sent once and never come back. */
+export interface CredentialAddRequest {
+  kind: 'website' | 'apikey' | 'login'
+  preset?: string | null
+  name: string
+  fields: CredentialFieldValue[]
+}
+
+/** `PUT /api/connections/{id}/mailbox`: what is given replaces what is stored. */
+export interface MailboxEditRequest {
+  account?: string
+  username?: string
+  password?: string
+  imap?: MailServer
+  smtp?: MailServer
 }
 
 /** One mail server of a mailbox connection: where it is and how the connection is secured. */

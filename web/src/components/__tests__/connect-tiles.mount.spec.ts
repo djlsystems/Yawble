@@ -106,6 +106,7 @@ async function openAdd() {
   const wrapper = await mountDialog(ConnectionsDialog);
   await settle();
   await click(button('Add connection'));
+  await click(bodyFind('[data-connection-kind="imap"]'));
   return wrapper;
 }
 

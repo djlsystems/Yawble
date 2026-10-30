@@ -1,4 +1,4 @@
-import type { Connection, ConnectionProvider, ConnectionSlot, MailServer } from '../api/types';
+import type { Connection, ConnectionKind, ConnectionProvider, ConnectionSlot, CredentialPreset, MailServer } from '../api/types';
 import { localTime, wireInstant } from './localTime';
 
 /**
@@ -93,7 +93,85 @@ export function providerName(id: string, providers: ConnectionProvider[]): strin
   if (id === 'google') return 'Google';
   if (id === 'microsoft') return 'Microsoft';
   if (id === 'imap') return 'Mailbox (IMAP)';
+  if (id === 'login') return 'Username and password';
+  if (id === 'apikey') return 'API key';
+  if (id === 'website') return 'Website';
   return id;
+}
+
+/**
+ * THE KINDS OF CONNECTION, in the order Add connection offers them: a sign-in at Microsoft or Google,
+ * a mailbox with an app password, a website, an API key, a username and password. Each has its own
+ * fields and nothing else.
+ */
+export const ConnectionKinds: readonly { id: ConnectionKind; name: string; wayIn: string }[] = [
+  { id: 'oauth', name: 'Sign-in', wayIn: 'Microsoft or Google' },
+  { id: 'imap', name: 'Mailbox', wayIn: 'Gmail, iCloud, Yahoo and others, with an app password' },
+  { id: 'website', name: 'Website', wayIn: 'A website a member signs in to' },
+  { id: 'apikey', name: 'API key', wayIn: 'Stripe, Namecheap, Twilio or another service' },
+  { id: 'login', name: 'Username and password', wayIn: 'For anything else' },
+];
+
+/** A connection's kind: the Host's `kind`, or `oauth` from a Host older than kinds. */
+export function kindOf(connection: Pick<Connection, 'kind'>): ConnectionKind {
+  return connection.kind ?? 'oauth';
+}
+
+/** "Sign-in", "Mailbox", "API key", ...: a connection's kind as the Connections screen names it. */
+export function kindLabel(connection: Pick<Connection, 'kind'>): string {
+  return ConnectionKinds.find((kind) => kind.id === kindOf(connection))?.name ?? 'Sign-in';
+}
+
+/** The kinds a slot takes, as Add connection offers them: its OAuth providers are one Sign-in. */
+export function slotKinds(providers: readonly string[]): ConnectionKind[] {
+  return ConnectionKinds.map((kind) => kind.id).filter((kind) =>
+    kind === 'oauth' ? providers.some((id) => id === 'google' || id === 'microsoft') : providers.includes(kind));
+}
+
+/** "API key", "username and password", "website": in a sentence. */
+export function credentialKindWords(kind: 'website' | 'apikey' | 'login'): string {
+  return kind === 'apikey' ? 'API key' : kind === 'login' ? 'username and password' : 'website';
+}
+
+/** One field of a credential form: a preset's, or one Other names, with what is typed in it. */
+export interface CredentialRow {
+  name: string;
+  label: string;
+  masked: boolean;
+  required: boolean;
+  /** What is typed. A masked one starts empty, even when a value is set. */
+  value: string;
+  /** Editing: whether the connection has a value for it. */
+  set: boolean;
+  /** API key's Other: the person names the field and chooses whether it is masked. */
+  named: boolean;
+  /** Editing: an unmasked field's stored value, so leaving it as it was is not a change. */
+  original?: string;
+}
+
+/**
+ * The rows of a credential form: the preset's fields, or, for Other, the connection's own (none to
+ * start, for a new one). An unmasked field being edited starts with its value; a masked one never does.
+ */
+export function credentialRows(preset: CredentialPreset, connection: Pick<Connection, 'fields'> | null = null): CredentialRow[] {
+  const stored = connection?.fields ?? [];
+  if (preset.namedFields) {
+    return stored.map((field) => ({
+      name: field.name,
+      label: field.label,
+      masked: field.masked,
+      required: true,
+      value: field.masked ? '' : field.value ?? '',
+      set: field.set,
+      named: true,
+      original: field.masked ? '' : field.value ?? '',
+    }));
+  }
+  return preset.fields.map((spec) => {
+    const field = stored.find((candidate) => candidate.name === spec.name);
+    const value = spec.masked ? '' : field?.value ?? '';
+    return { name: spec.name, label: spec.label, masked: spec.masked, required: spec.required, value, set: field?.set ?? false, named: false, original: value };
+  });
 }
 
 /** Whether a slot takes connections of this connection's provider. `custom` takes any custom one. */
@@ -144,7 +222,9 @@ export function scopeRefusal(slotName: string, connection: Connection, missing: 
 
 /** "'Work mail' (person@example.com)", or just "'person@example.com'" when the name IS the account: the Host's `Named`. */
 export function named(connection: Pick<Connection, 'name' | 'account'>): string {
-  return connection.name === connection.account ? `'${connection.name}'` : `'${connection.name}' (${connection.account})`;
+  return connection.account === '' || connection.name === connection.account
+    ? `'${connection.name}'`
+    : `'${connection.name}' (${connection.account})`;
 }
 
 /** The sentence for a binding naming a connection that no longer exists. */
@@ -221,11 +301,12 @@ export function usedByLabels(connection: Pick<Connection, 'usedBy'>): string[] {
  * none of it.
  */
 /**
- * The providers of a slot Add connection connects: Google, Microsoft and a mailbox (`imap`). A custom
- * provider's account is connected in Admin → Connections.
+ * The providers of a slot Add connection connects: Google, Microsoft, a mailbox (`imap`), a username
+ * and password (`login`) and an API key (`apikey`). A custom provider's account is connected in
+ * Admin → Connections.
  */
 export function guidedProviders(spec: Pick<ConnectionSlot, 'providers'>): string[] {
-  return spec.providers.filter((id) => id === 'google' || id === 'microsoft' || id === 'imap');
+  return spec.providers.filter((id) => id === 'google' || id === 'microsoft' || id === 'imap' || id === 'login' || id === 'apikey');
 }
 
 export type CallbackOutcome =

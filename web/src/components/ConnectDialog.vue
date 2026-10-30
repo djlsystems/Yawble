@@ -4,6 +4,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import {
   getConnectionNeeds,
   listConnectionProviders,
+  listCredentialPresets,
   listConnections,
   listMailboxPresets,
   listOpenConnectionFlows,
@@ -21,7 +22,9 @@ import type {
   ConnectionNeeds,
   ConnectionOpenFlow,
   ConnectionProvider,
+  ConnectionKind,
   ConnectionProviderSave,
+  CredentialPreset,
   MailboxPreset,
   MicrosoftAudience,
 } from '../api/types';
@@ -29,6 +32,7 @@ import { currentOrigin, goTo } from '../lib/browserNavigation';
 import { copyText } from '../lib/clipboard';
 import {
   type CallbackOutcome,
+  ConnectionKinds,
   directoryRefusal,
   googleClientIdProblem,
   guideLink,
@@ -37,6 +41,7 @@ import {
   redirectUriWarning,
   refusalWords,
   rememberGuidedConnect,
+  slotKinds,
   UsernameIncorrectHint,
 } from '../lib/connections';
 import { listOf } from '../lib/agentInstall';
@@ -44,12 +49,19 @@ import { productCli } from '../presentation/product';
 import { awaitProviderReturn, newSigninTag, signinTabAddress } from '../lib/providerReturn';
 import { mailboxHint, OutlookHint, setupTime } from '../lib/mailboxHints';
 import MailboxForm from './MailboxForm.vue';
+import CredentialForm from './CredentialForm.vue';
 import CodeSignIn from './CodeSignIn.vue';
 import DirectoryField from './DirectoryField.vue';
 import { letGoSignIns } from '../lib/letGoSignIns';
 
 /**
  * ADD CONNECTION: connecting an account for a person who has never registered an OAuth app.
+ *
+ * 0. KIND - from Admin -> Connections, first: a Sign-in (Microsoft or Google), a Mailbox, a Website,
+ *    an API key or a Username and password. Then only that kind's fields: a sign-in goes on to the
+ *    service step with only Microsoft and Google, a mailbox to its preset tiles (Microsoft's among
+ *    them, its mailbox being reached by its sign-in), the other three to `CredentialForm`. From a slot, the kinds that slot takes: a slot taking only sign-ins and
+ *    mailboxes opens at the service step as it always has.
  *
  * 1. SERVICE - Google or Microsoft, and what the installed plugins will ask of it, in words, each
  *    line naming the plugin that wants it. All are ticked; any may be unticked. Nothing is typed:
@@ -134,9 +146,69 @@ const emit = defineEmits<{
   connected: [connection: Connection];
 }>();
 
-type Step = 'service' | 'setup' | 'signin' | 'result' | 'mailbox';
+type Step = 'kind' | 'service' | 'setup' | 'signin' | 'result' | 'mailbox' | 'credential';
 
 const step = ref<Step>('service');
+
+// --- 0. Kind --------------------------------------------------------------------------------------
+
+/** The kind chosen at the first step; null where there is no kind step (a slot of sign-ins and mailboxes). */
+const kind = ref<ConnectionKind | null>(null);
+
+/** The kinds offered: every kind from Admin -> Connections, a slot's own from a slot. */
+const offeredKinds = computed(() => {
+  const ids = props.need ? slotKinds(props.need.providers) : ConnectionKinds.map((entry) => entry.id);
+  return ConnectionKinds.filter((entry) => ids.includes(entry.id));
+});
+
+const isCredentialKind = (id: ConnectionKind | null): id is 'website' | 'apikey' | 'login' => id === 'website' || id === 'apikey' || id === 'login';
+
+/** Whether the dialog opens at the kind step: always from Admin -> Connections; from a slot only when it takes a credential kind. */
+const kindStep = computed(() => !props.need || offeredKinds.value.some((entry) => isCredentialKind(entry.id)));
+
+const credentialPresets = ref<CredentialPreset[]>([]);
+const credentialForm = ref<InstanceType<typeof CredentialForm> | null>(null);
+const credentialSaved = ref(false);
+
+async function readCredentialPresets(seq: number) {
+  try {
+    const read = await listCredentialPresets();
+    if (seq === opening) credentialPresets.value = read;
+  } catch {
+    // An older Host: no website, API key or login to offer.
+  }
+}
+
+function chooseKind(id: ConnectionKind) {
+  kind.value = id;
+  providerId.value = null;
+  needs.value = null;
+  mailboxPreset.value = '';
+  credentialSaved.value = false;
+  problem.value = '';
+  if (isCredentialKind(id)) {
+    step.value = 'credential';
+    return;
+  }
+  step.value = 'service';
+  // A sign-in from a slot that takes one provider goes on to it, as the service step always has.
+  if (id === 'oauth' && services.value.length === 1) void choose(services.value[0]!.id);
+}
+
+function backToKind() {
+  kind.value = null;
+  providerId.value = null;
+  needs.value = null;
+  mailboxPreset.value = '';
+  problem.value = '';
+  step.value = 'kind';
+}
+
+function credentialConnected(connection: Connection) {
+  credentialSaved.value = true;
+  emit('changed');
+  emit('connected', connection);
+}
 const providerId = ref<string | null>(null);
 const needs = ref<ConnectionNeeds | null>(null);
 const needsLoading = ref(false);
@@ -174,7 +246,9 @@ watch(open, (showing) => {
     return;
   }
 
-  step.value = 'service';
+  step.value = kindStep.value ? 'kind' : 'service';
+  kind.value = null;
+  credentialSaved.value = false;
   mailboxPreset.value = '';
   mailboxSaved.value = false;
   providerId.value = null;
@@ -198,13 +272,14 @@ watch(open, (showing) => {
 /** A waiting sign-in with a code is picked back up; else a slot taking one provider skips the service step. */
 async function begin(seq: number) {
   void readPresets(seq);
+  void readCredentialPresets(seq);
   let flows: ConnectionOpenFlow[] = [];
   try {
     flows = await listOpenConnectionFlows();
   } catch {
     // Nothing to pick up: the dialog starts at the service, as it would have.
   }
-  if (seq !== opening || !open.value || step.value !== 'service' || providerId.value !== null) return;
+  if (seq !== opening || !open.value || (step.value !== 'service' && step.value !== 'kind') || providerId.value !== null || kind.value !== null) return;
 
   const waiting = flows.find(
     (flow) =>
@@ -216,6 +291,13 @@ async function begin(seq: number) {
   );
   if (waiting) {
     resumeDevice(waiting);
+    return;
+  }
+
+  // A slot that takes one kind, and that a website, an API key or a login: its form at once.
+  if (step.value === 'kind') {
+    const single = offeredKinds.value.length === 1 ? offeredKinds.value[0]!.id : null;
+    if (props.need && single) chooseKind(single);
     return;
   }
 
@@ -245,7 +327,8 @@ const mailboxSaved = ref(false);
 const mailboxForm = ref<InstanceType<typeof MailboxForm> | null>(null);
 
 /** Offered unless the slot this was started from does not take a mailbox. */
-const mailboxTiles = computed(() => (!props.need || props.need.providers.includes('imap') ? presets.value : []));
+const mailboxTiles = computed(() =>
+  (kind.value === null || kind.value === 'imap') && (!props.need || props.need.providers.includes('imap')) ? presets.value : []);
 
 async function readPresets(seq: number) {
   try {
@@ -265,6 +348,10 @@ interface Tile {
   service?: string;
 }
 
+/**
+ * A sign-in service is on offer. A Mailbox keeps Microsoft's tile among the mailbox tiles: Outlook and
+ * Microsoft 365 take no app password, so their mailbox is reached by Microsoft's sign-in.
+ */
 const offers = (id: string) => services.value.some((service) => service.id === id);
 
 /** The provider tiles, in the plan's order: Gmail, Outlook, then the Host's other presets. */
@@ -598,6 +685,7 @@ async function startDevice() {
 
 /** A sign-in with a code the Host still holds, shown again as it was: its code, link and countdown. */
 function resumeDevice(flow: ConnectionOpenFlow) {
+  if (kindStep.value) kind.value = 'oauth';
   providerId.value = flow.provider;
   device.value = { flowId: flow.flowId, userCode: flow.userCode, verificationUri: flow.verificationUri, expiresAt: flow.expiresAt };
   deviceEnded.value = null;
@@ -710,6 +798,7 @@ async function finish() {
 const typed = computed(
   () =>
     (mailboxForm.value?.typed ?? false)
+    || (credentialForm.value?.typed ?? false)
     || [projectId, clientId, clientSecret, tenantId, directory, resultName].some((field) => field.value.trim() !== ''),
 );
 
@@ -735,7 +824,35 @@ const stepLabels = computed(() => [
         <q-btn v-close-popup flat round dense icon="close" aria-label="Close" />
       </q-card-section>
 
-      <q-card-section v-if="step !== 'result' && step !== 'mailbox'" class="q-py-xs">
+      <!-- 0. KIND: what is connected, then only that kind's fields -->
+      <q-card-section v-if="step === 'kind'" data-connect-step="kind" class="q-gutter-y-md">
+        <div>What do you want to connect?</div>
+        <div class="connect-tiles" data-kind-tiles>
+          <q-btn
+            v-for="entry in offeredKinds"
+            :key="entry.id"
+            no-caps
+            align="left"
+            class="connect-tile"
+            outline
+            :data-connection-kind="entry.id"
+            @click="chooseKind(entry.id)"
+          >
+            <div class="column items-start">
+              <div class="text-weight-medium" data-tile-name>{{ entry.name }}</div>
+              <div class="text-caption" data-tile-way>{{ entry.wayIn }}</div>
+            </div>
+          </q-btn>
+        </div>
+      </q-card-section>
+
+      <!-- A WEBSITE, AN API KEY, A USERNAME AND PASSWORD: the kind's own form -->
+      <q-card-section v-else-if="step === 'credential' && isCredentialKind(kind)" data-connect-step="credential" class="q-gutter-y-md">
+        <div class="text-weight-medium">{{ offeredKinds.find((entry) => entry.id === kind)?.name }}</div>
+        <CredentialForm ref="credentialForm" :presets="credentialPresets" :kind="kind" @saved="credentialConnected" />
+      </q-card-section>
+
+      <q-card-section v-if="step !== 'result' && step !== 'mailbox' && step !== 'kind' && step !== 'credential'" class="q-py-xs">
         <ol class="connect-steps text-caption">
           <li
             v-for="(item, index) in stepLabels"
@@ -1142,8 +1259,27 @@ const stepLabels = computed(() => [
       <q-card-section v-if="problem" class="text-negative q-pt-none" data-guided-problem>{{ problem }}</q-card-section>
 
       <q-card-actions align="right">
-        <template v-if="step === 'service'">
+        <template v-if="step === 'kind'">
           <q-btn v-close-popup flat no-caps label="Cancel" />
+        </template>
+        <template v-else-if="step === 'credential'">
+          <q-btn v-if="credentialSaved" v-close-popup color="primary" no-caps label="Finish" />
+          <template v-else>
+            <q-btn v-if="offeredKinds.length > 1" flat no-caps label="Back" @click="backToKind" />
+            <q-btn
+              color="primary"
+              no-caps
+              label="Save"
+              data-credential-save
+              :loading="credentialForm?.busy ?? false"
+              :disable="!(credentialForm?.ready ?? false) || (credentialForm?.busy ?? false)"
+              @click="credentialForm?.save()"
+            />
+          </template>
+        </template>
+        <template v-else-if="step === 'service'">
+          <q-btn v-if="kindStep" flat no-caps label="Back" @click="backToKind" />
+          <q-btn v-else v-close-popup flat no-caps label="Cancel" />
           <q-btn
             color="primary"
             no-caps
