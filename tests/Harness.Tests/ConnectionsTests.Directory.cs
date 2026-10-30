@@ -120,7 +120,7 @@ public sealed partial class ConnectionsTests
     }
 
     [Fact]
-    public async Task Reconnect_keeps_the_directory_and_a_reconnect_as_another_account_is_refused_and_changes_nothing()
+    public async Task Reconnect_keeps_the_directory_and_a_reconnect_as_another_account_is_accepted_in_the_directory_named()
     {
         await SetUpMicrosoftAsync();
         var id = await ConnectInDirectoryAsync(TenantGuid);
@@ -135,23 +135,19 @@ public sealed partial class ConnectionsTests
         var reconnected = JsonDocument.Parse(Assert.Single(await TenantDetailsAsync("connections.reconnected"))).RootElement;
         Assert.Equal(TenantGuid, reconnected.GetProperty("tenant").GetString());
 
-        // Another account: refused, and nothing about the connection changes.
-        var before = Assert.Single((await GetAsync("/api/connections")).EnumerateArray()).GetRawText();
+        // Another account, in the directory named: accepted under the same name and id, and moved there.
+        var before = Assert.Single((await GetAsync("/api/connections")).EnumerateArray());
         _provider.Account = "someone-else@example.com";
         var other = (await StartDeviceInAsync(Directory2, reconnectId: id)).GetProperty("flowId").GetString()!;
-        _provider.DeviceAnswers.Writer.TryWrite("approve");
-        Assert.Contains("You signed in as someone-else@example.com", (await FlowAsync(other, until: "refused")).GetProperty("sentence").GetString());
-        Assert.Equal(before, Assert.Single((await GetAsync("/api/connections")).EnumerateArray()).GetRawText());
-        Assert.Equal([TenantGuid], await TenantColumnAsync("connections"));
-        Assert.Single(await TenantDetailsAsync("connections.reconnected"));
-
-        // Named: the reconnect moves it to that directory.
-        _provider.Account = Account;
-        var moved = (await StartDeviceInAsync(Directory2, reconnectId: id)).GetProperty("flowId").GetString()!;
         Assert.Equal(At(Directory2, "devicecode"), _provider.DeviceStarts[^1].Url);
         _provider.DeviceAnswers.Writer.TryWrite("approve");
-        await FlowAsync(moved, until: "done");
+        await FlowAsync(other, until: "done");
+        var after = Assert.Single((await GetAsync("/api/connections")).EnumerateArray());
+        Assert.Equal((id, before.GetProperty("name").GetString(), "someone-else@example.com"),
+            (after.GetProperty("id").GetString(), after.GetProperty("name").GetString(), after.GetProperty("account").GetString()));
         Assert.Equal([Directory2], await TenantColumnAsync("connections"));
+        var moved = JsonDocument.Parse((await TenantDetailsAsync("connections.reconnected"))[^1]).RootElement;
+        Assert.Equal((Directory2, Account), (moved.GetProperty("tenant").GetString(), moved.GetProperty("fromAccount").GetString()));
     }
 
     [Fact]

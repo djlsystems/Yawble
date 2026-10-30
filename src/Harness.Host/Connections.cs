@@ -1175,13 +1175,14 @@ public sealed class Connections(
     public async Task<MailboxAnswer> AddMailboxAsync(ConnectionActor actor, AddMailbox request, CancellationToken ct = default)
     {
         if (MailboxRefusal(request) is { } refusal) return new MailboxAnswer(StatusCodes.Status400BadRequest, null, refusal, null);
-        if (mail is null) return new MailboxAnswer(StatusCodes.Status400BadRequest, null, "This Host cannot log in to mailboxes.", null);
-
-        var account = request.Account!.Trim();
         if (!string.IsNullOrWhiteSpace(request.Name) && await store.NameTakenAsync(request.Name.Trim(), null, ct))
         {
             return new MailboxAnswer(StatusCodes.Status409Conflict, null, NameTaken(request.Name.Trim()), null);
         }
+
+        if (mail is null) return new MailboxAnswer(StatusCodes.Status400BadRequest, null, "This Host cannot log in to mailboxes.", null);
+
+        var account = request.Account!.Trim();
 
         var settings = new MailboxSettings(
             string.IsNullOrWhiteSpace(request.Username) ? account : request.Username.Trim(),

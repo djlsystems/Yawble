@@ -68,6 +68,12 @@ public sealed partial class ConnectionsTests : IAsyncLifetime
                 """{"mail":{"description":"The mailbox.","providers":["google","microsoft"],"scopes":{"google":["MAIL_SCOPE"]},"required":true}}"""
                     .Replace("MAIL_SCOPE", MailScope))));
 
+        // A PLUGIN WHOSE ONE SLOT TAKES A USERNAME AND PASSWORD OR AN API KEY, writing its request alike.
+        PluginInstall.Write(_dataRoot, "keeper",
+            script: $"req=$(cat); printf '%s\\n' \"$req\" >> '{Requests}'; printf '%s\\n' \"$req\"; echo '{{\"t\":\"result\",\"ok\":true,\"output\":\"kept\"}}'",
+            manifest: PluginInstall.Manifest("keeper", edit: m => m["connections"] = JsonNode.Parse(
+                """{"login":{"description":"The account.","providers":["login","apikey"],"required":true}}""")));
+
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host => host
             .UseSetting("DataRoot", _dataRoot)
             .UseSetting("Logging:LogLevel:Default", "Warning")
@@ -338,19 +344,31 @@ public sealed partial class ConnectionsTests : IAsyncLifetime
         Assert.Equal(_provider.Issued[^1].Access, (string?)LastRequest()["connections"]!["mail"]!["accessToken"]);
     }
 
+    /// <summary>THE NAME IS THE KEY: a Reconnect that signs in as another account keeps the name and the
+    /// id, takes the new account and its tokens, and its tenant row names both accounts and no token.</summary>
     [Fact]
-    public async Task A_reconnect_that_signs_in_as_another_account_is_refused_and_changes_nothing()
+    public async Task A_reconnect_that_signs_in_as_another_account_is_accepted_under_the_same_name_and_id()
     {
         var id = await ConnectAsync();
+        await HireAsync("Inbox", id);
         var reconnect = await StartAsync([], reconnectId: id);
 
         _provider.Account = "someone-else@example.com";
         var location = await CallbackLocationAsync(reconnect.GetProperty("state").GetString()!);
 
-        Assert.Contains("connection=refused", location);
-        Assert.Contains("someone-else%40example.com", location);
+        Assert.Contains("connection=reconnected", location);
         var listed = Assert.Single((await GetAsync("/api/connections")).EnumerateArray());
-        Assert.Equal(Account, listed.GetProperty("account").GetString());
+        Assert.Equal((id, Account, "someone-else@example.com"),
+            (listed.GetProperty("id").GetString(), listed.GetProperty("name").GetString(), listed.GetProperty("account").GetString()));
+
+        var row = JsonDocument.Parse(Assert.Single(await TenantDetailsAsync(TenantActions.ConnectionReconnected))).RootElement;
+        Assert.Equal(("someone-else@example.com", Account), (row.GetProperty("account").GetString(), row.GetProperty("fromAccount").GetString()));
+        Assert.All(_provider.Issued, t => Assert.DoesNotContain(t.Access, row.GetRawText()));
+
+        // The member bound to the name gets the new account's token at its next run, with no prompt.
+        Assert.Equal(MessageTypes.Completed, (await TellAndAwaitAsync("Inbox")).Type);
+        Assert.Equal(_provider.Issued[^1].Access, (string?)LastRequest()["connections"]!["mail"]!["accessToken"]);
+        Assert.Equal("someone-else@example.com", (string?)LastRequest()["connections"]!["mail"]!["account"]);
     }
 
     // ---- binding ----------------------------------------------------------------------------------
@@ -993,22 +1011,22 @@ public sealed partial class ConnectionsTests : IAsyncLifetime
         return location;
     }
 
-    private async Task HireAsync(string name, string connectionId)
+    private async Task HireAsync(string name, string connectionId, string? team = null, string plugin = "mailer", string slot = "mail")
     {
-        var hired = await _person.PostAsJsonAsync($"/api/teams/{_team}/containers", new
+        var hired = await _person.PostAsJsonAsync($"/api/teams/{team ?? _team}/containers", new
         {
             name,
-            agent = "plugin:mailer",
-            connections = new Dictionary<string, string> { ["mail"] = connectionId },
+            agent = $"plugin:{plugin}",
+            connections = new Dictionary<string, string> { [slot] = connectionId },
         }, Ct);
         var body = await hired.Content.ReadAsStringAsync(Ct);
         _responses.Add(body);
         Assert.True(hired.StatusCode == HttpStatusCode.OK, body);
     }
 
-    private async Task<Message> TellAndAwaitAsync(string member)
+    private async Task<Message> TellAndAwaitAsync(string member, string? team = null)
     {
-        var who = new ContainerId(_team, member);
+        var who = new ContainerId(team ?? _team, member);
         var log = Services.GetRequiredService<IMessageLog>();
 
         async Task<IReadOnlyList<Message>> Rows() =>
@@ -1016,7 +1034,7 @@ public sealed partial class ConnectionsTests : IAsyncLifetime
 
         var after = (await Rows()).Select(m => m.Seq).DefaultIfEmpty(0).Max();
 
-        var told = await _person.PostAsJsonAsync($"/api/teams/{_team}/containers/{member}/tell", new { instruction = "read the mail" }, Ct);
+        var told = await _person.PostAsJsonAsync($"/api/teams/{who.Team}/containers/{member}/tell", new { instruction = "read the mail" }, Ct);
         Assert.True(told.IsSuccessStatusCode, await told.Content.ReadAsStringAsync(Ct));
 
         var deadline = DateTime.UtcNow.AddSeconds(30);

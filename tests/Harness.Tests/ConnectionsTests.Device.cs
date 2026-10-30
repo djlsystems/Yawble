@@ -95,18 +95,20 @@ public sealed partial class ConnectionsTests
         Assert.Contains(logger.Lines, l => l.Contains("symbolic link"));
     }
 
+    /// <summary>EVERY NAME IS ITS OWN: a second connection of one account, named by nobody, is called
+    /// "account (2)", so removing by the name takes exactly the one called it.</summary>
     [Fact]
-    public async Task Removing_by_a_name_two_connections_share_is_refused_naming_the_id_way()
+    public async Task Two_connections_of_one_account_have_their_own_names_and_removing_by_name_takes_the_one_called_it()
     {
         var first = await ConnectAsync();
         var second = await ConnectAsync();
         Assert.NotEqual(first, second);
+        Assert.Equal([Account, $"{Account} (2)"], (await GetAsync("/api/connections")).EnumerateArray().Select(c => c.GetProperty("name").GetString()));
 
         var removed = await ExchangeAsync(new { op = "remove", id = Account });
 
-        Assert.Equal(409, removed.GetProperty("status").GetInt32());
-        Assert.Contains("remove it by id", removed.GetProperty("error").GetString());
-        Assert.Equal(2, (await GetAsync("/api/connections")).GetArrayLength());
+        Assert.Equal(204, removed.GetProperty("status").GetInt32());
+        Assert.Equal(second, Assert.Single((await GetAsync("/api/connections")).EnumerateArray()).GetProperty("id").GetString());
     }
 
     // ---- sign in with a code (device flow) ----------------------------------------------------------
@@ -348,24 +350,42 @@ public sealed partial class ConnectionsTests
         Assert.DoesNotContain("U1-WXYZ", await response.Content.ReadAsStringAsync(Ct));
     }
 
+    /// <summary>
+    /// A MICROSOFT RECONNECT AS ANOTHER ACCOUNT, under the same name, with a member on each of two teams
+    /// bound to it: accepted, the id and name kept, and both members' next runs get the new account's
+    /// token with no prompt. The tenant row names both accounts, never a token.
+    /// </summary>
     [Fact]
-    public async Task A_device_reconnect_that_signs_in_as_another_account_is_refused_and_changes_nothing()
+    public async Task A_device_reconnect_as_another_microsoft_account_is_accepted_and_used_by_every_member_bound_to_it()
     {
         await SetUpMicrosoftAsync();
-        var first = (await StartDeviceAsync()).GetProperty("flowId").GetString()!;
+        var first = (await StartDeviceAsync(name: "Outlook")).GetProperty("flowId").GetString()!;
         _provider.DeviceAnswers.Writer.TryWrite("approve");
         var id = (await FlowAsync(first, until: "done")).GetProperty("connection").GetProperty("id").GetString()!;
+
+        var other = (await Services.GetRequiredService<TeamRegistry>().CreateAsync("Other", "claude-headless", memberAgent: "claude-headless", ct: Ct)).Id;
+        await HireAsync("Inbox", id);
+        await HireAsync("Reader", id, team: other);
 
         var reconnect = (await StartDeviceAsync(reconnectId: id)).GetProperty("flowId").GetString()!;
         _provider.Account = "someone-else@example.com";
         _provider.DeviceAnswers.Writer.TryWrite("approve");
-
-        var refused = await FlowAsync(reconnect, until: "refused");
-        Assert.Contains("someone-else@example.com", refused.GetProperty("sentence").GetString());
+        await FlowAsync(reconnect, until: "done");
 
         var listed = Assert.Single((await GetAsync("/api/connections")).EnumerateArray());
-        Assert.Equal(Account, listed.GetProperty("account").GetString());
-        Assert.Equal(_provider.Issued[0].Refresh, (await Services.GetRequiredService<ConnectionStore>().TokensAsync(id, Ct))!.RefreshToken);
-        Assert.DoesNotContain(TenantActions.ConnectionReconnected, await TenantActionsAsync());
+        Assert.Equal((id, "Outlook", "someone-else@example.com"),
+            (listed.GetProperty("id").GetString(), listed.GetProperty("name").GetString(), listed.GetProperty("account").GetString()));
+        Assert.Equal(_provider.Issued[^1].Refresh, (await Services.GetRequiredService<ConnectionStore>().TokensAsync(id, Ct))!.RefreshToken);
+
+        var row = JsonDocument.Parse(Assert.Single(await TenantDetailsAsync(TenantActions.ConnectionReconnected))).RootElement;
+        Assert.Equal(("someone-else@example.com", Account), (row.GetProperty("account").GetString(), row.GetProperty("fromAccount").GetString()));
+        Assert.All(_provider.Issued, t => Assert.DoesNotContain(t.Access, row.GetRawText()));
+
+        foreach (var (member, team) in new[] { ("Inbox", _team), ("Reader", other) })
+        {
+            Assert.Equal(MessageTypes.Completed, (await TellAndAwaitAsync(member, team)).Type);
+            var slot = LastRequest()["connections"]!["mail"]!;
+            Assert.Equal((_provider.Issued[^1].Access, "someone-else@example.com"), ((string?)slot["accessToken"], (string?)slot["account"]));
+        }
     }
 }

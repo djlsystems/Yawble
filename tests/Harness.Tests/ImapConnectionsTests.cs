@@ -413,6 +413,42 @@ public sealed class ImapConnectionsTests : IAsyncLifetime
         Assert.Equal("0", await ScalarAsync("SELECT COUNT(*) FROM imap_connections"));
     }
 
+    /// <summary>
+    /// THE MAILBOX KIND, edited in place: a new app password through the edit route logs in first, is
+    /// kept under the same name and id, reaches the bound member's next run with no prompt, and its row
+    /// names what changed and never the password. A refused login changes nothing. Then renamed, and
+    /// deleted on confirmation with the member unbound.
+    /// </summary>
+    [Fact]
+    public async Task A_mailbox_is_edited_renamed_and_deleted_and_its_member_gets_the_new_password_at_its_next_run()
+    {
+        var id = await AddedAsync(name: "Work mail");
+        await HireAsync("Inbox", id);
+
+        var refused = await SendAsync(HttpMethod.Put, $"/api/connections/{id}/mailbox", new { password = NewAppPassword });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.Status);
+        Assert.DoesNotContain(await TenantRowsAsync(), r => r.Action == TenantActions.ConnectionCredentialsChanged);
+
+        _server.Password = NewAppPassword;
+        var (status, body) = await SendAsync(HttpMethod.Put, $"/api/connections/{id}/mailbox", new { password = NewAppPassword });
+        Assert.True(status == HttpStatusCode.OK, body);
+        var connection = JsonDocument.Parse(body).RootElement.GetProperty("connection");
+        Assert.Equal((id, "Work mail", "imap"), (connection.GetProperty("id").GetString(), connection.GetProperty("name").GetString(), connection.GetProperty("kind").GetString()));
+
+        var row = Assert.Single(await TenantRowsAsync(), r => r.Action == TenantActions.ConnectionCredentialsChanged);
+        Assert.Equal(["password"], JsonDocument.Parse(row.Detail!).RootElement.GetProperty("changed").EnumerateArray().Select(c => c.GetString()));
+        Assert.DoesNotContain(NewAppPassword, row.Detail);
+        Assert.DoesNotContain(AppPassword, row.Detail);
+
+        Assert.Equal(MessageTypes.Completed, (await TellAndAwaitAsync("Inbox")).Type);
+        Assert.Equal(NewAppPassword, (string?)LastRequest()["connections"]!["mail"]!["password"]);
+
+        Assert.Equal(HttpStatusCode.OK, (await SendAsync(HttpMethod.Patch, $"/api/connections/{id}", new { name = "Shop mail" })).Status);
+        Assert.Equal(HttpStatusCode.NoContent, (await SendAsync(HttpMethod.Delete, $"/api/connections/{id}?unbind=true", null)).Status);
+        Assert.Equal("0", await ScalarAsync("SELECT COUNT(*) FROM imap_connections"));
+        Assert.Contains(await TenantRowsAsync(), r => r.Action == TenantActions.MemberConnectionsChanged && r.Detail!.Contains("connection deleted"));
+    }
+
     [Fact]
     public async Task A_machine_principal_is_refused_every_mailbox_route()
     {

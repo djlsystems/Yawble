@@ -360,7 +360,7 @@ public sealed class MarketplaceTests : IDisposable
     {
         var table = File.ReadAllText(Path.Combine(SolutionSamples.RepoRoot(), "web", "src", "lib", "marketplace.ts"));
 
-        Assert.Equal(["google", "microsoft", "custom", "imap"], ConnectionProviders.ManifestProviders);
+        Assert.Equal(["google", "microsoft", "custom", "imap", "login", "apikey"], ConnectionProviders.ManifestProviders);
         foreach (var provider in ConnectionProviders.ManifestProviders)
         {
             var console = Regex.Match(table, $"\n  {provider}: {{ name: '([^']+)'");

@@ -146,16 +146,16 @@ public abstract class ConnectionStoreContract : HostStoreContract
     }
 
     [Fact]
-    public async Task The_list_is_in_name_order_whatever_the_case_then_by_id()
+    public async Task The_list_is_in_name_order_whatever_the_case()
     {
         var store = await StoreAsync();
         await InsertAsync(store, "conn-3", "beta");
         await InsertAsync(store, "conn-2", "Alpha");
-        await InsertAsync(store, "conn-1", "alpha");
+        await InsertAsync(store, "conn-1", "alpha two");
         await InsertAsync(store, "conn-4", "a-z");
         await InsertAsync(store, "conn-5", "a_z");
 
-        Assert.Equal(["conn-4", "conn-5", "conn-1", "conn-2", "conn-3"], (await store.ListAsync(Ct)).Select(c => c.Id));
+        Assert.Equal(["conn-4", "conn-5", "conn-2", "conn-1", "conn-3"], (await store.ListAsync(Ct)).Select(c => c.Id));
     }
 
     [Fact]
@@ -201,8 +201,13 @@ public abstract class ConnectionStoreContract : HostStoreContract
         Assert.Equal(["conn-a"], await database.ColumnAsync($"SELECT subject FROM tenant_events WHERE action = '{TenantActions.ConnectionRenamed}'"));
     }
 
+    /// <summary>
+    /// A DELETE ASKS FIRST, THEN UNBINDS. Unconfirmed (no <c>unbind</c>), a connection a member binds is
+    /// kept and its users are named. Confirmed, the connection goes with every member's binding of it -
+    /// the other slots kept - and the connection's row and each member's row land in the same transaction.
+    /// </summary>
     [Fact]
-    public async Task A_connection_is_not_removed_while_a_member_binds_it_and_its_users_are_named()
+    public async Task A_used_connection_is_named_first_then_deleted_with_every_binding_of_it_and_their_rows()
     {
         var database = await DatabaseAsync();
         await HireAsync(database, "Beta", "Dev");
@@ -216,15 +221,161 @@ public abstract class ConnectionStoreContract : HostStoreContract
             await settings.SaveAsync(new ContainerId(team, member), Bind(("mail", "conn-a"), ("files", "conn-b")), Ct);
         }
 
-        var refused = await store.DeleteAsync("conn-a", Row(TenantActions.ConnectionDisconnected, "conn-a"), Ct);
+        var asked = await store.DeleteAsync("conn-a", Row(TenantActions.ConnectionDisconnected, "conn-a"), Ct);
 
-        Assert.False(refused.Deleted);
-        Assert.Equal([new ConnectionUse("Alpha", "Dev", "mail"), new ConnectionUse("Alpha", "Ops", "mail"), new ConnectionUse("Beta", "Dev", "mail")], refused.UsedBy);
-        Assert.Equal(refused.UsedBy, await store.UsedByAsync("conn-a", Ct));
-        var all = await store.AllUsesAsync(Ct);
-        Assert.Equal((3, 3), (all["conn-a"].Count(), all["conn-b"].Count()));
+        IReadOnlyList<ConnectionUse> users = [new("Alpha", "Dev", "mail"), new("Alpha", "Ops", "mail"), new("Beta", "Dev", "mail")];
+        Assert.False(asked.Deleted);
+        Assert.Equal(users, asked.UsedBy);
+        Assert.Equal(users, await store.UsedByAsync("conn-a", Ct));
         Assert.NotNull(await store.GetAsync("conn-a", Ct));
         Assert.Equal(0, await database.LongAsync($"SELECT COUNT(*) FROM tenant_events WHERE action = '{TenantActions.ConnectionDisconnected}'"));
+
+        IReadOnlyList<ConnectionUse>? handed = null;
+        var deleted = await store.DeleteAsync("conn-a", Row(TenantActions.ConnectionDisconnected, "conn-a"), Ct, found =>
+        {
+            handed = found;
+            return [.. found.Select(u => Row(TenantActions.MemberConnectionsChanged, $"{u.Team}/{u.Member}"))];
+        });
+
+        Assert.True(deleted.Deleted);
+        Assert.Equal(users, deleted.UsedBy);
+        Assert.Equal(users, handed);
+        Assert.Null(await store.GetAsync("conn-a", Ct));
+        Assert.Empty(await store.UsedByAsync("conn-a", Ct));
+        foreach (var (team, member) in new[] { ("Beta", "Dev"), ("Alpha", "Ops"), ("Alpha", "Dev") })
+        {
+            var left = (await settings.ForAsync(new ContainerId(team, member), Ct)).Connections;
+            Assert.Equal(new Dictionary<string, string> { ["files"] = "conn-b" }, left);
+        }
+
+        Assert.Equal(3, (await store.AllUsesAsync(Ct))["conn-b"].Count());
+        Assert.Equal(1, await database.LongAsync($"SELECT COUNT(*) FROM tenant_events WHERE action = '{TenantActions.ConnectionDisconnected}'"));
+        Assert.Equal(
+            ["Alpha/Dev", "Alpha/Ops", "Beta/Dev"],
+            (await database.ColumnAsync($"SELECT subject FROM tenant_events WHERE action = '{TenantActions.MemberConnectionsChanged}'")).Order(StringComparer.Ordinal));
+    }
+
+    /// <summary>A confirmed delete whose tenant row cannot be written changes nothing: the connection,
+    /// its credentials and every binding of it stay.</summary>
+    [Fact]
+    public async Task A_confirmed_delete_whose_tenant_row_cannot_land_changes_nothing()
+    {
+        var database = await DatabaseAsync();
+        await HireAsync(database, "Beta", "Dev");
+        var store = await StoreAsync();
+        var settings = database.MemberSettings();
+        await InsertCredentialAsync(store, "conn-a", "A");
+        await settings.SaveAsync(new ContainerId("Beta", "Dev"), Bind(("login", "conn-a")), Ct);
+        await database.ExecuteAsync("DROP TABLE tenant_events");
+
+        await Assert.ThrowsAnyAsync<DbException>(() => store.DeleteAsync(
+            "conn-a", Row(TenantActions.ConnectionDisconnected, "conn-a"), Ct,
+            found => [.. found.Select(u => Row(TenantActions.MemberConnectionsChanged, $"{u.Team}/{u.Member}"))]));
+
+        Assert.NotNull(await store.GetAsync("conn-a", Ct));
+        Assert.Equal("password-value-1", (await store.CredentialSecretsAsync("conn-a", Ct))!["password"]);
+        Assert.Equal([new ConnectionUse("Beta", "Dev", "login")], await store.UsedByAsync("conn-a", Ct));
+    }
+
+    private static CredentialSettings Login(string username, bool passwordSet = true) => new(null,
+    [
+        new CredentialField("username", "Username", false, username, true),
+        new CredentialField("password", "Password", true, null, passwordSet),
+        new CredentialField("url", "URL", false, null, false),
+    ]);
+
+    private Task InsertCredentialAsync(IConnectionStore store, string id, string name, string password = "password-value-1") =>
+        store.InsertCredentialAsync(
+            new ConnectionRecord(id, name, ConnectionKinds.Login, "user-1", [], At, null, ConnectionRecord.Ok, null, Credential: Login("user-1")),
+            new Dictionary<string, string> { ["password"] = password }, "person", Row(TenantActions.ConnectionConnected, id), Ct);
+
+    /// <summary>A CREDENTIAL CONNECTION round-trips its kind, preset and fields; its masked values are
+    /// one ciphertext no column shows, replaced whole by an edit, and gone with the connection.</summary>
+    [Fact]
+    public async Task A_credential_connection_round_trips_its_fields_and_seals_its_masked_values()
+    {
+        var database = await DatabaseAsync();
+        var store = await StoreAsync();
+        var key = new CredentialSettings("twilio",
+        [
+            new CredentialField("accountSid", "Account SID", false, "AC-0001", true),
+            new CredentialField("apiKeySid", "API key SID", false, "SK-0001", true),
+            new CredentialField("apiKeySecret", "API key secret", true, null, true),
+        ]);
+        await store.InsertCredentialAsync(
+            new ConnectionRecord("conn-key", "Twilio", ConnectionKinds.ApiKey, "AC-0001", [], At, null, ConnectionRecord.Ok, null, Credential: key),
+            new Dictionary<string, string> { ["apiKeySecret"] = "secret-value-xyz" }, "person", Row(TenantActions.ConnectionConnected, "conn-key"), Ct);
+        await InsertCredentialAsync(store, "conn-login", "Login");
+
+        var read = (await store.GetAsync("conn-key", Ct))!;
+        Assert.Equal((ConnectionKinds.ApiKey, "twilio", "AC-0001"), (read.Kind, read.Credential!.Preset, read.Account));
+        Assert.Equal(key.Fields, read.Credential.Fields);
+        Assert.Null(read.Mailbox);
+        Assert.Equal("secret-value-xyz", (await store.CredentialSecretsAsync("conn-key", Ct))!["apiKeySecret"]);
+        foreach (var column in new[] { "SELECT secrets_protected FROM credential_connections", "SELECT fields FROM credential_connections" })
+        {
+            Assert.All(await database.ColumnAsync(column), v => Assert.DoesNotContain("secret-value-xyz", v));
+        }
+
+        Assert.True(await store.UpdateCredentialAsync(
+            "conn-login", "user-2", Login("user-2"), new Dictionary<string, string> { ["password"] = "password-value-2" },
+            Row(TenantActions.ConnectionCredentialsChanged, "conn-login"), Ct));
+        Assert.False(await store.UpdateCredentialAsync(
+            "conn-none", "x", Login("x"), new Dictionary<string, string>(), Row(TenantActions.ConnectionCredentialsChanged, "conn-none"), Ct));
+        var edited = (await store.GetAsync("conn-login", Ct))!;
+        Assert.Equal(("Login", "user-2", "user-2"), (edited.Name, edited.Account, edited.Credential!.Fields[0].Value));
+        Assert.Equal("password-value-2", (await store.CredentialSecretsAsync("conn-login", Ct))!["password"]);
+        Assert.Equal(["conn-login"], await database.ColumnAsync($"SELECT subject FROM tenant_events WHERE action = '{TenantActions.ConnectionCredentialsChanged}'"));
+
+        Assert.True((await store.DeleteAsync("conn-key", Row(TenantActions.ConnectionDisconnected, "conn-key"), Ct)).Deleted);
+        Assert.Null(await store.CredentialSecretsAsync("conn-key", Ct));
+        Assert.Equal(1, await database.LongAsync("SELECT COUNT(*) FROM credential_connections"));
+    }
+
+    /// <summary>THE NAME IS THE KEY: no write gives a connection a name another has, ignoring case and
+    /// the spaces around it, and a refused write lands nothing. A rename to its own name is no clash.</summary>
+    [Fact]
+    public async Task Every_write_refuses_a_name_another_connection_has_and_lands_nothing()
+    {
+        var database = await DatabaseAsync();
+        var store = await StoreAsync();
+        await InsertAsync(store, "conn-a", "Work mail");
+        await InsertAsync(store, "conn-b", "Files");
+
+        Assert.True(await store.NameTakenAsync(" WORK MAIL ", null, Ct));
+        Assert.False(await store.NameTakenAsync("Work mail", "conn-a", Ct));
+        Assert.False(await store.NameTakenAsync("Other", null, Ct));
+
+        await Assert.ThrowsAsync<ConnectionNameTakenException>(() => InsertAsync(store, "conn-c", "work mail"));
+        await Assert.ThrowsAsync<ConnectionNameTakenException>(() => store.InsertMailboxAsync(
+            Record("conn-d", "WORK MAIL", MailboxSettings.Kind), Mailbox, "app-password-value", null, Row(TenantActions.ConnectionConnected, "conn-d"), Ct));
+        await Assert.ThrowsAsync<ConnectionNameTakenException>(() => InsertCredentialAsync(store, "conn-e", "Work Mail"));
+        await Assert.ThrowsAsync<ConnectionNameTakenException>(() => store.RenameAsync("conn-b", "work mail", Row(TenantActions.ConnectionRenamed, "conn-b"), Ct));
+        Assert.True(await store.RenameAsync("conn-a", "WORK MAIL", Row(TenantActions.ConnectionRenamed, "conn-a"), Ct));
+
+        Assert.Equal([("conn-b", "Files"), ("conn-a", "WORK MAIL")], (await store.ListAsync(Ct)).Select(c => (c.Id, c.Name)));
+        Assert.Equal(0, await database.LongAsync("SELECT COUNT(*) FROM imap_connections"));
+        Assert.Equal(0, await database.LongAsync("SELECT COUNT(*) FROM credential_connections"));
+        Assert.Equal(2, await database.LongAsync($"SELECT COUNT(*) FROM tenant_events WHERE action = '{TenantActions.ConnectionConnected}'"));
+    }
+
+    /// <summary>A reconnect as another account keeps the id and name and takes the account; one with no
+    /// account given keeps the stored one.</summary>
+    [Fact]
+    public async Task A_reconnect_may_take_another_account_under_the_same_id_and_name()
+    {
+        var store = await StoreAsync();
+        await InsertAsync(store, "conn-a", "Work");
+
+        await store.ReconnectAsync("conn-a", ["openid"], new ConnectionTokens("refresh-2", "access-2", null), Row(TenantActions.ConnectionReconnected, "conn-a"), Ct);
+        Assert.Equal("conn-a@example.test", (await store.GetAsync("conn-a", Ct))!.Account);
+
+        await store.ReconnectAsync(
+            "conn-a", ["openid"], new ConnectionTokens("refresh-3", "access-3", null), Row(TenantActions.ConnectionReconnected, "conn-a"), Ct,
+            account: "other@example.test");
+        var read = (await store.GetAsync("conn-a", Ct))!;
+        Assert.Equal(("conn-a", "Work", "other@example.test"), (read.Id, read.Name, read.Account));
+        Assert.Equal("refresh-3", (await store.TokensAsync("conn-a", Ct))!.RefreshToken);
     }
 
     [Fact]
