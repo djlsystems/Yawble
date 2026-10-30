@@ -2958,6 +2958,8 @@ export interface PluginTableColumn {
   readOnly: boolean
   /** A secret column's mask; null for any other column. */
   masked: boolean | null
+  /** `url`: a bare address (`mysite.com`) is given `https://` on leaving the field and on save. Absent from an older Host. */
+  format?: 'url' | null
 }
 
 /** A link shown on each saved row whose `column` holds `equals`, such as Sign in on an `interactive` row. */

@@ -32,6 +32,35 @@ export const MaxTextLength = 2048;
 /** A row's key: a letter or digit, then letters, digits, `-` and `_`, at most 64 characters. */
 export const RowNamePattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
+/** A host as a bare address names it: dotted labels ending in letters, `localhost` or IPv4, an optional port. */
+const BareHostPattern =
+  /^(?:(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?\.)+(?:\p{L}{2,63}|xn--[A-Za-z0-9-]{1,59})|localhost|(?:[0-9]{1,3}\.){3}[0-9]{1,3})\.?(?::[0-9]{1,5})?$/iu;
+
+/**
+ * A `format: "url"` cell as it is saved: a bare address (`mysite.com`, `www.mysite.com/login`) with
+ * `https://` before it; anything else exactly as written - a value with any scheme (`http://` stays
+ * http, `javascript:` stays and still fails the plugin's check), a path (`/login`, `dashboard`) and
+ * text that is not an address (`not a url`, `foo bar.com`). The Host's `PluginTableColumn.WithScheme`
+ * holds the same rule, so a save from anywhere stores the same.
+ */
+export function withScheme(value: string): string {
+  const text = value.trim();
+  if (text === '') return value;
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(text) && !/^[^:/?#]+:[0-9]+(?:[/?#]|$)/.test(text)) return value;
+  const host = text.split(/[/?#]/)[0]!;
+  return BareHostPattern.test(host) ? `https://${text}` : value;
+}
+
+/** `row` with each `format: "url"` cell a person writes given `https://` when it is a bare address. */
+export function withSchemes(shape: PluginTableShape, row: PluginTableRow): PluginTableRow {
+  const out = { ...row };
+  for (const column of writableColumns(shape)) {
+    const value = out[column.name];
+    if (column.format === 'url' && typeof value === 'string') out[column.name] = withScheme(value);
+  }
+  return out;
+}
+
 /** The rows of a value, or none for a value that is not a list of rows. */
 export function tableRows(value: unknown): PluginTableRow[] {
   return Array.isArray(value) ? value.filter((row): row is PluginTableRow => typeof row === 'object' && row !== null && !Array.isArray(row)) : [];
