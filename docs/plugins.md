@@ -488,6 +488,37 @@ A secret field may say that, from this version on, its value is held by an API-k
 - `` `secrets.<field>.movedTo` names '<slot>', which is not a slot this manifest's `connections` declares. ``
 - `` `secrets.<field>.movedTo` names '<slot>', which is not an API-key slot: a secret moves only into a slot whose `providers` is ["apikey"]. ``
 
+**The move.** When a version declaring `movedTo` becomes active - a plugin install or a Replace
+(`POST /api/plugins/install`, and the operator CLI's `plugin install --from-instance`), or a solution
+install or update once its whole run has succeeded - every member hired on the plugin, on every team,
+has its own values moved (`PluginSecretMoves`). For each slot fields move to, in ONE transaction:
+
+- one API-key connection is made from the member's own values for the fields moved to that slot
+  (several fields make one connection: Namecheap's `apiUser` and `apiKey`). Its fields are named as
+  the plugin's, masked as the manifest says; it is the matching preset when its fields are exactly a
+  preset's (Namecheap), else Other. It is named `<team> - <member>` (`<team> - <member> - <slot>`
+  when the version moves fields into more than one slot; ` (2)` added if the name is taken);
+- it is assigned to the member's team and bound to the slot - a multiple slot's first free key
+  (`<slot>`, then `<slot>#2`...);
+- the member's own values for those fields are removed;
+- the tenant rows `connections.connected`, `team.connection-assigned`, `member.connections-changed`
+  and one `member.secret-moved` per field are written. They name fields, never a value.
+
+Anything failing rolls all of it back: the member keeps its values, no connection is left, and a
+`member.secret-move-failed` row names the fields and the reason. A run then reads the value from
+`connections.<slot>.fields.<field>`; the field is no longer handed under `secrets`.
+
+- **No own value**: nothing is made. The slot stays unbound and, if required, the member reads Needs
+  you ("bind a connection for the slot `x`"). A required field with `movedTo` never asks for an own
+  value itself: its slot is what is required.
+- **The slot is already bound** (one that is not multiple): the binding is not overwritten, no
+  connection is made, and the member KEEPS its own values for the fields, so nothing is lost; a
+  `member.secret-move-kept` row names them, and a person clears them once the bound connection is
+  the one meant. A multiple slot is never "already bound": the move takes its next free key.
+- **Again**: an install of the same version moves nothing twice; a moved value is gone.
+- The install route's answer carries `moves`: one `{ team, member, slot, outcome, fields, connection,
+  key, reason }` per member and slot, `outcome` `moved`, `nothing`, `kept` or `failed`.
+
 #### Several Microsoft APIs from one connection
 
 A Microsoft access token is for one API. A `microsoft` slot's `scopes` may name scopes of several

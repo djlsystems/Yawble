@@ -82,6 +82,7 @@ internal sealed partial class HostComposition
         builder.Services.AddSingleton<IPluginSecretRows>(new SqlitePluginSecretRows(database));
         builder.Services.AddSingleton<IPluginMemberSecretRows>(new SqlitePluginMemberSecretRows(database));
         builder.Services.AddSingleton<IPluginRemovalRows>(new SqlitePluginRemovalRows(database));
+        builder.Services.AddSingleton<IPluginSecretMoveRows>(new SqlitePluginSecretMoveRows(database));
 
         // A plugin member's settings rows (`team_member_config`): the provider's own, so the plugin
         // composition below takes whichever database the Host runs on.

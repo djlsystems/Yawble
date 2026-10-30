@@ -805,7 +805,8 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
 
         if (KeyNamedByAValue(settings.Secrets, secrets) is { } named) return named;
 
-        foreach (var (name, secret) in manifest.Secrets.Where(s => s.Value.Required))
+        // A FIELD MOVED TO A SLOT (`movedTo`, CON 7) is required of its slot, not of the member's values.
+        foreach (var (name, secret) in manifest.Secrets.Where(s => s.Value.Required && s.Value.MovedTo is null))
         {
             // THE MEMBER'S OWN VALUE satisfies the field, whatever is bound.
             if (valued?.Contains(name) == true) continue;
@@ -866,7 +867,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             {
                 resolved[name] = value;
             }
-            else if (secret.Required)
+            else if (secret.Required && secret.MovedTo is null)
             {
                 return (resolved, keys, key is null
                     ? $"This member has no value for the plugin's required secret `{name}`. A person types it in the member's settings."

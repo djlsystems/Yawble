@@ -111,6 +111,7 @@ internal sealed partial class HostComposition
         builder.Services.AddSingleton<IPluginMemberSecretRows>(new SqlServerPluginMemberSecretRows(connection));
         builder.Services.AddSingleton<IPluginSecretRows>(new SqlServerPluginSecretRows(connection));
         builder.Services.AddSingleton<IPluginRemovalRows>(new SqlServerPluginRemovalRows(connection));
+        builder.Services.AddSingleton<IPluginSecretMoveRows>(new SqlServerPluginSecretMoveRows(connection));
         builder.Services.AddSingleton<IConnectionStore>(sp => new SqlServerConnectionStore(connection, sp.GetRequiredService<IDataProtectionProvider>()));
 
         // THE DATABASE ITSELF: whether it answers (`SELECT 1`), and the housekeeping SQLite's file needs,

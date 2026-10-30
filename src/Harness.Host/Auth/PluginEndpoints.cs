@@ -66,7 +66,7 @@ public static class PluginEndpoints
                 + "unchanged, for reading. 404 with a sentence when there is none.");
 
         app.MapPost("/api/plugins/install", async (
-            InstallPlugin request, PluginInstaller installer, TenantLogging audit, HttpContext context,
+            InstallPlugin request, PluginInstaller installer, TenantLogging audit, PluginSecretMoves moves, HttpContext context,
             CancellationToken ct) =>
         {
             var result = await installer.InstallAsync(request.Path, request.Replace, ct);
@@ -86,10 +86,22 @@ public static class PluginEndpoints
                     },
                     ct);
 
+                // A VERSION DECLARING `movedTo` moves each member's own values into connections (CON 7),
+                // after the install's own row: each move answered by slot, naming fields, never a value.
+                var moved = result.Installed
+                    ? await moves.MoveAsync(result.Id!, new Solutions.SolutionActor(
+                        context.User.FindFirstValue(ClaimTypes.NameIdentifier), context.User.FindFirstValue(ClaimTypes.Email)), ct)
+                    : [];
+
                 return Results.Ok(new
                 {
                     id = result.Id, version = result.Version, installed = result.Installed,
                     replaced = result.Replaced, reason = result.Reason,
+                    moves = moved.Select(m => new
+                    {
+                        team = m.Member.Team, member = m.Member.Name, slot = m.Slot, outcome = m.Outcome, fields = m.Fields,
+                        connection = m.ConnectionId, key = m.Key, reason = m.Reason,
+                    }),
                 });
             }
 
@@ -113,7 +125,9 @@ public static class PluginEndpoints
                 + "`plugins/<id>/<version>/` (Host user, the agent's group, directories 0750, files 0640, "
                 + "the manifest's executables 0750), made `active`, the catalog rescanned, and a "
                 + "`plugins.installed` tenant row appended. Answers `{ id, version, installed, replaced, "
-                + "reason }`: `installed` is the Host's verdict after the rescan.");
+                + "reason, moves }`: `installed` is the Host's verdict after the rescan; `moves` is what a version "
+                + "declaring `secrets.<field>.movedTo` did with each member's own values, one entry per member and "
+                + "slot (`outcome` moved, nothing, kept or failed; the fields; the connection made) - never a value.");
 
         app.MapDelete("/api/plugins/{id}", async (
             [Description("The plugin's id.")] string id,

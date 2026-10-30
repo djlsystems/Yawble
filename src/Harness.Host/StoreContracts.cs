@@ -51,6 +51,7 @@ public static class StoreContracts
         typeof(IOutcomeStartRows),
         typeof(ILedgerStartRows),
         typeof(IPluginRemovalRows),
+        typeof(IPluginSecretMoveRows),
     ];
 }
 
@@ -96,6 +97,7 @@ public static class SqlServerStoreRegistry
         typeof(IPluginMemberSecretRows),
         typeof(IPluginSecretRows),
         typeof(IPluginRemovalRows),
+        typeof(IPluginSecretMoveRows),
         typeof(IConnectionStore),
         typeof(IDatabaseHealth),
         typeof(IDatabaseMaintenance),

@@ -36,7 +36,8 @@ public static class PluginReadyNotice
     {
         var missing = new List<string>();
 
-        foreach (var (name, secret) in manifest.Secrets.Where(s => s.Value.Required))
+        // A FIELD MOVED TO A SLOT (`movedTo`, CON 7) asks for no own value: its slot's binding is what is missing.
+        foreach (var (name, secret) in manifest.Secrets.Where(s => s.Value.Required && s.Value.MovedTo is null))
         {
             // The member's own value satisfies the field.
             if (valued?.Contains(name) == true) continue;
