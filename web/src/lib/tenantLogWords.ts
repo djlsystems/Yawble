@@ -595,6 +595,32 @@ const words: Record<string, Words> = {
     did: "removed a plugin member's named secret",
     detail: (d) => sentence([`${text(d, 'name') ?? 'a named secret'} removed${text(d, 'member') ? ` for ${text(d, 'member')}` : ''}${onTeam(d)}`, text(d, 'plugin') && `plugin ${text(d, 'plugin')}`]),
   },
+  'member.secret-moved': {
+    did: "moved a plugin member's own secret into a connection",
+    detail: (d) =>
+      sentence([
+        `${text(d, 'field') ?? 'a field'} moved to slot ${text(d, 'slot') ?? 'its slot'}${text(d, 'member') ? ` for ${text(d, 'member')}` : ''}${onTeam(d)}`,
+        text(d, 'plugin') && `plugin ${text(d, 'plugin')}`,
+      ]),
+  },
+  'member.secret-move-kept': {
+    did: "kept a plugin member's own secrets: the slot already had a connection",
+    detail: (d) =>
+      sentence([
+        `${names(d, 'fields') ?? 'its fields'} kept${text(d, 'member') ? ` for ${text(d, 'member')}` : ''}${onTeam(d)}`,
+        text(d, 'slot') && `slot ${text(d, 'slot')} already had a connection`,
+        text(d, 'plugin') && `plugin ${text(d, 'plugin')}`,
+      ]),
+  },
+  'member.secret-move-failed': {
+    did: "could not move a plugin member's own secrets into a connection",
+    detail: (d) =>
+      sentence([
+        `${names(d, 'fields') ?? 'its fields'} not moved${text(d, 'member') ? ` for ${text(d, 'member')}` : ''}${onTeam(d)}`,
+        text(d, 'reason'),
+        'the member keeps its values',
+      ]),
+  },
   'member.secrets-copied': {
     did: "copied stored keys onto plugin members",
     detail: (d) =>
@@ -730,6 +756,11 @@ const words: Record<string, Words> = {
     did: 'found a connection needs reconnecting',
     detail: (d) =>
       sentence([`${text(d, 'account') ?? 'the account'} with ${text(d, 'provider') ?? 'its provider'} needs reconnecting`, text(d, 'reason')]),
+  },
+  'connections.tested': {
+    did: 'tested a connection',
+    detail: (d) =>
+      sentence([text(d, 'outcome') === 'ok' ? 'it works' : 'it needs a person', text(d, 'sentence')]),
   },
   'connections.credentials-changed': {
     did: "changed what is behind a connection",

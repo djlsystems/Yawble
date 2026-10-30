@@ -495,8 +495,14 @@ has its own values moved (`PluginSecretMoves`). For each slot fields move to, in
 
 - one API-key connection is made from the member's own values for the fields moved to that slot
   (several fields make one connection: Namecheap's `apiUser` and `apiKey`). Its fields are named as
-  the plugin's, masked as the manifest says; it is the matching preset when its fields are exactly a
-  preset's (Namecheap), else Other. It is named `<team> - <member>` (`<team> - <member> - <slot>`
+  the plugin's, masked as the manifest says. Its preset is one holding every moved field, each
+  masked as the manifest says: a preset whose fields are exactly the moved ones first, else the one
+  with the fewest fields over - taken only when two or more fields move, since one shared name such
+  as `apiKey` says nothing of the service - else Other. Namecheap's `apiUser` and `apiKey` make a
+  Namecheap connection; its required `clientIp` (Whitelisted IP), which the member never held, is
+  left empty and never made up, and the connection reads Needs you (status `needs-reconnect`, reason
+  ``` `clientIp` (Whitelisted IP) is required. ```) - a run bound to it is refused saying so - until a
+  person fills it in and saves it, which sets it ok. It is named `<team> - <member>` (`<team> - <member> - <slot>`
   when the version moves fields into more than one slot; ` (2)` added if the name is taken);
 - it is assigned to the member's team and bound to the slot - a multiple slot's first free key
   (`<slot>`, then `<slot>#2`...);
@@ -871,7 +877,7 @@ rows, `row.status`), `cli/internal/plugin/manifest_test.go` and `web/src/lib/__t
   (iCloud). A slot bound to a **username and password** (`login`) or an **API key** (`apikey`) holds
   `{ "kind", "account", "preset", "fields": { "<name>": "<value>" } }` - a login's `username`,
   `password` and `url` when set; an API key's preset fields (Stripe `key`; Namecheap `apiUser`,
-  `apiKey`; Twilio `accountSid`, `apiKeySid`, `apiKeySecret`) or Other's own - and every masked value
+  `apiKey`, `clientIp`; Twilio `accountSid`, `apiKeySid`, `apiKeySecret`) or Other's own - and every masked value
   is redacted from everything the plugin writes.
 - **`siteFiles`** names the files folder of every site of the member's OWN team, by name, as an
   absolute path; `[]` when the team has none. A file the plugin makes for a site's page goes under

@@ -3368,8 +3368,13 @@ export interface Connection {
   /** For a mailbox: its last successful login. */
   refreshedAt: string | null
   status: 'ok' | 'needs-reconnect'
-  /** For a mailbox that needs reconnecting: the login's own sentence. */
+  /** For a mailbox that needs reconnecting: the login's own sentence; after a refused Test connection, the test's. */
   statusReason: string | null
+  /**
+   * Whether Test connection applies: every sign-in and mailbox, an API key or a username and password
+   * whose preset declares a test it has the fields for; never a website. Absent from a Host older than it.
+   */
+  testable?: boolean
   usedBy: ConnectionUse[]
   /** A mailbox's login name; null for an OAuth account. */
   username?: string | null
@@ -3418,6 +3423,15 @@ export interface CredentialPreset {
   /** API key's Other: the person names each field and whether it is masked. */
   namedFields: boolean
   fields: CredentialPresetField[]
+  /** Whether the preset declares a request Test connection sends. Absent from a Host older than it. */
+  test?: boolean
+}
+
+/** `POST /api/connections/{id}/test`: the health the test recorded and its one sentence. */
+export interface ConnectionTested {
+  health: 'ok' | 'needs-reconnect'
+  sentence: string
+  connection: Connection
 }
 
 /** A field as a credential write sends it. On an edit a null `value` keeps the stored one. */

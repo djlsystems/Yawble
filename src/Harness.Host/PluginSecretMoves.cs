@@ -155,22 +155,35 @@ public sealed class PluginSecretMoves(
                 return new SecretMoveResult(member, slot, Kept, moved);
             }
 
-            // THE CONNECTION'S FORM: a preset whose fields are exactly these (Namecheap's apiUser and
-            // apiKey), else Other with the plugin's own field names, each masked as the manifest says.
-            var preset = CredentialPresets.All.FirstOrDefault(p =>
-                    p.Kind == ConnectionKinds.ApiKey && !p.NamedFields && p.Fields.Count == moved.Count
-                    && p.Fields.All(f => values.ContainsKey(f.Name) && f.Masked == manifest.Secrets[f.Name].Masked))
+            // THE CONNECTION'S FORM: a preset holding every moved field, masked as the manifest says -
+            // exactly these first, else the one with the fewest fields over (Namecheap's apiUser and apiKey,
+            // without its clientIp) - else Other with the plugin's own field names. A preset with fields over
+            // is taken only for two or more of its fields: one shared name such as apiKey says nothing of
+            // which service it is.
+            var preset = CredentialPresets.All
+                    .Where(p => p.Kind == ConnectionKinds.ApiKey && !p.NamedFields
+                        && (p.Fields.Count == moved.Count || moved.Count > 1)
+                        && moved.All(m => p.Fields.Any(f => f.Name == m && f.Masked == manifest.Secrets[m].Masked)))
+                    .MinBy(p => p.Fields.Count)
                 ?? CredentialPresets.For(ConnectionKinds.ApiKey, CredentialPresets.Other)!;
 
+            // A REQUIRED FIELD THE MEMBER DOES NOT HOLD is left empty, never made up: the connection reads
+            // Needs you, as a refused test does, until a person fills it in and saves it.
+            var unheld = preset.Fields.Where(f => f.Required && !values.ContainsKey(f.Name)).ToList();
+            var form = unheld.Count == 0 ? preset
+                : preset with { Fields = [.. preset.Fields.Select(f => unheld.Contains(f) ? f with { Required = false } : f)] };
+            var needsYou = unheld.Count == 0 ? null : string.Join(" ", unheld.Select(f => $"`{f.Name}` ({f.Label}) is required."));
+
             var (settings, secrets, _, refusal) = CredentialForm.Read(
-                preset, [.. moved.Select(f => new CredentialFieldValue(f, values[f].Value, manifest.Secrets[f].Masked))]);
+                form, [.. moved.Select(f => new CredentialFieldValue(f, values[f].Value, manifest.Secrets[f].Masked))]);
             if (refusal is not null) return await FailAsync(member, memberName, manifest, slot, moved, refusal, actor, ct);
 
             var name = await connections.UniqueNameAsync(severalSlots ? $"{teamName} - {memberName} - {slot}" : $"{teamName} - {memberName}", ct);
             var account = settings!.Fields.FirstOrDefault(f => !f.Masked && f.Value is { Length: > 0 })?.Value ?? manifest.Id;
             var record = new ConnectionRecord(
                 "conn-" + Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(6)).ToLowerInvariant(),
-                name, ConnectionKinds.ApiKey, account, [], DateTimeOffset.UtcNow, null, ConnectionRecord.Ok, null, Credential: settings);
+                name, ConnectionKinds.ApiKey, account, [], DateTimeOffset.UtcNow, null,
+                needsYou is null ? ConnectionRecord.Ok : ConnectionRecord.NeedsReconnect, needsYou, Credential: settings);
 
             IReadOnlyList<TriggerAudit> Audits(string key) =>
             [
@@ -312,9 +325,11 @@ public sealed class SqlitePluginSecretMoveRows(string databasePath) : IPluginSec
             command.CommandText =
                 """
                 INSERT INTO connections (id, name, provider, account, scopes, connected_at, refreshed_at, status, status_reason, connected_by)
-                VALUES ($id, $name, $provider, $account, '[]', $at, NULL, 'ok', NULL, $by)
+                VALUES ($id, $name, $provider, $account, '[]', $at, NULL, $status, $reason, $by)
                 """;
             command.Parameters.AddWithValue("$id", move.Connection.Id);
+            command.Parameters.AddWithValue("$status", move.Connection.Status);
+            command.Parameters.AddWithValue("$reason", (object?)move.Connection.StatusReason ?? DBNull.Value);
             command.Parameters.AddWithValue("$name", move.Connection.Name);
             command.Parameters.AddWithValue("$provider", move.Connection.Provider);
             command.Parameters.AddWithValue("$account", move.Connection.Account);

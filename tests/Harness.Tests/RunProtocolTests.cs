@@ -37,6 +37,8 @@ public sealed class RunProtocolTests
         new RunAgentCommands("r3", [new AgentCliRun(
             "claude", ["mcp", "list"], new Dictionary<string, string> { ["A"] = "1" }, ["OPENAI_API_KEY"], 45, true, false)]),
         new RemoveAsAgent("r4", "/data/teams/t", ["/data/teams/t/workspaces/a"]),
+        // A test's probe crosses only sealed (ConnectionTestTests); as plain JSON a test carries none.
+        new TestConnection("r6", null),
         new CancelRun(Run),
         new ChangeRunMemoryAllowance(["alpha/worker", "beta/other"]),
         new HoldIdleClock(Run.Member, true),
@@ -73,6 +75,7 @@ public sealed class RunProtocolTests
         new SignInProbed("r2", [new SignInProbeResult("claude", true, null, "The status command did not finish in time.")]),
         new AgentCommandsRan("r3", [new AgentCliRunResult(true, 0, false, "out", "err", true, null)]),
         new RemovedAsAgent("r4", "Refused: /x is not inside /data/teams/t."),
+        new ConnectionTested("r6", ConnectionTested.Refused, "Stripe refused the secret key (HTTP 401)."),
         new RunCredentialApplied(Run),
         new RunStarted(Run, 42, At),
         new RunProgress(Run, "held"),

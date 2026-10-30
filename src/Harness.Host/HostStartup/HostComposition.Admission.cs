@@ -59,7 +59,8 @@ internal sealed partial class HostComposition
             sp.GetRequiredService<ILogger<RunAllowances>>(),
             builder.Configuration["Capacity:CgroupRoot"],
             builder.Configuration["Capacity:ProcRoot"],
-            sp.GetRequiredService<WorkerStreams>().Deliver));
+            sp.GetRequiredService<WorkerStreams>().Deliver,
+            tester: sp.GetService<ConnectionTester>()));
         builder.Services.AddSingleton<IRunWorker>(sp =>
         {
             var worker = sp.GetRequiredService<InProcessWorker>().Worker;

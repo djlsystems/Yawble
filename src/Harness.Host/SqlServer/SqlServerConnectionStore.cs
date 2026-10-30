@@ -347,6 +347,23 @@ public sealed class SqlServerConnectionStore(string connectionString, IDataProte
             },
             audit, ct);
 
+    public Task RecordTestAsync(string id, string? needsYou, DateTimeOffset at, TriggerAudit audit, CancellationToken ct = default) =>
+        WriteAsync(
+            async (connection, transaction, token) =>
+            {
+                await using var command = Command(
+                    connection, transaction,
+                    needsYou is null
+                        ? $"UPDATE connections SET status = 'ok', status_reason = NULL, refreshed_at = @at WHERE {IdMatch}"
+                        : $"UPDATE connections SET status = 'needs-reconnect', status_reason = @reason, access_token_protected = NULL, access_expires_at = NULL WHERE {IdMatch}");
+                command.Parameters.AddWithValue("@id", id);
+                if (needsYou is null) command.Parameters.AddWithValue("@at", Instant.Stamp(at));
+                else command.Parameters.AddWithValue("@reason", needsYou);
+                await command.ExecuteNonQueryAsync(token);
+                return true;
+            },
+            audit, ct);
+
     public Task<bool> RenameAsync(string id, string name, TriggerAudit audit, CancellationToken ct = default) =>
         WriteAsync(
             async (connection, transaction, token) =>

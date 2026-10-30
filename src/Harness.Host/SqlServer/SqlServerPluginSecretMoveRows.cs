@@ -59,9 +59,11 @@ public sealed class SqlServerPluginSecretMoveRows(string connectionString) : IPl
                     command.CommandText =
                         """
                         INSERT INTO connections (id, name, provider, account, scopes, connected_at, refreshed_at, status, status_reason, connected_by)
-                        VALUES (@id, @name, @provider, @account, '[]', @at, NULL, 'ok', NULL, @by)
+                        VALUES (@id, @name, @provider, @account, '[]', @at, NULL, @status, @reason, @by)
                         """;
                     command.Parameters.AddWithValue("@id", move.Connection.Id);
+                    command.Parameters.AddWithValue("@status", move.Connection.Status);
+                    command.Parameters.AddWithValue("@reason", (object?)move.Connection.StatusReason ?? DBNull.Value);
                     command.Parameters.AddWithValue("@name", move.Connection.Name);
                     command.Parameters.AddWithValue("@provider", move.Connection.Provider);
                     command.Parameters.AddWithValue("@account", move.Connection.Account);
