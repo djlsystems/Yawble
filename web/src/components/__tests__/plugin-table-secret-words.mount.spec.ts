@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import PluginTableField from '../PluginTableField.vue';
-import type { PluginTableColumn } from '../../api/types';
+import type { PluginTableColumn, PluginTableRow } from '../../api/types';
 import { bodyFind, resetBody } from '../../test/mountQuasar';
 import { hostField } from '../../test/pluginFixtures';
 
@@ -42,7 +42,7 @@ const states = { entries: { site1: { password: { set: true as const, setBy: 'Ada
 
 afterEach(resetBody);
 
-function mountTable(rows: Record<string, unknown>[] = [], savedRows: string[] = []) {
+function mountTable(rows: PluginTableRow[] = [], savedRows: string[] = []) {
   return mount(PluginTableField, {
     // The form's own button is Save: the editor must not borrow it.
     props: { name: 'entries', field: entries, label: 'Entries', modelValue: rows, editable: true, saveLabel: 'Save', states, savedRows },
