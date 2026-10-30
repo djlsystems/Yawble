@@ -223,9 +223,10 @@ defineExpose({ save, ready, busy, connected, typed, presetId });
         label="App password"
         autocomplete="new-password"
         spellcheck="false"
-        :hint="editing ? 'Set. Leave empty to keep it, or type a new one to replace it.' : undefined"
       >
-        <template #append><FieldHelp text="Stored encrypted and never shown again." /></template>
+        <template #append>
+          <FieldHelp :text="editing ? 'Set. Leave empty to keep it, or type a new one to replace it. Stored encrypted and never shown again.' : 'Stored encrypted and never shown again.'" />
+        </template>
       </q-input>
       <div v-if="passwordWarning" class="text-caption text-warning" role="status" data-app-password-warning>{{ passwordWarning }}</div>
 

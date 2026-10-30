@@ -697,6 +697,7 @@ const words: Record<string, Words> = {
       sentence([
         `connected ${text(d, 'account') ?? 'an account'} with ${text(d, 'provider') ?? 'its provider'}`,
         names(d, 'scopes') && `scopes ${names(d, 'scopes')}`,
+        names(d, 'fields') && `fields ${names(d, 'fields')}`,
         text(d, 'imap') && `mail in ${text(d, 'imap')}`,
         text(d, 'smtp') && `mail out ${text(d, 'smtp')}`,
       ]),
@@ -706,6 +707,7 @@ const words: Record<string, Words> = {
     detail: (d) =>
       sentence([
         `reconnected ${text(d, 'account') ?? 'an account'} with ${text(d, 'provider') ?? 'its provider'}`,
+        text(d, 'fromAccount') && `in place of ${text(d, 'fromAccount')}`,
         get(d, 'wasNeedingReconnect') === true && 'it needed reconnecting',
         names(d, 'scopes') && `scopes ${names(d, 'scopes')}`,
       ]),
@@ -728,6 +730,14 @@ const words: Record<string, Words> = {
     did: 'found a connection needs reconnecting',
     detail: (d) =>
       sentence([`${text(d, 'account') ?? 'the account'} with ${text(d, 'provider') ?? 'its provider'} needs reconnecting`, text(d, 'reason')]),
+  },
+  'connections.credentials-changed': {
+    did: "changed what is behind a connection",
+    detail: (d) =>
+      sentence([
+        `changed ${names(d, 'changed') ?? 'nothing'} of ${text(d, 'account') || 'the connection'}`,
+        get(d, 'wasNeedingReconnect') === true && 'it needed reconnecting',
+      ]),
   },
   'connections.password-updated': {
     did: "updated a mailbox's password",

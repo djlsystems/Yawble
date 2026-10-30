@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FieldHelp from './FieldHelp.vue';
 import { computed, ref, watch } from 'vue';
 import { addCredentialConnection, editCredentialConnection } from '../api/client';
 import type { Connection, CredentialFieldValue, CredentialPreset } from '../api/types';
@@ -139,9 +140,10 @@ defineExpose({ save, ready, busy, saved, typed });
         label="Name"
         maxlength="80"
         data-credential-name
-        :hint="`What teams and members use this ${credentialKindWords(kind)} by. No other connection may have it.`"
         :disable="saved"
-      />
+      >
+        <template #append><FieldHelp :text="`What teams and members use this ${credentialKindWords(kind)} by. No other connection may have it.`" /></template>
+      </q-input>
 
       <div v-for="(row, index) in rows" :key="index" class="row items-start q-col-gutter-sm" :data-credential-field="row.named ? index : row.name">
         <q-input
@@ -162,10 +164,13 @@ defineExpose({ save, ready, busy, saved, typed });
           autocomplete="off"
           :type="row.masked ? 'password' : 'text'"
           :label="row.named ? 'Value' : `${row.label}${row.required ? '' : ' (optional)'}`"
-          :hint="row.masked && row.set && editing ? 'Set. Leave empty to keep it, or type a new one to replace it.' : undefined"
           data-credential-field-value
           :disable="saved"
-        />
+        >
+          <template v-if="row.masked" #append>
+            <FieldHelp :text="row.set && editing ? 'Set. Leave empty to keep it, or type a new one to replace it.' : 'Stored encrypted and never shown again.'" />
+          </template>
+        </q-input>
         <template v-if="row.named">
           <q-toggle v-model="row.masked" label="Masked" data-credential-field-masked :disable="saved" />
           <q-btn flat dense round icon="close" aria-label="Remove field" data-credential-field-remove :disable="saved" @click="removeField(index)" />
