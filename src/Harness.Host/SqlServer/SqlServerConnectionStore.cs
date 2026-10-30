@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Harness.Contracts;
 using Harness.SqlServer;
 using Microsoft.AspNetCore.DataProtection;
@@ -560,24 +561,18 @@ public sealed class SqlServerConnectionStore(string connectionString, IDataProte
             },
             ct);
 
-    public Task AssignAllAsync(string team, IReadOnlyList<(string ConnectionId, TriggerAudit Audit)> assignments, CancellationToken ct = default) =>
-        RunAsync(
-            async (connection, token) =>
-            {
-                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
+    public async Task AssignAllAsync(
+        DbConnection connection, DbTransaction transaction, string team,
+        IReadOnlyList<(string ConnectionId, TriggerAudit Audit)> assignments, CancellationToken ct = default)
+    {
+        var sql = (SqlConnection)connection;
+        var inside = (SqlTransaction)transaction;
 
-                foreach (var (id, audit) in assignments)
-                {
-                    if (await InsertAssignmentAsync(connection, transaction, team, id, token))
-                    {
-                        await SqlServerTenantAuditRow.AppendAsync(connection, transaction, audit, token);
-                    }
-                }
-
-                await SqlServerOpen.CommitAsync(transaction, token);
-                return true;
-            },
-            ct);
+        foreach (var (id, audit) in assignments)
+        {
+            if (await InsertAssignmentAsync(sql, inside, team, id, ct)) await SqlServerTenantAuditRow.AppendAsync(sql, inside, audit, ct);
+        }
+    }
 
     public async Task<(bool Removed, IReadOnlyList<ConnectionUse> Unbound)> UnassignAsync(
         string team, string connectionId, TriggerAudit audit,

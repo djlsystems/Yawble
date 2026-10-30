@@ -140,14 +140,14 @@ internal static class TeamEndpoints
                             addRepo: newRepos.AddRepoAsync,
 
                             // THE CONNECTIONS THE PERSON CHOSE in New team → Connections, each with its
-                            // row, in one transaction with nothing else of the team made yet: if a row
-                            // cannot be written, the team is not created either.
-                            withRow: chosen.Count == 0 ? null : async (id, token) =>
+                            // row, in the team row's own transaction: if a row cannot be written, the
+                            // team's row is never committed either.
+                            withRow: chosen.Count == 0 ? null : async (id, connection, transaction, token) =>
                             {
                                 var actor = new ConnectionActor(actorId ?? "", actorEmail);
                                 try
                                 {
-                                    await connections.Store.AssignAllAsync(id, [.. chosen.Select(c => (c.Id,
+                                    await connections.Store.AssignAllAsync(connection, transaction, id, [.. chosen.Select(c => (c.Id,
                                         actor.Row(TenantActions.TeamConnectionAssigned, c.Id, c.Name, Connections.AssignedDetail(id, c, "new team"))))], token);
                                 }
                                 catch (DbException exception)

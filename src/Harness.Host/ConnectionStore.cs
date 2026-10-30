@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Harness.Contracts;
 using Harness.Identity;
 using Microsoft.AspNetCore.DataProtection;
@@ -585,17 +586,17 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
         return AssignOutcome.Assigned;
     }
 
-    public async Task AssignAllAsync(string team, IReadOnlyList<(string ConnectionId, TriggerAudit Audit)> assignments, CancellationToken ct = default)
+    public async Task AssignAllAsync(
+        DbConnection connection, DbTransaction transaction, string team,
+        IReadOnlyList<(string ConnectionId, TriggerAudit Audit)> assignments, CancellationToken ct = default)
     {
-        await using var connection = Open();
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+        var sqlite = (SqliteConnection)connection;
+        var inside = (SqliteTransaction)transaction;
 
         foreach (var (id, audit) in assignments)
         {
-            if (await InsertAssignmentAsync(connection, transaction, team, id, ct)) await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
+            if (await InsertAssignmentAsync(sqlite, inside, team, id, ct)) await TenantAuditRow.AppendAsync(sqlite, inside, audit, ct);
         }
-
-        await transaction.CommitAsync(ct);
     }
 
     public async Task<(bool Removed, IReadOnlyList<ConnectionUse> Unbound)> UnassignAsync(

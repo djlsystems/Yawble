@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Harness.Contracts;
 
 namespace Harness.Host;
@@ -111,10 +112,15 @@ public interface IConnectionStore
     Task<AssignOutcome> AssignAsync(string team, string connectionId, TriggerAudit audit, CancellationToken ct = default);
 
     /// <summary>
-    /// A new team's assignments, each with its tenant row, in one transaction: all of them, or none
-    /// and the exception. One already there is skipped, with no row.
+    /// A new team's assignments, each with its tenant row, written on <paramref name="connection"/> inside
+    /// <paramref name="transaction"/> - the one the team store writes the team's row in
+    /// (<see cref="ITeamStore.SaveTeamAsync(PersistedTeam, Func{DbConnection, DbTransaction, CancellationToken, Task}, CancellationToken)"/>),
+    /// so the row and every assignment commit together or not at all. Never commits. One already there
+    /// is skipped, with no row.
     /// </summary>
-    Task AssignAllAsync(string team, IReadOnlyList<(string ConnectionId, TriggerAudit Audit)> assignments, CancellationToken ct = default);
+    Task AssignAllAsync(
+        DbConnection connection, DbTransaction transaction, string team,
+        IReadOnlyList<(string ConnectionId, TriggerAudit Audit)> assignments, CancellationToken ct = default);
 
     /// <summary>
     /// Removes <paramref name="connectionId"/> from <paramref name="team"/>. Every member of the team that

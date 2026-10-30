@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Data.Common;
 using System.Text.Json;
 using Harness.Containers;
 using Harness.Contracts;
@@ -1804,7 +1805,7 @@ public sealed class TeamRegistry(
         Func<IReadOnlyList<RepoCloneOutcome>, bool>? handleRepoSetup = null,
         IReadOnlyDictionary<string, string>? upstreams = null,
         Func<string, CancellationToken, Task<string?>>? addRepo = null,
-        Func<string, CancellationToken, Task>? withRow = null)
+        Func<string, DbConnection, DbTransaction, CancellationToken, Task>? withRow = null)
     {
         var trimmed = label.Trim();
         var (validatedRepos, contributors) = ValidateRepos(repos, upstreams);
@@ -2086,33 +2087,21 @@ public sealed class TeamRegistry(
         // failure that would look exactly like the invented-credential one.
         var seededEnv = TeamEnv.SeedFor(team);
 
-        await teams.SaveTeamAsync(
-            new PersistedTeam(
-                team,
-                string.Equals(trimmed, team, StringComparison.OrdinalIgnoreCase) ? null : trimmed,
-                AdditionalInstructions: instructions,
-                MemberAgent: memberAgentNames[0],
-                MemberAgents: memberAgentNames,
-                Root: resolvedRoot,
-                Repos: validatedRepos,
-                Env: seededEnv),
-            ct);
-
         // WHAT MUST LAND WITH THE ROW, or no team: the caller's writes keyed on the new id (a new team's
-        // connections, which reference its row). One that throws takes the row back out before anything
-        // else of the team exists - no dictionary, no Manager, no push - so the create fails whole.
-        if (withRow is not null)
-        {
-            try
-            {
-                await withRow(team, ct);
-            }
-            catch
-            {
-                await teams.DeleteTeamAsync(team, CancellationToken.None);
-                throw;
-            }
-        }
+        // connections, which reference its row) go in THE ROW'S OWN TRANSACTION. One that throws rolls
+        // the row back with it - nothing was ever committed, so there is nothing to take back out, and
+        // a stop part-way leaves no team for a restart to find.
+        var teamRow = new PersistedTeam(
+            team,
+            string.Equals(trimmed, team, StringComparison.OrdinalIgnoreCase) ? null : trimmed,
+            AdditionalInstructions: instructions,
+            MemberAgent: memberAgentNames[0],
+            MemberAgents: memberAgentNames,
+            Root: resolvedRoot,
+            Repos: validatedRepos,
+            Env: seededEnv);
+        if (withRow is null) await teams.SaveTeamAsync(teamRow, ct);
+        else await teams.SaveTeamAsync(teamRow, (connection, transaction, token) => withRow(team, connection, transaction, token), ct);
 
         // NOTHING TENANT-WIDE IS WRITTEN BY CREATING A TEAM. Writing the Concierge setting here would
         // change every other team's Concierge as a side effect of a create, with no audit line

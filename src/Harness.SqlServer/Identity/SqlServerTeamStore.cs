@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Harness.Contracts;
 using Harness.Identity;
 using Microsoft.Data.SqlClient;
@@ -100,7 +101,34 @@ public sealed class SqlServerTeamStore(string connectionString) : ITeamStore
     /// halves - their narrow setters are their only writers, so a full-record save cannot clear them.
     /// </summary>
     public Task SaveTeamAsync(PersistedTeam team, CancellationToken ct = default) =>
-        ExecuteAsync(
+        RunAsync(
+            async (connection, token) =>
+            {
+                await WriteTeamAsync(connection, null, team, token);
+                return true;
+            },
+            ct);
+
+    public Task SaveTeamAsync(
+        PersistedTeam team, Func<DbConnection, DbTransaction, CancellationToken, Task> withRow, CancellationToken ct = default) =>
+        RunAsync(
+            async (connection, token) =>
+            {
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
+
+                await WriteTeamAsync(connection, transaction, team, token);
+                await withRow(connection, transaction, token);
+
+                await SqlServerOpen.CommitAsync(transaction, token);
+                return true;
+            },
+            ct);
+
+    private static async Task WriteTeamAsync(SqlConnection connection, SqlTransaction? transaction, PersistedTeam team, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText =
             """
             MERGE teams WITH (HOLDLOCK) AS t
             USING (SELECT @id AS id) AS n ON t.id = n.id
@@ -110,20 +138,18 @@ public sealed class SqlServerTeamStore(string connectionString) : ITeamStore
             WHEN NOT MATCHED THEN INSERT
                 (id, name, member_agent, member_agents, additional_instructions, root, repos, env, created_utc)
                 VALUES (@id, @name, @memberAgent, @memberAgents, @instructions, @root, @repos, @env, @createdUtc);
-            """,
-            command =>
-            {
-                command.Parameters.AddWithValue("@id", team.Id);
-                command.Parameters.AddWithValue("@name", TeamRows.Text(team.Name));
-                command.Parameters.AddWithValue("@memberAgent", TeamRows.MemberAgent(team));
-                command.Parameters.AddWithValue("@memberAgents", TeamRows.MemberAgents(team.MemberAgents));
-                command.Parameters.AddWithValue("@instructions", TeamRows.Instructions(team.AdditionalInstructions));
-                command.Parameters.AddWithValue("@root", TeamRows.Text(team.Root));
-                command.Parameters.AddWithValue("@repos", TeamRows.Repos(team.Repos));
-                command.Parameters.AddWithValue("@env", TeamRows.Env(team.Env));
-                command.Parameters.AddWithValue("@createdUtc", Instant.Now());
-            },
-            ct);
+            """;
+        command.Parameters.AddWithValue("@id", team.Id);
+        command.Parameters.AddWithValue("@name", TeamRows.Text(team.Name));
+        command.Parameters.AddWithValue("@memberAgent", TeamRows.MemberAgent(team));
+        command.Parameters.AddWithValue("@memberAgents", TeamRows.MemberAgents(team.MemberAgents));
+        command.Parameters.AddWithValue("@instructions", TeamRows.Instructions(team.AdditionalInstructions));
+        command.Parameters.AddWithValue("@root", TeamRows.Text(team.Root));
+        command.Parameters.AddWithValue("@repos", TeamRows.Repos(team.Repos));
+        command.Parameters.AddWithValue("@env", TeamRows.Env(team.Env));
+        command.Parameters.AddWithValue("@createdUtc", Instant.Now());
+        await command.ExecuteNonQueryAsync(ct);
+    }
 
     public Task SetNameAsync(string team, string? name, CancellationToken ct = default) =>
         ExecuteAsync(

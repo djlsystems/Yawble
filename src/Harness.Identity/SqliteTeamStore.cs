@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Microsoft.Data.Sqlite;
 using Harness.Contracts;
 
@@ -30,7 +31,25 @@ public sealed class SqliteTeamStore : ITeamStore
     public async Task SaveTeamAsync(PersistedTeam team, CancellationToken ct = default)
     {
         await using var connection = Open();
+        await WriteTeamAsync(connection, null, team, ct);
+    }
+
+    public async Task SaveTeamAsync(
+        PersistedTeam team, Func<DbConnection, DbTransaction, CancellationToken, Task> withRow, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        await WriteTeamAsync(connection, transaction, team, ct);
+        await withRow(connection, transaction, ct);
+
+        await transaction.CommitAsync(ct);
+    }
+
+    private static async Task WriteTeamAsync(SqliteConnection connection, SqliteTransaction? transaction, PersistedTeam team, CancellationToken ct)
+    {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
 
         // Upsert: created_utc is left alone on conflict, so a re-save of an existing team does not
         // reset when it was first created.
