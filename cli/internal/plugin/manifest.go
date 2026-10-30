@@ -43,9 +43,10 @@ var (
 	configName  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
 	eventSuffix = regexp.MustCompile(`^[a-z][a-z0-9.-]{0,63}$`)
 	// connectionProvider is a provider a connection slot may name: a built-in, any custom
-	// provider, one custom provider by id (at most 40 characters in all, as the Host), or imap for a
-	// mailbox signed in with an app password.
-	connectionProvider = regexp.MustCompile(`^(google|microsoft|custom|custom-[a-z0-9][a-z0-9-]{0,32}|imap)$`)
+	// provider, one custom provider by id (at most 40 characters in all, as the Host), imap for a
+	// mailbox signed in with an app password, or a credential: login (a username and password) or
+	// apikey (an API key).
+	connectionProvider = regexp.MustCompile(`^(google|microsoft|custom|custom-[a-z0-9][a-z0-9-]{0,32}|imap|login|apikey)$`)
 	// slug is SiteRules.IsSlug: lower-case letters, digits and single hyphens, starting and ending
 	// with a letter or digit, at most 63 characters (the length is checked beside it).
 	slug = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
@@ -198,6 +199,7 @@ func parse(root map[string]any) (Manifest, []string, string) {
 			}
 		}
 	}
+	var moved [][2]string
 	if s, present := root["secrets"]; present {
 		secrets, ok := s.(map[string]any)
 		if !ok {
@@ -214,6 +216,13 @@ func parse(root map[string]any) (Manifest, []string, string) {
 			if _, has := secret["value"]; has {
 				return m, nil, fmt.Sprintf("`secrets.%s` carries a value. A manifest names a secret; the value is set with `secret set` and bound by a logical key.", key)
 			}
+			if to, present := secret["movedTo"]; present && to != nil {
+				slot, ok := to.(string)
+				if !ok || strings.TrimSpace(slot) == "" {
+					return m, nil, fmt.Sprintf("`secrets.%s.movedTo` must be the name of a connection slot this manifest declares.", key)
+				}
+				moved = append(moved, [2]string{key, slot})
+			}
 		}
 	}
 	if c, present := root["connections"]; present && c != nil {
@@ -225,6 +234,12 @@ func parse(root map[string]any) (Manifest, []string, string) {
 			if r := connectionSlot(key, slots[key]); r != "" {
 				return m, nil, r
 			}
+		}
+	}
+	for _, field := range moved {
+		slots, _ := root["connections"].(map[string]any)
+		if r := movedTo(field[0], field[1], slots); r != "" {
+			return m, nil, r
 		}
 	}
 	var ignored []string
@@ -421,13 +436,13 @@ func connectionSlot(name string, value any) string {
 	}
 	list, ok := slot["providers"].([]any)
 	if !ok || len(list) == 0 || !stringArray(slot["providers"]) {
-		return fmt.Sprintf("`connections.%s.providers` must be a non-empty list of providers (google, microsoft, custom, custom-<id> or imap).", name)
+		return fmt.Sprintf("`connections.%s.providers` must be a non-empty list of providers (google, microsoft, custom, custom-<id>, imap, login or apikey).", name)
 	}
 	var providers []string
 	for _, item := range list {
 		p := item.(string)
 		if !connectionProvider.MatchString(p) {
-			return fmt.Sprintf("`connections.%s.providers` names '%s', which is not a provider (google, microsoft, custom, custom-<id> or imap).", name, p)
+			return fmt.Sprintf("`connections.%s.providers` names '%s', which is not a provider (google, microsoft, custom, custom-<id>, imap, login or apikey).", name, p)
 		}
 		providers = append(providers, p)
 	}
@@ -441,6 +456,9 @@ func connectionSlot(name string, value any) string {
 			for _, key := range orderedKeys(v) {
 				if key == "imap" {
 					return fmt.Sprintf("`connections.%s.scopes` has an entry for 'imap', but scopes do not apply to an imap connection: a mailbox signs in with its app password.", name)
+				}
+				if key == "login" || key == "apikey" {
+					return fmt.Sprintf("`connections.%s.scopes` has an entry for '%s', but scopes do not apply to a %s connection: it has no sign-in.", name, key, credentialDisplay[key])
 				}
 				if !slices.Contains(providers, key) {
 					return fmt.Sprintf("`connections.%s.scopes` has scopes for '%s', which the slot's providers do not name.", name, key)
@@ -462,6 +480,28 @@ func connectionSlot(name string, value any) string {
 		if _, ok := r.(bool); !ok {
 			return fmt.Sprintf("`connections.%s.required` must be true or false.", name)
 		}
+	}
+	if r, present := slot["multiple"]; present {
+		if _, ok := r.(bool); !ok {
+			return fmt.Sprintf("`connections.%s.multiple` must be true or false.", name)
+		}
+	}
+	return ""
+}
+
+// credentialDisplay is ConnectionKinds.Display for the credential kinds a slot may name.
+var credentialDisplay = map[string]string{"login": "username and password", "apikey": "API key"}
+
+// movedTo checks `secrets.<field>.movedTo` as PluginSecret.MovedToRefusal does, in its words: the
+// slot must be one the manifest's `connections` declares, taking only API-key connections.
+func movedTo(field, slot string, connections map[string]any) string {
+	declared, ok := connections[slot].(map[string]any)
+	if !ok {
+		return fmt.Sprintf("`secrets.%s.movedTo` names '%s', which is not a slot this manifest's `connections` declares.", field, slot)
+	}
+	providers, _ := declared["providers"].([]any)
+	if len(providers) != 1 || providers[0] != "apikey" {
+		return fmt.Sprintf("`secrets.%s.movedTo` names '%s', which is not an API-key slot: a secret moves only into a slot whose `providers` is [\"apikey\"].", field, slot)
 	}
 	return ""
 }

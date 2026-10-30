@@ -315,7 +315,7 @@ Content-Type: application/json
 | `executable.path`, `executable.args` | required / optional | A relative path inside the version directory. `args` is a fixed argv with no substitution. |
 | `timeoutSeconds` | optional | An **idle** clock: this long with no `progress` record ends the run. Default 300. |
 | `config` | optional | Name → `{type: string, number, bool or list (string when absent); enum; default; required; setBy: "person" or "anyone"; advanced; label; description}`. `label` - a short line of text, 1 to 80 characters - is what a settings screen names the field; anything else refuses the manifest naming the field. A name starts with a letter and holds letters, digits, `_` and `-`, at most 64 characters. `"advanced"` (true or false, nothing else) is accepted and no screen hides a field behind it (see [Every setting on one screen](#every-setting-on-one-screen)); a `number` may add `min`, `max` and `integer` (see [Number bounds](#number-bounds)). A `list` is a list of strings, default `[]`. See [List settings](#list-settings). A `table` is rows of typed columns a person edits; see [Table settings](#table-settings-type-table). |
-| `secrets` | optional | Name → `{description, required, label?, masked?, when?}`. A `value` key is refused. `masked` (default `true`; `true` or `false`, anything else refuses the manifest naming the field) says the value is secret: never answered, never shown, redacted from what the plugin writes. `"masked": false` declares a value that is not secret (an account name): the settings screen shows it in a plain text box and the read answers it. `label` is as for `config`. `when` - `{"<config field>": "<value>"}`, one pair - says the secret is needed only while that list or choice setting holds that value (`{"sources": "adzuna"}`); the field must be declared and the value one of its `enum`. A solution install uses it to say a secret for a setting the person left off is not needed. |
+| `secrets` | optional | Name → `{description, required, label?, masked?, when?, movedTo?}`. A `value` key is refused. `masked` (default `true`; `true` or `false`, anything else refuses the manifest naming the field) says the value is secret: never answered, never shown, redacted from what the plugin writes. `"masked": false` declares a value that is not secret (an account name): the settings screen shows it in a plain text box and the read answers it. `label` is as for `config`. `when` - `{"<config field>": "<value>"}`, one pair - says the secret is needed only while that list or choice setting holds that value (`{"sources": "adzuna"}`); the field must be declared and the value one of its `enum`. A solution install uses it to say a secret for a setting the person left off is not needed. `movedTo` names a slot this manifest's `connections` declares whose `providers` is exactly `["apikey"]`: this version reads the field's value from that API-key connection (see [A secret moved to a connection](#a-secret-moved-to-a-connection-movedto)). |
 | `connections` | optional | Slot name → `{description, providers, scopes, required}`: an OAuth account the plugin acts on, which the Host holds and refreshes. See [Connections](#connections-oauth-accounts). |
 | `reads` | optional | A list of `{site, collection}`, at most 32: the collections of the plugin's OWN team's sites it reads, delivered on stdin at each run. See [Reading site data](#reading-site-data-reads). |
 | `events.publishes` | optional | `type` is a suffix: lowercase letters, digits, `-` and `.`. The full type is `plugin.<id>.<type>`. `highVolume` (default false) and `fields` (`name`, `kind`: `string`, `number`, `boolean` or `list`, `summary`) are optional; `source` cannot be declared. `monitor` (optional) tells the Monitor what the event did outside the platform; see [Monitor hints](#monitor-hints). `inLedger` is not read in v1: a plugin event declared `highVolume` stays out of the member ledger and is still an ordinary log row, and any other plugin event stays in the ledger. See [Events](#events). |
@@ -429,6 +429,7 @@ token, refreshes and rotates, and hands the plugin a fresh access token on each 
 | `providers` | Which providers' connections may be bound: `google`, `microsoft`, `custom` (any custom provider), `custom-<id>` (one custom provider), `imap` for a mailbox signed in with an app password (see [connections.md](connections.md#a-mailbox-with-an-app-password-imap)), `login` for a username and password, or `apikey` for an API key (see [connections.md](connections.md#websites-api-keys-usernames-and-passwords)). At least one. An unknown provider refuses the plugin, with the reason on the Plugins screen. |
 | `scopes` | Provider → the scopes the slot needs, or one list that applies to every OAuth provider the slot names. A `custom` entry applies to any custom provider. A connection lacking one of them is refused at binding, with a sentence that offers Reconnect. Scopes do not apply to `imap`, `login` or `apikey`: an entry for one refuses the plugin. |
 | `required` | Default false. An unbound required slot blocks the member's runs with a sentence naming the slot, as a missing required secret does. |
+| `multiple` | Default false. True lets a member bind several connections to the slot, and a run receives them all as an array (see [A slot with several connections](#a-slot-with-several-connections-multiple)). Anything but true or false refuses the plugin. |
 
 - **Without `connections`** a run gets `"connections": {}`.
 - **A malformed slot** refuses the plugin with its reason on the Plugins screen, as other manifest
@@ -442,6 +443,50 @@ token, refreshes and rotates, and hands the plugin a fresh access token on each 
   person assigned to the member's team (Team settings → Connections). A Manager or Concierge hire may
   bind any connection assigned to its own team, and is refused one that is not. See
   [connections.md](connections.md#which-teams-may-use-a-connection).
+
+#### A slot with several connections: `multiple`
+
+`"multiple": true` on a slot (as Azure's app secrets need) lets one member bind several connections
+to it. Each binding is an ordinary slot-to-id entry in the member's `connections`: the first under
+the slot's own name, the rest under `<slot>#2`, `<slot>#3`, and so on (`PluginConnectionSlot.BindingKey`;
+a slot name never holds `#`). So assigning to the team, `usedBy`, and a confirmed delete with
+`unbind=true` treat each one exactly as they treat a single binding.
+
+```json
+"connections": { "appSecrets": { "providers": ["apikey"], "multiple": true, "required": true } }
+```
+
+```json
+PUT /api/teams/{team}/members/{member}/plugin-settings
+{ "connections": { "appSecrets": "<id A>", "appSecrets#2": "<id B>", "appSecrets#3": "<id C>" } }
+```
+
+- **The run** gets `connections.<slot>` as an **array**, one entry per bound connection, ordered by
+  its binding key (`<slot>`, then `#2`, `#3`...). Each entry has the same shape a single slot's
+  object has (for an API key `{ kind, account, preset, fields }`). An array of one is still an
+  array. A multiple slot with nothing bound is absent, as an unbound single slot is.
+- **A slot that is not multiple** is unchanged: one object, and a second binding (`<slot>#2`) is
+  refused ("Slot `x` takes one connection, so `x#2` cannot bind another. ..."). A multiple slot
+  refuses the same connection bound twice, and a key such as `<slot>#1` or `<slot>#x` is not a slot.
+- **`required`** is met by any one binding.
+
+#### A secret moved to a connection: `movedTo`
+
+A secret field may say that, from this version on, its value is held by an API-key connection:
+
+```json
+"secrets": { "apiKey": { "description": "Stripe secret key", "movedTo": "stripe" } },
+"connections": { "stripe": { "providers": ["apikey"], "required": true } }
+```
+
+`movedTo` must name a slot the same manifest declares, and that slot's `providers` must be exactly
+`["apikey"]`. The Host (`PluginSecret.MovedToRefusal`) and the operator CLI's checker
+(`cli/internal/plugin`) refuse anything else in the same words, read from one set of cases
+(`tests/Fixtures/PluginConnectionMoves/cases.json`):
+
+- `` `secrets.<field>.movedTo` must be the name of a connection slot this manifest declares. ``
+- `` `secrets.<field>.movedTo` names '<slot>', which is not a slot this manifest's `connections` declares. ``
+- `` `secrets.<field>.movedTo` names '<slot>', which is not an API-key slot: a secret moves only into a slot whose `providers` is ["apikey"]. ``
 
 #### Several Microsoft APIs from one connection
 
@@ -779,7 +824,8 @@ rows, `row.status`), `cli/internal/plugin/manifest_test.go` and `web/src/lib/__t
   a fresh access token, when it expires and the scopes it was granted. The Host refreshes the token
   before the run when it would expire within 5 minutes, so a run always starts with at least that
   long. It is `{}` when the manifest declares no slot or the member has none bound; a plugin that ignores it
-  is unaffected. The refresh
+  is unaffected. A slot declared `"multiple": true` holds an array of these entries, one per bound
+  connection (see [A slot with several connections](#a-slot-with-several-connections-multiple)). The refresh
   token and the client secret never reach a plugin. A **Microsoft** slot also carries `tokens`, its
   last member: API → `{ accessToken, expiresAt, scopes }`, one entry per API the slot's scopes name
   (see [Several Microsoft APIs](#several-microsoft-apis-from-one-connection)), in the slot's order.
