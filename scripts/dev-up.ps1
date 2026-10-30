@@ -70,6 +70,11 @@ foreach ($build in @(@{ Target = 'control'; Ref = $tag }, @{ Target = 'worker'; 
 # up replaces control and the workers on the same volume (asking first when agents are running).
 & $yawble config set image $tag
 if ($LASTEXITCODE -ne 0) { throw "yawble config set image failed" }
+# The worker image is derived from `image` ($tag-worker, built above) unless `workerImage` is saved.
+# A saved one would keep every worker on an older build, which control then refuses as another
+# version, so this script clears it: what it built is what the workers run.
+& $yawble config set workerImage ''
+if ($LASTEXITCODE -ne 0) { throw "yawble config set workerImage failed" }
 $upArgs = @('up', '--no-browser')
 if ($Yes) { $upArgs += '--yes' }
 & $yawble @upArgs

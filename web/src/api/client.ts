@@ -2163,10 +2163,14 @@ export const installSolution = (body: SolutionInstallRequest) =>
 export const updateSolution = (body: SolutionUpdateRequest) =>
   json<SolutionInstallResult>('/api/solutions/update', postJson(body))
 
-/** The package a team was installed from and what it still waits for; `null` (a 404) for a team not from a package. */
+/**
+ * The package a team was installed from and what it still waits for; `null` for a team not from a
+ * package (204) or one that no longer exists (404).
+ */
 export async function teamSolution(team: string): Promise<TeamSolution | null> {
   try {
-    return await json<TeamSolution>(`/api/teams/${encodeURIComponent(team)}/solution`)
+    const response = await send(`/api/teams/${encodeURIComponent(team)}/solution`)
+    return response.status === 204 ? null : ((await response.json()) as TeamSolution)
   } catch (cause) {
     if ((cause as { status?: number }).status === 404) return null
     throw cause

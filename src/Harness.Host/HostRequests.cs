@@ -57,6 +57,23 @@ internal readonly record struct SchedulePatch(
 /// One store of the Concierge or non-Manager Container refusal, so duplicating the sentence is
 /// impossible.
 /// </summary>
+/// <summary>
+/// Who may `tell`: a person; any machine principal holding Tell; and a member (a container, which
+/// <c>TeamGate</c> binds to its own team) telling a plugin member, Tell or not. A principal that
+/// cannot be read is refused.
+/// </summary>
+internal static class TellPermit
+{
+    public static bool Allows(Principal? caller, bool targetIsPlugin) => caller switch
+    {
+        null => false,
+        { Kind: PrincipalKind.User } => true,
+        _ when caller.May(Permits.Tell) => true,
+        { Kind: PrincipalKind.Container } => targetIsPlugin,
+        _ => false,
+    };
+}
+
 internal static class TellRefusals
 {
     /// <summary>

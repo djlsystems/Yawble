@@ -54,7 +54,8 @@ public sealed partial class PlatformMcpTools(
     [McpServerTool(Name = "tell"), Description(
         "Tell a member to do something. Pass causation from HARNESS_CAUSATION, or from STEERING.md "
         + "when you are the Concierge and the person is looking at a workflow, so this joins that "
-        + "workflow instead of starting a new one. A container's team is its own; a Concierge must pass team.")]
+        + "workflow instead of starting a new one. A container's team is its own; a Concierge must pass team. "
+        + "Any member may tell a plugin member of its own team; telling an agent member is the Manager's.")]
     public async Task<string> Tell(
         [Description("The member to address. The manager is named Manager unless relabelled.")] string member,
         [Description("The full instruction.")] string instruction,

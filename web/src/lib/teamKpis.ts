@@ -1,6 +1,7 @@
 import { clockDuration } from './duration';
 import { outcomeLabel } from '../api/outcomes';
 import { localTime } from './localTime';
+import { spendAgainstBudget } from './teamBudget';
 import type {
   ContainerSnapshot,
   Message,
@@ -1217,6 +1218,14 @@ export interface WorkflowRow {
 
   /** The wakes members asked for in this workflow that are still pending, earliest due first; empty when none. */
   wakes: PendingWake[];
+
+  /**
+   * THE TOKENS THIS WORKFLOW HAS SPENT AGAINST ITS BUDGET, null when not measured: the window the
+   * pump decides on (`spendSinceNudge`), else the whole workflow's spend, through the same
+   * `spendAgainstBudget` the tile reads. The dialog measures it against the budget in force; null
+   * draws no bar, never a bar at zero.
+   */
+  spentTokens: number | null;
 }
 
 /**
@@ -1582,6 +1591,8 @@ export function workflowsTile(
 
       // Absent when none, and an older Host sends no such field.
       wakes: entry.wakes ?? [],
+
+      spentTokens: spendAgainstBudget(entry.spendSinceNudge?.tokensSpent, entry.spend?.tokensSpent),
     };
   });
 

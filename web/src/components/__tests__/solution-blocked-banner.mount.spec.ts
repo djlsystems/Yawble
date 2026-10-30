@@ -99,7 +99,15 @@ describe('the blocked banner', () => {
     expect(wrapper.find('[data-solution-blocked]').exists()).toBe(false);
   });
 
-  it('renders nothing for a team not installed from a package (404)', async () => {
+  it('renders nothing for a team not installed from a package (204)', async () => {
+    serve([(call) => (call.url === '/api/teams/plain/solution' ? reply(204) : undefined)]);
+    const wrapper = await banner('plain');
+    expect(sent(calls, 'GET', '/api/teams/plain/solution')).toHaveLength(1);
+    expect(wrapper.find('[data-solution-blocked]').exists()).toBe(false);
+    expect(wrapper.text()).toBe('');
+  });
+
+  it('renders nothing for a team that no longer exists (404)', async () => {
     serve([(call) => (call.url === '/api/teams/plain/solution' ? reply(404, { error: 'Team plain was not installed from a package.' }) : undefined)]);
     const wrapper = await banner('plain');
     expect(sent(calls, 'GET', '/api/teams/plain/solution')).toHaveLength(1);
