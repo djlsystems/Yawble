@@ -92,7 +92,10 @@ describe('Solution wizard - Your part', () => {
     const wrapper = await yourPart();
 
     const picker = selectLabelled(wrapper, 'Connection for Scout: mail');
-    expect(picker.props('options')).toEqual([{ value: 'conn-1', label: 'Work mail - dana@example.com (Microsoft)' }]);
+    expect(picker.props('options')).toEqual([
+      { value: 'conn-1', label: 'Work mail - dana@example.com (Microsoft)' },
+      { value: '__new_connection__', label: 'New connection...' },
+    ]);
     expect(textAndHelp(bodyFind('[data-connection-input="Scout/mail"]')!)).toContain('Where postings are emailed from.');
   });
 

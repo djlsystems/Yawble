@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import { listConnectionProviders, listConnections } from '../api/client';
-import type { Connection, ConnectionProvider, PluginNamedSecretState, PluginSecretState, PluginTableRow } from '../api/types';
+import { listConnectionProviders, listConnections, listTeamConnections } from '../api/client';
+import { asTeamId, type Connection, type ConnectionProvider, type PluginNamedSecretState, type PluginSecretState, type PluginTableRow } from '../api/types';
 import { tableRows, type TableSecretStates, type TableSecretsDraft } from '../lib/pluginTable';
 import { emptyNamedSecretsDraft, type NamedSecretsDraft } from '../lib/namedSecrets';
 import {
@@ -84,6 +84,11 @@ const props = defineProps<{
   savedTableRows?: Record<string, string[]> | undefined;
   /** The member being edited, for a table row action's link. */
   memberContext?: { team: string; member: string } | undefined;
+  /**
+   * The member's team: its slots then list only the connections assigned to it (Team settings →
+   * Connections). Absent for a team not made yet, whose install assigns what is chosen.
+   */
+  team?: string | undefined;
 }>();
 
 const config = defineModel<PluginFieldValues>('config', { required: true });
@@ -114,20 +119,31 @@ const body = computed(() => settingsBody(props.shape, config.value, secrets.valu
 const available = ref<Connection[]>([]);
 const providers = ref<ConnectionProvider[]>([]);
 const connectionsProblem = ref('');
+/** The ids of the connections assigned to `team`, or undefined when no team is named. */
+const assigned = ref<string[] | undefined>(undefined);
 
 async function loadConnections() {
   if (!hasSlots(props.shape)) return;
 
   connectionsProblem.value = '';
   try {
-    [available.value, providers.value] = await Promise.all([listConnections(), listConnectionProviders()]);
+    const team = props.team;
+    const [all, kinds, given] = await Promise.all([
+      listConnections(),
+      listConnectionProviders(),
+      // Unread, every connection that fits is offered, and the Host still checks the binding.
+      team ? listTeamConnections(asTeamId(team)).catch(() => null) : Promise.resolve(null),
+    ]);
+    available.value = all;
+    providers.value = kinds;
+    assigned.value = given ? given.connections.map((entry) => entry.connection.id) : undefined;
   } catch (cause) {
     connectionsProblem.value = `The connections could not be read: ${cause instanceof Error ? cause.message : String(cause)}`;
   }
 }
 
 onMounted(() => void loadConnections());
-watch(() => props.shape, () => void loadConnections());
+watch([() => props.shape, () => props.team], () => void loadConnections());
 
 /** A secret field's state on the member, or null at hire and for a field the Host did not answer. */
 function stateOf(name: string): PluginSecretState | null {
@@ -393,6 +409,7 @@ function text(name: string): string {
           :slot-name="String(key)"
           :spec="declared"
           :connections="available"
+          :assigned="assigned"
           :providers="providers"
           :plugin="plugin"
           :bind="bindSlot ? (id: string) => bindSlot!(String(key), id) : undefined"

@@ -8,6 +8,7 @@ import { refusedReconnect } from '../lib/slotBinding';
 import CodeSignIn from './CodeSignIn.vue';
 import SlotConnect from './SlotConnect.vue';
 import SlotReconnect from './SlotReconnect.vue';
+import ConnectDialog from './ConnectDialog.vue';
 import {
   connectionsForSlot,
   goneRefusal,
@@ -47,6 +48,13 @@ import {
  * With `reconnectInTab` (the solution wizard, whose answers a trip away would lose) Reconnect opens
  * the provider in another tab and waits here - a Microsoft one shows its code here, as everywhere; the reconnected connection comes back as `connected`
  * and stays the binding, and a sign-in that granted fewer scopes than asked says so.
+ *
+ * ONLY WHAT THE TEAM WAS GIVEN (`assigned`): a member's slot lists only the connections assigned to
+ * its team (Team settings → Connections) that fit the slot - its kind, providers and scopes - and
+ * when exactly one fits, it is preselected. **New connection...**, the list's last entry, opens the
+ * connection wizard (ConnectDialog) for this slot; what it saves is bound as `connected` binds, and
+ * the Host's binding assigns it to the team in the same transaction. Without `assigned` (a new
+ * team's install, before it has any) every connection that fits is offered.
  */
 const props = defineProps<{
   slotName: string;
@@ -65,6 +73,10 @@ const props = defineProps<{
   pluginName?: string | undefined;
   /** Reconnect in another tab, leaving this page as it is. */
   reconnectInTab?: boolean | undefined;
+  /** The ids of the connections assigned to the member's team: only these are offered. */
+  assigned?: readonly string[] | undefined;
+  /** False where choosing binds at once (a blocked install's fix): nothing is chosen for the person. */
+  noPreselect?: boolean | undefined;
 }>();
 
 const bound = defineModel<string>({ required: true });
@@ -75,7 +87,35 @@ const emit = defineEmits<{
   closed: [];
 }>();
 
-const choices = computed(() => connectionsForSlot(props.spec, props.connections));
+/** The value of the list's New connection... entry: never a connection's id. */
+const NewConnection = '__new_connection__';
+
+/**
+ * WHAT FITS THE SLOT AND THE TEAM: of the team's assigned connections, those of a provider the slot
+ * takes holding every scope it asks. The one bound stays listed whatever it is, so the list shows it.
+ */
+const choices = computed(() => {
+  const given = props.assigned ? new Set(props.assigned) : null;
+  return connectionsForSlot(props.spec, props.connections).filter(
+    (connection) => connection.id === bound.value || !given || given.has(connection.id),
+  );
+});
+
+/** The connections that fit outright: the team's, of the slot's providers, lacking no scope. */
+const fitting = computed(() =>
+  choices.value.filter((connection) => connection.status === 'ok' && missingScopes(props.spec, connection).length === 0),
+);
+
+// EXACTLY ONE FITS: it is preselected, once, while nothing is bound. The person still saves it.
+watch(
+  fitting,
+  (fits) => {
+    // An optional slot a member already has is left as the person left it.
+    const choosing = !props.noPreselect && (props.spec.required || !props.bind);
+    if (choosing && bound.value === '' && fits.length === 1 && props.assigned) bound.value = fits[0]!.id;
+  },
+  { immediate: true },
+);
 
 const options = computed(() =>
   choices.value.map((connection) => ({
@@ -83,8 +123,30 @@ const options = computed(() =>
     label:
       `${connection.name} - ${connection.account} (${providerName(connection.provider, props.providers)})` +
       (connection.status === 'ok' ? '' : `, ${statusLabel(connection)}`),
-  })),
+  })).concat([{ value: NewConnection, label: 'New connection...' }]),
 );
+
+/** New connection... from this slot: the wizard, for this slot's kinds and scopes. */
+const wizardOpen = ref(false);
+const wizardNeed = computed(() =>
+  props.plugin
+    ? {
+        plugin: props.plugin,
+        slot: props.slotName,
+        providers: props.spec.providers,
+        scopes: props.spec.scopes,
+        pluginName: props.pluginName,
+      }
+    : null,
+);
+
+function picked(value: string | null) {
+  if (value === NewConnection) {
+    wizardOpen.value = true;
+    return;
+  }
+  bound.value = value ?? '';
+}
 
 const chosen = computed(() => props.connections.find((connection) => connection.id === bound.value) ?? null);
 
@@ -259,7 +321,8 @@ async function connected(connection: Connection) {
       dense
       clearable
       :label="label ?? `Connection for ${slotName}`"
-      @update:model-value="(value: string | null) => (bound = value ?? '')"
+      data-connection-select
+      @update:model-value="picked"
     >
       <template #append><FieldHelp :text="hint ?? slotHint(spec, providers)" /></template>
       <template #no-option>
@@ -270,9 +333,20 @@ async function connected(connection: Connection) {
         </q-item>
       </template>
     </q-select>
+    <ConnectDialog
+      v-model="wizardOpen"
+      :providers="providers"
+      :connections="connections"
+      :need="wizardNeed"
+      @connected="connected"
+    />
 
     <div v-if="choices.length === 0 && !offerConnect" class="text-caption os-text-muted q-mt-xs" data-no-connections>
-      No connection of that kind yet. A person connects one in Admin → Connections.
+      {{
+        assigned
+          ? "No connection of that kind is assigned to this team. Choose New connection..., or assign one in Team settings → Connections."
+          : 'No connection of that kind yet. Choose New connection..., or connect one in Admin → Connections.'
+      }}
     </div>
 
     <div v-if="unbound" class="text-caption os-text-muted q-mt-xs" data-slot-unbound>

@@ -49,6 +49,8 @@ import type {
   MemberRunsPage,
   PluginHire,
   Connection,
+  TeamConnectionEntry,
+  TeamConnections,
   CredentialAddRequest,
   CredentialFieldValue,
   CredentialPreset,
@@ -627,6 +629,12 @@ export const createTeam = (
    * to a choice the refusal offered for it. Omitted when empty.
    */
   repoChoices?: Record<string, RepoChoice>,
+
+  /**
+   * The ids of existing connections assigned to the new team (New team → Connections), each with its
+   * `team.connection-assigned` row. Omitted when empty: the team starts with none.
+   */
+  connections?: string[],
 ) =>
   json<TeamCreated>('/api/teams', {
     method: 'POST',
@@ -646,6 +654,7 @@ export const createTeam = (
       upstreams: upstreams && Object.keys(upstreams).length > 0 ? upstreams : undefined,
       localRepository,
       repoChoices: repoChoices && Object.keys(repoChoices).length > 0 ? repoChoices : undefined,
+      connections: connections && connections.length > 0 ? connections : undefined,
     }),
   })
 
@@ -1673,6 +1682,31 @@ export const renameConnection = (id: string, name: string) =>
  */
 export const disconnectConnection = (id: string, unbind = false) =>
   send(`/api/connections/${encodeURIComponent(id)}${unbind ? '?unbind=true' : ''}`, { method: 'DELETE' }).then(() => undefined)
+
+/**
+ * TEAM SETTINGS → CONNECTIONS: the connections assigned to a team, oldest first, each with `usedBy`
+ * narrowed to the team's own members. A plugin member of the team binds only one of these.
+ */
+export const listTeamConnections = (team: TeamId) =>
+  json<TeamConnections>(`/api/teams/${encodeURIComponent(team)}/connections`)
+
+/** Assigns a connection to a team: a person's act only. 201, or 200 when it already was. */
+export const assignTeamConnection = (team: TeamId, connection: string) =>
+  json<TeamConnectionEntry>(`/api/teams/${encodeURIComponent(team)}/connections`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ connection }),
+  })
+
+/**
+ * Removes a connection from a team. Without `unbind`, one the team's members use is refused 409
+ * naming them (`ActionRefused`, `body.usedBy`); with it, they are unbound in the same transaction.
+ */
+export const removeTeamConnection = (team: TeamId, id: string, unbind = false) =>
+  send(
+    `/api/teams/${encodeURIComponent(team)}/connections/${encodeURIComponent(id)}${unbind ? '?unbind=true' : ''}`,
+    { method: 'DELETE' },
+  ).then(() => undefined)
 
 /** The forms of a website, API key (Stripe, Namecheap, Twilio, Other) and username and password connection. */
 export const listCredentialPresets = () => json<CredentialPreset[]>('/api/connections/credentials/presets')

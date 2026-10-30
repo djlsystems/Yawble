@@ -5,6 +5,7 @@ import {
   getPluginSettings,
   listConnectionProviders,
   listConnections,
+  listTeamConnections,
   pauseTeam,
   readRunTranscript,
   resumeTeam,
@@ -217,7 +218,11 @@ async function rereadPanel() {
 /** The connections and providers again, after a sign-in from a slot made one. */
 async function reloadConnections() {
   try {
-    [available.value, providers.value] = await Promise.all([listConnections(), listConnectionProviders()]);
+    [available.value, providers.value, assigned.value] = await Promise.all([
+      listConnections(),
+      listConnectionProviders(),
+      assignedIds(props.team),
+    ]);
   } catch {
     // The pickers keep what they had.
   }
@@ -347,6 +352,17 @@ interface MemberSettings {
 const settings = ref<Record<string, MemberSettings>>({});
 const available = ref<Connection[]>([]);
 const providers = ref<ConnectionProvider[]>([]);
+/** The ids of the connections assigned to this team: a slot here offers only these. */
+const assigned = ref<string[] | undefined>(undefined);
+
+async function assignedIds(team: string): Promise<string[] | undefined> {
+  try {
+    return (await listTeamConnections(asTeamId(team))).connections.map((entry) => entry.connection.id);
+  } catch {
+    // Unread, every connection that fits is offered; the Host still checks the binding.
+    return undefined;
+  }
+}
 
 async function loadSettings(read: SolutionPanel) {
   const plugins = read.members.filter((member) => member.kind === 'plugin');
@@ -400,7 +416,11 @@ async function loadSettings(read: SolutionPanel) {
     read.blocked.some((item) => item.fix?.connection);
   if (needsConnections && available.value.length === 0) {
     try {
-      [available.value, providers.value] = await Promise.all([listConnections(), listConnectionProviders()]);
+      [available.value, providers.value, assigned.value] = await Promise.all([
+        listConnections(),
+        listConnectionProviders(),
+        assignedIds(props.team),
+      ]);
     } catch {
       // The pickers say there is nothing to choose; the forms say the rest.
     }
@@ -674,6 +694,8 @@ function closeUninstall() {
                   :slot-name="item.fix.connection.slot"
                   :spec="settings[item.fix.connection.member]!.shape.connections![item.fix.connection.slot]!"
                   :connections="available"
+                  :assigned="assigned"
+                  no-preselect
                   :providers="providers"
                   :plugin="settings[item.fix.connection.member]!.plugin || undefined"
                   :bind="(id: string) => bindConnected(item.fix!.connection!.member, item.fix!.connection!.slot, id)"
@@ -859,6 +881,7 @@ function closeUninstall() {
           <div v-for="group in listed" :key="`listed-${group.member}`" class="q-mb-md" :data-listed-settings="group.member">
             <div class="text-weight-medium q-mb-xs">{{ group.packageMember }}</div>
             <PluginSettingsForm
+              :team="team"
               v-model:config="settings[group.member]!.config"
               v-model:secrets="settings[group.member]!.secrets"
               :shape="group.shape"
@@ -888,6 +911,7 @@ function closeUninstall() {
               <div class="text-weight-medium q-mb-xs">{{ member.packageName }}</div>
               <template v-if="settings[member.member]">
                 <PluginSettingsForm
+              :team="team"
                   v-model:config="settings[member.member]!.config"
                   v-model:secrets="settings[member.member]!.secrets"
                   v-model:values="settings[member.member]!.values"
@@ -922,6 +946,7 @@ function closeUninstall() {
           <div v-for="member in withSlots" :key="`slots-${member.member}`" class="q-mb-md" :data-connections-member="member.member">
             <div class="text-weight-medium q-mb-xs">{{ member.packageName }}</div>
             <PluginSettingsForm
+              :team="team"
               v-model:config="settings[member.member]!.config"
               v-model:secrets="settings[member.member]!.secrets"
               v-model:connections="settings[member.member]!.connections"

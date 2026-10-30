@@ -375,7 +375,8 @@ async function submit() {
             v-model:named="pluginNamed"
             v-model:connections="pluginConnections"
             :shape="plugin"
-            :plugin="plugin.id"
+:plugin="plugin.id"
+            :team="team"
             save-label="Add member"
           />
         </div>

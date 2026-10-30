@@ -264,9 +264,11 @@ export function teamStatus(
     // instruction - so its last failed run is history, not the team's state. Counting it would paint
     // a team FAILED while one of its members was visibly working, e.g. after a host restart.
     const movedOn = container.state === 'Running' || container.queueDepth > 0;
-    if (!movedOn && log?.lastTerminal[container.id]?.event === 'failed') failed = true;
+    // A PLUGIN MEMBER WAITING FOR A PERSON (`needs-person`) did not fail: it is a wait, never an error.
+    const waitsForPerson = !!container.needsPerson || container.failureClass === 'needs-person';
+    if (!movedOn && !waitsForPerson && log?.lastTerminal[container.id]?.event === 'failed') failed = true;
 
-    if (container.blocked) blocked = true;
+    if (container.blocked || waitsForPerson) blocked = true;
 
     if (container.state === 'Running') running = true;
     if (container.queueDepth > 0) queued = true;
@@ -1920,6 +1922,13 @@ export type ContainerMark =
   | null;
 
 export function containerMark(container: ContainerSnapshot): ContainerMark {
+  // A PLUGIN MEMBER WAITING FOR A PERSON TO SET SOMETHING (a required connection slot with nothing
+  // bound) reads Needs you, never as a failure: its runs end `needs-person`, which is a wait for a
+  // person and not an error. It outranks `blocked` too: removing its connection from the team marks
+  // it blocked as well, and what the person must do is the setting this names.
+  if (container.needsPerson) return { kind: 'needs-decision', reason: container.needsPerson };
+  if (container.failed && container.failureClass === 'needs-person') return { kind: 'needs-decision', reason: container.failed };
+
   if (container.failed) {
     return {
       kind: 'failed',

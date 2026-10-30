@@ -8,6 +8,8 @@ export type MemberState = 'idle' | 'running' | 'waiting' | 'blocked' | 'decision
 
 /** A member's state from its snapshot: a mark first (failed, then needs you, then blocked), then its run. */
 export function memberStateOf(container: Team['containers'][number]): MemberState {
+  // Waiting for a person to set something (`needs-person`) is Needs you, never a failure.
+  if (container.needsPerson || (container.failed && container.failureClass === 'needs-person')) return 'decision'
   if (container.failed) return 'failed'
   if (container.needsDecision) return 'decision'
   if (container.blocked) return 'blocked'
