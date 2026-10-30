@@ -372,6 +372,28 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
         await transaction.CommitAsync(ct);
     }
 
+    /// <summary>A person's Test connection; see <see cref="IConnectionStore.RecordTestAsync"/>.</summary>
+    public async Task RecordTestAsync(string id, string? needsYou, DateTimeOffset at, TriggerAudit audit, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = needsYou is null
+                ? "UPDATE connections SET status = 'ok', status_reason = NULL, refreshed_at = $at WHERE id = $id"
+                : "UPDATE connections SET status = 'needs-reconnect', status_reason = $reason, access_token_protected = NULL, access_expires_at = NULL WHERE id = $id";
+            command.Parameters.AddWithValue("$id", id);
+            command.Parameters.AddWithValue("$at", Instant.Stamp(at));
+            command.Parameters.AddWithValue("$reason", (object?)needsYou ?? DBNull.Value);
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
+        await transaction.CommitAsync(ct);
+    }
+
     public async Task<bool> RenameAsync(string id, string name, TriggerAudit audit, CancellationToken ct = default)
     {
         await using var connection = Open();

@@ -34,7 +34,7 @@ public sealed partial class ConnectionsTests
         Assert.Equal([false, false, true], twilio.GetProperty("fields").EnumerateArray().Select(f => f.GetProperty("masked").GetBoolean()));
 
         var stripe = await AddCredentialAsync("apikey", "stripe", "Stripe live", ("key", KindSecrets[0], null));
-        var namecheap = await AddCredentialAsync("apikey", "namecheap", "Namecheap", ("apiUser", "nc-user", null), ("apiKey", KindSecrets[2], null));
+        var namecheap = await AddCredentialAsync("apikey", "namecheap", "Namecheap", ("apiUser", "nc-user", null), ("apiKey", KindSecrets[2], null), ("clientIp", "203.0.113.7", null));
         var twilioKey = await AddCredentialAsync(
             "apikey", "twilio", "Twilio", ("accountSid", "AC0001", null), ("apiKeySid", "SK0001", null), ("apiKeySecret", KindSecrets[3], null));
         var other = await AddCredentialAsync("apikey", "other", "Acme API", ("tenant", "acme-eu", false), ("token", KindSecrets[4], null));

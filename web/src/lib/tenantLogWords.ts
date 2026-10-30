@@ -731,6 +731,11 @@ const words: Record<string, Words> = {
     detail: (d) =>
       sentence([`${text(d, 'account') ?? 'the account'} with ${text(d, 'provider') ?? 'its provider'} needs reconnecting`, text(d, 'reason')]),
   },
+  'connections.tested': {
+    did: 'tested a connection',
+    detail: (d) =>
+      sentence([text(d, 'outcome') === 'ok' ? 'it works' : 'it needs a person', text(d, 'sentence')]),
+  },
   'connections.credentials-changed': {
     did: "changed what is behind a connection",
     detail: (d) =>

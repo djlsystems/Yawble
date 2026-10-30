@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Harness.Contracts;
 using System.Text.RegularExpressions;
 
 namespace Harness.Host;
@@ -72,8 +73,10 @@ public sealed record CredentialFieldSpec(string Name, string Label, bool Masked,
 /// <summary>
 /// A form a credential kind is made from: the fields a service needs, each masked or not. A preset
 /// with <see cref="NamedFields"/> (API key's Other) takes the fields the person names instead.
+/// <see cref="Test"/> is the one harmless request Test connection sends; null, and it has no test.
 /// </summary>
-public sealed record CredentialPreset(string Kind, string? Id, string Name, IReadOnlyList<CredentialFieldSpec> Fields, bool NamedFields = false)
+public sealed record CredentialPreset(
+    string Kind, string? Id, string Name, IReadOnlyList<CredentialFieldSpec> Fields, bool NamedFields = false, CredentialTest? Test = null)
 {
     public object View() => new
     {
@@ -82,7 +85,81 @@ public sealed record CredentialPreset(string Kind, string? Id, string Name, IRea
         name = Name,
         namedFields = NamedFields,
         fields = Fields.Select(f => new { name = f.Name, label = f.Label, masked = f.Masked, required = f.Required }),
+        test = Test is not null,
     };
+}
+
+/// <summary>
+/// THE ONE HARMLESS REQUEST a preset's Test connection sends: a GET of <see cref="Url"/>, whose
+/// <c>{field}</c> marks are the connection's values (a bare <c>{url}</c> is the address as typed), signed
+/// with HTTP Basic (<see cref="BasicUser"/> and <see cref="BasicPassword"/> name fields; no password
+/// field sends an empty one) or a <see cref="Bearer"/> token (<see cref="OnlyMasked"/>: the one masked
+/// field). A 401 or 403 is a refusal, and so is a body matching <see cref="RefusedWhen"/>, with the
+/// first group of <see cref="ReasonFrom"/> as its reason. <see cref="What"/> is what a sentence says
+/// was refused or accepted, by the service's name - or, for a request to the connection's own
+/// <c>{url}</c>, by that address's host. A preset whose test names a field the connection has not set has no test.
+/// </summary>
+public sealed partial record CredentialTest(
+    string Url, string What, string? BasicUser = null, string? BasicPassword = null, string? Bearer = null,
+    string? RefusedWhen = null, string? ReasonFrom = null)
+{
+    public const string OnlyMasked = "*";
+
+    /// <summary>The probe for a connection's values, or null when it has no test: a field the request
+    /// names is not set, or (Other) it has no <c>url</c> or not exactly one masked field.</summary>
+    public HttpProbe? Probe(CredentialPreset preset, CredentialSettings settings, IReadOnlyDictionary<string, string> secrets)
+    {
+        string? Value(string name) => settings.Fields.FirstOrDefault(f => f.Name == name && f.Set) is { } field
+            ? field.Masked ? secrets.GetValueOrDefault(name) : field.Value
+            : null;
+
+        var masked = settings.Fields.Where(f => f.Masked && f.Set && f.Name != "url").ToList();
+
+        var unset = false;
+        var url = Url == "{url}" ? Value("url") : FieldMark().Replace(Url, m =>
+        {
+            if (Value(m.Groups[1].Value) is { } value) return Uri.EscapeDataString(value);
+            unset = true;
+            return "";
+        });
+
+        if (url is null || unset || !Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
+        {
+            return null;
+        }
+
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        if (BasicUser is not null)
+        {
+            if (Value(BasicUser) is not { } user) return null;
+            var password = BasicPassword is null ? "" : Value(BasicPassword);
+            if (password is null) return null;
+            headers["Authorization"] = "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes(user + ":" + password));
+        }
+        else if (Bearer is not null)
+        {
+            var token = Bearer == OnlyMasked ? masked.Count == 1 ? secrets.GetValueOrDefault(masked[0].Name) : null : Value(Bearer);
+            if (token is null) return null;
+            headers["Authorization"] = "Bearer " + token;
+        }
+
+        List<string> hidden = [.. settings.Fields.Where(f => f.Masked && f.Set).Select(f => secrets.GetValueOrDefault(f.Name)).OfType<string>(), .. headers.Values];
+
+        // A request to the person's own address names the address; a service's, the service.
+        return new HttpProbe(Url == "{url}" ? uri.Host : preset.Name, What, url, headers, hidden, RefusedWhen, ReasonFrom);
+    }
+
+    /// <summary>Whether a connection's settings give this request all it names, without reading a
+    /// masked value: what the button is shown for.</summary>
+    public bool Applies(CredentialSettings settings)
+    {
+        var placeholders = settings.Fields.Where(f => f.Set).ToDictionary(f => f.Name, f => f.Masked ? "masked" : f.Value ?? "", StringComparer.Ordinal);
+        return Probe(new CredentialPreset("", null, "", []), settings, placeholders) is not null;
+    }
+
+    [GeneratedRegex(@"\{([A-Za-z][A-Za-z0-9_.-]*)\}")]
+    private static partial Regex FieldMark();
 }
 
 /// <summary>The forms of the credential kinds. A website's fields are not defined yet: it is a name alone.</summary>
@@ -92,15 +169,35 @@ public static class CredentialPresets
 
     public static IReadOnlyList<CredentialPreset> All { get; } =
     [
-        new(ConnectionKinds.ApiKey, "stripe", "Stripe", [new("key", "Secret key", true, true)]),
-        new(ConnectionKinds.ApiKey, "namecheap", "Namecheap", [new("apiUser", "API user", false, true), new("apiKey", "API key", true, true)]),
+        // Stripe: the account's balance, read with the secret key as a bearer token - https://docs.stripe.com/api/balance/balance_retrieve.
+        new(ConnectionKinds.ApiKey, "stripe", "Stripe", [new("key", "Secret key", true, true)],
+            Test: new("https://api.stripe.com/v1/balance", "secret key", Bearer: "key")),
+        // Namecheap: the account's balances. It answers 200 with Status="ERROR" for a key it refuses, a
+        // user it does not know or an address not on the key's whitelist - https://www.namecheap.com/support/api/methods/users/get-balances/.
+        // ClientIp must be the public IPv4 the call leaves from and one the person whitelisted (else 1011150,
+        // Invalid request IP) - https://www.namecheap.com/support/api/intro/ - so the person names it.
+        new(ConnectionKinds.ApiKey, "namecheap", "Namecheap",
+            [new("apiUser", "API user", false, true), new("apiKey", "API key", true, true), new("clientIp", "Whitelisted IP", false, true)],
+            Test: new(
+                "https://api.namecheap.com/xml.response?ApiUser={apiUser}&ApiKey={apiKey}&UserName={apiUser}&ClientIp={clientIp}&Command=namecheap.users.getBalances",
+                "API key", RefusedWhen: "Status=\"ERROR\"", ReasonFrom: "<Error[^>]*>([^<]*)</Error>")),
+        // Twilio: the account itself, read with the API key SID and secret - https://www.twilio.com/docs/iam/api/account#fetch-an-account-resource.
         new(ConnectionKinds.ApiKey, "twilio", "Twilio",
-            [new("accountSid", "Account SID", false, true), new("apiKeySid", "API key SID", false, true), new("apiKeySecret", "API key secret", true, true)]),
-        new(ConnectionKinds.ApiKey, Other, "Other", [], NamedFields: true),
+            [new("accountSid", "Account SID", false, true), new("apiKeySid", "API key SID", false, true), new("apiKeySecret", "API key secret", true, true)],
+            Test: new("https://api.twilio.com/2010-04-01/Accounts/{accountSid}.json", "API key", BasicUser: "apiKeySid", BasicPassword: "apiKeySecret")),
+        // Other: tested only when it has a `url` field and one masked field, sent as a bearer token.
+        new(ConnectionKinds.ApiKey, Other, "Other", [], NamedFields: true, Test: new("{url}", "API key", Bearer: CredentialTest.OnlyMasked)),
+        // Username and password: tested only with a URL, signed in to with HTTP Basic.
         new(ConnectionKinds.Login, null, "Username and password",
-            [new("username", "Username", false, true), new("password", "Password", true, true), new("url", "URL", false, false)]),
+            [new("username", "Username", false, true), new("password", "Password", true, true), new("url", "URL", false, false)],
+            Test: new("{url}", "username and password", BasicUser: "username", BasicPassword: "password")),
+        // A website's test is its own sign-in, which a later release adds.
         new(ConnectionKinds.Website, null, "Website", []),
     ];
+
+    /// <summary>Whether a credential connection has a test: its preset declares one, and it has what that test names.</summary>
+    public static bool Testable(string kind, CredentialSettings settings) =>
+        For(kind, settings.Preset)?.Test is { } test && test.Applies(settings);
 
     public static CredentialPreset? For(string kind, string? preset) =>
         All.FirstOrDefault(p => p.Kind == kind && string.Equals(p.Id, preset, StringComparison.Ordinal));

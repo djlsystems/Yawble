@@ -15,6 +15,7 @@ import {
   saveConnectionProvider,
   startConnection,
   startDeviceConnection,
+  testConnection,
   updateMailboxPassword,
 } from '../api/client';
 import type {
@@ -32,6 +33,7 @@ import { currentOrigin, goTo } from '../lib/browserNavigation';
 import { productCli } from '../presentation/product';
 import ConnectDialog from './ConnectDialog.vue';
 import CredentialForm from './CredentialForm.vue';
+import ConnectionTest from './ConnectionTest.vue';
 import MailboxForm from './MailboxForm.vue';
 import DialogTabs from './DialogTabs.vue';
 import DirectoryField from './DirectoryField.vue';
@@ -444,6 +446,32 @@ async function startEdit(connection: Connection) {
   }
 }
 
+/** The edit screen's Test connection: what is saved, its health shown on its tile too. */
+async function editTested(connection: Connection) {
+  if (editing.value?.id === connection.id) editing.value = connection;
+  await load();
+}
+
+// --- Test connection, from a tile ---------------------------------------------------------------
+
+const testingRow = ref<string | null>(null);
+
+/** A tile's Test connection: an ok answer is said on the tile; a refusal is its health, which the tile shows. */
+async function testRow(connection: Connection) {
+  if (testingRow.value) return;
+  testingRow.value = connection.id;
+  try {
+    const answer = await testConnection(connection.id);
+    const others = Object.fromEntries(Object.entries(rowNotice.value).filter(([id]) => id !== connection.id));
+    rowNotice.value = answer.health === 'ok' ? { ...others, [connection.id]: answer.sentence } : others;
+    await load();
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    testingRow.value = null;
+  }
+}
+
 async function edited(connection: Connection, sentence?: string) {
   editing.value = null;
   rowNotice.value = {
@@ -739,6 +767,9 @@ async function removeProvider(provider: ConnectionProvider) {
                 <template v-if="isMailbox(connection)">
                   {{ connection.statusReason ?? 'The server refused the login.' }} Update its password to clear this.
                 </template>
+                <template v-else-if="isCredential(connection)">
+                  {{ connection.statusReason ?? 'Its test was refused.' }} Edit it, then test it again, to clear this.
+                </template>
                 <template v-else>
                   {{ connection.statusReason ?? 'The provider gave no reason.' }} Reconnect it to clear this.
                 </template>
@@ -788,6 +819,20 @@ async function removeProvider(provider: ConnectionProvider) {
               </dl>
 
               <div class="conn-tile-actions">
+                <span v-if="connection.testable" class="row-btn-wrap">
+                  <q-btn
+                    dense
+                    flat
+                    round
+                    icon="network_check"
+                    :loading="testingRow === connection.id"
+                    :disable="testingRow !== null"
+                    :aria-label="`Test connection ${connection.name}`"
+                    data-connection-test-row
+                    @click="testRow(connection)"
+                  />
+                  <q-tooltip>Test connection: try what is saved, now</q-tooltip>
+                </span>
                 <span v-if="isMailbox(connection)" class="row-btn-wrap">
                   <q-btn
                     dense
@@ -1273,6 +1318,10 @@ async function removeProvider(provider: ConnectionProvider) {
           :connection="editing"
           @saved="(saved, sentence) => edited(saved, sentence)"
         />
+      </q-card-section>
+      <q-card-section v-if="editing?.testable" class="q-pt-none" data-edit-test>
+        <div class="text-caption os-text-muted q-mb-xs">Test connection tries what is saved, not what is typed above.</div>
+        <ConnectionTest :connection="editing" @tested="editTested" />
       </q-card-section>
       <q-card-actions align="right">
         <q-btn flat no-caps label="Cancel" @click="editing = null" />

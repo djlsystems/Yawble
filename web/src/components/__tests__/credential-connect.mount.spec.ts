@@ -57,7 +57,11 @@ const presets: CredentialPreset[] = [
   { kind: 'apikey', id: 'stripe', name: 'Stripe', namedFields: false, fields: [{ name: 'key', label: 'Secret key', masked: true, required: true }] },
   {
     kind: 'apikey', id: 'namecheap', name: 'Namecheap', namedFields: false,
-    fields: [{ name: 'apiUser', label: 'API user', masked: false, required: true }, { name: 'apiKey', label: 'API key', masked: true, required: true }],
+    fields: [
+      { name: 'apiUser', label: 'API user', masked: false, required: true },
+      { name: 'apiKey', label: 'API key', masked: true, required: true },
+      { name: 'clientIp', label: 'Whitelisted IP', masked: false, required: true },
+    ],
   },
   {
     kind: 'apikey', id: 'twilio', name: 'Twilio', namedFields: false,

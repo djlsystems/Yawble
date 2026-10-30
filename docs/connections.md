@@ -17,7 +17,7 @@ Each connection has one kind, and each kind its own fields:
 | **Sign-in** (`oauth`) | An account at Microsoft or Google (or a custom OAuth provider): its scopes, and for Microsoft its directory. See below. |
 | **Mailbox** (`imap`) | A preset (Gmail, iCloud, Yahoo, Namecheap Private Email, Other), the username, the app password and the servers. See [A mailbox with an app password](#a-mailbox-with-an-app-password-imap). |
 | **Website** (`website`) | The kind exists, with its name; the fields it signs in with are defined in a later release. |
-| **API key** (`apikey`) | A preset naming the fields a service needs - Stripe: key; Namecheap: API user, API key; Twilio: account SID, API key SID, API key secret; Other: fields you name - each masked or not as the preset says. |
+| **API key** (`apikey`) | A preset naming the fields a service needs - Stripe: key; Namecheap: API user, API key, whitelisted IP; Twilio: account SID, API key SID, API key secret; Other: fields you name - each masked or not as the preset says. |
 | **Username and password** (`login`) | A username, a password and an optional URL, for anything else. |
 
 **The name is the key.** Every connection has a name no other connection has (ignoring case), and
@@ -495,7 +495,8 @@ Admin → **Connections** → **Add connection** → **Website**, **API key** or
 Each asks for a **Name** - required, and no other connection's - and then only its kind's fields:
 
 - **API key** - choose the service first, then its fields: **Stripe** (Secret key, masked);
-  **Namecheap** (API user, shown; API key, masked); **Twilio** (Account SID and API key SID, shown;
+  **Namecheap** (API user, shown; API key, masked; Whitelisted IP, shown - the public IPv4 address
+  Yawble calls Namecheap from, which must be on the key's whitelist); **Twilio** (Account SID and API key SID, shown;
   API key secret, masked); **Other** - **Add a field** for each one the service needs, its name and
   value, each **Masked** unless you turn it off.
 - **Username and password** - Username, Password (masked) and an optional URL (`http://` or
@@ -504,8 +505,9 @@ Each asks for a **Name** - required, and no other connection's - and then only i
 
 A masked value is at least 8 characters, so it can be kept out of everything a plugin writes. It is
 stored only as Data Protection ciphertext - all of a connection's masked values as one - and never
-answered: a field says `set`. Nothing is signed in to on Save; the service the values are for checks
-them when a run uses them.
+answered: a field says `set`. Nothing is signed in to on Save; **Test connection** tries them when you
+ask (see [Testing a connection](#testing-a-connection)), and the service the values are for checks them
+when a run uses them.
 
 **Edit** on the connection's tile shows the same form: an unmasked field with its value, a masked one
 empty. Leave a masked field empty to keep it, or type a new value to replace it. The name and id stay,
@@ -522,6 +524,43 @@ joins its redaction set.
 The routes (people only): `GET /api/connections/credentials/presets`, `POST /api/connections/credentials`
 `{ kind, preset?, name, fields: [{ name, value, masked? }] }`, `PUT /api/connections/{id}/credentials`
 `{ fields }`, `PUT /api/connections/{id}/mailbox` `{ account?, username?, password?, imap?, smtp? }`.
+
+## Testing a connection
+
+**Test connection** says whether a connection works now, without hiring a member and running it. It
+is in Add connection once the connection is saved, on the connection's tile in Admin → Connections,
+and on its **Edit** screen. It tries what is **saved** - nothing typed and not yet saved is sent - and
+answers in one sentence:
+
+| Kind | What the test does |
+|---|---|
+| Sign-in (OAuth) | Refreshes the token and reads the account's profile once, at the provider's userinfo endpoint (a custom provider with none: the refresh alone). A refresh token the provider rotates is stored first. |
+| Mailbox | Logs in to IMAP and authenticates to SMTP: the same login test as Save. |
+| API key | Sends the one harmless request its preset declares: **Stripe** reads the balance (`GET /v1/balance`, the key as a bearer token); **Namecheap** reads the account's balances (`namecheap.users.getBalances`, with the Whitelisted IP as `ClientIp`; a `Status="ERROR"` answer is a refusal, with Namecheap's reason - an address not on the key's whitelist is `Invalid request IP`); **Twilio** reads the account (`GET /2010-04-01/Accounts/<Account SID>.json`, with the API key SID and secret). **Other** is tested only when it has a field named `url` and exactly one masked field: a GET of that address with the masked value as a bearer token. |
+| Username and password | Only with a URL: a GET of it with HTTP Basic. A redirect - to a sign-in page, say - is not taken as a yes. With no URL there is nothing to test. |
+| Website | No test yet: a website's test is its own sign-in, which a later release adds. |
+
+A connection with no test - a website, Other without a `url` or with more than one masked field, a
+username and password with no URL - shows **no** Test connection button rather than a result nobody
+measured; the connection answers `testable: false`.
+
+**The answer is the connection's health**, shown where the Connections list shows it: "Connected:
+Stripe accepted the secret key." leaves it `ok` (and clears an earlier mark); a refusal - "Stripe
+refused the secret key (HTTP 401).", "The incoming (IMAP) server refused the password. ...", "Acme
+refused to renew the sign-in (invalid_grant: ...). Reconnect it." - or a service that cannot be reached
+marks it `needs reconnect` with that sentence, and every run of a member bound to it is blocked with it
+until a later test passes, or a reconnect or password update clears it. Each test lands with a
+`connections.tested` tenant row (the outcome and the sentence) in the same transaction.
+
+**It runs as platform code on a worker**, never through a team or a plugin member, so a connection no
+team uses can be tested. Control sends the worker what to try, sealed under the worker connection's
+key, and the worker answers; a test no worker ran - none is connected, or it did not answer within 60
+seconds - says so and records nothing. Nothing tests a connection on a schedule: a test runs only when
+a person asks. No token, password or key is in the sentence, the connection, the tenant row or any
+log: each value the test carried is taken out of its sentence, and a masked field stays set.
+
+The route (people only): `POST /api/connections/{id}/test`, answering
+`{ health: ok|needs-reconnect, sentence, connection }`.
 
 ## When a connection needs reconnecting
 

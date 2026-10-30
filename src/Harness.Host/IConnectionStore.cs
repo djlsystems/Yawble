@@ -42,6 +42,14 @@ public interface IConnectionStore
 
     Task MarkNeedsReconnectAsync(string id, string reason, TriggerAudit audit, CancellationToken ct = default);
 
+    /// <summary>
+    /// A person's Test connection, recorded with its tenant row in one transaction: passed
+    /// (<paramref name="needsYou"/> null), the connection is <c>ok</c> with no reason and
+    /// <c>refreshed_at</c> is <paramref name="at"/>; refused, it is <c>needs-reconnect</c> with the
+    /// test's sentence and no held access token.
+    /// </summary>
+    Task RecordTestAsync(string id, string? needsYou, DateTimeOffset at, TriggerAudit audit, CancellationToken ct = default);
+
     Task<bool> RenameAsync(string id, string name, TriggerAudit audit, CancellationToken ct = default);
 
     /// <summary>

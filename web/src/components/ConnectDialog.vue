@@ -50,6 +50,7 @@ import { awaitProviderReturn, newSigninTag, signinTabAddress } from '../lib/prov
 import { mailboxHint, OutlookHint, setupTime } from '../lib/mailboxHints';
 import MailboxForm from './MailboxForm.vue';
 import CredentialForm from './CredentialForm.vue';
+import ConnectionTest from './ConnectionTest.vue';
 import CodeSignIn from './CodeSignIn.vue';
 import DirectoryField from './DirectoryField.vue';
 import { letGoSignIns } from '../lib/letGoSignIns';
@@ -204,8 +205,18 @@ function backToKind() {
   step.value = 'kind';
 }
 
+/** What a credential or mailbox form saved: its Test connection tests it. */
+const savedConnection = ref<Connection | null>(null);
+
+/** A test's result is the connection's health: the lists behind the dialog read it again. */
+function connectionTested(connection: Connection) {
+  if (savedConnection.value?.id === connection.id) savedConnection.value = connection;
+  emit('changed');
+}
+
 function credentialConnected(connection: Connection) {
   credentialSaved.value = true;
+  savedConnection.value = connection;
   emit('changed');
   emit('connected', connection);
 }
@@ -411,6 +422,7 @@ function chooseMailbox(id: string) {
 
 function mailboxConnected(connection: Connection) {
   mailboxSaved.value = true;
+  savedConnection.value = connection;
   emit('changed');
   emit('connected', connection);
 }
@@ -850,6 +862,7 @@ const stepLabels = computed(() => [
       <q-card-section v-else-if="step === 'credential' && isCredentialKind(kind)" data-connect-step="credential" class="q-gutter-y-md">
         <div class="text-weight-medium">{{ offeredKinds.find((entry) => entry.id === kind)?.name }}</div>
         <CredentialForm ref="credentialForm" :presets="credentialPresets" :kind="kind" @saved="credentialConnected" />
+        <ConnectionTest v-if="credentialSaved && savedConnection" :connection="savedConnection" @tested="connectionTested" />
       </q-card-section>
 
       <q-card-section v-if="step !== 'result' && step !== 'mailbox' && step !== 'kind' && step !== 'credential'" class="q-py-xs">
@@ -898,6 +911,11 @@ const stepLabels = computed(() => [
           :chooser="false"
           @saved="mailboxConnected"
           @advanced="chooseAdvanced"
+        />
+        <ConnectionTest
+          v-if="step === 'mailbox' && mailboxSaved && savedConnection"
+          :connection="savedConnection"
+          @tested="connectionTested"
         />
         <template v-else>
           <div v-if="advanced && providerId !== 'microsoft'">
@@ -1253,6 +1271,7 @@ const stepLabels = computed(() => [
           >
             <template #append><FieldHelp :text="returnedConnection ? `Leave empty to keep ${returnedConnection.name}.` : 'Leave empty to keep the account\'s name.'" /></template>
           </q-input>
+          <ConnectionTest v-if="returnedConnection" :connection="returnedConnection" @tested="connectionTested" />
         </template>
       </q-card-section>
 
