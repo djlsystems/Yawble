@@ -10,7 +10,7 @@ using Microsoft.Extensions.Hosting;
 namespace Harness.Tests;
 
 /// <summary>
-/// CON 7, INDEPENDENT VERIFICATION (card 23041): the paths and edges the move's own tests do not take -
+/// CON 7, INDEPENDENT VERIFICATION: the paths and edges the move's own tests do not take -
 /// the operator CLI's install request as a Replace, a second solution update to the same version, a
 /// team with several members and a member of the same name on another team, a connection name already
 /// taken, a slot kept twice, and the answers a person reads scanned for the moved value.
