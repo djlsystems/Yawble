@@ -174,7 +174,11 @@ public static class ConnectionProviders
 
     /// <summary>Every provider word a plugin manifest's <c>connections.&lt;slot&gt;.providers</c> may
     /// name, besides <c>custom-&lt;id&gt;</c>. The console's provider wording table has words for each.</summary>
-    public static IReadOnlyList<string> ManifestProviders { get; } = [Google, Microsoft, Custom, MailboxSettings.Kind];
+    public static IReadOnlyList<string> ManifestProviders { get; } = [Google, Microsoft, Custom, MailboxSettings.Kind, ConnectionKinds.Login, ConnectionKinds.ApiKey];
+
+    /// <summary>The manifest words for a connection with no OAuth sign-in, so no scopes: a mailbox, a
+    /// username and password, an API key.</summary>
+    public static bool HasNoScopes(string provider) => provider == MailboxSettings.Kind || ConnectionKinds.IsCredential(provider);
 
     /// <summary>
     /// THE HOST'S PROVIDER WORDS: each provider a manifest may name, as a person says it - "Google" in
@@ -187,6 +191,8 @@ public static class ConnectionProviders
         [Microsoft] = "Microsoft",
         [MailboxSettings.Kind] = "mailbox by app password",
         [Custom] = "custom sign-in",
+        [ConnectionKinds.Login] = "username and password",
+        [ConnectionKinds.ApiKey] = "API key",
     };
 
     /// <summary>
@@ -196,7 +202,8 @@ public static class ConnectionProviders
     /// </summary>
     public static string Spoken(string id, Func<string, string?>? named = null)
     {
-        if (id == MailboxSettings.Kind) return $"a {Words[id]}";
+        if (id is MailboxSettings.Kind or ConnectionKinds.Login) return $"a {Words[id]}";
+        if (id == ConnectionKinds.ApiKey) return $"an {Words[id]}";
 
         var name = Words.TryGetValue(id, out var words) ? words
             : IsCustomId(id) && named?.Invoke(id) is { } own && !string.IsNullOrWhiteSpace(own) ? own.Trim()
@@ -225,7 +232,7 @@ public static class ConnectionProviders
 
     public static bool IsKnownId(string id) => IsBuiltIn(id) || IsCustomId(id);
 
-    public static string KindOf(string id) => IsBuiltIn(id) || id == MailboxSettings.Kind ? id : Custom;
+    public static string KindOf(string id) => IsBuiltIn(id) || id == MailboxSettings.Kind || ConnectionKinds.IsCredential(id) ? id : Custom;
 
     /// <summary>A person-facing name for a provider id or manifest provider word.</summary>
     public static string Display(string id) => id switch
@@ -234,6 +241,9 @@ public static class ConnectionProviders
         Microsoft => "Microsoft",
         Custom => "custom",
         MailboxSettings.Kind => "mailbox (IMAP)",
+        ConnectionKinds.Login => "username and password",
+        ConnectionKinds.ApiKey => "API key",
+        ConnectionKinds.Website => "website",
         _ => id,
     };
 

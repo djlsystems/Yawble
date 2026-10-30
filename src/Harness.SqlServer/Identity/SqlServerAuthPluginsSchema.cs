@@ -160,5 +160,26 @@ public static class SqlServerAuthPluginsSchema
                      REFERENCES team_members(team, name) ON DELETE CASCADE
              );
              """),
+
+        // `AuthSchema`'s auth-031: a credential connection's preset, fields and sealed values, and every
+        // connection's name made unique, the first connected keeping it. `id` is NVARCHAR(64), as
+        // `connections.id`. Names compare in the NOCASE collation, as SQLite's do.
+        new MigrationStep(
+            "auth-031",
+            $"""
+             CREATE TABLE credential_connections (
+                 id                NVARCHAR(64)  NOT NULL CONSTRAINT pk_credential_connections PRIMARY KEY,
+                 preset            NVARCHAR(MAX) NULL,
+                 fields            NVARCHAR(MAX) NOT NULL DEFAULT N'{EmptyList}',
+                 secrets_protected NVARCHAR(MAX) NULL
+             );
+
+             UPDATE c SET name = c.name + N' (' + c.id + N')'
+             FROM connections c
+             WHERE EXISTS (
+                 SELECT 1 FROM connections o
+                 WHERE o.name COLLATE {SqlServerSql.NoCase} = c.name COLLATE {SqlServerSql.NoCase}
+                   AND (o.connected_at < c.connected_at OR (o.connected_at = c.connected_at AND o.id < c.id)));
+             """),
     ];
 }

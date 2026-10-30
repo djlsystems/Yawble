@@ -140,9 +140,99 @@ public static class ConnectionEndpoints
             .HumansOnly()
             .WithSummary("The connected accounts")
             .WithDescription(
-                "Each connection: `id`, `name`, `provider`, `providerKind`, `account`, `scopes`, "
+                "Each connection: `id`, `name` (unique, ignoring case: what teams and members use), `kind` (`oauth`, `imap`, "
+                + "`website`, `apikey` or `login`), `provider`, `providerKind`, `account`, `scopes`, "
                 + "`permissions` (the scopes in words, once each), `connectedAt`, `refreshedAt`, `status` (`ok` or `needs-reconnect`, with the provider's "
-                + "`statusReason`) and `usedBy` (`team`, `member`, `label`, `slot`). Never a token.");
+                + "`statusReason`), `usedBy` (`team`, `member`, `label`, `slot`), and for a website, API key or username and password its "
+                + "`preset` and `fields` (`name`, `label`, `masked`, `set`, and `value` for an unmasked one only). Never a token, a password or a key.");
+
+        app.MapGet("/api/connections/credentials/presets", () => Results.Ok(CredentialPresets.All.Select(p => p.View())))
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("The forms a website, API key or username and password connection is made from")
+            .WithDescription(
+                "Each `{ kind, id, name, namedFields, fields: [{ name, label, masked, required }] }`: API key's Stripe (key), "
+                + "Namecheap (API user, API key), Twilio (account SID, API key SID, API key secret) and Other (`namedFields`: the "
+                + "person names each field and whether it is masked); username and password (username, password, optional URL); "
+                + "and website, whose fields are not defined yet.");
+
+        app.MapPost("/api/connections/credentials", async (
+            AddCredential request, Connections connections, TeamRegistry teams, HttpContext context, CancellationToken ct) =>
+        {
+            MailboxAnswer answer;
+
+            try
+            {
+                answer = await connections.AddCredentialAsync(Actor(context), request, ct);
+            }
+            catch (DbException exception)
+            {
+                return Unrecorded("The connection was not saved", exception);
+            }
+
+            return await CredentialResultAsync(answer, connections, teams, ct);
+        })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Add a website, API key or username and password connection")
+            .WithDescription(
+                "Body `{ kind: website|apikey|login, preset?, name, fields: [{ name, value, masked? }] }`: `preset` is an API "
+                + "key's service (stripe, namecheap, twilio, other); `masked` is read for Other's fields only (default true). "
+                + "200 `{ connection }`; 409 when another connection has the name (names are unique, ignoring case); 400 naming "
+                + "the field that is wrong. Every masked value is stored encrypted with the instance's Data Protection keys and "
+                + "never answered: the field says `set`. Saved with a `connections.connected` tenant row naming the fields, never a value.");
+
+        app.MapPut("/api/connections/{id}/credentials", async (
+            [Description("The connection's id.")] string id,
+            EditCredential request, Connections connections, TeamRegistry teams, HttpContext context, CancellationToken ct) =>
+        {
+            MailboxAnswer answer;
+
+            try
+            {
+                answer = await connections.EditCredentialAsync(Actor(context), id, request, ct);
+            }
+            catch (DbException exception)
+            {
+                return Unrecorded("The connection was not changed", exception);
+            }
+
+            return await CredentialResultAsync(answer, connections, teams, ct);
+        })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Change what is behind a website, API key or username and password connection")
+            .WithDescription(
+                "Body `{ fields: [{ name, value, masked? }] }`. A field given replaces its value; one left out, or with a null "
+                + "`value`, keeps its own (Other: the fields given are the connection's fields, a masked one with a null value "
+                + "keeping its own). The name and id stay, so every team and member using it gets the new value at its next run. "
+                + "A `connections.credentials-changed` tenant row names the fields that changed - never a value - in the same transaction.");
+
+        app.MapPut("/api/connections/{id}/mailbox", async (
+            [Description("The mailbox connection's id.")] string id,
+            EditMailbox request, Connections connections, TeamRegistry teams, HttpContext context, CancellationToken ct) =>
+        {
+            MailboxAnswer answer;
+
+            try
+            {
+                answer = await connections.EditMailboxAsync(Actor(context), id, request, ct);
+            }
+            catch (DbException exception)
+            {
+                return Unrecorded("The mailbox was not changed", exception);
+            }
+
+            return await MailboxResultAsync(answer, connections, teams, ct);
+        })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Change a mailbox's account, username, servers or app password")
+            .WithDescription(
+                "Body `{ account?, username?, password?, imap?, smtp? }`: what is given replaces what is stored. The Host logs in "
+                + "with the result first; only then is it stored, `needs-reconnect` cleared and a `connections.credentials-changed` "
+                + "tenant row naming what changed (never the password) written, in one transaction. 200 `{ sentence, connection }`; "
+                + "a refused login changes nothing and answers 422 with its sentence in `error`.");
 
         app.MapGet("/api/connections/imap/presets", () => Results.Ok(MailPresets.All.Select(p => p.View())))
             .WithTags(Area)
@@ -167,7 +257,7 @@ public static class ConnectionEndpoints
                 return Unrecorded("The mailbox was not saved", exception);
             }
 
-            return MailboxResult(answer, teams);
+            return await MailboxResultAsync(answer, connections, teams, ct);
         })
             .WithTags(Area)
             .HumansOnly()
@@ -178,7 +268,7 @@ public static class ConnectionEndpoints
                 + "account, `name` to the account. The Host logs in to IMAP and authenticates to SMTP with them "
                 + "first. 200 `{ sentence, connection }` (\"Connected: 1,240 messages in Inbox\"); a refused or "
                 + "unreachable login saves nothing and answers 422 with its sentence in `error`; a field that "
-                + "is wrong answers 400 naming it. The password is stored encrypted with the instance's Data "
+                + "is wrong answers 400 naming it; a `name` another connection has answers 409. The password is stored encrypted with the instance's Data "
                 + "Protection keys and never answered: the connection says `passwordSet`. Saved with a "
                 + "`connections.connected` tenant row in the same transaction.");
 
@@ -197,7 +287,7 @@ public static class ConnectionEndpoints
                 return Unrecorded("The password was not updated", exception);
             }
 
-            return MailboxResult(answer, teams);
+            return await MailboxResultAsync(answer, connections, teams, ct);
         })
             .WithTags(Area)
             .HumansOnly()
@@ -358,6 +448,10 @@ public static class ConnectionEndpoints
                 await connections.Store.RenameAsync(
                     id, name, Actor(context).Row(TenantActions.ConnectionRenamed, id, name, new { connection = id, from = before.Name, to = name }), ct);
             }
+            catch (ConnectionNameTakenException)
+            {
+                return Results.Conflict(new { error = Connections.NameTaken(name) });
+            }
             catch (DbException exception)
             {
                 return Unrecorded("The connection was not renamed", exception);
@@ -368,27 +462,39 @@ public static class ConnectionEndpoints
             .WithTags(Area)
             .HumansOnly()
             .WithSummary("Rename a connection")
-            .WithDescription("Body `{ name }`, 1 to 80 characters. A `connections.renamed` tenant row lands with it.");
+            .WithDescription(
+                "Body `{ name }`, 1 to 80 characters, that no other connection has (ignoring case): 409 otherwise. The id stays, so "
+                + "every team and member using it keeps it. A `connections.renamed` tenant row lands with it.");
 
         app.MapDelete("/api/connections/{id}", async (
             [Description("The connection's id.")] string id,
-            Connections connections, TeamRegistry teams, HttpContext context, CancellationToken ct) =>
+            [Description("True once the person has seen who uses it and confirmed: their bindings go with it.")] bool? unbind,
+            Connections connections, TeamRegistry teams, IMemberReports reports, HttpContext context, CancellationToken ct) =>
         {
-            var (status, body) = await DisconnectAsync(connections, teams, id, Actor(context), ct);
+            var (status, body) = await DisconnectAsync(connections, teams, id, Actor(context), ct, unbind == true, reports);
             return status == StatusCodes.Status204NoContent ? Results.NoContent() : Results.Json(body, statusCode: status);
         })
             .WithTags(Area)
             .HumansOnly()
-            .WithSummary("Disconnect an account")
+            .WithSummary("Delete a connection")
             .WithDescription(
-                "Refused 409 while a member binds it, naming them (`usedBy`). Otherwise deletes the tokens "
-                + "and the connection, then revokes at the provider where it supports that, best effort: "
-                + "the result is a `connections.revoked` tenant row, and a failed revoke never blocks. 204.");
+                "Without `unbind=true`, a connection a member binds answers 409 naming them (`usedBy`), so the person is asked "
+                + "first. With it, the connection, its credentials and every member's binding of it go in one transaction with "
+                + "a `connections.disconnected` row and a `member.connections-changed` row per member, or none of it does; each "
+                + "such member is then marked blocked, which Needs you shows, until a person binds another. A provider that "
+                + "supports it then has the grant revoked, best effort: a `connections.revoked` row, and a failed revoke never "
+                + "blocks. 204.");
     }
 
-    private static IResult MailboxResult(MailboxAnswer answer, TeamRegistry teams) => answer.Connection is { } connection
-        ? Results.Ok(new { sentence = answer.Sentence, connection = View(connection, [], teams) })
-        : Results.Json(new { error = answer.Error }, statusCode: answer.Status);
+    private static async Task<IResult> MailboxResultAsync(MailboxAnswer answer, Connections connections, TeamRegistry teams, CancellationToken ct) =>
+        answer.Connection is { } connection
+            ? Results.Ok(new { sentence = answer.Sentence, connection = View(connection, await connections.Store.UsedByAsync(connection.Id, ct), teams) })
+            : Results.Json(new { error = answer.Error }, statusCode: answer.Status);
+
+    private static async Task<IResult> CredentialResultAsync(MailboxAnswer answer, Connections connections, TeamRegistry teams, CancellationToken ct) =>
+        answer.Connection is { } connection
+            ? Results.Ok(new { connection = View(connection, await connections.Store.UsedByAsync(connection.Id, ct), teams) })
+            : Results.Json(new { error = answer.Error }, statusCode: answer.Status);
 
     /// <summary>What a flow nobody may read answers: the same for a missing flow and another person's.</summary>
     public const string MissingFlow = "There is no such sign-in, or it was not started by you. Start again.";
@@ -415,7 +521,8 @@ public static class ConnectionEndpoints
 
     /// <summary>The route's and the operator exchange's disconnect: (204, null), or a status and body.</summary>
     public static async Task<(int Status, object? Body)> DisconnectAsync(
-        Connections connections, TeamRegistry teams, string id, ConnectionActor actor, CancellationToken ct)
+        Connections connections, TeamRegistry teams, string id, ConnectionActor actor, CancellationToken ct,
+        bool unbind = false, IMemberReports? reports = null)
     {
         if (await connections.Store.GetAsync(id, ct) is not { } connection)
         {
@@ -426,20 +533,28 @@ public static class ConnectionEndpoints
         var provider = await connections.ProviderAsync(connection.Provider, ct);
         var revokes = provider is { Revokes: true } && (tokens?.RefreshToken ?? tokens?.AccessToken) is not null;
 
-        // DELETED FIRST, the in-use check inside the same transaction: a binding made meanwhile
-        // refuses the delete, and nothing is revoked for a connection that stays.
+        // DELETED FIRST, the in-use check inside the same transaction: unconfirmed, a binding made
+        // meanwhile refuses the delete; confirmed, every binding found there goes with it. Nothing is
+        // revoked for a connection that stays.
+        IReadOnlyList<ConnectionUse> unbound;
+
         try
         {
-            var (deleted, stillUsed) = await connections.Store.DeleteAsync(id, actor.Row(
-                TenantActions.ConnectionDisconnected, id, connection.Name,
-                new { connection = id, provider = connection.Provider, account = connection.Account, revoke = revokes ? "follows" : "not supported" }), ct);
+            var revoke = revokes ? "follows" : "not supported";
+            var (deleted, used) = await connections.Store.DeleteAsync(
+                id,
+                actor.Row(TenantActions.ConnectionDisconnected, id, connection.Name, new { connection = id, provider = connection.Provider, account = connection.Account, revoke }),
+                ct,
+                unbind ? users => UnboundRows(actor, connection, users, teams) : null);
 
             if (!deleted)
             {
-                return stillUsed.Count > 0
-                    ? InUse(connection, stillUsed, teams)
+                return used.Count > 0
+                    ? InUse(connection, used, teams)
                     : (StatusCodes.Status404NotFound, new { error = $"There is no connection '{id}'." });
             }
+
+            unbound = used;
         }
         catch (DbException exception)
         {
@@ -447,6 +562,21 @@ public static class ConnectionEndpoints
         }
 
         connections.Forget(id);
+
+        // EACH MEMBER THAT USED IT NOW NEEDS A PERSON: marked blocked with what happened and what to do,
+        // so Needs you lists it. Its runs stop at the missing slot until a person binds another.
+        if (reports is not null)
+        {
+            foreach (var member in unbound.GroupBy(u => (u.Team, u.Member)))
+            {
+                var slots = string.Join(", ", member.Select(u => $"`{u.Slot}`"));
+                await reports.BlockedAsync(
+                    new ContainerId(member.Key.Team, member.Key.Member),
+                    $"Connection {connection.Named} was deleted, so slot{(member.Count() == 1 ? "" : "s")} {slots} of this member "
+                    + "has no connection. Its runs stop until a person chooses another in the member's settings.",
+                    ct: CancellationToken.None);
+            }
+        }
 
         // THEN REVOKED, best effort: the tokens are already gone here, and a provider that cannot be
         // reached changes nothing for the person. What happened is its own tenant row.
@@ -476,9 +606,27 @@ public static class ConnectionEndpoints
         {
             error = $"Connection {connection.Named} is used by "
                 + string.Join(", ", used.Select(u => $"{u.Team}/{u.Member} (slot {u.Slot})"))
-                + ". Unbind it from those members first.",
+                + ". Deleting it stops their runs until another is chosen; confirm to delete it and unbind them.",
             usedBy = UsedBy(used, teams),
         });
+
+    /// <summary>A delete's <c>member.connections-changed</c> rows: one per member, naming each slot that
+    /// lost the connection.</summary>
+    private static IReadOnlyList<TriggerAudit> UnboundRows(
+        ConnectionActor actor, ConnectionRecord connection, IReadOnlyList<ConnectionUse> users, TeamRegistry teams)
+    {
+        var members = teams.All().SelectMany(t => t.Containers).ToList();
+
+        return [.. users.GroupBy(u => (u.Team, u.Member)).Select(member => actor.Row(
+            TenantActions.MemberConnectionsChanged, $"{member.Key.Team}/{member.Key.Member}", LabelOf(member.First(), members),
+            new
+            {
+                team = member.Key.Team,
+                setBy = "person",
+                reason = "connection deleted",
+                slots = member.Select(u => new { slot = u.Slot, from = connection.Id, to = (string?)null }),
+            }))];
+    }
 
     /// <summary>A connection as every answer shows it: no token, ever.</summary>
     public static object View(ConnectionRecord connection, IEnumerable<ConnectionUse> uses, TeamRegistry teams) => new
@@ -500,12 +648,14 @@ public static class ConnectionEndpoints
         username = connection.Mailbox?.Username,
         imap = Server(connection.Mailbox?.Imap),
         smtp = Server(connection.Mailbox?.Smtp),
-        preset = connection.Mailbox?.Preset,
+        preset = connection.Mailbox?.Preset ?? connection.Credential?.Preset,
         passwordSet = connection.Mailbox?.PasswordSet,
+        fields = connection.Credential?.Fields.Select(f => new { name = f.Name, label = f.Label, masked = f.Masked, value = f.Masked ? null : f.Value, set = f.Set }),
     };
 
-    /// <summary><c>imap</c> for a mailbox, <c>oauth</c> for an account signed in at a provider.</summary>
-    public static string KindOf(ConnectionRecord connection) => connection.Mailbox is null ? "oauth" : MailboxSettings.Kind;
+    /// <summary><c>imap</c> for a mailbox, <c>website</c>, <c>apikey</c> or <c>login</c> for a credential,
+    /// <c>oauth</c> for an account signed in at a provider.</summary>
+    public static string KindOf(ConnectionRecord connection) => connection.Kind;
 
     /// <summary>A mailbox's server as every answer shows it, or null.</summary>
     public static object? Server(MailServer? server) =>
@@ -515,15 +665,12 @@ public static class ConnectionEndpoints
     {
         var members = teams.All().SelectMany(t => t.Containers).ToList();
 
-        return [.. uses.Select(u => (object)new
-        {
-            team = u.Team,
-            member = u.Member,
-            label = members.FirstOrDefault(m => string.Equals(m.Team, u.Team, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(m.Id, u.Member, StringComparison.OrdinalIgnoreCase))?.Name ?? u.Member,
-            slot = u.Slot,
-        })];
+        return [.. uses.Select(u => (object)new { team = u.Team, member = u.Member, label = LabelOf(u, members), slot = u.Slot })];
     }
+
+    private static string LabelOf(ConnectionUse use, IEnumerable<ContainerSnapshot> members) =>
+        members.FirstOrDefault(m => string.Equals(m.Team, use.Team, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(m.Id, use.Member, StringComparison.OrdinalIgnoreCase))?.Name ?? use.Member;
 
     /// <summary>The person acting: their own id, or the person a person's key acts as.</summary>
     public static ConnectionActor Actor(HttpContext context) => new(

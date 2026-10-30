@@ -1087,7 +1087,7 @@ public sealed record PluginConnectionSlot(
             || providersElement.GetArrayLength() == 0
             || providersElement.EnumerateArray().Any(p => p.ValueKind != JsonValueKind.String))
         {
-            return (null, $"`connections.{name}.providers` must be a non-empty array of provider names (google, microsoft, custom, imap).");
+            return (null, $"`connections.{name}.providers` must be a non-empty array of provider names (google, microsoft, custom, imap, login, apikey).");
         }
 
         var providers = new List<string>();
@@ -1096,7 +1096,7 @@ public sealed record PluginConnectionSlot(
         {
             if (!ConnectionProviders.ManifestProviders.Contains(provider) && !ConnectionProviders.IsCustomId(provider))
             {
-                return (null, $"`connections.{name}.providers` names '{provider}', which is not a provider this Host knows (google, microsoft, custom, custom-<id>, or imap for a mailbox).");
+                return (null, $"`connections.{name}.providers` names '{provider}', which is not a provider this Host knows (google, microsoft, custom, custom-<id>, imap for a mailbox, login for a username and password, or apikey for an API key).");
             }
 
             if (!providers.Contains(provider, StringComparer.Ordinal)) providers.Add(provider);
@@ -1111,7 +1111,7 @@ public sealed record PluginConnectionSlot(
                 if (ScopeList(scopesElement) is not { } all) return (null, $"`connections.{name}.scopes` must hold scope strings.");
 
                 // A MAILBOX HAS NO SCOPES: a list is every OAuth provider's.
-                foreach (var provider in providers.Where(p => p != MailboxSettings.Kind)) scopes[provider] = all;
+                foreach (var provider in providers.Where(p => !ConnectionProviders.HasNoScopes(p))) scopes[provider] = all;
             }
             else if (scopesElement.ValueKind == JsonValueKind.Object)
             {
@@ -1120,6 +1120,11 @@ public sealed record PluginConnectionSlot(
                     if (entry.Name == MailboxSettings.Kind)
                     {
                         return (null, $"`connections.{name}.scopes` has an entry for 'imap', but scopes do not apply to an imap connection: a mailbox signs in with its app password.");
+                    }
+
+                    if (ConnectionKinds.IsCredential(entry.Name))
+                    {
+                        return (null, $"`connections.{name}.scopes` has an entry for '{entry.Name}', but scopes do not apply to a {ConnectionKinds.Display(entry.Name)} connection: it has no sign-in.");
                     }
 
                     if (!providers.Contains(entry.Name, StringComparer.Ordinal))

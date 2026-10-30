@@ -17,14 +17,18 @@ public sealed record ConnectionRecord(
     string Status,
     string? StatusReason,
     MailboxSettings? Mailbox = null,
-    string? Tenant = null)
+    string? Tenant = null,
+    CredentialSettings? Credential = null)
 {
     public const string Ok = "ok";
 
     public const string NeedsReconnect = "needs-reconnect";
 
     /// <summary>"'Work mail' (person@example.com)", as every sentence names a connection.</summary>
-    public string Named => string.Equals(Name, Account, StringComparison.Ordinal) ? $"'{Name}'" : $"'{Name}' ({Account})";
+    public string Named => Account.Length == 0 || string.Equals(Name, Account, StringComparison.Ordinal) ? $"'{Name}'" : $"'{Name}' ({Account})";
+
+    /// <summary><c>oauth</c>, <c>imap</c>, <c>website</c>, <c>apikey</c> or <c>login</c>: see <see cref="ConnectionKinds"/>.</summary>
+    public string Kind => ConnectionKinds.Of(Provider);
 }
 
 /// <summary>The tokens of one connection, decrypted for the Host's own use and never answered.</summary>
@@ -180,8 +184,8 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
     /// <summary>A connection and, for a mailbox, its servers - never its password, only whether one is set.</summary>
     private const string ConnectionSelect =
         "SELECT " + ConnectionRows.ConnectionHead + ", "
-        + "m.password_protected IS NOT NULL, c.tenant "
-        + "FROM connections c LEFT JOIN imap_connections m ON m.id = c.id";
+        + "m.password_protected IS NOT NULL, c.tenant, " + ConnectionRows.CredentialTail + " "
+        + "FROM connections c LEFT JOIN imap_connections m ON m.id = c.id " + ConnectionRows.CredentialJoin;
 
     public async Task<IReadOnlyList<ConnectionRecord>> ListAsync(CancellationToken ct = default)
     {
@@ -231,6 +235,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
     {
         await using var connection = Open();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+        await EnsureNameFreeAsync(connection, transaction, record.Name, null, ct);
 
         await using (var command = connection.CreateCommand())
         {
@@ -257,10 +262,12 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
         await transaction.CommitAsync(ct);
     }
 
-    /// <summary>A Reconnect: new tokens and scopes, the directory it signed in through, and the status
-    /// back to <c>ok</c>. A refresh token the provider did not re-issue keeps the stored one.</summary>
+    /// <summary>A Reconnect: new tokens and scopes, the account and directory it signed in as and
+    /// through, and the status back to <c>ok</c>. A refresh token the provider did not re-issue keeps
+    /// the stored one.</summary>
     public async Task ReconnectAsync(
-        string id, IReadOnlyList<string> scopes, ConnectionTokens tokens, TriggerAudit audit, CancellationToken ct = default, string? tenant = null)
+        string id, IReadOnlyList<string> scopes, ConnectionTokens tokens, TriggerAudit audit, CancellationToken ct = default, string? tenant = null,
+        string? account = null)
     {
         await using var connection = Open();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
@@ -278,10 +285,12 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
                     refreshed_at = $now,
                     status = 'ok',
                     status_reason = NULL,
-                    tenant = $tenant
+                    tenant = $tenant,
+                    account = COALESCE($account, account)
                 WHERE id = $id
                 """;
             command.Parameters.AddWithValue("$id", id);
+            command.Parameters.AddWithValue("$account", (object?)account ?? DBNull.Value);
             command.Parameters.AddWithValue("$scopes", ConnectionRows.Scopes(scopes));
             command.Parameters.AddWithValue("$tenant", (object?)tenant ?? DBNull.Value);
             command.Parameters.AddWithValue("$now", Now());
@@ -366,6 +375,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
     {
         await using var connection = Open();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+        await EnsureNameFreeAsync(connection, transaction, name, id, ct);
 
         await using (var command = connection.CreateCommand())
         {
@@ -381,16 +391,19 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
         return true;
     }
 
-    /// <summary>Deletes the connection and its tokens, refused (the users) while any member binds it.
-    /// The check and the delete are one transaction, so a binding made in between cannot be orphaned.</summary>
+    /// <summary>Deletes the connection and its credentials; see <see cref="IConnectionStore.DeleteAsync"/>.
+    /// The check, the unbinding and the delete are one transaction, so a binding made in between is
+    /// either seen and unbound or refuses the delete: never orphaned.</summary>
     public async Task<(bool Deleted, IReadOnlyList<ConnectionUse> UsedBy)> DeleteAsync(
-        string id, TriggerAudit audit, CancellationToken ct = default)
+        string id, TriggerAudit audit, CancellationToken ct = default,
+        Func<IReadOnlyList<ConnectionUse>, IReadOnlyList<TriggerAudit>>? unbind = null)
     {
         await using var connection = Open();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
 
-        var used = await UsedByAsync(connection, transaction, id, ct);
-        if (used.Count > 0) return (false, used);
+        var bindings = await BindingRowsAsync(connection, transaction, ct);
+        var used = bindings.SelectMany(r => ConnectionRows.Bindings(r.Team, r.Member, r.Json)).Where(b => b.Id == id).Select(b => b.Use).ToList();
+        if (used.Count > 0 && unbind is null) return (false, used);
 
         await using (var command = connection.CreateCommand())
         {
@@ -400,17 +413,65 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
             if (await command.ExecuteNonQueryAsync(ct) == 0) return (false, []);
         }
 
-        await using (var command = connection.CreateCommand())
+        foreach (var table in new[] { "imap_connections", "credential_connections" })
         {
+            await using var command = connection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText = "DELETE FROM imap_connections WHERE id = $id";
+            command.CommandText = $"DELETE FROM {table} WHERE id = $id";
             command.Parameters.AddWithValue("$id", id);
             await command.ExecuteNonQueryAsync(ct);
         }
 
+        // EVERY MEMBER THAT BOUND IT loses those slots here, in the same transaction.
+        foreach (var row in bindings.Where(r => used.Any(u => u.Team == r.Team && u.Member == r.Member)))
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "UPDATE team_member_config SET connections_json = $json WHERE team = $team AND name = $name";
+            command.Parameters.AddWithValue("$team", row.Team);
+            command.Parameters.AddWithValue("$name", row.Member);
+            command.Parameters.AddWithValue("$json", ConnectionRows.Unbound(row.Json, id));
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
         await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
+        if (used.Count > 0)
+        {
+            foreach (var row in unbind!(used)) await TenantAuditRow.AppendAsync(connection, transaction, row, ct);
+        }
+
         await transaction.CommitAsync(ct);
-        return (true, []);
+        return (true, used);
+    }
+
+    public async Task<bool> NameTakenAsync(string name, string? exceptId = null, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        return await NameTakenAsync(connection, null, name, exceptId, ct);
+    }
+
+    private static async Task<bool> NameTakenAsync(
+        SqliteConnection connection, SqliteTransaction? transaction, string name, string? exceptId, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT id, name FROM connections";
+
+        var key = ConnectionRows.NameKey(name);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            if (reader.GetString(0) != exceptId && ConnectionRows.NameKey(reader.GetString(1)) == key) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>Inside a write's transaction: the name is free, or the write throws and nothing lands.</summary>
+    private static async Task EnsureNameFreeAsync(
+        SqliteConnection connection, SqliteTransaction transaction, string name, string? exceptId, CancellationToken ct)
+    {
+        if (await NameTakenAsync(connection, transaction, name, exceptId, ct)) throw new ConnectionNameTakenException(name.Trim());
     }
 
     /// <summary>A tenant row on its own: what followed a write already committed.</summary>
@@ -440,6 +501,19 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
         SqliteConnection connection, SqliteTransaction? transaction, string id, CancellationToken ct) =>
         [.. (await BindingsAsync(connection, transaction, ct)).Where(b => b.Id == id).Select(b => b.Use)];
 
+    private static async Task<List<(string Team, string Member, string Json)>> BindingRowsAsync(
+        SqliteConnection connection, SqliteTransaction? transaction, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT team, name, connections_json FROM team_member_config WHERE connections_json <> '{}' ORDER BY team, name";
+
+        var list = new List<(string, string, string)>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct)) list.Add((reader.GetString(0), reader.GetString(1), reader.GetString(2)));
+        return list;
+    }
+
     private static async Task<List<(string Id, ConnectionUse Use)>> BindingsAsync(
         SqliteConnection connection, SqliteTransaction? transaction, CancellationToken ct)
     {
@@ -466,6 +540,7 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
     {
         await using var connection = Open();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+        await EnsureNameFreeAsync(connection, transaction, record.Name, null, ct);
 
         await using (var command = connection.CreateCommand())
         {
@@ -562,6 +637,139 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
         command.Parameters.AddWithValue("$id", id);
         command.Parameters.AddWithValue("$at", Instant.Stamp(at));
         await command.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>A mailbox's edit; see <see cref="IConnectionStore.UpdateMailboxAsync"/>.</summary>
+    public async Task<bool> UpdateMailboxAsync(
+        string id, string account, MailboxSettings settings, string? password, DateTimeOffset verifiedAt, TriggerAudit audit,
+        CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+                UPDATE imap_connections SET
+                    username = $username, imap_host = $imapHost, imap_port = $imapPort, imap_security = $imapSecurity,
+                    smtp_host = $smtpHost, smtp_port = $smtpPort, smtp_security = $smtpSecurity,
+                    password_protected = COALESCE($password, password_protected)
+                WHERE id = $id
+                """;
+            command.Parameters.AddWithValue("$id", id);
+            command.Parameters.AddWithValue("$username", settings.Username);
+            command.Parameters.AddWithValue("$imapHost", settings.Imap.Host);
+            command.Parameters.AddWithValue("$imapPort", settings.Imap.Port);
+            command.Parameters.AddWithValue("$imapSecurity", settings.Imap.Security);
+            command.Parameters.AddWithValue("$smtpHost", settings.Smtp.Host);
+            command.Parameters.AddWithValue("$smtpPort", settings.Smtp.Port);
+            command.Parameters.AddWithValue("$smtpSecurity", settings.Smtp.Security);
+            command.Parameters.AddWithValue("$password", _cipher.ProtectOrNull(password));
+            if (await command.ExecuteNonQueryAsync(ct) == 0) return false;
+        }
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "UPDATE connections SET account = $account, status = 'ok', status_reason = NULL, refreshed_at = $at WHERE id = $id";
+            command.Parameters.AddWithValue("$id", id);
+            command.Parameters.AddWithValue("$account", account);
+            command.Parameters.AddWithValue("$at", Instant.Stamp(verifiedAt));
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
+        await transaction.CommitAsync(ct);
+        return true;
+    }
+
+    // ---- credentials (website, API key, username and password) --------------------------------------
+
+    /// <summary>A new credential connection; see <see cref="IConnectionStore.InsertCredentialAsync"/>.</summary>
+    public async Task InsertCredentialAsync(
+        ConnectionRecord record, IReadOnlyDictionary<string, string> secrets, string? connectedBy, TriggerAudit audit, CancellationToken ct = default)
+    {
+        var settings = record.Credential ?? throw new ArgumentException("A credential connection has its fields.", nameof(record));
+
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+        await EnsureNameFreeAsync(connection, transaction, record.Name, null, ct);
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+                INSERT INTO connections (id, name, provider, account, scopes, connected_at, refreshed_at, status, status_reason, connected_by)
+                VALUES ($id, $name, $provider, $account, '[]', $at, NULL, 'ok', NULL, $by)
+                """;
+            command.Parameters.AddWithValue("$id", record.Id);
+            command.Parameters.AddWithValue("$name", record.Name);
+            command.Parameters.AddWithValue("$provider", record.Provider);
+            command.Parameters.AddWithValue("$account", record.Account);
+            command.Parameters.AddWithValue("$at", Instant.Stamp(record.ConnectedAt));
+            command.Parameters.AddWithValue("$by", (object?)connectedBy ?? DBNull.Value);
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "INSERT INTO credential_connections (id, preset, fields, secrets_protected) VALUES ($id, $preset, $fields, $secrets)";
+            command.Parameters.AddWithValue("$id", record.Id);
+            command.Parameters.AddWithValue("$preset", (object?)settings.Preset ?? DBNull.Value);
+            command.Parameters.AddWithValue("$fields", settings.FieldsJson());
+            command.Parameters.AddWithValue("$secrets", ConnectionRows.SealSecrets(_cipher, secrets));
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
+        await transaction.CommitAsync(ct);
+    }
+
+    public async Task<IReadOnlyDictionary<string, string>?> CredentialSecretsAsync(string id, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT secrets_protected FROM credential_connections WHERE id = $id";
+        command.Parameters.AddWithValue("$id", id);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct)) return null;
+
+        return ConnectionRows.OpenSecrets(_cipher, ConnectionRows.NullableText(reader, 0));
+    }
+
+    public async Task<bool> UpdateCredentialAsync(
+        string id, string account, CredentialSettings settings, IReadOnlyDictionary<string, string> secrets, TriggerAudit audit,
+        CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "UPDATE credential_connections SET fields = $fields, secrets_protected = $secrets WHERE id = $id";
+            command.Parameters.AddWithValue("$id", id);
+            command.Parameters.AddWithValue("$fields", settings.FieldsJson());
+            command.Parameters.AddWithValue("$secrets", ConnectionRows.SealSecrets(_cipher, secrets));
+            if (await command.ExecuteNonQueryAsync(ct) == 0) return false;
+        }
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "UPDATE connections SET account = $account, status = 'ok', status_reason = NULL WHERE id = $id";
+            command.Parameters.AddWithValue("$id", id);
+            command.Parameters.AddWithValue("$account", account);
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
+        await transaction.CommitAsync(ct);
+        return true;
     }
 
     // ---- flows ----------------------------------------------------------------------------------

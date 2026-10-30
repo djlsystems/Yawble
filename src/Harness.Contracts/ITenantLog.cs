@@ -241,6 +241,10 @@ public static class TenantActions
     /// clearing <c>needs-reconnect</c>. Never the password.</summary>
     public const string ConnectionPasswordUpdated = "connections.password-updated";
 
+    /// <summary>A person changed what is behind a connection's name - a password, a key, a username, a
+    /// mailbox's servers. Detail names the fields that changed - never a value or any part of it.</summary>
+    public const string ConnectionCredentialsChanged = "connections.credentials-changed";
+
     /// <summary>A person set a plugin key (a logical key such as ACME_STORAGE_KEY) from the screen
     /// where none was stored. Detail: the key - never the value or any part of it.</summary>
     public const string SecretSet = "secrets.set";

@@ -145,7 +145,7 @@ internal sealed partial class HostComposition
             microsoftClientId: builder.Configuration[Connections.MicrosoftClientSetting] ?? builder.Configuration[Connections.MicrosoftClientVariable]));
         builder.Services.AddSingleton(sp => new ConnectRequests(
             sp.GetRequiredService<Connections>(), dataRoot, sp.GetRequiredService<ILogger<ConnectRequests>>(),
-            sp.GetRequiredService<TeamRegistry>()));
+            sp.GetRequiredService<TeamRegistry>(), sp.GetRequiredService<IMemberReports>()));
         builder.Services.AddHostedService(sp => sp.GetRequiredService<ConnectRequests>());
 
         if (unmeasuredHeadlessPresets.Count > 0)

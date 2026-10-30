@@ -452,7 +452,16 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
                         ["imap"] = new JsonObject { ["host"] = mailbox.Imap.Host, ["port"] = mailbox.Imap.Port, ["security"] = mailbox.Imap.Security },
                         ["smtp"] = new JsonObject { ["host"] = mailbox.Smtp.Host, ["port"] = mailbox.Smtp.Port, ["security"] = mailbox.Smtp.Security },
                     }
-                    : Grant(g.Value))))),
+                    : g.Value.Credential is { } credential
+                        // A WEBSITE, AN API KEY, A USERNAME AND PASSWORD: each field by name, its value as stored.
+                        ? new JsonObject
+                        {
+                            ["kind"] = credential.Kind,
+                            ["account"] = g.Value.Account,
+                            ["preset"] = credential.Preset,
+                            ["fields"] = new JsonObject(credential.Values.Select(v => KeyValuePair.Create(v.Key, (JsonNode?)JsonValue.Create(v.Value)))),
+                        }
+                        : Grant(g.Value))))),
 
             // EACH OF THE MEMBER'S OWN TEAM'S SITES' FILES FOLDER (see SiteFilesAsync); [] for none.
             // Cloned: the request is built twice when reads are measured, and a node has one parent.

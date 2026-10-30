@@ -27,6 +27,12 @@ public static class ConnectionRows
         "c.id, c.name, c.provider, c.account, c.scopes, c.connected_at, c.refreshed_at, c.status, c.status_reason, "
         + "m.username, m.imap_host, m.imap_port, m.imap_security, m.smtp_host, m.smtp_port, m.smtp_security, m.preset";
 
+    /// <summary>A credential connection's columns, positions 19 and 20 after the tenant, from
+    /// <see cref="CredentialJoin"/>: never its sealed values.</summary>
+    public const string CredentialTail = "k.preset, k.fields";
+
+    public const string CredentialJoin = "LEFT JOIN credential_connections k ON k.id = c.id";
+
     /// <summary>A flow's columns, in the order <see cref="ReadFlow"/> reads them.</summary>
     public const string FlowColumns =
         "state, user_id, provider, scopes, name, reconnect_id, redirect_uri, loopback, verifier_protected, issued_at, used_at, tenant";
@@ -45,7 +51,8 @@ public static class ConnectionRows
             new MailServer(reader.GetString(10), checked((int)reader.GetInt64(11)), reader.GetString(12)),
             new MailServer(reader.GetString(13), checked((int)reader.GetInt64(14)), reader.GetString(15)),
             NullableText(reader, 16), reader.GetInt64(17) != 0),
-        NullableText(reader, 18));
+        NullableText(reader, 18),
+        reader.IsDBNull(20) ? null : new CredentialSettings(NullableText(reader, 19), CredentialSettings.ReadFields(reader.GetString(20))));
 
     /// <summary>A flow as its row holds it, its verifier opened by <paramref name="unprotect"/>.</summary>
     public static ConnectionFlow ReadFlow(DbDataReader reader, Func<string?, string?> unprotect) => new(
@@ -69,6 +76,24 @@ public static class ConnectionRows
     public static IEnumerable<(string Id, ConnectionUse Use)> Bindings(string team, string member, string connectionsJson) =>
         (JsonSerializer.Deserialize<Dictionary<string, string>>(connectionsJson) ?? [])
             .Select(binding => (binding.Value, new ConnectionUse(team, member, binding.Key)));
+
+    /// <summary>A credential connection's masked values as their sealed column holds them: one JSON
+    /// object, field to value, as ciphertext; null for none.</summary>
+    public static object SealSecrets(ConnectionCipher cipher, IReadOnlyDictionary<string, string> secrets) =>
+        secrets.Count == 0 ? DBNull.Value : cipher.Protect(JsonSerializer.Serialize(secrets));
+
+    public static IReadOnlyDictionary<string, string> OpenSecrets(ConnectionCipher cipher, string? sealedValue) =>
+        cipher.Unprotect(sealedValue) is { } json
+            ? JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? new Dictionary<string, string>(StringComparer.Ordinal)
+            : new Dictionary<string, string>(StringComparer.Ordinal);
+
+    /// <summary>A member's bindings with every slot bound to <paramref name="id"/> taken out.</summary>
+    public static string Unbound(string connectionsJson, string id) => JsonSerializer.Serialize(
+        (JsonSerializer.Deserialize<Dictionary<string, string>>(connectionsJson) ?? [])
+            .Where(b => b.Value != id).ToDictionary(b => b.Key, b => b.Value));
+
+    /// <summary>A name as two names compare: trimmed, case folded.</summary>
+    public static string NameKey(string name) => name.Trim().ToUpperInvariant();
 
     /// <summary>A mailbox's verified time as it is first written, round-trip text as SQLite's has always been.</summary>
     public static string MailboxVerified(ConnectionRecord record) =>

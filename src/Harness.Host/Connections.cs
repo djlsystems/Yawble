@@ -12,11 +12,13 @@ namespace Harness.Host;
 /// access token per API its scopes name, the first of them being <see cref="AccessToken"/>.</summary>
 public sealed record ConnectionGrant(
     string ConnectionId, string Provider, string Account, string AccessToken, DateTimeOffset? ExpiresAt, IReadOnlyList<string> Scopes,
-    MailboxGrant? Mailbox = null, IReadOnlyList<ApiToken>? Tokens = null)
+    MailboxGrant? Mailbox = null, IReadOnlyList<ApiToken>? Tokens = null, CredentialGrant? Credential = null)
 {
-    /// <summary>The values the run's redaction set takes: every access token, or the app password.</summary>
+    /// <summary>The values the run's redaction set takes: every access token, the app password, or a
+    /// credential's masked values.</summary>
     public IReadOnlyList<string> Secrets => Mailbox is { } mailbox
         ? [mailbox.Password]
+        : Credential is { } credential ? credential.Secrets
         : [.. new[] { AccessToken }.Concat(Tokens?.Select(t => t.AccessToken) ?? []).Distinct(StringComparer.Ordinal)];
 }
 
@@ -362,6 +364,11 @@ public sealed class Connections(
                 return (null, null, null, null, $"Connection {reconnecting.Named} is a mailbox; update its password instead of reconnecting it.");
             }
 
+            if (reconnecting.Credential is not null)
+            {
+                return (null, null, null, null, $"Connection {reconnecting.Named} is a {ConnectionKinds.Display(reconnecting.Kind)} connection; edit its fields instead of reconnecting it.");
+            }
+
             if (!string.IsNullOrWhiteSpace(request.Provider) && request.Provider.Trim() != reconnecting.Provider)
             {
                 return (null, null, null, null, $"Connection {reconnecting.Named} is a {ConnectionProviders.Display(reconnecting.Provider)} connection; reconnect it with that provider.");
@@ -386,6 +393,12 @@ public sealed class Connections(
         if (request.Name is { } name && name.Trim().Length > MaximumNameLength)
         {
             return (null, null, null, null, $"`name` is longer than {MaximumNameLength} characters.");
+        }
+
+        // THE NAME IS THE KEY: a new connection's name is refused before anyone signs in, not after.
+        if (reconnecting is null && !string.IsNullOrWhiteSpace(request.Name) && await store.NameTakenAsync(request.Name.Trim(), null, ct))
+        {
+            return (null, null, null, null, NameTaken(request.Name.Trim()));
         }
 
         var directory = reconnecting?.Tenant;
@@ -508,20 +521,23 @@ public sealed class Connections(
                 var existing = await store.GetAsync(reconnectId, ct);
                 if (existing is null) return (null, false, "The connection being reconnected was disconnected meanwhile. Connect it again.");
 
-                if (!string.Equals(existing.Account, account, StringComparison.OrdinalIgnoreCase))
-                {
-                    return (null, false, $"You signed in as {account}, but {existing.Named} is {existing.Account}. Reconnect with the same account, or connect {account} as a new connection.");
-                }
+                // ANOTHER ACCOUNT UNDER THE SAME NAME is the person's choice: the name is what teams and
+                // members use, and each of them gets this account at its next run. The row says so.
+                var otherAccount = !string.Equals(existing.Account, account, StringComparison.OrdinalIgnoreCase);
 
                 var scopes = Union(existing.Scopes, granted);
                 ForgetApis(existing.Id);
                 var wasNeedingReconnect = existing.Status == ConnectionRecord.NeedsReconnect;
                 await store.ReconnectAsync(existing.Id, scopes, tokens, who.Row(
                     TenantActions.ConnectionReconnected, existing.Id, existing.Name,
-                    directory is null && existing.Tenant is null
-                        ? new { connection = existing.Id, provider = provider.Id, account = existing.Account, scopes, wasNeedingReconnect }
-                        : new { connection = existing.Id, provider = provider.Id, account = existing.Account, tenant = directory, scopes, wasNeedingReconnect }), ct,
-                    directory);
+                    (otherAccount, directory is null && existing.Tenant is null) switch
+                    {
+                        (false, true) => new { connection = existing.Id, provider = provider.Id, account = existing.Account, scopes, wasNeedingReconnect },
+                        (false, false) => (object)new { connection = existing.Id, provider = provider.Id, account = existing.Account, tenant = directory, scopes, wasNeedingReconnect },
+                        (true, true) => new { connection = existing.Id, provider = provider.Id, account, fromAccount = existing.Account, scopes, wasNeedingReconnect },
+                        (true, false) => new { connection = existing.Id, provider = provider.Id, account, fromAccount = existing.Account, tenant = directory, scopes, wasNeedingReconnect },
+                    }), ct,
+                    directory, otherAccount ? account : null);
 
                 return (await store.GetAsync(existing.Id, ct), true, null);
             }
@@ -532,14 +548,24 @@ public sealed class Connections(
         }
 
         var record = new ConnectionRecord(
-            "conn-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(6)).ToLowerInvariant(),
-            name ?? account, provider.Id, account, granted, now, null, ConnectionRecord.Ok, null, Tenant: directory);
+            NewId(), await UniqueNameAsync(name ?? account, ct), provider.Id, account, granted, now, null, ConnectionRecord.Ok, null, Tenant: directory);
 
-        await store.InsertAsync(record, tokens, userId, who.Row(
-            TenantActions.ConnectionConnected, record.Id, record.Name,
+        TriggerAudit Row(ConnectionRecord connected) => who.Row(
+            TenantActions.ConnectionConnected, connected.Id, connected.Name,
             directory is null
-                ? new { connection = record.Id, provider = provider.Id, account, scopes = granted }
-                : new { connection = record.Id, provider = provider.Id, account, tenant = directory, scopes = granted }), ct);
+                ? new { connection = connected.Id, provider = provider.Id, account, scopes = granted }
+                : new { connection = connected.Id, provider = provider.Id, account, tenant = directory, scopes = granted });
+
+        try
+        {
+            await store.InsertAsync(record, tokens, userId, Row(record), ct);
+        }
+        catch (ConnectionNameTakenException)
+        {
+            // TAKEN MEANWHILE, after the person signed in: the sign-in is kept under the next free name.
+            record = record with { Name = await UniqueNameAsync(record.Name, ct) };
+            await store.InsertAsync(record, tokens, userId, Row(record), ct);
+        }
 
         return (await store.GetAsync(record.Id, ct), false, null);
     }
@@ -909,6 +935,8 @@ public sealed class Connections(
 
             if (connection.Mailbox is { } mailbox) return await MailboxGrantAsync(connection, mailbox, ct);
 
+            if (connection.Credential is { } credential) return await CredentialGrantAsync(connection, credential, ct);
+
             var microsoft = connection.Provider == ConnectionProviders.Microsoft;
             if (microsoft && MicrosoftApis.Several(connection.Scopes)) return await ApisGrantAsync(connection, scopes ?? connection.Scopes, ct);
 
@@ -1150,6 +1178,11 @@ public sealed class Connections(
         if (mail is null) return new MailboxAnswer(StatusCodes.Status400BadRequest, null, "This Host cannot log in to mailboxes.", null);
 
         var account = request.Account!.Trim();
+        if (!string.IsNullOrWhiteSpace(request.Name) && await store.NameTakenAsync(request.Name.Trim(), null, ct))
+        {
+            return new MailboxAnswer(StatusCodes.Status409Conflict, null, NameTaken(request.Name.Trim()), null);
+        }
+
         var settings = new MailboxSettings(
             string.IsNullOrWhiteSpace(request.Username) ? account : request.Username.Trim(),
             Server(request.Imap!), Server(request.Smtp!),
@@ -1160,8 +1193,7 @@ public sealed class Connections(
 
         var now = clock.GetUtcNow();
         var record = new ConnectionRecord(
-            "conn-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(6)).ToLowerInvariant(),
-            string.IsNullOrWhiteSpace(request.Name) ? account : request.Name.Trim(), MailboxSettings.Kind, account, [], now, now,
+            NewId(), string.IsNullOrWhiteSpace(request.Name) ? await UniqueNameAsync(account, ct) : request.Name.Trim(), MailboxSettings.Kind, account, [], now, now,
             ConnectionRecord.Ok, null);
 
         await store.InsertMailboxAsync(record, settings, request.Password!, actor.Id, actor.Row(
@@ -1219,6 +1251,195 @@ public sealed class Connections(
             gate.Release();
         }
     }
+
+    /// <summary>
+    /// A mailbox's edit: what is given replaces what is stored (the account, username, either server,
+    /// the password), then a login with the result. Only when it succeeds is it stored, with
+    /// <c>needs-reconnect</c> cleared and a <c>connections.credentials-changed</c> row naming what
+    /// changed - never a value - in one transaction. A refused login changes nothing (422).
+    /// </summary>
+    public async Task<MailboxAnswer> EditMailboxAsync(ConnectionActor actor, string id, EditMailbox request, CancellationToken ct = default)
+    {
+        if (await store.GetAsync(id, ct) is not { } connection)
+        {
+            return new MailboxAnswer(StatusCodes.Status404NotFound, null, $"There is no connection '{id}'.", null);
+        }
+
+        if (connection.Mailbox is not { } mailbox)
+        {
+            return new MailboxAnswer(StatusCodes.Status400BadRequest, null, $"Connection {connection.Named} is not a mailbox.", null);
+        }
+
+        var stored = await store.MailboxPasswordAsync(id, ct);
+        var merged = new AddMailbox(
+            mailbox.Preset, connection.Name, request.Account ?? connection.Account, request.Username ?? mailbox.Username,
+            request.Password ?? stored,
+            request.Imap ?? new MailServerRequest(mailbox.Imap.Host, mailbox.Imap.Port, mailbox.Imap.Security),
+            request.Smtp ?? new MailServerRequest(mailbox.Smtp.Host, mailbox.Smtp.Port, mailbox.Smtp.Security));
+
+        if (merged.Password is null) return new MailboxAnswer(StatusCodes.Status400BadRequest, null, PasswordRefusal(null), null);
+        if (MailboxRefusal(merged) is { } refusal) return new MailboxAnswer(StatusCodes.Status400BadRequest, null, refusal, null);
+        if (mail is null) return new MailboxAnswer(StatusCodes.Status400BadRequest, null, "This Host cannot log in to mailboxes.", null);
+
+        var account = merged.Account!.Trim();
+        var settings = new MailboxSettings(
+            string.IsNullOrWhiteSpace(merged.Username) ? account : merged.Username.Trim(), Server(merged.Imap!), Server(merged.Smtp!), mailbox.Preset, true);
+
+        var changed = new List<string>();
+        if (!string.Equals(account, connection.Account, StringComparison.Ordinal)) changed.Add("account");
+        if (settings.Username != mailbox.Username) changed.Add("username");
+        if (settings.Imap != mailbox.Imap) changed.Add("imap");
+        if (settings.Smtp != mailbox.Smtp) changed.Add("smtp");
+        if (request.Password is not null && request.Password != stored) changed.Add("password");
+
+        var gate = Gate(id);
+        await gate.WaitAsync(ct);
+
+        try
+        {
+            var login = await mail.LoginAsync(account, settings, merged.Password, ct);
+            if (!login.Ok) return new MailboxAnswer(StatusCodes.Status422UnprocessableEntity, null, login.Sentence, null);
+
+            var updated = await store.UpdateMailboxAsync(id, account, settings, request.Password, clock.GetUtcNow(), actor.Row(
+                TenantActions.ConnectionCredentialsChanged, id, connection.Name,
+                new
+                {
+                    connection = id, kind = MailboxSettings.Kind, account, changed,
+                    wasNeedingReconnect = connection.Status == ConnectionRecord.NeedsReconnect,
+                }), ct);
+
+            return updated
+                ? new MailboxAnswer(StatusCodes.Status200OK, login.Sentence, null, await store.GetAsync(id, ct))
+                : new MailboxAnswer(StatusCodes.Status404NotFound, null, $"There is no connection '{id}'.", null);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    // ---- credentials (website, API key, username and password) ------------------------------------
+
+    /// <summary>
+    /// A new website, API key or username-and-password connection: the kind's form checked, then the
+    /// connection, its unmasked fields and its masked values as ciphertext saved with a
+    /// <c>connections.connected</c> row naming the fields - never a value - in one transaction. Nothing
+    /// is signed in to: the values are checked by the service they are for, at a run.
+    /// </summary>
+    public async Task<MailboxAnswer> AddCredentialAsync(ConnectionActor actor, AddCredential request, CancellationToken ct = default)
+    {
+        var kind = request.Kind?.Trim() ?? "";
+        if (!ConnectionKinds.IsCredential(kind))
+        {
+            return Refusal400($"`kind` is {string.Join(", ", ConnectionKinds.Credentials)}; a sign-in and a mailbox have their own routes.");
+        }
+
+        var presetId = string.IsNullOrWhiteSpace(request.Preset) ? null : request.Preset.Trim();
+        if (CredentialPresets.For(kind, presetId) is not { } preset)
+        {
+            var ids = CredentialPresets.IdsOf(kind);
+            return Refusal400(ids.Count == 0
+                ? $"A {ConnectionKinds.Display(kind)} connection takes no `preset`; leave it out."
+                : $"`preset` is one of {string.Join(", ", ids)} for an {ConnectionKinds.Display(kind)} connection.");
+        }
+
+        var name = request.Name?.Trim() ?? "";
+        if (name.Length is 0 or > MaximumNameLength) return Refusal400($"`name` is required: 1 to {MaximumNameLength} characters.");
+        if (await store.NameTakenAsync(name, null, ct)) return new MailboxAnswer(StatusCodes.Status409Conflict, null, NameTaken(name), null);
+
+        var (settings, secrets, _, error) = CredentialForm.Read(preset, request.Fields);
+        if (error is not null) return Refusal400(error);
+
+        var record = new ConnectionRecord(
+            NewId(), name, kind, CredentialForm.AccountOf(preset, settings!), [], clock.GetUtcNow(), null, ConnectionRecord.Ok, null,
+            Credential: settings);
+
+        try
+        {
+            await store.InsertCredentialAsync(record, secrets!, actor.Id, actor.Row(
+                TenantActions.ConnectionConnected, record.Id, record.Name,
+                new { connection = record.Id, provider = kind, preset = preset.Id, account = record.Account, fields = settings!.Fields.Select(f => f.Name) }), ct);
+        }
+        catch (ConnectionNameTakenException)
+        {
+            return new MailboxAnswer(StatusCodes.Status409Conflict, null, NameTaken(name), null);
+        }
+
+        return new MailboxAnswer(StatusCodes.Status200OK, null, null, await store.GetAsync(record.Id, ct));
+    }
+
+    /// <summary>
+    /// A credential connection's edit: each field given replaces its value (a masked one left out, or
+    /// null, keeps its own), under the same name and id, so every team and member using it gets the new
+    /// value at its next run. A <c>connections.credentials-changed</c> row names the fields that changed,
+    /// never a value, in the same transaction.
+    /// </summary>
+    public async Task<MailboxAnswer> EditCredentialAsync(ConnectionActor actor, string id, EditCredential request, CancellationToken ct = default)
+    {
+        if (await store.GetAsync(id, ct) is not { } connection)
+        {
+            return new MailboxAnswer(StatusCodes.Status404NotFound, null, $"There is no connection '{id}'.", null);
+        }
+
+        if (connection.Credential is not { } before || CredentialPresets.For(connection.Kind, before.Preset) is not { } preset)
+        {
+            return Refusal400(connection.Mailbox is not null
+                ? $"Connection {connection.Named} is a mailbox; edit it as one."
+                : $"Connection {connection.Named} signs in with {ConnectionProviders.Display(connection.Provider)}; reconnect it instead.");
+        }
+
+        var gate = Gate(id);
+        await gate.WaitAsync(ct);
+
+        try
+        {
+            var stored = await store.CredentialSecretsAsync(id, ct) ?? new Dictionary<string, string>();
+
+            // AN EDIT OF A FIXED FORM names only what changes: every field it leaves out is kept.
+            var given = preset.NamedFields
+                ? request.Fields
+                : [.. preset.Fields.Select(spec => request.Fields?.FirstOrDefault(f => f?.Name?.Trim() == spec.Name) ?? new CredentialFieldValue(spec.Name, null)),
+                   .. (request.Fields ?? []).Where(f => f is null || !preset.Fields.Any(spec => spec.Name == f.Name?.Trim()))];
+
+            var (settings, secrets, changed, error) = CredentialForm.Read(preset, given, before, stored);
+            if (error is not null) return Refusal400(error);
+
+            var account = CredentialForm.AccountOf(preset, settings!);
+            var updated = await store.UpdateCredentialAsync(id, account, settings!, secrets!, actor.Row(
+                TenantActions.ConnectionCredentialsChanged, id, connection.Name,
+                new { connection = id, kind = connection.Kind, preset = preset.Id, account, changed }), ct);
+
+            return updated
+                ? new MailboxAnswer(StatusCodes.Status200OK, null, null, await store.GetAsync(id, ct))
+                : new MailboxAnswer(StatusCodes.Status404NotFound, null, $"There is no connection '{id}'.", null);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <summary>A credential connection for a run: every field's value, the masked ones opened.</summary>
+    private async Task<(ConnectionGrant? Grant, string? Refusal)> CredentialGrantAsync(
+        ConnectionRecord connection, CredentialSettings credential, CancellationToken ct)
+    {
+        var secrets = await store.CredentialSecretsAsync(connection.Id, ct) ?? new Dictionary<string, string>();
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var field in credential.Fields.Where(f => f.Set))
+        {
+            if (!field.Masked) values[field.Name] = field.Value!;
+            else if (secrets.TryGetValue(field.Name, out var value)) values[field.Name] = value;
+            else return (null, $"The value of `{field.Name}` in connection {connection.Named} could not be read on this Host. Edit the connection in {Where}.");
+        }
+
+        return (new ConnectionGrant(
+            connection.Id, connection.Provider, connection.Account, "", null, [],
+            Credential: new CredentialGrant(connection.Kind, credential.Preset, values,
+                credential.Fields.Where(f => f.Masked).Select(f => f.Name).ToHashSet(StringComparer.Ordinal))), null);
+    }
+
+    private static MailboxAnswer Refusal400(string error) => new(StatusCodes.Status400BadRequest, null, error, null);
 
     private static MailServer Server(MailServerRequest request) =>
         new(request.Host!.Trim().ToLowerInvariant(), request.Port!.Value, request.Security!.Trim().ToUpperInvariant());
@@ -1355,6 +1576,28 @@ public sealed class Connections(
 
     // ---- helpers --------------------------------------------------------------------------------
 
+    private static string NewId() => "conn-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(6)).ToLowerInvariant();
+
+    /// <summary>The sentence a name another connection has is refused with.</summary>
+    public static string NameTaken(string name) =>
+        $"Another connection is already called '{name}'. Every connection has its own name: choose another.";
+
+    /// <summary><paramref name="name"/>, or the first of "name (2)", "name (3)", ... no connection has:
+    /// what a connection is called when the person named none and its account's name is taken.</summary>
+    public async Task<string> UniqueNameAsync(string name, CancellationToken ct = default)
+    {
+        name = name.Trim();
+        if (name.Length > MaximumNameLength) name = name[..MaximumNameLength].TrimEnd();
+        if (!await store.NameTakenAsync(name, null, ct)) return name;
+
+        for (var n = 2; ; n++)
+        {
+            var suffix = $" ({n})";
+            var candidate = (name.Length + suffix.Length > MaximumNameLength ? name[..(MaximumNameLength - suffix.Length)].TrimEnd() : name) + suffix;
+            if (!await store.NameTakenAsync(candidate, null, ct)) return candidate;
+        }
+    }
+
     /// <summary>The account's name: the ID token's <c>email</c> / <c>preferred_username</c>, else the
     /// provider's userinfo.</summary>
     private async Task<string> AccountAsync(OAuthProvider provider, OAuthTokenAnswer answer, CancellationToken ct)
@@ -1485,6 +1728,17 @@ public sealed record AddMailbox(
 
 /// <summary>One server of <see cref="AddMailbox"/>.</summary>
 public sealed record MailServerRequest(string? Host, int? Port, string? Security);
+
+/// <summary>Body of <c>PUT /api/connections/{id}/mailbox</c>: what is given replaces what is stored. Its
+/// printed form leaves the password out.</summary>
+public sealed record EditMailbox(string? Account, string? Username, string? Password, MailServerRequest? Imap, MailServerRequest? Smtp)
+{
+    private bool PrintMembers(StringBuilder builder)
+    {
+        builder.Append($"Account = {Account}, Username = {Username}, Imap = {Imap}, Smtp = {Smtp}");
+        return true;
+    }
+}
 
 /// <summary>Body of <c>PUT /api/connections/{id}/password</c>. Its printed form leaves the password out.</summary>
 public sealed record MailboxPassword(string? Password)

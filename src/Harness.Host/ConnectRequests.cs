@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using Harness.Contracts;
 
 namespace Harness.Host;
 
@@ -24,7 +25,8 @@ namespace Harness.Host;
 /// finished only through this same exchange, and no report carries a token or a secret.
 /// </para>
 /// </summary>
-public sealed class ConnectRequests(Connections connections, string dataRoot, ILogger<ConnectRequests> logger, TeamRegistry? teams = null)
+public sealed class ConnectRequests(
+    Connections connections, string dataRoot, ILogger<ConnectRequests> logger, TeamRegistry? teams = null, IMemberReports? reports = null)
     : BackgroundService
 {
     public const string Folder = "connections";
@@ -265,7 +267,9 @@ public sealed class ConnectRequests(Connections connections, string dataRoot, IL
 
         var (status, body) = teams is null
             ? (404, (object?)new { error = "Connections cannot be removed here." })
-            : await ConnectionEndpoints.DisconnectAsync(connections, teams, id, ConnectionActor.Operator, ct);
+            : await ConnectionEndpoints.DisconnectAsync(
+                connections, teams, id, ConnectionActor.Operator, ct,
+                unbind: root.TryGetProperty("unbind", out var unbind) && unbind.ValueKind == JsonValueKind.True, reports);
 
         if (body is null) return new { request = nonce, status, error = (string?)null };
 

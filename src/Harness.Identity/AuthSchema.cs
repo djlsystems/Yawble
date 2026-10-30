@@ -703,5 +703,31 @@ public static class AuthSchema
                 FOREIGN KEY (team, name) REFERENCES team_members(team, name) ON DELETE CASCADE
             );
             """),
+
+        // A CREDENTIAL CONNECTION - a website, an API key, a username and password - and EVERY NAME ITS
+        // OWN. Its `connections` row has the kind as its provider (`website`, `apikey`, `login`), no
+        // scopes and no tokens; this row holds the preset it was made from (NULL for a kind with one
+        // form), its fields as JSON (each one's name, label, whether it is masked and, for an unmasked
+        // one only, its value) and every masked value as ONE Data Protection ciphertext under the
+        // instance's `<dataRoot>/keys`. No column holds a masked value or any part of it. Removed with
+        // its connection, in the same transaction. A connection is known by its name from here on, so a
+        // name two connections share is made unique: the first connected keeps it, each later one
+        // takes its id after it ("Work mail (conn-0a1b2c3d4e5f)").
+        new MigrationStep(
+            "auth-031",
+            """
+            CREATE TABLE credential_connections (
+                id                TEXT PRIMARY KEY,
+                preset            TEXT NULL,
+                fields            TEXT NOT NULL DEFAULT '[]',
+                secrets_protected TEXT NULL
+            );
+
+            UPDATE connections SET name = name || ' (' || id || ')'
+            WHERE EXISTS (
+                SELECT 1 FROM connections o
+                WHERE o.name = connections.name COLLATE NOCASE
+                  AND (o.connected_at < connections.connected_at OR (o.connected_at = connections.connected_at AND o.id < connections.id)));
+            """),
     ];
 }
