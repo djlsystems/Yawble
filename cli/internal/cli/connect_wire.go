@@ -23,6 +23,8 @@ type connectRequest struct {
 	State       string   `json:"state,omitempty"`
 	Code        string   `json:"code,omitempty"`
 	ID          string   `json:"id,omitempty"`
+	// Unbind confirms a remove of a connection members use: their bindings go with it.
+	Unbind bool `json:"unbind,omitempty"`
 	// Flow is "device" on a start that signs in with a code; FlowID names that sign-in on a read.
 	Flow   string `json:"flow,omitempty"`
 	FlowID string `json:"flowId,omitempty"`
@@ -87,13 +89,27 @@ type connection struct {
 	StatusReason *string   `json:"statusReason"`
 	UsedBy       []connUse `json:"usedBy"`
 
-	// A mailbox (kind imap): its servers in place of scopes. The Host never answers its password,
-	// only whether one is set.
+	// Kind is oauth, imap (a mailbox), website, apikey or login (a username and password). A
+	// mailbox has its servers in place of scopes; the Host never answers its password, only whether
+	// one is set.
 	Kind        string      `json:"kind,omitempty"`
 	Username    string      `json:"username,omitempty"`
 	Imap        *mailServer `json:"imap,omitempty"`
 	Smtp        *mailServer `json:"smtp,omitempty"`
 	PasswordSet *bool       `json:"passwordSet,omitempty"`
+
+	// A website's, API key's or login's preset and fields. A masked field says only whether it is
+	// set: the Host never answers its value.
+	Preset string            `json:"preset,omitempty"`
+	Fields []credentialField `json:"fields,omitempty"`
+}
+
+type credentialField struct {
+	Name   string  `json:"name"`
+	Label  string  `json:"label"`
+	Masked bool    `json:"masked"`
+	Value  *string `json:"value"`
+	Set    bool    `json:"set"`
 }
 
 type mailServer struct {
@@ -104,10 +120,38 @@ type mailServer struct {
 
 func (c connection) mailbox() bool { return c.Kind == "imap" }
 
-// detail is what the list shows beside the status: a mailbox's servers, an account's scopes.
+// credential is a website, an API key or a username and password: fields, no sign-in.
+func (c connection) credential() bool {
+	return c.Kind == "website" || c.Kind == "apikey" || c.Kind == "login"
+}
+
+// kind is the connection's kind, oauth for a Host older than kinds.
+func (c connection) kind() string {
+	if c.Kind == "" {
+		return "oauth"
+	}
+	return c.Kind
+}
+
+// detail is what the list shows beside the status: a mailbox's servers, a credential's fields (a
+// masked one only as set), an account's scopes.
 func (c connection) detail() string {
 	if c.mailbox() && c.Imap != nil && c.Smtp != nil {
 		return fmt.Sprintf("%s:%d %s, %s:%d %s", c.Imap.Host, c.Imap.Port, c.Imap.Security, c.Smtp.Host, c.Smtp.Port, c.Smtp.Security)
+	}
+	if c.credential() {
+		var fields []string
+		for _, f := range c.Fields {
+			switch {
+			case !f.Set:
+				fields = append(fields, f.Name+"=not set")
+			case f.Masked || f.Value == nil:
+				fields = append(fields, f.Name+"=set")
+			default:
+				fields = append(fields, f.Name+"="+*f.Value)
+			}
+		}
+		return orDash(strings.Join(fields, " "))
 	}
 	return orDash(strings.Join(c.Scopes, " "))
 }
@@ -222,11 +266,14 @@ func listConnections(ctx context.Context, e engine.Engine) ([]connection, error)
 	return r.Connections, nil
 }
 
-// findConnection is the one named `name`, or with that id.
+// findConnection is the one with that id, else the one named `name`, ignoring case as the Host does.
 func findConnection(list []connection, name string) (connection, error) {
 	var found []connection
 	for _, c := range list {
-		if c.ID == name || c.Name == name {
+		if c.ID == name {
+			return c, nil
+		}
+		if strings.EqualFold(strings.TrimSpace(c.Name), strings.TrimSpace(name)) {
 			found = append(found, c)
 		}
 	}
@@ -252,10 +299,11 @@ func findConnection(list []connection, name string) (connection, error) {
 	}
 }
 
-// sameName is the connection of this provider with this name, to reconnect, or nil.
+// sameName is the connection with this name, to reconnect, or nil. Every name is its own, ignoring
+// case: a name another provider's connection has is reconnected too, and the Host says which provider it takes.
 func sameName(list []connection, provider, name string) *connection {
 	for i, c := range list {
-		if c.Provider == provider && c.Name == name {
+		if strings.EqualFold(strings.TrimSpace(c.Name), strings.TrimSpace(name)) {
 			return &list[i]
 		}
 	}

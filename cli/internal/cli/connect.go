@@ -105,7 +105,7 @@ func newConnectListCommand(deps Deps) *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:     "list",
-		Short:   "Each connection on the instance: name, provider, account, status, scopes (a mailbox's servers) and who uses it",
+		Short:   "Each connection on the instance: name, kind, provider, account, status, scopes (a mailbox's servers, a credential's fields) and who uses it",
 		Example: "  yawble connect list\n  yawble connect list --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -128,9 +128,9 @@ func newConnectListCommand(deps Deps) *cobra.Command {
 				return nil
 			}
 			w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(w, "NAME\tPROVIDER\tACCOUNT\tSTATUS\tSCOPES OR SERVERS\tUSED BY")
+			fmt.Fprintln(w, "NAME\tKIND\tPROVIDER\tACCOUNT\tSTATUS\tSCOPES, SERVERS OR FIELDS\tUSED BY")
 			for _, c := range list {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", c.Name, c.Provider, c.Account, c.statusText(), c.detail(), orDash(c.usedByText()))
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", c.Name, c.kind(), c.Provider, orDash(c.Account), c.statusText(), c.detail(), orDash(c.usedByText()))
 			}
 			return w.Flush()
 		},
@@ -140,12 +140,14 @@ func newConnectListCommand(deps Deps) *cobra.Command {
 }
 
 func newConnectRemoveCommand(deps Deps) *cobra.Command {
-	return &cobra.Command{
+	var unbind bool
+	cmd := &cobra.Command{
 		Use:   "remove <name>",
-		Short: "Disconnect a connection: revoke it at the provider where it can be, and delete its tokens",
-		Long: "Disconnects the connection named <name> (or with that id). The Host refuses while any member uses it " +
-			"and names them; unbind it in those members' settings first.",
-		Example: "  yawble connect remove \"Work mail\"",
+		Short: "Delete a connection: revoke it at the provider where it can be, and delete what the Host holds for it",
+		Long: "Deletes the connection named <name> (or with that id). While a member uses it, the Host names each one " +
+			"and nothing is deleted: --unbind confirms, deleting it and every member's binding of it in one go. " +
+			"Those members' runs stop until a person chooses another connection for them.",
+		Example: "  yawble connect remove \"Work mail\"\n  yawble connect remove \"Work mail\" --unbind",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, out := cmd.Context(), cmd.OutOrStdout()
@@ -161,21 +163,32 @@ func newConnectRemoveCommand(deps Deps) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			r, err := exchange(ctx, e, connectRequest{Op: "remove", ID: target.ID})
+			r, err := exchange(ctx, e, connectRequest{Op: "remove", ID: target.ID, Unbind: unbind})
 			if err != nil {
 				return err
 			}
 			if !r.ok() {
-				return r.refusal("the Host did not disconnect " + target.Name)
+				if r.Status == 409 && len(r.UsedBy) > 0 && !unbind {
+					return fmt.Errorf("%w; to delete it and unbind them, run it again with --unbind", r.refusal("the Host did not delete "+target.Name))
+				}
+				return r.refusal("the Host did not delete " + target.Name)
 			}
-			if target.mailbox() {
+			if unbind && len(target.UsedBy) > 0 {
+				fmt.Fprintf(out, "unbound %s; their runs stop until another connection is chosen\n", target.usedByText())
+			}
+			switch {
+			case target.mailbox():
 				fmt.Fprintf(out, "disconnected %s (%s, a mailbox); its app password is deleted\n", target.Name, target.Account)
-				return nil
+			case target.credential():
+				fmt.Fprintf(out, "deleted %s (%s); its values are deleted\n", target.Name, target.kind())
+			default:
+				fmt.Fprintf(out, "disconnected %s (%s at %s); its tokens are deleted\n", target.Name, target.Account, target.Provider)
 			}
-			fmt.Fprintf(out, "disconnected %s (%s at %s); its tokens are deleted\n", target.Name, target.Account, target.Provider)
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&unbind, "unbind", false, "delete it even while members use it, unbinding them")
+	return cmd
 }
 
 // connect runs one flow: start on the Host, the browser round trip on this computer, complete on

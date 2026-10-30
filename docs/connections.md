@@ -1,10 +1,35 @@
 # Connections
 
-A **connection** is one person's account at an OAuth service - a Gmail mailbox, an Outlook mailbox, a
-Google Drive, Microsoft Graph - held by the Host so that plugin members can act on it. The Host holds
-the provider's OAuth client and each account's refresh token, refreshes and rotates the tokens, and
-hands a plugin only a fresh access token on each run. No plugin writes OAuth code, and no long-lived
-credential ever leaves the Host.
+A **connection** is one credential the Host holds so that plugin members can act with it: an account
+at an OAuth service (a Gmail mailbox, an Outlook mailbox, a Google Drive, Microsoft Graph), a mailbox
+with an app password, a website, an API key, or a username and password. Connections are one store,
+and every connection is **known by its name**. For an OAuth account the Host holds the provider's
+OAuth client and the account's refresh token, refreshes and rotates the tokens, and hands a plugin
+only a fresh access token on each run. No plugin writes OAuth code, and no long-lived credential ever
+leaves the Host.
+
+## Kinds
+
+Each connection has one kind, and each kind its own fields:
+
+| Kind (`kind`) | What it holds |
+|---|---|
+| **Sign-in** (`oauth`) | An account at Microsoft or Google (or a custom OAuth provider): its scopes, and for Microsoft its directory. See below. |
+| **Mailbox** (`imap`) | A preset (Gmail, iCloud, Yahoo, Namecheap Private Email, Other), the username, the app password and the servers. See [A mailbox with an app password](#a-mailbox-with-an-app-password-imap). |
+| **Website** (`website`) | The kind exists, with its name; the fields it signs in with are defined in a later release. |
+| **API key** (`apikey`) | A preset naming the fields a service needs - Stripe: key; Namecheap: API user, API key; Twilio: account SID, API key SID, API key secret; Other: fields you name - each masked or not as the preset says. |
+| **Username and password** (`login`) | A username, a password and an optional URL, for anything else. |
+
+**The name is the key.** Every connection has a name no other connection has (ignoring case), and
+teams and members refer to it by that name. An internal id stays the same for the connection's life,
+so a rename breaks nothing. You may change the account behind a name - a password, a key, a username,
+even another Microsoft or Google account on Reconnect - and every team and member using it gets the
+new value at its next run, with no warning. Every change writes its tenant row in the same
+transaction, naming what changed and who changed it, never a value.
+
+Every secret - a refresh token, an app password, a masked field - is Data Protection ciphertext under
+`<dataRoot>/keys`. No route, tenant row, log, report or file carries a value: a masked field says only
+that it is `set`.
 
 - **Where:** Admin → **Connections** in the web UI, or `yawble connect` on the operator's computer.
 - **Who:** people only. No agent tool, skill, environment variable or route gives an agent a token.
@@ -43,8 +68,13 @@ means typing a new one.
 
 ## Connecting an account: the guided path
 
-Start here. Admin → **Connections** → **Add connection** - and a plugin slot's **Connect** - opens
-one screen of provider tiles, each saying its way in: **Gmail** (app password), **Microsoft
+Start here. Admin → **Connections** → **Add connection** first asks what you are connecting - a
+**Sign-in** (Microsoft or Google), a **Mailbox**, a **Website**, an **API key** or a **Username and
+password** - and then shows only that kind's fields. A Sign-in goes on to Microsoft and Google; a
+website, an API key and a username and password to their own form (see
+[Websites, API keys, usernames and passwords](#websites-api-keys-usernames-and-passwords)). A Mailbox -
+and a plugin slot's **Connect** for a slot that takes only sign-ins and mailboxes - opens one screen of
+provider tiles, each saying its way in: **Gmail** (app password), **Microsoft
 (Outlook, Microsoft 365, Azure)** (sign in with a code), **iCloud** (app-specific password),
 **Yahoo** (app password), **Namecheap Private Email** (app password) and **Other** (server
 settings). A mailbox tile opens the mailbox form with that provider's hints - for Gmail, links to
@@ -172,7 +202,9 @@ sign in again.
   `GET /api/connections`; `null` without one). A directory is not a secret.
 - **Reconnect** shows the connection's directory: left as it is, it is kept (no `tenant` is sent);
   changed, the new one is used; emptied, it is cleared (`tenant: ""`). Reconnect as another account
-  is refused. The same account in two directories is two connections.
+  is accepted: the connection keeps its name and id and holds the new account, which every member
+  bound to it uses at its next run, and its `connections.reconnected` row names both accounts
+  (`account`, `fromAccount`). The same account in two directories is two connections.
 - The solution wizard's Reconnect, in Your part and in the install step's refusal, signs a Microsoft
   connection in with a code in place and keeps its directory.
 - From the operator's computer: `yawble connect microsoft --device --tenant <directory ID or domain>`.
@@ -210,7 +242,7 @@ which with `deviceFlow`.
   `[{ flowId, provider, userCode, verificationUri, expiresAt, state: "waiting" }]`. Another person's
   are never listed, and neither the device code nor any secret or token is in it.
 - Approval runs the same completion as the web flow: the account from the ID token or userinfo, a
-  reconnect must be the same account, the scopes merged, the tokens stored as ciphertext with the
+  reconnect taking that account under the same name, the scopes merged, the tokens stored as ciphertext with the
   tenant row in the same transaction. Refusal and expiry store nothing.
 
 No step of either guide carries a secret: the secret is pasted by you, stored encrypted, and never
@@ -241,15 +273,28 @@ Each connection lists its provider, account, what its granted scopes allow - in 
 connected and last refreshed, its status (`ok`, or `needs reconnect` with the provider's reason) and the members that use
 it. On each one:
 
-- **Reconnect** - the same account again. A short dialog first says what it will ask for: what the
+- **Reconnect** - the account again, or another account under the same name. A short dialog first says what it will ask for: what the
   connection already has and, when an installed plugin's slot needs more of that provider, that it
   adds those. The provider's answer comes back to Admin → Connections, saying it worked or what
   failed. A Microsoft connection was made with a code (its app is a public client with no redirect
   URI) and reconnects with one: the dialog shows the code and the link to enter it at, and closes by
   itself on the same message. It clears `needs reconnect`.
-- **Rename** - the name members and the CLI show.
-- **Disconnect** - refused while any member uses it, naming them; unbind those first. It revokes the
-  grant at the provider where the provider supports that, and deletes the tokens.
+- **Edit** (a mailbox, a website, an API key, a username and password) - change what is behind the
+  name; see [Websites, API keys, usernames and passwords](#websites-api-keys-usernames-and-passwords).
+- **Rename** - the name teams, members and the CLI use. No other connection may have it (ignoring
+  case): `PATCH /api/connections/{id}` answers 409 otherwise. The id stays, so every binding stays.
+- **Delete** - asks first. The dialog lists each team and member using the connection and says their
+  runs stop until another is chosen; **Delete and unbind** confirms. The connection, what the Host
+  holds for it and every member's binding of it then go in one transaction, with a
+  `connections.disconnected` row and a `member.connections-changed` row per member - or none of it
+  does, when a row cannot be written. Each member that used it is marked blocked with a sentence naming
+  the connection, so Needs you lists it, and its runs stop at the missing slot until a person binds
+  another. Last, the grant is revoked at the provider where the provider supports that.
+  `DELETE /api/connections/{id}` without `unbind=true` answers 409 naming the users (`usedBy`) and
+  deletes nothing; with it, it deletes and unbinds.
+
+The Connections screen lists every connection with its kind, its health and, read only, the teams and
+members using it. It assigns nothing to a team.
 
 ## Connecting an account from the CLI
 
@@ -261,7 +306,12 @@ yawble connect google --scopes openid,email,https://mail.google.com/ --name "Wor
 yawble connect microsoft --scopes offline_access,https://outlook.office.com/IMAP.AccessAsUser.All
 yawble connect list
 yawble connect remove "Work mail"
+yawble connect remove "Work mail" --unbind
 ```
+
+`connect list` shows each connection's kind, and a credential's fields with a masked one only as
+`set`. `connect remove` names the members using a connection and deletes nothing; `--unbind` confirms,
+deleting it and unbinding them. A name is matched ignoring case, as the Host matches it.
 
 `yawble connect <provider>`:
 
@@ -439,6 +489,40 @@ The routes (people only): `GET /api/connections/imap/presets`, `POST /api/connec
 Each write - add, update password, rename, disconnect, a member's binding - lands with its
 `tenant_events` row in the same transaction, or does not happen.
 
+## Websites, API keys, usernames and passwords
+
+Admin → **Connections** → **Add connection** → **Website**, **API key** or **Username and password**.
+Each asks for a **Name** - required, and no other connection's - and then only its kind's fields:
+
+- **API key** - choose the service first, then its fields: **Stripe** (Secret key, masked);
+  **Namecheap** (API user, shown; API key, masked); **Twilio** (Account SID and API key SID, shown;
+  API key secret, masked); **Other** - **Add a field** for each one the service needs, its name and
+  value, each **Masked** unless you turn it off.
+- **Username and password** - Username, Password (masked) and an optional URL (`http://` or
+  `https://`).
+- **Website** - its name for now; what it signs in with is added in a later release.
+
+A masked value is at least 8 characters, so it can be kept out of everything a plugin writes. It is
+stored only as Data Protection ciphertext - all of a connection's masked values as one - and never
+answered: a field says `set`. Nothing is signed in to on Save; the service the values are for checks
+them when a run uses them.
+
+**Edit** on the connection's tile shows the same form: an unmasked field with its value, a masked one
+empty. Leave a masked field empty to keep it, or type a new value to replace it. The name and id stay,
+so every team and member using the connection gets the new value at its next run, and the
+`connections.credentials-changed` row names the fields that changed (`changed: ["password"]`), never a
+value. A mailbox's **Edit** changes its address, username, servers or app password the same way, after
+a login with the result.
+
+A plugin slot takes one when its manifest's `providers` names `login` (a username and password) or
+`apikey` (an API key); scopes do not apply. The run is handed
+`{ kind, account, preset, fields: { <name>: value } }` for the slot on stdin, and every masked value
+joins its redaction set.
+
+The routes (people only): `GET /api/connections/credentials/presets`, `POST /api/connections/credentials`
+`{ kind, preset?, name, fields: [{ name, value, masked? }] }`, `PUT /api/connections/{id}/credentials`
+`{ fields }`, `PUT /api/connections/{id}/mailbox` `{ account?, username?, password?, imap?, smtp? }`.
+
 ## When a connection needs reconnecting
 
 A refresh the provider refuses (`invalid_grant`: revoked, expired, the password changed, a Google app
@@ -452,7 +536,8 @@ clears it, and the next run goes ahead.
 A plugin member's settings - at hire, and later in Member settings - show a picker per slot the
 manifest declares, listing the connections of the providers the slot allows.
 
-- The member stores the connection's **id**, never a token. Cloning a team carries the binding.
+- The member stores the connection's **id**, never a token: a rename changes nothing for it, and a
+  change to what is behind the name reaches it at its next run. Cloning a team carries the binding.
 - Only a person binds. A Manager or Concierge hire may name a connection only when a person has
   already bound that same connection to a member of the same team.
 - A connection lacking a scope the slot asks for is refused at binding, offering **Reconnect** with

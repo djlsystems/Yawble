@@ -425,8 +425,8 @@ token, refreshes and rotates, and hands the plugin a fresh access token on each 
 |---|---|
 | slot name | The key the plugin reads in the request's `connections`. Same form as a config field's name. |
 | `description` | One line, shown beside the slot's picker. |
-| `providers` | Which providers' connections may be bound: `google`, `microsoft`, `custom` (any custom provider), `custom-<id>` (one custom provider), or `imap` for a mailbox signed in with an app password (see [connections.md](connections.md#a-mailbox-with-an-app-password-imap)). At least one. An unknown provider refuses the plugin, with the reason on the Plugins screen. |
-| `scopes` | Provider → the scopes the slot needs, or one list that applies to every OAuth provider the slot names. A `custom` entry applies to any custom provider. A connection lacking one of them is refused at binding, with a sentence that offers Reconnect. Scopes do not apply to `imap`: an `imap` entry refuses the plugin. |
+| `providers` | Which providers' connections may be bound: `google`, `microsoft`, `custom` (any custom provider), `custom-<id>` (one custom provider), `imap` for a mailbox signed in with an app password (see [connections.md](connections.md#a-mailbox-with-an-app-password-imap)), `login` for a username and password, or `apikey` for an API key (see [connections.md](connections.md#websites-api-keys-usernames-and-passwords)). At least one. An unknown provider refuses the plugin, with the reason on the Plugins screen. |
+| `scopes` | Provider → the scopes the slot needs, or one list that applies to every OAuth provider the slot names. A `custom` entry applies to any custom provider. A connection lacking one of them is refused at binding, with a sentence that offers Reconnect. Scopes do not apply to `imap`, `login` or `apikey`: an entry for one refuses the plugin. |
 | `required` | Default false. An unbound required slot blocks the member's runs with a sentence naming the slot, as a missing required secret does. |
 
 - **Without `connections`** a run gets `"connections": {}`.
@@ -788,7 +788,11 @@ rows, `row.status`), `cli/internal/plugin/manifest_test.go` and `web/src/lib/__t
   "smtp": { "host", "port", "security" } }`, `security` being `TLS` or `STARTTLS`. The app password is
   on stdin only, never in the environment or argv, and is redacted from everything the plugin writes,
   as an access token is. SMTP signs in with `username`, or with `account` when `username` has no @
-  (iCloud).
+  (iCloud). A slot bound to a **username and password** (`login`) or an **API key** (`apikey`) holds
+  `{ "kind", "account", "preset", "fields": { "<name>": "<value>" } }` - a login's `username`,
+  `password` and `url` when set; an API key's preset fields (Stripe `key`; Namecheap `apiUser`,
+  `apiKey`; Twilio `accountSid`, `apiKeySid`, `apiKeySecret`) or Other's own - and every masked value
+  is redacted from everything the plugin writes.
 - **`siteFiles`** names the files folder of every site of the member's OWN team, by name, as an
   absolute path; `[]` when the team has none. A file the plugin makes for a site's page goes under
   that folder, and the plugin stores the path RELATIVE to it in a document with `site.put`; the page

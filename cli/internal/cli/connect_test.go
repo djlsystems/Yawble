@@ -363,7 +363,7 @@ func TestConnectListPrintsEachConnectionWithoutAToken(t *testing.T) {
 }
 
 func TestConnectRemoveSaysWhoUsesItWhenTheHostRefuses(t *testing.T) {
-	refusal := "Connection 'Work mail' is used by mail-team/Inbox (slot mail). Unbind it from those members first."
+	refusal := "Connection 'Work mail' is used by mail-team/Inbox (slot mail). Deleting it stops their runs until another is chosen; confirm to delete it and unbind them."
 	h := newScriptedHost(t, func(req map[string]any) map[string]any {
 		if req["op"] == "list" {
 			return map[string]any{"status": 200, "connections": []any{workMail}}
@@ -373,11 +373,62 @@ func TestConnectRemoveSaysWhoUsesItWhenTheHostRefuses(t *testing.T) {
 
 	code, _, errOut := run(t, stubbed(h), "connect", "remove", "Work mail")
 
-	if code != 1 || !strings.Contains(errOut, refusal) {
+	if code != 1 || !strings.Contains(errOut, refusal) || !strings.Contains(errOut, "run it again with --unbind") {
 		t.Fatalf("exit %d: %s", code, errOut)
 	}
-	if r := h.sent("remove"); len(r) != 1 || r[0]["id"] != "conn-work" {
+	if r := h.sent("remove"); len(r) != 1 || r[0]["id"] != "conn-work" || r[0]["unbind"] != nil {
 		t.Errorf("remove requests: %v", r)
+	}
+}
+
+func TestConnectRemoveWithUnbindConfirmsAndSaysWhoIsUnbound(t *testing.T) {
+	h := newScriptedHost(t, func(req map[string]any) map[string]any {
+		if req["op"] == "list" {
+			return map[string]any{"status": 200, "connections": []any{workMail}}
+		}
+		return map[string]any{"status": 204}
+	})
+
+	code, out, errOut := run(t, stubbed(h), "connect", "remove", "work MAIL", "--unbind")
+
+	if code != 0 || !strings.Contains(out, "unbound mail-team/Inbox (mail)") || !strings.Contains(out, "disconnected Work mail") {
+		t.Fatalf("exit %d: %s %s", code, out, errOut)
+	}
+	if r := h.sent("remove"); len(r) != 1 || r[0]["id"] != "conn-work" || r[0]["unbind"] != true {
+		t.Errorf("remove requests: %v", r)
+	}
+}
+
+func TestConnectListNamesEachKindAndAMaskedFieldOnlyAsSet(t *testing.T) {
+	stripe := map[string]any{
+		"id": "conn-stripe", "name": "Stripe live", "kind": "apikey", "provider": "apikey", "providerKind": "apikey",
+		"account": "Stripe", "scopes": []string{}, "connectedAt": "2026-10-30T10:00:00Z", "refreshedAt": nil,
+		"status": "ok", "statusReason": nil, "usedBy": []any{}, "preset": "stripe",
+		"fields": []map[string]any{{"name": "key", "label": "Secret key", "masked": true, "value": nil, "set": true}},
+	}
+	login := map[string]any{
+		"id": "conn-router", "name": "Router", "kind": "login", "provider": "login", "providerKind": "login",
+		"account": "admin", "scopes": []string{}, "connectedAt": "2026-10-30T10:00:00Z", "refreshedAt": nil,
+		"status": "ok", "statusReason": nil, "usedBy": []any{},
+		"fields": []map[string]any{
+			{"name": "username", "label": "Username", "masked": false, "value": "admin", "set": true},
+			{"name": "password", "label": "Password", "masked": true, "value": nil, "set": true},
+			{"name": "url", "label": "URL", "masked": false, "value": nil, "set": false},
+		},
+	}
+	h := newScriptedHost(t, func(req map[string]any) map[string]any {
+		return map[string]any{"status": 200, "connections": []any{workMail, stripe, login}}
+	})
+
+	code, out, errOut := run(t, stubbed(h), "connect", "list")
+
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	for _, want := range []string{"KIND", "oauth", "apikey", "key=set", "login", "username=admin password=set url=not set"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("list has no %q:\n%s", want, out)
+		}
 	}
 }
 
