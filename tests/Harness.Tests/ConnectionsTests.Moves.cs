@@ -293,17 +293,51 @@ public sealed partial class ConnectionsTests
         var bound = Assert.Single(await BindingsAsync("Domains"));
         Assert.Equal("namecheap", bound.Key);
 
-        // ITS FIELDS ARE NAMECHEAP'S, so it is that preset: the user shown as the account, the key masked.
+        // ITS FIELDS ARE NAMECHEAP'S, so it is that preset: the user shown as the account, the key masked,
+        // and the whitelisted IP the member never held left empty.
         var connection = (await Services.GetRequiredService<ConnectionStore>().GetAsync(bound.Value, Ct))!;
         Assert.Equal(("namecheap", "acme-dns", "Mail - Domains"), (connection.Credential!.Preset, connection.Account, connection.Name));
-        Assert.Equal([("apiUser", false), ("apiKey", true)], connection.Credential.Fields.Select(f => (f.Name, f.Masked)));
+        Assert.Equal([("apiUser", false, true), ("apiKey", true, true), ("clientIp", false, false)],
+            connection.Credential.Fields.Select(f => (f.Name, f.Masked, f.Set)));
 
+        // A PERSON FILLS IT IN, and the run is handed every field.
+        await EditCredentialAsync(bound.Value, ("clientIp", "203.0.113.7", null));
         Assert.Equal(MessageTypes.Completed, (await TellAndAwaitAsync("Domains")).Type);
         var fields = LastRequest()["connections"]!["namecheap"]!["fields"]!;
-        Assert.Equal(("acme-dns", MovedSecrets[1]), ((string?)fields["apiUser"], (string?)fields["apiKey"]));
+        Assert.Equal(("acme-dns", MovedSecrets[1], "203.0.113.7"), ((string?)fields["apiUser"], (string?)fields["apiKey"], (string?)fields["clientIp"]));
 
         Assert.Equal(["apiKey", "apiUser"], (await TenantDetailsAsync(TenantActions.MemberSecretMoved))
             .Select(d => JsonDocument.Parse(d).RootElement.GetProperty("field").GetString()));
+        await AssertNoMovedSecretAsync();
+    }
+
+    /// <summary>
+    /// A REQUIRED PRESET FIELD THE MEMBER DOES NOT HOLD is left empty, not made up: the connection reads
+    /// Needs you (needs reconnect, naming the field) and a run is refused with it, until a person fills it in.
+    /// </summary>
+    [Fact]
+    public async Task A_connection_moved_without_a_required_preset_field_reads_needs_you_until_a_person_fills_it_in()
+    {
+        await InstallPluginAsync(PayPlugin("0.1.0", moved: null, slot: "namecheap", unmasked: true));
+        await HireOwnAsync("Domains", new() { ["apiUser"] = "acme-dns", ["apiKey"] = MovedSecrets[1] });
+
+        await InstallPluginAsync(PayPlugin(
+            "0.2.0", new Dictionary<string, string> { ["apiUser"] = "namecheap", ["apiKey"] = "namecheap" }, slot: "namecheap", unmasked: true));
+
+        Assert.Empty(await OwnValuesAsync("Domains"));
+        var id = Assert.Single(await BindingsAsync("Domains")).Value;
+        var listed = (await GetAsync("/api/connections")).EnumerateArray().Single(c => c.GetProperty("id").GetString() == id);
+        Assert.Equal("needs-reconnect", listed.GetProperty("status").GetString());
+        Assert.Equal("`clientIp` (Whitelisted IP) is required.", listed.GetProperty("statusReason").GetString());
+
+        var refused = await TellAndAwaitAsync("Domains");
+        Assert.Equal(MessageTypes.Failed, refused.Type);
+        Assert.Contains("needs you: `clientIp` (Whitelisted IP) is required.", Words(refused));
+
+        await EditCredentialAsync(id, ("clientIp", "203.0.113.7", null));
+        listed = (await GetAsync("/api/connections")).EnumerateArray().Single(c => c.GetProperty("id").GetString() == id);
+        Assert.Equal("ok", listed.GetProperty("status").GetString());
+        Assert.Equal(MessageTypes.Completed, (await TellAndAwaitAsync("Domains")).Type);
         await AssertNoMovedSecretAsync();
     }
 
