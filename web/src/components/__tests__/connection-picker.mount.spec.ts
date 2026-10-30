@@ -23,6 +23,7 @@ const {
   savePluginSettings,
   updateMember,
   goTo,
+  listTeamConnections,
 } = vi.hoisted(() => ({
   listCatalog: vi.fn(),
   listPlugins: vi.fn(),
@@ -35,6 +36,8 @@ const {
   savePluginSettings: vi.fn(),
   updateMember: vi.fn(),
   goTo: vi.fn(),
+  // The team's assignments unread: every connection that fits is offered, as before CON 2.
+  listTeamConnections: vi.fn(() => Promise.reject(new Error('not read'))),
 }));
 
 vi.mock('../../api/client', async (importOriginal) => ({
@@ -49,6 +52,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
   getPluginSettings,
   savePluginSettings,
   updateMember,
+  listTeamConnections,
 }));
 
 vi.mock('../../lib/browserNavigation', () => ({
