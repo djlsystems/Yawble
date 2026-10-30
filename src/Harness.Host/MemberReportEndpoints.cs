@@ -74,6 +74,20 @@ internal static class MemberReportEndpoints
             if (host.Find(id) is not { } container) return Refusals.NoMember(name);
             if (string.IsNullOrWhiteSpace(request.Instruction)) return Results.BadRequest(new { error = "Say something." });
 
+            // THE PERMIT, DECIDED HERE RATHER THAN BY THE MARKER, for one case: a member of this team
+            // may tell one of its own team's PLUGIN members without holding Tell. A plugin runs no model
+            // and does only what a person's settings let it, and its commands answer the member that
+            // asked (its session, its screenshot), so routing them through the Manager hands the answer
+            // to the wrong member. Telling an agent member still needs Tell. `TeamGate` has already bound
+            // a container to its own team, so "this team's plugin" is the only plugin it can reach.
+            var targetIsPlugin = container.Snapshot().Kind == MemberRef.PluginKind;
+            if (!TellPermit.Allows(PrincipalClaims.From(context.User), targetIsPlugin))
+            {
+                return Results.Json(
+                    new { error = PermitGate.Missing(Permits.Tell) },
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+
             // WORK GOES THROUGH THE COORDINATOR, AND THE PLATFORM SAYS SO RATHER THAN A SKILL.
             // A skill can ask for this but cannot enforce it, so without this one ambiguous instruction
             // pasted into a Concierge would be enough to root a whole workflow at a member while the
@@ -107,7 +121,11 @@ internal static class MemberReportEndpoints
 
                 // A team with NO Manager is excluded first: the concierge skill documents that shape and
                 // tells a Concierge to sequence the job itself, and only a hand-built team produces one.
-                if (host.Find(manager) is not null && !container.Id.Equals(manager) && !callerIsManager)
+                // A member asking its own team's plugin for something is not work skipping the Manager:
+                // the answer is the member's (see the permit above), and the Manager still sees the run.
+                var memberAsksPlugin = caller.Kind == PrincipalKind.Container && targetIsPlugin;
+
+                if (host.Find(manager) is not null && !container.Id.Equals(manager) && !callerIsManager && !memberAsksPlugin)
                 {
                     return Results.Json(
                         new { error = TellRefusals.SkipsManager },
@@ -298,7 +316,8 @@ internal static class MemberReportEndpoints
             });
         })
             .WithTags("Members")
-            .RequirePermit(Permits.Tell)
+            // The handler decides: Tell, or a member of this team telling one of its plugin members.
+            .NoPermitRequired()
             .WithSummary("Tell a member to do something")
             .WithDescription(
                 "The only way into a member, which is what keeps it event-driven rather than something with "
@@ -314,6 +333,8 @@ internal static class MemberReportEndpoints
                 + "When the text matches an instruction already queued to this member in the same workflow, "
                 + "`duplicateOf` names that queued seq and `duplicateNotice` says so in a sentence. The "
                 + "instruction is appended all the same: a match is reported, never held.\n\n"
+                + "A machine principal needs the Tell permit, except that a member may tell a plugin member "
+                + "of its own team without it; 403 otherwise.\n\n"
                 + "400 for an empty instruction; 404 for an unknown team or member.");
 
         // What a member says about ITSELF while it works. The one route a permit-less-by-default member
