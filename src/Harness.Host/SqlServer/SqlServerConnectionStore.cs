@@ -560,6 +560,25 @@ public sealed class SqlServerConnectionStore(string connectionString, IDataProte
             },
             ct);
 
+    public Task AssignAllAsync(string team, IReadOnlyList<(string ConnectionId, TriggerAudit Audit)> assignments, CancellationToken ct = default) =>
+        RunAsync(
+            async (connection, token) =>
+            {
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
+
+                foreach (var (id, audit) in assignments)
+                {
+                    if (await InsertAssignmentAsync(connection, transaction, team, id, token))
+                    {
+                        await SqlServerTenantAuditRow.AppendAsync(connection, transaction, audit, token);
+                    }
+                }
+
+                await SqlServerOpen.CommitAsync(transaction, token);
+                return true;
+            },
+            ct);
+
     public async Task<(bool Removed, IReadOnlyList<ConnectionUse> Unbound)> UnassignAsync(
         string team, string connectionId, TriggerAudit audit,
         Func<IReadOnlyList<ConnectionUse>, IReadOnlyList<TriggerAudit>> unbind, CancellationToken ct = default)

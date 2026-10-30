@@ -139,6 +139,36 @@ public sealed class MemberReports : IMemberReports, IRunWorkerClient
         return MemberReportOutcome.Ok;
     }
 
+    /// <summary>
+    /// The Host marking <paramref name="member"/> blocked because a person must set something it was
+    /// using - a connection removed from its team, or deleted. The same <c>blocked</c> row and mark as
+    /// <see cref="BlockedAsync"/>, carrying <c>failureClass: needs-person</c>, so a person's binding
+    /// clears it at once (<see cref="PluginSetup"/>), and a restart reads it back as the same kind.
+    /// </summary>
+    public async Task<MemberReportOutcome> NeedsPersonAsync(ContainerId member, string reason, CancellationToken ct = default)
+    {
+        if (host.Find(member) is not { } container) return NoSuchMember(member);
+
+        reason = Redacted(member, reason.Trim());
+
+        var row = await log.AppendAsync(
+            new NewMessage(
+                MessageTypes.Blocked,
+                JsonSerializer.Serialize(new Dictionary<string, string>
+                {
+                    [PayloadFields.Reason] = reason,
+                    [PayloadFields.FailureClass] = FailureClasses.NeedsPerson,
+                }),
+                container.Id.ToString(),
+                container.CurrentCausation),
+            ct);
+
+        container.MarkBlocked(reason, FailureClasses.NeedsPerson);
+        container.NoteMarkRow(row);
+
+        return MemberReportOutcome.Ok;
+    }
+
     public async Task<MemberReportOutcome> DeferAsync(ContainerId member, int item, string reason, CancellationToken ct = default)
     {
         if (host.Find(member) is not { } container) return NoSuchMember(member);

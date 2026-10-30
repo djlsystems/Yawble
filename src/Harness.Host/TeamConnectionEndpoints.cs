@@ -128,11 +128,11 @@ public static class TeamConnectionEndpoints
             {
                 var memberId = new ContainerId(stored, member.Key);
                 var slots = string.Join(", ", member.Select(u => $"`{u.Slot}`"));
-                await reports.BlockedAsync(
+                await reports.NeedsPersonAsync(
                     memberId,
                     $"Connection {connection?.Named ?? $"'{id}'"} was removed from this team, so slot{(member.Count() == 1 ? "" : "s")} {slots} "
                     + "of this member has no connection. Its runs wait until a person chooses another in the member's settings.",
-                    ct: CancellationToken.None);
+                    CancellationToken.None);
                 await setup.RefreshAsync(memberId, CancellationToken.None);
             }
 

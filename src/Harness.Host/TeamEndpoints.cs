@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Data.Common;
 using System.Globalization;
 using System.Net;
 using System.Net.WebSockets;
@@ -44,6 +45,7 @@ internal static class TeamEndpoints
             // refused, and every id must name a connection, before anything is created.
             var assign = (request.Connections ?? []).Where(c => !string.IsNullOrWhiteSpace(c)).Select(c => c.Trim())
                 .Distinct(StringComparer.Ordinal).ToList();
+            var chosen = new List<ConnectionRecord>();
             if (assign.Count > 0)
             {
                 if (PrincipalClaims.From(context.User) is { Kind: not PrincipalKind.User })
@@ -55,7 +57,8 @@ internal static class TeamEndpoints
 
                 foreach (var id in assign)
                 {
-                    if (await connections.Store.GetAsync(id, ct) is null) return Results.BadRequest(new { error = $"There is no connection '{id}'." });
+                    if (await connections.Store.GetAsync(id, ct) is not { } record) return Results.BadRequest(new { error = $"There is no connection '{id}'." });
+                    chosen.Add(record);
                 }
             }
 
@@ -134,7 +137,24 @@ internal static class TeamEndpoints
 
                             // ONE UNIT WITH THE TEAM: made once every check on the team has passed and before
                             // anything of it is written, so a repository that cannot be made refuses the create.
-                            addRepo: newRepos.AddRepoAsync);
+                            addRepo: newRepos.AddRepoAsync,
+
+                            // THE CONNECTIONS THE PERSON CHOSE in New team → Connections, each with its
+                            // row, in one transaction with nothing else of the team made yet: if a row
+                            // cannot be written, the team is not created either.
+                            withRow: chosen.Count == 0 ? null : async (id, token) =>
+                            {
+                                var actor = new ConnectionActor(actorId ?? "", actorEmail);
+                                try
+                                {
+                                    await connections.Store.AssignAllAsync(id, [.. chosen.Select(c => (c.Id,
+                                        actor.Row(TenantActions.TeamConnectionAssigned, c.Id, c.Name, Connections.AssignedDetail(id, c, "new team"))))], token);
+                                }
+                                catch (DbException exception)
+                                {
+                                    throw new TeamConnectionsNotAssignedException(exception);
+                                }
+                            });
                         teamCreated = true;
 
                         await newRepos.LogAsync(audit, actorId, actorEmail, made.Id, work);
@@ -159,14 +179,6 @@ internal static class TeamEndpoints
                                 createdOnGitHub = newRepos.CreatedOnGitHub.Count == 0 ? null : newRepos.CreatedOnGitHub,
                             },
                             work);
-
-                        // THE CONNECTIONS THE PERSON CHOSE in New team → Connections, each with its row.
-                        foreach (var id in assign)
-                        {
-                            var (_, assignError) = await TeamConnectionEndpoints.AssignAsync(
-                                made.Id, id, "new team", new ConnectionActor(actorId ?? "", actorEmail), connections, work);
-                            if (assignError is not null) throw new InvalidOperationException(assignError);
-                        }
 
                         await listPush.AnnounceCreatedAsync(made.Id, work);
                         return (made, retired);
@@ -258,6 +270,10 @@ internal static class TeamEndpoints
             catch (RepoSetupRefusedException refused)
             {
                 return Results.Json(refused.Body, statusCode: refused.Status);
+            }
+            catch (TeamConnectionsNotAssignedException unassigned)
+            {
+                return Results.Json(new { error = unassigned.Message }, statusCode: StatusCodes.Status500InternalServerError);
             }
             catch (TeamNameTakenException taken)
             {
@@ -1812,3 +1828,8 @@ internal static class TeamEndpoints
             label,
             JsonSerializer.Serialize(detail, JsonSerializerOptions.Web));
 }
+
+/// <summary>A new team's connections could not be assigned - their tenant row was not written - so the
+/// team was not created. The message is the sentence the create answers.</summary>
+public sealed class TeamConnectionsNotAssignedException(Exception inner) : Exception(
+    $"The team was not created: its connections' record could not be written ({inner.Message}).", inner);

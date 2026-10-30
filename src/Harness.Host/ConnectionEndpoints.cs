@@ -570,11 +570,11 @@ public static class ConnectionEndpoints
             foreach (var member in unbound.GroupBy(u => (u.Team, u.Member)))
             {
                 var slots = string.Join(", ", member.Select(u => $"`{u.Slot}`"));
-                await reports.BlockedAsync(
+                await reports.NeedsPersonAsync(
                     new ContainerId(member.Key.Team, member.Key.Member),
                     $"Connection {connection.Named} was deleted, so slot{(member.Count() == 1 ? "" : "s")} {slots} of this member "
                     + "has no connection. Its runs stop until a person chooses another in the member's settings.",
-                    ct: CancellationToken.None);
+                    CancellationToken.None);
             }
         }
 

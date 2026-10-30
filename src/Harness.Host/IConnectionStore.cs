@@ -111,6 +111,12 @@ public interface IConnectionStore
     Task<AssignOutcome> AssignAsync(string team, string connectionId, TriggerAudit audit, CancellationToken ct = default);
 
     /// <summary>
+    /// A new team's assignments, each with its tenant row, in one transaction: all of them, or none
+    /// and the exception. One already there is skipped, with no row.
+    /// </summary>
+    Task AssignAllAsync(string team, IReadOnlyList<(string ConnectionId, TriggerAudit Audit)> assignments, CancellationToken ct = default);
+
+    /// <summary>
     /// Removes <paramref name="connectionId"/> from <paramref name="team"/>. Every member of the team that
     /// binds it loses those slots in the same transaction, and the rows <paramref name="unbind"/> makes of
     /// them land with the removal's own: all of it, or none. False, with nothing written, when it was not

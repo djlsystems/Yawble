@@ -1298,8 +1298,15 @@ public sealed class TeamRegistry(
                     // `failed > blocked > needs-decision` and the tab chip orders them identically,
                     // in two places documented as having to agree. Choosing one here would be a
                     // third ranking, on the server, silently overriding both.
-                    if (marks.FailureReason is { } failure) container.MarkFailed(failure);
-                    if (marks.BlockedReason is { } reason) container.MarkBlocked(reason);
+                    // A NEEDS-PERSON MARK KEEPS ITS CLASS, so it still reads Needs you rather than
+                    // failed, and a person's binding still clears it (PluginSetup, read after this).
+                    // Any other class is left off, as it always was.
+                    var needsPerson = marks.FailureClass == FailureClasses.NeedsPerson ? FailureClasses.NeedsPerson : null;
+                    if (marks.FailureReason is { } failure) container.MarkFailed(failure, needsPerson);
+                    if (marks.BlockedReason is { } reason)
+                    {
+                        container.MarkBlocked(reason, marks.BlockedClass == FailureClasses.NeedsPerson ? FailureClasses.NeedsPerson : null);
+                    }
                     if (marks.Question is { } question) container.MarkNeedsDecision(question, marks.NeedsDecision!.Seq, marks.NeedsDecision.CorrelationId);
                     foreach (var row in new[] { marks.Failed, marks.Blocked, marks.NeedsDecision })
                     {
@@ -1796,7 +1803,8 @@ public sealed class TeamRegistry(
         CancellationToken ct = default,
         Func<IReadOnlyList<RepoCloneOutcome>, bool>? handleRepoSetup = null,
         IReadOnlyDictionary<string, string>? upstreams = null,
-        Func<string, CancellationToken, Task<string?>>? addRepo = null)
+        Func<string, CancellationToken, Task<string?>>? addRepo = null,
+        Func<string, CancellationToken, Task>? withRow = null)
     {
         var trimmed = label.Trim();
         var (validatedRepos, contributors) = ValidateRepos(repos, upstreams);
@@ -2089,6 +2097,22 @@ public sealed class TeamRegistry(
                 Repos: validatedRepos,
                 Env: seededEnv),
             ct);
+
+        // WHAT MUST LAND WITH THE ROW, or no team: the caller's writes keyed on the new id (a new team's
+        // connections, which reference its row). One that throws takes the row back out before anything
+        // else of the team exists - no dictionary, no Manager, no push - so the create fails whole.
+        if (withRow is not null)
+        {
+            try
+            {
+                await withRow(team, ct);
+            }
+            catch
+            {
+                await teams.DeleteTeamAsync(team, CancellationToken.None);
+                throw;
+            }
+        }
 
         // NOTHING TENANT-WIDE IS WRITTEN BY CREATING A TEAM. Writing the Concierge setting here would
         // change every other team's Concierge as a side effect of a create, with no audit line

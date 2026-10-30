@@ -585,6 +585,19 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
         return AssignOutcome.Assigned;
     }
 
+    public async Task AssignAllAsync(string team, IReadOnlyList<(string ConnectionId, TriggerAudit Audit)> assignments, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        foreach (var (id, audit) in assignments)
+        {
+            if (await InsertAssignmentAsync(connection, transaction, team, id, ct)) await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
+        }
+
+        await transaction.CommitAsync(ct);
+    }
+
     public async Task<(bool Removed, IReadOnlyList<ConnectionUse> Unbound)> UnassignAsync(
         string team, string connectionId, TriggerAudit audit,
         Func<IReadOnlyList<ConnectionUse>, IReadOnlyList<TriggerAudit>> unbind, CancellationToken ct = default)

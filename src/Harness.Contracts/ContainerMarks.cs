@@ -57,6 +57,32 @@ public sealed record ContainerMarks(Message? Blocked, Message? NeedsDecision, Me
     /// <summary>The words on the live <c>failed</c> row, or null.</summary>
     public string? FailureReason => TextOf(Failed, PayloadFields.LaunchError, PayloadFields.Output);
 
+    /// <summary>The live <c>failed</c> row's <c>failureClass</c>, or null.</summary>
+    public string? FailureClass => ClassOf(Failed);
+
+    /// <summary>The live <c>blocked</c> row's <c>failureClass</c> - <c>needs-person</c> when the Host
+    /// blocked the member for a person to set something - or null for an agent's own give-up.</summary>
+    public string? BlockedClass => ClassOf(Blocked);
+
+    private static string? ClassOf(Message? message)
+    {
+        if (message is null) return null;
+
+        try
+        {
+            using var payload = JsonDocument.Parse(message.Payload);
+            return payload.RootElement.ValueKind == JsonValueKind.Object
+                && payload.RootElement.TryGetProperty(PayloadFields.FailureClass, out var value)
+                && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>
     /// THE FIELD ORDERS ARE `MessageText`'S, AND THEY MUST STAY ITS.
     ///

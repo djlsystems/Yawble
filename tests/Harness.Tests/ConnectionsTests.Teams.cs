@@ -114,6 +114,30 @@ public sealed partial class ConnectionsTests
     }
 
     [Fact]
+    public async Task A_new_team_whose_connections_record_cannot_be_written_is_not_created_and_says_so()
+    {
+        var id = await ConnectAsync();
+        var store = Services.GetRequiredService<IConnectionStore>();
+
+        await ExecuteAsync("CREATE TRIGGER refuse_tenant BEFORE INSERT ON tenant_events BEGIN SELECT RAISE(ABORT, 'refused by the test'); END");
+        var (status, body) = await SendAsync(HttpMethod.Post, "/api/teams",
+            new { name = "Halfway", agent = "claude-headless", memberAgents = new[] { "claude-headless" }, connections = new[] { id } });
+        await ExecuteAsync("DROP TRIGGER refuse_tenant");
+
+        Assert.Equal(HttpStatusCode.InternalServerError, status);
+        Assert.StartsWith("The team was not created: its connections' record could not be written", JsonDocument.Parse(body).RootElement.GetProperty("error").GetString());
+        Assert.False(Services.GetRequiredService<TeamRegistry>().Exists("Halfway"));
+        Assert.DoesNotContain(id, (await store.AllAssignmentsAsync(Ct)).Select(g => g.Key));
+        Assert.DoesNotContain(await Services.GetRequiredService<ITeamStore>().TeamsAsync(Ct), t => t.Id == "Halfway");
+
+        // Nothing was left in the way: the same create, with the row writable, makes the team and its assignment.
+        (status, body) = await SendAsync(HttpMethod.Post, "/api/teams",
+            new { name = "Halfway", agent = "claude-headless", memberAgents = new[] { "claude-headless" }, connections = new[] { id } });
+        Assert.True(status is HttpStatusCode.OK or HttpStatusCode.Created, body);
+        Assert.Single((await GetAsync("/api/teams/Halfway/connections")).GetProperty("connections").EnumerateArray());
+    }
+
+    [Fact]
     public async Task Removing_a_connection_from_a_team_asks_first_then_unbinds_its_members_who_read_needs_you()
     {
         var id = await ConnectAsync();
@@ -145,6 +169,56 @@ public sealed partial class ConnectionsTests
         var failed = await TellAndAwaitAsync("Inbox");
         Assert.Equal(MessageTypes.Failed, failed.Type);
         Assert.Equal(FailureClasses.NeedsPerson, JsonDocument.Parse(failed.Payload).RootElement.GetProperty(PayloadFields.FailureClass).GetString());
+
+        // Binding another connection the team was given clears every mark the removal left: the card
+        // is not stopped or blocked, and the removal's own workflow no longer reads Blocked.
+        var log = Services.GetRequiredService<IMessageLog>();
+        var blockedRow = (await log.ReadAfterAsync(0, [MessageTypes.Blocked], int.MaxValue, Ct))
+            .Single(m => m.Source == new ContainerId(_team, "Inbox").ToString());
+        var other = await ConnectAsync();
+        Assert.Equal(HttpStatusCode.Created, (await SendAsync(HttpMethod.Post, $"/api/teams/{_team}/connections", new { connection = other })).Status);
+        var (bound, boundBody) = await SendAsync(HttpMethod.Put, $"/api/teams/{_team}/members/Inbox/plugin-settings",
+            new { config = new { }, connections = new Dictionary<string, string> { ["mail"] = other } });
+        Assert.True(bound == HttpStatusCode.OK, boundBody);
+
+        snapshot = Services.GetRequiredService<Harness.Containers.ContainerHost>().Find(new ContainerId(_team, "Inbox"))!.Snapshot();
+        Assert.Null(snapshot.NeedsPerson);
+        Assert.Null(snapshot.Blocked);
+        Assert.Null(snapshot.Failed);
+        Assert.Null(snapshot.FailureClass);
+        Assert.Empty(await log.OpenWorkflowsAmongAsync([blockedRow.CorrelationId], Ct));
+    }
+
+    [Fact]
+    public async Task After_a_removal_binding_another_assigned_connection_clears_the_blocked_mark_and_ends_its_wait()
+    {
+        var id = await ConnectAsync();
+        var other = await ConnectAsync();
+        await HireAsync("Inbox", id);
+        Assert.Equal(HttpStatusCode.Created, (await SendAsync(HttpMethod.Post, $"/api/teams/{_team}/connections", new { connection = other })).Status);
+        Assert.Equal(HttpStatusCode.NoContent, (await SendAsync(HttpMethod.Delete, $"/api/teams/{_team}/connections/{id}?unbind=true", null)).Status);
+
+        var member = new ContainerId(_team, "Inbox");
+        var runtime = Services.GetRequiredService<Harness.Containers.ContainerHost>().Find(member)!;
+        Assert.Contains("removed from this team", runtime.Snapshot().Blocked);
+
+        var log = Services.GetRequiredService<IMessageLog>();
+        var wait = (await log.ReadAfterAsync(0, [MessageTypes.Blocked], int.MaxValue, Ct)).Single(m => m.Source == member.ToString());
+        Assert.Equal(FailureClasses.NeedsPerson, new ContainerMarks(wait, null, null).BlockedClass);
+        Assert.Contains(wait.CorrelationId, await log.OpenWorkflowsAmongAsync([wait.CorrelationId], Ct));
+
+        var (status, body) = await SendAsync(HttpMethod.Put, $"/api/teams/{_team}/members/Inbox/plugin-settings",
+            new { config = new { }, connections = new Dictionary<string, string> { ["mail"] = other } });
+        Assert.True(status == HttpStatusCode.OK, body);
+
+        // Neither Needs you nor stopped without finishing, and the wait the removal opened is closed.
+        var snapshot = runtime.Snapshot();
+        Assert.Null(snapshot.NeedsPerson);
+        Assert.Null(snapshot.Blocked);
+        Assert.Null(runtime.Marks().Blocked);
+        Assert.Empty(await log.OpenWorkflowsAmongAsync([wait.CorrelationId], Ct));
+
+        Assert.Equal(MessageTypes.Completed, (await TellAndAwaitAsync("Inbox")).Type);
     }
 
     [Fact]
@@ -168,7 +242,11 @@ public sealed partial class ConnectionsTests
         Assert.Equal(id, Assert.Single((await GetAsync($"/api/teams/{_team}/connections")).GetProperty("connections").EnumerateArray())
             .GetProperty("connection").GetProperty("id").GetString());
         Assert.Equal("member binding", JsonDocument.Parse(Assert.Single(await TenantDetailsAsync(TenantActions.TeamConnectionAssigned))).RootElement.GetProperty("via").GetString());
-        Assert.Null(host.Find(new ContainerId(_team, "Inbox"))!.Snapshot().NeedsPerson);
+        // Cleared at once, the run's needs-person failed mark with it: no next run is needed.
+        var ready = host.Find(new ContainerId(_team, "Inbox"))!.Snapshot();
+        Assert.Null(ready.NeedsPerson);
+        Assert.Null(ready.Failed);
+        Assert.Null(ready.FailureClass);
 
         var manager = MessageTypes.InstructionFor(new ContainerId(_team, TeamRegistry.DefaultManagerName));
         var notices = (await Services.GetRequiredService<IMessageLog>().ReadAfterAsync(0, [manager], int.MaxValue, Ct))
