@@ -95,3 +95,23 @@ between image builds).
 **Left open.** A worker that is not connected when a row or member is deleted is not told to remove
 that profile; it stays on the volume (still the worker user's alone) until the same row name is used
 again, which would then reuse it.
+
+## 2026-10: Advanced settings come back, and long choice lists live in the Host
+
+**Context.** Since 30322e0 the plugin settings form showed every setting on one screen and ignored
+the manifest's `advanced`. The person's standing rule is the reverse: required settings up front,
+everything else under Advanced. Separately, the web-credentials plugin's Language and Time zone
+needed dropdowns of every valid value - about 180 Chrome languages and 420 IANA zones - with
+readable names, which a manifest's plain `enum` cannot label and should not have to list.
+
+**Decision.** The form puts a `config` field marked `advanced` (and not required) under an
+Advanced toggle, opened by itself while one of them is out of range. A field may give `options`:
+labelled choices, or the name of a set the Host holds (`locale`, `timeZone`, in
+`PluginOptionSets.json`, generated from Chromium's accept-language list and the tz database's
+`zone.tab`). The Host - not the browser's `Intl` - owns the lists, so the dropdown, the write check
+and a run agree; a stored value outside them is kept and reported, and a run gets the default.
+
+**Considered.** Building the lists in the browser from `Intl.supportedValuesOf` and
+`Intl.DisplayNames`: the list then depends on the person's browser (Node and older Chrome answer
+`Asia/Calcutta`, newer ones `Asia/Kolkata`; neither lists UTC), and the Host would check against a
+different list than the one shown.

@@ -2919,12 +2919,25 @@ export interface PluginConfigField {
   max?: number | null
   /** A `number` field that takes whole numbers only. */
   integer?: boolean
-  /** The manifest's old mark for a setting most people never change. Accepted and ignored: every setting is on the one form. */
+  /** A setting most people never change: the form shows it under Advanced, unless it is required. */
   advanced?: boolean
   /** The manifest's short label for the field; the form says the field's name in words without one. */
   label?: string | null
   /** A `table` field's columns, key and row actions; null or absent for any other type. */
   table?: PluginTableShape | null
+  /**
+   * The manifest's `options`: each choice's value (as in `enum`) and the words shown for it, such as
+   * `en-US` / "English (United States)". Null or absent for a field without them.
+   */
+  options?: PluginConfigOption[] | null
+  /** The named set the options come from (`locale`, `timeZone`); null for a manifest's own list. */
+  optionSet?: string | null
+}
+
+/** One choice of a plugin setting with `options`: the value stored and the words shown for it. */
+export interface PluginConfigOption {
+  value: string
+  label: string
 }
 
 /** One column of a `table` field. A `secret` column's value is never in `config` and never answered once saved. */

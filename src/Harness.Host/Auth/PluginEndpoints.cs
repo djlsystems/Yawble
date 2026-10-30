@@ -904,6 +904,8 @@ public static class PluginEndpoints
             integer = c.Value.Integer,
             advanced = c.Value.Advanced,
             label = c.Value.Label,
+            options = c.Value.Options?.Select(o => new { value = o.Value, label = o.Label }),
+            optionSet = c.Value.OptionSet,
             table = c.Value.Table?.Describe(),
         });
 

@@ -554,6 +554,18 @@ public sealed record PluginConfigField(
     /// <summary>A <c>table</c> field's columns, key and row actions; null for every other type.</summary>
     public PluginTable? Table { get; init; }
 
+    /// <summary>
+    /// The manifest's <c>options</c>: the choices of a string or list field, each a value and the words
+    /// the settings form shows for it - a named set (<see cref="OptionSet"/>, such as every IANA time
+    /// zone) or the manifest's own <c>[{"value", "label"}]</c>. <see cref="PluginConfigField.Enum"/>
+    /// holds their values. Null for a field without them.
+    /// </summary>
+    public IReadOnlyList<PluginOption>? Options { get; init; }
+
+    /// <summary>The <see cref="PluginOptionSets"/> name the options come from (<c>locale</c>,
+    /// <c>timeZone</c>); null for a manifest's own list or none.</summary>
+    public string? OptionSet { get; init; }
+
     public static (PluginConfigField? Field, string? Refusal) Parse(string name, JsonElement element)
     {
         if (!PluginManifest.IsConfigName(name)) return (null, $"`config.{name}` is not a usable name.");
@@ -600,6 +612,52 @@ public sealed record PluginConfigField(
             }
 
             choices = [.. e.EnumerateArray().Select(v => v.GetString()!)];
+        }
+
+        // OPTIONS: an enum whose values each carry the words a person reads - a named set or a list.
+        IReadOnlyList<PluginOption>? options = null;
+        string? optionSet = null;
+
+        if (element.TryGetProperty("options", out var o))
+        {
+            if (type is not ("string" or "list")) return (null, $"`config.{name}.options` applies only to a string or list field.");
+            if (choices is not null) return (null, $"`config.{name}` gives both `enum` and `options`; give one.");
+
+            if (o.ValueKind == JsonValueKind.String)
+            {
+                optionSet = o.GetString()!;
+                options = PluginOptionSets.Named(optionSet);
+                if (options is null)
+                {
+                    return (null, $"`config.{name}.options` names no option set: '{optionSet}'. It may be {string.Join(" or ", PluginOptionSets.Names)}, or a list of {{\"value\", \"label\"}}.");
+                }
+            }
+            else if (o.ValueKind == JsonValueKind.Array && o.GetArrayLength() > 0)
+            {
+                var listed = new List<PluginOption>();
+                foreach (var option in o.EnumerateArray())
+                {
+                    if (option.ValueKind != JsonValueKind.Object
+                        || !option.TryGetProperty("value", out var v) || v.ValueKind != JsonValueKind.String || v.GetString() is not { Length: > 0 } given)
+                    {
+                        return (null, $"`config.{name}.options` must be a set's name or a list of {{\"value\", \"label\"}}, each value a string.");
+                    }
+
+                    var (optionLabel, optionLabelRefusal) = PluginManifest.Label($"config.{name}.options[{listed.Count}]", option);
+                    if (optionLabelRefusal is not null) return (null, optionLabelRefusal);
+                    if (listed.Any(l => l.Value == given)) return (null, $"`config.{name}.options` lists '{given}' twice.");
+
+                    listed.Add(new PluginOption(given, optionLabel ?? given));
+                }
+
+                options = listed;
+            }
+            else
+            {
+                return (null, $"`config.{name}.options` must be {string.Join(" or ", PluginOptionSets.Names.Select(n => $"\"{n}\""))}, or a list of {{\"value\", \"label\"}}.");
+            }
+
+            choices = [.. options.Select(option => option.Value)];
         }
 
         JsonElement? fallback = element.TryGetProperty("default", out var d) ? d.Clone() : null;
@@ -676,6 +734,8 @@ public sealed record PluginConfigField(
             Integer = integer,
             Advanced = advanced,
             Label = label,
+            Options = options,
+            OptionSet = optionSet,
         };
 
         if (fallback is { } value && field.Refusal(name, value) is { } badDefault)
@@ -724,6 +784,10 @@ public sealed record PluginConfigField(
 
         if (!fits) return Type == "list" ? $"`{name}` must be a list of strings." : $"`{name}` must be a {Type}.";
 
+        // A FIELD WITH OPTIONS is checked against them with its bounds (BoundsRefusal): a value stored
+        // before it had them is kept, reported, and replaced by the default for a run (ForRun).
+        if (Options is not null) return bounds ? BoundsRefusal(name, value) : null;
+
         if (Type == "list")
         {
             if (Enum is { } allowed
@@ -756,6 +820,8 @@ public sealed record PluginConfigField(
         // A TABLE'S BOUNDS ARE ITS NUMBER CELLS', checked with the rest of the table.
         if (Table is { } table) return table.Refusal(name, value, bounds: true);
 
+        if (OptionRefusal(name, value) is { } notAnOption) return notAnOption;
+
         if (Type != "number" || value.ValueKind != JsonValueKind.Number) return null;
 
         var number = value.GetDouble();
@@ -769,6 +835,50 @@ public sealed record PluginConfigField(
     }
 
     private static string Show(double number) => number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>Why <paramref name="value"/> is not among this field's <see cref="Options"/> (for a
+    /// list, an item that is not), or null. Names the value, never the hundreds a set may hold.</summary>
+    private string? OptionRefusal(string name, JsonElement value)
+    {
+        if (Enum is not { } allowed || Options is null) return null;
+
+        var outside = value.ValueKind switch
+        {
+            JsonValueKind.String when !allowed.Contains(value.GetString()!, StringComparer.Ordinal) => value.GetString(),
+            JsonValueKind.Array => value.EnumerateArray().Where(v => v.ValueKind == JsonValueKind.String)
+                .Select(v => v.GetString()!).FirstOrDefault(v => !allowed.Contains(v, StringComparer.Ordinal)),
+            _ => null,
+        };
+        if (outside is null) return null;
+
+        var kind = OptionSet switch
+        {
+            "locale" => "a language Chrome accepts, such as en-US",
+            "timeZone" => "an IANA time zone, such as Europe/London, or UTC",
+            _ => allowed.Count <= 20 ? $"one of: {string.Join(", ", allowed)}" : "one of its listed options",
+        };
+        return Type == "list"
+            ? $"`{name}` holds '{outside}'; each item must be {kind}."
+            : $"`{name}` must be {kind}; '{outside}' is not.";
+    }
+
+    /// <summary>
+    /// The value a run gets for a stored <paramref name="value"/>: itself, except for a field with
+    /// <see cref="Options"/> - a list keeps only its items among them, and a value with none of them
+    /// is the field's default (or nothing). A plugin is never handed a choice it did not list.
+    /// </summary>
+    public JsonElement? ForRun(JsonElement value)
+    {
+        if (Options is null || OptionRefusal("", value) is null) return value;
+
+        if (Type == "list" && value.ValueKind == JsonValueKind.Array)
+        {
+            var kept = value.EnumerateArray().Where(v => v.ValueKind == JsonValueKind.String && Enum!.Contains(v.GetString()!, StringComparer.Ordinal)).ToList();
+            if (kept.Count > 0) return JsonSerializer.SerializeToElement(kept.Select(v => v.GetString()));
+        }
+
+        return Default;
+    }
 }
 
 /// <summary>A secret the plugin needs, by name. The manifest never holds its value.</summary>

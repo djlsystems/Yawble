@@ -309,6 +309,13 @@ export function outOfRange(shape: PluginSettingsShape, config: PluginFieldValues
   const problems: Record<string, string> = {};
 
   for (const [name, field] of Object.entries(shape.config)) {
+    // A choice outside its options can only be one stored before it had them: the Host's sentence.
+    if (field.options && field.options.length > 0) {
+      const sentence = shape.stored?.outOfRange[name];
+      if (sentence && JSON.stringify(shape.stored?.config[name]) === JSON.stringify(config[name])) problems[name] = sentence;
+      continue;
+    }
+
     if (field.type !== 'number') continue;
 
     const kept = keptStored(shape, config, name);
@@ -325,7 +332,7 @@ export function outOfRange(shape: PluginSettingsShape, config: PluginFieldValues
  * out of range but never blocks. Any other out-of-range value is refused, as the Host refuses it.
  */
 export function refusedOutOfRange(shape: PluginSettingsShape, config: PluginFieldValues): string[] {
-  return Object.keys(outOfRange(shape, config)).filter((name) => !keptStored(shape, config, name));
+  return Object.keys(outOfRange(shape, config)).filter((name) => !shape.config[name]?.options?.length && !keptStored(shape, config, name));
 }
 
 /** Whether `name` still holds the value it was read with (the same number, however it is typed). */

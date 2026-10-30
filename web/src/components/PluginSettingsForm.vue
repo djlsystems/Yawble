@@ -36,8 +36,13 @@ import PluginTableField from './PluginTableField.vue';
  * NO FREE-FORM JSON. One input per `config` field, typed - text for a string, a number box for a
  * number, a toggle for a bool, a dropdown for a field with `enum`, chips for a list (`ChipListInput`:
  * chosen from the `enum` when there is one, else added through its dialog; × removes) - so the shape
- * saved is always one the plugin accepts. EVERY SETTING IS ON THE ONE SCREEN, in the manifest's
- * order: the manifest's `advanced` is ignored. Each is labelled by the manifest's `label`, else its
+ * saved is always one the plugin accepts. A field with `options` (a manifest's own list, or a named
+ * set such as every language Chrome accepts or every IANA time zone) shows each choice's words and
+ * stores its value; its dropdown filters as the person types.
+ *
+ * REQUIRED SETTINGS UP FRONT, THE REST UNDER ADVANCED. Settings show in the manifest's order; one the
+ * manifest marks `advanced` - and does not require - sits under the Advanced toggle at the end, closed
+ * until opened, and opened by itself when one of them is out of range. Each is labelled by the manifest's `label`, else its
  * name in words (`apiKey` -> "API key"); a text or number box's default is its placeholder, and
  * Reset to default puts it back. No info icon and no Default line: the plugin's Documentation says
  * what its settings do. What a person must see now - an error, Required, a value not set, the saved
@@ -192,22 +197,64 @@ function secretUnset(name: string): boolean {
 }
 
 /**
- * THE FORM'S ROWS, IN THE MANIFEST'S ORDER: every setting, then the secrets, then the connection
- * slots - all on the one screen. The manifest's `advanced` mark is accepted and ignored: a setting a
- * person needs is never behind a toggle.
+ * THE FORM'S ROWS, IN THE MANIFEST'S ORDER: the settings, then the secrets, then the connection
+ * slots; then, when the manifest marks any setting `advanced` (and does not require it), the
+ * Advanced toggle and those settings. A required setting is never behind the toggle.
  */
 type Row =
-  | { kind: 'config'; name: string }
+  | { kind: 'config'; name: string; advanced?: boolean }
   | { kind: 'secret'; name: string }
   | { kind: 'named' }
-  | { kind: 'slots' };
+  | { kind: 'slots' }
+  | { kind: 'advanced' };
 
-const rows = computed<Row[]>(() => [
-  ...Object.keys(props.shape.config).map((name): Row => ({ kind: 'config', name })),
-  ...Object.keys(props.shape.secrets).map((name): Row => ({ kind: 'secret', name })),
-  ...(props.shape.namedSecrets ? [{ kind: 'named' } as Row] : []),
-  ...(hasSlots(props.shape) ? [{ kind: 'slots' } as Row] : []),
-]);
+const behindAdvanced = (name: string) => {
+  const field = props.shape.config[name];
+  return field?.advanced === true && !field.required;
+};
+
+const rows = computed<Row[]>(() => {
+  const names = Object.keys(props.shape.config);
+  const advanced = names.filter(behindAdvanced);
+  return [
+    ...names.filter((name) => !behindAdvanced(name)).map((name): Row => ({ kind: 'config', name })),
+    ...Object.keys(props.shape.secrets).map((name): Row => ({ kind: 'secret', name })),
+    ...(props.shape.namedSecrets ? [{ kind: 'named' } as Row] : []),
+    ...(hasSlots(props.shape) ? [{ kind: 'slots' } as Row] : []),
+    ...(advanced.length > 0 ? [{ kind: 'advanced' } as Row] : []),
+    ...advanced.map((name): Row => ({ kind: 'config', name, advanced: true })),
+  ];
+});
+
+/** Whether the Advanced settings show: opened by the person, or by one of them being out of range. */
+const advancedOpen = ref(false);
+const advancedNeedsYou = computed(() => Object.keys(bounds.value).some(behindAdvanced));
+const showAdvanced = computed(() => advancedOpen.value || advancedNeedsYou.value);
+
+/** A field's choices as the dropdown lists them: its `options`, else its `enum` as they are. */
+function choicesOf(name: string): { label: string; value: string }[] {
+  const field = props.shape.config[name]!;
+  if (field.options && field.options.length > 0) return field.options;
+  return (field.enum ?? []).map((value) => ({ label: value, value }));
+}
+
+const hasChoices = (name: string) => choicesOf(name).length > 0;
+
+/** What the one-choice dropdown lists now: every choice, or those whose words or value hold what is typed. */
+const filter = ref<Record<string, string>>({});
+
+function shownChoices(name: string) {
+  const typed = (filter.value[name] ?? '').trim().toLowerCase();
+  const all = choicesOf(name);
+  if (!typed) return all;
+  return all.filter((option) => option.label.toLowerCase().includes(typed) || option.value.toLowerCase().includes(typed));
+}
+
+function filterChoices(name: string, typed: string, update: (fn: () => void) => void) {
+  update(() => {
+    filter.value = { ...filter.value, [name]: typed };
+  });
+}
 
 /** What a setting or secret is called on the form: the manifest's label, else its name in words. */
 function labelOf(name: string): string {
@@ -216,6 +263,9 @@ function labelOf(name: string): string {
 }
 
 const rowKey = (row: Row) => ('name' in row ? `${row.kind}-${row.name}` : row.kind);
+
+/** Whether a row shows now: a setting under Advanced only while Advanced is open. */
+const visible = (row: Row) => row.kind !== 'config' || !row.advanced || showAdvanced.value;
 
 const showJson = ref(false);
 const json = computed(() => JSON.stringify(body.value, null, 2));
@@ -247,10 +297,27 @@ function text(name: string): string {
       <!-- A SETTING: its label, its value (the default as an empty box's placeholder), and one line
            with what a person must see now - Required, a number's bounds - and Reset to default. No info icon and no
            Default line: the plugin's documentation explains its settings. -->
+      <!-- THE ADVANCED TOGGLE: the settings the manifest marks advanced follow it, shown while open. -->
+      <q-btn
+        v-if="row.kind === 'advanced'"
+        flat
+        dense
+        no-caps
+        align="left"
+        class="plugin-settings-advanced"
+        :icon="showAdvanced ? 'expand_less' : 'expand_more'"
+        label="Advanced"
+        :aria-expanded="showAdvanced ? 'true' : 'false'"
+        :disable="advancedNeedsYou"
+        data-advanced-toggle
+        @click="advancedOpen = !advancedOpen"
+      />
+
       <div
-        v-if="row.kind === 'config'"
+        v-else-if="row.kind === 'config' && visible(row)"
         class="plugin-setting"
         :data-setting="row.name"
+        :data-advanced="row.advanced ? '' : undefined"
       >
         <PluginTableField
           v-if="shape.config[row.name]!.type === 'table' && shape.config[row.name]!.table"
@@ -280,18 +347,30 @@ function text(name: string): string {
           v-else-if="shape.config[row.name]!.type === 'list'"
           :model-value="listOf(row.name)"
           :label="labelOf(row.name)"
-          :options="shape.config[row.name]!.enum && shape.config[row.name]!.enum!.length > 0 ? shape.config[row.name]!.enum : null"
+          :options="hasChoices(row.name) ? choicesOf(row.name) : null"
+          :error="bounds[row.name] ? true : undefined"
+          :error-message="bounds[row.name] ?? undefined"
           @update:model-value="(value: string[]) => set(row.name, value)"
         />
 
         <q-select
-          v-else-if="shape.config[row.name]!.enum && shape.config[row.name]!.enum!.length > 0"
+          v-else-if="hasChoices(row.name)"
           :model-value="text(row.name)"
-          :options="shape.config[row.name]!.enum!"
+          :options="shownChoices(row.name)"
+          emit-value
+          map-options
+          use-input
+          fill-input
+          hide-selected
+          input-debounce="0"
           outlined
           dense
           :label="labelOf(row.name)"
-          :error="missing.includes(row.name) ? true : undefined"
+          :error="missing.includes(row.name) || bounds[row.name] ? true : undefined"
+          :error-message="bounds[row.name] ?? ''"
+          :data-out-of-range="bounds[row.name] ? '' : undefined"
+          data-choice-select
+          @filter="(typed: string, update: (fn: () => void) => void) => filterChoices(row.name, typed, update)"
           @update:model-value="(value: string) => set(row.name, value)"
         />
 

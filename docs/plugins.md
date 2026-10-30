@@ -261,7 +261,8 @@ Content-Type: application/json
 ### In the web UI
 
 - **Add member.** The dialog offers each installed plugin (from `GET /api/plugins`) after the Agent
-  presets. Choosing one shows every setting of its manifest on one screen, in the manifest's order:
+  presets. Choosing one shows the settings of its manifest in the manifest's order, the ones marked
+  `advanced` (and not required) under **Advanced** ([Advanced settings](#advanced-settings)):
   each `config` field as an input whose placeholder is its default, and each secret field as ONE box
   for its value, labelled by the manifest's `label` (else the field's name in words). A masked field
   is a password box; a `"masked": false` field is a plain text box. No key name is asked for; one
@@ -313,7 +314,7 @@ Content-Type: application/json
 | `protocol` | required | `harness.member/1`, the only protocol this Host speaks. |
 | `executable.path`, `executable.args` | required / optional | A relative path inside the version directory. `args` is a fixed argv with no substitution. |
 | `timeoutSeconds` | optional | An **idle** clock: this long with no `progress` record ends the run. Default 300. |
-| `config` | optional | Name → `{type: string, number, bool or list (string when absent); enum; default; required; setBy: "person" or "anyone"; advanced; label; description}`. `label` - a short line of text, 1 to 80 characters - is what a settings screen names the field; anything else refuses the manifest naming the field. A name starts with a letter and holds letters, digits, `_` and `-`, at most 64 characters. `"advanced"` (true or false, nothing else) is accepted and no screen hides a field behind it (see [Every setting on one screen](#every-setting-on-one-screen)); a `number` may add `min`, `max` and `integer` (see [Number bounds](#number-bounds)). A `list` is a list of strings, default `[]`. See [List settings](#list-settings). A `table` is rows of typed columns a person edits; see [Table settings](#table-settings-type-table). |
+| `config` | optional | Name → `{type: string, number, bool or list (string when absent); enum; options; default; required; setBy: "person" or "anyone"; advanced; label; description}`. `label` - a short line of text, 1 to 80 characters - is what a settings screen names the field; anything else refuses the manifest naming the field. A name starts with a letter and holds letters, digits, `_` and `-`, at most 64 characters. `"advanced"` (true or false, nothing else) puts a field that is not required under the form's Advanced toggle (see [Advanced settings](#advanced-settings)); `options` gives a string or list field labelled choices, or a named set of them (see [Options](#options-labelled-choices-and-named-sets)); a `number` may add `min`, `max` and `integer` (see [Number bounds](#number-bounds)). A `list` is a list of strings, default `[]`. See [List settings](#list-settings). A `table` is rows of typed columns a person edits; see [Table settings](#table-settings-type-table). |
 | `secrets` | optional | Name → `{description, required, label?, masked?, when?}`. A `value` key is refused. `masked` (default `true`; `true` or `false`, anything else refuses the manifest naming the field) says the value is secret: never answered, never shown, redacted from what the plugin writes. `"masked": false` declares a value that is not secret (an account name): the settings screen shows it in a plain text box and the read answers it. `label` is as for `config`. `when` - `{"<config field>": "<value>"}`, one pair - says the secret is needed only while that list or choice setting holds that value (`{"sources": "adzuna"}`); the field must be declared and the value one of its `enum`. A solution install uses it to say a secret for a setting the person left off is not needed. |
 | `connections` | optional | Slot name → `{description, providers, scopes, required}`: an OAuth account the plugin acts on, which the Host holds and refreshes. See [Connections](#connections-oauth-accounts). |
 | `reads` | optional | A list of `{site, collection}`, at most 32: the collections of the plugin's OWN team's sites it reads, delivered on stdin at each run. See [Reading site data](#reading-site-data-reads). |
@@ -342,14 +343,16 @@ manifest gives none, so the plugin always receives an array in the request's `co
 A `type` other than `string`, `number`, `bool` or `list` refuses the manifest, naming the field.
 The web's settings editor shows a list as chips.
 
-### Every setting on one screen
+### Advanced settings
 
 The settings screens (Add member, Member settings, the solution wizard and a solution's panel) show
-every `config` field and every secret field of a plugin on one screen, in the manifest's order. A
-field's default is its placeholder, and "Reset to default" puts it back. `"advanced": true` on a
-`config` field is still accepted - `true` or `false`, anything else refuses the manifest naming the
-field - and answered as `advanced` by the settings read and `GET /api/plugins`, but no screen hides a
-field behind it.
+a plugin's `config` fields and secret fields in the manifest's order. A field's default is its
+placeholder, and "Reset to default" puts it back. A `config` field the manifest marks
+`"advanced": true` - and does not mark `required` - sits under an **Advanced** toggle after the
+rest, closed until a person opens it, and open by itself while one of those fields is out of range.
+A required field is always up front, whatever its mark. `advanced` must be `true` or `false`;
+anything else refuses the manifest naming the field. The settings read and `GET /api/plugins`
+answer it as `advanced`.
 
 The plugin's description (`description`, which the settings read answers whole) shows its first
 paragraph and a **Documentation** link that opens the
@@ -359,9 +362,48 @@ last read lists the plugin, and null otherwise - then the screen shows the whole
 link. The Host names no catalog host: the origin is the one the operator configured
 (`Marketplace:Catalog`).
 
-Pinned by `PluginAdvancedSettingsTests`, `PluginFieldLabelsTests`,
+Pinned by `PluginAdvancedSettingsTests`, `plugin-settings-advanced.mount.spec.ts`, `PluginFieldLabelsTests`,
 `MarketplaceTests.A_plugins_page_is_the_catalog_origin_and_its_id_when_the_catalog_lists_it_and_null_otherwise`
 and `PluginMemberSecretsTests.The_settings_read_answers_the_plugins_description_and_no_marketplace_page_when_no_catalog_lists_the_plugin`.
+
+### Options: labelled choices and named sets
+
+A `string` or `list` field may give `options` instead of `enum`: choices a person picks by their
+words while the field stores their value. Either a list of `{"value", "label"}` (a label is as for
+the field's own, and defaults to the value), or the name of a set the Host holds, so a manifest
+need not list hundreds of values:
+
+| Set | Values |
+|---|---|
+| `"locale"` | Every language Chrome accepts for its languages (Accept-Language, `navigator.languages`), by its BCP 47 code: `en-US`, labelled "English (United States)". Chromium's `kAcceptLanguageList` without its pseudolocales. |
+| `"timeZone"` | `UTC`, then every IANA time zone in the tz database's `zone.tab` (`Europe/London`, `Asia/Kolkata`), each labelled by its name. Not `Intl.supportedValuesOf('timeZone')`, which omits UTC and in some engines answers CLDR's old names (`Asia/Calcutta`). |
+
+```json
+"config": {
+  "timeZone":  { "type": "string", "options": "timeZone", "default": "UTC", "advanced": true },
+  "languages": { "type": "list", "options": "locale", "default": ["en-US"] },
+  "mode":      { "type": "string", "options": [{ "value": "dryRun", "label": "Dry run" }, { "value": "send", "label": "Send" }] }
+}
+```
+
+- The settings form shows a dropdown of the labels, filtered as the person types (a list: chips of
+  the labels), and stores the value.
+- **Every writer refuses a value outside them**, with 400 and one sentence naming the field and the
+  value, never the whole set: "`timeZone` must be an IANA time zone, such as Europe/London, or UTC;
+  'Mars/Olympus' is not." The `default` must be one of them, or the manifest is refused.
+- **A value stored before the field had options** (an older version's free text) is kept, reported
+  on the settings read in `outOfRange`, and saving the rest of the form with it unchanged is
+  accepted - as a number outside later bounds is. **A run never gets it**: the plugin receives the
+  field's default instead, and a list only its items among the options (the default when none is).
+- `options` with `enum`, on any other type, naming no set, empty, or listing a value twice refuses
+  the manifest naming the field. The field's `enum` is answered as the options' values, so whatever
+  reads `enum` (a secret's `when`, a solution's setting) works unchanged.
+- The settings read's `fields.<field>` and `GET /api/plugins`' `config.<field>` carry `options`
+  (`[{value, label}]`, null without them) and `optionSet` (the set's name, or null).
+
+The sets are `src/Harness.Host/PluginOptionSets.json`, written only by
+`node web/scripts/plugin-option-sets.mjs <chromium_language_matcher.cc> <zone.tab>`. Pinned by
+`PluginOptionSetsTests` and `plugin-settings-options.mount.spec.ts`.
 
 ### Number bounds
 
@@ -1050,9 +1092,9 @@ deletion, a same-name successor and a clone), `MemberSecretsCopyTests`, `PluginN
 
 A person changes a plugin member's configuration, its secret values and its connection bindings without hiring a new member:
 **Member settings → Settings**, the same form Add member shows, filled with what is stored. It is
-generated from the manifest: every setting on one screen in the manifest's order
-([Every setting on one screen](#every-setting-on-one-screen)) - one typed input per `config` field
-(text, number box, toggle, dropdown for an `enum`, chips for a `list`), its default as its
+generated from the manifest: the settings in the manifest's order, the advanced ones under Advanced
+([Advanced settings](#advanced-settings)) - one typed input per `config` field
+(text, number box, toggle, dropdown for an `enum` or `options`, chips for a `list`), its default as its
 placeholder, "Reset to default" per field; one value box per secret field; and a read-only view of
 the JSON that will be stored, the only place a bound key name shows. It saves only the fields that
 differ from their default. A plugin form's fields carry no info icon and no "Default" or "Set by"

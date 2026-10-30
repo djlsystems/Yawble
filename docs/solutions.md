@@ -602,8 +602,8 @@ address and whether it is published now - a read, with no control of its own. It
   install wizard, started on this team's update) and **Uninstall**.
 
 Members, triggers and sites are tiles, laid out as the Plugins and Agents tiles are; the settings,
-connections and maintenance are forms. A plugin's settings form shows every setting on one screen
-([plugins.md](plugins.md#every-setting-on-one-screen)), its secrets as each member's own values.
+connections and maintenance are forms. A plugin's settings form shows its settings with the advanced
+ones under Advanced ([plugins.md](plugins.md#advanced-settings)), its secrets as each member's own values.
 
 **Every control is an existing route**, with its own permit marker and tenant row - the panel adds
 none:

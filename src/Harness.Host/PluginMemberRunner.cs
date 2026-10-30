@@ -676,7 +676,8 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
     /// <summary>The manifest's defaults under this member's own values, each checked against its
     /// field's type. A required field with neither is a refusal naming it. Bounds are a WRITE's
     /// check (<see cref="SettingsRefusal"/>), not a run's: a value stored before its bounds existed
-    /// is never rewritten, and the member keeps running with it.</summary>
+    /// is never rewritten, and the member keeps running with it. A value outside its field's
+    /// <c>options</c> is not run with: the run gets the default instead (<see cref="PluginConfigField.ForRun"/>).</summary>
     public static (IReadOnlyDictionary<string, JsonNode?> Config, string? Refusal) EffectiveConfig(
         PluginManifest manifest, PluginMemberSettings bound)
     {
@@ -687,7 +688,9 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             if (bound.Config.TryGetValue(name, out var value))
             {
                 if (field.Refusal(name, value, bounds: false) is { } refusal) return (config, $"This member's configuration is invalid: {refusal}");
-                config[name] = field.Table is { } table ? table.ForRun(value) : JsonNode.Parse(value.GetRawText());
+                if (field.Table is { } table) config[name] = table.ForRun(value);
+                else if (field.ForRun(value) is { } given) config[name] = JsonNode.Parse(given.GetRawText());
+                else if (field.Required) return (config, $"This member's configuration has no usable `{name}`, which the plugin requires.");
             }
             else if (field.Default is { } fallback)
             {
