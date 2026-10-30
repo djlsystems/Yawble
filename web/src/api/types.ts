@@ -2938,6 +2938,8 @@ export interface PluginConfigField {
 export interface PluginConfigOption {
   value: string
   label: string
+  /** Other words typing finds it by: a language's other English name ("British English"), a time zone's older names. */
+  keywords?: string | null
 }
 
 /** One column of a `table` field. A `secret` column's value is never in `config` and never answered once saved. */

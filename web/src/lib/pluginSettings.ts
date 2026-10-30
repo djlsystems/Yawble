@@ -319,7 +319,8 @@ export function outOfRange(shape: PluginSettingsShape, config: PluginFieldValues
     if (field.type !== 'number') continue;
 
     const kept = keptStored(shape, config, name);
-    const problem = (kept ? shape.stored?.outOfRange[name] : undefined) ?? boundsProblem(name, field, config[name]);
+    // NAMED AS THE HOST NAMES IT: by the manifest's label, else by its key.
+    const problem = (kept ? shape.stored?.outOfRange[name] : undefined) ?? boundsProblem(field.label?.trim() || name, field, config[name]);
     if (problem) problems[name] = problem;
   }
 

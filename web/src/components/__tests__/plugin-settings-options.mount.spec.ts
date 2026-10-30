@@ -25,13 +25,13 @@ const field = (over: Partial<PluginConfigField>): PluginConfigField => ({
 });
 
 const zones = [
-  { value: 'UTC', label: 'UTC' },
-  { value: 'America/New_York', label: 'America/New_York' },
+  { value: 'UTC', label: 'UTC', keywords: 'Etc/UTC GMT' },
+  { value: 'America/New_York', label: 'America/New_York', keywords: 'US/Eastern' },
   { value: 'Europe/London', label: 'Europe/London' },
 ];
 const languages = [
-  { value: 'en-GB', label: 'English (United Kingdom)' },
-  { value: 'en-US', label: 'English (United States)' },
+  { value: 'en-GB', label: 'English (United Kingdom)', keywords: 'British English' },
+  { value: 'en-US', label: 'English (United States)', keywords: 'American English' },
   { value: 'de-DE', label: 'German (Germany)' },
 ];
 
@@ -80,9 +80,32 @@ describe('a setting with options', () => {
     await flushPromises();
     expect(select.props('options')).toEqual([zones[1]]);
 
+    select.vm.$emit('filter', 'us/eastern', (fn: () => void) => fn());
+    await flushPromises();
+    expect(select.props('options')).toEqual([zones[1]]);
+
     select.vm.$emit('filter', '', (fn: () => void) => fn());
     await flushPromises();
     expect(select.props('options')).toEqual(zones);
+
+    wrapper.unmount();
+  });
+
+  it.each(['brit', 'united', 'gb', 'en-GB'])('filters a list setting by typing "%s", finding English (United Kingdom)', async (text) => {
+    const wrapper = await mountForm({ languages: [] });
+    const input = document.body.querySelector<HTMLInputElement>('[data-setting="languages"] input')!;
+
+    input.focus();
+    input.value = text;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushPromises();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await flushPromises();
+
+    const list = wrapper.findAllComponents(QSelect).find((s) => s.element.closest('[data-setting="languages"]'))!;
+    const offered = (list.props('options') as { value: string }[]).map((o) => o.value);
+    expect(offered).toContain('en-GB');
+    expect(offered).not.toContain('de-DE');
 
     wrapper.unmount();
   });

@@ -131,4 +131,43 @@ describe("a plugin member's settings", () => {
 
     wrapper.unmount();
   });
+
+  it('keeps Advanced open once it opened by itself, when the person fixes the last bad value there', async () => {
+    const wrapper = await mountForm({ dailySendCap: '5000' });
+    const toggle = document.body.querySelector('[data-advanced-toggle]')!;
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+
+    document.body.querySelector<HTMLButtonElement>('[aria-label="Reset Daily send cap to default"]')!.click();
+    await flushPromises();
+    await wrapper.setProps({ config: wrapper.emitted('update:config')!.at(-1)![0] as Record<string, string> });
+    await flushPromises();
+
+    expect(document.body.querySelector('[data-setting="dailySendCap"]')?.textContent).not.toContain('must be at most');
+    expect(shown()).toEqual(['mode', 'fromNumber', 'region', 'dailySendCap', 'footer']);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+
+    // Now it is the person's to close.
+    await openAdvanced();
+    expect(shown()).toEqual(['mode', 'fromNumber', 'region']);
+
+    wrapper.unmount();
+  });
+
+  it("names a field by the manifest's label in a bounds sentence, else by its key", async () => {
+    const labelled: PluginSettingsShape = {
+      config: { ...shape.config, dailySendCap: { ...shape.config.dailySendCap!, label: 'Daily cap' } },
+      secrets: {},
+    };
+    const wrapper = mount(PluginSettingsForm, {
+      attachTo: document.body,
+      props: { shape: labelled, config: { mode: 'dryRun', fromNumber: '', dailySendCap: '5000', footer: true, region: '' }, secrets: {} },
+    });
+    await flushPromises();
+    expect(document.body.querySelector('[data-setting="dailySendCap"]')?.textContent).toContain('5000 is out of range for Daily cap: it must be at most 1000.');
+    wrapper.unmount();
+
+    const bare = await mountForm({ dailySendCap: '5000' });
+    expect(document.body.querySelector('[data-setting="dailySendCap"]')?.textContent).toContain('5000 is out of range for dailySendCap: it must be at most 1000.');
+    bare.unmount();
+  });
 });

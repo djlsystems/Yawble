@@ -349,7 +349,8 @@ The settings screens (Add member, Member settings, the solution wizard and a sol
 a plugin's `config` fields and secret fields in the manifest's order. A field's default is its
 placeholder, and "Reset to default" puts it back. A `config` field the manifest marks
 `"advanced": true` - and does not mark `required` - sits under an **Advanced** toggle after the
-rest, closed until a person opens it, and open by itself while one of those fields is out of range.
+rest, closed until a person opens it, and open by itself while one of those fields is out of range -
+then it stays open once the value is fixed, until the person closes it.
 A required field is always up front, whatever its mark. `advanced` must be `true` or `false`;
 anything else refuses the manifest naming the field. The settings read and `GET /api/plugins`
 answer it as `advanced`.
@@ -375,8 +376,8 @@ need not list hundreds of values:
 
 | Set | Values |
 |---|---|
-| `"locale"` | Every language Chrome accepts for its languages (Accept-Language, `navigator.languages`), by its BCP 47 code: `en-US`, labelled "English (United States)". Chromium's `kAcceptLanguageList` without its pseudolocales. |
-| `"timeZone"` | `UTC`, then every IANA time zone in the tz database's `zone.tab` (`Europe/London`, `Asia/Kolkata`), each labelled by its name. Not `Intl.supportedValuesOf('timeZone')`, which omits UTC and in some engines answers CLDR's old names (`Asia/Calcutta`). |
+| `"locale"` | Every language Chrome accepts for its languages (Accept-Language, `navigator.languages`), by its BCP 47 code: `en-US`, labelled "English (United States)". Chromium's `kAcceptLanguageList` without its pseudolocales. A tag in another case (`en-gb`) is that language (`en-GB`). |
+| `"timeZone"` | `UTC`, then every IANA time zone in the tz database's `zone.tab` (`Europe/London`, `Asia/Kolkata`), each labelled by its name. Not `Intl.supportedValuesOf('timeZone')`, which omits UTC and in some engines answers CLDR's old names (`Asia/Calcutta`). An older name the tz database links to a zone (its `backward` and `etcetera` links: `Asia/Calcutta`, `Europe/Kiev`, `US/Eastern`), or a name in another case, is that zone; `Etc/UTC`, `GMT` and their kin are `UTC`. |
 
 ```json
 "config": {
@@ -387,10 +388,18 @@ need not list hundreds of values:
 ```
 
 - The settings form shows a dropdown of the labels, filtered as the person types (a list: chips of
-  the labels), and stores the value.
-- **Every writer refuses a value outside them**, with 400 and one sentence naming the field and the
-  value, never the whole set: "`timeZone` must be an IANA time zone, such as Europe/London, or UTC;
-  'Mars/Olympus' is not." The `default` must be one of them, or the manifest is refused.
+  the labels, and the same filter in its field), and stores the value. The filter matches the
+  label, the value and a set option's `keywords` - a language's other English name ("British
+  English"), a zone's older names - so "brit", "united", "gb" and "en-GB" all find English (United
+  Kingdom), and "Calcutta" finds Asia/Kolkata.
+- **A set's value under another name or case is stored as its option** by every writer
+  (`Asia/Calcutta` is saved as `Asia/Kolkata`, `en-gb` as `en-GB`, a list naming one twice keeps it
+  once). One stored that way before is read and run as its option and not reported. A manifest's
+  own list is matched exactly. The dropdown lists only the options themselves.
+- **Every writer refuses a value outside them**, with 400 and one sentence naming the field by its
+  `label` (its key when it has none) and the value, never the whole set: "Time zone must be an IANA
+  time zone, such as Europe/London, or UTC; 'Mars/Olympus' is not." The `default` must be one of
+  them, or the manifest is refused.
 - **A value stored before the field had options** (an older version's free text) is kept, reported
   on the settings read in `outOfRange`, and saving the rest of the form with it unchanged is
   accepted - as a number outside later bounds is. **A run never gets it**: the plugin receives the
@@ -399,10 +408,12 @@ need not list hundreds of values:
   the manifest naming the field. The field's `enum` is answered as the options' values, so whatever
   reads `enum` (a secret's `when`, a solution's setting) works unchanged.
 - The settings read's `fields.<field>` and `GET /api/plugins`' `config.<field>` carry `options`
-  (`[{value, label}]`, null without them) and `optionSet` (the set's name, or null).
+  (`[{value, label, keywords}]`, null without them; `keywords` null when an option has none) and
+  `optionSet` (the set's name, or null).
 
-The sets are `src/Harness.Host/PluginOptionSets.json`, written only by
-`node web/scripts/plugin-option-sets.mjs <chromium_language_matcher.cc> <zone.tab>`. Pinned by
+The sets, their keywords and the time zone aliases are `src/Harness.Host/PluginOptionSets.json`,
+written only by `node web/scripts/plugin-option-sets.mjs <chromium_language_matcher.cc> <tzdata directory>`
+(an unpacked IANA `tzdataNNNNx.tar.gz`). Pinned by
 `PluginOptionSetsTests` and `plugin-settings-options.mount.spec.ts`.
 
 ### Number bounds
@@ -425,7 +436,8 @@ and a salary maximum of -2 makes a job board drop every posting that states a sa
 - **Every writer refuses a value outside them** - Member settings (`PUT .../plugin-settings`), a hire
   (`POST /api/teams/{team}/containers`, Add member and a Manager's `member` tool), and a solution
   install or update (a package's `members[].settings` in the check, a person's `inputs.settings`
-  answer at install) - with 400 and one sentence naming the field and the bound, such as
+  answer at install) - with 400 and one sentence naming the field by its `label` (its key when it has
+  none) and the bound, such as "Salary max must be at least 0; -2 is below it." or
   "`salaryMax` must be at least 0; -2 is below it.", and writes nothing: no setting, no member, no
   `tenant_events` row. One Host check does it (`PluginMemberRunner.SettingsRefusal`, over
   `PluginConfigField.BoundsRefusal`); the web says the bounds earlier, in the field's help, but

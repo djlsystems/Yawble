@@ -226,13 +226,25 @@ const rows = computed<Row[]>(() => {
   ];
 });
 
-/** Whether the Advanced settings show: opened by the person, or by one of them being out of range. */
+/**
+ * Whether the Advanced settings show: opened by the person, or by one of them being out of range. Once
+ * it opens by itself it STAYS open, as if the person had opened it: fixing the last bad value there
+ * must not fold the section away under them.
+ */
 const advancedOpen = ref(false);
 const advancedNeedsYou = computed(() => Object.keys(bounds.value).some(behindAdvanced));
 const showAdvanced = computed(() => advancedOpen.value || advancedNeedsYou.value);
 
+watch(
+  advancedNeedsYou,
+  (needs) => {
+    if (needs) advancedOpen.value = true;
+  },
+  { immediate: true },
+);
+
 /** A field's choices as the dropdown lists them: its `options`, else its `enum` as they are. */
-function choicesOf(name: string): { label: string; value: string }[] {
+function choicesOf(name: string): { label: string; value: string; keywords?: string | null | undefined }[] {
   const field = props.shape.config[name]!;
   if (field.options && field.options.length > 0) return field.options;
   return (field.enum ?? []).map((value) => ({ label: value, value }));
@@ -240,14 +252,14 @@ function choicesOf(name: string): { label: string; value: string }[] {
 
 const hasChoices = (name: string) => choicesOf(name).length > 0;
 
-/** What the one-choice dropdown lists now: every choice, or those whose words or value hold what is typed. */
+/** What the one-choice dropdown lists now: every choice, or those whose words, value or keywords hold what is typed. */
 const filter = ref<Record<string, string>>({});
 
 function shownChoices(name: string) {
   const typed = (filter.value[name] ?? '').trim().toLowerCase();
   const all = choicesOf(name);
   if (!typed) return all;
-  return all.filter((option) => option.label.toLowerCase().includes(typed) || option.value.toLowerCase().includes(typed));
+  return all.filter((option) => [option.label, option.value, option.keywords ?? ''].some((words) => words.toLowerCase().includes(typed)));
 }
 
 function filterChoices(name: string, typed: string, update: (fn: () => void) => void) {

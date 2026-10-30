@@ -237,6 +237,9 @@ public static class PluginEndpoints
                 return Results.BadRequest(new { error = invalid });
             }
 
+            // STORED AS ITS OPTIONS: a value under an older name or in another case is saved as the option.
+            changed = PluginMemberRunner.Canonical(plugin.Manifest, changed);
+
             // A TABLE'S SECRET CELLS: a value sets or replaces, null clears, a cell not sent stays; a row
             // the save removes takes its cells with it. Checked against the rows as saved, so a row added
             // in this save takes its secrets in the same save.
@@ -859,7 +862,8 @@ public static class PluginEndpoints
         plugin = plugin.Manifest.Id,
         version = plugin.Manifest.Version,
         description = string.IsNullOrWhiteSpace(plugin.Manifest.Description) ? null : plugin.Manifest.Description,
-        config = stored.Config,
+        // A VALUE STORED UNDER AN OLDER NAME reads as its option, so the form shows and saves the option.
+        config = PluginMemberRunner.Canonical(plugin.Manifest, stored).Config,
         secrets = stored.Secrets,
         secretStates = await reads.StatesAsync(id, plugin.Manifest, stored, ct),
         connections = stored.Connections,
@@ -904,7 +908,7 @@ public static class PluginEndpoints
             integer = c.Value.Integer,
             advanced = c.Value.Advanced,
             label = c.Value.Label,
-            options = c.Value.Options?.Select(o => new { value = o.Value, label = o.Label }),
+            options = c.Value.Options?.Select(o => new { value = o.Value, label = o.Label, keywords = o.Keywords }),
             optionSet = c.Value.OptionSet,
             table = c.Value.Table?.Describe(),
         });

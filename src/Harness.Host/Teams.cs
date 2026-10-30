@@ -2795,6 +2795,12 @@ public sealed class TeamRegistry(
             throw new PluginSettingsException(settingsRefusal);
         }
 
+        // STORED AS ITS OPTIONS: a value under an older name or in another case is saved as the option.
+        if (isPlugin && settings is not null && plugins?.For(pluginId!) is { } hired)
+        {
+            settings = PluginMemberRunner.Canonical(hired.Manifest, settings);
+        }
+
         var command = isPlugin
             ? null
             : agents.For(agent)

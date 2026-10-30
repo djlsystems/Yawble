@@ -706,6 +706,23 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
     }
 
     /// <summary>
+    /// <paramref name="settings"/> with each config value as it is stored and run
+    /// (<see cref="PluginConfigField.Canonical"/>): <c>Asia/Calcutta</c> as <c>Asia/Kolkata</c>,
+    /// <c>en-gb</c> as <c>en-GB</c>. A value no option stands for, and a field the manifest does not
+    /// declare, is left as it is.
+    /// </summary>
+    public static PluginMemberSettings Canonical(PluginManifest manifest, PluginMemberSettings settings)
+    {
+        var config = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        foreach (var (name, value) in settings.Config)
+        {
+            config[name] = manifest.Config.TryGetValue(name, out var field) ? field.Canonical(value) : value;
+        }
+
+        return settings with { Config = config };
+    }
+
+    /// <summary>
     /// Each stored config value outside its field's bounds, by field, with the sentence a write of it
     /// would be refused with. Reported on the settings read; the value itself is left as it is.
     /// </summary>

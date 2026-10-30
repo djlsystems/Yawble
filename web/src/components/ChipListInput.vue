@@ -9,7 +9,9 @@ import type { QSelect } from 'quasar';
  * Quasar select showing its items as chips, so a list looks and behaves the same everywhere:
  *
  * - FROM A FIXED SET (`options`): the dropdown offers what is not chosen yet, and each chosen item is
- *   a removable chip.
+ *   a removable chip. Typing in the field narrows the dropdown to the options whose words, value or
+ *   keywords hold the text ("brit", "united", "gb" and "en-GB" all find English (United Kingdom)), so
+ *   a list of hundreds is never only scrolled - on a phone the field opens its keyboard for it.
  * - FREE TEXT (`freeform`, the default when there are no options): typed into the list's own field,
  *   Return adds it as a removable chip; the Add button opens a dialog for it, where several lines add
  *   several items. Both make the same check (`accept`): an empty, repeated or refused value adds
@@ -25,8 +27,9 @@ const props = withDefaults(
     modelValue: string[] | null | undefined;
     label?: string | undefined;
     hint?: string | undefined;
-    /** The fixed set to choose from. Strings, or `{ label, value }` where the label differs. */
-    options?: (string | { label: string; value: string })[] | null;
+    /** The fixed set to choose from. Strings, or `{ label, value }` where the label differs, with any
+     *  other `keywords` typing should find it by. */
+    options?: (string | { label: string; value: string; keywords?: string | null | undefined })[] | null;
     /** Whether a value outside `options` may be typed in as well. Always so when there are no options. */
     freeform?: boolean;
     readonly?: boolean;
@@ -76,8 +79,27 @@ const labelOf = (value: string) => optionEntries.value.find((option) => option.v
 const same = (a: string, b: string) => (props.ignoreCase ? a.toLowerCase() === b.toLowerCase() : a === b);
 const has = (items: string[], value: string) => items.some((item) => same(item, value));
 
-/** The dropdown offers only what is not chosen yet. */
-const remaining = computed(() => optionEntries.value.filter((option) => !has(list.value, option.value)));
+/*
+ * THE DROPDOWN'S FILTER: what is typed in the field, as the dropdown last applied it. The options are
+ * all here, so the select's `no-option-prefetch`: without it, a filter matching nothing reads to
+ * Quasar as lazy options still to load, and it clears what the person typed.
+ */
+const query = ref('');
+
+const matches = (option: { label: string; value: string; keywords?: string | null | undefined }, typed: string) =>
+  [option.label, option.value, option.keywords ?? ''].some((words) => words.toLowerCase().includes(typed));
+
+/** The dropdown offers only what is not chosen yet, and of that, what matches what is typed. */
+const remaining = computed(() => {
+  const typed = query.value.trim().toLowerCase();
+  return optionEntries.value.filter((option) => !has(list.value, option.value) && (typed === '' || matches(option, typed)));
+});
+
+function onFilter(value: string, update: (fn: () => void) => void) {
+  update(() => {
+    query.value = value;
+  });
+}
 
 function remove(value: string) {
   emit('update:modelValue', list.value.filter((item) => item !== value));
@@ -85,6 +107,12 @@ function remove(value: string) {
 
 function onSelect(values: string[] | null) {
   emit('update:modelValue', values ?? []);
+
+  // A PICK FROM A FILTERED LIST clears the filter, so the next pick starts from the whole list.
+  if (!canType.value && typed.value !== '') {
+    typed.value = '';
+    select.value?.updateInputValue('', true);
+  }
 }
 
 /**
@@ -194,14 +222,16 @@ function onDraftKey(event: KeyboardEvent) {
       :label="label"
       :readonly="readonly"
       :disable="disable"
-      :use-input="canType && !readonly && !disable"
+      :use-input="(canType || optionEntries.length > 0) && !readonly && !disable"
       input-debounce="0"
+      no-option-prefetch
       :error="typedProblem !== '' || error"
       :error-message="typedProblem || errorMessage"
       :hide-dropdown-icon="readonly || optionEntries.length === 0"
       :popup-content-class="layerClass"
       class="chip-list-select"
       @update:model-value="onSelect"
+      @filter="onFilter"
       @input-value="onTyped"
       @keydown="onFieldKey"
     >
@@ -242,7 +272,7 @@ function onDraftKey(event: KeyboardEvent) {
 
       <template v-if="optionEntries.length > 0" #no-option>
         <q-item dense>
-          <q-item-section class="os-text-muted">Everything is chosen.</q-item-section>
+          <q-item-section class="os-text-muted" data-chip-no-match>{{ query.trim() ? `Nothing matches "${query.trim()}".` : 'Everything is chosen.' }}</q-item-section>
         </q-item>
       </template>
     </q-select>

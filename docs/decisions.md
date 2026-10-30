@@ -115,3 +115,11 @@ and a run agree; a stored value outside them is kept and reported, and a run get
 `Intl.DisplayNames`: the list then depends on the person's browser (Node and older Chrome answer
 `Asia/Calcutta`, newer ones `Asia/Kolkata`; neither lists UTC), and the Host would check against a
 different list than the one shown.
+
+**Amended (card 22724, Ingrid's D4).** Refusing every name outside the list broke values an older
+install held that had worked (`Asia/Calcutta`, which Chrome itself reports on many machines;
+`en-gb`). A named set's value now matches without regard to case, and the time zone set keeps the
+tz database's `backward`/`etcetera` links as aliases (`Etc/UTC`, `GMT` -> `UTC`). Writers store the
+canonical option, the settings read and a run turn an older stored alias into it, and the dropdown
+still lists only canonical entries. Only a value no option stands for (`Mars/Olympus`) is refused
+and replaced by the default for a run.

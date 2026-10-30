@@ -793,7 +793,7 @@ public sealed record PluginConfigField(
             if (Enum is { } allowed
                 && value.EnumerateArray().Select(v => v.GetString()!).FirstOrDefault(v => !allowed.Contains(v, StringComparer.Ordinal)) is { } outside)
             {
-                return $"`{name}` holds '{outside}'; each item must be one of: {string.Join(", ", allowed)}.";
+                return $"{Called(name)} holds '{outside}'; each item must be one of: {string.Join(", ", allowed)}.";
             }
 
             return null;
@@ -802,7 +802,7 @@ public sealed record PluginConfigField(
         if (Enum is { } choices && value.ValueKind == JsonValueKind.String
             && !choices.Contains(value.GetString()!, StringComparer.Ordinal))
         {
-            return $"`{name}` must be one of: {string.Join(", ", choices)}.";
+            return $"{Called(name)} must be one of: {string.Join(", ", choices)}.";
         }
 
         return bounds ? BoundsRefusal(name, value) : null;
@@ -826,15 +826,47 @@ public sealed record PluginConfigField(
 
         var number = value.GetDouble();
 
-        if (!double.IsFinite(number)) return $"`{name}` must be a finite number; {value.GetRawText()} is too large to hold.";
-        if (Min is { } min && number < min) return $"`{name}` must be at least {Show(min)}; {value.GetRawText()} is below it.";
-        if (Max is { } max && number > max) return $"`{name}` must be at most {Show(max)}; {value.GetRawText()} is above it.";
-        if (Integer && Math.Floor(number) != number) return $"`{name}` must be a whole number; {value.GetRawText()} is not.";
+        if (!double.IsFinite(number)) return $"{Called(name)} must be a finite number; {value.GetRawText()} is too large to hold.";
+        if (Min is { } min && number < min) return $"{Called(name)} must be at least {Show(min)}; {value.GetRawText()} is below it.";
+        if (Max is { } max && number > max) return $"{Called(name)} must be at most {Show(max)}; {value.GetRawText()} is above it.";
+        if (Integer && Math.Floor(number) != number) return $"{Called(name)} must be a whole number; {value.GetRawText()} is not.";
 
         return null;
     }
 
     private static string Show(double number) => number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>The field as an option or bounds sentence names it: its <see cref="Label"/>, the words
+    /// the form shows ("Time zone"), else its key (<c>`timeZone`</c>).</summary>
+    private string Called(string name) => string.IsNullOrWhiteSpace(Label) ? $"`{name}`" : Label;
+
+    /// <summary>The option <paramref name="given"/> stands for, or null when none: a named set's entry
+    /// in any case or under an older name (<see cref="PluginOptionSets.Canonical"/>), a manifest's own
+    /// option exactly.</summary>
+    private string? OptionFor(string given) => OptionSet is { } set
+        ? PluginOptionSets.Canonical(set, given)
+        : Enum is { } allowed && allowed.Contains(given, StringComparer.Ordinal) ? given : null;
+
+    /// <summary>
+    /// <paramref name="value"/> as it is STORED AND RUN: for a field with <see cref="Options"/>, each
+    /// value that stands for an option is that option (<c>Asia/Calcutta</c> is <c>Asia/Kolkata</c>,
+    /// <c>en-gb</c> is <c>en-GB</c>, a list naming one twice keeps it once); anything else is left as it
+    /// is, for <see cref="Refusal"/> to name. Every other field's value is returned unchanged.
+    /// </summary>
+    public JsonElement Canonical(JsonElement value)
+    {
+        if (Options is null) return value;
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.String when OptionFor(value.GetString()!) is { } option && option != value.GetString()
+                => JsonSerializer.SerializeToElement(option),
+            JsonValueKind.Array when value.EnumerateArray().All(v => v.ValueKind == JsonValueKind.String)
+                => JsonSerializer.SerializeToElement(value.EnumerateArray()
+                    .Select(v => OptionFor(v.GetString()!) ?? v.GetString()!).Distinct(StringComparer.Ordinal)),
+            _ => value,
+        };
+    }
 
     /// <summary>Why <paramref name="value"/> is not among this field's <see cref="Options"/> (for a
     /// list, an item that is not), or null. Names the value, never the hundreds a set may hold.</summary>
@@ -844,9 +876,9 @@ public sealed record PluginConfigField(
 
         var outside = value.ValueKind switch
         {
-            JsonValueKind.String when !allowed.Contains(value.GetString()!, StringComparer.Ordinal) => value.GetString(),
+            JsonValueKind.String when OptionFor(value.GetString()!) is null => value.GetString(),
             JsonValueKind.Array => value.EnumerateArray().Where(v => v.ValueKind == JsonValueKind.String)
-                .Select(v => v.GetString()!).FirstOrDefault(v => !allowed.Contains(v, StringComparer.Ordinal)),
+                .Select(v => v.GetString()!).FirstOrDefault(v => OptionFor(v) is null),
             _ => null,
         };
         if (outside is null) return null;
@@ -858,18 +890,22 @@ public sealed record PluginConfigField(
             _ => allowed.Count <= 20 ? $"one of: {string.Join(", ", allowed)}" : "one of its listed options",
         };
         return Type == "list"
-            ? $"`{name}` holds '{outside}'; each item must be {kind}."
-            : $"`{name}` must be {kind}; '{outside}' is not.";
+            ? $"{Called(name)} holds '{outside}'; each item must be {kind}."
+            : $"{Called(name)} must be {kind}; '{outside}' is not.";
     }
 
     /// <summary>
     /// The value a run gets for a stored <paramref name="value"/>: itself, except for a field with
-    /// <see cref="Options"/> - a list keeps only its items among them, and a value with none of them
-    /// is the field's default (or nothing). A plugin is never handed a choice it did not list.
+    /// <see cref="Options"/> - its <see cref="Canonical"/> form (a value stored under an older name runs
+    /// as its option), a list keeps only its items among them, and a value with none of them is the
+    /// field's default (or nothing). A plugin is never handed a choice it did not list.
     /// </summary>
     public JsonElement? ForRun(JsonElement value)
     {
-        if (Options is null || OptionRefusal("", value) is null) return value;
+        if (Options is null) return value;
+
+        value = Canonical(value);
+        if (OptionRefusal("", value) is null) return value;
 
         if (Type == "list" && value.ValueKind == JsonValueKind.Array)
         {
