@@ -143,7 +143,7 @@ public static class ConnectionEndpoints
                 "Each connection: `id`, `name` (unique, ignoring case: what teams and members use), `kind` (`oauth`, `imap`, "
                 + "`website`, `apikey` or `login`), `provider`, `providerKind`, `account`, `scopes`, "
                 + "`permissions` (the scopes in words, once each), `connectedAt`, `refreshedAt`, `status` (`ok` or `needs-reconnect`, with the provider's "
-                + "`statusReason`), `usedBy` (`team`, `member`, `label`, `slot`), and for a website, API key or username and password its "
+                + "`statusReason`), `testable` (whether Test connection applies), `usedBy` (`team`, `member`, `label`, `slot`), and for a website, API key or username and password its "
                 + "`preset` and `fields` (`name`, `label`, `masked`, `set`, and `value` for an unmasked one only). Never a token, a password or a key.");
 
         app.MapGet("/api/connections/credentials/presets", () => Results.Ok(CredentialPresets.All.Select(p => p.View())))
@@ -297,6 +297,49 @@ public static class ConnectionEndpoints
                 + "only then is it stored, `needs-reconnect` cleared and a `connections.password-updated` "
                 + "tenant row written, in one transaction. 200 `{ sentence, connection }`; a refused login "
                 + "changes nothing and answers 422 with its sentence in `error`. 400 for an OAuth connection.");
+
+        app.MapPost("/api/connections/{id}/test", async (
+            [Description("The connection's id.")] string id,
+            Connections connections, WorkerAsks asks, TeamRegistry teams, HttpContext context, CancellationToken ct) =>
+        {
+            ConnectionTestAnswer answer;
+
+            try
+            {
+                answer = await connections.TestAsync(Actor(context), id, asks, ct);
+            }
+            catch (DbException exception)
+            {
+                return Unrecorded("The test's result was not recorded", exception);
+            }
+            catch (RefreshNotStoredException exception)
+            {
+                return Results.Json(
+                    new { error = $"The test's renewed sign-in could not be stored ({exception.Code}). Nothing else was recorded; try again." },
+                    statusCode: StatusCodes.Status500InternalServerError);
+            }
+
+            return answer.Connection is { } connection
+                ? Results.Ok(new
+                {
+                    health = answer.Health,
+                    sentence = answer.Sentence,
+                    connection = View(connection, await connections.Store.UsedByAsync(connection.Id, ct), teams),
+                })
+                : Results.Json(new { error = answer.Error }, statusCode: answer.Status);
+        })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Test a connection: does it work now?")
+            .WithDescription(
+                "A worker tries what the connection holds, as platform code - never a team or a plugin member: a sign-in is "
+                + "refreshed and the account's profile read once; a mailbox logs in to IMAP and authenticates to SMTP; an API "
+                + "key sends the one harmless request its preset declares; a username and password with a URL signs in to it "
+                + "with HTTP Basic. 200 `{ health: ok|needs-reconnect, sentence, connection }`: the connection's `status` and "
+                + "`statusReason` follow, with a `connections.tested` tenant row, in one transaction. A connection whose "
+                + "`testable` is false (a website, a preset with no test, a username and password with no URL) answers 400; "
+                + "no worker, or none that answers, 503 and records nothing. Never a token, a password or a key, in the "
+                + "answer, the row or a log.");
 
         app.MapPost("/api/connections/start", async (
             StartConnection request, Connections connections, HttpContext context, CancellationToken ct) =>
@@ -653,6 +696,7 @@ public static class ConnectionEndpoints
         statusReason = connection.StatusReason,
         usedBy = UsedBy(uses, teams),
         kind = KindOf(connection),
+        testable = Connections.Testable(connection),
         username = connection.Mailbox?.Username,
         imap = Server(connection.Mailbox?.Imap),
         smtp = Server(connection.Mailbox?.Smtp),

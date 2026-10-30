@@ -8,7 +8,7 @@ namespace Harness.Contracts;
 // worker: its caller answers "not measured" at once.
 // ---------------------------------------------------------------------------------------------
 
-/// <summary>A request about an agent CLI, answered by an event that carries the same <see cref="Request"/>.</summary>
+/// <summary>A request about an agent CLI - or a connection's test - answered by an event that carries the same <see cref="Request"/>.</summary>
 public abstract record AgentCliCommand(string Request) : ControlMessage;
 
 /// <summary>

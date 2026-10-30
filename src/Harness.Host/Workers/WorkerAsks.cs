@@ -83,6 +83,7 @@ public sealed class WorkerAsks(Func<IRunWorker> any, TimeProvider? clock = null)
             SignInProbed probed => probed.Request,
             AgentCommandsRan ran => ran.Request,
             RemovedAsAgent removed => removed.Request,
+            ConnectionTested tested => tested.Request,
             _ => null,
         };
 
@@ -94,10 +95,11 @@ public sealed class WorkerAsks(Func<IRunWorker> any, TimeProvider? clock = null)
     /// Asks a worker of this process's own that takes no run: for a control part composed without
     /// the Host's worker, as a test composes one. The same worker code, over the same transport.
     /// </summary>
-    public static WorkerAsks InProcess(AgentLaunchUser? runAs)
+    public static WorkerAsks InProcess(AgentLaunchUser? runAs, ConnectionTester? tester = null)
     {
         WorkerAsks? asks = null;
-        var worker = InProcessWorker.ForAgentClis(WorkerId.Local, runAs, (envelope, ct) => asks?.HandleAsync(envelope, ct) ?? Task.CompletedTask);
+        var worker = InProcessWorker.ForAgentClis(
+            WorkerId.Local, runAs, (envelope, ct) => asks?.HandleAsync(envelope, ct) ?? Task.CompletedTask, tester);
         asks = new WorkerAsks(() => worker.Worker);
         return asks;
     }

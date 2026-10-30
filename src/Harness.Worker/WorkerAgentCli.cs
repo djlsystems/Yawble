@@ -5,12 +5,14 @@ namespace Harness.Host;
 
 /// <summary>
 /// THIS WORKER'S ANSWERS ABOUT ITS AGENT CLIS: a sign-in probe, a list of commands run, a removal as
-/// the agent. Each request is applied on its own task, as a launch check is, so the worker's ordered
+/// the agent - and a connection's test (<see cref="ConnectionTester"/>). Each request is applied on its own task, as a launch check is, so the worker's ordered
 /// command queue is never held by a CLI, and answered by one event under the request's id.
 /// </summary>
-public sealed class WorkerAgentCli(WorkerId id, AgentLaunchUser? runAs, ILogger? log = null)
+public sealed class WorkerAgentCli(WorkerId id, AgentLaunchUser? runAs, ILogger? log = null, ConnectionTester? tester = null)
 {
     private readonly AgentCommands _commands = new(runAs);
+
+    private readonly ConnectionTester _tester = tester ?? new ConnectionTester();
 
     /// <summary>What a path outside the removal's boundary is refused with.</summary>
     public static string NotConfined(string path, string boundary) => $"Refused: {path} is not inside {boundary}.";
@@ -47,6 +49,17 @@ public sealed class WorkerAgentCli(WorkerId id, AgentLaunchUser? runAs, ILogger?
 
             case RemoveAsAgent remove:
                 return new RemovedAsAgent(remove.Request, await RemoveAsync(remove, ct));
+
+            case TestConnection test:
+                try
+                {
+                    return await _tester.TestAsync(test, ct);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    // The type only: an exception's message may hold what the probe carried.
+                    return new ConnectionTested(test.Request, ConnectionTested.Failed, $"The test failed on worker {id} ({exception.GetType().Name}).");
+                }
 
             default:
                 throw new NotSupportedException($"A worker does not take {request.GetType().Name}.");
