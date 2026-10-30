@@ -107,6 +107,12 @@ public sealed class UndeclarableWorkflows(
 
         if (WorkflowPause.IsPaused(thread)) return false;
 
+        // A MEMBER STILL WAITING FOR A PERSON leaves it open: a run in it ended needs-person, so what
+        // it was asked has not been done, and a person's save tells the Manager in this workflow to
+        // send it again (PluginReadyNotice) - which only an open workflow is told. Declared here, the
+        // Manager's own quick run would end it first and the notice would never land.
+        if (WaitsForPerson(thread)) return false;
+
         // NOTHING LEFT WORKING IT. `excluded: member` is the ending run itself.
         if ((await WorkflowBusyState.DescribeAsync(stored, correlation, host, pending, log, excluded: member, ct)).Count != 0)
         {
@@ -166,4 +172,15 @@ public sealed class UndeclarableWorkflows(
         await log.FindAsync(correlation, ct) is { } root
         && root.Type.StartsWith(MessageTypes.InstructionPrefix, StringComparison.Ordinal)
         && WakeManagerPolicy.OfInstruction(root.Source, root.Payload) is not null;
+
+    /// <summary>
+    /// Whether a member's last run outcome in <paramref name="thread"/> is a <c>failed</c> row of class
+    /// <c>needs-person</c>: it waits for a person, and its workflow is not finished.
+    /// </summary>
+    internal static bool WaitsForPerson(IReadOnlyList<Message> thread) =>
+        thread
+            .Where(row => row.Type is MessageTypes.Failed or MessageTypes.Completed)
+            .GroupBy(row => row.Source, StringComparer.Ordinal)
+            .Select(rows => rows.MaxBy(row => row.Seq)!)
+            .Any(last => last.Type == MessageTypes.Failed && new ContainerMarks(null, null, last).FailureClass == FailureClasses.NeedsPerson);
 }

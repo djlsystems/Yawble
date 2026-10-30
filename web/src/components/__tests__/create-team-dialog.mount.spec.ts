@@ -310,7 +310,7 @@ describe('CreateTeamDialog validation', () => {
   it('puts the repositories on a Code tab after General, with no local-repository checkbox', async () => {
     const wrapper = await open();
 
-    expect([...document.body.querySelectorAll('.q-tab')].map((tab) => tab.textContent?.trim())).toEqual(['General', 'Code', 'Advanced']);
+    expect([...document.body.querySelectorAll('.q-tab')].map((tab) => tab.textContent?.trim())).toEqual(['General', 'Code', 'Advanced', 'Connections']);
     expect(activeTab()).toBe('General');
     expect(() => field(wrapper, 'GitHub Repos')).toThrow();
 

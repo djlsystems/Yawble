@@ -38,6 +38,7 @@ import ForkItForMe from './ForkItForMe.vue';
 import LocalRepoPicker from './LocalRepoPicker.vue';
 import RepoCheckRefusal from './RepoCheckRefusal.vue';
 import DialogTabs from './DialogTabs.vue';
+import TeamConnectionsPanel from './TeamConnectionsPanel.vue';
 import { afterRefusal, withChoice } from '../lib/repoChoices';
 import type { ForkResult } from '../api/types';
 
@@ -349,7 +350,10 @@ async function loadDefaults() {
  * to check. A failing field, or a repository the Host refused, brings its own tab forward rather
  * than leaving the error on a tab nobody is looking at.
  */
-const tab = ref<'general' | 'code' | 'advanced'>('general');
+const tab = ref<'general' | 'code' | 'advanced' | 'connections'>('general');
+
+/** New team → Connections: the connections the team is made with, assigned in the create itself. */
+const chosenConnections = ref<string[]>([]);
 const codePanel = ref<HTMLElement | null>(null);
 
 function showFailingTab(component: { $el?: Element }) {
@@ -360,6 +364,7 @@ function showFailingTab(component: { $el?: Element }) {
 watch(open, (showing) => {
   if (showing) {
     tab.value = 'general';
+    chosenConnections.value = [];
     carriesOn.value = '';
     void loadDefaults();
   }
@@ -564,6 +569,9 @@ async function submit() {
 
       // The answer to a refused check, when there was one.
       repoChoices.value,
+
+      // The connections chosen on the Connections tab: the team starts with these, or none.
+      chosenConnections.value,
     );
 
     remember({
@@ -645,6 +653,7 @@ async function submit() {
           <q-tab name="general" label="General" />
           <q-tab name="code" label="Code" />
           <q-tab name="advanced" label="Advanced" data-advanced-tab :alert="budgetRefused ? 'negative' : false" />
+          <q-tab name="connections" :label="chosenConnections.length > 0 ? `Connections (${chosenConnections.length})` : 'Connections'" />
         </DialogTabs>
 
         <q-separator />
@@ -1010,6 +1019,11 @@ async function submit() {
                 </div>
               </div>
             </div>
+          </q-tab-panel>
+
+          <!-- CONNECTIONS: which connections the new team's plugin members may use, assigned as it is made. -->
+          <q-tab-panel name="connections">
+            <TeamConnectionsPanel v-model:chosen="chosenConnections" />
           </q-tab-panel>
         </q-tab-panels>
 

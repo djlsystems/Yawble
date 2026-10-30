@@ -120,6 +120,14 @@ export interface ContainerSnapshot {
   needsDecisionCorrelation?: number | null
 
   /**
+   * WHAT A PERSON MUST STILL SET before this plugin member can run - a required connection slot with
+   * nothing bound, a required secret with no value - in words, or absent. Read by the Host from the
+   * member's settings, never cleared by a wake: shown as Needs you, and its runs wait (`needs-person`),
+   * which is never an error.
+   */
+  needsPerson?: string | null
+
+  /**
    * WHAT THIS MEMBER LAST HANDED BACK — the words on its most recent `agentContainer.handback`, or
    * `null` when it has never handed anything back.
    *
@@ -3321,6 +3329,18 @@ export interface ConnectionUse {
   member: string
   label: string
   slot: string
+}
+
+/** One connection assigned to a team, as `GET /api/teams/{team}/connections` lists it. */
+export interface TeamConnectionEntry {
+  assignedAt: string
+  /** As `GET /api/connections` answers it, `usedBy` narrowed to this team's members. */
+  connection: Connection
+}
+
+export interface TeamConnections {
+  team: string
+  connections: TeamConnectionEntry[]
 }
 
 /** One connected account, as `GET /api/connections` lists it. No token is ever on it. */

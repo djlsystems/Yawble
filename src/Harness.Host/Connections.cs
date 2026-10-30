@@ -1502,13 +1502,13 @@ public sealed class Connections(
 
     /// <summary>
     /// Why <paramref name="bindings"/> (slot to connection id) cannot be bound on a member of
-    /// <paramref name="manifest"/>, or null. <paramref name="boundOnTeam"/> is set for an agent's hire
-    /// (a Manager or a Concierge): each connection must then be one a person already bound on that
-    /// team. <paramref name="retry"/> ends a missing-scope refusal: what the person does after the
+    /// <paramref name="manifest"/>, or null. <paramref name="assignedToTeam"/> is set for an agent's hire
+    /// (a Manager or a Concierge): each connection must then be one a person assigned to that team.
+    /// <paramref name="retry"/> ends a missing-scope refusal: what the person does after the
     /// Reconnect offered beside it.
     /// </summary>
     public async Task<BindingRefusal?> BindingRefusalAsync(
-        PluginManifest manifest, IReadOnlyDictionary<string, string> bindings, IReadOnlySet<string>? boundOnTeam,
+        PluginManifest manifest, IReadOnlyDictionary<string, string> bindings, IReadOnlySet<string>? assignedToTeam,
         CancellationToken ct = default, string retry = BindAgain)
     {
         foreach (var (slot, connectionId) in bindings)
@@ -1519,11 +1519,11 @@ public sealed class Connections(
                     + (manifest.Connections.Count == 0 ? "none" : string.Join(", ", manifest.Connections.Keys)) + ".");
             }
 
-            if (boundOnTeam is not null && !boundOnTeam.Contains(connectionId))
+            if (assignedToTeam is not null && !assignedToTeam.Contains(connectionId))
             {
                 return new BindingRefusal(
-                    $"The connection '{connectionId}' named for slot `{slot}` is not one a person has bound on this team. "
-                    + "Only a person binds a connection first; a Manager may then name the same one when hiring onto this team.");
+                    $"The connection '{connectionId}' named for slot `{slot}` is not assigned to this team. "
+                    + "Only a person assigns a connection to a team, in Team settings, Connections; a hire may then bind any connection assigned to its own team.");
             }
 
             if (await store.GetAsync(connectionId, ct) is not { } connection)
@@ -1536,6 +1536,28 @@ public sealed class Connections(
 
         return null;
     }
+
+    /// <summary>Of <paramref name="ids"/>, each existing connection not yet assigned to <paramref name="team"/>:
+    /// what a person's binding of them assigns, each with its own <c>team.connection-assigned</c> row.</summary>
+    public async Task<IReadOnlyList<ConnectionRecord>> NotYetAssignedAsync(string team, IEnumerable<string> ids, CancellationToken ct = default)
+    {
+        var assigned = await AssignedIdsAsync(team, ct);
+        var list = new List<ConnectionRecord>();
+        foreach (var id in ids.Distinct(StringComparer.Ordinal).Where(id => !assigned.Contains(id)))
+        {
+            if (await store.GetAsync(id, ct) is { } connection) list.Add(connection);
+        }
+
+        return list;
+    }
+
+    /// <summary>A <c>team.connection-assigned</c> row's detail: never a value.</summary>
+    public static object AssignedDetail(string team, ConnectionRecord connection, string via, string? clonedFrom = null) =>
+        new { team, connection = connection.Id, name = connection.Name, kind = connection.Kind, via, clonedFrom };
+
+    /// <summary>The ids of the connections assigned to <paramref name="team"/> (its stored id).</summary>
+    public async Task<IReadOnlySet<string>> AssignedIdsAsync(string team, CancellationToken ct = default) =>
+        (await store.AssignedAsync(team, ct)).Select(a => a.ConnectionId).ToHashSet(StringComparer.Ordinal);
 
     /// <summary>How a missing-scope refusal ends where a binding is saved.</summary>
     public const string BindAgain = "bind it again";

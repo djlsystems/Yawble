@@ -63,6 +63,7 @@ import TeamSkillsPanel from './TeamSkillsPanel.vue';
 import LocalRepoPicker from './LocalRepoPicker.vue';
 import RepoCheckRefusal from './RepoCheckRefusal.vue';
 import DialogTabs from './DialogTabs.vue';
+import TeamConnectionsPanel from './TeamConnectionsPanel.vue';
 import { afterRefusal, withChoice } from '../lib/repoChoices';
 import type { ForkResult, RepoCheckRefusal as RepoCheckRefused, RepoChoice } from '../api/types';
 
@@ -99,7 +100,7 @@ const open = defineModel<boolean>({ required: true });
  *  state. */
 const props = withDefaults(
   defineProps<{
-    initialTab?: 'general' | 'members' | 'instructions' | 'skills' | 'repos' | 'env';
+    initialTab?: 'general' | 'members' | 'instructions' | 'skills' | 'repos' | 'env' | 'connections';
     /** The team to show; the active team when not given (the Teams list's row menu names one). */
     teamId?: string | null;
   }>(),
@@ -114,7 +115,7 @@ const { installations } = useAgentInstallations();
 /** The tab's name: the heading without "(optional)", which a tab has no room for. */
 const TeamInstructionsTab = 'Team instructions';
 
-const tab = ref<'general' | 'members' | 'instructions' | 'skills' | 'repos' | 'env'>(props.initialTab);
+const tab = ref<'general' | 'members' | 'instructions' | 'skills' | 'repos' | 'env' | 'connections'>(props.initialTab);
 
 const team = computed(() => (props.teamId ? board.teams.find((candidate) => candidate.id === props.teamId) : null) ?? board.activeTeam);
 const containers = computed(() => team.value?.containers ?? []);
@@ -847,6 +848,7 @@ watch(open, (showing) => {
           <q-tab name="skills" label="Skills" />
           <q-tab name="repos" label="Code" />
           <q-tab name="env" label="Environment" />
+          <q-tab name="connections" label="Connections" />
         </DialogTabs>
 
         <q-separator />
@@ -1432,6 +1434,12 @@ watch(open, (showing) => {
             <div v-if="envParsed.error" class="text-negative q-mt-sm">{{ envParsed.error }}</div>
 
             <div v-if="envError" class="text-negative q-mt-sm">{{ envError }}</div>
+          </q-tab-panel>
+
+          <!-- CONNECTIONS: which connections this team's plugin members may use. Each change is the
+               Host's at once, not Save's; a person's act only. -->
+          <q-tab-panel name="connections">
+            <TeamConnectionsPanel v-if="team" :team="team.id" />
           </q-tab-panel>
 
         </q-tab-panels>

@@ -126,6 +126,13 @@ public sealed class MemberRuntime : IAsyncDisposable
     private volatile string? _blocked;
 
     /// <summary>
+    /// <c>needs-person</c> when <see cref="_blocked"/> is the Host saying a person must set something
+    /// (a connection taken from the member), else null. Cleared with <see cref="_blocked"/>; what lets
+    /// <see cref="ClearNeedsPersonMarks"/> clear that mark, and only that one, once it is set.
+    /// </summary>
+    private volatile string? _blockedClass;
+
+    /// <summary>
     /// Why the PLATFORM did not complete the last run, or null. Beside _blocked rather than folded
     /// into it: that one is the AGENT saying it gave up, and this is the platform saying the run
     /// did not finish. See ContainerSnapshot.Failed, which documents the whole pair.
@@ -153,6 +160,11 @@ public sealed class MemberRuntime : IAsyncDisposable
     /// </summary>
     private volatile string? _resumeAt;
     private volatile string? _needsDecision;
+
+    /// <summary>What a person must still set before this plugin member can run, or null. See
+    /// <see cref="ContainerSnapshot.NeedsPerson"/>: set and cleared by the Host from the member's
+    /// settings, never by a wake.</summary>
+    private volatile string? _needsPerson;
 
     /// <summary>The `needs-decision` row <see cref="_needsDecision"/> was read from, or null. One
     /// reference, so a snapshot never reads one row's seq beside another's workflow.</summary>
@@ -485,7 +497,21 @@ public sealed class MemberRuntime : IAsyncDisposable
         Kind: MemberRef.KindOf(_definition.Agent),
         Wakes: _wakes,
         NeedsDecisionSeq: _needsDecisionRow?.Seq,
-        NeedsDecisionCorrelation: _needsDecisionRow?.Correlation);
+        NeedsDecisionCorrelation: _needsDecisionRow?.Correlation,
+        NeedsPerson: _needsPerson);
+
+    /// <summary>
+    /// Records what a person must still set before this plugin member's runs can start, or clears it
+    /// with null, and pushes it when it moves. Not cleared by a wake: the Host's read of the member's
+    /// settings is the only writer.
+    /// </summary>
+    public void MarkNeedsPerson(string? what)
+    {
+        if (string.Equals(_needsPerson, what, StringComparison.Ordinal)) return;
+
+        _needsPerson = what;
+        Publish();
+    }
 
     /// <summary>
     /// Records that this container has stopped without finishing, and pushes it.
@@ -498,9 +524,10 @@ public sealed class MemberRuntime : IAsyncDisposable
     /// <see cref="ContainerSnapshot.Blocked"/> before changing either half; the pair is the whole
     /// behaviour.
     /// </summary>
-    public void MarkBlocked(string reason)
+    public void MarkBlocked(string reason, string? blockedClass = null)
     {
         _blocked = reason;
+        _blockedClass = blockedClass;
         _blockedRow = MarkedNow();
 
         // Pushed, or the board never looks. The SPA's feed has no poll - it refetches only when a
@@ -597,12 +624,43 @@ public sealed class MemberRuntime : IAsyncDisposable
         if (_blocked is null && _failed is null) return;
 
         _blocked = null;
+        _blockedClass = null;
         _failed = null;
         _blockedRow = null;
         _failedRow = null;
         _failureClass = null;
         _resumeAt = null;
         Publish();
+    }
+
+    /// <summary>
+    /// Clears the marks that said this member waits for a person - a run that failed
+    /// <c>needs-person</c>, a block the Host wrote as <c>needs-person</c> - once a person has set what
+    /// they named (<c>PluginSetup</c>: nothing is missing any more). Any other mark stays for the next
+    /// wake. Pushed only when a mark moves.
+    /// </summary>
+    public void ClearNeedsPersonMarks()
+    {
+        var moved = false;
+
+        if (_failed is not null && _failureClass == FailureClasses.NeedsPerson)
+        {
+            _failed = null;
+            _failedRow = null;
+            _failureClass = null;
+            _resumeAt = null;
+            moved = true;
+        }
+
+        if (_blocked is not null && _blockedClass == FailureClasses.NeedsPerson)
+        {
+            _blocked = null;
+            _blockedClass = null;
+            _blockedRow = null;
+            moved = true;
+        }
+
+        if (moved) Publish();
     }
 
     /// <summary>
@@ -1468,6 +1526,7 @@ public sealed class MemberRuntime : IAsyncDisposable
         // and the platform publishes `failed` - and a wake that cleared one of a pair would leave a
         // card wearing half of the last job.
         _blocked = null;
+        _blockedClass = null;
         _failed = null;
         _blockedRow = null;
         _failedRow = null;

@@ -500,7 +500,8 @@ public sealed partial class PlatformMcpTools(
         Dictionary<string, string>? secrets = null,
         [Description(
             "A plugin's connection bindings: each connection slot it declares, to the id of a connection a "
-            + "person has already bound on your team (the hiring tool lists them). Never a token. Only with `plugin`.")]
+            + "person has assigned to your team (the hiring tool lists them). Only a person assigns a connection "
+            + "to a team; no tool does. Never a token. Only with `plugin`.")]
         Dictionary<string, string>? connections = null,
         CancellationToken cancellationToken = default)
     {

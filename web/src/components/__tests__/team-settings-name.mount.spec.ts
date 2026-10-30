@@ -202,14 +202,14 @@ describe('TeamSettingsDialog, mounted, and the removed team rename', () => {
  * Manager too, so a box on General beside the agent allowlist read as a setting for hired members only.
  */
 describe('TeamSettingsDialog, Team instructions', () => {
-  it('orders the tabs General, Members, Team instructions, Skills, Code, Environment', async () => {
+  it('orders the tabs General, Members, Team instructions, Skills, Code, Environment, Connections', async () => {
     const { wrapper } = await mountSettings();
 
     const labels = tabLabels();
-    expect(labels).toHaveLength(6);
+    expect(labels).toHaveLength(7);
     expect(labels[0]).toBe('General');
     expect(labels[1]).toMatch(/^Members \(\d+\)$/);
-    expect(labels.slice(2)).toEqual(['Team instructions', 'Skills', 'Code', 'Environment']);
+    expect(labels.slice(2)).toEqual(['Team instructions', 'Skills', 'Code', 'Environment', 'Connections']);
 
     wrapper.unmount();
   });

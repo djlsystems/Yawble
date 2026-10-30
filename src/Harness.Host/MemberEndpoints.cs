@@ -79,14 +79,14 @@ internal static class MemberEndpoints
                 return Refusals.NoTeam(team);
             }
 
-            // THE CONNECTIONS A PERSON HAS BOUND ON THIS TEAM: the only ones a Manager's hire may name. By id,
-            // name and provider - never an account's token, and not the account itself.
-            var uses = await connectionStore.AllUsesAsync(ct);
-            var boundHere = (await connectionStore.ListAsync(ct))
-                .SelectMany(c => uses[c.Id]
-                    .Where(u => string.Equals(u.Team, team, StringComparison.OrdinalIgnoreCase))
-                    .Select(u => new { id = c.Id, name = c.Name, provider = c.Provider, slot = u.Slot }))
-                .Distinct()
+            // THE CONNECTIONS A PERSON HAS ASSIGNED TO THIS TEAM: the only ones a Manager's hire may name. By
+            // id, name, kind and provider - never a token or any other value.
+            var assigned = (await connectionStore.AssignedAsync(teams.ExistingName(team) ?? team, ct))
+                .Select(a => a.ConnectionId)
+                .ToHashSet(StringComparer.Ordinal);
+            var assignedHere = (await connectionStore.ListAsync(ct))
+                .Where(c => assigned.Contains(c.Id))
+                .Select(c => new { id = c.Id, name = c.Name, kind = c.Kind, provider = c.Provider })
                 .ToArray();
 
             var allowlist = teams.MemberAgentsFor(team) ?? [];
@@ -134,7 +134,7 @@ internal static class MemberEndpoints
                     connections = p.Manifest.Connections.ToDictionary(c => c.Key, c => c.Value.Summary),
                 }).ToArray(),
 
-                connections = boundHere,
+                connections = assignedHere,
             });
         })
             .WithTags("Teams")
@@ -145,8 +145,8 @@ internal static class MemberEndpoints
                 + "current per-tag counts on this team, plus `uncoveredTags`: the hire roles (developer, "
                 + "tester, researcher) that no allowed agent carries, and `plugins`: every plugin installed "
                 + "on this Host (id, reference, one line, its skill's name, and what each connection slot "
-                + "needs), and `connections`: each connection a person has bound on this team (`id`, `name`, "
-                + "`provider`, `slot`) - the only ones a Manager's hire may name.\n\n"
+                + "needs), and `connections`: each connection a person has assigned to this team (`id`, `name`, "
+                + "`kind`, `provider`) - the only ones a Manager's hire may bind.\n\n"
                 + "This route never returns command lines, `env`, a token, or Agents outside this team's allowlist.");
 
         app.MapPost("/api/teams/{team}/containers", async (
@@ -325,10 +325,11 @@ internal static class MemberEndpoints
 
                 // CONNECTIONS ARE A PERSON'S CHOICE. A binding points a plugin at somebody's mailbox, so an
                 // agent's hire (a Manager's credential, or a Concierge's) may name only a connection a PERSON
-                // has already bound on a member of this same team - otherwise incoming content could steer an
-                // agent into pointing a plugin at an account nobody chose for this team. Every hire's binding
-                // must exist, suit the slot's providers and hold the slot's scopes; the refusal offers
-                // Reconnect when only scopes are missing.
+                // has assigned to this same team - otherwise incoming content could steer an agent into
+                // pointing a plugin at an account nobody gave this team. A person's hire may name any: one
+                // not yet assigned is assigned with the binding, with its own row. Every hire's binding must
+                // exist, suit the slot's providers and hold the slot's scopes; the refusal offers Reconnect
+                // when only scopes are missing.
                 if (request.Connections is { Count: > 0 } connectionBindings)
                 {
                     if (request.Agent is not { } boundAgent || !MemberRef.IsPlugin(boundAgent.Trim(), out var boundPluginId))
@@ -339,9 +340,9 @@ internal static class MemberEndpoints
                     if (plugins.For(boundPluginId) is { } boundPlugin)
                     {
                         var agentHire = hirer is { Kind: PrincipalKind.Container or PrincipalKind.Concierge or PrincipalKind.TenantConcierge };
-                        var boundOnTeam = agentHire ? await pluginSettings.ConnectionsBoundOnAsync(team, ct) : null;
+                        var assignedToTeam = agentHire ? await connections.AssignedIdsAsync(teams.ExistingName(team) ?? team, ct) : null;
 
-                        if (await connections.BindingRefusalAsync(boundPlugin.Manifest, connectionBindings, boundOnTeam, ct) is { } bindingRefusal)
+                        if (await connections.BindingRefusalAsync(boundPlugin.Manifest, connectionBindings, assignedToTeam, ct) is { } bindingRefusal)
                         {
                             return Results.BadRequest(bindingRefusal.Body());
                         }
@@ -392,6 +393,15 @@ internal static class MemberEndpoints
                 IReadOnlySet<string> valued = values.Keys.ToHashSet(StringComparer.Ordinal);
                 var hiredPluginReference = request.Agent?.Trim();
 
+                // A PERSON'S BINDING OF A CONNECTION NOT YET ASSIGNED to the team assigns it, with its own
+                // `team.connection-assigned` row beside the binding's. An agent's never gets here with one.
+                var assigning = request.Connections is { Count: > 0 } toAssign
+                    ? await connections.NotYetAssignedAsync(teams.ExistingName(team) ?? team, toAssign.Values, ct)
+                    : [];
+                IReadOnlyList<TriggerAudit> AssignedRows(ContainerId member) =>
+                    [.. assigning.Select(c => TenantLogging.Row(
+                        context, TenantActions.TeamConnectionAssigned, c.Id, c.Name, Connections.AssignedDetail(member.Team, c, "hire")))];
+
                 var snapshot = await teams.HireMemberAsync(
                     // THE TEAM, never a name in code - the Agent half of the same rule its Prompt follows,
                     // and refused rather than defaulted when the team has chosen none.
@@ -411,11 +421,11 @@ internal static class MemberEndpoints
                     // THE BINDING'S ROW lands in the same transaction as the member's settings.
                     connectionsAudit: request.Connections is { Count: > 0 } hiredBindings
                         && request.Agent is { } hiredAgent && MemberRef.IsPlugin(hiredAgent.Trim(), out var hiredId)
-                        ? member => TenantLogging.Row(
+                        ? member => [TenantLogging.Row(
                             context, TenantActions.MemberConnectionsChanged, $"{member.Team}/{member.Name}", name,
                             PluginEndpoints.ConnectionsChangedDetail(
                                 member, hiredId, hiredBindings.Keys.Order(StringComparer.Ordinal), PluginMemberSettings.None,
-                                PluginMemberSettings.None with { Connections = hiredBindings }))
+                                PluginMemberSettings.None with { Connections = hiredBindings })), .. AssignedRows(member)]
                         : null,
 
                     // THE HIRER wrote the member's own instructions: a Manager through the `member` tool,
@@ -436,11 +446,17 @@ internal static class MemberEndpoints
                                     context, TenantActions.MemberConnectionsChanged, $"{member.Team}/{member.Name}", name,
                                     PluginEndpoints.ConnectionsChangedDetail(
                                         member, valuedId!, valuedBindings.Keys.Order(StringComparer.Ordinal), PluginMemberSettings.None,
-                                        PluginMemberSettings.None with { Connections = valuedBindings }))]
+                                        PluginMemberSettings.None with { Connections = valuedBindings })), .. AssignedRows(member)]
                                 : [],
                             values.ToDictionary(v => v.Key, v => (string?)v.Value, StringComparer.Ordinal),
                             namedValues,
                             PluginEndpoints.SecretActor(context), token));
+
+                // A PLUGIN MEMBER HIRED WITH A REQUIRED SLOT OR SECRET UNSET reads Needs you from now on.
+                if (context.RequestServices.GetService<PluginSetup>() is { } setup)
+                {
+                    await setup.RefreshAsync(new ContainerId(snapshot.Team, snapshot.Id), ct);
+                }
 
                 // Said in the BODY as well as the header: the body is what the `member` tool hands the
                 // Manager, and a substitution said only in a header is never seen by anyone who hired.

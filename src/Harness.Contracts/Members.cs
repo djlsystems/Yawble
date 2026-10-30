@@ -118,6 +118,14 @@ public interface IMemberReports
     Task<MemberReportOutcome> BlockedAsync(ContainerId member, string reason, int? item = null, CancellationToken ct = default);
 
     /// <summary>
+    /// The Host blocking <paramref name="member"/> until a person sets something it was using - its
+    /// <c>blocked</c> row and mark carry <c>failureClass: needs-person</c>, so a person's setting clears
+    /// them at once. A reporter with no such kind blocks it as <see cref="BlockedAsync"/> does.
+    /// </summary>
+    Task<MemberReportOutcome> NeedsPersonAsync(ContainerId member, string reason, CancellationToken ct = default) =>
+        BlockedAsync(member, reason, null, ct);
+
+    /// <summary>
     /// Defers one item of the running batch by its 1-based number: it is not closed when the run
     /// ends but delivered again as its own next run. Refused for the only item of a run.
     /// </summary>

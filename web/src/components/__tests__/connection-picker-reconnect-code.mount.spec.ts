@@ -23,6 +23,7 @@ const {
   startDeviceConnection,
   getConnectionFlow,
   goTo,
+  listTeamConnections,
 } = vi.hoisted(() => ({
   listCatalog: vi.fn(),
   listPlugins: vi.fn(),
@@ -33,6 +34,8 @@ const {
   startDeviceConnection: vi.fn(),
   getConnectionFlow: vi.fn(),
   goTo: vi.fn(),
+  // The team's assignments unread: every connection that fits is offered, as before CON 2.
+  listTeamConnections: vi.fn(() => Promise.reject(new Error('not read'))),
 }));
 
 vi.mock('../../api/client', async (importOriginal) => ({
@@ -45,6 +48,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
   startConnection,
   startDeviceConnection,
   getConnectionFlow,
+  listTeamConnections,
 }));
 
 vi.mock('../../lib/browserNavigation', () => ({

@@ -104,6 +104,14 @@ public sealed class PluginNeedsPersonTests : IAsyncLifetime
         }
         Assert.Contains("token", failed.Payload);
 
+        // THE MANAGER'S WOKEN RUN ENDS FIRST, as it does whenever a person takes longer than an agent:
+        // the workflow is the plugin's, which cannot declare, and must stay open for the notice.
+        await ManagerRanAsync(failed);
+        Assert.Contains(failed.CorrelationId, await Services.GetRequiredService<IMessageLog>().OpenWorkflowsAmongAsync([failed.CorrelationId], Ct));
+
+        // AND THE WAIT IS NOT AN ERROR on the workflow either: the screen's tab and tile read this word.
+        await AssertWaitingNotFailedAsync(failed.CorrelationId);
+
         // The person sets a key and binds it on the member, from the screen.
         var key = $"NEEDS_PERSON_TEST_{Guid.NewGuid():N}".ToUpperInvariant();
         Assert.Equal(HttpStatusCode.OK, (await _person.PutAsJsonAsync($"/api/secrets/{key}", new { value = $"value-{Guid.NewGuid():N}" }, Ct)).StatusCode);
@@ -117,6 +125,7 @@ public sealed class PluginNeedsPersonTests : IAsyncLifetime
         Assert.Equal(failed.Seq, notice.CausationSeq);
         Assert.Contains("Keyed is ready now", notice.Payload);
         Assert.Contains("send it the same instruction again", notice.Payload);
+        await AssertWaitingNotFailedAsync(failed.CorrelationId);
 
         // A second save says nothing more: the workflow was already told.
         var again = await _person.PutAsJsonAsync(
@@ -201,6 +210,38 @@ public sealed class PluginNeedsPersonTests : IAsyncLifetime
         Assert.Contains("`[needs-person]`", prompt);
         Assert.Contains("Report it to the person once with `blocked`", prompt);
         Assert.Contains("send the instruction again", prompt);
+    }
+
+    /// <summary>Waits until the Manager the failure woke has run and is idle again.</summary>
+    private async Task ManagerRanAsync(Message failed)
+    {
+        var manager = new ContainerId(_team, TeamRegistry.DefaultManagerName);
+        var log = Services.GetRequiredService<IMessageLog>();
+        var host = Services.GetRequiredService<Harness.Containers.ContainerHost>();
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (DateTime.UtcNow < deadline)
+        {
+            var ended = (await log.ReadAfterAsync(failed.Seq, [MessageTypes.Completed, MessageTypes.Failed], int.MaxValue, Ct))
+                .Any(m => m.Source == manager.ToString() && m.CorrelationId == failed.CorrelationId);
+            if (ended && host.Find(manager)!.State == ContainerState.Idle) return;
+            await Task.Delay(50, Ct);
+        }
+
+        Assert.Fail("The Manager was not woken by the needs-person failure, or its run did not end.");
+    }
+
+    /// <summary>
+    /// The workflow as the screen reads it: open, Awaiting the plugin member, with no failed member and
+    /// no failed run counted.
+    /// </summary>
+    private async Task AssertWaitingNotFailedAsync(long correlation)
+    {
+        var workflows = await _person.GetFromJsonAsync<JsonObject>($"/api/teams/{_team}/workflows", Ct);
+        var workflow = workflows!["workflows"]!.AsArray().Single(w => (long)w!["correlation"]! == correlation)!;
+        Assert.Equal("Awaiting", (string?)workflow["state"]);
+        Assert.Empty(workflow["failedMembers"]!.AsArray());
+        Assert.Equal(0, (int)workflow["runsFailed"]!);
+        Assert.Null(workflow["endedAt"]);
     }
 
     private async Task<IReadOnlyList<Message>> NoticesAsync()

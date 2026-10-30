@@ -144,6 +144,25 @@ public sealed class SqlServerPluginMemberSettings(string connectionString) : IPl
         command.Parameters.AddWithValue("@secrets", PluginMemberSettingsRows.SecretsJson(settings));
         command.Parameters.AddWithValue("@connections", PluginMemberSettingsRows.ConnectionsJson(settings));
         await command.ExecuteNonQueryAsync(ct);
+
+        // A BINDING IS AN ASSIGNMENT, as SQLite's: every bound connection is assigned to the team here.
+        foreach (var id in settings.Connections.Values.Distinct(StringComparer.Ordinal))
+        {
+            await using var assign = connection.CreateCommand();
+            assign.Transaction = transaction;
+            assign.CommandText =
+                """
+                INSERT INTO team_connections (team, connection_id, assigned_at)
+                SELECT t.id, @id, @at FROM teams t
+                WHERE t.id = @team
+                  AND EXISTS (SELECT 1 FROM connections c WHERE c.id = @id)
+                  AND NOT EXISTS (SELECT 1 FROM team_connections a WITH (UPDLOCK, HOLDLOCK) WHERE a.team = t.id AND a.connection_id = @id);
+                """;
+            assign.Parameters.AddWithValue("@team", member.Team);
+            assign.Parameters.AddWithValue("@id", id);
+            assign.Parameters.AddWithValue("@at", Instant.Now());
+            await assign.ExecuteNonQueryAsync(ct);
+        }
     }
 
     internal static void BindMember(SqlCommand command, ContainerId member) => BindMember(command, member.Team, member.Name);

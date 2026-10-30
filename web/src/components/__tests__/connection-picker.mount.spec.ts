@@ -158,11 +158,12 @@ async function mountHire() {
 }
 
 describe('the binding picker, at hire', () => {
-  it('lists only connections of a provider the slot allows, by name, account and provider', async () => {
+  it('lists only connections of a provider the slot allows, by name, account and provider, then New connection...', async () => {
     const wrapper = await mountHire();
 
     const options = select(wrapper, 'Connection for mail').props('options') as { value: string; label: string }[];
-    expect(options.map((option) => option.value)).toEqual(['conn-read', 'conn-work']);
+    expect(options.map((option) => option.value)).toEqual(['conn-read', 'conn-work', '__new_connection__']);
+    expect(options.at(-1)!.label).toBe('New connection...');
     expect(options.find((option) => option.value === 'conn-work')!.label).toBe('Work mail - person@example.com (Google)');
     expect(select(wrapper, 'Connection for mail').find('[data-help]').attributes('aria-label')).toContain('needs a Google or Microsoft connection');
 

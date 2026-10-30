@@ -273,16 +273,27 @@ public static class PluginEndpoints
 
             // A PERSON BINDS: this route is HumansOnly, so any connection may be named - but it must
             // exist, suit the slot's providers and hold every scope the slot asks for.
-            if (await connections.BindingRefusalAsync(plugin.Manifest, changed.Connections, boundOnTeam: null, ct) is { } bindingRefusal)
+            if (await connections.BindingRefusalAsync(plugin.Manifest, changed.Connections, assignedToTeam: null, ct) is { } bindingRefusal)
             {
                 return Results.BadRequest(bindingRefusal.Body());
             }
 
+            // A PERSON'S BINDING IS ALSO AN ASSIGNMENT: a connection not yet assigned to the team (New
+            // connection... from this slot) is assigned with the binding, its own row in the same transaction.
+            var assigning = await connections.NotYetAssignedAsync(id.Team, changed.Connections.Values, ct);
+
             try
             {
-                var rows = PersonChangeRows(
-                    context.User.FindFirstValue(ClaimTypes.NameIdentifier), context.User.FindFirstValue(ClaimTypes.Email),
-                    id, found.Label ?? found.Name, plugin.Manifest.Id, before, changed);
+                IReadOnlyList<TriggerAudit> rows =
+                [
+                    .. PersonChangeRows(
+                        context.User.FindFirstValue(ClaimTypes.NameIdentifier), context.User.FindFirstValue(ClaimTypes.Email),
+                        id, found.Label ?? found.Name, plugin.Manifest.Id, before, changed),
+                    .. assigning.Select(c => new TriggerAudit(
+                        context.User.FindFirstValue(ClaimTypes.NameIdentifier), context.User.FindFirstValue(ClaimTypes.Email),
+                        TenantActions.TeamConnectionAssigned, c.Id, c.Name,
+                        JsonSerializer.Serialize(Connections.AssignedDetail(id.Team, c, "member binding")))),
+                ];
 
                 // The settings, their rows and every value with its own row land in ONE transaction.
                 if (cells.Count > 0)
@@ -312,6 +323,7 @@ public static class PluginEndpoints
 
             // A PERSON'S SAVE THAT LEAVES NOTHING MISSING tells the Manager in every workflow whose run
             // of this member failed needs-person. Best effort: the save stands whatever the notice does.
+            await RefreshSetupAsync(context, id, ct);
             await NoticeIfReadyAsync(log, id, found.Label ?? found.Name, plugin.Manifest, changed, secrets, valued, ct);
 
             return Results.Ok(await SettingsAsync(id, plugin, changed, reads, ct));
@@ -403,6 +415,7 @@ public static class PluginEndpoints
             }
 
             var bound = await settings.ForAsync(id, ct);
+            await RefreshSetupAsync(context, id, ct);
             await NoticeIfReadyAsync(
                 log, id, found.Label ?? found.Name, plugin.Manifest, bound, secrets,
                 (await memberSecrets.StatesAsync(id, ct)).Keys.ToHashSet(StringComparer.Ordinal), ct);
@@ -647,6 +660,7 @@ public static class PluginEndpoints
                     var id = new ContainerId(member.Team, member.Id);
                     var bound = await settings.ForAsync(id, ct);
                     if (!bound.Secrets.Values.Contains(key, StringComparer.Ordinal)) continue;
+                    await RefreshSetupAsync(context, id, ct);
                     await NoticeIfReadyAsync(
                         log, id, member.Name, plugin.Manifest, bound, secrets,
                         (await memberSecrets.StatesAsync(id, ct)).Keys.ToHashSet(StringComparer.Ordinal), ct);
@@ -804,6 +818,10 @@ public static class PluginEndpoints
     /// sets is missing any more. A notice that cannot be written is logged by the log and never
     /// undoes the person's save.
     /// </summary>
+    /// <summary>The member's Needs you mark read again from what was just saved (<see cref="PluginSetup"/>).</summary>
+    private static Task RefreshSetupAsync(HttpContext context, ContainerId id, CancellationToken ct) =>
+        context.RequestServices.GetService<PluginSetup>() is { } setup ? setup.RefreshAsync(id, ct) : Task.CompletedTask;
+
     private static async Task NoticeIfReadyAsync(
         IMessageLog log, ContainerId id, string name, PluginManifest manifest, PluginMemberSettings bound, ISecretStore secrets,
         IReadOnlySet<string>? valued, CancellationToken ct)

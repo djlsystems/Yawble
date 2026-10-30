@@ -14,6 +14,7 @@ import {
   installSolution,
   listConnectionProviders,
   listConnections,
+  listTeamConnections,
   previewSolution,
   solutionPanel,
   solutionsInstalled,
@@ -570,6 +571,27 @@ function slotPlugin(input: { member: string; slot: string }): { id: string; name
   if (!named?.plugin || providers.value.length === 0) return null;
   return { id: named.plugin, name: plan.value?.plugins.find((plugin) => plugin.id === named.plugin)?.name ?? named.plugin };
 }
+
+// THE TEAM'S CONNECTIONS: an update (or a reinstall over a kept team) offers only those assigned to
+// that team; a new team has none yet, so every connection that fits is offered and the install
+// assigns what is chosen to it.
+const existingTeam = computed(() => (mode.value === 'update' ? updateTeam.value : (reinstall.value?.team ?? '')) || '');
+const teamAssigned = ref<string[] | undefined>(undefined);
+
+watch(
+  existingTeam,
+  async (team) => {
+    teamAssigned.value = undefined;
+    if (!team) return;
+    try {
+      const read = (await listTeamConnections(asTeamId(team))).connections.map((entry) => entry.connection.id);
+      if (existingTeam.value === team) teamAssigned.value = read;
+    } catch {
+      // Unread, the pickers offer every connection that fits; the Host still checks the binding.
+    }
+  },
+  { immediate: true },
+);
 
 function rememberConnection(connection: Connection) {
   connectedHere.value = [...connectedHere.value.filter((made) => made.id !== connection.id), connection];
@@ -1218,6 +1240,7 @@ function next() {
                   :slot-name="input.slot"
                   :spec="slotSpec(input)"
                   :connections="wizardConnections"
+                  :assigned="teamAssigned"
                   :providers="providers"
                   :plugin="slotPlugin(input)?.id"
                   :plugin-name="slotPlugin(input)?.name"

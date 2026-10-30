@@ -1536,8 +1536,10 @@ public static class BuiltInSkills
             plugin writes no OAuth code.
 
             - A person connects the account in Admin, Connections (or with the operator CLI's connect
-              command) and binds it to the member's slot in the member's settings. A Manager may
-              name only a connection a person has already bound on its team.
+              command) and assigns it to the teams that may use it, in Team settings, Connections.
+              A member's slot binds one assigned to its team. A Manager's hire may bind any
+              connection assigned to its own team (`hiring` lists them) and is refused one that is
+              not. Only a person assigns a connection to a team: no tool does, so ask the person.
             - Never ask the person for a token, a refresh token or a client secret, and never ask
               them to paste one into a message, a setting or a secret.
             - Never write an "authorize" or "login" command into a plugin or a spec: the platform

@@ -531,22 +531,65 @@ run of a member bound to it is blocked with a sentence naming the connection and
 it from Admin → Connections. **Reconnect** there, or `yawble connect <provider> --name <name>` again,
 clears it, and the next run goes ahead.
 
+## Which teams may use a connection
+
+A connection is set up once and used by as many teams as a person chooses. **Which teams may use it is a
+person's decision, made where they manage a team**, and a plugin member picks only from what its team has
+been given. A new team has none.
+
+- **Team settings → Connections** lists the connections assigned to the team and, under each, the members
+  of the team using it. **Add connection** picks an existing one; **New connection...** opens the same
+  wizard as Admin → Connections and assigns what it saves to this team; **Remove** takes one off the team.
+- **New team → Connections** does the same while the team is created: the team starts with those.
+- **Removing asks first**, naming the members that use it. Confirmed, the assignment and every binding of
+  it on that team go in one transaction; each member unbound reads **Needs you** until a person binds
+  another. The connection itself stays, and every other team keeps it.
+- **Only a person assigns.** The routes are a person's only (`GET`/`POST /api/teams/{team}/connections`,
+  `DELETE /api/teams/{team}/connections/{id}?unbind=true`, and `connections` on `POST /api/teams`, refused
+  403 for an agent's create). No Manager, member or Concierge route or tool assigns a connection.
+- **An agent's hire binds what the team was given.** A Manager's (or Concierge's) hire may bind any
+  connection assigned to its own team - `hiring` lists them as `connections: [{ id, name, kind, provider }]`
+  - and is refused one that is not. (This replaces the earlier rule, which let an agent reuse only a
+  connection a person had already bound on a member of that team.)
+- **A person's binding is also an assignment.** A person binding a connection not yet assigned to the team -
+  New connection... from a member's slot, a hire, a solution install - assigns it in the same transaction,
+  with its own row. So every binding is of a connection assigned to the member's team.
+- **Lifecycle.** Cloning a team copies its assignments and its members' bindings, so the clone's plugin
+  members run with the original's connections without a person touching them. An archived team keeps its
+  assignments and bindings. A deleted team's assignments and bindings go with it; the connections stay.
+  Deleting a connection removes it from every team.
+- **Every assignment, removal and binding** writes its tenant row in the same transaction as the change, or
+  nothing changes: `team.connection-assigned` (team, connection id, name, kind, and where it was made:
+  `team settings`, `new team`, `member binding`, `hire`, `solution install` or `clone`),
+  `team.connection-removed` (with the members unbound), `member.connections-changed`. No route, row, log or
+  file carries a secret value.
+- An existing volume's bindings are assigned to their teams when it is upgraded (schema step `auth-032`),
+  so nothing bound before stops.
+
 ## Binding a connection to a member
 
-A plugin member's settings - at hire, and later in Member settings - show a picker per slot the
-manifest declares, listing the connections of the providers the slot allows.
+A plugin member's settings - at hire (Add member), later in Member settings, and in a solution install -
+show a picker per slot the manifest declares, listing **only the connections assigned to the member's
+team that fit the slot**: its kind, its providers and its scopes. When exactly one fits, it is
+preselected. **New connection...** opens the connection wizard and, on save, assigns the connection to
+the team and binds it to the member in one go.
 
 - The member stores the connection's **id**, never a token: a rename changes nothing for it, and a
   change to what is behind the name reaches it at its next run. Cloning a team carries the binding.
-- Only a person binds. A Manager or Concierge hire may name a connection only when a person has
-  already bound that same connection to a member of the same team.
+- A Manager or Concierge hire may bind any connection assigned to its own team, and is refused one
+  that is not (see above).
 - A connection lacking a scope the slot asks for is refused at binding, offering **Reconnect** with
   the missing scope.
 - A connection made from a slot's **Connect** is bound through the same route a person's binding
   uses, `PUT /api/teams/{team}/members/{member}/plugin-settings` with `connections: { <slot>: <id> }`:
-  the same scope check, the same `member.connections-changed` row in the same transaction.
+  the same scope check, the same `member.connections-changed` row in the same transaction, and a
+  `team.connection-assigned` row when it was not yet assigned to the team.
 - Before an install, nothing of a package's plugin is installed, so the plan names what each connection
   input's slot takes: `personConnections: [{ member, slot, description, required, plugin, providers,
-  scopes }]`, `scopes` keyed by provider as the manifest declares them.
-- An unbound required slot blocks the member's runs with a sentence naming the slot.
-- Connecting, reconnecting and binding take effect without a restart.
+  scopes }]`, `scopes` keyed by provider as the manifest declares them. The install asks for each from
+  the connections that fit, or offers New connection..., and assigns what is chosen to the new team.
+- **A required slot with nothing bound** shows **Needs you** where the member's status shows (the
+  snapshot's `needsPerson`). Its runs wait for a person, ending `needs-person` - a wait, never an
+  error. A person's binding clears it and tells the Manager in each workflow that waited (the
+  plugin-ready notice), so the work is sent again.
+- Connecting, reconnecting, assigning and binding take effect without a restart.

@@ -571,6 +571,7 @@ async function submit() {
             :table-states="pluginTableStates"
             :saved-table-rows="pluginSavedRows"
             :member-context="memberContext"
+            :team="snapshot.team"
             :plugin="pluginId"
             :bind-slot="bindPluginSlot"
           />

@@ -181,5 +181,25 @@ public static class SqlServerAuthPluginsSchema
                  WHERE o.name COLLATE {SqlServerSql.NoCase} = c.name COLLATE {SqlServerSql.NoCase}
                    AND (o.connected_at < c.connected_at OR (o.connected_at = c.connected_at AND o.id < c.id)));
              """),
+
+        // `AuthSchema`'s auth-032: which teams may use a connection. `connection_id` is NVARCHAR(64), as
+        // `connections.id`, compared exactly; `team` folds case, as `teams.id`. An existing database's
+        // bindings are assigned to their teams.
+        new MigrationStep(
+            "auth-032",
+            $"""
+             CREATE TABLE team_connections (
+                 team          NVARCHAR(200) COLLATE {SqlServerSql.NoCase} NOT NULL
+                               REFERENCES teams(id) ON DELETE CASCADE,
+                 connection_id NVARCHAR(64)  NOT NULL,
+                 assigned_at   NVARCHAR(40)  NOT NULL,
+                 CONSTRAINT pk_team_connections PRIMARY KEY (team, connection_id)
+             );
+
+             INSERT INTO team_connections (team, connection_id, assigned_at)
+             SELECT DISTINCT c.team, j.[value], CONVERT(NVARCHAR(40), SYSUTCDATETIME(), 127) + N'Z'
+             FROM team_member_config c CROSS APPLY OPENJSON(c.connections_json) j
+             WHERE j.[value] IN (SELECT id FROM connections) AND c.team IN (SELECT id FROM teams);
+             """),
     ];
 }

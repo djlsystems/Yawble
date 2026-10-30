@@ -766,7 +766,8 @@ public sealed class SqlServerMessageStore : IMessageLog, ICursors, ISubscription
             while (await reader.ReadAsync(ct)) facts.LiveDeclaration(reader.GetString(0), reader.GetString(1));
         }
 
-        // A COUNT OF RUNS that failed, not of members, without the runs a person stopped. SQLite's
+        // A COUNT OF RUNS that failed, not of members, without the runs a person stopped or the
+        // runs waiting for a person (`needs-person`, a wait and never an error). SQLite's
         // `json_extract(...) IS NOT 1` is true for anything but a JSON true there.
         await using (var failures = Command(
             $"""
@@ -776,9 +777,11 @@ public sealed class SqlServerMessageStore : IMessageLog, ICursors, ISubscription
               AND type = @failed
               AND {TeamRows("")}
               AND COALESCE(JSON_VALUE(payload, '$.{PayloadFields.StoppedByPerson}'), N'') <> N'true'
+              AND COALESCE(JSON_VALUE(payload, '$.{PayloadFields.FailureClass}'), N'') <> @needsPerson
             """))
         {
             failures.Parameters.AddWithValue("@failed", MessageTypes.Failed);
+            failures.Parameters.AddWithValue("@needsPerson", FailureClasses.NeedsPerson);
             BindTeam(failures, team);
 
             facts.RunsFailed = Convert.ToInt32(await failures.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
@@ -890,7 +893,9 @@ public sealed class SqlServerMessageStore : IMessageLog, ICursors, ISubscription
             UNION ALL
             SELECT N'last', o.correlation_id, o.source, o.type, NULL,
                    CAST(CASE WHEN o.type = @runFailed AND ISJSON(o.payload) = 1
-                             THEN CASE WHEN JSON_VALUE(o.payload, '$.{PayloadFields.StoppedByPerson}') = N'true' THEN 1 ELSE 0 END
+                             THEN CASE WHEN JSON_VALUE(o.payload, '$.{PayloadFields.StoppedByPerson}') = N'true'
+                                         OR JSON_VALUE(o.payload, '$.{PayloadFields.FailureClass}') = @needsPerson
+                                       THEN 1 ELSE 0 END
                              ELSE 0 END AS BIGINT),
                    o.seq
             FROM messages o
@@ -922,6 +927,7 @@ public sealed class SqlServerMessageStore : IMessageLog, ICursors, ISubscription
                 command.Parameters.AddWithValue("@resumed", MessageTypes.WorkflowResumed);
                 command.Parameters.AddWithValue("@runCompleted", MessageTypes.Completed);
                 command.Parameters.AddWithValue("@runFailed", MessageTypes.Failed);
+                command.Parameters.AddWithValue("@needsPerson", FailureClasses.NeedsPerson);
                 command.Parameters.AddWithValue("@blocked", MessageTypes.Blocked);
                 command.Parameters.AddWithValue("@started", MessageTypes.Started);
                 SqlServerWorkflowSql.BindNotClosed(command);

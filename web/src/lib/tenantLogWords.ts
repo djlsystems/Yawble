@@ -739,6 +739,23 @@ const words: Record<string, Words> = {
         get(d, 'wasNeedingReconnect') === true && 'it needed reconnecting',
       ]),
   },
+  'team.connection-assigned': {
+    did: 'assigned a connection to a team',
+    detail: (d) =>
+      sentence([
+        `${text(d, 'name') ?? text(d, 'connection') ?? 'a connection'} to ${text(d, 'team') ?? 'the team'}`,
+        text(d, 'via') && `from ${text(d, 'via')}`,
+        text(d, 'clonedFrom') && `cloned from ${text(d, 'clonedFrom')}`,
+      ]),
+  },
+  'team.connection-removed': {
+    did: 'removed a connection from a team',
+    detail: (d) =>
+      sentence([
+        `${text(d, 'name') ?? text(d, 'connection') ?? 'a connection'} from ${text(d, 'team') ?? 'the team'}`,
+        names(d, 'unbound') && `unbound ${names(d, 'unbound')}`,
+      ]),
+  },
   'connections.password-updated': {
     did: "updated a mailbox's password",
     detail: (d) =>

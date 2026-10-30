@@ -1,3 +1,5 @@
+using System.Data.Common;
+
 namespace Harness.Contracts;
 
 /// <summary>A durable team. <paramref name="Name"/> is NULLABLE and NULL means NEVER RELABELLED - the
@@ -191,6 +193,14 @@ public sealed record RepoPullRequest(string Url, int Number, string State, DateT
 public interface ITeamStore
 {
     Task SaveTeamAsync(PersistedTeam team, CancellationToken ct = default);
+
+    /// <summary>
+    /// The team row and <paramref name="withRow"/>'s writes in ONE TRANSACTION on this store's database:
+    /// both commit, or neither does and the exception comes out. <paramref name="withRow"/> writes on the
+    /// connection and transaction it is handed - rows keyed on the new team, such as a new team's
+    /// connection assignments and their tenant rows - and never commits.
+    /// </summary>
+    Task SaveTeamAsync(PersistedTeam team, Func<DbConnection, DbTransaction, CancellationToken, Task> withRow, CancellationToken ct = default);
 
     /// <summary>Sets a team's name; <paramref name="name"/> of null means "never relabelled" and
     /// removes any stored name rather than storing a copy of the identifier.</summary>

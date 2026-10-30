@@ -382,7 +382,7 @@ public sealed partial class ConnectionsTests : IAsyncLifetime
         var refused = await tools.Hire("Sneaky", plugin: "mailer", connections: new() { ["mail"] = id }, cancellationToken: Ct);
 
         Assert.StartsWith("HTTP 400", refused);
-        Assert.Contains($"The connection '{id}' named for slot `mail` is not one a person has bound on this team.", refused);
+        Assert.Contains($"The connection '{id}' named for slot `mail` is not assigned to this team.", refused);
         Assert.Null(Services.GetRequiredService<Harness.Containers.ContainerHost>().Find(new ContainerId(_team, "Sneaky")));
     }
 

@@ -40,6 +40,7 @@ internal sealed partial class HostComposition
         PluginEndpoints.Map(app);
         SolutionEndpoints.Map(app);
         ConnectionEndpoints.Map(app);
+        TeamConnectionEndpoints.Map(app);
         RepoEndpoints.Map(app);
         KeyEndpoints.Map(app);
         FileSystemEndpoints.Map(app);

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Data.Common;
 using System.Text.Json;
 using Harness.Containers;
 using Harness.Contracts;
@@ -408,7 +409,10 @@ public sealed class TeamRegistry(
     LocalRepos? localRepos = null,
 
     // Which solution package each team came from; none without one.
-    ITeamSolutions? solutions = null)
+    ITeamSolutions? solutions = null,
+
+    // Which connections each team may use; a clone copies them. None without one.
+    IConnectionStore? connections = null)
 {
     /// <summary>What each role is offered, for the "Available skills" list every prompt carries.
     /// A registry built without one lists the built-ins.</summary>
@@ -1295,8 +1299,15 @@ public sealed class TeamRegistry(
                     // `failed > blocked > needs-decision` and the tab chip orders them identically,
                     // in two places documented as having to agree. Choosing one here would be a
                     // third ranking, on the server, silently overriding both.
-                    if (marks.FailureReason is { } failure) container.MarkFailed(failure);
-                    if (marks.BlockedReason is { } reason) container.MarkBlocked(reason);
+                    // A NEEDS-PERSON MARK KEEPS ITS CLASS, so it still reads Needs you rather than
+                    // failed, and a person's binding still clears it (PluginSetup, read after this).
+                    // Any other class is left off, as it always was.
+                    var needsPerson = marks.FailureClass == FailureClasses.NeedsPerson ? FailureClasses.NeedsPerson : null;
+                    if (marks.FailureReason is { } failure) container.MarkFailed(failure, needsPerson);
+                    if (marks.BlockedReason is { } reason)
+                    {
+                        container.MarkBlocked(reason, marks.BlockedClass == FailureClasses.NeedsPerson ? FailureClasses.NeedsPerson : null);
+                    }
                     if (marks.Question is { } question) container.MarkNeedsDecision(question, marks.NeedsDecision!.Seq, marks.NeedsDecision.CorrelationId);
                     foreach (var row in new[] { marks.Failed, marks.Blocked, marks.NeedsDecision })
                     {
@@ -1793,7 +1804,8 @@ public sealed class TeamRegistry(
         CancellationToken ct = default,
         Func<IReadOnlyList<RepoCloneOutcome>, bool>? handleRepoSetup = null,
         IReadOnlyDictionary<string, string>? upstreams = null,
-        Func<string, CancellationToken, Task<string?>>? addRepo = null)
+        Func<string, CancellationToken, Task<string?>>? addRepo = null,
+        Func<string, DbConnection, DbTransaction, CancellationToken, Task>? withRow = null)
     {
         var trimmed = label.Trim();
         var (validatedRepos, contributors) = ValidateRepos(repos, upstreams);
@@ -2075,17 +2087,21 @@ public sealed class TeamRegistry(
         // failure that would look exactly like the invented-credential one.
         var seededEnv = TeamEnv.SeedFor(team);
 
-        await teams.SaveTeamAsync(
-            new PersistedTeam(
-                team,
-                string.Equals(trimmed, team, StringComparison.OrdinalIgnoreCase) ? null : trimmed,
-                AdditionalInstructions: instructions,
-                MemberAgent: memberAgentNames[0],
-                MemberAgents: memberAgentNames,
-                Root: resolvedRoot,
-                Repos: validatedRepos,
-                Env: seededEnv),
-            ct);
+        // WHAT MUST LAND WITH THE ROW, or no team: the caller's writes keyed on the new id (a new team's
+        // connections, which reference its row) go in THE ROW'S OWN TRANSACTION. One that throws rolls
+        // the row back with it - nothing was ever committed, so there is nothing to take back out, and
+        // a stop part-way leaves no team for a restart to find.
+        var teamRow = new PersistedTeam(
+            team,
+            string.Equals(trimmed, team, StringComparison.OrdinalIgnoreCase) ? null : trimmed,
+            AdditionalInstructions: instructions,
+            MemberAgent: memberAgentNames[0],
+            MemberAgents: memberAgentNames,
+            Root: resolvedRoot,
+            Repos: validatedRepos,
+            Env: seededEnv);
+        if (withRow is null) await teams.SaveTeamAsync(teamRow, ct);
+        else await teams.SaveTeamAsync(teamRow, (connection, transaction, token) => withRow(team, connection, transaction, token), ct);
 
         // NOTHING TENANT-WIDE IS WRITTEN BY CREATING A TEAM. Writing the Concierge setting here would
         // change every other team's Concierge as a side effect of a create, with no audit line
@@ -2305,6 +2321,31 @@ public sealed class TeamRegistry(
             }
         }
 
+        // THE SOURCE'S CONNECTIONS, BEFORE ITS MEMBERS: each one assigned to the source is assigned to
+        // the clone, each with its `team.connection-assigned` row, so every carried binding below binds
+        // a connection its new team was given and its plugin members run without a person touching
+        // them. The connections themselves are shared, never copied. Collected, as the env step is.
+        if (connections is not null)
+        {
+            try
+            {
+                var records = (await connections.ListAsync(ct)).ToDictionary(c => c.Id, StringComparer.Ordinal);
+                await connections.CopyAssignmentsAsync(
+                    stored, created.Id,
+                    connectionId => new TriggerAudit(
+                        null, null, TenantActions.TeamConnectionAssigned, connectionId,
+                        records.TryGetValue(connectionId, out var record) ? record.Name : connectionId,
+                        System.Text.Json.JsonSerializer.Serialize(record is null
+                            ? new { team = created.Id, connection = connectionId, via = "clone", clonedFrom = stored }
+                            : Connections.AssignedDetail(created.Id, record, "clone", stored))),
+                    ct);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                failures.Add($"connections: {exception.Message}");
+            }
+        }
+
         var hired = 0;
 
         foreach (var id in ContainerIdsOf(stored))
@@ -2344,7 +2385,7 @@ public sealed class TeamRegistry(
                     // THE BINDING TRAVELS with the member (a connection id, never a token), recorded
                     // as carried from the source rather than chosen again.
                     connectionsAudit: settings is { Connections.Count: > 0 } carriedBindings
-                        ? cloned => new TriggerAudit(
+                        ? cloned => [new TriggerAudit(
                             null, null, TenantActions.MemberConnectionsChanged, $"{cloned.Team}/{cloned.Name}", member.Label ?? member.Name,
                             System.Text.Json.JsonSerializer.Serialize(new
                             {
@@ -2352,7 +2393,7 @@ public sealed class TeamRegistry(
                                 clonedFrom = $"{id.Team}/{id.Name}",
                                 setBy = "person",
                                 slots = carriedBindings.Connections.OrderBy(c => c.Key, StringComparer.Ordinal).Select(c => new { slot = c.Key, from = (string?)null, to = c.Value }),
-                            }))
+                            }))]
                         : null);
 
                 hired += 1;
@@ -2734,7 +2775,7 @@ public sealed class TeamRegistry(
         CancellationToken ct = default,
         PluginMemberSettings? settings = null,
         SystemPromptSetter? promptSetBy = null,
-        Func<ContainerId, TriggerAudit>? connectionsAudit = null,
+        Func<ContainerId, IReadOnlyList<TriggerAudit>>? connectionsAudit = null,
         bool secretsSetLater = false,
         bool waitForPerson = false,
         IReadOnlySet<string>? valued = null,
@@ -2760,7 +2801,7 @@ public sealed class TeamRegistry(
         CancellationToken ct = default,
         PluginMemberSettings? settings = null,
         SystemPromptSetter? promptSetBy = null,
-        Func<ContainerId, TriggerAudit>? connectionsAudit = null,
+        Func<ContainerId, IReadOnlyList<TriggerAudit>>? connectionsAudit = null,
         bool secretsSetLater = false,
         bool waitForPerson = false,
         IReadOnlySet<string>? valued = null,
@@ -3002,10 +3043,11 @@ public sealed class TeamRegistry(
         }
         else if (isPlugin && pluginSettings is not null)
         {
-            // A CONNECTION BINDING lands with its `member.connections-changed` row, or not at all.
+            // A CONNECTION BINDING lands with its `member.connections-changed` row, and the
+            // `team.connection-assigned` row of each connection it assigns to the team, or not at all.
             if (connectionsAudit is not null && settings is { Connections.Count: > 0 })
             {
-                await pluginSettings.SaveAsync(id, settings, [connectionsAudit(id)], ct);
+                await pluginSettings.SaveAsync(id, settings, connectionsAudit(id), ct);
             }
             else
             {

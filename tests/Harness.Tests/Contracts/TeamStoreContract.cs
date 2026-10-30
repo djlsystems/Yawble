@@ -41,6 +41,30 @@ public abstract class TeamStoreContract : IdentityContract
     }
 
     [Fact]
+    public async Task A_team_row_and_what_is_written_with_it_commit_together_or_not_at_all()
+    {
+        var store = await CreateAsync();
+
+        // The caller's write runs inside the row's own transaction: it sees the row before any commit.
+        long seen = -1;
+        await store.SaveTeamAsync(new PersistedTeam("Alpha", null), async (connection, transaction, token) =>
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "SELECT COUNT(*) FROM teams WHERE id = 'Alpha'";
+            seen = Convert.ToInt64(await command.ExecuteScalarAsync(token));
+        }, Ct);
+        Assert.Equal(1, seen);
+        Assert.Contains(await store.TeamsAsync(Ct), t => t.Id == "Alpha");
+
+        // One that throws leaves no row: it was never committed, so nothing had to be taken back out.
+        var refused = new InvalidOperationException("refused by the test");
+        Assert.Same(refused, await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.SaveTeamAsync(new PersistedTeam("Beta", null), (_, _, _) => throw refused, Ct)));
+        Assert.DoesNotContain(await store.TeamsAsync(Ct), t => t.Id == "Beta");
+    }
+
+    [Fact]
     public async Task A_team_round_trips_without_the_dropped_columns()
     {
         var store = await CreateAsync();

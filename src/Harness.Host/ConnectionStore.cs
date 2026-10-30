@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Harness.Contracts;
 using Harness.Identity;
 using Microsoft.AspNetCore.DataProtection;
@@ -422,6 +423,15 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
             await command.ExecuteNonQueryAsync(ct);
         }
 
+        // EVERY TEAM IT WAS ASSIGNED TO loses it here, in the same transaction.
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "DELETE FROM team_connections WHERE connection_id = $id";
+            command.Parameters.AddWithValue("$id", id);
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
         // EVERY MEMBER THAT BOUND IT loses those slots here, in the same transaction.
         foreach (var row in bindings.Where(r => used.Any(u => u.Team == r.Team && u.Member == r.Member)))
         {
@@ -529,6 +539,149 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
         }
 
         return list;
+    }
+
+    // ---- team assignments -----------------------------------------------------------------------
+
+    public async Task<IReadOnlyList<TeamConnection>> AssignedAsync(string team, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT team, connection_id, assigned_at FROM team_connections WHERE team = $team ORDER BY assigned_at, connection_id";
+        command.Parameters.AddWithValue("$team", team);
+
+        var list = new List<TeamConnection>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            list.Add(new TeamConnection(reader.GetString(0), reader.GetString(1), Instant.Parse(reader.GetString(2))));
+        }
+
+        return list;
+    }
+
+    public async Task<ILookup<string, string>> AllAssignmentsAsync(CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT connection_id, team FROM team_connections ORDER BY team";
+
+        var list = new List<(string Id, string Team)>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct)) list.Add((reader.GetString(0), reader.GetString(1)));
+        return list.ToLookup(a => a.Id, a => a.Team, StringComparer.Ordinal);
+    }
+
+    public async Task<AssignOutcome> AssignAsync(string team, string connectionId, TriggerAudit audit, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        if (await GetAsync(connection, transaction, connectionId, ct) is null) return AssignOutcome.NoConnection;
+        if (!await InsertAssignmentAsync(connection, transaction, team, connectionId, ct)) return AssignOutcome.Already;
+
+        await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
+        await transaction.CommitAsync(ct);
+        return AssignOutcome.Assigned;
+    }
+
+    public async Task AssignAllAsync(
+        DbConnection connection, DbTransaction transaction, string team,
+        IReadOnlyList<(string ConnectionId, TriggerAudit Audit)> assignments, CancellationToken ct = default)
+    {
+        var sqlite = (SqliteConnection)connection;
+        var inside = (SqliteTransaction)transaction;
+
+        foreach (var (id, audit) in assignments)
+        {
+            if (await InsertAssignmentAsync(sqlite, inside, team, id, ct)) await TenantAuditRow.AppendAsync(sqlite, inside, audit, ct);
+        }
+    }
+
+    public async Task<(bool Removed, IReadOnlyList<ConnectionUse> Unbound)> UnassignAsync(
+        string team, string connectionId, TriggerAudit audit,
+        Func<IReadOnlyList<ConnectionUse>, IReadOnlyList<TriggerAudit>> unbind, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "DELETE FROM team_connections WHERE team = $team AND connection_id = $id";
+            command.Parameters.AddWithValue("$team", team);
+            command.Parameters.AddWithValue("$id", connectionId);
+            if (await command.ExecuteNonQueryAsync(ct) == 0) return (false, []);
+        }
+
+        // EVERY MEMBER OF THE TEAM THAT BOUND IT loses those slots here, in the same transaction.
+        var rows = (await BindingRowsAsync(connection, transaction, ct))
+            .Where(r => string.Equals(r.Team, team, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var used = rows.SelectMany(r => ConnectionRows.Bindings(r.Team, r.Member, r.Json)).Where(b => b.Id == connectionId).Select(b => b.Use).ToList();
+
+        foreach (var row in rows.Where(r => used.Any(u => u.Member == r.Member)))
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "UPDATE team_member_config SET connections_json = $json WHERE team = $team AND name = $name";
+            command.Parameters.AddWithValue("$team", row.Team);
+            command.Parameters.AddWithValue("$name", row.Member);
+            command.Parameters.AddWithValue("$json", ConnectionRows.Unbound(row.Json, connectionId));
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
+        if (used.Count > 0)
+        {
+            foreach (var row in unbind(used)) await TenantAuditRow.AppendAsync(connection, transaction, row, ct);
+        }
+
+        await transaction.CommitAsync(ct);
+        return (true, used);
+    }
+
+    public async Task<IReadOnlyList<string>> CopyAssignmentsAsync(
+        string from, string to, Func<string, TriggerAudit> audit, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        var ids = new List<string>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "SELECT connection_id FROM team_connections WHERE team = $team ORDER BY assigned_at, connection_id";
+            command.Parameters.AddWithValue("$team", from);
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct)) ids.Add(reader.GetString(0));
+        }
+
+        var copied = new List<string>();
+        foreach (var id in ids)
+        {
+            if (!await InsertAssignmentAsync(connection, transaction, to, id, ct)) continue;
+            await TenantAuditRow.AppendAsync(connection, transaction, audit(id), ct);
+            copied.Add(id);
+        }
+
+        await transaction.CommitAsync(ct);
+        return copied;
+    }
+
+    /// <summary>One assignment, inside a write's transaction: false when it was already there.</summary>
+    private static async Task<bool> InsertAssignmentAsync(
+        SqliteConnection connection, SqliteTransaction transaction, string team, string connectionId, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText =
+            "INSERT OR IGNORE INTO team_connections (team, connection_id, assigned_at) VALUES ($team, $id, $at)";
+        command.Parameters.AddWithValue("$team", team);
+        command.Parameters.AddWithValue("$id", connectionId);
+        command.Parameters.AddWithValue("$at", Now());
+        return await command.ExecuteNonQueryAsync(ct) > 0;
     }
 
     // ---- mailboxes ------------------------------------------------------------------------------

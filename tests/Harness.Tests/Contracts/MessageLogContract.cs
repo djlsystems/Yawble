@@ -606,6 +606,51 @@ public abstract class MessageLogContract : IAsyncDisposable
     }
 
     [Fact]
+    public async Task A_run_waiting_for_a_person_is_an_awaiting_workflow_and_not_a_failed_one()
+    {
+        var log = await CreateAsync();
+        var waiting = await RunAsync(log, Dev, "pay", finish: false);
+        await AppendAsync(
+            log,
+            MessageTypes.Failed,
+            $$"""{"error":"This member has no connection bound","{{PayloadFields.FailureClass}}":"{{FailureClasses.NeedsPerson}}"}""",
+            Dev.ToString(),
+            waiting.Seq);
+
+        // The Manager's woken run in the same workflow has ended; the workflow is still open.
+        var manager = new ContainerId("Alpha", "Manager");
+        await AppendAsync(log, MessageTypes.Started, "{}", manager.ToString(), waiting.Seq);
+        await AppendAsync(log, MessageTypes.Completed, """{"output":"noted"}""", manager.ToString(), waiting.Seq);
+
+        var wait = await log.WorkflowForTeamAsync("Alpha", waiting.Seq, 0, Ct);
+        Assert.Equal("Awaiting", wait.State);
+        Assert.Equal("Dev", wait.AwaitingFrom);
+        Assert.Empty(wait.FailedMembers);
+        Assert.Equal(0, wait.RunsFailed);
+        Assert.Null(wait.EndedAt);
+
+        var standings = await log.WorkflowStandingsAmongAsync(new Dictionary<long, string> { [waiting.Seq] = "Alpha" }, Ct);
+        Assert.Equal(new WorkflowStanding(waiting.Seq, true, null, null), standings[waiting.Seq]);
+
+        // A failure of any other class is still a failure, in the same workflow and counted once.
+        await AppendAsync(log, MessageTypes.Started, "{}", manager.ToString(), waiting.Seq);
+        await AppendAsync(
+            log,
+            MessageTypes.Failed,
+            $$"""{"error":"boom","{{PayloadFields.FailureClass}}":"{{FailureClasses.Unknown}}"}""",
+            manager.ToString(),
+            waiting.Seq);
+
+        var failed = await log.WorkflowForTeamAsync("Alpha", waiting.Seq, 0, Ct);
+        Assert.Equal("Failed", failed.State);
+        Assert.Equal(["Manager"], failed.FailedMembers);
+        Assert.Equal(1, failed.RunsFailed);
+
+        standings = await log.WorkflowStandingsAmongAsync(new Dictionary<long, string> { [waiting.Seq] = "Alpha" }, Ct);
+        Assert.Equal("Failed", standings[waiting.Seq].Stuck);
+    }
+
+    [Fact]
     public async Task A_teams_highest_seq_counts_a_persons_row_addressed_to_it_and_no_other_teams()
     {
         var log = await CreateAsync();

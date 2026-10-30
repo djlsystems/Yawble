@@ -1035,7 +1035,8 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             // seconds, and the tile says both numbers.
             //
             // Exclude failures with stoppedByPerson: true, which are not platform
-            // failures but runs stopped by a person.
+            // failures but runs stopped by a person, and `needs-person` failures, which are a
+            // wait for a person and never an error (WorkflowPayloads.NotAFailure).
             failures.CommandText =
                 $"""
                 SELECT COUNT(*) FROM messages
@@ -1045,11 +1046,13 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
                   AND team = $team
                   AND source NOT LIKE $nested COLLATE NOCASE ESCAPE '\'
                   AND json_extract(payload, '$.{PayloadFields.StoppedByPerson}') IS NOT 1
+                  AND json_extract(payload, '$.{PayloadFields.FailureClass}') IS NOT $needsPerson
                 """;
 
             failures.Parameters.AddWithValue("$correlation", correlation);
             failures.Parameters.AddWithValue("$since", sinceSeq);
             failures.Parameters.AddWithValue("$failed", MessageTypes.Failed);
+            failures.Parameters.AddWithValue("$needsPerson", FailureClasses.NeedsPerson);
             failures.Parameters.AddWithValue("$team", team);
             failures.Parameters.AddWithValue("$nested", nested);
 
@@ -1186,15 +1189,16 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
     /// rows), <c>end</c> (every <c>workflow.completed</c>/<c>workflow.closed</c> row, flagged when an
     /// instruction or card row woke it since - the inner clause of <c>WorkflowOpenSql.NotClosed</c>),
     /// <c>pause</c> (the latest paused and resumed seq), <c>last</c> (each source's last run outcome,
-    /// with whether a failure was stopped by a person) and <c>blocked</c> (a blocked row its source has
-    /// not started again since). The team's own rows - <c>Team/x</c>, not a nested <c>Team/x/y</c> -
-    /// are picked here, per correlation, rather than by a <c>LIKE</c> per team in SQL.
+    /// with whether a failure was stopped by a person or is waiting for one) and <c>blocked</c> (a
+    /// blocked row its source has not started again since). The team's own rows - <c>Team/x</c>, not
+    /// a nested <c>Team/x/y</c> - are picked here, per correlation, rather than by a <c>LIKE</c> per
+    /// team in SQL.
     /// </para>
     ///
     /// <para>
     /// THE LADDER IS <see cref="TimingForAsync"/>'S: Completed (any completion), Closed (a close nothing
-    /// woke), Paused, then Failed (a member whose last outcome failed, not stopped by a person), then
-    /// Blocked. Only the last two are answered, as <see cref="WorkflowStanding.Stuck"/>.
+    /// woke), Paused, then Failed (a member whose last outcome failed, not stopped by a person and not
+    /// waiting for one), then Blocked. Only the last two are answered, as <see cref="WorkflowStanding.Stuck"/>.
     /// </para>
     /// </summary>
     public async Task<IReadOnlyDictionary<long, WorkflowStanding>> WorkflowStandingsAmongAsync(
@@ -1232,6 +1236,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             SELECT 'last', o.correlation_id, o.source, o.type, NULL,
                    CASE WHEN o.type = $runFailed AND json_valid(o.payload)
                         THEN json_extract(o.payload, '$.{PayloadFields.StoppedByPerson}') IS 1
+                             OR json_extract(o.payload, '$.{PayloadFields.FailureClass}') IS $needsPerson
                         ELSE 0 END,
                    o.seq
             FROM messages o
@@ -1258,6 +1263,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         command.Parameters.AddWithValue("$resumed", MessageTypes.WorkflowResumed);
         command.Parameters.AddWithValue("$runCompleted", MessageTypes.Completed);
         command.Parameters.AddWithValue("$runFailed", MessageTypes.Failed);
+        command.Parameters.AddWithValue("$needsPerson", FailureClasses.NeedsPerson);
         command.Parameters.AddWithValue("$blocked", MessageTypes.Blocked);
         command.Parameters.AddWithValue("$started", MessageTypes.Started);
         WorkflowOpenSql.Bind(command);
