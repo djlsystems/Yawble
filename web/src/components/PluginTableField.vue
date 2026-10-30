@@ -96,6 +96,8 @@ const draftSecrets = ref<Record<string, string | null>>({});
 /** The row's name when the editor opened: its secrets in the draft are kept under it. */
 const openedAs = ref('');
 
+/** The editor's own button: what its secret lines name, so the words and the button never drift apart. */
+const applyLabel = computed(() => (editIndex.value >= 0 ? 'Done' : 'Add'));
 const draftSaved = computed(() => editIndex.value >= 0 && isSaved(rows.value[editIndex.value]!));
 const draftProblems = computed(() =>
   rowProblems(shape.value, draft.value, rows.value.filter((_, at) => at !== editIndex.value)),
@@ -168,10 +170,11 @@ function toggleClear(column: string) {
   draftSecrets.value = entry === null ? rest : { ...rest, [column]: null };
 }
 
+/** The line under an editor's secret box, naming the editor's own button (Add or Done), not the form's. */
 function secretSaying(column: PluginTableColumn): string {
   const typed = draftSecrets.value[column.name];
-  if (typed === null) return `Cleared when you press ${button.value}.`;
-  if (typeof typed === 'string' && typed !== '') return `Saved when you press ${button.value}.`;
+  if (typed === null) return `Cleared when you press ${applyLabel.value}.`;
+  if (typeof typed === 'string' && typed !== '') return `Saved when you press ${applyLabel.value}.`;
   if (!draftSaved.value) return 'Not set.';
   const state = cellState(props.states, props.name, openedAs.value, column.name);
   if (!state) return 'Not set.';
@@ -359,7 +362,7 @@ function href(action: string, row: PluginTableRow): string | null {
           <q-btn
             color="primary"
             no-caps
-            :label="editIndex >= 0 ? 'Done' : 'Add'"
+            :label="applyLabel"
             :disable="Object.keys(draftProblems).length > 0"
             data-table-apply
             @click="apply"
