@@ -31,6 +31,7 @@ public sealed class ConnectionTestTests : IAsyncLifetime
 
     private const string StripeKey = "sk_test_right_51Habc";
     private const string NamecheapKey = "namecheap-right-key-0123";
+    private const string WhitelistedIp = "203.0.113.7";
     private const string TwilioSecret = "twilio-right-secret-4567";
     private const string OtherToken = "other-right-token-89ab";
     private const string LoginPassword = "login-right-password";
@@ -153,22 +154,45 @@ public sealed class ConnectionTestTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Namecheap_reads_the_balances_and_a_status_error_is_its_refusal_with_namecheaps_reason()
+    public async Task Namecheap_reads_the_balances_from_the_whitelisted_ip_and_a_status_error_is_its_refusal_with_namecheaps_reason()
     {
+        // LIKE NAMECHEAP: the right key from an address the person has not whitelisted is refused too
+        // (1011150), so the fake accepts only the right key AND the ClientIp stored on the connection.
         _services.On("api.namecheap.com", request =>
         {
-            var query = request.RequestUri!.Query;
-            return query.Contains($"ApiKey={NamecheapKey}", StringComparison.Ordinal) && query.Contains("Command=namecheap.users.getBalances", StringComparison.Ordinal)
+            var query = System.Web.HttpUtility.ParseQueryString(request.RequestUri!.Query);
+            if (query["Command"] != "namecheap.users.getBalances" || query["ApiKey"] != NamecheapKey)
+            {
+                return Xml("""<ApiResponse Status="ERROR"><Errors><Error Number="1011102">API Key is invalid or API access has not been enabled</Error></Errors></ApiResponse>""");
+            }
+
+            return query["ClientIp"] == WhitelistedIp
                 ? Xml("""<ApiResponse Status="OK"><CommandResponse Type="namecheap.users.getBalances"/></ApiResponse>""")
-                : Xml("""<ApiResponse Status="ERROR"><Errors><Error Number="1011102">API Key is invalid or API access has not been enabled</Error></Errors></ApiResponse>""");
+                : Xml("""<ApiResponse Status="ERROR"><Errors><Error Number="1011150">Invalid request IP</Error></Errors></ApiResponse>""");
         });
 
-        var id = await CredentialAsync("apikey", "namecheap", "Namecheap", [new { name = "apiUser", value = "ada" }, new { name = "apiKey", value = NamecheapKey }]);
+        var presets = await GetAsync("/api/connections/credentials/presets");
+        var namecheap = presets.EnumerateArray().Single(p => p.GetProperty("id").GetString() == "namecheap");
+        Assert.Equal(
+            [("apiUser", "API user", false, true), ("apiKey", "API key", true, true), ("clientIp", "Whitelisted IP", false, true)],
+            namecheap.GetProperty("fields").EnumerateArray().Select(f => (
+                f.GetProperty("name").GetString(), f.GetProperty("label").GetString(), f.GetProperty("masked").GetBoolean(), f.GetProperty("required").GetBoolean())));
+
+        var id = await CredentialAsync("apikey", "namecheap", "Namecheap",
+            [new { name = "apiUser", value = "ada" }, new { name = "apiKey", value = NamecheapKey }, new { name = "clientIp", value = WhitelistedIp }]);
         await PassesAsync(id, "Connected: Namecheap accepted the API key.");
 
         await EditAsync(id, [new { name = "apiKey", value = Wrong }]);
         await RefusedAsync(id, "Namecheap refused the API key: API Key is invalid or API access has not been enabled.");
 
+        // THE RIGHT KEY FROM AN ADDRESS NOT WHITELISTED is refused, with Namecheap's reason.
+        await EditAsync(id, [new { name = "apiKey", value = NamecheapKey }, new { name = "clientIp", value = "127.0.0.1" }]);
+        await RefusedAsync(id, "Namecheap refused the API key: Invalid request IP.");
+
+        await EditAsync(id, [new { name = "clientIp", value = WhitelistedIp }]);
+        await PassesAsync(id, "Connected: Namecheap accepted the API key.");
+
+        Assert.Equal(Enumerable.Repeat("GET api.namecheap.com/xml.response", 4), _services.Requests);
         await NothingLeakedAsync();
     }
 

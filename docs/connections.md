@@ -17,7 +17,7 @@ Each connection has one kind, and each kind its own fields:
 | **Sign-in** (`oauth`) | An account at Microsoft or Google (or a custom OAuth provider): its scopes, and for Microsoft its directory. See below. |
 | **Mailbox** (`imap`) | A preset (Gmail, iCloud, Yahoo, Namecheap Private Email, Other), the username, the app password and the servers. See [A mailbox with an app password](#a-mailbox-with-an-app-password-imap). |
 | **Website** (`website`) | The kind exists, with its name; the fields it signs in with are defined in a later release. |
-| **API key** (`apikey`) | A preset naming the fields a service needs - Stripe: key; Namecheap: API user, API key; Twilio: account SID, API key SID, API key secret; Other: fields you name - each masked or not as the preset says. |
+| **API key** (`apikey`) | A preset naming the fields a service needs - Stripe: key; Namecheap: API user, API key, whitelisted IP; Twilio: account SID, API key SID, API key secret; Other: fields you name - each masked or not as the preset says. |
 | **Username and password** (`login`) | A username, a password and an optional URL, for anything else. |
 
 **The name is the key.** Every connection has a name no other connection has (ignoring case), and
@@ -495,7 +495,8 @@ Admin → **Connections** → **Add connection** → **Website**, **API key** or
 Each asks for a **Name** - required, and no other connection's - and then only its kind's fields:
 
 - **API key** - choose the service first, then its fields: **Stripe** (Secret key, masked);
-  **Namecheap** (API user, shown; API key, masked); **Twilio** (Account SID and API key SID, shown;
+  **Namecheap** (API user, shown; API key, masked; Whitelisted IP, shown - the public IPv4 address
+  Yawble calls Namecheap from, which must be on the key's whitelist); **Twilio** (Account SID and API key SID, shown;
   API key secret, masked); **Other** - **Add a field** for each one the service needs, its name and
   value, each **Masked** unless you turn it off.
 - **Username and password** - Username, Password (masked) and an optional URL (`http://` or
@@ -535,7 +536,7 @@ answers in one sentence:
 |---|---|
 | Sign-in (OAuth) | Refreshes the token and reads the account's profile once, at the provider's userinfo endpoint (a custom provider with none: the refresh alone). A refresh token the provider rotates is stored first. |
 | Mailbox | Logs in to IMAP and authenticates to SMTP: the same login test as Save. |
-| API key | Sends the one harmless request its preset declares: **Stripe** reads the balance (`GET /v1/balance`, the key as a bearer token); **Namecheap** reads the account's balances (`namecheap.users.getBalances`; a `Status="ERROR"` answer is a refusal, with Namecheap's reason); **Twilio** reads the account (`GET /2010-04-01/Accounts/<Account SID>.json`, with the API key SID and secret). **Other** is tested only when it has a field named `url` and exactly one masked field: a GET of that address with the masked value as a bearer token. |
+| API key | Sends the one harmless request its preset declares: **Stripe** reads the balance (`GET /v1/balance`, the key as a bearer token); **Namecheap** reads the account's balances (`namecheap.users.getBalances`, with the Whitelisted IP as `ClientIp`; a `Status="ERROR"` answer is a refusal, with Namecheap's reason - an address not on the key's whitelist is `Invalid request IP`); **Twilio** reads the account (`GET /2010-04-01/Accounts/<Account SID>.json`, with the API key SID and secret). **Other** is tested only when it has a field named `url` and exactly one masked field: a GET of that address with the masked value as a bearer token. |
 | Username and password | Only with a URL: a GET of it with HTTP Basic. A redirect - to a sign-in page, say - is not taken as a yes. With no URL there is nothing to test. |
 | Website | No test yet: a website's test is its own sign-in, which a later release adds. |
 

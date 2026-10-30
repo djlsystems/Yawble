@@ -174,9 +174,12 @@ public static class CredentialPresets
             Test: new("https://api.stripe.com/v1/balance", "secret key", Bearer: "key")),
         // Namecheap: the account's balances. It answers 200 with Status="ERROR" for a key it refuses, a
         // user it does not know or an address not on the key's whitelist - https://www.namecheap.com/support/api/methods/users/get-balances/.
-        new(ConnectionKinds.ApiKey, "namecheap", "Namecheap", [new("apiUser", "API user", false, true), new("apiKey", "API key", true, true)],
+        // ClientIp must be the public IPv4 the call leaves from and one the person whitelisted (else 1011150,
+        // Invalid request IP) - https://www.namecheap.com/support/api/intro/ - so the person names it.
+        new(ConnectionKinds.ApiKey, "namecheap", "Namecheap",
+            [new("apiUser", "API user", false, true), new("apiKey", "API key", true, true), new("clientIp", "Whitelisted IP", false, true)],
             Test: new(
-                "https://api.namecheap.com/xml.response?ApiUser={apiUser}&ApiKey={apiKey}&UserName={apiUser}&ClientIp=127.0.0.1&Command=namecheap.users.getBalances",
+                "https://api.namecheap.com/xml.response?ApiUser={apiUser}&ApiKey={apiKey}&UserName={apiUser}&ClientIp={clientIp}&Command=namecheap.users.getBalances",
                 "API key", RefusedWhen: "Status=\"ERROR\"", ReasonFrom: "<Error[^>]*>([^<]*)</Error>")),
         // Twilio: the account itself, read with the API key SID and secret - https://www.twilio.com/docs/iam/api/account#fetch-an-account-resource.
         new(ConnectionKinds.ApiKey, "twilio", "Twilio",

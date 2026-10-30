@@ -152,7 +152,7 @@ public static class ConnectionEndpoints
             .WithSummary("The forms a website, API key or username and password connection is made from")
             .WithDescription(
                 "Each `{ kind, id, name, namedFields, fields: [{ name, label, masked, required }] }`: API key's Stripe (key), "
-                + "Namecheap (API user, API key), Twilio (account SID, API key SID, API key secret) and Other (`namedFields`: the "
+                + "Namecheap (API user, API key, whitelisted IP), Twilio (account SID, API key SID, API key secret) and Other (`namedFields`: the "
                 + "person names each field and whether it is masked); username and password (username, password, optional URL); "
                 + "and website, whose fields are not defined yet.");
 
