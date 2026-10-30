@@ -469,9 +469,9 @@ public static class ConnectionEndpoints
         app.MapDelete("/api/connections/{id}", async (
             [Description("The connection's id.")] string id,
             [Description("True once the person has seen who uses it and confirmed: their bindings go with it.")] bool? unbind,
-            Connections connections, TeamRegistry teams, IMemberReports reports, HttpContext context, CancellationToken ct) =>
+            Connections connections, TeamRegistry teams, IMemberReports reports, PluginSetup setup, HttpContext context, CancellationToken ct) =>
         {
-            var (status, body) = await DisconnectAsync(connections, teams, id, Actor(context), ct, unbind == true, reports);
+            var (status, body) = await DisconnectAsync(connections, teams, id, Actor(context), ct, unbind == true, reports, setup);
             return status == StatusCodes.Status204NoContent ? Results.NoContent() : Results.Json(body, statusCode: status);
         })
             .WithTags(Area)
@@ -522,7 +522,7 @@ public static class ConnectionEndpoints
     /// <summary>The route's and the operator exchange's disconnect: (204, null), or a status and body.</summary>
     public static async Task<(int Status, object? Body)> DisconnectAsync(
         Connections connections, TeamRegistry teams, string id, ConnectionActor actor, CancellationToken ct,
-        bool unbind = false, IMemberReports? reports = null)
+        bool unbind = false, IMemberReports? reports = null, PluginSetup? setup = null)
     {
         if (await connections.Store.GetAsync(id, ct) is not { } connection)
         {
@@ -575,6 +575,14 @@ public static class ConnectionEndpoints
                     $"Connection {connection.Named} was deleted, so slot{(member.Count() == 1 ? "" : "s")} {slots} of this member "
                     + "has no connection. Its runs stop until a person chooses another in the member's settings.",
                     ct: CancellationToken.None);
+            }
+        }
+
+        if (setup is not null)
+        {
+            foreach (var member in unbound.Select(u => (u.Team, u.Member)).Distinct())
+            {
+                await setup.RefreshAsync(new ContainerId(member.Team, member.Member), CancellationToken.None);
             }
         }
 

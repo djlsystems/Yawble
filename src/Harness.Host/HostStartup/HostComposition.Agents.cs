@@ -87,6 +87,11 @@ internal sealed partial class HostComposition
         builder.Services.AddSingleton<IPluginMemberSecrets>(sp => sp.GetRequiredService<PluginMemberSecretStore>());
         builder.Services.AddSingleton(sp => new MemberSecretReads(
             sp.GetRequiredService<PluginMemberSecretStore>(), sp.GetRequiredService<PluginSecretStore>(), sp.GetService<Marketplace>()));
+        // WHETHER A PLUGIN MEMBER WAITS FOR A PERSON, on its card (Needs you): read from its settings.
+        builder.Services.AddSingleton(sp => new PluginSetup(
+            sp.GetRequiredService<ContainerHost>(), sp.GetRequiredService<PluginCatalog>(),
+            sp.GetRequiredService<IPluginMemberSettingsStore>(), sp.GetRequiredService<ISecretStore>(),
+            sp.GetRequiredService<PluginMemberSecretStore>()));
         builder.Services.AddHostedService(sp => new MemberSecretsCopyAtStart(
             sp.GetRequiredService<PluginMemberSecretStore>(), sp.GetRequiredService<IDataProtectionProvider>(),
             sp.GetRequiredService<ILogger<MemberSecretsCopyAtStart>>()));

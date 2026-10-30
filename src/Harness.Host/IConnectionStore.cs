@@ -94,7 +94,50 @@ public interface IConnectionStore
 
     Task StoreMailboxVerifiedAsync(string id, DateTimeOffset at, CancellationToken ct = default);
 
+    // ---- which teams may use a connection (team_connections, auth-032) ---------------------------
+
+    /// <summary>The connections assigned to <paramref name="team"/>, oldest first. A plugin member of the
+    /// team binds only one of these.</summary>
+    Task<IReadOnlyList<TeamConnection>> AssignedAsync(string team, CancellationToken ct = default);
+
+    /// <summary>Every assignment on the instance: connection id to the teams it is assigned to.</summary>
+    Task<ILookup<string, string>> AllAssignmentsAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Assigns <paramref name="connectionId"/> to <paramref name="team"/> with its tenant row, in one
+    /// transaction. <see cref="AssignOutcome.Already"/> and <see cref="AssignOutcome.NoConnection"/>
+    /// write nothing.
+    /// </summary>
+    Task<AssignOutcome> AssignAsync(string team, string connectionId, TriggerAudit audit, CancellationToken ct = default);
+
+    /// <summary>
+    /// Removes <paramref name="connectionId"/> from <paramref name="team"/>. Every member of the team that
+    /// binds it loses those slots in the same transaction, and the rows <paramref name="unbind"/> makes of
+    /// them land with the removal's own: all of it, or none. False, with nothing written, when it was not
+    /// assigned.
+    /// </summary>
+    Task<(bool Removed, IReadOnlyList<ConnectionUse> Unbound)> UnassignAsync(
+        string team, string connectionId, TriggerAudit audit,
+        Func<IReadOnlyList<ConnectionUse>, IReadOnlyList<TriggerAudit>> unbind, CancellationToken ct = default);
+
+    /// <summary>A clone's assignments: every connection assigned to <paramref name="from"/> assigned to
+    /// <paramref name="to"/> too, each with the row <paramref name="audit"/> makes of it, in one
+    /// transaction. Answers the ids assigned.</summary>
+    Task<IReadOnlyList<string>> CopyAssignmentsAsync(
+        string from, string to, Func<string, TriggerAudit> audit, CancellationToken ct = default);
+
     Task InsertFlowAsync(ConnectionFlow flow, CancellationToken ct = default);
 
     Task<ConnectionFlow?> ConsumeFlowAsync(string state, DateTimeOffset now, string? userId, CancellationToken ct = default);
+}
+
+/// <summary>One connection assigned to one team.</summary>
+public sealed record TeamConnection(string Team, string ConnectionId, DateTimeOffset AssignedAt);
+
+/// <summary>What an assignment came to.</summary>
+public enum AssignOutcome
+{
+    Assigned,
+    Already,
+    NoConnection,
 }

@@ -236,7 +236,14 @@ internal sealed record CreateTeam(
         + "is in contributor mode, its URL is the fork (origin), and its clone is made with an "
         + "`upstream` remote. A blank value, or a repository not named, is owned. Checked BEFORE "
         + "anything is created (400). Changeable later on the team's settings screen.")]
-    IReadOnlyDictionary<string, string>? Upstreams = null);
+    IReadOnlyDictionary<string, string>? Upstreams = null,
+
+    [property: Description(
+        "The ids of existing connections to assign to the new team, so its plugin members may bind them. "
+        + "A person only: an agent's create naming any is refused (403). Each must exist (400 otherwise, "
+        + "before anything is created); each lands with its `team.connection-assigned` row. Omitted, the "
+        + "team starts with none.")]
+    IReadOnlyList<string>? Connections = null);
 
 /// <summary>
 /// What a person typed as the clone's name, and NOTHING ELSE. The identifier is derived from it
@@ -458,7 +465,8 @@ internal sealed record CreateContainer(
         "A PLUGIN member's connection bindings: each connection slot its manifest declares, to a "
         + "CONNECTION ID (Admin > Connections) - never a token. The connection must suit the slot's "
         + "providers and hold its scopes. A Manager or a Concierge may name only a connection a person "
-        + "has already bound on a member of this team. Refused for an Agent.")]
+        + "has assigned to this team (Team settings > Connections; `hiring` lists them). A person may name any: "
+        + "one not yet assigned is assigned with the binding. Refused for an Agent.")]
     Dictionary<string, string>? Connections = null,
     [property: Description(
         "A PLUGIN member's OWN secret values, typed by a person: each secret field its manifest names, to "

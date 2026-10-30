@@ -18,8 +18,8 @@ public interface IPluginMemberSettingsStore : IPluginMemberSettings
     /// <c>member.connections-changed</c> row that goes with it - in the same transaction.</summary>
     Task SaveAsync(ContainerId member, PluginMemberSettings settings, IReadOnlyList<TriggerAudit> audits, CancellationToken ct = default);
 
-    /// <summary>Every connection id bound by a member currently on <paramref name="team"/> - the
-    /// connections a person has bound there, which is all an agent's hire may name.</summary>
+    /// <summary>Every connection id bound by a member currently on <paramref name="team"/>. An agent's
+    /// hire is checked against the team's assignments (<see cref="IConnectionStore.AssignedAsync"/>), not this.</summary>
     Task<IReadOnlySet<string>> ConnectionsBoundOnAsync(string team, CancellationToken ct = default);
 
     /// <summary>Every logical key bound by a member currently on <paramref name="team"/> - the keys a
@@ -104,6 +104,34 @@ public sealed class SqlitePluginMemberSettings(string databasePath) : IPluginMem
         command.Parameters.AddWithValue("$secrets", PluginMemberSettingsRows.SecretsJson(settings));
         command.Parameters.AddWithValue("$connections", PluginMemberSettingsRows.ConnectionsJson(settings));
         await command.ExecuteNonQueryAsync(ct);
+
+        if (settings.Connections.Count > 0) await AssignBoundAsync(connection, transaction, member, settings, ct);
+    }
+
+    /// <summary>
+    /// A BINDING IS AN ASSIGNMENT: every connection the member binds is assigned to its team, inside the
+    /// same transaction, so a member never binds one its team was not given. An agent's binding is
+    /// checked against the team's assignments before it gets here and assigns nothing new; a person's
+    /// binding of one not yet assigned writes its <c>team.connection-assigned</c> row with the save.
+    /// </summary>
+    private static async Task AssignBoundAsync(
+        SqliteConnection connection, SqliteTransaction? transaction, ContainerId member, PluginMemberSettings settings, CancellationToken ct)
+    {
+        foreach (var id in settings.Connections.Values.Distinct(StringComparer.Ordinal))
+        {
+            await using var assign = connection.CreateCommand();
+            assign.Transaction = transaction;
+            assign.CommandText =
+                """
+                INSERT OR IGNORE INTO team_connections (team, connection_id, assigned_at)
+                SELECT t.id, $id, $at FROM teams t
+                WHERE t.id = $team AND EXISTS (SELECT 1 FROM connections WHERE id = $id)
+                """;
+            assign.Parameters.AddWithValue("$team", member.Team);
+            assign.Parameters.AddWithValue("$id", id);
+            assign.Parameters.AddWithValue("$at", Instant.Now());
+            await assign.ExecuteNonQueryAsync(ct);
+        }
     }
 
     public async Task<IReadOnlySet<string>> KeysBoundOnAsync(string team, CancellationToken ct = default)

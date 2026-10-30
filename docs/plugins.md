@@ -438,8 +438,10 @@ token, refreshes and rotates, and hands the plugin a fresh access token on each 
   Azure SQL and Azure Storage"), and `/api/plugins` lists them per slot as `microsoftApis`
   (`[{ api, name, scopes }]`, null for a slot that does not admit Microsoft).
 - **Binding.** A person picks a connection per slot when hiring the member and in Member settings.
-  The member stores the connection's id, never a token. A Manager or Concierge hire may name a
-  connection only when a person has already bound that same connection to a member of the same team.
+  The member stores the connection's id, never a token. The picker lists only the connections a
+  person assigned to the member's team (Team settings → Connections). A Manager or Concierge hire may
+  bind any connection assigned to its own team, and is refused one that is not. See
+  [connections.md](connections.md#which-teams-may-use-a-connection).
 
 #### Several Microsoft APIs from one connection
 
@@ -1334,8 +1336,8 @@ A person hires a plugin through `POST /api/teams/{team}/containers` with `agent:
   the operator's env file outside the container. A person's binding is a deliberate choice for this
   team. A Manager cannot grow the set, and firing the last member that bound a key removes the key
   from it. Pinned by `PluginManagerHiringTests.A_manager_binds_only_keys_a_person_has_bound_on_its_team`.
-- **Connections** follow the same rule: an agent's hire may name only a connection a person has
-  already bound on a member of the same team.
+- **Connections** are assigned to a team by a person (Team settings → Connections): an agent's hire
+  may bind any connection assigned to its own team, and no agent route or tool assigns one.
 - **Person-only settings.** A `config` field marked `"setBy": "person"` may be left at its default
   by an agent's hire and nothing else (see [the house rule](#plugins-that-act-outward-the-house-rule)).
 - Its own team only: the route's `{team}` is checked against the Manager's credential.

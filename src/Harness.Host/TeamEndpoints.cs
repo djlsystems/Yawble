@@ -36,9 +36,28 @@ internal static class TeamEndpoints
         app.MapPost("/api/teams", async (
             CreateTeam request, TeamRegistry teams, TenantLogging audit, HttpContext context,
             AgentInstallProbe probe, AgentCatalog catalog, TeamListPush listPush, TeamRepoSetup repoSetup,
-            DetachedWork detached, CancellationToken ct) =>
+            DetachedWork detached, Connections connections, CancellationToken ct) =>
         {
             var name = (request.Name ?? "").Trim();
+
+            // WHICH CONNECTIONS THE TEAM MAY USE is a person's choice: an agent's create naming any is
+            // refused, and every id must name a connection, before anything is created.
+            var assign = (request.Connections ?? []).Where(c => !string.IsNullOrWhiteSpace(c)).Select(c => c.Trim())
+                .Distinct(StringComparer.Ordinal).ToList();
+            if (assign.Count > 0)
+            {
+                if (PrincipalClaims.From(context.User) is { Kind: not PrincipalKind.User })
+                {
+                    return Results.Json(
+                        new { error = "Only a person assigns a connection to a team. Create the team without `connections`; a person assigns them in Team settings, Connections." },
+                        statusCode: StatusCodes.Status403Forbidden);
+                }
+
+                foreach (var id in assign)
+                {
+                    if (await connections.Store.GetAsync(id, ct) is null) return Results.BadRequest(new { error = $"There is no connection '{id}'." });
+                }
+            }
 
             if (name.Length == 0) return Results.BadRequest(new { error = "A team needs a name." });
 
@@ -140,6 +159,14 @@ internal static class TeamEndpoints
                                 createdOnGitHub = newRepos.CreatedOnGitHub.Count == 0 ? null : newRepos.CreatedOnGitHub,
                             },
                             work);
+
+                        // THE CONNECTIONS THE PERSON CHOSE in New team → Connections, each with its row.
+                        foreach (var id in assign)
+                        {
+                            var (_, assignError) = await TeamConnectionEndpoints.AssignAsync(
+                                made.Id, id, "new team", new ConnectionActor(actorId ?? "", actorEmail), connections, work);
+                            if (assignError is not null) throw new InvalidOperationException(assignError);
+                        }
 
                         await listPush.AnnounceCreatedAsync(made.Id, work);
                         return (made, retired);

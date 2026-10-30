@@ -729,7 +729,20 @@ public sealed record ContainerSnapshot(
     /// with it.
     /// </summary>
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    long? NeedsDecisionCorrelation = null);
+    long? NeedsDecisionCorrelation = null,
+
+    /// <summary>
+    /// WHAT A PERSON MUST STILL SET before this plugin member's runs can start - a required connection
+    /// slot with nothing bound, a required secret with no value - in words, or null (and absent) when
+    /// nothing is missing. Shown as Needs you where the member's status shows.
+    ///
+    /// NOT A RUN'S MARK: it says what the member's settings lack, so no wake clears it. The Host sets it
+    /// from the settings at restore, at hire and after every change to them (<c>PluginSetup</c>), and
+    /// a person's save that leaves nothing missing clears it. Its runs meanwhile end `needs-person`,
+    /// which is a wait for a person and never an error.
+    /// </summary>
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? NeedsPerson = null);
 
 /// <summary>
 /// A chosen Agent that did not resolve on this machine's PATH.

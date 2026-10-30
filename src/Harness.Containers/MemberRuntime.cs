@@ -154,6 +154,11 @@ public sealed class MemberRuntime : IAsyncDisposable
     private volatile string? _resumeAt;
     private volatile string? _needsDecision;
 
+    /// <summary>What a person must still set before this plugin member can run, or null. See
+    /// <see cref="ContainerSnapshot.NeedsPerson"/>: set and cleared by the Host from the member's
+    /// settings, never by a wake.</summary>
+    private volatile string? _needsPerson;
+
     /// <summary>The `needs-decision` row <see cref="_needsDecision"/> was read from, or null. One
     /// reference, so a snapshot never reads one row's seq beside another's workflow.</summary>
     private volatile DecisionRow? _needsDecisionRow;
@@ -485,7 +490,21 @@ public sealed class MemberRuntime : IAsyncDisposable
         Kind: MemberRef.KindOf(_definition.Agent),
         Wakes: _wakes,
         NeedsDecisionSeq: _needsDecisionRow?.Seq,
-        NeedsDecisionCorrelation: _needsDecisionRow?.Correlation);
+        NeedsDecisionCorrelation: _needsDecisionRow?.Correlation,
+        NeedsPerson: _needsPerson);
+
+    /// <summary>
+    /// Records what a person must still set before this plugin member's runs can start, or clears it
+    /// with null, and pushes it when it moves. Not cleared by a wake: the Host's read of the member's
+    /// settings is the only writer.
+    /// </summary>
+    public void MarkNeedsPerson(string? what)
+    {
+        if (string.Equals(_needsPerson, what, StringComparison.Ordinal)) return;
+
+        _needsPerson = what;
+        Publish();
+    }
 
     /// <summary>
     /// Records that this container has stopped without finishing, and pushes it.

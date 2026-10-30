@@ -408,7 +408,10 @@ public sealed class TeamRegistry(
     LocalRepos? localRepos = null,
 
     // Which solution package each team came from; none without one.
-    ITeamSolutions? solutions = null)
+    ITeamSolutions? solutions = null,
+
+    // Which connections each team may use; a clone copies them. None without one.
+    IConnectionStore? connections = null)
 {
     /// <summary>What each role is offered, for the "Available skills" list every prompt carries.
     /// A registry built without one lists the built-ins.</summary>
@@ -2305,6 +2308,31 @@ public sealed class TeamRegistry(
             }
         }
 
+        // THE SOURCE'S CONNECTIONS, BEFORE ITS MEMBERS: each one assigned to the source is assigned to
+        // the clone, each with its `team.connection-assigned` row, so every carried binding below binds
+        // a connection its new team was given and its plugin members run without a person touching
+        // them. The connections themselves are shared, never copied. Collected, as the env step is.
+        if (connections is not null)
+        {
+            try
+            {
+                var records = (await connections.ListAsync(ct)).ToDictionary(c => c.Id, StringComparer.Ordinal);
+                await connections.CopyAssignmentsAsync(
+                    stored, created.Id,
+                    connectionId => new TriggerAudit(
+                        null, null, TenantActions.TeamConnectionAssigned, connectionId,
+                        records.TryGetValue(connectionId, out var record) ? record.Name : connectionId,
+                        System.Text.Json.JsonSerializer.Serialize(record is null
+                            ? new { team = created.Id, connection = connectionId, via = "clone", clonedFrom = stored }
+                            : Connections.AssignedDetail(created.Id, record, "clone", stored))),
+                    ct);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                failures.Add($"connections: {exception.Message}");
+            }
+        }
+
         var hired = 0;
 
         foreach (var id in ContainerIdsOf(stored))
@@ -2344,7 +2372,7 @@ public sealed class TeamRegistry(
                     // THE BINDING TRAVELS with the member (a connection id, never a token), recorded
                     // as carried from the source rather than chosen again.
                     connectionsAudit: settings is { Connections.Count: > 0 } carriedBindings
-                        ? cloned => new TriggerAudit(
+                        ? cloned => [new TriggerAudit(
                             null, null, TenantActions.MemberConnectionsChanged, $"{cloned.Team}/{cloned.Name}", member.Label ?? member.Name,
                             System.Text.Json.JsonSerializer.Serialize(new
                             {
@@ -2352,7 +2380,7 @@ public sealed class TeamRegistry(
                                 clonedFrom = $"{id.Team}/{id.Name}",
                                 setBy = "person",
                                 slots = carriedBindings.Connections.OrderBy(c => c.Key, StringComparer.Ordinal).Select(c => new { slot = c.Key, from = (string?)null, to = c.Value }),
-                            }))
+                            }))]
                         : null);
 
                 hired += 1;
@@ -2734,7 +2762,7 @@ public sealed class TeamRegistry(
         CancellationToken ct = default,
         PluginMemberSettings? settings = null,
         SystemPromptSetter? promptSetBy = null,
-        Func<ContainerId, TriggerAudit>? connectionsAudit = null,
+        Func<ContainerId, IReadOnlyList<TriggerAudit>>? connectionsAudit = null,
         bool secretsSetLater = false,
         bool waitForPerson = false,
         IReadOnlySet<string>? valued = null,
@@ -2760,7 +2788,7 @@ public sealed class TeamRegistry(
         CancellationToken ct = default,
         PluginMemberSettings? settings = null,
         SystemPromptSetter? promptSetBy = null,
-        Func<ContainerId, TriggerAudit>? connectionsAudit = null,
+        Func<ContainerId, IReadOnlyList<TriggerAudit>>? connectionsAudit = null,
         bool secretsSetLater = false,
         bool waitForPerson = false,
         IReadOnlySet<string>? valued = null,
@@ -3002,10 +3030,11 @@ public sealed class TeamRegistry(
         }
         else if (isPlugin && pluginSettings is not null)
         {
-            // A CONNECTION BINDING lands with its `member.connections-changed` row, or not at all.
+            // A CONNECTION BINDING lands with its `member.connections-changed` row, and the
+            // `team.connection-assigned` row of each connection it assigns to the team, or not at all.
             if (connectionsAudit is not null && settings is { Connections.Count: > 0 })
             {
-                await pluginSettings.SaveAsync(id, settings, [connectionsAudit(id)], ct);
+                await pluginSettings.SaveAsync(id, settings, connectionsAudit(id), ct);
             }
             else
             {

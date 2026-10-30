@@ -1714,6 +1714,15 @@ public sealed class SolutionInstaller(
                 .ToDictionary(v => v.Key, v => (string?)v.Value, StringComparer.Ordinal);
             var settings = new PluginMemberSettings(config, new Dictionary<string, string>(member.Secrets, StringComparer.Ordinal)) { Connections = bindings };
 
+            // EACH CONNECTION THE PERSON CHOSE is assigned to the new team with the binding, each with its
+            // `team.connection-assigned` row in the same transaction.
+            var assigning = connections is null || bindings.Count == 0
+                ? []
+                : await connections.NotYetAssignedAsync(team, bindings.Values, ct);
+            IReadOnlyList<TriggerAudit> AssignedRows(ContainerId id) =>
+                [.. assigning.Select(c => actor.Row(
+                    TenantActions.TeamConnectionAssigned, c.Id, c.Name, Connections.AssignedDetail(id.Team, c, "solution install")))];
+
             try
             {
                 snapshot = await teams.HireMemberAsync(
@@ -1726,8 +1735,8 @@ public sealed class SolutionInstaller(
                     promptSetBy: actor.PromptSetter,
                     connectionsAudit: bindings.Count == 0
                         ? null
-                        : id => actor.Row(TenantActions.MemberConnectionsChanged, $"{id.Team}/{id.Name}", member.Name,
-                            new { plugin = member.PluginId, slots = bindings.Keys.Order(StringComparer.Ordinal) }),
+                        : id => [actor.Row(TenantActions.MemberConnectionsChanged, $"{id.Team}/{id.Name}", member.Name,
+                            new { plugin = member.PluginId, slots = bindings.Keys.Order(StringComparer.Ordinal) }), .. AssignedRows(id)],
                     secretsSetLater: true,
                     valued: values.Keys.ToHashSet(StringComparer.Ordinal),
 
@@ -1740,7 +1749,7 @@ public sealed class SolutionInstaller(
                             bindings.Count == 0
                                 ? []
                                 : [actor.Row(TenantActions.MemberConnectionsChanged, $"{id.Team}/{id.Name}", member.Name,
-                                    new { plugin = member.PluginId, slots = bindings.Keys.Order(StringComparer.Ordinal) })],
+                                    new { plugin = member.PluginId, slots = bindings.Keys.Order(StringComparer.Ordinal) }), .. AssignedRows(id)],
                             values.ToDictionary(v => v.Key, v => (string?)v.Value, StringComparer.Ordinal),
                             named,
                             new CredentialActor(actor.UserId, actor.Label), token));

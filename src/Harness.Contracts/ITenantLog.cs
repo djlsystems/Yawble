@@ -245,6 +245,15 @@ public static class TenantActions
     /// mailbox's servers. Detail names the fields that changed - never a value or any part of it.</summary>
     public const string ConnectionCredentialsChanged = "connections.credentials-changed";
 
+    /// <summary>A person assigned a connection to a team, so the team's plugin members may bind it
+    /// (in Team settings, at team creation, at a binding or a solution install, or carried by a clone).
+    /// Detail: team, connection id, name, kind - never a value.</summary>
+    public const string TeamConnectionAssigned = "team.connection-assigned";
+
+    /// <summary>A person removed a connection from a team; every member of the team that bound it was
+    /// unbound in the same transaction. Detail: team, connection id, name, the members unbound.</summary>
+    public const string TeamConnectionRemoved = "team.connection-removed";
+
     /// <summary>A person set a plugin key (a logical key such as ACME_STORAGE_KEY) from the screen
     /// where none was stored. Detail: the key - never the value or any part of it.</summary>
     public const string SecretSet = "secrets.set";

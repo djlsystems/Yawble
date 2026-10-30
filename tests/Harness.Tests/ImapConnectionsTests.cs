@@ -483,7 +483,7 @@ public sealed class ImapConnectionsTests : IAsyncLifetime
 
         var refused = await tools.Hire("Sneaky", plugin: "mailer", connections: new() { ["mail"] = id }, cancellationToken: Ct);
         Assert.StartsWith("HTTP 400", refused);
-        Assert.Contains($"The connection '{id}' named for slot `mail` is not one a person has bound on this team.", refused);
+        Assert.Contains($"The connection '{id}' named for slot `mail` is not assigned to this team.", refused);
 
         await HireAsync("Inbox", id);
         var hired = await tools.Hire("Second", plugin: "mailer", connections: new() { ["mail"] = id }, cancellationToken: Ct);

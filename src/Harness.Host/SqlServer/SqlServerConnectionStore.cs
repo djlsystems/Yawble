@@ -394,6 +394,13 @@ public sealed class SqlServerConnectionStore(string connectionString, IDataProte
                     await command.ExecuteNonQueryAsync(token);
                 }
 
+                // EVERY TEAM IT WAS ASSIGNED TO loses it here, in the same transaction.
+                await using (var command = Command(connection, transaction, $"DELETE FROM team_connections WHERE {SqlServerSql.Same("connection_id", "@id")}"))
+                {
+                    command.Parameters.AddWithValue("@id", id);
+                    await command.ExecuteNonQueryAsync(token);
+                }
+
                 // EVERY MEMBER THAT BOUND IT loses those slots here, in the same transaction.
                 foreach (var row in rows.Where(r => used.Any(u => u.Team == r.Team && u.Member == r.Member)))
                 {
@@ -494,6 +501,160 @@ public sealed class SqlServerConnectionStore(string connectionString, IDataProte
         }
 
         return list;
+    }
+
+    // ---- team assignments -----------------------------------------------------------------------
+
+    private static readonly string TeamMatch = "team = @team";
+
+    public Task<IReadOnlyList<TeamConnection>> AssignedAsync(string team, CancellationToken ct = default) =>
+        RunAsync<IReadOnlyList<TeamConnection>>(
+            async (connection, token) =>
+            {
+                await using var command = Command(
+                    connection, null,
+                    $"SELECT team, connection_id, assigned_at FROM team_connections WHERE {TeamMatch} ORDER BY assigned_at, connection_id");
+                command.Parameters.AddWithValue("@team", team);
+
+                var list = new List<TeamConnection>();
+                await using var reader = await command.ExecuteReaderAsync(token);
+                while (await reader.ReadAsync(token))
+                {
+                    list.Add(new TeamConnection(reader.GetString(0), reader.GetString(1), Instant.Parse(reader.GetString(2))));
+                }
+
+                return list;
+            },
+            ct);
+
+    public Task<ILookup<string, string>> AllAssignmentsAsync(CancellationToken ct = default) =>
+        RunAsync(
+            async (connection, token) =>
+            {
+                await using var command = Command(connection, null, "SELECT connection_id, team FROM team_connections ORDER BY team");
+
+                var list = new List<(string Id, string Team)>();
+                await using var reader = await command.ExecuteReaderAsync(token);
+                while (await reader.ReadAsync(token)) list.Add((reader.GetString(0), reader.GetString(1)));
+                return list.ToLookup(a => a.Id, a => a.Team, StringComparer.Ordinal);
+            },
+            ct);
+
+    public Task<AssignOutcome> AssignAsync(string team, string connectionId, TriggerAudit audit, CancellationToken ct = default) =>
+        RunAsync(
+            async (connection, token) =>
+            {
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
+
+                await using (var exists = Command(connection, transaction, $"SELECT COUNT(*) FROM connections WITH (UPDLOCK, HOLDLOCK) WHERE {IdMatch}"))
+                {
+                    exists.Parameters.AddWithValue("@id", connectionId);
+                    if (Convert.ToInt64(await exists.ExecuteScalarAsync(token)) == 0) return AssignOutcome.NoConnection;
+                }
+
+                if (!await InsertAssignmentAsync(connection, transaction, team, connectionId, token)) return AssignOutcome.Already;
+
+                await SqlServerTenantAuditRow.AppendAsync(connection, transaction, audit, token);
+                await SqlServerOpen.CommitAsync(transaction, token);
+                return AssignOutcome.Assigned;
+            },
+            ct);
+
+    public async Task<(bool Removed, IReadOnlyList<ConnectionUse> Unbound)> UnassignAsync(
+        string team, string connectionId, TriggerAudit audit,
+        Func<IReadOnlyList<ConnectionUse>, IReadOnlyList<TriggerAudit>> unbind, CancellationToken ct = default)
+    {
+        IReadOnlyList<ConnectionUse> used = [];
+
+        var removed = await RunAsync(
+            async (connection, token) =>
+            {
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
+
+                // THE BINDINGS, HELD: a member of the team bound to it meanwhile waits, and is seen.
+                var rows = (await BindingRowsAsync(connection, transaction, held: true, token))
+                    .Where(r => string.Equals(r.Team, team, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                await using (var command = Command(
+                    connection, transaction,
+                    $"DELETE FROM team_connections WHERE {TeamMatch} AND {SqlServerSql.Same("connection_id", "@id")}"))
+                {
+                    command.Parameters.AddWithValue("@team", team);
+                    command.Parameters.AddWithValue("@id", connectionId);
+                    if (await command.ExecuteNonQueryAsync(token) == 0) return false;
+                }
+
+                used = [.. rows.SelectMany(r => ConnectionRows.Bindings(r.Team, r.Member, r.Json)).Where(b => b.Id == connectionId).Select(b => b.Use)];
+
+                foreach (var row in rows.Where(r => used.Any(u => u.Member == r.Member)))
+                {
+                    await using var command = Command(
+                        connection, transaction,
+                        $"UPDATE team_member_config SET connections_json = @json WHERE {SqlServerSql.Same("team", "@team")} AND {SqlServerSql.Same("name", "@name")}");
+                    command.Parameters.AddWithValue("@team", row.Team);
+                    command.Parameters.AddWithValue("@name", row.Member);
+                    command.Parameters.AddWithValue("@json", ConnectionRows.Unbound(row.Json, connectionId));
+                    await command.ExecuteNonQueryAsync(token);
+                }
+
+                await SqlServerTenantAuditRow.AppendAsync(connection, transaction, audit, token);
+                if (used.Count > 0)
+                {
+                    foreach (var row in unbind(used)) await SqlServerTenantAuditRow.AppendAsync(connection, transaction, row, token);
+                }
+
+                await SqlServerOpen.CommitAsync(transaction, token);
+                return true;
+            },
+            ct);
+
+        return removed ? (true, used) : (false, []);
+    }
+
+    public Task<IReadOnlyList<string>> CopyAssignmentsAsync(
+        string from, string to, Func<string, TriggerAudit> audit, CancellationToken ct = default) =>
+        RunAsync<IReadOnlyList<string>>(
+            async (connection, token) =>
+            {
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
+
+                var ids = new List<string>();
+                await using (var command = Command(
+                    connection, transaction,
+                    $"SELECT connection_id FROM team_connections WHERE {TeamMatch} ORDER BY assigned_at, connection_id"))
+                {
+                    command.Parameters.AddWithValue("@team", from);
+                    await using var reader = await command.ExecuteReaderAsync(token);
+                    while (await reader.ReadAsync(token)) ids.Add(reader.GetString(0));
+                }
+
+                var copied = new List<string>();
+                foreach (var id in ids)
+                {
+                    if (!await InsertAssignmentAsync(connection, transaction, to, id, token)) continue;
+                    await SqlServerTenantAuditRow.AppendAsync(connection, transaction, audit(id), token);
+                    copied.Add(id);
+                }
+
+                await SqlServerOpen.CommitAsync(transaction, token);
+                return copied;
+            },
+            ct);
+
+    /// <summary>One assignment, inside a write's transaction: false when it was already there.</summary>
+    private static async Task<bool> InsertAssignmentAsync(
+        SqlConnection connection, SqlTransaction transaction, string team, string connectionId, CancellationToken ct)
+    {
+        await using var command = Command(
+            connection, transaction,
+            "INSERT INTO team_connections (team, connection_id, assigned_at) "
+            + "SELECT @team, @id, @at WHERE NOT EXISTS (SELECT 1 FROM team_connections WITH (UPDLOCK, HOLDLOCK) "
+            + $"WHERE {TeamMatch} AND {SqlServerSql.Same("connection_id", "@id")})");
+        command.Parameters.AddWithValue("@team", team);
+        command.Parameters.AddWithValue("@id", connectionId);
+        command.Parameters.AddWithValue("@at", Instant.Now());
+        return await command.ExecuteNonQueryAsync(ct) > 0;
     }
 
     // ---- mailboxes ------------------------------------------------------------------------------

@@ -729,5 +729,26 @@ public static class AuthSchema
                 WHERE o.name = connections.name COLLATE NOCASE
                   AND (o.connected_at < connections.connected_at OR (o.connected_at = connections.connected_at AND o.id < connections.id)));
             """),
+
+        // WHICH TEAMS MAY USE A CONNECTION: one row per team a person assigned it to. A plugin member
+        // binds only a connection assigned to its own team, so every binding has its row here (a
+        // person's binding of one not yet assigned assigns it in the same transaction). Removed with
+        // the team by the foreign key, and with the connection by its delete, in that transaction.
+        // An existing volume's bindings are assigned to their teams, so nothing bound today stops.
+        new MigrationStep(
+            "auth-032",
+            """
+            CREATE TABLE team_connections (
+                team          TEXT NOT NULL COLLATE NOCASE REFERENCES teams(id) ON DELETE CASCADE,
+                connection_id TEXT NOT NULL,
+                assigned_at   TEXT NOT NULL,
+                PRIMARY KEY (team, connection_id)
+            );
+
+            INSERT OR IGNORE INTO team_connections (team, connection_id, assigned_at)
+            SELECT DISTINCT c.team, j.value, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            FROM team_member_config c, json_each(c.connections_json) j
+            WHERE j.value IN (SELECT id FROM connections) AND c.team IN (SELECT id FROM teams);
+            """),
     ];
 }
