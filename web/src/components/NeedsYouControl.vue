@@ -14,6 +14,7 @@ import {
   groupNeedsYou,
   needsYouDecision,
   needsYouOpen,
+  needsYouLead,
   needsYouOpenWords,
   needsYouSubject,
   type NeedsYouOpen,
@@ -32,6 +33,8 @@ import FieldHelp from './FieldHelp.vue';
  */
 /** `word: false` is the row short of room (`lib/headerFit.ts`): the count pill alone, as on a phone. */
 const props = withDefaults(defineProps<{ word?: boolean }>(), { word: true });
+/** A connection row's Open: Admin → Connections is the shell's dialog, so the shell opens it. */
+const emit = defineEmits<{ 'open-connections': [] }>();
 
 const needsYou = useNeedsYouStore();
 const { count, items, error } = storeToRefs(needsYou);
@@ -67,7 +70,7 @@ const label = computed(() => {
 
 const HelpText =
   'What is waiting on a person, across every team you can see: decisions, blocked and failed members, ' +
-  'inputs a solution waits for, work ready to merge, stranded workflows and unfinished removals. ' +
+  'inputs a solution waits for, connections to put right, work ready to merge, stranded workflows and unfinished removals. ' +
   'A row leaves the list when what it says is no longer true.';
 
 function since(item: NeedsYouItem): string {
@@ -107,6 +110,9 @@ function open(target: NeedsYouOpen) {
     case 'removals':
       toConsole();
       board.showTeamsView();
+      return;
+    case 'connections':
+      emit('open-connections');
       return;
   }
 }
@@ -154,7 +160,7 @@ function open(target: NeedsYouOpen) {
           >
             <div class="col needs-you-text">
               <div class="needs-you-who">
-                <span class="text-weight-medium" data-test="needs-you-team">{{ item.team.name || item.team.id }}</span>
+                <span class="text-weight-medium" data-test="needs-you-team">{{ needsYouLead(item) }}</span>
                 <span v-if="needsYouSubject(item)" data-test="needs-you-subject"> · {{ needsYouSubject(item) }}</span>
               </div>
               <div class="needs-you-words" data-test="needs-you-words">{{ item.words }}</div>

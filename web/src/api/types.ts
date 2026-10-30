@@ -4454,7 +4454,7 @@ export interface CapacityView {
 }
 
 /** The kinds `GET /api/needs-you?part=live` answers: read from memory, fresh on every push. */
-export const NeedsYouLiveKinds = ['decision', 'blocked', 'failed', 'waiting-input'] as const
+export const NeedsYouLiveKinds = ['decision', 'blocked', 'failed', 'waiting-input', 'connection'] as const
 /** The kinds `GET /api/needs-you?part=stored` answers: the stores and the landed cache. */
 export const NeedsYouStoredKinds = ['merge-ready', 'stranded', 'removal'] as const
 
@@ -4465,7 +4465,7 @@ export type NeedsYouPart = 'live' | 'stored'
 
 /** What a Needs you row opens: the view, and what in it. */
 export interface NeedsYouWhere {
-  view: 'workflow' | 'card' | 'backlog' | 'merge' | 'solution' | 'removals'
+  view: 'workflow' | 'card' | 'backlog' | 'merge' | 'solution' | 'removals' | 'connections'
   team: string
   workflow?: number | null
   card?: string | null
@@ -4490,6 +4490,15 @@ export interface NeedsYouItem {
   needsDecisionSeq?: number | null
   /** On a failure: its class. */
   failureClass?: string | null
+  /** On a connection row: the connection, and each team with the members of it the connection holds up. */
+  connection?: NeedsYouConnection | null
+}
+
+/** A connection that needs a person, once, with whom it holds up. */
+export interface NeedsYouConnection {
+  id: string
+  name: string
+  holds: { team: { id: string; name: string }; members: string[] }[]
 }
 
 /** `GET /api/needs-you`: newest first. */

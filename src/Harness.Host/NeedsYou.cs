@@ -17,14 +17,25 @@ public static class NeedsYouKinds
     public const string MergeReady = "merge-ready";
     public const string Stranded = "stranded";
     public const string Removal = "removal";
+    public const string Connection = "connection";
 }
+
+/// <summary>
+/// The connection a <c>connection</c> row is about - its id and name - and whom it holds up: each
+/// team, by id and name, with the members of it using the connection.
+/// </summary>
+public sealed record NeedsYouConnection(string Id, string Name, IReadOnlyList<NeedsYouHeld> Holds);
+
+/// <summary>One team a connection holds up, and its members held.</summary>
+public sealed record NeedsYouHeld(NeedsYouTeam Team, IReadOnlyList<string> Members);
 
 /// <summary>The team a row is about: its id and the name a person reads.</summary>
 public sealed record NeedsYouTeam(string Id, string Name);
 
 /// <summary>
-/// What opens a row: <c>workflow</c>, <c>card</c>, <c>backlog</c>, <c>merge</c>, <c>solution</c> or
-/// <c>removals</c>, on <see cref="Team"/>, with the workflow, card and item it names when it names one.
+/// What opens a row: <c>workflow</c>, <c>card</c>, <c>backlog</c>, <c>merge</c>, <c>solution</c>,
+/// <c>removals</c> or <c>connections</c> (Admin → Connections), on <see cref="Team"/>, with the workflow,
+/// card and item it names when it names one.
 /// </summary>
 public sealed record NeedsYouWhere(
     string View,
@@ -48,7 +59,8 @@ public sealed record NeedsYouItem(
     string Words,
     NeedsYouWhere Where,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? NeedsDecisionSeq = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? FailureClass = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? FailureClass = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] NeedsYouConnection? Connection = null);
 
 /// <summary>
 /// WHAT IS WAITING ON A PERSON, in one list: <c>GET /api/needs-you</c>. A read that decides nothing,
@@ -75,7 +87,7 @@ public static class NeedsYou
             HttpContext context,
             TeamRegistry teams, ContainerHost host, IBacklogStore backlog, IMessageLog log,
             KanbanStore kanban, BacklogLandedCache landedCache, UnfinishedRemovalRetry removals,
-            ITeamSolutionStore solutions, SolutionInstaller installer, SolutionWait waiting,
+            ITeamSolutionStore solutions, SolutionInstaller installer, SolutionWait waiting, PluginSetup setup,
             string? part = null,
             CancellationToken ct = default) =>
         {
@@ -89,7 +101,7 @@ public static class NeedsYou
 
             if (part is null or LivePart)
             {
-                items.AddRange(await LiveAsync(names, host, backlog, solutions, installer, waiting, ct));
+                items.AddRange(await LiveAsync(names, host, backlog, solutions, installer, waiting, ct, setup));
             }
 
             if (part is null or StoredPart)
@@ -106,17 +118,21 @@ public static class NeedsYou
                 "One list of what is waiting on a person, newest first by `since`: `{ items: [...] }`. "
                 + "Each item is `{ kind, team: { id, name }, member, card, workflow, item: { id, title } "
                 + "or null, since, words, where: { view, team, workflow?, card?, item? } }`, with "
-                + "`needsDecisionSeq` on a decision and `failureClass` on a failure. `kind` is `decision` "
+                + "`needsDecisionSeq` on a decision, `failureClass` on a failure and `connection: { id, name, "
+                + "holds: [{ team: { id, name }, members }] }` on a connection. `kind` is `decision` "
                 + "(a member's needs-decision mark), `blocked` (a member's last run published blocked), "
                 + "`failed` (a member's last run failed; a member both blocked and failed is listed "
                 + "failed), `waiting-input` (a solution team's `missing`), `merge-ready` (a backlog item "
                 + "whose current dispatch workflow ended with `workflow.completed` and whose landed reads "
                 + "`pushed`), `stranded` (an item carrying `stranded`) or `removal` (an unfinished "
-                + "removal). `words` are the platform's own: the blocked reason, the failure, the "
-                + "question, the missing input's sentence, the landed sentence, the stranded notice, "
-                + "what the removal left. `where.view` is `workflow`, `card`, `backlog`, `merge`, "
-                + "`solution` or `removals`.\n\n"
-                + "`part=live` answers only decision, blocked, failed and waiting-input, from memory; "
+                + "removal), or `connection` (a connection that needs a person - refused, or asking for a "
+                + "sign-in - listed ONCE however many members it holds up, naming each team and member in "
+                + "`connection.holds`; those members' own failures are not listed beside it; `team` is "
+                + "the first team it holds up). `words` are the platform's own: the blocked reason, the "
+                + "failure, the question, the missing input's sentence, the landed sentence, the stranded "
+                + "notice, what the removal left, the connection's sentence. `where.view` is `workflow`, "
+                + "`card`, `backlog`, `merge`, `solution`, `removals` or `connections`.\n\n"
+                + "`part=live` answers only decision, blocked, failed, waiting-input and connection, from memory; "
                 + "`part=stored` answers only merge-ready, stranded and removal, from the stores and the "
                 + "landed cache - this route never fetches a remote and never runs git, so an item whose "
                 + "team's landed is not cached is not listed until the Backlog or Git dialog has read "
@@ -147,9 +163,37 @@ public static class NeedsYou
         ITeamSolutionStore solutions,
         SolutionInstaller installer,
         SolutionWait waiting,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        PluginSetup? setup = null)
     {
         var marked = new List<(ContainerSnapshot Snapshot, string Kind, MarkRow Row)>();
+        var result = new List<NeedsYouItem>();
+
+        // A CONNECTION THAT NEEDS A PERSON, ONCE, however many members on however many teams it holds
+        // up - each named under it. Since is the earliest held run's failure, else when it was first seen.
+        var holds = (setup?.Holds() ?? [])
+            .Select(hold => (Hold: hold, Members: hold.Members.Where(m => names.ContainsKey(m.Team)).ToList()))
+            .Where(h => h.Members.Count > 0)
+            .ToList();
+        var holding = holds.Select(h => h.Hold.Id).ToHashSet(StringComparer.Ordinal);
+
+        foreach (var (hold, members) in holds)
+        {
+            var teams = members
+                .GroupBy(m => m.Team, StringComparer.OrdinalIgnoreCase)
+                .Select(g => new NeedsYouHeld(new NeedsYouTeam(g.Key, names[g.Key]), [.. g.Select(m => m.Name)]))
+                .ToList();
+            var since = members
+                .Select(m => host.Find(m) is { } runtime && runtime.HeldByConnection == hold.Id ? runtime.Marks().Failed?.At : null)
+                .Where(at => at is not null)
+                .DefaultIfEmpty(hold.Since)
+                .Min()!.Value;
+
+            result.Add(new NeedsYouItem(
+                NeedsYouKinds.Connection, teams[0].Team, null, null, null, null, since, hold.Sentence,
+                new NeedsYouWhere("connections", teams[0].Team.Id),
+                Connection: new NeedsYouConnection(hold.Id, hold.Name, teams)));
+        }
 
         foreach (var snapshot in host.Snapshots())
         {
@@ -157,6 +201,9 @@ public static class NeedsYou
             if (host.Find(new ContainerId(snapshot.Team, snapshot.Id)) is not { } member) continue;
 
             var rows = member.Marks();
+
+            // HELD UP BY A CONNECTION LISTED ABOVE: its row says this member; its failure is not said again.
+            if (member.HeldByConnection is { } heldBy && holding.Contains(heldBy)) rows = rows with { Failed = null, Blocked = null };
 
             // FAILED OUTRANKS BLOCKED, as on the card (`ContainerSnapshot.Failed`): a run that gave
             // up and then died is one stop, said once. A question is its own ask and is listed too.
@@ -174,8 +221,6 @@ public static class NeedsYou
                 marked.Add((snapshot, NeedsYouKinds.Decision, decision));
             }
         }
-
-        var result = new List<NeedsYouItem>();
 
         if (marked.Count > 0)
         {

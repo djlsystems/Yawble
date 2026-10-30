@@ -149,6 +149,15 @@ public sealed class MemberRuntime : IAsyncDisposable
     private volatile string? _failureClass;
 
     /// <summary>
+    /// THE CONNECTION THAT HELD <see cref="_failed"/>'S RUN UP, by id, or null: the run's
+    /// <see cref="MemberResult.HeldByConnection"/>. Beside `_failed` and cleared with it, for
+    /// `_failureClass`'s reason. A person putting the connection right clears the mark
+    /// (<see cref="ClearNeedsPersonMarks"/>), and Needs you lists the connection once instead of this
+    /// member's failure.
+    /// </summary>
+    private volatile string? _failedConnection;
+
+    /// <summary>
     /// WHEN THE PLATFORM WILL RESUME THIS MEMBER'S WORKFLOW BY ITSELF, as an ISO-8601 instant, or
     /// null when it will not.
     ///
@@ -454,6 +463,9 @@ public sealed class MemberRuntime : IAsyncDisposable
     public event Action<ContainerSnapshot>? Changed;
 
     /// <summary>The rows this member's live trouble marks were read from. See <see cref="MarkRows"/>.</summary>
+    /// <summary>The connection the live failed mark's run was held up by, or null. Not on the snapshot.</summary>
+    public string? HeldByConnection => _failed is null ? null : _failedConnection;
+
     public MarkRows Marks() => new(
         _blocked is null ? null : _blockedRow,
         _failed is null ? null : _failedRow,
@@ -593,16 +605,18 @@ public sealed class MemberRuntime : IAsyncDisposable
     /// a card is read by a person, and telling them "unknown" where nobody even asked the question
     /// is noise.
     /// </param>
-    public void MarkFailed(string reason, string? failureClass = null)
+    public void MarkFailed(string reason, string? failureClass = null, string? heldByConnection = null)
     {
         if (string.Equals(_failed, reason, StringComparison.Ordinal)
-            && string.Equals(_failureClass, failureClass, StringComparison.Ordinal))
+            && string.Equals(_failureClass, failureClass, StringComparison.Ordinal)
+            && string.Equals(_failedConnection, heldByConnection, StringComparison.Ordinal))
         {
             return;
         }
 
         _failed = reason;
         _failureClass = failureClass;
+        _failedConnection = heldByConnection;
         _failedRow = MarkedNow();
 
         // Pushed, or the board never looks. The SPA has no poll - it refetches only when a
@@ -629,6 +643,7 @@ public sealed class MemberRuntime : IAsyncDisposable
         _blockedRow = null;
         _failedRow = null;
         _failureClass = null;
+        _failedConnection = null;
         _resumeAt = null;
         Publish();
     }
@@ -643,11 +658,14 @@ public sealed class MemberRuntime : IAsyncDisposable
     {
         var moved = false;
 
-        if (_failed is not null && _failureClass == FailureClasses.NeedsPerson)
+        // A RUN A CONNECTION HELD UP waited for a person as well, whatever its class: the run is not
+        // relabelled a wait on the log, but its mark goes when what held it is put right.
+        if (_failed is not null && (_failureClass == FailureClasses.NeedsPerson || _failedConnection is not null))
         {
             _failed = null;
             _failedRow = null;
             _failureClass = null;
+            _failedConnection = null;
             _resumeAt = null;
             moved = true;
         }
@@ -1535,6 +1553,7 @@ public sealed class MemberRuntime : IAsyncDisposable
         // above is adjacent: a class or a promised resume outliving the reason it belongs to is a
         // card describing two different runs at once.
         _failureClass = null;
+        _failedConnection = null;
         _resumeAt = null;
         _needsDecision = null;
         _needsDecisionRow = null;
@@ -1881,6 +1900,12 @@ public sealed class MemberRuntime : IAsyncDisposable
                     payload = payload[..^1] + $",\"{PayloadFields.DeferredFromRun}\":{deferredFromRun}}}";
                 }
 
+                // THE CONNECTION THAT HELD A FAILED RUN UP, the same way: one key, only on such a row.
+                if (!result.Succeeded && result.HeldByConnection is { } heldBy)
+                {
+                    payload = payload[..^1] + $",\"{PayloadFields.HeldByConnection}\":{JsonSerializer.Serialize(heldBy)}}}";
+                }
+
                 // A QUIET RUN, the same way: one key, only when true, so every other row is byte for
                 // byte what it was. The pump wakes nobody on it; see PayloadFields.Quiet.
                 //
@@ -1923,7 +1948,7 @@ public sealed class MemberRuntime : IAsyncDisposable
                 // hook: whoever sees the Failed row may read the reason at once. Marked after the
                 // append, a reader that polled the row in the moment before this continuation ran -
                 // only ever under load - read the row and a null `failed`.
-                if (!result.Succeeded) MarkFailed(failure, failureClass);
+                if (!result.Succeeded) MarkFailed(failure, failureClass, result.HeldByConnection);
 
                 var terminal = await SafeAppendAsync(new NewMessage(
                     result.Succeeded ? MessageTypes.Completed : MessageTypes.Failed,

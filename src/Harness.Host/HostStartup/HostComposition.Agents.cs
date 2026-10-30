@@ -91,7 +91,7 @@ internal sealed partial class HostComposition
         builder.Services.AddSingleton(sp => new PluginSetup(
             sp.GetRequiredService<ContainerHost>(), sp.GetRequiredService<PluginCatalog>(),
             sp.GetRequiredService<IPluginMemberSettingsStore>(), sp.GetRequiredService<ISecretStore>(),
-            sp.GetRequiredService<PluginMemberSecretStore>(), sp.GetService<IMessageLog>()));
+            sp.GetRequiredService<PluginMemberSecretStore>(), sp.GetService<IMessageLog>(), sp.GetService<IConnectionStore>()));
         builder.Services.AddHostedService(sp => new MemberSecretsCopyAtStart(
             sp.GetRequiredService<PluginMemberSecretStore>(), sp.GetRequiredService<IDataProtectionProvider>(),
             sp.GetRequiredService<ILogger<MemberSecretsCopyAtStart>>()));

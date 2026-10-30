@@ -82,6 +82,9 @@ public sealed record MemberRunContext(
 /// <param name="Quiet">A successful run that found nothing anyone needs to be woken for: its
 /// `completed` row is written as usual, marked <see cref="PayloadFields.Quiet"/>, and wakes no
 /// subscriber. Ignored on a failure, which always wakes. Only a plugin's result record sets it.</param>
+/// <param name="HeldByConnection">On a failure, the id of the connection that held the run up and
+/// now waits for a person; written as <see cref="PayloadFields.HeldByConnection"/>. Only a plugin's
+/// run sets it.</param>
 public sealed record MemberResult(
     bool Succeeded,
     int ExitCode,
@@ -93,7 +96,8 @@ public sealed record MemberResult(
     int? ProcessId = null,
     InvocationUsage? Usage = null,
     RunTranscript? Transcript = null,
-    bool Quiet = false)
+    bool Quiet = false,
+    string? HeldByConnection = null)
 {
     /// <summary>A run that did not begin or was cut off: the sentence is both the launch error
     /// and the reason.</summary>

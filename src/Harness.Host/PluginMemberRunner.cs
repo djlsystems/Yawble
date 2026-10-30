@@ -202,8 +202,13 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             return MemberResult.NotRun(namedRefusal, FailureClasses.NeedsPerson);
         }
 
-        var (grants, connectionRefusal) = await GrantConnectionsAsync(manifest, bound, ct);
-        if (connectionRefusal is not null) return MemberResult.NotRun(connectionRefusal, FailureClasses.NeedsPerson);
+        var (grants, connectionRefusal, heldBy) = await GrantConnectionsAsync(manifest, bound, ct);
+        if (connectionRefusal is not null)
+        {
+            // A CONNECTION THAT STILL NEEDS A PERSON holds this run up too: the row names it, so the
+            // person's fix tells the Manager here as well.
+            return MemberResult.NotRun(connectionRefusal, FailureClasses.NeedsPerson) with { HeldByConnection = heldBy };
+        }
 
         // THE REDACTION SET: every bound secret AND every access token and app password this run is handed.
         // A field the manifest declares `"masked": false` is not secret, and is not redacted.
@@ -354,6 +359,30 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             text = text.Length == 0 ? reason : reason + "\n" + text;
         }
 
+        // A CONNECTION THE RUN WAS HANDED, REPORTED REFUSED OR ASKING FOR A PERSON'S SIGN-IN, is marked
+        // needs-reconnect: every member using it reads Needs you and waits. The run itself is still the
+        // failure it was - not relabelled a wait - and names the connection that held it up. Only the
+        // plugin's named kind decides; a kind not named, unreachable, or a slot this run was not handed
+        // marks nothing. See RunConnectionFailures.
+        string? heldByConnection = null;
+        if (gathered.Result is { Ok: false, Slot: { } slot, Kind: { } kind } failedOn
+            && RunConnectionFailures.Holds(kind)
+            && grants.TryGetValue(slot, out var handed)
+            && connections is not null)
+        {
+            var sentence = Redact(RunConnectionFailures.Sentence(kind, failedOn.Error), redacted);
+
+            try
+            {
+                await connections.MarkFromRunAsync(handed.ConnectionId, sentence, kind, invocation.Member, slot, ct);
+                heldByConnection = handed.ConnectionId;
+            }
+            catch (System.Data.Common.DbException)
+            {
+                // Not marked: the run fails as it would have, and the next run reports it again.
+            }
+        }
+
         return new MemberResult(
             reason is null,
             ended.ExitCode,
@@ -362,7 +391,8 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             ProcessId: ended.ProcessId,
             // A FAILURE IS NEVER QUIET, whatever the record said: ok:false, a non-zero exit, a
             // timeout and a Stop all wake as they always did.
-            Quiet: reason is null && gathered.Result is { Quiet: true });
+            Quiet: reason is null && gathered.Result is { Quiet: true },
+            HeldByConnection: reason is null ? null : heldByConnection);
     }
 
     /// <summary>The request document: protocol v1's whole input, one JSON object on stdin.</summary>
@@ -939,7 +969,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
     /// older than <see cref="Connections.MailboxRecheck"/>), or the sentence the run is blocked with: a
     /// required slot unbound, a connection gone, needing reconnect, or lacking a scope the slot asks for.
     /// </summary>
-    private async Task<(IReadOnlyDictionary<string, ConnectionGrant> Grants, string? Refusal)> GrantConnectionsAsync(
+    private async Task<(IReadOnlyDictionary<string, ConnectionGrant> Grants, string? Refusal, string? HeldBy)> GrantConnectionsAsync(
         PluginManifest manifest, PluginMemberSettings bound, CancellationToken ct)
     {
         var grants = new Dictionary<string, ConnectionGrant>(StringComparer.Ordinal);
@@ -951,7 +981,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
                 if (declared.Required)
                 {
                     return (grants, $"This member has no connection bound for the plugin's required slot `{slot}`. "
-                        + "A person binds one in the member's settings.");
+                        + "A person binds one in the member's settings.", null);
                 }
 
                 continue;
@@ -959,13 +989,13 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
 
             if (connections is null)
             {
-                return (grants, $"This Host holds no connections, so slot `{slot}` could not be given its account.");
+                return (grants, $"This Host holds no connections, so slot `{slot}` could not be given its account.", null);
             }
 
             var record = await connections.Store.GetAsync(connectionId, ct);
             if (record is not null && Connections.ScopeRefusal(slot, declared, record, retry: null) is { } scopeRefusal)
             {
-                return (grants, scopeRefusal.Error);
+                return (grants, scopeRefusal.Error, null);
             }
 
             ConnectionGrant? grant;
@@ -980,20 +1010,25 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
                 // A REFRESHED TOKEN THAT COULD NOT BE STORED IS NOT HANDED OUT: a rotated refresh token
                 // lost here would strand the connection, so the run does not start.
                 return (grants, $"The connection bound for slot `{slot}` was refreshed but could not be stored "
-                    + $"({exception.Code}), so this run did not start. The next run tries again.");
+                    + $"({exception.Code}), so this run did not start. The next run tries again.", null);
             }
             catch (System.Data.Common.DbException exception)
             {
                 return (grants, $"The connection bound for slot `{slot}` could not be read or updated "
-                    + $"({DatabaseFault.Code(exception)}), so this run did not start. The next run tries again.");
+                    + $"({DatabaseFault.Code(exception)}), so this run did not start. The next run tries again.", null);
             }
 
-            if (refusal is not null) return (grants, refusal);
+            if (refusal is not null)
+            {
+                // Held by the connection when it is, after the grant, marked as needing a person.
+                var after = await connections.Store.GetAsync(connectionId, ct);
+                return (grants, refusal, after?.Status == ConnectionRecord.NeedsReconnect ? connectionId : null);
+            }
 
             grants[slot] = grant!;
         }
 
-        return (grants, null);
+        return (grants, null, null);
     }
 
     private static string ShortSecret(string key, string name) =>
@@ -1051,7 +1086,9 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
                     record!["ok"]?.GetValueKind() == JsonValueKind.True,
                     record["output"]?.GetValueKind() == JsonValueKind.String ? (string?)record["output"] : null,
                     record["error"]?.GetValueKind() == JsonValueKind.String ? (string?)record["error"] : null,
-                    record["quiet"]?.GetValueKind() == JsonValueKind.True);
+                    record["quiet"]?.GetValueKind() == JsonValueKind.True,
+                    record[RunConnectionFailures.SlotField]?.GetValueKind() == JsonValueKind.String ? (string?)record[RunConnectionFailures.SlotField] : null,
+                    record[RunConnectionFailures.KindField]?.GetValueKind() == JsonValueKind.String ? (string?)record[RunConnectionFailures.KindField] : null);
                 break;
 
             case "publish":
@@ -1475,7 +1512,9 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         public readonly HashSet<string> Dropped = new(StringComparer.Ordinal);
     }
 
-    private sealed record ResultRecord(bool Ok, string? Output, string? Error, bool Quiet);
+    /// <summary>A <c>result</c> record. <see cref="Slot"/> and <see cref="Kind"/> are its
+    /// <see cref="RunConnectionFailures"/> fields, as written; only a held kind on a handed slot marks.</summary>
+    private sealed record ResultRecord(bool Ok, string? Output, string? Error, bool Quiet, string? Slot = null, string? Kind = null);
 }
 
 /// <summary>A plugin member's own configuration values and secret bindings.</summary>

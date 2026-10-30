@@ -108,7 +108,23 @@ const removal = row({
   where: { view: 'removals', team: 'gone' },
 });
 
-const Live = [decision, blocked, waiting, failed];
+const connection = row({
+  kind: 'connection',
+  team: { id: 'alpha', name: 'Alpha team' },
+  since: '2026-10-19T14:45:00Z',
+  words: "Connection 'Stripe' needs you: Stripe refused the key. Edit it in Admin → Connections, then test it again.",
+  where: { view: 'connections', team: 'alpha' },
+  connection: {
+    id: 'c-stripe',
+    name: 'Stripe',
+    holds: [
+      { team: { id: 'alpha', name: 'Alpha team' }, members: ['Biller'] },
+      { team: { id: 'beta', name: 'Beta team' }, members: ['Clerk', 'Payer'] },
+    ],
+  },
+});
+
+const Live = [decision, blocked, waiting, failed, connection];
 const Stored = [mergeReady, stranded, removal];
 
 function answer(live: NeedsYouItem[], stored: NeedsYouItem[]) {
@@ -167,7 +183,7 @@ describe('the header count', () => {
     expect(wrapper!.get('[data-test="needs-you-count"]').text()).toBe(String(Live.length + Stored.length));
     expect(control().attributes('data-state')).toBe('needs-you');
     expect(control().classes()).toContain('needs-you--waiting');
-    expect(control().attributes('aria-label')).toBe('Needs you: 7');
+    expect(control().attributes('aria-label')).toBe('Needs you: 8');
     expect(control().text()).toContain('Needs you');
   });
 
@@ -181,7 +197,7 @@ describe('the header count', () => {
 
     expect(control().find('[data-test="needs-you-word"]').exists()).toBe(false);
     expect(wrapper!.get('[data-test="needs-you-count"]').text()).toBe(String(Live.length + Stored.length));
-    expect(control().attributes('aria-label')).toBe('Needs you: 7');
+    expect(control().attributes('aria-label')).toBe('Needs you: 8');
     expect(wrapper!.findComponent({ name: 'QTooltip' }).exists()).toBe(true);
 
     await wrapper!.setProps({ word: true });
@@ -278,6 +294,7 @@ describe('the panel', () => {
     const groups = [...document.body.querySelectorAll<HTMLElement>('[data-needs-you-group]')];
     expect(groups.map((group) => group.dataset.needsYouGroup)).toEqual([
       'decision',
+      'connection',
       'blocked',
       'failed',
       'waiting-input',
@@ -286,7 +303,7 @@ describe('the panel', () => {
       'removal',
     ]);
     expect(groups[0]!.textContent).toContain(`${NeedsYouKindWords.decision} (1)`);
-    expect(groups.map((group) => group.querySelectorAll('[data-test="needs-you-row"]').length)).toEqual([1, 1, 1, 1, 1, 1, 1]);
+    expect(groups.map((group) => group.querySelectorAll('[data-test="needs-you-row"]').length)).toEqual([1, 1, 1, 1, 1, 1, 1, 1]);
   });
 
   it("names the row's team, its member or item, the platform's words and when it began", async () => {
@@ -307,6 +324,20 @@ describe('the panel', () => {
     expect(rowOf('failed').querySelector('[data-test="needs-you-since"]')!.textContent).toBe(
       localStamp(wireInstant(failed.since)),
     );
+  });
+
+  it('names a connection row by its connection, then every team and member it holds up, once', async () => {
+    answer(Live, Stored);
+    await mountControl();
+    await openPanel();
+
+    expect(rows().filter((node) => node.dataset.kind === 'connection')).toHaveLength(1);
+    const connectionRow = rowOf('connection');
+    expect(connectionRow.querySelector('[data-test="needs-you-team"]')!.textContent).toBe('Stripe');
+    expect(connectionRow.querySelector('[data-test="needs-you-subject"]')!.textContent).toContain(
+      'holds up Alpha team: Biller; Beta team: Clerk, Payer',
+    );
+    expect(connectionRow.querySelector('[data-test="needs-you-words"]')!.textContent).toBe(connection.words);
   });
 
   it('says nothing is waiting when the route answers nothing', async () => {
@@ -345,7 +376,7 @@ describe('the panel', () => {
     await mountControl();
     await openPanel();
 
-    for (const kind of ['blocked', 'failed', 'waiting-input', 'merge-ready', 'stranded', 'removal']) {
+    for (const kind of ['connection', 'blocked', 'failed', 'waiting-input', 'merge-ready', 'stranded', 'removal']) {
       const node = rowOf(kind);
       expect(node.querySelector('[data-test="discuss-with-concierge"]'), kind).toBeNull();
       expect(node.querySelector('[data-test="needs-you-open"]')?.textContent, kind).toContain('Open');
@@ -410,6 +441,13 @@ describe("each row's Open lands where it says", () => {
     await flushPromises();
 
     expect(router.currentRoute.value.path).toBe('/solutions/resumes');
+  });
+
+  it('a connection: Admin → Connections, which the shell opens', async () => {
+    await mountControl();
+    await openRow('connection');
+
+    expect(wrapper!.emitted('open-connections')).toHaveLength(1);
   });
 
   it('an unfinished removal: the Teams view, where removals are listed', async () => {

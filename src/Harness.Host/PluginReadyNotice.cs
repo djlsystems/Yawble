@@ -66,8 +66,14 @@ public static class PluginReadyNotice
     /// Tells the team's Manager, in every open workflow where a run of <paramref name="member"/>
     /// last failed <c>needs-person</c> and no notice has said so since, that the member is ready
     /// and its instruction is to be sent again. Answers how many workflows were told.
+    ///
+    /// With <paramref name="heldByConnection"/>, the workflows are instead those where the member's
+    /// last run failed held up by that connection (<see cref="PayloadFields.HeldByConnection"/>) -
+    /// a run that reported it refused or asking for a sign-in, of whatever class, and each later run
+    /// it kept from starting: the connection was put right.
     /// </summary>
-    public static async Task<int> SendAsync(IMessageLog log, ContainerId member, string memberName, CancellationToken ct)
+    public static async Task<int> SendAsync(
+        IMessageLog log, ContainerId member, string memberName, CancellationToken ct, string? heldByConnection = null)
     {
         var source = member.ToString();
 
@@ -80,7 +86,9 @@ public static class PluginReadyNotice
             var page = await log.ReadAfterAsync(after, [MessageTypes.Failed, MessageTypes.Completed], Page, ct);
             foreach (var row in page.Where(m => string.Equals(m.Source, source, StringComparison.Ordinal)))
             {
-                if (row.Type == MessageTypes.Failed && ClassOf(row) == FailureClasses.NeedsPerson)
+                if (row.Type == MessageTypes.Failed && (heldByConnection is null
+                    ? ClassOf(row) == FailureClasses.NeedsPerson
+                    : new ContainerMarks(null, null, row).HeldByConnection == heldByConnection))
                 {
                     waiting[row.CorrelationId] = row;
                 }
@@ -107,10 +115,13 @@ public static class PluginReadyNotice
             var failure = waiting[correlation];
             if (await AlreadyToldAsync(log, manager, failure, source, ct)) continue;
 
-            var instruction =
-                $"{memberName} is ready now: a person set what it was waiting for. Its run in this "
-                + "workflow did not start, so nothing it was asked has been done yet: send it the same "
-                + "instruction again, with the same `card`.";
+            var instruction = heldByConnection is null
+                ? $"{memberName} is ready now: a person set what it was waiting for. Its run in this "
+                    + "workflow did not start, so nothing it was asked has been done yet: send it the same "
+                    + "instruction again, with the same `card`."
+                : $"{memberName} is ready now: a person put right the connection its run in this workflow "
+                    + "was held up by, so what it was asked has not been done yet: send it the same "
+                    + "instruction again, with the same `card`.";
 
             await log.AppendAsync(
                 new NewMessage(

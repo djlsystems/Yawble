@@ -175,12 +175,17 @@ public sealed class UndeclarableWorkflows(
 
     /// <summary>
     /// Whether a member's last run outcome in <paramref name="thread"/> is a <c>failed</c> row of class
-    /// <c>needs-person</c>: it waits for a person, and its workflow is not finished.
+    /// <c>needs-person</c>, or one a connection held up (<see cref="PayloadFields.HeldByConnection"/>):
+    /// it waits for a person, and its workflow is not finished - the notice the person's fix sends
+    /// lands in it (<see cref="PluginReadyNotice"/>). The held run stays a failure; only the workflow
+    /// is kept open.
     /// </summary>
     internal static bool WaitsForPerson(IReadOnlyList<Message> thread) =>
         thread
             .Where(row => row.Type is MessageTypes.Failed or MessageTypes.Completed)
             .GroupBy(row => row.Source, StringComparer.Ordinal)
             .Select(rows => rows.MaxBy(row => row.Seq)!)
-            .Any(last => last.Type == MessageTypes.Failed && new ContainerMarks(null, null, last).FailureClass == FailureClasses.NeedsPerson);
+            .Any(last => last.Type == MessageTypes.Failed
+                && new ContainerMarks(null, null, last) is var marks
+                && (marks.FailureClass == FailureClasses.NeedsPerson || marks.HeldByConnection is not null));
 }

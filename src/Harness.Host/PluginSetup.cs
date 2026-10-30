@@ -19,13 +19,126 @@ namespace Harness.Host;
 /// the member was idle, opened a workflow of its own; it is closed here, or the team's tab would go on
 /// reading it as blocked. The restart's read clears both again from the log's classes.
 /// </summary>
+///
+/// A CONNECTION THAT NEEDS A PERSON holds up every member using it the same way: a bound connection
+/// marked <c>needs-reconnect</c> - by a run that reported it refused or asking for a sign-in, by a refused
+/// refresh, or by a Test connection - is said on the member's mark, and the member is
+/// remembered as held by it (<see cref="Holds"/>), which Needs you lists once per connection. When the
+/// connection is put right (<see cref="ConnectionChangedAsync"/>), each member it held is read again, and
+/// its Manager is told, once, in each still-open workflow a run of the member failed held up by it
+/// (<see cref="PluginReadyNotice.SendAsync"/>).
+/// </summary>
 public sealed class PluginSetup(
     ContainerHost host, PluginCatalog plugins, IPluginMemberSettingsStore settings, ISecretStore secrets,
-    PluginMemberSecretStore memberSecrets, IMessageLog? log = null)
+    PluginMemberSecretStore memberSecrets, IMessageLog? log = null, IConnectionStore? connections = null)
 {
+    /// <summary>One connection holding members up: what it is called, what it says, since when, and whom.</summary>
+    public sealed record ConnectionHold(string Id, string Name, string Sentence, DateTimeOffset Since, IReadOnlyList<ContainerId> Members);
+
+    private readonly Lock _gate = new();
+
+    /// <summary>Each member held up, and the connections holding it: (id, name, the sentence the member reads).</summary>
+    private readonly Dictionary<ContainerId, IReadOnlyList<(string Id, string Name, string Sentence)>> _held = [];
+
+    /// <summary>When each holding connection was first seen holding, on this Host's run.</summary>
+    private readonly Dictionary<string, DateTimeOffset> _since = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// EVERY CONNECTION HOLDING A MEMBER UP, once each, with the members it holds: what
+    /// <c>GET /api/needs-you</c> lists as one <c>connection</c> row. Read from memory.
+    /// </summary>
+    public IReadOnlyList<ConnectionHold> Holds()
+    {
+        lock (_gate)
+        {
+            return [.. _held
+                .SelectMany(pair => pair.Value.Select(c => (Member: pair.Key, Connection: c)))
+                .GroupBy(h => h.Connection.Id, StringComparer.Ordinal)
+                .Select(g => new ConnectionHold(
+                    g.Key, g.First().Connection.Name, g.First().Connection.Sentence,
+                    _since.GetValueOrDefault(g.Key, DateTimeOffset.UtcNow),
+                    [.. g.Select(h => h.Member).Distinct().OrderBy(m => m.Team, StringComparer.OrdinalIgnoreCase).ThenBy(m => m.Name, StringComparer.Ordinal)]))
+                .OrderBy(h => h.Name, StringComparer.OrdinalIgnoreCase)];
+        }
+    }
+
+    /// <summary>
+    /// A CONNECTION'S HEALTH MAY HAVE MOVED (<see cref="Connections.HealthChanged"/>): every member using it,
+    /// and every member it held, is read again - marked, or cleared and its Manager told.
+    /// </summary>
+    public async Task ConnectionChangedAsync(string connectionId, CancellationToken ct = default)
+    {
+        var members = new HashSet<ContainerId>();
+
+        lock (_gate)
+        {
+            foreach (var (member, holding) in _held)
+            {
+                if (holding.Any(c => c.Id == connectionId)) members.Add(member);
+            }
+        }
+
+        if (connections is not null)
+        {
+            foreach (var use in await connections.UsedByAsync(connectionId, ct))
+            {
+                members.Add(new ContainerId(use.Team, use.Member));
+            }
+        }
+
+        foreach (var member in members.OrderBy(m => m.Team, StringComparer.OrdinalIgnoreCase).ThenBy(m => m.Name, StringComparer.Ordinal))
+        {
+            await RefreshAsync(member, ct);
+        }
+    }
+
+    /// <summary>The connections bound on the member that need a person, as the member's mark says them.</summary>
+    private async Task<IReadOnlyList<(string Id, string Name, string Sentence)>> HoldingAsync(PluginMemberSettings bound, CancellationToken ct)
+    {
+        if (connections is null || bound.Connections.Count == 0) return [];
+
+        var holding = new List<(string, string, string)>();
+        foreach (var id in bound.Connections.Values.Distinct(StringComparer.Ordinal))
+        {
+            if (await connections.GetAsync(id, ct) is { Status: ConnectionRecord.NeedsReconnect } connection)
+            {
+                holding.Add((connection.Id, connection.Name, Connections.NeedsReconnect(connection, connection.StatusReason)));
+            }
+        }
+
+        return holding;
+    }
+
+    /// <summary>Records what holds <paramref name="member"/> up now; answers the connections that held it and no longer do.</summary>
+    private IReadOnlyList<string> Hold(ContainerId member, IReadOnlyList<(string Id, string Name, string Sentence)> holding)
+    {
+        lock (_gate)
+        {
+            var before = _held.TryGetValue(member, out var was) ? was.Select(c => c.Id).ToList() : [];
+
+            if (holding.Count == 0) _held.Remove(member);
+            else _held[member] = holding;
+
+            foreach (var (id, _, _) in holding) _since.TryAdd(id, DateTimeOffset.UtcNow);
+
+            var still = _held.Values.SelectMany(h => h).Select(c => c.Id).ToHashSet(StringComparer.Ordinal);
+            foreach (var gone in _since.Keys.Where(id => !still.Contains(id)).ToList()) _since.Remove(gone);
+
+            return [.. before.Where(id => holding.All(c => c.Id != id))];
+        }
+    }
+
     /// <summary>The words a member's mark carries for <paramref name="missing"/>, or null for none.</summary>
     public static string? Words(IReadOnlyList<string> missing) =>
         missing.Count == 0 ? null : "Waits for a person to " + string.Join("; and to ", missing) + ".";
+
+    /// <summary>The mark's words: what is missing, then each connection that needs a person, in its own sentence.</summary>
+    private static string? Words(IReadOnlyList<string> missing, IReadOnlyList<(string Id, string Name, string Sentence)> holding)
+    {
+        var words = (string?[])[Words(missing), .. holding.Select(c => c.Sentence)];
+        var said = words.Where(w => w is not null).ToList();
+        return said.Count == 0 ? null : string.Join(" ", said);
+    }
 
     /// <summary>Reads one member's settings and sets or clears its mark. Answers what is missing.</summary>
     public async Task<IReadOnlyList<string>> RefreshAsync(ContainerId member, CancellationToken ct = default)
@@ -40,12 +153,24 @@ public sealed class PluginSetup(
             var bound = await settings.ForAsync(member, ct);
             var valued = (await memberSecrets.StatesAsync(member, ct)).Keys.ToHashSet(StringComparer.Ordinal);
             var missing = PluginReadyNotice.Missing(plugin.Manifest, bound, secrets, valued);
+            var holding = await HoldingAsync(bound, ct);
+            var released = Hold(member, holding);
 
-            runtime.MarkNeedsPerson(Words(missing));
-            if (missing.Count == 0)
+            runtime.MarkNeedsPerson(Words(missing, holding));
+            if (missing.Count == 0 && holding.Count == 0)
             {
                 runtime.ClearNeedsPersonMarks();
                 await CloseWaitsAsync(member, ct);
+            }
+
+            // A CONNECTION PUT RIGHT tells the Manager, once, in each open workflow a run of this member
+            // failed held up by it. A workflow that has ended is not woken.
+            if (log is not null)
+            {
+                foreach (var connection in released)
+                {
+                    await PluginReadyNotice.SendAsync(log, member, runtime.Snapshot().Name, ct, heldByConnection: connection);
+                }
             }
 
             return missing;
