@@ -308,6 +308,9 @@ public sealed class MemberGoldenTests
 
         var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host => host
             .UseSetting("DataRoot", dataRoot)
+            // HARNESS_URL is pinned here, not read from the process: it follows ASPNETCORE_URLS,
+            // which the instance container sets and a team member's run does not carry.
+            .UseSetting("MemberBaseAddress", "http://127.0.0.1:8080")
             .UseSetting("Logging:LogLevel:Default", "Warning")
             .ConfigureTestServices(services => services.AddSingleton<IAgentRunner>(fake)));
 
