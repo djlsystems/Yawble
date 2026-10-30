@@ -17,6 +17,8 @@ import {
   tableProblem,
   typedSecretColumns,
   withRowSecrets,
+  withScheme,
+  withSchemes,
   writableColumns,
   type TableSecretStates,
   type TableSecretsDraft,
@@ -133,6 +135,8 @@ function remove(index: number) {
 
 function apply() {
   if (Object.keys(draftProblems.value).length > 0) return;
+  // A url cell typed then saved with Enter has not left its field: give it its scheme here too.
+  draft.value = withSchemes(shape.value, draft.value);
 
   const name = rowName(shape.value, draft.value);
   if (editIndex.value >= 0) {
@@ -150,6 +154,12 @@ function apply() {
 
 function setCell(column: string, value: string | number | boolean | null) {
   draft.value = { ...draft.value, [column]: value };
+}
+
+/** On leaving a `format: "url"` box: a bare address becomes https://, so the person sees it before Add or Done. */
+function leaveCell(column: PluginTableColumn) {
+  const value = draft.value[column.name];
+  if (column.format === 'url' && typeof value === 'string' && withScheme(value) !== value) setCell(column.name, withScheme(value));
 }
 
 /** The line under an editor box: why a saved row's name is fixed, else the column's description and a number's bounds. */
@@ -321,6 +331,7 @@ function href(action: string, row: PluginTableRow): string | null {
               spellcheck="false"
               :data-editor-cell="column.name"
               @update:model-value="(value) => setCell(column.name, value === null ? '' : String(value))"
+              @blur="leaveCell(column)"
             >
               <template #append><FieldHelp :text="hintFor(column)" /></template>
             </q-input>

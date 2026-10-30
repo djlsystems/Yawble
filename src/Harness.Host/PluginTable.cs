@@ -14,6 +14,10 @@ namespace Harness.Host;
 /// <c>bool</c>, <c>enum</c> (its <c>enum</c> list) or <c>secret</c> (<c>masked</c> unless it says
 /// <c>false</c>). Any column may be <c>readOnly</c>: written only by the plugin's <c>row.status</c>
 /// record (or, for a secret column, by the platform), never by a person's save.</item>
+/// <item>A string column may say <c>"format": "url"</c>: a cell written as a bare address
+/// (<c>mysite.com</c>, <c>www.mysite.com/login</c>) is saved with <c>https://</c> before it
+/// (<see cref="PluginTableColumn.WithScheme"/>); one with a scheme, a path and anything else are
+/// left as written. A Host that predates the key ignores it.</item>
 /// <item>The rows are stored as the field's config value, an array of row objects holding every cell
 /// BUT a secret one. A secret cell is the member's own secret (<see cref="PluginMemberSecretStore"/>,
 /// <see cref="PluginMemberSecretStore.CellField"/>): never in <c>config</c>, never answered once
@@ -243,6 +247,36 @@ public sealed partial record PluginTable(string Key, IReadOnlyList<PluginTableCo
         return JsonSerializer.SerializeToElement(rows);
     }
 
+    /// <summary>
+    /// <paramref name="sent"/> with each <c>"format": "url"</c> cell given <c>https://</c> when it is a
+    /// bare address (<see cref="PluginTableColumn.WithScheme"/>), so every save stores the address the
+    /// settings form shows on leaving the field. Answers <paramref name="sent"/> unchanged when no cell changes.
+    /// </summary>
+    public JsonElement WithSchemes(JsonElement sent)
+    {
+        if (sent.ValueKind != JsonValueKind.Array) return sent;
+        var urls = Columns.Where(c => c.Format == PluginTableColumn.UrlFormat && !c.ReadOnly).ToList();
+        if (urls.Count == 0) return sent;
+
+        var rows = JsonNode.Parse(sent.GetRawText())!.AsArray();
+        var changed = false;
+
+        foreach (var row in rows.OfType<JsonObject>())
+        {
+            foreach (var column in urls)
+            {
+                if (row[column.Name] is JsonValue cell && cell.TryGetValue<string>(out var text)
+                    && PluginTableColumn.WithScheme(text) is var prefixed && prefixed != text)
+                {
+                    row[column.Name] = prefixed;
+                    changed = true;
+                }
+            }
+        }
+
+        return changed ? JsonSerializer.SerializeToElement(rows) : sent;
+    }
+
     /// <summary>The rows as a run receives them: each row's cells with every non-secret column's
     /// default filled in where the row has no cell. Never a secret cell.</summary>
     public JsonArray ForRun(JsonElement value)
@@ -294,13 +328,14 @@ public sealed partial record PluginTable(string Key, IReadOnlyList<PluginTableCo
             integer = c.Integer,
             readOnly = c.ReadOnly,
             masked = c.IsSecret ? c.Masked : (bool?)null,
+            format = c.Format,
         }),
         rowActions = RowActions.Select(a => new { action = a.Action, label = a.Label, column = a.Column, equals = a.EqualTo }),
     };
 }
 
 /// <summary>One column of a <see cref="PluginTable"/>.</summary>
-public sealed record PluginTableColumn(
+public sealed partial record PluginTableColumn(
     string Name,
     string Type,
     string? Label,
@@ -315,6 +350,40 @@ public sealed record PluginTableColumn(
     bool Masked)
 {
     public bool IsSecret => Type == "secret";
+
+    /// <summary>The one <c>format</c> a column takes: a web address (<see cref="WithScheme"/>).</summary>
+    public const string UrlFormat = "url";
+
+    /// <summary>The column's <c>format</c>: <see cref="UrlFormat"/> or null.</summary>
+    public string? Format { get; init; }
+
+    /// <summary>
+    /// A bare address with <c>https://</c> before it: <c>mysite.com</c> becomes <c>https://mysite.com</c>,
+    /// <c>www.mysite.com/login</c> <c>https://www.mysite.com/login</c>. Anything else is answered exactly
+    /// as written: a value with any scheme (<c>http://</c> stays http, <c>javascript:</c> stays and
+    /// still fails the plugin's check), a path (<c>/login</c>, <c>dashboard</c>), and text that is not
+    /// an address (<c>not a url</c>, <c>foo bar.com</c>). A host is dotted labels ending in letters,
+    /// <c>localhost</c> or an IPv4 address, with an optional port. The settings form
+    /// (web/src/lib/pluginTable.ts <c>withScheme</c>) holds the same rule.
+    /// </summary>
+    public static string WithScheme(string value)
+    {
+        var text = value.Trim();
+        if (text.Length == 0) return value;
+        if (SchemePattern().IsMatch(text) && !HostPortPattern().IsMatch(text)) return value;
+
+        var host = text.Split('/', '?', '#')[0];
+        return BareHostPattern().IsMatch(host) ? "https://" + text : value;
+    }
+
+    [GeneratedRegex(@"^[A-Za-z][A-Za-z0-9+.-]*:")]
+    private static partial Regex SchemePattern();
+
+    [GeneratedRegex(@"^[^:/?#]+:[0-9]+(?:[/?#]|$)")]
+    private static partial Regex HostPortPattern();
+
+    [GeneratedRegex(@"^(?:(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?\.)+(?:\p{L}{2,63}|xn--[A-Za-z0-9-]{1,59})|localhost|(?:[0-9]{1,3}\.){3}[0-9]{1,3})\.?(?::[0-9]{1,5})?$", RegexOptions.IgnoreCase)]
+    private static partial Regex BareHostPattern();
 
     /// <summary>The ordinary field rules a non-secret cell is held to: the same type, <c>enum</c> and
     /// bounds sentences a config field's value gets.</summary>
@@ -430,10 +499,18 @@ public sealed record PluginTableColumn(
         var (label, labelRefusal) = PluginManifest.Label(at, element);
         if (labelRefusal is not null) return (null, labelRefusal);
 
+        string? format = null;
+        if (element.TryGetProperty("format", out var f))
+        {
+            if (f.ValueKind != JsonValueKind.String || f.GetString() != UrlFormat) return (null, $"`{at}.format` must be \"{UrlFormat}\".");
+            if (type != "string") return (null, $"`{at}.format` applies only to a string column.");
+            format = UrlFormat;
+        }
+
         var column = new PluginTableColumn(
             name, type, label,
             element.TryGetProperty("description", out var desc) && desc.ValueKind == JsonValueKind.String ? desc.GetString()! : "",
-            required, fallback, choices, min, max, integer, readOnly, masked);
+            required, fallback, choices, min, max, integer, readOnly, masked) { Format = format };
 
         if (fallback is { } value && column.CellRefusal($"{at}.default", value, bounds: true) is { } badDefault) return (null, badDefault);
 

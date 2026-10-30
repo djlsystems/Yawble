@@ -194,11 +194,12 @@ public static class PluginEndpoints
             var sent = new Dictionary<string, JsonElement>(request.Config ?? [], StringComparer.Ordinal);
 
             // A TABLE'S READ-ONLY CELLS ARE THE PLUGIN'S: whatever the body says, each row keeps what is stored.
+            // A "format": "url" cell written as a bare address is stored with https:// before it.
             foreach (var (name, field) in plugin!.Manifest.Config)
             {
                 if (field.Table is { } table && sent.TryGetValue(name, out var rows))
                 {
-                    sent[name] = table.Merge(rows, before.Config.TryGetValue(name, out var kept) ? kept : null);
+                    sent[name] = table.WithSchemes(table.Merge(rows, before.Config.TryGetValue(name, out var kept) ? kept : null));
                 }
             }
 

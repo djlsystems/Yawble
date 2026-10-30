@@ -37,6 +37,8 @@ public sealed class PluginTableSettingsTests : IAsyncLifetime
             { "name": "name", "type": "string", "required": true },
             { "name": "method", "type": "enum", "enum": ["password", "token", "interactive"], "required": true },
             { "name": "active", "type": "bool", "default": true },
+            { "name": "siteUrl", "type": "string", "format": "url" },
+            { "name": "hosts", "type": "string" },
             { "name": "password", "type": "secret" },
             { "name": "status", "type": "string", "readOnly": true }
           ],
@@ -222,6 +224,32 @@ public sealed class PluginTableSettingsTests : IAsyncLifetime
 
         var stored = await GetAsync($"/api/teams/{_team}/members/Strict/plugin-settings");
         Assert.False(stored.GetProperty("config").TryGetProperty("entries", out _));
+    }
+
+    [Fact]
+    public async Task A_bare_address_in_a_url_column_is_stored_with_https_and_other_hosts_and_schemed_values_are_kept()
+    {
+        await HireAsync("Addresses");
+
+        var saved = await SaveAsync("Addresses", """
+            [
+              {"name":"bare","method":"password","siteUrl":"mysite.com","hosts":"login.mysite.com"},
+              {"name":"www","method":"password","siteUrl":"www.mysite.com"},
+              {"name":"plain","method":"password","siteUrl":"http://mysite.com","hosts":"https://sso.mysite.com/"},
+              {"name":"junk","method":"password","siteUrl":"javascript:alert(1)"}
+            ]
+            """);
+        Assert.Equal(HttpStatusCode.OK, saved.Status);
+
+        var rows = (await GetAsync($"/api/teams/{_team}/members/Addresses/plugin-settings"))
+            .GetProperty("config").GetProperty("entries").EnumerateArray().ToList();
+        Assert.Equal(["https://mysite.com", "https://www.mysite.com", "http://mysite.com", "javascript:alert(1)"],
+            rows.Select(r => r.GetProperty("siteUrl").GetString()));
+        Assert.Equal("login.mysite.com", rows[0].GetProperty("hosts").GetString());
+        Assert.Equal("https://sso.mysite.com/", rows[2].GetProperty("hosts").GetString());
+
+        var column = (await GetAsync($"/api/teams/{_team}/members/Addresses/plugin-settings")).ToString();
+        Assert.Contains("\"format\":\"url\"", column.Replace(" ", ""));
     }
 
     [Fact]
