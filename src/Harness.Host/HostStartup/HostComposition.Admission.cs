@@ -60,7 +60,9 @@ internal sealed partial class HostComposition
             builder.Configuration["Capacity:CgroupRoot"],
             builder.Configuration["Capacity:ProcRoot"],
             sp.GetRequiredService<WorkerStreams>().Deliver,
-            tester: sp.GetService<ConnectionTester>()));
+            tester: sp.GetService<ConnectionTester>(),
+            // THE MCP SERVERS THIS HOST'S OWN WORKER RUNS (MCP 3): the worker makes its own unless a test gives it one.
+            stdio: sp.GetService<McpStdioServers>()));
         builder.Services.AddSingleton<IRunWorker>(sp =>
         {
             var worker = sp.GetRequiredService<InProcessWorker>().Worker;

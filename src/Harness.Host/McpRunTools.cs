@@ -27,7 +27,8 @@ namespace Harness.Host;
 public sealed class McpRunTools(
     McpServers servers, McpForwarding forwarding, TimeProvider clock, ILogger<McpRunTools> log,
     long maximumBinary = McpRunTools.DefaultMaximumBinary, int maximumText = McpRunTools.DefaultMaximumText,
-    AgentLaunchUser? runAs = null, WorkerAsks? asks = null, IUserStore? users = null, Func<TeamRegistry>? teams = null)
+    AgentLaunchUser? runAs = null, WorkerAsks? asks = null, IUserStore? users = null, Func<TeamRegistry>? teams = null,
+    McpStdio? stdio = null)
 {
     public const long DefaultMaximumBinary = 20L * 1024 * 1024;
 
@@ -64,7 +65,7 @@ public sealed class McpRunTools(
     /// </summary>
     public async Task<IAsyncDisposable> BeginAsync(ContainerId member, string workingCopy, CancellationToken ct)
     {
-        var tools = await ToolsOfAsync(member.Team, member.ToString(), ct);
+        var tools = await ToolsOfAsync(member.Team, member.ToString(), member, ct);
         if (tools is null) return Nothing.Instance;
 
         var run = new RunTools(member.Team, workingCopy, tools);
@@ -82,7 +83,7 @@ public sealed class McpRunTools(
     public async Task BeginConciergeAsync(string user, string? team, string workspace, CancellationToken ct)
     {
         var key = ConciergeLaunchFactory.PrincipalId(user);
-        var tools = team is null ? null : await ToolsOfAsync(team, key, ct);
+        var tools = team is null ? null : await ToolsOfAsync(team, key, null, ct);
         _runs[key] = new RunTools(team ?? "", workspace, tools ?? []);
     }
 
@@ -107,8 +108,12 @@ public sealed class McpRunTools(
         }
     };
 
-    /// <summary><paramref name="team"/>'s web address servers' tools, for <paramref name="who"/>'s log lines; null with none.</summary>
-    private async Task<IReadOnlyList<ListedTool>?> ToolsOfAsync(string team, string who, CancellationToken ct)
+    /// <summary>
+    /// <paramref name="team"/>'s servers' tools, for <paramref name="who"/>'s log lines; null with none. Entries the
+    /// platform runs are listed only for a member's run, on the worker <paramref name="member"/> is on: the Concierge
+    /// is on no worker, and keeps the web address servers alone.
+    /// </summary>
+    private async Task<IReadOnlyList<ListedTool>?> ToolsOfAsync(string team, string who, ContainerId? member, CancellationToken ct)
     {
         var assigned = await servers.Store.AssignedAsync(team, ct);
         if (assigned.Count == 0) return null;
@@ -116,10 +121,10 @@ public sealed class McpRunTools(
         var entries = new List<McpServerRecord>();
         foreach (var given in assigned)
         {
-            if (await servers.Store.GetAsync(given.ServerId, ct) is { Kind: McpServerRecord.Web } entry) entries.Add(entry);
+            if (await servers.Store.GetAsync(given.ServerId, ct) is { } entry && (entry.Kind == McpServerRecord.Web || stdio is not null && member is not null)) entries.Add(entry);
         }
 
-        var listed = await Task.WhenAll(entries.Select(entry => ListAsync(entry, ct)));
+        var listed = await Task.WhenAll(entries.Select(entry => entry.Kind == McpServerRecord.Runs ? ListRunsAsync(member!, entry, ct) : ListAsync(entry, ct)));
         var tools = listed.SelectMany(t => t).ToList();
 
         var clashing = McpToolNames.Clashes(tools.Select(t => (t.Server.Name, t.Upstream))).Select(c => c.Name).ToHashSet(StringComparer.Ordinal);
@@ -153,6 +158,35 @@ public sealed class McpRunTools(
             return [];
         }
 
+        return Listed(server, tools);
+    }
+
+    /// <summary>
+    /// An entry the platform runs, listed by the worker <paramref name="member"/>'s run is on: the worker starts it as the
+    /// <c>mcp</c> user when it does not run there yet. A first start that takes longer than the list's bound goes on, and a
+    /// later run lists it.
+    /// </summary>
+    private async Task<IReadOnlyList<ListedTool>> ListRunsAsync(ContainerId member, McpServerRecord server, CancellationToken ct)
+    {
+        var (launch, error) = await servers.LaunchAsync(server, ct);
+        if (launch is null)
+        {
+            log.LogWarning("MCP server {Server} is not listed for this run: {Why}", server.Name, ConnectionTester.Redact(error!.Sentence, error.Secrets));
+            return [];
+        }
+
+        var (tools, failure) = await stdio!.ListAsync(member, launch, forwarding.ListTimeout, ct);
+        if (tools is null)
+        {
+            log.LogWarning("MCP server {Server} is not listed for this run: {Why}", server.Name, ConnectionTester.Redact(failure!, launch.Environment.Values));
+            return [];
+        }
+
+        return Listed(server, tools);
+    }
+
+    private static List<ListedTool> Listed(McpServerRecord server, IReadOnlyList<JsonObject> tools)
+    {
         var listed = new List<ListedTool>();
         foreach (var tool in tools)
         {
@@ -212,7 +246,7 @@ public sealed class McpRunTools(
 
         var run = _runs.GetValueOrDefault(caller.Id);
 
-        // THE RUN'S OWN LIST FIRST; then what every web address entry last listed, so a member calling another
+        // THE RUN'S OWN LIST FIRST; then what every entry last listed, so a member calling another
         // team's tool is told whose servers those are rather than that no such tool exists.
         var (server, upstream) = run?.Tools.FirstOrDefault(t => t.Name == name) is { } listed
             ? (listed.Server, listed.Upstream)
@@ -235,8 +269,10 @@ public sealed class McpRunTools(
         }
 
         // HELD AT THIS MOMENT: an entry taken off the team, or removed from the instance, during the run is refused.
+        // An entry the platform runs is a member's alone: it runs on the worker the member's run is on.
         var held = (await servers.Store.AssignedAsync(team, ct)).Any(a => a.ServerId == server.Id);
-        if (!held || await servers.Store.GetAsync(server.Id, ct) is not { Kind: McpServerRecord.Web } entry)
+        if (!held || await servers.Store.GetAsync(server.Id, ct) is not { } entry
+            || entry.Kind != McpServerRecord.Web && (entry.Kind != McpServerRecord.Runs || stdio is null || concierge))
         {
             return Error(refusal(server.Name));
         }
@@ -255,11 +291,32 @@ public sealed class McpRunTools(
             output = inside;
         }
 
-        var (target, error) = await servers.TargetAsync(entry, ct);
-        if (target is null) return Error(ConnectionTester.Redact(error!.Sentence, error.Secrets));
+        // AN ENTRY THE PLATFORM RUNS is called on the worker the member's run is on, which starts it when it is not running.
+        McpForwarded answer;
+        ValueRedactor redactor;
+        Func<Task<IReadOnlyList<JsonObject>?>> listAgain;
+        if (entry.Kind == McpServerRecord.Runs)
+        {
+            var member = ContainerId.Parse(caller.Id);
+            var (launch, launchError) = await servers.LaunchAsync(entry, ct);
+            if (launch is null) return Error(ConnectionTester.Redact(launchError!.Sentence, launchError.Secrets));
 
-        var redactor = ValueRedactor.For(target.Secrets);
-        var answer = await forwarding.CallAsync(target, upstream, args, ct);
+            redactor = ValueRedactor.For([.. launch.Environment.Values]);
+            answer = await stdio!.CallAsync(member, launch, upstream, args, ct);
+
+            // A SENTENCE FROM THE WORKER already names the server: "<server> stopped; the next call starts it again."
+            if (answer.Failure is { } stopped) return Error(PluginMemberRunner.Redact(stopped, redactor));
+            listAgain = async () => (await stdio.ListAsync(member, launch, forwarding.ListTimeout, ct)).Tools;
+        }
+        else
+        {
+            var (target, error) = await servers.TargetAsync(entry, ct);
+            if (target is null) return Error(ConnectionTester.Redact(error!.Sentence, error.Secrets));
+
+            redactor = ValueRedactor.For(target.Secrets);
+            answer = await forwarding.CallAsync(target, upstream, args, ct);
+            listAgain = async () => (await forwarding.ListAsync(target, ct)).Tools;
+        }
 
         if (answer.NoAnswer) return Error(DidNotAnswer(entry.Name));
         if (answer.Failure is { } failure) return Error(PluginMemberRunner.Redact($"{entry.Name}: {failure}", redactor));
@@ -267,7 +324,7 @@ public sealed class McpRunTools(
         // A REFUSAL OR AN ERROR RESULT MAY BE A TOOL THAT IS GONE: asked again, a list without it says so.
         if (answer.Error is not null || answer.Result?["isError"] is JsonValue flag && flag.TryGetValue<bool>(out var isError) && isError)
         {
-            var (now, _) = await forwarding.ListAsync(target, ct);
+            var now = await listAgain();
             if (now is not null && !now.Any(t => t["name"] is JsonValue n && n.TryGetValue<string>(out var said) && said == upstream))
             {
                 return Error(NoLongerOffers(entry.Name, upstream));
@@ -288,10 +345,10 @@ public sealed class McpRunTools(
         return (id, registry.LabelFor(id));
     }
 
-    /// <summary>The entry and tool a name stands for, from what each web address entry last listed.</summary>
+    /// <summary>The entry and tool a name stands for, from what each entry last listed.</summary>
     private static (McpServerRecord? Server, string? Tool) Find(IReadOnlyList<McpServerRecord> all, string name)
     {
-        foreach (var server in all.Where(s => s.Kind == McpServerRecord.Web))
+        foreach (var server in all)
         {
             foreach (var tool in server.Tools ?? [])
             {

@@ -105,13 +105,16 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/* \
     && gh --version
-# THREE USERS. `harness` runs the Host in control (and in `all`); `worker` runs the Host in a worker;
+# FOUR USERS. `harness` runs the Host in control (and in `all`); `worker` runs the Host in a worker;
 # `agent` runs every agent child and the Concierge PTY, so an agent cannot signal a Host or read the
-# database and keys. The ids are FIXED: they are what the volume records, so every image, rebuilt or
-# not, must mean the same users by them. `harness` and `worker` are also in group `agent`, to create
-# and write inside the team trees; `agent` is in no group of theirs, and `worker` in none of
-# `harness`'s, so a worker reads nothing the ownership map keeps for `harness`.
-#   harness  10001:10001   agent  10002:10002   worker  10003:10003
+# database and keys; `mcp` runs the MCP servers the platform starts (npx, uvx) on a worker, so no
+# agent can read their keys, environment or files, and they read none of a member's. The ids are
+# FIXED: they are what the volume records, so every image, rebuilt or not, must mean the same users by
+# them. `harness` and `worker` are also in group `agent`, to create and write inside the team trees;
+# `agent` is in no group of theirs, and `worker` in none of `harness`'s, so a worker reads nothing the
+# ownership map keeps for `harness`. `mcp` is in no group but its own, nobody is in its group, and it
+# has no login shell; its home and package caches are /data/mcp, its own and mode 0700.
+#   harness  10001:10001   agent  10002:10002   worker  10003:10003   mcp  10004:10004
 # The Hosts find `agent` by name. A container starts as root; the entrypoint sets ownership on the
 # volume (control), installs the "System packages" setting, and drops to its Host's user with setpriv
 # (util-linux, installed above, as is runuser). It calls setpriv and dotnet by absolute path, which
@@ -122,6 +125,9 @@ RUN groupadd --gid 10001 harness \
     && useradd --uid 10001 --gid harness --groups agent --no-create-home --home-dir /data/agent-home --shell /usr/sbin/nologin harness \
     && useradd --uid 10002 --gid agent --no-create-home --home-dir /data/agent-home --shell /bin/bash agent \
     && useradd --uid 10003 --gid worker --groups agent --no-create-home --home-dir /data/agent-home --shell /usr/sbin/nologin worker \
+    && groupadd --gid 10004 mcp \
+    && useradd --uid 10004 --gid mcp --no-create-home --home-dir /data/mcp/home --shell /usr/sbin/nologin mcp \
+    && test "$(id -Gn mcp)" = mcp && test -z "$(getent group mcp | cut -d: -f4)" \
     && command -v setpriv && command -v runuser && command -v flock \
     && test -x /usr/bin/setpriv && test -x /usr/bin/dotnet \
     && mkdir -p /data
@@ -177,7 +183,9 @@ ARG TARGETARCH
 # because they change often. This layer is the ordinary toolchain.
 #
 # In: git, GitHub CLI, ssh, curl, jq, ripgrep, fd, sqlite, unzip, a C compiler,
-#     Node 22 and npm, Python 3, pip, venv, uv, Go, and the .NET 10 SDK.
+#     Node 22 and npm, Python 3, pip, venv, uv, Go, and the .NET 10 SDK. npx and uvx, in
+#     /usr/local/bin, are also how the MCP servers the platform runs start, as `mcp`, whose PATH is
+#     /usr/local/bin:/usr/bin:/bin alone.
 # Out, on purpose: a JDK, Rust, PHP, Ruby, and a Docker client. Each is large,
 #     and none is required to build the kind of work this image is aimed at.
 #     Add one when a team actually needs it.
@@ -200,6 +208,7 @@ RUN apt-get update \
     && rm /tmp/dotnet-install.sh \
     && curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh \
     && node --version && npm --version && python3 --version && /usr/local/go/bin/go version \
+    && test -x /usr/local/bin/npx && test -x /usr/local/bin/uvx \
     && dotnet --list-sdks && gh --version && uv --version && rg --version
 # A headless browser for agents that test web apps. Only the SYSTEM LIBRARIES are baked in here,
 # because they need the package manager; the browser itself is downloaded onto the data volume

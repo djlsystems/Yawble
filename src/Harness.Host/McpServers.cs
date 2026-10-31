@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Harness.Contracts;
 
@@ -31,8 +34,8 @@ public sealed record McpServerCheckAnswer(string Outcome, string Sentence, IRead
 /// THE INSTANCE'S MCP SERVERS (MCP 1). An administrator keeps the list; a person gives entries to teams in
 /// Team settings. An entry is a WEB ADDRESS, checked on every save and by its Test - initialize, then list
 /// the tools - on a worker, as Test connection is; or one THE PLATFORM RUNS (a command, a package at a pinned
-/// version, fixed arguments, environment variables each filled from a connection's field), stored and
-/// validated here and started by MCP 3. A refused credential marks the entry and its connection Needs you;
+/// version, fixed arguments, environment variables each filled from a connection's field), validated here,
+/// started on a worker as the <c>mcp</c> user and checked the same way (MCP 3). A refused credential marks the entry and its connection Needs you;
 /// a server not reached fails the check and marks neither. No answer, row or log line holds a value or the
 /// URL's query. See <c>docs/mcp-servers.md</c>.
 /// </summary>
@@ -50,9 +53,6 @@ public sealed partial class McpServers(IMcpServerStore store, Connections connec
 
     public const string Placeholder = "{value}";
 
-    /// <summary>What an entry the platform runs's health says until MCP 3 starts and checks it.</summary>
-    public const string CheckedLater = "checked when MCP 3 is in place";
-
     public const string Where = "Admin → MCP servers";
 
     public static readonly IReadOnlyList<string> Commands = ["npx", "uvx"];
@@ -66,6 +66,10 @@ public sealed partial class McpServers(IMcpServerStore store, Connections connec
     [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]*$")]
     private static partial Regex EnvRule();
 
+    /// <summary>Names the C library or loader reads at start: never set on a server, so none can reach the user switch.</summary>
+    [GeneratedRegex("^(LD_.*|MALLOC_.*|GCONV_PATH|LOCPATH|NLSPATH)$", RegexOptions.IgnoreCase)]
+    private static partial Regex LoaderEnv();
+
     /// <summary>An npm version that names one release: major.minor.patch, with an optional pre-release and build.</summary>
     [GeneratedRegex(@"^v?\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$")]
     private static partial Regex NpmExact();
@@ -74,10 +78,12 @@ public sealed partial class McpServers(IMcpServerStore store, Connections connec
     [GeneratedRegex(@"^\d+(\.\d+)*((a|b|rc)\d+)?(\.post\d+)?(\.dev\d+)?(\+[A-Za-z0-9.]+)?$", RegexOptions.IgnoreCase)]
     private static partial Regex PythonExact();
 
-    [GeneratedRegex(@"^(@[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]+$")]
+    // A name starts with a letter or digit (after an optional @scope/): one led by `-` or `.` would be read
+    // as an npx/uvx option, ahead of the pinned version.
+    [GeneratedRegex(@"^(@[A-Za-z0-9][A-Za-z0-9._-]*/)?[A-Za-z0-9][A-Za-z0-9._-]*$")]
     private static partial Regex NpmPackage();
 
-    [GeneratedRegex(@"^[A-Za-z0-9._-]+(\[[A-Za-z0-9._,-]+\])?$")]
+    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._-]*(\[[A-Za-z0-9._,-]+\])?$")]
     private static partial Regex PythonPackage();
 
     public static string NameRuleSentence =>
@@ -221,6 +227,7 @@ public sealed partial class McpServers(IMcpServerStore store, Connections connec
         {
             var name = given?.Name?.Trim() ?? "";
             if (!EnvRule().IsMatch(name)) return (null, null, $"`{name}` is not an environment variable's name: letters, digits and `_`, not starting with a digit.");
+            if (LoaderEnv().IsMatch(name)) return (null, null, $"`{name}` changes how programs load and may not be set on a server.");
             if (env.Any(e => e.Name == name)) return (null, null, $"Environment variable `{name}` is named twice.");
 
             var connectionId = given?.Connection?.Trim() ?? "";
@@ -269,12 +276,9 @@ public sealed partial class McpServers(IMcpServerStore store, Connections connec
     /// mark; refused marks the entry Needs you and its connection too; failed marks neither. A check no worker
     /// ran records nothing.
     /// </summary>
-    public async Task<McpServerCheckAnswer> CheckAsync(ConnectionActor actor, McpServerRecord server, WorkerAsks asks, CancellationToken ct)
+    public async Task<McpServerCheckAnswer> CheckAsync(ConnectionActor actor, McpServerRecord server, WorkerAsks asks, McpStdio stdio, CancellationToken ct)
     {
-        if (server.Kind != McpServerRecord.Web)
-        {
-            return new McpServerCheckAnswer(ConnectionTested.Failed, $"MCP server '{server.Name}' is run by the platform: it is {CheckedLater}.", null);
-        }
+        if (server.Kind == McpServerRecord.Runs) return await CheckRunsAsync(actor, server, stdio, ct);
 
         var (target, error) = await TargetAsync(server, ct);
         if (target is null)
@@ -299,7 +303,7 @@ public sealed partial class McpServers(IMcpServerStore store, Connections connec
         }
 
         // TWO TOOLS THAT WOULD SHARE A NAME on the harness server (MCP 2) refuse the save, naming both: this entry's
-        // own, or one of this entry's and one another web address entry last listed. Nothing listed is kept.
+        // own, or one of this entry's and one another entry last listed. Nothing listed is kept.
         if (tested.Outcome == ConnectionTested.Ok && Clash(server, tested.Tools ?? [], await store.ListAsync(ct)) is { } clash)
         {
             return await RecordAsync(actor, server, ConnectionTested.Failed, clash, null, secrets, ct);
@@ -307,6 +311,66 @@ public sealed partial class McpServers(IMcpServerStore store, Connections connec
 
         return await RecordAsync(actor, server, tested.Outcome, sentence, tested.Outcome == ConnectionTested.Ok ? tested.Tools ?? [] : null, secrets, ct);
     }
+
+    /// <summary>
+    /// AN ENTRY THE PLATFORM RUNS, CHECKED (MCP 3): a worker starts it in a process of its own, as the <c>mcp</c> user,
+    /// lists its tools and stops it. Recorded as a web address's check is: ok keeps the tools and clears a mark, failed
+    /// marks nothing, and two tools that would share a name fail it. A check no worker ran records nothing.
+    /// </summary>
+    private async Task<McpServerCheckAnswer> CheckRunsAsync(ConnectionActor actor, McpServerRecord server, McpStdio stdio, CancellationToken ct)
+    {
+        var (launch, error) = await LaunchAsync(server, ct);
+        if (launch is null) return await RecordAsync(actor, server, ConnectionTested.Failed, error!.Sentence, null, error.Secrets, ct);
+
+        var secrets = launch.Environment.Values.ToList();
+        var (tools, failure, ran) = await stdio.CheckAsync(launch, ct);
+        if (!ran)
+        {
+            return new McpServerCheckAnswer(ConnectionTested.Failed, $"The check did not run: {failure} Nothing was recorded; test it again.", null);
+        }
+
+        if (tools is null) return await RecordAsync(actor, server, ConnectionTested.Failed, failure!, null, secrets, ct);
+
+        if (Clash(server, tools, await store.ListAsync(ct)) is { } clash) return await RecordAsync(actor, server, ConnectionTested.Failed, clash, null, secrets, ct);
+
+        var sentence = tools.Count == 1 ? $"{server.Name} started and listed 1 tool." : $"{server.Name} started and listed {tools.Count} tools.";
+        return await RecordAsync(actor, server, ConnectionTested.Ok, sentence, tools, secrets, ct);
+    }
+
+    /// <summary>
+    /// How a worker starts an entry the platform runs (MCP 3): its command line, and each variable it names filled from
+    /// its connection's field, read here. The fingerprint changes with any of it, a value included, and is keyed by this
+    /// Host so it says nothing of a value. Null with the sentence when a connection or a value cannot be read.
+    /// </summary>
+    public async Task<(McpStdioLaunch? Launch, McpTargetError? Error)> LaunchAsync(McpServerRecord server, CancellationToken ct)
+    {
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var variable in server.Env)
+        {
+            var connection = await connections.Store.GetAsync(variable.Connection, ct);
+            var values = connection is null ? null : await connections.Store.CredentialSecretsAsync(connection.Id, ct);
+            var field = connection?.Credential?.Fields.FirstOrDefault(f => f.Name == variable.Field);
+            var value = field is null ? null : field.Masked ? values?.GetValueOrDefault(field.Name) : field.Value;
+
+            if (connection is null || value is null)
+            {
+                return (null, new McpTargetError(
+                    connection is null
+                        ? $"The connection `{variable.Name}` of MCP server '{server.Name}' is filled from no longer exists. Choose another in {Where}."
+                        : $"The value of `{variable.Field}` in connection {connection.Named} could not be read on this Host. Edit the connection in {Connections.Where}.",
+                    [.. environment.Values]));
+            }
+
+            environment[variable.Name] = value;
+        }
+
+        var described = JsonSerializer.Serialize(new object?[] { server.Command, server.Package, server.Version, server.Args, environment.OrderBy(e => e.Key, StringComparer.Ordinal) });
+        var fingerprint = Convert.ToHexString(HMACSHA256.HashData(FingerprintKey, Encoding.UTF8.GetBytes(described)));
+
+        return (new McpStdioLaunch(server.Id, server.Name, server.Command!, server.Package!, server.Version!, server.Args, environment, fingerprint), null);
+    }
+
+    private static readonly byte[] FingerprintKey = RandomNumberGenerator.GetBytes(32);
 
     /// <summary>The sentence naming two tools whose names on the harness server would be the same, or null.</summary>
     public static string? Clash(McpServerRecord server, IReadOnlyList<string> tools, IReadOnlyList<McpServerRecord> all)
@@ -319,7 +383,7 @@ public sealed partial class McpServers(IMcpServerStore store, Connections connec
         }
 
         var listed = tools.Select(t => (Server: server.Name, Tool: t))
-            .Concat(all.Where(o => o.Id != server.Id && o.Kind == McpServerRecord.Web && o.Name != server.Name)
+            .Concat(all.Where(o => o.Id != server.Id && o.Name != server.Name)
                 .SelectMany(o => (o.Tools ?? []).Select(t => (Server: o.Name, Tool: t))));
 
         foreach (var clash in McpToolNames.Clashes(listed))

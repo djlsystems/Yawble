@@ -35,7 +35,7 @@ public sealed record McpServerRecord(
 
     public const string Runs = "runs";
 
-    /// <summary>Never checked, or an entry the platform runs, which MCP 3 checks.</summary>
+    /// <summary>Never checked.</summary>
     public const string Unchecked = "unchecked";
 
     public const string Ok = "ok";

@@ -57,17 +57,18 @@ public sealed class McpServerToolsBed : IAsyncDisposable
 
     public static async Task<McpServerToolsBed> StartAsync(
         TimeSpan? callTimeout = null, long maximumBinary = McpRunTools.DefaultMaximumBinary, bool assign = true,
-        IReadOnlyList<string>? memberAgents = null, AgentLaunchUser? runAs = null, WorkerAsks? asks = null, IPtyEngine? terminals = null)
+        IReadOnlyList<string>? memberAgents = null, AgentLaunchUser? runAs = null, WorkerAsks? asks = null, IPtyEngine? terminals = null,
+        McpStdioServers? stdio = null)
     {
         var bed = new McpServerToolsBed();
         await bed.InitializeAsync(
-            callTimeout ?? TimeSpan.FromSeconds(10), maximumBinary, assign, memberAgents ?? ["claude-headless"], runAs, asks, terminals);
+            callTimeout ?? TimeSpan.FromSeconds(10), maximumBinary, assign, memberAgents ?? ["claude-headless"], runAs, asks, terminals, stdio);
         return bed;
     }
 
     private async Task InitializeAsync(
         TimeSpan callTimeout, long maximumBinary, bool assign, IReadOnlyList<string> memberAgents, AgentLaunchUser? runAs, WorkerAsks? asks,
-        IPtyEngine? terminals)
+        IPtyEngine? terminals, McpStdioServers? stdio)
     {
         Directory.CreateDirectory(DataRoot);
         Agents.Behaviour = async invocation =>
@@ -96,7 +97,10 @@ public sealed class McpServerToolsBed : IAsyncDisposable
                 services.AddSingleton(sp => new McpRunTools(
                     sp.GetRequiredService<McpServers>(), sp.GetRequiredService<McpForwarding>(), sp.GetRequiredService<TimeProvider>(),
                     sp.GetRequiredService<ILogger<McpRunTools>>(), maximumBinary, runAs: runAs, asks: asks,
-                    users: sp.GetRequiredService<IUserStore>(), teams: sp.GetRequiredService<TeamRegistry>));
+                    users: sp.GetRequiredService<IUserStore>(), teams: sp.GetRequiredService<TeamRegistry>,
+                    stdio: sp.GetRequiredService<McpStdio>()));
+                // THE SERVERS THE HOST'S OWN WORKER RUNS: a test's, pointed at a fake stdio server.
+                if (stdio is not null) services.AddSingleton(stdio);
             }));
 
         PersonId = (await Services.GetRequiredService<IUserStore>().CreateAsync(Email, PersonPassword)).Id;

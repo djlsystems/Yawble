@@ -29,7 +29,7 @@ public static class McpServerEndpoints
                 + "`healthReason`, the tools it last listed and the teams it is given to. Never a value or a query string.");
 
         app.MapPost("/api/mcp-servers", async (
-            SaveMcpServer request, McpServers servers, WorkerAsks asks, HttpContext context, CancellationToken ct) =>
+            SaveMcpServer request, McpServers servers, WorkerAsks asks, McpStdio stdio, HttpContext context, CancellationToken ct) =>
         {
             var (server, url, error) = await servers.ReadAsync(request, null, ct);
             if (error is not null) return Results.BadRequest(new { error });
@@ -48,7 +48,7 @@ public static class McpServerEndpoints
 
             if (written == McpServerWrite.NameTaken) return Results.Conflict(new { error = McpServers.NameTaken(server.Name) });
 
-            return await SavedAsync(servers, server.Id, actor, asks, StatusCodes.Status201Created, ct);
+            return await SavedAsync(servers, server.Id, actor, asks, stdio, StatusCodes.Status201Created, ct);
         })
             .WithTags(Area)
             .HumansOnly()
@@ -61,12 +61,12 @@ public static class McpServerEndpoints
                 + "missing, `latest` or a range is refused 400 with a sentence saying a version must be pinned), `args` and "
                 + "`env` (`[{ name, connection, field }]`). 201 `{ server, check }` with an `mcp.server-added` row. A web "
                 + "address is then checked - initialize and list its tools - and `check` says `ok` with the tools, `refused` "
-                + "(the entry and its connection read Needs you) or `failed` (nothing marked); a `runs` entry's `check` is "
-                + "null: it is checked when MCP 3 is in place.");
+                + "(the entry and its connection read Needs you) or `failed` (nothing marked). A `runs` entry is checked on a "
+                + "worker: started as the `mcp` user in a process of its own, its tools listed, then stopped - `ok` or `failed`.");
 
         app.MapPut("/api/mcp-servers/{id}", async (
             [Description("The entry's id.")] string id,
-            SaveMcpServer request, McpServers servers, WorkerAsks asks, HttpContext context, CancellationToken ct) =>
+            SaveMcpServer request, McpServers servers, WorkerAsks asks, McpStdio stdio, HttpContext context, CancellationToken ct) =>
         {
             if (await servers.Store.GetAsync(id, ct) is not { } before) return NoServer(id);
 
@@ -89,7 +89,10 @@ public static class McpServerEndpoints
             if (written == McpServerWrite.NameTaken) return Results.Conflict(new { error = McpServers.NameTaken(server.Name) });
             if (written == McpServerWrite.Missing) return NoServer(id);
 
-            return await SavedAsync(servers, server.Id, actor, asks, StatusCodes.Status200OK, ct);
+            // THE PROCESS A WORKER RUNS FOR IT STOPS: the next call starts it with what the entry holds now.
+            if (before.Kind == McpServerRecord.Runs) await stdio.StopEverywhereAsync(before.Id, ct);
+
+            return await SavedAsync(servers, server.Id, actor, asks, stdio, StatusCodes.Status200OK, ct);
         })
             .WithTags(Area)
             .HumansOnly()
@@ -97,23 +100,19 @@ public static class McpServerEndpoints
             .WithDescription(
                 "Body as for an add; for a web address, `url` left out keeps the stored address (query and all). 200 "
                 + "`{ server, check }` with an `mcp.server-edited` row naming the settings that changed, then the same check "
-                + "as a save. 404 for an unknown id, 409 for a name taken.");
+                + "as a save. An entry the platform runs is stopped on every worker first; the next call starts it again. "
+                + "404 for an unknown id, 409 for a name taken.");
 
         app.MapPost("/api/mcp-servers/{id}/test", async (
             [Description("The entry's id.")] string id,
-            McpServers servers, WorkerAsks asks, HttpContext context, CancellationToken ct) =>
+            McpServers servers, WorkerAsks asks, McpStdio stdio, HttpContext context, CancellationToken ct) =>
         {
             if (await servers.Store.GetAsync(id, ct) is not { } server) return NoServer(id);
-
-            if (server.Kind != McpServerRecord.Web)
-            {
-                return Results.BadRequest(new { error = $"MCP server '{server.Name}' is run by the platform: it is {McpServers.CheckedLater}." });
-            }
 
             McpServerCheckAnswer check;
             try
             {
-                check = await servers.CheckAsync(ConnectionEndpoints.Actor(context), server, asks, ct);
+                check = await servers.CheckAsync(ConnectionEndpoints.Actor(context), server, asks, stdio, ct);
             }
             catch (DbException exception)
             {
@@ -128,12 +127,12 @@ public static class McpServerEndpoints
             .WithDescription(
                 "The check a save runs, again: initialize and list the tools, on a worker. `{ check: { outcome, sentence, "
                 + "tools, toolCount }, server }`, with an `mcp.server-checked` row. `refused` marks the entry and its "
-                + "connection Needs you; `failed` (not reached) marks neither; `ok` clears the entry's mark. 400 for a "
-                + "`runs` entry: it is checked when MCP 3 is in place.");
+                + "connection Needs you; `failed` (not reached) marks neither; `ok` clears the entry's mark. A `runs` entry is "
+                + "started on a worker in a process of its own, listed and stopped.");
 
         app.MapDelete("/api/mcp-servers/{id}", async (
             [Description("The entry's id.")] string id,
-            McpServers servers, HttpContext context, CancellationToken ct) =>
+            McpServers servers, McpStdio stdio, HttpContext context, CancellationToken ct) =>
         {
             if (await servers.Store.GetAsync(id, ct) is not { } server) return NoServer(id);
 
@@ -155,14 +154,19 @@ public static class McpServerEndpoints
                 return Unrecorded("The MCP server was not removed", exception);
             }
 
-            return teams is null ? NoServer(id) : Results.Ok(new { removed = server.Id, name = server.Name, teams });
+            if (teams is null) return NoServer(id);
+
+            if (server.Kind == McpServerRecord.Runs) await stdio.StopEverywhereAsync(server.Id, ct);
+
+            return Results.Ok(new { removed = server.Id, name = server.Name, teams });
         })
             .WithTags(Area)
             .HumansOnly()
             .WithSummary("Remove an MCP server")
             .WithDescription(
                 "Removes the entry and every team's assignment of it in one transaction, with an `mcp.server-removed` row "
-                + "and one `team.mcp-server-removed` row per team that had it. `{ removed, name, teams }`; 404 for an unknown id.");
+                + "and one `team.mcp-server-removed` row per team that had it; an entry the platform runs is stopped on every "
+                + "worker. `{ removed, name, teams }`; 404 for an unknown id.");
 
         // ---- Team settings → MCP servers ---------------------------------------------------------------
 
@@ -245,16 +249,16 @@ public static class McpServerEndpoints
                 + "teams keep it. 204; 404 when the team did not have it.");
     }
 
-    /// <summary>After an add or an edit: a web address is checked, and the answer is the entry with the check.</summary>
+    /// <summary>After an add or an edit: the entry is checked, and the answer is the entry with the check.</summary>
     private static async Task<IResult> SavedAsync(
-        McpServers servers, string id, ConnectionActor actor, WorkerAsks asks, int status, CancellationToken ct)
+        McpServers servers, string id, ConnectionActor actor, WorkerAsks asks, McpStdio stdio, int status, CancellationToken ct)
     {
         object? check = null;
-        if (await servers.Store.GetAsync(id, ct) is { Kind: McpServerRecord.Web } saved)
+        if (await servers.Store.GetAsync(id, ct) is { } saved)
         {
             try
             {
-                check = (await servers.CheckAsync(actor, saved, asks, ct)).View;
+                check = (await servers.CheckAsync(actor, saved, asks, stdio, ct)).View;
             }
             catch (DbException exception)
             {
@@ -306,7 +310,7 @@ public static class McpServerEndpoints
         args = s.Args,
         env = s.Env.Select(e => new { name = e.Name, connection = e.Connection, connectionName = connectionNames.GetValueOrDefault(e.Connection), field = e.Field }),
         health = s.Status,
-        healthReason = s.Kind == McpServerRecord.Runs ? McpServers.CheckedLater : s.StatusReason,
+        healthReason = s.StatusReason,
         tools = s.Tools,
         toolCount = s.Tools?.Count,
         checkedAt = s.CheckedAt,

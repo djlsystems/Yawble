@@ -240,9 +240,10 @@ public sealed record AgentLaunchUser(
     /// effective capabilities from <c>/proc/self/status</c>, <c>setpriv</c> in a system directory,
     /// and whether a file can be given to the target's group (measured by doing it to a scratch
     /// directory). When it does not switch and the Host holds ambient or inheritable capabilities,
-    /// <see cref="ClearsCapabilities"/> is set so children still start with none.
+    /// <see cref="ClearsCapabilities"/> is set so children still start with none. <paramref name="shares"/> false is a
+    /// user the Host hands no file (the <c>mcp</c> user MCP servers run as): its group is not measured.
     /// </summary>
-    public static AgentLaunchUser Resolve(string? name = null, string passwd = "/etc/passwd")
+    public static AgentLaunchUser Resolve(string? name = null, string passwd = "/etc/passwd", bool shares = true)
     {
         name = string.IsNullOrWhiteSpace(name) ? DefaultName : name.Trim();
 
@@ -258,7 +259,7 @@ public sealed record AgentLaunchUser(
             (int)geteuid(),
             Capabilities("CapEff:"),
             setpriv,
-            CanShareWithGroup);
+            shares ? CanShareWithGroup : _ => true);
 
         return !decided.Switches && setpriv is not null && (Capabilities("CapAmb:") | Capabilities("CapInh:")) != 0
             ? decided with { ClearsCapabilities = true, SetprivPath = setpriv }
