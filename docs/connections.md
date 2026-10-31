@@ -625,6 +625,24 @@ been given. A new team has none.
 - An existing volume's bindings are assigned to their teams when it is upgraded (schema step `auth-032`),
   so nothing bound before stops.
 
+## Team Connections: asking about a team's connections
+
+Every team has a member named **Team Connections** (the built-in plugin of that name, see
+[plugins.md](plugins.md#team-connections)). It holds every connection assigned to its team - the
+assignment above is the consent, and no binding is needed - and answers any member that `tell`s it:
+
+- **`list`**: each connection assigned to the team, by name, kind and health (`ok` or
+  `needs reconnect` with its reason), and whether it has a test.
+- **`test <name>`**: that connection's own [Test connection](#testing-a-connection), by name, on a
+  worker: the same test, the same health and the same `connections.tested` row as a person's. A
+  website, and a preset with no test, still have no successful test.
+
+It **never hands out a value**: no key, password, token or app password is in its answer, its rows or
+any file, and it never reads a connection assigned only to another team. It is shown on the board and
+in status only while the team has at least one connection; removing the last hides it again and keeps
+its runs. Nobody hires, removes or renames it, and no member takes its name. Agents are told to ask it
+for anything to do with a connection (the `manager` and `member` skills, and the prompts the platform gives the Manager and every member).
+
 ## Binding a connection to a member
 
 A plugin member's settings - at hire (Add member), later in Member settings, and in a solution install -

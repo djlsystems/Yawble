@@ -1,292 +1,106 @@
 // @vitest-environment happy-dom
 //
-// WHICH CONNECTIONS A TEAM MAY USE (CON 2): Team settings → Connections lists what is assigned to the
-// team and who on it uses each, adds from a pick list, and removes only after naming the members it
-// unbinds; New team → Connections chooses them for the create. A plugin member's slot lists only the
-// connections assigned to its team that fit, preselects the only one, and ends with New connection...
-// A required slot with nothing bound reads Needs you where the member's status shows.
-//
-// THE MOCK IS OF `api/client`; the Host's own rules (a person's act only, one transaction, the hire
-// rule) are pinned server-side in ConnectionsTests.Teams.cs.
+// TEAM CONNECTIONS, the platform's own member on every team (TeamConnectionsMember in the Host). Its
+// card's settings icon opens Team settings -> Connections, never Member settings - it has no settings of
+// its own; and its built-in plugin is offered nowhere a person hires (Add member), nowhere in the
+// Marketplace, and in Admin -> Plugins as a locked built-in with no Remove.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createPinia, setActivePinia } from 'pinia';
+import { flushPromises, mount } from '@vue/test-utils';
 
-const {
-  listCatalog,
-  listPlugins,
-  addMember,
-  listConnections,
-  listConnectionProviders,
-  listTeamConnections,
-  assignTeamConnection,
-  removeTeamConnection,
-  getConnectionNeeds,
-  listOpenConnectionFlows,
-} = vi.hoisted(() => ({
-  getConnectionNeeds: vi.fn(async () => ({ provider: 'google', scopes: [], plugins: [] })),
-  listOpenConnectionFlows: vi.fn(async () => []),
+const { listContainerTriggers, listCatalog, listPlugins } = vi.hoisted(() => ({
+  listContainerTriggers: vi.fn(),
   listCatalog: vi.fn(),
   listPlugins: vi.fn(),
-  addMember: vi.fn(),
-  listConnections: vi.fn(),
-  listConnectionProviders: vi.fn(),
-  listTeamConnections: vi.fn(),
-  assignTeamConnection: vi.fn(),
-  removeTeamConnection: vi.fn(),
 }));
 
 vi.mock('../../api/client', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
+  listContainerTriggers,
   listCatalog,
   listPlugins,
-  addMember,
-  listConnections,
-  listConnectionProviders,
-  listTeamConnections,
-  assignTeamConnection,
-  removeTeamConnection,
-  getConnectionNeeds,
-  listOpenConnectionFlows,
-  listMailboxPresets: vi.fn(async () => []),
-  listCredentialPresets: vi.fn(async () => []),
 }));
 
+import ContainerCard from '../ContainerCard.vue';
 import AddMemberDialog from '../AddMemberDialog.vue';
-import TeamConnectionsPanel from '../TeamConnectionsPanel.vue';
-import type { Connection, ContainerSnapshot, InstalledPlugin, TeamId } from '../../api/types';
-import { containerMark } from '../../lib/teamKpis';
-import { memberStateOf, stateWords } from '../../lib/memberState';
-import { bodyFind, bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
-import { hostConnection, hostList, hostPlugin, hostProvider, hostSlot } from '../../test/pluginFixtures';
-import { button, settle, type } from '../../test/formProbe';
+import { asMemberId, asTeamId, type ContainerSnapshot, type TeamId } from '../../api/types';
+import { mountDialog, resetBody } from '../../test/mountQuasar';
+import { hostList, hostPlugin } from '../../test/pluginFixtures';
+import { pluginRows } from '../../lib/plugins';
+import { isTeamConnections, TEAM_CONNECTIONS_AGENT } from '../../lib/teamConnections';
 
-const mailer: InstalledPlugin = hostPlugin({
-  id: 'mailer',
-  name: 'Mailer',
-  connections: {
-    mail: hostSlot({
-      description: 'The mailbox to read and send from.',
-      providers: ['google'],
-      scopes: { google: ['https://mail.google.com/'] },
-      required: true,
-      summary: 'needs a Google connection',
-    }),
-  },
+const teamConnections = (): ContainerSnapshot => ({
+  team: asTeamId('alpha'),
+  id: asMemberId('TeamConnections'),
+  name: 'Team Connections',
+  agent: TEAM_CONNECTIONS_AGENT,
+  kind: 'plugin',
+  state: 'Idle',
+  queueDepth: 0,
+  ceiling: 16,
+  subscribes: [],
+  currentCorrelation: null,
+  sinceSeq: 0,
 });
 
-const workMail = hostConnection({
-  id: 'conn-work',
-  name: 'Work mail',
-  provider: 'google',
-  scopes: ['openid', 'email', 'https://mail.google.com/'],
-  usedBy: [{ team: 'alpha', member: 'inbox', label: 'Inbox', slot: 'mail' }],
-});
-const homeMail = hostConnection({
-  id: 'conn-home',
-  name: 'Home mail',
-  provider: 'google',
-  account: 'home@example.com',
-  scopes: ['openid', 'email', 'https://mail.google.com/'],
-});
-
-/** Alpha was given Work mail; Beta was given nothing. */
-const assignments: Record<string, Connection[]> = { alpha: [workMail], beta: [] };
+const builtIn = hostPlugin({ id: 'team-connections', name: 'Team Connections', version: '1.0.0', builtIn: true, locked: true });
+const echo = hostPlugin({ id: 'sample-echo', name: 'Sample Echo', version: '0.1.0' });
 
 beforeEach(() => {
-  for (const mock of [
-    listCatalog,
-    listPlugins,
-    addMember,
-    listConnections,
-    listConnectionProviders,
-    listTeamConnections,
-    assignTeamConnection,
-    removeTeamConnection,
-  ]) {
-    mock.mockReset();
-  }
+  setActivePinia(createPinia());
+  listContainerTriggers.mockResolvedValue([]);
   listCatalog.mockResolvedValue({ agents: [{ name: 'claude', mode: 'Headless' }] });
-  listPlugins.mockResolvedValue(hostList([mailer]));
-  addMember.mockResolvedValue({ name: 'Inbox' });
-  listConnections.mockResolvedValue([workMail, homeMail]);
-  listConnectionProviders.mockResolvedValue([hostProvider({ id: 'google', configured: true })]);
-  listTeamConnections.mockImplementation(async (team: string) => ({
-    team,
-    connections: (assignments[team] ?? []).map((connection) => ({ assignedAt: '2026-10-30T10:00:00Z', connection })),
-  }));
-  assignTeamConnection.mockResolvedValue({});
-  removeTeamConnection.mockResolvedValue(undefined);
+  listPlugins.mockResolvedValue(hostList([builtIn, echo]));
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})));
 });
 
-afterEach(resetBody);
+afterEach(() => {
+  vi.unstubAllGlobals();
+  resetBody();
+});
 
-type Select = { props: (name: string) => unknown; vm: { $emit: (event: string, value: unknown) => void } };
+describe('Team Connections', () => {
+  it('is known by what it runs', () => {
+    expect(isTeamConnections(teamConnections())).toBe(true);
+    expect(isTeamConnections({ agent: 'plugin:sample-echo' })).toBe(false);
+  });
 
-function select(wrapper: { findAllComponents: (s: { name: string }) => unknown[] }, label: string): Select {
-  const found = (wrapper.findAllComponents({ name: 'QSelect' }) as Select[]).find((s) => s.props('label') === label);
-  if (!found) throw new Error(`no QSelect labelled "${label}"`);
-  return found;
-}
-
-async function hire(team: string) {
-  const wrapper = await mountDialog(AddMemberDialog, { team: team as TeamId, teamName: team, memberAgents: ['claude'] });
-  await type('Member name', 'Inbox');
-  select(wrapper, 'Agent').vm.$emit('update:modelValue', 'plugin:mailer');
-  await settle();
-  await settle();
-  return wrapper;
-}
-
-const optionValues = (wrapper: Parameters<typeof select>[0]) =>
-  (select(wrapper, 'Connection for mail').props('options') as { value: string }[]).map((option) => option.value);
-
-describe("a plugin member's slot lists only its team's connections", () => {
-  it("offers the team's one fitting connection, preselected, and the hire binds it", async () => {
-    const wrapper = await hire('alpha');
-
-    expect(listTeamConnections).toHaveBeenCalledWith('alpha');
-    expect(optionValues(wrapper)).toEqual(['conn-work', '__new_connection__']);
-    expect(select(wrapper, 'Connection for mail').props('modelValue')).toBe('conn-work');
-
-    button('Add member').click();
-    await settle();
-    expect(addMember).toHaveBeenCalledWith('alpha', 'Inbox', 'plugin:mailer', {
-      config: {},
-      secrets: {},
-      connections: { mail: 'conn-work' },
+  it("opens Team settings on Connections from its card's settings icon, and never Member settings", async () => {
+    const wrapper = mount(ContainerCard, {
+      attachTo: document.body,
+      props: { snapshot: teamConnections(), feed: [] },
+      global: { stubs: { ActivityFeed: true, MemberSettingsDialog: true, TriggersDialog: true, TeamSettingsDialog: true } },
     });
+    await flushPromises();
 
+    expect(wrapper.find('[aria-label="Member settings"]').exists()).toBe(false);
+    await wrapper.find('[aria-label="Team connections"]').trigger('click');
+    await flushPromises();
+
+    const team = wrapper.findComponent({ name: 'TeamSettingsDialog' });
+    expect(team.exists()).toBe(true);
+    expect(team.props('initialTab')).toBe('connections');
+    expect(team.props('teamId')).toBe('alpha');
+    expect(wrapper.findComponent({ name: 'MemberSettingsDialog' }).exists()).toBe(false);
     wrapper.unmount();
   });
 
-  it("does not offer another team's connection: a team given none offers only New connection...", async () => {
-    const wrapper = await hire('beta');
+  it('is not offered in Add member', async () => {
+    const wrapper = await mountDialog(AddMemberDialog, { team: 'alpha' as TeamId, teamName: 'Alpha', memberAgents: ['claude'] });
 
-    expect(optionValues(wrapper)).toEqual(['__new_connection__']);
-    expect(select(wrapper, 'Connection for mail').props('modelValue')).toBeNull();
-    // Nothing to choose, so Connect is offered first, as it is for a slot with nothing suitable.
-    expect(bodyFind('[data-connection-slot="mail"] [data-slot-connect]')).not.toBeNull();
-
+    const agent = (wrapper.findAllComponents({ name: 'QSelect' }) as { props: (n: string) => unknown }[])
+      .find((s) => s.props('label') === 'Agent')!;
+    expect(agent.props('options')).toEqual(['claude', 'plugin:sample-echo']);
     wrapper.unmount();
   });
 
-  it('opens the connection wizard from New connection..., choosing nothing in the list', async () => {
-    const wrapper = await hire('beta');
+  it('is a row of Admin -> Plugins though it has no version folder on the volume', () => {
+    const rows = pluginRows(hostList([builtIn, echo], {
+      versions: [{ id: 'sample-echo', version: '0.1.0', name: 'Sample Echo', active: true, verdict: 'installed', reason: null }],
+    }));
 
-    select(wrapper, 'Connection for mail').vm.$emit('update:modelValue', '__new_connection__');
-    await settle();
-
-    expect(bodyFind('[data-guided-connect]')).not.toBeNull();
-    expect(select(wrapper, 'Connection for mail').props('modelValue')).toBeNull();
-
-    wrapper.unmount();
-  });
-});
-
-describe('Team settings → Connections', () => {
-  it('lists the connections assigned to the team and the members of the team using each', async () => {
-    const wrapper = await mountDialog(TeamConnectionsPanel, { team: 'alpha' }, { attachTo: document.body });
-
-    const row = bodyFind('[data-team-connection="Work mail"]');
-    expect(row?.textContent).toContain('Work mail');
-    expect(row?.querySelector('[data-team-connection-users]')?.textContent).toContain('Used by Inbox (mail)');
-    expect(bodyFind('[data-team-connection="Home mail"]')).toBeNull();
-
-    // The pick list offers what the team does not have yet.
-    expect(optionValuesOf(wrapper, 'Add connection')).toEqual(['conn-home']);
-
-    wrapper.unmount();
-  });
-
-  it('adds an existing connection from the pick list', async () => {
-    const wrapper = await mountDialog(TeamConnectionsPanel, { team: 'alpha' }, { attachTo: document.body });
-
-    select(wrapper, 'Add connection').vm.$emit('update:modelValue', 'conn-home');
-    await settle();
-
-    expect(assignTeamConnection).toHaveBeenCalledWith('alpha', 'conn-home');
-    expect(listTeamConnections).toHaveBeenCalledTimes(2);
-
-    wrapper.unmount();
-  });
-
-  it('asks before removing, naming the members it unbinds, then removes and unbinds them', async () => {
-    const wrapper = await mountDialog(TeamConnectionsPanel, { team: 'alpha' }, { attachTo: document.body });
-
-    (bodyFind('[data-team-connection="Work mail"] [data-team-connection-remove]') as HTMLButtonElement).click();
-    await settle();
-
-    expect(removeTeamConnection).not.toHaveBeenCalled();
-    expect(bodyFind('[data-team-connection-confirm-users]')?.textContent).toContain('Inbox (mail)');
-    expect(bodyText()).toContain('The connection itself stays, and other teams keep it.');
-
-    button('Remove and unbind').click();
-    await settle();
-
-    expect(removeTeamConnection).toHaveBeenCalledWith('alpha', 'conn-work', true);
-
-    wrapper.unmount();
-  });
-
-  it('a team with none says it starts with none', async () => {
-    const wrapper = await mountDialog(TeamConnectionsPanel, { team: 'beta' }, { attachTo: document.body });
-
-    expect(bodyFind('[data-team-connections-empty]')?.textContent).toContain('This team starts with none');
-
-    wrapper.unmount();
-  });
-});
-
-describe('New team → Connections', () => {
-  it('chooses connections for the create without assigning anything at the Host', async () => {
-    const wrapper = await mountDialog(TeamConnectionsPanel, { chosen: [] }, { attachTo: document.body });
-
-    expect(bodyFind('[data-team-connections-empty]')?.textContent).toContain('The new team starts with none');
-    select(wrapper, 'Add connection').vm.$emit('update:modelValue', 'conn-home');
-    await settle();
-
-    expect(wrapper.emitted('update:chosen')?.at(-1)).toEqual([['conn-home']]);
-    expect(assignTeamConnection).not.toHaveBeenCalled();
-    expect(listTeamConnections).not.toHaveBeenCalled();
-
-    wrapper.unmount();
-  });
-});
-
-function optionValuesOf(wrapper: Parameters<typeof select>[0], label: string): string[] {
-  return (select(wrapper, label).props('options') as { value: string }[]).map((option) => option.value);
-}
-
-describe('a required slot with nothing bound reads Needs you', () => {
-  const member = {
-    id: 'inbox',
-    name: 'Inbox',
-    state: 'Idle',
-    queueDepth: 0,
-    held: false,
-    needsPerson: 'Waits for a person to choose a connection for slot `mail`.',
-    blocked: 'Connection Work mail was removed from this team.',
-  } as unknown as ContainerSnapshot;
-
-  it("where the member's status shows, ahead of the blocked line a removal also writes", () => {
-    expect(containerMark(member)).toEqual({ kind: 'needs-decision', reason: member.needsPerson });
-    expect(stateWords(memberStateOf(member))).toBe('Needs you');
-  });
-
-  it('a run that ended needs-person is a wait, never a failure', () => {
-    const waited = {
-      ...member,
-      needsPerson: null,
-      blocked: null,
-      failed: 'Slot `mail` has no connection.',
-      failureClass: 'needs-person',
-    } as unknown as ContainerSnapshot;
-    expect(containerMark(waited)).toEqual({ kind: 'needs-decision', reason: 'Slot `mail` has no connection.' });
-    expect(stateWords(memberStateOf(waited))).toBe('Needs you');
-  });
-
-  it('and not once a binding clears it', () => {
-    const bound = { ...member, needsPerson: null, blocked: null } as unknown as ContainerSnapshot;
-    expect(containerMark(bound)).toBeNull();
-    expect(stateWords(memberStateOf(bound))).toBe('Idle');
+    expect(rows.map((row) => row.id)).toEqual(['sample-echo', 'team-connections']);
+    const row = rows.find((candidate) => candidate.id === 'team-connections')!;
+    expect(row.verdict === 'installed' && row.plugin.builtIn).toBe(true);
   });
 });

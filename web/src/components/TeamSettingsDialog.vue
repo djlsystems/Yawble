@@ -64,6 +64,7 @@ import LocalRepoPicker from './LocalRepoPicker.vue';
 import RepoCheckRefusal from './RepoCheckRefusal.vue';
 import DialogTabs from './DialogTabs.vue';
 import TeamConnectionsPanel from './TeamConnectionsPanel.vue';
+import { isTeamConnections } from '../lib/teamConnections';
 import { afterRefusal, withChoice } from '../lib/repoChoices';
 import type { ForkResult, RepoCheckRefusal as RepoCheckRefused, RepoChoice } from '../api/types';
 
@@ -451,6 +452,11 @@ const reposChanged = computed(() => {
 const settingsOpen = ref(false);
 
 function openSettings(container: ContainerSnapshot) {
+  // TEAM CONNECTIONS has no settings of its own: what it holds is this dialog's Connections tab.
+  if (isTeamConnections(container)) {
+    tab.value = 'connections';
+    return;
+  }
   settingsSnapshot.value = container;
   settingsOpen.value = true;
 }
@@ -1075,7 +1081,7 @@ watch(open, (showing) => {
                          question "what would let me press it", and nothing would: the server answers
                          409 whoever asks. The empty span keeps the two rows' controls aligned. -->
                     <q-btn
-                      v-if="!isManager(container)"
+                      v-if="!isManager(container) && !isTeamConnections(container)"
                       flat
                       dense
                       round

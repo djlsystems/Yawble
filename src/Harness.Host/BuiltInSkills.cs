@@ -299,6 +299,20 @@ public static class BuiltInSkills
             you in this workflow that the member is ready; then send the same instruction again, with
             the same `card`.
 
+            ## Connections: ask Team Connections
+
+            For anything to do with a connection - which accounts, mailboxes, API keys or logins the
+            team has, whether one works - `tell` the member Team Connections `list` (each connection
+            assigned to this team by name, kind and health) or `test <name>` (that connection's own
+            test, as Test connection in Admin -> Connections runs it). Its answer is its run's
+            output, and a member that asks gets it back as an instruction. It never hands out a
+            value - no key, password or token - so never ask it, or anyone, for one: a plugin member
+            bound to a connection gets the value inside its own run only. It is on the team, and in
+            `status`, only while a person has assigned the team at least one connection. Nobody
+            hires, removes or renames it, and no member takes its name. Only a person assigns a
+            connection to a team, in Team settings -> Connections: when one is missing, say so to
+            the person.
+
             If the team stopped part-way - a failed run, a spend limit, a restart - load the
             `recovery` skill before dispatching anything. If you are asked to finalise, finish, wrap
             up or clean up a round, load the `wrap-up` skill first. Before you sign in to anything,
@@ -487,6 +501,16 @@ public static class BuiltInSkills
 
             Keep the board readable: `progress` with status "<what you are doing now>". If you paused
             because you need an answer: `needs_decision` with question "<the decision you need>".
+
+            ## Connections: ask Team Connections
+
+            For anything to do with a connection - an account, a mailbox, an API key, a login -
+            `tell` the member Team Connections, without needing the Manager: `list` answers each
+            connection assigned to your team by name, kind and health, and `test <name>` runs that
+            connection's own test. Its answer comes back to you as an instruction in the same
+            workflow. It never hands out a value - no key, password or token - and nothing else does;
+            do not look for one in files or the environment. It is on the team only while a person
+            has assigned it a connection; when one you need is missing, say so with `blocked`.
 
             ## The watchdog measures silence, not slowness
 
