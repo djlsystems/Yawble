@@ -19,7 +19,7 @@ const props = withDefaults(defineProps<{
   weeks: string[];
   series: CostSeries[];
   /** Money when the instance has a rate, otherwise agent hours. */
-  money: boolean;
+  inMoney: boolean;
   currency: string;
   size?: 'tile' | 'row' | 'large';
 }>(), { size: 'large' });
@@ -41,7 +41,7 @@ const plot = computed(() => ({
 
 /** Each week's total, the sum of its stacked segments. */
 const totals = computed(() => props.weeks.map((_, week) =>
-  props.series.reduce((sum, s) => sum + weekValue(s.weekly[week] ?? { cost: null, agentSeconds: 0 }, props.money), 0)));
+  props.series.reduce((sum, s) => sum + weekValue(s.weekly[week] ?? { cost: null, agentSeconds: 0 }, props.inMoney), 0)));
 
 const ticks = computed(() => axisTicks(Math.max(0, ...totals.value)));
 const top = computed(() => ticks.value[ticks.value.length - 1] ?? 1);
@@ -67,7 +67,7 @@ const segments = computed<Segment[]>(() => {
   props.weeks.forEach((_, week) => {
     const x = plot.value.x + week * slot.value + (slot.value - barWidth.value) / 2;
     const parts = props.series
-      .map((s) => ({ s, value: weekValue(s.weekly[week] ?? { cost: null, agentSeconds: 0 }, props.money) }))
+      .map((s) => ({ s, value: weekValue(s.weekly[week] ?? { cost: null, agentSeconds: 0 }, props.inMoney) }))
       .filter((p) => p.value > 0);
 
     let base = 0;
@@ -114,7 +114,7 @@ const tooltip = computed(() => {
     };
   });
   const seconds = props.series.reduce((sum, s) => sum + (s.weekly[week]?.agentSeconds ?? 0), 0);
-  const cost = props.money ? props.series.reduce((sum, s) => sum + (s.weekly[week]?.cost ?? 0), 0) : null;
+  const cost = props.inMoney ? props.series.reduce((sum, s) => sum + (s.weekly[week]?.cost ?? 0), 0) : null;
 
   return {
     title: `Week of ${weekLabel(props.weeks[week]!)}`,
@@ -126,12 +126,12 @@ const tooltip = computed(() => {
 
 /** A compact chart's native hover text per week: its date and total. */
 function weekTitle(week: number): string {
-  return `Week of ${weekLabel(props.weeks[week]!)}: ${valueText(totals.value[week] ?? 0, props.money, props.currency)}`;
+  return `Week of ${weekLabel(props.weeks[week]!)}: ${valueText(totals.value[week] ?? 0, props.inMoney, props.currency)}`;
 }
 </script>
 
 <template>
-  <div class="cost-chart" :class="`cost-chart--${size}`" data-cost-chart :data-size="size">
+  <div class="cost-chart" data-cost-chart :data-size="size">
     <div v-if="legend" class="cost-legend" data-cost-legend>
       <span v-for="s in [...series].reverse()" :key="s.key" class="cost-legend-item" :data-cost-legend-item="s.key">
         <span class="cost-swatch" :style="{ background: s.colour }" aria-hidden="true"></span>{{ s.name }}
@@ -145,14 +145,14 @@ function weekTitle(week: number): string {
         :height="large ? undefined : box.height"
         class="cost-chart-svg"
         role="img"
-        :aria-label="money ? 'Cost by week and outcome' : 'Agent hours by week and outcome'"
+        :aria-label="inMoney ? 'Cost by week and outcome' : 'Agent hours by week and outcome'"
       >
         <!-- THE GRID AND THE ONE AXIS, recessive: hairlines in the rule colour, labels muted. -->
         <g v-if="large" class="cost-grid">
           <g v-for="tick in ticks" :key="tick">
             <line :x1="plot.x" :x2="plot.x + plot.width" :y1="yOf(tick)" :y2="yOf(tick)" class="cost-grid-line" />
             <text :x="plot.x - 8" :y="yOf(tick)" dy="0.32em" text-anchor="end" class="cost-axis-text" data-cost-tick>
-              {{ valueText(tick, money, currency) }}
+              {{ valueText(tick, inMoney, currency) }}
             </text>
           </g>
           <text
@@ -216,8 +216,8 @@ function weekTitle(week: number): string {
 </template>
 
 <style scoped>
-.cost-chart--tile,
-.cost-chart--row {
+.cost-chart[data-size='tile'],
+.cost-chart[data-size='row'] {
   display: inline-block;
   line-height: 0;
 }
@@ -238,7 +238,7 @@ function weekTitle(week: number): string {
 
 .cost-axis-text {
   fill: var(--os-ink-muted);
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 
 .cost-hover {

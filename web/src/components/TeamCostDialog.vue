@@ -77,7 +77,7 @@ const usage = computed(() => (props.usage !== undefined ? props.usage : readUsag
 
 // --- The Cost tab ---------------------------------------------------------------------------------
 
-const money = computed(() => (props.cost ? priced(props.cost) : false));
+const isPriced = computed(() => (props.cost ? priced(props.cost) : false));
 const currency = computed(() => props.cost?.money.currency ?? 'USD');
 const series = computed(() => costSeries(props.cost?.outcomes ?? []));
 const colourOf = computed(() => new Map(series.value.map((s) => [s.key, s.colour])));
@@ -141,8 +141,8 @@ function changeRate() {
           <!-- THE HEADLINE FIGURES. Spent is money only when there is a rate: never $0 for unpriced time. -->
           <q-card-section class="cost-figures" data-cost-figures>
             <div class="cost-figure" data-cost-figure="spent">
-              <div class="cost-figure-value mono">{{ money ? costCell(cost.totals.cost) : '—' }}</div>
-              <div class="text-caption os-text-muted">Spent{{ money ? '' : ' · no rate set' }}</div>
+              <div class="cost-figure-value mono">{{ isPriced ? costCell(cost.totals.cost) : '—' }}</div>
+              <div class="text-caption os-text-muted">Spent{{ isPriced ? '' : ' · no rate set' }}</div>
             </div>
             <div class="cost-figure" data-cost-figure="agent-time">
               <div class="cost-figure-value mono">{{ agentHours(cost.totals.agentSeconds) }}</div>
@@ -163,8 +163,8 @@ function changeRate() {
           </q-card-section>
 
           <q-card-section class="q-pt-none">
-            <CostWeeksChart :weeks="cost.weeks" :series="series" :money="money" :currency="currency" size="large" />
-            <div v-if="!money" class="text-caption os-text-muted q-mt-xs" data-cost-no-rate>
+            <CostWeeksChart :weeks="cost.weeks" :series="series" :in-money="isPriced" :currency="currency" size="large" />
+            <div v-if="!isPriced" class="text-caption os-text-muted q-mt-xs" data-cost-no-rate>
               Set an agent hourly rate in Outcomes to see dollars
             </div>
           </q-card-section>

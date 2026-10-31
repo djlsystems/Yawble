@@ -807,7 +807,7 @@ async function setPaused(team: Team | null, paused: boolean) {
                 <CostWeeksChart
                   :weeks="costCell(row.id)!.cost.weeks"
                   :series="costCell(row.id)!.series"
-                  :money="costCell(row.id)!.money"
+                  :in-money="costCell(row.id)!.money"
                   :currency="costCell(row.id)!.cost.money.currency"
                   size="row"
                 />

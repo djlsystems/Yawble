@@ -380,10 +380,13 @@ export interface TeamCostOutcome {
   outcomeTotalCost: number | null
 }
 
+/** How the cost routes price agent time: the currency, and the rate (null when none is set). */
+export type TeamCostMoney = Pick<OutcomeMoney, 'currency' | 'agentHourlyRate'>
+
 /** `GET /api/teams/{team}/cost`: one team's outcome figures over the last eight weeks. */
 export interface TeamCost {
   team: string
-  money: Pick<OutcomeMoney, 'currency' | 'agentHourlyRate'>
+  money: TeamCostMoney
   /** Eight Monday-start UTC weeks, oldest first. */
   weeks: string[]
   /** No outcome first when present, then each outcome. */
@@ -393,7 +396,7 @@ export interface TeamCost {
 
 /** `GET /api/teams/cost`: every team's figures at once, for the teams list - one call, never one per row. */
 export interface TeamsCost {
-  money: TeamCost['money']
+  money: TeamCostMoney
   weeks: string[]
   teams: Array<Pick<TeamCost, 'team' | 'outcomes' | 'totals'>>
 }

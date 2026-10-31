@@ -1,4 +1,4 @@
-import type { TeamCost, TeamCostOutcome, TeamCostTotals, TeamCostWeek } from '../api/outcomes'
+import type { TeamCost, TeamCostMoney, TeamCostOutcome, TeamCostTotals, TeamCostWeek } from '../api/outcomes'
 import { moneyText } from './outcomes'
 
 /**
@@ -35,7 +35,7 @@ export interface CostSeries {
 }
 
 /** Whether the instance prices agent time: then figures are money, otherwise agent hours. */
-export function priced(cost: Pick<TeamCost, 'money'>): boolean {
+export function priced(cost: { money: TeamCostMoney }): boolean {
   return cost.money.agentHourlyRate !== null
 }
 

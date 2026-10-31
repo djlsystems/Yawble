@@ -799,7 +799,7 @@ function showThread(row: WorkflowRow) {
           <CostWeeksChart
             :weeks="cost.weeks"
             :series="costChartSeries"
-            :money="costMoney"
+            :in-money="costMoney"
             :currency="cost.money.currency"
             size="tile"
           />
@@ -1305,12 +1305,6 @@ function showThread(row: WorkflowRow) {
   line-height: 1.2;
 }
 
-.team-kpi-of {
-  font-size: 0.75rem;
-  font-weight: 400;
-  color: var(--os-ink-muted);
-}
-
 /* The state word sits ON the label line rather than under the figure, so the tile keeps the height
    the three it replaced had between them. */
 .team-kpi-state {
@@ -1417,7 +1411,6 @@ function showThread(row: WorkflowRow) {
   outline-offset: 2px;
 }
 
-
 /* THE TILE'S TONE IS A STATE'S COLOUR (`lib/states.ts`): live is running, warn blocked, error
    failed, info waiting (a hand-back awaiting its Manager, or a slot). */
 .team-kpi--live {
@@ -1516,20 +1509,6 @@ function showThread(row: WorkflowRow) {
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--os-ink-faint);
-}
-
-.team-kpi-partial {
-  margin-top: 2px;
-  font-size: 0.7rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--os-warn);
-}
-
-.team-kpi-breakdown {
-  margin-top: 2px;
-  font-size: 0.7rem;
   color: var(--os-ink-faint);
 }
 
