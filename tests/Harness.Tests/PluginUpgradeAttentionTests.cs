@@ -63,9 +63,11 @@ public sealed class PluginUpgradeAttentionTests : IAsyncLifetime
          "size":{"type":"number","min":1,"max":100,"default":10}}
         """;
 
-    private string Built(string version, string config = FirstConfig, string secrets = """{"token":{"description":"A demo credential.","required":false}}""")
+    private string Built(
+        string version, string config = FirstConfig, string secrets = """{"token":{"description":"A demo credential.","required":false}}""",
+        string? folder = null)
     {
-        var folder = Path.Combine(_dataRoot, "teams", "t", "repos", "R", "wt_x", Id, "out", version);
+        folder ??= Path.Combine(_dataRoot, "teams", "t", "repos", "R", "wt_x", Id, "out", version);
         Directory.CreateDirectory(Path.Combine(folder, "bin"));
         var manifest = PluginInstall.Manifest(Id, version, m =>
         {
@@ -196,6 +198,45 @@ public sealed class PluginUpgradeAttentionTests : IAsyncLifetime
         var rolledBack = await InstallAsync(person, Built("1.0.0"));
         Assert.Equal("1.1.0", rolledBack.GetProperty("previous").GetString());
         Assert.Empty(rolledBack.GetProperty("attention").EnumerateArray());
+        Assert.Equal("1.0.0\n", await File.ReadAllTextAsync(Path.Combine(Plugins, Id, PluginCatalog.ActiveFile), Ct));
+    }
+
+    /// <summary>
+    /// PLG 3: THE ROLLBACK THE UPGRADE'S WORDS NAME. The copy kept under the plugins folder is refused
+    /// (the words no longer point at it); the old version's Marketplace folder,
+    /// Documents › Marketplace › &lt;id&gt;-&lt;version&gt;, and the folder it was built into each roll back
+    /// with Replace: the old version active, the newer one kept inactive, the member's settings kept.
+    /// </summary>
+    [Fact]
+    public async Task A_rollback_installs_the_old_versions_marketplace_folder_or_build_folder_with_replace_and_never_its_kept_copy()
+    {
+        using var person = await PersonAsync();
+        var documents = Services.GetRequiredService<TeamDocuments>().InstanceRoot;
+        var fetched = Built("1.0.0", folder: Path.Combine(documents, Marketplace.Folder, $"{Id}-1.0.0"));
+        await InstallAsync(person, fetched);
+        await HireAsync(person, "Echo", new { mode = "reverse", size = 7 });
+
+        var upgraded = await InstallAsync(person, Built("1.1.0"));
+        Assert.Equal("1.0.0", upgraded.GetProperty("previous").GetString());
+
+        // THE KEPT COPY: refused, as the old words led a person to try.
+        var kept = await person.PostAsJsonAsync("/api/plugins/install", new { path = Path.Combine(Plugins, Id, "1.0.0"), replace = true }, Ct);
+        Assert.Equal(HttpStatusCode.BadRequest, kept.StatusCode);
+        Assert.Contains("already under the plugins folder", await kept.Content.ReadAsStringAsync(Ct));
+        Assert.Equal("1.1.0\n", await File.ReadAllTextAsync(Path.Combine(Plugins, Id, PluginCatalog.ActiveFile), Ct));
+
+        // THE MARKETPLACE FOLDER, with Replace: rolled back.
+        var rolledBack = await InstallAsync(person, fetched, replace: true);
+        Assert.Equal(("1.0.0", "1.1.0"), (rolledBack.GetProperty("version").GetString(), rolledBack.GetProperty("previous").GetString()));
+        Assert.Equal("1.0.0\n", await File.ReadAllTextAsync(Path.Combine(Plugins, Id, PluginCatalog.ActiveFile), Ct));
+        Assert.True(Directory.Exists(Path.Combine(Plugins, Id, "1.1.0")));
+        var config = (await Services.GetRequiredService<IPluginMemberSettingsStore>().ForAsync(new ContainerId(_team, "Echo"), Ct)).Config;
+        Assert.Equal(("reverse", 7), (config["mode"].GetString(), config["size"].GetInt32()));
+
+        // THE BUILD FOLDER, after upgrading again: rolled back the same way.
+        await InstallAsync(person, Built("1.1.0"), replace: true);
+        var fromBuild = await InstallAsync(person, Built("1.0.0"), replace: true);
+        Assert.Equal("1.1.0", fromBuild.GetProperty("previous").GetString());
         Assert.Equal("1.0.0\n", await File.ReadAllTextAsync(Path.Combine(Plugins, Id, PluginCatalog.ActiveFile), Ct));
     }
 
