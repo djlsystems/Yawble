@@ -8,7 +8,8 @@ namespace Harness.Host;
 
 /// <summary>
 /// WEB CREDENTIALS ENTRIES BECOME WEBSITE CONNECTIONS (CON 6), at the first start with this step: every
-/// entry of every member running the Web Credentials plugin, on every team, becomes a website connection
+/// entry of every member running the Web Credentials plugin - hired as <c>plugin:web-credentials</c> or, since
+/// the plugin's rename, <c>plugin:web-credentials-plugin</c> (CON 10) - on every team, becomes a website connection
 /// named after its team and its entry (<c>Alpha supplier-admin</c>), assigned to that team, with its
 /// fields and its password, token, TOTP secret and saved session - the platform's own session format,
 /// so nothing is signed in to again. One <see cref="TenantActions.ConnectionsCarriedOver"/> row names how
@@ -31,8 +32,17 @@ public sealed class WebCredentialsCarryOver(
     ITeamStore teams, IPluginMemberSettingsStore settings, IPluginMemberSecrets secrets, IConnectionStore store, ITenantLog tenantLog,
     TeamRegistry? registry = null, TimeProvider? clock = null, ILogger<WebCredentialsCarryOver>? log = null) : IHostedService
 {
-    /// <summary>The Web Credentials plugin's id and its member's agent.</summary>
+    /// <summary>The Web Credentials plugin's first id (solution 1.0.0), and its member's agent.</summary>
     public const string PluginId = "web-credentials";
+
+    /// <summary>
+    /// The id it runs under since Yawble-packages d1215e2 (solution 1.1.0, plugin 1.0.0): its members are
+    /// hired as <c>plugin:web-credentials-plugin</c>.
+    /// </summary>
+    public const string RenamedPluginId = "web-credentials-plugin";
+
+    /// <summary>Every id a Web Credentials member runs under, each carried the same way (CON 10).</summary>
+    public static readonly IReadOnlyList<string> PluginIds = [PluginId, RenamedPluginId];
 
     /// <summary>The plugin's entries table.</summary>
     public const string Table = "entries";
@@ -66,9 +76,20 @@ public sealed class WebCredentialsCarryOver(
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <summary>The step: how many connections it made, or null when it had already run.</summary>
+    /// <remarks>
+    /// <para>
+    /// A SUMMARY ROW NAMES THE IDS IT CARRIED (<c>plugins</c>). A row from a Host before CON 10 names none:
+    /// that Host carried <see cref="PluginId"/> only and skipped <see cref="RenamedPluginId"/>'s members, so
+    /// the next start carries the ids that row did not cover - those alone, so an entry the old run carried
+    /// and a person has since renamed, changed or removed is not made again - and writes a row naming them all.
+    /// </para>
+    /// </remarks>
     public async Task<int?> CarryOverOnceAsync(CancellationToken ct = default)
     {
-        if (await tenantLog.FindLatestAsync(TenantActions.ConnectionsCarriedOver, Subject, ct) is not null) return null;
+        var done = await tenantLog.FindLatestAsync(TenantActions.ConnectionsCarriedOver, Subject, ct);
+        var covered = done is null ? new HashSet<string>(StringComparer.Ordinal) : Covered(done.Detail);
+        var carrying = PluginIds.Where(p => !covered.Contains(p)).ToHashSet(StringComparer.Ordinal);
+        if (carrying.Count == 0) return null;
 
         var preset = CredentialPresets.For(ConnectionKinds.Website, null)!;
         var names = (await teams.TeamsAsync(ct)).ToDictionary(t => t.Id, t => string.IsNullOrWhiteSpace(t.Name) ? t.Id : t.Name!, StringComparer.OrdinalIgnoreCase);
@@ -80,7 +101,7 @@ public sealed class WebCredentialsCarryOver(
 
         foreach (var member in await teams.MembersAsync(ct))
         {
-            if (!MemberRef.IsPlugin(member.Agent, out var plugin) || plugin != PluginId || !names.TryGetValue(member.Team, out var team)) continue;
+            if (!MemberRef.IsPlugin(member.Agent, out var plugin) || !carrying.Contains(plugin) || !names.TryGetValue(member.Team, out var team)) continue;
 
             members++;
             var id = new ContainerId(member.Team, member.Name);
@@ -115,7 +136,7 @@ public sealed class WebCredentialsCarryOver(
                         null, null, TenantActions.ConnectionConnected, record.Id, record.Name, JsonSerializer.Serialize(new
                         {
                             connection = record.Id, provider = ConnectionKinds.Website, account = record.Account,
-                            fields = website.Settings.Fields.Where(f => f.Set).Select(f => f.Name), from = $"{PluginId} {id}",
+                            fields = website.Settings.Fields.Where(f => f.Set).Select(f => f.Name), from = $"{plugin} {id}",
                         })), ct);
                 }
                 catch (ConnectionNameTakenException)
@@ -133,16 +154,44 @@ public sealed class WebCredentialsCarryOver(
         }
 
         // AN INSTANCE WITH NO WEB CREDENTIALS MEMBER has nothing to carry over and gets no row: the
-        // look is a read of the members, made again at the next start.
+        // look is a read of the members, made again at the next start. The same holds for the ids an
+        // old row did not cover: no member under them, no second row.
         if (members == 0) return 0;
 
         await store.RecordAsync(new TriggerAudit(
             null, null, TenantActions.ConnectionsCarriedOver, Subject, "Web Credentials",
-            JsonSerializer.Serialize(new { count = made, already, leftOut = left, teams = forTeams })), ct);
+            JsonSerializer.Serialize(new { count = made, already, leftOut = left, teams = forTeams, plugins = PluginIds })), ct);
 
         if (made > 0 && registry is not null) await registry.RefreshConnectionPresenceAsync(ct);
         log?.LogInformation("{Count} Web Credentials entries became website connections ({Already} already were, {Left} left out).", made, already, left);
         return made;
+    }
+
+    /// <summary>
+    /// The ids a summary row's run carried: its <c>plugins</c>, or <see cref="PluginId"/> alone for a row
+    /// written before CON 10 (no <c>plugins</c>), or one whose detail cannot be read.
+    /// </summary>
+    internal static HashSet<string> Covered(string? detail)
+    {
+        var covered = new HashSet<string>(StringComparer.Ordinal) { PluginId };
+        if (string.IsNullOrWhiteSpace(detail)) return covered;
+        try
+        {
+            using var document = JsonDocument.Parse(detail);
+            if (document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("plugins", out var plugins) && plugins.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var plugin in plugins.EnumerateArray())
+                {
+                    if (plugin.ValueKind == JsonValueKind.String && plugin.GetString() is { Length: > 0 } one) covered.Add(one);
+                }
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return covered;
     }
 
     /// <summary>The connection's name: its team's and its entry's, at most a connection's length.</summary>

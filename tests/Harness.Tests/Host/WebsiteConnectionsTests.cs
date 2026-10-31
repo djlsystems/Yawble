@@ -545,12 +545,156 @@ public sealed class WebsiteConnectionsTests : IAsyncLifetime
         await AssertNowhereAsync(SitePassword, Session);
     }
 
+    // ---- CON 10: the renamed plugin id ---------------------------------------------------------------
+
+    /// <summary>The Web Credentials plugin installed under each id, before any member is hired (one start).</summary>
+    private async Task InstallWebCredentialsAsync(params string[] plugins)
+    {
+        foreach (var plugin in plugins)
+        {
+            PluginInstall.Write(_dataRoot, plugin, "1.0.0", manifest: PluginInstall.Manifest(plugin, "1.0.0",
+                m => m["config"] = JsonNode.Parse(WebCredentialsConfig)));
+        }
+
+        await RestartAsync();
+    }
+
+    /// <summary>
+    /// A Web Credentials member hired under <paramref name="plugin"/> with the given entries (siteUrl the
+    /// fake site, method password, username <see cref="SiteUser"/>) and each entry's password set.
+    /// </summary>
+    private async Task<ContainerId> WebCredentialsMemberAsync(string plugin, string member, params string[] entries)
+    {
+        var hired = await _person.PostAsJsonAsync($"/api/teams/{_team}/containers", new { name = member, agent = $"plugin:{plugin}" }, Ct);
+        Assert.True(hired.IsSuccessStatusCode, await hired.Content.ReadAsStringAsync(Ct));
+        var rows = new JsonArray(entries.Select(e => (JsonNode)new JsonObject
+        {
+            ["name"] = e, ["siteUrl"] = _origin, ["method"] = "password", ["signInUrl"] = "/login",
+            ["checkUrl"] = "/dashboard", ["checkText"] = "Signed in as", ["username"] = SiteUser,
+        }).ToArray());
+        var saved = await _person.PutAsJsonAsync($"/api/teams/{_team}/members/{member}/plugin-settings", new
+        {
+            config = new Dictionary<string, JsonElement> { ["entries"] = JsonDocument.Parse(rows.ToJsonString()).RootElement.Clone() },
+        }, Ct);
+        Assert.True(saved.IsSuccessStatusCode, await saved.Content.ReadAsStringAsync(Ct));
+
+        var id = new ContainerId(_team, member);
+        var cells = Services.GetRequiredService<PluginMemberSecretStore>();
+        foreach (var entry in entries)
+        {
+            await cells.SetCellAsync(id, member, plugin, "entries", entry, "password", SitePassword, new CredentialActor(null, Email), Ct);
+        }
+
+        return id;
+    }
+
+    private async Task<JsonArray> ConnectionsAsync() => JsonNode.Parse(await _person.GetStringAsync("/api/connections", Ct))!.AsArray();
+
+    private static string? FieldOf(JsonNode c, string name) => (string?)c["fields"]!.AsArray().Single(f => (string?)f!["name"] == name)!["value"];
+
+    [Fact]
+    public async Task A_web_credentials_plugin_members_entries_become_website_connections_assigned_to_their_team_and_work_through_Team_Connections()
+    {
+        Assert.SkipWhen(SignInBrowserChromiumTests.Chromium() is null, SignInBrowserChromiumTests.NoChrome);
+
+        // A MEMBER HIRED UNDER THE RENAMED ID (solution 1.1.0, plugin 1.0.0), and no member under the old one.
+        await InstallWebCredentialsAsync(WebCredentialsCarryOver.RenamedPluginId);
+        var creds = await WebCredentialsMemberAsync(WebCredentialsCarryOver.RenamedPluginId, "Creds", "portal-admin");
+        Assert.Empty(await CarriedOverDetailAsync());
+
+        await RestartAsync();
+
+        var admin = (await ConnectionsAsync()).Single(c => (string?)c!["name"] == "Alpha portal-admin")!;
+        Assert.Equal(("website", "password", "/login", SiteUser), ((string?)admin["kind"], FieldOf(admin, "method"), FieldOf(admin, "signInUrl"), FieldOf(admin, "username")));
+        Assert.True(admin["fields"]!.AsArray().Single(f => (string?)f!["name"] == "password")!["set"]!.GetValue<bool>());
+        var assigned = (await Services.GetRequiredService<IConnectionStore>().AssignedAsync(_team, Ct)).Select(a => a.ConnectionId);
+        Assert.Contains((string)admin["id"]!, assigned);
+
+        var detail = Assert.Single(await CarriedOverDetailAsync());
+        Assert.Equal(1, JsonNode.Parse(detail)!["count"]!.GetValue<int>());
+        Assert.Equal(WebCredentialsCarryOver.PluginIds, JsonNode.Parse(detail)!["plugins"]!.AsArray().Select(p => (string?)p));
+        Assert.DoesNotContain(SitePassword, detail, StringComparison.Ordinal);
+        Assert.NotNull(Services.GetRequiredService<ContainerHost>().Find(creds));
+
+        using var dev = await KeyClientAsync(new ContainerId(_team, "Dev").ToString());
+        Assert.Contains("Signed in as Pat", Output(await TellAndAwaitAsync(dev, "check Alpha portal-admin")), StringComparison.Ordinal);
+
+        // ONCE.
+        await RestartAsync();
+        Assert.Single(await CarriedOverDetailAsync());
+        Assert.Single(await ConnectionsAsync(), c => (string?)c!["name"] == "Alpha portal-admin");
+        await AssertNowhereAsync(SitePassword);
+    }
+
+    [Fact]
+    public async Task An_instance_with_members_under_both_Web_Credentials_ids_carries_both_in_one_row()
+    {
+        await InstallWebCredentialsAsync(WebCredentialsCarryOver.PluginId, WebCredentialsCarryOver.RenamedPluginId);
+        await WebCredentialsMemberAsync(WebCredentialsCarryOver.PluginId, "OldCreds", "billing");
+        await WebCredentialsMemberAsync(WebCredentialsCarryOver.RenamedPluginId, "NewCreds", "portal-admin", "supplier");
+        Assert.Empty(await CarriedOverDetailAsync());
+
+        await RestartAsync();
+
+        var names = (await ConnectionsAsync()).Where(c => (string?)c!["kind"] == "website").Select(c => (string?)c!["name"]).Order().ToArray();
+        Assert.Equal(["Alpha billing", "Alpha portal-admin", "Alpha supplier"], names);
+        var detail = JsonNode.Parse(Assert.Single(await CarriedOverDetailAsync()))!;
+        Assert.Equal(3, detail["count"]!.GetValue<int>());
+        Assert.Equal(WebCredentialsCarryOver.PluginIds, detail["plugins"]!.AsArray().Select(p => (string?)p));
+
+        await RestartAsync();
+        Assert.Single(await CarriedOverDetailAsync());
+        Assert.Equal(3, (await ConnectionsAsync()).Count(c => (string?)c!["kind"] == "website"));
+    }
+
+    [Fact]
+    public async Task An_instance_whose_summary_row_the_old_Host_wrote_carries_the_skipped_members_once_at_the_next_start_and_overwrites_nothing()
+    {
+        // AN INSTANCE THE OLD HOST (web-credentials only) ALREADY CARRIED: its old-id member's entries
+        // became connections - one a person has since changed, one a person has since removed - and its
+        // summary row (no `plugins`) was written; the renamed-id member was skipped.
+        await InstallWebCredentialsAsync(WebCredentialsCarryOver.PluginId, WebCredentialsCarryOver.RenamedPluginId);
+        await WebCredentialsMemberAsync(WebCredentialsCarryOver.PluginId, "OldCreds", "billing", "retired");
+        await WebCredentialsMemberAsync(WebCredentialsCarryOver.RenamedPluginId, "NewCreds", "portal-admin");
+        var billing = await WebsiteAsync("Alpha billing", ("siteUrl", _origin), ("method", "password"), ("username", "changed-by-a-person@example.test"));
+        await AssignAsync(billing);
+        await Services.GetRequiredService<IConnectionStore>().RecordAsync(new TriggerAudit(
+            null, null, TenantActions.ConnectionsCarriedOver, WebCredentialsCarryOver.Subject, "Web Credentials",
+            JsonSerializer.Serialize(new { count = 2, already = 0, leftOut = 0, teams = new[] { _team } })), Ct);
+        Assert.Single(await CarriedOverDetailAsync());
+
+        // THE NEXT START: the skipped member is carried; the old-id member is not looked at again.
+        await RestartAsync();
+
+        var website = (await ConnectionsAsync()).Where(c => (string?)c!["kind"] == "website").ToArray();
+        Assert.Equal(["Alpha billing", "Alpha portal-admin"], website.Select(c => (string?)c!["name"]).Order().ToArray());
+        var kept = website.Single(c => (string?)c!["id"] == billing)!;
+        Assert.Equal("changed-by-a-person@example.test", FieldOf(kept, "username"));
+        var carried = website.Single(c => (string?)c!["name"] == "Alpha portal-admin")!;
+        Assert.Equal(SiteUser, FieldOf(carried, "username"));
+        Assert.Contains((string)carried["id"]!, (await Services.GetRequiredService<IConnectionStore>().AssignedAsync(_team, Ct)).Select(a => a.ConnectionId));
+
+        var rows = await CarriedOverDetailAsync();
+        Assert.Equal(2, rows.Count);
+        var second = JsonNode.Parse(rows[1])!;
+        Assert.Equal(1, second["count"]!.GetValue<int>());
+        Assert.Equal(WebCredentialsCarryOver.PluginIds, second["plugins"]!.AsArray().Select(p => (string?)p));
+        foreach (var row in rows) Assert.DoesNotContain(SitePassword, row, StringComparison.Ordinal);
+
+        // NEVER TWICE: a person removes the carried connection; the start after makes it not again, and no third row.
+        var removed = await _person.DeleteAsync($"/api/connections/{(string)carried["id"]!}?unbind=true", Ct);
+        Assert.True(removed.IsSuccessStatusCode, await removed.Content.ReadAsStringAsync(Ct));
+        await RestartAsync();
+        Assert.Equal(["Alpha billing"], (await ConnectionsAsync()).Where(c => (string?)c!["kind"] == "website").Select(c => (string?)c!["name"]).ToArray());
+        Assert.Equal(2, (await CarriedOverDetailAsync()).Count);
+    }
+
     private async Task<IReadOnlyList<string>> CarriedOverDetailAsync()
     {
         await using var db = new SqliteConnection($"Data Source={Path.Combine(_dataRoot, "messages.db")}");
         await db.OpenAsync(Ct);
         var read = db.CreateCommand();
-        read.CommandText = "SELECT detail FROM tenant_events WHERE action = $action";
+        read.CommandText = "SELECT detail FROM tenant_events WHERE action = $action ORDER BY seq";
         read.Parameters.AddWithValue("$action", TenantActions.ConnectionsCarriedOver);
         var rows = new List<string>();
         await using var reader = await read.ExecuteReaderAsync(Ct);
