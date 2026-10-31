@@ -10,12 +10,15 @@ namespace Harness.Host;
 /// A CONNECTION'S TEST, on this worker: a mailbox's IMAP login and SMTP authentication (the same
 /// <see cref="IMailLogin"/> a mailbox is saved with), a sign-in's refresh and one read of the account's
 /// profile, or the one harmless GET a credential's preset declares. Answers ok, refused or failed in one
-/// sentence. No sentence carries a value the probe holds: each is taken out before it is answered, and
+/// sentence; a website's signed-in check (and Team Connections' commands on it) in the platform's browser
+/// (<see cref="WebsiteRunner"/>). No sentence carries a value the probe holds: each is taken out before it is answered, and
 /// nothing here logs. Tests point it at fake servers: <paramref name="mail"/> trusting a fake server's
 /// certificate, <paramref name="http"/> answering for a fake service.
 /// </summary>
-public sealed class ConnectionTester(IMailLogin? mail = null, HttpMessageHandler? http = null, TimeSpan? timeout = null)
+public sealed class ConnectionTester(IMailLogin? mail = null, HttpMessageHandler? http = null, TimeSpan? timeout = null, WebsiteRunner? website = null)
 {
+    private readonly WebsiteRunner _website = website ?? new WebsiteRunner();
+
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(20);
 
     /// <summary>The most of a body read: enough for a refusal's reason.</summary>
@@ -37,6 +40,9 @@ public sealed class ConnectionTester(IMailLogin? mail = null, HttpMessageHandler
         if (request.Probe is null) return new ConnectionTested(request.Request, ConnectionTested.Failed, "The test reached the worker with nothing to test.");
 
         var probe = ConnectionProbe.Open(request.Probe);
+
+        // A WEBSITE: its signed-in check, or a Team Connections command, in the platform's browser.
+        if (probe is WebsiteProbe site) return await _website.RunAsync(request.Request, site, ct);
 
         if (probe is McpProbe mcp)
         {

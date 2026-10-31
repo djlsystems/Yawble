@@ -142,6 +142,9 @@ internal sealed partial class HostComposition
             // TEAM CONNECTIONS' `test <name>` runs the connection's own test, on a worker, as a person's does.
             ConnectionTests = sp.GetRequiredService<WorkerAsks>(),
             Answers = sp.GetRequiredService<IMessageLog>(),
+            // A website check's screenshot goes to the team's documents; a session to the asking member's workspace.
+            Documents = sp.GetRequiredService<TeamDocuments>(),
+            Paths = sp.GetRequiredService<TeamPaths>(),
         });
         builder.Services.AddSingleton<IMemberRunner>(sp => new MemberRunnerRouter(
             sp.GetRequiredService<AgentMemberRunner>(),

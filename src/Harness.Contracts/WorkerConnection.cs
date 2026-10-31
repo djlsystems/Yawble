@@ -232,11 +232,11 @@ public sealed class WorkerFrameCodec
                 };
                 break;
 
-            case EventFrame { Envelope.Event: ConnectionTested { RefreshToken: not null } tested } @event:
+            case EventFrame { Envelope.Event: ConnectionTested tested } @event when tested.RefreshToken is not null || tested.Handoff is not null:
                 frame = @event with
                 {
-                    Envelope = @event.Envelope with { Event = tested with { RefreshToken = null } },
-                    Sealed = Seal(new Secrets(null, ConnectionSecret: tested.RefreshToken.Value)),
+                    Envelope = @event.Envelope with { Event = tested with { RefreshToken = null, Handoff = null } },
+                    Sealed = Seal(new Secrets(null, StorageState: tested.Handoff?.Value, ConnectionSecret: tested.RefreshToken?.Value)),
                 };
                 break;
 
@@ -328,7 +328,19 @@ public sealed class WorkerFrameCodec
                 return command with { Message = test with { Probe = Secret(Open(blob)) }, Sealed = null };
 
             case EventFrame { Sealed: { } blob, Envelope.Event: ConnectionTested tested } @event:
-                return @event with { Envelope = @event.Envelope with { Event = tested with { RefreshToken = Secret(Open(blob)) } }, Sealed = null };
+                var forTested = Open(blob);
+                return @event with
+                {
+                    Envelope = @event.Envelope with
+                    {
+                        Event = tested with
+                        {
+                            RefreshToken = Secret(forTested),
+                            Handoff = forTested.StorageState is { } handoff ? new ConnectionTestSecret(handoff) : null,
+                        },
+                    },
+                    Sealed = null,
+                };
 
             case CommandFrame { Sealed: not null } or EventFrame { Sealed: not null }:
                 throw new InvalidDataException(UnsealableText);
@@ -390,8 +402,8 @@ public sealed class WorkerFrameCodec
     /// <summary>
     /// A run's secrets, written by hand: a redaction set may never be written as JSON by a serializer.
     /// <see cref="Environment"/> is a terminal's whole environment, which holds its session's key;
-    /// <see cref="StorageState"/> a sign-in browser's saved session; <see cref="ConnectionSecret"/> a
-    /// connection test's probe or rotated refresh token.
+    /// <see cref="StorageState"/> a sign-in browser's saved session, or the session a website's run hands
+    /// over; <see cref="ConnectionSecret"/> a connection test's probe or rotated refresh token.
     /// </summary>
     private sealed record Secrets(
         ValueRedactor? Redaction, IReadOnlyDictionary<string, string>? Environment = null, string? StorageState = null,

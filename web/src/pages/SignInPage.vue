@@ -1,18 +1,22 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
-import { connectSignIn, keyInput, mouseInput, pointAt, type SignInMessage, type SignInSocket } from '../lib/sign-in-socket';
+import { connectSignIn, keyInput, mouseInput, pointAt, type SignInMessage, type SignInSocket, type SignInWhere } from '../lib/sign-in-socket';
 
 /**
  * THE SIGN-IN PAGE, `#/teams/<team>/members/<member>/sign-in/<field>/<row>`: a table row's Sign in
- * link opens it. The platform runs a Google Chrome for that row, starting at the entry's Site
+ * link opens it - and `#/connections/<id>/sign-in`, a website connection's Sign in (CON 6), whose
+ * session is kept as the connection's masked saved session. The platform runs a Google Chrome for that row, starting at the entry's Site
  * URL, and this page shows its screen and sends it the person's mouse and keys. Done keeps the
  * browser's session as the row's masked secret and closes the browser; Cancel or leaving the page
  * closes it and keeps nothing. The session is never shown here.
  */
 const route = useRoute();
 const param = (name: string) => String(route.params[name] ?? '');
-const where = { team: param('team'), member: param('member'), field: param('field'), row: param('row') };
+// A website connection's Sign in (`#/connections/<id>/sign-in`, CON 6), or a member's table row's.
+const where: SignInWhere = route.params.connection
+  ? { connection: param('connection') }
+  : { team: param('team'), member: param('member'), field: param('field'), row: param('row') };
 
 type State = 'connecting' | 'live' | 'saving' | 'over';
 const state = ref<State>('connecting');
@@ -32,6 +36,10 @@ let socket: SignInSocket | null = null;
 
 const live = computed(() => state.value === 'live');
 
+/** What the page is signing in to: the row's name, or a website connection's site (from its start). */
+const site = ref('');
+const heading = computed(() => ('row' in where ? where.row : site.value || 'a website'));
+
 /**
  * ONE NOTE AT A TIME above the browser: the latest refusal or provider replaces the one before (a
  * repeated refusal is the same note), and the person may dismiss it. A list would push the browser
@@ -46,6 +54,11 @@ function onMessage(message: SignInMessage) {
     case 'started':
       size.value = { width: message.width, height: message.height };
       address.value = message.site;
+      try {
+        site.value = new URL(message.site).host;
+      } catch {
+        site.value = message.site;
+      }
       state.value = 'live';
       screen.value?.focus();
       break;
@@ -166,7 +179,7 @@ onBeforeUnmount(() => {
   <div class="sign-in-page q-pa-md column no-wrap">
     <div class="row items-center q-gutter-sm q-mb-sm">
       <div class="col">
-        <div class="text-subtitle1">Sign in: {{ where.row }}</div>
+        <div class="text-subtitle1">Sign in: {{ heading }}</div>
         <div class="text-caption ellipsis sign-in-address" :title="address">
           {{ title || address || (state === 'over' ? '' : 'Starting the browser…') }}
         </div>

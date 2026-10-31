@@ -95,3 +95,35 @@ between image builds).
 **Left open.** A worker that is not connected when a row or member is deleted is not told to remove
 that profile; it stays on the volume (still the worker user's alone) until the same row name is used
 again, which would then reuse it.
+
+## 2026-10: Where a website connection's browser runs (CON 6)
+
+**Context.** A website connection (CON 6) signs in to a site with a password, a token or a session a
+person kept with Sign in, and a team uses it through Team Connections: open a page signed in, hand a
+member a short-lived session, act on a page. The Web Credentials plugin already did all of this in
+Node with Playwright, in a Chrome of its own. The platform already has one Chrome and one sign-in page
+(above). Team Connections, like every plugin, runs as the agent user, and the connection's values and
+its browser profile must stay where no agent can read them.
+
+**Decision.** The Web Credentials plugin's Node and Playwright code is moved into the built-in
+plugin's folder, `plugins/team-connections/website/` (the browser, the identity, the sign-in, the
+signed-in check, TOTP, the redaction rule, with its two fixes on its own branch: a language tag in
+another case runs as its canonical tag, and a Site URL, Sign-in URL or check URL written as a bare
+address is given `https://`). It is run **by a worker, as the worker's own user** (`WebsiteRunner`),
+never by the Team Connections process: the Team Connections process only writes a `website` record,
+and control sends the worker the connection's values sealed, as a Test connection's probe
+(`WebsiteProbe`). It runs in **the platform's Google Chrome** (`ChromiumSignInBrowser.Root`; nothing is
+fetched) and in **the connection's own profile** (`SignInProfileKey.Connection`), the one its Sign in
+uses, under the same lock, so a site sees one browser come back whichever of them is running. The
+saved session is the sign-in page's v2 envelope, so a Web Credentials entry's session carries over
+as it is. `playwright-core` is pinned by `plugins/team-connections/package-lock.json` and installed at
+build (the Host project's `BuiltInPluginNodeModules` target; the Containerfile's `plugin-modules`
+stage), never committed.
+
+**Considered.** Running the moved code in the Team Connections process (it would hold the values and
+need the profile, as the agent user); rewriting it in C# over the sign-in browser's DevTools pipe (a
+second implementation of what the moved code already does and is tested for); committing
+`node_modules` (13 MB of generated code in the repository).
+
+**Left open.** A screenshot is a picture of the page: a value the page itself shows is in it. Words
+are redacted; pictures cannot be.

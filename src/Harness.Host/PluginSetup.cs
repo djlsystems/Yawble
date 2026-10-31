@@ -40,6 +40,12 @@ public sealed class PluginSetup(
     /// <summary>Each member held up, and the connections holding it: (id, name, the sentence the member reads).</summary>
     private readonly Dictionary<ContainerId, IReadOnlyList<(string Id, string Name, string Sentence)>> _held = [];
 
+    /// <summary>
+    /// The connections a Team Connections run of each member failed held up by (CON 6), kept until each
+    /// no longer needs a person - a later run that succeeds at something else does not put it right.
+    /// </summary>
+    private readonly Dictionary<ContainerId, HashSet<string>> _heldByRun = [];
+
     /// <summary>When each holding connection was first seen holding, on this Host's run.</summary>
     private readonly Dictionary<string, DateTimeOffset> _since = new(StringComparer.Ordinal);
 
@@ -92,17 +98,66 @@ public sealed class PluginSetup(
         }
     }
 
-    /// <summary>The connections bound on the member that need a person, as the member's mark says them.</summary>
-    private async Task<IReadOnlyList<(string Id, string Name, string Sentence)>> HoldingAsync(PluginMemberSettings bound, CancellationToken ct)
+    /// <summary>
+    /// A MEMBER'S RUN ENDED (<c>onTerminal</c>): a Team Connections run that failed held up by a connection
+    /// - a website's refused sign-in, expired session, CAPTCHA or device approval, or one that already
+    /// needed a person (CON 6) - is a connection hold from now on, as a bound member's is (CON 4).
+    /// </summary>
+    public async Task RunEndedAsync(Message terminal, CancellationToken ct = default)
     {
-        if (connections is null || bound.Connections.Count == 0) return [];
+        if (terminal.Type != MessageTypes.Failed
+            || new ContainerMarks(null, null, terminal).HeldByConnection is not { } heldBy
+            || !ContainerId.TryParse(terminal.Source, out var member)
+            || !TeamConnectionsMember.Is(member))
+        {
+            return;
+        }
+
+        lock (_gate)
+        {
+            if (!_heldByRun.TryGetValue(member, out var ids)) _heldByRun[member] = ids = new(StringComparer.Ordinal);
+            ids.Add(heldBy);
+        }
+
+        await RefreshAsync(member, ct);
+    }
+
+    /// <summary>
+    /// The connections bound on the member that need a person, as the member's mark says them. TEAM
+    /// CONNECTIONS binds none - it uses the team's assigned connections (CON 6) - so for it, each
+    /// connection a run of it failed held up by (<see cref="RunEndedAsync"/>, and after a restart the
+    /// failed mark's <see cref="MemberRuntime.HeldByConnection"/>) while that still needs a person.
+    /// </summary>
+    private async Task<IReadOnlyList<(string Id, string Name, string Sentence)>> HoldingAsync(
+        PluginMemberSettings bound, MemberRuntime runtime, CancellationToken ct)
+    {
+        if (connections is null) return [];
+
+        var byRun = new List<string>();
+        if (TeamConnectionsMember.Is(runtime.Id))
+        {
+            lock (_gate)
+            {
+                if (_heldByRun.TryGetValue(runtime.Id, out var ids)) byRun.AddRange(ids);
+            }
+
+            if (runtime.HeldByConnection is { } heldBy) byRun.Add(heldBy);
+        }
 
         var holding = new List<(string, string, string)>();
-        foreach (var id in bound.Connections.Values.Distinct(StringComparer.Ordinal))
+        foreach (var id in bound.Connections.Values.Concat(byRun).Distinct(StringComparer.Ordinal))
         {
             if (await connections.GetAsync(id, ct) is { Status: ConnectionRecord.NeedsReconnect } connection)
             {
                 holding.Add((connection.Id, connection.Name, Connections.NeedsReconnect(connection, connection.StatusReason)));
+            }
+            else if (byRun.Contains(id))
+            {
+                // Put right, or removed: it holds this member no more.
+                lock (_gate)
+                {
+                    if (_heldByRun.TryGetValue(runtime.Id, out var ids) && ids.Remove(id) && ids.Count == 0) _heldByRun.Remove(runtime.Id);
+                }
             }
         }
 
@@ -153,7 +208,7 @@ public sealed class PluginSetup(
             var bound = await settings.ForAsync(member, ct);
             var valued = (await memberSecrets.StatesAsync(member, ct)).Keys.ToHashSet(StringComparer.Ordinal);
             var missing = PluginReadyNotice.Missing(plugin.Manifest, bound, secrets, valued);
-            var holding = await HoldingAsync(bound, ct);
+            var holding = await HoldingAsync(bound, runtime, ct);
             var released = Hold(member, holding);
 
             runtime.MarkNeedsPerson(Words(missing, holding));

@@ -21,8 +21,15 @@ public sealed record TestConnection(string Request, ConnectionTestSecret? Probe)
 /// stores; never written as JSON.
 /// <see cref="Tools"/> is what an MCP server's check listed: its tools' names, when it was ok.
 /// </summary>
+/// <para>
+/// A WEBSITE's run (<see cref="WebsiteProbe"/>) says more: <see cref="Failure"/> is why it did not pass
+/// (<see cref="WebsiteFailures"/>), <see cref="Report"/> the page it opened (every value taken out),
+/// <see cref="Screenshot"/> that page as a PNG, and <see cref="Handoff"/> the short-lived session a
+/// <c>session</c> command hands over - sealed like the refresh token, never written as JSON.
+/// </para>
 public sealed record ConnectionTested(
-    string Request, string Outcome, string Sentence, ConnectionTestSecret? RefreshToken = null, IReadOnlyList<string>? Tools = null) : WorkerEvent
+    string Request, string Outcome, string Sentence, ConnectionTestSecret? RefreshToken = null, IReadOnlyList<string>? Tools = null,
+    string? Failure = null, string? Report = null, byte[]? Screenshot = null, ConnectionTestSecret? Handoff = null) : WorkerEvent
 {
     public const string Ok = "ok";
 
@@ -31,12 +38,37 @@ public sealed record ConnectionTested(
     public const string Failed = "failed";
 }
 
+/// <summary>
+/// Why a website's run did not pass, as <see cref="ConnectionTested.Failure"/> names it. A refused
+/// sign-in, an expired session, a CAPTCHA or device approval, and a page that left the site's hosts are
+/// the connection's (<c>refused</c>: Needs you on it); a site that did not answer is the run's alone
+/// (<c>failed</c>); a command refused before anything was sent (a path off the hosts, May act on
+/// pages off, a step that matched nothing) is neither, and leaves the connection as it was.
+/// </summary>
+public static class WebsiteFailures
+{
+    public const string SignInRefused = "sign-in-refused";
+
+    public const string Expired = "expired";
+
+    public const string Captcha = "captcha";
+
+    public const string OffHost = "off-host";
+
+    public const string NeedsYou = "needs-you";
+
+    public const string Unreachable = "unreachable";
+
+    public const string Refusal = "refusal";
+}
+
 /// <summary>What a test reaches. Each kind is one record; it crosses only sealed, inside a <see cref="ConnectionTestSecret"/>.</summary>
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "probe")]
 [JsonDerivedType(typeof(MailboxProbe), "mailbox")]
 [JsonDerivedType(typeof(OAuthProbe), "oauth")]
 [JsonDerivedType(typeof(HttpProbe), "http")]
 [JsonDerivedType(typeof(McpProbe), "mcp")]
+[JsonDerivedType(typeof(WebsiteProbe), "website")]
 public abstract record ConnectionProbe
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -124,3 +156,31 @@ public sealed record McpProbe(string Name, string Url, IReadOnlyDictionary<strin
 
     public override string ToString() => $"McpProbe {{ Name = {Name}, Host = {Host} }}";
 }
+
+/// <summary>
+/// A WEBSITE CONNECTION'S RUN IN THE PLATFORM'S BROWSER (CON 6), on a worker: <see cref="Command"/> is
+/// <c>verify</c> (the signed-in check, its Test connection), <c>check</c> (open <see cref="Path"/> signed
+/// in and report it with a screenshot, looking for <see cref="Expect"/>), <c>session</c> (hand over a
+/// session good for <see cref="Minutes"/>) or <c>act</c> (do <see cref="Steps"/> on <see cref="Path"/>).
+/// <see cref="Fields"/> are the connection's unmasked values and <see cref="Secrets"/> its masked ones,
+/// the saved session among them; <see cref="Profile"/> its browser profile's key on the worker's volume
+/// (<c>SignInProfileKey.Connection</c>), the one Sign in uses.
+/// </summary>
+public sealed record WebsiteProbe(
+    string Name, string Profile, string Command, IReadOnlyDictionary<string, string> Fields, IReadOnlyDictionary<string, string> Secrets,
+    string? Path = null, string? Expect = null, int? Minutes = null, IReadOnlyList<WebsiteStep>? Steps = null)
+    : ConnectionProbe
+{
+    public const string Verify = "verify";
+
+    public const string Check = "check";
+
+    public const string Session = "session";
+
+    public const string Act = "act";
+
+    public override string ToString() => $"WebsiteProbe {{ Name = {Name}, Command = {Command} }}";
+}
+
+/// <summary>One thing an <c>act</c> command does: <c>click</c>, <c>fill</c> (with <see cref="Value"/>) or <c>submit</c>, on <see cref="Selector"/>.</summary>
+public sealed record WebsiteStep(string Action, string Selector, string? Value = null);

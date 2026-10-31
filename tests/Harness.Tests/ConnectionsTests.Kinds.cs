@@ -39,16 +39,27 @@ public sealed partial class ConnectionsTests
             "apikey", "twilio", "Twilio", ("accountSid", "AC0001", null), ("apiKeySid", "SK0001", null), ("apiKeySecret", KindSecrets[3], null));
         var other = await AddCredentialAsync("apikey", "other", "Acme API", ("tenant", "acme-eu", false), ("token", KindSecrets[4], null));
         var login = await AddCredentialAsync("login", null, "Router", ("username", "admin", null), ("password", KindSecrets[6], null), ("url", "https://router.example.test", null));
-        var website = await AddCredentialAsync("website", null, "Supplier portal");
+        // A WEBSITE (CON 6): its Site URL given https:// when it is a bare address, a method, its password masked.
+        var website = await AddCredentialAsync("website", null, "Supplier portal",
+            ("siteUrl", "supplier.example.test/portal", null), ("method", "password", null), ("username", "buyer", null), ("password", KindSecrets[7], null));
 
         // Every kind is listed with its kind, and a masked field says only that it is set.
         var listed = (await GetAsync("/api/connections")).EnumerateArray().ToDictionary(c => c.GetProperty("id").GetString()!);
         Assert.Equal(
-            [("apikey", "Stripe"), ("apikey", "nc-user"), ("apikey", "AC0001"), ("apikey", "acme-eu"), ("login", "admin"), ("website", "")],
+            [("apikey", "Stripe"), ("apikey", "nc-user"), ("apikey", "AC0001"), ("apikey", "acme-eu"), ("login", "admin"), ("website", "supplier.example.test")],
             new[] { stripe, namecheap, twilioKey, other, login, website }.Select(id => (listed[id].GetProperty("kind").GetString(), listed[id].GetProperty("account").GetString())));
         var token = listed[other].GetProperty("fields").EnumerateArray().Single(f => f.GetProperty("name").GetString() == "token");
         Assert.Equal((true, true, JsonValueKind.Null), (token.GetProperty("masked").GetBoolean(), token.GetProperty("set").GetBoolean(), token.GetProperty("value").ValueKind));
-        Assert.Empty(listed[website].GetProperty("fields").EnumerateArray());
+        var site = listed[website].GetProperty("fields").EnumerateArray().ToDictionary(f => f.GetProperty("name").GetString()!);
+        Assert.Equal("https://supplier.example.test/portal", site["siteUrl"].GetProperty("value").GetString());
+        Assert.Equal("false", site["mayAct"].GetProperty("value").GetString());
+        Assert.Equal((true, true, JsonValueKind.Null), (site["password"].GetProperty("masked").GetBoolean(), site["password"].GetProperty("set").GetBoolean(), site["password"].GetProperty("value").ValueKind));
+        Assert.False(site["session"].GetProperty("set").GetBoolean());
+
+        // Its saved session is never typed: only Sign in keeps one.
+        var typed = await SendAsync(HttpMethod.Put, $"/api/connections/{website}/credentials", new { fields = new[] { new { name = "session", value = "{\"cookies\":[]}" } } });
+        Assert.Equal(HttpStatusCode.BadRequest, typed.Status);
+        Assert.Contains("`session` (Saved session) is not typed", typed.Body);
 
         // EDITED: a new key, a new username, a new value for one of Other's fields; what is left out is kept.
         await EditCredentialAsync(stripe, ("key", KindSecrets[1], null));

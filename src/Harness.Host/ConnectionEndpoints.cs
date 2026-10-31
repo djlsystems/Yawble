@@ -151,10 +151,12 @@ public static class ConnectionEndpoints
             .HumansOnly()
             .WithSummary("The forms a website, API key or username and password connection is made from")
             .WithDescription(
-                "Each `{ kind, id, name, namedFields, fields: [{ name, label, masked, required }] }`: API key's Stripe (key), "
+                "Each `{ kind, id, name, namedFields, test, fields: [{ name, label, masked, required, type, options, advanced, readOnly, default, help }] }`: API key's Stripe (key), "
                 + "Namecheap (API user, API key, whitelisted IP), Twilio (account SID, API key SID, API key secret) and Other (`namedFields`: the "
                 + "person names each field and whether it is masked); username and password (username, password, optional URL); "
-                + "and website, whose fields are not defined yet.");
+                + "and website (CON 6): Site URL, Other hosts, Method (password, token or interactive), Sign-in URL, Username, Password, "
+                + "TOTP secret, Token, Token header, Signed-in check URL and text; under Advanced the field selectors, Language and Time "
+                + "zone; May act on pages (off by default); and the read-only saved session Sign in keeps.");
 
         app.MapPost("/api/connections/credentials", async (
             AddCredential request, Connections connections, TeamRegistry teams, HttpContext context, CancellationToken ct) =>
@@ -335,10 +337,12 @@ public static class ConnectionEndpoints
                 "A worker tries what the connection holds, as platform code - never a team or a plugin member: a sign-in is "
                 + "refreshed and the account's profile read once; a mailbox logs in to IMAP and authenticates to SMTP; an API "
                 + "key sends the one harmless request its preset declares; a username and password with a URL signs in to it "
-                + "with HTTP Basic. 200 `{ health: ok|needs-reconnect, sentence, connection }`: the connection's `status` and "
+                + "with HTTP Basic; a website runs its signed-in check in the platform's browser (signing in first for a "
+                + "password or token one). 200 `{ health: ok|needs-reconnect, sentence, connection }`: the connection's `status` and "
                 + "`statusReason` follow, with a `connections.tested` tenant row, in one transaction. A connection whose "
-                + "`testable` is false (a website, a preset with no test, a username and password with no URL) answers 400; "
-                + "no worker, or none that answers, 503 and records nothing. Never a token, a password or a key, in the "
+                + "`testable` is false (a preset with no test, a username and password with no URL) answers 400; "
+                + "no worker, or none that answers, 503 and records nothing; a website whose site did not answer, 503 with a "
+                + "`connections.tested` row and its health left as it was. Never a token, a password, a key or a session, in the "
                 + "answer, the row or a log.");
 
         app.MapPost("/api/connections/start", async (
@@ -512,12 +516,18 @@ public static class ConnectionEndpoints
         app.MapDelete("/api/connections/{id}", async (
             [Description("The connection's id.")] string id,
             [Description("True once the person has seen who uses it and confirmed: their bindings go with it.")] bool? unbind,
-            Connections connections, TeamRegistry teams, IMemberReports reports, PluginSetup setup, HttpContext context, CancellationToken ct) =>
+            Connections connections, TeamRegistry teams, IMemberReports reports, PluginSetup setup, SignInProfileCleanup profiles, HttpContext context,
+            CancellationToken ct) =>
         {
             var (status, body) = await DisconnectAsync(connections, teams, id, Actor(context), ct, unbind == true, reports, setup);
 
-            // A TEAM WHOSE LAST CONNECTION THIS WAS hides its Team Connections again.
-            if (status == StatusCodes.Status204NoContent) await teams.RefreshConnectionPresenceAsync(CancellationToken.None);
+            // A TEAM WHOSE LAST CONNECTION THIS WAS hides its Team Connections again; a website's browser
+            // profile goes with it (CON 6), from every connected worker.
+            if (status == StatusCodes.Status204NoContent)
+            {
+                await teams.RefreshConnectionPresenceAsync(CancellationToken.None);
+                await profiles.ForgetConnectionAsync(id, CancellationToken.None);
+            }
             return status == StatusCodes.Status204NoContent ? Results.NoContent() : Results.Json(body, statusCode: status);
         })
             .WithTags(Area)

@@ -38,6 +38,7 @@ import MailboxForm from './MailboxForm.vue';
 import DialogTabs from './DialogTabs.vue';
 import DirectoryField from './DirectoryField.vue';
 import {
+  connectionSignInHref,
   countdown,
   directoryRefusal,
   kindLabel,
@@ -832,6 +833,20 @@ async function removeProvider(provider: ConnectionProvider) {
                     @click="testRow(connection)"
                   />
                   <q-tooltip>Test connection: try what is saved, now</q-tooltip>
+                </span>
+                <span v-if="kindOf(connection) === 'website'" class="row-btn-wrap">
+                  <q-btn
+                    dense
+                    flat
+                    round
+                    icon="language"
+                    :href="connectionSignInHref(connection)"
+                    target="_blank"
+                    rel="noopener"
+                    :aria-label="`Sign in ${connection.name}`"
+                    data-connection-sign-in
+                  />
+                  <q-tooltip>Sign in: open the site in the platform's browser and sign in yourself; the session is kept on this connection</q-tooltip>
                 </span>
                 <span v-if="isMailbox(connection)" class="row-btn-wrap">
                   <q-btn

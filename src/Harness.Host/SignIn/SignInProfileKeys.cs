@@ -19,12 +19,19 @@ public static class SignInProfileKey
     public static string Row(ContainerId member, string field, string row) =>
         Member(member) + "/" + Hash("row\n" + field + "\n" + row.ToLowerInvariant());
 
+    /// <summary>
+    /// A WEBSITE CONNECTION'S PROFILE (CON 6): <c>&lt;connections key&gt;/&lt;connection key&gt;</c>, of the
+    /// connection's id, so the same connection - whatever it is renamed to - always finds the one profile
+    /// its Sign in and its runs share, and the volume names no connection.
+    /// </summary>
+    public static string Connection(string connectionId) => Hash("connections") + "/" + Hash("connection\n" + connectionId);
+
     private static string Hash(string text) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)))[..32];
 }
 
 /// <summary>
-/// REMOVES A ROW'S OR A MEMBER'S SIGN-IN PROFILES with the row or the member: every connected worker
+/// REMOVES A ROW'S, A MEMBER'S OR A WEBSITE CONNECTION'S SIGN-IN PROFILES with the row, the member or the connection: every connected worker
 /// is told (<see cref="DeleteSignInProfiles"/>), as the profiles are on the volume they share. Best
 /// effort: a worker that is gone has nothing open, and a failure never stops the deletion it follows.
 /// </summary>
@@ -35,6 +42,10 @@ public sealed class SignInProfileCleanup(Func<IReadOnlyList<IRunWorker>> workers
 
     public Task ForgetMemberAsync(ContainerId member, CancellationToken ct = default) =>
         TellAsync(SignInProfileKey.Member(member), ct);
+
+    /// <summary>A website connection's profile, removed with the connection (CON 6).</summary>
+    public Task ForgetConnectionAsync(string connectionId, CancellationToken ct = default) =>
+        TellAsync(SignInProfileKey.Connection(connectionId), ct);
 
     private async Task TellAsync(string key, CancellationToken ct)
     {

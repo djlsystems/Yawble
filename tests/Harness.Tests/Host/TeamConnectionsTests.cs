@@ -236,7 +236,7 @@ public sealed class TeamConnectionsTests : IAsyncLifetime
     public async Task A_members_tell_of_list_answers_its_teams_connections_by_name_kind_and_health_and_test_runs_the_connections_own_test_with_no_secret()
     {
         var billing = await StripeAsync("Billing", StripeKey);
-        var shop = await CredentialAsync("website", null, "Supplier portal", []);
+        var shop = await CredentialAsync("website", null, "Supplier portal", [("siteUrl", "http://127.0.0.1:9"), ("method", "interactive")]);
         await AssignAsync(_alpha, billing);
         await AssignAsync(_alpha, shop);
 
@@ -247,7 +247,7 @@ public sealed class TeamConnectionsTests : IAsyncLifetime
         Assert.Equal(MessageTypes.Completed, list.Type);
         var listed = Output(list);
         Assert.Contains("Billing (apikey): ok", listed, StringComparison.Ordinal);
-        Assert.Contains("Supplier portal (website): ok (no test)", listed, StringComparison.Ordinal);
+        Assert.Contains("Supplier portal (website): ok - check, session", listed, StringComparison.Ordinal);
         Assert.Contains(listed, await AnswersToAsync(_alpha, "Dev", list.CausationSeq!.Value), StringComparison.Ordinal);
 
         // TEST BY NAME runs CON 3's test: Stripe's balance read, the health recorded, a connections.tested row.
@@ -257,10 +257,11 @@ public sealed class TeamConnectionsTests : IAsyncLifetime
         Assert.Contains(tested, await AnswersToAsync(_alpha, "Dev", test.CausationSeq!.Value), StringComparison.Ordinal);
         Assert.Contains(await TenantActionsAsync(), a => a == TenantActions.ConnectionTested);
 
-        // A WEBSITE STILL HAS NO TEST, as CON 3 says, in CON 3's own sentence.
+        // A WEBSITE HAS A TEST NOW (CON 6): its signed-in check. One with nothing kept by Sign in yet needs a
+        // person, in the check's own sentence (WebsiteConnectionsTests runs it against a fake site).
         var website = Output(await TellAndAwaitAsync(dev, _alpha, "test Supplier portal"));
-        Assert.Contains("is a website: its test is its own sign-in, which is not here yet.", website, StringComparison.Ordinal);
-        Assert.DoesNotContain(": ok.", website, StringComparison.Ordinal);
+        Assert.Contains("Test connection 'Supplier portal' (website): needs reconnect.", website, StringComparison.Ordinal);
+        Assert.Contains("Sign in", website, StringComparison.Ordinal);
 
         // A REFUSED KEY is CON 3's refusal and marks the connection, still with no value said.
         await _person.PutAsJsonAsync($"/api/connections/{billing}/credentials", new { fields = new[] { new { name = "key", value = "sk_test_wrong_00000000" } } }, Ct);
