@@ -19,8 +19,10 @@ public sealed record TestConnection(string Request, ConnectionTestSecret? Probe)
 /// the connection holds) or <c>failed</c> (not reached, or not answering as it should).
 /// <see cref="RefreshToken"/> is a sign-in's refresh token when the provider rotated it, which control
 /// stores; never written as JSON.
+/// <see cref="Tools"/> is what an MCP server's check listed: its tools' names, when it was ok.
 /// </summary>
-public sealed record ConnectionTested(string Request, string Outcome, string Sentence, ConnectionTestSecret? RefreshToken = null) : WorkerEvent
+public sealed record ConnectionTested(
+    string Request, string Outcome, string Sentence, ConnectionTestSecret? RefreshToken = null, IReadOnlyList<string>? Tools = null) : WorkerEvent
 {
     public const string Ok = "ok";
 
@@ -34,6 +36,7 @@ public sealed record ConnectionTested(string Request, string Outcome, string Sen
 [JsonDerivedType(typeof(MailboxProbe), "mailbox")]
 [JsonDerivedType(typeof(OAuthProbe), "oauth")]
 [JsonDerivedType(typeof(HttpProbe), "http")]
+[JsonDerivedType(typeof(McpProbe), "mcp")]
 public abstract record ConnectionProbe
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -106,4 +109,18 @@ public sealed class ConnectionTestSecretNeverSerialised : JsonConverter<Connecti
 
     public override void Write(Utf8JsonWriter writer, ConnectionTestSecret value, JsonSerializerOptions options) =>
         throw new NotSupportedException("A connection test's secret is never written as JSON.");
+}
+
+/// <summary>
+/// An MCP server at a web address (MCP 1): initialize over streamable HTTP, then list its tools, with
+/// <see cref="Headers"/> on every request. A 401 or 403 is a refusal of what the headers carry.
+/// <see cref="Name"/> is the entry's name; <see cref="Secrets"/> are the values no sentence may carry,
+/// the URL's query among them. <see cref="Host"/> is all a sentence says of the address.
+/// </summary>
+public sealed record McpProbe(string Name, string Url, IReadOnlyDictionary<string, string> Headers, IReadOnlyList<string> Secrets)
+    : ConnectionProbe
+{
+    public string Host => Uri.TryCreate(Url, UriKind.Absolute, out var uri) ? uri.Host : Name;
+
+    public override string ToString() => $"McpProbe {{ Name = {Name}, Host = {Host} }}";
 }

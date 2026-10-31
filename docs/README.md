@@ -9,6 +9,7 @@ Start with the [README](../README.md) to install and start Yawble. These pages c
 | [triggers.md](triggers.md) | Triggers and what they cost: the measured cost line, waking the Manager, the daily token cap, why polling belongs to plugins, and where a scheduled team's activity view begins. |
 | [ops/folder-change-triggers.md](ops/folder-change-triggers.md) | Folder-change triggers: watching the team's documents or a mounted share. |
 | [local-repositories.md](local-repositories.md) | Local repositories: git repositories kept only on the instance, `local:<name>`, creating and deleting them, and getting the code out with `yawble repo`. |
+| [mcp-servers.md](mcp-servers.md) | MCP servers: the instance's list in Admin → MCP servers, checking a web address, an entry Yawble runs, and giving entries to teams in Team settings. |
 | [connections.md](connections.md) | Connections: the accounts (Google, Microsoft, a mailbox with an app password, custom OAuth) the Host holds for plugins, setting each one up, the web and `yawble connect` flows, and binding a connection to a member. |
 | [sites.md](sites.md) | Sites: a team's small web pages the platform serves and backs - publishing, the data store, actions, the helper script, and how every browser request is authorized. |
 | [solutions.md](solutions.md) | Solution packages: a whole working team in one folder - `solution.json`, the package layout, the check, and installing one. |

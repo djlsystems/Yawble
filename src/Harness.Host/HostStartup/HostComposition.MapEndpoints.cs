@@ -41,6 +41,7 @@ internal sealed partial class HostComposition
         SolutionEndpoints.Map(app);
         ConnectionEndpoints.Map(app);
         TeamConnectionEndpoints.Map(app);
+        McpServerEndpoints.Map(app);
         RepoEndpoints.Map(app);
         KeyEndpoints.Map(app);
         FileSystemEndpoints.Map(app);

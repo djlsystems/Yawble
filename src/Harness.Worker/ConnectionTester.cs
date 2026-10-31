@@ -38,6 +38,12 @@ public sealed class ConnectionTester(IMailLogin? mail = null, HttpMessageHandler
 
         var probe = ConnectionProbe.Open(request.Probe);
 
+        if (probe is McpProbe mcp)
+        {
+            var (checkedOutcome, checkedSentence, tools) = await new McpServerCheck(_http, timeout ?? DefaultTimeout).CheckAsync(mcp, ct);
+            return new ConnectionTested(request.Request, checkedOutcome, Redact(checkedSentence, mcp.Secrets), Tools: tools);
+        }
+
         var (outcome, sentence, rotated) = probe switch
         {
             MailboxProbe mailbox => await MailboxAsync(mailbox, ct),

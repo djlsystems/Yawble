@@ -1184,6 +1184,37 @@ public sealed class Connections(
         }
     }
 
+    /// <summary>
+    /// AN MCP SERVER'S CHECK WAS REFUSED the credential this connection holds (MCP 1): the connection is
+    /// marked <c>needs-reconnect</c> with <paramref name="sentence"/>, with a <c>connections.needs-reconnect</c>
+    /// row naming the server, and every member using it reads Needs you, as a run's refusal marks it. Never
+    /// a value: the sentence was redacted by the check.
+    /// </summary>
+    public async Task MarkFromMcpServerAsync(string connectionId, string sentence, string server, CancellationToken ct = default)
+    {
+        var gate = Gate(connectionId);
+        await gate.WaitAsync(ct);
+
+        try
+        {
+            if (await store.GetAsync(connectionId, ct) is not { } connection) return;
+
+            ForgetApis(connection.Id);
+            await store.MarkNeedsReconnectAsync(connection.Id, sentence, new TriggerAudit(
+                null, null, TenantActions.ConnectionNeedsReconnect, connection.Id, connection.Name,
+                JsonSerializer.Serialize(new
+                {
+                    connection = connection.Id, provider = connection.Provider, account = connection.Account, reason = sentence,
+                    mcpServer = server, kind = "refused",
+                })), ct);
+            await HealthChangedAsync(connection.Id, ct);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
     public static string NeedsReconnect(ConnectionRecord connection, string? reason) => connection.Mailbox is not null
         ? $"Connection {connection.Named} needs a new app password: {reason ?? "the server refused the password."} Update its password in {Where}."
         : connection.Credential is not null

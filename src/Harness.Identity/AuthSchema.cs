@@ -750,5 +750,46 @@ public static class AuthSchema
             FROM team_member_config c, json_each(c.connections_json) j
             WHERE j.value IN (SELECT id FROM connections) AND c.team IN (SELECT id FROM teams);
             """),
+
+        // THE INSTANCE'S MCP SERVERS (MCP 1): one row per entry an administrator added, known by a name
+        // unique on the instance that later prefixes its tools' names. A web address keeps the URL twice:
+        // `url_shown` without its query, the only form any answer or row shows, and `url_protected`, the
+        // whole URL as Data Protection ciphertext, since a query may hold a key. An entry the platform runs
+        // keeps its command, package, pinned version, arguments and environment (each variable a field of
+        // a named connection, never a value). `team_mcp_servers` is which teams a person gave it to, as
+        // `team_connections`; removed with the team or the entry by the foreign keys.
+        new MigrationStep(
+            "auth-033",
+            """
+            CREATE TABLE mcp_servers (
+                id             TEXT PRIMARY KEY,
+                name           TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                kind           TEXT NOT NULL,
+                url_shown      TEXT NULL,
+                url_protected  TEXT NULL,
+                connection_id  TEXT NULL,
+                field          TEXT NULL,
+                header_name    TEXT NULL,
+                value_template TEXT NULL,
+                command        TEXT NULL,
+                package        TEXT NULL,
+                version        TEXT NULL,
+                args_json      TEXT NOT NULL DEFAULT '[]',
+                env_json       TEXT NOT NULL DEFAULT '[]',
+                status         TEXT NOT NULL DEFAULT 'unchecked',
+                status_reason  TEXT NULL,
+                tools_json     TEXT NULL,
+                checked_at     TEXT NULL,
+                created_at     TEXT NOT NULL,
+                updated_at     TEXT NOT NULL
+            );
+
+            CREATE TABLE team_mcp_servers (
+                team        TEXT NOT NULL COLLATE NOCASE REFERENCES teams(id) ON DELETE CASCADE,
+                server_id   TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+                assigned_at TEXT NOT NULL,
+                PRIMARY KEY (team, server_id)
+            );
+            """),
     ];
 }

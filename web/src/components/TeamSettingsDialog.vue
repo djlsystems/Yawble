@@ -64,6 +64,7 @@ import LocalRepoPicker from './LocalRepoPicker.vue';
 import RepoCheckRefusal from './RepoCheckRefusal.vue';
 import DialogTabs from './DialogTabs.vue';
 import TeamConnectionsPanel from './TeamConnectionsPanel.vue';
+import TeamMcpServersPanel from './TeamMcpServersPanel.vue';
 import { afterRefusal, withChoice } from '../lib/repoChoices';
 import type { ForkResult, RepoCheckRefusal as RepoCheckRefused, RepoChoice } from '../api/types';
 
@@ -115,7 +116,7 @@ const { installations } = useAgentInstallations();
 /** The tab's name: the heading without "(optional)", which a tab has no room for. */
 const TeamInstructionsTab = 'Team instructions';
 
-const tab = ref<'general' | 'members' | 'instructions' | 'skills' | 'repos' | 'env' | 'connections'>(props.initialTab);
+const tab = ref<'general' | 'members' | 'instructions' | 'skills' | 'repos' | 'env' | 'connections' | 'mcp'>(props.initialTab);
 
 const team = computed(() => (props.teamId ? board.teams.find((candidate) => candidate.id === props.teamId) : null) ?? board.activeTeam);
 const containers = computed(() => team.value?.containers ?? []);
@@ -849,6 +850,7 @@ watch(open, (showing) => {
           <q-tab name="repos" label="Code" />
           <q-tab name="env" label="Environment" />
           <q-tab name="connections" label="Connections" />
+          <q-tab name="mcp" label="MCP servers" />
         </DialogTabs>
 
         <q-separator />
@@ -1440,6 +1442,12 @@ watch(open, (showing) => {
                Host's at once, not Save's; a person's act only. -->
           <q-tab-panel name="connections">
             <TeamConnectionsPanel v-if="team" :team="team.id" />
+          </q-tab-panel>
+
+          <!-- MCP SERVERS: which of the instance's MCP servers this team is given (MCP 1). Each change is
+               the Host's at once, like Connections beside it. -->
+          <q-tab-panel name="mcp">
+            <TeamMcpServersPanel v-if="team" :team="team.id" />
           </q-tab-panel>
 
         </q-tab-panels>
