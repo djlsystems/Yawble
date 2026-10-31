@@ -252,7 +252,7 @@ public sealed class McpStdioServersTests : IDisposable
     {
         Assert.SkipUnless(OperatingSystem.IsLinux(), "Linux only.");
         var standIn = Path.Combine(_fake.Folder, "setpriv");
-        File.WriteAllText(standIn, "#!/bin/sh\necho \"$*\" >> \"$(dirname \"$0\")/calls\"\nwhile [ \"$1\" != \"--\" ]; do shift; done\nshift\nexec \"$@\"\n");
+        File.WriteAllText(standIn, "#!/bin/sh\necho \"$*\" >> \"$(dirname \"$0\")/calls\"\nenv > \"$(dirname \"$0\")/switch-env\"\nwhile [ \"$1\" != \"--\" ]; do shift; done\nshift\nexec \"$@\"\n");
         File.SetUnixFileMode(standIn, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         var user = new AgentLaunchUser(true, McpStdioServers.UserName, (int)getuid(), (int)getgid(), "the suite's setpriv stand-in", standIn);
         await using var servers = _fake.Servers(user);
@@ -264,6 +264,12 @@ public sealed class McpStdioServersTests : IDisposable
         Assert.Contains(" -c ", call);
         Assert.EndsWith($"{servers.WorkingFolder("mcp-fake")} npx -y @fake/server@1.2.3 --flag two words", call);
         Assert.DoesNotContain("stdio-secret-9f8e7d", call);
+
+        // THE SWITCH holds the worker's capabilities: no entry variable reaches it under its own name (the loader and
+        // the C library read some names), only numbered copies the switched shell names and drops.
+        var names = File.ReadAllLines(Path.Combine(_fake.Folder, "switch-env")).Select(l => l.Split('=')[0])
+            .Except(["PWD", "OLDPWD", "SHLVL", "_"]).Order(StringComparer.Ordinal);
+        Assert.Equal(["HARNESS_MCP_ENV_0", "HOME", "PATH"], names);
     }
 
     [Fact]

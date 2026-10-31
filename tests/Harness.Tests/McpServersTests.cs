@@ -216,6 +216,14 @@ public sealed class McpServersTests : IAsyncLifetime
     [InlineData("uvx", "mcp-server-fetch", null)]
     [InlineData("uvx", "mcp-server-fetch>=0.6", null)]
     [InlineData("uvx", "mcp-server-fetch", "~=0.6")]
+    [InlineData("npx", "--yes", "1.2.3")]
+    [InlineData("npx", "-q", "1.2.3")]
+    [InlineData("npx", "-c", "1.2.3")]
+    [InlineData("npx", ".hidden", "1.2.3")]
+    [InlineData("npx", "@-x/server", "1.2.3")]
+    [InlineData("uvx", "--offline", "1.2.3")]
+    [InlineData("uvx", "-q", "1.2.3")]
+    [InlineData("uvx", ".hidden", "1.2.3")]
     public async Task An_entry_the_platform_runs_with_no_pinned_version_is_refused_with_a_sentence_saying_so(string command, string package, string? version)
     {
         var (status, body) = await SendAsync(HttpMethod.Post, "/api/mcp-servers", new { name = "runner", kind = "runs", command, package, version });
@@ -265,6 +273,29 @@ public sealed class McpServersTests : IAsyncLifetime
         Assert.Contains("has no field `nope`", Error(bad.Body), StringComparison.Ordinal);
 
         await NothingLeakedAsync();
+    }
+
+    [Theory]
+    [InlineData("LD_PRELOAD")]
+    [InlineData("LD_LIBRARY_PATH")]
+    [InlineData("ld_audit")]
+    [InlineData("GCONV_PATH")]
+    [InlineData("LOCPATH")]
+    [InlineData("MALLOC_CHECK_")]
+    [InlineData("NLSPATH")]
+    public async Task A_variable_the_loader_or_C_library_reads_is_refused_on_an_entry_the_platform_runs(string name)
+    {
+        var key = await KeyAsync(Token);
+
+        var (status, body) = await SendAsync(HttpMethod.Post, "/api/mcp-servers", new
+        {
+            name = "loader", kind = "runs", command = "npx", package = "x", version = "1.0.0",
+            env = new[] { new { name, connection = key, field = "token" } },
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, status);
+        Assert.Contains("changes how programs load", Error(body), StringComparison.Ordinal);
+        Assert.Empty((await GetAsync("/api/mcp-servers")).GetProperty("servers").EnumerateArray());
     }
 
     // ---- names --------------------------------------------------------------------------------------

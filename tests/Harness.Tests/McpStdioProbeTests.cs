@@ -13,8 +13,8 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Harness.Tests;
 
 /// <summary>
-/// TESTER PROBES FOR B007H (MCP 3), against 0c7205b. Each test states what the spec or the developer's notes promise and
-/// asserts it; a failing test here is a defect in the report (/data/documents/McpServers/B007H-test-report.md).
+/// TESTER PROBES FOR MCP 3 (servers the platform runs). Each test states what the spec or the developer's notes promise and
+/// asserts it; a failing test here is a defect in the report.
 /// </summary>
 public sealed class McpStdioProbeTests : IDisposable
 {

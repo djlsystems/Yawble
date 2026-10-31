@@ -164,7 +164,13 @@ so no agent can read their keys, environment or files, and they read none of a m
   its connection's field on the Host, plus `PATH=/usr/local/bin:/usr/bin:/bin` and `HOME=/data/mcp/home`, and
   nothing else of the worker's (no key, no `HARNESS_*`; an entry naming `PATH` or `HOME` does not replace them). The
   values cross the worker connection sealed, as a terminal's environment does, and no answer, row or log line holds
-  one. A worker that should switch to `mcp` and cannot (no CAP_SETUID) starts nothing and says why; where there is no
+  one. The values never reach `setsid` or `setpriv` (which hold the worker's capabilities) under their own names:
+  they cross them as numbered `HARNESS_MCP_ENV_<n>` copies, and the shell switched to `mcp` gives each its name and
+  drops the copy; no value is on any command line. An entry may not name `LD_*`, `MALLOC_*`, `GCONV_PATH`, `LOCPATH`
+  or `NLSPATH`. A package's name must start with a letter or digit (after an optional `@scope/`), so it is never read
+  as an `npx` or `uvx` option. **Never put a secret in the arguments:** a server's command line (package, version
+  and arguments) is readable in `/proc/<pid>/cmdline` by any user on the worker; give it a variable from a
+  connection instead. A worker that should switch to `mcp` and cannot (no CAP_SETUID) starts nothing and says why; where there is no
   `mcp` user (development, the test suite) the server runs as the worker's own user under its temp folder.
 - **One process per server per worker,** shared by every caller on that worker. A member's list and calls go to the
   worker its run is placed on; a check goes to any worker. The protocol is MCP over stdio: initialize, the
@@ -175,7 +181,10 @@ so no agent can read their keys, environment or files, and they read none of a m
   120-second call limit counts from the moment the process answered initialize. A run's list at its start still
   waits at most 20 seconds; a first start that takes longer goes on on the worker, and the next run lists it. An
   answer may be up to 32 MiB on the worker connection (room for 20 MB of binary as base64, as a write as the member
-  has); a bigger one is dropped whole with a sentence. Results reach the member exactly as a web address server's
+  has); a bigger one is dropped whole with a sentence. The limit covers writing the request too: a server that stops
+  reading its input is killed when a call's limit ends (that call fails as unanswered, calls queued behind it as
+  stopped), and the next call starts it again. A line from the server that cannot be read never ends the process; a
+  call it was answering fails with a sentence. Results reach the member exactly as a web address server's
   do (MCP 2): binary written as the member, text cut, every string redacted of the values the entry was given.
 - **Stopping.** After 10 minutes without a call the process is stopped (its whole process group: SIGTERM, then
   SIGKILL after two seconds), and the next call starts it. A process that stops by itself is started again by the
@@ -188,5 +197,6 @@ so no agent can read their keys, environment or files, and they read none of a m
 - **The check** (save and **Test**) starts the server on a worker in a process of its own, lists its tools page by
   page and stops it. It reads as a web address's: `ok` with the tools (kept, and their names count in the same-name
   check against every other entry), or `failed` with a sentence (did not start in time, stopped before initialize
-  with its exit code and the end of its stderr, redacted). A check no worker ran records nothing.
+  with its exit code and the end of its stderr, redacted). A check no worker ran records nothing. A check's process
+  runs beside the shared one, if there is one, in the same working folder and package cache.
 

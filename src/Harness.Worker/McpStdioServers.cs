@@ -55,6 +55,30 @@ public sealed class McpStdioServers : IAsyncDisposable
 
     private const string Script = "umask 077; mkdir -p -- \"$HOME\" \"$1\" && cd -- \"$1\" || exit 126; shift; exec \"$@\"";
 
+    private const string PassedPrefix = "HARNESS_MCP_ENV_";
+
+    /// <summary>The entry's names the switched shell sets, in order: a name's own rule, and never PATH or HOME.</summary>
+    private static IEnumerable<string> Passed(IEnumerable<string> names) => names
+        .Where(n => n.Length > 0 && (char.IsAsciiLetter(n[0]) || n[0] == '_') && n.All(c => char.IsAsciiLetterOrDigit(c) || c == '_'))
+        .Where(n => n is not "PATH" and not "HOME" && !n.StartsWith(PassedPrefix, StringComparison.Ordinal))
+        .Order(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The script the switched shell runs: it names each numbered value (the names alone are on its command
+    /// line, never a value), drops the numbered copy, then makes the working folder and execs the server.
+    /// </summary>
+    internal static string SwitchedScript(IEnumerable<string> names)
+    {
+        var script = new System.Text.StringBuilder();
+        var index = 0;
+        foreach (var name in Passed(names))
+        {
+            script.Append($"{name}=\"${PassedPrefix}{index}\"; export {name}; unset {PassedPrefix}{index}; ");
+            index++;
+        }
+        return script.Append(Script).ToString();
+    }
+
     private readonly WorkerId _worker;
     private readonly AgentLaunchUser _user;
     private readonly string _path;
@@ -278,14 +302,17 @@ public sealed class McpStdioServers : IAsyncDisposable
         }
 
         start.ArgumentList.Add("-c");
-        start.ArgumentList.Add(Script);
+        start.ArgumentList.Add(SwitchedScript(launch.Environment.Keys));
         start.ArgumentList.Add("sh");
         start.ArgumentList.Add(WorkingFolder(launch.Server));
         foreach (var part in launch.CommandLine) start.ArgumentList.Add(part);
 
-        // NOTHING OF THE WORKER'S: the entry's variables, then the two the platform sets, which an entry cannot replace.
+        // NOTHING OF THE WORKER'S, AND NOTHING OF THE ENTRY'S UNDER ITS OWN NAME before the switch: setsid and setpriv
+        // hold the worker's capabilities, so the entry's values cross them numbered (no loader or C library reads
+        // those names) and the switched shell gives them their names. The values stay off every command line.
         start.Environment.Clear();
-        foreach (var (name, value) in launch.Environment) start.Environment[name] = value;
+        var index = 0;
+        foreach (var name in Passed(launch.Environment.Keys)) start.Environment[$"{PassedPrefix}{index++}"] = launch.Environment[name];
         start.Environment["PATH"] = _path;
         start.Environment["HOME"] = Path.Combine(Root, "home");
 
@@ -394,8 +421,13 @@ public sealed class McpStdioServers : IAsyncDisposable
     }
 
     /// <summary>One server process and the JSON-RPC conversation over its pipes.</summary>
+    private enum Written { Done, Failed, TimedOut }
+
     private sealed class Session(string name, string fingerprint, Process process, DateTimeOffset started)
     {
+        /// <summary>How long a notification or an answer to the server's own request may take to write.</summary>
+        private static readonly TimeSpan ReplyBound = TimeSpan.FromSeconds(30);
+
         private readonly ConcurrentDictionary<long, TaskCompletionSource<JsonObject>> _pending = new();
         private readonly TaskCompletionSource _exited = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly SemaphoreSlim _write = new(1, 1);
@@ -445,7 +477,15 @@ public sealed class McpStdioServers : IAsyncDisposable
                             continue;
                         }
 
-                        await HandleAsync(line.Text!);
+                        // ONE BAD LINE is the server's mistake, never the end of a live session.
+                        try
+                        {
+                            await HandleAsync(line.Text!);
+                        }
+                        catch (Exception exception) when (exception is not (IOException or ObjectDisposedException))
+                        {
+                            Refuse(line.Text!);
+                        }
                     }
                 }
                 catch (Exception exception) when (exception is IOException or ObjectDisposedException or InvalidOperationException)
@@ -499,12 +539,16 @@ public sealed class McpStdioServers : IAsyncDisposable
             _pending[id] = answer;
             try
             {
-                if (!await WriteAsync(new JsonObject { ["jsonrpc"] = "2.0", ["id"] = id, ["method"] = method, ["params"] = parameters }))
+                // THE BOUND COVERS THE WRITE TOO: a server that stops reading must not hold a call, the calls queued
+                // behind it, or the idle stop, past the bound.
+                var deadline = Task.Delay(bound, ct);
+                switch (await WriteAsync(new JsonObject { ["jsonrpc"] = "2.0", ["id"] = id, ["method"] = method, ["params"] = parameters }, deadline))
                 {
-                    return new Reply(null, null, false, true, null);
+                    case Written.Failed: return new Reply(null, null, false, true, null);
+                    case Written.TimedOut: return new Reply(null, null, true, false, null);
                 }
 
-                var done = await Task.WhenAny(answer.Task, Task.Delay(bound, ct));
+                var done = await Task.WhenAny(answer.Task, deadline);
                 if (done != answer.Task) return new Reply(null, null, true, false, null);
                 if (answer.Task.IsCanceled) return new Reply(null, null, false, true, null);
 
@@ -525,7 +569,7 @@ public sealed class McpStdioServers : IAsyncDisposable
         }
 
         public async Task NotifyAsync(string method) =>
-            await WriteAsync(new JsonObject { ["jsonrpc"] = "2.0", ["method"] = method });
+            await WriteAsync(new JsonObject { ["jsonrpc"] = "2.0", ["method"] = method }, Task.Delay(ReplyBound));
 
         /// <summary>Closes its input, asks its whole process group to stop, and kills it after two seconds.</summary>
         public async Task StopAsync()
@@ -583,6 +627,28 @@ public sealed class McpStdioServers : IAsyncDisposable
             return $" Its last words: {text}";
         }
 
+        /// <summary>A line that could not be read (a duplicated key, say): the call it answers, if any, fails at once.</summary>
+        private void Refuse(string line)
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(line);
+                if (document.RootElement.ValueKind == JsonValueKind.Object
+                    && document.RootElement.TryGetProperty("id", out var idElement)
+                    && idElement.ValueKind == JsonValueKind.Number && idElement.TryGetInt64(out var id)
+                    && _pending.TryRemove(id, out var waiting))
+                {
+                    waiting.TrySetResult(new JsonObject
+                    {
+                        ["error"] = new JsonObject { ["message"] = $"{name} answered with a message that is not valid JSON-RPC." },
+                    });
+                }
+            }
+            catch (JsonException)
+            {
+            }
+        }
+
         private async Task HandleAsync(string line)
         {
             JsonObject? message;
@@ -614,7 +680,7 @@ public sealed class McpStdioServers : IAsyncDisposable
             // A REQUEST FROM THE SERVER: ping is answered, anything else is not offered. A notification is read and let go.
             if (idNode is null) return;
 
-            var method = message["method"]!.GetValue<string>();
+            var method = message["method"] is JsonValue named && named.TryGetValue<string>(out var text) ? text : "";
             await WriteAsync(method == "ping"
                 ? new JsonObject { ["jsonrpc"] = "2.0", ["id"] = idNode.DeepClone(), ["result"] = new JsonObject() }
                 : new JsonObject
@@ -622,15 +688,45 @@ public sealed class McpStdioServers : IAsyncDisposable
                     ["jsonrpc"] = "2.0",
                     ["id"] = idNode.DeepClone(),
                     ["error"] = new JsonObject { ["code"] = -32601, ["message"] = $"The client does not offer {method}." },
-                });
+                }, Task.Delay(ReplyBound));
         }
 
-        private async Task<bool> WriteAsync(JsonObject message)
+        /// <summary>
+        /// Writes one line before <paramref name="deadline"/>. A write still unfinished then means the server has
+        /// stopped reading: its whole process group is killed, which ends the stuck write and every call waiting on it,
+        /// and the next call starts it again.
+        /// </summary>
+        private async Task<Written> WriteAsync(JsonObject message, Task deadline)
         {
-            await _write.WaitAsync();
+            var turn = _write.WaitAsync();
+            if (await Task.WhenAny(turn, deadline) != turn)
+            {
+                _ = turn.ContinueWith(_ => _write.Release(), TaskScheduler.Default);
+                return Written.TimedOut;
+            }
+
             try
             {
-                await process.StandardInput.WriteAsync(message.ToJsonString() + "\n");
+                var write = WriteLineAsync(message.ToJsonString() + "\n");
+                if (await Task.WhenAny(write, deadline) != write)
+                {
+                    Abandon();
+                    return Written.TimedOut;
+                }
+
+                return await write ? Written.Done : Written.Failed;
+            }
+            finally
+            {
+                _write.Release();
+            }
+        }
+
+        private async Task<bool> WriteLineAsync(string line)
+        {
+            try
+            {
+                await process.StandardInput.WriteAsync(line);
                 await process.StandardInput.FlushAsync();
                 return true;
             }
@@ -638,9 +734,18 @@ public sealed class McpStdioServers : IAsyncDisposable
             {
                 return false;
             }
-            finally
+        }
+
+        /// <summary>Kills the whole process group at once, from any thread; the read loop then ends the session.</summary>
+        private void Abandon()
+        {
+            _ = kill(-Pid, SigKill);
+            try
             {
-                _write.Release();
+                ChildProcess.Kill(process);
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException)
+            {
             }
         }
     }

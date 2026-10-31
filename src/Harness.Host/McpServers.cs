@@ -66,6 +66,10 @@ public sealed partial class McpServers(IMcpServerStore store, Connections connec
     [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]*$")]
     private static partial Regex EnvRule();
 
+    /// <summary>Names the C library or loader reads at start: never set on a server, so none can reach the user switch.</summary>
+    [GeneratedRegex("^(LD_.*|MALLOC_.*|GCONV_PATH|LOCPATH|NLSPATH)$", RegexOptions.IgnoreCase)]
+    private static partial Regex LoaderEnv();
+
     /// <summary>An npm version that names one release: major.minor.patch, with an optional pre-release and build.</summary>
     [GeneratedRegex(@"^v?\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$")]
     private static partial Regex NpmExact();
@@ -74,10 +78,12 @@ public sealed partial class McpServers(IMcpServerStore store, Connections connec
     [GeneratedRegex(@"^\d+(\.\d+)*((a|b|rc)\d+)?(\.post\d+)?(\.dev\d+)?(\+[A-Za-z0-9.]+)?$", RegexOptions.IgnoreCase)]
     private static partial Regex PythonExact();
 
-    [GeneratedRegex(@"^(@[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]+$")]
+    // A name starts with a letter or digit (after an optional @scope/): one led by `-` or `.` would be read
+    // as an npx/uvx option, ahead of the pinned version.
+    [GeneratedRegex(@"^(@[A-Za-z0-9][A-Za-z0-9._-]*/)?[A-Za-z0-9][A-Za-z0-9._-]*$")]
     private static partial Regex NpmPackage();
 
-    [GeneratedRegex(@"^[A-Za-z0-9._-]+(\[[A-Za-z0-9._,-]+\])?$")]
+    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._-]*(\[[A-Za-z0-9._,-]+\])?$")]
     private static partial Regex PythonPackage();
 
     public static string NameRuleSentence =>
@@ -221,6 +227,7 @@ public sealed partial class McpServers(IMcpServerStore store, Connections connec
         {
             var name = given?.Name?.Trim() ?? "";
             if (!EnvRule().IsMatch(name)) return (null, null, $"`{name}` is not an environment variable's name: letters, digits and `_`, not starting with a digit.");
+            if (LoaderEnv().IsMatch(name)) return (null, null, $"`{name}` changes how programs load and may not be set on a server.");
             if (env.Any(e => e.Name == name)) return (null, null, $"Environment variable `{name}` is named twice.");
 
             var connectionId = given?.Connection?.Trim() ?? "";
