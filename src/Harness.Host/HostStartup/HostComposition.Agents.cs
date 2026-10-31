@@ -151,6 +151,11 @@ internal sealed partial class HostComposition
         // THE INSTANCE'S MCP SERVERS (MCP 1): the list, its checks on a worker, and which teams have each.
         builder.Services.AddSingleton(sp => new McpServers(
             sp.GetRequiredService<IMcpServerStore>(), sp.GetRequiredService<Connections>(), sp.GetRequiredService<TimeProvider>()));
+        // A TEAM'S MCP SERVERS ON THE HARNESS SERVER (MCP 2): the Host's own client to them, and each run's list.
+        builder.Services.AddSingleton(_ => new McpForwarding());
+        builder.Services.AddSingleton(sp => new McpRunTools(
+            sp.GetRequiredService<McpServers>(), sp.GetRequiredService<McpForwarding>(), sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<ILogger<McpRunTools>>()));
         builder.Services.AddSingleton(sp => new ConnectRequests(
             sp.GetRequiredService<Connections>(), dataRoot, sp.GetRequiredService<ILogger<ConnectRequests>>(),
             sp.GetRequiredService<TeamRegistry>(), sp.GetRequiredService<IMemberReports>()));
