@@ -10,7 +10,7 @@ import {
 } from '../api/client';
 import { asTeamId, type Connection, type ConnectionProvider, type ConnectionUse, type TeamConnectionEntry } from '../api/types';
 import { kindLabel, providerName, statusLabel } from '../lib/connections';
-import ConnectDialog from './ConnectDialog.vue';
+import ConnectionSelect from './ConnectionSelect.vue';
 
 /**
  * WHICH CONNECTIONS A TEAM MAY USE: Team settings → Connections and New team → Connections. A
@@ -20,7 +20,8 @@ import ConnectDialog from './ConnectDialog.vue';
  * WITH `team` (Team settings) every change is the Host's at once: Add assigns, Remove asks first -
  * naming the members of this team that use it, from the list and then from the Host's 409 - and,
  * confirmed, removes it and unbinds them in one transaction (each then reads Needs you). New
- * connection... opens the same wizard as Admin → Connections and assigns what it saves to this team.
+ * connection..., Add connection's last entry (ConnectionSelect), opens the same wizard as Admin →
+ * Connections and assigns what it saves to this team.
  *
  * WITHOUT `team` (New team, before the team exists) the choice is the `chosen` model: the ids the
  * create sends as `connections`, so the team is made with them. Nothing is bound yet, so a removal
@@ -80,13 +81,8 @@ function describe(connection: Connection): string {
   return `${kindLabel(connection)}${provider}${connection.account ? ` · ${connection.account}` : ''}`;
 }
 
-/** Add connection's pick list: every connection not on the team yet, by name. */
-const addOptions = computed(() =>
-  all.value
-    .filter((connection) => !listedIds.value.has(connection.id))
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map((connection) => ({ value: connection.id, label: `${connection.name} - ${describe(connection)}` })),
-);
+/** Add connection's pick list: every connection not on the team yet, by name, then New connection... */
+const addLabel = (connection: Connection) => `${connection.name} - ${describe(connection)}`;
 
 const adding = ref<string | null>(null);
 const busy = ref(false);
@@ -114,12 +110,12 @@ async function add(id: string | null) {
 
 // --- New connection... ----------------------------------------------------------------------------
 
-const wizardOpen = ref(false);
-
-/** The wizard saved a connection: it is read again with the rest, and assigned (or chosen) here. */
-async function made(connection: Connection) {
+/**
+ * The wizard saved a connection: it is known here at once, and the select chooses it, which adds it
+ * (assigns it to the team, or chooses it for New team) as any choice does.
+ */
+function made(connection: Connection) {
   all.value = [...all.value.filter((existing) => existing.id !== connection.id), connection];
-  await add(connection.id);
 }
 
 // --- Remove ---------------------------------------------------------------------------------------
@@ -179,34 +175,18 @@ function usersOf(connection: Connection): string[] {
     </div>
 
     <div class="row items-center q-gutter-sm q-mb-md no-wrap">
-      <q-select
-        v-model="adding"
+      <ConnectionSelect
+        :model-value="adding"
         class="col"
-        :options="addOptions"
-        emit-value
-        map-options
-        outlined
-        dense
+        :connections="all"
+        :catalog="providers"
+        :exclude="[...listedIds]"
+        :option-label="addLabel"
         label="Add connection"
         :disable="busy || loading"
         data-team-connection-add
         @update:model-value="add"
-      >
-        <template #no-option>
-          <q-item>
-            <q-item-section class="os-text-muted">Every connection is already on this team. Choose New connection... for another.</q-item-section>
-          </q-item>
-        </template>
-      </q-select>
-      <q-btn
-        outline
-        no-caps
-        color="primary"
-        icon="add"
-        label="New connection..."
-        :disable="busy"
-        data-team-connection-new
-        @click="wizardOpen = true"
+        @created="made"
       />
     </div>
 
@@ -243,8 +223,6 @@ function usersOf(connection: Connection): string[] {
         </q-item-section>
       </q-item>
     </q-list>
-
-    <ConnectDialog v-model="wizardOpen" :providers="providers" :connections="all" @connected="made" />
 
     <!-- REMOVING ASKS FIRST, naming the members that use it. `no-backdrop-dismiss`: a stray click must
          not answer a destructive question, and Escape cancels. -->

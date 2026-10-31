@@ -191,8 +191,8 @@ describe('Team settings → Connections', () => {
     expect(row?.querySelector('[data-team-connection-users]')?.textContent).toContain('Used by Inbox (mail)');
     expect(bodyFind('[data-team-connection="Home mail"]')).toBeNull();
 
-    // The pick list offers what the team does not have yet.
-    expect(optionValuesOf(wrapper, 'Add connection')).toEqual(['conn-home']);
+    // The pick list offers what the team does not have yet, then New connection...
+    expect(optionValuesOf(wrapper, 'Add connection')).toEqual(['conn-home', '__new_connection__']);
 
     wrapper.unmount();
   });
