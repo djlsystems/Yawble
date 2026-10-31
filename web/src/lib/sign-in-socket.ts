@@ -61,12 +61,26 @@ export function signInSocketUrl(
   return url;
 }
 
-export function connectSignIn(
-  where: { team: string; member: string; field: string; row: string },
-  handlers: SignInHandlers,
-): SignInSocket {
+/**
+ * The socket's address for a WEBSITE CONNECTION's Sign in (CON 6): `/api/connections/<id>/sign-in`, with
+ * the person's languages and time zone as for a row.
+ */
+export function connectionSignInSocketUrl(connection: string, href: string, locale?: SignInLocale): URL {
+  const url = new URL(`/api/connections/${encodeURIComponent(connection)}/sign-in`, href);
+  url.protocol = url.protocol.replace('http', 'ws');
+  if (locale?.languages.length) url.searchParams.set('lang', locale.languages.slice(0, 10).join(','));
+  if (locale?.timeZone) url.searchParams.set('tz', locale.timeZone);
+  return url;
+}
+
+/** Where a sign-in is for: a plugin member's table row, or a website connection (CON 6). */
+export type SignInWhere = { team: string; member: string; field: string; row: string } | { connection: string };
+
+export function connectSignIn(where: SignInWhere, handlers: SignInHandlers): SignInSocket {
   const socket = new WebSocket(
-    signInSocketUrl(where.team, where.member, where.field, where.row, window.location.href, personLocale()),
+    'connection' in where
+      ? connectionSignInSocketUrl(where.connection, window.location.href, personLocale())
+      : signInSocketUrl(where.team, where.member, where.field, where.row, window.location.href, personLocale()),
   );
   socket.binaryType = 'blob';
 

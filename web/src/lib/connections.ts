@@ -147,6 +147,12 @@ export interface CredentialRow {
   named: boolean;
   /** Editing: an unmasked field's stored value, so leaving it as it was is not a change. */
   original?: string;
+  /** A website's field (CON 6): its type, its options, under Advanced, set by the platform, its help. */
+  type?: 'text' | 'url' | 'enum' | 'bool';
+  options?: string[];
+  advanced?: boolean;
+  readOnly?: boolean;
+  help?: string;
 }
 
 /**
@@ -169,8 +175,23 @@ export function credentialRows(preset: CredentialPreset, connection: Pick<Connec
   }
   return preset.fields.map((spec) => {
     const field = stored.find((candidate) => candidate.name === spec.name);
-    const value = spec.masked ? '' : field?.value ?? '';
-    return { name: spec.name, label: spec.label, masked: spec.masked, required: spec.required, value, set: field?.set ?? false, named: false, original: value };
+    // A new connection starts from a field's default (Token header: Authorization; May act on pages: off).
+    const value = spec.masked ? '' : field?.value ?? (connection ? '' : spec.default ?? '');
+    return {
+      name: spec.name,
+      label: spec.label,
+      masked: spec.masked,
+      required: spec.required,
+      value,
+      set: field?.set ?? false,
+      named: false,
+      original: value,
+      type: spec.type ?? 'text',
+      options: spec.options ?? [],
+      advanced: spec.advanced ?? false,
+      readOnly: spec.readOnly ?? false,
+      help: spec.help ?? '',
+    };
   });
 }
 
@@ -507,4 +528,9 @@ export function countdown(expiresAt: string, now: number): string {
   const left = Math.max(0, Math.ceil((wireInstant(expiresAt) - now) / 1000));
   if (Number.isNaN(left)) return '';
   return `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+}
+
+/** The sign-in page for a website connection (SignInPage.vue, CON 6): a live browser the person signs in with. */
+export function connectionSignInHref(connection: Pick<Connection, 'id'>): string {
+  return `#/connections/${encodeURIComponent(connection.id)}/sign-in`;
 }

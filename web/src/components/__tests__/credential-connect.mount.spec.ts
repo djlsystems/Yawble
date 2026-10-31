@@ -3,7 +3,8 @@
 // ADMIN > CONNECTIONS, ONE STORE OF TYPED CREDENTIALS: Add connection chooses a kind first, then only
 // that kind's fields. An API key chooses its service (Stripe, Namecheap, Twilio, Other) and shows its
 // fields, masked or not as the preset says; Other names its own. A username and password, and a website
-// (its name alone for now). Each masked value is write-only: sent once, never filled, never shown. The
+// (CON 6): its Site URL, a method from a dropdown, May act on pages off unless switched on, the field
+// selectors under Advanced, and a saved session only Sign in keeps - never sent from the form. Each masked value is write-only: sent once, never filled, never shown. The
 // Connections screen names each connection's kind, shows a masked field only as set, and Edit changes
 // what is behind the name - an empty masked field keeps its value.
 //
@@ -80,7 +81,18 @@ const presets: CredentialPreset[] = [
       { name: 'url', label: 'URL', masked: false, required: false },
     ],
   },
-  { kind: 'website', id: null, name: 'Website', namedFields: false, fields: [] },
+  {
+    kind: 'website', id: null, name: 'Website', namedFields: false, test: true,
+    fields: [
+      { name: 'siteUrl', label: 'Site URL', masked: false, required: true, type: 'url', help: 'The origin the connection may sign in to.' },
+      { name: 'method', label: 'Method', masked: false, required: true, type: 'enum', options: ['password', 'token', 'interactive'] },
+      { name: 'username', label: 'Username', masked: false, required: false },
+      { name: 'password', label: 'Password', masked: true, required: false },
+      { name: 'mayAct', label: 'May act on pages', masked: false, required: false, type: 'bool', default: 'false' },
+      { name: 'session', label: 'Saved session', masked: true, required: false, readOnly: true, help: 'Sign in keeps it.' },
+      { name: 'usernameSelector', label: 'Username field selector', masked: false, required: false, advanced: true },
+    ],
+  },
 ];
 
 const stripeKey = 'sk_live_never-shown-0001';
@@ -214,7 +226,7 @@ describe('Add connection, the kinds', () => {
     wrapper.unmount();
   });
 
-  it('adds a username and password with no URL, and a website with its name alone', async () => {
+  it('adds a username and password with no URL, and a website with its Site URL, its method and May act on pages off', async () => {
     addCredentialConnection.mockResolvedValue({ connection: router });
     const wrapper = await openKind('login');
     expect(field('URL (optional)')).not.toBeNull();
@@ -232,9 +244,49 @@ describe('Add connection, the kinds', () => {
     const again = await openKind('website');
     expect(bodyFind('[data-website-note]')).not.toBeNull();
     await type('Name', 'Supplier portal');
+    await type('Site URL', 'supplier.example.test');
+
+    // The method is a dropdown; until it is chosen the form cannot be saved.
+    expect(isDisabled('Save')).toBe(true);
+    const method = again.findAllComponents({ name: 'QSelect' }).find((s) => String(s.props('label')).startsWith('Method'))!;
+    expect(method.props('options')).toEqual(['password', 'token', 'interactive']);
+    method.vm.$emit('update:modelValue', 'interactive');
+    await settle();
+
+    // Advanced is folded, and the saved session is shown as none, never as a field to type in.
+    expect(bodyFind('[data-credential-field="usernameSelector"]')).toBeNull();
+    await click(bodyFind('[data-credential-advanced]'));
+    expect(bodyFind('[data-credential-field="usernameSelector"]')).not.toBeNull();
+    expect(bodyFind('[data-credential-field-read-only]')!.textContent).toContain('Saved session: none yet');
+
     await click(button('Save'));
-    expect(addCredentialConnection).toHaveBeenLastCalledWith({ kind: 'website', preset: null, name: 'Supplier portal', fields: [] });
+    const sent = addCredentialConnection.mock.lastCall![0] as { kind: string; name: string; fields: { name: string; value: string | null }[] };
+    expect([sent.kind, sent.name]).toEqual(['website', 'Supplier portal']);
+    expect(Object.fromEntries(sent.fields.map((f) => [f.name, f.value]))).toEqual({
+      siteUrl: 'supplier.example.test', method: 'interactive', username: '', password: '', mayAct: 'false', usernameSelector: '',
+    });
     again.unmount();
+  });
+
+  it("offers Sign in on a website connection, opening the platform's sign-in page for it in a new tab", async () => {
+    listConnections.mockResolvedValue([
+      hostConnection({
+        id: 'conn-site', name: 'Supplier portal', provider: 'website', providerKind: 'website', kind: 'website', account: 'supplier.example.test',
+        scopes: [], preset: null, testable: true,
+        fields: [{ name: 'siteUrl', label: 'Site URL', masked: false, value: 'https://supplier.example.test', set: true }],
+      }),
+      router,
+    ]);
+    const wrapper = await mountDialog(ConnectionsDialog);
+    await settle();
+
+    const signIns = [...document.body.querySelectorAll('[data-connection-sign-in]')];
+    expect(signIns).toHaveLength(1);
+    expect(signIns[0]!.getAttribute('href')).toBe('#/connections/conn-site/sign-in');
+    expect(signIns[0]!.getAttribute('target')).toBe('_blank');
+    expect(signIns[0]!.getAttribute('aria-label')).toBe('Sign in Supplier portal');
+
+    wrapper.unmount();
   });
 
   it("says the Host's refusal of a name another connection has, and saves nothing", async () => {

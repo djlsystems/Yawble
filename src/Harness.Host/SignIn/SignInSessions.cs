@@ -58,11 +58,32 @@ public sealed class SignInSessions(
     /// a sentence when no worker can take it, or another person is signing in to the same row: the
     /// row has one profile, and one browser at a time.
     /// </summary>
-    public async Task<SignInSession> StartAsync(
+    public Task<SignInSession> StartAsync(
         string person, ContainerId member, string field, string row, SignInEntry entry, CancellationToken ct = default,
-        IReadOnlyList<string>? languages = null, string? timeZone = null)
+        IReadOnlyList<string>? languages = null, string? timeZone = null) =>
+        StartAsync(person, member, field, row, entry, SignInProfileKey.Row(member, field, row), null, ct, languages, timeZone);
+
+    /// <summary>
+    /// What a website connection's sign-in is addressed as (CON 6), for its logs only: the connection is
+    /// its row, and its profile is the connection's (<see cref="SignInProfileKey.Connection"/>), never a member's.
+    /// </summary>
+    public static readonly ContainerId ConnectionMember = new("Connections", "Website");
+
+    /// <summary>
+    /// Starts a browser for <paramref name="person"/> on a WEBSITE CONNECTION (CON 6), in the connection's
+    /// own profile - the one its runs use - and keeps the session through <paramref name="keep"/> (its
+    /// state, the hosts it holds and the providers among them), as a row's is kept through the rows.
+    /// The same one-live-session-per-person and one-browser-per-profile rules.
+    /// </summary>
+    public Task<SignInSession> StartForConnectionAsync(
+        string person, string connectionId, SignInEntry entry, SignInKeep keep, CancellationToken ct = default,
+        IReadOnlyList<string>? languages = null, string? timeZone = null) =>
+        StartAsync(person, ConnectionMember, "connection", connectionId, entry, SignInProfileKey.Connection(connectionId), keep, ct, languages, timeZone);
+
+    private async Task<SignInSession> StartAsync(
+        string person, ContainerId member, string field, string row, SignInEntry entry, string profile, SignInKeep? keep, CancellationToken ct,
+        IReadOnlyList<string>? languages, string? timeZone)
     {
-        var profile = SignInProfileKey.Row(member, field, row);
         if (_byPerson.Values.Any(s => s.Person != person && s.Profile == profile)) throw new InvalidOperationException(RowInUseText);
 
         IRunWorker worker;
@@ -77,7 +98,7 @@ public sealed class SignInSessions(
 
         var id = "sign-in:" + Guid.NewGuid().ToString("N");
         var stream = streams.Open(id, worker, whole: false);
-        var session = new SignInSession(this, id, person, member, field, row, entry, worker, stream) { Profile = profile };
+        var session = new SignInSession(this, id, person, member, field, row, entry, worker, stream) { Profile = profile, Keep = keep };
 
         if (_byPerson.TryGetValue(person, out var previous)) await previous.StopAsync(ReplacedText);
         _byPerson[person] = session;
@@ -137,6 +158,9 @@ public sealed class SignInSessions(
     internal ILogger? Log => log;
 }
 
+/// <summary>Keeps a sign-in's session somewhere other than a plugin member's row: a website connection's (CON 6).</summary>
+public delegate Task SignInKeep(SignInStorageState state, IReadOnlyList<string> hosts, IReadOnlyList<string> providers, CancellationToken ct);
+
 /// <summary>What a save did: kept (with the hosts kept and the providers among them), or why not.</summary>
 public sealed record SignInSaveResult(bool Saved, IReadOnlyList<string> Hosts, IReadOnlyList<string> Providers, string? Error);
 
@@ -182,6 +206,9 @@ public sealed class SignInSession
 
     /// <summary>The row's browser profile on the workers (<see cref="SignInProfileKey"/>).</summary>
     public string Profile { get; init; } = "";
+
+    /// <summary>Where the session is kept when it is not a row's: a website connection's (CON 6).</summary>
+    public SignInKeep? Keep { get; init; }
 
     public IRunWorker Worker { get; }
 
@@ -229,7 +256,8 @@ public sealed class SignInSession
 
         try
         {
-            await _owner.Rows.SaveSessionAsync(Member, Field, Row, Entry.SessionColumn, state, actor, ct);
+            if (Keep is { } keep) await keep(state, saved.Hosts, saved.Providers, ct);
+            else await _owner.Rows.SaveSessionAsync(Member, Field, Row, Entry.SessionColumn, state, actor, ct);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {

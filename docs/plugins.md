@@ -1612,14 +1612,24 @@ is the consent. It never reads a connection of another team.
 - **`test <name>`** runs that connection's own **Test connection** - the same `Connections.TestAsync`
   a person's button runs, on a worker - and answers its sentence. The health it records, the
   `connections.tested` row (with no person's id, Team Connections as who) and the clearing of a
-  needs-reconnect mark are the person's test's. A website, and a preset that declares no test, still
-  have no successful test, in that test's own words. A name not assigned to the team answers that it is
-  not, naming the team's connections.
+  needs-reconnect mark are the person's test's. A website's test is its signed-in check, in the
+  platform's browser; a preset that declares no test has no successful test, in that test's own words.
+  A name not assigned to the team answers that it is not, naming the team's connections.
+- **`check`, `session` and `act`** on a website (CON 6): open a page signed in and answer its text with a
+  screenshot in the team's documents; hand the member that asked a short-lived session in its own
+  workspace; click, fill or submit on a page, only while the website's May act on pages is on. Each is
+  held to the site's hosts, every value of the connection is taken out of the answer, and a refused
+  sign-in or an expired session marks the connection Needs you. See
+  [connections.md](connections.md#websites).
 
 How it is done, for the record: the run's stdin carries `teamConnections` (`[{ name, kind, health,
-reason, testable }]`, never a value) and only this built-in's run is handed it; its `{"t":"connection.test",
-"name":"..."}` record is honoured only for it (from any other plugin it is text), and each test runs
-after its process has ended, its sentence added to the run's output. Pinned by `TeamConnectionsTests`.
+reason, testable, mayAct }]`, never a value) and only this built-in's run is handed it; its `{"t":"connection.test",
+"name":"..."}` and `{"t":"website","command":"check|session|act","name":"...",...}` records are honoured
+only for it (from any other plugin they are text), and each runs after its process has ended, its
+answer added to the run's output. A website's runs are not this process's: the worker runs the
+plugin's `website/run.mjs` (the Web Credentials plugin's Node and Playwright code, moved here) as its
+own user, so neither the connection's values nor its browser profile reach the agent the plugin runs as.
+Pinned by `TeamConnectionsTests` and `WebsiteConnectionsTests`.
 
 ## Where it is pinned
 

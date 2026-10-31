@@ -58,8 +58,23 @@
        so they are in every image the publish goes into, and in a test's output, versioned with the
        platform. PluginCatalog reads them from AppContext.BaseDirectory/plugins. -->
   <ItemGroup>
-    <Content Include="..\..\plugins\**\*" LinkBase="plugins" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\plugins\**\*" Exclude="..\..\plugins\*\node_modules\**;..\..\plugins\*\website\test\**" LinkBase="plugins" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <!-- A BUILT-IN PLUGIN'S npm DEPENDENCIES (Team Connections' playwright-core, for a website connection's
+       browser), installed from its package-lock.json when they are missing - never committed - and
+       copied beside it. The image installs them in its own stage (Containerfile). No npm here and none
+       installed: a website run says the runner cannot start. -->
+  <Target Name="BuiltInPluginNodeModules" BeforeTargets="AssignTargetPaths">
+    <Exec Command="npm ci --omit=dev --ignore-scripts --no-audit --no-fund --loglevel=error &amp;&amp; rm -rf node_modules/.bin"
+          WorkingDirectory="..\..\plugins\team-connections"
+          Condition="Exists('..\..\plugins\team-connections\package-lock.json') And !Exists('..\..\plugins\team-connections\node_modules\playwright-core\package.json')"
+          ContinueOnError="true" />
+    <ItemGroup>
+      <_BuiltInPluginModule Include="..\..\plugins\team-connections\node_modules\**\*" />
+      <Content Include="@(_BuiltInPluginModule)" Link="plugins\team-connections\node_modules\%(_BuiltInPluginModule.RecursiveDir)%(_BuiltInPluginModule.Filename)%(_BuiltInPluginModule.Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
 
   <!-- The run worker's, compiled into Harness.Worker; see its project file. -->
   <ItemGroup>

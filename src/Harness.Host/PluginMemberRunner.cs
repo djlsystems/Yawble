@@ -27,7 +27,7 @@ namespace Harness.Host;
 ///
 /// It holds no platform credential and needs none: everything it reports, the runtime writes.
 /// </summary>
-public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
+public sealed partial class PluginMemberRunner : IMemberRunner, IRunWorkerClient
 {
     private readonly PluginCatalog catalog;
     private readonly IMemberReports reports;
@@ -138,6 +138,12 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
     /// null sends none, and the answer is only its run's <c>completed</c> row.
     /// </summary>
     public IMessageLog? Answers { get; init; }
+
+    /// <summary>Where a website check's screenshot goes: the team's documents (CON 6). Null keeps none.</summary>
+    public TeamDocuments? Documents { get; init; }
+
+    /// <summary>Where a member's workspace is, for the session a website's <c>session</c> hands it (CON 6).</summary>
+    public TeamPaths? Paths { get; init; }
 
     /// <summary>The only variables a plugin child inherits from the Host. Everything else - provider
     /// keys, HARNESS_*, CLAUDE_*, GROK_* - is absent because it was never copied.</summary>
@@ -254,6 +260,8 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
                 ["health"] = c.Status,
                 ["reason"] = c.StatusReason,
                 ["testable"] = Connections.Testable(c),
+                // A website's May act on pages: whether `act` may be asked (CON 6). The switch, never a value.
+                ["mayAct"] = c.Kind == ConnectionKinds.Website && c.Credential is { } website && WebsiteFields.MayActOn(website),
             })]);
         }
 
@@ -314,10 +322,11 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
 
         var outcome = ended.Process!;
 
-        // EACH TEST TEAM CONNECTIONS ASKED FOR, now that its process has let go of the worker.
+        // EACH TEST AND WEBSITE COMMAND TEAM CONNECTIONS ASKED FOR, now that its process has let go of the worker.
         if (outcome is { Killed: false, StartError: null, Refused: null })
         {
             foreach (var name in gathered.TestsAsked) gathered.Answers.Add(await TestByNameAsync(invocation.Member, name, ct));
+            foreach (var asked in gathered.WebsitesAsked) gathered.Answers.Add(await WebsiteByNameAsync(invocation, asked, gathered, ct));
         }
 
         if (outcome.Refused is not null)
@@ -385,6 +394,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
 
         string? reason = gathered.Result switch
         {
+            _ when gathered.WebsiteFailure is { } website => Redact(website.Sentence, redacted),
             null => $"The plugin exited {ended.ExitCode} without a result record.",
             { Ok: false } failed => Redact(
                 string.IsNullOrWhiteSpace(failed.Error) ? "The plugin reported that it failed." : failed.Error!,
@@ -429,16 +439,23 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         // TEAM CONNECTIONS ANSWERS THE MEMBER THAT ASKED, in its own workflow, as an instruction to it.
         if (gathered.TeamConnections) await AnswerAskersAsync(invocation, text, ct);
 
+        // A WEBSITE THAT NEEDS A PERSON (CON 6) - a refused sign-in, an expired session, a CAPTCHA or a
+        // device approval, or one already waiting - is a connection hold: the run waits for a person,
+        // held by the connection, and its put-right clears it (PluginSetup). A site that does not answer
+        // holds nothing and fails as it would have.
+        var websiteHeld = reason is not null && gathered.WebsiteFailure is { Held: not null, ConnectionId: not null };
+
         return new MemberResult(
             reason is null,
             ended.ExitCode,
             text,
             FailureReason: reason,
+            FailureClass: websiteHeld ? FailureClasses.NeedsPerson : null,
             ProcessId: ended.ProcessId,
             // A FAILURE IS NEVER QUIET, whatever the record said: ok:false, a non-zero exit, a
             // timeout and a Stop all wake as they always did.
             Quiet: reason is null && gathered.Result is { Quiet: true },
-            HeldByConnection: reason is null ? null : heldByConnection);
+            HeldByConnection: reason is null ? null : heldByConnection ?? (websiteHeld ? gathered.WebsiteFailure!.ConnectionId : null));
     }
 
     /// <summary>The request's <c>connections</c>: each slot's grant by slot name, or for a multiple slot
@@ -1206,6 +1223,11 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
                 gathered.TestsAsked.Add(name.Trim());
                 break;
 
+            // A WEBSITE COMMAND (CON 6): check, session or act on a website connection, run the same way.
+            case "website" when gathered.TeamConnections && WebsiteAsk.From(record!) is { } website:
+                gathered.WebsitesAsked.Add(website);
+                break;
+
             default:
                 // NOT A RECORD, OR NOT ONE THIS VERSION KNOWS: kept as text, never an error.
                 if (gathered.Text.Length > 0) gathered.Text.Append('\n');
@@ -1709,6 +1731,12 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
 
         /// <summary>Each connection a <c>connection.test</c> record named, in the order asked.</summary>
         public readonly List<string> TestsAsked = [];
+
+        /// <summary>Each website command a <c>website</c> record asked for, in the order asked.</summary>
+        public readonly List<WebsiteAsk> WebsitesAsked = [];
+
+        /// <summary>The first website command that failed: the run fails with its sentence, and names the connection it held.</summary>
+        public WebsiteAnswer? WebsiteFailure;
 
         /// <summary>Each test's sentence, in the order asked: they follow the plugin's own output.</summary>
         public readonly List<string> Answers = [];

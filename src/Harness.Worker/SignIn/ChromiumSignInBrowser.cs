@@ -93,15 +93,22 @@ public sealed partial class ChromiumSignInBrowser : IAsyncDisposable
     public Task<string> Ended => _ended.Task;
 
     /// <summary>
+    /// Where the platform's Google Chrome is: <c>HARNESS_SIGN_IN_CHROME</c>, else <c>google-chrome</c> in
+    /// the data root. A website connection's runs use the same (<see cref="WebsiteRunner"/>).
+    /// </summary>
+    public static string Root() =>
+        Environment.GetEnvironmentVariable("HARNESS_SIGN_IN_CHROME") is { Length: > 0 } set
+            ? set
+            : Path.Combine(Environment.GetEnvironmentVariable("HARNESS_DATA_ROOT") is { Length: > 0 } data ? data : "/data", DefaultChromeFolder);
+
+    /// <summary>
     /// The newest Google Chrome under <paramref name="root"/> (<c>&lt;root&gt;/&lt;version&gt;/chrome</c>, as
     /// <c>scripts/install-google-chrome.sh</c> lays it out), or null when none is installed. The root is
     /// <c>HARNESS_SIGN_IN_CHROME</c>, else <c>google-chrome</c> in the data root.
     /// </summary>
     public static string? Find(string? root = null)
     {
-        root ??= Environment.GetEnvironmentVariable("HARNESS_SIGN_IN_CHROME") is { Length: > 0 } set
-            ? set
-            : Path.Combine(Environment.GetEnvironmentVariable("HARNESS_DATA_ROOT") is { Length: > 0 } data ? data : "/data", DefaultChromeFolder);
+        root ??= Root();
         if (!Directory.Exists(root)) return null;
 
         return Directory.EnumerateDirectories(root)
@@ -262,14 +269,13 @@ public sealed partial class ChromiumSignInBrowser : IAsyncDisposable
         "about:blank",
     ];
 
-    /// <summary>The person's languages as the browser takes them: language tags only, at most 10, en-US when none is.</summary>
+    /// <summary>
+    /// The person's languages as the browser takes them: language tags only, each in its canonical case
+    /// (en-gb runs as en-GB), at most 10, en-US when none is.
+    /// </summary>
     public static IReadOnlyList<string> Languages(IReadOnlyList<string>? languages)
     {
-        var kept = (languages ?? [])
-            .Where(l => l is { Length: > 0 and <= 35 } && LanguageTag().IsMatch(l))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(10)
-            .ToList();
+        var kept = LanguageTags.CanonicalList((languages ?? []).Where(l => l is { Length: > 0 } && LanguageTag().IsMatch(l)));
         return kept.Count > 0 ? kept : ["en-US", "en"];
     }
 

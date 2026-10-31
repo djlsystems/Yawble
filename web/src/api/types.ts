@@ -3427,6 +3427,20 @@ export interface CredentialPresetField {
   label: string
   masked: boolean
   required: boolean
+  /**
+   * A website's fields say more (CON 6): `text`, `url` (a bare address is given https://), `enum` (one of
+   * `options`) or `bool` (`true`/`false`). Absent from a Host older than it: `text`.
+   */
+  type?: 'text' | 'url' | 'enum' | 'bool'
+  options?: string[] | null
+  /** Under Advanced. */
+  advanced?: boolean
+  /** Never typed: the platform sets it (a website's saved session, kept by Sign in). */
+  readOnly?: boolean
+  /** The value a field left out has. */
+  default?: string | null
+  /** The sentence beside it. */
+  help?: string | null
 }
 
 /** `GET /api/connections/credentials/presets`: the forms a website, API key or login is made from. */

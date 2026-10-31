@@ -96,6 +96,12 @@ internal sealed partial class HostComposition
         builder.Services.AddHostedService(sp => new MemberSecretsCopyAtStart(
             sp.GetRequiredService<PluginMemberSecretStore>(), sp.GetRequiredService<IDataProtectionProvider>(),
             sp.GetRequiredService<ILogger<MemberSecretsCopyAtStart>>()));
+        // WEB CREDENTIALS ENTRIES BECOME WEBSITE CONNECTIONS (CON 6), once, after the copy above, so an
+        // entry's cells are the member's own by then. The plugin's members stay.
+        builder.Services.AddHostedService(sp => new WebCredentialsCarryOver(
+            sp.GetRequiredService<ITeamStore>(), sp.GetRequiredService<IPluginMemberSettingsStore>(), sp.GetRequiredService<IPluginMemberSecrets>(),
+            sp.GetRequiredService<IConnectionStore>(), sp.GetRequiredService<ITenantLog>(), sp.GetRequiredService<TeamRegistry>(),
+            log: sp.GetRequiredService<ILogger<WebCredentialsCarryOver>>()));
 
         // CONNECTIONS: OAuth accounts the Host holds for plugins (see Connections). The client secret and
         // every token are Data Protection ciphertext under `<dataRoot>/keys`; the provider is reached only

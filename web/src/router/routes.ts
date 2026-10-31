@@ -77,6 +77,14 @@ const routes: RouteRecordRaw[] = [
     meta: { title: 'Sign in to a site' },
   },
 
+  // A WEBSITE CONNECTION'S SIGN IN (CON 6), from Connections: the same page, in the connection's own
+  // browser profile, keeping the session on the connection. The Host refuses its socket to anyone but a person.
+  {
+    path: '/connections/:connection/sign-in',
+    component: () => import('@/pages/SignInPage.vue'),
+    meta: { title: 'Sign in to a site' },
+  },
+
   // Always leave this as last one.
   {
     path: '/:catchAll(.*)*',

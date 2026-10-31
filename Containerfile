@@ -41,6 +41,14 @@ RUN npm install -g npm@11 && npm ci --ignore-scripts
 COPY web/ ./
 RUN npx quasar prepare --silent && npx quasar build
 
+# A BUILT-IN PLUGIN'S npm DEPENDENCIES, from its lockfile: Team Connections' playwright-core, which a
+# worker runs a website connection's browser with (CON 6). Plain JavaScript, so the build platform's
+# install is every target's. Never committed; the build stage copies them beside the plugin.
+FROM --platform=$BUILDPLATFORM node:${NODE_MAJOR}-bookworm AS plugin-modules
+WORKDIR /src/plugins/team-connections
+COPY plugins/team-connections/package.json plugins/team-connections/package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund && rm -rf node_modules/.bin
+
 # The compiler runs natively and CROSS-publishes for TARGETARCH. Running the .NET SDK under QEMU for
 # the arm64 half is an hour and crashes; a framework-dependent publish only has to pick the right
 # native SQLite and PTY libraries, which `-a` does.
@@ -69,6 +77,7 @@ COPY src/ src/
 # THE BUILT-IN PLUGINS (plugins/<id>/): the Host's project copies them beside itself, so the publish -
 # and so both images - carries them as /app/plugins/<id>/, versioned with the platform.
 COPY plugins/ plugins/
+COPY --from=plugin-modules /src/plugins/team-connections/node_modules/ plugins/team-connections/node_modules/
 # The Material Symbols names the Host embeds; the operator CLI embeds the same file.
 COPY cli/internal/plugin/material-symbols.txt cli/internal/plugin/
 COPY --from=web /src/web/dist/spa/ src/Harness.Host/wwwroot/

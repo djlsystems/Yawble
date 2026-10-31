@@ -16,7 +16,7 @@ Each connection has one kind, and each kind its own fields:
 |---|---|
 | **Sign-in** (`oauth`) | An account at Microsoft or Google (or a custom OAuth provider): its scopes, and for Microsoft its directory. See below. |
 | **Mailbox** (`imap`) | A preset (Gmail, iCloud, Yahoo, Namecheap Private Email, Other), the username, the app password and the servers. See [A mailbox with an app password](#a-mailbox-with-an-app-password-imap). |
-| **Website** (`website`) | The kind exists, with its name; the fields it signs in with are defined in a later release. |
+| **Website** (`website`) | A site the platform's own browser signs in to - with a password (and an optional two-step code), a token, or a session you keep with **Sign in** - and a page that shows it is signed in. See [Websites](#websites). |
 | **API key** (`apikey`) | A preset naming the fields a service needs - Stripe: key; Namecheap: API user, API key, whitelisted IP; Twilio: account SID, API key SID, API key secret; Other: fields you name - each masked or not as the preset says. |
 | **Username and password** (`login`) | A username, a password and an optional URL, for anything else. |
 
@@ -501,7 +501,7 @@ Each asks for a **Name** - required, and no other connection's - and then only i
   value, each **Masked** unless you turn it off.
 - **Username and password** - Username, Password (masked) and an optional URL (`http://` or
   `https://`).
-- **Website** - its name for now; what it signs in with is added in a later release.
+- **Website** - see [Websites](#websites) below.
 
 A masked value is at least 8 characters, so it can be kept out of everything a plugin writes. It is
 stored only as Data Protection ciphertext - all of a connection's masked values as one - and never
@@ -525,6 +525,70 @@ The routes (people only): `GET /api/connections/credentials/presets`, `POST /api
 `{ kind, preset?, name, fields: [{ name, value, masked? }] }`, `PUT /api/connections/{id}/credentials`
 `{ fields }`, `PUT /api/connections/{id}/mailbox` `{ account?, username?, password?, imap?, smtp? }`.
 
+## Websites
+
+Admin → **Connections** → **Add connection** → **Website** asks for its **Name** and:
+
+| Field | What it is |
+|---|---|
+| **Site URL** | The origin it signs in to, such as `https://app.example.com`. An address without `http://` or `https://` is given `https://`. |
+| **Other hosts** | Other hosts the browser may go to for this site (pages and frames), such as `www.example.com`, separated by commas or spaces, kept as written. Images, scripts and fetches from other hosts still load. |
+| **Method** | `password` fills the sign-in form; `token` sends a header; `interactive` uses the session you keep with **Sign in**. |
+| **Sign-in URL** | For password: the sign-in page, a path on the site (`/login`) or a full URL on its hosts. Default: the Site URL. A bare address is given `https://`. |
+| **Username**, **Password** | For password. The password is masked. |
+| **TOTP secret** | Optional, for password: the two-step secret (base32), masked, so the browser types the code. |
+| **Token**, **Token header** | For token. `Authorization` (the default) sends `Bearer <token>`; any other header sends the token as it is. The token is masked. |
+| **Signed-in check URL**, **Signed-in check text** | A page only a signed-in user can see (default: the Site URL), and optionally text it must show, or a CSS selector written `css=<selector>`. A bare address is given `https://`. |
+| **May act on pages** | Off unless you turn it on: with it off, a team member may open pages signed in and read them, never click, fill or submit. |
+| **Saved session** | Kept by **Sign in**; never typed and never shown. |
+| Advanced: **Username / Password / Submit button / Code field selector** | Optional CSS selectors, when the sign-in form's fields are not found on their own. |
+| Advanced: **Language**, **Time zone** | What the browser says it reads and where it is, such as `en-GB, en` and `Europe/London` (a tag in another case runs as its canonical one: `en-gb` as `en-GB`). A session kept with Sign in uses those of the browser that signed in. Default: `en-US`, `UTC`. |
+
+**Sign in**, on a website's tile, opens the platform's sign-in page for the connection in a new tab:
+the site's Site URL in the platform's own Google Chrome, which you use as your own; **Done** keeps its
+session (cookies and local storage, pruned to the site's hosts and the sign-in providers you passed
+through) as the connection's saved session, with a `connections.signed-in` row naming how many hosts
+it holds - never the session - and clears **Needs you**. Only a person can open it.
+
+**One browser, one profile.** Sign in, Test connection and every Team Connections command on the
+website run in the same browser - Google Chrome from the volume, run headed by a worker as its own
+user - in the connection's own lasting profile on the worker's volume, kept where no agent can read it
+and removed with the connection. See [decisions.md](decisions.md).
+
+**A team uses it through Team Connections** (assign it to the team first), in the Web Credentials
+plugin's words:
+
+- **`check <name> [<path>] [expect "<text>"]`** opens the page (default: the check URL) signed in and
+  answers its HTTP status, address, title, heading and text, with a screenshot saved in the team's
+  documents as `Team Connections/<connection>-<time>.png`.
+- **`session <name> [for <minutes>]`** (1 to 120, default 30) hands a short-lived session to the member
+  that asked: a file in that member's own workspace, `.team-connections-sessions/<connection>-<random>.json`
+  - a Playwright `storageState` (or, for a token website, the header and value) for the site's hosts - deleted when it expires.
+- **`act <name> <path> click "<selector>" | fill "<selector>" "<text>" | submit "<selector>"`**, steps
+  joined by `then`, acts on the page and answers it as `check` does - only when **May act on pages** is
+  on; otherwise it is refused with a sentence naming the switch.
+
+Every command is held to the Site URL's host and the other hosts: a path elsewhere is refused before
+the browser goes anywhere, and a redirect, a script or a click that leads elsewhere is stopped in the
+browser. Every value of the connection - its password, token, TOTP secret, username and every part of
+its session - is taken out of what comes back; no value is in a route, a row, a log, an answer, a
+screenshot's name or a file other than the session handed over. Each command lands one
+`connections.website-used` row (the command, the outcome, the sentence). A refused sign-in or an
+expired session marks the website `needs reconnect` (Needs you, on every member using it), a CAPTCHA or
+a device approval the same, saying you sign in yourself with **Sign in**. Needs you then lists the
+connection once, naming the team and Team Connections; the run that asked waits for you, held by the
+connection (its workflow reads Awaiting, not Failed), and while it needs you no command opens the
+browser for it. A passing **Test connection**, or **Sign in** then **Done**, clears it and tells the
+team's Manager once in each workflow it held up. A site that does not answer fails the run only and
+marks nothing.
+
+**Web Credentials entries come over.** At the first start with this release, every entry of every
+member running the Web Credentials plugin, on every team, becomes a website connection named after its
+team and its entry (`Alpha supplier-admin`), assigned to that team, with its fields, its plugin's
+language and time zone, and its password, token, TOTP secret and saved session; one
+`connections.web-credentials-carried-over` row names how many. The plugin's own members, their hourly
+verify schedule and their `status.changed` event stay as they are.
+
 ## Testing a connection
 
 **Test connection** says whether a connection works now, without hiring a member and running it. It
@@ -538,9 +602,9 @@ answers in one sentence:
 | Mailbox | Logs in to IMAP and authenticates to SMTP: the same login test as Save. |
 | API key | Sends the one harmless request its preset declares: **Stripe** reads the balance (`GET /v1/balance`, the key as a bearer token); **Namecheap** reads the account's balances (`namecheap.users.getBalances`, with the Whitelisted IP as `ClientIp`; a `Status="ERROR"` answer is a refusal, with Namecheap's reason - an address not on the key's whitelist is `Invalid request IP`); **Twilio** reads the account (`GET /2010-04-01/Accounts/<Account SID>.json`, with the API key SID and secret). **Other** is tested only when it has a field named `url` and exactly one masked field: a GET of that address with the masked value as a bearer token. |
 | Username and password | Only with a URL: a GET of it with HTTP Basic. A redirect - to a sign-in page, say - is not taken as a yes. With no URL there is nothing to test. |
-| Website | No test yet: a website's test is its own sign-in, which a later release adds. |
+| Website | Its **signed-in check**, in the platform's browser on a worker: a password website signs in first (typing its two-step code), a token website sends its header, an interactive one uses the session kept with **Sign in**; then the check page must answer and, when set, show the check text. A refused sign-in or an expired session marks it `needs reconnect`; a CAPTCHA or a device approval marks it saying you sign in yourself with **Sign in**; a site that does not answer says so and leaves its health as it was. |
 
-A connection with no test - a website, Other without a `url` or with more than one masked field, a
+A connection with no test - Other without a `url` or with more than one masked field, a
 username and password with no URL - shows **no** Test connection button rather than a result nobody
 measured; the connection answers `testable: false`.
 
@@ -635,7 +699,8 @@ assignment above is the consent, and no binding is needed - and answers any memb
   `needs reconnect` with its reason), and whether it has a test.
 - **`test <name>`**: that connection's own [Test connection](#testing-a-connection), by name, on a
   worker: the same test, the same health and the same `connections.tested` row as a person's. A
-  website, and a preset with no test, still have no successful test.
+  preset with no test has no successful test.
+- For a **website**, `check`, `session` and `act` - see [Websites](#websites).
 
 It **never hands out a value**: no key, password, token or app password is in its answer, its rows or
 any file, and it never reads a connection assigned only to another team. It is shown on the board and
