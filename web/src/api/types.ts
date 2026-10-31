@@ -3136,6 +3136,40 @@ export interface PluginInstallResult {
   /** Whether it went over a version already installed (Replace ticked). */
   replaced: boolean
   reason: string | null
+  /** The version active before this install, or null when none was. Absent from an older Host. */
+  previous?: string | null
+  /**
+   * What a version declaring `secrets.<field>.movedTo` did with each member's own values, one entry
+   * per member and slot. Never a value. Absent on a refusal and from an older Host.
+   */
+  moves?: PluginSecretMove[]
+  /**
+   * On an UPGRADE (a newer version made active over an older one), each member hired on the plugin
+   * whose saved settings do not fit the new version, with every field that does not. `[]` when every
+   * member's fit, and on any install that is not an upgrade. Never a value.
+   */
+  attention?: PluginUpgradeAttention[]
+}
+
+/** One slot's secret move for one member on a plugin install (CON 7). */
+export interface PluginSecretMove {
+  team: string
+  member: string
+  slot: string
+  outcome: 'moved' | 'nothing' | 'kept' | 'failed'
+  fields: string[]
+  connection: string | null
+  key: string | null
+  reason: string | null
+}
+
+/** A member whose saved settings do not fit an upgraded plugin's new version: field names and sentences only. */
+export interface PluginUpgradeAttention {
+  team: string
+  member: string
+  teamName: string
+  memberName: string
+  fields: { field: string; reason: string }[]
 }
 
 /** `DELETE /api/plugins/{id}`: what went - the whole plugin, or one version. */

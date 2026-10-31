@@ -106,6 +106,64 @@ agent cannot ask for a rescan. The report names members of every team, so the Ho
 When the Host does not answer within 20 seconds the CLI says so; a restart (`yawble down`,
 `yawble up`) loads the files it has already put in place.
 
+### Upgrade a plugin to the Marketplace's newer version
+
+When the Marketplace's catalog lists a newer version of an installed plugin, **Admin → Plugins** shows
+an upgrade icon on that plugin's first tile ("Upgrade to <version>"), and **Marketplace → Installed**
+shows Update on the plugin's tile. There is no icon when the catalog does not list the plugin, lists
+the installed version or an older one, or has not been checked.
+
+Both open the same confirm, and it is the install press - there is no second install dialog:
+
+- **Upgrade <name> to <version>?** "Settings from the old version are not guaranteed to map to the new
+  version. Are you sure you want to replace the installed plugin with the latest version?"
+- Below it, the members who will move ("Used by …"), and each solution team that uses the plugin with
+  the oldest version it needs.
+- **Cancel** changes nothing. **Upgrade** fetches the package (`POST /api/marketplace/{id}/fetch`; a
+  folder already holding that version is used as it is), then installs the fetched folder
+  (`POST /api/plugins/install` with `replace` set, so a copy of the same version kept on disk is
+  replaced by the catalog's).
+
+A refusal at either step - the download, the package check, an install refusal such as a version older
+than a solution team needs - shows the Host's sentence on the plugin's tile, and the installed version
+stays active.
+
+**What carries over.** A member is hired as `plugin:<id>` with no version, so the new active version
+moves every member onto it at once. Nothing else is needed and nothing is removed:
+
+- every member stays hired, with its settings, kept by field name;
+- a field declaring `secrets.<field>.movedTo` moves the member's own value into a connection, as
+  [A secret moved to a connection](#a-secret-moved-to-a-connection-movedto) describes; the dialog
+  lists each move;
+- the old version stays on disk, inactive.
+
+**The attention list.** On an upgrade - a newer version made active over an older one - the install
+answer's `attention` names each member whose saved settings do not fit the new version:
+`{ team, member, teamName, memberName, fields: [{ field, reason }] }`. Every problem of a member is
+listed, not only the first:
+
+- a required field with no saved value and no default;
+- a saved value of the wrong type, or outside the field's bounds;
+- a saved value for a field the new version no longer declares (kept, and not used);
+- a secret binding, or the member's own secret value, for a secret the new version does not declare.
+
+The checks are the ones a run and a save already make (`PluginMemberRunner.EffectiveConfig`,
+`PluginConfigField.Refusal` and `BoundsRefusal`), gathered by `PluginUpgradeAttention`. Only field
+names and sentences are answered, never a value. `attention` is `[]` when every member's settings fit,
+and on any install that is not an upgrade: a first install, a Replace of the same version, and a
+rollback to an older one. After the upgrade the dialog says "Upgraded <name> to <version>" and shows
+each such member with its fields and a link to its settings.
+
+An upgrade never removes or stops a member. A member whose settings need attention fails its runs,
+naming the field, until a person fixes it in the member's settings, as it would after any change to
+the plugin.
+
+**Rolling back.** The old version is kept on disk. To go back, install it again with Replace: Admin →
+Plugins → Install from a folder… on the older version's folder with Replace ticked, or
+`yawble plugin install <older folder> --force`. That makes it active again; members move back with
+their settings, and the newer version is kept, inactive. A solution team's minimum still applies: a
+version older than an installed solution team needs is refused.
+
 ### Install from a folder inside the instance
 
 A plugin built inside the instance - by a team in its worktree, or by the Concierge in its workspace -
@@ -1677,6 +1735,13 @@ Pinned by `TeamConnectionsTests` and `WebsiteConnectionsTests`.
   and a folder outside the data root, and a request the Host never answers being withdrawn; its
   request, report and withdraw scripts run under `sh`. `PluginInstallRouteTests` pins the Host's side,
   a copy staged under `.incoming` included (`A_copy_the_operator_cli_staged_under_incoming_installs_through_the_installer`).
+- **Upgrading from the Marketplace.** `PluginUpgradeAttentionTests` pins the install answer's
+  `attention`: an upgrade that adds a required field and drops another names each member and both
+  fields, keeps 1.0.0 on disk inactive and every member with its settings; an upgrade every member
+  fits answers `[]`; a Replace of the same version and a rollback answer `[]`; and every problem is
+  gathered per member with no value in any sentence. The web mount specs `plugins-dialog-upgrade`
+  (the icon, the confirm, Cancel, the fetch and install, attention, and both refusals) and
+  `marketplace` (Update asks with the same confirm before it fetches).
 - **The minimum a solution team needs.** `PluginMinimumTests.A_plugin_version_older_than_an_installed_solution_team_needs_is_refused_naming_the_team_and_a_newer_one_is_not`
   (a new install, a Replace and a kept version through the route and the request file, each refused
   with nothing changed; a newer version accepted; accepted again once the package is uninstalled) and
