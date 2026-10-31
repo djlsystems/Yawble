@@ -139,7 +139,7 @@ async function upgrade() {
             >{{ entry.teamName }} / {{ entry.memberName }}</a>
             <ul class="q-my-xs q-pl-lg">
               <li v-for="field in entry.fields" :key="field.field" class="os-body" :data-attention-field="field.field">
-                <span class="mono">{{ field.field }}</span>: {{ field.reason }}
+                {{ field.reason }}
               </li>
             </ul>
           </div>
