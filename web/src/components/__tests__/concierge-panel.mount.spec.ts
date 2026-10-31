@@ -598,7 +598,7 @@ describe('the terminal', () => {
 describe('the MCP tools note', () => {
   /** The socket's own open, as the server's accept fires it. */
   async function socketOpens() {
-    const handlers = connectConcierge.mock.calls.at(-1)![1] as { onOpen: () => void };
+    const handlers = (connectConcierge.mock.calls.at(-1) as unknown as [unknown, { onOpen: () => void }])[1];
     handlers.onOpen();
     await flushPromises();
   }
