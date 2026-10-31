@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Harness.Contracts;
 using ModelContextProtocol;
+using Microsoft.Win32.SafeHandles;
 using ModelContextProtocol.Protocol;
 
 namespace Harness.Host;
@@ -283,13 +285,27 @@ public sealed class McpRunTools(
                 continue;
             }
 
-            n++;
-            var path = output is null ? Default(workingCopy, server, stamp, ref n, mime) : Numbered(output, n);
-            if (!Write(workingCopy, path, bytes))
+            // A default name already taken moves on to the next <n>; a named output path already taken is refused.
+            string path;
+            McpWrite outcome;
+            do
+            {
+                n++;
+                path = output is null ? Default(workingCopy, server, stamp, n, mime) : Numbered(output, n);
+                outcome = Write(workingCopy, path, bytes);
+            }
+            while (outcome == McpWrite.Exists && output is null);
+
+            if (outcome != McpWrite.Written)
             {
                 refused = true;
-                notes.Add($"A {mime} result of {bytes.Length} bytes from {server} was not written: "
-                    + $"`{Path.GetRelativePath(workingCopy, path)}` is or passes through a link, which could lead outside your working copy.");
+                var at = Path.GetRelativePath(workingCopy, path);
+                notes.Add($"A {mime} result of {bytes.Length} bytes from {server} was not written: " + outcome switch
+                {
+                    McpWrite.Exists => $"`{at}` already exists, and nothing is overwritten.",
+                    McpWrite.Unsupported => "binary results are written only when the Host runs on Linux.",
+                    _ => $"`{at}` is or passes through a link, which could lead outside your working copy.",
+                });
                 continue;
             }
 
@@ -336,51 +352,93 @@ public sealed class McpRunTools(
 
     /// <summary>
     /// <paramref name="bytes"/> written at <paramref name="path"/>, inside <paramref name="workingCopy"/>, never through a
-    /// link: every folder on the way, made here or already there, and the file itself must not be one. The Host may
-    /// write with more rights than the member, so a link the member made must not carry the bytes elsewhere. The
-    /// bytes go to a new file first (created exclusively, which does not follow a link) and are renamed into place,
-    /// which replaces a name rather than following it. False, with nothing written, when a link is in the way.
+    /// link and never over a file. The Host may write with more rights than the member, and the member can change its
+    /// working copy at any moment, so no path is resolved after it is checked: the working copy is opened as a folder,
+    /// each folder on the way is made (<c>mkdirat</c>) and opened relative to the one before with
+    /// <c>O_DIRECTORY|O_NOFOLLOW</c>, and the file is created relative to the last with <c>O_CREAT|O_EXCL|O_NOFOLLOW</c>
+    /// and written through that descriptor alone. A link anywhere refuses the write atomically, however the folders
+    /// are swapped meanwhile. Linux only: elsewhere nothing is written.
     /// </summary>
-    public static bool Write(string workingCopy, string path, byte[] bytes)
+    public static McpWrite Write(string workingCopy, string path, byte[] bytes)
     {
         var root = Path.GetFullPath(workingCopy).TrimEnd(Path.DirectorySeparatorChar);
         var whole = Path.GetFullPath(path);
-        if (!whole.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal)) return false;
+        if (!whole.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal)) return McpWrite.Link;
+        if (OpenFlags is not { } f) return McpWrite.Unsupported;
 
-        var folder = root;
-        foreach (var part in Path.GetRelativePath(root, Path.GetDirectoryName(whole)!).Split(Path.DirectorySeparatorChar))
-        {
-            if (part is "." or "") continue;
-            folder = Path.Combine(folder, part);
-            if (new DirectoryInfo(folder).LinkTarget is not null || File.Exists(folder)) return false;
-            Directory.CreateDirectory(folder);
-        }
+        var folders = Path.GetRelativePath(root, Path.GetDirectoryName(whole)!)
+            .Split(Path.DirectorySeparatorChar).Where(p => p is not ("." or "")).ToList();
+        var name = Path.GetFileName(whole);
 
-        var file = new FileInfo(whole);
-        if (file.LinkTarget is not null || Directory.Exists(whole)) return false;
-
-        var temp = Path.Combine(folder, $".{Path.GetFileName(whole)}.{Guid.NewGuid():N}.part");
+        var fd = open(root, f.Directory | f.Nofollow | f.Cloexec);
+        if (fd < 0) return Failed(Marshal.GetLastPInvokeError(), root);
         try
         {
-            using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None)) stream.Write(bytes);
-            File.Move(temp, whole, overwrite: true);
+            foreach (var part in folders)
+            {
+                if (mkdirat(fd, part, 0x1FF) != 0 && Marshal.GetLastPInvokeError() is var made && made != Eexist) return Failed(made, part);
+                var next = openat(fd, part, f.Directory | f.Nofollow | f.Cloexec, 0);
+                if (next < 0) return Failed(Marshal.GetLastPInvokeError(), part);
+                _ = close(fd);
+                fd = next;
+            }
+
+            var file = openat(fd, name, f.Wronly | f.Creat | f.Excl | f.Nofollow | f.Cloexec, 0x1B6);
+            if (file < 0)
+            {
+                var error = Marshal.GetLastPInvokeError();
+                if (error != Eexist) return Failed(error, name);
+                return new FileInfo(whole).LinkTarget is null ? McpWrite.Exists : McpWrite.Link;
+            }
+
+            using var handle = new SafeFileHandle(file, ownsHandle: true);
+            try
+            {
+                RandomAccess.Write(handle, bytes, 0);
+            }
+            catch
+            {
+                // The name is the one this call just made in the folder it holds open.
+                _ = unlinkat(fd, name, 0);
+                throw;
+            }
+
+            return McpWrite.Written;
         }
-        catch
+        finally
         {
-            File.Delete(temp);
-            throw;
+            _ = close(fd);
         }
-
-        return true;
     }
 
-    private static string Default(string workingCopy, string server, string stamp, ref int n, string mime)
-    {
-        var folder = Path.Combine(workingCopy, Folder, server);
-        string path;
-        while (File.Exists(path = Path.Combine(folder, $"{stamp}-{n}.{Extension(mime)}"))) n++;
-        return path;
-    }
+    /// <summary>A link (or a file where a folder belongs) on the way is a refusal; any other error is the disk's.</summary>
+    private static McpWrite Failed(int error, string at) => error is Eloop or Enotdir
+        ? McpWrite.Link
+        : throw new IOException($"{at}: {Marshal.GetPInvokeErrorMessage(error)}");
+
+    // The errno values are the generic Linux ones; the open flags differ between x64 and arm64.
+    private const int Eexist = 17, Enotdir = 20, Eloop = 40;
+
+    private static readonly LinuxOpenFlags? OpenFlags =
+        OperatingSystem.IsLinux() ? ConciergeAttachments.LinuxOpenFlagsFor(RuntimeInformation.ProcessArchitecture) : null;
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int open(string path, int flags);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int openat(int dirfd, string path, int flags, uint mode);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int mkdirat(int dirfd, string path, uint mode);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int unlinkat(int dirfd, string path, int flags);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int close(int fd);
+
+    private static string Default(string workingCopy, string server, string stamp, int n, string mime) =>
+        Path.Combine(workingCopy, Folder, server, $"{stamp}-{n}.{Extension(mime)}");
 
     /// <summary>The named output path for the first binary block; <c>name-2.ext</c> and on for the rest.</summary>
     private static string Numbered(string output, int n) =>
@@ -502,3 +560,6 @@ public sealed class McpRunTools(
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }
+
+/// <summary>What became of one binary block's write.</summary>
+public enum McpWrite { Written, Link, Exists, Unsupported }

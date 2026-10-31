@@ -110,8 +110,13 @@ are offered there: every agent CLI gets them at once, and no credential leaves t
   instead (`name-2.ext` and on for a second block); a path outside it, absolute, or through a link that leads
   out is refused before the call is sent. Nothing is written through a link: when a folder on the way (the
   default `.harness/mcp/<server>` included) or the file itself is a link, the block is not written, a line says
-  so and the result is an error. The bytes go to a new file in that folder, created exclusively, and are renamed
-  into place, so a link made at the name in between is replaced, never followed. In the result, each block becomes a text block holding
+  so and the result is an error. The write resolves no path after its check: the Host opens the working copy as
+  a folder, makes and opens each folder on the way relative to the one before (`mkdirat`, then `openat` with
+  `O_DIRECTORY|O_NOFOLLOW`), and creates the file relative to the last with `O_CREAT|O_EXCL|O_NOFOLLOW`, so a
+  folder swapped for a link at any moment refuses the write rather than carrying it out. Nothing is
+  overwritten: a default name already taken moves on to the next `<n>`, and an `outputPath` already taken is
+  refused with a line saying it exists. Binary results are written only when the Host runs on Linux; elsewhere
+  the block is refused with a line saying so. In the result, each block becomes a text block holding
   `{"path", "mimeType", "bytes"}`, the path absolute. At most 20 MB is written per call; a block past that is
   dropped and a line says which and how big.
 - **Text** passes through, cut at 100,000 characters across the result's text blocks, with a line saying the
