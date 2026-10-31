@@ -108,12 +108,17 @@ are offered there: every agent CLI gets them at once, and no credential leaves t
   `.harness/mcp/<server>/<UTC yyyyMMdd-HHmmss>-<n>.<ext>`, the extension from the MIME type (`bin` when
   unknown). An `outputPath` (or `output_path`) argument naming a relative path inside the working copy is used
   instead (`name-2.ext` and on for a second block); a path outside it, absolute, or through a link that leads
-  out is refused before the call is sent. Nothing is written through a link: when a folder on the way (the
-  default `.harness/mcp/<server>` included) or the file itself is a link, the block is not written, a line says
-  so and the result is an error. The write resolves no path after its check: the Host opens the working copy as
-  a folder, makes and opens each folder on the way relative to the one before (`mkdirat`, then `openat` with
-  `O_DIRECTORY|O_NOFOLLOW`), and creates the file relative to the last with `O_CREAT|O_EXCL|O_NOFOLLOW`, so a
-  folder swapped for a link at any moment refuses the write rather than carrying it out. Nothing is
+  out is refused before the call is sent. **The file is written as the member.** When the Host switches users
+  (the image: Host `harness`, members `agent`), it writes nothing in the working copy itself: it puts the bytes
+  in an owner-only folder of its own that only the agent's group may read, then `mkdir -p` and
+  `dd conv=excl`, started through the same `setpriv` prefix as every agent child, make the folders and copy
+  the bytes. The file is the member's, and a link anywhere on the way to a place the member may not write (the
+  Host's database, keys, logs) is refused by the system: the block is not written, a line gives the system's
+  reason and the result is an error. A link to a place the member may write anyway gains it nothing. The
+  Host's folder is removed afterwards. Where the Host does not switch users (development, the test suite) it
+  writes itself, as the member's own user, and still never through a link: it opens each folder on the way
+  relative to the one before with `O_DIRECTORY|O_NOFOLLOW` and creates the file with
+  `O_CREAT|O_EXCL|O_NOFOLLOW`. Either way nothing is
   overwritten: a default name already taken moves on to the next `<n>`, and an `outputPath` already taken is
   refused with a line saying it exists. Binary results are written only when the Host runs on Linux; elsewhere
   the block is refused with a line saying so. In the result, each block becomes a text block holding
