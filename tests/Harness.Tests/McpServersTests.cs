@@ -118,7 +118,7 @@ public sealed class McpServersTests : IAsyncLifetime
         _server.EventStream = true;
         _server.PageSize = 2;
 
-        var (status, body) = await SendAsync(HttpMethod.Post, "/api/mcp-servers", new { name = "paged", kind = "web", url = $"https://{Host}/mcp?key={QueryKey}" });
+        var (status, body) = await SendAsync(HttpMethod.Post, "/api/mcp-servers", new { name = "paged", kind = "url", url = $"https://{Host}/mcp?key={QueryKey}" });
         Assert.True(status == HttpStatusCode.Created, body);
 
         var check = JsonDocument.Parse(body).RootElement.GetProperty("check");
@@ -266,16 +266,16 @@ public sealed class McpServersTests : IAsyncLifetime
     {
         foreach (var name in new[] { "", "has space", "dots.not", new string('a', 21), "émoji" })
         {
-            var (status, body) = await SendAsync(HttpMethod.Post, "/api/mcp-servers", new { name, kind = "web", url = "https://other.example.test/mcp" });
+            var (status, body) = await SendAsync(HttpMethod.Post, "/api/mcp-servers", new { name, kind = "url", url = "https://other.example.test/mcp" });
             Assert.Equal(HttpStatusCode.BadRequest, status);
             Assert.Contains("1 to 20 letters, digits, `-` or `_`", Error(body), StringComparison.Ordinal);
         }
 
         _server.Down = true;
-        Assert.Equal(HttpStatusCode.Created, (await SendAsync(HttpMethod.Post, "/api/mcp-servers", new { name = new string('a', 20), kind = "web", url = "https://other.example.test/mcp" })).Status);
-        Assert.Equal(HttpStatusCode.Created, (await SendAsync(HttpMethod.Post, "/api/mcp-servers", new { name = "Git-Hub_2", kind = "web", url = "https://other.example.test/mcp" })).Status);
+        Assert.Equal(HttpStatusCode.Created, (await SendAsync(HttpMethod.Post, "/api/mcp-servers", new { name = new string('a', 20), kind = "url", url = "https://other.example.test/mcp" })).Status);
+        Assert.Equal(HttpStatusCode.Created, (await SendAsync(HttpMethod.Post, "/api/mcp-servers", new { name = "Git-Hub_2", kind = "url", url = "https://other.example.test/mcp" })).Status);
 
-        var (taken, takenBody) = await SendAsync(HttpMethod.Post, "/api/mcp-servers", new { name = "git-hub_2", kind = "web", url = "https://other.example.test/mcp" });
+        var (taken, takenBody) = await SendAsync(HttpMethod.Post, "/api/mcp-servers", new { name = "git-hub_2", kind = "url", url = "https://other.example.test/mcp" });
         Assert.Equal(HttpStatusCode.Conflict, taken);
         Assert.Contains("already an MCP server named 'git-hub_2'", Error(takenBody), StringComparison.Ordinal);
     }
@@ -289,7 +289,7 @@ public sealed class McpServersTests : IAsyncLifetime
 
         var (status, edited) = await SendAsync(HttpMethod.Put, $"/api/mcp-servers/{id}", new
         {
-            name = "github2", kind = "web", connection = key, header = "X-Api-Key", template = "{value}",
+            name = "github2", kind = "url", connection = key, header = "X-Api-Key", template = "{value}",
         });
         Assert.True(status == HttpStatusCode.OK, edited);
 
@@ -415,7 +415,7 @@ public sealed class McpServersTests : IAsyncLifetime
 
     // ---- helpers ------------------------------------------------------------------------------------
 
-    private static object Web(string name, string key) => new { name, kind = "web", url = Url, connection = key, header = "Authorization", template = "Bearer {value}" };
+    private static object Web(string name, string key) => new { name, kind = "url", url = Url, connection = key, header = "Authorization", template = "Bearer {value}" };
 
     private async Task NothingLeakedAsync()
     {

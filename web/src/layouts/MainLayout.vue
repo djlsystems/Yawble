@@ -30,6 +30,7 @@ import TenantLogDialog from '../components/TenantLogDialog.vue';
 import DiagnosticsDialog from '../components/DiagnosticsDialog.vue';
 import SkillsDialog from '../components/SkillsDialog.vue';
 import PluginsDialog from '../components/PluginsDialog.vue';
+import McpServersDialog from '../components/McpServersDialog.vue';
 import LocalReposDialog from '../components/LocalReposDialog.vue';
 import SitesDialog from '../components/SitesDialog.vue';
 import OutcomesDialog from '../components/OutcomesDialog.vue';
@@ -56,6 +57,7 @@ import {
   DocumentsAction,
   OutcomesAction,
   PluginsAction,
+  McpServersAction,
   RepositoriesAction,
   Ribbon,
   SitesAction,
@@ -173,6 +175,8 @@ watch(
 const skillsOpen = ref(false);
 /** Admin > Plugins. */
 const pluginsOpen = ref(false);
+/** Admin > MCP servers. */
+const mcpServersOpen = ref(false);
 /** Admin > Connections. */
 const connectionsOpen = ref(false);
 /** What the provider's round trip came back with, shown once in the Connections dialog. */
@@ -396,6 +400,7 @@ function onRibbonAction(action: string, team: TeamId | null = null) {
   else if (action === 'admin-agents') agentsOpen.value = true;
   else if (action === 'admin-skills') skillsOpen.value = true;
   else if (action === PluginsAction) pluginsOpen.value = true;
+  else if (action === McpServersAction) mcpServersOpen.value = true;
   else if (action === ConnectionsAction) openConnections();
   else if (action === RepositoriesAction) repositoriesOpen.value = true;
   else if (action === OutcomesAction) {
@@ -774,6 +779,7 @@ async function signOut() {
     />
     <SkillsDialog v-model="skillsOpen" />
     <PluginsDialog v-model="pluginsOpen" />
+    <McpServersDialog v-model="mcpServersOpen" />
     <ConnectionsDialog v-model="connectionsOpen" :notice="connectionNotice" />
     <LocalReposDialog v-model="repositoriesOpen" />
     <OutcomesDialog v-model="outcomesOpen" :outcome="outcomesAt" />

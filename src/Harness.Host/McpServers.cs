@@ -113,7 +113,7 @@ public sealed partial class McpServers(IMcpServerStore store, Connections connec
         {
             McpServerRecord.Web => await WebAsync(request, before, blank, ct),
             McpServerRecord.Runs => await RunsAsync(request, blank, ct),
-            _ => (null, null, "`kind` is `web` (a web address) or `runs` (Yawble runs it)."),
+            _ => (null, null, "`kind` is `url` (a web address) or `runs` (Yawble runs it)."),
         };
     }
 

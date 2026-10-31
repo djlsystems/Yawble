@@ -675,9 +675,9 @@ public sealed class FreshVolumeTests : IDisposable
         Assert.Empty(await ColumnAsync("SELECT id FROM mcp_servers"));
 
         await ExecuteAsync(
-            "INSERT INTO mcp_servers (id, name, kind, created_at, updated_at) VALUES ('mcp-1', 'github', 'web', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z')");
+            "INSERT INTO mcp_servers (id, name, kind, created_at, updated_at) VALUES ('mcp-1', 'github', 'url', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z')");
         await Assert.ThrowsAsync<SqliteException>(() => ExecuteAsync(
-            "INSERT INTO mcp_servers (id, name, kind, created_at, updated_at) VALUES ('mcp-2', 'GitHub', 'web', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z')"));
+            "INSERT INTO mcp_servers (id, name, kind, created_at, updated_at) VALUES ('mcp-2', 'GitHub', 'url', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z')"));
         await ExecuteAsync("INSERT INTO team_mcp_servers (team, server_id, assigned_at) VALUES ('alpha', 'mcp-1', '2026-10-01T00:00:00Z')");
         Assert.Equal(["unchecked"], await ColumnAsync("SELECT status FROM mcp_servers"));
 

@@ -23,7 +23,7 @@ public static class McpServerEndpoints
             .HumansOnly()
             .WithSummary("The instance's MCP servers")
             .WithDescription(
-                "`{ servers: [...] }` by name: each entry's id, name, kind (`web` or `runs`), its settings - a web address "
+                "`{ servers: [...] }` by name: each entry's id, name, kind (`url` or `runs`), its settings - a web address "
                 + "without its query (`url`, with `queryHidden`), or the command, package, pinned version, arguments and "
                 + "environment variables (each a connection's field) - its `health` (`ok`, `needs-you`, `unchecked`) with "
                 + "`healthReason`, the tools it last listed and the teams it is given to. Never a value or a query string.");
@@ -55,7 +55,7 @@ public static class McpServerEndpoints
             .WithSummary("Add an MCP server")
             .WithDescription(
                 "Body `{ name, kind, ... }`. `name`: 1 to 20 letters, digits, `-` or `_`, unique on the instance (409 when "
-                + "taken). `kind: web`: `url`, and optionally `connection` (an API key connection's id), `field` (default its "
+                + "taken). `kind: url`: `url`, and optionally `connection` (an API key connection's id), `field` (default its "
                 + "one secret field), `header` (default `Authorization`) and `template` holding `{value}` (default "
                 + "`Bearer {value}`). `kind: runs`: `command` (`npx` or `uvx`), `package`, `version` (one exact version: "
                 + "missing, `latest` or a range is refused 400 with a sentence saying a version must be pinned), `args` and "

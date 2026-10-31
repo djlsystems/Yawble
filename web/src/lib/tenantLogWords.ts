@@ -787,6 +787,56 @@ const words: Record<string, Words> = {
         names(d, 'unbound') && `unbound ${names(d, 'unbound')}`,
       ]),
   },
+  'mcp.server-added': {
+    did: 'added an MCP server',
+    detail: (d) =>
+      sentence([
+        `${text(d, 'name') ?? 'an MCP server'}${text(d, 'kind') === 'runs' ? ', which Yawble runs' : ''}`,
+        text(d, 'url') && `at ${text(d, 'url')}`,
+        text(d, 'package') && `package ${text(d, 'package')}${text(d, 'version') ? ` ${text(d, 'version')}` : ''}`,
+        text(d, 'connectionName') && `sent connection ${text(d, 'connectionName')}`,
+      ]),
+  },
+  'mcp.server-edited': {
+    did: 'changed an MCP server',
+    detail: (d) => {
+      const extra = get(d, 'extra');
+      const changed = extra && typeof extra === 'object' ? names(extra as Detail, 'changed') : null;
+      return sentence([`changed ${changed ?? 'nothing'} of ${text(d, 'name') ?? 'an MCP server'}`]);
+    },
+  },
+  'mcp.server-removed': {
+    did: 'removed an MCP server',
+    detail: (d) => {
+      const extra = get(d, 'extra');
+      const teams = extra && typeof extra === 'object' ? names(extra as Detail, 'teams') : null;
+      return sentence([`removed ${text(d, 'name') ?? 'an MCP server'}`, teams && `taken from ${teams}`]);
+    },
+  },
+  'mcp.server-checked': {
+    did: 'checked an MCP server',
+    detail: (d) =>
+      sentence([
+        text(d, 'outcome') === 'ok'
+          ? `${text(d, 'name') ?? 'it'} works`
+          : text(d, 'outcome') === 'refused'
+            ? `${text(d, 'name') ?? 'it'} needs a person`
+            : `${text(d, 'name') ?? 'it'} was not reached`,
+        text(d, 'sentence'),
+      ]),
+  },
+  'team.mcp-server-assigned': {
+    did: 'gave an MCP server to a team',
+    detail: (d) => sentence([`${text(d, 'name') ?? text(d, 'server') ?? 'an MCP server'} to ${text(d, 'team') ?? 'the team'}`]),
+  },
+  'team.mcp-server-removed': {
+    did: 'took an MCP server off a team',
+    detail: (d) =>
+      sentence([
+        `${text(d, 'name') ?? text(d, 'server') ?? 'an MCP server'} from ${text(d, 'team') ?? 'the team'}`,
+        text(d, 'reason'),
+      ]),
+  },
   'connections.password-updated': {
     did: "updated a mailbox's password",
     detail: (d) =>

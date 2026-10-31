@@ -65,6 +65,12 @@ export const PluginsAction = 'admin-plugins';
  */
 export const ConnectionsAction = 'admin-connections';
 
+/**
+ * Admin > MCP servers, the instance's MCP servers that Team settings gives to teams. LAST, after
+ * Settings, so Sites, Plugins, Connections and Settings keep their order.
+ */
+export const McpServersAction = 'admin-mcp-servers';
+
 /** Admin > Repositories, the instance's local repositories: listed, and deleted after asking. */
 export const RepositoriesAction = 'admin-repositories';
 
@@ -211,6 +217,7 @@ export const Ribbon: RibbonSpec = {
           size: 'large',
           tooltip: 'Instance-wide settings: admission, spend, Concierge, sweeps, kanban',
         },
+        { kind: 'button', action: McpServersAction, label: 'MCP servers', icon: 'hub', size: 'large' },
       ],
     },
   ],

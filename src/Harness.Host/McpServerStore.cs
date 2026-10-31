@@ -152,7 +152,7 @@ public sealed class McpServerStore(string databasePath, IDataProtectionProvider 
                     connection_id = $connection, field = $field, header_name = $header, value_template = $template,
                     command = $command, package = $package, version = $version, args_json = $args, env_json = $env,
                     status = $status, status_reason = NULL,
-                    tools_json = CASE WHEN $kind = 'web' THEN tools_json ELSE NULL END, updated_at = $updated
+                    tools_json = CASE WHEN $kind = 'url' THEN tools_json ELSE NULL END, updated_at = $updated
                 WHERE id = $id
                 """;
             McpServerRows.Settings(command, "$", server, _cipher.ProtectOrNull(url));

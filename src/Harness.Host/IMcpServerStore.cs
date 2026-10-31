@@ -31,7 +31,7 @@ public sealed record McpServerRecord(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt)
 {
-    public const string Web = "web";
+    public const string Web = "url";
 
     public const string Runs = "runs";
 

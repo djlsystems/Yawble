@@ -111,7 +111,7 @@ public sealed class SqlServerMcpServerStore(string connectionString, IDataProtec
                          connection_id = @connection, field = @field, header_name = @header, value_template = @template,
                          command = @command, package = @package, version = @version, args_json = @args, env_json = @env,
                          status = @status, status_reason = NULL,
-                         tools_json = CASE WHEN @kind = N'web' THEN tools_json ELSE NULL END, updated_at = @updated
+                         tools_json = CASE WHEN @kind = N'url' THEN tools_json ELSE NULL END, updated_at = @updated
                      WHERE {IdMatch}
                      """))
                 {
