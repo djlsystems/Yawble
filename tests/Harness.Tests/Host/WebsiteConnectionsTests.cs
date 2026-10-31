@@ -104,7 +104,17 @@ public sealed class WebsiteConnectionsTests : IAsyncLifetime
         await _site.StartAsync(Ct);
         _origin = _site.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
 
-        _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host => host
+        _factory = Factory();
+
+        _team = (await Services.GetRequiredService<TeamRegistry>().CreateAsync("Alpha", "claude-headless", memberAgent: "claude-headless", ct: Ct)).Id;
+        await Services.GetRequiredService<IUserStore>().CreateAsync(Email, Password);
+        _person = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        (await _person.PostAsJsonAsync("/api/auth/login", new { email = Email, password = Password }, Ct)).EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.OK, (await _person.PostAsJsonAsync($"/api/teams/{_team}/containers", new { name = "Dev", agent = "claude-headless" }, Ct)).StatusCode);
+    }
+
+    private WebApplicationFactory<Program> Factory() =>
+        new WebApplicationFactory<Program>().WithWebHostBuilder(host => host
             .UseSetting("DataRoot", _dataRoot)
             .UseSetting("Logging:LogLevel:Default", "Warning")
             .ConfigureTestServices(services =>
@@ -114,11 +124,15 @@ public sealed class WebsiteConnectionsTests : IAsyncLifetime
                 services.AddSingleton(new ConnectionTester(website: new WebsiteRunner(environment: new Dictionary<string, string> { ["WEB_CREDENTIALS_PACE"] = "0.2" })));
             }));
 
-        _team = (await Services.GetRequiredService<TeamRegistry>().CreateAsync("Alpha", "claude-headless", memberAgent: "claude-headless", ct: Ct)).Id;
-        await Services.GetRequiredService<IUserStore>().CreateAsync(Email, Password);
+    /// <summary>The Host stopped and started again on the same data root, signed in as the person.</summary>
+    private async Task RestartAsync()
+    {
+        _person.Dispose();
+        await _factory.DisposeAsync();
+        SqliteConnection.ClearAllPools();
+        _factory = Factory();
         _person = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         (await _person.PostAsJsonAsync("/api/auth/login", new { email = Email, password = Password }, Ct)).EnsureSuccessStatusCode();
-        Assert.Equal(HttpStatusCode.OK, (await _person.PostAsJsonAsync($"/api/teams/{_team}/containers", new { name = "Dev", agent = "claude-headless" }, Ct)).StatusCode);
     }
 
     public async ValueTask DisposeAsync()
@@ -270,6 +284,138 @@ public sealed class WebsiteConnectionsTests : IAsyncLifetime
         Assert.Equal(ConnectionRecord.Ok, (string?)(await ConnectionAsync(down))["status"]);
 
         await AssertNowhereAsync(SitePassword, "not-the-password-1");
+    }
+
+    // ---- Done when 3 -----------------------------------------------------------------------------------
+
+    /// <summary>The Web Credentials plugin's entries table and settings, as its manifest declares them.</summary>
+    private const string WebCredentialsConfig = """
+        {
+          "languages": { "type": "list", "default": ["en-US"], "advanced": true, "setBy": "person" },
+          "timeZone": { "type": "string", "default": "UTC", "advanced": true, "setBy": "person" },
+          "entries": {
+            "type": "table",
+            "key": "name",
+            "columns": [
+              { "name": "name", "type": "string", "required": true },
+              { "name": "siteUrl", "type": "string", "format": "url", "required": true },
+              { "name": "hosts", "type": "string" },
+              { "name": "method", "type": "enum", "enum": ["password", "token", "interactive"], "required": true },
+              { "name": "active", "type": "bool", "default": true },
+              { "name": "signInUrl", "type": "string", "format": "url" },
+              { "name": "checkUrl", "type": "string", "format": "url" },
+              { "name": "checkText", "type": "string" },
+              { "name": "username", "type": "string" },
+              { "name": "password", "type": "secret" },
+              { "name": "totpSecret", "type": "secret" },
+              { "name": "token", "type": "secret" },
+              { "name": "tokenHeader", "type": "string", "default": "Authorization" },
+              { "name": "session", "type": "secret", "readOnly": true },
+              { "name": "status", "type": "string", "readOnly": true }
+            ],
+            "rowActions": [ { "action": "sign-in", "label": "Sign in", "when": { "column": "method", "equals": "interactive" } } ]
+          }
+        }
+        """;
+
+    [Fact]
+    public async Task An_existing_instances_Web_Credentials_entries_become_website_connections_assigned_to_their_teams_and_work_through_Team_Connections()
+    {
+        Assert.SkipWhen(SignInBrowserChromiumTests.Chromium() is null, SignInBrowserChromiumTests.NoChrome);
+
+        // AN INSTANCE FROM BEFORE THIS STEP: a Web Credentials member with a password entry and an entry a
+        // person signed in to with its Sign in link.
+        PluginInstall.Write(_dataRoot, WebCredentialsCarryOver.PluginId, "1.0.0", manifest: PluginInstall.Manifest(WebCredentialsCarryOver.PluginId, "1.0.0",
+            m => m["config"] = JsonNode.Parse(WebCredentialsConfig)));
+        await RestartAsync();
+        var hired = await _person.PostAsJsonAsync($"/api/teams/{_team}/containers", new { name = "Creds", agent = $"plugin:{WebCredentialsCarryOver.PluginId}" }, Ct);
+        Assert.True(hired.IsSuccessStatusCode, await hired.Content.ReadAsStringAsync(Ct));
+        var rows = $$"""
+            [
+              {"name":"portal-admin","siteUrl":"{{_origin}}","method":"password","signInUrl":"/login","checkUrl":"/dashboard","checkText":"Signed in as","username":"{{SiteUser}}"},
+              {"name":"saved","siteUrl":"{{_origin}}","method":"interactive","checkUrl":"/dashboard","checkText":"Signed in as"}
+            ]
+            """;
+        var saved = await _person.PutAsJsonAsync($"/api/teams/{_team}/members/Creds/plugin-settings", new
+        {
+            config = new Dictionary<string, JsonElement>
+            {
+                ["entries"] = JsonDocument.Parse(rows).RootElement.Clone(),
+                ["languages"] = JsonDocument.Parse("""["en-gb"]""").RootElement.Clone(),
+            },
+        }, Ct);
+        Assert.True(saved.IsSuccessStatusCode, await saved.Content.ReadAsStringAsync(Ct));
+
+        _live.Add(Session);
+        var session = SignInSessionValue.Write(
+            $$"""{"cookies":[{"name":"sess","value":"{{Session}}","domain":"127.0.0.1","path":"/","expires":{{DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds()}},"httpOnly":false,"secure":false,"sameSite":"Lax"}],"origins":[]}""",
+            new SignInBrowserIdentity("chrome", "156.0.0.0", "Mozilla/5.0", new SignInUserAgentMetadata([], [], "Linux", "", "x86", "", false, "64"),
+                "en-GB", ["en-GB", "en"], "Europe/London", new SignInBrowserSize(1920, 1080), new SignInBrowserSize(1280, 800), 1));
+        var cells = Services.GetRequiredService<PluginMemberSecretStore>();
+        var creds = new ContainerId(_team, "Creds");
+        var actor = new CredentialActor(null, Email);
+        await cells.SetCellAsync(creds, "Creds", WebCredentialsCarryOver.PluginId, "entries", "portal-admin", "password", SitePassword, actor, Ct);
+        await cells.SetCellAsync(creds, "Creds", WebCredentialsCarryOver.PluginId, "entries", "saved", "session", session, actor, Ct);
+
+        // This start already ran the step, with nothing to carry: the instance is made one from before it.
+        await using (var db = new SqliteConnection($"Data Source={Path.Combine(_dataRoot, "messages.db")}"))
+        {
+            await db.OpenAsync(Ct);
+            var forget = db.CreateCommand();
+            forget.CommandText = "DELETE FROM tenant_events WHERE action = $action";
+            forget.Parameters.AddWithValue("$action", TenantActions.ConnectionsCarriedOver);
+            Assert.Equal(1, await forget.ExecuteNonQueryAsync(Ct));
+        }
+
+        // THE FIRST START WITH THIS STEP.
+        await RestartAsync();
+
+        var connections = JsonNode.Parse(await _person.GetStringAsync("/api/connections", Ct))!.AsArray();
+        var admin = connections.Single(c => (string?)c!["name"] == "Alpha portal-admin")!;
+        var kept = connections.Single(c => (string?)c!["name"] == "Alpha saved")!;
+        Assert.Equal(["website", "website"], new[] { (string?)admin["kind"], (string?)kept["kind"] });
+        string? Field(JsonNode c, string name) => (string?)c["fields"]!.AsArray().Single(f => (string?)f!["name"] == name)!["value"];
+        bool Set(JsonNode c, string name) => c["fields"]!.AsArray().Single(f => (string?)f!["name"] == name)!["set"]!.GetValue<bool>();
+        Assert.Equal(("password", "/login", "en-GB", "false"), (Field(admin, "method"), Field(admin, "signInUrl"), Field(admin, "languages"), Field(admin, "mayAct")));
+        Assert.True(Set(admin, "password"));
+        Assert.True(Set(kept, "session"));
+        var assigned = (await Services.GetRequiredService<IConnectionStore>().AssignedAsync(_team, Ct)).Select(a => a.ConnectionId).ToHashSet();
+        Assert.Contains((string)admin["id"]!, assigned);
+        Assert.Contains((string)kept["id"]!, assigned);
+
+        // ONE ROW naming how many, and never a value; the plugin's own member stays.
+        var detail = await CarriedOverDetailAsync();
+        Assert.Single(detail);
+        Assert.Equal(2, JsonNode.Parse(detail[0])!["count"]!.GetValue<int>());
+        Assert.NotNull(Services.GetRequiredService<ContainerHost>().Find(creds));
+
+        // THEY WORK THROUGH TEAM CONNECTIONS: the password one signs in, the saved one uses its session.
+        using var dev = await KeyClientAsync(new ContainerId(_team, "Dev").ToString());
+        var signedIn = Output(await TellAndAwaitAsync(dev, "check Alpha portal-admin"));
+        Assert.Contains("Signed in as Pat", signedIn, StringComparison.Ordinal);
+        var used = Output(await TellAndAwaitAsync(dev, "check Alpha saved"));
+        Assert.Contains("Signed in as Pat", used, StringComparison.Ordinal);
+
+        // ONCE: a later start makes nothing again.
+        await RestartAsync();
+        Assert.Single(await CarriedOverDetailAsync());
+        Assert.Single(JsonNode.Parse(await _person.GetStringAsync("/api/connections", Ct))!.AsArray(), c => (string?)c!["name"] == "Alpha portal-admin");
+
+        foreach (var row in detail) Assert.DoesNotContain(SitePassword, row, StringComparison.Ordinal);
+        await AssertNowhereAsync(SitePassword, Session);
+    }
+
+    private async Task<IReadOnlyList<string>> CarriedOverDetailAsync()
+    {
+        await using var db = new SqliteConnection($"Data Source={Path.Combine(_dataRoot, "messages.db")}");
+        await db.OpenAsync(Ct);
+        var read = db.CreateCommand();
+        read.CommandText = "SELECT detail FROM tenant_events WHERE action = $action";
+        read.Parameters.AddWithValue("$action", TenantActions.ConnectionsCarriedOver);
+        var rows = new List<string>();
+        await using var reader = await read.ExecuteReaderAsync(Ct);
+        while (await reader.ReadAsync(Ct)) rows.Add(reader.GetString(0));
+        return rows;
     }
 
     // ---- helpers ---------------------------------------------------------------------------------------
