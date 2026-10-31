@@ -233,6 +233,8 @@ const repositoriesOpen = ref(false);
 const outcomesOpen = ref(false);
 /** The outcome the Outcomes dialog opens at (the palette's outcome row), or null for the list. */
 const outcomesAt = ref<string | null>(null);
+/** Whether the Outcomes dialog opens at its rate (the Cost dialog's "Change in Outcomes"). */
+const outcomesRate = ref(false);
 /** Admin > Sites, and Active Team > Sites, which is the same screen with `sitesTeam` set. */
 const sitesOpen = ref(false);
 const sitesTeam = ref<TeamId | null>(null);
@@ -248,6 +250,19 @@ watch(
     gitOpen.value = true;
   },
 );
+/** The Cost dialog's "Change in Outcomes": the Outcomes dialog, at its rate. */
+watch(
+  () => workflowNav.outcomeRateAsks,
+  () => {
+    conciergeOpen.value = false;
+    outcomesAt.value = null;
+    outcomesRate.value = true;
+    outcomesOpen.value = true;
+  },
+);
+watch(outcomesOpen, (isOpen) => {
+  if (!isOpen) outcomesRate.value = false;
+});
 const tenantLogOpen = ref(false);
 /** Admin → Diagnostics. Beside the tenant log on the ribbon and a different store: `Log` is what a
  *  person did to the instance, this is what the instance did when it went wrong. */
@@ -782,7 +797,7 @@ async function signOut() {
     <McpServersDialog v-model="mcpServersOpen" />
     <ConnectionsDialog v-model="connectionsOpen" :notice="connectionNotice" />
     <LocalReposDialog v-model="repositoriesOpen" />
-    <OutcomesDialog v-model="outcomesOpen" :outcome="outcomesAt" />
+    <OutcomesDialog v-model="outcomesOpen" :outcome="outcomesAt" :rate="outcomesRate" />
     <LogoAnimationDialog v-model="logoAnimationOpen" />
     <CommandPalette v-if="session.user" v-model:open="paletteOpen" @action="onRibbonAction" @outcome="openOutcome" />
     <SitesDialog v-model="sitesOpen" :team="sitesTeam" />

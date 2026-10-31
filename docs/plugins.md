@@ -349,8 +349,9 @@ Content-Type: application/json
   (`An_item_blocked_by_a_run_still_working_is_not_listed_as_a_finished_run`). An agent member's
   run that blocked every item is listed the same way; it recorded no transcript, so there is
   nothing to open.
-- **Team KPI card.** On a team whose every member is a plugin, the Tokens tile reads `none` with no
-  advice about usage capture, and the workflow tile draws no budget line or bar.
+- **Team KPI card.** On a team whose every member is a plugin, the Cost dialog's Tokens tab says
+  plugins run no model, with no advice about usage capture, and the workflow tile draws no budget
+  line or bar.
 
 ## Manifest v1 (`plugin.json`)
 

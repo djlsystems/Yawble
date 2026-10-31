@@ -169,12 +169,12 @@ async function mountStrip(props: Record<string, unknown> = {}) {
 const tile = () => wrapper!.find('.team-kpi--statistics');
 
 describe('the Activity tile', () => {
-  it('sits between the Workflow tile and the Tokens tile', async () => {
+  it('sits between the Workflow tile and the Cost tile', async () => {
     await mountStrip();
 
     const tiles = wrapper!.findAll('.team-kpi-strip > .team-kpi').map((t) => t.find('.team-kpi-label').text());
 
-    expect(tiles.map((label) => label.split(/\s/)[0])).toEqual(['Workflow', 'Activity', 'Tokens']);
+    expect(tiles.map((label) => label.split(/\s/)[0])).toEqual(['Workflow', 'Activity', 'Cost']);
   });
 
   it('draws one lane per current member with its initials, the Manager first, then board order', async () => {

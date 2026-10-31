@@ -86,6 +86,8 @@ const open = defineModel<boolean>({ required: true });
 const props = defineProps<{
   /** An outcome id to open at, or null for the list. */
   outcome?: string | null;
+  /** Open with the rate (currency, agent hourly rate) dialog showing: the Cost dialog's link. */
+  rate?: boolean;
 }>();
 
 /**
@@ -154,7 +156,10 @@ function liveOptions(except: string | null) {
 
 watch(open, (showing) => {
   if (!showing) return;
-  void load();
+  // AT THE RATE: once the list has answered, so the rate dialog opens with the instance's own figures.
+  void load().then(() => {
+    if (props.rate && open.value) askPricing();
+  });
   if (props.outcome) void select(props.outcome);
   else closeDetail();
 }, { immediate: true });
