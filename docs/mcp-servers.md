@@ -90,6 +90,9 @@ are offered there: every agent CLI gets them at once, and no credential leaves t
   its own, or one of its own and one another web-address entry last listed - fails its check with a sentence
   naming both (``Tool `get.page` of fake and tool `getpage` of fake would both be named `fake_getpage` …``) and
   keeps nothing it listed. Should a server start listing such a pair later, both are left out of the run.
+  The platform's own tools count too: an entry `skills` whose server offers `get` would be `skills_get`, so the
+  save fails (``Tool `get` of skills and the platform's own tool `skills_get` would both be named …``) and a run
+  leaves that tool out. A platform tool is never shadowed or listed twice.
 - **A call.** The Host finds the server and tool from the name (the run's list first, then what every entry
   last listed), checks the caller's team holds the server at that moment, and forwards `tools/call` with the
   credential added. Not held - another team's tool, or one taken off the team during the run - answers
@@ -97,12 +100,18 @@ are offered there: every agent CLI gets them at once, and no credential leaves t
   When the server answers an error and no longer lists the tool, the answer is "`<server>` no longer offers
   `<tool>`."
 - **Limits.** A call with no answer in 120 seconds fails with "`<server>` did not answer." The run goes on.
+  The Host reads at most 64 MB of one answer; a bigger one is dropped whole and the result says so, with the
+  20 MB rule. codex is launched with `mcp_servers.harness.tool_timeout_sec=180`, so its own client waits past the
+  Host's 120 s.
 - **Binary results.** Image, audio and embedded-resource (`blob`) bytes are written into the caller's working
   copy - the card's tree when it has one, else the member's working folder - under
   `.harness/mcp/<server>/<UTC yyyyMMdd-HHmmss>-<n>.<ext>`, the extension from the MIME type (`bin` when
   unknown). An `outputPath` (or `output_path`) argument naming a relative path inside the working copy is used
   instead (`name-2.ext` and on for a second block); a path outside it, absolute, or through a link that leads
-  out is refused before the call is sent. In the result, each block becomes a text block holding
+  out is refused before the call is sent. Nothing is written through a link: when a folder on the way (the
+  default `.harness/mcp/<server>` included) or the file itself is a link, the block is not written, a line says
+  so and the result is an error. The bytes go to a new file in that folder, created exclusively, and are renamed
+  into place, so a link made at the name in between is replaced, never followed. In the result, each block becomes a text block holding
   `{"path", "mimeType", "bytes"}`, the path absolute. At most 20 MB is written per call; a block past that is
   dropped and a line says which and how big.
 - **Text** passes through, cut at 100,000 characters across the result's text blocks, with a line saying the

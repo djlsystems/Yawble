@@ -146,7 +146,22 @@ public sealed class McpForwarding(HttpMessageHandler? handler = null, TimeSpan? 
 
             if (response.Headers.TryGetValues("Mcp-Session-Id", out var ids) && ids.FirstOrDefault() is { Length: > 0 } session) _id ??= session;
 
-            var message = await ReadAsync(response, id, ct);
+            var (message, tooBig) = await ReadAsync(response, id, ct);
+
+            // AN ANSWER PAST THE BODY LIMIT is not read to its end; a call's result still says what was dropped.
+            if (tooBig)
+            {
+                var sentence = $"The answer from {Host(target)} was more than {MaximumBody / (1024 * 1024)} MB and was dropped whole: "
+                    + "at most 20 MB of binary results is written per call.";
+                return method == "tools/call"
+                    ? McpForwarded.Answered(new JsonObject
+                    {
+                        ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = sentence }),
+                        ["isError"] = true,
+                    })
+                    : McpForwarded.Failed(sentence);
+            }
+
             if (message is not JsonObject answer) return McpForwarded.Failed($"{Host(target)} did not answer as an MCP server.");
 
             if (answer["error"] is JsonObject error) return McpForwarded.Refused(Text(error["message"]) is { Length: > 0 } said ? said : "no reason given");
@@ -190,7 +205,7 @@ public sealed class McpForwarding(HttpMessageHandler? handler = null, TimeSpan? 
         }
 
         /// <summary>The JSON-RPC answer to request <paramref name="id"/>: the body, or the event carrying that id.</summary>
-        private async Task<JsonNode?> ReadAsync(HttpResponseMessage response, int id, CancellationToken ct)
+        private async Task<(JsonNode? Message, bool TooBig)> ReadAsync(HttpResponseMessage response, int id, CancellationToken ct)
         {
             await using var stream = await response.Content.ReadAsStreamAsync(ct);
             using var reader = new StreamReader(stream, Encoding.UTF8);
@@ -202,10 +217,10 @@ public sealed class McpForwarding(HttpMessageHandler? handler = null, TimeSpan? 
                 while (await reader.ReadAsync(buffer.AsMemory(), ct) is var n and > 0)
                 {
                     body.Append(buffer, 0, n);
-                    if (body.Length > MaximumBody) return null;
+                    if (body.Length > MaximumBody) return (null, true);
                 }
 
-                return Parse(body.ToString());
+                return (Parse(body.ToString()), false);
             }
 
             var data = new StringBuilder();
@@ -213,7 +228,7 @@ public sealed class McpForwarding(HttpMessageHandler? handler = null, TimeSpan? 
             while (await reader.ReadLineAsync(ct) is { } line)
             {
                 total += line.Length;
-                if (total > MaximumBody) return null;
+                if (total > MaximumBody) return (null, true);
 
                 if (line.StartsWith("data:", StringComparison.Ordinal))
                 {
@@ -226,13 +241,13 @@ public sealed class McpForwarding(HttpMessageHandler? handler = null, TimeSpan? 
                 if (Parse(data.ToString()) is JsonObject message && message["id"] is JsonValue value
                     && value.TryGetValue<int>(out var answered) && answered == id)
                 {
-                    return message;
+                    return (message, false);
                 }
 
                 data.Clear();
             }
 
-            return data.Length > 0 ? Parse(data.ToString()) : null;
+            return (data.Length > 0 ? Parse(data.ToString()) : null, false);
         }
 
         private static JsonNode? Parse(string text)

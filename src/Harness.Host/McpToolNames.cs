@@ -1,5 +1,7 @@
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
+using ModelContextProtocol.Server;
 
 namespace Harness.Host;
 
@@ -21,6 +23,14 @@ public static class McpToolNames
     public const int Longest = Limit - 14;
 
     private const int HashLength = 8;
+
+    /// <summary>The platform's own tools' names: a server's tool named the same is never listed, so it cannot
+    /// shadow one or be listed beside it.</summary>
+    public static readonly IReadOnlySet<string> Platform = typeof(PlatformMcpTools)
+        .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
+        .Select(m => m.GetCustomAttribute<McpServerToolAttribute>()?.Name)
+        .OfType<string>()
+        .ToHashSet(StringComparer.Ordinal);
 
     public static string For(string server, string tool)
     {
