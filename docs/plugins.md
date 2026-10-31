@@ -1565,8 +1565,8 @@ the Host as `plugins/<id>/`, so it ships in the worker image (and the control im
 manifest) and is **versioned with the platform**: it changes only with a release.
 
 - **Listed and locked.** `GET /api/plugins` lists it with `builtIn: true` and `locked: true`,
-  `members: []` and no `marketplaceUrl`. Admin → Plugins shows it with a **Built-in** badge and no
-  Remove or View manifest. `DELETE /api/plugins/<id>` refuses it (409), an install of a folder whose
+  `members: []` and no `marketplaceUrl`. Admin → Plugins does not list it (a folder under
+  `<dataRoot>/plugins` that takes its id still shows there as a refused row, with the Host's sentence). `DELETE /api/plugins/<id>` refuses it (409), an install of a folder whose
   manifest takes its id is refused (409, whoever installs it, a solution install included), and a folder
   under `<dataRoot>/plugins` with its id is refused at every rescan: the platform's own is used.
 - **Never offered or hired.** It is not in the Marketplace, in Add member, or in the `hiring` tool's
