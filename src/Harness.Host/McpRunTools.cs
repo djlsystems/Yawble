@@ -74,6 +74,12 @@ public sealed class McpRunTools(
             log.LogWarning("Two tools of {Team}'s MCP servers would both be named {Name}; neither is listed for {Member}.", member.Team, name, member);
         }
 
+        foreach (var tool in tools.Where(t => McpToolNames.Platform.Contains(t.Name)))
+        {
+            log.LogWarning("Tool {Tool} of {Server} would be named {Name}, the platform's own tool; it is not listed for {Member}.", tool.Upstream, tool.Server.Name, tool.Name, member);
+            clashing.Add(tool.Name);
+        }
+
         var run = new RunTools(member.Team, workingCopy, [.. tools.Where(t => !clashing.Contains(t.Name))]);
         var key = member.ToString();
         _runs[key] = run;
@@ -243,6 +249,7 @@ public sealed class McpRunTools(
         var written = 0L;
         var stamp = clock.GetUtcNow().UtcDateTime.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
         var n = 0;
+        var refused = false;
 
         foreach (var block in content.OfType<JsonObject>())
         {
@@ -278,8 +285,14 @@ public sealed class McpRunTools(
 
             n++;
             var path = output is null ? Default(workingCopy, server, stamp, ref n, mime) : Numbered(output, n);
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllBytes(path, bytes);
+            if (!Write(workingCopy, path, bytes))
+            {
+                refused = true;
+                notes.Add($"A {mime} result of {bytes.Length} bytes from {server} was not written: "
+                    + $"`{Path.GetRelativePath(workingCopy, path)}` is or passes through a link, which could lead outside your working copy.");
+                continue;
+            }
+
             written += bytes.Length;
 
             shaped.Add(new JsonObject
@@ -292,7 +305,8 @@ public sealed class McpRunTools(
         foreach (var note in notes) shaped.Add(new JsonObject { ["type"] = "text", ["text"] = note });
 
         var answer = new JsonObject { ["content"] = shaped };
-        if (result["isError"] is { } isError) answer["isError"] = isError.DeepClone();
+        if (refused) answer["isError"] = true;
+        else if (result["isError"] is { } isError) answer["isError"] = isError.DeepClone();
         if (result["structuredContent"] is { } structured) answer["structuredContent"] = structured.DeepClone();
         if (result["_meta"] is { } meta) answer["_meta"] = meta.DeepClone();
 
@@ -318,6 +332,46 @@ public sealed class McpRunTools(
 
         var mime = holder["mimeType"] is JsonValue m && m.TryGetValue<string>(out var said) && said.Length > 0 ? said : "application/octet-stream";
         return (data, mime);
+    }
+
+    /// <summary>
+    /// <paramref name="bytes"/> written at <paramref name="path"/>, inside <paramref name="workingCopy"/>, never through a
+    /// link: every folder on the way, made here or already there, and the file itself must not be one. The Host may
+    /// write with more rights than the member, so a link the member made must not carry the bytes elsewhere. The
+    /// bytes go to a new file first (created exclusively, which does not follow a link) and are renamed into place,
+    /// which replaces a name rather than following it. False, with nothing written, when a link is in the way.
+    /// </summary>
+    public static bool Write(string workingCopy, string path, byte[] bytes)
+    {
+        var root = Path.GetFullPath(workingCopy).TrimEnd(Path.DirectorySeparatorChar);
+        var whole = Path.GetFullPath(path);
+        if (!whole.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal)) return false;
+
+        var folder = root;
+        foreach (var part in Path.GetRelativePath(root, Path.GetDirectoryName(whole)!).Split(Path.DirectorySeparatorChar))
+        {
+            if (part is "." or "") continue;
+            folder = Path.Combine(folder, part);
+            if (new DirectoryInfo(folder).LinkTarget is not null || File.Exists(folder)) return false;
+            Directory.CreateDirectory(folder);
+        }
+
+        var file = new FileInfo(whole);
+        if (file.LinkTarget is not null || Directory.Exists(whole)) return false;
+
+        var temp = Path.Combine(folder, $".{Path.GetFileName(whole)}.{Guid.NewGuid():N}.part");
+        try
+        {
+            using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None)) stream.Write(bytes);
+            File.Move(temp, whole, overwrite: true);
+        }
+        catch
+        {
+            File.Delete(temp);
+            throw;
+        }
+
+        return true;
     }
 
     private static string Default(string workingCopy, string server, string stamp, ref int n, string mime)

@@ -190,6 +190,7 @@ public sealed class CodexMcpWiringTests
     [
         "-c", "mcp_servers.harness.url=\"{mcpUrl}\"",
         "-c", "mcp_servers.harness.env_http_headers={\"X-Api-Key\"=\"HARNESS_KEY\"}",
+        "-c", "mcp_servers.harness.tool_timeout_sec=180",
     ];
 
     [Fact]

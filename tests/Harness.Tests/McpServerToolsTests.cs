@@ -324,18 +324,57 @@ public sealed class McpServerToolsTests
         Assert.DoesNotContain("getpage", tested.GetProperty("server").GetProperty("tools").EnumerateArray().Select(t => t.GetString()));
     }
 
+    private static McpServerRecord Entry(string id, string name, params string[] tools)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return new(id, name, McpServerRecord.Web, "https://x.test/mcp", null, null, null, null, null, null, null, [], [], McpServerRecord.Ok, null, tools, now, now, now);
+    }
+
     [Fact]
     public void A_clash_across_two_entries_names_both()
     {
-        var now = DateTimeOffset.UtcNow;
-        McpServerRecord Entry(string id, string name, params string[] tools) => new(
-            id, name, McpServerRecord.Web, "https://x.test/mcp", null, null, null, null, null, null, null, [], [], McpServerRecord.Ok, null, tools, now, now, now);
-
         var other = Entry("2", "a_b", "c");
         Assert.Equal(
             "Tool `b_c` of a and tool `c` of a_b would both be named `a_b_c` for members. Rename the entry or ask the server's owner to rename one; nothing listed was kept.",
             McpServers.Clash(Entry("1", "a"), ["b_c"], [other]));
         Assert.Null(McpServers.Clash(Entry("1", "a"), ["b_d"], [other]));
+    }
+
+    [Fact]
+    public void A_tool_that_would_take_a_platform_tools_name_fails_the_save_naming_both()
+    {
+        Assert.Contains("skills_get", McpToolNames.Platform);
+        Assert.Equal(
+            "Tool `get` of skills and the platform's own tool `skills_get` would both be named `skills_get` for members. "
+                + "Rename the entry or ask the server's owner to rename the tool; nothing listed was kept.",
+            McpServers.Clash(Entry("1", "skills"), ["search_all", "get"], []));
+        Assert.Null(McpServers.Clash(Entry("1", "skills"), ["fetch"], []));
+    }
+
+    [Fact]
+    public void A_binary_result_is_never_written_through_a_link()
+    {
+        var root = Directory.CreateTempSubdirectory("mcp-write-").FullName;
+        var outside = Directory.CreateTempSubdirectory("mcp-outside-").FullName;
+        try
+        {
+            File.CreateSymbolicLink(Path.Combine(root, "file.png"), Path.Combine(outside, "file.png"));
+            Directory.CreateSymbolicLink(Path.Combine(root, "dir"), outside);
+
+            Assert.False(McpRunTools.Write(root, Path.Combine(root, "file.png"), [1]));
+            Assert.False(McpRunTools.Write(root, Path.Combine(root, "dir", "a", "b.png"), [1]));
+            Assert.Empty(Directory.GetFileSystemEntries(outside));
+
+            Assert.True(McpRunTools.Write(root, Path.Combine(root, "new", "deep", "c.png"), [1, 2]));
+            Assert.True(McpRunTools.Write(root, Path.Combine(root, "new", "deep", "c.png"), [3]));
+            Assert.Equal([3], File.ReadAllBytes(Path.Combine(root, "new", "deep", "c.png")));
+            Assert.Single(Directory.GetFileSystemEntries(Path.Combine(root, "new", "deep")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+            Directory.Delete(outside, recursive: true);
+        }
     }
 
     [Fact]

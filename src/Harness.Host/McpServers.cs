@@ -311,6 +311,13 @@ public sealed partial class McpServers(IMcpServerStore store, Connections connec
     /// <summary>The sentence naming two tools whose names on the harness server would be the same, or null.</summary>
     public static string? Clash(McpServerRecord server, IReadOnlyList<string> tools, IReadOnlyList<McpServerRecord> all)
     {
+        if (tools.FirstOrDefault(t => McpToolNames.Platform.Contains(McpToolNames.For(server.Name, t))) is { } platform)
+        {
+            var name = McpToolNames.For(server.Name, platform);
+            return $"Tool `{platform}` of {server.Name} and the platform's own tool `{name}` would both be named `{name}` for members. "
+                + "Rename the entry or ask the server's owner to rename the tool; nothing listed was kept.";
+        }
+
         var listed = tools.Select(t => (Server: server.Name, Tool: t))
             .Concat(all.Where(o => o.Id != server.Id && o.Kind == McpServerRecord.Web && o.Name != server.Name)
                 .SelectMany(o => (o.Tools ?? []).Select(t => (Server: o.Name, Tool: t))));
