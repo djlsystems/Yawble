@@ -1,5 +1,7 @@
 **/.git
 **/bin
+# ...but a built-in plugin's executable (plugins/<id>/bin/run), which the image ships.
+!plugins/*/bin
 **/obj
 **/node_modules
 web/dist

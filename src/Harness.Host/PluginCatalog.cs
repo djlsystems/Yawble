@@ -26,11 +26,35 @@ namespace Harness.Host;
 /// A manifest that is wrong is REFUSED BY NAME, with the field, in <see cref="Refused"/> - never
 /// half-loaded.
 /// </summary>
+/// <para>
+/// THE BUILT-IN PLUGINS are the platform's own, from <paramref name="builtInRoot"/>
+/// (<c>plugins/&lt;id&gt;/plugin.json</c>, no version folder: the Host's build copies the repository's
+/// <c>plugins/</c> beside itself, so they ship in the image and are versioned with the platform). They are
+/// listed as <see cref="InstalledPlugin.BuiltIn"/> - locked: never uninstalled, never replaced by an
+/// install, never in the Marketplace or Add member, never hired by anyone. A folder under
+/// <paramref name="root"/> with a built-in's id is refused by name.
+/// </para>
+/// </summary>
 /// <param name="runtimeFound">Whether a runtime a manifest <c>requires</c> is on this Host's PATH.
 /// Null is <see cref="PathSearch.Find"/>; a test passes its own.</param>
-public sealed class PluginCatalog(string root, Func<string, bool>? runtimeFound = null) : IPluginEventRegistry
+/// <param name="builtInRoot">Where the built-in plugins are; null for none (most tests).</param>
+public sealed class PluginCatalog(string root, Func<string, bool>? runtimeFound = null, string? builtInRoot = null) : IPluginEventRegistry
 {
     public const string ActiveFile = "active";
+
+    /// <summary>Where a Host finds the built-in plugins: beside itself, as its build put them.</summary>
+    public static string BuiltInFolder => Path.Combine(AppContext.BaseDirectory, "plugins");
+
+    /// <summary>Where the built-in plugins are read from, or null.</summary>
+    public string? BuiltInRoot => builtInRoot;
+
+    /// <summary>Whether <paramref name="id"/> is a built-in plugin's, loaded or not.</summary>
+    public bool IsBuiltIn(string id) =>
+        builtInRoot is not null && MemberRef.IsValidPluginId(id) && File.Exists(Path.Combine(builtInRoot, id, PluginManifest.FileName));
+
+    /// <summary>Why a built-in plugin is refused a person's or an agent's hand, in one sentence.</summary>
+    public static string BuiltInRefusal(string id) =>
+        $"'{id}' is a built-in plugin: it ships with the platform, is never installed, uninstalled or replaced, and is never hired - the platform gives every team its member.";
 
     private volatile PluginScan _scan = new([], []);
 
@@ -72,7 +96,7 @@ public sealed class PluginCatalog(string root, Func<string, bool>? runtimeFound 
 
         try
         {
-            var scan = Scan(root, runtimeFound);
+            var scan = Scan(root, runtimeFound, builtInRoot);
             _scan = scan;
             await FollowAsync(_followers, scan);
             return scan;
@@ -150,10 +174,26 @@ public sealed class PluginCatalog(string root, Func<string, bool>? runtimeFound 
 
     private static bool OnPath(string runtime) => PathSearch.Find(runtime) is not null;
 
-    public static PluginScan Scan(string root, Func<string, bool>? runtimeFound = null)
+    public static PluginScan Scan(string root, Func<string, bool>? runtimeFound = null, string? builtInRoot = null)
     {
         var plugins = new List<InstalledPlugin>();
         var refused = new List<PluginRefused>();
+
+        // THE BUILT-INS FIRST, so an installed folder cannot take one's id.
+        var builtIns = new HashSet<string>(StringComparer.Ordinal);
+        if (builtInRoot is not null && Directory.Exists(builtInRoot))
+        {
+            foreach (var pluginDirectory in Directory.EnumerateDirectories(builtInRoot).Order(StringComparer.Ordinal))
+            {
+                var id = Path.GetFileName(pluginDirectory);
+                if (!MemberRef.IsValidPluginId(id) || !File.Exists(Path.Combine(pluginDirectory, PluginManifest.FileName))) continue;
+
+                builtIns.Add(id);
+                var (plugin, reason) = LoadBuiltIn(pluginDirectory, id, runtimeFound ?? OnPath);
+                if (plugin is not null) plugins.Add(plugin);
+                else refused.Add(new PluginRefused(id, pluginDirectory, reason!));
+            }
+        }
 
         if (!Directory.Exists(root)) return new PluginScan(plugins, refused);
 
@@ -171,6 +211,12 @@ public sealed class PluginCatalog(string root, Func<string, bool>? runtimeFound 
                 continue;
             }
 
+            if (builtIns.Contains(id))
+            {
+                refused.Add(new PluginRefused(id, pluginDirectory, $"'{id}' is a built-in plugin's id; the platform's own is used."));
+                continue;
+            }
+
             var (plugin, reason) = Load(pluginDirectory, id, runtimeFound ?? OnPath);
 
             if (plugin is not null) plugins.Add(plugin);
@@ -178,6 +224,28 @@ public sealed class PluginCatalog(string root, Func<string, bool>? runtimeFound 
         }
 
         return new PluginScan(plugins, refused);
+    }
+
+    /// <summary>A built-in plugin: its manifest directly in its folder, checked as an installed one is.</summary>
+    private static (InstalledPlugin? Plugin, string? Reason) LoadBuiltIn(string directory, string id, Func<string, bool> runtimeFound)
+    {
+        string json;
+
+        try
+        {
+            json = File.ReadAllText(Path.Combine(directory, PluginManifest.FileName));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return (null, $"the built-in {PluginManifest.FileName} could not be read: {exception.Message}");
+        }
+
+        var (manifest, refusal) = PluginManifest.Parse(json);
+        if (manifest is null) return (null, refusal);
+        if (manifest.Id != id) return (null, $"the manifest's `id` is '{manifest.Id}' but its directory is '{id}'.");
+
+        var (plugin, reason) = Check(directory, "built-in", manifest, runtimeFound, requireExecutableBit: true);
+        return (plugin is null ? null : plugin with { BuiltIn = true }, reason);
     }
 
     private static (InstalledPlugin? Plugin, string? Reason) Load(string pluginDirectory, string id, Func<string, bool> runtimeFound)
@@ -330,6 +398,10 @@ public sealed record InstalledPlugin(PluginManifest Manifest, string Directory, 
     /// <summary>Its skills as they are indexed: read from its files, names forced
     /// (<see cref="PluginSkills"/>).</summary>
     public IReadOnlyList<SkillDraft> Skills { get; init; } = [];
+
+    /// <summary>The platform's own (<see cref="PluginCatalog.BuiltInRoot"/>): locked, never hired,
+    /// installed, uninstalled or offered.</summary>
+    public bool BuiltIn { get; init; }
 }
 
 /// <summary>A plugin directory that was not loaded, and why, in one sentence.</summary>

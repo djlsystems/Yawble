@@ -75,6 +75,9 @@ public sealed class PluginRemover(PluginCatalog catalog, PluginInstaller install
             return PluginRemoveResult.Refused(400, $"'{version}' is not a plugin version.", id);
         }
 
+        // THE PLATFORM'S OWN PLUGIN is never uninstalled: it ships with the image.
+        if (catalog.IsBuiltIn(id)) return PluginRemoveResult.Refused(409, PluginCatalog.BuiltInRefusal(id), id, version);
+
         var pluginDirectory = Path.Combine(catalog.Root, id);
 
         if (!Directory.Exists(pluginDirectory))

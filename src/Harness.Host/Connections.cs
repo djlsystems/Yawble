@@ -87,8 +87,13 @@ public sealed record ConnectionActor(string Id, string? Email)
     /// <summary>The operator CLI's `connect`, through the file exchange: root on the instance.</summary>
     public static readonly ConnectionActor Operator = new("operator", "operator (CLI connect)");
 
+    /// <summary>A member asking through Team Connections (a test by name): no person's id, its name as who.</summary>
+    public static ConnectionActor ForMember(ContainerId member) => new(MemberPrefix + member, $"{TeamConnectionsMember.Label} for {member}");
+
+    private const string MemberPrefix = "member:";
+
     public TriggerAudit Row(string action, string? subject, string? subjectName, object detail) =>
-        new(this == Operator ? null : Id, Email, action, subject, subjectName, JsonSerializer.Serialize(detail));
+        new(this == Operator || Id.StartsWith(MemberPrefix, StringComparison.Ordinal) ? null : Id, Email, action, subject, subjectName, JsonSerializer.Serialize(detail));
 }
 
 /// <summary>

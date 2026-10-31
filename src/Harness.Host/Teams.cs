@@ -905,6 +905,10 @@ public sealed class TeamRegistry(
     // against the host by name, and then one container can come back as the card for two
     // different teams.
     private readonly Dictionary<string, List<ContainerId>> _teams = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The teams with at least one connection assigned: where Team Connections is shown.
+    /// Replaced whole by <see cref="RefreshConnectionPresenceAsync"/>.</summary>
+    private volatile IReadOnlySet<string> _withConnections = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     // Tenant-wide: one Concierge setting set for the whole tenant, then reused for every
     // team launch. NULL until somebody chooses: the launcher then picks the default.
     private string? _Concierge;
@@ -1428,6 +1432,9 @@ public sealed class TeamRegistry(
     {
         if (ExistingName(team) is not { } stored) return;
 
+        // THE PLATFORM'S OWN MEMBER never goes while its team does (a team's deletion is TeamDeletion's).
+        if (TeamConnectionsMember.Is(new ContainerId(stored, name))) throw new BuiltInMemberException(TeamConnectionsMember.ChangeRefused);
+
         await teams.DeleteMemberAsync(stored, name, ct);
 
         if (_teams.TryGetValue(stored, out var ids))
@@ -1567,6 +1574,7 @@ public sealed class TeamRegistry(
             // quadratic for nothing.
             _labels.GetValueOrDefault(team, team),
             [.. (_teams.GetValueOrDefault(team) ?? [])
+                .Where(Shows)
                 .Select(id => host.Find(id)?.Snapshot())
                 .OfType<ContainerSnapshot>()],
             ConciergeFor(team),
@@ -1711,6 +1719,7 @@ public sealed class TeamRegistry(
         _teams.TryGetValue(team, out var members)
             ? [.. members
                 .Where(m => !string.Equals(m.Name, DefaultManagerName, StringComparison.OrdinalIgnoreCase))
+                .Where(Shows)
                 .Select(RosterEntry)]
             : [];
 
@@ -2166,6 +2175,10 @@ public sealed class TeamRegistry(
         await AddContainerAsync(
             team, DefaultManagerName, agent, "", ManagerSubscriptions(), ManagerPermits, ct: ct);
 
+        // EVERY TEAM HAS ITS TEAM CONNECTIONS, from its creation; shown once it has a connection.
+        await EnsureTeamConnectionsAsync(team, ct);
+        await RefreshConnectionPresenceAsync(ct);
+
         if (validatedRepos.Count > 0)
             await WakeManagerForReposAsync(team, validatedRepos, ct, handleRepoSetup, atCreation: true);
 
@@ -2352,6 +2365,9 @@ public sealed class TeamRegistry(
         {
             if (string.Equals(id.Name, DefaultManagerName, StringComparison.OrdinalIgnoreCase)) continue;
 
+            // The clone has its own, made with it.
+            if (TeamConnectionsMember.Is(id)) continue;
+
             try
             {
                 var member = await MemberAsync(stored, id.Name, ct);
@@ -2440,6 +2456,9 @@ public sealed class TeamRegistry(
                 failures.Add($"{DefaultManagerName}: {exception.Message}");
             }
         }
+
+        // ITS ASSIGNMENTS WERE COPIED above, so its Team Connections shows when the original's did.
+        await RefreshConnectionPresenceAsync(ct);
 
         return new TeamCloneResult(
             // RE-READ rather than reusing `created`: the roster hires and the manager's override
@@ -2805,7 +2824,8 @@ public sealed class TeamRegistry(
         bool secretsSetLater = false,
         bool waitForPerson = false,
         IReadOnlySet<string>? valued = null,
-        Func<ContainerId, PluginMemberSettings, CancellationToken, Task>? saveSettings = null)
+        Func<ContainerId, PluginMemberSettings, CancellationToken, Task>? saveSettings = null,
+        bool builtIn = false)
     {
         if (!_teams.TryGetValue(team, out var members)) throw new InvalidOperationException($"No team '{team}'.");
 
@@ -2814,6 +2834,12 @@ public sealed class TeamRegistry(
         // ordering avoids too.
         // WHAT IT RUNS: an Agent preset, or `plugin:<id>` - see MemberRef.
         var isPlugin = MemberRef.IsPlugin(agent, out var pluginId);
+
+        // A BUILT-IN PLUGIN IS NEVER HIRED, and its member's name is the platform's: only the platform's
+        // own call (EnsureTeamConnectionsAsync) makes one, whoever else asks - a person, a Manager, the
+        // Concierge, a solution install or a clone.
+        if (!builtIn && isPlugin && IsBuiltInPlugin(pluginId!)) throw new BuiltInMemberException(PluginCatalog.BuiltInRefusal(pluginId!));
+        if (!builtIn && TeamConnectionsMember.IsReserved(label)) throw new BuiltInMemberException(TeamConnectionsMember.NameRefused);
 
         if (isPlugin && PluginRefusal(agent, pluginId!) is { } refusal)
         {
@@ -3155,6 +3181,15 @@ public sealed class TeamRegistry(
         var container = host.Find(id) ?? throw new InvalidOperationException($"No member '{name}'.");
         var member = await teams.MemberAsync(stored, name, ct) ?? throw new InvalidOperationException($"No member '{name}'.");
 
+        // THE PLATFORM'S OWN MEMBER is not renamed, re-instructed or repointed; no other member takes its
+        // name, and none is repointed onto a built-in plugin.
+        if (TeamConnectionsMember.Is(id)) throw new BuiltInMemberException(TeamConnectionsMember.ChangeRefused);
+        if (!string.IsNullOrWhiteSpace(label) && TeamConnectionsMember.IsReserved(label)) throw new BuiltInMemberException(TeamConnectionsMember.NameRefused);
+        if (!string.IsNullOrWhiteSpace(agent) && MemberRef.IsPlugin(agent.Trim(), out var askedPlugin) && IsBuiltInPlugin(askedPlugin!))
+        {
+            throw new BuiltInMemberException(PluginCatalog.BuiltInRefusal(askedPlugin!));
+        }
+
         // A repoint, when one was asked for. Absent and blank both mean "leave it alone", the same
         // two-state rule the label follows - there is no such thing as clearing a member's Agent.
         //
@@ -3425,6 +3460,89 @@ public sealed class TeamRegistry(
         !MemberRef.IsValidPluginId(pluginId)
             ? $"'{reference}' is not a plugin id: use lowercase letters, digits and hyphens, as in 'plugin:sample-echo'."
             : plugins?.RefusalFor(pluginId);
+
+    private bool IsBuiltInPlugin(string pluginId) =>
+        plugins is not null && (plugins.IsBuiltIn(pluginId) || plugins.For(pluginId) is { BuiltIn: true });
+
+    // ---- Team Connections (TeamConnectionsMember) -------------------------------------------------
+
+    /// <summary>Whether <paramref name="id"/> is shown - on the board, in status, in its Manager's roster:
+    /// every member, but Team Connections only while its team has a connection assigned.</summary>
+    public bool Shows(ContainerId id) => !TeamConnectionsMember.Is(id) || _withConnections.Contains(id.Team);
+
+    /// <summary>Whether <paramref name="team"/> has at least one connection assigned, as last read.</summary>
+    public bool HasConnections(string team) => _withConnections.Contains(team);
+
+    /// <summary>
+    /// Reads again which teams have a connection, after anything that assigns or removes one. A team
+    /// whose answer changed has its Manager re-prompted (its roster names Team Connections only while
+    /// shown) and its summary pushed, so the card appears or goes with no reload. Never fatal.
+    /// </summary>
+    public async Task RefreshConnectionPresenceAsync(CancellationToken ct = default)
+    {
+        // A registry with no connection store (a test's) shows Team Connections nowhere.
+        if (connections is null) return;
+
+        IReadOnlySet<string> now;
+        try
+        {
+            now = await TeamConnectionsMember.TeamsWithConnectionsAsync(connections, ct);
+        }
+        catch (Exception exception) when (exception is System.Data.Common.DbException or InvalidOperationException)
+        {
+            Console.WriteLine($"WARNING: which teams have a connection could not be read: {exception.Message}");
+            return;
+        }
+
+        var before = _withConnections;
+        _withConnections = new HashSet<string>(now, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var team in _teams.Keys.ToList().Where(t => before.Contains(t) != now.Contains(t)))
+        {
+            await RepromptManagerAsync(team, ct);
+            TeamChanged?.Invoke(SummaryFor(team, withRoot: false));
+        }
+    }
+
+    /// <summary>
+    /// Gives <paramref name="team"/> its Team Connections member when it has none: at creation, at a
+    /// clone, and at start for every team made before it existed. The platform's call, never a route's.
+    /// Nothing happens where the built-in plugin is not loaded (a test's registry with no catalog).
+    /// </summary>
+    public async Task EnsureTeamConnectionsAsync(string team, CancellationToken ct = default)
+    {
+        if (ExistingName(team) is not { } stored || !_teams.TryGetValue(stored, out var members)) return;
+        if (plugins?.For(TeamConnectionsMember.PluginId) is not { BuiltIn: true }) return;
+        if (members.Any(TeamConnectionsMember.Is)) return;
+
+        // A MEMBER ALREADY CALLED SO, from before the name was reserved, keeps its own name; the
+        // platform's member waits until it is renamed or removed, and says so.
+        if (members.Any(m => TeamConnectionsMember.IsReserved(LabelForContainer(m))))
+        {
+            Console.WriteLine($"WARNING: team '{stored}' has a member called '{TeamConnectionsMember.Label}' already; its built-in Team Connections member was not added.");
+            return;
+        }
+
+        await AddContainerAsync(stored, TeamConnectionsMember.Label, TeamConnectionsMember.Agent, "", [], ct: ct, builtIn: true);
+    }
+
+    /// <summary><see cref="EnsureTeamConnectionsAsync"/> for every team, then the presence read: at start.</summary>
+    public async Task EnsureAllTeamConnectionsAsync(CancellationToken ct = default)
+    {
+        foreach (var team in _teams.Keys.ToList())
+        {
+            try
+            {
+                await EnsureTeamConnectionsAsync(team, ct);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                Console.WriteLine($"WARNING: team '{team}' could not be given its Team Connections member: {exception.Message}");
+            }
+        }
+
+        await RefreshConnectionPresenceAsync(ct);
+    }
 
     /// <summary>Whether this id is its team's manager. Case-insensitive, matching ContainerId's own
     /// equality - `manager` and `Manager` are one container.</summary>
