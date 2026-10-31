@@ -148,6 +148,9 @@ internal sealed partial class HostComposition
             // or HARNESS_MICROSOFT_CLIENT_ID), used while no Microsoft client is saved; with none, Microsoft
             // waits for a person's own app.
             microsoftClientId: builder.Configuration[Connections.MicrosoftClientSetting] ?? builder.Configuration[Connections.MicrosoftClientVariable]));
+        // THE INSTANCE'S MCP SERVERS (MCP 1): the list, its checks on a worker, and which teams have each.
+        builder.Services.AddSingleton(sp => new McpServers(
+            sp.GetRequiredService<IMcpServerStore>(), sp.GetRequiredService<Connections>(), sp.GetRequiredService<TimeProvider>()));
         builder.Services.AddSingleton(sp => new ConnectRequests(
             sp.GetRequiredService<Connections>(), dataRoot, sp.GetRequiredService<ILogger<ConnectRequests>>(),
             sp.GetRequiredService<TeamRegistry>(), sp.GetRequiredService<IMemberReports>()));

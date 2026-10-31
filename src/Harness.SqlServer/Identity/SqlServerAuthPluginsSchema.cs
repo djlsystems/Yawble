@@ -201,5 +201,44 @@ public static class SqlServerAuthPluginsSchema
              FROM team_member_config c CROSS APPLY OPENJSON(c.connections_json) j
              WHERE j.[value] IN (SELECT id FROM connections) AND c.team IN (SELECT id FROM teams);
              """),
+
+        // `AuthSchema`'s auth-033: the instance's MCP servers and which teams were given each. `id` and
+        // `server_id` are NVARCHAR(64), compared exactly; `name` folds case and is unique, as SQLite's
+        // NOCASE column is; `team` folds case, as `teams.id`.
+        new MigrationStep(
+            "auth-033",
+            $"""
+             CREATE TABLE mcp_servers (
+                 id             NVARCHAR(64)  NOT NULL CONSTRAINT pk_mcp_servers PRIMARY KEY,
+                 name           NVARCHAR(200) COLLATE {SqlServerSql.NoCase} NOT NULL CONSTRAINT uq_mcp_servers_name UNIQUE,
+                 kind           NVARCHAR(40)  NOT NULL,
+                 url_shown      NVARCHAR(MAX) NULL,
+                 url_protected  NVARCHAR(MAX) NULL,
+                 connection_id  NVARCHAR(64)  NULL,
+                 field          NVARCHAR(MAX) NULL,
+                 header_name    NVARCHAR(MAX) NULL,
+                 value_template NVARCHAR(MAX) NULL,
+                 command        NVARCHAR(40)  NULL,
+                 package        NVARCHAR(MAX) NULL,
+                 version        NVARCHAR(MAX) NULL,
+                 args_json      NVARCHAR(MAX) NOT NULL DEFAULT N'{EmptyList}',
+                 env_json       NVARCHAR(MAX) NOT NULL DEFAULT N'{EmptyList}',
+                 status         NVARCHAR(40)  NOT NULL DEFAULT N'unchecked',
+                 status_reason  NVARCHAR(MAX) NULL,
+                 tools_json     NVARCHAR(MAX) NULL,
+                 checked_at     NVARCHAR(40)  NULL,
+                 created_at     NVARCHAR(40)  NOT NULL,
+                 updated_at     NVARCHAR(40)  NOT NULL
+             );
+
+             CREATE TABLE team_mcp_servers (
+                 team        NVARCHAR(200) COLLATE {SqlServerSql.NoCase} NOT NULL
+                             REFERENCES teams(id) ON DELETE CASCADE,
+                 server_id   NVARCHAR(64)  NOT NULL
+                             REFERENCES mcp_servers(id) ON DELETE CASCADE,
+                 assigned_at NVARCHAR(40)  NOT NULL,
+                 CONSTRAINT pk_team_mcp_servers PRIMARY KEY (team, server_id)
+             );
+             """),
     ];
 }

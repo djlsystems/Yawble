@@ -271,6 +271,28 @@ public static class TenantActions
     /// unbound in the same transaction. Detail: team, connection id, name, the members unbound.</summary>
     public const string TeamConnectionRemoved = "team.connection-removed";
 
+    /// <summary>An administrator added an MCP server to the instance's list. Detail: id, name, kind, the
+    /// URL without its query, the connection's id and name - never a value or a query string.</summary>
+    public const string McpServerAdded = "mcp.server-added";
+
+    /// <summary>An administrator edited an MCP server. Detail: as for an add, and the fields that changed.</summary>
+    public const string McpServerEdited = "mcp.server-edited";
+
+    /// <summary>An administrator removed an MCP server; every team it was given to lost it in the same
+    /// transaction, each with its own <see cref="TeamMcpServerRemoved"/> row. Detail names those teams.</summary>
+    public const string McpServerRemoved = "mcp.server-removed";
+
+    /// <summary>An MCP server was checked - on its save or by its Test: detail says the outcome (ok,
+    /// refused or failed), its sentence and how many tools it lists, never a value.</summary>
+    public const string McpServerChecked = "mcp.server-checked";
+
+    /// <summary>A person gave an MCP server to a team (Team settings → MCP servers). Detail: team, id, name.</summary>
+    public const string TeamMcpServerAssigned = "team.mcp-server-assigned";
+
+    /// <summary>An MCP server was taken off a team: by a person in Team settings, or because the entry
+    /// was removed from the instance (detail's <c>reason</c> says which). One row per team.</summary>
+    public const string TeamMcpServerRemoved = "team.mcp-server-removed";
+
     /// <summary>A person set a plugin key (a logical key such as ACME_STORAGE_KEY) from the screen
     /// where none was stored. Detail: the key - never the value or any part of it.</summary>
     public const string SecretSet = "secrets.set";

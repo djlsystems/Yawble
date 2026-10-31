@@ -83,6 +83,8 @@ public abstract class IdentityDatabase : IAsyncDisposable
 
     public abstract IConnectionStore Connections(IDataProtectionProvider protection);
 
+    public abstract IMcpServerStore McpServers(IDataProtectionProvider protection);
+
     public abstract IDatabaseHealth Health();
 
     /// <summary>The health probe of a database that does not exist.</summary>
@@ -196,6 +198,8 @@ public sealed class SqliteIdentityDatabase : IdentityDatabase
 
     public override IConnectionStore Connections(IDataProtectionProvider protection) => new ConnectionStore(_database.Path, protection);
 
+    public override IMcpServerStore McpServers(IDataProtectionProvider protection) => new McpServerStore(_database.Path, protection);
+
     public override IDatabaseHealth Health() => new SqliteDatabaseHealth(_database.Path);
 
     public override IDatabaseHealth MissingHealth() =>
@@ -288,6 +292,8 @@ public sealed class SqlServerIdentityDatabase : IdentityDatabase
     public override IPluginRemovalRows RemovalRows() => new SqlServerPluginRemovalRows(ConnectionString);
 
     public override IConnectionStore Connections(IDataProtectionProvider protection) => new SqlServerConnectionStore(ConnectionString, protection);
+
+    public override IMcpServerStore McpServers(IDataProtectionProvider protection) => new SqlServerMcpServerStore(ConnectionString, protection);
 
     public override IDatabaseHealth Health() => new SqlServerDatabaseHealth(ConnectionString);
 

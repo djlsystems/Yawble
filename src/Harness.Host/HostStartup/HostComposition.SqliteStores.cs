@@ -91,6 +91,7 @@ internal sealed partial class HostComposition
         // OAuth and mailbox connections. Registered as the class too, for the same reason as above.
         builder.Services.AddSingleton(sp => new ConnectionStore(database, sp.GetRequiredService<IDataProtectionProvider>()));
         builder.Services.AddSingleton<IConnectionStore>(sp => sp.GetRequiredService<ConnectionStore>());
+        builder.Services.AddSingleton<IMcpServerStore>(sp => new McpServerStore(database, sp.GetRequiredService<IDataProtectionProvider>()));
 
         // Order carries no schema obligation - SchemaMigrator above has already applied every step
         // and set journal_mode on the file. These are readers and writers over a database that exists.
