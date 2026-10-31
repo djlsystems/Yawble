@@ -168,6 +168,33 @@ public sealed class WorkerFrameTests
         Assert.Equal(WorkerFrameCodec.TooLargeText, read.Message);
     }
 
+    /// <summary>
+    /// A BINARY RESULT WRITTEN AS THE MEMBER carries up to 20 MB as base64, past <see cref="WorkerFrameCodec.MaxBytes"/>:
+    /// that one kind of frame is held to <see cref="WorkerFrameCodec.MaxWriteBytes"/> instead, and no other.
+    /// </summary>
+    [Fact]
+    public void A_binary_result_to_write_as_the_member_has_room_for_20_MB_and_no_other_frame_does()
+    {
+        var codec = new WorkerFrameCodec(Key);
+        var bytes = new byte[20 * 1024 * 1024];
+        Random.Shared.NextBytes(bytes);
+
+        var text = codec.Write(new CommandFrame(1, new WriteAsAgent("w1", "/w", "/w/x.png", bytes)));
+        Assert.True(Encoding.UTF8.GetByteCount(text) > WorkerFrameCodec.MaxBytes);
+        var write = Assert.IsType<WriteAsAgent>(Assert.IsType<CommandFrame>(codec.Read(text)).Message);
+        Assert.Equal(bytes, write.Data);
+
+        var over = Assert.Throws<InvalidDataException>(
+            () => codec.Write(new CommandFrame(1, new WriteAsAgent("w1", "/w", "/w/x.png", new byte[25 * 1024 * 1024]))));
+        Assert.Equal(WorkerFrameCodec.WriteTooLargeText, over.Message);
+
+        // Another frame of the same size is still refused, written or read, even naming a write in its text.
+        var output = new EventFrame(new WorkerEnvelope(new WorkerId("w1"), 1, new RunOutput(Run, "\"writeAsAgent\"" + new string('x', WorkerFrameCodec.MaxBytes))));
+        Assert.Equal(WorkerFrameCodec.TooLargeText, Assert.Throws<InvalidDataException>(() => codec.Write(output)).Message);
+        var forged = JsonSerializer.Serialize<WorkerFrame>(output, WorkerFrameCodec.Json);
+        Assert.Equal(WorkerFrameCodec.TooLargeText, Assert.Throws<InvalidDataException>(() => codec.Read(forged)).Message);
+    }
+
     [Fact]
     public void A_terminal_launch_and_a_read_never_hold_a_secret_in_clear_and_open_on_the_other_end()
     {

@@ -1,0 +1,77 @@
+#!/usr/bin/env node
+// TEAM CONNECTIONS, the platform's built-in plugin (docs/plugins.md -> Built-in plugins).
+//
+// It speaks harness.member/1 like any plugin. The platform hands it, on stdin, `teamConnections`:
+// every connection assigned to its team by name, kind and health - never a value - and runs a
+// connection's test for it when it writes `{"t":"connection.test","name":"..."}`, adding the test's
+// sentence to this run's output. It holds no secret, so it can print none.
+'use strict';
+
+let input = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', chunk => { input += chunk; });
+process.stdin.on('end', () => {
+  let request;
+  try {
+    request = JSON.parse(input);
+  } catch {
+    emit({ t: 'result', ok: false, error: 'Team Connections could not read its request.' });
+    return;
+  }
+
+  const connections = Array.isArray(request.teamConnections) ? request.teamConnections : [];
+  const answers = [];
+
+  for (const item of request.work || []) {
+    const words = String(item.instruction ?? '').trim();
+    const [command, ...rest] = words.split(/\s+/);
+    const verb = (command || '').toLowerCase();
+
+    if (verb === '' || verb === 'list') {
+      answers.push(list(connections));
+    } else if (verb === 'test') {
+      const name = unquote(rest.join(' '));
+      if (name === '') {
+        answers.push('Say which connection to test: `test <name>`. ' + names(connections));
+      } else {
+        // THE PLATFORM RUNS THE TEST (Admin -> Connections' own Test connection) and adds its
+        // sentence to this run's output: this process never sees what the connection holds.
+        emit({ t: 'connection.test', name });
+      }
+    } else {
+      answers.push(`Team Connections answers \`list\` and \`test <name>\`; '${words}' is neither.`);
+    }
+  }
+
+  emit({ t: 'result', ok: true, output: answers.join('\n\n') });
+});
+
+function list(connections) {
+  if (connections.length === 0) {
+    return 'This team has no connections assigned. A person assigns them in Team settings -> Connections.';
+  }
+
+  const lines = connections.map(c => {
+    const health = c.health === 'ok' ? 'ok' : 'needs reconnect';
+    const reason = c.health === 'ok' || !c.reason ? '' : ` - ${c.reason}`;
+    const test = c.testable ? '' : ' (no test)';
+    return `- ${c.name} (${c.kind}): ${health}${reason}${test}`;
+  });
+
+  return `This team's connections (${connections.length}):\n${lines.join('\n')}`;
+}
+
+function names(connections) {
+  return connections.length === 0
+    ? 'This team has no connections assigned.'
+    : `This team's connections: ${connections.map(c => c.name).join(', ')}.`;
+}
+
+function unquote(text) {
+  const t = text.trim();
+  return /^(["'`]).*\1$/.test(t) && t.length >= 2 ? t.slice(1, -1).trim() : t;
+}
+
+function emit(record) {
+  process.stdout.write(JSON.stringify(record) + '\n');
+}

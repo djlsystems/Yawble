@@ -116,7 +116,11 @@ are offered there: every agent CLI gets them at once, and no credential leaves t
   the bytes. The file is the member's, and a link anywhere on the way to a place the member may not write (the
   Host's database, keys, logs) is refused by the system: the block is not written, a line gives the system's
   reason and the result is an error. A link to a place the member may write anyway gains it nothing. The
-  worker's folder is removed afterwards; no worker answering within 2 minutes is a line saying so. Where the
+  worker's folder is removed afterwards; no worker answering within 2 minutes is a line saying so. The bytes
+  cross to a remote worker as base64 in one frame: that one kind of frame may be up to 32 MiB, room for 20 MB,
+  while every other worker frame stays within 16 MiB (a worker built before this reads at most 16 MiB, so give
+  remote workers the Host's version). A request that cannot be sent at all, or any other failure of the write,
+  is a line saying so, never an error out of the call. Where the
   Host does not switch users (development, the test suite) it
   writes itself, as the member's own user, and still never through a link: it opens each folder on the way
   relative to the one before with `O_DIRECTORY|O_NOFOLLOW` and creates the file with

@@ -9,6 +9,8 @@ import { failureClassLabel, failureClassWords, resumeTimeText } from '../lib/fai
 import ActivityFeed from './ActivityFeed.vue';
 import LiveViewDialog from './LiveViewDialog.vue';
 import MemberSettingsDialog from './MemberSettingsDialog.vue';
+import TeamSettingsDialog from './TeamSettingsDialog.vue';
+import { isTeamConnections } from '../lib/teamConnections';
 import TriggersDialog from './TriggersDialog.vue';
 import WakeLines from './WakeLines.vue';
 import DiscussWithConcierge from './DiscussWithConcierge.vue';
@@ -32,6 +34,15 @@ const props = defineProps<{
  * nothing this card does not already hold.
  */
 const settingsOpen = ref(false);
+
+/** TEAM CONNECTIONS has no settings of its own: its settings icon opens Team settings -> Connections. */
+const teamConnections = computed(() => isTeamConnections(props.snapshot));
+const teamSettingsOpen = ref(false);
+
+function openSettings() {
+  if (teamConnections.value) teamSettingsOpen.value = true;
+  else settingsOpen.value = true;
+}
 
 /**
  * The way into `TriggersDialog`, nested exactly like the settings dialog above for the same
@@ -233,7 +244,13 @@ async function cancel(wake: PendingWake) {
 </script>
 
 <template>
-  <MemberSettingsDialog v-model="settingsOpen" :snapshot="snapshot" />
+  <MemberSettingsDialog v-if="!teamConnections" v-model="settingsOpen" :snapshot="snapshot" />
+  <TeamSettingsDialog
+    v-if="teamConnections && teamSettingsOpen"
+    v-model="teamSettingsOpen"
+    initial-tab="connections"
+    :team-id="snapshot.team"
+  />
   <TriggersDialog
     v-model="triggersOpen"
     :team="snapshot.team"
@@ -372,10 +389,10 @@ async function cancel(wake: PendingWake) {
           round
           size="sm"
           icon="tune"
-          aria-label="Member settings"
-          @click="settingsOpen = true"
+          :aria-label="teamConnections ? 'Team connections' : 'Member settings'"
+          @click="openSettings"
         >
-          <q-tooltip>Member settings</q-tooltip>
+          <q-tooltip>{{ teamConnections ? 'Team settings: Connections' : 'Member settings' }}</q-tooltip>
         </q-btn>
 
         <!-- What this member runs without anybody asking. A trigger belongs to exactly one Agent

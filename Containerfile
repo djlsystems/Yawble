@@ -66,6 +66,9 @@ COPY src/Harness.Streaming/Harness.Streaming.csproj src/Harness.Streaming/
 COPY src/Harness.Worker/Harness.Worker.csproj src/Harness.Worker/
 RUN dotnet restore src/Harness.Host/Harness.Host.csproj -a "$TARGETARCH"
 COPY src/ src/
+# THE BUILT-IN PLUGINS (plugins/<id>/): the Host's project copies them beside itself, so the publish -
+# and so both images - carries them as /app/plugins/<id>/, versioned with the platform.
+COPY plugins/ plugins/
 # The Material Symbols names the Host embeds; the operator CLI embeds the same file.
 COPY cli/internal/plugin/material-symbols.txt cli/internal/plugin/
 COPY --from=web /src/web/dist/spa/ src/Harness.Host/wwwroot/

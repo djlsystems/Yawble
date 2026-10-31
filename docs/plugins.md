@@ -26,7 +26,8 @@ This page covers manifest v1 (`plugin.json`) and the protocol `harness.member/1`
 skills, published events and hiring by a Manager (see [Skills](#skills), [Events](#events) and
 [Hiring](#hiring)). A plugin arrives as a version folder: built by you or a team, or fetched from
 **Marketplace → Browse** ([solutions.md](solutions.md#getting-a-package-in)). Plugins are not
-signed; a person reviews what they install.
+signed; a person reviews what they install. A few plugins are the platform's own and ship with it: see
+[Built-in plugins](#built-in-plugins).
 
 ## Install a plugin
 
@@ -1556,6 +1557,70 @@ someone happened to install. The runtimes it does need from the image are named 
 `requires` (`"dotnet"`, `"node"`, `"python3"`); a .NET plugin declares `["dotnet"]`, and a Go
 plugin declares none.
 
+## Built-in plugins
+
+A **built-in plugin** is the platform's own. Its source is in the platform repository under
+`plugins/<id>/` (`plugin.json` and what it runs, no version folder); the Host's build copies it beside
+the Host as `plugins/<id>/`, so it ships in the worker image (and the control image, which reads its
+manifest) and is **versioned with the platform**: it changes only with a release.
+
+- **Listed and locked.** `GET /api/plugins` lists it with `builtIn: true` and `locked: true`,
+  `members: []` and no `marketplaceUrl`. Admin → Plugins shows it with a **Built-in** badge and no
+  Remove or View manifest. `DELETE /api/plugins/<id>` refuses it (409), an install of a folder whose
+  manifest takes its id is refused (409, whoever installs it, a solution install included), and a folder
+  under `<dataRoot>/plugins` with its id is refused at every rescan: the platform's own is used.
+- **Never offered or hired.** It is not in the Marketplace, in Add member, or in the `hiring` tool's
+  list, and the hire route refuses `plugin:<id>` for a built-in (409) for a person, a Manager and the
+  Concierge alike. Nobody repoints a member onto one. The platform makes its members itself.
+- **An ordinary plugin otherwise.** It runs as a plugin member speaking `harness.member/1`, through the
+  same `PluginMemberRunner`, `ChildProcess` launch and redaction as any plugin. Nothing of it is in the
+  pump: `PumpArchitectureTests` stays green.
+
+### Team Connections
+
+Every team has a member named exactly **Team Connections** running the built-in plugin
+`team-connections`. It holds **every connection assigned to its team**, with no binding: a person's
+assignment (Team settings → Connections, see [connections.md](connections.md#which-teams-may-use-a-connection))
+is the consent. It never reads a connection of another team.
+
+- **Made by the platform.** A new or cloned team gets one at creation; an existing team gets one at
+  the Host's start. The name is reserved: no other member may take it (409). A name is refused
+  when its Unicode confusables skeleton ([UTS #39](https://www.unicode.org/reports/tr39/)) is that
+  of `teamconnections`: each character is first looked up in Unicode's look-alikes (as written, then
+  lower-cased) and otherwise normalized (NFKD) and its parts looked up the same way; then combining
+  marks are dropped, it is case-folded and only its letters are kept. Looking up first keeps a
+  look-alike that normalizing or dropping marks would hide (Greek lunate sigma `ϲ`, Telugu `ం`). So
+  `TEAM-CONNECTIONS`, `Team_Connections`, `Team Connections 2`, `Téam`, `Ｔeam`, and a Cyrillic,
+  Greek, Armenian or other look-alike (Cyrillic `е`, Armenian `օ`, dotless `ı`) are refused as much
+  as `Team Connections`, while `Team Connection`, `Team`, `Connections` and `My Team Connections`
+  hire as usual. The look-alikes are Unicode's own `confusables.txt`, the entries mapping to a letter
+  of `teamconnections`, checked in at
+  `src/Harness.Host/Confusables/team-connections-confusables.txt` with its Unicode version; the
+  platform never downloads it. A letter the file does not map stays itself, so a name in another
+  script hires as usual. Nobody hires, removes,
+  renames, re-instructs, repoints or sets it up (409). It has no settings of its own.
+- **Shown only while the team has a connection.** The board, `status` (`/api/overview`) and the
+  Manager's roster show it while at least one connection is assigned to the team; otherwise it is
+  hidden and not offered. Hiding it keeps its runs and history. Its card's settings icon opens Team
+  settings → Connections.
+- **Asked with `tell`.** Any member of the team tells it, without the Tell permit, as a member tells
+  any plugin member of its own team. Its answer is its run's `completed` row, and a member (not the
+  Manager, which that row wakes) that asked also gets it back as an instruction from Team Connections,
+  caused by its own tell, in the same workflow.
+- **`list`** answers each connection assigned to the team by name, kind and health (`ok` or
+  `needs reconnect`, with the reason), and whether it has a test. Never a value.
+- **`test <name>`** runs that connection's own **Test connection** - the same `Connections.TestAsync`
+  a person's button runs, on a worker - and answers its sentence. The health it records, the
+  `connections.tested` row (with no person's id, Team Connections as who) and the clearing of a
+  needs-reconnect mark are the person's test's. A website, and a preset that declares no test, still
+  have no successful test, in that test's own words. A name not assigned to the team answers that it is
+  not, naming the team's connections.
+
+How it is done, for the record: the run's stdin carries `teamConnections` (`[{ name, kind, health,
+reason, testable }]`, never a value) and only this built-in's run is handed it; its `{"t":"connection.test",
+"name":"..."}` record is honoured only for it (from any other plugin it is text), and each test runs
+after its process has ended, its sentence added to the run's output. Pinned by `TeamConnectionsTests`.
+
 ## Where it is pinned
 
 - **Agents are unchanged.** `MemberGoldenTests` pins an agent member's rows, prompt, context,
@@ -1577,6 +1642,10 @@ plugin declares none.
   interpolation, `System.Text.Json`, reflection, or logging. Each of those has a self-test in
   `The_scan_catches_a_violation`, and `PrintMembers` has `The_definition_rules_forbid_PrintMembers`.
   A read of another field, such as `Environment.Count`, is a capability, and it is allowed.
+- **Built-in plugins and Team Connections.** `TeamConnectionsTests` (shown only with a connection,
+  every refusal for a person, a Manager and the Concierge, list and test with no value in any answer,
+  row or file, nothing of another team's, the catalog's built-in and locked entry, and the build
+  copying `plugins/` into the image).
 - **Plugins run as `agent`.** `PluginLaunchUserTests` launches a plugin through a real user switch
   and checks it runs as `agent` and reads its `0750` directory. Where the process cannot switch
   users it skips, naming why; the release suite runs it as root in the product image.

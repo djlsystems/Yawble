@@ -137,7 +137,12 @@ internal sealed partial class HostComposition
             sp.GetRequiredService<ISecretStore>(),
             sp.GetRequiredService<Connections>(),
             sp.GetRequiredService<SiteService>(),
-            memberSecrets: sp.GetRequiredService<IPluginMemberSecrets>()));
+            memberSecrets: sp.GetRequiredService<IPluginMemberSecrets>())
+        {
+            // TEAM CONNECTIONS' `test <name>` runs the connection's own test, on a worker, as a person's does.
+            ConnectionTests = sp.GetRequiredService<WorkerAsks>(),
+            Answers = sp.GetRequiredService<IMessageLog>(),
+        });
         builder.Services.AddSingleton<IMemberRunner>(sp => new MemberRunnerRouter(
             sp.GetRequiredService<AgentMemberRunner>(),
             sp.GetRequiredService<PluginMemberRunner>()));

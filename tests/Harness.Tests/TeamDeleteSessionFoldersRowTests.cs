@@ -52,7 +52,7 @@ public sealed class TeamDeleteSessionFoldersRowTests : IAsyncDisposable
         var team = (await JsonAsync(created)).GetProperty("id").GetString()!;
 
         var paths = _factory.Services.GetRequiredService<TeamPaths>();
-        var workspace = paths.WorkspaceFor(Assert.Single(_factory.Services.GetRequiredService<TeamRegistry>().ContainerIdsOf(team)));
+        var workspace = paths.WorkspaceFor(Assert.Single(_factory.Services.GetRequiredService<TeamRegistry>().ContainerIdsOf(team), id => id.Name == TeamRegistry.DefaultManagerName));
 
         // Claude's projects folder goes; its cache folder, reached through a linked `~/.cache`, is left.
         var projects = Path.Combine(_home, ".claude", "projects", LiveView.Dashed(workspace));

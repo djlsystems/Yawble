@@ -127,6 +127,18 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
     /// <summary>The worker plugin runs go to.</summary>
     public IRunWorker Worker => worker;
 
+    /// <summary>
+    /// Who runs a connection's test (<see cref="Connections.TestAsync"/>) for Team Connections'
+    /// <c>connection.test</c> record; null answers that no test can run here.
+    /// </summary>
+    public WorkerAsks? ConnectionTests { get; init; }
+
+    /// <summary>
+    /// Where Team Connections' answer is sent to the member that asked (<see cref="AnswerAskersAsync"/>);
+    /// null sends none, and the answer is only its run's <c>completed</c> row.
+    /// </summary>
+    public IMessageLog? Answers { get; init; }
+
     /// <summary>The only variables a plugin child inherits from the Host. Everything else - provider
     /// keys, HARNESS_*, CLAUDE_*, GROK_* - is absent because it was never copied.</summary>
     public static readonly IReadOnlyList<string> InheritedVariables =
@@ -226,7 +238,26 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             maskedTokens);
 
         var siteFiles = await SiteFilesAsync(invocation.Member, ct);
-        var request = Request(invocation, manifest, config, resolvedSecrets, grants, new JsonArray(), siteFiles, secretKeys, named, cells);
+
+        // TEAM CONNECTIONS, THE BUILT-IN: every connection assigned to its team by name, kind and health,
+        // never a value; and its `connection.test` record runs that connection's own test. No other plugin
+        // is handed either, so every other request is byte for byte what it was.
+        var gathered = new Gathered();
+        JsonArray? teamConnections = null;
+        if (plugin.BuiltIn && manifest.Id == TeamConnectionsMember.PluginId && connections is not null)
+        {
+            gathered.TeamConnections = true;
+            teamConnections = new JsonArray([.. (await AssignedConnectionsAsync(invocation.Member.Team, ct)).Select(c => (JsonNode)new JsonObject
+            {
+                ["name"] = c.Name,
+                ["kind"] = c.Kind,
+                ["health"] = c.Status,
+                ["reason"] = c.StatusReason,
+                ["testable"] = Connections.Testable(c),
+            })]);
+        }
+
+        var request = Request(invocation, manifest, config, resolvedSecrets, grants, new JsonArray(), siteFiles, secretKeys, named, cells, teamConnections);
 
         StartRun Start(string stdin) => new(
             RunId.For(invocation.Member),
@@ -258,7 +289,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         if (manifest.Reads.Count > 0)
         {
             var (read, delivery) = await ReadSitesAsync(invocation.Member, manifest, FramedBytes(Start(request)), ct);
-            request = Request(invocation, manifest, config, resolvedSecrets, grants, read, siteFiles, secretKeys, named, cells);
+            request = Request(invocation, manifest, config, resolvedSecrets, grants, read, siteFiles, secretKeys, named, cells, teamConnections);
 
             foreach (var row in (string?[])[delivery.CutRow, delivery.MissingRow])
             {
@@ -268,9 +299,7 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             SiteDataDelivered?.Invoke(delivery);
         }
 
-        // The run's record, gathered as the lines arrive.
-        var gathered = new Gathered();
-
+        // The run's record, gathered as the lines arrive (made above).
         // ON THE WORKER, through the run protocol: the same launcher every member shares, over
         // MINIMAL AND ALLOW-LISTED variables, the opposite of an agent's inherited-then-scrubbed
         // environment - a plugin is given only what it is named here. Each line it prints comes back
@@ -284,6 +313,12 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         if (lost) return MemberResult.NotRun(ended.LaunchError ?? RunDirectory.LostRunText, ended.FailureClass ?? FailureClasses.Interrupted);
 
         var outcome = ended.Process!;
+
+        // EACH TEST TEAM CONNECTIONS ASKED FOR, now that its process has let go of the worker.
+        if (outcome is { Killed: false, StartError: null, Refused: null })
+        {
+            foreach (var name in gathered.TestsAsked) gathered.Answers.Add(await TestByNameAsync(invocation.Member, name, ct));
+        }
 
         if (outcome.Refused is not null)
         {
@@ -311,6 +346,14 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         }
 
         var output = new StringBuilder(gathered.Result?.Output ?? "");
+
+        // EACH TEST TEAM CONNECTIONS ASKED FOR, in the test's own sentence: its answer to the member that asked.
+        // Redacted below with the rest of the output.
+        foreach (var answer in gathered.Answers)
+        {
+            if (output.Length > 0) output.AppendLine();
+            output.Append(answer);
+        }
 
         if (gathered.Text.Length > 0)
         {
@@ -383,6 +426,9 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             }
         }
 
+        // TEAM CONNECTIONS ANSWERS THE MEMBER THAT ASKED, in its own workflow, as an instruction to it.
+        if (gathered.TeamConnections) await AnswerAskersAsync(invocation, text, ct);
+
         return new MemberResult(
             reason is null,
             ended.ExitCode,
@@ -447,7 +493,8 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         IReadOnlyDictionary<string, JsonNode?> config, IReadOnlyDictionary<string, string> resolvedSecrets,
         IReadOnlyDictionary<string, ConnectionGrant>? grants = null, JsonArray? sites = null,
         JsonArray? siteFiles = null, IReadOnlyDictionary<string, string>? secretKeys = null,
-        IReadOnlyDictionary<string, string>? namedSecrets = null, JsonObject? tableSecrets = null)
+        IReadOnlyDictionary<string, string>? namedSecrets = null, JsonObject? tableSecrets = null,
+        JsonArray? teamConnections = null)
     {
         var work = new JsonArray();
 
@@ -535,6 +582,9 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             document["namedSecrets"] = new JsonObject(names.Select(n => KeyValuePair.Create(n, (JsonNode?)JsonValue.Create(namedSecrets![n]))));
             document["namedSecretNames"] = new JsonArray([.. names.Select(n => (JsonNode?)JsonValue.Create(n))]);
         }
+
+        // TEAM CONNECTIONS' OWN: its team's connections, never a value. Only the built-in is handed it.
+        if (teamConnections is not null) document["teamConnections"] = teamConnections.DeepClone();
 
         // THE DECLARED READS of the member's own team's sites (see ReadSitesAsync); [] for none.
         // Last, so what is measured before it is the whole rest of the request.
@@ -1149,6 +1199,13 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
                 await RowStatusAsync(member, manifest, record!, gathered, secretValues, ct);
                 break;
 
+            // TEAM CONNECTIONS ONLY: any other plugin's line of this shape is text, as an unknown record is.
+            // Asked here, run once the process has ended: a test runs on a worker, and this worker is waiting
+            // for this line to be read.
+            case "connection.test" when gathered.TeamConnections && Words(record!, "name") is { } name:
+                gathered.TestsAsked.Add(name.Trim());
+                break;
+
             default:
                 // NOT A RECORD, OR NOT ONE THIS VERSION KNOWS: kept as text, never an error.
                 if (gathered.Text.Length > 0) gathered.Text.Append('\n');
@@ -1549,9 +1606,112 @@ public sealed class PluginMemberRunner : IMemberRunner, IRunWorkerClient
     /// <summary>Every spelling of the bound values that <see cref="Redact"/> replaces, longest first.</summary>
     internal static IReadOnlyList<string> RedactedForms(IEnumerable<string> values) => ValueRedactor.For(values).Forms;
 
+    /// <summary>
+    /// The connections assigned to <paramref name="team"/> (its stored id), oldest first: what Team
+    /// Connections holds. Read from the team's assignments and nothing else, so a connection assigned
+    /// only to another team is never among them.
+    /// </summary>
+    private async Task<IReadOnlyList<ConnectionRecord>> AssignedConnectionsAsync(string team, CancellationToken ct)
+    {
+        var list = new List<ConnectionRecord>();
+        foreach (var assigned in await connections!.Store.AssignedAsync(team, ct))
+        {
+            if (await connections.Store.GetAsync(assigned.ConnectionId, ct) is { } connection) list.Add(connection);
+        }
+
+        return list;
+    }
+
+    /// <summary>
+    /// TEAM CONNECTIONS' <c>test &lt;name&gt;</c>: the connection of that name assigned to the member's team,
+    /// put through its own Test connection (<see cref="Connections.TestAsync"/>) - the same test, the same
+    /// health and the same <c>connections.tested</c> row as a person's, with the member as who asked. One
+    /// sentence, never a value: the test's sentence has every value it carried taken out.
+    /// </summary>
+    private async Task<string> TestByNameAsync(ContainerId member, string name, CancellationToken ct)
+    {
+        var assigned = await AssignedConnectionsAsync(member.Team, ct);
+        var connection = assigned.FirstOrDefault(c => string.Equals(c.Name.Trim(), name, StringComparison.OrdinalIgnoreCase));
+
+        if (connection is null)
+        {
+            return $"Test connection '{name}': no connection of that name is assigned to this team. "
+                + (assigned.Count == 0
+                    ? "This team has none; a person assigns them in Team settings → Connections."
+                    : $"This team's connections: {string.Join(", ", assigned.Select(c => c.Name))}.");
+        }
+
+        if (ConnectionTests is null) return $"Test connection '{connection.Name}': no worker can run a test here.";
+
+        ConnectionTestAnswer answer;
+        try
+        {
+            answer = await connections!.TestAsync(ConnectionActor.ForMember(member), connection.Id, ConnectionTests, ct);
+        }
+        catch (Exception exception) when (exception is System.Data.Common.DbException or RefreshNotStoredException)
+        {
+            return $"Test connection '{connection.Name}': the test's result could not be recorded. Nothing was changed; try again.";
+        }
+
+        return answer.Health is { } health
+            ? $"Test connection '{connection.Name}' ({connection.Kind}): {(health == ConnectionRecord.Ok ? "ok" : "needs reconnect")}. {answer.Sentence}"
+            : $"Test connection '{connection.Name}' ({connection.Kind}): {answer.Error}";
+    }
+
+    /// <summary>
+    /// TEAM CONNECTIONS' ANSWER REACHES THE MEMBER THAT ASKED: for each work item an agent member of the
+    /// same team sent (never the Manager, which its <c>completed</c> row wakes already; never a person, the
+    /// Concierge or a schedule), one instruction to that member, caused by its own tell so it lands in
+    /// that member's workflow, from Team Connections, carrying the run's answer - names, kinds, health and
+    /// test sentences, never a value. Best effort: the answer is still the run's <c>completed</c> row.
+    /// </summary>
+    private async Task AnswerAskersAsync(MemberInvocation invocation, string text, CancellationToken ct)
+    {
+        if (Answers is null) return;
+
+        foreach (var item in invocation.Work)
+        {
+            if (!ContainerId.TryParse(item.Source, out var asker)
+                || !string.Equals(asker.Team, invocation.Member.Team, StringComparison.OrdinalIgnoreCase)
+                || asker.Equals(invocation.Member)
+                || string.Equals(asker.Name, TeamRegistry.DefaultManagerName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var answer = $"{TeamConnectionsMember.Label} answers your request:\n{(text.Length == 0 ? "(no answer)" : text)}";
+            try
+            {
+                await Answers.AppendAsync(
+                    new NewMessage(
+                        MessageTypes.InstructionFor(new ContainerId(invocation.Member.Team, asker.Name)),
+                        JsonSerializer.Serialize(new Dictionary<string, object?>
+                        {
+                            [PayloadFields.Instruction] = answer,
+                        }),
+                        invocation.Member.ToString(),
+                        item.Seq),
+                    ct);
+            }
+            catch (System.Data.Common.DbException)
+            {
+                // Not sent: the answer is still the run's completed row, in the same workflow.
+            }
+        }
+    }
+
     private sealed class Gathered
     {
         public ResultRecord? Result;
+
+        /// <summary>Whether this run is Team Connections', whose <c>connection.test</c> records are honoured.</summary>
+        public bool TeamConnections;
+
+        /// <summary>Each connection a <c>connection.test</c> record named, in the order asked.</summary>
+        public readonly List<string> TestsAsked = [];
+
+        /// <summary>Each test's sentence, in the order asked: they follow the plugin's own output.</summary>
+        public readonly List<string> Answers = [];
         public readonly StringBuilder Text = new();
         public readonly List<string> Notes = [];
         public readonly HashSet<string> Dropped = new(StringComparer.Ordinal);

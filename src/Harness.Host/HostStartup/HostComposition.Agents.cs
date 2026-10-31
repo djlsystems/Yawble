@@ -45,7 +45,8 @@ internal sealed partial class HostComposition
         // restart. A refused manifest is named here, once, with the field that is wrong.
         // In control a plugin's runtime is the workers' to have, never looked up on control's own PATH
         // (PluginCatalog.OnWorkers).
-        pluginCatalog = new PluginCatalog(Path.Combine(dataRoot, "plugins"), control ? PluginCatalog.OnWorkers : null);
+        // The BUILT-IN plugins come from the build, beside the Host (PluginCatalog.BuiltInFolder), never the volume.
+        pluginCatalog = new PluginCatalog(Path.Combine(dataRoot, "plugins"), control ? PluginCatalog.OnWorkers : null, PluginCatalog.BuiltInFolder);
         PluginEndpoints.Report(pluginCatalog.Rescan(), Console.Out);
         builder.Services.AddSingleton(pluginCatalog);
 
