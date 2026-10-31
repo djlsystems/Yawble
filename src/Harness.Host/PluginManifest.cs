@@ -282,6 +282,19 @@ public sealed record PluginManifest(
                     var (label, labelRefusal) = Label($"secrets.{secret.Name}", secret.Value);
                     if (labelRefusal is not null) return (null, labelRefusal);
 
+                    // MOVED TO A CONNECTION SLOT (`"movedTo": "<slot>"`): this version takes the field's
+                    // value from an API-key connection; the slot itself is checked once `connections` is read.
+                    string? movedTo = null;
+                    if (secret.Value.TryGetProperty("movedTo", out var movedElement) && movedElement.ValueKind != JsonValueKind.Null)
+                    {
+                        if (movedElement.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(movedElement.GetString()))
+                        {
+                            return (null, PluginSecret.MovedToNotASlot(secret.Name));
+                        }
+
+                        movedTo = movedElement.GetString()!;
+                    }
+
                     secrets[secret.Name] = new PluginSecret(
                         Text(secret.Value, "description") ?? "",
                         secret.Value.TryGetProperty("required", out var required) && required.ValueKind == JsonValueKind.True)
@@ -289,6 +302,7 @@ public sealed record PluginManifest(
                         When = when,
                         Masked = masked,
                         Label = label,
+                        MovedTo = movedTo,
                     };
                 }
             }
@@ -427,6 +441,14 @@ public sealed record PluginManifest(
                     var (parsed, refusal) = PluginConnectionSlot.Parse(slot.Name, slot.Value);
                     if (refusal is not null) return (null, refusal);
                     connections[slot.Name] = parsed!;
+                }
+            }
+
+            foreach (var (field, secret) in secrets)
+            {
+                if (secret.MovedTo is { } slotName && PluginSecret.MovedToRefusal(field, slotName, connections) is { } movedRefusal)
+                {
+                    return (null, movedRefusal);
                 }
             }
 
@@ -784,6 +806,32 @@ public sealed record PluginSecret(string Description, bool Required)
 
     /// <summary>The manifest's <c>label</c>, or null.</summary>
     public string? Label { get; init; }
+
+    /// <summary>The manifest's <c>movedTo</c>: the API-key connection slot this field's value now comes
+    /// from, or null. Checked by <see cref="MovedToRefusal"/>, in the same words as the operator CLI's
+    /// check (cli/internal/plugin).</summary>
+    public string? MovedTo { get; init; }
+
+    public static string MovedToNotASlot(string field) =>
+        $"`secrets.{field}.movedTo` must be the name of a connection slot this manifest declares.";
+
+    /// <summary>Why <c>secrets.&lt;field&gt;.movedTo</c> naming <paramref name="slot"/> is refused, or
+    /// null: the slot must be one <paramref name="connections"/> declares, taking only API-key
+    /// connections (<c>"providers": ["apikey"]</c>), since the move makes an API-key connection.</summary>
+    public static string? MovedToRefusal(string field, string slot, IReadOnlyDictionary<string, PluginConnectionSlot> connections)
+    {
+        if (!connections.TryGetValue(slot, out var declared))
+        {
+            return $"`secrets.{field}.movedTo` names '{slot}', which is not a slot this manifest's `connections` declares.";
+        }
+
+        if (declared.Providers is not [ConnectionKinds.ApiKey])
+        {
+            return $"`secrets.{field}.movedTo` names '{slot}', which is not an API-key slot: a secret moves only into a slot whose `providers` is [\"apikey\"].";
+        }
+
+        return null;
+    }
 }
 
 /// <summary>
@@ -1045,6 +1093,29 @@ public sealed record PluginConnectionSlot(
     IReadOnlyDictionary<string, IReadOnlyList<string>> Scopes,
     bool Required)
 {
+    /// <summary>The manifest's <c>multiple</c>: the slot takes several connections per member, bound
+    /// under <c>&lt;slot&gt;</c>, <c>&lt;slot&gt;#2</c>, <c>&lt;slot&gt;#3</c>... (see <see cref="BindingKey"/>),
+    /// and a run is handed them as an array. False: one connection, handed as one object.</summary>
+    public bool Multiple { get; init; }
+
+    /// <summary>What separates a multiple slot's name from the number of its second, third... binding.
+    /// A slot name never holds it (<see cref="PluginManifest.IsConfigName"/>).</summary>
+    public const char More = '#';
+
+    /// <summary>The slot a binding key names and its place among the slot's connections: <c>appKeys</c>
+    /// is (appKeys, 1), <c>appKeys#3</c> is (appKeys, 3); null for a key with a number below 2 or not
+    /// a plain number.</summary>
+    public static (string Slot, int Index)? BindingKey(string key)
+    {
+        var at = key.IndexOf(More);
+        if (at < 0) return (key, 1);
+
+        var number = key[(at + 1)..];
+        return number.Length is > 0 and <= 3 && number[0] != '0' && number.All(char.IsAsciiDigit) && int.Parse(number) >= 2
+            ? (key[..at], int.Parse(number))
+            : null;
+    }
+
     /// <summary>The scopes this slot asks of a connection of <paramref name="providerId"/>: its own
     /// entry, or the <c>custom</c> entry for a custom provider.</summary>
     public IReadOnlyList<string> ScopesFor(string providerId) =>
@@ -1156,9 +1227,14 @@ public sealed record PluginConnectionSlot(
             return (null, $"`connections.{name}.description` must be a string.");
         }
 
+        if (element.TryGetProperty("multiple", out var multiple) && multiple.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            return (null, $"`connections.{name}.multiple` must be true or false.");
+        }
+
         return (new PluginConnectionSlot(
             description.ValueKind == JsonValueKind.String ? description.GetString()! : "",
-            providers, scopes, required.ValueKind == JsonValueKind.True), null);
+            providers, scopes, required.ValueKind == JsonValueKind.True) { Multiple = multiple.ValueKind == JsonValueKind.True }, null);
     }
 
     private static IReadOnlyList<string>? ScopeList(JsonElement array)

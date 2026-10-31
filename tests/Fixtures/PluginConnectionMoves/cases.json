@@ -1,0 +1,20 @@
+{
+  "_": "Manifest `secrets` and `connections` blocks for CON 7 (`movedTo`, `multiple`) that the Host (PluginConnectionMovesManifestTests) and the CLI (cli/internal/plugin/manifest_test.go) both read. Each `accepted` pair must load, with `movedTo` and `multiple` read as given; each `refused` pair must refuse the manifest with exactly `says`.",
+  "accepted": [
+    { "secrets": { "apiKey": { "movedTo": "stripe" } }, "connections": { "stripe": { "providers": [ "apikey" ] } }, "moved": { "apiKey": "stripe" }, "multiple": [] },
+    { "secrets": { "apiKey": { "movedTo": "stripe", "required": true }, "webhook": { "description": "Not moved." } }, "connections": { "stripe": { "providers": [ "apikey" ], "required": true } }, "moved": { "apiKey": "stripe" }, "multiple": [] },
+    { "secrets": { "apiUser": { "movedTo": "namecheap", "masked": false }, "apiKey": { "movedTo": "namecheap" } }, "connections": { "namecheap": { "providers": [ "apikey" ] } }, "moved": { "apiUser": "namecheap", "apiKey": "namecheap" }, "multiple": [] },
+    { "secrets": { "appSecret": { "movedTo": "appSecrets" } }, "connections": { "appSecrets": { "providers": [ "apikey" ], "multiple": true } }, "moved": { "appSecret": "appSecrets" }, "multiple": [ "appSecrets" ] },
+    { "secrets": { "token": { "movedTo": null } }, "connections": { "mail": { "providers": [ "google", "microsoft" ], "multiple": true }, "keys": { "providers": [ "apikey" ], "multiple": false } }, "moved": {}, "multiple": [ "mail" ] }
+  ],
+  "refused": [
+    { "secrets": { "apiKey": { "movedTo": "stripe" } }, "connections": null, "says": "`secrets.apiKey.movedTo` names 'stripe', which is not a slot this manifest's `connections` declares." },
+    { "secrets": { "apiKey": { "movedTo": "strype" } }, "connections": { "stripe": { "providers": [ "apikey" ] } }, "says": "`secrets.apiKey.movedTo` names 'strype', which is not a slot this manifest's `connections` declares." },
+    { "secrets": { "apiKey": { "movedTo": "account" } }, "connections": { "account": { "providers": [ "login" ] } }, "says": "`secrets.apiKey.movedTo` names 'account', which is not an API-key slot: a secret moves only into a slot whose `providers` is [\"apikey\"]." },
+    { "secrets": { "apiKey": { "movedTo": "either" } }, "connections": { "either": { "providers": [ "apikey", "login" ] } }, "says": "`secrets.apiKey.movedTo` names 'either', which is not an API-key slot: a secret moves only into a slot whose `providers` is [\"apikey\"]." },
+    { "secrets": { "apiKey": { "movedTo": "google" } }, "connections": { "google": { "providers": [ "google" ], "scopes": [ "openid" ] } }, "says": "`secrets.apiKey.movedTo` names 'google', which is not an API-key slot: a secret moves only into a slot whose `providers` is [\"apikey\"]." },
+    { "secrets": { "apiKey": { "movedTo": 7 } }, "connections": { "stripe": { "providers": [ "apikey" ] } }, "says": "`secrets.apiKey.movedTo` must be the name of a connection slot this manifest declares." },
+    { "secrets": { "apiKey": { "movedTo": " " } }, "connections": { "stripe": { "providers": [ "apikey" ] } }, "says": "`secrets.apiKey.movedTo` must be the name of a connection slot this manifest declares." },
+    { "secrets": {}, "connections": { "keys": { "providers": [ "apikey" ], "multiple": "yes" } }, "says": "`connections.keys.multiple` must be true or false." }
+  ]
+}

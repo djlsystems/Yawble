@@ -1729,12 +1729,27 @@ public sealed class Connections(
         PluginManifest manifest, IReadOnlyDictionary<string, string> bindings, IReadOnlySet<string>? assignedToTeam,
         CancellationToken ct = default, string retry = BindAgain)
     {
-        foreach (var (slot, connectionId) in bindings)
+        foreach (var (key, connectionId) in bindings)
         {
+            // A MULTIPLE SLOT'S SECOND, THIRD... CONNECTION is bound under `<slot>#2`, `<slot>#3`; any
+            // other slot takes one, so a second binding of it is refused.
+            var slot = PluginConnectionSlot.BindingKey(key)?.Slot ?? key;
+
             if (!manifest.Connections.TryGetValue(slot, out var declared))
             {
-                return new BindingRefusal($"`{slot}` is not a connection slot of plugin '{manifest.Id}'. It has: "
+                return new BindingRefusal($"`{key}` is not a connection slot of plugin '{manifest.Id}'. It has: "
                     + (manifest.Connections.Count == 0 ? "none" : string.Join(", ", manifest.Connections.Keys)) + ".");
+            }
+
+            if (slot != key && !declared.Multiple)
+            {
+                return new BindingRefusal($"Slot `{slot}` takes one connection, so `{key}` cannot bind another. "
+                    + "Only a slot its manifest declares `\"multiple\": true` takes several.");
+            }
+
+            if (slot != key && bindings.Any(other => other.Key != key && other.Value == connectionId && PluginConnectionSlot.BindingKey(other.Key)?.Slot == slot))
+            {
+                return new BindingRefusal($"Slot `{slot}` binds the connection '{connectionId}' twice. Each of its connections is bound once.");
             }
 
             if (assignedToTeam is not null && !assignedToTeam.Contains(connectionId))

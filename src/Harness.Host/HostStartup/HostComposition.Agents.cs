@@ -153,6 +153,14 @@ internal sealed partial class HostComposition
             sp.GetRequiredService<TeamRegistry>(), sp.GetRequiredService<IMemberReports>()));
         builder.Services.AddHostedService(sp => sp.GetRequiredService<ConnectRequests>());
 
+        // A PLUGIN UPDATE MOVES A MEMBER'S OWN SECRET INTO A CONNECTION (CON 7): run by an install, a
+        // Replace and a solution install or update once a version declaring `movedTo` is active.
+        builder.Services.AddSingleton(sp => new PluginSecretMoves(
+            sp.GetRequiredService<PluginCatalog>(), sp.GetRequiredService<TeamRegistry>(),
+            sp.GetRequiredService<IPluginMemberSettingsStore>(), sp.GetRequiredService<IPluginMemberSecretRows>(),
+            sp.GetRequiredService<IPluginSecretMoveRows>(), sp.GetRequiredService<Connections>(),
+            sp.GetRequiredService<IDataProtectionProvider>(), sp.GetService<PluginSetup>()));
+
         if (unmeasuredHeadlessPresets.Count > 0)
         {
             Console.WriteLine(

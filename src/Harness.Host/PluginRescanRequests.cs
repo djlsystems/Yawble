@@ -38,7 +38,7 @@ namespace Harness.Host;
 /// </summary>
 public sealed class PluginRescanRequests(
     PluginCatalog plugins, TeamRegistry teams, TenantLogging audit, ILogger<PluginRescanRequests> logger,
-    PluginInstaller installer)
+    PluginInstaller installer, PluginSecretMoves? moves = null)
     : BackgroundService
 {
     public const string RequestFile = ".rescan";
@@ -160,6 +160,9 @@ public sealed class PluginRescanRequests(
                 null, null, TenantActions.PluginInstalled, result.Id, result.Id,
                 new { by = "operator", id = result.Id, version = result.Version, source = path, replaced = result.Replaced, installed = result.Installed, reason = result.Reason },
                 ct);
+
+            // A VERSION DECLARING `movedTo` moves each member's own values into connections (CON 7).
+            if (result.Installed && moves is not null) await moves.MoveAsync(result.Id!, Solutions.SolutionActor.Operator, ct);
         }
 
         await WriteReportAsync(InstallReportFile, new
