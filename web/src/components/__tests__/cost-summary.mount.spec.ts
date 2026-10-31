@@ -77,6 +77,7 @@ describe('the Budgets tile', () => {
     expect(budgets.get('[data-summary-status]').text()).toBe('All inside budget');
     expect(budgets.get('[data-summary-status]').attributes('data-over')).toBeUndefined();
     expect(budgets.get('[data-summary-unbudgeted]').text()).toBe('· $600 unbudgeted');
+    expect(budgets.element.textContent).toContain('All inside budget · $600 unbudgeted');
   });
 
   it('over budget: names the outcomes over, with ⚠, in the critical colour', () => {
@@ -88,6 +89,7 @@ describe('the Budgets tile', () => {
     expect(budgets.get('[data-summary-status]').text()).toBe('⚠ Docs refresh over');
     expect(budgets.get('[data-summary-status]').attributes('data-over')).toBe('true');
     expect(budgets.get('.cost-summary-bar-fill').attributes('data-over')).toBe('true');
+    expect(budgets.element.textContent).toContain('⚠ Docs refresh over · ');
   });
 
   it('no budgets: None set, and how to set one', () => {
