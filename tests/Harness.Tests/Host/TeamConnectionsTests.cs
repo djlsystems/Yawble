@@ -334,6 +334,10 @@ public sealed class TeamConnectionsTests : IAsyncLifetime
         Assert.Contains(@"..\..\plugins\**\*", File.ReadAllText(Path.Combine(repo, "src", "Harness.Host", "Harness.Host.csproj")), StringComparison.Ordinal);
     }
 
+    /// <summary>The table rows that NFKD (the lunate sigmas) or dropping combining marks (the rest) once hid.
+    /// Declared before <see cref="ReservedSpellings"/>, which reads it: static initializers run in order.</summary>
+    private static readonly int[] HiddenRows = [0x03F2, 0x03F9, 0x0C02, 0x0C82, 0x0D02, 0x0D82, 0x1BEA, 0x11302];
+
     /// <summary>Spellings of the reserved name: its letters, whatever separates or decorates them.</summary>
     private static readonly string[] ReservedSpellings =
     [
@@ -346,7 +350,14 @@ public sealed class TeamConnectionsTests : IAsyncLifetime
         "T\u0435\u0430m C\u03BFnn\u0435\u0441t\u0456\u043Ens", "Te\u0301am Connections",
         // Off the old hand-written table, in Unicode's confusables: Armenian oh, dotless i, Greek capital Nu.
         "Team C\u0585nnections", "Team Connect\u0131ons", "TEAM CO\u039D\u039DECTIONS",
+        // Rows the table has that NFKD or the combining-mark drop used to hide: Greek lunate sigmas (to c),
+        // and spacing combining marks (to o), U+11302 a supplementary character.
+        "Team \u03F2onnections", "Team \u03F9onnections",
+        // A letter with no row whose decomposition has one: Cyrillic \u0400 / \u0450 (Е, е with a grave), Greek \u0386.
+        "T\u0400am Connections", "T\u0450am Connections", "Te\u0386m Connections",
+        .. HiddenRows[2..].Select(o => $"Team c{new Rune(o)}nnections"),
     ];
+
 
     /// <summary>Names that only look close, or are in another script, and still hire.</summary>
     private static readonly string[] StillHires =
@@ -359,7 +370,8 @@ public sealed class TeamConnectionsTests : IAsyncLifetime
     public void The_reserved_name_is_its_letters_whatever_separates_them_and_hyphenated_names_still_derive_as_before()
     {
         foreach (var name in ReservedSpellings) Assert.True(TeamConnectionsMember.IsReserved(name), name);
-        foreach (var name in StillHires.Concat(["T\u4E00am Connections", "", null]))
+        Assert.True(TeamConnectionsMember.IsReserved("Team Connections\uFFFE")); // a code point NFKD refuses is not a letter
+        foreach (var name in StillHires.Concat(["T\u4E00am Connections", "Team Connect\u04CFons", "Team Co\u03BD\u03BDections", "", null]))
             Assert.False(TeamConnectionsMember.IsReserved(name), name ?? "null");
 
         // The real member keeps its name and id; DeriveName is unchanged for a hyphen or underscore.
@@ -390,6 +402,23 @@ public sealed class TeamConnectionsTests : IAsyncLifetime
         Assert.True(TeamConnectionsMember.IsReserved("Team C\u0585nnections"));
         Assert.True(TeamConnectionsMember.IsReserved("Team Connect\u0131ons"));
         Assert.False(TeamConnectionsMember.IsReserved("Team Connect\u04CFons"));
+
+        // The rows NFKD or the combining-mark drop once hid are in it, and are read before either.
+        foreach (var (source, target) in HiddenRows.Zip(new[] { "c", "C", "o", "o", "o", "o", "o", "o" }))
+            Assert.Equal(target, table[source]);
+
+        // EVERY row whose target is one letter of teamconnections reserves the name with that letter swapped for it.
+        var single = 0;
+        foreach (var (source, target) in table)
+        {
+            var letters = new string(target.ToLowerInvariant().Where(char.IsLetter).ToArray());
+            if (letters.Length != 1 || !"teamconnections".Contains(letters[0])) continue;
+            var at = "teamconnections".IndexOf(letters[0]);
+            var name = string.Concat("teamconnections".AsSpan(0, at), new Rune(source).ToString(), "teamconnections".AsSpan(at + 1));
+            Assert.True(TeamConnectionsMember.IsReserved(name), $"U+{source:X4} -> {target}: '{name}'");
+            single++;
+        }
+        Assert.Equal(513, single);
     }
 
     // ---- helpers ------------------------------------------------------------------------------------------

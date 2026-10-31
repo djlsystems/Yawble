@@ -1503,8 +1503,10 @@ is the consent. It never reads a connection of another team.
 - **Made by the platform.** A new or cloned team gets one at creation; an existing team gets one at
   the Host's start. The name is reserved: no other member may take it (409). A name is refused
   when its Unicode confusables skeleton ([UTS #39](https://www.unicode.org/reports/tr39/)) is that
-  of `teamconnections`: the name is normalized (NFKD), its combining marks dropped, case-folded,
-  each look-alike mapped to the letter it imitates, and then only its letters kept. So
+  of `teamconnections`: each character is first looked up in Unicode's look-alikes (as written, then
+  lower-cased) and otherwise normalized (NFKD) and its parts looked up the same way; then combining
+  marks are dropped, it is case-folded and only its letters are kept. Looking up first keeps a
+  look-alike that normalizing or dropping marks would hide (Greek lunate sigma `ϲ`, Telugu `ం`). So
   `TEAM-CONNECTIONS`, `Team_Connections`, `Team Connections 2`, `Téam`, `Ｔeam`, and a Cyrillic,
   Greek, Armenian or other look-alike (Cyrillic `е`, Armenian `օ`, dotless `ı`) are refused as much
   as `Team Connections`, while `Team Connection`, `Team`, `Connections` and `My Team Connections`

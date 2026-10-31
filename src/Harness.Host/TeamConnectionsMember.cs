@@ -39,32 +39,53 @@ public static class TeamConnectionsMember
 
     /// <summary>
     /// Whether <paramref name="label"/> is the reserved name: its confusables SKELETON equals that of
-    /// <c>teamconnections</c>. The skeleton (UTS #39, with <see cref="Confusables"/>): NFKD; drop the
-    /// combining marks; case-fold; map each character through the table (looked up as written and,
-    /// when it has no entry, case-folded, so a capital look-alike such as Greek Nu counts as its own
-    /// letter); then keep only letters. So <c>TEAM-CONNECTIONS</c>, <c>Team_Connections</c>,
+    /// <c>teamconnections</c>. The skeleton (UTS #39, with <see cref="Confusables"/>), per code point of the
+    /// label and BEFORE any normalization: the table's target for it as written; else the target for its
+    /// case-fold (a capital with no row of its own); else its NFKD, each code point of that read in the table
+    /// the same way (so Cyrillic \u0400, Cyrillic Е with a grave, is still the E it imitates). Then, on the
+    /// result: drop the combining marks, case-fold, keep only letters. Reading the table first is what keeps a row NFKD would rewrite
+    /// (Greek lunate sigma U+03F2 / U+03F9, to <c>c</c>) or a spacing combining mark the table maps (Telugu
+    /// anusvara U+0C02, to <c>o</c>). So <c>TEAM-CONNECTIONS</c>, <c>Team_Connections</c>,
     /// <c>Team - Connections</c>, <c>Team Connections 2</c>, <c>T\u0435am Connections</c> (Cyrillic ie),
-    /// <c>Team C\u0585nnections</c> (Armenian oh), <c>Team Connect\u0131ons</c> (dotless i) and
-    /// <c>T\u00E9am Connections</c> are refused, though <see cref="ContainerId.DeriveName"/> keeps '-'
-    /// and '_' and would give them another identifier; <c>Team Connection</c>, <c>Connections</c>,
-    /// <c>Team</c> and a name in another script are not. A letter the table does not map stays itself.
+    /// <c>Team C\u0585nnections</c> (Armenian oh), <c>Team Connect\u0131ons</c> (dotless i),
+    /// <c>Team \u03F2onnections</c> and <c>T\u00E9am Connections</c> are refused, though
+    /// <see cref="ContainerId.DeriveName"/> keeps '-' and '_' and would give them another identifier;
+    /// <c>Team Connection</c>, <c>Connections</c>, <c>Team</c> and a name in another script are not. A letter
+    /// the table does not map stays itself.
     /// </summary>
     public static bool IsReserved(string? label) =>
         label is not null && Skeleton(label) == ReservedSkeleton;
 
     private static string Skeleton(string label)
     {
+        var mapped = new StringBuilder();
+        foreach (var rune in label.EnumerateRunes())
+        {
+            if (Map(rune) is { } target) { mapped.Append(target); continue; }
+            // Its decomposition, each part read in the same table: Cyrillic Ѐ is Cyrillic Е (to E) and a grave.
+            foreach (var part in Decompose(rune).EnumerateRunes()) mapped.Append(Map(part) ?? part.ToString());
+        }
+
         var skeleton = new StringBuilder();
-        foreach (var rune in label.Normalize(NormalizationForm.FormKD).EnumerateRunes())
+        foreach (var rune in mapped.ToString().EnumerateRunes())
         {
             if (Rune.GetUnicodeCategory(rune) is UnicodeCategory.NonSpacingMark or UnicodeCategory.SpacingCombiningMark
                 or UnicodeCategory.EnclosingMark) continue;
             var folded = Rune.ToLowerInvariant(rune);
-            var mapped = Confusables.GetValueOrDefault(rune.Value) ?? Confusables.GetValueOrDefault(folded.Value) ?? folded.ToString();
-            foreach (var letter in mapped.EnumerateRunes())
-                if (Rune.IsLetter(letter)) skeleton.Append(Rune.ToLowerInvariant(letter).ToString());
+            if (Rune.IsLetter(folded)) skeleton.Append(folded.ToString());
         }
         return skeleton.ToString();
+    }
+
+    /// <summary>The table's target for <paramref name="rune"/> as written, else for its case-fold, else none.</summary>
+    private static string? Map(Rune rune) =>
+        Confusables.GetValueOrDefault(rune.Value) ?? Confusables.GetValueOrDefault(Rune.ToLowerInvariant(rune).Value);
+
+    /// <summary>NFKD of one code point; a code point the normalizer refuses (U+FFFE) is kept as it is.</summary>
+    private static string Decompose(Rune rune)
+    {
+        try { return rune.ToString().Normalize(NormalizationForm.FormKD); }
+        catch (ArgumentException) { return rune.ToString(); }
     }
 
     /// <summary>The embedded copy of <c>Confusables/team-connections-confusables.txt</c>.</summary>
