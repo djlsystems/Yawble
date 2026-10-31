@@ -148,3 +148,105 @@ public sealed class McpServerToolsProbe3Tests
     [DllImport("libc")]
     private static extern uint getgid();
 }
+
+/// <summary>
+/// THE D1 LINES WITH A REAL SWITCH. Skipped unless this process can really start a child as the agent user
+/// (<see cref="AgentLaunchUser.Resolve"/> switches): run it as the Host's user holding CAP_SETUID and CAP_SETGID, the way
+/// the container entrypoint starts the Host, with HARNESS_TEST_HOST_ONLY_FILE and HARNESS_TEST_HOST_ONLY_DIR naming
+/// a file (600) and a folder (700) of that user's own.
+/// </summary>
+public sealed class McpServerToolsRealSwitchTests
+{
+    private static CancellationToken Ct => McpServerToolsBed.Ct;
+
+    [Fact]
+    public async Task With_users_switched_links_to_Host_only_places_change_nothing_and_a_200_write_swap_race_never_does()
+    {
+        Assert.SkipUnless(OperatingSystem.IsLinux(), "Linux only.");
+        var user = AgentLaunchUser.Resolve();
+        Assert.SkipUnless(user.Switches, "This process cannot switch users: " + user.Reason);
+        var file = Environment.GetEnvironmentVariable("HARNESS_TEST_HOST_ONLY_FILE");
+        var dir = Environment.GetEnvironmentVariable("HARNESS_TEST_HOST_ONLY_DIR");
+        Assert.SkipWhen(string.IsNullOrEmpty(file) || string.IsNullOrEmpty(dir), "HARNESS_TEST_HOST_ONLY_FILE and HARNESS_TEST_HOST_ONLY_DIR are not set");
+        string Print(string p) => Stat("%i %s %Y %Z %U %a", p);
+        var before = (Print(file!), Print(dir!));
+
+        // A working copy the agent may write, as a member's is.
+        var root = Path.Combine("/tmp", $"probe3-real-{Guid.NewGuid():N}");
+        var open = (UnixFileMode)0b111_111_111;
+        Directory.CreateDirectory(root, open);
+        File.SetUnixFileMode(root, open);
+        var cli = new WorkerAgentCli(WorkerId.Local, user);
+        async Task<WroteAsAgent> Write(string path) => Assert.IsType<WroteAsAgent>(
+            await cli.AnswerAsync(new WriteAsAgent(WorkerAsks.NewRequest(), root, path, [1, 2, 3]), Ct));
+        try
+        {
+            // A link at the target file.
+            Directory.CreateDirectory(Path.Combine(root, "art"), open);
+            File.SetUnixFileMode(Path.Combine(root, "art"), open);
+            File.CreateSymbolicLink(Path.Combine(root, "art", "pic.png"), file!);
+            Assert.Equal(WroteAsAgent.Link, (await Write(Path.Combine(root, "art", "pic.png"))).Result);
+
+            // A link as the default folder, to the Host-only file and to the Host-only folder.
+            var folder = Path.Combine(root, McpRunTools.Folder, "fake");
+            Directory.CreateDirectory(Path.GetDirectoryName(folder)!, open);
+            File.SetUnixFileMode(Path.Combine(root, McpRunTools.Folder), open);
+            File.SetUnixFileMode(Path.GetDirectoryName(folder)!, open);
+            File.CreateSymbolicLink(folder, file!);
+            Assert.NotEqual(WroteAsAgent.Written, (await Write(Path.Combine(folder, "a-1.png"))).Result);
+            File.Delete(folder);
+            File.CreateSymbolicLink(folder, dir!);
+            Assert.Equal(WroteAsAgent.Denied, (await Write(Path.Combine(folder, "a-1.png"))).Result);
+
+            // The swap race, 200 writes.
+            var real = Path.Combine(root, "d");
+            var link = Path.Combine(root, "lnk");
+            Directory.CreateDirectory(real, open);
+            File.SetUnixFileMode(real, open);
+            Directory.CreateSymbolicLink(link, dir!);
+            using var stop = new CancellationTokenSource();
+            long swaps = 0;
+            var flipper = Task.Factory.StartNew(() =>
+            {
+                while (!stop.IsCancellationRequested)
+                {
+                    if (renameat2(-100, real, -100, link, 2) == 0) Interlocked.Increment(ref swaps);
+                }
+            }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+            var outcomes = new Dictionary<string, int>();
+            for (var i = 0; i < 200; i++)
+            {
+                var r = (await Write(Path.Combine(real, $"pic-{i}.png"))).Result;
+                outcomes[r] = outcomes.GetValueOrDefault(r) + 1;
+            }
+
+            await stop.CancelAsync();
+            await flipper;
+            var said = $"{swaps} swaps; " + string.Join(", ", outcomes.Select(o => $"{o.Key} {o.Value}"));
+            TestContext.Current.SendDiagnosticMessage(said);
+            Assert.True(before == (Print(file!), Print(dir!)), "a Host-only place changed: " + said);
+
+            // Every file written is the agent's.
+            var written = Directory.GetFiles(root, "*.png", SearchOption.AllDirectories).Where(f => new FileInfo(f).LinkTarget is null).ToList();
+            Assert.NotEmpty(written);
+            Assert.All(written, f => Assert.Equal(user.Uid.ToString(), Stat("%u", f)));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static string Stat(string format, string path)
+    {
+        var start = new System.Diagnostics.ProcessStartInfo("stat") { RedirectStandardOutput = true, UseShellExecute = false };
+        foreach (var a in new[] { "-c", format, "--", path }) start.ArgumentList.Add(a);
+        using var process = System.Diagnostics.Process.Start(start)!;
+        var said = process.StandardOutput.ReadToEnd().Trim();
+        process.WaitForExit();
+        return said;
+    }
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int renameat2(int olddirfd, string oldpath, int newdirfd, string newpath, uint flags);
+}
