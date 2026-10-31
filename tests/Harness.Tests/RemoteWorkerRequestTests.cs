@@ -32,6 +32,7 @@ public sealed class RemoteWorkerRequestTests
         ["ProbeSignIn"] = new ProbeSignIn("r2", [new SignInProbeSpec("claude", null, null, ["auth", "status"], null, null)]),
         ["RunAgentCommands"] = new RunAgentCommands("r3", [new AgentCliRun("claude", ["--version"], new Dictionary<string, string>(), [], 30)]),
         ["RemoveAsAgent"] = new RemoveAsAgent("r4", "/data/teams/t", ["/data/teams/t/workspaces/a"]),
+        ["WriteAsAgent"] = new WriteAsAgent("r6", "/data/teams/t/workspaces/a", "/data/teams/t/workspaces/a/x.png", [1]),
         ["StartTerminal"] = new StartTerminal(
             "s1", new TerminalLaunch(["cli"], "/data/home", new Dictionary<string, string>(), [], null, null, null), 80, 24),
         ["ResizeTerminal"] = new ResizeTerminal("s1", 120, 40),

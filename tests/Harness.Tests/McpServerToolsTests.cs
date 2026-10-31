@@ -166,6 +166,34 @@ public sealed class McpServerToolsTests
     }
 
     [Fact]
+    public async Task Nothing_is_overwritten_a_taken_default_name_moves_to_the_next_number_and_a_taken_output_path_is_refused()
+    {
+        await using var bed = await McpServerToolsBed.StartAsync();
+
+        JsonObject? first = null, second = null, named = null;
+        string workingCopy = "";
+        await bed.RunAsync("Alpha", "Dev", async run =>
+        {
+            workingCopy = run.WorkingDirectory;
+            await File.WriteAllTextAsync(Path.Combine(workingCopy, "mine.png"), "the member's", Ct);
+            using var mcp = bed.Mcp(McpServerToolsBed.Key(run));
+            first = await mcp.CallAsync("fake_draw");
+            second = await mcp.CallAsync("fake_draw");
+            named = await mcp.CallAsync("fake_draw", new JsonObject { ["outputPath"] = "mine.png" });
+        });
+
+        string PathOf(JsonObject answer) =>
+            JsonNode.Parse(((JsonArray)answer["result"]!["content"]!)[0]!["text"]!.GetValue<string>())!["path"]!.GetValue<string>();
+        Assert.NotEqual(PathOf(first!), PathOf(second!));
+        Assert.Equal(FakeToolServer.Png, await File.ReadAllBytesAsync(PathOf(first!), Ct));
+        Assert.Equal(FakeToolServer.Png, await File.ReadAllBytesAsync(PathOf(second!), Ct));
+
+        Assert.True(HarnessMcp.IsError(named!), named!.ToJsonString());
+        Assert.Contains("`mine.png` already exists, and nothing is overwritten.", HarnessMcp.Text(named!), StringComparison.Ordinal);
+        Assert.Equal("the member's", await File.ReadAllTextAsync(Path.Combine(workingCopy, "mine.png"), Ct));
+    }
+
+    [Fact]
     public async Task Bytes_past_the_limit_are_dropped_and_the_result_says_what_was_dropped()
     {
         Assert.Equal(20L * 1024 * 1024, McpRunTools.DefaultMaximumBinary);
@@ -361,13 +389,13 @@ public sealed class McpServerToolsTests
             File.CreateSymbolicLink(Path.Combine(root, "file.png"), Path.Combine(outside, "file.png"));
             Directory.CreateSymbolicLink(Path.Combine(root, "dir"), outside);
 
-            Assert.False(McpRunTools.Write(root, Path.Combine(root, "file.png"), [1]));
-            Assert.False(McpRunTools.Write(root, Path.Combine(root, "dir", "a", "b.png"), [1]));
+            Assert.Equal(McpWrite.Link, McpRunTools.Write(root, Path.Combine(root, "file.png"), [1]));
+            Assert.Equal(McpWrite.Link, McpRunTools.Write(root, Path.Combine(root, "dir", "a", "b.png"), [1]));
             Assert.Empty(Directory.GetFileSystemEntries(outside));
 
-            Assert.True(McpRunTools.Write(root, Path.Combine(root, "new", "deep", "c.png"), [1, 2]));
-            Assert.True(McpRunTools.Write(root, Path.Combine(root, "new", "deep", "c.png"), [3]));
-            Assert.Equal([3], File.ReadAllBytes(Path.Combine(root, "new", "deep", "c.png")));
+            Assert.Equal(McpWrite.Written, McpRunTools.Write(root, Path.Combine(root, "new", "deep", "c.png"), [1, 2]));
+            Assert.Equal(McpWrite.Exists, McpRunTools.Write(root, Path.Combine(root, "new", "deep", "c.png"), [3]));
+            Assert.Equal([1, 2], File.ReadAllBytes(Path.Combine(root, "new", "deep", "c.png")));
             Assert.Single(Directory.GetFileSystemEntries(Path.Combine(root, "new", "deep")));
         }
         finally
