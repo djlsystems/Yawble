@@ -260,6 +260,16 @@ watch(
     outcomesOpen.value = true;
   },
 );
+/** The teams summary's tiles: the Outcomes dialog, at an outcome or on its list. */
+watch(
+  () => workflowNav.outcomeAsks,
+  () => {
+    conciergeOpen.value = false;
+    outcomesAt.value = workflowNav.outcomeAt;
+    outcomesRate.value = false;
+    outcomesOpen.value = true;
+  },
+);
 watch(outcomesOpen, (isOpen) => {
   if (!isOpen) outcomesRate.value = false;
 });

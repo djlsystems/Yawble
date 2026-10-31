@@ -23,7 +23,9 @@ const props = withDefaults(defineProps<{
   inMoney: boolean;
   currency: string;
   size?: 'tile' | 'row' | 'large';
-}>(), { size: 'large' });
+  /** A shared scale's top (the teams list's Same scale); the chart's own largest week otherwise. */
+  scaleMax?: number | null;
+}>(), { size: 'large', scaleMax: null });
 
 const Gap = 2;
 
@@ -44,7 +46,7 @@ const plot = computed(() => ({
 const totals = computed(() => props.weeks.map((_, week) =>
   props.series.reduce((sum, s) => sum + weekValue(s.weekly[week] ?? { cost: null, agentSeconds: 0 }, props.inMoney), 0)));
 
-const ticks = computed(() => axisTicks(Math.max(0, ...totals.value)));
+const ticks = computed(() => axisTicks(Math.max(0, props.scaleMax ?? 0, ...totals.value)));
 const top = computed(() => ticks.value[ticks.value.length - 1] ?? 1);
 
 const slot = computed(() => plot.value.width / Math.max(props.weeks.length, 1));
