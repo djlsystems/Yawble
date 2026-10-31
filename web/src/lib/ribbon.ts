@@ -188,8 +188,6 @@ export const Ribbon: RibbonSpec = {
         { kind: 'button', action: 'admin-users', label: 'Users', icon: 'manage_accounts', size: 'large' },
         { kind: 'button', action: 'admin-agents', label: 'Agents', icon: 'smart_toy', size: 'large' },
         { kind: 'button', action: 'admin-skills', label: 'Skills', icon: 'psychology', size: 'large' },
-        // The instance's MCP servers, which Team settings gives to teams. After Skills, before Log.
-        { kind: 'button', action: McpServersAction, label: 'MCP servers', icon: 'hub', size: 'large' },
         { kind: 'button', action: 'admin-log', label: 'Log', icon: 'receipt_long', size: 'large' },
         // BESIDE Log AND NOT THE SAME THING. `Log` is what a PERSON did to the
         // instance; this is what the instance did when it went wrong, and no row here names an
@@ -203,8 +201,10 @@ export const Ribbon: RibbonSpec = {
         // The instance's local repositories - git kept on the volume, which a team names as
         // `local:<name>`. Before Sites.
         { kind: 'button', action: RepositoriesAction, label: 'Repositories', icon: 'account_tree', size: 'large' },
-        // Every team's published sites. After Repositories, before Plugins.
+        // Every team's published sites. After Repositories, before MCP servers.
         { kind: 'button', action: SitesAction, label: 'Sites', icon: 'public', size: 'large' },
+        // The instance's MCP servers, which Team settings gives to teams. After Sites, directly before Plugins.
+        { kind: 'button', action: McpServersAction, label: 'MCP servers', icon: 'hub', size: 'large' },
         // What is installed on the instance, then the accounts it acts on, then how it is configured.
         { kind: 'button', action: PluginsAction, label: 'Plugins', icon: 'extension', size: 'large' },
         // DIRECTLY AFTER Plugins, and Settings follows: the OAuth accounts plugins act on.

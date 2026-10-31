@@ -3,6 +3,7 @@ import * as ribbonModule from '../ribbon'
 import {
   ConnectionsAction,
   DocumentsAction,
+  McpServersAction,
   OutcomesAction,
   PluginsAction,
   RepositoriesAction,
@@ -232,7 +233,9 @@ describe('the ribbon', () => {
     const actions = admin?.items.map((item) => item.action) ?? []
 
     expect(actions.indexOf(SitesAction)).toBe(actions.indexOf(RepositoriesAction) + 1)
-    expect(actions.indexOf(SitesAction)).toBe(actions.indexOf(PluginsAction) - 1)
+    // MCP servers sits between Sites and Plugins.
+    expect(actions.indexOf(SitesAction)).toBe(actions.indexOf(McpServersAction) - 1)
+    expect(actions.indexOf(McpServersAction)).toBe(actions.indexOf(PluginsAction) - 1)
     expect(actions.indexOf(SitesAction)).toBeLessThan(actions.indexOf(TenantSettingsAction))
     expect(needsActiveWorkTeam(SitesAction, undefined)).toBe(false)
 
