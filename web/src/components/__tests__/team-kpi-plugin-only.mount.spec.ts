@@ -14,6 +14,10 @@ vi.mock('../../api/client', async (importOriginal) => ({
   getTeamActivity: () => new Promise(() => {}),
   getTeamTokenRuns: () => new Promise(() => {}),
 }));
+vi.mock('../../api/outcomes', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  getTeamCost: () => new Promise(() => {}),
+}));
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 
@@ -102,20 +106,16 @@ async function mountStrip(containers: ContainerSnapshot[]) {
   return wrapper;
 }
 
+/** The Cost tile opens the Cost dialog; the Tokens dialog's content is its Tokens tab. */
 async function openTokensDialog(strip: VueWrapper): Promise<string> {
-  await strip.find('.team-kpi--tokens').trigger('click');
+  await strip.find('.team-kpi--cost').trigger('click');
+  await flushPromises();
+  (document.body.querySelector('[data-cost-tab="tokens"]') as HTMLElement).click();
   await flushPromises();
   return document.body.querySelector('.token-dialog-card')?.textContent?.replace(/\s+/g, ' ') ?? '';
 }
 
 describe('the team KPI card on a plugin-only team', () => {
-  it('says none on the Tokens tile, not unavailable', async () => {
-    const strip = await mountStrip([echo, mailer]);
-
-    expect(strip.find('.team-kpi--tokens').text()).toContain('none');
-    expect(strip.find('.team-kpi--tokens').text()).not.toContain('unavailable');
-  });
-
   it('gives no advice about usage capture, and says why there are no tokens', async () => {
     const dialog = await openTokensDialog(await mountStrip([echo, mailer]));
 
@@ -136,7 +136,6 @@ describe('the team KPI card on a team with an agent', () => {
   it('still says unavailable and points to usage capture', async () => {
     const strip = await mountStrip([dev, echo]);
 
-    expect(strip.find('.team-kpi--tokens').text()).toContain('unavailable');
     expect(await openTokensDialog(strip)).toContain('Configure usage capture in the Agents screen.');
   });
 

@@ -160,8 +160,11 @@ async function mountStrip(usage: TeamTokenTotals = totals()) {
 
 const dialog = () => document.querySelector<HTMLElement>('.token-dialog-card');
 
+/** The Cost tile opens the Cost dialog; the Tokens dialog's content is its Tokens tab. */
 async function openDialog() {
-  await wrapper!.find('.team-kpi--tokens').trigger('click');
+  await wrapper!.find('.team-kpi--cost').trigger('click');
+  await settle();
+  document.querySelector<HTMLElement>('[data-cost-tab="tokens"]')!.click();
   await settle();
 }
 

@@ -13,6 +13,10 @@ vi.mock('../../api/client', async (importOriginal) => ({
   getTeamActivity: () => new Promise(() => {}),
   getTeamTokenRuns: () => new Promise(() => {}),
 }));
+vi.mock('../../api/outcomes', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  getTeamCost: () => new Promise(() => {}),
+}));
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 
@@ -103,8 +107,11 @@ async function mountStrip(usage: TeamTokenTotals | null, workflows: TeamWorkflow
   return wrapper;
 }
 
+/** The Cost tile opens the Cost dialog; the Tokens dialog's content is its Tokens tab. */
 async function openTokensDialog(strip: VueWrapper): Promise<string> {
-  await strip.find('.team-kpi--tokens').trigger('click');
+  await strip.find('.team-kpi--cost').trigger('click');
+  await flushPromises();
+  (document.body.querySelector('[data-cost-tab="tokens"]') as HTMLElement).click();
   await flushPromises();
   return document.body.querySelector('.token-dialog-card')?.textContent?.replace(/\s+/g, ' ') ?? '';
 }
@@ -113,8 +120,6 @@ describe('TeamKpiStrip token card', () => {
   it('says unavailable, and points to the Agents screen there', async () => {
     const strip = await mountStrip(totals({ available: false, missing: 'No usage on the log' }));
 
-    expect(strip.find('.team-kpi--tokens').text()).toContain('unavailable');
-
     const dialog = await openTokensDialog(strip);
     expect(dialog).toContain('Unavailable. No usage on the log.');
     expect(dialog).toContain('Configure usage capture in the Agents screen.');
@@ -122,20 +127,20 @@ describe('TeamKpiStrip token card', () => {
 
   it('labels an available total as a team total', async () => {
     const strip = await mountStrip(totals());
-    const tile = strip.find('.team-kpi--tokens').text();
+    const dialog = await openTokensDialog(strip);
 
-    expect(tile).toContain('1,200');
-    expect(tile).toContain('340');
-    expect(tile).toContain('team total');
-    expect(tile).not.toContain('partial');
-
-    expect(await openTokensDialog(strip)).toContain('Team total from the message log.');
+    expect(dialog).toContain('Team total from the message log.');
+    expect(document.body.querySelector('[data-token-part="in"]')?.textContent).toContain('1,200');
+    expect(document.body.querySelector('[data-token-part="out"]')?.textContent).toContain('340');
   });
 
-  it('says partial when some runs have no usage', async () => {
+  /** The tile is Cost now: no token figure is on it, and the tokens are one click away. */
+  it('puts no token figure on the Cost tile', async () => {
     const strip = await mountStrip(totals({ partial: true, runsWithoutUsage: 1 }));
 
-    expect(strip.find('.team-kpi-partial').text()).toBe('partial');
+    expect(strip.find('.team-kpi--tokens').exists()).toBe(false);
+    expect(strip.find('.team-kpi--cost').text()).not.toContain('1,200');
+    expect(strip.find('.team-kpi--cost').text()).not.toContain('billable');
   });
 
   it('renders a member total the log does not have as the literal (unknown)', async () => {
@@ -170,8 +175,10 @@ describe('TeamKpiStrip token card', () => {
    *  team got busier. The figure is the log total and nothing the containers carry. */
   it('shows the log total, not anything summed from containers', async () => {
     const strip = await mountStrip(totals({ tokensIn: 7, tokensOut: 3 }));
+    await openTokensDialog(strip);
 
-    expect(strip.find('.team-kpi--tokens').text()).toMatch(/7 in ·[\s\S]*· 3 out/);
+    expect(document.body.querySelector('[data-token-part="in"]')?.textContent?.trim()).toMatch(/^7\s*in$/);
+    expect(document.body.querySelector('[data-token-part="out"]')?.textContent?.trim()).toMatch(/^3\s*out$/);
   });
 });
 

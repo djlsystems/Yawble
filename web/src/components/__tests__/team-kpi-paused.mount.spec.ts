@@ -32,6 +32,11 @@ vi.mock('../../api/client', async (importOriginal) => ({
   // The Activity tile's read; nothing here is about it, so it never answers.
   getTeamActivity: () => new Promise(() => {}),
 }));
+vi.mock('../../api/outcomes', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  // The Cost tile reads `/cost` when the strip mounts; nothing here is about it, so it never answers.
+  getTeamCost: () => new Promise(() => {}),
+}));
 
 import TeamKpiStrip from '../TeamKpiStrip.vue';
 import { useConsoleStore } from '../../stores/console';
