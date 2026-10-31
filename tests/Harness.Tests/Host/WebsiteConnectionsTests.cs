@@ -44,6 +44,9 @@ public sealed class WebsiteConnectionsTests : IAsyncLifetime
     private readonly string _dataRoot = Path.Combine(Path.GetTempPath(), $"harness-website-{Guid.NewGuid():N}");
     private readonly FakeAgent _agents = new();
     private readonly HashSet<string> _live = new(StringComparer.Ordinal);
+    private int _loginPosts;
+    /// <summary>Sessions have expired: arriving signs nobody in, and the dashboard answers 401 to a stale one.</summary>
+    private volatile bool _expired;
     private WebApplicationFactory<Program> _factory = null!;
     private WebApplication _site = null!;
     private HttpClient _person = null!;
@@ -72,17 +75,19 @@ public sealed class WebsiteConnectionsTests : IAsyncLifetime
         bool SignedIn(HttpContext c) => c.Request.Cookies.TryGetValue("sess", out var s) && _live.Contains(s!);
         _site.MapGet("/", (HttpContext c) =>
         {
+            if (_expired) return Results.Content(Page("<h1>Welcome</h1>You are not signed in."), "text/html");
             _live.Add(Session);
             c.Response.Cookies.Append("sess", Session, new CookieOptions { Expires = DateTimeOffset.UtcNow.AddHours(1) });
             return Results.Content(Page("<h1>Welcome</h1>You are signed in."), "text/html");
         });
         _site.MapGet("/dashboard", (HttpContext c) => SignedIn(c)
             ? Results.Content(Page("<h1>Dashboard</h1><p id=\"who\">Signed in as Pat</p>"), "text/html")
-            : Results.Redirect("/login"));
+            : _expired ? Results.Content(Page("<h1>Session expired</h1>"), "text/html", statusCode: 401) : Results.Redirect("/login"));
         _site.MapGet("/login", () => Results.Content(Page(
             "<h1>Sign in</h1><form method=\"post\" action=\"/login\"><input type=\"email\" name=\"email\"/><input type=\"password\" name=\"password\"/><button type=\"submit\">Log in</button></form>"), "text/html"));
         _site.MapPost("/login", async (HttpContext c) =>
         {
+            Interlocked.Increment(ref _loginPosts);
             var form = await c.Request.ReadFormAsync();
             if (form["email"] != SiteUser || form["password"] != SitePassword) return Results.Content(Page("<h1>Sign in</h1><p>Wrong username or password</p>"), "text/html");
             var token = "sess-" + Guid.NewGuid().ToString("N")[..12];
@@ -254,7 +259,7 @@ public sealed class WebsiteConnectionsTests : IAsyncLifetime
     // ---- Failures follow CON 4 ---------------------------------------------------------------------------
 
     [Fact]
-    public async Task A_refused_sign_in_is_Needs_you_on_the_connection_and_a_site_that_does_not_answer_fails_the_run_alone()
+    public async Task A_refused_sign_in_through_Team_Connections_is_a_connection_hold_a_passing_test_clears_it_and_tells_the_Manager_once_and_a_site_that_does_not_answer_fails_the_run_alone()
     {
         Assert.SkipWhen(SignInBrowserChromiumTests.Chromium() is null, SignInBrowserChromiumTests.NoChrome);
 
@@ -271,19 +276,161 @@ public sealed class WebsiteConnectionsTests : IAsyncLifetime
         Assert.Equal(ConnectionRecord.NeedsReconnect, (string?)(await ConnectionAsync(wrong))["status"]);
         Assert.Contains(TenantActions.ConnectionNeedsReconnect, await TenantActionsAsync());
 
-        // While it needs a person, a member's command does not sign in again.
-        var held = Output(await TellAndAwaitAsync(dev, "check Wrong"));
-        Assert.Contains("Wrong needs a person, so it was not used", held, StringComparison.Ordinal);
+        // A CON 4 CONNECTION HOLD: the run waits for a person, held by the connection; Needs you lists the
+        // connection once, naming the team and Team Connections, and no Failed item beside it; the member
+        // reads held and the team's workflow does not read Failed.
+        Assert.Equal(FailureClasses.NeedsPerson, Field(refused, PayloadFields.FailureClass));
+        Assert.Equal(wrong, Field(refused, PayloadFields.HeldByConnection));
+        await AssertHeldAsync(wrong, "the sign-in was rejected", refused);
 
-        // A person fixes it and tests it: Needs you is cleared, as CON 4 clears it.
+        // While it needs a person, a member's command does not run the browser: the same hold.
+        var posts = _loginPosts;
+        var again = await TellAndAwaitAsync(dev, "check Wrong");
+        Assert.Contains("Wrong needs a person, so it was not used", Output(again), StringComparison.Ordinal);
+        Assert.Equal(posts, _loginPosts);
+        Assert.Equal(FailureClasses.NeedsPerson, Field(again, PayloadFields.FailureClass));
+        Assert.Equal(wrong, Field(again, PayloadFields.HeldByConnection));
+        await AssertHeldAsync(wrong, "the sign-in was rejected", again);
+        await ManagerRanAsync(refused);
+        await ManagerRanAsync(again);
+
+        // A person fixes it and tests it: the hold, the member's marks and Failed are cleared, as CON 4
+        // clears them, and the Manager is told once in each workflow the connection held up.
         await _person.PutAsJsonAsync($"/api/connections/{wrong}/credentials", new { fields = new[] { new { name = "password", value = SitePassword } } }, Ct);
         Assert.Equal(ConnectionRecord.Ok, (await TestAsync(wrong)).GetProperty("health").GetString());
+        await AssertClearedAsync(refused, again);
+        var notices = await NoticesAsync();
+        Assert.Equal([refused.CorrelationId, again.CorrelationId], notices.Select(n => n.CorrelationId).Distinct().Order());
+        Assert.Equal(notices.Count, notices.Select(n => n.CorrelationId).Distinct().Count());
+        Assert.All(notices, n => Assert.Contains("is ready now: a person put right the connection", n.Payload, StringComparison.Ordinal));
 
+        // A second passing test sends no second notice.
+        Assert.Equal(ConnectionRecord.Ok, (await TestAsync(wrong)).GetProperty("health").GetString());
+        Assert.Equal(notices.Count, (await NoticesAsync()).Count);
+
+        // A SITE THAT DOES NOT ANSWER fails that run only: the connection is left ok and nothing holds.
         var unreachable = await TellAndAwaitAsync(dev, "check Down");
         Assert.Equal(MessageTypes.Failed, unreachable.Type);
         Assert.Equal(ConnectionRecord.Ok, (string?)(await ConnectionAsync(down))["status"]);
+        Assert.NotEqual(FailureClasses.NeedsPerson, Field(unreachable, PayloadFields.FailureClass));
+        Assert.Null(Field(unreachable, PayloadFields.HeldByConnection));
+        Assert.DoesNotContain(await NeedsYouAsync(), i => (string?)i["kind"] == NeedsYouKinds.Connection);
 
         await AssertNowhereAsync(SitePassword, "not-the-password-1");
+    }
+
+    [Fact]
+    public async Task An_expired_session_through_Team_Connections_is_a_connection_hold_and_Sign_in_then_Done_clears_it()
+    {
+        Assert.SkipWhen(SignInBrowserChromiumTests.Chromium() is null, SignInBrowserChromiumTests.NoChrome);
+
+        var portal = await WebsiteAsync("Fake portal", ("siteUrl", _origin), ("method", "interactive"), ("checkUrl", "/dashboard"), ("checkText", "Signed in as"));
+        await AssignAsync(portal);
+        await SignInAsync(portal);
+        using var dev = await KeyClientAsync(new ContainerId(_team, "Dev").ToString());
+
+        // The site forgets every session: the kept one has expired.
+        _expired = true;
+        _live.Clear();
+        var expired = await TellAndAwaitAsync(dev, "check Fake portal");
+        Assert.Equal(MessageTypes.Failed, expired.Type);
+        Assert.Contains("is expired", Output(expired), StringComparison.Ordinal);
+        Assert.Equal(ConnectionRecord.NeedsReconnect, (string?)(await ConnectionAsync(portal))["status"]);
+        Assert.Equal(FailureClasses.NeedsPerson, Field(expired, PayloadFields.FailureClass));
+        Assert.Equal(portal, Field(expired, PayloadFields.HeldByConnection));
+        await AssertHeldAsync(portal, "Sign in", expired);
+        await ManagerRanAsync(expired);
+
+        // SIGN IN THEN DONE restores the connection and clears the same hold, telling the Manager once.
+        _expired = false;
+        await SignInAsync(portal);
+        Assert.Equal(ConnectionRecord.Ok, (string?)(await ConnectionAsync(portal))["status"]);
+        await AssertClearedAsync(expired);
+        Assert.Equal(expired.CorrelationId, Assert.Single(await NoticesAsync()).CorrelationId);
+
+        Assert.Equal(MessageTypes.Completed, (await TellAndAwaitAsync(dev, "check Fake portal")).Type);
+        await AssertNowhereAsync(Session);
+    }
+
+    /// <summary>
+    /// One Needs you item for <paramref name="connection"/>, a <c>connection</c> item naming the team and
+    /// Team Connections, no Failed item for Team Connections; the member held by it, reading needs-person;
+    /// each held run's workflow not Failed.
+    /// </summary>
+    private async Task AssertHeldAsync(string connection, string words, params Message[] runs)
+    {
+        var items = await NeedsYouAsync();
+        var item = Assert.Single(items, i => (string?)i["kind"] == NeedsYouKinds.Connection);
+        Assert.Equal(connection, (string?)item["connection"]!["id"]);
+        Assert.Contains(words, (string?)item["words"], StringComparison.Ordinal);
+        var held = Assert.Single(item["connection"]!["holds"]!.AsArray());
+        Assert.Equal(_team, (string?)held!["team"]!["id"]);
+        Assert.Equal([Tc], held["members"]!.AsArray().Select(m => (string?)m));
+        Assert.DoesNotContain(items, i => (string?)i["kind"] == NeedsYouKinds.Failed && JsonSerializer.Serialize(i).Contains(Tc, StringComparison.Ordinal));
+
+        var member = TeamConnections().Snapshot();
+        Assert.Equal(FailureClasses.NeedsPerson, member.FailureClass);
+        Assert.Contains(words, member.NeedsPerson, StringComparison.Ordinal);
+        Assert.Equal(connection, TeamConnections().HeldByConnection);
+
+        foreach (var run in runs)
+        {
+            var workflow = await WorkflowAsync(run.CorrelationId);
+            Assert.NotEqual("Failed", (string?)workflow["state"]);
+            Assert.Empty(workflow["failedMembers"]!.AsArray());
+        }
+    }
+
+    /// <summary>No connection item, Team Connections' failed and needs-person marks clear, no held workflow Failed.</summary>
+    private async Task AssertClearedAsync(params Message[] runs)
+    {
+        Assert.DoesNotContain(await NeedsYouAsync(), i => (string?)i["kind"] == NeedsYouKinds.Connection
+            || JsonSerializer.Serialize(i).Contains(Tc, StringComparison.Ordinal));
+        var member = TeamConnections().Snapshot();
+        Assert.Null(member.Failed);
+        Assert.Null(member.NeedsPerson);
+        Assert.Null(TeamConnections().HeldByConnection);
+        foreach (var run in runs)
+        {
+            Assert.NotEqual("Failed", (string?)(await WorkflowAsync(run.CorrelationId))["state"]);
+        }
+    }
+
+    private MemberRuntime TeamConnections() => Services.GetRequiredService<ContainerHost>().Find(new ContainerId(_team, Tc))!;
+
+    private async Task<IReadOnlyList<JsonNode>> NeedsYouAsync() =>
+        [.. (await _person.GetFromJsonAsync<JsonObject>("/api/needs-you?part=live", Ct))!["items"]!.AsArray().Select(i => i!)];
+
+    private async Task<JsonNode> WorkflowAsync(long correlation) =>
+        (await _person.GetFromJsonAsync<JsonObject>($"/api/teams/{_team}/workflows", Ct))!["workflows"]!.AsArray()
+            .Single(w => (long)w!["correlation"]! == correlation)!;
+
+    private static string? Field(Message row, string field) =>
+        JsonNode.Parse(row.Payload)![field] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+
+    private async Task<IReadOnlyList<Message>> NoticesAsync()
+    {
+        var manager = MessageTypes.InstructionFor(new ContainerId(_team, TeamRegistry.DefaultManagerName));
+        var rows = await Services.GetRequiredService<IMessageLog>().ReadAfterAsync(0, [manager], int.MaxValue, Ct);
+        return [.. rows.Where(m => m.Payload.Contains(PluginReadyNotice.ReadyField, StringComparison.Ordinal))];
+    }
+
+    /// <summary>Waits until the Manager the failure woke has run and is idle again.</summary>
+    private async Task ManagerRanAsync(Message failed)
+    {
+        var manager = new ContainerId(_team, TeamRegistry.DefaultManagerName);
+        var log = Services.GetRequiredService<IMessageLog>();
+        var host = Services.GetRequiredService<ContainerHost>();
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (DateTime.UtcNow < deadline)
+        {
+            var ended = (await log.ReadAfterAsync(failed.Seq, [MessageTypes.Completed, MessageTypes.Failed], int.MaxValue, Ct))
+                .Any(m => m.Source == manager.ToString() && m.CorrelationId == failed.CorrelationId);
+            if (ended && host.Find(manager)!.State == ContainerState.Idle) return;
+            await Task.Delay(50, Ct);
+        }
+
+        Assert.Fail("The Manager was not woken by the failure, or its run did not end.");
     }
 
     // ---- Done when 3 -----------------------------------------------------------------------------------

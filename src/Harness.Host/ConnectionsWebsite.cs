@@ -8,8 +8,9 @@ namespace Harness.Host;
 /// one line and <see cref="Report"/> the page it opened, each with every value of the connection taken
 /// out; <see cref="Screenshot"/> that page; <see cref="Handoff"/> the session a <c>session</c> command hands
 /// over, which only the asking member's workspace receives. <see cref="Held"/> is the CON 4 kind the
-/// connection was marked with (<see cref="RunConnectionFailures"/>), and <see cref="Failed"/> whether the run
-/// that asked fails: a refused sign-in, an expired session or a CAPTCHA hold the connection, a site that
+/// connection was marked with (<see cref="RunConnectionFailures"/>), or <see cref="ConnectionRecord.NeedsReconnect"/>
+/// when it already needed a person and was not used; either way the run is held by it. <see cref="Failed"/> is
+/// whether the run that asked fails: a refused sign-in, an expired session or a CAPTCHA hold the connection, a site that
 /// did not answer fails the run alone, and a refused command (May act on pages off) is only answered.
 /// </summary>
 public sealed record WebsiteAnswer(
@@ -77,7 +78,7 @@ public sealed partial class Connections
         {
             return new WebsiteAnswer(
                 $"{connection.Name} needs a person, so it was not used: {connection.StatusReason ?? "it needs reconnecting."} "
-                + $"A person fixes it in {Where} (Sign in, or edit it and Test connection).", Failed: true, ConnectionId: id);
+                + $"A person fixes it in {Where} (Sign in, or edit it and Test connection).", Held: ConnectionRecord.NeedsReconnect, Failed: true, ConnectionId: id);
         }
 
         if (command == WebsiteProbe.Act && !WebsiteFields.MayActOn(settings)) return new WebsiteAnswer(MayActOffText(connection.Name));

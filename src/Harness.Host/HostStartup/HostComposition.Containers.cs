@@ -112,8 +112,15 @@ internal sealed partial class HostComposition
             // THE PER-RUN FOREIGN TOOLS CHECK, on the row that carries the run, inside the run: the
             // transcript the agent wrote is read for tools the platform did not give it. Late-bound for
             // the reason above. See ForeignToolsCheck.
+            //
+            // THEN A CONNECTION HOLD, on a Team Connections run a website held up (CON 6): it uses the
+            // team's connections, not a bound slot, so the hold is read from its failed row. See
+            // PluginSetup.RunEndedAsync.
             onTerminal: async (terminal, ct) =>
-                await sp.GetRequiredService<ForeignToolsCheck>().CheckAsync(terminal, ct),
+            {
+                await sp.GetRequiredService<ForeignToolsCheck>().CheckAsync(terminal, ct);
+                if (sp.GetService<PluginSetup>() is { } setup) await setup.RunEndedAsync(terminal, ct);
+            },
 
             // AN ARCHIVED TEAM, asked by the pump for a paused team: its trigger-only events are skipped
             // (TeamArchive, through triggerHeld above) rather than left to fire at Resume. Late-bound for the

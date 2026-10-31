@@ -439,16 +439,23 @@ public sealed partial class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         // TEAM CONNECTIONS ANSWERS THE MEMBER THAT ASKED, in its own workflow, as an instruction to it.
         if (gathered.TeamConnections) await AnswerAskersAsync(invocation, text, ct);
 
+        // A WEBSITE THAT NEEDS A PERSON (CON 6) - a refused sign-in, an expired session, a CAPTCHA or a
+        // device approval, or one already waiting - is a connection hold: the run waits for a person,
+        // held by the connection, and its put-right clears it (PluginSetup). A site that does not answer
+        // holds nothing and fails as it would have.
+        var websiteHeld = reason is not null && gathered.WebsiteFailure is { Held: not null, ConnectionId: not null };
+
         return new MemberResult(
             reason is null,
             ended.ExitCode,
             text,
             FailureReason: reason,
+            FailureClass: websiteHeld ? FailureClasses.NeedsPerson : null,
             ProcessId: ended.ProcessId,
             // A FAILURE IS NEVER QUIET, whatever the record said: ok:false, a non-zero exit, a
             // timeout and a Stop all wake as they always did.
             Quiet: reason is null && gathered.Result is { Quiet: true },
-            HeldByConnection: reason is null ? null : heldByConnection ?? (gathered.WebsiteFailure is { Held: not null } held ? held.ConnectionId : null));
+            HeldByConnection: reason is null ? null : heldByConnection ?? (websiteHeld ? gathered.WebsiteFailure!.ConnectionId : null));
     }
 
     /// <summary>The request's <c>connections</c>: each slot's grant by slot name, or for a multiple slot

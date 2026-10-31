@@ -575,9 +575,12 @@ its session - is taken out of what comes back; no value is in a route, a row, a 
 screenshot's name or a file other than the session handed over. Each command lands one
 `connections.website-used` row (the command, the outcome, the sentence). A refused sign-in or an
 expired session marks the website `needs reconnect` (Needs you, on every member using it), a CAPTCHA or
-a device approval the same, saying you sign in yourself with **Sign in**; the run that asked fails and
-names it, and while it needs you no command signs in again. A site that does not answer fails the run
-only.
+a device approval the same, saying you sign in yourself with **Sign in**. Needs you then lists the
+connection once, naming the team and Team Connections; the run that asked waits for you, held by the
+connection (its workflow reads Awaiting, not Failed), and while it needs you no command opens the
+browser for it. A passing **Test connection**, or **Sign in** then **Done**, clears it and tells the
+team's Manager once in each workflow it held up. A site that does not answer fails the run only and
+marks nothing.
 
 **Web Credentials entries come over.** At the first start with this release, every entry of every
 member running the Web Credentials plugin, on every team, becomes a website connection named after its
