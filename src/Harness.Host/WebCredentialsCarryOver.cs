@@ -36,7 +36,7 @@ public sealed class WebCredentialsCarryOver(
     public const string PluginId = "web-credentials";
 
     /// <summary>
-    /// The id it runs under since Yawble-packages d1215e2 (solution 1.1.0, plugin 1.0.0): its members are
+    /// The id it runs under since its packages renamed it (solution 1.1.0, plugin 1.0.0): its members are
     /// hired as <c>plugin:web-credentials-plugin</c>.
     /// </summary>
     public const string RenamedPluginId = "web-credentials-plugin";
