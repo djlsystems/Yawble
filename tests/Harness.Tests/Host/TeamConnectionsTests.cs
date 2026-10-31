@@ -179,10 +179,11 @@ public sealed class TeamConnectionsTests : IAsyncLifetime
             // HIRE the built-in, or ANY member under its name.
             await RefusedAsync(who, "hire the built-in", await client.PostAsJsonAsync($"/api/teams/{_alpha}/containers",
                 new { name = "Connections Two", agent = TeamConnectionsMember.Agent }, Ct));
-            foreach (var name in new[] { "Team Connections", "team connections", " TEAM CONNECTIONS ", "TeamConnections" })
+            foreach (var name in ReservedSpellings)
             {
                 await RefusedAsync(who, $"take the name '{name}'", await client.PostAsJsonAsync($"/api/teams/{_alpha}/containers",
                     new { name, agent = "claude-headless" }, Ct));
+                await RefusedAsync(who, $"rename another member to '{name}'", await client.PatchAsJsonAsync($"/api/teams/{_alpha}/containers/Dev", new { name }, Ct));
             }
 
             // REMOVE, RENAME, REPOINT, SET UP.
@@ -194,6 +195,18 @@ public sealed class TeamConnectionsTests : IAsyncLifetime
 
             // UNINSTALL.
             await RefusedAsync(who, "uninstall it", await client.DeleteAsync($"/api/plugins/{TeamConnectionsMember.PluginId}", Ct));
+        }
+
+        // NAMES THAT ONLY LOOK CLOSE still hire, whoever asks, and keep the identifier they derive to.
+        foreach (var (who, client) in new[] { ("person", _person), ("manager", manager), ("concierge", concierge) })
+        {
+            foreach (var name in new[] { "Connections", "Team", "Team Connection", "Dev Quinn" })
+            {
+                var hired = await client.PostAsJsonAsync($"/api/teams/{_alpha}/containers", new { name, agent = "claude-headless" }, Ct);
+                Assert.True(hired.IsSuccessStatusCode, $"{who} could not hire '{name}': {(int)hired.StatusCode} {await hired.Content.ReadAsStringAsync(Ct)}");
+                var id = ContainerId.DeriveName(name)!;
+                Assert.Equal(HttpStatusCode.OK, (await _person.DeleteAsync($"/api/teams/{_alpha}/containers/{id}", Ct)).StatusCode);
+            }
         }
 
         // A PERSON'S INSTALL of a folder claiming its id is refused, naming it the platform's.
@@ -316,6 +329,26 @@ public sealed class TeamConnectionsTests : IAsyncLifetime
         Assert.Contains("COPY plugins/ plugins/", containerfile, StringComparison.Ordinal);
         Assert.Contains("!plugins/*/bin", File.ReadAllText(Path.Combine(repo, ".dockerignore")), StringComparison.Ordinal);
         Assert.Contains(@"..\..\plugins\**\*", File.ReadAllText(Path.Combine(repo, "src", "Harness.Host", "Harness.Host.csproj")), StringComparison.Ordinal);
+    }
+
+    /// <summary>Spellings of the reserved name: its letters, whatever separates or decorates them.</summary>
+    private static readonly string[] ReservedSpellings =
+    [
+        "Team Connections", "team connections", " TEAM CONNECTIONS ", "TeamConnections", "TEAM-CONNECTIONS", "Team-Connections",
+        "Team_Connections", "Team.Connections", "Team--Connections", "Team - Connections", "Team Connections!",
+    ];
+
+    [Fact]
+    public void The_reserved_name_is_its_letters_whatever_separates_them_and_hyphenated_names_still_derive_as_before()
+    {
+        foreach (var name in ReservedSpellings) Assert.True(TeamConnectionsMember.IsReserved(name), name);
+        foreach (var name in new[] { "Connections", "Team", "Team Connection", "Dev Quinn", "Team Connections Two", "My Team Connections", "", null })
+            Assert.False(TeamConnectionsMember.IsReserved(name), name ?? "null");
+
+        // The real member keeps its name and id; DeriveName is unchanged for a hyphen or underscore.
+        Assert.Equal(("Team Connections", "TeamConnections"), (TeamConnectionsMember.Label, TeamConnectionsMember.Name));
+        Assert.Equal("Team-Connections", ContainerId.DeriveName("Team-Connections"));
+        Assert.Equal("Team_Connections", ContainerId.DeriveName("Team_Connections"));
     }
 
     // ---- helpers ------------------------------------------------------------------------------------------

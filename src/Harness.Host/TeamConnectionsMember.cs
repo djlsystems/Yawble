@@ -35,11 +35,18 @@ public static class TeamConnectionsMember
     /// <summary>Whether <paramref name="id"/> is a team's Team Connections member.</summary>
     public static bool Is(ContainerId id) => string.Equals(id.Name, Name, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Whether <paramref name="label"/> (or the identifier it derives to) is the reserved name.</summary>
+    /// <summary>
+    /// Whether <paramref name="label"/> is the reserved name: its ASCII letters, case-insensitively and
+    /// ignoring everything else (spaces, hyphens, underscores, dots, digits, punctuation), are exactly
+    /// <c>teamconnections</c>. So <c>TEAM-CONNECTIONS</c>, <c>Team_Connections</c> and <c>Team - Connections</c>
+    /// are refused, though <see cref="ContainerId.DeriveName"/> keeps '-' and '_' and would give them
+    /// another identifier; <c>Team Connection</c>, <c>Connections</c> and <c>Team</c> are not.
+    /// </summary>
     public static bool IsReserved(string? label) =>
         label is not null
-        && (string.Equals(label.Trim(), Label, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(ContainerId.DeriveName(label.Trim()), Name, StringComparison.OrdinalIgnoreCase));
+        && string.Equals(new string(label.Where(char.IsAsciiLetter).ToArray()), ReservedLetters, StringComparison.OrdinalIgnoreCase);
+
+    private const string ReservedLetters = "teamconnections";
 
     /// <summary>Whether <paramref name="agent"/> names the built-in plugin.</summary>
     public static bool Runs(string? agent) =>

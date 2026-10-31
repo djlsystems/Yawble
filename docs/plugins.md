@@ -1501,9 +1501,11 @@ assignment (Team settings → Connections, see [connections.md](connections.md#w
 is the consent. It never reads a connection of another team.
 
 - **Made by the platform.** A new or cloned team gets one at creation; an existing team gets one at
-  the Host's start. The name is reserved: no other member may take it (409, whatever the spelling or
-  case), and nobody hires, removes, renames, re-instructs, repoints or sets it up (409). It has no
-  settings of its own.
+  the Host's start. The name is reserved: no other member may take it (409). A name is refused
+  when its letters, in any case and ignoring spaces, hyphens, underscores, dots and anything else,
+  spell `teamconnections` - `TEAM-CONNECTIONS` and `Team_Connections` as much as `Team Connections`
+  - while `Team Connection`, `Team` and `Connections` hire as usual. Nobody hires, removes,
+  renames, re-instructs, repoints or sets it up (409). It has no settings of its own.
 - **Shown only while the team has a connection.** The board, `status` (`/api/overview`) and the
   Manager's roster show it while at least one connection is assigned to the team; otherwise it is
   hidden and not offered. Hiding it keeps its runs and history. Its card's settings icon opens Team

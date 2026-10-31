@@ -1,0 +1,15 @@
+<Project>
+  <!-- THE BUILT-IN PLUGINS' MODES. Harness.Host copies plugins/<id>/ beside itself (see its project file),
+       and so does every project that references it. A copy keeps the checkout's mode, and a checkout
+       under a umask such as 0007 strips other-execute from a plugin's bin/ files, which git records as
+       100755. Set the shipped copy's mode here, so a plugin beside the Host runs whoever the Host runs
+       as, whatever the checkout's umask. -->
+  <Target Name="BuiltInPluginModes" AfterTargets="CopyFilesToOutputDirectory"
+          Condition="!$([MSBuild]::IsOSPlatform('Windows')) And Exists('$(OutDir)plugins')">
+    <Exec Command="find &quot;$(OutDir)plugins&quot; -path '*/bin/*' -type f -exec chmod 755 {} +" />
+  </Target>
+  <Target Name="BuiltInPluginPublishModes" AfterTargets="Publish"
+          Condition="!$([MSBuild]::IsOSPlatform('Windows')) And Exists('$(PublishDir)plugins')">
+    <Exec Command="find &quot;$(PublishDir)plugins&quot; -path '*/bin/*' -type f -exec chmod 755 {} +" />
+  </Target>
+</Project>
