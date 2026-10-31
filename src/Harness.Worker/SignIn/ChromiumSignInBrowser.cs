@@ -262,14 +262,13 @@ public sealed partial class ChromiumSignInBrowser : IAsyncDisposable
         "about:blank",
     ];
 
-    /// <summary>The person's languages as the browser takes them: language tags only, at most 10, en-US when none is.</summary>
+    /// <summary>
+    /// The person's languages as the browser takes them: language tags only, each in its canonical case
+    /// (en-gb runs as en-GB), at most 10, en-US when none is.
+    /// </summary>
     public static IReadOnlyList<string> Languages(IReadOnlyList<string>? languages)
     {
-        var kept = (languages ?? [])
-            .Where(l => l is { Length: > 0 and <= 35 } && LanguageTag().IsMatch(l))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(10)
-            .ToList();
+        var kept = LanguageTags.CanonicalList((languages ?? []).Where(l => l is { Length: > 0 } && LanguageTag().IsMatch(l)));
         return kept.Count > 0 ? kept : ["en-US", "en"];
     }
 

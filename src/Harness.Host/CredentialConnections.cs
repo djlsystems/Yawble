@@ -66,9 +66,27 @@ public sealed record CredentialSettings(string? Preset, IReadOnlyList<Credential
     };
 }
 
-/// <summary>A field a preset names: what it is called, whether its value is masked (a secret, stored
-/// as ciphertext and never answered) and whether a connection must have it.</summary>
-public sealed record CredentialFieldSpec(string Name, string Label, bool Masked, bool Required);
+/// <summary>
+/// A field a preset names: what it is called, whether its value is masked (a secret, stored as
+/// ciphertext and never answered) and whether a connection must have it. A website's fields say more:
+/// <see cref="Type"/> is <c>text</c>, <c>url</c> (a bare address is given <c>https://</c>), <c>enum</c>
+/// (one of <see cref="Options"/>) or <c>bool</c> (<c>true</c> or <c>false</c>); <see cref="Advanced"/>
+/// fields sit under Advanced; a <see cref="ReadOnly"/> one is never typed - the platform sets it (a
+/// website's saved session, kept by Sign in); <see cref="Default"/> is the value a field left out has;
+/// <see cref="Help"/> is the sentence beside it.
+/// </summary>
+public sealed record CredentialFieldSpec(
+    string Name, string Label, bool Masked, bool Required, string Type = CredentialFieldSpec.Text,
+    IReadOnlyList<string>? Options = null, bool Advanced = false, bool ReadOnly = false, string? Default = null, string? Help = null)
+{
+    public const string Text = "text";
+
+    public const string Url = "url";
+
+    public const string Enum = "enum";
+
+    public const string Bool = "bool";
+}
 
 /// <summary>
 /// A form a credential kind is made from: the fields a service needs, each masked or not. A preset
@@ -84,8 +102,12 @@ public sealed record CredentialPreset(
         id = Id,
         name = Name,
         namedFields = NamedFields,
-        fields = Fields.Select(f => new { name = f.Name, label = f.Label, masked = f.Masked, required = f.Required }),
-        test = Test is not null,
+        fields = Fields.Select(f => new
+        {
+            name = f.Name, label = f.Label, masked = f.Masked, required = f.Required, type = f.Type, options = f.Options,
+            advanced = f.Advanced, readOnly = f.ReadOnly, @default = f.Default, help = f.Help,
+        }),
+        test = Test is not null || Kind == ConnectionKinds.Website,
     };
 }
 
@@ -162,7 +184,7 @@ public sealed partial record CredentialTest(
     private static partial Regex FieldMark();
 }
 
-/// <summary>The forms of the credential kinds. A website's fields are not defined yet: it is a name alone.</summary>
+/// <summary>The forms of the credential kinds.</summary>
 public static class CredentialPresets
 {
     public const string Other = "other";
@@ -191,13 +213,17 @@ public static class CredentialPresets
         new(ConnectionKinds.Login, null, "Username and password",
             [new("username", "Username", false, true), new("password", "Password", true, true), new("url", "URL", false, false)],
             Test: new("{url}", "username and password", BasicUser: "username", BasicPassword: "password")),
-        // A website's test is its own sign-in, which a later release adds.
-        new(ConnectionKinds.Website, null, "Website", []),
+        // A website: what the platform's browser signs in with, and the page that shows it is signed in.
+        // Its test is that signed-in check, run in the browser on a worker (WebsiteFields).
+        new(ConnectionKinds.Website, null, "Website", WebsiteFields.All),
     ];
 
-    /// <summary>Whether a credential connection has a test: its preset declares one, and it has what that test names.</summary>
+    /// <summary>
+    /// Whether a credential connection has a test: its preset declares one, and it has what that test
+    /// names. A website always has one - its signed-in check - which says itself what it lacks.
+    /// </summary>
     public static bool Testable(string kind, CredentialSettings settings) =>
-        For(kind, settings.Preset)?.Test is { } test && test.Applies(settings);
+        kind == ConnectionKinds.Website || (For(kind, settings.Preset)?.Test is { } test && test.Applies(settings));
 
     public static CredentialPreset? For(string kind, string? preset) =>
         All.FirstOrDefault(p => p.Kind == kind && string.Equals(p.Id, preset, StringComparison.Ordinal));
@@ -308,25 +334,31 @@ public static partial class CredentialForm
             var previous = before?.Fields.FirstOrDefault(f => f.Name == spec.Name && f.Masked == spec.Masked);
             var kept = previous is null ? null : spec.Masked ? stored?.GetValueOrDefault(spec.Name) : previous.Value;
 
+            // A FIELD THE PLATFORM SETS (a website's saved session, kept by Sign in) is never typed.
+            if (spec.ReadOnly && value is not null)
+            {
+                return (null, null, [], $"`{spec.Name}` ({spec.Label}) is not typed: {spec.Help ?? "the platform sets it."}");
+            }
+
             if (value is null)
             {
-                // AN EDIT KEEPS what it does not name; a new connection has nothing to keep.
-                value = kept;
+                // AN EDIT KEEPS what it does not name; a new connection has nothing to keep but a default.
+                value = kept ?? (before is null || previous is null ? spec.Default : null);
             }
             else
             {
                 if (spec.Masked ? value.Length == 0 : value.Trim().Length == 0)
                 {
                     if (spec.Required) return (null, null, [], $"`{spec.Name}` ({spec.Label}) is required.");
-                    value = null;
+                    value = spec.Default;
                 }
-                else if (Refusal(spec, spec.Masked ? value : value.Trim()) is { } refusal)
+                else if (Refusal(spec, spec.Masked ? value : Normal(spec, value.Trim())) is { } refusal)
                 {
                     return (null, null, [], refusal);
                 }
                 else
                 {
-                    value = spec.Masked ? value : value.Trim();
+                    value = spec.Masked ? value : Normal(spec, value.Trim());
                 }
 
                 if (!string.Equals(value, kept, StringComparison.Ordinal)) changed.Add(spec.Name);
@@ -348,15 +380,36 @@ public static partial class CredentialForm
     }
 
     /// <summary>What a connection's account reads as: a login's username, an API key's first unmasked
-    /// field, else the service's name; a website's is empty.</summary>
+    /// field, else the service's name; a website's, its site's host.</summary>
     public static string AccountOf(CredentialPreset preset, CredentialSettings settings) =>
-        preset.Kind == ConnectionKinds.Website ? ""
+        preset.Kind == ConnectionKinds.Website ? WebsiteFields.AccountOf(settings)
         : settings.Fields.FirstOrDefault(f => !f.Masked && f.Value is { Length: > 0 } && f.Name != "url")?.Value
             ?? (preset.Kind == ConnectionKinds.ApiKey ? preset.Name : "");
+
+    /// <summary>
+    /// A value as it is kept: a <c>url</c> field's bare address (<c>mysite.com/login</c>) given
+    /// <c>https://</c>, a path or any other scheme as written; a <c>bool</c> in lower case; an
+    /// <c>enum</c> as its option is spelled; a website's languages each in their canonical case.
+    /// </summary>
+    private static string Normal(CredentialFieldSpec spec, string value) => spec.Type switch
+    {
+        CredentialFieldSpec.Url => WebsiteFields.WithScheme(value),
+        CredentialFieldSpec.Bool => value.ToLowerInvariant(),
+        CredentialFieldSpec.Enum => spec.Options?.FirstOrDefault(o => string.Equals(o, value, StringComparison.OrdinalIgnoreCase)) ?? value,
+        _ when spec.Name == WebsiteFields.Languages => WebsiteFields.CanonicalLanguages(value),
+        _ => value,
+    };
 
     private static string? Refusal(CredentialFieldSpec spec, string value)
     {
         if (value.Length > MaximumValueLength) return $"`{spec.Name}` ({spec.Label}) is longer than {MaximumValueLength} characters.";
+        if (spec.Type == CredentialFieldSpec.Enum && spec.Options is { } options && !options.Contains(value, StringComparer.Ordinal))
+        {
+            return $"`{spec.Name}` ({spec.Label}) is one of {string.Join(", ", options)}.";
+        }
+
+        if (spec.Type == CredentialFieldSpec.Bool && value is not ("true" or "false")) return $"`{spec.Name}` ({spec.Label}) is true or false.";
+        if (WebsiteFields.Refusal(spec, value) is { } website) return website;
         if (value.Any(char.IsControl)) return $"`{spec.Name}` ({spec.Label}) holds a control character.";
 
         // A MASKED VALUE IS REDACTED from everything a plugin writes, which a value this short cannot be.

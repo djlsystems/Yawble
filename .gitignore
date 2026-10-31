@@ -19,3 +19,6 @@ TestResults/
 
 # A built-in plugin ships its executable under its own bin/ (plugins/<id>/bin/run).
 !plugins/*/bin/
+
+# A built-in plugin's npm dependencies are installed at build (Harness.Host.csproj, Containerfile), never committed.
+plugins/*/node_modules/
