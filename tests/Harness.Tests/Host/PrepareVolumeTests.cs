@@ -91,17 +91,23 @@ public sealed class PrepareVolumeTests : IDisposable
         // The operator CLI's `connect` exchange: the host answers only while nobody else can write here.
         Assert.Equal("700", Mode("connections"));
         Assert.Equal("600", Mode("connections/.connect-report.json"));
-        Assert.Equal("750", Mode("."));
+        // "Other" may pass through the data root and nothing more: that is how mcp reaches its own folder.
+        Assert.Equal("751", Mode("."));
+        Assert.Equal("700", Mode("mcp"));
 
-        // Agent's trees: the host writes through the group, and what it makes stays in the group.
+        // Agent's trees: the host writes through the group, and what it makes stays in the group. Nothing for
+        // "other" at the top, so mcp, which the data root lets through, reaches none of them.
         foreach (var directory in new[]
                  {
-                     "teams", "teams/alpha/workspaces", "documents", "tenant-interactive-agent-workspaces", "steering",
-                     "agent-home", "npm-global", "npm-global/bin", "bin", "go", "ms-playwright",
+                     "teams", "documents", "tenant-interactive-agent-workspaces", "steering",
+                     "agent-home", "npm-global", "bin", "go", "ms-playwright",
                  })
         {
-            Assert.Equal("2775", Mode(directory));
+            Assert.Equal("2770", Mode(directory));
         }
+
+        Assert.Equal("660", Mode("cli-versions.jsonl"));
+        foreach (var directory in new[] { "teams/alpha/workspaces", "npm-global/bin" }) Assert.Equal("2775", Mode(directory));
 
         Assert.Equal("664", Mode("teams/alpha/workspaces/Ines/notes.md"));
         Assert.Equal("664", Mode("documents/spec.md"));
@@ -144,6 +150,7 @@ public sealed class PrepareVolumeTests : IDisposable
 
         var chowned = ChownedPaths();
         Assert.Equal(AgentOwner, chowned[elsewhere]);
+        Assert.Equal("2770", Exec("stat", ["-c", "%a", elsewhere]).Output.Trim());
         Assert.Equal(AgentOwner, chowned[Path.Combine(elsewhere, "teams", "beta", "README.md")]);
         Assert.Equal("2775", Exec("stat", ["-c", "%a", Path.Combine(elsewhere, "teams", "beta")]).Output.Trim());
         Assert.Equal("664", Exec("stat", ["-c", "%a", Path.Combine(elsewhere, "teams", "beta", "README.md")]).Output.Trim());
@@ -189,6 +196,50 @@ public sealed class PrepareVolumeTests : IDisposable
     }
 
     [Fact]
+    public void The_mcp_folder_is_mcps_alone_and_the_data_root_lets_it_through_to_nothing_else()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "A POSIX shell script.");
+        Directory.CreateDirectory(Path.Combine(_data, "teams", "alpha"));
+        File.SetUnixFileMode(Path.Combine(_data, "teams"), (UnixFileMode)Convert.ToInt32("2775", 8));
+        File.WriteAllText(Path.Combine(_data, "cli-versions.jsonl"), "{}");
+        File.SetUnixFileMode(Path.Combine(_data, "cli-versions.jsonl"), (UnixFileMode)Convert.ToInt32("664", 8));
+
+        var output = Run("ownership");
+
+        Assert.True(Directory.Exists(Path.Combine(_data, "mcp")), output);
+        Assert.Equal("10004:10004", ChownedPaths()[Path.Combine(_data, "mcp")]);
+        Assert.Equal("700", Mode("mcp"));
+        Assert.Equal("751", Mode("."));
+        Assert.Equal("2770", Mode("teams"));
+        Assert.Equal("660", Mode("cli-versions.jsonl"));
+
+        // WHAT IS IN IT IS NEVER WALKED: mcp wrote it, and root following a tree third-party code writes could be
+        // raced onto a link. A folder a server left open stays as it is, behind the 700 above.
+        var cache = Path.Combine(_data, "mcp", "home", ".npm");
+        Directory.CreateDirectory(cache);
+        File.SetUnixFileMode(cache, (UnixFileMode)Convert.ToInt32("755", 8));
+        File.Delete(_chownLog);
+        Run("ownership");
+        Assert.Equal("755", Mode("mcp/home/.npm"));
+        Assert.DoesNotContain(ChownedPaths().Keys, path => path.StartsWith(Path.Combine(_data, "mcp") + "/", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_link_in_place_of_the_mcp_folder_is_left_alone()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "A POSIX shell script.");
+        var target = Path.Combine(_root, "elsewhere");
+        Directory.CreateDirectory(target);
+        File.SetUnixFileMode(target, (UnixFileMode)Convert.ToInt32("755", 8));
+        File.CreateSymbolicLink(Path.Combine(_data, "mcp"), target);
+
+        Run("ownership");
+
+        Assert.Equal("755", Exec("stat", ["-c", "%a", target]).Output.Trim());
+        Assert.False(ChownedPaths().ContainsKey(Path.Combine(_data, "mcp")));
+    }
+
+    [Fact]
     public void An_installed_plugin_is_harness_agent_with_its_executable_kept_and_nothing_writable_by_agent()
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "A POSIX shell script.");
@@ -229,7 +280,7 @@ public sealed class PrepareVolumeTests : IDisposable
         Assert.Contains("ownership set: 0 change(s)", Run("ownership", new Dictionary<string, string>
         {
             ["HARNESS_HOST_UID"] = Id("-u"), ["HARNESS_HOST_GID"] = Id("-g"),
-            ["HARNESS_AGENT_UID"] = Id("-u"), ["HARNESS_AGENT_GID"] = Id("-g"), ["HARNESS_WORKER_UID"] = Id("-u"), ["HARNESS_WORKER_GID"] = Id("-g"), ["HARNESS_CHOWN"] = "chown",
+            ["HARNESS_AGENT_UID"] = Id("-u"), ["HARNESS_AGENT_GID"] = Id("-g"), ["HARNESS_WORKER_UID"] = Id("-u"), ["HARNESS_WORKER_GID"] = Id("-g"), ["HARNESS_MCP_UID"] = Id("-u"), ["HARNESS_MCP_GID"] = Id("-g"), ["HARNESS_CHOWN"] = "chown",
         }));
     }
 
@@ -274,7 +325,7 @@ public sealed class PrepareVolumeTests : IDisposable
         Assert.Contains("ownership set: 0 change(s)", Run("ownership", new Dictionary<string, string>
         {
             ["HARNESS_HOST_UID"] = Id("-u"), ["HARNESS_HOST_GID"] = Id("-g"),
-            ["HARNESS_AGENT_UID"] = Id("-u"), ["HARNESS_AGENT_GID"] = Id("-g"), ["HARNESS_WORKER_UID"] = Id("-u"), ["HARNESS_WORKER_GID"] = Id("-g"), ["HARNESS_CHOWN"] = "chown",
+            ["HARNESS_AGENT_UID"] = Id("-u"), ["HARNESS_AGENT_GID"] = Id("-g"), ["HARNESS_WORKER_UID"] = Id("-u"), ["HARNESS_WORKER_GID"] = Id("-g"), ["HARNESS_MCP_UID"] = Id("-u"), ["HARNESS_MCP_GID"] = Id("-g"), ["HARNESS_CHOWN"] = "chown",
         }));
     }
 
@@ -320,7 +371,7 @@ public sealed class PrepareVolumeTests : IDisposable
         Assert.Contains("ownership set: 0 change(s)", Run("ownership", new Dictionary<string, string>
         {
             ["HARNESS_HOST_UID"] = Id("-u"), ["HARNESS_HOST_GID"] = Id("-g"),
-            ["HARNESS_AGENT_UID"] = Id("-u"), ["HARNESS_AGENT_GID"] = Id("-g"), ["HARNESS_WORKER_UID"] = Id("-u"), ["HARNESS_WORKER_GID"] = Id("-g"), ["HARNESS_CHOWN"] = "chown",
+            ["HARNESS_AGENT_UID"] = Id("-u"), ["HARNESS_AGENT_GID"] = Id("-g"), ["HARNESS_WORKER_UID"] = Id("-u"), ["HARNESS_WORKER_GID"] = Id("-g"), ["HARNESS_MCP_UID"] = Id("-u"), ["HARNESS_MCP_GID"] = Id("-g"), ["HARNESS_CHOWN"] = "chown",
         }));
     }
 
@@ -379,7 +430,7 @@ public sealed class PrepareVolumeTests : IDisposable
             : new Dictionary<string, string>
             {
                 ["HARNESS_HOST_UID"] = Id("-u"), ["HARNESS_HOST_GID"] = Id("-g"),
-                ["HARNESS_AGENT_UID"] = Id("-u"), ["HARNESS_AGENT_GID"] = Id("-g"), ["HARNESS_WORKER_UID"] = Id("-u"), ["HARNESS_WORKER_GID"] = Id("-g"),
+                ["HARNESS_AGENT_UID"] = Id("-u"), ["HARNESS_AGENT_GID"] = Id("-g"), ["HARNESS_WORKER_UID"] = Id("-u"), ["HARNESS_WORKER_GID"] = Id("-g"), ["HARNESS_MCP_UID"] = Id("-u"), ["HARNESS_MCP_GID"] = Id("-g"),
             };
         environment["HARNESS_CHOWN"] = "chown";
 

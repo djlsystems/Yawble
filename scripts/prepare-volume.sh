@@ -11,11 +11,16 @@
 #   agent    10002:10002  runs every agent child and the Concierge PTY. In no harness group.
 #   worker   10003:10003  runs the host in a worker. In group `agent` and in no harness group, so the
 #                         map below gives it exactly what agent has: no host entry, ever.
+#   mcp      10004:10004  runs the MCP servers the platform starts on a worker. In no group but its own,
+#                         and nobody is in that one: it reaches mcp below and nothing else on the volume.
 # Only control (and `all`) runs this. A worker's entrypoint changes no ownership: it shares the volume
 # with control and every other worker, and waits for control to have prepared it.
 #
-# THE OWNERSHIP MAP. The data root itself is harness:agent 0750 (agents may pass through it, not
-# create in it). These top-level entries are the host's and nobody else's - harness:harness, 700
+# THE OWNERSHIP MAP. The data root itself is harness:agent 0751 (agents may pass through it, not
+# create in it; "other" may pass through only, which is how mcp reaches its own folder). Because
+# "other" may pass through, NO OTHER TOP-LEVEL ENTRY KEEPS AN "OTHER" BIT: every one below is made
+# o= at its top, so mcp, the one user that is "other" to all of them, reaches none of them, whatever
+# modes an agent leaves deeper down. These top-level entries are the host's and nobody else's - harness:harness, 700
 # for directories and 600 for everything else, all the way down:
 #   messages.db*  keys  agents.json*  agent-launch.json*  logs  backups  host.lock*  system-packages*  .healthz-*  connections
 #   agent-credentials  agent-auth.json*  agent-tools.json*  agent-launch-checks.json*  wip.json*  workers.json*
@@ -56,6 +61,10 @@
 # way down. Both are created when missing.
 # tmp holds each member's TMPDIR (MemberTemp), on the volume so an engine's tmpfs /tmp never holds
 # a member's temporary files in memory. It is created when missing and is agent's like the rest.
+# mcp is the mcp user's home, its npm and uv caches and the servers' working folders: mcp:mcp 0700, so
+# no agent, worker or host reads a server's keys or files. Only the folder itself is set, never what is
+# in it: everything inside is written by mcp (umask 077) and so already its own, and root walking a tree
+# third-party code writes could be raced onto a link. It is created when missing.
 # Every other top-level entry - teams, documents, agent-home, npm-global, bin, the tool caches, the
 # Concierge's workspaces - is agent:agent, with directories group-writable and setgid and files
 # group read-write, so what the host creates there (it runs with umask 0007) stays in group agent
@@ -100,6 +109,8 @@ worker_uid="${HARNESS_WORKER_UID:-10003}"
 worker_gid="${HARNESS_WORKER_GID:-10003}"
 # Who runs the sign-in browsers, and so owns their profiles: a worker's user, or in `all` the host's
 # own (its worker is in-process), which the entrypoint says.
+mcp_uid="${HARNESS_MCP_UID:-10004}"
+mcp_gid="${HARNESS_MCP_GID:-10004}"
 sign_in_uid="${HARNESS_SIGN_IN_UID:-$worker_uid}"
 sign_in_gid="${HARNESS_SIGN_IN_GID:-$worker_gid}"
 
@@ -154,8 +165,17 @@ own_worker() { # path
   find "$1" ! -type d ! -type l -perm /6077 -print -exec chmod go=,ug-s {} +
 }
 
+# The folder itself and nothing in it (see "mcp" above); a link in its place is left alone.
+own_mcp() { # path
+  [ -d "$1" ] && [ ! -L "$1" ] || return 0
+  find "$1" -maxdepth 0 \( ! -uid "$mcp_uid" -o ! -gid "$mcp_gid" \) -print -exec "$chown_cmd" -h "$mcp_uid:$mcp_gid" {} +
+  find "$1" -maxdepth 0 ! -perm 700 -print -exec chmod u=rwx,go=,ug-s {} +
+}
+
 own_agent() { # path
   set_owner "$1" "$agent_uid" "$agent_gid"
+  # Nothing for "other" at the top: the data root lets "other" (mcp) pass through.
+  find "$1" -maxdepth 0 ! -type l -perm /007 -print -exec chmod o= {} +
   if [ "$1" = "$root/agent-home" ]; then own_agent_home "$1"; return; fi
   find "$1" -type d ! -perm -2070 -print -exec chmod g+rwxs {} +
   find "$1" -type f ! -perm -060 -print -exec chmod g+rw {} +
@@ -204,7 +224,7 @@ ownership() {
   changed=$(
     {
       [ "$(stat -c '%u:%g' "$root")" = "$host_uid:$agent_gid" ] || { "$chown_cmd" "$host_uid:$agent_gid" "$root"; echo "$root"; }
-      [ "$(stat -c '%a' "$root")" = 750 ] || { chmod u=rwx,g=rx,o=,ug-s "$root"; echo "$root"; }
+      [ "$(stat -c '%a' "$root")" = 751 ] || { chmod u=rwx,g=rx,o=x,ug-s "$root"; echo "$root"; }
 
       [ -e "$root/plugins" ] || [ -L "$root/plugins" ] || { mkdir "$root/plugins"; echo "$root/plugins"; }
       [ -e "$root/repos" ] || [ -L "$root/repos" ] || { mkdir "$root/repos"; echo "$root/repos"; }
@@ -212,6 +232,7 @@ ownership() {
       [ -e "$root/tmp" ] || [ -L "$root/tmp" ] || { mkdir "$root/tmp"; echo "$root/tmp"; }
       [ -e "$root/google-chrome" ] || [ -L "$root/google-chrome" ] || { mkdir "$root/google-chrome"; echo "$root/google-chrome"; }
       [ -e "$root/sign-in-profiles" ] || [ -L "$root/sign-in-profiles" ] || { mkdir "$root/sign-in-profiles"; echo "$root/sign-in-profiles"; }
+      [ -e "$root/mcp" ] || [ -L "$root/mcp" ] || { mkdir -m 700 "$root/mcp"; echo "$root/mcp"; }
 
       for path in "$root"/* "$root"/.[!.]* "$root"/..?*; do
         [ -e "$path" ] || [ -L "$path" ] || continue
@@ -221,6 +242,7 @@ ownership() {
         elif [ "$name" = repos ] || [ "$name" = reference ]; then own_repos "$path"
         elif [ "$name" = google-chrome ]; then own_browser "$path"
         elif [ "$name" = sign-in-profiles ]; then own_worker "$path"
+        elif [ "$name" = mcp ]; then own_mcp "$path"
         else own_agent "$path"; fi
       done
 

@@ -39,6 +39,10 @@ public sealed class McpServersTests : IAsyncLifetime
     private readonly FakeMcpServer _server = new(Token, QueryKey);
     private readonly ConcurrentQueue<string> _logs = new();
     private readonly List<string> _responses = [];
+
+    // AN ENTRY THE PLATFORM RUNS starts behind a fake npx and uvx: no test reaches a package registry.
+    private readonly FakeStdioServer _stdio = new();
+    private McpStdioServers _stdioServers = null!;
     private WebApplicationFactory<Program> _factory = null!;
     private HttpClient _person = null!;
 
@@ -49,6 +53,7 @@ public sealed class McpServersTests : IAsyncLifetime
     public async ValueTask InitializeAsync()
     {
         Directory.CreateDirectory(_dataRoot);
+        _stdioServers = _stdio.Servers();
 
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host => host
             .UseSetting("DataRoot", _dataRoot)
@@ -58,6 +63,7 @@ public sealed class McpServersTests : IAsyncLifetime
             {
                 services.AddSingleton<IAgentRunner>(new FakeAgent());
                 services.AddSingleton(new ConnectionTester(http: _server, timeout: TimeSpan.FromSeconds(5)));
+                services.AddSingleton(_stdioServers);
             }));
 
         await Services.GetRequiredService<IUserStore>().CreateAsync(Email, PersonPassword);
@@ -69,6 +75,8 @@ public sealed class McpServersTests : IAsyncLifetime
     {
         _person.Dispose();
         await _factory.DisposeAsync();
+        await _stdioServers.DisposeAsync();
+        _stdio.Dispose();
         SqliteConnection.ClearAllPools();
         try { Directory.Delete(_dataRoot, recursive: true); }
         catch (IOException) { }
@@ -219,7 +227,7 @@ public sealed class McpServersTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task An_entry_the_platform_runs_is_stored_with_its_pinned_version_and_says_it_is_checked_when_MCP_3_is_in_place()
+    public async Task An_entry_the_platform_runs_is_stored_with_its_pinned_version_and_checked_by_starting_it_on_a_worker()
     {
         var key = await KeyAsync(Token);
 
@@ -231,19 +239,19 @@ public sealed class McpServersTests : IAsyncLifetime
         Assert.True(status == HttpStatusCode.Created, body);
 
         var answer = JsonDocument.Parse(body).RootElement;
-        Assert.Equal(JsonValueKind.Null, answer.GetProperty("check").ValueKind);
+        Assert.Equal("ok", answer.GetProperty("check").GetProperty("outcome").GetString());
+        Assert.Equal(5, answer.GetProperty("check").GetProperty("toolCount").GetInt32());
 
         var entry = answer.GetProperty("server");
         Assert.Equal("@modelcontextprotocol/server-github", entry.GetProperty("package").GetString());
         Assert.Equal("2025.4.8", entry.GetProperty("version").GetString());
-        Assert.Equal("unchecked", entry.GetProperty("health").GetString());
-        Assert.Equal("checked when MCP 3 is in place", entry.GetProperty("healthReason").GetString());
+        Assert.Equal("ok", entry.GetProperty("health").GetString());
         Assert.Equal("GITHUB_TOKEN", entry.GetProperty("env")[0].GetProperty("name").GetString());
         Assert.Empty(_server.Methods);
 
         var (tested, testBody) = await SendAsync(HttpMethod.Post, $"/api/mcp-servers/{entry.GetProperty("id").GetString()}/test", null);
-        Assert.Equal(HttpStatusCode.BadRequest, tested);
-        Assert.Contains("checked when MCP 3 is in place", Error(testBody), StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.OK, tested);
+        Assert.Equal("ok", JsonDocument.Parse(testBody).RootElement.GetProperty("check").GetProperty("outcome").GetString());
 
         var uvx = await SendAsync(HttpMethod.Post, "/api/mcp-servers", new { name = "fetch", kind = "runs", command = "uvx", package = "mcp-server-fetch==0.6.2" });
         Assert.True(uvx.Status == HttpStatusCode.Created, uvx.Body);

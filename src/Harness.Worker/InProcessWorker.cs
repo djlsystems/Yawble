@@ -70,7 +70,8 @@ public sealed class InProcessWorker
         string? procRoot = null,
         Action<WorkerId, StreamChunk>? streams = null,
         Harness.Pty.IPtyEngine? pty = null,
-        ConnectionTester? tester = null)
+        ConnectionTester? tester = null,
+        McpStdioServers? stdio = null)
     {
         var proc = procRoot ?? WorkerPaths.Proc;
         var memory = RunMemoryLimits.Resolve(memoryLimit, WorkerPaths.CgroupRoot, WorkerPaths.ProcSelfCgroup, memoryCeiling);
@@ -94,7 +95,7 @@ public sealed class InProcessWorker
             events => host = new WorkerHost(
                 id, events, launcher, heartbeat, allowances,
                 new CgroupReader(cgroupRoot ?? WorkerPaths.CgroupRoot), new ProcessGroupReader(proc), RunProcessGroups.Shared,
-                cli: new WorkerAgentCli(id, runAs, launchLog, tester),
+                cli: new WorkerAgentCli(id, runAs, launchLog, tester, stdio),
                 log: launchLog,
                 streaming: new WorkerStreaming((IRunStreamSink)events, pty ?? new Harness.Pty.PortaPtyEngine(), runAs)),
             control,
@@ -111,14 +112,15 @@ public sealed class InProcessWorker
     /// worker - a test's - asks, over the same transport and the same worker code.
     /// </summary>
     public static InProcessWorker ForAgentClis(
-        WorkerId id, AgentLaunchUser? runAs, Func<WorkerEnvelope, CancellationToken, Task> control, ConnectionTester? tester = null)
+        WorkerId id, AgentLaunchUser? runAs, Func<WorkerEnvelope, CancellationToken, Task> control, ConnectionTester? tester = null,
+        McpStdioServers? stdio = null)
     {
         var heartbeat = new RunHeartbeat();
         return Connect(
             id,
             events => new WorkerHost(
                 id, events, new RunLauncher(heartbeat, runAs: runAs), heartbeat,
-                cli: new WorkerAgentCli(id, runAs, tester: tester)),
+                cli: new WorkerAgentCli(id, runAs, tester: tester, stdio: stdio)),
             control);
     }
 

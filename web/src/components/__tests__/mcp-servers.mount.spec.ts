@@ -2,7 +2,7 @@
 //
 // ADMIN → MCP SERVERS AND TEAM SETTINGS → MCP SERVERS (MCP 1): the list shows each entry's health, its
 // tools and the teams it is given to; a save shows the check's sentence and the tools' names and count;
-// an entry the platform runs says it is checked when MCP 3 is in place, and a refusal shows the Host's
+// an entry the platform runs is checked and tested like a web address (MCP 3), and a refusal shows the Host's
 // sentence; removing asks first, naming the teams. Team settings lists only what the team was given.
 //
 // THE MOCK IS OF `api/mcpServers`; the Host's own rules (the check, the marks, the version rule, the
@@ -87,10 +87,10 @@ const local = server({
   command: 'uvx',
   package: 'mcp-server-fetch',
   version: '0.6.2',
-  health: 'unchecked',
-  healthReason: 'checked when MCP 3 is in place',
-  tools: null,
-  toolCount: null,
+  health: 'ok',
+  healthReason: null,
+  tools: ['fetch'],
+  toolCount: 1,
   teams: [],
 });
 
@@ -108,7 +108,7 @@ beforeEach(() => {
 afterEach(resetBody);
 
 describe('Admin → MCP servers', () => {
-  it("lists each entry's health, tools and teams, and an entry the platform runs says when it is checked", async () => {
+  it("lists each entry's health, tools and teams, and an entry the platform runs reads and tests like a web address", async () => {
     const wrapper = await mountDialog(McpServersDialog, {}, { attachTo: document.body });
 
     expect(bodyFind('[data-mcp-server="github"] [data-mcp-health]')?.textContent).toContain('Working');
@@ -120,8 +120,8 @@ describe('Admin → MCP servers', () => {
     expect(jira).toContain('refused the credential (HTTP 401)');
 
     expect(bodyFind('[data-mcp-server="fetch"]')?.textContent).toContain('uvx mcp-server-fetch@0.6.2');
-    expect(bodyFind('[data-mcp-server="fetch"] [data-mcp-health]')?.textContent).toContain('Checked when MCP 3 is in place');
-    expect(bodyFind('[data-mcp-server="fetch"] [data-mcp-test]')).toBeNull();
+    expect(bodyFind('[data-mcp-server="fetch"] [data-mcp-health]')?.textContent).toContain('Working');
+    expect(bodyFind('[data-mcp-server="fetch"] [data-mcp-test]')).not.toBeNull();
 
     wrapper.unmount();
   });

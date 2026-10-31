@@ -154,10 +154,16 @@ internal sealed partial class HostComposition
             sp.GetRequiredService<IMcpServerStore>(), sp.GetRequiredService<Connections>(), sp.GetRequiredService<TimeProvider>()));
         // A TEAM'S MCP SERVERS ON THE HARNESS SERVER (MCP 2): the Host's own client to them, and each run's list.
         builder.Services.AddSingleton(_ => new McpForwarding());
+        // THE ONES THE PLATFORM RUNS (MCP 3): started on a worker as `mcp`; a member's calls go to the worker its run is on.
+        builder.Services.AddSingleton(sp => new McpStdio(
+            sp.GetRequiredService<WorkerAsks>(),
+            member => sp.GetRequiredService<WorkerPool>().For(sp.GetRequiredService<WipLedger>().PlacedOn(member)),
+            () => sp.GetRequiredService<WorkerPool>().Connected(),
+            sp.GetRequiredService<McpForwarding>().CallTimeout));
         builder.Services.AddSingleton(sp => new McpRunTools(
             sp.GetRequiredService<McpServers>(), sp.GetRequiredService<McpForwarding>(), sp.GetRequiredService<TimeProvider>(),
             sp.GetRequiredService<ILogger<McpRunTools>>(), runAs: sp.GetRequiredService<AgentLaunchUser>(),
-            asks: sp.GetRequiredService<WorkerAsks>()));
+            asks: sp.GetRequiredService<WorkerAsks>(), stdio: sp.GetRequiredService<McpStdio>()));
         builder.Services.AddSingleton(sp => new ConnectRequests(
             sp.GetRequiredService<Connections>(), dataRoot, sp.GetRequiredService<ILogger<ConnectRequests>>(),
             sp.GetRequiredService<TeamRegistry>(), sp.GetRequiredService<IMemberReports>()));

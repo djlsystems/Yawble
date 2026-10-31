@@ -148,8 +148,9 @@ public sealed class WorkerFrameCodec
     public const string TooLargeText = "A worker message over 16 MiB was refused.";
 
     /// <summary>
-    /// The largest frame carrying a binary result to be written as the member (<see cref="WriteAsAgent"/>): its
-    /// 20 MB, as base64, and the rest of the frame. Every other frame stays within <see cref="MaxBytes"/>.
+    /// The largest frame carrying a binary result: one to be written as the member (<see cref="WriteAsAgent"/>), or an
+    /// answer from an MCP server a worker runs (<see cref="McpStdioAnswered"/>): its 20 MB, as base64, and the rest of
+    /// the frame. Every other frame stays within <see cref="MaxBytes"/>.
     /// </summary>
     public const int MaxWriteBytes = 32 * 1024 * 1024;
 
@@ -232,6 +233,14 @@ public sealed class WorkerFrameCodec
                 };
                 break;
 
+            case CommandFrame { Message: McpStdioRequest { Launch.Environment.Count: > 0 } stdio } command:
+                frame = command with
+                {
+                    Message = stdio with { Launch = stdio.Launch with { Environment = new Dictionary<string, string>() } },
+                    Sealed = Seal(new Secrets(null, stdio.Launch.Environment)),
+                };
+                break;
+
             case EventFrame { Envelope.Event: ConnectionTested { RefreshToken: not null } tested } @event:
                 frame = @event with
                 {
@@ -254,10 +263,10 @@ public sealed class WorkerFrameCodec
         return text;
     }
 
-    /// <summary>Refuses a frame of <paramref name="length"/> bytes past its cap: <see cref="MaxWriteBytes"/> for a binary result written as the member, <see cref="MaxBytes"/> for any other.</summary>
+    /// <summary>Refuses a frame of <paramref name="length"/> bytes past its cap: <see cref="MaxWriteBytes"/> for a binary result written as the member or answered by an MCP server a worker runs, <see cref="MaxBytes"/> for any other.</summary>
     private static void Bound(int length, WorkerFrame frame)
     {
-        if (frame is CommandFrame { Message: WriteAsAgent })
+        if (frame is CommandFrame { Message: WriteAsAgent } or EventFrame { Envelope.Event: McpStdioAnswered })
         {
             if (length > MaxWriteBytes) throw new InvalidDataException(WriteTooLargeText);
         }
@@ -272,7 +281,10 @@ public sealed class WorkerFrameCodec
     {
         var length = Encoding.UTF8.GetByteCount(text);
         if (length > MaxWriteBytes) throw new InvalidDataException(WriteTooLargeText);
-        if (length > MaxBytes && !text.Contains("\"writeAsAgent\"", StringComparison.Ordinal)) throw new InvalidDataException(TooLargeText);
+        if (length > MaxBytes && !text.Contains("\"writeAsAgent\"", StringComparison.Ordinal) && !text.Contains("\"mcpStdioAnswered\"", StringComparison.Ordinal))
+        {
+            throw new InvalidDataException(TooLargeText);
+        }
 
         WorkerFrame frame;
         try
@@ -321,6 +333,14 @@ public sealed class WorkerFrameCodec
                     {
                         Event = saved with { State = forSave.StorageState is { } state ? new SignInStorageState(state) : null },
                     },
+                    Sealed = null,
+                };
+
+            case CommandFrame { Sealed: { } blob, Message: McpStdioRequest stdio } command:
+                var forStdio = Open(blob);
+                return command with
+                {
+                    Message = stdio with { Launch = stdio.Launch with { Environment = forStdio.Environment ?? new Dictionary<string, string>() } },
                     Sealed = null,
                 };
 
@@ -389,7 +409,7 @@ public sealed class WorkerFrameCodec
 
     /// <summary>
     /// A run's secrets, written by hand: a redaction set may never be written as JSON by a serializer.
-    /// <see cref="Environment"/> is a terminal's whole environment, which holds its session's key;
+    /// <see cref="Environment"/> is a terminal's whole environment, which holds its session's key, or the variables an MCP server the platform runs is started with;
     /// <see cref="StorageState"/> a sign-in browser's saved session; <see cref="ConnectionSecret"/> a
     /// connection test's probe or rotated refresh token.
     /// </summary>

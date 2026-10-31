@@ -40,6 +40,10 @@ public sealed class RunProtocolTests
         new WriteAsAgent("r7", "/data/teams/t/workspaces/a", "/data/teams/t/workspaces/a/.harness/mcp/s/x.png", [1, 2, 3]),
         // A test's probe crosses only sealed (ConnectionTestTests); as plain JSON a test carries none.
         new TestConnection("r6", null),
+        // The environment crosses only sealed (McpStdioFrameTests); as plain JSON a request carries none.
+        new McpStdioRequest("r8", new McpStdioLaunch("mcp-1", "fetch", "uvx", "mcp-server-fetch", "0.6.2", ["--x"], new Dictionary<string, string>(), "f1"),
+            McpStdioRequest.Call, "fetch", new System.Text.Json.Nodes.JsonObject { ["url"] = "https://example.test/" }, 120, 300),
+        new McpStdioStop("r9", "mcp-1"),
         new CancelRun(Run),
         new ChangeRunMemoryAllowance(["alpha/worker", "beta/other"]),
         new HoldIdleClock(Run.Member, true),
@@ -78,6 +82,7 @@ public sealed class RunProtocolTests
         new RemovedAsAgent("r4", "Refused: /x is not inside /data/teams/t."),
         new WroteAsAgent("r7", WroteAsAgent.Denied, "Permission denied"),
         new ConnectionTested("r6", ConnectionTested.Refused, "Stripe refused the secret key (HTTP 401)."),
+        new McpStdioAnswered("r8", new System.Text.Json.Nodes.JsonObject { ["content"] = new System.Text.Json.Nodes.JsonArray() }, null, false, null),
         new RunCredentialApplied(Run),
         new RunStarted(Run, 42, At),
         new RunProgress(Run, "held"),

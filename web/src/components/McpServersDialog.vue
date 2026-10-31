@@ -29,8 +29,9 @@ const runsIt = `${productTitle} runs it`;
  * and lists the server's tools, and this dialog shows their names and how many. A refused credential
  * marks the entry and its connection Needs you; a server not reached fails the check with a sentence
  * and marks neither. Or THE PLATFORM RUNS IT: a command, a package at one exact version, fixed arguments, and
- * environment variables each filled from a connection's field - stored and validated now, checked when
- * MCP 3 is in place.
+ * environment variables each filled from a connection's field - which a worker starts as its own user on a
+ * member's first call (MCP 3); its save and Test start it in a process of their own, list its tools and stop
+ * it, with the same answer and health as a web address.
  *
  * Never a value: an entry names its connection and field, and its address is shown without its query;
  * an edit that leaves the address empty keeps the stored one whole.
@@ -268,7 +269,6 @@ async function remove() {
             <q-item-section side>
               <div class="row no-wrap q-gutter-xs">
                 <q-btn
-                  v-if="server.kind === 'url'"
                   flat
                   dense
                   no-caps
@@ -363,7 +363,9 @@ async function remove() {
               <q-btn flat round dense icon="delete" :aria-label="`Remove ${row.name || 'variable'}`" @click="env.splice(index, 1)" />
             </div>
             <q-btn flat dense no-caps icon="add" label="Add variable" @click="env.push({ name: '', connection: null, field: null })" />
-            <div class="text-caption os-text-muted">Checked when MCP 3 is in place.</div>
+            <div class="text-caption os-text-muted">
+              Saving starts it on a worker to list its tools; the first start installs the package and may take a minute.
+            </div>
           </template>
 
           <div v-if="formError" class="text-negative" data-mcp-form-error>{{ formError }}</div>

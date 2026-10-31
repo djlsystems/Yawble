@@ -154,7 +154,15 @@ internal sealed partial class HostComposition
         // A CONNECTION THAT NEEDS A PERSON holds up every member using it, the same way, and its fix
         // clears them and tells their Managers: every change to a connection's health is read here.
         var pluginSetup = app.Services.GetRequiredService<PluginSetup>();
-        app.Services.GetRequiredService<Connections>().HealthChanged = pluginSetup.ConnectionChangedAsync;
+        // An MCP server the platform runs that reads the connection is stopped on every worker too (MCP 3): the next
+        // call starts it with the connection's new value.
+        var mcpStdio = app.Services.GetRequiredService<McpStdio>();
+        var mcpServers = app.Services.GetRequiredService<IMcpServerStore>();
+        app.Services.GetRequiredService<Connections>().HealthChanged = async (id, ct) =>
+        {
+            await pluginSetup.ConnectionChangedAsync(id, ct);
+            await mcpStdio.ConnectionChangedAsync(mcpServers, id, ct);
+        };
         await pluginSetup.RefreshAllAsync();
 
         // A PLACED TEAM WHOSE VOLUME IS NOT THERE. Said out loud for the reason the blocked moves above

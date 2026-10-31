@@ -24,10 +24,10 @@ import type { TeamId } from './types'
  * | take off a team | `DELETE /api/teams/{team}/mcp-servers/{id}` |
  */
 
-/** `url`: a web address. `runs`: the platform runs it (MCP 3 starts it). */
+/** `url`: a web address. `runs`: the platform runs it, on a worker (MCP 3). */
 export type McpServerKind = 'url' | 'runs'
 
-/** `unchecked` until a check says otherwise; a `runs` entry stays so until MCP 3. */
+/** `unchecked` until a check says otherwise. */
 export type McpServerHealth = 'ok' | 'needs-you' | 'unchecked'
 
 export interface McpServerEnv {
@@ -68,7 +68,7 @@ export interface McpServerCheck {
   toolCount: number | null
 }
 
-/** What an add or a change answers: the entry, and its check (null for a `runs` entry). */
+/** What an add or a change answers: the entry, and its check (null when none ran). */
 export interface McpServerSaved {
   server: McpServer
   check: McpServerCheck | null
@@ -96,7 +96,6 @@ export interface TeamMcpServerEntry {
 
 /** What an entry's health reads as, in a person's words. */
 export function healthLabel(server: Pick<McpServer, 'kind' | 'health'>): string {
-  if (server.kind === 'runs') return 'Checked when MCP 3 is in place'
   if (server.health === 'ok') return 'Working'
   if (server.health === 'needs-you') return 'Needs you'
   return 'Not checked yet'
