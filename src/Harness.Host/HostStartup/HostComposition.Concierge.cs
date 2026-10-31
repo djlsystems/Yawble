@@ -319,9 +319,11 @@ internal sealed partial class HostComposition
                 // A Concierge's run is its session: a lease it took ends with it, through the same path
                 // as a run's end, so a member the queue hands it to is un-paused and its card told.
                 // And the images the person attached and the preview env files go with it, however it ended.
+                // And its MCP servers' tools (MCP 4).
                 sp.GetRequiredService<ConciergeAttachments>().RemovingOnEnd(
                     sp.GetRequiredService<PreviewEnvFiles>().RemovingOnEnd(
-                        leaseActions.Releasing((key, ct) => launcher.RevokeAsync(key.User, ct)))),
+                        sp.GetRequiredService<McpRunTools>().EndingConcierge(
+                            leaseActions.Releasing((key, ct) => launcher.RevokeAsync(key.User, ct))))),
                 sp.GetRequiredService<TimeProvider>(),
                 launches.FloorOf,
                 sp.GetRequiredService<ILogger<ConciergeSessionStore>>());

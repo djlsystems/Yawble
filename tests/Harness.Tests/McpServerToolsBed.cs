@@ -8,6 +8,7 @@ using System.Text.Json.Nodes;
 using Harness.Contracts;
 using Harness.Host;
 using Harness.Host.Auth;
+using Harness.Pty;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -51,18 +52,23 @@ public sealed class McpServerToolsBed : IAsyncDisposable
 
     public string ServerId { get; private set; } = "";
 
+    /// <summary>The person's user id, whose Concierge a test starts.</summary>
+    public string PersonId { get; private set; } = "";
+
     public static async Task<McpServerToolsBed> StartAsync(
         TimeSpan? callTimeout = null, long maximumBinary = McpRunTools.DefaultMaximumBinary, bool assign = true,
-        IReadOnlyList<string>? memberAgents = null, AgentLaunchUser? runAs = null, WorkerAsks? asks = null, McpStdioServers? stdio = null)
+        IReadOnlyList<string>? memberAgents = null, AgentLaunchUser? runAs = null, WorkerAsks? asks = null, IPtyEngine? terminals = null,
+        McpStdioServers? stdio = null)
     {
         var bed = new McpServerToolsBed();
-        await bed.InitializeAsync(callTimeout ?? TimeSpan.FromSeconds(10), maximumBinary, assign, memberAgents ?? ["claude-headless"], runAs, asks, stdio);
+        await bed.InitializeAsync(
+            callTimeout ?? TimeSpan.FromSeconds(10), maximumBinary, assign, memberAgents ?? ["claude-headless"], runAs, asks, terminals, stdio);
         return bed;
     }
 
     private async Task InitializeAsync(
         TimeSpan callTimeout, long maximumBinary, bool assign, IReadOnlyList<string> memberAgents, AgentLaunchUser? runAs, WorkerAsks? asks,
-        McpStdioServers? stdio)
+        IPtyEngine? terminals, McpStdioServers? stdio)
     {
         Directory.CreateDirectory(DataRoot);
         Agents.Behaviour = async invocation =>
@@ -85,16 +91,19 @@ public sealed class McpServerToolsBed : IAsyncDisposable
             .ConfigureTestServices(services =>
             {
                 services.AddSingleton<IAgentRunner>(Agents);
+                if (terminals is not null) services.AddSingleton(terminals);
                 services.AddSingleton(new ConnectionTester(http: Upstream, timeout: TimeSpan.FromSeconds(5)));
                 services.AddSingleton(new McpForwarding(Upstream, callTimeout, TimeSpan.FromSeconds(5)));
                 services.AddSingleton(sp => new McpRunTools(
                     sp.GetRequiredService<McpServers>(), sp.GetRequiredService<McpForwarding>(), sp.GetRequiredService<TimeProvider>(),
-                    sp.GetRequiredService<ILogger<McpRunTools>>(), maximumBinary, runAs: runAs, asks: asks, stdio: sp.GetRequiredService<McpStdio>()));
+                    sp.GetRequiredService<ILogger<McpRunTools>>(), maximumBinary, runAs: runAs, asks: asks,
+                    users: sp.GetRequiredService<IUserStore>(), teams: sp.GetRequiredService<TeamRegistry>,
+                    stdio: sp.GetRequiredService<McpStdio>()));
                 // THE SERVERS THE HOST'S OWN WORKER RUNS: a test's, pointed at a fake stdio server.
                 if (stdio is not null) services.AddSingleton(stdio);
             }));
 
-        await Services.GetRequiredService<IUserStore>().CreateAsync(Email, PersonPassword);
+        PersonId = (await Services.GetRequiredService<IUserStore>().CreateAsync(Email, PersonPassword)).Id;
         Person = Factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         (await Person.PostAsJsonAsync("/api/auth/login", new { email = Email, password = PersonPassword }, Ct)).EnsureSuccessStatusCode();
 

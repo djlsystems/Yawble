@@ -200,3 +200,35 @@ so no agent can read their keys, environment or files, and they read none of a m
   with its exit code and the end of its stderr, redacted). A check no worker ran records nothing. A check's process
   runs beside the shared one, if there is one, in the same working folder and package cache.
 
+## The Concierge using its active team's servers (MCP 4)
+
+The Concierge reaches the same `harness` server with its own key, so it is offered the same central servers as
+the team the person has open, without sending work to a team.
+
+- **The list, per session.** When a Concierge session starts, the Host reads the person's current team (the
+  "active team" its header shows) and lists that team's web-address servers' tools exactly as at the start of a
+  member's run, and keeps that list for the session. With no current team it keeps none: `tools/list` is the
+  platform's tools alone.
+- **Servers Yawble runs (MCP 3) are a member's only.** Such an entry runs on the worker a member's run is placed
+  on, and the Concierge is on no worker, so its list leaves them out and a call to one is refused as a server its
+  team does not hold.
+- **A call** is checked against the person's current team **at that moment**, not the one the session started
+  on. A server that team does not hold answers "`<server>` is not one of `<team>`'s MCP servers. Reload the
+  Concierge to get `<team>`'s tools.", naming the team by its label. With no team open it answers
+  "`<server>` is not available: no team is open. Open a team and reload the Concierge to get its tools."
+- **Switching team never restarts the Concierge.** Its list stays the start's; after a switch the panel's
+  header says "MCP tools still `<team>`'s until Reload" (or "no MCP tools until Reload" when it started with no
+  team), from `GET /api/concierge/mcp-tools` (`{ started, team, name }`, the caller's own session). Reload ends
+  the session and starts a new one, which takes the team current then. The list is dropped when the session
+  ends, however it ends. A Host restart forgets it too: a session that outlives one lists no MCP server tools
+  until Reload, and its calls are still checked against the current team.
+- **Binary results** go to the Concierge's own workspace, under `.harness/mcp/<server>/`, and an `outputPath`
+  must be inside that workspace. They are written the same way as a member's: as the agent, through a worker
+  where the Host switches users, never through a link and never over a file. Text, limits and redaction are
+  as for a member.
+- **Its home configuration keeps working as today.** Servers the Concierge's agent CLI has configured in its
+  own home are loaded beside `harness` as before. **Remove from that home configuration any server the
+  instance also offers** (Admin → MCP servers, given to the team): the home configuration is a file in the
+  agent user's home, which every member's agent shares, so a key written there is readable by any of them; the
+  instance's entry keeps its key in a Connection that never leaves the Host. With both, the CLI lists the server twice, once under its
+  home name and once as `harness`'s `<server>_<tool>`.

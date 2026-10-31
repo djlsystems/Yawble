@@ -28,6 +28,7 @@ import type {
   BacklogExecutionStats,
   BacklogItemView,
   ConciergeAttachment,
+  ConciergeMcpTools,
   ConciergeSettings,
   ApiKey,
   Catalog,
@@ -1406,6 +1407,9 @@ export const saveAppearance = (appearance: AppearanceRecord) =>
  * and would leave an instance with no teams unable to see or fix its own Concierge.
  */
 export const concierge = () => json<ConciergeSettings>('/api/concierge')
+
+/** Whose MCP servers your running Concierge holds: its start's team, kept until Reload. */
+export const conciergeMcpTools = () => json<ConciergeMcpTools>('/api/concierge/mcp-tools')
 
 /**
  * Points the tenant-wide Concierge at another preset.

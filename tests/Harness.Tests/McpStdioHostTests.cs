@@ -7,6 +7,7 @@ using System.Text.Json.Nodes;
 using Harness.Contracts;
 using Harness.Host;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Harness.Tests;
 
@@ -78,6 +79,22 @@ public sealed class McpStdioHostTests : IAsyncLifetime
         var rows = await TenantRowsAsync();
         Assert.Equal(2, rows.Count(r => r.StartsWith(TenantActions.McpServerChecked + " ", StringComparison.Ordinal) && r.Contains("\"outcome\":\"ok\"", StringComparison.Ordinal) && r.Contains("local started and listed 5 tools.", StringComparison.Ordinal)));
         Assert.DoesNotContain(rows.Concat(await _bed.LogTextAsync()), row => row.Contains(Token, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task The_Concierge_is_on_no_worker_so_its_list_leaves_an_entry_the_platform_runs_out_and_starts_nothing()
+    {
+        Assert.SkipUnless(OperatingSystem.IsLinux(), "Linux only.");
+        var id = (await AddAsync()).GetProperty("server").GetProperty("id").GetString()!;
+        await _bed.PostAsync("/api/teams/Alpha/mcp-servers", new { server = id });
+        var tools = _bed.Services.GetRequiredService<McpRunTools>();
+
+        await tools.BeginConciergeAsync(_bed.PersonId, "Alpha", _bed.DataRoot, Ct);
+
+        var names = tools.ListFor(ConciergeLaunchFactory.PrincipalId(_bed.PersonId)).Select(t => t.Name).ToList();
+        Assert.Contains(names, n => n.StartsWith("fake_", StringComparison.Ordinal));
+        Assert.DoesNotContain(names, n => n.StartsWith("local_", StringComparison.Ordinal));
+        Assert.Null(_servers.Pid(id));
     }
 
     [Fact]
