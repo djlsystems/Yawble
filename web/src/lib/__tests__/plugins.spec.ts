@@ -78,6 +78,22 @@ describe('pluginRows', () => {
   it('is empty when nothing is in the plugins folder', () => {
     expect(pluginRows(hostList([]))).toEqual([]);
   });
+
+  it('has no row for a built-in plugin, with or without a version row naming it', () => {
+    const builtIn = hostPlugin({ id: 'team-connections', name: 'Team Connections', builtIn: true, locked: true });
+
+    expect(pluginRows({ plugins: [builtIn, echo], refused: [], versions: [] })).toEqual([]);
+    expect(pluginRows(hostList([builtIn, echo])).map((row) => row.id)).toEqual(['sample-echo']);
+  });
+
+  it("keeps a folder under a built-in's id, refused with the Host's sentence", () => {
+    const builtIn = hostPlugin({ id: 'team-connections', name: 'Team Connections', builtIn: true, locked: true });
+    const reason = "'team-connections' is a built-in plugin's id; the platform's own is used.";
+
+    expect(pluginRows({ plugins: [builtIn], refused: [{ id: 'team-connections', reason }], versions: [] })).toEqual([
+      expect.objectContaining({ id: 'team-connections', verdict: 'refused', reason }),
+    ]);
+  });
 });
 
 describe('pluginEvents', () => {

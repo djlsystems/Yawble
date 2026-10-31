@@ -1,4 +1,5 @@
 import type { InstalledPlugin, PluginEvent, PluginList, PluginVersion, RefusedPlugin } from '../api/types';
+import { isBuiltInPlugin } from './teamConnections';
 
 /**
  * THE PLUGINS SCREEN'S ROWS: one per plugin version under the plugins directory, installed or
@@ -45,16 +46,20 @@ function installedRow(plugin: InstalledPlugin): PluginRow {
  * One row per version folder, by id then version: each of `versions`, with the Host's verdict,
  * joined to `plugins` for an installed version's details - and a row for every refusal no version
  * folder carries.
+ *
+ * NO BUILT-IN PLUGIN IS A ROW (`isBuiltInPlugin`, as Add member and the Solutions launcher read
+ * it): it ships with the platform and a release keeps it, so there is nothing here for a person to
+ * do with it. A FOLDER a person put under a built-in's id is theirs to fix, so its refusal stays.
  */
 export function pluginRows(list: PluginList): PluginRow[] {
-  const rows = list.versions.map((entry: PluginVersion, index): PluginRow => {
+  const rows = list.versions.flatMap((entry: PluginVersion, index): PluginRow[] => {
     const plugin = entry.verdict === 'installed'
       ? list.plugins.find((candidate) => candidate.id === entry.id && candidate.version === entry.version)
       : undefined;
 
-    if (plugin) return installedRow(plugin);
+    if (plugin) return isBuiltInPlugin(plugin) ? [] : [installedRow(plugin)];
 
-    return {
+    return [{
       key: `${entry.verdict}:${entry.id}@${entry.version ?? ''}#${index}`,
       verdict: entry.verdict === 'inactive' ? 'inactive' : 'refused',
       id: entry.id,
@@ -62,13 +67,10 @@ export function pluginRows(list: PluginList): PluginRow[] {
       version: entry.version,
       active: entry.active,
       reason: entry.reason,
-    };
+    }];
   });
 
-  // THE BUILT-INS have no version folder on the volume: one row each, from the platform's own list.
-  const builtIns = list.plugins.filter((plugin) => plugin.builtIn === true).map(installedRow);
-
-  return [...rows, ...builtIns, ...unshownRefusals(list.refused, rows)].sort(byId);
+  return [...rows, ...unshownRefusals(list.refused, rows)].sort(byId);
 }
 
 /**

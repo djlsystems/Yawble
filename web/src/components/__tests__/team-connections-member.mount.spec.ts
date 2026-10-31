@@ -3,7 +3,7 @@
 // TEAM CONNECTIONS, the platform's own member on every team (TeamConnectionsMember in the Host). Its
 // card's settings icon opens Team settings -> Connections, never Member settings - it has no settings of
 // its own; and its built-in plugin is offered nowhere a person hires (Add member), nowhere in the
-// Marketplace, and in Admin -> Plugins as a locked built-in with no Remove.
+// Marketplace, and not listed in Admin -> Plugins at all (PLG 1; plugins-dialog.mount.spec.ts).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount } from '@vue/test-utils';
@@ -94,13 +94,11 @@ describe('Team Connections', () => {
     wrapper.unmount();
   });
 
-  it('is a row of Admin -> Plugins though it has no version folder on the volume', () => {
+  it('is no row of Admin -> Plugins, though GET /api/plugins carries it', () => {
     const rows = pluginRows(hostList([builtIn, echo], {
       versions: [{ id: 'sample-echo', version: '0.1.0', name: 'Sample Echo', active: true, verdict: 'installed', reason: null }],
     }));
 
-    expect(rows.map((row) => row.id)).toEqual(['sample-echo', 'team-connections']);
-    const row = rows.find((candidate) => candidate.id === 'team-connections')!;
-    expect(row.verdict === 'installed' && row.plugin.builtIn).toBe(true);
+    expect(rows.map((row) => row.id)).toEqual(['sample-echo']);
   });
 });
