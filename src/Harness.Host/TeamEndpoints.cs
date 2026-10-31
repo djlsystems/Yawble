@@ -1760,12 +1760,7 @@ internal static class TeamEndpoints
                 // THE SAME FLOOR THE PER-TEAM ROUTES COMPUTE, and it must be the same: without it a team
                 // deleted and recreated under the same names would otherwise report its PREDECESSOR'S
                 // workflow, because members share their qualified ids with whatever came before.
-                var floor = teams.ContainerIdsOf(team.Id)
-                    .Select(host.Find)
-                    .Where(container => container is not null)
-                    .Select(container => container!.Snapshot().SinceSeq)
-                    .DefaultIfEmpty(0)
-                    .Min();
+                var floor = RollupFloor(teams, host, team.Id);
 
                 // THE PLURAL PROJECTION, BESIDE THE SINGULAR ONE, ON THE SAME FLOOR - the Teams table needs
                 // every team's workflows, not only the team a person happens to have made active, and this
@@ -1815,6 +1810,16 @@ internal static class TeamEndpoints
                 + "a second answer waiting to disagree with the first.\n\n"
                 + "An empty list means the caller reaches no team. It is not a refusal.");
     }
+
+    /// <summary>The floor the rollup reads a team's workflows above: the lowest of its members'
+    /// <c>SinceSeq</c>, 0 with none.</summary>
+    internal static long RollupFloor(TeamRegistry teams, ContainerHost host, string team) =>
+        teams.ContainerIdsOf(team)
+            .Select(host.Find)
+            .Where(container => container is not null)
+            .Select(container => container!.Snapshot().SinceSeq)
+            .DefaultIfEmpty(0)
+            .Min();
 
     // An archive or unarchive's tenant row: the caller's id, and the person's email - for the
     // Concierge, the person it acts for.
