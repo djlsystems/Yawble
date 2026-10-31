@@ -349,6 +349,18 @@ describe('the panel', () => {
     expect(rows()).toHaveLength(0);
   });
 
+  it('opens when asked from elsewhere: the teams summary\'s waiting on you', async () => {
+    answer(Live, Stored);
+    await mountControl();
+    expect(rows()).toHaveLength(0);
+
+    useWorkflowNavStore().openNeedsYou();
+    await flushPromises();
+
+    expect(document.body.querySelector('[data-test="needs-you-panel"]')).not.toBeNull();
+    expect(rows().length).toBeGreaterThan(0);
+  });
+
   it('offers Discuss with Concierge on a decision row, and a click hands the Concierge that decision', async () => {
     answer(Live, Stored);
     await mountControl();

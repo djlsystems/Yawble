@@ -40,8 +40,10 @@ import { isLocalRepoReference } from '../lib/rules';
 import UnfinishedRemovals from './UnfinishedRemovals.vue';
 import TeamCostDialog from './TeamCostDialog.vue';
 import CostWeeksChart from './CostWeeksChart.vue';
-import { getTeamsCost, type TeamCost, type TeamsCost } from '../api/outcomes';
-import { costSeries, overCount, priced, spendText } from '../lib/teamCost';
+import CostSummary from './CostSummary.vue';
+import { getCostSummary, getTeamsCost, type CostSummary as CostSummaryAnswer, type TeamCost, type TeamsCost } from '../api/outcomes';
+import { costSeries, overCount, priced, spendText, weekValue } from '../lib/teamCost';
+import { periodLine } from '../lib/costSummary';
 import TeamStatusIcon from './TeamStatusIcon.vue';
 import { vResizableColumns } from '../lib/resizableColumns';
 import { itemLabel } from '../lib/backlog';
@@ -79,6 +81,64 @@ async function readTeamsCost() {
     teamsCost.value = null;
   }
 }
+
+/**
+ * THE SUMMARY ABOVE THE LIST: the instance's eight weeks, budgets, where the money goes and what is
+ * going on now, from one call. Not read, the tiles and their header line are not shown.
+ */
+const summary = ref<CostSummaryAnswer | null>(null);
+
+async function readSummary() {
+  try {
+    summary.value = await getCostSummary();
+  } catch {
+    summary.value = null;
+  }
+}
+
+/** The summary's currency: the route's when it sends one, the list's cost answer's otherwise. */
+const summaryCurrency = computed(() => summary.value?.currency ?? teamsCost.value?.money.currency ?? 'USD');
+
+/**
+ * SAME SCALE, remembered in this browser: off, each row's chart is on its own scale; on, every row is
+ * on the largest team's, so bars compare across teams.
+ */
+const SameScaleKey = 'harness.teamsCostSameScale';
+
+function storedSameScale(): boolean {
+  try {
+    return localStorage.getItem(SameScaleKey) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+const sameScale = ref(storedSameScale());
+
+function setSameScale(value: boolean) {
+  sameScale.value = value;
+  try {
+    localStorage.setItem(SameScaleKey, String(value));
+  } catch {
+    // Still applies for this session.
+  }
+}
+
+/** The largest week of any team, in the list's unit: the shared top when Same scale is on. */
+const sharedTop = computed<number | null>(() => {
+  const answer = teamsCost.value;
+  if (!sameScale.value || !answer) return null;
+  const money = priced(answer);
+  let top = 0;
+  for (const team of answer.teams) {
+    answer.weeks.forEach((_, week) => {
+      const total = team.outcomes.reduce(
+        (sum, o) => sum + weekValue(o.weekly[week] ?? { cost: null, agentSeconds: 0 }, money), 0);
+      top = Math.max(top, total);
+    });
+  }
+  return top;
+});
 
 /** One team's figures from the list's answer, in the one-team route's shape the dialog reads. */
 function costFor(team: string): TeamCost | null {
@@ -156,6 +216,7 @@ onMounted(() => {
   badgeClock = setInterval(() => (now.value = Date.now()), BadgeClockTick);
   wip.watch();
   void readTeamsCost();
+  void readSummary();
 });
 
 onUnmounted(() => {
@@ -665,6 +726,19 @@ async function setPaused(team: Team | null, paused: boolean) {
     </div>
 
     <template v-else>
+    <!-- THE TEAMS TITLE, with the summary's period at its right, then the four tiles. -->
+    <div class="row items-baseline justify-between q-mb-sm teams-title-row">
+      <div class="text-h6 teams-title">Teams</div>
+      <div v-if="summary" class="os-text-muted teams-period" data-teams-period>{{ periodLine(summary) }}</div>
+    </div>
+    <CostSummary
+      v-if="summary"
+      :summary="summary"
+      :currency="summaryCurrency"
+      @open-outcome="workflowNav.openOutcome"
+      @open-needs-you="workflowNav.openNeedsYou()"
+    />
+
     <!-- WHICH TEAMS ARE LISTED, remembered per browser. Archived ones are out of the way until asked for. -->
     <div class="row q-gutter-md q-mb-sm teams-shown">
       <q-checkbox
@@ -724,7 +798,23 @@ async function setPaused(team: Team | null, paused: boolean) {
           </th>
 
           <!-- NOT SORTABLE: eight weeks by outcome have no single value to order by. -->
-          <th data-col="cost" class="text-left">Cost · 8 weeks</th>
+          <th data-col="cost" class="text-left">
+            <div class="teams-cost-head">
+              <span>Cost · 8 weeks</span>
+              <!-- SAME SCALE, remembered in this browser: every row on the largest team's scale. -->
+              <q-toggle
+                dense
+                size="xs"
+                :model-value="sameScale"
+                label="Same scale"
+                class="teams-cost-scale"
+                data-teams-cost-scale
+                @update:model-value="setSameScale"
+              >
+                <q-tooltip>Every row on the largest team's scale, so bars compare across teams</q-tooltip>
+              </q-toggle>
+            </div>
+          </th>
 
           <!-- No label: the column carries live controls rather than sortable data. -->
           <th class="text-right" />
@@ -809,6 +899,7 @@ async function setPaused(team: Team | null, paused: boolean) {
                   :series="costCell(row.id)!.series"
                   :in-money="costCell(row.id)!.money"
                   :currency="costCell(row.id)!.cost.money.currency"
+                  :scale-max="sharedTop"
                   size="row"
                 />
                 <span class="teams-cost-total mono" data-teams-cost-total>{{ costCell(row.id)!.total }}</span>
@@ -1198,6 +1289,29 @@ async function setPaused(team: Team | null, paused: boolean) {
   line-height: 14px;
   color: var(--os-ink-muted);
   cursor: pointer;
+}
+
+/* The Teams title, with the summary's period at its right. */
+.teams-title-row {
+  gap: 8px;
+}
+
+.teams-period {
+  font-size: 0.875rem;
+}
+
+/* The Cost heading: its words, then the Same scale switch beside them. */
+.teams-cost-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.teams-cost-scale {
+  font-weight: 400;
+  font-size: 0.75rem;
+  color: var(--os-ink-muted);
 }
 
 /* The Cost cell: the chart with its total and marker as one control, then the team's status icon. */

@@ -122,11 +122,12 @@ async function mountView(latest: string | null = null, roster = members) {
 const row = (view: VueWrapper, id: string) => view.find(`tr[data-team="${id}"]`);
 
 describe('the Cost · 8 weeks column', () => {
-  it('replaces Activity, with no Same time span switch and no legend', async () => {
+  it('replaces Activity, with no Same time span switch and no legend; its heading carries Same scale', async () => {
     const { view } = await mountView();
 
     const headings = view.findAll('thead th').map((th) => th.text().replace(/arrow_(up|down)ward/, '').replace(/\s+/g, ' ').trim());
-    expect(headings).toEqual(['Team', 'Members', 'Status', 'Cost · 8 weeks', '']);
+    expect(headings).toEqual(['Team', 'Members', 'Status', 'Cost · 8 weeksSame scale', '']);
+    expect(view.find('thead th[data-col="cost"] [data-teams-cost-scale]').exists()).toBe(true);
     expect(view.find('thead th[data-col="activity"]').exists()).toBe(false);
     expect(view.find('[data-activity-relative]').exists()).toBe(false);
     expect(view.find('[data-activity-legend-anchor]').exists()).toBe(false);
