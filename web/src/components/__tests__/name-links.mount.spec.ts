@@ -72,7 +72,6 @@ import BacklogDialog from '../BacklogDialog.vue';
 import { useConsoleStore } from '../../stores/console';
 import { useWorkflowNavStore } from '../../stores/workflowNav';
 import { useSessionStore } from '../../stores/session';
-import { ActivityStates, stateWords } from '../../lib/teamActivity';
 import type { KanbanCard as Card } from '../../api/kanban';
 import { mountDialog, resetBody } from '../../test/mountQuasar';
 
@@ -205,16 +204,6 @@ describe('the Teams table', () => {
     await name.trigger('click');
     expect(openTeam).toHaveBeenCalledTimes(1);
     expect(openTeam).toHaveBeenCalledWith('alpha');
-  });
-
-  it('gives the Activity heading a legend on hover: lanes, initials and every state\'s words', async () => {
-    const { view } = await mountTeams();
-
-    const legend = await showTooltip(view.find('[data-activity-legend-anchor]') as never);
-
-    expect(legend).toContain('One lane per member, named by its initials; hover the initials for the full name.');
-    for (const state of ActivityStates) expect(legend).toContain(stateWords(state));
-    expect(legend).toContain("A click on a team's lanes opens its Statistics.");
   });
 
   it('keeps the aria-labels on clone, archive and delete, and gives each a tooltip sentence like Pause\'s', async () => {

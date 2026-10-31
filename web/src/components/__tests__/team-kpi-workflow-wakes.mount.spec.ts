@@ -16,6 +16,11 @@ vi.mock('../../api/client', async (importOriginal) => ({
   getTeamActivity: () => new Promise(() => {}),
   cancelWake,
 }));
+vi.mock('../../api/outcomes', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  // The Cost tile reads `/cost` when the strip mounts; nothing here is about it, so it never answers.
+  getTeamCost: () => new Promise(() => {}),
+}));
 
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';

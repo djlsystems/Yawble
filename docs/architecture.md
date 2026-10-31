@@ -87,7 +87,9 @@ The product name, Yawble, lives in the web app's presentation layer
   backlog dispatch or a trigger links its workflows to one; a Manager or the Concierge may propose
   one, or link a workflow that has none. Only a person creates, confirms, renames, merges,
   retires or rejects an outcome. Its figures (agent time, elapsed time, tokens, time blocked on a
-  person, cost at a rate a person sets) come from the ledger and are never estimated.
+  person, cost at a rate a person sets) come from the ledger and are never estimated. A team's
+  cost by outcome, against the outcomes' budgets, is its page's Cost tile and the Teams list's
+  Cost column ([cost.md](cost.md)).
 - **Archived teams.** Archive (in the Teams view) keeps everything a team has - members, settings,
   documents, repositories, sites and history - and stops its work: it is paused, every trigger
   skips with the reason "team archived", and a tell, a backlog dispatch, a new card or a site action

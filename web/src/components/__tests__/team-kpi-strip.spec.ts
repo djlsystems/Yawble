@@ -9,6 +9,10 @@ vi.mock('../../api/client', async (importOriginal) => ({
   getTeamActivity: () => new Promise(() => {}),
   getTeamTokenRuns: () => new Promise(() => {}),
 }));
+vi.mock('../../api/outcomes', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  getTeamCost: () => new Promise(() => {}),
+}));
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount } from '@vue/test-utils';
 
@@ -77,29 +81,36 @@ function tableRows(kind: 'brand' | 'member'): Record<string, string>[] {
   );
 }
 
-describe('TeamKpiStrip token tile, mounted', () => {
+/** The Cost tile opens the Cost dialog; the Tokens dialog's content is its Tokens tab. */
+async function openTokensTab(wrapper: ReturnType<typeof mountStrip>) {
+  await flushPromises();
+  await wrapper.find('.team-kpi--cost').trigger('click');
+  await flushPromises();
+  (document.body.querySelector('[data-cost-tab="tokens"]') as HTMLElement).click();
+  await flushPromises();
+}
+
+describe('TeamKpiStrip Tokens tab, mounted', () => {
   afterEach(resetBody);
 
   it('leads with billable and shows in, cache read, cache write and out beneath it', async () => {
     const wrapper = mountStrip(wave1);
-    await flushPromises();
+    await openTokensTab(wrapper);
 
-    const tile = squash(wrapper.find('.team-kpi--tokens').text());
-    expect(squash(wrapper.find('.team-kpi--tokens .team-kpi-value').text())).toBe(
-      `${n(11_217_369)} billable`,
-    );
-    expect(tile).toContain(
-      `${n(2_142)} in · ${n(76_466_631)} cache read · ${n(2_393_199)} cache write · ${n(577_066)} out`,
-    );
+    const part = (selector: string) =>
+      [...document.body.querySelectorAll(`${selector} > div`)].map((div) => squash(div.textContent ?? '').trim());
+    expect(part('.token-summary-total')).toEqual([n(11_217_369), 'billable tokens']);
+    expect(part('[data-token-part="in"]')).toEqual([n(2_142), 'in']);
+    expect(part('[data-token-part="cache-read"]')).toEqual([n(76_466_631), 'cache read']);
+    expect(part('[data-token-part="cache-write"]')).toEqual([n(2_393_199), 'cache write']);
+    expect(part('[data-token-part="out"]')).toEqual([n(577_066), 'out']);
 
     wrapper.unmount();
   });
 
   it('shows the four figures and billable on the brand and member rows of the dialog', async () => {
     const wrapper = mountStrip(wave1);
-    await flushPromises();
-    await wrapper.find('.team-kpi--tokens').trigger('click');
-    await flushPromises();
+    await openTokensTab(wrapper);
 
     const row = {
       billable: n(11_217_369),
@@ -117,10 +128,10 @@ describe('TeamKpiStrip token tile, mounted', () => {
 
   it('still reads unavailable when the log carries no usage', async () => {
     const wrapper = mountStrip({ ...wave1, available: false, members: [] });
-    await flushPromises();
+    await openTokensTab(wrapper);
 
-    expect(wrapper.find('.team-kpi--tokens').text()).toContain('unavailable');
-    expect(wrapper.find('.team-kpi--tokens').text()).not.toContain('billable');
+    expect(squash(bodyText())).toContain('Unavailable.');
+    expect(document.body.querySelector('[data-token-summary]')).toBeNull();
 
     wrapper.unmount();
   });
@@ -134,17 +145,12 @@ describe('TeamKpiStrip token tile, mounted', () => {
 describe('TeamKpiStrip token card copy, mounted', () => {
   afterEach(resetBody);
 
-  async function openDialog(wrapper: ReturnType<typeof mountStrip>) {
-    await flushPromises();
-    await wrapper.find('.team-kpi--tokens').trigger('click');
-    await flushPromises();
-  }
+  const openDialog = openTokensTab;
 
   it('has an unavailable state, and points to the Agents screen there', async () => {
     const wrapper = mountStrip({ ...wave1, available: false, members: [], missing: 'No usage in the log' });
     await openDialog(wrapper);
 
-    expect(wrapper.find('.team-kpi--tokens').text()).toMatch(/unavailable/i);
     const text = squash(bodyText());
     expect(text).toMatch(/unavailable/i);
     expect(text).toContain('Configure usage capture in the Agents screen.');
@@ -157,9 +163,6 @@ describe('TeamKpiStrip token card copy, mounted', () => {
     const wrapper = mountStrip({ ...wave1, partial: true, runsWithoutUsage: 2 });
     await openDialog(wrapper);
 
-    const tile = wrapper.find('.team-kpi--tokens');
-    expect(tile.find('.team-kpi-claim').text()).toBe('team total');
-    expect(tile.find('.team-kpi-partial').text()).toMatch(/partial/i);
     const text = squash(bodyText());
     expect(text).toContain('Team total from the message log.');
     expect(text).not.toContain('Partial — some runs on this team have no usage recorded.');
@@ -171,7 +174,9 @@ describe('TeamKpiStrip token card copy, mounted', () => {
     const wrapper = mountStrip(wave1);
     await flushPromises();
 
-    expect(wrapper.find('.team-kpi--tokens .team-kpi-partial').exists()).toBe(false);
+    await openDialog(wrapper);
+
+    expect(squash(bodyText())).not.toMatch(/partial/i);
 
     wrapper.unmount();
   });

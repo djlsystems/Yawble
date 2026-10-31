@@ -38,15 +38,16 @@ import { localDay } from '../lib/localTime';
 import type { ArchiveCheck, LocalRepo, Team, TeamDeleted, TeamId } from '../api/types';
 import { isLocalRepoReference } from '../lib/rules';
 import UnfinishedRemovals from './UnfinishedRemovals.vue';
-import TeamStatisticsTile from './TeamStatisticsTile.vue';
-import { type ActivityRange, sharedWindow } from '../lib/teamActivity';
+import TeamCostDialog from './TeamCostDialog.vue';
+import CostWeeksChart from './CostWeeksChart.vue';
+import { getTeamsCost, type TeamCost, type TeamsCost } from '../api/outcomes';
+import { costSeries, overCount, priced, spendText } from '../lib/teamCost';
 import TeamStatusIcon from './TeamStatusIcon.vue';
 import { vResizableColumns } from '../lib/resizableColumns';
 import { itemLabel } from '../lib/backlog';
 import { useWorkflowNavStore } from '../stores/workflowNav';
 import { TeamMenu } from '../lib/ribbon';
 import { boardHref } from '../lib/consoleLinks';
-import { ActivityStates, stateWords } from '../lib/teamActivity';
 
 const board = useConsoleStore();
 const workflowNav = useWorkflowNavStore();
@@ -65,42 +66,49 @@ function storedSort(): TeamSort {
 
 const sort = ref<TeamSort>(storedSort());
 
-const RelativeKey = 'harness.teamsActivityRelative';
-
 /**
- * THE ACTIVITY COLUMN'S RELATIVE VIEW: off, each chart runs over its own team's window; on, every
- * chart runs over one axis, the earliest start to the latest end of every team with a chart, so a
- * team waiting for a slot sits under the team holding it. Kept per browser, like the sort.
+ * THE COST COLUMN (B007Q): every team's eight weeks by outcome, from ONE call for the whole list -
+ * never one per row. Read when the list mounts; a team the answer does not carry shows a dash.
  */
-function storedRelative(): boolean {
+const teamsCost = ref<TeamsCost | null>(null);
+
+async function readTeamsCost() {
   try {
-    return localStorage.getItem(RelativeKey) === '1';
+    teamsCost.value = await getTeamsCost();
   } catch {
-    return false;
+    teamsCost.value = null;
   }
 }
 
-const relative = ref(storedRelative());
-
-function setRelative(on: boolean) {
-  relative.value = on;
-  try {
-    localStorage.setItem(RelativeKey, on ? '1' : '0');
-  } catch {
-    // Not kept: the switch still works for this visit.
-  }
+/** One team's figures from the list's answer, in the one-team route's shape the dialog reads. */
+function costFor(team: string): TeamCost | null {
+  const answer = teamsCost.value;
+  const entry = answer?.teams.find((t) => t.team === team);
+  if (!answer || !entry) return null;
+  return { team, money: answer.money, weeks: answer.weeks, outcomes: entry.outcomes, totals: entry.totals };
 }
 
-/** Each row's own window, as its chart reports it; `null` for a team with no chart. */
-const activityWindows = ref<Record<string, ActivityRange | null>>({});
-
-function noteWindow(teamId: string, range: ActivityRange | null) {
-  activityWindows.value = { ...activityWindows.value, [teamId]: range };
+/** The row's chart, period total and over-budget marker, or null without figures. */
+function costCell(team: string) {
+  const cost = costFor(team);
+  if (!cost) return null;
+  return {
+    cost,
+    series: costSeries(cost.outcomes),
+    money: priced(cost),
+    total: spendText(cost.totals, cost.money.currency),
+    over: overCount(cost.outcomes),
+  };
 }
 
-/** The one axis every chart shares while relative is on: over the rows listed, nothing else. */
-const sharedRange = computed(() =>
-  relative.value ? sharedWindow(rows.value.map((row) => activityWindows.value[row.id] ?? null)) : null);
+/** The team whose Cost dialog is open, or null. */
+const costTeam = ref<TeamId | null>(null);
+const costOpen = computed({
+  get: () => costTeam.value !== null,
+  set: (value: boolean) => {
+    if (!value) costTeam.value = null;
+  },
+});
 
 const ShownKey = 'harness.teamsShown';
 
@@ -147,6 +155,7 @@ function slotLine(team: TeamId): string {
 onMounted(() => {
   badgeClock = setInterval(() => (now.value = Date.now()), BadgeClockTick);
   wip.watch();
+  void readTeamsCost();
 });
 
 onUnmounted(() => {
@@ -714,30 +723,8 @@ async function setPaused(team: Team | null, paused: boolean) {
             </q-btn>
           </th>
 
-          <!-- NOT SORTABLE: lanes over time have no single value to order by. -->
-          <th data-col="activity" class="text-left">
-            <div class="teams-activity-heading">
-              <!-- THE LEGEND, on hover: what a lane, its initials and its colours are. -->
-              <span class="teams-activity-word" tabindex="0" data-activity-legend-anchor>Activity<q-tooltip data-activity-legend>
-                  <div>One lane per member, named by its initials; hover the initials for the full name.</div>
-                  <div v-for="state in ActivityStates" :key="state" class="teams-legend-row">
-                    <span class="teams-legend-swatch" :style="{ background: `var(--os-stat-${state})` }"></span>
-                    {{ stateWords(state) }}
-                  </div>
-                  <div>A click on a team's lanes opens its Statistics.</div>
-                </q-tooltip></span>
-              <q-toggle
-                dense
-                size="xs"
-                data-activity-relative
-                label="Same time span"
-                :model-value="relative"
-                @update:model-value="setRelative"
-              >
-                <q-tooltip>Every chart on the same time span, so teams can be compared side by side</q-tooltip>
-              </q-toggle>
-            </div>
-          </th>
+          <!-- NOT SORTABLE: eight weeks by outcome have no single value to order by. -->
+          <th data-col="cost" class="text-left">Cost · 8 weeks</th>
 
           <!-- No label: the column carries live controls rather than sortable data. -->
           <th class="text-right" />
@@ -803,21 +790,36 @@ async function setPaused(team: Team | null, paused: boolean) {
             </div>
           </td>
 
-          <!-- THE TEAM'S ACTIVITY TILE, lanes only: the same chart its page shows, without the
-               label and the caption. A click on it opens the Activity dialog for this team, not the
-               team itself, so the row's own click is stopped on the chart - and only there: the
-               status icon and the room around the chart open the team as the rest of the row does. -->
-          <td class="teams-activity">
-            <div class="teams-activity-cell">
-              <TeamStatisticsTile
-                compact
-                @click.stop
-                :team-id="row.id"
-                :containers="teamFor(row)?.containers ?? []"
-                :workflows="board.workflowsFor(row.id)"
-                :range="sharedRange"
-                @own-window="(range: ActivityRange | null) => noteWindow(row.id, range)"
-              />
+          <!-- COST · 8 WEEKS: the team's stacked weekly chart by outcome at row height, the period's
+               total beside it (agent hours without a rate) and ⚠ when one of its outcomes is over
+               budget. A click on it opens that team's Cost dialog, not the team; the status icon and
+               the room around it open the team as the rest of the row does. -->
+          <td class="teams-cost">
+            <div class="teams-cost-cell">
+              <button
+                v-if="costCell(row.id)"
+                type="button"
+                class="teams-cost-button"
+                data-teams-cost
+                :aria-label="`Cost of ${row.name}, last 8 weeks: ${costCell(row.id)!.total}`"
+                @click.stop="costTeam = row.id"
+              >
+                <CostWeeksChart
+                  :weeks="costCell(row.id)!.cost.weeks"
+                  :series="costCell(row.id)!.series"
+                  :money="costCell(row.id)!.money"
+                  :currency="costCell(row.id)!.cost.money.currency"
+                  size="row"
+                />
+                <span class="teams-cost-total mono" data-teams-cost-total>{{ costCell(row.id)!.total }}</span>
+                <span
+                  v-if="costCell(row.id)!.over > 0"
+                  class="teams-cost-over"
+                  data-teams-cost-over
+                  :title="`${costCell(row.id)!.over} outcome${costCell(row.id)!.over === 1 ? '' : 's'} over budget`"
+                >⚠</span>
+              </button>
+              <span v-else class="os-text-muted" data-teams-cost-none>—</span>
               <TeamStatusIcon :status="row.status" :held="row.held" :workflows="board.workflowsFor(row.id)" />
             </div>
           </td>
@@ -918,6 +920,18 @@ async function setPaused(team: Team | null, paused: boolean) {
         </tr>
       </tbody>
     </q-markup-table>
+
+    <!-- ONE COST DIALOG for the list, on the row whose Cost cell was clicked. Its Tokens tab reads the
+         team's token totals itself: the list holds none. -->
+    <TeamCostDialog
+      v-if="costTeam"
+      v-model="costOpen"
+      :team-id="costTeam"
+      :team-name="board.teams.find((t) => t.id === costTeam)?.name ?? costTeam"
+      :containers="board.teams.find((t) => t.id === costTeam)?.containers ?? []"
+      :cost="costFor(costTeam)"
+      :cost-failed="teamsCost === null"
+    />
     </template>
 
     <UnfinishedRemovals ref="removalsList" />
@@ -1186,54 +1200,42 @@ async function setPaused(team: Team | null, paused: boolean) {
   cursor: pointer;
 }
 
-/* The Activity heading: its word, then the Same time span switch beside it. */
-.teams-activity-heading {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-weight: inherit;
-}
-
-/* The legend's word: a heading a pointer or focus explains. */
-.teams-activity-word {
-  cursor: help;
-}
-
-.teams-legend-row {
+/* The Cost cell: the chart with its total and marker as one control, then the team's status icon. */
+.teams-cost-cell {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.teams-legend-swatch {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-}
-
-/* The Activity cell: the chart, then the team's status icon on its right. */
-.teams-activity-cell {
-  display: flex;
+.teams-cost-button {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
 }
 
-.teams-activity-cell > :first-child {
-  flex: 1 1 auto;
-  min-width: 0;
+.teams-cost-button:hover {
+  border-color: var(--os-rule-strong);
 }
 
-/* 350px (in rem, so it grows with the person's text size) UNTIL A PERSON RESIZES THE COLUMN. Under the browser's automatic layout the chart's canvas
-   is its own width, so the column only ever grew and pushed the actions off the page. Once a
-   column is resized, `lib/resizableColumns.ts` marks the table `os-cols-fixed` at run time and the
-   cell fills the width it was given. */
-.teams-activity-cell {
-  width: 21.875rem;
+.teams-cost-button:focus-visible {
+  outline: 2px solid var(--os-ink);
+  outline-offset: 1px;
 }
 
-:deep(.os-cols-fixed) .teams-activity-cell {
-  width: auto;
+.teams-cost-total {
+  white-space: nowrap;
+}
+
+.teams-cost-over {
+  color: var(--os-error);
+  font-weight: 600;
 }
 
 .teams-table [data-col-actions] {

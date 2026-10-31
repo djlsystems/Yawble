@@ -16,7 +16,6 @@ import {
   WaitingForSlot,
   heldMembers,
   teamChip,
-  tokenUsageFromTotals,
   waitingForSlotText,
   workflowsExecution,
   workflowsTile,
@@ -32,11 +31,13 @@ import { asTeamId } from '../api/types';
 import { cancelWake, closeWorkflow, nudgeWorkflow, resumeWorkflow, stopWorkflow } from '../api/client';
 import { useConsoleStore } from '../stores/console';
 import { useWorkflowNavStore } from '../stores/workflowNav';
-import { vResizableColumns } from '../lib/resizableColumns';
 import TeamStatisticsTile from './TeamStatisticsTile.vue';
 import TeamStatusIcon from './TeamStatusIcon.vue';
 import type { TeamStatus } from '../lib/teamKpis';
-import TeamTokensChart from './TeamTokensChart.vue';
+import TeamCostDialog from './TeamCostDialog.vue';
+import CostWeeksChart from './CostWeeksChart.vue';
+import { getTeamCost, type TeamCost } from '../api/outcomes';
+import { costSeries, costTile, priced } from '../lib/teamCost';
 import WakeLines from './WakeLines.vue';
 import WorkflowName from './WorkflowName.vue';
 
@@ -217,13 +218,48 @@ watch(() => [workflowNav.workflowsAsks, props.teamId], takeWorkflowsAsk);
  */
 
 /**
- * Snapshot figures recompute whenever a snapshot lands: the page feeds
- * `activeTeam.containers`, and `applySnapshot` replaces a member in that array in place.
- * Token totals come from the log, not from those snapshots and not from the feed slice.
+ * THE COST TILE (B007Q): what the team cost over the last eight weeks, by outcome, against the
+ * budgets of the outcomes it serves - read from `GET /api/teams/{team}/cost` when the strip mounts,
+ * when the team changes and each time the Cost dialog opens. The tokens behind it are the Cost
+ * dialog's Tokens tab, from the log as before (`usage`).
  */
-const tokensOpen = ref(false);
+const costOpen = ref(false);
+const cost = ref<TeamCost | null>(null);
+const costFailed = ref(false);
+let costSeq = 0;
 
-const tokens = computed(() => tokenUsageFromTotals(props.usage));
+async function readCost() {
+  const seq = ++costSeq;
+  const team = props.teamId;
+  costFailed.value = false;
+
+  try {
+    const answer = await getTeamCost(team);
+    if (seq === costSeq) cost.value = answer;
+  } catch {
+    if (seq === costSeq) {
+      cost.value = null;
+      costFailed.value = true;
+    }
+  }
+}
+
+watch(() => props.teamId, () => {
+  cost.value = null;
+  void readCost();
+}, { immediate: true });
+
+function openCost() {
+  costOpen.value = true;
+  void readCost();
+}
+
+const costMoney = computed(() => (cost.value ? priced(cost.value) : false));
+const costTileWords = computed(() => (cost.value ? costTile(cost.value) : null));
+const costChartSeries = computed(() => costSeries(cost.value?.outcomes ?? []));
+
+/** The team's name, for the Cost dialog's title. */
+const teamName = computed(() => useConsoleStore().teams.find((t) => t.id === props.teamId)?.name ?? props.teamId);
 
 /**
  * A TEAM WHOSE EVERY MEMBER IS A PLUGIN runs no model, so there is no usage to capture and no spend
@@ -352,7 +388,6 @@ function rowBudget(row: WorkflowRow) {
   return { line, bar: budgetBar(row.spentTokens, effectiveWorkflowBudget.value) };
 }
 
-const formatToken = (value: number | null) => (value === null ? '(unknown)' : value.toLocaleString());
 
 
 const anyMemberRunning = computed(() => {
@@ -753,27 +788,44 @@ function showThread(row: WorkflowRow) {
       </template>
     </TeamStatisticsTile>
 
-    <button type="button" class="team-kpi team-kpi--tokens" @click="tokensOpen = true">
-      <div class="team-kpi-label">Tokens</div>
-      <template v-if="tokens.available">
-        <!-- BILLABLE LEADS. tokensIn is uncached input only, so on its own a team that read ~76M
-             tokens from the cache read as a few thousand. -->
-        <div class="team-kpi-value mono">
-          {{ tokens.billable.toLocaleString() }}
-          <span class="team-kpi-of">billable</span>
+    <!-- COST, LAST 8 WEEKS: dollars by outcome against the budgets of what the team serves, or agent
+         hours while no rate is set - never $0 for unpriced time. The whole tile opens the Cost
+         dialog, whose Tokens tab is what this tile used to show. -->
+    <button type="button" class="team-kpi team-kpi--cost" data-cost-tile @click="openCost">
+      <div class="team-kpi-label">Cost - last 8 weeks</div>
+      <template v-if="cost && costTileWords">
+        <div class="team-kpi-cost-row">
+          <div class="team-kpi-value mono" data-cost-value>{{ costTileWords.value }}</div>
+          <CostWeeksChart
+            :weeks="cost.weeks"
+            :series="costChartSeries"
+            :money="costMoney"
+            :currency="cost.money.currency"
+            size="tile"
+          />
         </div>
-        <div class="team-kpi-breakdown mono">
-          {{ tokens.input.toLocaleString() }} in · {{ tokens.cachedIn.toLocaleString() }} cache read ·
-          {{ tokens.cacheCreation.toLocaleString() }} cache write · {{ tokens.output.toLocaleString() }} out
-        </div>
-        <div v-if="tokens.partial" class="team-kpi-partial">
-          <span v-if="tokens.partial">partial</span>
-        </div>
-        <div class="team-kpi-claim">{{ tokens.claim }}</div>
+        <div v-if="costTileWords.detail" class="team-kpi-detail mono" data-cost-detail>{{ costTileWords.detail }}</div>
+        <template v-if="costTileWords.bar !== null">
+          <div
+            class="team-kpi-cost-bar"
+            :class="{ 'team-kpi-cost-bar--over': costTileWords.state === 'over' }"
+            data-cost-bar
+            :data-over="costTileWords.state === 'over' ? '' : undefined"
+            aria-hidden="true"
+          >
+            <div class="team-kpi-cost-bar__fill" :style="{ width: `${costTileWords.bar * 100}%` }" />
+          </div>
+          <div class="team-kpi-detail" data-cost-budget>
+            {{ costTileWords.budgetLine }}
+            <span v-if="costTileWords.overLine" class="team-kpi-cost-over" data-cost-over>{{ costTileWords.overLine }}</span>
+          </div>
+          <div v-if="costTileWords.unbudgetedLine" class="team-kpi-detail" data-cost-unbudgeted>{{ costTileWords.unbudgetedLine }}</div>
+        </template>
+        <div v-if="costTileWords.note" class="team-kpi-claim team-kpi-cost-note" data-cost-note>{{ costTileWords.note }}</div>
       </template>
-      <div v-else-if="pluginOnly" class="team-kpi-value team-kpi-unavailable team-kpi-none">none</div>
-      <div v-else class="team-kpi-value team-kpi-unavailable">unavailable</div>
-      <q-tooltip>Tokens consumed — click for the breakdown</q-tooltip>
+      <div v-else-if="costFailed" class="team-kpi-value team-kpi-unavailable">unavailable</div>
+      <div v-else class="team-kpi-value team-kpi-unavailable">—</div>
+      <q-tooltip>Cost by outcome, and the tokens behind it — click for the breakdown</q-tooltip>
     </button>
   </div>
 
@@ -1170,150 +1222,15 @@ function showThread(row: WorkflowRow) {
     </q-card>
   </q-dialog>
 
-  <q-dialog v-model="tokensOpen">
-    <q-card class="token-dialog-card os-dialog-lg">
-      <q-card-section class="q-pb-none">
-        <div class="os-dialog-title">Tokens consumed</div>
-        <div v-if="tokens.available" class="text-caption q-mt-xs">
-          Team total from the message log.
-        </div>
-      </q-card-section>
-
-      <!-- WHEN THE TEAM SPENT, AND WHO: the ledger's runs at the time each ended, above the totals,
-           which stay as they were. -->
-      <q-card-section v-if="!pluginOnly">
-        <TeamTokensChart
-          :team-id="teamId"
-          :containers="containers"
-          :log-billable="tokens.available ? tokens.billable : null"
-        />
-      </q-card-section>
-
-      <q-card-section v-if="tokens.available">
-        <!-- THE TEAM TOTAL: billable as the headline, the four figures it is weighted from as
-             labelled values beside it, never one run-on line of numbers. -->
-        <div class="token-summary" data-token-summary>
-          <div class="token-summary-total">
-            <div class="token-summary-value mono">{{ tokens.billable.toLocaleString() }}</div>
-            <div class="text-caption os-text-muted">billable tokens</div>
-          </div>
-          <div class="token-summary-parts">
-            <div class="token-summary-part" data-token-part="in">
-              <div class="mono">{{ tokens.input.toLocaleString() }}</div>
-              <div class="text-caption os-text-muted">in</div>
-            </div>
-            <div class="token-summary-part" data-token-part="cache-read">
-              <div class="mono">{{ tokens.cachedIn.toLocaleString() }}</div>
-              <div class="text-caption os-text-muted">cache read</div>
-            </div>
-            <div class="token-summary-part" data-token-part="cache-write">
-              <div class="mono">{{ tokens.cacheCreation.toLocaleString() }}</div>
-              <div class="text-caption os-text-muted">cache write</div>
-            </div>
-            <div class="token-summary-part" data-token-part="out">
-              <div class="mono">{{ tokens.output.toLocaleString() }}</div>
-              <div class="text-caption os-text-muted">out</div>
-            </div>
-          </div>
-        </div>
-        <div class="text-caption os-text-muted q-mt-sm">
-          Billable weights a cache read at 1/10 and a cache write at 5/4, and counts a combined
-          total as reported.
-        </div>
-
-        <!-- ONE COLUMN PER FIGURE, right-aligned so the digits line up, and the name in a column
-             of its own that WRAPS rather than truncates: "De...416" named nobody. A row's note
-             ("this Agent reports no usage") REPLACES its figures, spanning their columns - the
-             decision is lib/teamKpis.ts's, as before. -->
-        <div class="token-section-title">By agent brand</div>
-        <div v-if="tokens.byBrand.length === 0" class="text-caption os-text-muted">
-          No brand totals.
-        </div>
-        <table v-else v-resizable-columns="'tokens-by-brand'" class="token-table" data-token-table="brand">
-          <thead>
-            <tr>
-              <th class="token-name-col">Brand</th>
-              <th class="token-num">Billable</th>
-              <th class="token-num">In</th>
-              <th class="token-num">Cache read</th>
-              <th class="token-num">Cache write</th>
-              <th class="token-num">Out</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in tokens.byBrand" :key="row.brand" :data-token-row="`brand:${row.brand}`">
-              <td class="token-name">{{ row.brand }}</td>
-              <td v-if="row.note" colspan="5" class="token-note">{{ row.note }}</td>
-              <template v-else>
-                <td class="token-num mono token-billable" data-cell="billable">{{ formatToken(row.billable) }}</td>
-                <td class="token-num mono" data-cell="in">{{ formatToken(row.input) }}</td>
-                <td class="token-num mono" data-cell="cache-read">{{ formatToken(row.cachedIn) }}</td>
-                <td class="token-num mono" data-cell="cache-write">{{ formatToken(row.cacheCreation) }}</td>
-                <td class="token-num mono" data-cell="out">{{ formatToken(row.output) }}</td>
-              </template>
-            </tr>
-          </tbody>
-        </table>
-
-        <div class="token-section-title">By member</div>
-        <div v-if="tokens.byMember.length === 0" class="text-caption os-text-muted">
-          No member totals.
-        </div>
-        <table v-else v-resizable-columns="'tokens-by-member'" class="token-table" data-token-table="member">
-          <thead>
-            <tr>
-              <th class="token-name-col">Member</th>
-              <th class="token-num">Billable</th>
-              <th class="token-num">In</th>
-              <th class="token-num">Cache read</th>
-              <th class="token-num">Cache write</th>
-              <th class="token-num">Out</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in tokens.byMember" :key="row.member" :data-token-row="`member:${row.member}`">
-              <td class="token-name">
-                <div>{{ row.member }}</div>
-                <div class="text-caption os-text-muted">{{ row.brand }}</div>
-              </td>
-              <td v-if="row.note" colspan="5" class="token-note">{{ row.note }}</td>
-              <template v-else>
-                <td class="token-num mono token-billable" data-cell="billable">{{ formatToken(row.billable) }}</td>
-                <td class="token-num mono" data-cell="in">{{ formatToken(row.input) }}</td>
-                <td class="token-num mono" data-cell="cache-read">{{ formatToken(row.cachedIn) }}</td>
-                <td class="token-num mono" data-cell="cache-write">{{ formatToken(row.cacheCreation) }}</td>
-                <td class="token-num mono" data-cell="out">{{ formatToken(row.output) }}</td>
-              </template>
-            </tr>
-          </tbody>
-        </table>
-      </q-card-section>
-
-      <q-card-section v-else-if="pluginOnly" class="os-body os-text-muted team-kpi-plugin-only">
-        Every member of this team is a plugin. Plugins run no model, so this team uses no tokens.
-      </q-card-section>
-
-      <q-card-section v-else>
-        <q-banner dense class="os-bg-quiet os-text-muted">
-          <template #avatar><q-icon name="block" /></template>
-          Unavailable. {{ tokens.missing }}.
-        </q-banner>
-        <div class="text-body2 q-mt-md">
-          This card only shows a team total summed from tokensIn and tokensOut on
-          agentContainer.completed and agentContainer.failed rows in the message log. It does not sum
-          the twenty messages a card still holds — that slice would count down as the team
-          got busier. A guessed count would look like a real one.
-        </div>
-        <div class="os-body os-text-muted q-mt-md">
-          Configure usage capture in the Agents screen.
-        </div>
-      </q-card-section>
-
-      <q-card-actions align="right">
-        <q-btn flat no-caps label="Close" @click="tokensOpen = false" />
-      </q-card-actions>
-    </q-card>
-  </q-dialog>
+  <TeamCostDialog
+    v-model="costOpen"
+    :team-id="teamId"
+    :team-name="teamName"
+    :containers="containers"
+    :cost="cost"
+    :cost-failed="costFailed"
+    :usage="usage"
+  />
 </template>
 
 <style scoped>
@@ -1536,7 +1453,7 @@ function showThread(row: WorkflowRow) {
   animation: team-kpi-pulse 1.2s ease-in-out infinite;
 }
 
-.team-kpi--tokens {
+.team-kpi--cost {
   /* A BUTTON CENTRES ITS CONTENT VERTICALLY, and its two neighbours are divs whose content starts at
      the top - so this tile's label hung about 29px lower than `WORKFLOW` and `REPOS` and the three
      titles did not line up. The tiles are equal-height flex siblings, so the taller the strip gets
@@ -1552,9 +1469,46 @@ function showThread(row: WorkflowRow) {
   border-style: dashed;
 }
 
-.team-kpi--tokens:focus-visible {
+.team-kpi--cost:focus-visible {
   outline: 2px solid var(--os-ink);
   outline-offset: 2px;
+}
+
+/* The Cost tile: the figure, its small weekly chart beside it. */
+.team-kpi-cost-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* The budget bar: spent against budget, the critical colour once any outcome is over. */
+.team-kpi-cost-bar {
+  height: 4px;
+  margin-top: 6px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--os-rule);
+}
+
+.team-kpi-cost-bar__fill {
+  height: 100%;
+  background: var(--q-primary);
+}
+
+.team-kpi-cost-bar--over .team-kpi-cost-bar__fill {
+  background: var(--os-error);
+}
+
+.team-kpi-cost-over {
+  margin-left: 4px;
+  font-weight: 600;
+  color: var(--os-error);
+}
+
+.team-kpi-cost-note {
+  text-transform: none;
+  letter-spacing: normal;
 }
 
 .team-kpi-unavailable {
@@ -1678,83 +1632,4 @@ function showThread(row: WorkflowRow) {
   }
 }
 
-/* THE TOKENS DIALOG. The headline total with its four parts, then two tables whose figures line
-   up in right-aligned columns and whose names wrap instead of being cut. */
-.token-summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 16px 32px;
-}
-
-.token-summary-value {
-  font-size: 1.75rem;
-  font-weight: 600;
-  line-height: 1.1;
-}
-
-.token-summary-parts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 24px;
-  font-variant-numeric: tabular-nums;
-}
-
-.token-section-title {
-  margin: 20px 0 6px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  opacity: 0.7;
-}
-
-.token-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-variant-numeric: tabular-nums;
-}
-
-.token-table th {
-  padding: 4px 8px;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  text-align: left;
-  opacity: 0.7;
-  border-bottom: 1px solid var(--os-rule-strong);
-  white-space: nowrap;
-}
-
-.token-table td {
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--os-rule);
-  vertical-align: top;
-}
-
-.token-table tbody tr:last-child td {
-  border-bottom: none;
-}
-
-.token-table .token-num {
-  text-align: right;
-  white-space: nowrap;
-}
-
-.token-name-col {
-  width: 100%;
-}
-
-.token-name {
-  overflow-wrap: anywhere;
-  min-width: 10ch;
-}
-
-.token-billable {
-  font-weight: 600;
-}
-
-.token-note {
-  font-size: 0.75rem;
-  opacity: 0.7;
-}
 </style>

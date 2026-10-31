@@ -346,3 +346,58 @@ export async function findOutcomeRef(id: string): Promise<OutcomeRef | null> {
 export function endedOutcomeLabel(outcome: Pick<OutcomeRef, 'name' | 'status'>): string {
   return `${outcome.name} (${outcome.status})`
 }
+
+// ---- A team's cost, by outcome, over the last eight weeks ---------------------------------------
+
+/** One week of one outcome's work for one team; `cost` is null when no rate is set, never 0. */
+export interface TeamCostWeek {
+  weekStart: string
+  agentSeconds: number
+  billable: number
+  measuredRuns: number
+  unmeasuredRuns: number
+  cost: number | null
+}
+
+/** Totals over the eight weeks, the same shape for an outcome and for the team. */
+export interface TeamCostTotals {
+  agentSeconds: number
+  billable: number
+  measuredRuns: number
+  unmeasuredRuns: number
+  cost: number | null
+}
+
+/** One outcome the team's workflows served, or `id: null` for its unlinked workflows ("No outcome"). */
+export interface TeamCostOutcome {
+  id: string | null
+  name: string
+  /** The outcome's budget (what achieving it is worth), or null when none is set. */
+  value: number | null
+  weekly: TeamCostWeek[]
+  totals: TeamCostTotals
+  /** The outcome's total across ALL teams: the figure its budget is measured against. */
+  outcomeTotalCost: number | null
+}
+
+/** `GET /api/teams/{team}/cost`: one team's outcome figures over the last eight weeks. */
+export interface TeamCost {
+  team: string
+  money: Pick<OutcomeMoney, 'currency' | 'agentHourlyRate'>
+  /** Eight Monday-start UTC weeks, oldest first. */
+  weeks: string[]
+  /** No outcome first when present, then each outcome. */
+  outcomes: TeamCostOutcome[]
+  totals: TeamCostTotals
+}
+
+/** `GET /api/teams/cost`: every team's figures at once, for the teams list - one call, never one per row. */
+export interface TeamsCost {
+  money: TeamCost['money']
+  weeks: string[]
+  teams: Array<Pick<TeamCost, 'team' | 'outcomes' | 'totals'>>
+}
+
+export const getTeamCost = (team: string) => json<TeamCost>(`/api/teams/${encodeURIComponent(team)}/cost`)
+
+export const getTeamsCost = () => json<TeamsCost>('/api/teams/cost')

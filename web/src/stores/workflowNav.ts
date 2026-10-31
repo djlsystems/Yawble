@@ -28,6 +28,8 @@ export const useWorkflowNavStore = defineStore('workflowNav', {
     teamCommand: null as { team: TeamId; action: string } | null,
     /** Counts asks, so the same command on the same team twice is still a change the layout sees. */
     teamCommandAsks: 0,
+    /** Counts asks for the Outcomes dialog at its rate (the Cost dialog's "Change in Outcomes"). */
+    outcomeRateAsks: 0,
   }),
 
   actions: {
@@ -36,6 +38,12 @@ export const useWorkflowNavStore = defineStore('workflowNav', {
       this.backlogTeam = null
       this.backlogItem = id
       this.backlogOpen = true
+    },
+
+    /** Asks the layout for the Outcomes dialog with its agent hourly rate open. */
+    openOutcomeRate() {
+      this.backlogOpen = false
+      this.outcomeRateAsks += 1
     },
 
     /** Opens the Backlog dialog on its list. */
