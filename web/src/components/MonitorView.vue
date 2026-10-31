@@ -564,34 +564,32 @@ function startLive() {
   publish(performance.now())
 }
 
-/**
- * THE ACTIVITY PANE'S CLEAR: forget, in this browser, what the Monitor holds - the list, the chart,
- * the token figure and its stretch, the counts and the workflows drawn - and remember the seq it
- * cleared after, so a reload reads from the row after it. The teams and members stay, and the live
- * connection: the next row shows as before. Everything goes at once; nothing animates.
- */
-function clearActivity() {
-  const last = history.value.at(-1)?.seq
-  if (last !== undefined) {
-    clearedAfter.value = last
-    writeClearedAfter(last)
-  }
-  pushLines = []
-  // A replay's own model goes with it: live reads the window from the mark, which is empty.
-  if (mode.value !== 'live') startLive()
-  else model.forget(board.choosableTeams)
-  scene?.forget(model)
-  tokensTarget = 0
-  tokensShown.value = 0
-  dirty = true
-  publish(performance.now())
-}
-
 /** Show everything again (the settings): forget the mark and read the whole window as before. */
 function showEverything() {
   clearedAfter.value = null
   writeClearedAfter(null)
   if (mode.value === 'live') startLive()
+}
+
+/** Remembered per browser, as the kept view is: the activity pane folded to a strip, or open. */
+const ActivityOpenKey = 'harness.monitor.activityOpen'
+function readActivityOpen(): boolean {
+  try {
+    return localStorage.getItem(ActivityOpenKey) !== '0'
+  } catch {
+    return true
+  }
+}
+/** Off: the activity pane is a narrow strip and the graph takes its room (the stage's ResizeObserver redraws it). */
+const activityOpen = ref(readActivityOpen())
+function toggleActivity() {
+  activityOpen.value = !activityOpen.value
+  try {
+    if (activityOpen.value) localStorage.removeItem(ActivityOpenKey)
+    else localStorage.setItem(ActivityOpenKey, '0')
+  } catch {
+    // Remembered only while this page is open.
+  }
 }
 
 /** Which replay is current: one started later, or live, makes an earlier one's late answer moot. */
@@ -1195,7 +1193,24 @@ onUnmounted(() => {
 
     <!-- THE SAME ACTIVITY IN WORDS, newest first: what a screen reader reads, and what a person
          reads when the graph is busy. -->
-    <aside class="monitor-ticker" aria-label="Activity">
+    <aside v-if="!activityOpen" class="monitor-ticker monitor-ticker--collapsed" aria-label="Activity" data-monitor-activity-collapsed>
+      <q-btn
+        flat
+        dense
+        round
+        size="sm"
+        icon="chevron_left"
+        class="monitor-expand"
+        aria-label="Show activity"
+        :aria-expanded="false"
+        data-monitor-activity-toggle
+        @click="toggleActivity"
+      >
+        <q-tooltip>Show activity</q-tooltip>
+      </q-btn>
+      <span class="monitor-ticker-strip-label" aria-hidden="true">Activity</span>
+    </aside>
+    <aside v-else class="monitor-ticker" aria-label="Activity">
       <div class="monitor-ticker-head">
         <span>Activity</span>
         <span v-if="picked" class="monitor-picked">
@@ -1240,13 +1255,14 @@ onUnmounted(() => {
           dense
           round
           size="sm"
-          icon="clear_all"
-          class="monitor-clear"
-          aria-label="Clear"
-          data-monitor-clear
-          @click="clearActivity"
+          icon="chevron_right"
+          class="monitor-collapse"
+          aria-label="Hide activity"
+          :aria-expanded="true"
+          data-monitor-activity-toggle
+          @click="toggleActivity"
         >
-          <q-tooltip>Clear</q-tooltip>
+          <q-tooltip>Hide activity</q-tooltip>
         </q-btn>
       </div>
       <ol class="monitor-rows">
@@ -1763,8 +1779,29 @@ onUnmounted(() => {
   color: var(--monitor-ink-dim);
 }
 
-.monitor-clear {
+.monitor-collapse,
+.monitor-expand {
   margin-left: auto;
+  color: var(--monitor-ink-dim);
+}
+
+.monitor-ticker--collapsed {
+  flex: 0 0 2.5rem;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+}
+
+.monitor-ticker--collapsed .monitor-expand {
+  margin-left: 0;
+}
+
+.monitor-ticker-strip-label {
+  writing-mode: vertical-rl;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   color: var(--monitor-ink-dim);
 }
 
@@ -1974,6 +2011,26 @@ onUnmounted(() => {
     flex: 0 0 16rem;
     border-left: 0;
     border-top: 1px solid var(--monitor-rule);
+  }
+
+  .monitor-ticker--collapsed {
+    flex: 0 0 auto;
+    flex-direction: row;
+    padding: 4px 12px;
+  }
+
+  .monitor-ticker--collapsed .monitor-expand {
+    order: 2;
+    margin-left: auto;
+    transform: rotate(90deg);
+  }
+
+  .monitor-collapse {
+    transform: rotate(90deg);
+  }
+
+  .monitor-ticker-strip-label {
+    writing-mode: horizontal-tb;
   }
 
   .monitor-stats {

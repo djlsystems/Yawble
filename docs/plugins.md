@@ -109,7 +109,8 @@ When the Host does not answer within 20 seconds the CLI says so; a restart (`yaw
 ### Upgrade a plugin to the Marketplace's newer version
 
 When the Marketplace's catalog lists a newer version of an installed plugin, **Admin → Plugins** shows
-an upgrade icon on that plugin's first tile ("Upgrade to <version>"), and **Marketplace → Installed**
+an upgrade icon on the tile of that plugin's active version ("Upgrade to <version>"; not on a tile of an
+inactive older version kept beside it), and **Marketplace → Installed**
 shows Update on the plugin's tile. There is no icon when the catalog does not list the plugin, lists
 the installed version or an older one, or has not been checked.
 
@@ -134,8 +135,11 @@ moves every member onto it at once. Nothing else is needed and nothing is remove
 - every member stays hired, with its settings, kept by field name;
 - a field declaring `secrets.<field>.movedTo` moves the member's own value into a connection, as
   [A secret moved to a connection](#a-secret-moved-to-a-connection-movedto) describes; the dialog
-  lists each move;
-- the old version stays on disk, inactive.
+  lists each move, under "Secrets moved into connections" only when something moved. A member with
+  no own value whose slot is already bound - a second upgrade after a rollback, or a person bound it -
+  reads "no value for `<field>` to move; slot <slot> is already bound to <connection name>", not "left
+  for a person to bind";
+- the old version stays under `<dataRoot>/plugins/<id>/<old version>`, inactive.
 
 **The attention list.** On an upgrade - a newer version made active over an older one - the install
 answer's `attention` names each member whose saved settings do not fit the new version:
@@ -158,10 +162,14 @@ An upgrade never removes or stops a member. A member whose settings need attenti
 naming the field, until a person fixes it in the member's settings, as it would after any change to
 the plugin.
 
-**Rolling back.** The old version is kept on disk. To go back, install it again with Replace: Admin →
-Plugins → Install from a folder… on the older version's folder with Replace ticked, or
-`yawble plugin install <older folder> --force`. That makes it active again; members move back with
-their settings, and the newer version is kept, inactive. A solution team's minimum still applies: a
+**Rolling back.** To go back, install the older version again with Replace, from a folder outside the
+plugins folder: the folder it was built into, or - when it came from the Marketplace and that folder is
+still there - **Documents › Marketplace › `<id>-<old version>`**, where the Marketplace's fetch unpacked
+it. Use Admin → Plugins → Install from a folder… on that folder with Replace ticked, or
+`yawble plugin install <that folder> --force`. The copy kept under `<dataRoot>/plugins/<id>/<old version>`
+cannot be installed: the Host refuses it as already under the plugins folder. The dialog says the same
+after an upgrade. Installing it makes the older version active again; members move back with their
+settings, and the newer version is kept, inactive. A solution team's minimum still applies: a
 version older than an installed solution team needs is refused.
 
 ### Install from a folder inside the instance
@@ -576,14 +584,19 @@ Anything failing rolls all of it back: the member keeps its values, no connectio
 
 - **No own value**: nothing is made. The slot stays unbound and, if required, the member reads Needs
   you ("bind a connection for the slot `x`"). A required field with `movedTo` never asks for an own
-  value itself: its slot is what is required.
+  value itself: its slot is what is required. When the slot is ALREADY BOUND (its own key, `<slot>`) -
+  a second upgrade after a rollback, where the first move bound it, or a person bound it - the outcome
+  is `alreadyBound` instead, naming the bound connection's name; nothing is written.
 - **The slot is already bound** (one that is not multiple): the binding is not overwritten, no
   connection is made, and the member KEEPS its own values for the fields, so nothing is lost; a
   `member.secret-move-kept` row names them, and a person clears them once the bound connection is
   the one meant. A multiple slot is never "already bound": the move takes its next free key.
 - **Again**: an install of the same version moves nothing twice; a moved value is gone.
 - The install route's answer carries `moves`: one `{ team, member, slot, outcome, fields, connection,
-  key, reason }` per member and slot, `outcome` `moved`, `nothing`, `kept` or `failed`.
+  connectionName, key, reason }` per member and slot, `outcome` `moved`, `nothing` (no own value, the
+  slot unbound), `alreadyBound` (no own value, the slot already bound), `kept` or `failed`.
+  `connection` and `connectionName` are the connection made (`moved`) or the one the slot already binds
+  (`alreadyBound`, `kept`) - a name, never a value.
 
 #### Several Microsoft APIs from one connection
 

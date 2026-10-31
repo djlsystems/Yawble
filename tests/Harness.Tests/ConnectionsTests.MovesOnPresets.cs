@@ -196,7 +196,10 @@ public sealed partial class ConnectionsTests
 
         var again = await InstallPluginAsync(PayPlugin("0.2.0", MovesNamecheapPair, slot: "namecheap", unmasked: true), replace: true);
 
-        Assert.Equal("nothing", Assert.Single(again.GetProperty("moves").EnumerateArray()).GetProperty("outcome").GetString());
+        // ALREADY BOUND to the connection the first install made, and said so by its name (PLG 3).
+        var move = Assert.Single(again.GetProperty("moves").EnumerateArray());
+        Assert.Equal(("alreadyBound", first, "Mail - Domains"),
+            (move.GetProperty("outcome").GetString(), move.GetProperty("connection").GetString(), move.GetProperty("connectionName").GetString()));
         Assert.Equal(count, (await GetAsync("/api/connections")).GetArrayLength());
         Assert.Equal(first, Assert.Single(await BindingsAsync("Domains")).Value);
         Assert.Single(await TenantDetailsAsync(TenantActions.ConnectionConnected));

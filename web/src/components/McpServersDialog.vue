@@ -2,7 +2,8 @@
 import { computed, ref, watch } from 'vue';
 import { listConnections } from '../api/client';
 import FieldHelp from './FieldHelp.vue';
-import type { Connection } from '../api/types';
+import ConnectionSelect from './ConnectionSelect.vue';
+import type { Connection, ConnectionKind } from '../api/types';
 import {
   addMcpServer,
   changeMcpServer,
@@ -33,6 +34,11 @@ const runsIt = `${productTitle} runs it`;
  * member's first call (MCP 3); its save and Test start it in a process of their own, list its tools and stop
  * it, with the same answer and health as a web address.
  *
+ * EITHER CONNECTION IS MADE HERE, from its select's New connection... (ConnectionSelect): the wizard opens
+ * over this form - API key only for a web address; for a variable at API key's Other, so a person names
+ * their own fields (key, autoSave, endpoint) - and what it saves is chosen at once, the connections are
+ * read again, and the Field select lists the new connection's fields. Nothing typed here is touched.
+ *
  * Never a value: an entry names its connection and field, and its address is shown without its query;
  * an edit that leaves the address empty keeps the stored one whole.
  */
@@ -42,6 +48,15 @@ const servers = ref<McpServer[]>([]);
 const connections = ref<Connection[]>([]);
 const loaded = ref(false);
 const error = ref('');
+
+/** The connections read again - a connection was made from the form - leaving the form as it is. */
+async function readConnections() {
+  try {
+    connections.value = await listConnections();
+  } catch (cause) {
+    formError.value = `The connections could not be read again: ${cause instanceof Error ? cause.message : String(cause)}`;
+  }
+}
 
 async function load() {
   error.value = '';
@@ -59,8 +74,27 @@ watch(open, (showing) => {
   if (showing) void load();
 }, { immediate: true });
 
-const apiKeys = computed(() => connections.value.filter((c) => c.kind === 'apikey'));
-const credentialConnections = computed(() => connections.value.filter((c) => c.kind === 'apikey' || c.kind === 'login' || c.kind === 'website'));
+/** What the web address sends: an API key. */
+const ApiKeyKinds: readonly ConnectionKind[] = ['apikey'];
+/** What fills a variable: any credential connection's field. */
+const CredentialKinds: readonly ConnectionKind[] = ['apikey', 'login', 'website'];
+/** A variable's New connection... opens at API key, then Other: the person names its fields. */
+const VariableStart = { kind: 'apikey' as const, preset: 'other' };
+
+/** The connection chosen for the web address: a field of another connection no longer applies. */
+function chooseConnection(id: string | null) {
+  if (id !== connection.value) field.value = null;
+  connection.value = id;
+}
+
+/** A variable's connection chosen: its field is chosen again from the new connection's. */
+function chooseRowConnection(row: EnvRow, id: string | null) {
+  if (id !== row.connection) row.field = null;
+  row.connection = id;
+}
+
+/** How a connection reads in either list: its name. */
+const byName = (c: Connection) => c.name;
 
 function fieldsOf(id: string | null | undefined): string[] {
   const connection = connections.value.find((c) => c.id === id);
@@ -319,19 +353,19 @@ async function remove() {
               :placeholder="editing?.url ? `${editing.url} (leave empty to keep it)` : 'https://example.com/mcp'"
               data-mcp-url
             />
-            <q-select
-              v-model="connection"
-              :options="apiKeys.map((c) => ({ value: c.id, label: c.name }))"
-              emit-value
-              map-options
+            <ConnectionSelect
+              :model-value="connection"
+              :connections="connections"
+              :kinds="ApiKeyKinds"
+              :option-label="byName"
               clearable
-              outlined
-              dense
               label="Connection (API key, optional)"
               data-mcp-connection
+              @update:model-value="chooseConnection"
+              @created="readConnections"
             />
             <template v-if="connection">
-              <q-select v-model="field" :options="fieldsOf(connection)" clearable outlined dense label="Field (default: its secret field)" />
+              <q-select v-model="field" :options="fieldsOf(connection)" clearable outlined dense label="Field (default: its secret field)" data-mcp-field />
               <q-input v-model="header" outlined dense label="Header name" data-mcp-header />
               <q-input v-model="template" outlined dense label="Value template" data-mcp-template>
                 <template #append><FieldHelp text="{value} is replaced by the connection's value, as in Bearer {value}." /></template>
@@ -349,17 +383,19 @@ async function remove() {
             <div class="text-caption os-text-muted">Environment variables, each filled from a connection's field</div>
             <div v-for="(row, index) in env" :key="index" class="row no-wrap q-gutter-x-sm items-center">
               <q-input v-model="row.name" class="col" outlined dense label="Name" />
-              <q-select
-                v-model="row.connection"
+              <ConnectionSelect
+                :model-value="row.connection"
                 class="col"
-                :options="credentialConnections.map((c) => ({ value: c.id, label: c.name }))"
-                emit-value
-                map-options
-                outlined
-                dense
+                :connections="connections"
+                :kinds="CredentialKinds"
+                :start="VariableStart"
+                :option-label="byName"
                 label="Connection"
+                data-mcp-env-connection
+                @update:model-value="(id: string | null) => chooseRowConnection(row, id)"
+                @created="readConnections"
               />
-              <q-select v-model="row.field" class="col" :options="fieldsOf(row.connection)" outlined dense label="Field" />
+              <q-select v-model="row.field" class="col" :options="fieldsOf(row.connection)" outlined dense label="Field" data-mcp-env-field />
               <q-btn flat round dense icon="delete" :aria-label="`Remove ${row.name || 'variable'}`" @click="env.splice(index, 1)" />
             </div>
             <q-btn flat dense no-caps icon="add" label="Add variable" @click="env.push({ name: '', connection: null, field: null })" />

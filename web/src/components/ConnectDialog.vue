@@ -119,6 +119,12 @@ import { letGoSignIns } from '../lib/letGoSignIns';
  * address under an open dialog, taking the provider's answer off it, and Quasar's default closes
  * every dialog when it does.
  *
+ * OPENED OVER ANOTHER DIALOG (`inTab`, ConnectionSelect's New connection...): whatever is typed in the
+ * dialog underneath must survive, so a sign-in that would leave the page - Google's - opens in another
+ * tab and waits here, as it does from a slot; Microsoft's code is shown here as always. `accepts`
+ * narrows what is offered to what the place asking takes (its kinds, its providers), and `start` opens
+ * at one kind's form - with a preset already chosen, such as API key's Other.
+ *
  * THE CLIENT SECRET IS WRITE-ONLY here as in Advanced: typed, sent once, never shown or kept. The
  * provider's device code never reaches the browser: only the code the person types does.
  */
@@ -138,6 +144,15 @@ const props = defineProps<{
     scopes?: Record<string, string[]> | undefined;
     pluginName?: string | undefined;
   } | null;
+  /**
+   * What the place asking takes: only these kinds are offered, and a sign-in only these providers.
+   * Narrows `need`'s kinds when both are given.
+   */
+  accepts?: { kinds?: readonly ConnectionKind[] | undefined; providers?: readonly string[] | undefined } | null;
+  /** Open at this kind's form, with this preset chosen (API key's `other`), when the kind is offered. */
+  start?: { kind: ConnectionKind; preset?: string | undefined } | null;
+  /** A sign-in that would leave the page opens in another tab instead, so the page underneath stays. */
+  inTab?: boolean | undefined;
 }>();
 const open = defineModel<boolean>({ required: true });
 const emit = defineEmits<{
@@ -159,13 +174,17 @@ const kind = ref<ConnectionKind | null>(null);
 /** The kinds offered: every kind from Admin -> Connections, a slot's own from a slot. */
 const offeredKinds = computed(() => {
   const ids = props.need ? slotKinds(props.need.providers) : ConnectionKinds.map((entry) => entry.id);
-  return ConnectionKinds.filter((entry) => ids.includes(entry.id));
+  const accepted = props.accepts?.kinds;
+  return ConnectionKinds.filter((entry) => ids.includes(entry.id) && (!accepted || accepted.includes(entry.id)));
 });
 
 const isCredentialKind = (id: ConnectionKind | null): id is 'website' | 'apikey' | 'login' => id === 'website' || id === 'apikey' || id === 'login';
 
 /** Whether the dialog opens at the kind step: always from Admin -> Connections; from a slot only when it takes a credential kind. */
 const kindStep = computed(() => !props.need || offeredKinds.value.some((entry) => isCredentialKind(entry.id)));
+
+/** The credential preset the form opens on: `start`'s, for the kind it names. */
+const startPreset = computed(() => (props.start && props.start.kind === kind.value ? props.start.preset ?? null : null));
 
 const credentialPresets = ref<CredentialPreset[]>([]);
 const credentialForm = ref<InstanceType<typeof CredentialForm> | null>(null);
@@ -307,8 +326,10 @@ async function begin(seq: number) {
 
   // A slot that takes one kind, and that a website, an API key or a login: its form at once.
   if (step.value === 'kind') {
+    const started = props.start && offeredKinds.value.some((entry) => entry.id === props.start!.kind) ? props.start.kind : null;
     const single = offeredKinds.value.length === 1 ? offeredKinds.value[0]!.id : null;
-    if (props.need && single) chooseKind(single);
+    if (started) chooseKind(started);
+    else if ((props.need || props.accepts?.kinds) && single) chooseKind(single);
     return;
   }
 
@@ -327,7 +348,12 @@ const builtIn = [
 ];
 
 /** The services offered: a slot's own, when started from one. */
-const services = computed(() => (props.need ? builtIn.filter((service) => props.need!.providers.includes(service.id)) : builtIn));
+const services = computed(() =>
+  builtIn.filter(
+    (service) =>
+      (!props.need || props.need.providers.includes(service.id))
+      && (!props.accepts?.providers || props.accepts.providers.includes(service.id)),
+  ));
 
 // --- A mailbox with an app password ---------------------------------------------------------------
 
@@ -339,7 +365,8 @@ const mailboxForm = ref<InstanceType<typeof MailboxForm> | null>(null);
 
 /** Offered unless the slot this was started from does not take a mailbox. */
 const mailboxTiles = computed(() =>
-  (kind.value === null || kind.value === 'imap') && (!props.need || props.need.providers.includes('imap')) ? presets.value : []);
+  (kind.value === null || kind.value === 'imap') && (!props.need || props.need.providers.includes('imap'))
+  && (!props.accepts?.kinds || props.accepts.kinds.includes('imap')) ? presets.value : []);
 
 async function readPresets(seq: number) {
   try {
@@ -632,8 +659,8 @@ async function signIn() {
   problem.value = '';
   try {
     const flow = await startConnection({ provider: chosen.id, scopes: chosenScopes.value });
-    if (props.need) {
-      // From a slot: the provider opens in another tab, and this one waits for its return.
+    if (props.need || props.inTab) {
+      // From a slot, or over another dialog: the provider opens in another tab, and this one waits for its return.
       // The tab is tagged, so only this sign-in's return is taken here.
       stopWaiting();
       const tag = newSigninTag();
@@ -861,7 +888,7 @@ const stepLabels = computed(() => [
       <!-- A WEBSITE, AN API KEY, A USERNAME AND PASSWORD: the kind's own form -->
       <q-card-section v-else-if="step === 'credential' && isCredentialKind(kind)" data-connect-step="credential" class="q-gutter-y-md">
         <div class="text-weight-medium">{{ offeredKinds.find((entry) => entry.id === kind)?.name }}</div>
-        <CredentialForm ref="credentialForm" :presets="credentialPresets" :kind="kind" @saved="credentialConnected" />
+        <CredentialForm ref="credentialForm" :presets="credentialPresets" :kind="kind" :preset="startPreset" @saved="credentialConnected" />
         <ConnectionTest v-if="credentialSaved && savedConnection" :connection="savedConnection" @tested="connectionTested" />
       </q-card-section>
 
@@ -1232,7 +1259,7 @@ const stepLabels = computed(() => [
             <span>Waiting for you to sign in…</span>
           </div>
         </div>
-        <div v-else-if="need">
+        <div v-else-if="need || inTab">
           {{ provider.name }} opens in another tab to sign in and agree, so this page stays as it is.
           {{ chosenScopes.length === 0
             ? 'Only the account\'s name and email address are asked for.'

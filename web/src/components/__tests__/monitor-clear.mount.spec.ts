@@ -1,11 +1,10 @@
 // @vitest-environment happy-dom
 //
-// THE ACTIVITY PANE'S CLEAR, MOUNTED through the real console store. A Clear icon button at the
-// right of the ACTIVITY heading empties the activity list and the timeline chart, starts the token
-// figure and its stretch over, and remembers in this browser the seq it cleared after
-// (`harness.monitor.clearedAfter`), so a Monitor mounted later reads the window from the row after
-// it. Show everything again in the settings dialog forgets the mark. Nothing goes to the server.
-// What the model forgets is `monitorClear.spec.ts`, with the scene under reduced motion.
+// THE ACTIVITY PANE, MOUNTED through the real console store. The Clear button is gone: the pane
+// folds to a strip instead (a chevron at the right of the ACTIVITY heading), remembered in this
+// browser (`harness.monitor.activityOpen`). A mark the former Clear left (`harness.monitor.clearedAfter`)
+// is still read, so a Monitor mounted later reads the window from the row after it, and Show
+// everything again in the settings dialog forgets it. Nothing goes to the server.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
@@ -29,6 +28,8 @@ import MonitorView from '../MonitorView.vue'
 import { useConsoleStore } from '../../stores/console'
 import { resetBody } from '../../test/mountQuasar'
 import { ClearedKey } from '../../lib/monitor/cleared'
+
+const ActivityOpenKey = 'harness.monitor.activityOpen'
 
 let seq = 0
 function row(type: string, source: string, payload: Record<string, unknown>, at: string, correlationId = 1): Message {
@@ -89,6 +90,7 @@ beforeEach(() => {
   listEvents.mockResolvedValue([])
   getFileChanges.mockResolvedValue({ changes: [], next: null })
   localStorage.removeItem(ClearedKey)
+  localStorage.removeItem(ActivityOpenKey)
 })
 
 afterEach(() => {
@@ -96,59 +98,55 @@ afterEach(() => {
   wrapper = null
   resetBody()
   localStorage.removeItem(ClearedKey)
+  localStorage.removeItem(ActivityOpenKey)
   vi.clearAllMocks()
 })
 
-describe('the Clear button on the activity pane', () => {
-  it('sits at the right of the ACTIVITY heading as an icon button whose tooltip and label say Clear', async () => {
+describe('the activity pane folds to a strip', () => {
+  it('has no Clear button: its heading ends in a Hide activity chevron', async () => {
     const { wrapper } = await mountMonitor(three())
     const head = wrapper.get('.monitor-ticker-head')
-    const clear = head.get('[data-monitor-clear]')
+    const toggle = head.get('[data-monitor-activity-toggle]')
 
+    expect(wrapper.find('[data-monitor-clear]').exists()).toBe(false)
     expect(head.element.firstElementChild?.textContent?.trim()).toBe('Activity')
-    expect(head.element.lastElementChild).toBe(clear.element)
-    expect(clear.attributes('aria-label')).toBe('Clear')
-    expect(clear.text()).not.toContain('Clear')
-    expect(clear.find('.q-icon').exists()).toBe(true)
-
-    const tooltip = clear.findComponent({ name: 'QTooltip' })
-    ;(tooltip.vm as unknown as { show: () => void }).show()
-    await flushPromises()
-    expect(document.body.querySelector('.q-tooltip')?.textContent?.trim()).toBe('Clear')
+    expect(head.element.lastElementChild).toBe(toggle.element)
+    expect(toggle.attributes('aria-label')).toBe('Hide activity')
+    expect(toggle.attributes('aria-expanded')).toBe('true')
   })
 
-  it('empties the list, the chart and the token figure at once, writes the mark, and shows the next row as before', async () => {
-    const rows = three()
-    const { wrapper, board } = await mountMonitor(rows)
+  it('folds to a strip and opens again, keeping its rows, and this browser remembers it', async () => {
+    const { wrapper } = await mountMonitor(three())
     await published()
     expect(listed(wrapper)).toEqual(['finished', 'started', 'told'])
-    expect(bars(wrapper).length).toBeGreaterThan(0)
-    expect(spanHint(wrapper)).toContain('3 rows')
-    expect(wrapper.get('[data-stat="tokens"] .monitor-stat-value').text()).toBe('12k')
 
-    await wrapper.get('[data-monitor-clear]').trigger('click')
+    await wrapper.get('[data-monitor-activity-toggle]').trigger('click')
     await flushPromises()
 
-    expect(listed(wrapper)).toEqual([])
-    expect(bars(wrapper)).toEqual([])
-    expect(spanHint(wrapper)).toContain('0 rows')
-    // At once: no roll down to zero, nothing that moves.
-    expect(wrapper.get('[data-stat="tokens"] .monitor-stat-value').text()).toBe('0')
-    expect(wrapper.get('[data-stat="tokens"] .monitor-stat-words').text()).toBe('billable tokens')
-    expect(wrapper.get('[data-stat="open"] .monitor-stat-value').text()).toBe('0')
-    expect(localStorage.getItem(ClearedKey)).toBe(String(rows[2]!.seq))
-    // Nothing is asked of the server.
-    expect(getMessages).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-monitor-activity-collapsed]').exists()).toBe(true)
+    expect(wrapper.findAll('.monitor-row')).toEqual([])
+    const show = wrapper.get('[data-monitor-activity-toggle]')
+    expect(show.attributes('aria-label')).toBe('Show activity')
+    expect(show.attributes('aria-expanded')).toBe('false')
+    expect(localStorage.getItem(ActivityOpenKey)).toBe('0')
 
-    board.record([tell('Write the tests', '2026-10-21T10:10:00Z', 2)])
+    await show.trigger('click')
     await published()
 
-    expect(listed(wrapper)).toEqual(['told'])
-    expect(wrapper.findAll('.monitor-row')[0]!.text()).toContain('Write the tests')
-    expect(spanHint(wrapper)).toContain('1 rows')
-    expect(wrapper.get('[data-stat="open"] .monitor-stat-value').text()).toBe('1')
+    expect(wrapper.find('[data-monitor-activity-collapsed]').exists()).toBe(false)
+    expect(listed(wrapper)).toEqual(['finished', 'started', 'told'])
+    expect(localStorage.getItem(ActivityOpenKey)).toBeNull()
   })
 
+  it('starts folded when this browser last folded it', async () => {
+    localStorage.setItem(ActivityOpenKey, '0')
+    const { wrapper } = await mountMonitor(three())
+
+    expect(wrapper.find('[data-monitor-activity-collapsed]').exists()).toBe(true)
+  })
+})
+
+describe('a mark left by the former Clear', () => {
   it('reads the window from the row after the mark when the Monitor is mounted with one', async () => {
     const rows = three()
     localStorage.setItem(ClearedKey, String(rows[1]!.seq))

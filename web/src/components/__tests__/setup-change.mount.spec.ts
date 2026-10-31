@@ -12,6 +12,8 @@ import { QSelect } from 'quasar';
 import type { VueWrapper } from '@vue/test-utils';
 
 import SolutionPanel from '../SolutionPanel.vue';
+import ConnectionSelect from '../ConnectionSelect.vue';
+import ConnectDialog from '../ConnectDialog.vue';
 import type { PluginMemberSettings, SolutionMissing } from '../../api/types';
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
 import { button, field, settle, type } from '../../test/formProbe';
@@ -183,6 +185,63 @@ describe('Change setup', () => {
     // The new binding, with the mailbox's binding and the stored answers sent back as they were.
     expect(saves[0]!.body).toMatchObject({ config: { region: 'EU', limit: 25 }, connections: { mail: 'conn-mail', alerts: 'conn-mail' } });
     expect(screenId()).toBe('ready');
+  });
+  it('makes a connection for an unasked input from its select (ConnectionSelect), chooses it, and binds it on Next', async () => {
+    const plan = setupPlan();
+    const alerts = { ...plan.setup!.connections[0]!, slot: 'alerts', question: null, hint: null, advanced: true, required: false, description: 'Where alerts are sent from.' };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        fakeHost(
+          [
+            (call) =>
+              call.method === 'POST' && call.url === '/api/solutions/check'
+                ? reply(200, okCheck({ ...plan, setup: { ...plan.setup!, connections: [...plan.setup!.connections, alerts] } }))
+                : undefined,
+            ...routes,
+            ...panelRoutes(),
+          ],
+          calls,
+        ),
+      ),
+    );
+    stored = scout({ mail: 'conn-mail' });
+    stored.connectionFields = { ...stored.connectionFields, alerts: { ...stored.connectionFields!.mail!, required: false, description: 'Where alerts are sent from.' } };
+    const wrapper = await mountDialog(SolutionPanel, { team: 'job-tracker' });
+    await settle();
+
+    (bodyFind('[data-change-setup]') as HTMLElement).click();
+    await settle();
+    await next();
+    await next();
+    await next();
+    button('Advanced…').click();
+    await settle();
+
+    const select = (wrapper as VueWrapper).findAllComponents(ConnectionSelect).find((found) => found.props('label') === 'Where alerts are sent from.');
+    expect(select).toBeDefined();
+    const options = select!.findComponent(QSelect).props('options') as { value: string }[];
+    expect(options.map((option) => option.value)).toEqual(['conn-mail', '__new_connection__']);
+
+    select!.findComponent(QSelect).vm.$emit('update:modelValue', '__new_connection__');
+    await settle();
+    // The wizard opens over the setup wizard for this input: a mailbox or a sign-in, never a credential kind.
+    expect(bodyFind('[data-guided-connect]')).not.toBeNull();
+    expect(bodyFind('[data-guided-connect] [data-connection-kind="apikey"]')).toBeNull();
+    expect(screenId()).toBe('preferences');
+
+    const fresh = savedMailbox({ id: 'conn-alerts', name: 'alerts@example.com', account: 'alerts@example.com' });
+    select!.findComponent(ConnectDialog).vm.$emit('connected', fresh);
+    await settle();
+    expect(select!.findComponent(QSelect).props('modelValue')).toBe('conn-alerts');
+
+    bodyFind('[data-guided-connect] [aria-label="Close"]')?.click();
+    await settle();
+    await next();
+
+    const saves = sent(calls, 'PUT', SettingsPath);
+    expect(saves).toHaveLength(1);
+    expect(saves[0]!.body).toMatchObject({ connections: { mail: 'conn-mail', alerts: 'conn-alerts' } });
   });
 });
 

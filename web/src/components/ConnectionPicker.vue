@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import FieldHelp from './FieldHelp.vue';
 import { computed, ref, watch } from 'vue';
 import { listConnections, startConnection, startDeviceConnection } from '../api/client';
 import type { Connection, ConnectionDeviceStart, ConnectionFlow, ConnectionProvider, ConnectionSlot } from '../api/types';
@@ -8,7 +7,7 @@ import { refusedReconnect } from '../lib/slotBinding';
 import CodeSignIn from './CodeSignIn.vue';
 import SlotConnect from './SlotConnect.vue';
 import SlotReconnect from './SlotReconnect.vue';
-import ConnectDialog from './ConnectDialog.vue';
+import ConnectionSelect from './ConnectionSelect.vue';
 import {
   connectionsForSlot,
   goneRefusal,
@@ -51,8 +50,9 @@ import {
  *
  * ONLY WHAT THE TEAM WAS GIVEN (`assigned`): a member's slot lists only the connections assigned to
  * its team (Team settings → Connections) that fit the slot - its kind, providers and scopes - and
- * when exactly one fits, it is preselected. **New connection...**, the list's last entry, opens the
- * connection wizard (ConnectDialog) for this slot; what it saves is bound as `connected` binds, and
+ * when exactly one fits, it is preselected. The select is ConnectionSelect: **New connection...**, the
+ * list's last entry, opens the connection wizard (ConnectDialog) for this slot, over the form it is in;
+ * what it saves is bound as `connected` binds, and
  * the Host's binding assigns it to the team in the same transaction. Without `assigned` (a new
  * team's install, before it has any) every connection that fits is offered.
  */
@@ -87,9 +87,6 @@ const emit = defineEmits<{
   closed: [];
 }>();
 
-/** The value of the list's New connection... entry: never a connection's id. */
-const NewConnection = '__new_connection__';
-
 /**
  * WHAT FITS THE SLOT AND THE TEAM: of the team's assigned connections, those of a provider the slot
  * takes holding every scope it asks. The one bound stays listed whatever it is, so the list shows it.
@@ -117,17 +114,15 @@ watch(
   { immediate: true },
 );
 
-const options = computed(() =>
-  choices.value.map((connection) => ({
-    value: connection.id,
-    label:
-      `${connection.name} - ${connection.account} (${providerName(connection.provider, props.providers)})` +
-      (connection.status === 'ok' ? '' : `, ${statusLabel(connection)}`),
-  })).concat([{ value: NewConnection, label: 'New connection...' }]),
-);
+/** How a connection reads in the slot's list, as it always has. */
+function optionLabel(connection: Connection): string {
+  return (
+    `${connection.name} - ${connection.account} (${providerName(connection.provider, props.providers)})` +
+    (connection.status === 'ok' ? '' : `, ${statusLabel(connection)}`)
+  );
+}
 
 /** New connection... from this slot: the wizard, for this slot's kinds and scopes. */
-const wizardOpen = ref(false);
 const wizardNeed = computed(() =>
   props.plugin
     ? {
@@ -141,10 +136,6 @@ const wizardNeed = computed(() =>
 );
 
 function picked(value: string | null) {
-  if (value === NewConnection) {
-    wizardOpen.value = true;
-    return;
-  }
   bound.value = value ?? '';
 }
 
@@ -312,33 +303,22 @@ async function connected(connection: Connection) {
       <div v-if="choices.length > 0" class="text-caption os-text-muted q-mt-xs">Or choose an existing connection:</div>
     </SlotConnect>
 
-    <q-select
+    <!-- The slot's choices are ConnectionSelect's: its kinds and providers, the team's, the one bound;
+         what New connection... makes is bound by `connected`, never chosen by the select itself. -->
+    <ConnectionSelect
       :model-value="bound === '' ? null : bound"
-      :options="options"
-      emit-value
-      map-options
-      outlined
-      dense
+      :connections="choices"
+      :catalog="providers"
+      :for-slot="spec"
+      :need="wizardNeed"
+      :option-label="optionLabel"
       clearable
+      no-select-created
       :label="label ?? `Connection for ${slotName}`"
+      :hint="hint ?? slotHint(spec, providers)"
       data-connection-select
       @update:model-value="picked"
-    >
-      <template #append><FieldHelp :text="hint ?? slotHint(spec, providers)" /></template>
-      <template #no-option>
-        <q-item>
-          <q-item-section class="os-text-muted">
-            No connection of that kind yet. A person connects one in Admin → Connections.
-          </q-item-section>
-        </q-item>
-      </template>
-    </q-select>
-    <ConnectDialog
-      v-model="wizardOpen"
-      :providers="providers"
-      :connections="connections"
-      :need="wizardNeed"
-      @connected="connected"
+      @created="connected"
     />
 
     <div v-if="choices.length === 0 && !offerConnect" class="text-caption os-text-muted q-mt-xs" data-no-connections>

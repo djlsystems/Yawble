@@ -8,6 +8,12 @@
 // step shows the Host's sentence on the tile.
 //
 // SEEN TO FAIL: before PLG 2 the dialog read no catalog and offered no upgrade at all.
+//
+// PLG 3: the rollback words name a folder the install accepts (never the kept copy under the plugins
+// folder); a slot already bound says so, naming the connection, and "Secrets moved into connections"
+// heads the moves only when something moved; field names render as code, no literal backtick; and the
+// icon sits on the active version's tile, not an inactive older one listed first. SEEN TO FAIL on
+// 234829f: the rollback line, already-bound, heading, code and active-tile tests below.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
@@ -196,7 +202,11 @@ describe('PluginsDialog upgrade', () => {
     expect(installPlugin).toHaveBeenCalledWith('/data/documents/Marketplace/fixture-mail-1.1.0', true);
     expect(bodyFind('[data-install-dialog]')).toBeNull();
     expect(bodyFind('[data-upgrade-done]')?.textContent?.trim()).toBe('Upgraded Fixture Mail to 1.1.0');
-    expect(bodyText()).toContain('1.0.0 is kept on disk, inactive');
+    expect(bodyFind('[data-upgrade-rollback]')?.textContent?.trim()).toBe(
+      '1.0.0 is kept under the plugins folder, inactive. To roll back, install 1.0.0 again with Replace from the folder it was '
+      + 'built into, or from Documents › Marketplace › fixture-mail-1.0.0 if it came from the Marketplace and that folder is still '
+      + 'there. The copy under the plugins folder cannot be installed.');
+    expect(bodyText()).not.toContain('kept on disk');
     expect(bodyFind('[data-upgrade-attention]')).toBeNull();
     expect(bodyFind('[data-upgrade-moves]')).toBeNull();
     expect(listPlugins.mock.calls.length).toBeGreaterThan(1);
@@ -237,7 +247,7 @@ describe('PluginsDialog upgrade', () => {
     }
     expect(attention.querySelector('[data-attention-link="alpha/Mailer"]')?.textContent?.trim()).toBe('Alpha Team / Mailer');
     expect(attention.textContent).toContain('required by fixture-mail 1.1.0');
-    expect(bodyFind('[data-upgrade-move="alpha/Mailer"]')?.textContent).toContain('`password` moved into a connection on slot mailbox');
+    expect(bodyFind('[data-upgrade-move="alpha/Mailer"]')?.textContent).toContain('password moved into a connection on slot mailbox');
 
     (attention.querySelector('[data-attention-link="alpha/Mailer"]') as HTMLElement).click();
     await settle();
@@ -270,6 +280,110 @@ describe('PluginsDialog upgrade', () => {
     expect(refused).toContain('The installed version is still active.');
     expect(tile().getAttribute('data-plugin-version')).toBe('1.0.0');
     expect(tile().querySelector('[data-active]')).not.toBeNull();
+    wrapper.unmount();
+  });
+
+  // ---- PLG 3 ---------------------------------------------------------------------------------------
+
+  it('rolls back from a folder the install accepts: no rollback line on a first install', async () => {
+    installPlugin.mockResolvedValue(installed({ previous: null }));
+    const wrapper = await mountPlugins();
+    await confirmUpgrade();
+    expect(bodyFind('[data-upgrade-done]')).not.toBeNull();
+    expect(bodyFind('[data-upgrade-rollback]')).toBeNull();
+    wrapper.unmount();
+  });
+
+  it('a slot already bound says so naming the connection, with no "moved" heading', async () => {
+    installPlugin.mockResolvedValue(installed({
+      moves: [{
+        team: 'alpha', member: 'Mailer', slot: 'mailbox', outcome: 'alreadyBound', fields: ['password'],
+        connection: 'conn-1', connectionName: 'Alpha Team - Mailer', key: null, reason: null,
+      }],
+    }));
+    const wrapper = await mountPlugins();
+    await confirmUpgrade();
+
+    const move = bodyFind('[data-upgrade-move="alpha/Mailer"]')!;
+    expect(move.textContent?.trim()).toBe('alpha / Mailer: no value for password to move; slot mailbox is already bound to Alpha Team - Mailer.');
+    expect(move.textContent).not.toContain('left for a person to bind');
+    expect(bodyFind('[data-upgrade-moves-heading]')).toBeNull();
+    expect(bodyText()).not.toContain('Secrets moved into connections');
+    wrapper.unmount();
+  });
+
+  it('a first upgrade still says moved, under the heading; a slot left unbound alone has no heading', async () => {
+    installPlugin.mockResolvedValue(installed({
+      moves: [
+        { team: 'alpha', member: 'Mailer', slot: 'mailbox', outcome: 'moved', fields: ['password'], connection: 'conn-1', connectionName: 'Alpha Team - Mailer', key: 'mailbox', reason: null },
+        { team: 'beta', member: 'Inbox', slot: 'mailbox', outcome: 'nothing', fields: ['password'], connection: null, connectionName: null, key: null, reason: null },
+      ],
+    }));
+    const wrapper = await mountPlugins();
+    await confirmUpgrade();
+    expect(bodyFind('[data-upgrade-moves-heading]')?.textContent?.trim()).toBe('Secrets moved into connections');
+    expect(bodyFind('[data-upgrade-move="alpha/Mailer"]')?.textContent?.trim()).toBe('alpha / Mailer: password moved into a connection on slot mailbox.');
+    expect(bodyFind('[data-upgrade-move="beta/Inbox"]')?.textContent?.trim()).toBe('beta / Inbox: no value for password, so slot mailbox is left for a person to bind.');
+    wrapper.unmount();
+
+    installPlugin.mockResolvedValue(installed({
+      moves: [{ team: 'beta', member: 'Inbox', slot: 'mailbox', outcome: 'nothing', fields: ['password'], connection: null, connectionName: null, key: null, reason: null }],
+    }));
+    const again = await mountPlugins();
+    await confirmUpgrade();
+    expect(bodyFind('[data-upgrade-moves]')).not.toBeNull();
+    expect(bodyFind('[data-upgrade-moves-heading]')).toBeNull();
+    again.unmount();
+  });
+
+  it('shows field names as code, with no literal backtick, in the move and attention sentences', async () => {
+    installPlugin.mockResolvedValue(installed({
+      moves: [{ team: 'alpha', member: 'Mailer', slot: 'mailbox', outcome: 'moved', fields: ['password', 'user'], connection: 'conn-1', connectionName: null, key: 'mailbox', reason: null }],
+      attention: [{ team: 'alpha', member: 'Mailer', teamName: 'Alpha Team', memberName: 'Mailer', fields: [
+        { field: 'region', reason: '`region` is required by fixture-mail 1.1.0, and this member has no value for it and the plugin gives no default.' },
+      ] }],
+    }));
+    const wrapper = await mountPlugins();
+    await confirmUpgrade();
+
+    const move = bodyFind('[data-upgrade-move="alpha/Mailer"]')!;
+    expect(move.textContent).not.toContain('`');
+    expect([...move.querySelectorAll('code')].map((c) => c.textContent)).toEqual(['password', 'user']);
+    const field = bodyFind('[data-attention-field="region"]')!;
+    expect(field.textContent).not.toContain('`');
+    expect(field.textContent?.trim()).toBe('region is required by fixture-mail 1.1.0, and this member has no value for it and the plugin gives no default.');
+    expect([...field.querySelectorAll('code')].map((c) => c.textContent)).toEqual(['region']);
+    expect(bodyFind('[data-plugin-upgrade-done]')!.textContent).not.toContain('`');
+    wrapper.unmount();
+  });
+
+  it('puts the icon on the active version\'s tile, not an inactive older version listed first', async () => {
+    listPlugins.mockResolvedValue({
+      ...list,
+      versions: [
+        { id: 'fixture-mail', version: '0.9.0', name: 'Fixture Mail', active: false, verdict: 'inactive', reason: null },
+        ...list.versions,
+      ],
+    } satisfies PluginList);
+    const wrapper = await mountPlugins();
+
+    const tiles = [...document.body.querySelectorAll('[data-plugin="fixture-mail"]')];
+    expect(tiles.map((t) => t.getAttribute('data-plugin-version'))).toEqual(['0.9.0', '1.0.0']);
+    expect(tiles[0]!.querySelector('[data-plugin-upgrade]')).toBeNull();
+    const onActive = tiles[1]!.querySelector('[data-plugin-upgrade]') as HTMLElement;
+    expect(onActive.getAttribute('aria-label')).toBe('Upgrade to 1.1.0');
+    expect(tiles[1]!.querySelector('[data-active]')).not.toBeNull();
+
+    // A refusal shows on that same tile.
+    installPlugin.mockRejectedValue(new ActionRefused('fixture-mail 1.1.0 is older than Beta Team needs.', { installed: false }));
+    onActive.click();
+    await settle();
+    (bodyFind('[data-upgrade-confirm]') as HTMLElement).click();
+    await settle();
+    await settle();
+    const after = [...document.body.querySelectorAll('[data-plugin="fixture-mail"]')];
+    expect(after[0]!.querySelector('[data-upgrade-refused]')).toBeNull();
+    expect(after[1]!.querySelector('[data-upgrade-refused]')).not.toBeNull();
     wrapper.unmount();
   });
 });

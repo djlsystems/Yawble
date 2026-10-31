@@ -2,7 +2,9 @@
 import { computed, ref, watch } from 'vue';
 import type { InstalledPlugin, MarketplacePackage, PluginInstallResult, PluginMemberRef } from '../api/types';
 import { pluginNeedWords, pluginUsedByWords } from '../lib/marketplace';
-import { UPGRADE_WARNING, secretMoveWords, upgradePlugin, upgradeTitle, upgradedWords } from '../lib/pluginUpgrade';
+import {
+  UPGRADE_WARNING, anythingMoved, codeParts, rollbackWords, secretMoveWords, upgradePlugin, upgradeTitle, upgradedWords,
+} from '../lib/pluginUpgrade';
 
 /**
  * UPGRADE AN INSTALLED PLUGIN TO THE MARKETPLACE'S NEWER VERSION (PLG 2), from Admin -> Plugins and
@@ -11,7 +13,9 @@ import { UPGRADE_WARNING, secretMoveWords, upgradePlugin, upgradeTitle, upgraded
  * Upgrade fetches and installs in one go (`upgradePlugin`); a refusal at either step closes this and
  * is handed to the opener (`refused`) to show on the plugin's row, the installed version still active.
  *
- * Once installed it says so, lists the secret moves the install made, and names each member whose
+ * Once installed it says so, says how to roll back (`rollbackWords`: a folder the install accepts),
+ * lists the secret moves the install made - under "Secrets moved into connections" only when one did -
+ * and names each member whose
  * saved settings do not fit the new version - each with its fields and a link to its settings
  * (`member`). Nothing is removed or stopped: such a member fails its runs, naming the field, until a
  * person fixes it.
@@ -109,14 +113,20 @@ async function upgrade() {
         <div class="os-dialog-title" data-upgrade-done>{{ upgradedWords(name, result.version ?? pkg.version) }}</div>
       </q-card-section>
       <q-card-section>
-        <p class="os-body os-text-muted">
-          {{ result.previous ? `${result.previous} is kept on disk, inactive; install it again with Replace to roll back.` : '' }}
+        <p v-if="result.previous" class="os-body os-text-muted" data-upgrade-rollback>
+          {{ rollbackWords(result.id ?? pkg.id, result.previous) }}
         </p>
 
         <div v-if="(result.moves ?? []).length > 0" class="q-mb-md" data-upgrade-moves>
-          <div class="text-weight-medium q-mb-xs">Secrets moved into connections</div>
-          <div v-for="move in result.moves" :key="`${move.team}/${move.member}/${move.slot}`" class="os-body" :data-upgrade-move="`${move.team}/${move.member}`">
-            {{ secretMoveWords(move) }}
+          <div v-if="anythingMoved(result.moves)" class="text-weight-medium q-mb-xs" data-upgrade-moves-heading>Secrets moved into connections</div>
+          <div
+            v-for="move in result.moves"
+            :key="`${move.team}/${move.member}/${move.slot}`"
+            class="os-body"
+            :data-upgrade-move="`${move.team}/${move.member}`"
+            :data-upgrade-move-outcome="move.outcome"
+          >
+            <template v-for="(part, index) in codeParts(secretMoveWords(move))" :key="index"><code v-if="part.code">{{ part.text }}</code><template v-else>{{ part.text }}</template></template>
           </div>
         </div>
 
@@ -139,7 +149,7 @@ async function upgrade() {
             >{{ entry.teamName }} / {{ entry.memberName }}</a>
             <ul class="q-my-xs q-pl-lg">
               <li v-for="field in entry.fields" :key="field.field" class="os-body" :data-attention-field="field.field">
-                {{ field.reason }}
+                <template v-for="(part, index) in codeParts(field.reason)" :key="index"><code v-if="part.code">{{ part.text }}</code><template v-else>{{ part.text }}</template></template>
               </li>
             </ul>
           </div>
