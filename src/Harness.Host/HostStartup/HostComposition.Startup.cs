@@ -140,6 +140,10 @@ internal sealed partial class HostComposition
             return false;
         }
 
+        // EVERY TEAM HAS ITS TEAM CONNECTIONS MEMBER: a team made before it existed gets one now, and
+        // it is shown wherever its team has a connection assigned (TeamConnectionsMember).
+        await registry.EnsureAllTeamConnectionsAsync();
+
         // A MANAGER'S ROSTER NAMES ITS PLUGIN MEMBERS' DESCRIPTIONS AND SKILLS, so a rescan that changes
         // them re-prompts every member, the same as a skill write does. Attached after the restore, which
         // composed every prompt from the plugins already loaded.

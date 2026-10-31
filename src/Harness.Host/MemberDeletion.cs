@@ -127,6 +127,9 @@ public sealed class MemberDeletion(
             throw new ManagerCannotBeDeletedException(teams.LabelFor(stored));
         }
 
+        // THE PLATFORM'S OWN MEMBER, before anything is stopped or removed.
+        if (TeamConnectionsMember.Is(id)) throw new BuiltInMemberException(TeamConnectionsMember.ChangeRefused);
+
         var failures = new List<string>();
         var swept = 0;
         var removedSchedules = 0;

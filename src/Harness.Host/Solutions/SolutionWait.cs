@@ -63,7 +63,8 @@ public sealed class SolutionWait(
         {
             foreach (var snapshot in host.Snapshots().Where(s => string.Equals(s.Team, row.Team, StringComparison.OrdinalIgnoreCase)))
             {
-                host.Find(new ContainerId(snapshot.Team, snapshot.Name))?.ClearTroubleMarks();
+                // By its IDENTIFIER: the label (`Name`) may hold a space, as "Team Connections" does.
+                host.Find(new ContainerId(snapshot.Team, snapshot.Id))?.ClearTroubleMarks();
             }
         }
 

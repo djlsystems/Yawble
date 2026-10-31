@@ -125,7 +125,7 @@ internal static class MemberEndpoints
                 // THE INSTALLED PLUGINS, which a Manager may hire onto its own team with the `member`
                 // tool's `plugin`: each one's id, one line, and the skill that says how to use it
                 // (`skills_get`), whether or not it is hired anywhere.
-                plugins = plugins.Plugins.Select(p => new
+                plugins = plugins.Plugins.Where(p => !p.BuiltIn).Select(p => new
                 {
                     id = p.Manifest.Id,
                     reference = MemberRef.ForPlugin(p.Manifest.Id),
@@ -515,7 +515,16 @@ internal static class MemberEndpoints
                         }
                     }
                 }
+                // A PERSON'S HIRE MAY HAVE ASSIGNED the team its first connection: Team Connections shows.
+                await teams.RefreshConnectionPresenceAsync(CancellationToken.None);
+
                 return Results.Json(node, statusCode: 200);
+            }
+            catch (BuiltInMemberException exception)
+            {
+                // THE PLATFORM'S OWN: a built-in plugin, or Team Connections' name. Nothing about the caller
+                // would make it allowed.
+                return Results.Conflict(new { error = exception.Message });
             }
             catch (TeamNameTakenException taken)
             {
@@ -754,6 +763,11 @@ internal static class MemberEndpoints
                 // InvalidOperationException, which it derives from.
                 return Results.BadRequest(new { error = exception.Message });
             }
+            catch (BuiltInMemberException exception)
+            {
+                // Team Connections, its name, or a built-in plugin: 409, whoever asks.
+                return Results.Conflict(new { error = exception.Message });
+            }
             catch (InvalidOperationException exception)
             {
                 return Results.NotFound(new { error = exception.Message });
@@ -836,6 +850,11 @@ internal static class MemberEndpoints
                 // 409 rather than 403: nothing about the caller would make this allowed.
                 return Results.Conflict(new { error = exception.Message });
             }
+            catch (BuiltInMemberException exception)
+            {
+                // Team Connections goes only with its team, for the same reason.
+                return Results.Conflict(new { error = exception.Message });
+            }
         })
             .WithTags("Members")
             .HumansOnly()
@@ -851,7 +870,7 @@ internal static class MemberEndpoints
                 + "usually a file still held by a child process that has not finished exiting. Those are "
                 + "named rather than swallowed, and the member is gone either way.\n\n"
                 + "409 for a team's manager: there is no team without a door into it, so delete the team "
-                + "itself instead.\n\n"
+                + "itself instead. 409 for Team Connections, the platform's own member on every team.\n\n"
                 + "404 for an unknown team or member; asking twice is not an error.");
 
         // WHAT IS WAITING FOR EACH MEMBER: accepted, not started. `status` shows it so a Manager does not

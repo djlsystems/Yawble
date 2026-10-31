@@ -136,7 +136,9 @@ public static class TeamActivity
         }
 
         // THE CURRENT MEMBERS, the Manager first and the rest as the board lists them.
+        // Team Connections only while shown (TeamRegistry.Shows); hidden, its runs in the period still list it below.
         var current = teams.ContainerIdsOf(team)
+            .Where(teams.Shows)
             .Select(id => (Id: id, Snapshot: host.Find(id)?.Snapshot()))
             .Where(m => m.Snapshot is not null)
             .OrderBy(m => IsManager(m.Id.Name) ? 0 : 1)

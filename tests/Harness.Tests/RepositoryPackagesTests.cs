@@ -4,12 +4,15 @@ namespace Harness.Tests;
 /// THE REPOSITORY HOLDS NO PACKAGE TO INSTALL. What a person installs is on the marketplace; this repository keeps only test data under <c>tests/</c>, never listed, built into
 /// an image or shipped. So no <c>solution.json</c> and no plugin <c>plugin.json</c> lives outside
 /// <c>tests/</c>, except the Go plugin template's own manifest, allowed by name: the template is how
-/// a team builds a plugin, not a package to install.
+/// a team builds a plugin, not a package to install - and the built-in plugins' under <c>plugins/</c>,
+/// also by name, which ship inside the platform.
 /// </summary>
 public sealed class RepositoryPackagesTests
 {
-    /// <summary>The one manifest allowed outside <c>tests/</c>, relative to the repository root.</summary>
-    public static readonly IReadOnlyList<string> Allowed = ["templates/plugin-go/plugin.json"];
+    /// <summary>The manifests allowed outside <c>tests/</c>, relative to the repository root: the Go template's,
+    /// and each BUILT-IN plugin's (<c>plugins/&lt;id&gt;/</c>), which ships with the platform and is never a
+    /// package to install (see <c>PluginCatalog.BuiltInFolder</c>).</summary>
+    public static readonly IReadOnlyList<string> Allowed = ["templates/plugin-go/plugin.json", "plugins/team-connections/plugin.json"];
 
     private static readonly string[] Manifests = ["solution.json", "plugin.json"];
 

@@ -515,6 +515,9 @@ public static class ConnectionEndpoints
             Connections connections, TeamRegistry teams, IMemberReports reports, PluginSetup setup, HttpContext context, CancellationToken ct) =>
         {
             var (status, body) = await DisconnectAsync(connections, teams, id, Actor(context), ct, unbind == true, reports, setup);
+
+            // A TEAM WHOSE LAST CONNECTION THIS WAS hides its Team Connections again.
+            if (status == StatusCodes.Status204NoContent) await teams.RefreshConnectionPresenceAsync(CancellationToken.None);
             return status == StatusCodes.Status204NoContent ? Results.NoContent() : Results.Json(body, statusCode: status);
         })
             .WithTags(Area)

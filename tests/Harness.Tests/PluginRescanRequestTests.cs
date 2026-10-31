@@ -39,7 +39,8 @@ public sealed class PluginRescanRequestTests : IAsyncLifetime
         // Started, with nothing installed.
         _ = _factory.Services;
         await Services.GetRequiredService<IUserStore>().CreateAsync(Email, Password);
-        Assert.Empty(Services.GetRequiredService<PluginCatalog>().Plugins);
+        // Nothing installed on the volume; the built-ins ship with the Host.
+        Assert.DoesNotContain(Services.GetRequiredService<PluginCatalog>().Plugins, p => !p.BuiltIn);
     }
 
     private IServiceProvider Services => _factory.Services;

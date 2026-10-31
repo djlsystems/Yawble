@@ -182,6 +182,11 @@ const versionCounts = computed(() => {
   return counts;
 });
 
+/** A BUILT-IN is locked: no Remove, and no manifest on the volume to view. */
+function builtIn(row: PluginRow) {
+  return row.verdict === 'installed' && row.plugin.builtIn === true;
+}
+
 /** The first row of each plugin carries Remove plugin. */
 function firstOfPlugin(row: PluginRow) {
   return rows.value.find((candidate) => candidate.id === row.id) === row;
@@ -319,6 +324,9 @@ async function confirmRemove() {
               <span class="text-weight-medium">{{ row.name }}</span>
               <span v-if="row.version" class="mono">{{ row.version }}</span>
               <q-badge v-if="row.active" outline color="primary" label="Active" data-active />
+              <q-badge v-if="builtIn(row)" outline color="grey-7" label="Built-in" data-built-in>
+                <q-tooltip>Ships with the platform and is versioned with it: never installed, removed or hired. Every team has its member.</q-tooltip>
+              </q-badge>
               <q-space />
               <q-badge :color="verdictColor[row.verdict]" :label="verdictLabel[row.verdict]" />
             </div>
@@ -371,7 +379,7 @@ async function confirmRemove() {
                 />
                 <q-tooltip>Details: its settings, secrets, connections, events, skill and members</q-tooltip>
               </span>
-              <span v-if="row.version" class="row-btn-wrap">
+              <span v-if="row.version && !builtIn(row)" class="row-btn-wrap">
                 <q-btn
                   dense
                   flat
@@ -383,7 +391,7 @@ async function confirmRemove() {
                 />
                 <q-tooltip>View manifest</q-tooltip>
               </span>
-              <span v-if="row.version && (versionCounts.get(row.id) ?? 0) > 1" class="row-btn-wrap">
+              <span v-if="row.version && !builtIn(row) && (versionCounts.get(row.id) ?? 0) > 1" class="row-btn-wrap">
                 <q-btn
                   dense
                   flat
@@ -396,7 +404,7 @@ async function confirmRemove() {
                 />
                 <q-tooltip>Remove this version</q-tooltip>
               </span>
-              <span v-if="firstOfPlugin(row)" class="row-btn-wrap">
+              <span v-if="firstOfPlugin(row) && !builtIn(row)" class="row-btn-wrap">
                 <q-btn
                   dense
                   flat

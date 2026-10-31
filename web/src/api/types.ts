@@ -3080,6 +3080,10 @@ export interface InstalledPlugin {
   namedSecrets?: PluginNamedSecrets | null
   /** Its marketplace page when the catalog lists it, else null. */
   marketplaceUrl?: string | null
+  /** The platform's own plugin (Team Connections): shipped with it, never installed, removed or hired. */
+  builtIn?: boolean
+  /** Locked: never uninstalled or replaced. True exactly for a built-in. */
+  locked?: boolean
   /** Manifest keys reserved for a later Host, and unknown keys it ignored. */
   reserved: string[]
   ignored: string[]

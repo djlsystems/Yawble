@@ -237,7 +237,8 @@ public sealed class TeamReset(
 
             repos = RepoTargetsOf(stored);
 
-            var everyMember = teams.ContainerIdsOf(stored).All(id => targeted.Contains(id));
+            // Team Connections holds no worktree and nobody ticks it: it never keeps a team branch.
+            var everyMember = teams.ContainerIdsOf(stored).Where(id => !TeamConnectionsMember.Is(id)).All(id => targeted.Contains(id));
             plan = await reset.PlanAsync(stored, repos, targeted.Select(id => id.Name).ToList(), everyMember, ct);
 
             if (recordRepositories is not null)
@@ -375,7 +376,7 @@ public sealed class TeamReset(
         if (teams.ExistingName(team) is not { } stored || repositories is null) return null;
 
         var repos = RepoTargetsOf(stored);
-        var members = teams.ContainerIdsOf(stored).Select(id => id.Name).ToList();
+        var members = teams.ContainerIdsOf(stored).Where(id => !TeamConnectionsMember.Is(id)).Select(id => id.Name).ToList();
 
         // Never refused: a preview that could not be shown because a default branch is not known
         // would hide the very thing that says the team-branch step will be refused.

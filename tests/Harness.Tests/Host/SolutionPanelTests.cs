@@ -255,7 +255,8 @@ public sealed class SolutionPanelTests(HostFixture host) : IClassFixture<HostFix
         // Gone: triggers, members (the Manager stays, without the package's instructions), skills,
         // tools and the plugin no other team used. The package is no longer installed.
         Assert.Empty(await Get<ITriggerStore>().ListForTeamAsync(team, Ct));
-        Assert.Equal(["Manager"], Get<TeamRegistry>().ContainerIdsOf(team).Select(c => c.Name));
+        // Team Connections, the platform's own, stays with the team.
+        Assert.Equal(["Manager", TeamConnectionsMember.Name], Get<TeamRegistry>().ContainerIdsOf(team).Select(c => c.Name));
         Assert.Empty(await Get<ISkillStore>().ListTeamAsync(team, Ct));
         Assert.False(Directory.Exists(tools));
         Assert.Null(Get<PluginCatalog>().For("jb-uninstall"));
@@ -338,7 +339,7 @@ public sealed class SolutionPanelTests(HostFixture host) : IClassFixture<HostFix
         Assert.Equal(HttpStatusCode.OK, (await person.GetAsync($"/sites/{Uri.EscapeDataString(team)}/tracker/", Ct)).StatusCode);
 
         // MEMBERS AND TRIGGERS MADE AGAIN, the person's answer with them; the package installed.
-        Assert.Equal(["Manager", "Scout", "Writer"], Get<TeamRegistry>().ContainerIdsOf(team).Select(c => c.Name).Order());
+        Assert.Equal(["Manager", "Scout", TeamConnectionsMember.Name, "Writer"], Get<TeamRegistry>().ContainerIdsOf(team).Select(c => c.Name).Order(StringComparer.Ordinal));
         Assert.Contains("coordinate the job search", (await Get<TeamRegistry>().MemberAsync(team, "Manager", Ct)).SystemPrompt ?? "");
         Assert.Equal(5, (await Get<ITriggerStore>().ListForTeamAsync(team, Ct)).Count);
         Assert.Equal("[\"sample\"]", (await Get<IPluginMemberSettingsStore>().ForAsync(new ContainerId(team, "Scout"), Ct)).Config["sources"].GetRawText());
