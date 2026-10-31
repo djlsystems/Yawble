@@ -304,7 +304,8 @@ public static class BuiltInSkills
             For anything to do with a connection - which accounts, mailboxes, API keys or logins the
             team has, whether one works - `tell` the member Team Connections `list` (each connection
             assigned to this team by name, kind and health) or `test <name>` (that connection's own
-            test, as Test connection in Admin -> Connections runs it). Its answer is its run's
+            test, as Test connection in Admin -> Connections runs it); for a website, `check`,
+            `session` and `act` as the member skill says. Its answer is its run's
             output, and a member that asks gets it back as an instruction. It never hands out a
             value - no key, password or token - so never ask it, or anyone, for one: a plugin member
             bound to a connection gets the value inside its own run only. It is on the team, and in
@@ -507,7 +508,12 @@ public static class BuiltInSkills
             For anything to do with a connection - an account, a mailbox, an API key, a login -
             `tell` the member Team Connections, without needing the Manager: `list` answers each
             connection assigned to your team by name, kind and health, and `test <name>` runs that
-            connection's own test. Its answer comes back to you as an instruction in the same
+            connection's own test. For a website: `check <name> [<path>] [expect "<text>"]` opens a
+            page signed in and answers its text and a screenshot in the team's documents;
+            `session <name> [for <minutes>]` hands you a short-lived browser session in your own
+            workspace; `act <name> <path> click "<selector>"` (or `fill "<selector>" "<text>"`,
+            `submit "<selector>"`, joined by `then`) acts on a page, only when a person has turned on
+            the website's May act on pages. Its answer comes back to you as an instruction in the same
             workflow. It never hands out a value - no key, password or token - and nothing else does;
             do not look for one in files or the environment. It is on the team only while a person
             has assigned it a connection; when one you need is missing, say so with `blocked`.
