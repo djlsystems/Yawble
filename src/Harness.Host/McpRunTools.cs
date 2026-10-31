@@ -368,6 +368,19 @@ public sealed class McpRunTools(
     /// </summary>
     private async Task<(McpWrite Outcome, string? Why)> WriteAsync(string workingCopy, string path, byte[] bytes, CancellationToken ct)
     {
+        // Whatever goes wrong, the call answers with a sentence; only the call's own cancellation ends it.
+        try
+        {
+            return await TryWriteAsync(workingCopy, path, bytes, ct);
+        }
+        catch (Exception exception) when (!ct.IsCancellationRequested)
+        {
+            return (McpWrite.Unsupported, $"the write failed ({exception.Message}).");
+        }
+    }
+
+    private async Task<(McpWrite Outcome, string? Why)> TryWriteAsync(string workingCopy, string path, byte[] bytes, CancellationToken ct)
+    {
         if (runAs is { Refuses: true }) return (McpWrite.Unsupported, runAs.Refusal("The binary write"));
         if (runAs is not { Switches: true } || _asks.Value is not { } workers) return (Write(workingCopy, path, bytes), null);
 

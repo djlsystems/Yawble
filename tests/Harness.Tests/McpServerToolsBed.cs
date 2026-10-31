@@ -53,15 +53,15 @@ public sealed class McpServerToolsBed : IAsyncDisposable
 
     public static async Task<McpServerToolsBed> StartAsync(
         TimeSpan? callTimeout = null, long maximumBinary = McpRunTools.DefaultMaximumBinary, bool assign = true,
-        IReadOnlyList<string>? memberAgents = null, AgentLaunchUser? runAs = null)
+        IReadOnlyList<string>? memberAgents = null, AgentLaunchUser? runAs = null, WorkerAsks? asks = null)
     {
         var bed = new McpServerToolsBed();
-        await bed.InitializeAsync(callTimeout ?? TimeSpan.FromSeconds(10), maximumBinary, assign, memberAgents ?? ["claude-headless"], runAs);
+        await bed.InitializeAsync(callTimeout ?? TimeSpan.FromSeconds(10), maximumBinary, assign, memberAgents ?? ["claude-headless"], runAs, asks);
         return bed;
     }
 
     private async Task InitializeAsync(
-        TimeSpan callTimeout, long maximumBinary, bool assign, IReadOnlyList<string> memberAgents, AgentLaunchUser? runAs)
+        TimeSpan callTimeout, long maximumBinary, bool assign, IReadOnlyList<string> memberAgents, AgentLaunchUser? runAs, WorkerAsks? asks)
     {
         Directory.CreateDirectory(DataRoot);
         Agents.Behaviour = async invocation =>
@@ -88,7 +88,7 @@ public sealed class McpServerToolsBed : IAsyncDisposable
                 services.AddSingleton(new McpForwarding(Upstream, callTimeout, TimeSpan.FromSeconds(5)));
                 services.AddSingleton(sp => new McpRunTools(
                     sp.GetRequiredService<McpServers>(), sp.GetRequiredService<McpForwarding>(), sp.GetRequiredService<TimeProvider>(),
-                    sp.GetRequiredService<ILogger<McpRunTools>>(), maximumBinary, runAs: runAs));
+                    sp.GetRequiredService<ILogger<McpRunTools>>(), maximumBinary, runAs: runAs, asks: asks));
             }));
 
         await Services.GetRequiredService<IUserStore>().CreateAsync(Email, PersonPassword);

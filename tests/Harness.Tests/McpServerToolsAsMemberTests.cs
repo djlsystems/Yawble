@@ -99,6 +99,37 @@ public sealed class McpServerToolsAsMemberTests
         Assert.Contains(member.Calls(), c => c.Contains("of=" + path));
     }
 
+    /// <summary>A worker that cannot be sent the write, whatever the reason: the call still answers with a sentence.</summary>
+    [Fact]
+    public async Task A_write_the_worker_cannot_be_sent_is_answered_with_a_sentence()
+    {
+        Assert.SkipUnless(OperatingSystem.IsLinux(), "The member's write is Linux only.");
+        using var member = new StandIn();
+        await using var bed = await McpServerToolsBed.StartAsync(runAs: member.User, asks: new WorkerAsks(() => new Unsendable()));
+        JsonObject? answer = null;
+        await bed.RunAsync("Alpha", "Dev", async run =>
+        {
+            using var mcp = bed.Mcp(McpServerToolsBed.Key(run));
+            answer = await mcp.CallAsync("fake_draw");
+        });
+
+        var result = answer!["result"]!;
+        Assert.True(result["isError"]!.GetValue<bool>());
+        var said = ((JsonArray)result["content"]!)[^1]!["text"]!.GetValue<string>();
+        Assert.StartsWith("A image/png result of ", said);
+        Assert.EndsWith("was not written: the write failed (the socket is gone).", said);
+        Assert.Empty(member.Calls());
+    }
+
+    private sealed class Unsendable : IRunWorker
+    {
+        public WorkerId Id => WorkerId.Local;
+
+        public Task Closed { get; } = new TaskCompletionSource().Task;
+
+        public Task SendAsync(ControlMessage message, CancellationToken ct = default) => throw new NotSupportedException("the socket is gone");
+    }
+
     [Theory]
     [InlineData("target")]
     [InlineData("folder-to-file")]

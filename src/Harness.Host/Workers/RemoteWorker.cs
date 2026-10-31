@@ -206,6 +206,12 @@ public sealed class RemoteWorker : IRunWorker, IRunWorkerConnection, IRunWorkerI
         {
             await socket.SendAsync(new CommandFrame(id, message), CancellationToken.None);
         }
+        catch (InvalidDataException)
+        {
+            // The frame could not be written (too large): nothing was sent, so nothing will settle it.
+            lock (_gate) _pending.Remove(id);
+            throw;
+        }
         catch (Exception exception) when (exception is WebSocketException or IOException or ObjectDisposedException or OperationCanceledException)
         {
             // The connection is going: dropping it settles this send with the rest.

@@ -147,6 +147,15 @@ public sealed class WorkerFrameCodec
     /// <summary>What a frame over <see cref="MaxBytes"/> is refused with.</summary>
     public const string TooLargeText = "A worker message over 16 MiB was refused.";
 
+    /// <summary>
+    /// The largest frame carrying a binary result to be written as the member (<see cref="WriteAsAgent"/>): its
+    /// 20 MB, as base64, and the rest of the frame. Every other frame stays within <see cref="MaxBytes"/>.
+    /// </summary>
+    public const int MaxWriteBytes = 32 * 1024 * 1024;
+
+    /// <summary>What a frame over <see cref="MaxWriteBytes"/> is refused with.</summary>
+    public const string WriteTooLargeText = "A worker message over 32 MiB was refused.";
+
     /// <summary>What a sealed secret that does not open is refused with.</summary>
     public const string UnsealableText = "A sealed run secret did not open with this worker's key.";
 
@@ -241,14 +250,29 @@ public sealed class WorkerFrameCodec
         }
 
         var text = JsonSerializer.Serialize(frame, Json);
-        if (Encoding.UTF8.GetByteCount(text) > MaxBytes) throw new InvalidDataException(TooLargeText);
+        Bound(Encoding.UTF8.GetByteCount(text), frame);
         return text;
+    }
+
+    /// <summary>Refuses a frame of <paramref name="length"/> bytes past its cap: <see cref="MaxWriteBytes"/> for a binary result written as the member, <see cref="MaxBytes"/> for any other.</summary>
+    private static void Bound(int length, WorkerFrame frame)
+    {
+        if (frame is CommandFrame { Message: WriteAsAgent })
+        {
+            if (length > MaxWriteBytes) throw new InvalidDataException(WriteTooLargeText);
+        }
+        else if (length > MaxBytes)
+        {
+            throw new InvalidDataException(TooLargeText);
+        }
     }
 
     /// <summary>The frame <paramref name="text"/> is, its secrets opened. Throws <see cref="InvalidDataException"/> with a sentence when it cannot be.</summary>
     public WorkerFrame Read(string text)
     {
-        if (Encoding.UTF8.GetByteCount(text) > MaxBytes) throw new InvalidDataException(TooLargeText);
+        var length = Encoding.UTF8.GetByteCount(text);
+        if (length > MaxWriteBytes) throw new InvalidDataException(WriteTooLargeText);
+        if (length > MaxBytes && !text.Contains("\"writeAsAgent\"", StringComparison.Ordinal)) throw new InvalidDataException(TooLargeText);
 
         WorkerFrame frame;
         try
@@ -260,6 +284,8 @@ public sealed class WorkerFrameCodec
         {
             throw new InvalidDataException($"A worker message was not a frame: {exception.Message}");
         }
+
+        Bound(length, frame);
 
         switch (frame)
         {

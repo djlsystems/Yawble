@@ -186,6 +186,44 @@ public sealed class RemoteWorkerRequestTests
     }
 
     /// <summary>
+    /// A REQUEST TOO LARGE FOR ANY FRAME is refused at once with a sentence, nothing is sent, and the connection
+    /// carries on: the next request is answered, and the refused one is never said to a worker that comes back.
+    /// </summary>
+    [Fact]
+    public async Task A_request_too_large_for_a_frame_is_refused_and_the_connection_carries_on()
+    {
+        var clock = new ManualTime(DateTimeOffset.UnixEpoch.AddDays(1));
+        var remote = new RemoteWorker(
+            new WorkerInfo(new WorkerId("w1"), null, 4, 8_000_000_000, DateTimeOffset.UnixEpoch),
+            "s1", (_, _) => Task.CompletedTask, WorkerTimings.Default, _ => { }, _ => { }, clock);
+
+        var (control, worker) = await Pair();
+        var first = remote.RunAsync(new WorkerSocket(control.Socket, new WorkerFrameCodec(null)), Ct);
+        var socket = new WorkerSocket(worker.Socket, new WorkerFrameCodec(null));
+
+        var huge = new WriteAsAgent("r9", "/w", "/w/x.png", new byte[25 * 1024 * 1024]);
+        var refused = await Assert.ThrowsAsync<InvalidDataException>(() => remote.SendAsync(huge, Ct).WaitAsync(Bound, Ct));
+        Assert.Equal(WorkerFrameCodec.WriteTooLargeText, refused.Message);
+
+        var next = remote.SendAsync(RequestsByName["WriteAsAgent"], Ct);
+        var command = Assert.IsType<CommandFrame>(await socket.ReceiveAsync(Ct).WaitAsync(Bound, Ct));
+        Assert.Equal("r6", Assert.IsType<WriteAsAgent>(command.Message).Request);
+        await socket.SendAsync(new AppliedFrame(command.Id, null), Ct);
+        await next.WaitAsync(Bound, Ct);
+
+        // Dropped and back: nothing of the refused request is left to say again.
+        worker.Drop();
+        await first.WaitAsync(Bound, Ct);
+        (control, worker) = await Pair();
+        socket = new WorkerSocket(worker.Socket, new WorkerFrameCodec(null));
+        var second = remote.RunAsync(new WorkerSocket(control.Socket, new WorkerFrameCodec(null)), Ct);
+        Assert.Empty(await SaidAgainAsync(remote, socket, null));
+
+        remote.Shutdown();
+        await second.WaitAsync(Bound, Ct);
+    }
+
+    /// <summary>
     /// What the worker that came back is told again: everything it receives, answered as applied, up to
     /// <paramref name="last"/> when that is said again, and up to a marker control sends after it - so a
     /// message said again behind <paramref name="last"/> is seen too. The marker is not returned.

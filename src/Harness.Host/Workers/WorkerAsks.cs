@@ -57,6 +57,10 @@ public sealed class WorkerAsks(Func<IRunWorker> any, TimeProvider? clock = null)
             {
                 return new Asked<T>(null, worker.Id, $"Worker {worker.Id} is not connected.");
             }
+            catch (InvalidDataException exception)
+            {
+                return new Asked<T>(null, worker.Id, $"Worker {worker.Id} could not be sent it: {exception.Message}");
+            }
 
             var done = await Task.WhenAny(answer.Task, worker.Closed, Task.Delay(bound, _clock, ct));
             if (done == answer.Task && await answer.Task is T found) return new Asked<T>(found, worker.Id, null);
