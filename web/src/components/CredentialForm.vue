@@ -27,7 +27,9 @@ const props = withDefaults(defineProps<{
   kind: 'website' | 'apikey' | 'login';
   /** Editing: the connection whose fields are changed. Its name is renamed elsewhere. */
   connection?: Connection | null;
-}>(), { connection: null });
+  /** The preset a new connection opens on, when there is more than one (API key's `other`). */
+  preset?: string | null;
+}>(), { connection: null, preset: null });
 const emit = defineEmits<{ saved: [connection: Connection] }>();
 
 const editing = computed(() => props.connection !== null);
@@ -41,7 +43,8 @@ const busy = ref(false);
 const saved = ref(false);
 
 function reset() {
-  presetId.value = props.connection?.preset ?? (choices.value.length === 1 ? choices.value[0]!.id : null);
+  const opening = props.preset && choices.value.some((candidate) => candidate.id === props.preset) ? props.preset : null;
+  presetId.value = props.connection?.preset ?? opening ?? (choices.value.length === 1 ? choices.value[0]!.id : null);
   name.value = '';
   problem.value = '';
   saved.value = false;
@@ -52,7 +55,7 @@ function fill() {
   rows.value = preset.value ? credentialRows(preset.value, props.connection) : [];
 }
 
-watch(() => [props.kind, props.connection?.id, props.presets.length], reset, { immediate: true });
+watch(() => [props.kind, props.connection?.id, props.presets.length, props.preset], reset, { immediate: true });
 
 function choosePreset(id: string | null) {
   presetId.value = id;

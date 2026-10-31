@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import FieldHelp from './FieldHelp.vue';
 import { computed, onMounted, ref } from 'vue';
 import ConnectDialog from './ConnectDialog.vue';
+import ConnectionSelect from './ConnectionSelect.vue';
 import MailboxForm from './MailboxForm.vue';
 import SetupQuestion from './SetupQuestion.vue';
 import SolutionPlanReview from './SolutionPlanReview.vue';
@@ -363,6 +363,20 @@ const signInNeed = computed(() => {
     pluginName: props.plan.plugins.find((plugin) => plugin.id === connection.plugin)?.name,
   };
 });
+
+/** An input the package asks nothing about, as ConnectDialog takes a slot: New connection... for it. */
+function needFor(connection: SolutionSetupConnection) {
+  return {
+    plugin: connection.plugin ?? '',
+    slot: connection.slot,
+    providers: connection.providers,
+    scopes: connection.scopes,
+    pluginName: props.plan.plugins.find((plugin) => plugin.id === connection.plugin)?.name,
+  };
+}
+
+/** How a connection reads in an input's list: the account it signs in as. */
+const byAccount = (connection: Connection) => connection.account;
 
 function signedIn(made: Connection) {
   const connection = signIn.value.connection;
@@ -802,19 +816,20 @@ const isLast = computed(() => screen.value.kind === 'ready');
             @update:model-value="(value: unknown) => setValue(setting, value)"
           />
           <div v-for="connection in otherConnections" :key="slotKey(connection)" class="q-mb-md" :data-setup-other-connection="slotKey(connection)">
-            <q-select
+            <ConnectionSelect
               :model-value="bindings[slotKey(connection)] ?? null"
-              :options="connections.filter((candidate) => offeredFor(candidate, connection)).map((candidate) => ({ label: candidate.account, value: candidate.id }))"
-              emit-value
-              map-options
+              :connections="connections.filter((candidate) => offeredFor(candidate, connection))"
+              :catalog="providers"
+              :providers="connection.providers"
+              :need="needFor(connection)"
+              :option-label="byAccount"
               clearable
-              outlined
-              dense
               :label="questionText(connection)"
+              :hint="`${connection.member}: ${connection.slot}`"
+              data-setup-connection-select
               @update:model-value="(id: string | null) => (bindings = id ? { ...bindings, [slotKey(connection)]: id } : Object.fromEntries(Object.entries(bindings).filter(([key]) => key !== slotKey(connection))))"
-            >
-              <template #append><FieldHelp :text="`${connection.member}: ${connection.slot}`" /></template>
-            </q-select>
+              @created="(made: Connection) => (connections = [...connections.filter((candidate) => candidate.id !== made.id), made])"
+            />
           </div>
           <div v-for="document in otherDocuments" :key="document.folder" class="q-mb-md" :data-setup-other-document="document.folder">
             <div>{{ questionText(document) }} <span class="mono">({{ document.folder }}/)</span></div>
