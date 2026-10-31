@@ -26,7 +26,9 @@ public sealed class ConciergeLaunches(
     IUserStore accounts,
     // For the agent the Concierge runs when nobody has chosen one - see ConciergeAgentDefault.
     AgentCatalog catalog,
-    AgentAuthProbe probe)
+    AgentAuthProbe probe,
+    // The MCP servers' tools the session is given (MCP 4): its person's current team's, as it stands at launch.
+    McpRunTools mcp)
 {
     // The output floor each session must pass, from the preset it launched with: recorded against
     // the staged spec's environment, which the store's own `with` for the size keeps.
@@ -63,7 +65,7 @@ public sealed class ConciergeLaunches(
         var agent = await ConciergeAgentDefault.ResolveAsync(settings.Agent, catalog, probe, ct);
 
         // Resolved here, made into a terminal by the worker that runs it.
-        var staged = terminals.Stage(await launcher.ResolveAsync(
+        var resolved = await launcher.ResolveAsync(
             stored ?? "",
             stored is null ? "this instance" : teams.LabelFor(stored),
             key.User,
@@ -74,7 +76,13 @@ public sealed class ConciergeLaunches(
             publicUrl: browser?.PublicUrl,
             timeZone: browser?.TimeZone,
             ct: ct,
-            steered: await steering.ReadAsync(key.User, ct)));
+            steered: await steering.ReadAsync(key.User, ct));
+
+        // THE PERSON'S CURRENT TEAM'S MCP SERVERS, AT THIS START, never re-read on a switch: Reload is a new start.
+        var current = await accounts.CurrentTeamForAsync(key.User, ct) is { Length: > 0 } chosen ? teams.ExistingName(chosen) : null;
+        await mcp.BeginConciergeAsync(key.User, current, resolved.StartingFolder, ct);
+
+        var staged = terminals.Stage(resolved);
         if (staged.Env is { } environment) _floors.AddOrUpdate(environment, OutputFloor.Of(catalog.Definition(agent)));
         return staged;
     }

@@ -38,6 +38,7 @@ import ConciergeKeyBar from './ConciergeKeyBar.vue';
 import TenantSettingsDialog from './TenantSettingsDialog.vue';
 import {
   concierge as readConcierge,
+  conciergeMcpTools,
   endConcierge,
   listCatalog,
   setConcierge,
@@ -48,7 +49,7 @@ import { useConciergeAskStore } from '../stores/conciergeAsk';
 import { useSessionStore } from '../stores/session';
 import { useTerminalDisplayStore } from '../stores/terminalDisplay';
 import { useWindowFrame } from '../lib/useWindowFrame';
-import { agentsForMode, asTeamId, type ConciergeSettings, type TeamId } from '../api/types';
+import { agentsForMode, asTeamId, type ConciergeMcpTools, type ConciergeSettings, type TeamId } from '../api/types';
 
 const props = defineProps<{
   team: TeamId | null;
@@ -241,6 +242,30 @@ const activeTeamLabel = computed(() => props.activeTeamName || props.activeTeam 
 
 // No "launched on team X" label or mismatch warning: the agent resolves its current team per
 // command, so there is no spawn-time team for the header to disagree with.
+
+/**
+ * WHOSE MCP SERVERS THE RUNNING SESSION HOLDS: the team current when it started, kept until Reload, because a
+ * switch of team never restarts it. Read when the socket opens and again once the session is ready (a start
+ * takes its list while the socket is already open); null while unknown.
+ */
+const mcpHeld = ref<ConciergeMcpTools | null>(null);
+
+async function readMcpHeld() {
+  try {
+    mcpHeld.value = await conciergeMcpTools();
+  } catch {
+    // Best effort: without it the header says nothing about MCP tools, and the session is unaffected.
+    mcpHeld.value = null;
+  }
+}
+
+/** The header's note when the person has opened another team since this session started: its MCP tools are
+ *  still the previous team's (or none) until Reload. Nothing when they agree, or nothing is known. */
+const mcpStale = computed(() => {
+  const held = mcpHeld.value;
+  if (!held?.started || (held.team ?? null) === (props.activeTeam ?? null)) return '';
+  return held.team ? `MCP tools still ${held.name || held.team}'s until Reload` : 'no MCP tools until Reload';
+});
 
 /** The Concierge's Agent has been changed since this session launched, so the subtitle is
  *  describing a terminal that Reload would replace. */
@@ -790,6 +815,7 @@ async function attach() {
     () => {
       sessionReady.value = true;
       typeAsked();
+      void readMcpHeld();
     },
     () => {
       if (asks.asked) asks.refuse(NotReadySentence);
@@ -805,6 +831,7 @@ async function attach() {
       terminal?.clear();
       refit();
       nudgeFirstPaint();
+      void readMcpHeld();
     },
 
     onData: (bytes) => {
@@ -814,6 +841,7 @@ async function attach() {
 
     onClose: (reason) => {
       readyWatch?.dispose();
+      mcpHeld.value = null;
       sessionReady.value = false;
       if (asks.asked) asks.refuse(NotReadySentence);
 
@@ -1145,6 +1173,15 @@ onBeforeUnmount(() => {
             <!-- A REAL STATE, given words rather than left blank: on the Teams overview no team is
                  active, the agent is told so, and it asks which team rather than guessing. -->
             no active team
+          </div>
+          <!-- ITS MCP SERVERS' TOOLS ARE THE START'S: a switch of team does not restart the session, so after one
+               this says whose tools it still has. Reload is the word, as on the button. -->
+          <div v-if="mcpStale" class="concierge-mcp-stale ellipsis">
+            {{ mcpStale }}
+            <q-tooltip>
+              The Concierge was given its MCP server tools when it started. A call to one the active team does not
+              hold is refused; Reload starts it again with the active team's.
+            </q-tooltip>
           </div>
         </q-toolbar-title>
 
@@ -1496,6 +1533,12 @@ onBeforeUnmount(() => {
 
 .concierge-active-team {
   color: rgba(255, 255, 255, 0.73);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+}
+
+.concierge-mcp-stale {
+  color: var(--q-warning);
   font-size: 11.5px;
   letter-spacing: 0.02em;
 }

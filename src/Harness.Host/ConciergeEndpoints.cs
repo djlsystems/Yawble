@@ -55,6 +55,26 @@ internal static class ConciergeEndpoints
                 + "`sessions` is every running Concierge session, any person's, oldest first: `user` and `email`; `worker`, the worker its terminal runs on; `startedAt`; `viewer`, whether a browser has it open now, and `lastViewerAt`, null while one does, otherwise when the last left (its start, when nobody ever opened it); `lastActivityAt` and `lastActivity` (`started`, `output`, `typed`, `attached` or `call`), now while `callsInFlight` - platform calls under its own credential - is above 0; `outputFloor`, the bytes in one minute its output must exceed to count as activity, with `source` `declared` (its preset's measured floor, `measuredWith` saying what was measured) or `default` (the platform's, never a measurement); `outputPerMinute`, the bytes it printed in each of its last 60 minutes, oldest first, which is how a floor is measured; `wouldEndAt`, null while viewed, otherwise the later of `lastViewerAt` and `lastActivityAt` plus `concierge.idleTimeout` - it is ended at the first sweep at or after it; and `memory`, the resident bytes and processes of its process group on its worker at the last capacity sample, null when not measured.\n\n"
                 + "**A person's action.**");
 
+        // WHOSE MCP SERVERS THE PERSON'S RUNNING CONCIERGE HOLDS (MCP 4): taken at its start and kept until Reload, so
+        // the panel can say so when the person has since opened another team. The person's own session only.
+        app.MapGet("/api/concierge/mcp-tools", (HttpContext context, McpRunTools mcp, TeamRegistry teams) =>
+        {
+            if (PrincipalClaims.From(context.User) is not { } caller) return Results.Unauthorized();
+
+            var (started, team) = mcp.ConciergeTeam(caller.Id);
+            var stored = team is null ? null : teams.ExistingName(team);
+            return Results.Ok(new { started, team, name = stored is null ? team : teams.LabelFor(stored) });
+        })
+            .WithTags("Concierge")
+            .HumansOnly()
+            .WithSummary("Whose MCP servers your Concierge holds")
+            .WithDescription(
+                "The team whose MCP servers' tools your running Concierge was given when it started: the current team at "
+                + "that moment. A switch of team does not change it; Reload starts the Concierge again on the team current then.\n\n"
+                + "`started` is false when no session of yours has started since the Host did. `team` is null when it started "
+                + "with no current team, and so holds no MCP server tools; `name` is its label.\n\n"
+                + "**A person's action.**");
+
         app.MapPut("/api/concierge", async (
             SetConcierge request, TeamRegistry teams, HttpContext context,
             CancellationToken ct) =>

@@ -80,11 +80,12 @@ const fake = vi.hoisted(() => {
   return { FakeTerminal, FakeFitAddon, nextSize, fits };
 });
 
-const { concierge, endConcierge, listCatalog, setConcierge, uploadConciergeAttachment, connectConcierge, sockets, notify, screen, platform } =
+const { concierge, conciergeMcpTools, endConcierge, listCatalog, setConcierge, uploadConciergeAttachment, connectConcierge, sockets, notify, screen, platform } =
   vi.hoisted(() => {
     const sockets: { sendInput: ReturnType<typeof vi.fn>; sendResize: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn> }[] = [];
     return {
       concierge: vi.fn(),
+      conciergeMcpTools: vi.fn(),
       endConcierge: vi.fn(),
       listCatalog: vi.fn(),
       setConcierge: vi.fn(),
@@ -116,6 +117,7 @@ vi.mock('quasar', async (importOriginal) => {
 vi.mock('../../api/client', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   concierge,
+  conciergeMcpTools,
   endConcierge,
   listCatalog,
   setConcierge,
@@ -161,6 +163,7 @@ beforeEach(() => {
 
   concierge.mockResolvedValue({ agent: 'claude-interactive' });
   endConcierge.mockResolvedValue(undefined);
+  conciergeMcpTools.mockResolvedValue({ started: false, team: null, name: null });
   setConcierge.mockResolvedValue(undefined);
   listCatalog.mockResolvedValue({
     agents: [{ name: 'claude-interactive', mode: 'Interactive' }, { name: 'codex-interactive', mode: 'Interactive' }],
@@ -585,6 +588,74 @@ describe('the terminal', () => {
     expect(event.defaultPrevented).toBe(true);
     expect(sockets[0]!.sendInput).toHaveBeenCalledWith(conciergeNewline());
     expect(passOn).toBe(false);
+  });
+});
+
+/**
+ * ITS MCP SERVERS' TOOLS ARE ITS START'S. A switch of team never restarts the session, so the header says whose
+ * tools it still holds until Reload, and nothing while they agree.
+ */
+describe('the MCP tools note', () => {
+  /** The socket's own open, as the server's accept fires it. */
+  async function socketOpens() {
+    const handlers = connectConcierge.mock.calls.at(-1)![1] as { onOpen: () => void };
+    handlers.onOpen();
+    await flushPromises();
+  }
+
+  const note = () => shell().querySelector('.concierge-mcp-stale')?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+
+  it('says nothing while the session holds the active team\'s tools', async () => {
+    conciergeMcpTools.mockResolvedValue({ started: true, team: 'alpha', name: 'Alpha' });
+    await openPanel({ activeTeam: 'alpha', activeTeamName: 'Alpha' });
+    await socketOpens();
+
+    expect(note()).toBe('');
+  });
+
+  it('notes the previous team\'s tools after a switch, without restarting the session', async () => {
+    conciergeMcpTools.mockResolvedValue({ started: true, team: 'alpha', name: 'Alpha' });
+    const panel = await openPanel({ activeTeam: 'alpha', activeTeamName: 'Alpha' });
+    await socketOpens();
+
+    await panel.setProps({ activeTeam: 'beta', activeTeamName: 'Beta' });
+    await flushPromises();
+
+    expect(note()).toBe('MCP tools still Alpha\'s until Reload');
+    expect(endConcierge).not.toHaveBeenCalled();
+    expect(connectConcierge).toHaveBeenCalledTimes(1);
+    expect(sockets[0]!.dispose).not.toHaveBeenCalled();
+  });
+
+  it('notes no tools when the session started with no team open', async () => {
+    conciergeMcpTools.mockResolvedValue({ started: true, team: null, name: null });
+    const panel = await openPanel();
+    await socketOpens();
+    expect(note()).toBe('');
+
+    await panel.setProps({ activeTeam: 'beta', activeTeamName: 'Beta' });
+    await flushPromises();
+
+    expect(note()).toBe('no MCP tools until Reload');
+  });
+
+  it('clears once Reload\'s new session holds the active team\'s tools', async () => {
+    conciergeMcpTools.mockResolvedValue({ started: true, team: 'alpha', name: 'Alpha' });
+    await openPanel({ activeTeam: 'beta', activeTeamName: 'Beta' });
+    await socketOpens();
+    expect(note()).toBe('MCP tools still Alpha\'s until Reload');
+
+    conciergeMcpTools.mockResolvedValue({ started: true, team: 'beta', name: 'Beta' });
+    await click('Reload the Concierge');
+    const confirm = [...document.body.querySelectorAll('.reset-confirm-card button')]
+      .find((b) => b.textContent?.trim() !== 'Cancel') as HTMLButtonElement;
+    confirm.click();
+    await flushPromises();
+    await flushPromises();
+    await socketOpens();
+
+    expect(endConcierge).toHaveBeenCalledWith();
+    expect(note()).toBe('');
   });
 });
 

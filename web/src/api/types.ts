@@ -2432,6 +2432,17 @@ export interface ConciergeAttachment {
 }
 
 /**
+ * Whose MCP servers the person's running Concierge holds, as `GET /api/concierge/mcp-tools` answers: the
+ * team current when it started, kept until Reload. `started` is false when no session of theirs has started
+ * since the Host did; `team` is null when it started with no team open, and so holds no MCP server tools.
+ */
+export interface ConciergeMcpTools {
+  started: boolean
+  team: string | null
+  name: string | null
+}
+
+/**
  * The tenant-wide Concierge: which Agent runs it. What it is told is the built-in Concierge prompt,
  * chosen by role and never by a person.
  */
