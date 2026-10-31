@@ -123,6 +123,10 @@ public static class OutcomeFigures
         public const string DeclaredAchieved = "achieved";
         public const string DeclaredInProgress = "in-progress";
 
+        /// <summary>The instance's pricing as the outcome settings hold it now.</summary>
+        public static Pricing Of(TenantSettings settings) =>
+            new(settings.OutcomesCurrency, settings.OutcomesAgentHourlyRate, settings.OutcomesDeclaredCountsAs);
+
         public decimal? CostOf(double agentSeconds) =>
             AgentHourlyRate <= 0 ? null : decimal.Round((decimal)agentSeconds / 3600m * AgentHourlyRate, 2);
     }
@@ -220,19 +224,7 @@ public static class OutcomeFigures
         var blockedSeconds = workflows.Sum(c => blocked.GetValueOrDefault(c));
         var total = figures.AgentSeconds + blockedSeconds;
 
-        var thisWeek = WeekOf(now);
-        var runs = workflows.SelectMany(c => all.RunsOf[c]).ToList();
-        var weekly = Enumerable.Range(0, Weeks)
-            .Select(i => thisWeek.AddDays(-7 * (Weeks - 1 - i)))
-            .Select(start =>
-            {
-                var inWeek = runs.Where(r => r.EndedAt >= start && r.EndedAt < start.AddDays(7)).ToList();
-                var seconds = inWeek.Sum(AgentSeconds);
-                return new Week(
-                    start, seconds, inWeek.Where(r => r.Measured).Sum(r => r.Billable ?? 0),
-                    inWeek.Count(r => r.Measured), inWeek.Count(r => !r.Measured), pricing.CostOf(seconds));
-            })
-            .ToList();
+        var weekly = Weekly(workflows.SelectMany(c => all.RunsOf[c]).ToList(), pricing, now);
 
         return figures with
         {
@@ -243,6 +235,31 @@ public static class OutcomeFigures
             Cost = new Money(pricing.CostOf(figures.AgentSeconds), pricing.Currency),
         };
     }
+
+    /// <summary>The Monday 00:00 UTC starts of the last <see cref="Weeks"/> weeks, oldest first, the
+    /// last being <paramref name="now"/>'s own week. Every weekly series is read over these.</summary>
+    public static IReadOnlyList<DateTimeOffset> WeekStarts(DateTimeOffset now)
+    {
+        var thisWeek = WeekOf(now);
+        return Enumerable.Range(0, Weeks).Select(i => thisWeek.AddDays(-7 * (Weeks - 1 - i))).ToList();
+    }
+
+    /// <summary>
+    /// <paramref name="runs"/> by the week they ended in, over <see cref="WeekStarts"/>: agent time,
+    /// billable tokens of the measured runs, the measured and unmeasured runs counted, and the cost at
+    /// the rate (null with none). A run outside the weeks is not counted.
+    /// </summary>
+    public static IReadOnlyList<Week> Weekly(IReadOnlyList<UsageLedgerRow> runs, Pricing pricing, DateTimeOffset now) =>
+        WeekStarts(now)
+            .Select(start =>
+            {
+                var inWeek = runs.Where(r => r.EndedAt >= start && r.EndedAt < start.AddDays(7)).ToList();
+                var seconds = inWeek.Sum(AgentSeconds);
+                return new Week(
+                    start, seconds, inWeek.Where(r => r.Measured).Sum(r => r.Billable ?? 0),
+                    inWeek.Count(r => r.Measured), inWeek.Count(r => !r.Measured), pricing.CostOf(seconds));
+            })
+            .ToList();
 
     /// <summary>The items whose own outcome, followed through merges, is <paramref name="outcome"/>
     /// (null: the items with no outcome).</summary>
@@ -380,7 +397,8 @@ public static class OutcomeFigures
             link?.SetAt);
     }
 
-    private static double AgentSeconds(UsageLedgerRow run) =>
+    /// <summary>One run's agent time: its end less its start; a run never started had none.</summary>
+    public static double AgentSeconds(UsageLedgerRow run) =>
         run.StartedAt is { } started ? Math.Max(0, (run.EndedAt - started).TotalSeconds) : 0;
 
     private static double? Median(IReadOnlyList<double> sorted) =>
