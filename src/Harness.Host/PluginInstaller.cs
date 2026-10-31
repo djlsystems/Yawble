@@ -128,6 +128,9 @@ public sealed class PluginInstaller(PluginCatalog catalog, string dataRoot, int 
 
         var (id, version) = (manifest.Id, manifest.Version);
 
+        // A BUILT-IN'S ID IS THE PLATFORM'S: it ships with the image and is never installed over.
+        if (catalog.IsBuiltIn(id)) return Refused(PluginCatalog.BuiltInRefusal(id)) with { Status = StatusCodes.Status409Conflict, Id = id };
+
         if (PluginCatalog.Check(source, version, manifest, catalog.RuntimeFound, requireExecutableBit: false) is { Reason: { } checkRefusal })
         {
             return Refused($"The Host refuses {id} {version}: {checkRefusal}", id, version);

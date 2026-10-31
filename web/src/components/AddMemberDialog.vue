@@ -3,6 +3,7 @@ import FieldHelp from './FieldHelp.vue';
 import { computed, ref, watch } from 'vue';
 import { useQuasar, type QForm } from 'quasar';
 import { addMember, listCatalog, listPlugins } from '../api/client';
+import { isBuiltInPlugin } from '../lib/teamConnections';
 import { agentsForMode, type Agent, type InstalledPlugin } from '../api/types';
 import { allowedAgentOptions, allowlistIncludes, normalizeAllowlist } from '../lib/memberAllowlist';
 import { installStatus, installationFor } from '../lib/agentInstall';
@@ -156,7 +157,8 @@ const pluginOutOfRange = computed(() =>
 
 async function loadPlugins() {
   try {
-    plugins.value = (await listPlugins()).plugins ?? [];
+    // A BUILT-IN (Team Connections) is the platform's own on every team, and never hired.
+    plugins.value = ((await listPlugins()).plugins ?? []).filter((entry) => !isBuiltInPlugin(entry));
   } catch {
     // Nothing to offer rather than a fault: the Agent presets still work.
     plugins.value = [];

@@ -1289,8 +1289,10 @@ internal static class WorkflowEndpoints
                     return Results.Ok(WorkflowWaitReply.Timeout(correlationId, timeout, TimeoutVerdict.Working));
                 }
 
+                // The members the board shows: a hidden Team Connections is nobody's work.
                 var snapshots = host.Snapshots()
                     .Where(snapshot => string.Equals(snapshot.Team, team, StringComparison.OrdinalIgnoreCase))
+                    .Where(snapshot => teams.Shows(new ContainerId(snapshot.Team, snapshot.Id)))
                     .ToArray();
                 if (snapshots.Length == 0)
                 {

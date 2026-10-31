@@ -831,7 +831,11 @@ public sealed class SolutionInstaller(
 
         try
         {
-            return await InstallLockedAsync(request, actor, afterStep, ct);
+            var outcome = await InstallLockedAsync(request, actor, afterStep, ct);
+
+            // ITS CONNECTIONS ARE ASSIGNED NOW: the team's Team Connections shows.
+            await teams.RefreshConnectionPresenceAsync(CancellationToken.None);
+            return outcome;
         }
         finally
         {

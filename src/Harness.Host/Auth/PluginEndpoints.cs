@@ -340,6 +340,9 @@ public static class PluginEndpoints
             await RefreshSetupAsync(context, id, ct);
             await NoticeIfReadyAsync(log, id, found.Label ?? found.Name, plugin.Manifest, changed, secrets, valued, ct);
 
+            // A PERSON'S BINDING MAY HAVE ASSIGNED the team its first connection: Team Connections shows.
+            await teams.RefreshConnectionPresenceAsync(CancellationToken.None);
+
             return Results.Ok(await SettingsAsync(id, plugin, changed, reads, ct));
         })
             .WithTags("Members")
@@ -880,6 +883,13 @@ public static class PluginEndpoints
             return (found, null, Results.Conflict(new { error = plugins.RefusalFor(id!) }));
         }
 
+        // A BUILT-IN PLUGIN'S MEMBER HAS NO SETTINGS OF ITS OWN: Team Connections holds what its team is
+        // assigned, in Team settings -> Connections.
+        if (plugin.BuiltIn)
+        {
+            return (found, null, Results.Conflict(new { error = TeamConnectionsMember.ChangeRefused }));
+        }
+
         return (found, plugin, null);
     }
 
@@ -1007,6 +1017,10 @@ public static class PluginEndpoints
                 version = p.Manifest.Version,
                 active = true,
                 verdict = "installed",
+                // THE PLATFORM'S OWN: shipped in the image, versioned with it, never uninstalled, never in the
+                // Marketplace or Add member, never hired. Every team has its member (TeamConnectionsMember).
+                builtIn = p.BuiltIn,
+                locked = p.BuiltIn,
                 protocol = p.Manifest.Protocol,
                 timeoutSeconds = p.Manifest.TimeoutSeconds,
                 config = Fields(p.Manifest),
@@ -1017,7 +1031,7 @@ public static class PluginEndpoints
                 skills = p.Manifest.Skills,
                 skill = PluginSkills.SkillOf(p),
                 requires = p.Manifest.Requires,
-                members = hired[p.Manifest.Id].Select(m => new { team = m.Team, member = m.Id }),
+                members = p.BuiltIn ? [] : hired[p.Manifest.Id].Select(m => new { team = m.Team, member = m.Id }),
                 solutions = person
                     ? solutions
                         .Where(row => row.MinimumFor(p.Manifest.Id) is not null)
@@ -1030,7 +1044,7 @@ public static class PluginEndpoints
                     : [],
                 reserved = p.Manifest.Reserved.Keys,
                 ignored = p.Manifest.Ignored,
-                marketplaceUrl = marketplace.PluginPage(p.Manifest.Id),
+                marketplaceUrl = p.BuiltIn ? null : marketplace.PluginPage(p.Manifest.Id),
             }),
             refused = plugins.Refused.Select(r => new { id = r.Id, reason = r.Reason }),
             versions = Versions(plugins),

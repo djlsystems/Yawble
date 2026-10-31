@@ -16,3 +16,6 @@ TestResults/
 
 # Per-test results of every suite run (scripts/test-history.ps1)
 .test-history/
+
+# A built-in plugin ships its executable under its own bin/ (plugins/<id>/bin/run).
+!plugins/*/bin/

@@ -48,6 +48,9 @@ public static class TeamConnectionEndpoints
             var (status, error) = await AssignAsync(stored, id, "team settings", ConnectionEndpoints.Actor(context), connections, ct);
             if (error is not null) return Results.Json(new { error }, statusCode: status);
 
+            // ITS FIRST CONNECTION shows the team's Team Connections.
+            await teams.RefreshConnectionPresenceAsync(CancellationToken.None);
+
             var entry = (await ListAsync(stored, teams, connections, ct)).FirstOrDefault(e => e.Id == id);
             return Results.Json(entry?.View, statusCode: status);
         })
@@ -122,6 +125,9 @@ public static class TeamConnectionEndpoints
             }
 
             if (!result.Removed) return Results.NotFound(new { error = $"Connection '{id}' is not assigned to team '{stored}'." });
+
+            // ITS LAST CONNECTION hides the team's Team Connections again; its runs and history stay.
+            await teams.RefreshConnectionPresenceAsync(CancellationToken.None);
 
             // EACH MEMBER UNBOUND NOW NEEDS A PERSON: Needs you lists it, and its card says so.
             foreach (var member in result.Unbound.GroupBy(u => u.Member))

@@ -104,12 +104,13 @@ public sealed class PluginRescanRequests(
         {
             request = nonce,
             at = DateTimeOffset.UtcNow,
-            plugins = scan.Plugins.Select(p => new { id = p.Manifest.Id, version = p.Manifest.Version, name = p.Manifest.Name }),
+            // WHAT IS INSTALLED ON THE VOLUME: a built-in ships with the Host, and `plugin remove` never sees it.
+            plugins = scan.Plugins.Where(p => !p.BuiltIn).Select(p => new { id = p.Manifest.Id, version = p.Manifest.Version, name = p.Manifest.Name }),
             refused = scan.Refused.Select(r => new { id = r.Id, reason = r.Reason }),
             // WHO IS HIRED ON EACH PLUGIN, so `plugin remove` can refuse while one is.
             members = teams.All()
                 .SelectMany(team => team.Containers.Select(member => (team, member)))
-                .Where(pair => MemberRef.IsPlugin(pair.member.Agent))
+                .Where(pair => MemberRef.IsPlugin(pair.member.Agent) && !TeamConnectionsMember.Runs(pair.member.Agent))
                 .Select(pair => new
                 {
                     plugin = MemberRef.IsPlugin(pair.member.Agent, out var id) ? id : null,

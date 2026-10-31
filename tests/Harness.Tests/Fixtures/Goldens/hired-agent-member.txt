@@ -57,6 +57,15 @@ Durable notes you have written for yourself are in `STANDING-NOTES.md` in your w
 folder. Read it when a job touches something you may have met before, and append to it when
 you learn something that will still be true next week. Nothing loads it for you.
 
+## Connections
+
+Ask Team Connections for anything to do with a connection - an account, a mailbox, an API key,
+a login: `tell` it `list` for each connection assigned to this team by name, kind and health,
+or `test <name>` to run that connection's own test. Its answer comes back to you. It never
+hands out a value - no key, password or token - and nothing else does: a plugin member bound
+to a connection gets the value inside its own run only. It is on the team only while a person
+has assigned it a connection; only a person assigns one, in Team settings -> Connections.
+
 ## Shared folder
 
 The team's shared folder is `<root>/documents/Golden` (also in HARNESS_SHARED). It is what a person sees in

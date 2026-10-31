@@ -4,6 +4,7 @@ import { listPlugins, solutionsInstalled } from '../api/client';
 import type { InstalledPlugin, InstalledSolution, MarketplaceCatalog, MarketplacePackage, SolutionCheck, SolutionStateKind } from '../api/types';
 import { pluginNeedWords, pluginUpdateFor, pluginUsedByWords, updateFor } from '../lib/marketplace';
 import { fetchIntoDocuments } from '../lib/marketplaceFetch';
+import { isBuiltInPlugin } from '../lib/teamConnections';
 import { solutionMatches, stateBadge, stateChoices, teamChoices, whenWords } from '../lib/solutionPanel';
 import { localInstants } from '../lib/localTime';
 import DialogTabs from './DialogTabs.vue';
@@ -74,7 +75,8 @@ async function load() {
       (cause) => (error.value = cause instanceof Error ? cause.message : String(cause)),
     ),
     listPlugins().then(
-      (read) => (plugins.value = read.plugins),
+      // A BUILT-IN (Team Connections) ships with the platform: never in the Marketplace.
+      (read) => (plugins.value = read.plugins.filter((plugin) => !isBuiltInPlugin(plugin))),
       (cause) => (pluginsError.value = cause instanceof Error ? cause.message : String(cause)),
     ),
   ]);

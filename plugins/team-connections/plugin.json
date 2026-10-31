@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "team-connections",
+  "name": "Team Connections",
+  "description": "Answers for the connections assigned to its team: list them by name, kind and health, or test one by name. Never hands out a value.",
+  "version": "1.0.0",
+  "protocol": "harness.member/1",
+  "executable": { "path": "bin/run", "args": [] },
+  "timeoutSeconds": 120,
+  "requires": ["node"]
+}

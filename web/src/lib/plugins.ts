@@ -65,7 +65,10 @@ export function pluginRows(list: PluginList): PluginRow[] {
     };
   });
 
-  return [...rows, ...unshownRefusals(list.refused, rows)].sort(byId);
+  // THE BUILT-INS have no version folder on the volume: one row each, from the platform's own list.
+  const builtIns = list.plugins.filter((plugin) => plugin.builtIn === true).map(installedRow);
+
+  return [...rows, ...builtIns, ...unshownRefusals(list.refused, rows)].sort(byId);
 }
 
 /**
