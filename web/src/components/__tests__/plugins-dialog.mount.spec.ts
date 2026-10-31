@@ -24,8 +24,11 @@ const {
   fileSystemRoots,
   browseFileSystem,
   checkSolution,
+  getMarketplace,
 } = vi.hoisted(() => ({
   listPlugins: vi.fn(),
+  // The upgrade icon reads the Marketplace's catalog (PLG 2): unchecked here, so no icon - its own spec is plugins-dialog-upgrade.
+  getMarketplace: vi.fn(async () => ({ checked: false, reason: 'not read in this spec', checkedAt: null, packages: [] })),
   rescanPlugins: vi.fn(),
   getPluginManifest: vi.fn(),
   installPlugin: vi.fn(),
@@ -54,6 +57,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
   fileSystemRoots,
   browseFileSystem,
   checkSolution,
+  getMarketplace,
 }));
 
 // The install dialog's Upload a package lists the Documents folders on open; none here.

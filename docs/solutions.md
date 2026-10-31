@@ -371,8 +371,9 @@ a newer version than a team has says so (**Update available: 1.1.0**) and offers
 fetches that version as Get does and opens the install wizard on **Update an existing team** for
 that team. Nothing is updated until you press **Update** in the wizard. Below the solutions, under
 **Plugins**, the tab lists each plugin installed on the instance with its version and the members
-that use it, and **Update** when the catalog lists it newer, which fetches it and opens the plugin
-install dialog.
+that use it, and **Update** when the catalog lists it newer. Update asks first, with the same
+confirm as Admin → Plugins' upgrade, then fetches and installs it in one go
+([plugins.md](plugins.md#upgrade-a-plugin-to-the-marketplaces-newer-version)).
 
 Otherwise a package is installed from a folder inside the instance, so it goes into Documents first:
 

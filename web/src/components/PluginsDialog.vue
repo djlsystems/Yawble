@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { ActionRefused, getPluginManifest, listPlugins, removePlugin, rescanPlugins } from '../api/client';
-import type { ContainerSnapshot, InstalledPlugin, PluginList, PluginMemberRef } from '../api/types';
+import { getMarketplace, getPluginManifest, listPlugins, removePlugin, rescanPlugins } from '../api/client';
+import type { ContainerSnapshot, InstalledPlugin, MarketplaceCatalog, MarketplacePackage, PluginList, PluginMemberRef } from '../api/types';
+import { pluginUpdateFor } from '../lib/marketplace';
+import { upgradeLabel } from '../lib/pluginUpgrade';
 import { formatManifest, pluginEvents, pluginRows, pluginSkill, type PluginRow } from '../lib/plugins';
 import { defaultLabel, setByPerson } from '../lib/pluginSettings';
 import { slotSummary } from '../lib/connections';
@@ -11,6 +13,7 @@ import FilterText from './FilterText.vue';
 import PluginInstallDialog from './PluginInstallDialog.vue';
 import MemberSettingsDialog from './MemberSettingsDialog.vue';
 import SolutionWizard from './SolutionWizard.vue';
+import PluginUpgradeDialog from './PluginUpgradeDialog.vue';
 import type { SolutionCheck } from '../api/types';
 
 /**
@@ -32,6 +35,11 @@ import type { SolutionCheck } from '../api/types';
  * whole plugin while members are hired on it (naming them) and the active version while others are
  * kept - its sentence is shown in the question. Every one of these is a person's: the routes that
  * change anything are humans-only.
+ *
+ * UPGRADE (PLG 2): the plugin's first tile shows an upgrade icon only when the Marketplace's catalog
+ * lists a newer version (`pluginUpdateFor`) - not when it does not list the plugin, lists the same or
+ * an older version, or has not been checked. It opens one confirm (`PluginUpgradeDialog`), which is the
+ * install press: fetch and install in one go. A refusal shows on the tile; the installed version stays.
  */
 const open = defineModel<boolean>({ required: true });
 
@@ -67,8 +75,62 @@ async function load() {
 
 watch(open, (showing) => {
   removed.value = '';
-  if (showing) void load();
+  upgradeRefused.value = null;
+  if (showing) {
+    void load();
+    void readCatalog();
+  }
 });
+
+// --- Upgrade: where the Marketplace lists a newer version -----------------------------------------
+
+/** The Marketplace's catalog, or null while unread or when it could not be read: no icon then. */
+const catalog = ref<MarketplaceCatalog | null>(null);
+
+async function readCatalog() {
+  try {
+    catalog.value = await getMarketplace();
+  } catch {
+    catalog.value = null;
+  }
+}
+
+/** The installed plugin of a row's id, whichever version row it is. */
+function installedOf(id: string): InstalledPlugin | null {
+  return list.value?.plugins.find((plugin) => plugin.id === id) ?? null;
+}
+
+/** The catalog's newer version for a plugin's FIRST tile, when it is installed and the catalog was checked. */
+function upgradeFor(row: PluginRow): MarketplacePackage | null {
+  if (!firstOfPlugin(row) || !installedOf(row.id) || !catalog.value?.checked) return null;
+  return pluginUpdateFor(row.id, catalog.value);
+}
+
+const upgrading = ref<{ pkg: MarketplacePackage; plugin: InstalledPlugin } | null>(null);
+const upgradeRefused = ref<{ id: string; text: string } | null>(null);
+
+function askUpgrade(row: PluginRow) {
+  const pkg = upgradeFor(row);
+  const plugin = installedOf(row.id);
+  if (!pkg || !plugin) return;
+  upgradeRefused.value = null;
+  upgrading.value = { pkg, plugin };
+}
+
+function upgradeRefusedOn(id: string, text: string) {
+  upgradeRefused.value = { id, text };
+  void load();
+}
+
+function upgraded() {
+  void load();
+  void readCatalog();
+}
+
+function openUpgradeMember(member: PluginMemberRef) {
+  upgrading.value = null;
+  openMember(member);
+}
 
 /** The installed version whose Details are open, or null. */
 const detailsRow = ref<PluginRow | null>(null);
@@ -326,6 +388,13 @@ async function confirmRemove() {
             </div>
             <div class="os-tile-line plugin-tile-line mono os-text-muted">{{ row.id }}</div>
 
+            <div
+              v-if="upgradeRefused && upgradeRefused.id === row.id && firstOfPlugin(row)"
+              class="os-tile-line plugin-tile-line text-negative"
+              role="alert"
+              data-upgrade-refused
+            >{{ upgradeRefused.text }}</div>
+
             <div v-if="row.verdict === 'refused'" class="os-tile-line plugin-tile-line text-negative" data-reason>
               {{ row.reason ?? 'The Host gave no reason.' }}
             </div>
@@ -361,6 +430,19 @@ async function confirmRemove() {
                  tile. Remove version only where the plugin has another; Remove plugin on its first
                  tile. -->
             <div class="plugin-tile-actions">
+              <span v-if="upgradeFor(row)" class="row-btn-wrap">
+                <q-btn
+                  dense
+                  flat
+                  round
+                  color="primary"
+                  icon="upgrade"
+                  :aria-label="upgradeLabel(upgradeFor(row)!.version)"
+                  data-plugin-upgrade
+                  @click="askUpgrade(row)"
+                />
+                <q-tooltip>{{ upgradeLabel(upgradeFor(row)!.version) }}</q-tooltip>
+              </span>
               <span v-if="row.verdict === 'installed'" class="row-btn-wrap">
                 <q-btn
                   dense
@@ -546,6 +628,15 @@ async function confirmRemove() {
 
   <!-- INSTALL FROM A FOLDER: a built plugin already inside the instance, with the Host's verdict. -->
   <PluginInstallDialog v-model="installOpen" @solution="installSolution" @settled="load" />
+
+  <PluginUpgradeDialog
+    :pkg="upgrading?.pkg ?? null"
+    :plugin="upgrading?.plugin ?? null"
+    @close="upgrading = null"
+    @refused="(text: string) => upgradeRefusedOn(upgrading?.pkg.id ?? '', text)"
+    @upgraded="upgraded"
+    @member="openUpgradeMember"
+  />
 
   <SolutionWizard v-model="wizard.open" :folder="wizard.folder" :check="wizard.check" @opened="open = false" />
 

@@ -66,8 +66,8 @@ public static class PluginEndpoints
                 + "unchanged, for reading. 404 with a sentence when there is none.");
 
         app.MapPost("/api/plugins/install", async (
-            InstallPlugin request, PluginInstaller installer, TenantLogging audit, PluginSecretMoves moves, HttpContext context,
-            CancellationToken ct) =>
+            InstallPlugin request, PluginInstaller installer, TenantLogging audit, PluginSecretMoves moves,
+            PluginUpgradeAttention attention, PluginCatalog catalog, HttpContext context, CancellationToken ct) =>
         {
             var result = await installer.InstallAsync(request.Path, request.Replace, ct);
 
@@ -93,10 +93,21 @@ public static class PluginEndpoints
                         context.User.FindFirstValue(ClaimTypes.NameIdentifier), context.User.FindFirstValue(ClaimTypes.Email)), ct)
                     : [];
 
+                // AN UPGRADE NAMES EACH MEMBER WHOSE SAVED SETTINGS DO NOT FIT THE NEW VERSION (PLG 2),
+                // after the moves, so a moved field is not reported. Any other install answers none.
+                var needs = result.Upgraded && catalog.For(result.Id!)?.Manifest is { } upgraded
+                    ? await attention.ForAsync(upgraded, ct)
+                    : [];
+
                 return Results.Ok(new
                 {
                     id = result.Id, version = result.Version, installed = result.Installed,
-                    replaced = result.Replaced, reason = result.Reason,
+                    replaced = result.Replaced, reason = result.Reason, previous = result.Previous,
+                    attention = needs.Select(a => new
+                    {
+                        team = a.Team, member = a.Member, teamName = a.TeamName, memberName = a.MemberName,
+                        fields = a.Fields.Select(f => new { field = f.Field, reason = f.Reason }),
+                    }),
                     moves = moved.Select(m => new
                     {
                         team = m.Member.Team, member = m.Member.Name, slot = m.Slot, outcome = m.Outcome, fields = m.Fields,
@@ -125,9 +136,17 @@ public static class PluginEndpoints
                 + "`plugins/<id>/<version>/` (Host user, the agent's group, directories 0750, files 0640, "
                 + "the manifest's executables 0750), made `active`, the catalog rescanned, and a "
                 + "`plugins.installed` tenant row appended. Answers `{ id, version, installed, replaced, "
-                + "reason, moves }`: `installed` is the Host's verdict after the rescan; `moves` is what a version "
+                + "reason, previous, moves, attention }`: `installed` is the Host's verdict after the rescan; "
+                + "`previous` the version active before, or null; `moves` is what a version "
                 + "declaring `secrets.<field>.movedTo` did with each member's own values, one entry per member and "
-                + "slot (`outcome` moved, nothing, kept or failed; the fields; the connection made) - never a value.");
+                + "slot (`outcome` moved, nothing, kept or failed; the fields; the connection made) - never a value. "
+                + "`attention`, on an UPGRADE (a newer version made active over an older one), is one entry per member "
+                + "hired on the plugin whose saved settings do not fit the new version - `{ team, member, teamName, "
+                + "memberName, fields: [{ field, reason }] }`: a required field with no value and no default, a value of "
+                + "the wrong type or outside its bounds, a field the new version dropped, a secret binding or own value "
+                + "for a secret it does not declare. Field names and sentences, never a value. `[]` when every member's "
+                + "fit, and on any install that is not an upgrade. Nothing is removed or stopped: such a member fails its "
+                + "runs, naming the field, until a person fixes it.");
 
         app.MapDelete("/api/plugins/{id}", async (
             [Description("The plugin's id.")] string id,

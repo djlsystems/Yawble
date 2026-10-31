@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { listPlugins, solutionsInstalled } from '../api/client';
-import type { InstalledPlugin, InstalledSolution, MarketplaceCatalog, MarketplacePackage, SolutionCheck, SolutionStateKind } from '../api/types';
+import type { ContainerSnapshot, InstalledPlugin, InstalledSolution, MarketplaceCatalog, MarketplacePackage, PluginMemberRef, SolutionCheck, SolutionStateKind } from '../api/types';
 import { pluginNeedWords, pluginUpdateFor, pluginUsedByWords, updateFor } from '../lib/marketplace';
 import { fetchIntoDocuments } from '../lib/marketplaceFetch';
 import { isBuiltInPlugin } from '../lib/teamConnections';
@@ -12,6 +12,9 @@ import FilterText from './FilterText.vue';
 import GetStartedTab from './GetStartedTab.vue';
 import InstallFromFolderDialog from './InstallFromFolderDialog.vue';
 import PluginInstallDialog from './PluginInstallDialog.vue';
+import PluginUpgradeDialog from './PluginUpgradeDialog.vue';
+import MemberSettingsDialog from './MemberSettingsDialog.vue';
+import { useConsoleStore } from '../stores/console';
 import SolutionWizard from './SolutionWizard.vue';
 
 /**
@@ -36,7 +39,8 @@ import SolutionWizard from './SolutionWizard.vue';
  * BELOW THE SOLUTIONS, THE PLUGINS installed on the instance (`GET /api/plugins`), one tile each -
  * its name, version, who uses it, and each solution team that uses it with the oldest version that
  * team needs (`solutions`; an older one is refused at install) - with Update when the catalog lists a newer version, which
- * fetches it and opens the plugin install dialog as Browse's Get does. Members are hired on a plugin
+ * asks first with the same confirm Admin -> Plugins' upgrade shows (`PluginUpgradeDialog`), then
+ * fetches and installs it in one go (PLG 2). Members are hired on a plugin
  * from Add member; Admin -> Plugins holds the rest.
  *
  * With no solution installed it says how solutions arrive: a package a team built, whose Review and
@@ -133,21 +137,36 @@ async function update(row: InstalledSolution, pkg: MarketplacePackage) {
 
 // --- Installed plugins: an Update where the catalog lists a newer version --------------------------
 
-const pluginUpdating = ref('');
 const pluginUpdateRefused = ref<{ id: string; text: string } | null>(null);
 
-async function updatePlugin(pkg: MarketplacePackage) {
-  if (pluginUpdating.value) return;
+/** The update being asked about: the confirm shows while it is set, and its Upgrade fetches and installs. */
+const pluginUpgrade = ref<{ pkg: MarketplacePackage; plugin: InstalledPlugin } | null>(null);
 
-  pluginUpdating.value = pkg.id;
+function updatePlugin(pkg: MarketplacePackage) {
+  const plugin = plugins.value.find((candidate) => candidate.id === pkg.id);
+  if (!plugin) return;
+
   pluginUpdateRefused.value = null;
-  try {
-    const fetched = await fetchIntoDocuments(pkg);
-    if (fetched.ok) pluginInstall.value = { open: true, folder: fetched.folder };
-    else pluginUpdateRefused.value = { id: pkg.id, text: fetched.text };
-  } finally {
-    pluginUpdating.value = '';
+  pluginUpgrade.value = { pkg, plugin };
+}
+
+function pluginUpgradeRefused(text: string) {
+  if (pluginUpgrade.value) pluginUpdateRefused.value = { id: pluginUpgrade.value.pkg.id, text };
+}
+
+// A member named by the upgrade's attention list opens its settings, from the board's snapshot.
+const board = useConsoleStore();
+const memberSettings = ref<{ open: boolean; snapshot: ContainerSnapshot | null }>({ open: false, snapshot: null });
+
+function openUpgradeMember(member: PluginMemberRef) {
+  const snapshot = board.teams.find((team) => team.id === member.team)?.containers.find((c) => c.id === member.member) ?? null;
+  const id = pluginUpgrade.value?.pkg.id ?? '';
+  pluginUpgrade.value = null;
+  if (!snapshot) {
+    pluginUpdateRefused.value = { id, text: `${member.team} / ${member.member} is not on the board, so its settings cannot be opened here.` };
+    return;
   }
+  memberSettings.value = { open: true, snapshot };
 }
 
 // --- Browse: a fetched package opens what Install from a folder opens ------------------------------
@@ -406,8 +425,6 @@ watch(() => pluginInstall.value.open, (showing, was) => {
                 icon="upgrade"
                 label="Update"
                 :aria-label="`Update ${plugin.name} to ${pluginUpdateFor(plugin.id, catalog)?.version}`"
-                :loading="pluginUpdating === plugin.id"
-                :disable="pluginUpdating !== '' && pluginUpdating !== plugin.id"
                 data-plugin-update
                 @click="updatePlugin(pluginUpdateFor(plugin.id, catalog)!)"
               />
@@ -477,6 +494,21 @@ watch(() => pluginInstall.value.open, (showing, was) => {
   />
 
   <PluginInstallDialog v-model="pluginInstall.open" :folder="pluginInstall.folder" @solution="pluginWasASolution" />
+
+  <PluginUpgradeDialog
+    :pkg="pluginUpgrade?.pkg ?? null"
+    :plugin="pluginUpgrade?.plugin ?? null"
+    @close="pluginUpgrade = null"
+    @refused="pluginUpgradeRefused"
+    @upgraded="load"
+    @member="openUpgradeMember"
+  />
+
+  <MemberSettingsDialog
+    v-if="memberSettings.snapshot"
+    v-model="memberSettings.open"
+    :snapshot="memberSettings.snapshot"
+  />
 
   <SolutionWizard v-model="wizard.open" :folder="wizard.folder" :check="wizard.check" :team="wizard.team" />
 </template>

@@ -184,6 +184,12 @@ internal sealed partial class HostComposition
             sp.GetRequiredService<IPluginSecretMoveRows>(), sp.GetRequiredService<Connections>(),
             sp.GetRequiredService<IDataProtectionProvider>(), sp.GetService<PluginSetup>()));
 
+        // AN UPGRADE NAMES EACH MEMBER WHOSE SAVED SETTINGS DO NOT FIT THE NEW VERSION (PLG 2): read
+        // only, never a value, after the install and its secret moves.
+        builder.Services.AddSingleton(sp => new PluginUpgradeAttention(
+            sp.GetRequiredService<TeamRegistry>(), sp.GetRequiredService<IPluginMemberSettingsStore>(),
+            sp.GetRequiredService<IPluginMemberSecretRows>()));
+
         if (unmeasuredHeadlessPresets.Count > 0)
         {
             Console.WriteLine(

@@ -104,6 +104,10 @@ function serve(installed: InstalledSolution[], packages: MarketplacePackage[] = 
               ? reply(200, { id: 'job-tracker', version: '1.1.0', kind: 'solution', folder: 'Marketplace/job-tracker-1.1.0' })
               : undefined,
           (call) => (call.method === 'GET' && call.url === '/api/documents' ? reply(200, { folders: [], root: Root }) : undefined),
+          (call) =>
+            call.method === 'POST' && call.url === '/api/plugins/install'
+              ? reply(200, { id: 'whoami', version: '0.4.0', installed: true, replaced: false, reason: null, previous: '0.3.0', moves: [], attention: [] })
+              : undefined,
           updateOfJobTracker,
           ...wizardRoutes({ installed, plugins }),
         ],
@@ -227,6 +231,8 @@ describe('Marketplace', () => {
       expect(news.querySelector('[data-tile-update]')).toBeNull();
     });
 
+    // PLG 2: Update asks first with the upgrade confirm, and its Upgrade fetches and installs in one go.
+    // SEEN TO FAIL: before, Update fetched at once and opened the plugin install dialog.
     it('lists the installed plugins under their own heading, with who uses each and Update where the catalog is newer', async () => {
       const newer = pkg({ ...WhoAmI, version: '0.4.0', installed: true, installedVersion: '0.3.0', updateAvailable: true });
       const wrapper = await marketplace([], [JobTracker, newer], [
@@ -246,10 +252,30 @@ describe('Marketplace', () => {
 
       (who.querySelector('[data-plugin-update]') as HTMLElement).click();
       await settle();
+      expect(bodyFind('[data-upgrade-title]')?.textContent?.trim()).toBe('Upgrade WhoAmI to 0.4.0?');
+      expect(bodyFind('[data-upgrade-warning]')?.textContent).toContain('Settings from the old version are not guaranteed to map to the new version.');
+      expect(bodyFind('[data-upgrade-members]')?.textContent?.trim()).toBe('Used by Alpha / Who');
+      expect(sent(calls, 'POST', '/api/marketplace/whoami/fetch')).toHaveLength(0);
+
+      // Cancel changes nothing.
+      (bodyFind('[data-upgrade-cancel]') as HTMLElement).click();
+      await settle();
+      expect(bodyFind('[data-plugin-upgrade-confirm]')).toBeNull();
+      expect(sent(calls, 'POST', '/api/marketplace/whoami/fetch')).toHaveLength(0);
+      expect(sent(calls, 'POST', '/api/plugins/install')).toHaveLength(0);
+
+      // Upgrade fetches, then installs the fetched folder - no second install dialog.
+      (who.querySelector('[data-plugin-update]') as HTMLElement).click();
+      await settle();
+      (bodyFind('[data-upgrade-confirm]') as HTMLElement).click();
+      await settle();
       await settle();
       expect(sent(calls, 'POST', '/api/marketplace/whoami/fetch')).toHaveLength(1);
-      expect(bodyFind('[data-install-dialog]')).not.toBeNull();
-      expect(sent(calls, 'POST', '/api/plugins/install')).toHaveLength(0);
+      const installs = sent(calls, 'POST', '/api/plugins/install');
+      expect(installs).toHaveLength(1);
+      expect(installs[0]!.body).toEqual({ path: `${Root}/Marketplace/whoami-0.4.0`, replace: true });
+      expect(bodyFind('[data-install-dialog]')).toBeNull();
+      expect(bodyFind('[data-upgrade-done]')?.textContent?.trim()).toBe('Upgraded WhoAmI to 0.4.0');
       wrapper.unmount();
     });
 
