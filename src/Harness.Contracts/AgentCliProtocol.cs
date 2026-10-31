@@ -70,6 +70,13 @@ public sealed record RunAgentCommands(string Request, IReadOnlyList<AgentCliRun>
 /// </summary>
 public sealed record RemoveAsAgent(string Request, string Boundary, IReadOnlyList<string> Paths) : AgentCliCommand(Request);
 
+/// <summary>
+/// Write <see cref="Data"/> at <see cref="Path"/>, inside <see cref="WorkingCopy"/>, AS THE AGENT: the folders
+/// made with <c>mkdir -p</c> and the file created exclusively with <c>dd conv=excl</c>, so the system decides what
+/// the agent may write and nothing is overwritten. An MCP server's binary result for a member.
+/// </summary>
+public sealed record WriteAsAgent(string Request, string WorkingCopy, string Path, byte[] Data) : AgentCliCommand(Request);
+
 /// <summary>The answer to <see cref="ProbeSignIn"/>, one result per command asked, in order.</summary>
 public sealed record SignInProbed(string Request, IReadOnlyList<SignInProbeResult> Results) : WorkerEvent;
 
@@ -78,6 +85,16 @@ public sealed record AgentCommandsRan(string Request, IReadOnlyList<AgentCliRunR
 
 /// <summary>The answer to <see cref="RemoveAsAgent"/>: done, or <see cref="Error"/> saying what was refused or failed.</summary>
 public sealed record RemovedAsAgent(string Request, string? Error) : WorkerEvent;
+
+/// <summary>The answer to <see cref="WriteAsAgent"/>: one of the results below, and the system's words when refused.</summary>
+public sealed record WroteAsAgent(string Request, string Result, string? Detail) : WorkerEvent
+{
+    public const string Written = "written";
+    public const string Exists = "exists";
+    public const string Link = "link";
+    public const string Denied = "denied";
+    public const string Unsupported = "unsupported";
+}
 
 /// <summary>Bounds every agent CLI request shares.</summary>
 public static class AgentCliRuns

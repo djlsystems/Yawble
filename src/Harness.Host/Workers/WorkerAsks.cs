@@ -83,6 +83,7 @@ public sealed class WorkerAsks(Func<IRunWorker> any, TimeProvider? clock = null)
             SignInProbed probed => probed.Request,
             AgentCommandsRan ran => ran.Request,
             RemovedAsAgent removed => removed.Request,
+            WroteAsAgent wrote => wrote.Request,
             ConnectionTested tested => tested.Request,
             _ => null,
         };

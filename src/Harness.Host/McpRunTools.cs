@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -28,7 +27,7 @@ namespace Harness.Host;
 public sealed class McpRunTools(
     McpServers servers, McpForwarding forwarding, TimeProvider clock, ILogger<McpRunTools> log,
     long maximumBinary = McpRunTools.DefaultMaximumBinary, int maximumText = McpRunTools.DefaultMaximumText,
-    AgentLaunchUser? runAs = null)
+    AgentLaunchUser? runAs = null, WorkerAsks? asks = null)
 {
     public const long DefaultMaximumBinary = 20L * 1024 * 1024;
 
@@ -42,6 +41,11 @@ public sealed class McpRunTools(
     public static readonly IReadOnlyList<string> OutputArguments = ["outputPath", "output_path"];
 
     public int MaximumText => maximumText;
+
+    /// <summary>How long a worker may take to write one binary result as the member.</summary>
+    public static readonly TimeSpan WriteBound = TimeSpan.FromMinutes(2);
+
+    private readonly Lazy<WorkerAsks?> _asks = new(() => asks ?? (runAs is { Switches: true } ? WorkerAsks.InProcess(runAs) : null));
 
     private readonly ConcurrentDictionary<string, RunTools> _runs = new(StringComparer.Ordinal);
 
@@ -307,7 +311,7 @@ public sealed class McpRunTools(
                 notes.Add($"A {mime} result of {bytes.Length} bytes from {server} was not written: " + outcome switch
                 {
                     McpWrite.Exists => $"`{at}` already exists, and nothing is overwritten.",
-                    McpWrite.Unsupported => "binary results are written only when the Host runs on Linux.",
+                    McpWrite.Unsupported => why ?? "binary results are written only when the Host runs on Linux.",
                     McpWrite.Denied => $"the system refused to write `{at}` as you ({why}).",
                     _ => $"`{at}` is or passes through a link, which could lead outside your working copy.",
                 });
@@ -356,103 +360,28 @@ public sealed class McpRunTools(
     }
 
     /// <summary>
-    /// <paramref name="bytes"/> written at <paramref name="path"/>: AS THE MEMBER when the Host switches users
-    /// (<see cref="WriteAsAgentAsync"/>), so the operating system, not a check, keeps the Host's own files out of reach;
-    /// otherwise by the Host, whose user is then the member's (<see cref="Write"/>).
+    /// <paramref name="bytes"/> written at <paramref name="path"/>. AS THE MEMBER when the Host switches users: a
+    /// path check followed by a write by the Host leaves a gap a member can race, so the Host writes nothing in the
+    /// working copy and asks a worker (<see cref="WriteAsAgent"/>), which copies the bytes there through the agent
+    /// prefix (<see cref="AgentFiles.WriteNewAsync"/>); the operating system, not a check, keeps the Host's own files
+    /// out of reach. Otherwise the Host writes itself, its user then being the member's (<see cref="Write"/>).
     /// </summary>
     private async Task<(McpWrite Outcome, string? Why)> WriteAsync(string workingCopy, string path, byte[] bytes, CancellationToken ct)
     {
-        if (runAs is { Switches: true } agent) return await WriteAsAgentAsync(agent, workingCopy, path, bytes, ct);
-        if (runAs is { Refuses: true }) return (McpWrite.Denied, runAs.Reason);
-        return (Write(workingCopy, path, bytes), null);
-    }
+        if (runAs is { Refuses: true }) return (McpWrite.Unsupported, runAs.Refusal("The binary write"));
+        if (runAs is not { Switches: true } || _asks.Value is not { } workers) return (Write(workingCopy, path, bytes), null);
 
-    /// <summary>
-    /// <paramref name="bytes"/> written at <paramref name="path"/> AS <paramref name="agent"/>, never over a file. A
-    /// path check followed by a write by the Host leaves a gap a member can race, so the Host writes nothing in the
-    /// working copy: it puts the bytes in an owner-only folder of its own that only the agent's group may read
-    /// (<see cref="AgentLaunchUser.Share(string)"/>), and <c>mkdir -p</c> and <c>dd conv=excl</c>, started through
-    /// <see cref="AgentLaunchUser.Prefix"/> as every agent child is, make the folders and copy the bytes. A link
-    /// anywhere on the way to a place the member may not write is refused by the system (permission denied); one to a
-    /// place it may write gains it nothing. <c>conv=excl</c> creates the file exclusively, so an existing name, a link
-    /// included, is never written through. The Host's folder is removed afterwards. The suite drives this with a
-    /// <c>setpriv</c> stand-in where it cannot switch users.
-    /// </summary>
-    public static async Task<(McpWrite Outcome, string? Why)> WriteAsAgentAsync(
-        AgentLaunchUser agent, string workingCopy, string path, byte[] bytes, CancellationToken ct)
-    {
-        var root = Path.GetFullPath(workingCopy).TrimEnd(Path.DirectorySeparatorChar);
-        var whole = Path.GetFullPath(path);
-        if (!whole.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal)) return (McpWrite.Link, null);
-        if (!OperatingSystem.IsLinux() || SystemCommand.Find("mkdir") is not { } mkdir || SystemCommand.Find("dd") is not { } dd)
+        var asked = await workers.AskAsync<WroteAsAgent>(new WriteAsAgent(WorkerAsks.NewRequest(), workingCopy, path, bytes), WriteBound, ct);
+        if (asked.Answer is not { } wrote) return (McpWrite.Unsupported, asked.Why);
+
+        return wrote.Result switch
         {
-            return (McpWrite.Unsupported, null);
-        }
-
-        // Beside the per-launch MCP folders (McpLaunchConfig), so the agent reaches it the same way.
-        var staging = Path.Combine(Path.GetTempPath(), "harness-mcp", $"out-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(staging, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        try
-        {
-            var source = Path.Combine(staging, "bytes");
-            await File.WriteAllBytesAsync(source, bytes, ct);
-            agent.Share(staging);
-
-            var (made, madeError) = await RunAsync([.. agent.Prefix, mkdir, "-p", "--", Path.GetDirectoryName(whole)!], ct);
-            if (made != 0) return Refused(madeError, whole, folder: true);
-
-            var (copied, copyError) = await RunAsync(
-                [.. agent.Prefix, dd, "if=" + source, "of=" + whole, "conv=excl", "bs=1M", "status=none"], ct);
-            return copied == 0 ? (McpWrite.Written, null) : Refused(copyError, whole, folder: false);
-        }
-        finally
-        {
-            try { Directory.Delete(staging, recursive: true); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-        }
-    }
-
-    /// <summary>What a failed <c>mkdir</c> (<paramref name="folder"/>) or <c>dd</c> run as the member said, as an outcome.
-    /// A name that exists where a folder belongs is not a folder, so only <c>dd</c>'s is a file already there.</summary>
-    private static (McpWrite, string?) Refused(string error, string whole, bool folder)
-    {
-        if (error.Contains("File exists", StringComparison.Ordinal) && folder) return (McpWrite.Link, null);
-        if (error.Contains("File exists", StringComparison.Ordinal))
-        {
-            return (new FileInfo(whole).LinkTarget is null ? McpWrite.Exists : McpWrite.Link, null);
-        }
-
-        if (error.Contains("Not a directory", StringComparison.Ordinal) || error.Contains("Too many levels", StringComparison.Ordinal))
-        {
-            return (McpWrite.Link, null);
-        }
-
-        // The system's own words, without the path, which the sentence names already.
-        var line = error.Trim().Split('\n')[^1];
-        return (McpWrite.Denied, line[(line.LastIndexOf(": ", StringComparison.Ordinal) + 1)..].Trim() is { Length: > 0 } said ? said : "it failed");
-    }
-
-    private static async Task<(int Exit, string Error)> RunAsync(IReadOnlyList<string> command, CancellationToken ct)
-    {
-        var start = new ProcessStartInfo(command[0]) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
-        foreach (var argument in command.Skip(1)) start.ArgumentList.Add(argument);
-
-        using var process = Process.Start(start) ?? throw new InvalidOperationException($"{command[0]} did not start.");
-        var output = process.StandardOutput.ReadToEndAsync(ct);
-        var error = process.StandardError.ReadToEndAsync(ct);
-        try
-        {
-            await process.WaitForExitAsync(ct);
-        }
-        catch (OperationCanceledException)
-        {
-            try { process.Kill(); }
-            catch (InvalidOperationException) { }
-            throw;
-        }
-
-        await output;
-        return (process.ExitCode, await error);
+            WroteAsAgent.Written => (McpWrite.Written, null),
+            WroteAsAgent.Exists => (McpWrite.Exists, null),
+            WroteAsAgent.Link => (McpWrite.Link, null),
+            WroteAsAgent.Denied => (McpWrite.Denied, wrote.Detail),
+            _ => (McpWrite.Unsupported, wrote.Detail),
+        };
     }
 
     /// <summary>

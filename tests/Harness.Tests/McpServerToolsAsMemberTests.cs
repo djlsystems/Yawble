@@ -1,13 +1,14 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
+using Harness.Contracts;
 using Harness.Host;
 
 namespace Harness.Tests;
 
 /// <summary>
-/// A BINARY RESULT WRITTEN AS THE MEMBER, where the Host switches users: the bytes reach the working copy through
-/// <c>mkdir</c> and <c>dd</c> started with the agent prefix, so the system decides what the member may write.
+/// A BINARY RESULT WRITTEN AS THE MEMBER, where the Host switches users: control asks a worker (<see cref="WriteAsAgent"/>),
+/// whose <c>mkdir</c> and <c>dd</c> start with the agent prefix, so the system decides what the member may write.
 ///
 /// <para>
 /// The suite cannot switch users (that needs CAP_SETUID), so <see cref="AsMember"/> is a real
@@ -34,7 +35,7 @@ public sealed class McpServerToolsAsMemberTests
         try
         {
             var path = Path.Combine(root, "new", "deep", "c.png");
-            Assert.Equal((McpWrite.Written, null), await McpRunTools.WriteAsAgentAsync(member.User, root, path, [1, 2, 3], Ct));
+            Assert.Equal((WroteAsAgent.Written, null), await member.WriteAsync(root, path, [1, 2, 3]));
 
             Assert.Equal([1, 2, 3], await File.ReadAllBytesAsync(path, Ct));
             Assert.Equal(getuid().ToString(), Stat("%u", path));
@@ -65,9 +66,9 @@ public sealed class McpServerToolsAsMemberTests
             File.CreateSymbolicLink(Path.Combine(root, "l.png"), Path.Combine(outside, "made.png"));
             File.WriteAllText(Path.Combine(root, "file"), "");
 
-            Assert.Equal(McpWrite.Exists, (await McpRunTools.WriteAsAgentAsync(member.User, root, path, [1], Ct)).Outcome);
-            Assert.Equal(McpWrite.Link, (await McpRunTools.WriteAsAgentAsync(member.User, root, Path.Combine(root, "l.png"), [1], Ct)).Outcome);
-            Assert.Equal(McpWrite.Link, (await McpRunTools.WriteAsAgentAsync(member.User, root, Path.Combine(root, "file", "x.png"), [1], Ct)).Outcome);
+            Assert.Equal(WroteAsAgent.Exists, (await member.WriteAsync(root, path, [1])).Result);
+            Assert.Equal(WroteAsAgent.Link, (await member.WriteAsync(root, Path.Combine(root, "l.png"), [1])).Result);
+            Assert.Equal(WroteAsAgent.Link, (await member.WriteAsync(root, Path.Combine(root, "file", "x.png"), [1])).Result);
 
             Assert.Equal([9], await File.ReadAllBytesAsync(path, Ct));
             Assert.Empty(Directory.GetFileSystemEntries(outside));
@@ -146,7 +147,7 @@ public sealed class McpServerToolsAsMemberTests
         var before = (Fingerprint(hostFile), Fingerprint(hostDir));
         using var stop = new CancellationTokenSource();
         long swaps = 0;
-        var outcomes = new Dictionary<McpWrite, int>();
+        var outcomes = new Dictionary<string, int>();
         try
         {
             // renameat2(RENAME_EXCHANGE): `d` and `lnk` trade places atomically, so `d` is always there.
@@ -160,7 +161,7 @@ public sealed class McpServerToolsAsMemberTests
 
             for (var i = 0; i < 200; i++)
             {
-                var (outcome, _) = await McpRunTools.WriteAsAgentAsync(member.User, root, Path.Combine(real, $"pic-{i}.png"), [1, 2, 3], Ct);
+                var (outcome, _) = await member.WriteAsync(root, Path.Combine(real, $"pic-{i}.png"), [1, 2, 3]);
                 outcomes[outcome] = outcomes.GetValueOrDefault(outcome) + 1;
             }
 
@@ -169,7 +170,7 @@ public sealed class McpServerToolsAsMemberTests
 
             var said = $"{swaps} swaps; " + string.Join(", ", outcomes.Select(o => $"{o.Key} {o.Value}"));
             Assert.True(before == (Fingerprint(hostFile), Fingerprint(hostDir)), "a Host-only place changed: " + said);
-            Assert.True(outcomes.GetValueOrDefault(McpWrite.Denied) > 0, "the swap never landed mid-write: " + said);
+            Assert.True(outcomes.GetValueOrDefault(WroteAsAgent.Denied) > 0, "the swap never landed mid-write: " + said);
             TestContext.Current.SendDiagnosticMessage(said);
         }
         finally
@@ -223,6 +224,14 @@ public sealed class McpServerToolsAsMemberTests
         }
 
         public AgentLaunchUser User { get; }
+
+        /// <summary>A worker's answer to a <see cref="WriteAsAgent"/>, as control would ask it.</summary>
+        public async Task<(string Result, string? Detail)> WriteAsync(string root, string path, byte[] bytes)
+        {
+            var answer = Assert.IsType<WroteAsAgent>(
+                await new WorkerAgentCli(WorkerId.Local, User).AnswerAsync(new WriteAsAgent("w1", root, path, bytes), Ct));
+            return (answer.Result, answer.Detail);
+        }
 
         public IReadOnlyList<string> Calls() =>
             File.Exists(Path.Combine(_folder, "calls")) ? File.ReadAllLines(Path.Combine(_folder, "calls")) : [];

@@ -97,6 +97,82 @@ public static class AgentFiles
         });
     }
 
+    /// <summary>
+    /// <paramref name="bytes"/> written at <paramref name="path"/>, inside <paramref name="workingCopy"/>, AS
+    /// <paramref name="agent"/>, never over a file: one of <see cref="WroteAsAgent"/>'s results, and the system's
+    /// words when it refused. The bytes go into an owner-only folder of this process's own that only the agent's
+    /// group may read (<see cref="AgentLaunchUser.Share(string)"/>, as the per-launch MCP config), then
+    /// <c>mkdir -p</c> and <c>dd conv=excl</c> run through <see cref="AgentLaunchUser.Prefix"/> make the folders and
+    /// copy them. A link anywhere on the way to a place the agent may not write is refused by the system; one to a
+    /// place it may write gains it nothing. <c>conv=excl</c> is <c>O_CREAT|O_EXCL</c>, so an existing name, a link
+    /// included, is never written through. The folder is removed afterwards. Never throws but for cancellation.
+    /// </summary>
+    public static async Task<(string Result, string? Detail)> WriteNewAsync(
+        AgentLaunchUser agent, string workingCopy, string path, byte[] bytes, CancellationToken ct)
+    {
+        var root = Path.GetFullPath(workingCopy).TrimEnd(Path.DirectorySeparatorChar);
+        var whole = Path.GetFullPath(path);
+        if (!whole.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal)) return (WroteAsAgent.Link, null);
+        if (!OperatingSystem.IsLinux() || SystemCommand.Find("mkdir") is not { } mkdir || SystemCommand.Find("dd") is not { } dd)
+        {
+            return (WroteAsAgent.Unsupported, "binary results are written only on Linux, with mkdir and dd in a system directory.");
+        }
+
+        // Beside the per-launch MCP folders, so the agent reaches it the same way.
+        var staging = Path.Combine(Path.GetTempPath(), "harness-mcp", $"out-{Guid.NewGuid():N}");
+        var source = Path.Combine(staging, "bytes");
+        try
+        {
+            Directory.CreateDirectory(staging, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            await File.WriteAllBytesAsync(source, bytes, ct);
+            agent.Share(staging);
+
+            var (made, _, madeError) = await RunAsync([.. agent.Prefix, mkdir, "-p", "--", Path.GetDirectoryName(whole)!], ct);
+            if (made != 0) return Refused(madeError, whole, folder: true);
+
+            var (copied, _, copyError) = await RunAsync(
+                [.. agent.Prefix, dd, "if=" + source, "of=" + whole, "conv=excl", "bs=1M", "status=none"], ct);
+            return copied == 0 ? (WroteAsAgent.Written, null) : Refused(copyError, whole, folder: false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException
+                                              or System.ComponentModel.Win32Exception)
+        {
+            return (WroteAsAgent.Unsupported, exception.Message);
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(source);
+                Directory.Delete(staging);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+            }
+        }
+    }
+
+    /// <summary>
+    /// What a failed <c>mkdir</c> (<paramref name="folder"/>) or <c>dd</c> said, as a result. A name that exists
+    /// where a folder belongs is not a folder, so only <c>dd</c>'s is a file already there.
+    /// </summary>
+    private static (string, string?) Refused(string error, string whole, bool folder)
+    {
+        if (error.Contains("File exists", StringComparison.Ordinal))
+        {
+            return (!folder && new FileInfo(whole).LinkTarget is null ? WroteAsAgent.Exists : WroteAsAgent.Link, null);
+        }
+
+        if (error.Contains("Not a directory", StringComparison.Ordinal) || error.Contains("Too many levels", StringComparison.Ordinal))
+        {
+            return (WroteAsAgent.Link, null);
+        }
+
+        // The system's own words, without the path, which the caller's sentence names already.
+        var line = error.Trim().Split('\n')[^1];
+        return (WroteAsAgent.Denied, line[(line.LastIndexOf(": ", StringComparison.Ordinal) + 1)..].Trim() is { Length: > 0 } said ? said : "it failed");
+    }
+
     // ---- Directly, as the Host.
 
     private static async Task<Read> ReadAllDirectlyAsync(string path, CancellationToken ct)
