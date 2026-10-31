@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { listConnections } from '../api/client';
+import FieldHelp from './FieldHelp.vue';
 import type { Connection } from '../api/types';
 import {
   addMcpServer,
@@ -295,10 +296,11 @@ async function remove() {
             outlined
             dense
             label="Name"
-            hint="Letters, digits, - and _, at most 20. It prefixes the server's tools' names."
             :error="name.length > 0 && !nameOk"
             data-mcp-name
-          />
+          >
+            <template #append><FieldHelp text="Letters, digits, - and _, at most 20. It prefixes the server's tools' names." /></template>
+          </q-input>
           <q-btn-toggle
             v-model="kind"
             no-caps
@@ -331,14 +333,18 @@ async function remove() {
             <template v-if="connection">
               <q-select v-model="field" :options="fieldsOf(connection)" clearable outlined dense label="Field (default: its secret field)" />
               <q-input v-model="header" outlined dense label="Header name" data-mcp-header />
-              <q-input v-model="template" outlined dense label="Value template" hint="{value} is replaced by the connection's value." data-mcp-template />
+              <q-input v-model="template" outlined dense label="Value template" data-mcp-template>
+                <template #append><FieldHelp text="{value} is replaced by the connection's value, as in Bearer {value}." /></template>
+              </q-input>
             </template>
           </template>
 
           <template v-else>
             <q-select v-model="command" :options="['npx', 'uvx']" outlined dense label="Command" data-mcp-command />
             <q-input v-model="pkg" outlined dense label="Package" data-mcp-package />
-            <q-input v-model="version" outlined dense label="Version" hint="One exact version, such as 1.4.2." data-mcp-version />
+            <q-input v-model="version" outlined dense label="Version" data-mcp-version>
+              <template #append><FieldHelp text="One exact version, such as 1.4.2: not latest, a range, or nothing." /></template>
+            </q-input>
             <q-input v-model="args" type="textarea" autogrow outlined dense label="Arguments, one per line" data-mcp-args />
             <div class="text-caption os-text-muted">Environment variables, each filled from a connection's field</div>
             <div v-for="(row, index) in env" :key="index" class="row no-wrap q-gutter-x-sm items-center">

@@ -66,8 +66,8 @@ export const PluginsAction = 'admin-plugins';
 export const ConnectionsAction = 'admin-connections';
 
 /**
- * Admin > MCP servers, the instance's MCP servers that Team settings gives to teams. LAST, after
- * Settings, so Sites, Plugins, Connections and Settings keep their order.
+ * Admin > MCP servers, the instance's MCP servers that Team settings gives to teams. After Skills
+ * and before Log, so Log through Settings keep their order and the instance-wide Settings stays last.
  */
 export const McpServersAction = 'admin-mcp-servers';
 
@@ -188,6 +188,8 @@ export const Ribbon: RibbonSpec = {
         { kind: 'button', action: 'admin-users', label: 'Users', icon: 'manage_accounts', size: 'large' },
         { kind: 'button', action: 'admin-agents', label: 'Agents', icon: 'smart_toy', size: 'large' },
         { kind: 'button', action: 'admin-skills', label: 'Skills', icon: 'psychology', size: 'large' },
+        // The instance's MCP servers, which Team settings gives to teams. After Skills, before Log.
+        { kind: 'button', action: McpServersAction, label: 'MCP servers', icon: 'hub', size: 'large' },
         { kind: 'button', action: 'admin-log', label: 'Log', icon: 'receipt_long', size: 'large' },
         // BESIDE Log AND NOT THE SAME THING. `Log` is what a PERSON did to the
         // instance; this is what the instance did when it went wrong, and no row here names an
@@ -217,7 +219,6 @@ export const Ribbon: RibbonSpec = {
           size: 'large',
           tooltip: 'Instance-wide settings: admission, spend, Concierge, sweeps, kanban',
         },
-        { kind: 'button', action: McpServersAction, label: 'MCP servers', icon: 'hub', size: 'large' },
       ],
     },
   ],
