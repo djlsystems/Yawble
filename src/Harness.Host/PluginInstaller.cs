@@ -5,9 +5,16 @@ namespace Harness.Host;
 /// <summary>What an install did, or why it did nothing. <paramref name="Status"/> is the HTTP status
 /// the route answers: 200 written (and <paramref name="Installed"/> is the Host's verdict after the
 /// rescan), 400 refused before anything was written, 409 that version is there and replacing was not
-/// asked for, or it is older than an installed solution team needs.</summary>
+/// asked for, or it is older than an installed solution team needs. <paramref name="Previous"/> is the
+/// version that was active before this install wrote anything, or null when none was.</summary>
 public sealed record PluginInstallResult(
-    int Status, string? Id, string? Version, bool Installed, bool Replaced, string? Reason);
+    int Status, string? Id, string? Version, bool Installed, bool Replaced, string? Reason, string? Previous = null)
+{
+    /// <summary>Whether this install made a NEWER version active over an older one: a Replace of the same
+    /// version, a first install and a rollback to an older version are not upgrades.</summary>
+    public bool Upgraded => Installed && Previous is not null && Version is not null
+        && Solutions.SolutionInstaller.CompareVersions(Version, Previous) > 0;
+}
 
 /// <summary>
 /// INSTALLS ONE BUILT PLUGIN VERSION FROM A FOLDER ALREADY INSIDE THE INSTANCE - a team's worktree, a
@@ -153,6 +160,9 @@ public sealed class PluginInstaller(PluginCatalog catalog, string dataRoot, int 
                 $"{id} {version} is already installed; choose Replace (the CLI's --force) to replace it.");
         }
 
+        // THE VERSION ACTIVE BEFORE THIS ONE, so the answer can say whether it was an upgrade.
+        var previous = catalog.For(id)?.Manifest.Version;
+
         // WRITING FROM HERE ON.
         var stage = Path.Combine(pluginDirectory, $".incoming-{version}-{Guid.NewGuid():N}");
         string? outgoing = null;
@@ -206,13 +216,13 @@ public sealed class PluginInstaller(PluginCatalog catalog, string dataRoot, int 
 
         if (catalog.For(id) is { } loaded && loaded.Manifest.Version == version)
         {
-            return new PluginInstallResult(200, id, version, true, exists, null);
+            return new PluginInstallResult(200, id, version, true, exists, null, previous);
         }
 
         var reason = catalog.Refused.FirstOrDefault(r => r.Id == id)?.Reason
             ?? $"the Host does not list {id} {version} after the rescan.";
 
-        return new PluginInstallResult(200, id, version, false, exists, reason);
+        return new PluginInstallResult(200, id, version, false, exists, reason, previous);
     }
 
     private static PluginInstallResult Refused(string reason, string? id = null, string? version = null) =>
