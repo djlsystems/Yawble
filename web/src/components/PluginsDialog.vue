@@ -15,7 +15,9 @@ import type { SolutionCheck } from '../api/types';
 
 /**
  * ADMIN > PLUGINS: every plugin version under the plugins directory and what the Host made of it -
- * installed, or refused with the Host's own sentence - from `GET /api/plugins`.
+ * installed, or refused with the Host's own sentence - from `GET /api/plugins`. A built-in plugin
+ * (team-connections) is not listed: a release installs and keeps it, and nobody removes, replaces
+ * or hires it (`pluginRows`). A folder under a built-in's id is listed, refused by name.
  *
  * For an installed version: its description, its settings as the manifest declares them, its
  * secrets BY NAME (no route carries a value), its connection slots ("needs a Google or Microsoft
@@ -182,11 +184,6 @@ const versionCounts = computed(() => {
   return counts;
 });
 
-/** A BUILT-IN is locked: no Remove, and no manifest on the volume to view. */
-function builtIn(row: PluginRow) {
-  return row.verdict === 'installed' && row.plugin.builtIn === true;
-}
-
 /** The first row of each plugin carries Remove plugin. */
 function firstOfPlugin(row: PluginRow) {
   return rows.value.find((candidate) => candidate.id === row.id) === row;
@@ -324,9 +321,6 @@ async function confirmRemove() {
               <span class="text-weight-medium">{{ row.name }}</span>
               <span v-if="row.version" class="mono">{{ row.version }}</span>
               <q-badge v-if="row.active" outline color="primary" label="Active" data-active />
-              <q-badge v-if="builtIn(row)" outline color="grey-7" label="Built-in" data-built-in>
-                <q-tooltip>Ships with the platform and is versioned with it: never installed, removed or hired. Every team has its member.</q-tooltip>
-              </q-badge>
               <q-space />
               <q-badge :color="verdictColor[row.verdict]" :label="verdictLabel[row.verdict]" />
             </div>
@@ -379,7 +373,7 @@ async function confirmRemove() {
                 />
                 <q-tooltip>Details: its settings, secrets, connections, events, skill and members</q-tooltip>
               </span>
-              <span v-if="row.version && !builtIn(row)" class="row-btn-wrap">
+              <span v-if="row.version" class="row-btn-wrap">
                 <q-btn
                   dense
                   flat
@@ -391,7 +385,7 @@ async function confirmRemove() {
                 />
                 <q-tooltip>View manifest</q-tooltip>
               </span>
-              <span v-if="row.version && !builtIn(row) && (versionCounts.get(row.id) ?? 0) > 1" class="row-btn-wrap">
+              <span v-if="row.version && (versionCounts.get(row.id) ?? 0) > 1" class="row-btn-wrap">
                 <q-btn
                   dense
                   flat
@@ -404,7 +398,7 @@ async function confirmRemove() {
                 />
                 <q-tooltip>Remove this version</q-tooltip>
               </span>
-              <span v-if="firstOfPlugin(row) && !builtIn(row)" class="row-btn-wrap">
+              <span v-if="firstOfPlugin(row)" class="row-btn-wrap">
                 <q-btn
                   dense
                   flat

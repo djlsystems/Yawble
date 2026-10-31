@@ -549,3 +549,93 @@ describe('PluginsDialog, installing from a folder', () => {
     wrapper.unmount();
   });
 });
+
+// PLG 1: A BUILT-IN PLUGIN (team-connections) ships with the platform and a release keeps it, so it
+// is no row of Admin -> Plugins and counts toward nothing the dialog shows. GET /api/plugins still
+// carries it (builtIn: true), with no version folder on the volume. A folder a person put under its
+// id is refused by the Host by name, and that refusal stays listed: it is theirs to fix.
+describe('PluginsDialog, built-in plugins', () => {
+  const teamConnections = hostPlugin({ id: 'team-connections', name: 'Team Connections', version: '1.0.0', builtIn: true, locked: true });
+  const echo = hostPlugin({ id: 'sample-echo', name: 'Sample Echo', version: '0.1.0' });
+  const echoVersion = { id: 'sample-echo', version: '0.1.0', name: 'Sample Echo', active: true, verdict: 'installed' as const, reason: null };
+  const builtInsSentence = "'team-connections' is a built-in plugin's id; the platform's own is used.";
+
+  const tiles = () => [...document.body.querySelectorAll('.plugin-tiles [data-plugin]')].map((el) => el.getAttribute('data-plugin'));
+
+  it('lists only the installed plugin beside a built-in, with no Built-in badge', async () => {
+    listPlugins.mockResolvedValue({ plugins: [teamConnections, echo], refused: [], versions: [echoVersion] });
+    const wrapper = await mountPlugins();
+
+    expect(tiles()).toEqual(['sample-echo']);
+    expect(bodyFind('[data-plugin="team-connections"]')).toBeNull();
+    expect(bodyFind('[data-built-in]')).toBeNull();
+    expect(document.body.textContent).not.toContain('Built-in');
+    expect(bodyFind('[data-no-plugins]')).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it('lists no built-in even if the Host names it among the versions', async () => {
+    listPlugins.mockResolvedValue(hostList([teamConnections, echo]));
+    const wrapper = await mountPlugins();
+
+    expect(tiles()).toEqual(['sample-echo']);
+
+    wrapper.unmount();
+  });
+
+  it('shows its empty state, not the filter miss, when only built-ins are installed', async () => {
+    listPlugins.mockResolvedValue({ plugins: [teamConnections], refused: [], versions: [] });
+    const wrapper = await mountPlugins();
+
+    expect(bodyFind('[data-no-plugins]')?.textContent).toContain('No plugins are installed.');
+    expect(bodyFind('[data-plugin-none-match]')).toBeNull();
+    expect(tiles()).toEqual([]);
+
+    // A filter that would have matched the built-in changes nothing: there is still nothing installed.
+    const filter = document.body.querySelector<HTMLInputElement>('input[data-plugin-filter], [data-plugin-filter] input')!;
+    filter.value = 'connections';
+    filter.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    expect(bodyFind('[data-no-plugins]')).not.toBeNull();
+    expect(bodyFind('[data-plugin-none-match]')).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it("still lists a folder installed under the built-in's id, refused with the Host's sentence", async () => {
+    listPlugins.mockResolvedValue({
+      plugins: [teamConnections, echo],
+      refused: [{ id: 'team-connections', reason: builtInsSentence }],
+      versions: [echoVersion],
+    });
+    const wrapper = await mountPlugins();
+
+    expect(tiles()).toEqual(['sample-echo', 'team-connections']);
+    const refused = bodyFind('[data-plugin="team-connections"]')!;
+    expect(refused.getAttribute('data-verdict')).toBe('refused');
+    expect(refused.textContent).toContain('Refused');
+    expect(refused.querySelector('[data-reason]')?.textContent?.trim()).toBe(builtInsSentence);
+    expect(bodyFind('[data-built-in]')).toBeNull();
+    expect(bodyFind('[data-no-plugins]')).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it('shows the refused folder rather than the empty state when the built-in is otherwise all there is', async () => {
+    listPlugins.mockResolvedValue({
+      plugins: [teamConnections],
+      refused: [{ id: 'team-connections', reason: builtInsSentence }],
+      versions: [{ id: 'team-connections', version: '1.0.0', name: null, active: true, verdict: 'refused', reason: builtInsSentence }],
+    });
+    const wrapper = await mountPlugins();
+
+    expect(bodyFind('[data-no-plugins]')).toBeNull();
+    const refused = [...document.body.querySelectorAll('[data-plugin="team-connections"]')];
+    expect(refused).toHaveLength(1);
+    expect(refused[0]!.getAttribute('data-verdict')).toBe('refused');
+    expect(refused[0]!.querySelector('[data-reason]')?.textContent?.trim()).toBe(builtInsSentence);
+
+    wrapper.unmount();
+  });
+});
