@@ -1504,7 +1504,11 @@ is the consent. It never reads a connection of another team.
   the Host's start. The name is reserved: no other member may take it (409). A name is refused
   when its letters, in any case and ignoring spaces, hyphens, underscores, dots and anything else,
   spell `teamconnections` - `TEAM-CONNECTIONS` and `Team_Connections` as much as `Team Connections`
-  - while `Team Connection`, `Team` and `Connections` hire as usual. Nobody hires, removes,
+  - while `Team Connection`, `Team` and `Connections` hire as usual. Letters are folded first, so a
+  look-alike counts as the letter it imitates: an accented or fullwidth Latin letter (`Téam`,
+  `Ｔeam`), and a Cyrillic or Greek letter drawn like a Latin one (Cyrillic `е`, `а`, `о`, `с`, `і`,
+  Greek `ο`, from a fixed table). Any other non-Latin letter is ignored, so a name in another script
+  hires as usual. Nobody hires, removes,
   renames, re-instructs, repoints or sets it up (409). It has no settings of its own.
 - **Shown only while the team has a connection.** The board, `status` (`/api/overview`) and the
   Manager's roster show it while at least one connection is assigned to the team; otherwise it is

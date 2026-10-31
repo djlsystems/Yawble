@@ -181,9 +181,12 @@ public sealed class TeamConnectionsTests : IAsyncLifetime
                 new { name = "Connections Two", agent = TeamConnectionsMember.Agent }, Ct));
             foreach (var name in ReservedSpellings)
             {
-                await RefusedAsync(who, $"take the name '{name}'", await client.PostAsJsonAsync($"/api/teams/{_alpha}/containers",
+                await NameRefusedAsync(who, $"take the name '{name}'", await client.PostAsJsonAsync($"/api/teams/{_alpha}/containers",
                     new { name, agent = "claude-headless" }, Ct));
-                await RefusedAsync(who, $"rename another member to '{name}'", await client.PatchAsJsonAsync($"/api/teams/{_alpha}/containers/Dev", new { name }, Ct));
+                // A person's rename reaches the name check (409); a Manager or the Concierge may rename nobody (403).
+                var rename = await client.PatchAsJsonAsync($"/api/teams/{_alpha}/containers/Dev", new { name }, Ct);
+                if (who == "person") await NameRefusedAsync(who, $"rename another member to '{name}'", rename);
+                else Assert.True(rename.StatusCode == HttpStatusCode.Forbidden, $"{who} rename to '{name}': {(int)rename.StatusCode}");
             }
 
             // REMOVE, RENAME, REPOINT, SET UP.
@@ -200,11 +203,11 @@ public sealed class TeamConnectionsTests : IAsyncLifetime
         // NAMES THAT ONLY LOOK CLOSE still hire, whoever asks, and keep the identifier they derive to.
         foreach (var (who, client) in new[] { ("person", _person), ("manager", manager), ("concierge", concierge) })
         {
-            foreach (var name in new[] { "Connections", "Team", "Team Connection", "Dev Quinn" })
+            foreach (var name in StillHires)
             {
                 var hired = await client.PostAsJsonAsync($"/api/teams/{_alpha}/containers", new { name, agent = "claude-headless" }, Ct);
                 Assert.True(hired.IsSuccessStatusCode, $"{who} could not hire '{name}': {(int)hired.StatusCode} {await hired.Content.ReadAsStringAsync(Ct)}");
-                var id = ContainerId.DeriveName(name)!;
+                var id = System.Text.Json.JsonDocument.Parse(await hired.Content.ReadAsStringAsync(Ct)).RootElement.GetProperty("id").GetString();
                 Assert.Equal(HttpStatusCode.OK, (await _person.DeleteAsync($"/api/teams/{_alpha}/containers/{id}", Ct)).StatusCode);
             }
         }
@@ -335,14 +338,23 @@ public sealed class TeamConnectionsTests : IAsyncLifetime
     private static readonly string[] ReservedSpellings =
     [
         "Team Connections", "team connections", " TEAM CONNECTIONS ", "TeamConnections", "TEAM-CONNECTIONS", "Team-Connections",
-        "Team_Connections", "Team.Connections", "Team--Connections", "Team - Connections", "Team Connections!",
+        "Team_Connections", "Team.Connections", "Team--Connections", "Team - Connections", "Team Connections!", "Team Connections 2",
+        // Look-alike letters: Cyrillic ie, a, o, es, i; Greek omicron; Latin e acute; fullwidth Latin.
+        "T\u0435am Connections", "Te\u0430m Connections", "Team C\u043Ennections", "Team \u0441onnections", "Team C\u03BFnnections",
+        "Team Connect\u0456ons", "T\u00E9am Connections", "\uFF34eam Connections",
+        "\uFF34\uFF45\uFF41\uFF4D \uFF23\uFF4F\uFF4E\uFF4E\uFF45\uFF43\uFF54\uFF49\uFF4F\uFF4E\uFF53",
+        "T\u0435\u0430m C\u03BFnn\u0435\u0441t\u0456\u043Ens", "Te\u0301am Connections",
     ];
+
+    /// <summary>Names that only look close, or are in another script, and still hire.</summary>
+    private static readonly string[] StillHires =
+        ["Connections", "Team", "Team Connection", "Team Connectionz", "Developer Rowan", "Developer Ren\u00E9e", "\u041A\u043E\u043C\u0430\u043D\u0434\u0430"];
 
     [Fact]
     public void The_reserved_name_is_its_letters_whatever_separates_them_and_hyphenated_names_still_derive_as_before()
     {
         foreach (var name in ReservedSpellings) Assert.True(TeamConnectionsMember.IsReserved(name), name);
-        foreach (var name in new[] { "Connections", "Team", "Team Connection", "Dev Quinn", "Team Connections Two", "My Team Connections", "", null })
+        foreach (var name in StillHires.Concat(["Team Connections Two", "My Team Connections", "T\u4E00am Connections", "", null]))
             Assert.False(TeamConnectionsMember.IsReserved(name), name ?? "null");
 
         // The real member keeps its name and id; DeriveName is unchanged for a hyphen or underscore.
@@ -379,6 +391,13 @@ public sealed class TeamConnectionsTests : IAsyncLifetime
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Api-Key", key);
         return client;
+    }
+
+    private static async Task NameRefusedAsync(string who, string what, HttpResponseMessage response)
+    {
+        var body = await response.Content.ReadAsStringAsync(Ct);
+        Assert.True(response.StatusCode == HttpStatusCode.Conflict, $"{who} could {what}: {(int)response.StatusCode} {body}");
+        Assert.Equal(TeamConnectionsMember.NameRefused, System.Text.Json.JsonDocument.Parse(body).RootElement.GetProperty("error").GetString());
     }
 
     private static async Task RefusedAsync(string who, string what, HttpResponseMessage response)
