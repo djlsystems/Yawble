@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// THE COST TILE AND THE COST DIALOG (B007Q), MOUNTED. The tile's four states - budgets, over budget,
+// THE COST TILE AND THE COST DIALOG, MOUNTED. The tile's four states - budgets, over budget,
 // no budgets, no rate - and the dialog's two tabs, headline figures, chart, table and note, read off
 // the screen. The cost route is a fixture in the pinned contract's shape (`test/costFixtures.ts`).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -63,8 +63,8 @@ afterEach(() => {
   resetBody();
 });
 
-async function mountStrip(options: CostOptions = {}) {
-  getTeamCost.mockResolvedValue(teamCost(options));
+async function mountStrip(options: CostOptions = {}, cost = teamCost(options)) {
+  getTeamCost.mockResolvedValue(cost);
   setActivePinia(createPinia());
   useConsoleStore().$patch({
     teams: [{ id: teamId, name: 'Alpha', memberAgents: [], repos: [] }],
@@ -120,6 +120,16 @@ describe('the Cost tile', () => {
     expect(first[0]!.attributes('style')).toContain('var(--os-ink-faint)');
     expect(first[1]!.attributes('style')).toContain('var(--os-series-1)');
     expect(first[2]!.attributes('style')).toContain('var(--os-series-2)');
+  });
+
+  it('colours an outcome by its global rank, not by its place among this team\'s outcomes', async () => {
+    const cost = teamCost();
+    cost.outcomes = cost.outcomes.filter((o) => o.id === null || o.id === 'o-docs');
+    await mountStrip({}, cost);
+
+    const first = tile().find('[data-cost-chart]').findAll('[data-cost-segment][data-week="0"]');
+    expect(first.map((s) => s.attributes('data-cost-segment'))).toEqual(['none', 'o-docs']);
+    expect(first[1]!.attributes('style')).toContain('var(--os-series-2)');
   });
 
   it('over budget: the bar in the critical colour and ⚠ 1 over', async () => {

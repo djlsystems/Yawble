@@ -2,7 +2,7 @@
 //
 // THE ACTIVITY TILE'S COMPACT FORM: lanes with no label and no caption, a click opening the Activity
 // dialog. The teams list drew it in its Activity column until that column became Cost · 8 weeks
-// (B007Q, `teams-view-cost.mount.spec.ts`); the form itself is still the tile's.
+// (`teams-view-cost.mount.spec.ts`); the form itself is still the tile's.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';

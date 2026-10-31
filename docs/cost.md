@@ -78,13 +78,20 @@ The team page's Activity tile is unchanged.
 
 ## Colours
 
-Outcomes keep a fixed order and colour: the first eight on the categorical palette's first slots,
-"No outcome" always neutral gray and stacked first. Dark mode uses the same palette's dark steps.
+Outcomes keep a fixed order and colour. The order is the same on every team: "No outcome" first,
+then outcomes by when they were created, oldest first. An outcome's colour comes from its place in
+that order among every outcome any team worked on in the eight weeks, not from its place on one
+team. So an outcome has the same colour on every row of the teams list, on the team page's tile and
+in the Cost dialog, even when a team works on only some outcomes. The first eight outcomes in that
+order take the categorical palette's first eight slots, and any outcome after them shares one
+neutral "Other" colour. "No outcome" is always neutral gray and stacked first. Because the order
+covers only the last eight weeks, an outcome can move up a slot when an older outcome has had no
+work for eight weeks. Dark mode uses the same palette's dark steps.
 Colour is never the only cue: the dialog's table carries every figure the chart draws.
 
 ## Routes
 
 | Route | Answers |
 |---|---|
-| `GET /api/teams/{team}/cost` | One team: `money` (`currency`, `agentHourlyRate`), the eight `weeks`, and per outcome (`id` null for No outcome) its `weekly` figures, `totals`, `value` (its budget) and `outcomeTotalCost` (its cost across all teams); then the team's `totals`. `cost` is null, never 0, when no rate is set. |
+| `GET /api/teams/{team}/cost` | One team: `money` (`currency`, `agentHourlyRate`), the eight `weeks`, and per outcome (`id` null for No outcome) its `weekly` figures, `totals`, `value` (its budget), `outcomeTotalCost` (its cost across all teams) and `rank` (its place in the order shared by every team, which picks its colour; null for No outcome); then the team's `totals`. `cost` is null, never 0, when no rate is set. |
 | `GET /api/teams/cost` | The same for every team at once (`money`, `weeks`, `teams[]`), for the Teams list. |

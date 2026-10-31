@@ -378,6 +378,12 @@ export interface TeamCostOutcome {
   totals: TeamCostTotals
   /** The outcome's total across ALL teams: the figure its budget is measured against. */
   outcomeTotalCost: number | null
+  /**
+   * The outcome's 1-based place in the fixed order (created, oldest first, ties by id) among every
+   * outcome ANY team served in the weeks - the same on every team, so it picks the outcome's colour.
+   * Null for No outcome.
+   */
+  rank: number | null
 }
 
 /** How the cost routes price agent time: the currency, and the rate (null when none is set). */

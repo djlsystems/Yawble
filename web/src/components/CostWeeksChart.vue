@@ -8,9 +8,10 @@ import { moneyText } from '../lib/outcomes';
  * the Cost tile's (`tile`), a teams-list row's (`row`) and the Cost dialog's (`large`, with its axis,
  * grid, legend and per-week hover box).
  *
- * THE CHART RULES (B007Q): series in the fixed order `costSeries` gives - No outcome first, at the
- * bottom of each stack in neutral gray, then each outcome on the categorical palette's first slots
- * (`--os-series-*`, which the theme steps for dark mode); a 2px surface gap between stacked segments;
+ * THE CHART RULES: series in the fixed order `costSeries` gives - No outcome first, at the
+ * bottom of each stack in neutral gray, then each outcome on the categorical palette slot of its
+ * GLOBAL rank (`--os-series-*`, which the theme steps for dark mode), so one outcome is one colour on
+ * every team; a 2px surface gap between stacked segments;
  * the data end (the top of a stack) rounded, the baseline square; one axis, in money or, without a
  * rate, in hours; a recessive grid; a legend for two or more series. Colour is never alone: the
  * dialog's table carries every figure, and the hover box names each outcome.

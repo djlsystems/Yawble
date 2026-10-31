@@ -22,7 +22,7 @@ import DialogTabs from './DialogTabs.vue';
 import TeamTokensPanel from './TeamTokensPanel.vue';
 
 /**
- * THE COST DIALOG (B007Q): what a team cost over the last eight weeks, in money by outcome against
+ * THE COST DIALOG: what a team cost over the last eight weeks, in money by outcome against
  * the budgets set for them, and - on its second tab - the tokens behind it. Opened from the team
  * page's Cost tile and from the teams list's Cost column.
  *

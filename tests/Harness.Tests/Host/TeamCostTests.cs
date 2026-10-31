@@ -226,6 +226,44 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
     }
 
     [Fact]
+    public async Task An_outcome_has_one_rank_on_every_team_whatever_else_each_team_lists()
+    {
+        var person = await host.PersonAsync();
+        var wide = await NewTeamAsync("Rank wide");
+        var narrow = await NewTeamAsync("Rank narrow");
+        var first = await CreateAsync(person, "Rank A");
+        var second = await CreateAsync(person, "Rank B");
+        var third = await CreateAsync(person, "Rank C");
+
+        var now = DateTimeOffset.UtcNow;
+        foreach (var outcome in new[] { first, second, third })
+        {
+            await RunAsync(await LinkedAsync(outcome.Id, wide), wide, now.AddHours(-2), now.AddHours(-1));
+        }
+        await RunAsync(await LinkedAsync(third.Id, narrow), narrow, now.AddHours(-2), now.AddHours(-1));
+        await RunAsync(NextCorrelation(), narrow, now.AddHours(-2), now.AddHours(-1));
+
+        static Dictionary<string, int?> Ranks(JsonElement outcomes) => outcomes.EnumerateArray().ToDictionary(
+            o => o.GetProperty("id").GetString() ?? "none",
+            o => o.GetProperty("rank").ValueKind == JsonValueKind.Null ? (int?)null : o.GetProperty("rank").GetInt32());
+
+        var wideRanks = Ranks((await CostAsync(person, wide)).GetProperty("outcomes"));
+        var narrowRanks = Ranks((await CostAsync(person, narrow)).GetProperty("outcomes"));
+
+        // THIRD ON ONE TEAM, THE ONLY OUTCOME ON THE OTHER: THE SAME RANK ON BOTH, IN CREATION ORDER.
+        Assert.True(wideRanks[first.Id] < wideRanks[second.Id]);
+        Assert.True(wideRanks[second.Id] < wideRanks[third.Id]);
+        Assert.Equal(wideRanks[third.Id], narrowRanks[third.Id]);
+        Assert.Null(narrowRanks["none"]);
+
+        // THE ALL-TEAMS READ CARRIES THE SAME RANKS.
+        var all = await JsonAsync(await person.GetAsync("/api/teams/cost", Ct));
+        var allNarrow = Ranks(all.GetProperty("teams").EnumerateArray()
+            .Single(t => t.GetProperty("team").GetString() == narrow).GetProperty("outcomes"));
+        Assert.Equal(narrowRanks[third.Id], allNarrow[third.Id]);
+    }
+
+    [Fact]
     public async Task An_unknown_team_is_not_found()
     {
         var person = await host.PersonAsync();

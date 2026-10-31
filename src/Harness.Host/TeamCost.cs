@@ -32,6 +32,12 @@ namespace Harness.Host;
 /// </para>
 ///
 /// <para>
+/// THE RANK IS GLOBAL: each outcome entry carries <c>rank</c>, its 1-based place in that same order
+/// among every outcome that ANY team's runs served in the eight weeks, so one outcome has one rank -
+/// and the web one colour - on every team, whichever of its outcomes a team happens to list.
+/// </para>
+///
+/// <para>
 /// <c>outcomeTotalCost</c> is the outcome's own cost - every team's work on it, all time, the figure
 /// <c>GET /api/outcomes</c> answers as its <c>cost</c> with no window - because a budget is shared by
 /// every team serving the outcome and is measured against all of it.
@@ -48,7 +54,7 @@ public static class TeamCost
 
     public sealed record OutcomeEntry(
         string? Id, string Name, decimal? Value,
-        IReadOnlyList<OutcomeFigures.Week> Weekly, Totals Totals, decimal? OutcomeTotalCost);
+        IReadOnlyList<OutcomeFigures.Week> Weekly, Totals Totals, decimal? OutcomeTotalCost, int? Rank);
 
     public sealed record TeamEntry(string Team, IReadOnlyList<OutcomeEntry> Outcomes, Totals Totals);
 
@@ -62,6 +68,10 @@ public static class TeamCost
         public required OutcomeFigures.Book Book { get; init; }
         public required IReadOnlyDictionary<string, Outcome> OutcomesById { get; init; }
         public required IReadOnlyDictionary<string, decimal?> OutcomeTotalCost { get; init; }
+
+        /// <summary>Each outcome any team's runs served in the eight weeks, by its 1-based place in the
+        /// fixed order (created, oldest first, ties by id): the same for every team.</summary>
+        public required IReadOnlyDictionary<string, int> Ranks { get; init; }
 
         public MoneyShape Money => new(Pricing.Currency, Pricing.AgentHourlyRate > 0 ? Pricing.AgentHourlyRate : null);
 
@@ -82,13 +92,31 @@ public static class TeamCost
                 }
             }
 
+            // THE GLOBAL ORDER: every outcome served in the weeks by any team's run, whatever team asks.
+            var weeks = OutcomeFigures.WeekStarts(now);
+            var from = weeks[0];
+            var to = weeks[^1].AddDays(7);
+            var byId = outcomes.ToDictionary(o => o.Id, StringComparer.Ordinal);
+            var ranks = book.Rows.Runs
+                .Where(r => r.TeamId is not null && r.EndedAt >= from && r.EndedAt < to)
+                .Select(r => book.OutcomeOf.GetValueOrDefault(r.Correlation))
+                .OfType<string>()
+                .Distinct(StringComparer.Ordinal)
+                .Select(id => byId.GetValueOrDefault(id))
+                .OfType<Outcome>()
+                .OrderBy(o => o.CreatedAt)
+                .ThenBy(o => o.Id, StringComparer.Ordinal)
+                .Select((o, index) => (o.Id, Rank: index + 1))
+                .ToDictionary(e => e.Id, e => e.Rank, StringComparer.Ordinal);
+
             return new Reading
             {
                 Pricing = pricing,
                 Now = now,
-                Weeks = OutcomeFigures.WeekStarts(now),
+                Weeks = weeks,
                 Book = book,
-                OutcomesById = outcomes.ToDictionary(o => o.Id, StringComparer.Ordinal),
+                OutcomesById = byId,
+                Ranks = ranks,
                 OutcomeTotalCost = seconds.ToDictionary(e => e.Key, e => pricing.CostOf(e.Value), StringComparer.Ordinal),
             };
         }
@@ -127,7 +155,8 @@ public static class TeamCost
                     BudgetOf(e.Outcome),
                     OutcomeFigures.Weekly(e.Runs, Pricing, Now),
                     TotalsOf(e.Runs),
-                    e.Outcome is null ? null : OutcomeTotalCost.GetValueOrDefault(e.Outcome.Id, Pricing.CostOf(0))))
+                    e.Outcome is null ? null : OutcomeTotalCost.GetValueOrDefault(e.Outcome.Id, Pricing.CostOf(0)),
+                    e.Outcome is null ? null : Ranks.GetValueOrDefault(e.Outcome.Id)))
                 .ToList();
 
             return new TeamEntry(team, entries, TotalsOf(runs));
@@ -219,7 +248,9 @@ public static class TeamCost
         + "`measuredRuns`, `unmeasuredRuns`, `cost`), `totals` (the team's own over the 8 weeks: "
         + "`agentSeconds`, `billable`, `measuredRuns`, `unmeasuredRuns`, `cost`) and `outcomeTotalCost` - "
         + "the outcome's cost across EVERY team and all time, what `GET /api/outcomes` gives as its `cost`, "
-        + "the figure its budget is measured against; null for No outcome. `totals`: the team's over all "
+        + "the figure its budget is measured against; null for No outcome - and `rank`, the outcome's 1-based "
+        + "place in that same order among every outcome ANY team served in the weeks, the same on every team "
+        + "(the web's colour for it); null for No outcome. `totals`: the team's over all "
         + "of it.\n\n"
         + "Cost is agent hours times `outcomes.agentHourlyRate`, rounded to the cent, and null - never 0 - "
         + "when no rate is set. `billable` sums measured runs only; a run that reported no usage is counted "

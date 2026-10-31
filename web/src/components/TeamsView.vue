@@ -67,7 +67,7 @@ function storedSort(): TeamSort {
 const sort = ref<TeamSort>(storedSort());
 
 /**
- * THE COST COLUMN (B007Q): every team's eight weeks by outcome, from ONE call for the whole list -
+ * THE COST COLUMN: every team's eight weeks by outcome, from ONE call for the whole list -
  * never one per row. Read when the list mounts; a team the answer does not carry shows a dash.
  */
 const teamsCost = ref<TeamsCost | null>(null);

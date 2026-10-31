@@ -41,8 +41,9 @@ export function priced(cost: { money: TeamCostMoney }): boolean {
 
 /**
  * THE FIXED ORDER: No outcome first (the bottom of each stack, neutral gray), then each outcome in the
- * route's order on the palette's first slots. The colour follows the outcome, never its rank among
- * whatever happens to be shown.
+ * route's order. AN OUTCOME'S COLOUR IS ITS GLOBAL RANK'S PALETTE SLOT (`rank`, the same on every
+ * team), never its position among whatever one team lists: one outcome is one colour on every teams-list
+ * row, the tile and the dialog. A rank past the last slot folds into Other.
  */
 export function costSeries(outcomes: readonly TeamCostOutcome[]): CostSeries[] {
   const none = outcomes.filter((o) => o.id === null)
@@ -50,14 +51,19 @@ export function costSeries(outcomes: readonly TeamCostOutcome[]): CostSeries[] {
 
   return [
     ...none.map((o) => ({ key: 'none', name: o.name || 'No outcome', colour: NoOutcomeColour, none: true, weekly: o.weekly })),
-    ...linked.map((o, index) => ({
+    ...linked.map((o) => ({
       key: o.id!,
       name: o.name,
-      colour: index < CostSeriesSlots ? `var(--os-series-${index + 1})` : OtherOutcomeColour,
+      colour: outcomeColour(o.rank),
       none: false,
       weekly: o.weekly,
     })),
   ]
+}
+
+/** An outcome's colour from its global rank: palette slots 1..8, then Other. */
+export function outcomeColour(rank: number | null): string {
+  return rank !== null && rank >= 1 && rank <= CostSeriesSlots ? `var(--os-series-${rank})` : OtherOutcomeColour
 }
 
 /** A week's figure for the chart: its cost when priced, otherwise its agent hours. */

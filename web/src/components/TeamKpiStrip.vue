@@ -218,7 +218,7 @@ watch(() => [workflowNav.workflowsAsks, props.teamId], takeWorkflowsAsk);
  */
 
 /**
- * THE COST TILE (B007Q): what the team cost over the last eight weeks, by outcome, against the
+ * THE COST TILE: what the team cost over the last eight weeks, by outcome, against the
  * budgets of the outcomes it serves - read from `GET /api/teams/{team}/cost` when the strip mounts,
  * when the team changes and each time the Cost dialog opens. The tokens behind it are the Cost
  * dialog's Tokens tab, from the log as before (`usage`).

@@ -1,7 +1,7 @@
 import type { TeamCost, TeamCostOutcome, TeamCostWeek } from '../api/outcomes';
 
 /**
- * A TEAM'S COST AS THE PINNED ROUTE ANSWERS IT (B007Q), for the Cost tile, dialog and list column's
+ * A TEAM'S COST AS THE PINNED ROUTE ANSWERS IT, for the Cost tile, dialog and list column's
  * mount tests: eight Monday-start UTC weeks, No outcome first, two budgeted outcomes (one shared with
  * another team, so its all-team total is more than this team's part), one unbudgeted outcome.
  *
@@ -21,7 +21,7 @@ export interface CostOptions {
 }
 
 function outcome(id: string | null, name: string, hoursPerWeek: number, billablePerWeek: number, rate: number | null,
-  value: number | null, outcomeTotal: number | null): TeamCostOutcome {
+  value: number | null, outcomeTotal: number | null, rank: number | null = null): TeamCostOutcome {
   const weekly: TeamCostWeek[] = Weeks.map((weekStart) => ({
     weekStart,
     agentSeconds: hoursPerWeek * 3600,
@@ -45,6 +45,7 @@ function outcome(id: string | null, name: string, hoursPerWeek: number, billable
       cost: rate === null ? null : (agentSeconds / 3600) * rate,
     },
     outcomeTotalCost: id === null || rate === null ? null : outcomeTotal,
+    rank: id === null ? null : rank,
   };
 }
 
@@ -54,9 +55,9 @@ export function teamCost(options: CostOptions = {}): TeamCost {
 
   const outcomes = [
     outcome(null, 'No outcome', 0.5, 100_000, rate, null, null),
-    outcome('o-billing', 'Ship billing', 1, 250_000, rate, budgets ? 1000 : null, 700),
-    outcome('o-docs', 'Docs refresh', 0.5, 50_000, rate, budgets ? 500 : null, options.over ? 650 : 300),
-    outcome('o-research', 'Research', 0.25, 25_000, rate, null, 120),
+    outcome('o-billing', 'Ship billing', 1, 250_000, rate, budgets ? 1000 : null, 700, 1),
+    outcome('o-docs', 'Docs refresh', 0.5, 50_000, rate, budgets ? 500 : null, options.over ? 650 : 300, 2),
+    outcome('o-research', 'Research', 0.25, 25_000, rate, null, 120, 3),
   ];
 
   const agentSeconds = outcomes.reduce((sum, o) => sum + o.totals.agentSeconds, 0);

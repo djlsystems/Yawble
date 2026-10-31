@@ -6,7 +6,7 @@ import { vResizableColumns } from '../lib/resizableColumns';
 import TeamTokensChart from './TeamTokensChart.vue';
 
 /**
- * THE COST DIALOG'S TOKENS TAB: what the Tokens dialog showed before the tile became Cost (B007Q),
+ * THE COST DIALOG'S TOKENS TAB: what the Tokens dialog showed before the tile became Cost,
  * MOVED HERE UNCHANGED - the ledger's runs chart with its metric switch, then the team total from
  * the message log with its in / cache read / cache write / out breakout, by brand and by member.
  *

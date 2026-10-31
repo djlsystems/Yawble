@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// THE TEAMS LIST'S COST · 8 WEEKS COLUMN (B007Q), in place of the Activity column: each team's
+// THE TEAMS LIST'S COST · 8 WEEKS COLUMN, in place of the Activity column: each team's
 // stacked weekly chart at row height, its period total and ⚠ when one of its outcomes is over
 // budget, all from ONE call for the whole list; a click on it opens that team's Cost dialog rather
 // than the team. The Activity column's Same time span switch and legend are gone.
@@ -147,6 +147,26 @@ describe('the Cost · 8 weeks column', () => {
     expect(cell.findAll('[data-cost-segment][data-week="0"]').map((s) => s.attributes('data-cost-segment')))
       .toEqual(['none', 'o-billing', 'o-docs', 'o-research']);
     expect(cell.find('[data-teams-cost-total]').text()).toBe('$1,080');
+  });
+
+  it('gives one outcome one colour on every row, whatever its place among each team\'s outcomes', async () => {
+    // Alpha serves all three outcomes, Beta only Research: Research is third on Alpha's row and the
+    // only one on Beta's, and its colour is its global rank's slot on both.
+    const both = teamsCost();
+    const beta = both.teams[1]!;
+    beta.outcomes = beta.outcomes.filter((o) => o.id === null || o.id === 'o-research');
+    getTeamsCost.mockResolvedValue(both);
+    const { view } = await mountView();
+
+    const fillOf = (team: string, key: string) =>
+      row(view, team).find(`[data-cost-segment="${key}"][data-week="0"]`).attributes('style');
+    expect(row(view, 'beta').findAll('[data-cost-segment][data-week="0"]').map((s) => s.attributes('data-cost-segment')))
+      .toEqual(['none', 'o-research']);
+    expect(fillOf('alpha', 'o-research')).toContain('var(--os-series-3)');
+    expect(fillOf('beta', 'o-research')).toContain('var(--os-series-3)');
+    expect(fillOf('beta', 'o-research')).not.toContain('var(--os-series-1)');
+    expect(fillOf('beta', 'none')).toContain('var(--os-ink-faint)');
+    expect(getTeamsCost).toHaveBeenCalledTimes(1);
   });
 
   it('shows ⚠ only on a team with an outcome over budget', async () => {
