@@ -631,8 +631,7 @@ public static class OutcomeEndpoints
             IReadOnlyList<OutcomeBacklogItem> items, DateTimeOffset? from, DateTimeOffset? to)
         {
             var now = DateTimeOffset.UtcNow;
-            var pricing = new OutcomeFigures.Pricing(
-                settings.OutcomesCurrency, settings.OutcomesAgentHourlyRate, settings.OutcomesDeclaredCountsAs);
+            var pricing = OutcomeFigures.Pricing.Of(settings);
             return new Dashboard(
                 pricing, whole, items, OutcomeFigures.Resolution(all),
                 OutcomeFigures.BlockedByWorkflow(whole.Rows, now, from, to), now);
