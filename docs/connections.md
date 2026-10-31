@@ -8,6 +8,26 @@ OAuth client and the account's refresh token, refreshes and rotates the tokens, 
 only a fresh access token on each run. No plugin writes OAuth code, and no long-lived credential ever
 leaves the Host.
 
+## Making a connection wherever one is asked for
+
+**A connection can be made wherever one is asked for.** Every place that chooses a connection - a
+plugin member's slot (at hire, in Member settings, in a solution install), Team settings → Connections
+and New team → Connections, the guided setup's Advanced… inputs, and Admin → MCP servers (a web
+address's API key, each environment variable's connection) - lists the existing connections that place
+accepts, and its **last entry is always New connection...**. It opens the connection wizard over the
+dialog it is in, offering only the kinds that place accepts; nothing typed underneath is lost. On save
+the new connection is chosen at once, the list is read again, and whatever depends on the choice
+follows it (an MCP server's Field lists the new connection's fields). Cancel leaves the select and the
+form as they were. A sign-in that leaves the page (Google's guided one) opens in another tab and waits;
+a Microsoft one shows its code in place. An MCP variable's New connection... opens at API key's
+**Other**, so a person names their own fields (`key`, `autoSave`, `endpoint`).
+
+**New places asking for a connection use `ConnectionSelect`** (`web/src/components/ConnectionSelect.vue`):
+it takes the accepted kinds and providers (or a slot, and the team's assigned connections), and
+optionally a slot's need as ConnectDialog takes it, v-models the chosen connection's id, and emits
+`created` with a new connection. No new Host route is involved: the wizard saves through the routes
+Admin → Connections uses.
+
 ## Kinds
 
 Each connection has one kind, and each kind its own fields:
@@ -661,8 +681,9 @@ person's decision, made where they manage a team**, and a plugin member picks on
 been given. A new team has none.
 
 - **Team settings → Connections** lists the connections assigned to the team and, under each, the members
-  of the team using it. **Add connection** picks an existing one; **New connection...** opens the same
-  wizard as Admin → Connections and assigns what it saves to this team; **Remove** takes one off the team.
+  of the team using it. **Add connection** picks an existing one, and its last entry, **New
+  connection...**, opens the same wizard as Admin → Connections and assigns what it saves to this team;
+  **Remove** takes one off the team.
 - **New team → Connections** does the same while the team is created: the team starts with those.
 - **Removing asks first**, naming the members that use it. Confirmed, the assignment and every binding of
   it on that team go in one transaction; each member unbound reads **Needs you** until a person binds
