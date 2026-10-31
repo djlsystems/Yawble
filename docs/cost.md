@@ -1,8 +1,9 @@
 # What a team costs
 
 A team's cost is read in money, by the outcomes it works on, against the budgets set for them, and
-only then in the tokens behind it. It is shown in three places: the **Cost** tile on the team's
-page, the **Cost** dialog that tile opens, and the **Cost · 8 weeks** column of the Teams list.
+only then in the tokens behind it. It is shown in four places: the **summary** above the Teams
+list, the **Cost** tile on the team's page, the **Cost** dialog that tile opens, and the
+**Cost · 8 weeks** column of the Teams list.
 
 Every figure comes from the usage ledger, over the last eight weeks (Monday-start weeks in UTC,
 oldest first, the same weeks the Outcomes dashboard uses). Nothing is estimated.
@@ -25,6 +26,42 @@ its budget is measured against **the outcome's total cost across all teams**, an
 show the same spent against the same budget. A team's own part of that cost is in the dialog's
 table, under **Cost**; the **Budget** column beside it is the outcome's all-team total against its
 budget.
+
+## The summary above the Teams list
+
+Before any team is opened, the Teams list answers four questions in four tiles: what is this
+costing, are we inside budget, where is the money going, and does anything need me. They sit in
+one row above the list, two to a row on a narrower screen and one on a phone. At the right of the
+**Teams** title, `Last 8 weeks · <first week> – <last day>` names the period: the first Monday of
+the eight weeks and the last day of the eighth. Every figure is every team's work together,
+from one call; when that call cannot be read, the tiles and the period line are not shown and the
+list is unchanged.
+
+- **Spend** (`8 wk`): the eight weeks' cost in the instance's currency; `▲ <n>%` or `▼ <n>%`
+  `vs prior 8 wk`, the change on the eight weeks before (no line when those weeks had none);
+  `<h> agent h at <rate>/h`; and the eight weeks as columns, one series, with each week's date and
+  figure on hover. **Without a rate** it reads agent hours, the change is in hours, and the line
+  says `no rate set`. Clicking it opens Outcomes.
+- **Budgets** (`<n> outcomes`, how many carry a budget): the share used across every budgeted
+  outcome, `<spent> of <budget>` and a bar. Each outcome's spent is its total across every team,
+  as on the Cost tile. Then `All inside budget`, or, in the critical colour,
+  `⚠ <outcome names> over`; and `· <amount> unbudgeted` when outcomes with no budget, or work
+  linked to no outcome, spent anything. **No budgets:** `None set` and
+  `Give an outcome a value to track it here.` **No rate:** `—` and
+  `Set an agent hourly rate in Outcomes to measure spend against budgets.` Clicking it opens
+  Outcomes.
+- **Where it goes** (`by outcome`): the three outcomes that spent most, then
+  **Other / no outcome** (every other outcome and the work linked to none), each a bar in its
+  outcome's colour with its amount. The four bars share one scale. An outcome with a budget has a
+  tick where its budget falls, and `⚠` after its name when it is over. Without a rate the bars are
+  agent hours and carry no ticks. Clicking a bar opens that outcome in Outcomes; Other opens the
+  Outcomes list.
+- **Right now**: open workflows, members running, and `⚠ waiting on you` - the same count the
+  app bar's **Needs you** shows - in the warning colour above 0, and plain at 0. Clicking waiting on
+  you opens the Needs-you list.
+
+Status colours mark only an outcome over budget and what waits on you; the names, amounts and `⚠`
+say the same without colour.
 
 ## The Cost tile
 
@@ -73,6 +110,11 @@ hours without a rate), and `⚠` when one of the team's outcomes is over its bud
 that team's Cost dialog; clicking anywhere else on the row opens the team, as before. The whole
 list is read in one call.
 
+**Same scale**, a switch in the column's heading, sets how the rows' charts compare. Off (the
+default), each row's chart uses its own scale, so a small team's weeks fill its chart as a big
+team's do. On, every row is drawn on the largest team's scale - the biggest week of any team - so
+bars compare across teams. The choice is remembered in this browser.
+
 This column replaces the Activity column, and its **Same time span** switch and legend went with it.
 The team page's Activity tile is unchanged.
 
@@ -81,8 +123,8 @@ The team page's Activity tile is unchanged.
 Outcomes keep a fixed order and colour. The order is the same on every team: "No outcome" first,
 then outcomes by when they were created, oldest first. An outcome's colour comes from its place in
 that order among every outcome any team worked on in the eight weeks, not from its place on one
-team. So an outcome has the same colour on every row of the teams list, on the team page's tile and
-in the Cost dialog, even when a team works on only some outcomes. The first eight outcomes in that
+team. So an outcome has the same colour on the summary's Where it goes tile, on every row of the teams
+list, on the team page's tile and in the Cost dialog, even when a team works on only some outcomes. The first eight outcomes in that
 order take the categorical palette's first eight slots, and any outcome after them shares one
 neutral "Other" colour. "No outcome" is always neutral gray and stacked first. Because the order
 covers only the last eight weeks, an outcome can move up a slot when an older outcome has had no
@@ -95,10 +137,11 @@ Colour is never the only cue: the dialog's table carries every figure the chart 
 |---|---|
 | `GET /api/teams/{team}/cost` | One team: `money` (`currency`, `agentHourlyRate`), the eight `weeks`, and per outcome (`id` null for No outcome) its `weekly` figures, `totals`, `value` (its budget), `outcomeTotalCost` (its cost across all teams) and `rank` (its place in the order shared by every team, which picks its colour; null for No outcome); then the team's `totals`. `cost` is null, never 0, when no rate is set. |
 | `GET /api/teams/cost` | The same for every team at once (`money`, `weeks`, `teams[]`), for the Teams list. |
+| `GET /api/teams/cost/summary` | The summary above the Teams list: `rate` (null without one); the eight `weeks` (`weekStart`, `agentSeconds`, `cost`), `periodStart` and `periodEnd`; the eight weeks' `total` and the eight before as `prior`; per outcome (`id` null for No outcome) its `name`, `rank`, `agentSeconds`, `cost`, `budget` and `spentTotal` (its spend across every team); and `rightNow` (`openWorkflows`, `membersRunning`, `waitingOnYou`). `cost` is null, never 0, when no rate is set. |
 
 In the web app, one module decides every outcome's colour: `web/src/lib/outcomeColours.ts`. Its
 `outcomeColour({ id, rank })` returns the colour for one outcome entry, `outcomeColours(entries)` builds
 an id-to-colour map (keyed `null` for No outcome) from one team's entries or every team's, and
-`colourForRank(rank)` returns the colour for a bare rank. The teams list's Cost column, the Cost tile
-and the Cost dialog all use it, and any new cost view should use it too, so that an outcome is never
+`colourForRank(rank)` returns the colour for a bare rank. The summary's Where it goes tile, the teams
+list's Cost column, the Cost tile and the Cost dialog all use it, and any new cost view should use it too, so that an outcome is never
 two colours.

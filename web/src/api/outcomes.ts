@@ -410,3 +410,52 @@ export interface TeamsCost {
 export const getTeamCost = (team: string) => json<TeamCost>(`/api/teams/${encodeURIComponent(team)}/cost`)
 
 export const getTeamsCost = () => json<TeamsCost>('/api/teams/cost')
+
+// ---- The instance's cost over the last eight weeks, for the summary above the teams list --------
+
+/** One week of every team's work together; `cost` is null when no rate is set, never 0. */
+export interface CostSummaryWeek {
+  weekStart: string
+  agentSeconds: number
+  cost: number | null
+}
+
+/** Agent seconds and cost over a period; `cost` is null when no rate is set, never 0. */
+export interface CostSummaryTotals {
+  agentSeconds: number
+  cost: number | null
+}
+
+/** One outcome's eight weeks across every team, or `id: null` for work linked to no outcome. */
+export interface CostSummaryOutcome {
+  id: string | null
+  name: string
+  /** Its place in the instance-wide fixed order, which picks its colour; null for No outcome. */
+  rank: number | null
+  agentSeconds: number
+  cost: number | null
+  /** What achieving it is worth, in the instance's currency; null when none is set. */
+  budget: number | null
+  /** What it has spent across every team, the figure its budget is measured against. */
+  spentTotal: number | null
+}
+
+/** `GET /api/teams/cost/summary`: the four tiles above the teams list, in one answer. */
+export interface CostSummary {
+  /** The agent hourly rate; null when none is set. */
+  rate: number | null
+  /** The instance's currency, when the route sends it; the teams cost route's otherwise. */
+  currency?: string
+  /** Eight Monday-start UTC weeks, oldest first. */
+  weeks: CostSummaryWeek[]
+  /** The first week's Monday and the last week's last day, `YYYY-MM-DD`. */
+  periodStart: string
+  periodEnd: string
+  total: CostSummaryTotals
+  /** The eight weeks before, for the change. */
+  prior: CostSummaryTotals
+  outcomes: CostSummaryOutcome[]
+  rightNow: { openWorkflows: number; membersRunning: number; waitingOnYou: number }
+}
+
+export const getCostSummary = () => json<CostSummary>('/api/teams/cost/summary')

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import type { NeedsYouItem } from '../api/types';
@@ -58,6 +58,13 @@ watch(
   (connected, was) => {
     if (connected && was === false) void needsYou.loadLive();
   },
+);
+
+/** The list, opened from elsewhere too: the teams summary's waiting on you asks for it. */
+const menu = ref<{ show: () => void } | null>(null);
+watch(
+  () => useWorkflowNavStore().needsYouAsks,
+  () => menu.value?.show(),
 );
 
 const waiting = computed(() => (count.value ?? 0) > 0);
@@ -133,7 +140,7 @@ function open(target: NeedsYouOpen) {
     <span class="needs-you-count" data-test="needs-you-count">{{ count ?? '–' }}</span>
     <q-tooltip>{{ label }}</q-tooltip>
 
-    <q-menu anchor="bottom right" self="top right" class="above-concierge" @before-show="needsYou.load()">
+    <q-menu ref="menu" anchor="bottom right" self="top right" class="above-concierge" @before-show="needsYou.load()">
       <div class="needs-you-panel q-pa-sm" data-test="needs-you-panel">
         <div class="row items-center no-wrap q-mb-xs">
           <div class="text-subtitle2">Needs you</div>

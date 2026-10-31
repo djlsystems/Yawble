@@ -30,6 +30,12 @@ export const useWorkflowNavStore = defineStore('workflowNav', {
     teamCommandAsks: 0,
     /** Counts asks for the Outcomes dialog at its rate (the Cost dialog's "Change in Outcomes"). */
     outcomeRateAsks: 0,
+    /** The outcome the Outcomes dialog is asked to open at (null: its list), from the teams summary. */
+    outcomeAt: null as string | null,
+    /** Counts asks for the Outcomes dialog, so asking for the same outcome twice is still a change. */
+    outcomeAsks: 0,
+    /** Counts asks for the Needs-you list (the teams summary's waiting on you). */
+    needsYouAsks: 0,
   }),
 
   actions: {
@@ -44,6 +50,19 @@ export const useWorkflowNavStore = defineStore('workflowNav', {
     openOutcomeRate() {
       this.backlogOpen = false
       this.outcomeRateAsks += 1
+    },
+
+    /** Asks the layout for the Outcomes dialog, at one outcome or (null) on its list. */
+    openOutcome(id: string | null) {
+      this.backlogOpen = false
+      this.outcomeAt = id
+      this.outcomeAsks += 1
+    },
+
+    /** Asks the app bar's Needs you control to open its list. */
+    openNeedsYou() {
+      this.backlogOpen = false
+      this.needsYouAsks += 1
     },
 
     /** Opens the Backlog dialog on its list. */

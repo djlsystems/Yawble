@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Harness.Containers;
 using Harness.Contracts;
 using Harness.Host;
 using Microsoft.Data.Sqlite;
@@ -270,6 +271,196 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
         Assert.Equal(HttpStatusCode.NotFound, (await person.GetAsync("/api/teams/no-such-team/cost", Ct)).StatusCode);
     }
 
+    // ---- the teams list's summary ----
+
+    [Fact]
+    public async Task The_summary_sums_eight_weeks_and_the_eight_before_them_from_the_ledger()
+    {
+        var person = await host.PersonAsync();
+        var team = await NewTeamAsync("Summary prior");
+        var now = DateTimeOffset.UtcNow;
+
+        try
+        {
+            await SetOkAsync(person, TenantSettings.OutcomesAgentHourlyRateName, 30);
+            var before = await SummaryAsync(person);
+
+            await RunAsync(NextCorrelation(), team, now.AddHours(-2), now.AddHours(-1));
+            // THE EIGHT WEEKS BEFORE: in prior, never in total.
+            await RunAsync(NextCorrelation(), team, now.AddDays(-80).AddHours(-2), now.AddDays(-80));
+            // OLDER STILL: in neither.
+            await RunAsync(NextCorrelation(), team, now.AddDays(-150).AddHours(-4), now.AddDays(-150));
+
+            var after = await SummaryAsync(person);
+
+            Assert.Equal(30, after.GetProperty("rate").GetInt32());
+            Assert.Equal(3600, Seconds(after, "total") - Seconds(before, "total"), 3);
+            Assert.Equal(7200, Seconds(after, "prior") - Seconds(before, "prior"), 3);
+            Assert.Equal(30m, Cost(after, "total") - Cost(before, "total"));
+            Assert.Equal(60m, Cost(after, "prior") - Cost(before, "prior"));
+
+            // EIGHT MONDAY-START WEEKS, OLDEST FIRST, THE CURRENT ONE LAST, SUMMING TO THE TOTAL.
+            var weeks = after.GetProperty("weeks").EnumerateArray().ToList();
+            Assert.Equal(8, weeks.Count);
+            var starts = OutcomeFigures.WeekStarts(now).Select(Day).ToList();
+            Assert.Equal(starts, weeks.Select(w => w.GetProperty("weekStart").GetString()));
+            Assert.Equal(Day(OutcomeFigures.WeekOf(now)), weeks[^1].GetProperty("weekStart").GetString());
+            Assert.Equal(Seconds(after, "total"), weeks.Sum(w => w.GetProperty("agentSeconds").GetDouble()), 3);
+            Assert.Equal(starts[0], after.GetProperty("periodStart").GetString());
+            Assert.Equal(Day(DateTimeOffset.UtcNow), after.GetProperty("periodEnd").GetString());
+
+            // THE SAME RUNS THE PER-TEAM FIGURES ARE: the total is the teams' totals summed.
+            var all = await JsonAsync(await person.GetAsync("/api/teams/cost", Ct));
+            Assert.Equal(
+                all.GetProperty("teams").EnumerateArray().Sum(t => t.GetProperty("totals").GetProperty("agentSeconds").GetDouble()),
+                Seconds(after, "total"), 3);
+        }
+        finally
+        {
+            await SetAsync(person, TenantSettings.OutcomesAgentHourlyRateName, null);
+        }
+    }
+
+    [Fact]
+    public async Task The_summary_measures_a_budget_shared_across_teams_against_its_total_and_keeps_an_unspent_budget()
+    {
+        var person = await host.PersonAsync();
+        var alpha = await NewTeamAsync("Summary share a");
+        var beta = await NewTeamAsync("Summary share b");
+        var shared = await CreateAsync(person, "Summary shared", value: "500");
+        var unspent = await CreateAsync(person, "Summary unspent", value: "75");
+        var now = DateTimeOffset.UtcNow;
+
+        await RunAsync(await LinkedAsync(shared.Id, alpha), alpha, now.AddHours(-2), now.AddHours(-1));
+        await RunAsync(await LinkedAsync(shared.Id, beta), beta, now.AddHours(-3), now.AddHours(-1));
+        // OUTSIDE THE EIGHT WEEKS: in what the budget is measured against, never in the weeks.
+        await RunAsync(await LinkedAsync(shared.Id, alpha), alpha, now.AddDays(-70).AddHours(-1), now.AddDays(-70));
+
+        try
+        {
+            await SetOkAsync(person, TenantSettings.OutcomesAgentHourlyRateName, 60);
+            var summary = await SummaryAsync(person);
+
+            var entry = OutcomeOf(summary, shared.Id);
+            Assert.Equal(shared.Name, entry.GetProperty("name").GetString());
+            Assert.Equal(10800, entry.GetProperty("agentSeconds").GetDouble(), 3);
+            Assert.Equal(180m, entry.GetProperty("cost").GetDecimal());
+            Assert.Equal(500m, entry.GetProperty("budget").GetDecimal());
+            Assert.Equal(240m, entry.GetProperty("spentTotal").GetDecimal());
+
+            // THE SAME FIGURES COST 1 GIVES: the outcomes dashboard's cost, and the all-teams read's
+            // total cost and rank.
+            var list = await JsonAsync(await person.GetAsync("/api/outcomes", Ct));
+            var figures = list.GetProperty("outcomes").EnumerateArray()
+                .Single(o => o.GetProperty("id").GetString() == shared.Id).GetProperty("figures");
+            Assert.Equal(figures.GetProperty("cost").GetProperty("amount").GetDecimal(), entry.GetProperty("spentTotal").GetDecimal());
+            var perTeam = (await CostAsync(person, alpha)).GetProperty("outcomes").EnumerateArray()
+                .Single(o => o.GetProperty("id").GetString() == shared.Id);
+            Assert.Equal(perTeam.GetProperty("outcomeTotalCost").GetDecimal(), entry.GetProperty("spentTotal").GetDecimal());
+            Assert.Equal(perTeam.GetProperty("rank").GetInt32(), entry.GetProperty("rank").GetInt32());
+
+            // A BUDGET WITH NO SPEND IN THE WEEKS IS STILL LISTED, at nothing.
+            var idle = OutcomeOf(summary, unspent.Id);
+            Assert.Equal(0, idle.GetProperty("agentSeconds").GetDouble());
+            Assert.Equal(0m, idle.GetProperty("cost").GetDecimal());
+            Assert.Equal(75m, idle.GetProperty("budget").GetDecimal());
+            Assert.Equal(0m, idle.GetProperty("spentTotal").GetDecimal());
+            Assert.Equal(JsonValueKind.Null, idle.GetProperty("rank").ValueKind);
+        }
+        finally
+        {
+            await SetAsync(person, TenantSettings.OutcomesAgentHourlyRateName, null);
+        }
+    }
+
+    [Fact]
+    public async Task The_summary_puts_unlinked_work_under_No_outcome_first()
+    {
+        var person = await host.PersonAsync();
+        var team = await NewTeamAsync("Summary unlinked");
+        var outcome = await CreateAsync(person, "Summary linked");
+        var now = DateTimeOffset.UtcNow;
+
+        // SOME UNLINKED WORK, so No outcome is there before as well as after.
+        await RunAsync(NextCorrelation(), team, now.AddHours(-1), now.AddMinutes(-30));
+        var before = NoOutcome(await SummaryAsync(person)).GetProperty("agentSeconds").GetDouble();
+
+        await RunAsync(NextCorrelation(), team, now.AddHours(-2), now.AddHours(-1));
+        var unlinked = await LinkedAsync(outcome.Id, team);
+        Assert.True((await Outcomes.UnlinkAsync(unlinked, team, new OutcomeActor(Email, OutcomeActorKind.Person),
+            new TriggerAudit(null, Email, TenantActions.WorkflowOutcomeChanged, null, null, null), Ct)).Ok);
+        await RunAsync(unlinked, team, now.AddHours(-1), now.AddMinutes(-30));
+        await RunAsync(await LinkedAsync(outcome.Id, team), team, now.AddHours(-1), now.AddMinutes(-30));
+
+        var summary = await SummaryAsync(person);
+        var none = NoOutcome(summary);
+        Assert.Equal(none.GetRawText(), summary.GetProperty("outcomes").EnumerateArray().First().GetRawText());
+        Assert.Equal("No outcome", none.GetProperty("name").GetString());
+        Assert.Equal(5400, none.GetProperty("agentSeconds").GetDouble() - before, 3);
+        Assert.Equal(JsonValueKind.Null, none.GetProperty("rank").ValueKind);
+        Assert.Equal(JsonValueKind.Null, none.GetProperty("budget").ValueKind);
+        Assert.Equal(JsonValueKind.Null, none.GetProperty("spentTotal").ValueKind);
+        Assert.Equal(1800, OutcomeOf(summary, outcome.Id).GetProperty("agentSeconds").GetDouble(), 3);
+    }
+
+    [Fact]
+    public async Task The_summary_with_no_rate_prices_nothing_and_never_answers_zero()
+    {
+        var person = await host.PersonAsync();
+        var team = await NewTeamAsync("Summary unpriced");
+        var outcome = await CreateAsync(person, "Summary unpriced", value: "100");
+        var now = DateTimeOffset.UtcNow;
+        await RunAsync(await LinkedAsync(outcome.Id, team), team, now.AddHours(-2), now.AddHours(-1));
+        await RunAsync(NextCorrelation(), team, now.AddHours(-2), now.AddHours(-1));
+        await RunAsync(NextCorrelation(), team, now.AddDays(-80).AddHours(-1), now.AddDays(-80));
+
+        var summary = await SummaryAsync(person);
+
+        Assert.Equal(JsonValueKind.Null, summary.GetProperty("rate").ValueKind);
+        Assert.Equal(JsonValueKind.Null, summary.GetProperty("total").GetProperty("cost").ValueKind);
+        Assert.Equal(JsonValueKind.Null, summary.GetProperty("prior").GetProperty("cost").ValueKind);
+        Assert.True(Seconds(summary, "total") >= 7200);
+        Assert.True(Seconds(summary, "prior") >= 3600);
+        Assert.All(summary.GetProperty("weeks").EnumerateArray(),
+            w => Assert.Equal(JsonValueKind.Null, w.GetProperty("cost").ValueKind));
+        Assert.All(summary.GetProperty("outcomes").EnumerateArray(), o =>
+        {
+            Assert.Equal(JsonValueKind.Null, o.GetProperty("cost").ValueKind);
+            Assert.Equal(JsonValueKind.Null, o.GetProperty("spentTotal").ValueKind);
+        });
+        Assert.Equal(100m, OutcomeOf(summary, outcome.Id).GetProperty("budget").GetDecimal());
+    }
+
+    [Fact]
+    public async Task The_summary_counts_right_now_as_the_rollup_and_Needs_you_do()
+    {
+        var person = await host.PersonAsync();
+        var team = await NewTeamAsync("Summary needs");
+        var registry = host.Services.GetRequiredService<TeamRegistry>();
+        await registry.SetPausedAsync(team, true, Ct);
+
+        var manager = host.Services.GetRequiredService<ContainerHost>().Find(new ContainerId(team, TeamRegistry.DefaultManagerName))!;
+        var log = host.Services.GetRequiredService<IMessageLog>();
+        var row = await log.AppendAsync(new NewMessage(
+            MessageTypes.Blocked, """{"reason":"The clone is missing."}""", manager.Id.ToString()), Ct);
+        manager.MarkBlocked("The clone is missing.");
+        manager.NoteMarkRow(row);
+
+        var summary = await SummaryAsync(person);
+        var needsYou = await JsonAsync(await person.GetAsync("/api/needs-you", Ct));
+        var rollup = await JsonAsync(await person.GetAsync("/api/teams/rollup", Ct));
+
+        var rightNow = summary.GetProperty("rightNow");
+        var waiting = rightNow.GetProperty("waitingOnYou").GetInt32();
+        Assert.True(waiting >= 1);
+        Assert.Equal(needsYou.GetProperty("items").GetArrayLength(), waiting);
+
+        var rows = rollup.GetProperty("teams").EnumerateArray().ToList();
+        Assert.Equal(rows.Sum(r => r.GetProperty("openWorkflows").GetProperty("openCount").GetInt32()),
+            rightNow.GetProperty("openWorkflows").GetInt32());
+        Assert.Equal(rows.Sum(r => r.GetProperty("running").GetInt32()), rightNow.GetProperty("membersRunning").GetInt32());
+    }
+
     // ---- fixtures ----
 
     private static JsonElement Single(JsonElement read) => Assert.Single(read.GetProperty("outcomes").EnumerateArray().ToList());
@@ -279,6 +470,21 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync(Ct));
         return JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync(Ct));
     }
+
+    private async Task<JsonElement> SummaryAsync(HttpClient person) =>
+        await JsonAsync(await person.GetAsync("/api/teams/cost/summary", Ct));
+
+    private static double Seconds(JsonElement summary, string amount) => summary.GetProperty(amount).GetProperty("agentSeconds").GetDouble();
+
+    private static decimal Cost(JsonElement summary, string amount) => summary.GetProperty(amount).GetProperty("cost").GetDecimal();
+
+    private static string Day(DateTimeOffset at) => at.UtcDateTime.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static JsonElement OutcomeOf(JsonElement summary, string id) =>
+        summary.GetProperty("outcomes").EnumerateArray().Single(o => o.GetProperty("id").GetString() == id);
+
+    private static JsonElement NoOutcome(JsonElement summary) =>
+        summary.GetProperty("outcomes").EnumerateArray().Single(o => o.GetProperty("id").ValueKind == JsonValueKind.Null);
 
     private async Task<JsonElement> CostAsync(HttpClient person, string team) =>
         await JsonAsync(await person.GetAsync($"/api/teams/{team}/cost", Ct));
