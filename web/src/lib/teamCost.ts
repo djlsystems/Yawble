@@ -1,4 +1,5 @@
 import type { TeamCost, TeamCostMoney, TeamCostOutcome, TeamCostTotals, TeamCostWeek } from '../api/outcomes'
+import { outcomeColour } from './outcomeColours'
 import { moneyText } from './outcomes'
 
 /**
@@ -11,15 +12,6 @@ import { moneyText } from './outcomes'
  * NO RATE IS NO DOLLARS, NEVER $0. The route's `cost` is null when no agent hourly rate is set; every
  * figure then falls back to agent hours, and nothing here prints a money amount for it.
  */
-
-/** The categorical palette's slots (`--os-series-1..8`). An outcome past the last folds into Other. */
-export const CostSeriesSlots = 8
-
-/** "No outcome": neutral gray, stacked first (at the bottom). Stepped per mode by the theme. */
-export const NoOutcomeColour = 'var(--os-ink-faint)'
-
-/** Outcomes past the palette's last slot share one recessive colour: a hue is never generated or cycled. */
-export const OtherOutcomeColour = 'var(--os-rule-strong)'
 
 /** The critical colour: an outcome over its budget. */
 export const CriticalColour = 'var(--os-error)'
@@ -41,29 +33,24 @@ export function priced(cost: { money: TeamCostMoney }): boolean {
 
 /**
  * THE FIXED ORDER: No outcome first (the bottom of each stack, neutral gray), then each outcome in the
- * route's order. AN OUTCOME'S COLOUR IS ITS GLOBAL RANK'S PALETTE SLOT (`rank`, the same on every
- * team), never its position among whatever one team lists: one outcome is one colour on every teams-list
- * row, the tile and the dialog. A rank past the last slot folds into Other.
+ * route's order. Each colour comes from the shared `outcomeColours` module (the outcome's global rank),
+ * never from its position among whatever one team lists: one outcome is one colour on every teams-list
+ * row, the tile and the dialog.
  */
 export function costSeries(outcomes: readonly TeamCostOutcome[]): CostSeries[] {
   const none = outcomes.filter((o) => o.id === null)
   const linked = outcomes.filter((o) => o.id !== null)
 
   return [
-    ...none.map((o) => ({ key: 'none', name: o.name || 'No outcome', colour: NoOutcomeColour, none: true, weekly: o.weekly })),
+    ...none.map((o) => ({ key: 'none', name: o.name || 'No outcome', colour: outcomeColour(o), none: true, weekly: o.weekly })),
     ...linked.map((o) => ({
       key: o.id!,
       name: o.name,
-      colour: outcomeColour(o.rank),
+      colour: outcomeColour(o),
       none: false,
       weekly: o.weekly,
     })),
   ]
-}
-
-/** An outcome's colour from its global rank: palette slots 1..8, then Other. */
-export function outcomeColour(rank: number | null): string {
-  return rank !== null && rank >= 1 && rank <= CostSeriesSlots ? `var(--os-series-${rank})` : OtherOutcomeColour
 }
 
 /** A week's figure for the chart: its cost when priced, otherwise its agent hours. */

@@ -95,3 +95,10 @@ Colour is never the only cue: the dialog's table carries every figure the chart 
 |---|---|
 | `GET /api/teams/{team}/cost` | One team: `money` (`currency`, `agentHourlyRate`), the eight `weeks`, and per outcome (`id` null for No outcome) its `weekly` figures, `totals`, `value` (its budget), `outcomeTotalCost` (its cost across all teams) and `rank` (its place in the order shared by every team, which picks its colour; null for No outcome); then the team's `totals`. `cost` is null, never 0, when no rate is set. |
 | `GET /api/teams/cost` | The same for every team at once (`money`, `weeks`, `teams[]`), for the Teams list. |
+
+In the web app, one module decides every outcome's colour: `web/src/lib/outcomeColours.ts`. Its
+`outcomeColour({ id, rank })` returns the colour for one outcome entry, `outcomeColours(entries)` builds
+an id-to-colour map (keyed `null` for No outcome) from one team's entries or every team's, and
+`colourForRank(rank)` returns the colour for a bare rank. The teams list's Cost column, the Cost tile
+and the Cost dialog all use it, and any new cost view should use it too, so that an outcome is never
+two colours.
