@@ -2,8 +2,11 @@
 # Runs the test suite on Linux, which is the only platform the Host runs on. On a Windows or macOS
 # development machine several tests fail for platform reasons alone (Unix file modes, setsid,
 # process groups), so this is how "the suite passes" is established there. The working tree is
-# copied into a named volume (bin, obj, node_modules and .git are left behind) and built inside the
-# .NET SDK image; NuGet packages are cached in a second volume so the second run is fast.
+# copied into a named volume (bin, obj, node_modules and .git are left behind) and built inside a test
+# image - the .NET SDK image plus python3 and node, which the stdio MCP servers' fakes and the Team
+# Connections plugin need, as the worker image has them - built once and reused (its tag names the
+# recipe, so a changed recipe builds a new one). NuGet packages are cached in a second volume so the
+# second run is fast.
 #
 #   scripts/test-in-container.sh                          the whole suite
 #   scripts/test-in-container.sh --filter-class '*.HostDoctorTests'
@@ -63,6 +66,27 @@ if [ -z "${HARNESS_TEST_SQLSERVER:-}" ]; then
 fi
 export HARNESS_TEST_SQLSERVER
 
+# THE TEST IMAGE: built once per recipe. Node is the major the Containerfile pins.
+test_recipe='FROM docker.io/library/node:22-bookworm-slim AS node
+FROM mcr.microsoft.com/dotnet/sdk:10.0
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 \
+ && rm -rf /var/lib/apt/lists/*'
+test_image="localhost/yawble-test-sdk:$(printf '%s' "$test_recipe" | sha256sum | cut -c1-12)"
+if ! podman image exists "$test_image"; then
+  echo "Building the test image $test_image (once)..." >&2
+  # Its own empty context: the repository root holds the product's Containerfile, which a build there
+  # picks up instead of this recipe.
+  recipe_dir=$(mktemp -d)
+  printf '%s\n' "$test_recipe" > "$recipe_dir/Containerfile"
+  # Path conversion is off above, so on Windows the podman client is given the folder as Windows names it.
+  context="$recipe_dir"
+  if command -v cygpath >/dev/null 2>&1; then context=$(cygpath -w "$recipe_dir"); fi
+  podman build -q -t "$test_image" "$context" >/dev/null
+  rm -f "$recipe_dir/Containerfile"; rmdir "$recipe_dir"
+fi
+
 # The arguments, quoted for the shell inside the container.
 args=""
 for a in "$@"; do
@@ -81,7 +105,7 @@ tar --exclude=./.git \
     -w /src \
     $network_args -e HARNESS_TEST_SQLSERVER \
     -e DOTNET_CLI_TELEMETRY_OPTOUT=1 -e DOTNET_NOLOGO=1     -e ASPNETCORE_URLS=http://0.0.0.0:8080 \
-    mcr.microsoft.com/dotnet/sdk:10.0 \
+    "$test_image" \
     sh -c "rm -rf /src/* /src/.[!.]* 2>/dev/null; tar -xf - \
         && dotnet build tests/Harness.Tests/Harness.Tests.csproj -v q \
         && dotnet tests/Harness.Tests/bin/Debug/net10.0/Harness.Tests.dll $args"

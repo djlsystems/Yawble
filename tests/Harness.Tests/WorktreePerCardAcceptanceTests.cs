@@ -808,8 +808,13 @@ public sealed class WorktreePerCardAcceptanceTests : IAsyncDisposable
         Commit(tree, $"{member.Name}-{key}");
         if (push)
         {
+            // THE HOST UNDER TEST MAY PUSH THE SAME BRANCH AT THE SAME MOMENT (its own sweep of member
+            // branches), and git then refuses the second push ("cannot lock ref ... reference already
+            // exists"). What the test needs is origin holding this commit under this branch, whoever put
+            // it there: anything else is still a failure.
             var pushed = Git(tree, "push", "origin", branch);
-            Assert.True(pushed.ExitCode == 0, pushed.Output);
+            var head = Git(tree, "rev-parse", "HEAD").Output.Trim();
+            Assert.True(pushed.ExitCode == 0 || OriginSha(branch) == head, pushed.Output);
         }
 
         return tree;

@@ -136,18 +136,14 @@ public sealed class McpServerToolsProbeTests
         Assert.True(answer.Result is not null, $"Failure: {answer.Failure}; Error: {answer.Error}; NoAnswer: {answer.NoAnswer}");
     }
 
+    // THE DEFAULT, NOT A TWO-MINUTE WAIT. That a silent server is NoAnswer once the call timeout passes is
+    // McpServerToolsTests' (with 300 ms); what is left to pin is that a forwarding nobody configured waits
+    // 120 seconds. Waiting them out cost the suite two minutes on every run.
     [Fact]
-    public async Task The_default_call_timeout_is_120_seconds_in_practice()
+    public void The_default_call_timeout_is_120_seconds()
     {
-        var forwarding = new McpForwarding(new Silent());
-        var target = new McpServers.McpTarget("https://silent.example.test/mcp", new Dictionary<string, string>(), [], null);
-
-        var clock = Stopwatch.StartNew();
-        var answer = await forwarding.CallAsync(target, "wait", null, Ct);
-        clock.Stop();
-
-        Assert.True(answer.NoAnswer);
-        Assert.InRange(clock.Elapsed.TotalSeconds, 119.5, 125);
+        Assert.Equal(TimeSpan.FromSeconds(120), McpForwarding.DefaultCallTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(120), new McpForwarding(new Silent()).CallTimeout);
     }
 
     private sealed class BigImage(int bytes) : HttpMessageHandler

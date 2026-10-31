@@ -92,7 +92,11 @@ public static class PtyWebSocket
 
             await Task.WhenAny(outbound, inbound);
 
-            if (evicted.IsCancellationRequested)
+            // THE SAME GRACE WHEN THE CHILD EXITED. The outbound pump has just sent "exit N" and returned;
+            // cancelling the inbound receive at once aborts the socket, and under load that abort can
+            // overtake the close frame still on its way, so the browser saw a dropped socket with no
+            // reason instead of the exit (ConciergeOnWorkerProcessTests, release suite, 31 October 2026).
+            if (evicted.IsCancellationRequested || outbound.IsCompletedSuccessfully)
             {
                 // The outbound pump has just sent the close frame carrying the reason, and the
                 // inbound pump is still sitting on a ReceiveAsync. Cancelling that receive would

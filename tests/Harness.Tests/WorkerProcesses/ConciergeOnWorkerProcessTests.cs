@@ -259,9 +259,25 @@ public sealed class ConciergeOnWorkerProcessTests
             }
 
             await bed.UntilWorkerAsync("w1", WorkersView.Connected);
+
+            // TYPED AGAIN UNTIL IT ARRIVES, as a person would. "Connected" is control's view; the worker
+            // takes the terminal back a moment later, and keystrokes in between are discarded exactly as
+            // those typed during the drop are. Under a loaded release suite that moment once outlasted a
+            // single attempt. What is ruled on is unchanged: after the return typing reaches the CLI, and
+            // nothing typed during the drop ever does.
+            var typed = DateTime.UtcNow;
             await browser.TypeAsync("after\r");
-            await bed.UntilAsync("what was typed after the worker returned reached the CLI", () =>
-                Task.FromResult(browser.Seen.Contains("GOT:after", StringComparison.Ordinal)));
+            await bed.UntilAsync("what was typed after the worker returned reached the CLI", async () =>
+            {
+                if (browser.Seen.Contains("GOT:after", StringComparison.Ordinal)) return true;
+                if (DateTime.UtcNow - typed > TimeSpan.FromSeconds(2))
+                {
+                    typed = DateTime.UtcNow;
+                    await browser.TypeAsync("after\r");
+                }
+
+                return false;
+            });
 
             Assert.DoesNotContain("GOT:during", browser.Seen, StringComparison.Ordinal);
         }
