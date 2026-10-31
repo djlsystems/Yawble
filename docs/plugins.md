@@ -1502,13 +1502,17 @@ is the consent. It never reads a connection of another team.
 
 - **Made by the platform.** A new or cloned team gets one at creation; an existing team gets one at
   the Host's start. The name is reserved: no other member may take it (409). A name is refused
-  when its letters, in any case and ignoring spaces, hyphens, underscores, dots and anything else,
-  spell `teamconnections` - `TEAM-CONNECTIONS` and `Team_Connections` as much as `Team Connections`
-  - while `Team Connection`, `Team` and `Connections` hire as usual. Letters are folded first, so a
-  look-alike counts as the letter it imitates: an accented or fullwidth Latin letter (`Téam`,
-  `Ｔeam`), and a Cyrillic or Greek letter drawn like a Latin one (Cyrillic `е`, `а`, `о`, `с`, `і`,
-  Greek `ο`, from a fixed table). Any other non-Latin letter is ignored, so a name in another script
-  hires as usual. Nobody hires, removes,
+  when its Unicode confusables skeleton ([UTS #39](https://www.unicode.org/reports/tr39/)) is that
+  of `teamconnections`: the name is normalized (NFKD), its combining marks dropped, case-folded,
+  each look-alike mapped to the letter it imitates, and then only its letters kept. So
+  `TEAM-CONNECTIONS`, `Team_Connections`, `Team Connections 2`, `Téam`, `Ｔeam`, and a Cyrillic,
+  Greek, Armenian or other look-alike (Cyrillic `е`, Armenian `օ`, dotless `ı`) are refused as much
+  as `Team Connections`, while `Team Connection`, `Team`, `Connections` and `My Team Connections`
+  hire as usual. The look-alikes are Unicode's own `confusables.txt`, the entries mapping to a letter
+  of `teamconnections`, checked in at
+  `src/Harness.Host/Confusables/team-connections-confusables.txt` with its Unicode version; the
+  platform never downloads it. A letter the file does not map stays itself, so a name in another
+  script hires as usual. Nobody hires, removes,
   renames, re-instructs, repoints or sets it up (409). It has no settings of its own.
 - **Shown only while the team has a connection.** The board, `status` (`/api/overview`) and the
   Manager's roster show it while at least one connection is assigned to the team; otherwise it is

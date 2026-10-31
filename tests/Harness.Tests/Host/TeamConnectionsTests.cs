@@ -344,23 +344,52 @@ public sealed class TeamConnectionsTests : IAsyncLifetime
         "Team Connect\u0456ons", "T\u00E9am Connections", "\uFF34eam Connections",
         "\uFF34\uFF45\uFF41\uFF4D \uFF23\uFF4F\uFF4E\uFF4E\uFF45\uFF43\uFF54\uFF49\uFF4F\uFF4E\uFF53",
         "T\u0435\u0430m C\u03BFnn\u0435\u0441t\u0456\u043Ens", "Te\u0301am Connections",
+        // Off the old hand-written table, in Unicode's confusables: Armenian oh, dotless i, Greek capital Nu.
+        "Team C\u0585nnections", "Team Connect\u0131ons", "TEAM CO\u039D\u039DECTIONS",
     ];
 
     /// <summary>Names that only look close, or are in another script, and still hire.</summary>
     private static readonly string[] StillHires =
-        ["Connections", "Team", "Team Connection", "Team Connectionz", "Developer Rowan", "Developer Ren\u00E9e", "\u041A\u043E\u043C\u0430\u043D\u0434\u0430"];
+        [
+            "Connections", "Team", "Team Connection", "Team Connectionz", "Developer Rowan", "Developer Ren\u00E9e",
+            "\u041A\u043E\u043C\u0430\u043D\u0434\u0430", "Team Connections Two", "My Team Connections",
+        ];
 
     [Fact]
     public void The_reserved_name_is_its_letters_whatever_separates_them_and_hyphenated_names_still_derive_as_before()
     {
         foreach (var name in ReservedSpellings) Assert.True(TeamConnectionsMember.IsReserved(name), name);
-        foreach (var name in StillHires.Concat(["Team Connections Two", "My Team Connections", "T\u4E00am Connections", "", null]))
+        foreach (var name in StillHires.Concat(["T\u4E00am Connections", "", null]))
             Assert.False(TeamConnectionsMember.IsReserved(name), name ?? "null");
 
         // The real member keeps its name and id; DeriveName is unchanged for a hyphen or underscore.
         Assert.Equal(("Team Connections", "TeamConnections"), (TeamConnectionsMember.Label, TeamConnectionsMember.Name));
         Assert.Equal("Team-Connections", ContainerId.DeriveName("Team-Connections"));
         Assert.Equal("Team_Connections", ContainerId.DeriveName("Team_Connections"));
+    }
+
+    [Fact]
+    public void The_look_alikes_come_from_the_checked_in_unicode_confusables_table()
+    {
+        // The table in the repository, with its Unicode version, is the one the Host embeds and folds by.
+        var path = Path.Combine(RepoRoot(), "src", "Harness.Host", "Confusables", "team-connections-confusables.txt");
+        var text = File.ReadAllText(path);
+        Assert.Matches(@"(?m)^# Unicode Version: \d+\.\d+\.\d+$", text);
+        var table = TeamConnectionsMember.ParseConfusables(text);
+        Assert.Equal(table.OrderBy(e => e.Key), TeamConnectionsMember.Confusables.OrderBy(e => e.Key));
+
+        // Armenian oh and dotless i, which the old hand-written table missed, alongside the ones it had.
+        Assert.Equal("o", table[0x0585]);
+        Assert.Equal("i", table[0x0131]);
+        foreach (var (source, target) in new[] { (0x0435, "e"), (0x0430, "a"), (0x043E, "o"), (0x0441, "c"), (0x03BF, "o"), (0x0456, "i") })
+            Assert.Equal(target, table[source]);
+
+        // Only targets made of the letters of teamconnections are kept; nothing else is special-cased.
+        Assert.All(table.Values, target => Assert.True(target.ToLowerInvariant().All("teamconnections".Contains), target));
+        Assert.False(table.ContainsKey(0x04CF)); // Cyrillic palochka is a look-alike of l
+        Assert.True(TeamConnectionsMember.IsReserved("Team C\u0585nnections"));
+        Assert.True(TeamConnectionsMember.IsReserved("Team Connect\u0131ons"));
+        Assert.False(TeamConnectionsMember.IsReserved("Team Connect\u04CFons"));
     }
 
     // ---- helpers ------------------------------------------------------------------------------------------

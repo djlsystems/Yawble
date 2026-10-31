@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using Harness.Contracts;
 
 namespace Harness.Host;
@@ -36,49 +38,72 @@ public static class TeamConnectionsMember
     public static bool Is(ContainerId id) => string.Equals(id.Name, Name, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Whether <paramref name="label"/> is the reserved name. The label is FOLDED first: NFKD, so a
-    /// fullwidth or accented Latin letter becomes its ASCII letter plus marks, then each single character
-    /// in <see cref="LookAlikes"/> (a Cyrillic or Greek letter drawn like an ASCII one) becomes that
-    /// letter. Then its ASCII letters, case-insensitively and ignoring everything else (spaces, hyphens,
-    /// underscores, dots, digits, punctuation, marks, and any non-ASCII character the table does not map),
-    /// must be exactly <c>teamconnections</c>. So <c>TEAM-CONNECTIONS</c>, <c>Team_Connections</c>,
-    /// <c>Team - Connections</c>, <c>T\u0435am Connections</c> (Cyrillic ie) and <c>T\u00E9am Connections</c>
-    /// are refused, though <see cref="ContainerId.DeriveName"/> keeps '-' and '_' and drops the rest and
-    /// would give them another identifier; <c>Team Connection</c>, <c>Connections</c>, <c>Team</c> and a
-    /// name in another script are not. An unmapped character is dropped, never a wildcard.
+    /// Whether <paramref name="label"/> is the reserved name: its confusables SKELETON equals that of
+    /// <c>teamconnections</c>. The skeleton (UTS #39, with <see cref="Confusables"/>): NFKD; drop the
+    /// combining marks; case-fold; map each character through the table (looked up as written and,
+    /// when it has no entry, case-folded, so a capital look-alike such as Greek Nu counts as its own
+    /// letter); then keep only letters. So <c>TEAM-CONNECTIONS</c>, <c>Team_Connections</c>,
+    /// <c>Team - Connections</c>, <c>Team Connections 2</c>, <c>T\u0435am Connections</c> (Cyrillic ie),
+    /// <c>Team C\u0585nnections</c> (Armenian oh), <c>Team Connect\u0131ons</c> (dotless i) and
+    /// <c>T\u00E9am Connections</c> are refused, though <see cref="ContainerId.DeriveName"/> keeps '-'
+    /// and '_' and would give them another identifier; <c>Team Connection</c>, <c>Connections</c>,
+    /// <c>Team</c> and a name in another script are not. A letter the table does not map stays itself.
     /// </summary>
-    public static bool IsReserved(string? label)
+    public static bool IsReserved(string? label) =>
+        label is not null && Skeleton(label) == ReservedSkeleton;
+
+    private static string Skeleton(string label)
     {
-        if (label is null) return false;
-        var letters = new System.Text.StringBuilder();
-        foreach (var c in label.Normalize(System.Text.NormalizationForm.FormKD))
+        var skeleton = new StringBuilder();
+        foreach (var rune in label.Normalize(NormalizationForm.FormKD).EnumerateRunes())
         {
-            var folded = LookAlikes.GetValueOrDefault(c, c);
-            if (char.IsAsciiLetter(folded)) letters.Append(folded);
+            if (Rune.GetUnicodeCategory(rune) is UnicodeCategory.NonSpacingMark or UnicodeCategory.SpacingCombiningMark
+                or UnicodeCategory.EnclosingMark) continue;
+            var folded = Rune.ToLowerInvariant(rune);
+            var mapped = Confusables.GetValueOrDefault(rune.Value) ?? Confusables.GetValueOrDefault(folded.Value) ?? folded.ToString();
+            foreach (var letter in mapped.EnumerateRunes())
+                if (Rune.IsLetter(letter)) skeleton.Append(Rune.ToLowerInvariant(letter).ToString());
         }
-        return string.Equals(letters.ToString(), ReservedLetters, StringComparison.OrdinalIgnoreCase);
+        return skeleton.ToString();
     }
 
-    private const string ReservedLetters = "teamconnections";
+    /// <summary>The embedded copy of <c>Confusables/team-connections-confusables.txt</c>.</summary>
+    public const string ConfusablesResource = "Harness.Host.team-connections-confusables.txt";
 
     /// <summary>
-    /// Single Cyrillic and Greek characters drawn like an ASCII letter, both cases: a fixed table, not a
-    /// confusables file. NFKD has already handled fullwidth and accented Latin.
+    /// Unicode's confusables (UTS #39 <c>confusables.txt</c>) whose target is made of the letters of
+    /// <c>teamconnections</c>: source code point to target text. Generated from the Unicode file by
+    /// <c>Confusables/generate.py</c> and checked in with its Unicode version; read from this assembly
+    /// only, never downloaded.
     /// </summary>
-    private static readonly IReadOnlyDictionary<char, char> LookAlikes = new Dictionary<char, char>
+    public static IReadOnlyDictionary<int, string> Confusables { get; } = LoadConfusables();
+
+    // After Confusables: static initializers run in the order they are written.
+    private static readonly string ReservedSkeleton = Skeleton("teamconnections");
+
+    /// <summary>The <c>source ; target ; type # comment</c> lines of a confusables file; a <c>#</c> line a comment.</summary>
+    public static IReadOnlyDictionary<int, string> ParseConfusables(string text)
     {
-        // Cyrillic: а е о с і ѕ ј р х у and А В Е К М Н О Р С Т Х І Ѕ Ј
-        ['\u0430'] = 'a', ['\u0435'] = 'e', ['\u043E'] = 'o', ['\u0441'] = 'c', ['\u0456'] = 'i', ['\u0455'] = 's',
-        ['\u0458'] = 'j', ['\u0440'] = 'p', ['\u0445'] = 'x', ['\u0443'] = 'y',
-        ['\u0410'] = 'A', ['\u0412'] = 'B', ['\u0415'] = 'E', ['\u041A'] = 'K', ['\u041C'] = 'M', ['\u041D'] = 'H',
-        ['\u041E'] = 'O', ['\u0420'] = 'P', ['\u0421'] = 'C', ['\u0422'] = 'T', ['\u0425'] = 'X', ['\u0406'] = 'I',
-        ['\u0405'] = 'S', ['\u0408'] = 'J',
-        // Greek: α ε ι ο ϲ κ ν and Α Β Ε Ι Κ Μ Ν Ο Ρ Τ Χ Ϲ
-        ['\u03B1'] = 'a', ['\u03B5'] = 'e', ['\u03B9'] = 'i', ['\u03BF'] = 'o', ['\u03F2'] = 'c', ['\u03BA'] = 'k',
-        ['\u03BD'] = 'v',
-        ['\u0391'] = 'A', ['\u0392'] = 'B', ['\u0395'] = 'E', ['\u0399'] = 'I', ['\u039A'] = 'K', ['\u039C'] = 'M',
-        ['\u039D'] = 'N', ['\u039F'] = 'O', ['\u03A1'] = 'P', ['\u03A4'] = 'T', ['\u03A7'] = 'X', ['\u03F9'] = 'C',
-    };
+        var table = new Dictionary<int, string>();
+        foreach (var line in text.Split('\n'))
+        {
+            var data = line.Split('#', 2)[0];
+            if (string.IsNullOrWhiteSpace(data)) continue;
+            var fields = data.Split(';');
+            var target = string.Concat(fields[1].Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+                .Select(hex => char.ConvertFromUtf32(Convert.ToInt32(hex, 16))));
+            table[Convert.ToInt32(fields[0].Trim(), 16)] = target;
+        }
+        return table;
+    }
+
+    private static IReadOnlyDictionary<int, string> LoadConfusables()
+    {
+        using var stream = typeof(TeamConnectionsMember).Assembly.GetManifestResourceStream(ConfusablesResource)
+            ?? throw new InvalidOperationException($"{ConfusablesResource} is not embedded in the Host.");
+        using var reader = new StreamReader(stream);
+        return ParseConfusables(reader.ReadToEnd());
+    }
 
     /// <summary>Whether <paramref name="agent"/> names the built-in plugin.</summary>
     public static bool Runs(string? agent) =>
