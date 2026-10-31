@@ -67,7 +67,8 @@ const now = computed(() => props.summary.rightNow);
       </span>
       <span v-if="budgets.status || budgets.unbudgeted" class="cost-summary-line">
         <span v-if="budgets.status" class="cost-summary-status" :data-over="budgets.state === 'over' ? 'true' : null" data-summary-status>{{ budgets.status }}</span>
-        <span v-if="budgets.unbudgeted" class="os-text-muted" data-summary-unbudgeted> {{ budgets.unbudgeted }}</span>
+        <!-- The space before the separator is part of the expression: template whitespace is condensed away. -->
+        <span v-if="budgets.unbudgeted" class="os-text-muted" data-summary-unbudgeted>{{ budgets.status ? ` ${budgets.unbudgeted}` : budgets.unbudgeted }}</span>
       </span>
       <span v-if="budgets.note" class="cost-summary-line os-text-muted" data-summary-note>{{ budgets.note }}</span>
     </button>
