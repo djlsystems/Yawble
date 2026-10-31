@@ -1619,7 +1619,8 @@ public sealed partial class Connections(
                     await store.RecordAsync(actor.Row(
                         TenantActions.ConnectionTested, id, connection.Name,
                         new { connection = id, kind = connection.Kind, provider = connection.Provider, outcome, sentence }), ct);
-                    return new ConnectionTestAnswer(StatusCodes.Status200OK, connection.Status, sentence, null, connection);
+                    return new ConnectionTestAnswer(StatusCodes.Status503ServiceUnavailable, null, null,
+                        $"The test did not reach the site: {sentence} The connection was left as it was; try again.", null);
                 }
             }
             else if (needsYou is not null)

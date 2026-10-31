@@ -73,6 +73,10 @@ public static partial class WebsiteFields
             Help: "A page only a signed-in user can see, such as /dashboard. Default: the Site URL."),
         new(CheckText, "Signed-in check text", false, false,
             Help: "Optional: text that must appear on the check page, or a CSS selector written css=<selector>."),
+        new(MayAct, MayActLabel, false, false, CredentialFieldSpec.Bool, Default: "false",
+            Help: "Off: a team member may open pages signed in and read them, never click, fill or submit. On: it may act on the site's pages too, on its hosts only."),
+        new(Session, "Saved session", true, false, ReadOnly: true,
+            Help: "Sign in keeps it: open Sign in on this connection and sign in yourself. Never shown."),
         new(UsernameSelector, "Username field selector", false, false, Advanced: true,
             Help: "Optional, for password: a CSS selector when the username field is not found on its own."),
         new(PasswordSelector, "Password field selector", false, false, Advanced: true, Help: "Optional, for password: a CSS selector for the password field."),
@@ -82,10 +86,6 @@ public static partial class WebsiteFields
             Help: "The languages the browser says it reads, most preferred first, such as en-GB, en. A session kept with Sign in uses the languages of the browser that signed in. Default: en-US."),
         new(TimeZone, "Time zone", false, false, Advanced: true,
             Help: "Your time zone, such as Europe/London, for the browser. A session kept with Sign in uses the time zone of the browser that signed in. Default: UTC."),
-        new(MayAct, MayActLabel, false, false, CredentialFieldSpec.Bool, Default: "false",
-            Help: "Off: a team member may open pages signed in and read them, never click, fill or submit. On: it may act on the site's pages too, on its hosts only."),
-        new(Session, "Saved session", true, false, ReadOnly: true,
-            Help: "Sign in keeps it: open Sign in on this connection and sign in yourself. Never shown."),
     ];
 
     /// <summary>The fields kept as masked values, the saved session among them.</summary>

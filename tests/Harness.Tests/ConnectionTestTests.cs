@@ -19,8 +19,9 @@ namespace Harness.Tests;
 /// Host's own worker against FAKE servers only: a fake IMAP and SMTP server over real sockets, and a
 /// fake Stripe, Namecheap, Twilio, sign-in page and OAuth provider answering through the worker's
 /// HTTP handler - nothing reaches the network. A right value answers ok and a wrong one a refusal
-/// sentence, for each kind that has a test, and the connection's health follows; a website and a
-/// preset with nothing to try show no test; no secret is in an answer, a row or a log.
+/// sentence, for each kind that has a test, and the connection's health follows; a preset with nothing
+/// to try shows no test, and a website's test is its signed-in check (CON 6, run in the browser:
+/// WebsiteConnectionsTests); no secret is in an answer, a row or a log.
 /// </summary>
 public sealed class ConnectionTestTests : IAsyncLifetime
 {
@@ -93,7 +94,7 @@ public sealed class ConnectionTestTests : IAsyncLifetime
     // ---- which connections have a test ---------------------------------------------------------------
 
     [Fact]
-    public async Task Each_preset_says_whether_it_has_a_test_and_a_website_has_none()
+    public async Task Each_preset_says_whether_it_has_a_test_and_a_website_has_its_signed_in_check()
     {
         var presets = (await GetAsync("/api/connections/credentials/presets")).EnumerateArray()
             .ToDictionary(p => $"{p.GetProperty("kind").GetString()}/{p.GetProperty("id").GetString()}", p => p.GetProperty("test").GetBoolean());
@@ -102,19 +103,22 @@ public sealed class ConnectionTestTests : IAsyncLifetime
             new Dictionary<string, bool>
             {
                 ["apikey/stripe"] = true, ["apikey/namecheap"] = true, ["apikey/twilio"] = true, ["apikey/other"] = true,
-                ["login/"] = true, ["website/"] = false,
+                ["login/"] = true, ["website/"] = true,
             },
             presets);
     }
 
     [Fact]
-    public async Task A_website_an_other_key_with_no_url_and_a_login_with_no_url_have_no_test_and_record_nothing()
+    public async Task An_other_key_with_no_url_and_a_login_with_no_url_have_no_test_and_record_nothing_and_a_website_has_one()
     {
-        var website = await CredentialAsync("website", null, "Shop", []);
+        // A WEBSITE HAS A TEST NOW (CON 6): its signed-in check, whatever it holds yet.
+        var website = await CredentialAsync("website", null, "Shop", [new { name = "siteUrl", value = "shop.example.test" }, new { name = "method", value = "interactive" }]);
+        Assert.True(Listed(await GetAsync("/api/connections"), website).GetProperty("testable").GetBoolean());
+
         var other = await CredentialAsync("apikey", "other", "Bare key", [new { name = "token", value = OtherToken, masked = true }]);
         var login = await CredentialAsync("login", null, "No address", [new { name = "username", value = "ada" }, new { name = "password", value = LoginPassword }]);
 
-        foreach (var (id, words) in new[] { (website, "is a website"), (other, "has no test"), (login, "names no URL") })
+        foreach (var (id, words) in new[] { (other, "has no test"), (login, "names no URL") })
         {
             Assert.False(Listed(await GetAsync("/api/connections"), id).GetProperty("testable").GetBoolean());
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { connectSignIn, keyInput, mouseInput, pointAt, signInSocketUrl } from '../sign-in-socket';
+import { connectSignIn, connectionSignInSocketUrl, keyInput, mouseInput, pointAt, signInSocketUrl } from '../sign-in-socket';
 
 /** Records every socket opened and what was sent through it, and lets a test speak for the Host. */
 class FakeSocket {
@@ -42,6 +42,12 @@ describe('the sign-in socket', () => {
     const url = signInSocketUrl('Sites', 'Creds', 'entries', 'site-admin', 'https://harness.example/console');
     expect(url.toString()).toBe('wss://harness.example/api/teams/Sites/members/Creds/sign-in/entries/site-admin');
     expect(signInSocketUrl('a b', 'm', 'f', 'r', 'http://h/').pathname).toBe('/api/teams/a%20b/members/m/sign-in/f/r');
+  });
+
+  it("opens a website connection's socket (CON 6), its id escaped, with the person's locale", () => {
+    const url = connectionSignInSocketUrl('conn 1', 'https://harness.example/console', { languages: ['en-GB'], timeZone: 'Europe/London' });
+    expect(url.origin + url.pathname).toBe('wss://harness.example/api/connections/conn%201/sign-in');
+    expect([url.searchParams.get('lang'), url.searchParams.get('tz')]).toEqual(['en-GB', 'Europe/London']);
   });
 
   it('carries the person’s languages and time zone, so the browser the site sees has their locale', () => {
