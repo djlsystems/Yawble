@@ -157,7 +157,8 @@ internal sealed partial class HostComposition
         builder.Services.AddSingleton(sp => new McpRunTools(
             sp.GetRequiredService<McpServers>(), sp.GetRequiredService<McpForwarding>(), sp.GetRequiredService<TimeProvider>(),
             sp.GetRequiredService<ILogger<McpRunTools>>(), runAs: sp.GetRequiredService<AgentLaunchUser>(),
-            asks: sp.GetRequiredService<WorkerAsks>()));
+            asks: sp.GetRequiredService<WorkerAsks>(), users: sp.GetRequiredService<IUserStore>(),
+            teams: sp.GetRequiredService<TeamRegistry>));
         builder.Services.AddSingleton(sp => new ConnectRequests(
             sp.GetRequiredService<Connections>(), dataRoot, sp.GetRequiredService<ILogger<ConnectRequests>>(),
             sp.GetRequiredService<TeamRegistry>(), sp.GetRequiredService<IMemberReports>()));

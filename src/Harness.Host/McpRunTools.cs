@@ -27,7 +27,7 @@ namespace Harness.Host;
 public sealed class McpRunTools(
     McpServers servers, McpForwarding forwarding, TimeProvider clock, ILogger<McpRunTools> log,
     long maximumBinary = McpRunTools.DefaultMaximumBinary, int maximumText = McpRunTools.DefaultMaximumText,
-    AgentLaunchUser? runAs = null, WorkerAsks? asks = null)
+    AgentLaunchUser? runAs = null, WorkerAsks? asks = null, IUserStore? users = null, Func<TeamRegistry>? teams = null)
 {
     public const long DefaultMaximumBinary = 20L * 1024 * 1024;
 
@@ -64,8 +64,54 @@ public sealed class McpRunTools(
     /// </summary>
     public async Task<IAsyncDisposable> BeginAsync(ContainerId member, string workingCopy, CancellationToken ct)
     {
-        var assigned = await servers.Store.AssignedAsync(member.Team, ct);
-        if (assigned.Count == 0) return Nothing.Instance;
+        var tools = await ToolsOfAsync(member.Team, member.ToString(), ct);
+        if (tools is null) return Nothing.Instance;
+
+        var run = new RunTools(member.Team, workingCopy, tools);
+        var key = member.ToString();
+        _runs[key] = run;
+        return new Ending(this, key, run);
+    }
+
+    /// <summary>
+    /// THE CONCIERGE'S LIST (MCP 4), taken when its session starts: the tools of <paramref name="team"/>, the person's
+    /// current team at that moment, or none with no current team. Kept, as a member's run keeps its own, until the
+    /// session ends or the next start replaces it - a switch of team changes nothing here, and Reload starts anew.
+    /// Binary results go to <paramref name="workspace"/>, the Concierge's own folder.
+    /// </summary>
+    public async Task BeginConciergeAsync(string user, string? team, string workspace, CancellationToken ct)
+    {
+        var key = ConciergeLaunchFactory.PrincipalId(user);
+        var tools = team is null ? null : await ToolsOfAsync(team, key, ct);
+        _runs[key] = new RunTools(team ?? "", workspace, tools ?? []);
+    }
+
+    /// <summary>The team <paramref name="user"/>'s Concierge session took its MCP tools from: null with none, and
+    /// <c>Started</c> false when no session has taken any since this Host started.</summary>
+    public (bool Started, string? Team) ConciergeTeam(string user) =>
+        _runs.TryGetValue(ConciergeLaunchFactory.PrincipalId(user), out var run) ? (true, run.Team is "" ? null : run.Team) : (false, null);
+
+    /// <summary>Forgets <paramref name="user"/>'s Concierge list, when its session ends.</summary>
+    public void EndConcierge(string user) => _runs.TryRemove(ConciergeLaunchFactory.PrincipalId(user), out _);
+
+    /// <summary>Ends the Concierge's list with its session, however it ended, then <paramref name="revoke"/>.</summary>
+    public ConciergeRevoke EndingConcierge(ConciergeRevoke revoke) => async (key, ct) =>
+    {
+        try
+        {
+            EndConcierge(key.User);
+        }
+        finally
+        {
+            await revoke(key, ct);
+        }
+    };
+
+    /// <summary><paramref name="team"/>'s web address servers' tools, for <paramref name="who"/>'s log lines; null with none.</summary>
+    private async Task<IReadOnlyList<ListedTool>?> ToolsOfAsync(string team, string who, CancellationToken ct)
+    {
+        var assigned = await servers.Store.AssignedAsync(team, ct);
+        if (assigned.Count == 0) return null;
 
         var entries = new List<McpServerRecord>();
         foreach (var given in assigned)
@@ -79,19 +125,16 @@ public sealed class McpRunTools(
         var clashing = McpToolNames.Clashes(tools.Select(t => (t.Server.Name, t.Upstream))).Select(c => c.Name).ToHashSet(StringComparer.Ordinal);
         foreach (var name in clashing)
         {
-            log.LogWarning("Two tools of {Team}'s MCP servers would both be named {Name}; neither is listed for {Member}.", member.Team, name, member);
+            log.LogWarning("Two tools of {Team}'s MCP servers would both be named {Name}; neither is listed for {Member}.", team, name, who);
         }
 
         foreach (var tool in tools.Where(t => McpToolNames.Platform.Contains(t.Name)))
         {
-            log.LogWarning("Tool {Tool} of {Server} would be named {Name}, the platform's own tool; it is not listed for {Member}.", tool.Upstream, tool.Server.Name, tool.Name, member);
+            log.LogWarning("Tool {Tool} of {Server} would be named {Name}, the platform's own tool; it is not listed for {Member}.", tool.Upstream, tool.Server.Name, tool.Name, who);
             clashing.Add(tool.Name);
         }
 
-        var run = new RunTools(member.Team, workingCopy, [.. tools.Where(t => !clashing.Contains(t.Name))]);
-        var key = member.ToString();
-        _runs[key] = run;
-        return new Ending(this, key, run);
+        return [.. tools.Where(t => !clashing.Contains(t.Name))];
     }
 
     private async Task<IReadOnlyList<ListedTool>> ListAsync(McpServerRecord server, CancellationToken ct)
@@ -144,19 +187,30 @@ public sealed class McpRunTools(
 
     public static string NotTheTeams(string server, string team) => $"{server} is not one of {team}'s MCP servers.";
 
+    /// <summary>The Concierge's refusal: its person's current team does not hold the server.</summary>
+    public static string NotTheConciergeTeams(string server, string team) =>
+        $"{server} is not one of {team}'s MCP servers. Reload the Concierge to get {team}'s tools.";
+
+    /// <summary>The Concierge's refusal when its person has no team open.</summary>
+    public static string NoConciergeTeam(string server) =>
+        $"{server} is not available: no team is open. Open a team and reload the Concierge to get its tools.";
+
     public static string DidNotAnswer(string server) => $"{server} did not answer.";
 
     public static string NoLongerOffers(string server, string tool) => $"{server} no longer offers {tool}.";
 
     /// <summary>
-    /// A call of <paramref name="name"/> by <paramref name="principal"/>. An unknown name is the protocol's own
+    /// A call of <paramref name="name"/> by <paramref name="caller"/>. An unknown name is the protocol's own
     /// unknown-tool error, as for any tool; everything else answers a result, an error result in a sentence.
+    /// A member's team is its own; a Concierge's is its person's current team at this moment.
     /// </summary>
-    public async Task<CallToolResult> CallAsync(string? principal, string name, IDictionary<string, JsonElement>? arguments, CancellationToken ct)
+    public async Task<CallToolResult> CallAsync(Principal? caller, string name, IDictionary<string, JsonElement>? arguments, CancellationToken ct)
     {
-        if (principal is null || !ContainerId.TryParse(principal, out var member)) throw Unknown(name);
+        if (caller is null) throw Unknown(name);
+        var concierge = ConciergeLaunchFactory.IsConcierge(caller);
+        if (!concierge && !ContainerId.TryParse(caller.Id, out _)) throw Unknown(name);
 
-        var run = _runs.GetValueOrDefault(principal);
+        var run = _runs.GetValueOrDefault(caller.Id);
 
         // THE RUN'S OWN LIST FIRST; then what every web address entry last listed, so a member calling another
         // team's tool is told whose servers those are rather than that no such tool exists.
@@ -165,11 +219,26 @@ public sealed class McpRunTools(
             : Find(await servers.Store.ListAsync(ct), name);
         if (server is null || upstream is null) throw Unknown(name);
 
-        // HELD AT THIS MOMENT: an entry taken off the team, or removed from the instance, during the run is refused.
-        var held = (await servers.Store.AssignedAsync(member.Team, ct)).Any(a => a.ServerId == server.Id);
-        if (!held || await servers.Store.GetAsync(server.Id, ct) is not { Kind: McpServerRecord.Web } current)
+        string team;
+        Func<string, string> refusal;
+        if (concierge)
         {
-            return Error(NotTheTeams(server.Name, member.Team));
+            // THE PERSON'S CURRENT TEAM NOW, not the one the session started on: a switch is seen at the next call.
+            if (await CurrentTeamAsync(caller.OwnerUserId!, ct) is not { } current) return Error(NoConciergeTeam(server.Name));
+            team = current.Id;
+            refusal = s => NotTheConciergeTeams(s, current.Label);
+        }
+        else
+        {
+            team = ContainerId.Parse(caller.Id).Team;
+            refusal = s => NotTheTeams(s, team);
+        }
+
+        // HELD AT THIS MOMENT: an entry taken off the team, or removed from the instance, during the run is refused.
+        var held = (await servers.Store.AssignedAsync(team, ct)).Any(a => a.ServerId == server.Id);
+        if (!held || await servers.Store.GetAsync(server.Id, ct) is not { Kind: McpServerRecord.Web } entry)
+        {
+            return Error(refusal(server.Name));
         }
 
         var args = arguments is null ? null : JsonSerializer.SerializeToNode(arguments, McpJsonUtilities.DefaultOptions) as JsonObject;
@@ -186,14 +255,14 @@ public sealed class McpRunTools(
             output = inside;
         }
 
-        var (target, error) = await servers.TargetAsync(current, ct);
+        var (target, error) = await servers.TargetAsync(entry, ct);
         if (target is null) return Error(ConnectionTester.Redact(error!.Sentence, error.Secrets));
 
         var redactor = ValueRedactor.For(target.Secrets);
         var answer = await forwarding.CallAsync(target, upstream, args, ct);
 
-        if (answer.NoAnswer) return Error(DidNotAnswer(current.Name));
-        if (answer.Failure is { } failure) return Error(PluginMemberRunner.Redact($"{current.Name}: {failure}", redactor));
+        if (answer.NoAnswer) return Error(DidNotAnswer(entry.Name));
+        if (answer.Failure is { } failure) return Error(PluginMemberRunner.Redact($"{entry.Name}: {failure}", redactor));
 
         // A REFUSAL OR AN ERROR RESULT MAY BE A TOOL THAT IS GONE: asked again, a list without it says so.
         if (answer.Error is not null || answer.Result?["isError"] is JsonValue flag && flag.TryGetValue<bool>(out var isError) && isError)
@@ -201,13 +270,22 @@ public sealed class McpRunTools(
             var (now, _) = await forwarding.ListAsync(target, ct);
             if (now is not null && !now.Any(t => t["name"] is JsonValue n && n.TryGetValue<string>(out var said) && said == upstream))
             {
-                return Error(NoLongerOffers(current.Name, upstream));
+                return Error(NoLongerOffers(entry.Name, upstream));
             }
 
-            if (answer.Error is { } refused) return Error(PluginMemberRunner.Redact($"{current.Name} refused the call: {refused}", redactor));
+            if (answer.Error is { } refused) return Error(PluginMemberRunner.Redact($"{entry.Name} refused the call: {refused}", redactor));
         }
 
-        return await ShapeAsync(answer.Result!, current.Name, workingCopy, output, redactor, ct);
+        return await ShapeAsync(answer.Result!, entry.Name, workingCopy, output, redactor, ct);
+    }
+
+    /// <summary>The person's current team as it stands, with its label; null with none, or one that no longer exists.</summary>
+    private async Task<(string Id, string Label)?> CurrentTeamAsync(string user, CancellationToken ct)
+    {
+        // THE REGISTRY ASKED FOR AT THE CALL: it is made from the runners, and a member's runner holds this.
+        if (users is null || teams?.Invoke() is not { } registry) return null;
+        if (await users.CurrentTeamForAsync(user, ct) is not { Length: > 0 } stored || registry.ExistingName(stored) is not { } id) return null;
+        return (id, registry.LabelFor(id));
     }
 
     /// <summary>The entry and tool a name stands for, from what each web address entry last listed.</summary>
