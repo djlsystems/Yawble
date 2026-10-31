@@ -111,7 +111,7 @@ public static class PluginEndpoints
                     moves = moved.Select(m => new
                     {
                         team = m.Member.Team, member = m.Member.Name, slot = m.Slot, outcome = m.Outcome, fields = m.Fields,
-                        connection = m.ConnectionId, key = m.Key, reason = m.Reason,
+                        connection = m.ConnectionId, connectionName = m.ConnectionName, key = m.Key, reason = m.Reason,
                     }),
                 });
             }
@@ -139,7 +139,8 @@ public static class PluginEndpoints
                 + "reason, previous, moves, attention }`: `installed` is the Host's verdict after the rescan; "
                 + "`previous` the version active before, or null; `moves` is what a version "
                 + "declaring `secrets.<field>.movedTo` did with each member's own values, one entry per member and "
-                + "slot (`outcome` moved, nothing, kept or failed; the fields; the connection made) - never a value. "
+                + "slot (`outcome` moved, nothing, alreadyBound, kept or failed; the fields; `connection` and `connectionName`, "
+                + "the connection made or the one the slot already binds) - never a value. "
                 + "`attention`, on an UPGRADE (a newer version made active over an older one), is one entry per member "
                 + "hired on the plugin whose saved settings do not fit the new version - `{ team, member, teamName, "
                 + "memberName, fields: [{ field, reason }] }`: a required field with no value and no default, a value of "

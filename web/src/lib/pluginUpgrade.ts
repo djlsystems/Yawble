@@ -28,7 +28,23 @@ export function upgradedWords(name: string, version: string): string {
   return `Upgraded ${name} to ${version}`;
 }
 
-/** One member's secret move on the upgrade, as a person reads it. Never a value. */
+/**
+ * HOW TO ROLL BACK, naming a folder the install accepts (PLG 3). The copy kept under the plugins folder
+ * is refused ("already under the plugins folder"), so the words point at the folder the old version was
+ * built into, or its Marketplace folder in the documents (`Marketplace/<id>-<version>`, where a fetch
+ * unpacks it) when it came from there and is still there.
+ */
+export function rollbackWords(id: string, previous: string): string {
+  return `${previous} is kept under the plugins folder, inactive. To roll back, install ${previous} again with Replace `
+    + `from the folder it was built into, or from Documents › Marketplace › ${id}-${previous} if it came from the Marketplace `
+    + 'and that folder is still there. The copy under the plugins folder cannot be installed.';
+}
+
+/** A slot's connection, by its name when the Host gave one. */
+const boundTo = (move: PluginSecretMove) => (move.connectionName ? `to ${move.connectionName}` : 'to a connection');
+
+/** One member's secret move on the upgrade, as a person reads it. Never a value. Field names are
+ * between backticks; `codeParts` renders them as code. */
 export function secretMoveWords(move: PluginSecretMove, teamName: (team: string) => string = (team) => team): string {
   const who = `${teamName(move.team)} / ${move.member}`;
   const fields = move.fields.map((field) => `\`${field}\``).join(', ');
@@ -37,12 +53,35 @@ export function secretMoveWords(move: PluginSecretMove, teamName: (team: string)
     case 'moved':
       return `${who}: ${fields} moved into a connection on slot ${move.slot}.`;
     case 'kept':
-      return `${who}: slot ${move.slot} was already bound, so ${fields} stayed as they were.`;
+      return `${who}: slot ${move.slot} was already bound ${boundTo(move)}, so ${fields} stayed as they were.`;
+    case 'alreadyBound':
+      return `${who}: no value for ${fields} to move; slot ${move.slot} is already bound ${boundTo(move)}.`;
     case 'nothing':
       return `${who}: no value for ${fields}, so slot ${move.slot} is left for a person to bind.`;
     default:
       return `${who}: ${fields} could not be moved to slot ${move.slot}: ${(move.reason ?? 'the Host gave no reason').replace(/\.$/, '')}.`;
   }
+}
+
+/** True when at least one move put a member's own value into a connection: the moves' heading says so. */
+export function anythingMoved(moves: readonly PluginSecretMove[] | null | undefined): boolean {
+  return (moves ?? []).some((move) => move.outcome === 'moved');
+}
+
+/** A piece of a sentence: plain text, or a name to show as code. */
+export interface TextPart { text: string; code: boolean }
+
+/**
+ * A SENTENCE WITH `NAMES` IN BACKTICKS (the Host's attention reasons, `secretMoveWords`) as parts, so a
+ * name renders as code and no backtick is shown. Interpolated as text, never markup. An unpaired
+ * backtick stays as typed.
+ */
+export function codeParts(sentence: string): TextPart[] {
+  const pieces = sentence.split('`');
+  if (pieces.length % 2 === 0) return [{ text: sentence, code: false }];
+  return pieces
+    .map((text, index) => ({ text, code: index % 2 === 1 }))
+    .filter((part) => part.text.length > 0);
 }
 
 /** What an upgrade came to: the install's answer, or the Host's sentence at either step. */
