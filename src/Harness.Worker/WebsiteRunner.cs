@@ -35,6 +35,11 @@ public sealed class WebsiteRunner(
     /// <summary>The most of the runner's answer read: a screenshot of a 1920x1080 page and its report.</summary>
     private const int MaximumAnswer = 12 * 1024 * 1024;
 
+    /// <summary>How long a run waits for the connection's profile while another browser has it.</summary>
+    public static readonly TimeSpan LockWait = TimeSpan.FromSeconds(20);
+
+    private static readonly TimeSpan LockPoll = TimeSpan.FromMilliseconds(250);
+
     public const string NoNodeText = "This worker has no Node.js to run the website's browser with.";
     public const string NoRunnerText = "This worker has no website runner (plugins/team-connections/website) beside the Host.";
     public const string InUseText = "This connection's browser is open for a sign-in or another run right now. Try again once it has closed.";
@@ -59,14 +64,19 @@ public sealed class WebsiteRunner(
         SignInProfiles.MakePrivate(Path.GetDirectoryName(folder)!);
         SignInProfiles.MakePrivate(folder);
 
-        FileStream held;
-        try
+        // A SIGN-IN JUST DONE is still closing its browser: the lock is waited for a while, not refused at once.
+        FileStream? held = null;
+        for (var waited = TimeSpan.Zero; held is null; waited += LockPoll)
         {
-            held = SignInProfiles.Lock(folder);
-        }
-        catch (IOException)
-        {
-            return Answer(ConnectionTested.Failed, InUseText, WebsiteFailures.Unreachable);
+            try
+            {
+                held = SignInProfiles.Lock(folder);
+            }
+            catch (IOException)
+            {
+                if (waited >= LockWait) return Answer(ConnectionTested.Failed, InUseText, WebsiteFailures.Unreachable);
+                await Task.Delay(LockPoll, ct);
+            }
         }
 
         await using (held)

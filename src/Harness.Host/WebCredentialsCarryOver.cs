@@ -12,7 +12,8 @@ namespace Harness.Host;
 /// named after its team and its entry (<c>Alpha supplier-admin</c>), assigned to that team, with its
 /// fields and its password, token, TOTP secret and saved session - the platform's own session format,
 /// so nothing is signed in to again. One <see cref="TenantActions.ConnectionsCarriedOver"/> row names how
-/// many, never a value, and marks the step done: a later start does nothing.
+/// many, never a value, and marks the step done: a later start does nothing. An instance with no Web
+/// Credentials member gets no row (nothing to carry over), and looks again at its next start.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -75,11 +76,13 @@ public sealed class WebCredentialsCarryOver(
         var already = 0;
         var left = 0;
         var forTeams = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        var members = 0;
 
         foreach (var member in await teams.MembersAsync(ct))
         {
             if (!MemberRef.IsPlugin(member.Agent, out var plugin) || plugin != PluginId || !names.TryGetValue(member.Team, out var team)) continue;
 
+            members++;
             var id = new ContainerId(member.Team, member.Name);
             var stored = await settings.ForAsync(id, ct);
             if (!stored.Config.TryGetValue(Table, out var rows) || rows.ValueKind != JsonValueKind.Array) continue;
@@ -128,6 +131,10 @@ public sealed class WebCredentialsCarryOver(
                 forTeams.Add(member.Team);
             }
         }
+
+        // AN INSTANCE WITH NO WEB CREDENTIALS MEMBER has nothing to carry over and gets no row: the
+        // look is a read of the members, made again at the next start.
+        if (members == 0) return 0;
 
         await store.RecordAsync(new TriggerAudit(
             null, null, TenantActions.ConnectionsCarriedOver, Subject, "Web Credentials",

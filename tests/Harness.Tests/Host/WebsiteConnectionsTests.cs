@@ -357,15 +357,8 @@ public sealed class WebsiteConnectionsTests : IAsyncLifetime
         await cells.SetCellAsync(creds, "Creds", WebCredentialsCarryOver.PluginId, "entries", "portal-admin", "password", SitePassword, actor, Ct);
         await cells.SetCellAsync(creds, "Creds", WebCredentialsCarryOver.PluginId, "entries", "saved", "session", session, actor, Ct);
 
-        // This start already ran the step, with nothing to carry: the instance is made one from before it.
-        await using (var db = new SqliteConnection($"Data Source={Path.Combine(_dataRoot, "messages.db")}"))
-        {
-            await db.OpenAsync(Ct);
-            var forget = db.CreateCommand();
-            forget.CommandText = "DELETE FROM tenant_events WHERE action = $action";
-            forget.Parameters.AddWithValue("$action", TenantActions.ConnectionsCarriedOver);
-            Assert.Equal(1, await forget.ExecuteNonQueryAsync(Ct));
-        }
+        // The starts so far had no Web Credentials member, so wrote no row: this is an instance from before the step.
+        Assert.Empty(await CarriedOverDetailAsync());
 
         // THE FIRST START WITH THIS STEP.
         await RestartAsync();
