@@ -7,7 +7,7 @@ using Harness.Host;
 namespace Harness.Tests;
 
 /// <summary>
-/// TESTER PROBES FOR B007G (MCP 2), beyond what McpServerToolsTests asserts. Each test states the behaviour
+/// TESTER PROBES FOR MCP 2, beyond what McpServerToolsTests asserts. Each test states the behaviour
 /// the spec asks for; a failing one is a defect report, not a test to keep green by changing it.
 /// </summary>
 public sealed class McpServerToolsProbeTests
