@@ -168,10 +168,19 @@ public sealed partial class ConnectionsTests
         Assert.Contains("\"field\":\"apiKey\"", Assert.Single(await TenantDetailsAsync(TenantActions.MemberSecretMoved)));
         await AssertNoMovedSecretAsync();
 
-        // AGAIN, nothing moves twice: no own value is left to move.
+        // AGAIN, nothing moves twice: no own value is left to move, and the slot is ALREADY BOUND - said
+        // so, naming the connection bound there (its name, never a value), not "left for a person to bind".
+        var bound = Assert.Single(await BindingsAsync("Billing"));
         var again = await InstallPluginAsync(PayPlugin("0.2.0", new Dictionary<string, string> { ["apiKey"] = "stripe" }), replace: true);
-        Assert.Equal("nothing", Assert.Single(again.GetProperty("moves").EnumerateArray()).GetProperty("outcome").GetString());
-        Assert.Single(await BindingsAsync("Billing"));
+        var second = Assert.Single(again.GetProperty("moves").EnumerateArray());
+        Assert.Equal(
+            ("alreadyBound", "stripe", bound.Value, "Mail - Billing"),
+            (second.GetProperty("outcome").GetString(), second.GetProperty("slot").GetString(),
+                second.GetProperty("connection").GetString(), second.GetProperty("connectionName").GetString()));
+        Assert.Equal(JsonValueKind.Null, second.GetProperty("key").ValueKind);
+        Assert.Equal([bound], await BindingsAsync("Billing"));
+        Assert.Single(await TenantDetailsAsync(TenantActions.MemberSecretMoved));
+        await AssertNoMovedSecretAsync();
     }
 
     [Fact]
@@ -263,7 +272,9 @@ public sealed partial class ConnectionsTests
         var before = (await GetAsync("/api/connections")).GetArrayLength();
 
         var answer = await InstallPluginAsync(PayPlugin("0.2.0", new Dictionary<string, string> { ["apiKey"] = "stripe" }));
-        Assert.Equal("nothing", Assert.Single(answer.GetProperty("moves").EnumerateArray()).GetProperty("outcome").GetString());
+        var nothing = Assert.Single(answer.GetProperty("moves").EnumerateArray());
+        Assert.Equal("nothing", nothing.GetProperty("outcome").GetString());
+        Assert.Equal(JsonValueKind.Null, nothing.GetProperty("connectionName").ValueKind);
 
         Assert.Equal(before, (await GetAsync("/api/connections")).GetArrayLength());
         Assert.Empty(await BindingsAsync("Billing"));
@@ -360,7 +371,8 @@ public sealed partial class ConnectionsTests
         Assert.True(hired.IsSuccessStatusCode, await hired.Content.ReadAsStringAsync(Ct));
 
         var answer = await InstallPluginAsync(PayPlugin("0.2.0", new Dictionary<string, string> { ["apiKey"] = "stripe" }));
-        Assert.Equal("kept", Assert.Single(answer.GetProperty("moves").EnumerateArray()).GetProperty("outcome").GetString());
+        var kept = Assert.Single(answer.GetProperty("moves").EnumerateArray());
+        Assert.Equal(("kept", "Stripe shared"), (kept.GetProperty("outcome").GetString(), kept.GetProperty("connectionName").GetString()));
 
         // THE BINDING STANDS, no connection is made, and the own value is kept for a person to clear.
         Assert.Equal([KeyValuePair.Create("stripe", existing)], await BindingsAsync("Billing"));
@@ -370,6 +382,39 @@ public sealed partial class ConnectionsTests
 
         Assert.Equal(MessageTypes.Completed, (await TellAndAwaitAsync("Billing")).Type);
         Assert.Equal(MovedSecrets[2], (string?)LastRequest()["connections"]!["stripe"]!["fields"]!["apiKey"]);
+        await AssertNoMovedSecretAsync();
+    }
+
+    /// <summary>
+    /// NO OWN VALUE AND THE SLOT ALREADY BOUND (a second upgrade, or a person bound it): the answer is
+    /// <c>alreadyBound</c>, naming the bound connection by its name, never "nothing" - which reads as the
+    /// slot left for a person to bind. Nothing is written but the binding stands.
+    /// </summary>
+    [Fact]
+    public async Task A_slot_already_bound_with_no_own_value_answers_already_bound_naming_the_connection()
+    {
+        var existing = await AddCredentialAsync("apikey", "other", "Stripe shared", ("apiKey", MovedSecrets[2], null));
+        PayPlugin("0.1.0", new Dictionary<string, string> { ["apiKey"] = "stripe" }, folder: Path.Combine(PluginInstall.PluginsRoot(_dataRoot), "pay", "0.1.0"));
+        await File.WriteAllTextAsync(Path.Combine(PluginInstall.PluginsRoot(_dataRoot), "pay", PluginCatalog.ActiveFile), "0.1.0\n", Ct);
+        await Services.GetRequiredService<PluginCatalog>().RescanAsync(Ct);
+
+        var hired = await _person.PostAsJsonAsync($"/api/teams/{_team}/containers", new
+        {
+            name = "Billing", agent = "plugin:pay", connections = new Dictionary<string, string> { ["stripe"] = existing },
+        }, Ct);
+        Assert.True(hired.IsSuccessStatusCode, await hired.Content.ReadAsStringAsync(Ct));
+        var before = (await GetAsync("/api/connections")).GetArrayLength();
+
+        var answer = await InstallPluginAsync(PayPlugin("0.2.0", new Dictionary<string, string> { ["apiKey"] = "stripe" }));
+        var move = Assert.Single(answer.GetProperty("moves").EnumerateArray());
+        Assert.Equal(("alreadyBound", existing, "Stripe shared"),
+            (move.GetProperty("outcome").GetString(), move.GetProperty("connection").GetString(), move.GetProperty("connectionName").GetString()));
+        Assert.Equal(["apiKey"], move.GetProperty("fields").EnumerateArray().Select(f => f.GetString()));
+
+        Assert.Equal(before, (await GetAsync("/api/connections")).GetArrayLength());
+        Assert.Equal([KeyValuePair.Create("stripe", existing)], await BindingsAsync("Billing"));
+        Assert.DoesNotContain(TenantActions.MemberSecretMoved, await TenantActionsAsync());
+        Assert.DoesNotContain(TenantActions.MemberSecretMoveKept, await TenantActionsAsync());
         await AssertNoMovedSecretAsync();
     }
 

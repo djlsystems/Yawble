@@ -3156,9 +3156,12 @@ export interface PluginSecretMove {
   team: string
   member: string
   slot: string
-  outcome: 'moved' | 'nothing' | 'kept' | 'failed'
+  /** `nothing`: no own value, the slot left unbound; `alreadyBound`: no own value, and the slot already binds a connection. */
+  outcome: 'moved' | 'nothing' | 'alreadyBound' | 'kept' | 'failed'
   fields: string[]
   connection: string | null
+  /** The name of the connection the slot binds - made (moved) or already there (alreadyBound, kept). Never a value. */
+  connectionName?: string | null
   key: string | null
   reason: string | null
 }

@@ -36,7 +36,8 @@ import type { SolutionCheck } from '../api/types';
  * kept - its sentence is shown in the question. Every one of these is a person's: the routes that
  * change anything are humans-only.
  *
- * UPGRADE (PLG 2): the plugin's first tile shows an upgrade icon only when the Marketplace's catalog
+ * UPGRADE (PLG 2): the plugin's ACTIVE version's tile (PLG 3: not its first, which may be an inactive
+ * older version) shows an upgrade icon only when the Marketplace's catalog
  * lists a newer version (`pluginUpdateFor`) - not when it does not list the plugin, lists the same or
  * an older version, or has not been checked. It opens one confirm (`PluginUpgradeDialog`), which is the
  * install press: fetch and install in one go. A refusal shows on the tile; the installed version stays.
@@ -100,9 +101,14 @@ function installedOf(id: string): InstalledPlugin | null {
   return list.value?.plugins.find((plugin) => plugin.id === id) ?? null;
 }
 
-/** The catalog's newer version for a plugin's FIRST tile, when it is installed and the catalog was checked. */
+/** The tile the upgrade is on: the plugin's ACTIVE installed version - never an inactive older one. */
+function upgradeTile(row: PluginRow): boolean {
+  return row.verdict === 'installed' && row.active;
+}
+
+/** The catalog's newer version for a plugin's active tile, when it is installed and the catalog was checked. */
 function upgradeFor(row: PluginRow): MarketplacePackage | null {
-  if (!firstOfPlugin(row) || !installedOf(row.id) || !catalog.value?.checked) return null;
+  if (!upgradeTile(row) || !installedOf(row.id) || !catalog.value?.checked) return null;
   return pluginUpdateFor(row.id, catalog.value);
 }
 
@@ -389,7 +395,7 @@ async function confirmRemove() {
             <div class="os-tile-line plugin-tile-line mono os-text-muted">{{ row.id }}</div>
 
             <div
-              v-if="upgradeRefused && upgradeRefused.id === row.id && firstOfPlugin(row)"
+              v-if="upgradeRefused && upgradeRefused.id === row.id && upgradeTile(row)"
               class="os-tile-line plugin-tile-line text-negative"
               role="alert"
               data-upgrade-refused

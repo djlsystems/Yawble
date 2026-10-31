@@ -46,11 +46,15 @@ public interface IPluginSecretMoveRows
 
 /// <summary>What one slot's move came to for one member.</summary>
 /// <param name="Outcome"><see cref="PluginSecretMoves.Moved"/>, <see cref="PluginSecretMoves.Nothing"/>
-/// (no own value: no connection, the slot unbound), <see cref="PluginSecretMoves.Kept"/> (the slot was
-/// already bound: the own values stay) or <see cref="PluginSecretMoves.Failed"/> (rolled back).</param>
+/// (no own value: no connection, the slot unbound), <see cref="PluginSecretMoves.AlreadyBound"/> (no own
+/// value, and the slot already binds a connection: nothing to do), <see cref="PluginSecretMoves.Kept"/>
+/// (the slot was already bound: the own values stay) or <see cref="PluginSecretMoves.Failed"/> (rolled
+/// back).</param>
+/// <param name="ConnectionName">The name of the connection the slot binds - the one made (moved) or
+/// the one already there (alreadyBound, kept). A name, never a value.</param>
 public sealed record SecretMoveResult(
     ContainerId Member, string Slot, string Outcome, IReadOnlyList<string> Fields, string? ConnectionId = null, string? Key = null,
-    string? Reason = null);
+    string? Reason = null, string? ConnectionName = null);
 
 /// <summary>
 /// A PLUGIN UPDATE MOVES A MEMBER'S OWN SECRET INTO A CONNECTION (CON 7). Run once a version whose
@@ -64,7 +68,9 @@ public sealed record SecretMoveResult(
 /// the team and the member, its fields named as the plugin's, assigned to the team, bound to the slot
 /// (a multiple slot's first free key), and the own values removed - in one transaction
 /// (<see cref="IPluginSecretMoveRows"/>), or nothing.</item>
-/// <item>A field with no own value makes nothing: the slot stays unbound and, required, reads Needs you.</item>
+/// <item>A field with no own value makes nothing: the slot stays unbound and, required, reads Needs you -
+/// unless the slot already binds a connection (a second upgrade, or a person bound it), answered
+/// <see cref="AlreadyBound"/> with that connection's name.</item>
 /// <item>A slot that takes one connection and ALREADY HAS ONE is not overwritten, and the member KEEPS
 /// its own values for the fields: nothing is lost, and a person clears them when the bound connection
 /// is the one meant. A <see cref="TenantActions.MemberSecretMoveKept"/> row names the fields.</item>
@@ -83,6 +89,11 @@ public sealed class PluginSecretMoves(
     public const string Nothing = "nothing";
 
     public const string Kept = "kept";
+
+    /// <summary>No own value to move and the slot already binds a connection - a second upgrade after a
+    /// rollback, or a person bound it. Told apart from <see cref="Nothing"/>, which leaves the slot for a
+    /// person to bind.</summary>
+    public const string AlreadyBound = "alreadyBound";
 
     public const string Failed = "failed";
 
@@ -139,7 +150,15 @@ public sealed class PluginSecretMoves(
             if (own.TryGetValue(field, out var row) && Open(row.ValueProtected) is { } value) values[field] = (value, row.ValueProtected);
         }
 
-        if (values.Count == 0) return new SecretMoveResult(member, slot, Nothing, fields);
+        if (values.Count == 0)
+        {
+            // NOTHING TO MOVE: the slot is either already bound (said so, naming the connection) or left
+            // for a person to bind. Only the slot's own key counts; a multiple slot's first is that key.
+            var bound = (await memberSettings.ForAsync(member, ct)).Connections;
+            return bound.TryGetValue(slot, out var boundId)
+                ? new SecretMoveResult(member, slot, AlreadyBound, fields, boundId, ConnectionName: await NameOfAsync(boundId, ct))
+                : new SecretMoveResult(member, slot, Nothing, fields);
+        }
 
         var moved = values.Keys.Order(StringComparer.Ordinal).ToList();
         var declared = manifest.Connections[slot];
@@ -152,7 +171,7 @@ public sealed class PluginSecretMoves(
             {
                 await connections.Store.RecordAsync(actor.Row(TenantActions.MemberSecretMoveKept, subject, memberName,
                     new { team = member.Team, member = member.Name, plugin = manifest.Id, slot, fields = moved }), ct);
-                return new SecretMoveResult(member, slot, Kept, moved);
+                return await KeptAsync(member, slot, moved, ct);
             }
 
             // THE CONNECTION'S FORM: a preset holding every moved field, masked as the manifest says -
@@ -208,10 +227,10 @@ public sealed class PluginSecretMoves(
             {
                 await connections.Store.RecordAsync(actor.Row(TenantActions.MemberSecretMoveKept, subject, memberName,
                     new { team = member.Team, member = member.Name, plugin = manifest.Id, slot, fields = moved }), ct);
-                return new SecretMoveResult(member, slot, Kept, moved);
+                return await KeptAsync(member, slot, moved, ct);
             }
 
-            return new SecretMoveResult(member, slot, Moved, moved, record.Id, bound);
+            return new SecretMoveResult(member, slot, Moved, moved, record.Id, bound, ConnectionName: record.Name);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -245,6 +264,17 @@ public sealed class PluginSecretMoves(
 
         return new SecretMoveResult(member, slot, Failed, fields, Reason: reason);
     }
+
+    /// <summary>Kept: the own values stay, and the answer names the connection the slot already binds.</summary>
+    private async Task<SecretMoveResult> KeptAsync(ContainerId member, string slot, IReadOnlyList<string> fields, CancellationToken ct)
+    {
+        var bound = (await memberSettings.ForAsync(member, ct)).Connections.GetValueOrDefault(slot);
+        return new SecretMoveResult(member, slot, Kept, fields, bound, ConnectionName: bound is null ? null : await NameOfAsync(bound, ct));
+    }
+
+    /// <summary>A bound connection's name; null when the binding names one since removed.</summary>
+    private async Task<string?> NameOfAsync(string connectionId, CancellationToken ct) =>
+        (await connections.Store.GetAsync(connectionId, ct))?.Name;
 
     private string? Open(string sealedValue)
     {
