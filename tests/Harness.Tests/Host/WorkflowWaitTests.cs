@@ -18,7 +18,9 @@ public sealed class WorkflowWaitTests(HostFixture host) : IClassFixture<HostFixt
     public async Task A_timed_out_wait_reads_each_members_latest_terminal_and_calls_the_team_quiet_when_every_one_completed()
     {
         var log = host.Services.GetRequiredService<IMessageLog>();
-        var members = host.Services.GetRequiredService<TeamRegistry>().ContainerIdsOf(host.Alpha).ToList();
+        // The members on the board: Team Connections is hidden while the team has no connection.
+        var registry = host.Services.GetRequiredService<TeamRegistry>();
+        var members = registry.ContainerIdsOf(host.Alpha).Where(registry.Shows).ToList();
         Assert.NotEmpty(members);
 
         // Rooted by a row the pump delivers to nobody: an instruction would start a real run.
