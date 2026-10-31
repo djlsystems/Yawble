@@ -132,7 +132,7 @@ async function check(entry, run, path, expect, steps) {
       await pause(150, 350);
       done.push(`${step.action} ${step.selector}`);
       if (guard.blocked.length || !hostAllowed(entry, new URL(page.url()))) {
-        return offHost(entry, `${step.action} ${step.selector} tried to go to ${guard.blocked[0] || new URL(page.url()).hostname}, off the connection's hosts; the browser stopped it.`, true);
+        return offHost(entry, `${step.action} ${step.selector} tried to go to ${guard.blocked[0] || new URL(page.url()).hostname}, off the connection's hosts; the browser stopped it.`);
       }
     }
     if (done.length) await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
@@ -175,8 +175,10 @@ async function check(entry, run, path, expect, steps) {
   }).catch((e) => ({ status: Status.failed, reason: `${entry.name}: ${String(e.message).split('\n')[0]}` }));
 }
 
-function offHost(entry, what, hold = false) {
-  return { status: Status.needsYou, offHost: true, hold, reason: `${entry.name} needs you: ${what} Add the host to the connection's Other hosts if it belongs to the site.` };
+// A page the member opened or acted on that led off the connection's hosts: stopped in the browser and
+// refused, not the connection's fault (a sign-in that leaves them is: verify.mjs says Needs you).
+function offHost(entry, what) {
+  return { status: Status.verified, refusal: true, offHost: true, reason: `${entry.name}: ${what} Ask a person to add the host to the connection's Other hosts if it belongs to the site.` };
 }
 
 // A SHORT-LIVED SESSION FOR THE MEMBER THAT ASKED, as Web Credentials hands one over: a token and its

@@ -4,8 +4,16 @@
 // It speaks harness.member/1 like any plugin. The platform hands it, on stdin, `teamConnections`:
 // every connection assigned to its team by name, kind and health - never a value - and runs a
 // connection's test for it when it writes `{"t":"connection.test","name":"..."}`, adding the test's
-// sentence to this run's output. It holds no secret, so it can print none.
+// sentence to this run's output. For a website (CON 6) it writes `{"t":"website",...}` - check, session
+// or act - and the platform runs it in its own browser on a worker, held to the site's hosts, adding
+// the page, its screenshot or the session's whereabouts to the output. It holds no secret, so it can
+// print none: the commands' words are the Web Credentials plugin's where they match.
 'use strict';
+
+const Usage =
+  'Team Connections answers `list`, `test <name>`, and for a website `check <name> [<path>] [expect "<text>"]`, ' +
+  '`session <name> [for <minutes>]` and `act <name> <path> click "<selector>" | fill "<selector>" "<text>" | submit "<selector>"` ' +
+  '(steps joined by `then`; only when the website\'s May act on pages is on).';
 
 let input = '';
 process.stdin.setEncoding('utf8');
@@ -26,6 +34,7 @@ process.stdin.on('end', () => {
     const words = String(item.instruction ?? '').trim();
     const [command, ...rest] = words.split(/\s+/);
     const verb = (command || '').toLowerCase();
+    const source = typeof item.source === 'string' ? item.source : undefined;
 
     if (verb === '' || verb === 'list') {
       answers.push(list(connections));
@@ -38,13 +47,86 @@ process.stdin.on('end', () => {
         // sentence to this run's output: this process never sees what the connection holds.
         emit({ t: 'connection.test', name });
       }
+    } else if (verb === 'check' || verb === 'session' || verb === 'act') {
+      const asked = website(verb, words.slice(command.length).trim(), connections);
+      if (asked.error) answers.push(asked.error);
+      else emit({ t: 'website', ...asked, source });
     } else {
-      answers.push(`Team Connections answers \`list\` and \`test <name>\`; '${words}' is neither.`);
+      answers.push(`'${words}' is not a command. ${Usage}`);
     }
   }
 
   emit({ t: 'result', ok: true, output: answers.join('\n\n') });
 });
+
+// A WEBSITE COMMAND'S WORDS: the connection's name - the longest run of leading words that names one
+// of the team's connections, or a quoted name, or the first word - then the command's own words.
+function website(verb, text, connections) {
+  const parts = tokens(text);
+  if (parts.length === 0) return { error: `Say which website: \`${verb} <name>\`. ${names(connections)}` };
+
+  let name = parts[0].text;
+  let at = 1;
+  if (!parts[0].quoted) {
+    for (let n = parts.length; n >= 1; n--) {
+      const candidate = parts.slice(0, n).map(p => p.text).join(' ');
+      if (connections.some(c => String(c.name).trim().toLowerCase() === candidate.toLowerCase())) {
+        name = candidate;
+        at = n;
+        break;
+      }
+    }
+  }
+  const args = parts.slice(at).map(p => p.text);
+
+  if (verb === 'session') {
+    const forAt = args.findIndex(a => a.toLowerCase() === 'for');
+    const minutes = forAt >= 0 ? parseInt(args[forAt + 1], 10) : NaN;
+    return { command: 'session', name, ...(Number.isFinite(minutes) ? { minutes } : {}) };
+  }
+
+  if (verb === 'check') {
+    const expectAt = args.findIndex(a => a.toLowerCase() === 'expect');
+    const before = expectAt >= 0 ? args.slice(0, expectAt) : args;
+    const expect = expectAt >= 0 ? args[expectAt + 1] : undefined;
+    return { command: 'check', name, ...(before[0] ? { path: before[0] } : {}), ...(expect ? { expect } : {}) };
+  }
+
+  // act <name> <path> <step> [then <step>]...
+  const path = args[0];
+  if (!path) return { error: `Say which page and what to do: \`act ${name} <path> click "<selector>"\`.` };
+  const steps = [];
+  let i = 1;
+  while (i < args.length) {
+    const action = String(args[i]).toLowerCase();
+    if (action === 'then') {
+      i++;
+      continue;
+    }
+    if (action === 'click' || action === 'submit') {
+      if (!args[i + 1]) return { error: `${action} needs a selector: \`${action} "<selector>"\`.` };
+      steps.push({ action, selector: args[i + 1] });
+      i += 2;
+    } else if (action === 'fill') {
+      if (!args[i + 1] || args[i + 2] === undefined) return { error: 'fill needs a selector and the text: `fill "<selector>" "<text>"`.' };
+      steps.push({ action, selector: args[i + 1], value: args[i + 2] });
+      i += 3;
+    } else {
+      return { error: `'${args[i]}' is not a step: each is click "<selector>", fill "<selector>" "<text>" or submit "<selector>".` };
+    }
+  }
+  if (steps.length === 0) return { error: `Say what to do on ${path}: click "<selector>", fill "<selector>" "<text>" or submit "<selector>".` };
+  return { command: 'act', name, path, steps };
+}
+
+// Splits words, keeping "quoted runs" (or 'single' ones) as one word, as Web Credentials does.
+function tokens(line) {
+  const out = [];
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let m;
+  while ((m = re.exec(line)) !== null) out.push(m[3] !== undefined ? { text: m[3], quoted: false } : { text: m[1] ?? m[2], quoted: true });
+  return out;
+}
 
 function list(connections) {
   if (connections.length === 0) {
@@ -55,7 +137,8 @@ function list(connections) {
     const health = c.health === 'ok' ? 'ok' : 'needs reconnect';
     const reason = c.health === 'ok' || !c.reason ? '' : ` - ${c.reason}`;
     const test = c.testable ? '' : ' (no test)';
-    return `- ${c.name} (${c.kind}): ${health}${reason}${test}`;
+    const site = c.kind === 'website' ? ` - check, session${c.mayAct ? ', act' : ''}` : '';
+    return `- ${c.name} (${c.kind}): ${health}${reason}${test}${site}`;
   });
 
   return `This team's connections (${connections.length}):\n${lines.join('\n')}`;

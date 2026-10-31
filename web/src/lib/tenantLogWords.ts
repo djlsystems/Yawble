@@ -770,6 +770,28 @@ const words: Record<string, Words> = {
         get(d, 'wasNeedingReconnect') === true && 'it needed reconnecting',
       ]),
   },
+  'connections.signed-in': {
+    did: 'signed in to a website connection',
+    detail: (d) =>
+      sentence([
+        `kept a session for ${text(d, 'name') ?? 'the connection'} on ${String(get(d, 'hosts') ?? 0)} host(s)`,
+        names(d, 'providers') && `through ${names(d, 'providers')}`,
+      ]),
+  },
+  'connections.website-used': {
+    did: 'used a website connection',
+    detail: (d) =>
+      sentence([
+        `${text(d, 'member') ?? 'a member'} asked ${text(d, 'command') ?? 'a command'}${text(d, 'path') ? ` on ${text(d, 'path')}` : ''}`,
+        text(d, 'outcome') === 'ok' ? 'it worked' : 'it did not',
+        text(d, 'sentence'),
+      ]),
+  },
+  'connections.web-credentials-carried-over': {
+    did: 'made website connections of Web Credentials entries',
+    detail: (d) =>
+      sentence([`${String(get(d, 'count') ?? 0)} entr${get(d, 'count') === 1 ? 'y' : 'ies'} became website connections`, names(d, 'teams') && `for ${names(d, 'teams')}`]),
+  },
   'team.connection-assigned': {
     did: 'assigned a connection to a team',
     detail: (d) =>

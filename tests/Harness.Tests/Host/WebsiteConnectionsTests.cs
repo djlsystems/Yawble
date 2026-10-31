@@ -1,0 +1,444 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Net.WebSockets;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Harness.Containers;
+using Harness.Contracts;
+using Harness.Host;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+
+namespace Harness.Tests.Host;
+
+/// <summary>
+/// WEBSITE CONNECTIONS (CON 6) ON THE REAL HOST: the platform's sign-in page signs in to a local fake
+/// site in Google Chrome and keeps the session on the connection; Test connection is the signed-in
+/// check; a member asking Team Connections - the real plugin, the real worker runner, the platform's
+/// Chrome - opens the check page and is answered with the page and a screenshot and no value; act is
+/// refused while May act on pages is off and acts, held to the site's hosts, when it is on; a refused
+/// sign-in is Needs you on the connection and a site that does not answer fails the run alone. No real
+/// site and no real account.
+/// </summary>
+[Collection(ProcessEnvironmentCollection.Name)]
+public sealed class WebsiteConnectionsTests : IAsyncLifetime
+{
+    private const string Email = "person@example.test";
+    private const string Password = "correct horse battery";
+    private const string SiteUser = "pat@example.test";
+    private const string SitePassword = "site-password-7f3a91";
+    private const string Session = "site-session-c0ffee9d";
+
+    private static readonly HashSet<string> MemberPermits =
+        new(StringComparer.Ordinal) { Permits.Progress, Permits.Skills, Permits.Read, Permits.Sites };
+
+    private readonly string _dataRoot = Path.Combine(Path.GetTempPath(), $"harness-website-{Guid.NewGuid():N}");
+    private readonly FakeAgent _agents = new();
+    private readonly HashSet<string> _live = new(StringComparer.Ordinal);
+    private WebApplicationFactory<Program> _factory = null!;
+    private WebApplication _site = null!;
+    private HttpClient _person = null!;
+    private string _origin = "";
+    private string _team = "";
+
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    private IServiceProvider Services => _factory.Services;
+
+    private static readonly string Tc = TeamConnectionsMember.Name;
+
+    public async ValueTask InitializeAsync()
+    {
+        Directory.CreateDirectory(_dataRoot);
+        _agents.Behaviour = invocation => Task.FromResult(new AgentResult(0, $"noted by {invocation.Container.Name}"));
+
+        // THE FAKE SITE: arriving at / signs the visitor in (what a person does in the sign-in page), a
+        // password form, a dashboard only a signed-in browser sees, a page that prints its own session, a
+        // form to act on and a link off the site.
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Logging.ClearProviders();
+        _site = builder.Build();
+        string Page(string body) => $"<!doctype html><html><head><title>Fake portal</title></head><body>{body}</body></html>";
+        bool SignedIn(HttpContext c) => c.Request.Cookies.TryGetValue("sess", out var s) && _live.Contains(s!);
+        _site.MapGet("/", (HttpContext c) =>
+        {
+            _live.Add(Session);
+            c.Response.Cookies.Append("sess", Session, new CookieOptions { Expires = DateTimeOffset.UtcNow.AddHours(1) });
+            return Results.Content(Page("<h1>Welcome</h1>You are signed in."), "text/html");
+        });
+        _site.MapGet("/dashboard", (HttpContext c) => SignedIn(c)
+            ? Results.Content(Page("<h1>Dashboard</h1><p id=\"who\">Signed in as Pat</p>"), "text/html")
+            : Results.Redirect("/login"));
+        _site.MapGet("/login", () => Results.Content(Page(
+            "<h1>Sign in</h1><form method=\"post\" action=\"/login\"><input type=\"email\" name=\"email\"/><input type=\"password\" name=\"password\"/><button type=\"submit\">Log in</button></form>"), "text/html"));
+        _site.MapPost("/login", async (HttpContext c) =>
+        {
+            var form = await c.Request.ReadFormAsync();
+            if (form["email"] != SiteUser || form["password"] != SitePassword) return Results.Content(Page("<h1>Sign in</h1><p>Wrong username or password</p>"), "text/html");
+            var token = "sess-" + Guid.NewGuid().ToString("N")[..12];
+            _live.Add(token);
+            c.Response.Cookies.Append("sess", token);
+            return Results.Redirect("/dashboard");
+        });
+        _site.MapGet("/leaky", (HttpContext c) => SignedIn(c)
+            ? Results.Content(Page($"<h1>Account</h1><p>Your session is {c.Request.Cookies["sess"]}.</p>"), "text/html")
+            : Results.Redirect("/login"));
+        _site.MapGet("/notes", (HttpContext c) => SignedIn(c)
+            ? Results.Content(Page("<h1>Notes</h1><form method=\"post\" action=\"/notes\"><input id=\"note\" name=\"note\"/><button id=\"save\" type=\"submit\">Save</button></form><a id=\"off\" href=\"http://127.0.0.2:9/elsewhere\">Leave</a>"), "text/html")
+            : Results.Redirect("/login"));
+        _site.MapPost("/notes", async (HttpContext c) =>
+        {
+            var form = await c.Request.ReadFormAsync();
+            return SignedIn(c) ? Results.Content(Page($"<h1>Saved</h1><p>Saved note: {form["note"]}</p>"), "text/html") : Results.Redirect("/login");
+        });
+        await _site.StartAsync(Ct);
+        _origin = _site.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
+
+        _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host => host
+            .UseSetting("DataRoot", _dataRoot)
+            .UseSetting("Logging:LogLevel:Default", "Warning")
+            .ConfigureTestServices(services =>
+            {
+                services.AddSingleton<IAgentRunner>(_agents);
+                // The worker's website runner, typing faster than a person does - still one key at a time.
+                services.AddSingleton(new ConnectionTester(website: new WebsiteRunner(environment: new Dictionary<string, string> { ["WEB_CREDENTIALS_PACE"] = "0.2" })));
+            }));
+
+        _team = (await Services.GetRequiredService<TeamRegistry>().CreateAsync("Alpha", "claude-headless", memberAgent: "claude-headless", ct: Ct)).Id;
+        await Services.GetRequiredService<IUserStore>().CreateAsync(Email, Password);
+        _person = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        (await _person.PostAsJsonAsync("/api/auth/login", new { email = Email, password = Password }, Ct)).EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.OK, (await _person.PostAsJsonAsync($"/api/teams/{_team}/containers", new { name = "Dev", agent = "claude-headless" }, Ct)).StatusCode);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _person.Dispose();
+        await _factory.DisposeAsync();
+        await _site.DisposeAsync();
+        SqliteConnection.ClearAllPools();
+        try { Directory.Delete(_dataRoot, recursive: true); }
+        catch (IOException) { }
+    }
+
+    // ---- Done when 1 -----------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task A_website_signed_in_with_Sign_in_is_used_by_a_member_through_Team_Connections_and_the_answer_carries_the_page_and_a_screenshot_and_no_secret()
+    {
+        Assert.SkipWhen(SignInBrowserChromiumTests.Chromium() is null, SignInBrowserChromiumTests.NoChrome);
+
+        var portal = await WebsiteAsync("Fake portal", ("siteUrl", _origin), ("method", "interactive"), ("checkUrl", "/dashboard"), ("checkText", "Signed in as"));
+        await AssignAsync(portal);
+
+        // Before Sign in, its test says a person signs in once - and marks it Needs you.
+        var before = await TestAsync(portal);
+        Assert.Equal(ConnectionRecord.NeedsReconnect, before.GetProperty("health").GetString());
+        Assert.Contains("Sign in", before.GetProperty("sentence").GetString(), StringComparison.Ordinal);
+
+        // SIGN IN, on the platform's sign-in page, in the connection's own profile.
+        var saved = await SignInAsync(portal);
+        Assert.Contains("127.0.0.1", saved.GetProperty("hosts").EnumerateArray().Select(h => h.GetString()));
+        var connection = await ConnectionAsync(portal);
+        Assert.True(connection["fields"]!.AsArray().Single(f => (string?)f!["name"] == "session")!["set"]!.GetValue<bool>());
+        Assert.Equal(ConnectionRecord.Ok, (string?)connection["status"]);
+        Assert.Contains(TenantActions.ConnectionSignedIn, await TenantActionsAsync());
+
+        // TEST CONNECTION is the signed-in check, in the same browser.
+        var tested = await TestAsync(portal);
+        Assert.Equal(ConnectionRecord.Ok, tested.GetProperty("health").GetString());
+
+        // A MEMBER ASKS TEAM CONNECTIONS to open its check page: the page, its text, a screenshot.
+        using var dev = await KeyClientAsync(new ContainerId(_team, "Dev").ToString());
+        var listed = Output(await TellAndAwaitAsync(dev, "list"));
+        Assert.Contains("Fake portal (website): ok - check, session", listed, StringComparison.Ordinal);
+
+        var check = await TellAndAwaitAsync(dev, "check Fake portal");
+        Assert.Equal(MessageTypes.Completed, check.Type);
+        var answer = Output(check);
+        Assert.Contains("HTTP 200", answer, StringComparison.Ordinal);
+        Assert.Contains("heading: Dashboard", answer, StringComparison.Ordinal);
+        Assert.Contains("Signed in as Pat", answer, StringComparison.Ordinal);
+        var shot = System.Text.RegularExpressions.Regex.Match(answer, @"screenshot: (Team Connections/fake-portal-[0-9-]+\.png)").Groups[1].Value;
+        Assert.NotEqual("", shot);
+        var png = await File.ReadAllBytesAsync(Path.Combine(_dataRoot, "documents", _team, shot), Ct);
+        Assert.Equal("PNG", Encoding.ASCII.GetString(png, 1, 3));
+        // Dev is answered with the same page, in its own workflow.
+        var told = await AnswersToAsync("Dev", check.CausationSeq!.Value);
+        Assert.Contains("Signed in as Pat", told, StringComparison.Ordinal);
+        Assert.Contains(shot, told, StringComparison.Ordinal);
+
+        // A page that prints the session: it is taken out of the answer.
+        var leaky = Output(await TellAndAwaitAsync(dev, "check \"Fake portal\" /leaky"));
+        Assert.Contains("Your session is [redacted]", leaky, StringComparison.Ordinal);
+
+        // A path off the site's hosts is refused before the browser goes anywhere.
+        var off = Output(await TellAndAwaitAsync(dev, "check Fake portal http://127.0.0.2:9/elsewhere"));
+        Assert.Contains("not one of the connection's hosts", off, StringComparison.Ordinal);
+
+        // SESSION hands a short-lived session to the member that asked, in its own workspace, as Web Credentials does.
+        var session = Output(await TellAndAwaitAsync(dev, "session Fake portal for 5"));
+        var handed = System.Text.RegularExpressions.Regex.Match(session, @"Dev:(\.team-connections-sessions/fake-portal-[0-9a-f]+\.json)").Groups[1].Value;
+        Assert.NotEqual("", handed);
+        var file = Path.Combine(_dataRoot, "teams", _team, "workspaces", "Dev", handed);
+        Assert.Contains(Session, await File.ReadAllTextAsync(file, Ct), StringComparison.Ordinal);
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead, File.GetUnixFileMode(file));
+        Assert.DoesNotContain(Session, session, StringComparison.Ordinal);
+
+        // NO SECRET in any answer, row, log or file under the data root but the handoff itself.
+        File.Delete(file);
+        await AssertNowhereAsync(Session);
+    }
+
+    // ---- Done when 2 -----------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Act_is_refused_with_a_sentence_naming_May_act_on_pages_while_it_is_off_and_acts_held_to_the_sites_hosts_when_it_is_on()
+    {
+        Assert.SkipWhen(SignInBrowserChromiumTests.Chromium() is null, SignInBrowserChromiumTests.NoChrome);
+
+        var portal = await WebsiteAsync("Portal", ("siteUrl", _origin), ("method", "password"), ("signInUrl", "/login"), ("checkUrl", "/dashboard"),
+            ("checkText", "Signed in as"), ("username", SiteUser), ("password", SitePassword));
+        await AssignAsync(portal);
+        using var dev = await KeyClientAsync(new ContainerId(_team, "Dev").ToString());
+
+        const string Act = "act Portal /notes fill \"#note\" \"hello from Dev\" then click \"#save\"";
+        var refused = Output(await TellAndAwaitAsync(dev, Act));
+        Assert.Contains("May act on pages", refused, StringComparison.Ordinal);
+        Assert.Contains(Connections.MayActOffText("Portal"), refused, StringComparison.Ordinal);
+
+        // A person turns the switch on - only a person can: every connection route is a person's.
+        Assert.NotEqual(HttpStatusCode.OK, (await dev.PutAsJsonAsync($"/api/connections/{portal}/credentials", new { fields = new[] { new { name = "mayAct", value = "true" } } }, Ct)).StatusCode);
+        var on = await _person.PutAsJsonAsync($"/api/connections/{portal}/credentials", new { fields = new[] { new { name = "mayAct", value = "true" } } }, Ct);
+        Assert.True(on.IsSuccessStatusCode, await on.Content.ReadAsStringAsync(Ct));
+
+        var acted = Output(await TellAndAwaitAsync(dev, Act));
+        Assert.Contains("Saved note: hello from Dev", acted, StringComparison.Ordinal);
+        Assert.Contains("done: fill #note; click #save", acted, StringComparison.Ordinal);
+        Assert.Contains("screenshot: Team Connections/portal-", acted, StringComparison.Ordinal);
+
+        // HELD TO THE SITE'S HOSTS: a click that leads off them is stopped in the browser and refused,
+        // and the connection is still ok.
+        var left = Output(await TellAndAwaitAsync(dev, "act Portal /notes click \"#off\""));
+        Assert.Contains("127.0.0.2", left, StringComparison.Ordinal);
+        Assert.Contains("off the connection's hosts", left, StringComparison.Ordinal);
+        Assert.Equal(ConnectionRecord.Ok, (string?)(await ConnectionAsync(portal))["status"]);
+
+        await AssertNowhereAsync(SitePassword);
+    }
+
+    // ---- Failures follow CON 4 ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task A_refused_sign_in_is_Needs_you_on_the_connection_and_a_site_that_does_not_answer_fails_the_run_alone()
+    {
+        Assert.SkipWhen(SignInBrowserChromiumTests.Chromium() is null, SignInBrowserChromiumTests.NoChrome);
+
+        var wrong = await WebsiteAsync("Wrong", ("siteUrl", _origin), ("method", "password"), ("signInUrl", "/login"), ("checkUrl", "/dashboard"),
+            ("username", SiteUser), ("password", "not-the-password-1"));
+        var down = await WebsiteAsync("Down", ("siteUrl", "http://127.0.0.1:9"), ("method", "password"), ("username", SiteUser), ("password", SitePassword));
+        await AssignAsync(wrong);
+        await AssignAsync(down);
+        using var dev = await KeyClientAsync(new ContainerId(_team, "Dev").ToString());
+
+        var refused = await TellAndAwaitAsync(dev, "check Wrong");
+        Assert.Equal(MessageTypes.Failed, refused.Type);
+        Assert.Contains("the sign-in was rejected", Output(refused), StringComparison.Ordinal);
+        Assert.Equal(ConnectionRecord.NeedsReconnect, (string?)(await ConnectionAsync(wrong))["status"]);
+        Assert.Contains(TenantActions.ConnectionNeedsReconnect, await TenantActionsAsync());
+
+        // While it needs a person, a member's command does not sign in again.
+        var held = Output(await TellAndAwaitAsync(dev, "check Wrong"));
+        Assert.Contains("Wrong needs a person, so it was not used", held, StringComparison.Ordinal);
+
+        // A person fixes it and tests it: Needs you is cleared, as CON 4 clears it.
+        await _person.PutAsJsonAsync($"/api/connections/{wrong}/credentials", new { fields = new[] { new { name = "password", value = SitePassword } } }, Ct);
+        Assert.Equal(ConnectionRecord.Ok, (await TestAsync(wrong)).GetProperty("health").GetString());
+
+        var unreachable = await TellAndAwaitAsync(dev, "check Down");
+        Assert.Equal(MessageTypes.Failed, unreachable.Type);
+        Assert.Equal(ConnectionRecord.Ok, (string?)(await ConnectionAsync(down))["status"]);
+
+        await AssertNowhereAsync(SitePassword, "not-the-password-1");
+    }
+
+    // ---- helpers ---------------------------------------------------------------------------------------
+
+    private async Task<string> WebsiteAsync(string name, params (string Name, string Value)[] fields)
+    {
+        var added = await _person.PostAsJsonAsync("/api/connections/credentials", new
+        {
+            kind = "website", name, fields = fields.Select(f => new { name = f.Name, value = f.Value }),
+        }, Ct);
+        var body = await added.Content.ReadAsStringAsync(Ct);
+        Assert.True(added.IsSuccessStatusCode, body);
+        return (string)JsonNode.Parse(body)!["connection"]!["id"]!;
+    }
+
+    private async Task AssignAsync(string connection)
+    {
+        var assigned = await _person.PostAsJsonAsync($"/api/teams/{_team}/connections", new { connection }, Ct);
+        Assert.True(assigned.IsSuccessStatusCode, await assigned.Content.ReadAsStringAsync(Ct));
+    }
+
+    private async Task<JsonNode> ConnectionAsync(string id) =>
+        JsonNode.Parse(await _person.GetStringAsync("/api/connections", Ct))!.AsArray().Single(c => (string?)c!["id"] == id)!;
+
+    private async Task<JsonElement> TestAsync(string id)
+    {
+        var tested = await _person.PostAsync($"/api/connections/{id}/test", null, Ct);
+        var body = await tested.Content.ReadAsStringAsync(Ct);
+        Assert.True(tested.IsSuccessStatusCode, body);
+        return JsonDocument.Parse(body).RootElement.Clone();
+    }
+
+    /// <summary>A person's Sign in on the connection: the page's socket, the site opened, Done pressed.</summary>
+    private async Task<JsonElement> SignInAsync(string id)
+    {
+        using var login = _factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false, AllowAutoRedirect = false });
+        var answer = await login.PostAsJsonAsync("/api/auth/login", new { email = Email, password = Password }, Ct);
+        answer.EnsureSuccessStatusCode();
+        var cookie = string.Join("; ", answer.Headers.GetValues("Set-Cookie").Select(c => c.Split(';')[0]));
+
+        var client = _factory.Server.CreateWebSocketClient();
+        client.ConfigureRequest = request => request.Headers.Cookie = cookie;
+        using var socket = await client.ConnectAsync(new Uri(_factory.Server.BaseAddress, $"/api/connections/{id}/sign-in?lang=en-gb"), Ct);
+        var buffer = new byte[4 * 1024 * 1024];
+        var texts = new List<string>();
+
+        async Task<JsonElement> Until(string kind, Func<JsonElement, bool>? when = null)
+        {
+            using var bound = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+            bound.CancelAfter(TimeSpan.FromSeconds(60));
+            while (true)
+            {
+                var length = 0;
+                WebSocketReceiveResult result;
+                do
+                {
+                    result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer, length, buffer.Length - length), bound.Token);
+                    length += result.Count;
+                }
+                while (!result.EndOfMessage);
+
+                if (result.MessageType == WebSocketMessageType.Close)
+                {
+                    Assert.Fail($"The socket closed before '{kind}': {string.Join(" | ", texts)}");
+                }
+                if (result.MessageType != WebSocketMessageType.Text) continue;
+                var text = Encoding.UTF8.GetString(buffer, 0, length);
+                texts.Add(text);
+                var message = JsonDocument.Parse(text).RootElement;
+                if (message.GetProperty("kind").GetString() == kind && (when is null || when(message))) return message.Clone();
+            }
+        }
+
+        await Until("started");
+        await Until("page", m => m.TryGetProperty("title", out var t) && t.GetString() == "Fake portal");
+        await socket.SendAsync(Encoding.UTF8.GetBytes("""{"type":"done"}"""), WebSocketMessageType.Text, true, Ct);
+        var saved = await Until("saved");
+        Assert.DoesNotContain(texts, t => t.Contains(Session, StringComparison.Ordinal));
+        return saved;
+    }
+
+    private async Task<HttpClient> KeyClientAsync(string id)
+    {
+        var key = await Services.GetRequiredService<IPrincipalStore>().MintAsync(id, PrincipalKind.Container, _team, MemberPermits, ct: Ct);
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Api-Key", key);
+        return client;
+    }
+
+    private async Task<Message> TellAndAwaitAsync(HttpClient client, string instruction)
+    {
+        var who = new ContainerId(_team, Tc);
+        var log = Services.GetRequiredService<IMessageLog>();
+
+        async Task<IReadOnlyList<Message>> Rows() =>
+            [.. (await log.ReadAfterAsync(0, [MessageTypes.Completed, MessageTypes.Failed], int.MaxValue, Ct)).Where(m => m.Source == who.ToString())];
+
+        var after = (await Rows()).Select(m => m.Seq).DefaultIfEmpty(0).Max();
+        var told = await client.PostAsJsonAsync($"/api/teams/{_team}/containers/{Tc}/tell", new { instruction }, Ct);
+        Assert.True(told.IsSuccessStatusCode, await told.Content.ReadAsStringAsync(Ct));
+
+        var deadline = DateTime.UtcNow.AddMinutes(4);
+        while (DateTime.UtcNow < deadline)
+        {
+            if ((await Rows()).FirstOrDefault(m => m.Seq > after) is { } row)
+            {
+                var host = Services.GetRequiredService<ContainerHost>();
+                while (host.Find(who)!.State != ContainerState.Idle && DateTime.UtcNow < deadline) await Task.Delay(20, Ct);
+                return row;
+            }
+
+            await Task.Delay(100, Ct);
+        }
+
+        throw new TimeoutException($"Team Connections never finished '{instruction}'.");
+    }
+
+    private static string Output(Message row)
+    {
+        var payload = JsonNode.Parse(row.Payload)!;
+        return ((string?)payload["output"] ?? "") + "\n" + ((string?)payload["error"] ?? "") + "\n" + ((string?)payload["reason"] ?? "");
+    }
+
+    private async Task<string> AnswersToAsync(string member, long told)
+    {
+        var log = Services.GetRequiredService<IMessageLog>();
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (DateTime.UtcNow < deadline)
+        {
+            var answer = (await log.ReadAfterAsync(0, [MessageTypes.InstructionFor(new ContainerId(_team, member))], int.MaxValue, Ct))
+                .FirstOrDefault(m => m.CausationSeq == told && m.Source == new ContainerId(_team, Tc).ToString());
+            if (answer is not null) return (string?)JsonNode.Parse(answer.Payload)![PayloadFields.Instruction] ?? "";
+            await Task.Delay(50, Ct);
+        }
+
+        throw new TimeoutException($"{member} was never answered.");
+    }
+
+    private async Task<IReadOnlyList<string>> TenantActionsAsync()
+    {
+        await using var db = new SqliteConnection($"Data Source={Path.Combine(_dataRoot, "messages.db")}");
+        await db.OpenAsync(Ct);
+        var read = db.CreateCommand();
+        read.CommandText = "SELECT action FROM tenant_events";
+        var actions = new List<string>();
+        await using var reader = await read.ExecuteReaderAsync(Ct);
+        while (await reader.ReadAsync(Ct)) actions.Add(reader.GetString(0));
+        return actions;
+    }
+
+    private async Task AssertNowhereAsync(params string[] secrets)
+    {
+        foreach (var file in Directory.EnumerateFiles(_dataRoot, "*", SearchOption.AllDirectories))
+        {
+            byte[] bytes;
+            try
+            {
+                using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var memory = new MemoryStream();
+                await stream.CopyToAsync(memory, Ct);
+                bytes = memory.ToArray();
+            }
+            catch (IOException)
+            {
+                continue;
+            }
+
+            var text = Encoding.UTF8.GetString(bytes);
+            foreach (var secret in secrets) Assert.False(text.Contains(secret, StringComparison.Ordinal), $"{secret} is in {file}");
+        }
+    }
+}

@@ -93,15 +93,22 @@ public sealed partial class ChromiumSignInBrowser : IAsyncDisposable
     public Task<string> Ended => _ended.Task;
 
     /// <summary>
+    /// Where the platform's Google Chrome is: <c>HARNESS_SIGN_IN_CHROME</c>, else <c>google-chrome</c> in
+    /// the data root. A website connection's runs use the same (<see cref="WebsiteRunner"/>).
+    /// </summary>
+    public static string Root() =>
+        Environment.GetEnvironmentVariable("HARNESS_SIGN_IN_CHROME") is { Length: > 0 } set
+            ? set
+            : Path.Combine(Environment.GetEnvironmentVariable("HARNESS_DATA_ROOT") is { Length: > 0 } data ? data : "/data", DefaultChromeFolder);
+
+    /// <summary>
     /// The newest Google Chrome under <paramref name="root"/> (<c>&lt;root&gt;/&lt;version&gt;/chrome</c>, as
     /// <c>scripts/install-google-chrome.sh</c> lays it out), or null when none is installed. The root is
     /// <c>HARNESS_SIGN_IN_CHROME</c>, else <c>google-chrome</c> in the data root.
     /// </summary>
     public static string? Find(string? root = null)
     {
-        root ??= Environment.GetEnvironmentVariable("HARNESS_SIGN_IN_CHROME") is { Length: > 0 } set
-            ? set
-            : Path.Combine(Environment.GetEnvironmentVariable("HARNESS_DATA_ROOT") is { Length: > 0 } data ? data : "/data", DefaultChromeFolder);
+        root ??= Root();
         if (!Directory.Exists(root)) return null;
 
         return Directory.EnumerateDirectories(root)

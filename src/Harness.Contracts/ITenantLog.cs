@@ -262,6 +262,19 @@ public static class TenantActions
     /// mailbox's servers. Detail names the fields that changed - never a value or any part of it.</summary>
     public const string ConnectionCredentialsChanged = "connections.credentials-changed";
 
+    /// <summary>A person signed in to a website connection with Sign in, and its session was kept (CON 6).
+    /// Detail: the connection, how many hosts the session holds and the sign-in providers among them -
+    /// never the session or any part of it.</summary>
+    public const string ConnectionSignedIn = "connections.signed-in";
+
+    /// <summary>A member used a website connection through Team Connections (CON 6): the command (check,
+    /// session, act), the path, the outcome and its sentence - never a value, a session or page text.</summary>
+    public const string ConnectionWebsiteUsed = "connections.website-used";
+
+    /// <summary>The first start with CON 6 made a website connection of every Web Credentials entry on any
+    /// member of any team, assigned to that team. Detail: how many, and the teams - never a value.</summary>
+    public const string ConnectionsCarriedOver = "connections.web-credentials-carried-over";
+
     /// <summary>A person assigned a connection to a team, so the team's plugin members may bind it
     /// (in Team settings, at team creation, at a binding or a solution install, or carried by a clone).
     /// Detail: team, connection id, name, kind - never a value.</summary>

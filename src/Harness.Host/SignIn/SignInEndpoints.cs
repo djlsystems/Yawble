@@ -104,6 +104,55 @@ public static partial class SignInEndpoints
             // A WebSocket upgrade wearing a GET, described here rather than in the API reference.
             .ExcludeFromDescription()
             .HumansOnly();
+
+        // A WEBSITE CONNECTION'S SIGN IN (CON 6), from Admin -> Connections: the same page and browser, in
+        // the connection's own profile - the one its runs use - and the session kept as the connection's
+        // masked saved session. Only a person, as every connection route is.
+        app.MapGet("/api/connections/{id}/sign-in", async (
+            [Description("The website connection's id.")] string id,
+            HttpContext context, Connections connections, SignInSessions sessions, CancellationToken ct) =>
+        {
+            if (PrincipalClaims.From(context.User) is not { } caller) return Results.Unauthorized();
+            if (caller.Kind != PrincipalKind.User)
+            {
+                return Results.Content(PermitGate.HumansOnlyBody, "application/json", statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            var (entry, why) = await connections.WebsiteSignInAsync(id, ct);
+            if (!context.WebSockets.IsWebSocketRequest)
+            {
+                return entry is null ? Results.NotFound(new { error = why }) : Results.BadRequest(new { error = "This endpoint speaks WebSocket." });
+            }
+
+            if (entry is null)
+            {
+                await RefuseAsync(context, why!, ct);
+                return Results.Empty;
+            }
+
+            var actor = ConnectionEndpoints.Actor(context);
+            using var socket = await context.WebSockets.AcceptWebSocketAsync();
+            SignInSession session;
+            try
+            {
+                session = await sessions.StartForConnectionAsync(
+                    caller.Id, id, entry,
+                    (state, hosts, providers, keepCt) => connections.SaveWebsiteSessionAsync(actor, id, state, hosts, providers, keepCt),
+                    ct, Languages(context), TimeZone(context));
+            }
+            catch (InvalidOperationException exception)
+            {
+                await SendAsync(socket, new { kind = "ended", reason = exception.Message }, ct);
+                await CloseAsync(socket);
+                return Results.Empty;
+            }
+
+            await SendAsync(socket, new { kind = "started", width = SignInSessions.Width, height = SignInSessions.Height, site = entry.SiteUrl }, ct);
+            await PumpAsync(socket, session, PluginEndpoints.SecretActor(context), ct);
+            return Results.Empty;
+        })
+            .ExcludeFromDescription()
+            .HumansOnly();
     }
 
     /// <summary>Accepts the page's socket only to say why no browser starts, then closes it.</summary>

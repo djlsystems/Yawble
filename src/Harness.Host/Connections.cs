@@ -112,7 +112,7 @@ public sealed record ConnectionActor(string Id, string? Email)
 /// <item>Nothing here answers a token or the client secret to a route, a row or a log.</item>
 /// </list>
 /// </summary>
-public sealed class Connections(
+public sealed partial class Connections(
     IConnectionStore store, IOAuthEndpoints endpoints, TimeProvider clock, IUserStore? users = null,
     Func<TimeSpan, CancellationToken, Task>? delay = null, IMailLogin? mail = null, string? microsoftClientId = null) : IDisposable
 {
@@ -1551,8 +1551,9 @@ public sealed class Connections(
     public static readonly TimeSpan TestBound = TimeSpan.FromSeconds(60);
 
     /// <summary>
-    /// Whether a connection has a test: every sign-in and every mailbox; a website, API key or username
-    /// and password when its preset declares one and the connection has what it names. A website has none.
+    /// Whether a connection has a test: every sign-in, every mailbox and every website (its signed-in
+    /// check); an API key or username and password when its preset declares one and the connection has
+    /// what it names.
     /// </summary>
     public static bool Testable(ConnectionRecord connection) =>
         connection.Mailbox is not null
@@ -1588,7 +1589,8 @@ public sealed class Connections(
             string outcome, sentence;
             if (probe is not null)
             {
-                var asked = await asks.AskAsync<ConnectionTested>(new TestConnection(WorkerAsks.NewRequest(), probe.Seal()), TestBound, ct);
+                var asked = await asks.AskAsync<ConnectionTested>(
+                    new TestConnection(WorkerAsks.NewRequest(), probe.Seal()), probe is WebsiteProbe ? WebsiteBound : TestBound, ct);
                 if (asked.Answer is not { } tested)
                 {
                     return new ConnectionTestAnswer(StatusCodes.Status503ServiceUnavailable, null, null,
@@ -1609,6 +1611,16 @@ public sealed class Connections(
                 }
 
                 (outcome, sentence) = (tested.Outcome, ConnectionTester.Redact(tested.Sentence, secrets));
+
+                // A SITE THAT DID NOT ANSWER says nothing about what the website holds: the test is
+                // answered and recorded, and the connection's health stays as it was (CON 4).
+                if (probe is WebsiteProbe && outcome == ConnectionTested.Failed)
+                {
+                    await store.RecordAsync(actor.Row(
+                        TenantActions.ConnectionTested, id, connection.Name,
+                        new { connection = id, kind = connection.Kind, provider = connection.Provider, outcome, sentence }), ct);
+                    return new ConnectionTestAnswer(StatusCodes.Status200OK, connection.Status, sentence, null, connection);
+                }
             }
             else if (needsYou is not null)
             {
@@ -1637,7 +1649,6 @@ public sealed class Connections(
 
     public static string NoTest(ConnectionRecord connection) => connection.Kind switch
     {
-        ConnectionKinds.Website => $"Connection {connection.Named} is a website: its test is its own sign-in, which is not here yet.",
         ConnectionKinds.Login => $"Connection {connection.Named} names no URL to sign in to, so there is nothing to test.",
         _ => $"Connection {connection.Named} has no test: its service declares no request to try it with.",
     };
@@ -1658,6 +1669,13 @@ public sealed class Connections(
                 connection.Account, mailbox.Username,
                 new ProbeServer(mailbox.Imap.Host, mailbox.Imap.Port, mailbox.Imap.Security),
                 new ProbeServer(mailbox.Smtp.Host, mailbox.Smtp.Port, mailbox.Smtp.Security), mailbox.Preset, password), [password], null, null);
+        }
+
+        if (connection.Credential is { } website && connection.Kind == ConnectionKinds.Website)
+        {
+            return await WebsiteProbeAsync(connection, website, WebsiteProbe.Verify, ct) is { } verify
+                ? (verify, WebsiteSecrets(verify), null, null)
+                : (null, [], null, $"A value of connection {connection.Named} could not be read on this Host. Edit the connection in {Where}.");
         }
 
         if (connection.Credential is { } credential)
