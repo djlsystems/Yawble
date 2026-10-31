@@ -293,6 +293,10 @@ public sealed class McpStdioServersTests : IDisposable
 
         var user = McpStdioServers.ResolveUser(passwd);
 
+        // Only where nobody holds CAP_SETUID: in the worker image (the release's suite) it can switch, and
+        // McpStdioRealSwitchTests covers that case.
+        Assert.SkipWhen(user.Switches, "This process can start a child as another user; McpStdioRealSwitchTests covers it.");
+
         // Here nobody holds CAP_SETUID, so it cannot switch; it says so, and fails closed rather than run as the worker.
         Assert.Equal(McpStdioServers.UserName, user.Name);
         Assert.False(user.Switches);
