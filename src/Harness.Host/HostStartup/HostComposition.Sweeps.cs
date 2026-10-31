@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.SignalR;
 using ModelContextProtocol.AspNetCore;
+using ModelContextProtocol.Protocol;
 using Harness.Containers;
 using Harness.Backlog;
 using Harness.Contracts;
@@ -316,6 +317,20 @@ internal sealed partial class HostComposition
         builder.Services.AddHostedService(sp => sp.GetRequiredService<AgentToolPreflight>());
         builder.Services.AddMcpServer()
             .WithHttpTransport(options => options.SessionMode = HttpServerSessionMode.Stateless)
-            .WithTools<PlatformMcpTools>();
+            .WithTools<PlatformMcpTools>()
+            // A TEAM'S MCP SERVERS' TOOLS (MCP 2), beside the platform's own: the SDK lists both and sends a call of
+            // any tool not among the platform's here. Nothing is listed outside a member's run.
+            .WithListToolsHandler((request, _) => ValueTask.FromResult(new ListToolsResult
+            {
+                Tools = request.Params?.Cursor is null
+                    ? [.. request.Services!.GetRequiredService<McpRunTools>().ListFor(McpCaller(request.Services!))]
+                    : [],
+            }))
+            .WithCallToolHandler(async (request, ct) => await request.Services!.GetRequiredService<McpRunTools>()
+                .CallAsync(McpCaller(request.Services!), request.Params!.Name, request.Params.Arguments, ct));
     }
+
+    /// <summary>The principal a <c>/mcp</c> request is made with: a member's id is its qualified name.</summary>
+    private static string? McpCaller(IServiceProvider services) =>
+        services.GetRequiredService<IHttpContextAccessor>().HttpContext?.User is { } user ? PrincipalClaims.From(user)?.Id : null;
 }

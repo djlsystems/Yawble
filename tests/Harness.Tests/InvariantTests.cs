@@ -87,7 +87,7 @@ public sealed class IdentityTests
     }
 }
 
-public sealed class McpContractTests
+public sealed partial class McpContractTests
 {
     [Fact]
     public void Built_in_skills_send_agents_to_mcp_tools_not_the_http_api()

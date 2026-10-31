@@ -276,10 +276,79 @@ public sealed partial class McpServers(IMcpServerStore store, Connections connec
             return new McpServerCheckAnswer(ConnectionTested.Failed, $"MCP server '{server.Name}' is run by the platform: it is {CheckedLater}.", null);
         }
 
+        var (target, error) = await TargetAsync(server, ct);
+        if (target is null)
+        {
+            return await RecordAsync(actor, server, ConnectionTested.Failed, error!.Sentence, null, error.Secrets, ct);
+        }
+
+        var (url, headers, secrets, connection) = (target.Url, target.Headers, target.Secrets, target.Connection);
+
+        var probe = new McpProbe(server.Name, url, headers, secrets);
+        var asked = await asks.AskAsync<ConnectionTested>(new TestConnection(WorkerAsks.NewRequest(), probe.Seal()), Connections.TestBound, ct);
+        if (asked.Answer is not { } tested)
+        {
+            return new McpServerCheckAnswer(ConnectionTested.Failed, $"The check did not run: {asked.Why} Nothing was recorded; test it again.", null);
+        }
+
+        var sentence = ConnectionTester.Redact(tested.Sentence, secrets);
+
+        if (tested.Outcome == ConnectionTested.Refused && connection is not null)
+        {
+            await connections.MarkFromMcpServerAsync(connection.Id, $"MCP server '{server.Name}' was refused: {sentence}", server.Name, ct);
+        }
+
+        // TWO TOOLS THAT WOULD SHARE A NAME on the harness server (MCP 2) refuse the save, naming both: this entry's
+        // own, or one of this entry's and one another web address entry last listed. Nothing listed is kept.
+        if (tested.Outcome == ConnectionTested.Ok && Clash(server, tested.Tools ?? [], await store.ListAsync(ct)) is { } clash)
+        {
+            return await RecordAsync(actor, server, ConnectionTested.Failed, clash, null, secrets, ct);
+        }
+
+        return await RecordAsync(actor, server, tested.Outcome, sentence, tested.Outcome == ConnectionTested.Ok ? tested.Tools ?? [] : null, secrets, ct);
+    }
+
+    /// <summary>The sentence naming two tools whose names on the harness server would be the same, or null.</summary>
+    public static string? Clash(McpServerRecord server, IReadOnlyList<string> tools, IReadOnlyList<McpServerRecord> all)
+    {
+        if (tools.FirstOrDefault(t => McpToolNames.Platform.Contains(McpToolNames.For(server.Name, t))) is { } platform)
+        {
+            var name = McpToolNames.For(server.Name, platform);
+            return $"Tool `{platform}` of {server.Name} and the platform's own tool `{name}` would both be named `{name}` for members. "
+                + "Rename the entry or ask the server's owner to rename the tool; nothing listed was kept.";
+        }
+
+        var listed = tools.Select(t => (Server: server.Name, Tool: t))
+            .Concat(all.Where(o => o.Id != server.Id && o.Kind == McpServerRecord.Web && o.Name != server.Name)
+                .SelectMany(o => (o.Tools ?? []).Select(t => (Server: o.Name, Tool: t))));
+
+        foreach (var clash in McpToolNames.Clashes(listed))
+        {
+            return $"Tool `{clash.First.Tool}` of {clash.First.Server} and tool `{clash.Second.Tool}` of {clash.Second.Server} would both be named "
+                + $"`{clash.Name}` for members. Rename the entry or ask the server's owner to rename one; nothing listed was kept.";
+        }
+
+        return null;
+    }
+
+    /// <summary>A web address entry as a request reaches it: its whole URL, the header the template makes from its
+    /// connection's value, and every value either holds (the query's parts, the field's value, the header sent).</summary>
+    public sealed record McpTarget(string Url, IReadOnlyDictionary<string, string> Headers, IReadOnlyList<string> Secrets, ConnectionRecord? Connection);
+
+    /// <summary>Why an entry cannot be reached from this Host, and the values the sentence must not carry.</summary>
+    public sealed record McpTargetError(string Sentence, IReadOnlyList<string> Secrets);
+
+    /// <summary>
+    /// How a web address entry is reached (MCP 1's check and MCP 2's calls alike): the URL read back from its
+    /// ciphertext and the connection's value in the named header. Null with the sentence when the address or the
+    /// value cannot be read on this Host.
+    /// </summary>
+    public async Task<(McpTarget? Target, McpTargetError? Error)> TargetAsync(McpServerRecord server, CancellationToken ct)
+    {
         if (await store.UrlAsync(server.Id, ct) is not { } url)
         {
-            return await RecordAsync(actor, server, ConnectionTested.Failed,
-                $"The address of MCP server '{server.Name}' could not be read on this Host. Edit it in {Where} and give the address again.", null, [], ct);
+            return (null, new McpTargetError(
+                $"The address of MCP server '{server.Name}' could not be read on this Host. Edit it in {Where} and give the address again.", []));
         }
 
         var secrets = new List<string>();
@@ -303,11 +372,11 @@ public sealed partial class McpServers(IMcpServerStore store, Connections connec
 
             if (connection is null || value is null)
             {
-                return await RecordAsync(actor, server, ConnectionTested.Failed,
+                return (null, new McpTargetError(
                     connection is null
                         ? $"The connection MCP server '{server.Name}' is sent no longer exists. Choose another in {Where}."
                         : $"The value of `{server.Field}` in connection {connection.Named} could not be read on this Host. Edit the connection in {Connections.Where}.",
-                    null, secrets, ct);
+                    secrets));
             }
 
             var sent = server.ValueTemplate!.Replace(Placeholder, value, StringComparison.Ordinal);
@@ -316,21 +385,7 @@ public sealed partial class McpServers(IMcpServerStore store, Connections connec
             secrets.Add(sent);
         }
 
-        var probe = new McpProbe(server.Name, url, headers, secrets);
-        var asked = await asks.AskAsync<ConnectionTested>(new TestConnection(WorkerAsks.NewRequest(), probe.Seal()), Connections.TestBound, ct);
-        if (asked.Answer is not { } tested)
-        {
-            return new McpServerCheckAnswer(ConnectionTested.Failed, $"The check did not run: {asked.Why} Nothing was recorded; test it again.", null);
-        }
-
-        var sentence = ConnectionTester.Redact(tested.Sentence, secrets);
-
-        if (tested.Outcome == ConnectionTested.Refused && connection is not null)
-        {
-            await connections.MarkFromMcpServerAsync(connection.Id, $"MCP server '{server.Name}' was refused: {sentence}", server.Name, ct);
-        }
-
-        return await RecordAsync(actor, server, tested.Outcome, sentence, tested.Outcome == ConnectionTested.Ok ? tested.Tools ?? [] : null, secrets, ct);
+        return (new McpTarget(url, headers, secrets, connection), null);
     }
 
     private async Task<McpServerCheckAnswer> RecordAsync(

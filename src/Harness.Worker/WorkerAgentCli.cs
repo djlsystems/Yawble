@@ -50,6 +50,15 @@ public sealed class WorkerAgentCli(WorkerId id, AgentLaunchUser? runAs, ILogger?
             case RemoveAsAgent remove:
                 return new RemovedAsAgent(remove.Request, await RemoveAsync(remove, ct));
 
+            case WriteAsAgent write:
+                if (runAs is not { Switches: true } writer)
+                {
+                    return new WroteAsAgent(write.Request, WroteAsAgent.Unsupported, $"Worker {id} does not start children as another user, so it writes nothing as the agent.");
+                }
+
+                var (result, detail) = await AgentFiles.WriteNewAsync(writer, write.WorkingCopy, write.Path, write.Data, ct);
+                return new WroteAsAgent(write.Request, result, detail);
+
             case TestConnection test:
                 try
                 {

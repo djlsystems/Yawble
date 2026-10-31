@@ -125,7 +125,8 @@ internal sealed partial class HostComposition
         // choice is made here and nowhere in the pump.
         builder.Services.AddSingleton(sp => new AgentMemberRunner(
             sp.GetRequiredService<IAgentRunner>(),
-            sp.GetRequiredService<IContextBuilder>()));
+            sp.GetRequiredService<IContextBuilder>(),
+            sp.GetRequiredService<McpRunTools>()));
         builder.Services.AddSingleton(sp => new PluginMemberRunner(
             sp.GetRequiredService<PluginCatalog>(),
             sp.GetRequiredService<IMemberReports>(),

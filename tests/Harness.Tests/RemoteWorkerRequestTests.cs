@@ -32,6 +32,7 @@ public sealed class RemoteWorkerRequestTests
         ["ProbeSignIn"] = new ProbeSignIn("r2", [new SignInProbeSpec("claude", null, null, ["auth", "status"], null, null)]),
         ["RunAgentCommands"] = new RunAgentCommands("r3", [new AgentCliRun("claude", ["--version"], new Dictionary<string, string>(), [], 30)]),
         ["RemoveAsAgent"] = new RemoveAsAgent("r4", "/data/teams/t", ["/data/teams/t/workspaces/a"]),
+        ["WriteAsAgent"] = new WriteAsAgent("r6", "/data/teams/t/workspaces/a", "/data/teams/t/workspaces/a/x.png", [1]),
         ["StartTerminal"] = new StartTerminal(
             "s1", new TerminalLaunch(["cli"], "/data/home", new Dictionary<string, string>(), [], null, null, null), 80, 24),
         ["ResizeTerminal"] = new ResizeTerminal("s1", 120, 40),
@@ -179,6 +180,44 @@ public sealed class RemoteWorkerRequestTests
         var received = await SaidAgainAsync(remote, socket, kept ? message.GetType() : null);
 
         Assert.Equal(kept ? [message.GetType()] : [], received.Select(m => m.GetType()));
+
+        remote.Shutdown();
+        await second.WaitAsync(Bound, Ct);
+    }
+
+    /// <summary>
+    /// A REQUEST TOO LARGE FOR ANY FRAME is refused at once with a sentence, nothing is sent, and the connection
+    /// carries on: the next request is answered, and the refused one is never said to a worker that comes back.
+    /// </summary>
+    [Fact]
+    public async Task A_request_too_large_for_a_frame_is_refused_and_the_connection_carries_on()
+    {
+        var clock = new ManualTime(DateTimeOffset.UnixEpoch.AddDays(1));
+        var remote = new RemoteWorker(
+            new WorkerInfo(new WorkerId("w1"), null, 4, 8_000_000_000, DateTimeOffset.UnixEpoch),
+            "s1", (_, _) => Task.CompletedTask, WorkerTimings.Default, _ => { }, _ => { }, clock);
+
+        var (control, worker) = await Pair();
+        var first = remote.RunAsync(new WorkerSocket(control.Socket, new WorkerFrameCodec(null)), Ct);
+        var socket = new WorkerSocket(worker.Socket, new WorkerFrameCodec(null));
+
+        var huge = new WriteAsAgent("r9", "/w", "/w/x.png", new byte[25 * 1024 * 1024]);
+        var refused = await Assert.ThrowsAsync<InvalidDataException>(() => remote.SendAsync(huge, Ct).WaitAsync(Bound, Ct));
+        Assert.Equal(WorkerFrameCodec.WriteTooLargeText, refused.Message);
+
+        var next = remote.SendAsync(RequestsByName["WriteAsAgent"], Ct);
+        var command = Assert.IsType<CommandFrame>(await socket.ReceiveAsync(Ct).WaitAsync(Bound, Ct));
+        Assert.Equal("r6", Assert.IsType<WriteAsAgent>(command.Message).Request);
+        await socket.SendAsync(new AppliedFrame(command.Id, null), Ct);
+        await next.WaitAsync(Bound, Ct);
+
+        // Dropped and back: nothing of the refused request is left to say again.
+        worker.Drop();
+        await first.WaitAsync(Bound, Ct);
+        (control, worker) = await Pair();
+        socket = new WorkerSocket(worker.Socket, new WorkerFrameCodec(null));
+        var second = remote.RunAsync(new WorkerSocket(control.Socket, new WorkerFrameCodec(null)), Ct);
+        Assert.Empty(await SaidAgainAsync(remote, socket, null));
 
         remote.Shutdown();
         await second.WaitAsync(Bound, Ct);

@@ -6,7 +6,8 @@ namespace Harness.Contracts;
 /// <summary>
 /// One end of a worker connection: frames over a WebSocket, one UTF-8 text message each, written
 /// one at a time and read in order. A message is reassembled from its fragments and refused past
-/// <see cref="WorkerFrameCodec.MaxBytes"/>. Used the same way at both ends.
+/// <see cref="WorkerFrameCodec.MaxWriteBytes"/>, the codec then holding each kind of frame to its own cap. Used the
+/// same way at both ends.
 /// </summary>
 public sealed class WorkerSocket(WebSocket socket, WorkerFrameCodec codec) : IDisposable
 {
@@ -47,7 +48,7 @@ public sealed class WorkerSocket(WebSocket socket, WorkerFrameCodec codec) : IDi
             if (result.MessageType == WebSocketMessageType.Close) return null;
 
             message.Write(buffer, 0, result.Count);
-            if (message.Length > WorkerFrameCodec.MaxBytes) throw new InvalidDataException(WorkerFrameCodec.TooLargeText);
+            if (message.Length > WorkerFrameCodec.MaxWriteBytes) throw new InvalidDataException(WorkerFrameCodec.WriteTooLargeText);
             if (result.EndOfMessage) break;
         }
 

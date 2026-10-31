@@ -25,7 +25,7 @@ namespace Harness.Host;
 /// <remarks>
 /// THE RUN'S CREDENTIAL SCOPE is decided by the runner below, from the catalog it owns.
 /// </remarks>
-public sealed class AgentMemberRunner(IAgentRunner agent, IContextBuilder? context = null)
+public sealed class AgentMemberRunner(IAgentRunner agent, IContextBuilder? context = null, McpRunTools? mcp = null)
     : IMemberRunner
 {
     /// <summary>The agent stack below this adapter.</summary>
@@ -47,6 +47,12 @@ public sealed class AgentMemberRunner(IAgentRunner agent, IContextBuilder? conte
         var prompt = run.Worktrees.Count == 0 || run.BranchHint is null
             ? MessageText.Of(invocation.Work)
             : MessageText.Of(invocation.Work) + "\n" + WorktreeText(run.BranchHint, run.Worktrees);
+
+        // THE TEAM'S MCP SERVERS' TOOLS, read once at the start and kept for this run (MCP 2). Binary results
+        // land in the card's tree when it has one, else in the member's working folder.
+        await using var tools = mcp is null
+            ? null
+            : await mcp.BeginAsync(invocation.Member, run.Worktrees.Count > 0 ? run.Worktrees[0].Path : invocation.WorkingDirectory, ct);
 
         var result = await agent.RunAsync(
             new AgentInvocation(

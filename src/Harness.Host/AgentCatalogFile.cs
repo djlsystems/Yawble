@@ -84,10 +84,15 @@ public static class AgentCatalogFile
         // POSTs MCP `initialize` to the URL carrying `X-Api-Key: <$HARNESS_KEY>` before it ever
         // reaches the model. A misspelt key is IGNORED SILENTLY (`codex mcp get` shows it
         // absent) while a wrong type is refused, so the spelling is what the tests pin.
+        //
+        // `tool_timeout_sec` above the Host's own 120 s wait for a team's MCP server (McpForwarding), so a codex
+        // member is told "<server> did not answer" rather than meeting codex's shorter default first. Checked
+        // against codex-cli 0.166.0: `codex mcp get` shows the key as set.
         var codexMcp = new[]
         {
             "-c", "mcp_servers.harness.url=\"{mcpUrl}\"",
             "-c", "mcp_servers.harness.env_http_headers={\"X-Api-Key\"=\"HARNESS_KEY\"}",
+            "-c", "mcp_servers.harness.tool_timeout_sec=180",
         };
 
         // WHERE TO GET EACH CLI, as SEED DATA - which is the whole of why this is expressed here
