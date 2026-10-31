@@ -24,7 +24,7 @@ import type { TeamId } from './types'
  * | take off a team | `DELETE /api/teams/{team}/mcp-servers/{id}` |
  */
 
-/** `url`: a web address. `runs`: Yawble runs it (MCP 3 starts it). */
+/** `url`: a web address. `runs`: the platform runs it (MCP 3 starts it). */
 export type McpServerKind = 'url' | 'runs'
 
 /** `unchecked` until a check says otherwise; a `runs` entry stays so until MCP 3. */

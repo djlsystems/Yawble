@@ -40,7 +40,7 @@ public sealed class McpServerCheck(HttpClient http, TimeSpan timeout)
             {
                 ["protocolVersion"] = ProtocolVersion,
                 ["capabilities"] = new JsonObject(),
-                ["clientInfo"] = new JsonObject { ["name"] = "Yawble", ["version"] = "1" },
+                ["clientInfo"] = new JsonObject { ["name"] = "Harness", ["version"] = "1" },
             }, "initialize", limit.Token);
             if (initialize.Failure is { } notInitialized) return (notInitialized.Outcome, notInitialized.Sentence, null);
 

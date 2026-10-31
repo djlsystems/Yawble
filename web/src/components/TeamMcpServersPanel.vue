@@ -10,6 +10,7 @@ import {
   type McpServer,
   type TeamMcpServerEntry,
 } from '../api/mcpServers';
+import { productTitle } from '../presentation/product';
 
 /**
  * TEAM SETTINGS → MCP SERVERS (MCP 1), beside Connections: which of the instance's MCP servers this team
@@ -47,7 +48,7 @@ const listedIds = computed(() => new Set(entries.value.map((entry) => entry.serv
 const addOptions = computed(() =>
   all.value
     .filter((server) => !listedIds.value.has(server.id))
-    .map((server) => ({ value: server.id, label: `${server.name} - ${server.kind === 'url' ? 'web address' : 'Yawble runs it'}` })),
+    .map((server) => ({ value: server.id, label: `${server.name} - ${server.kind === 'url' ? 'web address' : `${productTitle} runs it`}` })),
 );
 
 const adding = ref<string | null>(null);

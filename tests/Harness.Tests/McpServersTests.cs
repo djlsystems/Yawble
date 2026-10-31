@@ -19,8 +19,8 @@ namespace Harness.Tests;
 /// MCP 1 - ADMIN → MCP SERVERS AND TEAM SETTINGS → MCP SERVERS on the real Host, each check run by the
 /// Host's own worker against a FAKE MCP server answering through the worker's HTTP handler: nothing reaches
 /// the network. A web address lists its tools on save; a wrong token marks the entry and its connection
-/// Needs you; a server that is down fails the check with a sentence and marks neither. A "Yawble runs it"
-/// entry with no pinned version is refused. A team sees only what it was given, and removing an entry
+/// Needs you; a server that is down fails the check with a sentence and marks neither. An entry the platform runs
+/// with no pinned version is refused. A team sees only what it was given, and removing an entry
 /// takes it from every team with one row each. No value or query string is in an answer, a row or a log.
 /// </summary>
 public sealed class McpServersTests : IAsyncLifetime
@@ -195,7 +195,7 @@ public sealed class McpServersTests : IAsyncLifetime
         await NothingLeakedAsync();
     }
 
-    // ---- Yawble runs it: stored and validated -----------------------------------------------------------
+    // ---- the platform runs it: stored and validated -----------------------------------------------------------
 
     [Theory]
     [InlineData("npx", "@modelcontextprotocol/server-github", null)]
@@ -208,7 +208,7 @@ public sealed class McpServersTests : IAsyncLifetime
     [InlineData("uvx", "mcp-server-fetch", null)]
     [InlineData("uvx", "mcp-server-fetch>=0.6", null)]
     [InlineData("uvx", "mcp-server-fetch", "~=0.6")]
-    public async Task An_entry_Yawble_runs_with_no_pinned_version_is_refused_with_a_sentence_saying_so(string command, string package, string? version)
+    public async Task An_entry_the_platform_runs_with_no_pinned_version_is_refused_with_a_sentence_saying_so(string command, string package, string? version)
     {
         var (status, body) = await SendAsync(HttpMethod.Post, "/api/mcp-servers", new { name = "runner", kind = "runs", command, package, version });
 
@@ -219,7 +219,7 @@ public sealed class McpServersTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task An_entry_Yawble_runs_is_stored_with_its_pinned_version_and_says_it_is_checked_when_MCP_3_is_in_place()
+    public async Task An_entry_the_platform_runs_is_stored_with_its_pinned_version_and_says_it_is_checked_when_MCP_3_is_in_place()
     {
         var key = await KeyAsync(Token);
 

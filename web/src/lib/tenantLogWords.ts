@@ -791,7 +791,7 @@ const words: Record<string, Words> = {
     did: 'added an MCP server',
     detail: (d) =>
       sentence([
-        `${text(d, 'name') ?? 'an MCP server'}${text(d, 'kind') === 'runs' ? ', which Yawble runs' : ''}`,
+        `${text(d, 'name') ?? 'an MCP server'}${text(d, 'kind') === 'runs' ? ', which the platform runs' : ''}`,
         text(d, 'url') && `at ${text(d, 'url')}`,
         text(d, 'package') && `package ${text(d, 'package')}${text(d, 'version') ? ` ${text(d, 'version')}` : ''}`,
         text(d, 'connectionName') && `sent connection ${text(d, 'connectionName')}`,

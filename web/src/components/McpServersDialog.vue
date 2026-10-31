@@ -15,6 +15,10 @@ import {
   type McpServerKind,
   type McpServerSave,
 } from '../api/mcpServers';
+import { productTitle } from '../presentation/product';
+
+/** The second kind's name, in the product's own words. */
+const runsIt = `${productTitle} runs it`;
 
 /**
  * ADMIN → MCP SERVERS (MCP 1): the instance's list, which Team settings → MCP servers gives to teams.
@@ -23,7 +27,7 @@ import {
  * template holding `{value}` - checked by the Host on every save and by Test: it connects, initializes
  * and lists the server's tools, and this dialog shows their names and how many. A refused credential
  * marks the entry and its connection Needs you; a server not reached fails the check with a sentence
- * and marks neither. Or YAWBLE RUNS IT: a command, a package at one exact version, fixed arguments, and
+ * and marks neither. Or THE PLATFORM RUNS IT: a command, a package at one exact version, fixed arguments, and
  * environment variables each filled from a connection's field - stored and validated now, checked when
  * MCP 3 is in place.
  *
@@ -250,7 +254,7 @@ async function remove() {
             <q-item-section>
               <q-item-label class="text-weight-medium">
                 {{ server.name }}
-                <span class="text-caption os-text-muted"> · {{ server.kind === 'url' ? 'Web address' : 'Yawble runs it' }}</span>
+                <span class="text-caption os-text-muted"> · {{ server.kind === 'url' ? 'Web address' : runsIt }}</span>
               </q-item-label>
               <q-item-label caption>{{ describe(server) }}</q-item-label>
               <q-item-label caption data-mcp-health>
@@ -300,7 +304,7 @@ async function remove() {
             no-caps
             unelevated
             toggle-color="primary"
-            :options="[{ label: 'Web address', value: 'url' }, { label: 'Yawble runs it', value: 'runs' }]"
+            :options="[{ label: 'Web address', value: 'url' }, { label: runsIt, value: 'runs' }]"
             data-mcp-kind
           />
 

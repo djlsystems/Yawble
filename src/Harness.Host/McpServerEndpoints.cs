@@ -107,7 +107,7 @@ public static class McpServerEndpoints
 
             if (server.Kind != McpServerRecord.Web)
             {
-                return Results.BadRequest(new { error = $"MCP server '{server.Name}' is run by Yawble: it is {McpServers.CheckedLater}." });
+                return Results.BadRequest(new { error = $"MCP server '{server.Name}' is run by the platform: it is {McpServers.CheckedLater}." });
             }
 
             McpServerCheckAnswer check;

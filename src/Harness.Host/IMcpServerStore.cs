@@ -7,7 +7,7 @@ namespace Harness.Host;
 /// One entry of the instance's MCP servers (MCP 1), as every route may show it: never a value, and never
 /// the URL's query - <see cref="UrlShown"/> is the address without it. <see cref="Kind"/> is
 /// <see cref="Web"/> (a web address, optionally sent a connection's value in a header) or
-/// <see cref="Runs"/> (Yawble runs it: a command, a package at a pinned version, fixed arguments, and
+/// <see cref="Runs"/> (the platform runs it: a command, a package at a pinned version, fixed arguments, and
 /// environment variables each filled from a field of a connection).
 /// </summary>
 public sealed record McpServerRecord(
@@ -35,7 +35,7 @@ public sealed record McpServerRecord(
 
     public const string Runs = "runs";
 
-    /// <summary>Never checked, or a "Yawble runs it" entry, which MCP 3 checks.</summary>
+    /// <summary>Never checked, or an entry the platform runs, which MCP 3 checks.</summary>
     public const string Unchecked = "unchecked";
 
     public const string Ok = "ok";
@@ -51,7 +51,7 @@ public sealed record McpServerRecord(
         string.IsNullOrEmpty(json) ? [] : JsonSerializer.Deserialize<List<T>>(json, Json) ?? [];
 }
 
-/// <summary>An environment variable of a "Yawble runs it" entry: filled from <see cref="Field"/> of
+/// <summary>An environment variable of an entry the platform runs: filled from <see cref="Field"/> of
 /// connection <see cref="Connection"/> (its id) when MCP 3 starts it. Never a value.</summary>
 public sealed record McpServerEnv(string Name, string Connection, string Field);
 

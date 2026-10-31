@@ -754,7 +754,7 @@ public static class AuthSchema
         // THE INSTANCE'S MCP SERVERS (MCP 1): one row per entry an administrator added, known by a name
         // unique on the instance that later prefixes its tools' names. A web address keeps the URL twice:
         // `url_shown` without its query, the only form any answer or row shows, and `url_protected`, the
-        // whole URL as Data Protection ciphertext, since a query may hold a key. A "Yawble runs it" entry
+        // whole URL as Data Protection ciphertext, since a query may hold a key. An entry the platform runs
         // keeps its command, package, pinned version, arguments and environment (each variable a field of
         // a named connection, never a value). `team_mcp_servers` is which teams a person gave it to, as
         // `team_connections`; removed with the team or the entry by the foreign keys.

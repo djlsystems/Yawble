@@ -18,7 +18,7 @@ public sealed record SaveMcpServer(
     IReadOnlyList<string?>? Args,
     IReadOnlyList<SaveMcpServerEnv?>? Env);
 
-/// <summary>One environment variable of a "Yawble runs it" entry: a connection's id and one of its fields.</summary>
+/// <summary>One environment variable of an entry the platform runs: a connection's id and one of its fields.</summary>
 public sealed record SaveMcpServerEnv(string? Name, string? Connection, string? Field);
 
 /// <summary>How a check went: <c>ok</c> with the tools listed, <c>refused</c> or <c>failed</c>, in one sentence.</summary>
@@ -30,7 +30,7 @@ public sealed record McpServerCheckAnswer(string Outcome, string Sentence, IRead
 /// <summary>
 /// THE INSTANCE'S MCP SERVERS (MCP 1). An administrator keeps the list; a person gives entries to teams in
 /// Team settings. An entry is a WEB ADDRESS, checked on every save and by its Test - initialize, then list
-/// the tools - on a worker, as Test connection is; or one YAWBLE RUNS (a command, a package at a pinned
+/// the tools - on a worker, as Test connection is; or one THE PLATFORM RUNS (a command, a package at a pinned
 /// version, fixed arguments, environment variables each filled from a connection's field), stored and
 /// validated here and started by MCP 3. A refused credential marks the entry and its connection Needs you;
 /// a server not reached fails the check and marks neither. No answer, row or log line holds a value or the
@@ -50,7 +50,7 @@ public sealed partial class McpServers(IMcpServerStore store, Connections connec
 
     public const string Placeholder = "{value}";
 
-    /// <summary>What a "Yawble runs it" entry's health says until MCP 3 starts and checks it.</summary>
+    /// <summary>What an entry the platform runs's health says until MCP 3 starts and checks it.</summary>
     public const string CheckedLater = "checked when MCP 3 is in place";
 
     public const string Where = "Admin → MCP servers";
@@ -113,7 +113,7 @@ public sealed partial class McpServers(IMcpServerStore store, Connections connec
         {
             McpServerRecord.Web => await WebAsync(request, before, blank, ct),
             McpServerRecord.Runs => await RunsAsync(request, blank, ct),
-            _ => (null, null, "`kind` is `url` (a web address) or `runs` (Yawble runs it)."),
+            _ => (null, null, "`kind` is `url` (a web address) or `runs` (the platform runs it)."),
         };
     }
 
@@ -196,7 +196,7 @@ public sealed partial class McpServers(IMcpServerStore store, Connections connec
         if (command is null || !Commands.Contains(command, StringComparer.Ordinal)) return (null, null, "The command is `npx` or `uvx`.");
 
         var package = request.Package?.Trim() ?? "";
-        if (package.Length == 0) return (null, null, "Name the package Yawble runs.");
+        if (package.Length == 0) return (null, null, "Name the package the platform runs.");
 
         // A VERSION WRITTEN INTO THE PACKAGE ("name@1.2.3", "name==1.2.3") is the version; written in both places they must agree.
         var (bare, inline) = Split(command, package);
@@ -273,7 +273,7 @@ public sealed partial class McpServers(IMcpServerStore store, Connections connec
     {
         if (server.Kind != McpServerRecord.Web)
         {
-            return new McpServerCheckAnswer(ConnectionTested.Failed, $"MCP server '{server.Name}' is run by Yawble: it is {CheckedLater}.", null);
+            return new McpServerCheckAnswer(ConnectionTested.Failed, $"MCP server '{server.Name}' is run by the platform: it is {CheckedLater}.", null);
         }
 
         if (await store.UrlAsync(server.Id, ct) is not { } url)

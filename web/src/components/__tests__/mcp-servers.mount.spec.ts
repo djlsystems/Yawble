@@ -2,7 +2,7 @@
 //
 // ADMIN → MCP SERVERS AND TEAM SETTINGS → MCP SERVERS (MCP 1): the list shows each entry's health, its
 // tools and the teams it is given to; a save shows the check's sentence and the tools' names and count;
-// a "Yawble runs it" entry says it is checked when MCP 3 is in place, and a refusal shows the Host's
+// an entry the platform runs says it is checked when MCP 3 is in place, and a refusal shows the Host's
 // sentence; removing asks first, naming the teams. Team settings lists only what the team was given.
 //
 // THE MOCK IS OF `api/mcpServers`; the Host's own rules (the check, the marks, the version rule, the
@@ -108,7 +108,7 @@ beforeEach(() => {
 afterEach(resetBody);
 
 describe('Admin → MCP servers', () => {
-  it("lists each entry's health, tools and teams, and an entry Yawble runs says when it is checked", async () => {
+  it("lists each entry's health, tools and teams, and an entry the platform runs says when it is checked", async () => {
     const wrapper = await mountDialog(McpServersDialog, {}, { attachTo: document.body });
 
     expect(bodyFind('[data-mcp-server="github"] [data-mcp-health]')?.textContent).toContain('Working');
@@ -148,7 +148,7 @@ describe('Admin → MCP servers', () => {
     wrapper.unmount();
   });
 
-  it("shows the Host's sentence when an entry Yawble runs has no pinned version", async () => {
+  it("shows the Host's sentence when an entry the platform runs has no pinned version", async () => {
     addMcpServer.mockRejectedValue(new Error('A version must be pinned: give mcp-server-fetch one exact version, such as 1.4.2 - not `latest`, a range, or nothing.'));
     const wrapper = await mountDialog(McpServersDialog, {}, { attachTo: document.body });
 
