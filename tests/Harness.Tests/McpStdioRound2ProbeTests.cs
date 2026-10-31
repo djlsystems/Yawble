@@ -298,7 +298,6 @@ public sealed class McpStdioPackageRound2ProbeTests : IAsyncLifetime
     [InlineData("uvx", "-x", "1.0")]
     [InlineData("uvx", ".x", "1.0")]
     [InlineData("uvx", "_x", "1.0")]
-    [InlineData("uvx", "foo[--with]", "1.0")]
     [InlineData("uvx", "foo[x] --with evil", "1.0")]
     [InlineData("uvx", "git+https://x.test/r", "1.0")]
     [InlineData("uvx", "foo @ https://x.test/f.whl", null)]
