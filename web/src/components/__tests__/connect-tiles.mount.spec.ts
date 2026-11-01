@@ -473,6 +473,7 @@ describe("Microsoft's sign-in says whose permissions it asks for", () => {
     const wrapper = await openAdd();
     await click(tile('outlook'));
     await click(button('Next'));
+    await click(button('Next'));
 
     expect(step()).toBe('signin');
     expect(sentence()).toBe('These permissions are what the installed plugins need: Mail Helper and Azure Ops.');
@@ -490,6 +491,8 @@ describe("Microsoft's sign-in says whose permissions it asks for", () => {
     }, { attachTo: document.body });
     await settle();
     await click(button('Connect Microsoft'));
+    expect(step()).toBe('setup');
+    await click(bodyFind('[data-app-next]'));
 
     expect(step()).toBe('signin');
     expect(sentence()).toBeNull();

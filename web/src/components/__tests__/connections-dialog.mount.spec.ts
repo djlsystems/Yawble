@@ -2,10 +2,11 @@
 //
 // ADMIN > CONNECTIONS. Each connection with its provider, account, scopes, when connected and last
 // refreshed, its status (ok / needs reconnect with the provider's reason) and the members using it;
-// Connect an account (a provider - or its client set up first - and scopes), which sends the browser
-// to the provider with the exact redirect URI for this address shown beforehand; Reconnect, Rename,
-// and Disconnect with the Host's refusal naming the members. The client secret is write-only: the
-// dialog says "set" and never holds a value.
+// one Add connection and no second door - no Advanced, no Providers tab, no Connect an account. Each
+// OAuth service's app is its own step of Add connection: a custom service is named there, with the
+// exact redirect URI for this address shown beforehand, and signed in through. Reconnect, Rename, and
+// Disconnect with the Host's refusal naming the members. The client secret is write-only: the wizard
+// says "set" and never holds a value.
 //
 // THE MOCK IS OF `api/client`, in the shapes connections-api.md gives, and of the one navigation
 // the web makes (`lib/browserNavigation`), so where the browser would go is asserted, not followed.
@@ -20,6 +21,9 @@ const {
   saveConnectionProvider,
   deleteConnectionProvider,
   getConnectionNeeds,
+  listOpenConnectionFlows,
+  listMailboxPresets,
+  listCredentialPresets,
   goTo,
 } = vi.hoisted(() => ({
   listConnections: vi.fn(),
@@ -30,6 +34,9 @@ const {
   saveConnectionProvider: vi.fn(),
   deleteConnectionProvider: vi.fn(),
   getConnectionNeeds: vi.fn(),
+  listOpenConnectionFlows: vi.fn(),
+  listMailboxPresets: vi.fn(),
+  listCredentialPresets: vi.fn(),
   goTo: vi.fn(),
 }));
 
@@ -43,6 +50,9 @@ vi.mock('../../api/client', async (importOriginal) => ({
   saveConnectionProvider,
   deleteConnectionProvider,
   getConnectionNeeds,
+  listOpenConnectionFlows,
+  listMailboxPresets,
+  listCredentialPresets,
 }));
 
 // The address the page is on: a test sets another to see what a LAN address is told.
@@ -102,6 +112,9 @@ beforeEach(() => {
     saveConnectionProvider,
     deleteConnectionProvider,
     getConnectionNeeds,
+    listOpenConnectionFlows,
+    listMailboxPresets,
+    listCredentialPresets,
     goTo,
   ]) {
     mock.mockReset();
@@ -109,6 +122,9 @@ beforeEach(() => {
   listConnections.mockResolvedValue([workMail, outlook]);
   listConnectionProviders.mockResolvedValue([google, microsoft]);
   getConnectionNeeds.mockResolvedValue({ provider: 'google', needs: [], scopes: [], apis: [] });
+  listOpenConnectionFlows.mockResolvedValue([]);
+  listMailboxPresets.mockResolvedValue([]);
+  listCredentialPresets.mockResolvedValue([]);
   sessionStorage.clear();
   startConnection.mockResolvedValue({
     authorizationUrl,
@@ -120,13 +136,26 @@ beforeEach(() => {
 
 afterEach(resetBody);
 
-/** Mounts it with Advanced open: what these specs read is today's Providers tab and Connect form. */
 async function mountConnections(props: Record<string, unknown> = {}) {
   const wrapper = await mountDialog(ConnectionsDialog, props);
   await settle();
-  (bodyFind('[data-connections-advanced]') as HTMLElement).click();
-  await settle();
   return wrapper;
+}
+
+async function click(element: Element | null) {
+  if (!element) throw new Error('nothing to click');
+  (element as HTMLElement).click();
+  await settle();
+}
+
+const step = () => bodyFind('[data-connect-step]')?.getAttribute('data-connect-step') ?? null;
+
+/** Add connection -> Sign-in -> the service's tile -> Next: its app step. */
+async function toAppStep(tile: string) {
+  await click(button('Add connection'));
+  await click(bodyFind('[data-connection-kind="oauth"]'));
+  await click(bodyFind(`[data-provider-tile="${tile}"]`));
+  await click(button('Next'));
 }
 
 const row = (id: string) => bodyFind(`[data-connection="${id}"]`)!;
@@ -184,30 +213,38 @@ describe('ConnectionsDialog, the list', () => {
     wrapper.unmount();
   });
 
-  it('shows the connections and the providers on two tabs, each as tiles', async () => {
+  it('has one Add connection and no second door: no Advanced, no Providers tab, no Connect an account', async () => {
     const wrapper = await mountConnections();
 
-    expect(bodyFind('[data-connections-tab="connections"]')!.textContent).toContain('Connections (2)');
-    expect(bodyFind('[data-connections-tab="providers"]')!.textContent).toContain('Providers (2)');
+    expect(button('Add connection')).not.toBeNull();
+    expect(bodyFind('[data-connections-advanced]')).toBeNull();
+    expect(bodyFind('[data-connections-tab]')).toBeNull();
+    expect(bodyFind('[data-connections-panel="providers"]')).toBeNull();
+    expect(bodyFind('[data-provider]')).toBeNull();
+    expect(bodyText()).not.toContain('Connect an account');
+    expect(bodyText()).not.toContain('Providers');
     expect(bodyFind('[data-connection="conn-work"]')).not.toBeNull();
-    expect(bodyFind('[data-provider="google"]')).toBeNull();
-
-    await showTab('providers');
-    expect(bodyFind('[data-provider="google"]')).not.toBeNull();
-    expect(bodyFind('[data-provider="google"] [data-provider-connections]')!.textContent).toBe('1 account');
-    expect(bodyFind('[data-connection="conn-work"]')).toBeNull();
 
     wrapper.unmount();
   });
 
-  it('shows a provider client secret only as "set", never a value', async () => {
+  it("shows no account line for an Other API key whose unmasked fields are settings; Namecheap's API user still shows", async () => {
+    listConnections.mockResolvedValue([
+      hostConnection({
+        id: 'conn-saver', name: 'Acme saver', provider: 'apikey', providerKind: 'apikey', kind: 'apikey', preset: 'other', account: '',
+        fields: [{ name: 'autoSave', label: 'autoSave', masked: false, value: 'true', set: true }, { name: 'token', label: 'token', masked: true, value: null, set: true }],
+      }),
+      hostConnection({
+        id: 'conn-nc', name: 'Namecheap', provider: 'apikey', providerKind: 'apikey', kind: 'apikey', preset: 'namecheap', account: 'nc-user',
+        fields: [{ name: 'apiUser', label: 'API user', masked: false, value: 'nc-user', set: true }],
+      }),
+    ]);
     const wrapper = await mountConnections();
-    await showTab('providers');
 
-    expect(bodyFind('[data-provider="google"] [data-client-secret]')!.textContent).toBe('set');
-    expect(bodyFind('[data-provider="google"] [data-client-id]')!.textContent).toBe('123.apps.googleusercontent.com');
-    expect(bodyFind('[data-provider="microsoft"] [data-client-secret]')!.textContent).toBe('not set');
-    expect(bodyFind('[data-provider="microsoft"] [data-client-state]')!.textContent).toBe('Client not set up');
+    expect(row('conn-saver').querySelector('[data-connection-account]')).toBeNull();
+    // The setting is still shown as what it is, a field.
+    expect(row('conn-saver').querySelector('[data-connection-field="autoSave"]')!.textContent!.trim()).toBe('true');
+    expect(row('conn-nc').querySelector('[data-connection-account]')!.textContent).toBe('nc-user');
 
     wrapper.unmount();
   });
@@ -225,51 +262,84 @@ describe('ConnectionsDialog, the list', () => {
   });
 });
 
-describe('ConnectionsDialog, connecting an account', () => {
-  it('shows the exact redirect URI for this address and the provider help, then sends the browser to the provider', async () => {
+describe('ConnectionsDialog, an OAuth service through Add connection', () => {
+  it('offers every kind there is on the one flow', async () => {
     const wrapper = await mountConnections();
+    await click(button('Add connection'));
 
-    button('Connect an account…').click();
-    await settle();
+    expect([...document.body.querySelectorAll('[data-kind-tiles] [data-connection-kind]')].map((tile) => tile.getAttribute('data-connection-kind')))
+      .toEqual(['oauth', 'imap', 'website', 'apikey', 'login']);
+    expect(bodyFind('[data-connection-kind="oauth"]')!.textContent).toContain('Microsoft, Google or another OAuth service');
 
-    expect(bodyFind('[data-redirect-uri]')!.textContent).toBe('https://instance.example.test/api/connections/callback');
-    expect(bodyFind('[data-provider-help]')!.textContent).toContain('"Desktop app" client');
-    expect(bodyFind('[data-redirect-warning]')).toBeNull();
+    await click(bodyFind('[data-connection-kind="oauth"]'));
+    expect([...document.body.querySelectorAll('[data-provider-tile]')].map((tile) => tile.getAttribute('data-provider-tile')))
+      .toEqual(['google', 'outlook', 'custom-new']);
 
-    await type('Scopes', 'https://mail.google.com/, https://www.googleapis.com/auth/drive.readonly');
-    await type('Name', 'Work mail');
-    button('Connect').click();
-    await settle();
+    wrapper.unmount();
+  });
 
-    expect(startConnection).toHaveBeenCalledWith({
-      provider: 'google',
-      scopes: ['https://mail.google.com/', 'https://www.googleapis.com/auth/drive.readonly'],
-      name: 'Work mail',
+  it('names a custom service on its own step, with the exact redirect URI, then signs in through it', async () => {
+    const wrapper = await mountConnections();
+    await toAppStep('custom-new');
+
+    expect(step()).toBe('custom');
+    expect(bodyFind('.connect-steps')!.textContent).toContain('Name the service');
+    expect(bodyFind('[data-connect-step="custom"] [data-redirect-uri]')!.textContent).toBe('https://instance.example.test/api/connections/callback');
+    expect(bodyFind('[data-connect-step="custom"] [data-redirect-warning]')).toBeNull();
+    expect(isDisabled('Save and continue')).toBe(true);
+
+    await type('Service name', 'Acme ID');
+    await type('Authorization URL', 'https://id.acme.example.test/authorize');
+    await type('Token URL', 'https://id.acme.example.test/token');
+    await type('Userinfo URL (optional)', 'https://id.acme.example.test/userinfo');
+    await type('Default scopes', 'openid, profile');
+    await type('Client ID', 'acme-client');
+    await type('Client secret', 'acme-secret-value');
+    const saved = hostProvider({
+      id: 'custom-acme-id',
+      name: 'Acme ID',
+      clientId: 'acme-client',
+      clientSecretSet: true,
+      configured: true,
+      authorizeUrl: 'https://id.acme.example.test/authorize',
+      tokenUrl: 'https://id.acme.example.test/token',
+      userinfoUrl: 'https://id.acme.example.test/userinfo',
+      defaultScopes: ['openid', 'profile'],
     });
+    saveConnectionProvider.mockResolvedValue(saved);
+    await click(button('Save and continue'));
+
+    expect(saveConnectionProvider).toHaveBeenCalledWith('custom-acme-id', {
+      clientId: 'acme-client',
+      clientSecret: 'acme-secret-value',
+      name: 'Acme ID',
+      authorizeUrl: 'https://id.acme.example.test/authorize',
+      tokenUrl: 'https://id.acme.example.test/token',
+      userinfoUrl: 'https://id.acme.example.test/userinfo',
+      defaultScopes: ['openid', 'profile'],
+    });
+    expect(step()).toBe('signin');
+
+    // A scope no plugin asks for is added on the sign-in step.
+    await type('More scopes (optional)', 'acme.read acme.write');
+    await click(button('Sign in with Acme ID'));
+    expect(startConnection).toHaveBeenCalledWith({ provider: 'custom-acme-id', scopes: ['acme.read', 'acme.write'] });
     expect(goTo).toHaveBeenCalledWith(authorizationUrl);
 
     wrapper.unmount();
   });
 
   // A provider checks the redirect URI's spelling when it is registered: a LAN address over http is
-  // refused, so the dialog says so, and how to get one that is accepted, before anyone copies it.
-  it('warns that a LAN address will be refused and names localhost on that port, in Connect and in Set up client', async () => {
+  // refused, so the step says so, and how to get one that is accepted, before anyone copies it.
+  it('warns on the custom step that a LAN address will be refused, naming localhost on that port', async () => {
     page.origin = 'http://172.31.242.154:8080';
     try {
       const wrapper = await mountConnections();
+      await toAppStep('custom-new');
 
-      button('Connect an account…').click();
-      await settle();
-      expect(bodyFind('[data-connect-dialog] [data-redirect-uri]')!.textContent).toBe('http://172.31.242.154:8080/api/connections/callback');
-      expect(bodyFind('[data-connect-dialog] [data-redirect-warning]')!.textContent).toContain('IP address such as 172.31.242.154');
-      expect(bodyFind('[data-connect-dialog] [data-redirect-warning]')!.textContent).toContain('http://localhost:8080');
-      button('Cancel').click();
-      await settle();
-
-      await showTab('providers');
-      buttonIn(bodyFind('[data-provider="google"]')!, 'Set up client…').click();
-      await settle();
-      expect(bodyFind('[data-client-dialog] [data-redirect-warning]')!.textContent).toContain('http://localhost:8080');
+      expect(bodyFind('[data-connect-step="custom"] [data-redirect-uri]')!.textContent).toBe('http://172.31.242.154:8080/api/connections/callback');
+      expect(bodyFind('[data-connect-step="custom"] [data-redirect-warning]')!.textContent).toContain('IP address such as 172.31.242.154');
+      expect(bodyFind('[data-connect-step="custom"] [data-redirect-warning]')!.textContent).toContain('http://localhost:8080');
 
       wrapper.unmount();
     } finally {
@@ -277,53 +347,69 @@ describe('ConnectionsDialog, connecting an account', () => {
     }
   });
 
-  it('holds Connect for a provider whose client is not set up, and sets it up first', async () => {
-    const wrapper = await mountConnections();
-
-    button('Connect an account…').click();
-    await settle();
-    select(wrapper, 'Provider').vm.$emit('update:modelValue', 'microsoft');
-    await settle();
-
-    expect(bodyFind('[data-needs-client]')!.textContent).toContain('Its client is not set up yet.');
-    expect(isDisabled('Connect')).toBe(true);
-
-    buttonIn(bodyFind('[data-needs-client]')!, 'Set up client…').click();
-    await settle();
-
-    expect(bodyText()).toContain('Microsoft client');
-    await type('Client ID', 'app-id-1');
-    await type('Client secret', 'the-secret-value');
-    await type('Tenant', 'contoso.onmicrosoft.com');
-    saveConnectionProvider.mockResolvedValue({ ...microsoft, clientId: 'app-id-1', clientSecretSet: true, configured: true });
-    button('Save client').click();
-    await settle();
-
-    expect(saveConnectionProvider).toHaveBeenCalledWith('microsoft', {
-      clientId: 'app-id-1',
-      clientSecret: 'the-secret-value',
-      tenant: 'contoso.onmicrosoft.com',
+  it('opens a saved custom service at its step, filled but for the secret, and removes it there', async () => {
+    const acme = hostProvider({
+      id: 'custom-acme',
+      name: 'Acme',
+      clientId: 'acme-client',
+      clientSecretSet: true,
+      configured: true,
+      authorizeUrl: 'https://id.acme.example.test/authorize',
+      tokenUrl: 'https://id.acme.example.test/token',
+      defaultScopes: ['openid'],
     });
+    listConnectionProviders.mockResolvedValue([google, microsoft, acme]);
+    const wrapper = await mountConnections();
+    await toAppStep('custom-acme');
+
+    expect(step()).toBe('custom');
+    expect(field('Authorization URL').value).toBe('https://id.acme.example.test/authorize');
+    expect(field('Client ID').value).toBe('acme-client');
+    expect(field('Client secret').value).toBe('');
+
+    // Saved as it is, an empty secret keeps the stored one: no `clientSecret` key at all.
+    saveConnectionProvider.mockResolvedValue(acme);
+    await click(button('Save and continue'));
+    expect(saveConnectionProvider).toHaveBeenCalledWith('custom-acme', {
+      clientId: 'acme-client',
+      name: 'Acme',
+      authorizeUrl: 'https://id.acme.example.test/authorize',
+      tokenUrl: 'https://id.acme.example.test/token',
+      defaultScopes: ['openid'],
+    });
+
+    await click(button('Back'));
+    expect(step()).toBe('custom');
+    deleteConnectionProvider.mockResolvedValue(undefined);
+    await click(button('Remove this service'));
+    expect(deleteConnectionProvider).toHaveBeenCalledWith('custom-acme');
+    expect(step()).toBe('service');
 
     wrapper.unmount();
   });
 
-  it('never fills the client secret, and an empty one keeps what is stored', async () => {
+  it("shows the app a saved Google client is, never fills its secret, and an empty one keeps what is stored", async () => {
+    listConnectionProviders.mockResolvedValue([
+      { ...google, clientSource: 'saved', guide: { steps: [{ id: 'credentials', title: 'Client ID and secret', text: 'Paste them.', link: null, copy: [] }] } },
+      microsoft,
+    ]);
     const wrapper = await mountConnections();
-    await showTab('providers');
+    await toAppStep('google');
 
-    buttonIn(bodyFind('[data-provider="google"]')!, 'Set up client…').click();
-    await settle();
+    expect(step()).toBe('setup');
+    expect(bodyFind('[data-app-in-use="saved"]')!.textContent).toContain('123.apps.googleusercontent.com');
+    expect(bodyFind('[data-clear-client-button]')!.textContent).toContain('Remove this app');
 
+    await click(bodyFind('[data-own-app]'));
+    expect(field('Client ID').value).toBe('');
     expect(field('Client secret').value).toBe('');
-    expect(bodyFind('[data-secret-set]')!.textContent).toBe('set');
-
-    saveConnectionProvider.mockResolvedValue(google);
-    button('Save client').click();
-    await settle();
+    await type('Client ID', '456.apps.googleusercontent.com');
+    saveConnectionProvider.mockResolvedValue({ ...google, clientId: '456.apps.googleusercontent.com' });
+    await click(button('Save client'));
 
     // No `clientSecret` key at all: the Host keeps the stored one.
-    expect(saveConnectionProvider).toHaveBeenCalledWith('google', { clientId: '123.apps.googleusercontent.com' });
+    expect(saveConnectionProvider).toHaveBeenCalledWith('google', { clientId: '456.apps.googleusercontent.com' });
+    expect(step()).toBe('signin');
 
     wrapper.unmount();
   });

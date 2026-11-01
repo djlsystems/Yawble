@@ -105,7 +105,7 @@ export function providerName(id: string, providers: ConnectionProvider[]): strin
  * fields and nothing else.
  */
 export const ConnectionKinds: readonly { id: ConnectionKind; name: string; wayIn: string }[] = [
-  { id: 'oauth', name: 'Sign-in', wayIn: 'Microsoft or Google' },
+  { id: 'oauth', name: 'Sign-in', wayIn: 'Microsoft, Google or another OAuth service' },
   { id: 'imap', name: 'Mailbox', wayIn: 'Gmail, iCloud, Yahoo and others, with an app password' },
   { id: 'website', name: 'Website', wayIn: 'A website a member signs in to' },
   { id: 'apikey', name: 'API key', wayIn: 'Stripe, Namecheap, Twilio or another service' },

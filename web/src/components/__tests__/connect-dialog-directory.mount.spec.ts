@@ -4,8 +4,7 @@
 // step has an optional "Directory (tenant) ID or domain" field, its explanation behind FieldHelp,
 // sent as `tenant` when typed and left out when not; the Host's refusal is shown at the field.
 // Reconnect shows the connection's directory to change or clear, and sends nothing when it is left
-// as it was. Each connection with a directory names it on its tile; one without names none. Connect
-// an account (Advanced) offers the same field for Microsoft's browser sign-in.
+// as it was. Each connection with a directory names it on its tile; one without names none.
 //
 // THE MOCK IS OF `api/client`, in the shapes the Host serves. Every code and directory here is a fake one.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -105,11 +104,12 @@ async function click(element: Element | null) {
   await settle();
 }
 
-/** Add connection, then Microsoft, then Next: with the instance's app, straight to Sign in. */
+/** Add connection, then Microsoft, then Next past the app step: with the instance's app in use, Sign in. */
 async function microsoftSignIn() {
   await click(button('Add connection'));
   await click(bodyFind('[data-connection-kind="oauth"]'));
   await click(bodyFind('[data-connect-service="microsoft"]'));
+  await click(button('Next'));
   await click(button('Next'));
   expect(bodyFind('[data-connect-step]')?.getAttribute('data-connect-step')).toBe('signin');
 }
@@ -229,21 +229,6 @@ describe('Reconnect of a Microsoft connection with its own directory', () => {
     expect(fieldWrapper(label).textContent).toContain(refusal);
     expect(bodyFind('[data-reconnect-problem]')).toBeNull();
     expect(bodyFind('[data-reconnect-dialog] [data-device-code]')).toBeNull();
-
-    wrapper.unmount();
-  });
-});
-
-describe("Connect an account (Advanced), Microsoft's browser sign-in", () => {
-  it('sends the directory typed as tenant', async () => {
-    const wrapper = await mountConnections();
-    await click(bodyFind('[data-connections-advanced]'));
-    await click(button('Connect an account…'));
-    await type(label, directoryGuid);
-    await click(button('Connect'));
-
-    expect(startConnection).toHaveBeenCalledWith({ provider: 'microsoft', scopes: [], name: null, tenant: directoryGuid });
-    expect(goTo).toHaveBeenCalledWith('https://login.example.test/authorize');
 
     wrapper.unmount();
   });

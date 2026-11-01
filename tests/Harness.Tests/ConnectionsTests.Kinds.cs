@@ -102,6 +102,28 @@ public sealed partial class ConnectionsTests
     }
 
     [Fact]
+    public async Task An_other_api_key_whose_unmasked_fields_are_settings_has_no_account()
+    {
+        // A SETTING IS NOT AN ACCOUNT: Other's autoSave true or false, beside its url, names nobody.
+        var settings = await AddCredentialAsync("apikey", "other", "Acme saver",
+            ("url", "https://api.acme.example.test", false), ("autoSave", "true", false), ("token", KindSecrets[4], null));
+        var off = await AddCredentialAsync("apikey", "other", "Acme quiet", ("autoSave", "False", false), ("token", KindSecrets[5], null));
+        // Beside a field that is not a setting, that field is the account, wherever the setting sits.
+        var tenant = await AddCredentialAsync("apikey", "other", "Acme EU", ("autoSave", "true", false), ("tenant", "acme-eu", false), ("token", KindSecrets[4], null));
+        var stripe = await AddCredentialAsync("apikey", "stripe", "Stripe live", ("key", KindSecrets[0], null));
+
+        var listed = (await GetAsync("/api/connections")).EnumerateArray().ToDictionary(c => c.GetProperty("id").GetString()!);
+        Assert.Equal(
+            ["", "", "acme-eu", "Stripe"],
+            new[] { settings, off, tenant, stripe }.Select(id => listed[id].GetProperty("account").GetString()));
+
+        // AN EDIT reads it again: the setting turned off is still no account.
+        await EditCredentialAsync(tenant, ("autoSave", "false", false), ("token", KindSecrets[5], null));
+        listed = (await GetAsync("/api/connections")).EnumerateArray().ToDictionary(c => c.GetProperty("id").GetString()!);
+        Assert.Equal("", listed[tenant].GetProperty("account").GetString());
+    }
+
+    [Fact]
     public async Task Every_name_is_unique_ignoring_case_at_every_route_that_names_a_connection()
     {
         var first = await AddCredentialAsync("login", null, "Shared", ("username", "a", null), ("password", KindSecrets[6], null));

@@ -2,6 +2,7 @@
 import FieldHelp from './FieldHelp.vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import {
+  deleteConnectionProvider,
   getConnectionNeeds,
   listConnectionProviders,
   listCredentialPresets,
@@ -39,6 +40,9 @@ import {
   guideLink,
   microsoftIdProblem,
   named,
+  parseScopes,
+  providerHelp,
+  redirectUriFor,
   redirectUriWarning,
   refusalWords,
   rememberGuidedConnect,
@@ -62,23 +66,31 @@ import { letGoSignIns } from '../lib/letGoSignIns';
 /**
  * ADD CONNECTION: connecting an account for a person who has never registered an OAuth app.
  *
- * 0. KIND - from Admin -> Connections, first: a Sign-in (Microsoft or Google), a Mailbox, a Website,
- *    an API key or a Username and password. Then only that kind's fields: a sign-in goes on to the
- *    service step with only Microsoft and Google, a mailbox to its preset tiles (Microsoft's among
+ * 0. KIND - from Admin -> Connections, first: a Sign-in (Microsoft, Google or a custom OAuth service),
+ *    a Mailbox, a Website, an API key or a Username and password. Then only that kind's fields: a
+ *    sign-in goes on to the service step with Microsoft, Google, each custom service and Another
+ *    OAuth service, a mailbox to its preset tiles (Microsoft's among
  *    them, its mailbox being reached by its sign-in), the other three to `CredentialForm`. From a slot, the kinds that slot takes: a slot taking only sign-ins and
  *    mailboxes opens at the service step as it always has.
  *
  * 1. SERVICE - Google or Microsoft, and what the installed plugins will ask of it, in words, each
  *    line naming the plugin that wants it. All are ticked; any may be unticked. Nothing is typed:
  *    the scopes come from the plugins' connection slots, through the Host's needs read.
- * 2. SET UP THE APP - only when the provider's client is not set up: the provider's own guide, read
- *    for the ticked scopes, as a
- *    checklist, with deep links (into the person's project, once they name it), values to copy and
- *    a Done tick per step. Its last step takes the client ID (and, for Google, the secret) and saves
- *    them. Microsoft's first step also asks who can sign in; its client is a public one, with no
- *    secret at all. While the instance's DEFAULT MICROSOFT APP is in use (`clientSource: 'default'`),
- *    Microsoft goes straight to Sign in, and this step is under ADVANCED… there, for an app of one's own.
- * 3. SIGN IN - for Google, the existing web flow with the ticked scopes: the browser leaves for the
+ * 2. THE APP - every OAuth service's own step, before Sign in, and the only place its app is set up.
+ *    It says the app in use: the instance's (`clientSource: 'default'`, Microsoft), the saved one
+ *    (its client ID), or none. A saved one can be undone here (ClearClientOffer: "Use <product>'s
+ *    app", or "Remove this app"). Setting up an app of one's own is this step too: the provider's own
+ *    guide, read for the ticked scopes, as a checklist, with deep links (into the person's project,
+ *    once they name it), values to copy and a Done tick per step - shown at once when there is no
+ *    app, behind "Set up an app of your own" when there is one. Its last step takes the client ID
+ *    (and, for Google, the secret) and saves them. Microsoft's first step also asks who can sign in;
+ *    its client is a public one, with no secret at all. Next goes on only with an app to sign in through.
+ *    A CUSTOM OAUTH SERVICE's step names it instead: its authorization and token URLs, an optional
+ *    userinfo URL, default scopes, and its client, with the redirect URI to register; saved, it signs
+ *    in through the browser like Google. A saved custom service opens filled (never the secret), and
+ *    can be removed there while nothing signs in through it.
+ * 3. SIGN IN - a scope no plugin asks for can be added here (`More scopes`), asked for besides the
+ *    ticked ones. For Google or a custom service, the existing web flow with those scopes: the browser leaves for the
  *    provider and comes back to the Console, which opens this dialog again at `result`, the account
  *    and an optional name for it. For Microsoft, sign-in with a code: the Host asks Microsoft for
  *    one, the person enters it at Microsoft's page in another tab, and this step reads the flow until
@@ -114,11 +126,12 @@ import { letGoSignIns } from '../lib/letGoSignIns';
  * Microsoft 365", being asked for a mailbox. Gmail, iCloud, Yahoo and Other are a MAILBOX WITH AN APP PASSWORD, from the Host's
  * presets: they open `MailboxForm`, with that provider's hints, which logs in before it saves and
  * shows the login's one sentence. No app, no sign-in elsewhere. Outlook is Microsoft's sign-in with a
- * code. Gmail through a Google app of one's own sits behind ADVANCED…; where no mailbox is on offer -
- * a slot that does not take `imap`, or an older Host with no presets - the Google tile is that app.
+ * code. Gmail through a Google app of one's own is a link under the mailbox tiles (and in Gmail's
+ * hints) to Google's sign-in, whose app step follows; where no mailbox is on offer - a slot that does
+ * not take `imap`, or an older Host with no presets - the Google tile is that app.
  * A slot shows the tiles of the kinds it takes, `imap` included.
  *
- * ONE CHOICE IS MARKED CHOSEN at a time - a tile, or Advanced…'s Google sign-in shown as a tile of its
+ * ONE CHOICE IS MARKED CHOSEN at a time - a tile, or that link's Google sign-in shown as a tile of its
  * own - and choosing one clears the other. What the plugins will be allowed to do is listed only under
  * a chosen provider that asks for permissions, and its heading names that provider: a mailbox asks none.
  *
@@ -134,7 +147,10 @@ import { letGoSignIns } from '../lib/letGoSignIns';
  * narrows what is offered to what the place asking takes (its kinds, its providers), and `start` opens
  * at one kind's form - with a preset already chosen, such as API key's Other.
  *
- * THE CLIENT SECRET IS WRITE-ONLY here as in Advanced: typed, sent once, never shown or kept. The
+ * CLOSE (X) IS NEVER UNDER A STEP. No step's section pulls itself up with Quasar's negative-margin
+ * q-gutter-y-*, which laid the kind and credential steps over the header's X (`connect-stack-*`).
+ *
+ * THE CLIENT SECRET IS WRITE-ONLY: typed, sent once, never shown or kept. The
  * provider's device code never reaches the browser: only the code the person types does.
  */
 const props = defineProps<{
@@ -171,7 +187,7 @@ const emit = defineEmits<{
   connected: [connection: Connection];
 }>();
 
-type Step = 'kind' | 'service' | 'setup' | 'signin' | 'result' | 'mailbox' | 'credential';
+type Step = 'kind' | 'service' | 'setup' | 'custom' | 'signin' | 'result' | 'mailbox' | 'credential';
 
 const step = ref<Step>('service');
 
@@ -211,6 +227,7 @@ async function readCredentialPresets(seq: number) {
 function chooseKind(id: ConnectionKind) {
   kind.value = id;
   providerId.value = null;
+  customNew.value = false;
   needs.value = null;
   mailboxPreset.value = '';
   credentialSaved.value = false;
@@ -227,6 +244,7 @@ function chooseKind(id: ConnectionKind) {
 function backToKind() {
   kind.value = null;
   providerId.value = null;
+  customNew.value = false;
   needs.value = null;
   mailboxPreset.value = '';
   problem.value = '';
@@ -249,20 +267,30 @@ function credentialConnected(connection: Connection) {
   emit('connected', connection);
 }
 const providerId = ref<string | null>(null);
+/** "Another OAuth service" is chosen: one not named yet, which its app step names. */
+const customNew = ref(false);
 const needs = ref<ConnectionNeeds | null>(null);
 const needsLoading = ref(false);
 const unticked = ref<Set<string>>(new Set());
 const detailed = ref<Set<string>>(new Set());
 const problem = ref('');
 
-/** Set up during this dialog, before the lists are read again. */
-const setUpNow = ref(false);
+/**
+ * The provider as this dialog last had it from the Host - a client saved or cleared here, or a custom
+ * service named here - before the opener's lists are read again.
+ */
+const answered = ref<ConnectionProvider | null>(null);
 
-const provider = computed(() => props.providers.find((candidate) => candidate.id === providerId.value) ?? null);
-const needsSetUp = computed(() => provider.value !== null && !provider.value.configured && !setUpNow.value);
+const provider = computed(() =>
+  (answered.value && answered.value.id === providerId.value ? answered.value : null)
+  ?? props.providers.find((candidate) => candidate.id === providerId.value)
+  ?? null);
 
-/** The instance's own Microsoft app is what signs in: no app of one's own to set up first. */
-const usesDefault = computed(() => provider.value?.clientSource === 'default' && !setUpNow.value);
+/** The instance's own Microsoft app is what signs in until one of one's own is saved. */
+const usesDefault = computed(() => provider.value?.clientSource === 'default');
+
+/** A custom OAuth service: its app step names it (its URLs, its scopes) and its client. */
+const isCustom = computed(() => customNew.value || provider.value?.kind === 'custom');
 
 /** Each opening, so an answer read for an earlier one is dropped. */
 let opening = 0;
@@ -295,7 +323,11 @@ watch(open, (showing) => {
   needs.value = null;
   unticked.value = new Set();
   detailed.value = new Set();
-  setUpNow.value = false;
+  answered.value = null;
+  customNew.value = false;
+  ownApp.value = false;
+  extraScopes.value = '';
+  resetCustom(null);
   guide.value = null;
   projectId.value = '';
   done.value = new Set();
@@ -395,6 +427,8 @@ interface Tile {
   /** The mailbox preset it opens, or the service it signs in to. */
   preset?: string;
   service?: string;
+  /** A custom OAuth service not named yet: its app step names it. */
+  newCustom?: boolean;
 }
 
 /**
@@ -413,6 +447,14 @@ const tiles = computed<Tile[]>(() => {
   for (const preset of mailboxTiles.value) {
     if (preset.id !== 'gmail') list.push({ id: preset.id, name: preset.name, wayIn: mailboxHint(preset.id).wayIn, preset: preset.id });
   }
+  // A SIGN-IN offers the custom OAuth services too: each named one, and one not named yet.
+  if (kind.value === 'oauth' && !props.need) {
+    const accepted = props.accepts?.providers;
+    for (const custom of props.providers.filter((candidate) => candidate.kind === 'custom' && (!accepted || accepted.includes(candidate.id)))) {
+      list.push({ id: custom.id, name: custom.name, wayIn: 'Sign in through its app', service: custom.id });
+    }
+    if (!accepted) list.push({ id: 'custom-new', name: 'Another OAuth service', wayIn: 'Name its addresses and its app', newCustom: true });
+  }
   return list;
 });
 
@@ -421,20 +463,16 @@ const advanced = computed(() => offers('google') && tiles.value.some((tile) => t
 
 /** The tile marked chosen: its service signed in to, or its mailbox opened. */
 function isChosen(tile: Tile) {
-  return tile.service ? providerId.value === tile.service : providerId.value === null && mailboxPreset.value === tile.preset;
+  if (tile.newCustom) return customNew.value;
+  return tile.service ? providerId.value === tile.service : providerId.value === null && !customNew.value && mailboxPreset.value === tile.preset;
 }
 
-/**
- * Where Set up the app was opened from, so its Back returns there: the service step's own link
- * under the Microsoft tile, or Sign in's Advanced….
- */
-const setupFrom = ref<'service' | 'signin'>('service');
-
-/** Advanced…'s Google sign-in, chosen: there is no Google tile beside it to mark instead. */
+/** The mailbox step's link to Google's sign-in, chosen: there is no Google tile beside it to mark instead. */
 const advancedChosen = computed(() => advanced.value && providerId.value === 'google');
 
 function chooseTile(tile: Tile) {
-  if (tile.preset) chooseMailbox(tile.preset);
+  if (tile.newCustom) chooseNewCustom();
+  else if (tile.preset) chooseMailbox(tile.preset);
   else if (tile.service) {
     // From the mailbox form too: a service tile goes back to the service step, where it signs in.
     step.value = 'service';
@@ -448,9 +486,20 @@ function chooseAdvanced() {
   void choose('google');
 }
 
+/** A custom OAuth service not named yet: no plugin can ask anything of it, so there is nothing to read. */
+function chooseNewCustom() {
+  providerId.value = null;
+  mailboxPreset.value = '';
+  needs.value = null;
+  unticked.value = new Set();
+  problem.value = '';
+  customNew.value = true;
+}
+
 function chooseMailbox(id: string) {
   // A mailbox asks for no permissions: a provider chosen before it, and its list, are let go.
   providerId.value = null;
+  customNew.value = false;
   needs.value = null;
   mailboxPreset.value = id;
   mailboxSaved.value = false;
@@ -467,6 +516,7 @@ function mailboxConnected(connection: Connection) {
 
 async function choose(id: string) {
   providerId.value = id;
+  customNew.value = false;
   mailboxPreset.value = '';
   needs.value = null;
   unticked.value = new Set();
@@ -544,19 +594,22 @@ const chosenScopes = computed(() => (needs.value?.scopes ?? []).map((line) => li
 
 const guideLoading = ref(false);
 
+/** Next from the service: its app, a step of its own before Sign in for every OAuth service. */
 async function next() {
   problem.value = '';
-  if (!needsSetUp.value) {
-    step.value = 'signin';
+  if (isCustom.value) {
+    resetCustom(customNew.value ? null : provider.value);
+    step.value = 'custom';
     return;
   }
-  await openSetup('service');
+  await openSetup();
 }
 
-/** Set up the app: from Next when there is no client, or from Sign in's Advanced… for an app of one's own. */
-async function openSetup(from: 'service' | 'signin') {
+/** The app step: the app in use, and the guide for setting up one of one's own. */
+async function openSetup() {
   problem.value = '';
-  setupFrom.value = from;
+  // Shown at once when there is no app to sign in through; a choice on the step when there is one.
+  ownApp.value = provider.value !== null && !provider.value.configured;
   // The guide is read again for what is ticked: its APIs and data access are those scopes' own.
   // With nothing ticked, the provider's default scopes stand for "nothing more".
   const chosen = provider.value!;
@@ -642,9 +695,9 @@ async function saveClient() {
   clientBusy.value = true;
   problem.value = '';
   try {
-    await saveConnectionProvider(chosen.id, body);
+    answered.value = await saveConnectionProvider(chosen.id, body);
     clientSecret.value = '';
-    setUpNow.value = true;
+    ownApp.value = false;
     emit('changed');
     step.value = 'signin';
   } catch (cause) {
@@ -654,7 +707,108 @@ async function saveClient() {
   }
 }
 
+/** Whether the guide for an app of one's own is shown: always when there is no app to sign in through. */
+const ownApp = ref(false);
+
+/** The saved app was cleared on the app step: the provider as the Host has it now, and the lists read again. */
+function appCleared(answer: ConnectionProviderCleared) {
+  answered.value = answer.provider;
+  ownApp.value = !answer.provider.configured;
+  emit('changed');
+}
+
+// --- 2. A custom OAuth service: named, with its client ----------------------------------------------
+
+const customName = ref('');
+const authorizeUrl = ref('');
+const tokenUrl = ref('');
+const userinfoUrl = ref('');
+const defaultScopes = ref('');
+
+/** The custom service's fields as it is saved, or empty for one not named yet. The secret is never filled. */
+function resetCustom(from: ConnectionProvider | null) {
+  customName.value = from?.name ?? '';
+  authorizeUrl.value = from?.authorizeUrl ?? '';
+  tokenUrl.value = from?.tokenUrl ?? '';
+  userinfoUrl.value = from?.userinfoUrl ?? '';
+  defaultScopes.value = from ? from.defaultScopes.join(' ') : '';
+  clientId.value = from?.clientId ?? '';
+  clientSecret.value = '';
+}
+
+/** The redirect URI a custom service's app registers, for the address in use. */
+const redirectUri = computed(() => redirectUriFor(currentOrigin()));
+
+/** A new service's id: `custom-` and its name in lowercase letters, digits and hyphens, not one in use. */
+function customIdFor(name: string) {
+  const base = `custom-${name.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'service'}`;
+  let id = base;
+  for (let n = 2; props.providers.some((candidate) => candidate.id === id); n += 1) id = `${base}-${n}`;
+  return id;
+}
+
+const cannotSaveCustom = computed(
+  () => [customName, authorizeUrl, tokenUrl, clientId].some((field) => field.value.trim() === ''),
+);
+
+async function saveCustom() {
+  if (clientBusy.value || cannotSaveCustom.value) return;
+  const id = customNew.value || !provider.value ? customIdFor(customName.value.trim()) : provider.value.id;
+  const body: ConnectionProviderSave = {
+    clientId: clientId.value.trim(),
+    name: customName.value.trim(),
+    authorizeUrl: authorizeUrl.value.trim(),
+    tokenUrl: tokenUrl.value.trim(),
+    defaultScopes: parseScopes(defaultScopes.value),
+  };
+  if (userinfoUrl.value.trim() !== '') body.userinfoUrl = userinfoUrl.value.trim();
+  // Left empty, the stored secret is kept.
+  if (clientSecret.value !== '') body.clientSecret = clientSecret.value;
+
+  clientBusy.value = true;
+  problem.value = '';
+  try {
+    const saved = await saveConnectionProvider(id, body);
+    answered.value = saved;
+    providerId.value = saved.id;
+    customNew.value = false;
+    clientSecret.value = '';
+    emit('changed');
+    step.value = 'signin';
+  } catch (cause) {
+    problem.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    clientBusy.value = false;
+  }
+}
+
+/** A custom service with no connections can be removed from its own step; the Host refuses one in use, naming them. */
+async function removeCustom() {
+  const chosen = provider.value;
+  if (!chosen || chosen.kind !== 'custom' || clientBusy.value) return;
+  clientBusy.value = true;
+  problem.value = '';
+  try {
+    await deleteConnectionProvider(chosen.id);
+    answered.value = null;
+    providerId.value = null;
+    needs.value = null;
+    emit('changed');
+    step.value = 'service';
+  } catch (cause) {
+    problem.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    clientBusy.value = false;
+  }
+}
+
 // --- 3. Sign in -----------------------------------------------------------------------------------
+
+/** Scopes no plugin asks for, typed on the sign-in step: asked for besides those ticked. */
+const extraScopes = ref('');
+
+/** Everything the sign-in asks for: what is ticked, then what was typed, each once. */
+const requestScopes = computed(() => [...new Set([...chosenScopes.value, ...parseScopes(extraScopes.value)])]);
 
 const leaving = ref(false);
 
@@ -669,7 +823,7 @@ async function signIn() {
   leaving.value = true;
   problem.value = '';
   try {
-    const flow = await startConnection({ provider: chosen.id, scopes: chosenScopes.value });
+    const flow = await startConnection({ provider: chosen.id, scopes: requestScopes.value });
     if (props.need || props.inTab) {
       // From a slot, or over another dialog: the provider opens in another tab, and this one waits for its return.
       // The tab is tagged, so only this sign-in's return is taken here.
@@ -721,7 +875,7 @@ async function startDevice() {
   try {
     // A fresh object each time, so Try again starts over even on the same answer.
     device.value = {
-      ...(await startDeviceConnection({ provider: chosen.id, scopes: chosenScopes.value, flow: 'device', ...(tenant ? { tenant } : {}) })),
+      ...(await startDeviceConnection({ provider: chosen.id, scopes: requestScopes.value, flow: 'device', ...(tenant ? { tenant } : {}) })),
     };
     deviceEnded.value = null;
   } catch (cause) {
@@ -745,17 +899,25 @@ function resumeDevice(flow: ConnectionOpenFlow) {
 }
 
 /**
- * Back to the service: the code shown is left to expire at the Host, and a waiting one is let go of,
+ * Back to the app step: the code shown is left to expire at the Host, and a waiting one is let go of,
  * so opening Add connection again starts at the service rather than on this code.
  */
-function back() {
+async function back() {
   if (device.value && deviceState.value === 'waiting') letGoSignIns.add(device.value.flowId);
   resumed.value = false;
   stopWaiting();
   tabUrl.value = null;
   device.value = null;
   deviceEnded.value = null;
-  step.value = 'service';
+  if (isCustom.value) {
+    resetCustom(provider.value);
+    step.value = 'custom';
+  } else if (guide.value) {
+    step.value = 'setup';
+  } else {
+    // A sign-in picked back up as the dialog opened: its app step's guide is read now.
+    await openSetup();
+  }
 }
 
 /** Cancel beside the code ended the sign-in at the Host: back to the step's start, to sign in again. */
@@ -867,18 +1029,14 @@ const typed = computed(
   () =>
     (mailboxForm.value?.typed ?? false)
     || (credentialForm.value?.typed ?? false)
-    || [projectId, clientId, clientSecret, tenantId, directory, resultName].some((field) => field.value.trim() !== ''),
+    || [projectId, clientId, clientSecret, tenantId, directory, resultName, extraScopes, customName, authorizeUrl, tokenUrl, userinfoUrl, defaultScopes]
+      .some((field) => field.value.trim() !== ''),
 );
 
+/** Every OAuth service's app is a step of its own, before Sign in: a custom one's names the service too. */
 const stepLabels = computed(() => [
   { id: 'service', label: 'Service' },
-  // With the instance's own app, setting one up is under Advanced…, not a step of its own.
-  ...(usesDefault.value && step.value !== 'setup'
-    ? []
-    : [{
-        id: 'setup',
-        label: provider.value && provider.value.configured && !setUpNow.value && !usesDefault.value ? 'Set up the app (already set up)' : 'Set up the app',
-      }]),
+  isCustom.value ? { id: 'custom', label: 'Name the service' } : { id: 'setup', label: 'App' },
   { id: 'signin', label: 'Sign in' },
 ]);
 </script>
@@ -893,7 +1051,7 @@ const stepLabels = computed(() => [
       </q-card-section>
 
       <!-- 0. KIND: what is connected, then only that kind's fields -->
-      <q-card-section v-if="step === 'kind'" data-connect-step="kind" class="q-gutter-y-md">
+      <q-card-section v-if="step === 'kind'" data-connect-step="kind" class="connect-stack-md">
         <div>What do you want to connect?</div>
         <div class="connect-tiles" data-kind-tiles>
           <q-btn
@@ -915,7 +1073,7 @@ const stepLabels = computed(() => [
       </q-card-section>
 
       <!-- A WEBSITE, AN API KEY, A USERNAME AND PASSWORD: the kind's own form -->
-      <q-card-section v-else-if="step === 'credential' && isCredentialKind(kind)" data-connect-step="credential" class="q-gutter-y-md">
+      <q-card-section v-else-if="step === 'credential' && isCredentialKind(kind)" data-connect-step="credential" class="connect-stack-md">
         <div class="text-weight-medium">{{ offeredKinds.find((entry) => entry.id === kind)?.name }}</div>
         <CredentialForm ref="credentialForm" :presets="credentialPresets" :kind="kind" :preset="startPreset" @saved="credentialConnected" />
         <ConnectionTest v-if="credentialSaved && savedConnection" :connection="savedConnection" @tested="connectionTested" />
@@ -934,7 +1092,7 @@ const stepLabels = computed(() => [
       </q-card-section>
 
       <!-- 1. SERVICE, and a mailbox chosen there: one row of tiles above both, Microsoft's among them -->
-      <q-card-section v-if="step === 'service' || step === 'mailbox'" :data-connect-step="step" class="q-gutter-y-md">
+      <q-card-section v-if="step === 'service' || step === 'mailbox'" :data-connect-step="step" class="connect-stack-md">
         <div>Which account do you want to connect?</div>
         <div class="connect-tiles" data-provider-tiles>
           <q-btn
@@ -1010,23 +1168,14 @@ const stepLabels = computed(() => [
             <ul class="connect-hints text-caption" data-tile-hints="outlook">
               <li v-for="(item, index) in OutlookHint.steps" :key="index">{{ item.text }}</li>
             </ul>
-            <div v-if="usesDefault" class="text-caption os-text-muted" data-service-own-app>
-              To sign in to one organisation's directory only, or through an app you registered:
-              <q-btn
-                flat
-                dense
-                no-caps
-                color="primary"
-                label="Advanced…"
-                :loading="guideLoading"
-                data-connect-own-app-service
-                @click="openSetup('service')"
-              />
-            </div>
           </template>
           <div v-else-if="providerId === 'google'" class="text-caption" data-tile-hints="google">
             Gmail and the other Google services, signed in through a Google app you set up once in the Google
             Cloud console.
+          </div>
+          <div v-else-if="customNew" class="text-caption" data-tile-hints="custom">
+            Any other service that signs in with OAuth 2.0: the next step names its addresses and the app you
+            registered there.
           </div>
 
           <template v-if="provider">
@@ -1085,15 +1234,46 @@ const stepLabels = computed(() => [
         </template>
       </q-card-section>
 
-      <!-- 2. SET UP THE APP -->
-      <q-card-section v-else-if="step === 'setup' && provider" data-connect-step="setup" class="q-gutter-y-sm">
-        <div v-if="usesDefault" data-setup-own>
-          {{ provider.name }} signs in through this instance's app until you save one of your own here. Work
-          down the list in another tab; tick each step as you finish it.
+      <!-- 2. THE APP: the one in use, and setting up one of your own -->
+      <q-card-section v-else-if="step === 'setup' && provider" data-connect-step="setup" class="connect-stack-sm">
+        <div v-if="usesDefault" data-app-in-use="default">
+          {{ provider.name }} signs in through {{ productTitle }}'s app: there is nothing to register. Go on to
+          Sign in, or set up an app of your own below.
         </div>
-        <div v-else>
+        <div v-else-if="provider.configured" data-app-in-use="saved">
+          {{ provider.name }} signs in through the app you saved<template v-if="provider.clientId">,
+          <span class="mono">{{ provider.clientId }}</span></template>.
+        </div>
+        <div v-else data-app-in-use="none">
           {{ provider.name }} needs an app of your own to sign in through. Work down the list in another
           tab; tick each step as you finish it.
+        </div>
+        <ClearClientOffer
+          :provider-id="provider.id"
+          :provider="provider"
+          :connections="connections"
+          data-app-clear
+          @cleared="appCleared"
+        />
+        <div v-if="provider.configured && !ownApp">
+          <q-btn
+            flat
+            dense
+            no-caps
+            color="primary"
+            icon="add"
+            :label="usesDefault ? 'Set up an app of your own' : 'Set up another app of your own'"
+            data-own-app
+            @click="ownApp = true"
+          />
+          <span class="text-caption os-text-muted">
+            {{ isMicrosoft ? 'To sign in to one organisation\'s directory only, or through an app you registered.' : 'To sign in through a different app.' }}
+          </span>
+        </div>
+        <template v-if="ownApp">
+        <div v-if="provider.configured" data-setup-own>
+          Work down the list in another tab; tick each step as you finish it. Saving the app here makes
+          every later {{ provider.name }} sign-in go through it.
         </div>
         <ul class="connect-hints text-caption" data-setup-intro>
           <li data-setup-once>
@@ -1224,10 +1404,51 @@ const stepLabels = computed(() => [
             </div>
           </li>
         </ol>
+        </template>
+      </q-card-section>
+
+      <!-- 2. A CUSTOM OAUTH SERVICE: named, with its addresses and its client -->
+      <q-card-section v-else-if="step === 'custom'" data-connect-step="custom" class="connect-stack-sm">
+        <div>
+          The addresses the service publishes for OAuth 2.0, and the app you registered there. The Host stores
+          the client secret encrypted and never shows it again.
+        </div>
+        <q-input v-model="customName" outlined dense label="Service name" autocomplete="off" data-custom-field="name" />
+        <q-input v-model="authorizeUrl" outlined dense label="Authorization URL" spellcheck="false" autocomplete="off" data-custom-field="authorizeUrl" />
+        <q-input v-model="tokenUrl" outlined dense label="Token URL" spellcheck="false" autocomplete="off" data-custom-field="tokenUrl" />
+        <q-input v-model="userinfoUrl" outlined dense label="Userinfo URL (optional)" spellcheck="false" autocomplete="off" data-custom-field="userinfoUrl">
+          <template #append><FieldHelp text="Where the account's name is read." /></template>
+        </q-input>
+        <q-input v-model="defaultScopes" outlined dense label="Default scopes" spellcheck="false" autocomplete="off" data-custom-field="defaultScopes">
+          <template #append><FieldHelp text="Asked on every connection of this service. Separate with spaces or commas." /></template>
+        </q-input>
+        <q-input v-model="clientId" outlined dense label="Client ID" spellcheck="false" autocomplete="off" data-custom-field="clientId" />
+        <q-input
+          v-model="clientSecret"
+          outlined
+          dense
+          type="password"
+          label="Client secret"
+          autocomplete="new-password"
+          spellcheck="false"
+          data-custom-field="clientSecret"
+        >
+          <template #append><FieldHelp :text="provider?.clientSecretSet ? 'Set. Leave empty to keep it; type a new one to replace it.' : 'Stored encrypted and never shown again.'" /></template>
+        </q-input>
+        <div class="connect-redirect" data-redirect-uri-block>
+          <div class="text-caption os-text-muted">Redirect URI to register at the service for this address:</div>
+          <div class="mono" data-redirect-uri>{{ redirectUri }}</div>
+          <div v-if="redirectWarning" class="text-caption text-warning q-mt-xs" data-redirect-warning>{{ redirectWarning }}</div>
+          <div class="text-caption os-text-muted q-mt-xs">{{ providerHelp(provider ?? { id: 'custom', kind: 'custom', help: '' }) }}</div>
+        </div>
+        <div v-if="provider && !customNew" class="row items-center q-gutter-x-sm" data-custom-remove>
+          <q-btn flat dense no-caps size="sm" color="negative" icon="delete" label="Remove this service" :disable="clientBusy" @click="removeCustom" />
+          <span class="text-caption os-text-muted">Only while no connection signs in through it.</span>
+        </div>
       </q-card-section>
 
       <!-- 3. SIGN IN WITH A CODE -->
-      <q-card-section v-else-if="step === 'signin' && provider && isMicrosoft" data-connect-step="signin" class="q-gutter-y-sm">
+      <q-card-section v-else-if="step === 'signin' && provider && isMicrosoft" data-connect-step="signin" class="connect-stack-sm">
         <template v-if="device === null">
           <div v-if="askingPlugins.length > 0" data-signin-plugins>
             These permissions are what the installed plugins need: {{ listOf(askingPlugins) }}.
@@ -1235,9 +1456,9 @@ const stepLabels = computed(() => [
           <div>
             {{ provider.name }} gives you a code to enter on its own sign-in page, in another tab. Nothing
             has to come back to this address, so it works however you reached this page.
-            {{ chosenScopes.length === 0
+            {{ requestScopes.length === 0
               ? 'Only the account\'s name and email address are asked for.'
-              : `${chosenScopes.length === 1 ? 'One thing is' : `${chosenScopes.length} things are`} asked for besides the account's name and email address.` }}
+              : `${requestScopes.length === 1 ? 'One thing is' : `${requestScopes.length} things are`} asked for besides the account's name and email address.` }}
           </div>
           <div v-if="twoCodes" class="connect-two-codes" data-two-codes>
             <div class="text-weight-medium">This takes two short codes, one after the other.</div>
@@ -1250,19 +1471,18 @@ const stepLabels = computed(() => [
           </div>
           <DirectoryField v-model="directory" :error="directoryProblem" />
           <div class="text-caption os-text-muted" data-signin-directory-hint>{{ UsernameIncorrectHint }}</div>
-          <div v-if="usesDefault" data-signin-advanced>
-            <q-btn
-              flat
-              dense
-              no-caps
-              size="sm"
-              label="Advanced…"
-              :loading="guideLoading"
-              data-connect-own-app
-              @click="openSetup('signin')"
-            />
-            <span class="text-caption os-text-muted">Set up the app: sign in through an app of your own instead.</span>
-          </div>
+          <q-input
+            v-model="extraScopes"
+            outlined
+            dense
+            autogrow
+            label="More scopes (optional)"
+            spellcheck="false"
+            autocomplete="off"
+            data-extra-scopes
+          >
+            <template #append><FieldHelp text="Scopes no installed plugin asks for, asked for as well. Separate with spaces or commas." /></template>
+          </q-input>
         </template>
         <CodeSignIn
           v-else
@@ -1278,7 +1498,7 @@ const stepLabels = computed(() => [
       </q-card-section>
 
       <!-- 3. SIGN IN -->
-      <q-card-section v-else-if="step === 'signin' && provider" data-connect-step="signin" class="q-gutter-y-sm">
+      <q-card-section v-else-if="step === 'signin' && provider" data-connect-step="signin" class="connect-stack-sm">
         <div v-if="tabUrl" data-signin-tab>
           <div>
             <a :href="tabUrl" target="_blank" rel="noopener noreferrer" data-signin-link>Open {{ provider.name }} to sign in</a>
@@ -1291,16 +1511,29 @@ const stepLabels = computed(() => [
         </div>
         <div v-else-if="need || inTab">
           {{ provider.name }} opens in another tab to sign in and agree, so this page stays as it is.
-          {{ chosenScopes.length === 0
+          {{ requestScopes.length === 0
             ? 'Only the account\'s name and email address are asked for.'
-            : `${chosenScopes.length === 1 ? 'One thing is' : `${chosenScopes.length} things are`} asked for besides the account's name and email address.` }}
+            : `${requestScopes.length === 1 ? 'One thing is' : `${requestScopes.length} things are`} asked for besides the account's name and email address.` }}
         </div>
         <div v-else>
           Your browser goes to {{ provider.name }} to sign in and agree, then comes back here.
-          {{ chosenScopes.length === 0
+          {{ requestScopes.length === 0
             ? 'Only the account\'s name and email address are asked for.'
-            : `${chosenScopes.length === 1 ? 'One thing is' : `${chosenScopes.length} things are`} asked for besides the account's name and email address.` }}
+            : `${requestScopes.length === 1 ? 'One thing is' : `${requestScopes.length} things are`} asked for besides the account's name and email address.` }}
         </div>
+        <q-input
+          v-if="!tabUrl"
+          v-model="extraScopes"
+          outlined
+          dense
+          autogrow
+          label="More scopes (optional)"
+          spellcheck="false"
+          autocomplete="off"
+          data-extra-scopes
+        >
+          <template #append><FieldHelp text="Scopes no installed plugin asks for, asked for as well. Separate with spaces or commas." /></template>
+        </q-input>
         <div v-if="redirectWarning" class="text-caption text-warning" data-redirect-warning>{{ redirectWarning }}</div>
         <div class="text-caption os-text-muted">
           If {{ provider.name }} says it has not verified the app, that is expected for your own app:
@@ -1309,7 +1542,7 @@ const stepLabels = computed(() => [
       </q-card-section>
 
       <!-- BACK FROM THE PROVIDER -->
-      <q-card-section v-else-if="step === 'result'" data-connect-step="result" class="q-gutter-y-md">
+      <q-card-section v-else-if="step === 'result'" data-connect-step="result" class="connect-stack-md">
         <template v-if="refusal">
           <div class="text-negative">The account was not connected: {{ refusal }}</div>
         </template>
@@ -1372,12 +1605,26 @@ const stepLabels = computed(() => [
             no-caps
             label="Next"
             :loading="guideLoading"
-            :disable="!provider || needsLoading || needs === null || guideLoading"
+            :disable="!(customNew || (provider && !needsLoading && needs !== null)) || guideLoading"
             @click="next"
           />
         </template>
-        <template v-else-if="step === 'setup'">
-          <q-btn flat no-caps label="Back" @click="step = usesDefault ? setupFrom : 'service'" />
+        <template v-else-if="step === 'setup' && provider">
+          <q-btn flat no-caps label="Back" @click="step = 'service'" />
+          <q-btn color="primary" no-caps label="Next" :disable="!provider.configured" data-app-next @click="step = 'signin'" />
+        </template>
+        <template v-else-if="step === 'custom'">
+          <q-btn flat no-caps label="Back" @click="step = 'service'" />
+          <q-btn v-if="provider && !customNew && provider.configured" flat no-caps label="Next" data-custom-next @click="step = 'signin'" />
+          <q-btn
+            color="primary"
+            no-caps
+            label="Save and continue"
+            :loading="clientBusy"
+            :disable="clientBusy || cannotSaveCustom"
+            data-custom-save
+            @click="saveCustom"
+          />
         </template>
         <template v-else-if="step === 'mailbox'">
           <q-btn v-if="mailboxSaved" v-close-popup color="primary" no-caps label="Finish" />
@@ -1423,6 +1670,23 @@ const stepLabels = computed(() => [
 </template>
 
 <style scoped>
+/*
+ * EACH STEP'S ROWS SPACED WITHOUT A NEGATIVE MARGIN. Quasar's q-gutter-y-* pulls its container up by
+ * the gutter, which laid the kind and credential steps over the header's Close (X): a click at its
+ * centre landed on the section and closed nothing.
+ */
+.connect-stack-md > * + * {
+  margin-top: 16px;
+}
+
+.connect-stack-sm > * + * {
+  margin-top: 8px;
+}
+
+.connect-redirect {
+  word-break: break-all;
+}
+
 .connect-two-codes {
   border-left: 3px solid var(--q-primary);
   padding: 0.25rem 0 0.25rem 0.75rem;

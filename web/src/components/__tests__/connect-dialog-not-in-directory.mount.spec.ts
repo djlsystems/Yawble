@@ -141,6 +141,7 @@ async function chooseMicrosoft() {
   await click(bodyFind('[data-connection-kind="oauth"]'));
   await click(bodyFind('[data-connect-service="microsoft"]'));
   await click(button('Next'));
+  await click(button('Next'));
 }
 
 

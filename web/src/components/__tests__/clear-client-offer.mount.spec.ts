@@ -3,10 +3,10 @@
 // UNDO A SAVED MICROSOFT OR GOOGLE APP, and MICROSOFT NOT KNOWING THE SAVED APP'S CLIENT ID.
 //
 // Once Set up client is saved it wins over the instance's own app for good, unless a person clears it.
-// The Providers tile offers "Use <product>'s app" for Microsoft on an instance with an app of its own
-// and "Remove this app" for Google, naming the connections that signed in through the saved app and
-// need Reconnect; the Host's answer then names them again. A refusal (the row could not be written)
-// is said and the tile still shows the saved app.
+// The service's own app step in Add connection offers "Use <product>'s app" for Microsoft on an
+// instance with an app of its own and "Remove this app" for Google, naming the connections that
+// signed in through the saved app and need Reconnect; the Host's answer then names them again. A
+// refusal (the row could not be written) is said and the step still shows the saved app.
 //
 // A code start or a code that Microsoft ends with the Host's unknown-client sentence (AADSTS700016 or
 // unauthorized_client, a directory ID pasted into Client ID) shows that one sentence, never the code
@@ -65,7 +65,7 @@ import { UnknownClientSentence } from '../../lib/connections';
 import { productTitle } from '../../presentation/product';
 import { bodyFind, mountDialog, resetBody } from '../../test/mountQuasar';
 import { hostConnection, hostProvider } from '../../test/pluginFixtures';
-import { button, settle } from '../../test/formProbe';
+import { button, isDisabled, settle } from '../../test/formProbe';
 import { letGoSignIns } from '../../lib/letGoSignIns';
 
 const mailSend = 'https://graph.microsoft.com/Mail.Send';
@@ -107,26 +107,30 @@ async function click(element: Element | null) {
   await settle();
 }
 
-async function providersTab() {
+/** Add connection -> Sign-in -> the service -> Next: its own app step. */
+async function appStep(service: 'google' | 'microsoft') {
   const wrapper = await mountDialog(ConnectionsDialog, {});
   await settle();
-  await click(bodyFind('[data-connections-advanced]'));
-  await click(bodyFind('[data-connections-tab="providers"]'));
+  await click(button('Add connection'));
+  await click(bodyFind('[data-connection-kind="oauth"]'));
+  await click(bodyFind(`[data-connect-service="${service}"]`));
+  await click(button('Next'));
+  expect(bodyFind('[data-connect-step]')?.getAttribute('data-connect-step')).toBe('setup');
   return wrapper;
 }
 
-const tile = (id: string) => bodyFind(`[data-provider="${id}"]`)!;
+const app = () => bodyFind('[data-connect-step="setup"]')!;
 
 function cleared(provider: ConnectionProvider, reconnect: { id: string; name: string; account: string }[]) {
   return { provider, reconnect };
 }
 
-describe('A Providers tile with a saved app', () => {
+describe('The app step of a service with a saved app', () => {
   it("offers Use the instance's app for Microsoft, naming the connections that will need Reconnect, and clears it", async () => {
     clearConnectionProviderClient.mockResolvedValue(cleared(defaultMicrosoft, [{ id: 'conn-work', name: 'Work', account: 'worker@example.test' }]));
-    const wrapper = await providersTab();
+    const wrapper = await appStep('microsoft');
 
-    const offer = tile('microsoft').querySelector('[data-clear-client]')!;
+    const offer = app().querySelector('[data-clear-client]')!;
     expect(offer.querySelector('[data-clear-client-button]')?.textContent).toContain(useInstance);
     const words = offer.querySelector('[data-clear-client-words]')!.textContent!;
     expect(words).toContain(`signs in with ${productTitle}'s app again`);
@@ -138,13 +142,16 @@ describe('A Providers tile with a saved app', () => {
     await click(offer.querySelector('[data-clear-client-button]'));
 
     expect(clearConnectionProviderClient).toHaveBeenCalledWith('microsoft');
-    const done = tile('microsoft').querySelector('[data-clear-client-done]')!.textContent!;
+    const done = app().querySelector('[data-clear-client-done]')!.textContent!;
     expect(done).toContain(`Microsoft signs in with ${productTitle}'s app again.`);
     expect(done).toContain('This connection signed in through the saved app and needs Reconnect: Work.');
-    // The list is read again: the tile now says the instance's app.
+    // The list is read again, and the step now says the instance's app is in use.
     expect(listConnectionProviders.mock.calls.length).toBeGreaterThan(reads);
-    expect(tile('microsoft').querySelector('[data-client-state]')?.textContent).toContain("This instance's app");
-    expect(tile('microsoft').querySelector('[data-clear-client-button]')).toBeNull();
+    expect(app().querySelector('[data-app-in-use]')?.getAttribute('data-app-in-use')).toBe('default');
+    expect(app().querySelector('[data-app-in-use]')?.textContent).toContain(`${productTitle}'s app`);
+    expect(app().querySelector('[data-clear-client-button]')).toBeNull();
+    // Still the one way on: Next to Sign in.
+    expect(isDisabled('Next')).toBe(false);
 
     wrapper.unmount();
   });
@@ -153,30 +160,33 @@ describe('A Providers tile with a saved app', () => {
     clearConnectionProviderClient.mockResolvedValue(
       cleared(hostProvider({ id: 'google', configured: false, clientSource: null }), [{ id: 'conn-mail', name: 'Gmail', account: 'person@example.com' }]),
     );
-    const wrapper = await providersTab();
+    const wrapper = await appStep('google');
 
-    const offer = tile('google').querySelector('[data-clear-client]')!;
+    const offer = app().querySelector('[data-clear-client]')!;
     expect(offer.querySelector('[data-clear-client-button]')?.textContent).toContain('Remove this app');
     expect(offer.querySelector('[data-clear-client-words]')?.textContent).toContain('needs Reconnect afterwards: Gmail');
 
     await click(offer.querySelector('[data-clear-client-button]'));
 
     expect(clearConnectionProviderClient).toHaveBeenCalledWith('google');
-    expect(tile('google').querySelector('[data-clear-client-done]')?.textContent).toContain("Google's app was removed");
+    expect(app().querySelector('[data-clear-client-done]')?.textContent).toContain("Google's app was removed");
+    // Not set up now: the guide is shown, and there is no Sign in until an app is saved.
+    expect(app().querySelector('[data-app-in-use]')?.getAttribute('data-app-in-use')).toBe('none');
+    expect(isDisabled('Next')).toBe(true);
 
     wrapper.unmount();
   });
 
   it('says the refusal and changes nothing when the row cannot be written', async () => {
     clearConnectionProviderClient.mockRejectedValue(new Error('The client was not cleared: its record could not be written (forced failure).'));
-    const wrapper = await providersTab();
+    const wrapper = await appStep('microsoft');
     const reads = listConnectionProviders.mock.calls.length;
 
-    await click(tile('microsoft').querySelector('[data-clear-client-button]'));
+    await click(app().querySelector('[data-clear-client-button]'));
 
-    expect(tile('microsoft').querySelector('[data-clear-client-problem]')?.textContent).toContain('The client was not cleared');
-    expect(tile('microsoft').querySelector('[data-clear-client-button]')).not.toBeNull();
-    expect(tile('microsoft').querySelector('[data-client-id]')?.textContent).toContain(savedClient);
+    expect(app().querySelector('[data-clear-client-problem]')?.textContent).toContain('The client was not cleared');
+    expect(app().querySelector('[data-clear-client-button]')).not.toBeNull();
+    expect(app().querySelector('[data-app-in-use="saved"]')?.textContent).toContain(savedClient);
     expect(listConnectionProviders.mock.calls.length).toBe(reads);
 
     wrapper.unmount();
@@ -184,11 +194,15 @@ describe('A Providers tile with a saved app', () => {
 
   it('offers nothing for a built-in using the instance\'s app or with none saved', async () => {
     listConnectionProviders.mockResolvedValue([hostProvider({ id: 'google' }), defaultMicrosoft]);
-    const wrapper = await providersTab();
+    let wrapper = await appStep('microsoft');
+    expect(app().querySelector('[data-app-in-use]')?.getAttribute('data-app-in-use')).toBe('default');
+    expect(app().querySelector('[data-clear-client-button]')).toBeNull();
+    wrapper.unmount();
+    resetBody();
 
-    expect(tile('microsoft').querySelector('[data-clear-client-button]')).toBeNull();
-    expect(tile('google').querySelector('[data-clear-client-button]')).toBeNull();
-
+    wrapper = await appStep('google');
+    expect(app().querySelector('[data-app-in-use]')?.getAttribute('data-app-in-use')).toBe('none');
+    expect(app().querySelector('[data-clear-client-button]')).toBeNull();
     wrapper.unmount();
   });
 });
@@ -222,6 +236,7 @@ describe('Microsoft not knowing the saved app', () => {
     await click(button('Add connection'));
     await click(bodyFind('[data-connection-kind="oauth"]'));
     await click(bodyFind('[data-connect-service="microsoft"]'));
+    await click(button('Next'));
     await click(button('Next'));
     expect(bodyFind('[data-connect-step]')?.getAttribute('data-connect-step')).toBe('signin');
 

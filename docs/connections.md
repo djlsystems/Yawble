@@ -34,7 +34,7 @@ Each connection has one kind, and each kind its own fields:
 
 | Kind (`kind`) | What it holds |
 |---|---|
-| **Sign-in** (`oauth`) | An account at Microsoft or Google (or a custom OAuth provider): its scopes, and for Microsoft its directory. See below. |
+| **Sign-in** (`oauth`) | An account at Microsoft or Google (or a custom OAuth service): its scopes, and for Microsoft its directory. See below. |
 | **Mailbox** (`imap`) | A preset (Gmail, iCloud, Yahoo, Namecheap Private Email, Other), the username, the app password and the servers. See [A mailbox with an app password](#a-mailbox-with-an-app-password-imap). |
 | **Website** (`website`) | A site the platform's own browser signs in to - with a password (and an optional two-step code), a token, or a session you keep with **Sign in** - and a page that shows it is signed in. See [Websites](#websites). |
 | **API key** (`apikey`) | A preset naming the fields a service needs - Stripe: key; Namecheap: API user, API key, whitelisted IP; Twilio: account SID, API key SID, API key secret; Other: fields you name - each masked or not as the preset says. |
@@ -82,11 +82,12 @@ it signs in with a code.
 
 ### Undoing a saved Microsoft or Google client
 
-A client saved with **Set up client** wins over the instance's own app until a person clears it. In
-Advanced → **Providers**, a built-in provider with a saved client offers **Use Yawble's app**
-(Microsoft, on an instance with an app of its own) or **Remove this app** (Google, or Microsoft on
-an instance with none), naming the connections that signed in through the saved app and so need
-**Reconnect** afterwards.
+A client saved on a service's **App** step wins over the instance's own app until a person clears it.
+On that same step of Add connection (Sign-in → the service → **Next**), a built-in provider with a
+saved client offers **Use Yawble's app** (Microsoft, on an instance with an app of its own) or
+**Remove this app** (Google, or Microsoft on an instance with none), naming the connections that
+signed in through the saved app and so need **Reconnect** afterwards. Once cleared, the step says
+which app is in use now; Google then shows its guide and holds **Next** until an app is saved.
 
 - `DELETE /api/connections/providers/{id}/client` (people only, `google` or `microsoft`) forgets the
   saved client ID and secret with a `connections.provider-cleared` tenant row in the same
@@ -105,8 +106,8 @@ an instance with none), naming the connections that signed in through the saved 
 A Directory (tenant) ID pasted into **Client ID** makes every Microsoft sign-in fail on Microsoft's
 own page (AADSTS700016), which the Host never sees. So:
 
-- A Microsoft client save whose `clientId` equals its own `tenantId` (guided) or `tenant`
-  (Advanced), or any connection's directory, is refused with one sentence naming both fields
+- A Microsoft client save whose `clientId` equals its own `tenantId` (the App step) or `tenant`
+  (the route's other field), or any connection's directory, is refused with one sentence naming both fields
   (`clientId` and the Directory (tenant) ID), and nothing is saved.
 - When Microsoft answers a saved client's code start, a poll or a browser sign-in's
   code exchange with AADSTS700016 or `unauthorized_client` (what a directory's own endpoints answer),
@@ -117,17 +118,21 @@ own page (AADSTS700016), which the Host never sees. So:
   **Remove this app**) under it.
 
 Every other provider needs its **client** - a client ID and a client secret you register at the
-provider - entered once, in the Connections dialog (**Set up client**). The secret is stored encrypted with the
+provider - entered once, on its own **App** step of Add connection (Google's, or a custom service's
+**Name the service** step). The secret is stored encrypted with the
 instance's Data Protection keys (`<dataRoot>/keys`); it is never in plain text, never in the
-environment, and never returned by any route: the dialog shows only that it is **set**. Changing it
-means typing a new one.
+environment, and never returned by any route: the step says only that it is **set**, and its field
+starts empty. Left empty on save, the stored secret is kept; changing it means typing a new one.
 
 ## Connecting an account: the guided path
 
-Start here. Admin → **Connections** → **Add connection** first asks what you are connecting - a
-**Sign-in** (Microsoft or Google), a **Mailbox**, a **Website**, an **API key** or a **Username and
-password** - and then shows only that kind's fields. A Sign-in goes on to Microsoft and Google; a
-website, an API key and a username and password to their own form (see
+Admin → **Connections** has one button for every kind: **Add connection**. There is no second door -
+no Advanced, no Providers tab, no Connect an account; a slot's **Connect**, the solution wizard and
+**New connection...** open this same dialog, narrowed to the kinds the place takes. It first asks
+what you are connecting - a **Sign-in** (Microsoft, Google or another OAuth service), a **Mailbox**, a
+**Website**, an **API key** or a **Username and password** - and then shows only that kind's fields. A
+Sign-in goes on to Microsoft, Google, each custom OAuth service already named and **Another OAuth
+service**; a website, an API key and a username and password to their own form (see
 [Websites, API keys, usernames and passwords](#websites-api-keys-usernames-and-passwords)). A Mailbox -
 and a plugin slot's **Connect** for a slot that takes only sign-ins and mailboxes - opens one screen of
 provider tiles, each saying its way in: **Gmail** (app password), **Microsoft
@@ -139,12 +144,14 @@ a password shown once and a user name that is often the part before the @; for Y
 security → Generate app password; for Namecheap Private Email, webmail → Settings → Security Center
 → App passwords, a password shown once and the full address as the user name - see
 [A mailbox with an app password](#a-mailbox-with-an-app-password-imap). Gmail through a Google app of
-your own sits behind **Advanced…** (and in Gmail's hints, for an account that cannot make an app
-password). A slot's Connect shows only the kinds the slot takes, a mailbox (`imap`) included.
+your own is the link **Sign in through a Google app of your own…** under the mailbox tiles (and in
+Gmail's hints, for an account that cannot make an app password); it goes to Google's sign-in, whose
+App step follows. A slot's Connect shows only the kinds the slot takes, a mailbox (`imap`) included.
 
-Google (through Advanced…) and Microsoft (the Microsoft tile) then go in three steps:
+Every OAuth service - Google, Microsoft, a custom one - then goes in three steps, and its app is
+always the second, before sign-in:
 
-1. **Service** - Google or Microsoft. The dialog shows what will be asked, in words, each line naming
+1. **Service** - Google, Microsoft or a custom service. The dialog shows what will be asked, in words, each line naming
    the plugin that wants it ("Read, change and send your Gmail - mailer"); the raw scope is behind
    **details**, and a scope the Host has no words for reads as itself. Every line is ticked; untick
    any you do not want. Nothing is typed: the scopes come from the installed plugins' connection
@@ -152,18 +159,28 @@ Google (through Advanced…) and Microsoft (the Microsoft tile) then go in three
    When a Microsoft connection's scopes span several APIs, the lines are grouped under each API's
    name (Azure management, Azure SQL, Azure Storage, Key Vault, Log Analytics, Microsoft Graph),
    from the read's `microsoftApis`; one sign-in asks for every ticked line.
-2. **Set up the app** - only when the provider's client is not set up yet (for Microsoft with the
-   default client in use, the dialog goes straight to **Sign in**, and **Set up the app** is under
-   **Advanced…**, below the Microsoft tile and on the Sign in step, for an app of your own or to sign
-   in to one organisation's directory only): the provider's setup
+2. **App** - the service's app, a step of its own. It says which app signs in: for Microsoft,
+   **Yawble's app** (the instance's default client, `clientSource: "default"`) or the client you
+   saved; for Google, the client you saved, or that there is none yet. With a saved client the step
+   offers **Use Yawble's app** or **Remove this app** (see
+   [Undoing a saved Microsoft or Google client](#undoing-a-saved-microsoft-or-google-client)).
+   **Next** goes on to Sign in while an app is in use. Setting up an app of your own is this step too
+   - **Set up an app of your own** while one is in use (for Microsoft, also to sign in to one
+   organisation's directory only), shown at once when there is none: the provider's setup
    guide as a checklist, with links into the provider's console and buttons to copy each value (the
    redirect URI, the scopes, the APIs). It says first that this is a one-time setup and roughly how
    long it takes (Google about 20 to 30 minutes, Microsoft about 10), that the tick boxes only mark
    your own progress, and, for Google, that a project you already have is fine: the APIs and scopes
    it keeps for other things stay as they are. The guide is served with the provider by
    `GET /api/connections/providers` (`guide.steps`), so the dialog and this page say the same thing.
-3. **Sign in** - the provider's consent page, then back to the dialog, where you may name the
-   connection.
+   Saving the client goes on to Sign in.
+   A **custom OAuth service**'s second step is **Name the service** instead: its name, authorization
+   URL, token URL, optional userinfo URL and default scopes, and its client ID and secret, with the
+   exact redirect URI to register at the service (see
+   [A custom OAuth service](#a-custom-oauth-service-and-scopes-no-plugin-asks-for)).
+3. **Sign in** - the scopes the installed plugins ask for stay listed and ticked from the Service
+   step; **More scopes (optional)** adds any scope no plugin asks for. Then the provider's consent
+   page (Microsoft: a code, below), and back to the dialog, where you may name the connection.
 
 ### Google's setup steps
 
@@ -250,8 +267,8 @@ sign in again.
 - The connection then signs in, redeems its code, refreshes and gets each API's token at
   `https://login.microsoftonline.com/<directory>/oauth2/v2.0/...`, with the same client (the
   instance's app or one you saved). It is sent as `tenant` on `POST /api/connections/start`, for the
-  code and the browser sign-in alike; Advanced's **Connect an account** offers the same field for
-  Microsoft.
+  code and the browser sign-in alike (Add connection's Microsoft sign-in is the code); Reconnect and
+  a slot's Reconnect offer the same field.
 - A value that is neither a directory ID nor a domain (`common` and `organizations` included) is
   refused with one sentence naming the field, shown at the field, and nothing is stored.
 - Each connection with a directory names it in Admin → **Connections** (`tenant` on
@@ -270,8 +287,9 @@ sign in again.
   so type the subscription's directory there.
 - From the operator's computer: `yawble connect microsoft --device --tenant <directory ID or domain>`.
 
-The redirect app with a client secret is under **Advanced** (the `tenant` field and the
-secret); the long form is under [Registering a Microsoft client](#registering-a-microsoft-client).
+Add connection's Microsoft App step sets up the public client signed in with a code. A redirect app
+with a client secret has no screen of its own in the web: see
+[Registering a Microsoft client](#registering-a-microsoft-client).
 
 ### Signing in with a code (the device flow)
 
@@ -316,20 +334,28 @@ which with `deviceFlow`.
 No step of either guide carries a secret: the secret is pasted by you, stored encrypted, and never
 shown again.
 
-## Advanced: the full form
+## A custom OAuth service, and scopes no plugin asks for
 
-Admin → **Connections** → **Advanced** holds the Providers tab and the Connect form:
-custom providers, free-text scopes, the Microsoft tenant, the client secret. Use it for a custom
-provider, for scopes no installed plugin asks for, or to set a client by hand.
+A service that is neither Microsoft nor Google, but speaks OAuth 2.0 authorization code with PKCE, is
+added on the same flow:
 
-1. Admin → **Connections** → **Advanced** → **Connect an account**.
-2. Pick the provider. If its client is not set up yet, the dialog asks for it first.
-3. Choose the scopes. A plugin's slot lists the scopes it needs; connect with at least those.
-4. The browser goes to the provider's consent page and comes back to `/api/connections/callback` on
-   the Host, which checks the `state`, exchanges the code with the PKCE verifier and stores the
+1. Admin → **Connections** → **Add connection** → **Sign-in** → **Another OAuth service** → **Next**.
+2. **Name the service**: its name, **Authorization URL**, **Token URL**, an optional **Userinfo URL**
+   (where the account's name is read), **Default scopes** (asked on every connection of it), and the
+   **Client ID** and **Client secret** you registered there. **Save and continue** saves it
+   (`PUT /api/connections/providers/custom-<name>`) and goes on to Sign in. A service already named
+   has its own tile on the Service step and opens this step filled in - all but the secret, which is
+   kept when left empty - with **Remove this service** while no connection signs in through it.
+3. **Sign in**: type any scopes it needs beyond its defaults under **More scopes (optional)**. The
+   browser goes to the service's consent page and comes back to `/api/connections/callback` on the
+   Host, which checks the `state`, exchanges the code with the PKCE verifier and stores the
    connection.
 
-The dialog shows the **exact redirect URI** to register at the provider for the address you are using
+**More scopes (optional)** is on every service's Sign in step, Microsoft's and Google's too: the
+scopes the installed plugins ask for stay listed and ticked, and what is typed there is asked for
+besides them.
+
+The Name the service step shows the **exact redirect URI** to register at the service for the address you are using
 right now - `<the address in your browser>/api/connections/callback`. The provider must accept it:
 
 - reached at `http://127.0.0.1:<port>` or `http://localhost:<port>`, register that;
@@ -451,7 +477,8 @@ client for the CLI.
      Connections dialog shows (`https://<your address>/api/connections/callback`) under **Authorized
      redirect URIs**. A web client accepts only the URIs registered, port included, so use
      `yawble connect --port <n>` with `http://127.0.0.1:<n>` registered as well if you also use the CLI.
-6. Copy the client ID and secret into Admin → Connections → **Set up client** for `google`.
+6. Copy the client ID and secret into Admin → Connections → **Add connection** → **Sign-in** →
+   Google → **Next**: the App step (**Set up an app of your own**, when an app is already saved).
 
 ### In production: so refresh tokens do not expire after 7 days
 
@@ -468,8 +495,10 @@ issues after **7 days**, and every connection then turns `needs reconnect`. Publ
 ## Registering a Microsoft client
 
 The guided path (above) registers a public client signed in with a code, and needs only steps 1, 5
-and 6 here plus **Authentication → Allow public client flows: Yes**. What follows is the Advanced
-redirect app with a client secret.
+and 6 here plus **Authentication → Allow public client flows: Yes**, its client ID pasted on
+Microsoft's **App** step of Add connection. What follows is a redirect app with a client secret,
+which the web has no screen for: it is saved with `PUT /api/connections/providers/microsoft`
+`{ clientId, clientSecret, tenant? }`.
 
 1. In the [Microsoft Entra admin center](https://entra.microsoft.com/), **App registrations → New
    registration**.
@@ -482,12 +511,10 @@ redirect app with a client secret.
    secret, and Entra refuses a client secret on a redirect registered under a public-client
    platform.
 4. **Certificates & secrets → New client secret**. Copy its **Value** (not its ID) at once; Entra
-   never shows it again. Note when it expires, and set a new one in the Connections dialog before it
-   does.
+   never shows it again. Note when it expires, and save a new one before it does.
 5. **API permissions**: add the delegated permissions the plugins ask for (for mail:
    `IMAP.AccessAsUser.All`, `SMTP.Send`), and `offline_access`.
-6. Copy the **Application (client) ID** and the secret into Admin → Connections → **Set up client**
-   for `microsoft`.
+6. Save the **Application (client) ID** and the secret with `PUT /api/connections/providers/microsoft`.
 
 Microsoft rotates the refresh token on use; the Host stores each new one before it hands out the
 access token, and serialises the refreshes of one connection so two members sharing it never race.
@@ -570,6 +597,13 @@ Each asks for a **Name** - required, and no other connection's - and then only i
 - **Username and password** - Username, Password (masked) and an optional URL (`http://` or
   `https://`).
 - **Website** - see [Websites](#websites) below.
+
+**The account** a credential shows on its tile (and hands a run as `account`): a username and
+password's username, a website's host, an API key's first unmasked field that is not a setting -
+Namecheap's API user, Twilio's Account SID. A setting is not an account: a field a preset types as a
+switch, or an Other field whose value is `true` or `false` (an `autoSave`), so an Other key whose
+unmasked fields are all settings shows no account line. A key whose fields are all masked, such as
+Stripe's, shows the service's name.
 
 A masked value is at least 8 characters, so it can be kept out of everything a plugin writes. It is
 stored only as Data Protection ciphertext - all of a connection's masked values as one - and never

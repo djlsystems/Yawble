@@ -243,6 +243,9 @@ const step = () => bodyFind('[data-guided-connect] [data-connect-step]')?.getAtt
 /** Connect Microsoft, Sign in with Microsoft, and the flow reads done at its first read. */
 async function signInFromSlot() {
   await click(slotButton('Connect Microsoft'));
+  // Its app step, then Sign in.
+  expect(step()).toBe('setup');
+  await click(bodyFind('[data-app-next]'));
   expect(step()).toBe('signin');
   vi.useFakeTimers({ now, toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
   await click(button('Sign in with Microsoft'));
@@ -261,7 +264,9 @@ describe("a plugin member's slot with nothing suitable bound", () => {
 
     expect(bodyFind('[data-guided-connect]')).not.toBeNull();
     expect(getConnectionNeeds).toHaveBeenCalledWith('microsoft', { plugin: 'mailer', slot: 'mail' });
-    // One provider: no choice to make, so straight on to signing in.
+    // One provider: no choice to make, so straight on to its app, then signing in.
+    expect(step()).toBe('setup');
+    await click(bodyFind('[data-app-next]'));
     expect(step()).toBe('signin');
 
     wrapper.unmount();
@@ -373,6 +378,8 @@ describe("a Google slot's sign-in, in another tab", () => {
   async function startGoogle() {
     startConnection.mockResolvedValue(googleFlow);
     await click(slotButton('Connect Google'));
+    expect(step()).toBe('setup');
+    await click(bodyFind('[data-app-next]'));
     expect(step()).toBe('signin');
     await click(button('Sign in with Google'));
     return bodyFind('[data-guided-connect] a[data-signin-link]');
@@ -458,6 +465,8 @@ describe("a slot's Add connection and a sign-in with a code already waiting", ()
     expect(dialog.textContent).not.toContain('FAKE-WAIT');
     expect(getConnectionFlow).not.toHaveBeenCalled();
     expect(getConnectionNeeds).toHaveBeenCalledWith('google', { plugin: 'mailer', slot: 'mail' });
+    expect(step()).toBe('setup');
+    await click(bodyFind('[data-app-next]'));
     expect(step()).toBe('signin');
     expect(button('Sign in with Google')).toBeDefined();
 

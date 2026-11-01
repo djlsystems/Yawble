@@ -200,12 +200,17 @@ async function typeIn(label: string, value: string) {
 const step = () => bodyFind('[data-connect-step]')?.getAttribute('data-connect-step') ?? null;
 const audience = (value: string) => bodyFind(`[data-audience="${value}"]`);
 
-/** Add connection, then Microsoft, then Next: the set-up step when its client is not set up. */
+/**
+ * Add connection, then Microsoft, then Next: its app step, which stays shown when there is no app to
+ * sign in through; with one in use, its own Next goes on to Sign in.
+ */
 async function chooseMicrosoft() {
   await click(button('Add connection'));
   await click(bodyFind('[data-connection-kind="oauth"]'));
   await click(bodyFind('[data-connect-service="microsoft"]'));
   await click(button('Next'));
+  expect(step()).toBe('setup');
+  if (!isDisabled('Next')) await click(button('Next'));
 }
 
 /** From here the clock is the spec's: pinned at `now`, moved on only by `advance`. */
@@ -227,7 +232,7 @@ async function startSignIn() {
 }
 
 describe('Microsoft in Add connection', () => {
-  it('is guided like Google, not handed to Advanced', async () => {
+  it('is guided like Google, in Add connection itself', async () => {
     const wrapper = await mountConnections();
     await click(button('Add connection'));
     await click(bodyFind('[data-connection-kind="oauth"]'));
@@ -527,6 +532,9 @@ describe("Microsoft's sign-in step", () => {
     expect(step()).toBe('signin');
     expect(bodyFind('[data-device-resumed]')!.textContent).toContain('started earlier');
 
+    // Back is its app step, read for it now, and Back again the service.
+    await click(button('Back'));
+    expect(step()).toBe('setup');
     await click(button('Back'));
     expect(step()).toBe('service');
     await click(bodyFind('[data-guided-connect] button[aria-label="Close"]'));
