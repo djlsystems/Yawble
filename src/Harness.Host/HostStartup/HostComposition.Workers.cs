@@ -137,7 +137,8 @@ internal sealed partial class HostComposition
                 builder.Configuration["HARNESS_REINSTALL_AGENTS"]?.Trim() == "1",
                 dataRoot,
                 builder.Configuration["HARNESS_SIGN_IN_CHROME"] is { Length: > 0 } chrome ? chrome : null,
-                log: installsLog);
+                log: installsLog,
+                onThisMachine: !control);
             installs.Hold();
             if (control)
             {

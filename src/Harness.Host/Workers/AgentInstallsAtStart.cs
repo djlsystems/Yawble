@@ -58,7 +58,9 @@ public sealed class AgentInstallsAtStart : IDisposable
     private readonly string? _chromeRoot;
     private readonly TimeProvider _clock;
     private readonly ILogger? _log;
+    private readonly bool _onThisMachine;
     private readonly Lock _lock = new();
+    private readonly Lock _recording = new();
     private readonly Dictionary<string, Outcome> _outcomes = new(StringComparer.Ordinal);
     private readonly List<ITimer> _timers = [];
     private int _started;
@@ -70,6 +72,7 @@ public sealed class AgentInstallsAtStart : IDisposable
     /// <param name="update">Asks the gate to update a preset's command; null when updates are off.</param>
     /// <param name="interval">The least time between two update checks of one command (<c>agents.updateInterval</c>).</param>
     /// <param name="chromeRoot">Where Google Chrome for the sign-in page is installed; its installer's status file is read from there.</param>
+    /// <param name="onThisMachine">A Host that runs its runs itself: its sentences say "this machine", never its own worker's id.</param>
     public AgentInstallsAtStart(
         AgentUpdateGate gate,
         Func<IReadOnlyList<Command>> commands,
@@ -81,8 +84,10 @@ public sealed class AgentInstallsAtStart : IDisposable
         string dataRoot,
         string? chromeRoot = null,
         TimeProvider? clock = null,
-        ILogger? log = null)
+        ILogger? log = null,
+        bool onThisMachine = false)
     {
+        _onThisMachine = onThisMachine;
         _gate = gate;
         _commands = commands;
         _installed = installed;
@@ -342,7 +347,7 @@ public sealed class AgentInstallsAtStart : IDisposable
                         AgentUpdateKinds.Check => AgentInstallWords.Checking,
                         _ => AgentInstallWords.Updating,
                     },
-                    UpdatingOn.Text(hold), hold.Worker, hold.Since)
+                    UpdatingOn.Text(hold, _onThisMachine), _onThisMachine ? null : hold.Worker, hold.Since)
                 : outcome is { } known
                     ? new AgentInstallItem(command.Agent, command.Name, known.State, known.Detail, null, known.At)
                     : new AgentInstallItem(command.Agent, command.Name, AgentInstallWords.Checking, null, null, null);
@@ -358,15 +363,15 @@ public sealed class AgentInstallsAtStart : IDisposable
     {
         try
         {
-            var now = Now();
-            var key = JsonSerializer.Serialize(now with { RecordedAt = default });
-            lock (_lock)
+            // Read and written under one lock: a snapshot read before another's must never be written after it.
+            lock (_recording)
             {
+                var now = Now();
+                var key = JsonSerializer.Serialize(now with { RecordedAt = default });
                 if (key == _lastWritten) return;
                 _lastWritten = key;
+                now.Write(_dataRoot, _log);
             }
-
-            now.Write(_dataRoot, _log);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {

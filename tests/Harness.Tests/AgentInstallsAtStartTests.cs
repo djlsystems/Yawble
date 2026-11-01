@@ -59,7 +59,7 @@ public sealed class AgentInstallsAtStartTests : IDisposable
                     ok ? $"{command} installed" : $"`npm install -g {command}` exited 1: npm ERR! network unreachable");
             }, finished, kind).Started;
 
-        public AgentInstallsAtStart Over(string root, bool updates = true, bool reinstall = false, TimeSpan? interval = null) =>
+        public AgentInstallsAtStart Over(string root, bool updates = true, bool reinstall = false, TimeSpan? interval = null, bool onThisMachine = false) =>
             new(
                 Gate,
                 () => [.. Commands.Select(c => new AgentInstallsAtStart.Command(c, c))],
@@ -81,7 +81,8 @@ public sealed class AgentInstallsAtStartTests : IDisposable
                 } : null,
                 () => interval ?? TimeSpan.FromDays(1),
                 reinstall,
-                root);
+                root,
+                onThisMachine: onThisMachine);
     }
 
     private void CheckedAgo(TimeSpan ago, params string[] commands) =>
@@ -336,6 +337,21 @@ public sealed class AgentInstallsAtStartTests : IDisposable
         await WaitUntil(() => bed.Gate.Holding("claude") is null);
         Assert.Equal(AgentInstallWords.Ready, Assert.Single(installs.Now().Items, i => i.Command == "claude").State);
         foreach (var command in Commands.Where(c => c != "claude")) bed.ReleaseOf(command).SetResult(true);
+    }
+
+    [Fact]
+    public async Task In_a_host_that_runs_its_runs_itself_the_record_says_this_machine_never_its_own_worker()
+    {
+        var bed = new Bed();
+        using var installs = bed.Over(_root, onThisMachine: true);
+        await installs.StartAsync(null, Ct).WaitAsync(Bound, Ct);
+        await bed.StartedOf("claude").Task.WaitAsync(Bound, Ct);
+        bed.Gate.RunsOn("claude", "local");
+
+        var claude = Assert.Single(installs.Now().Items, i => i.Command == "claude");
+        Assert.Equal("Installing claude on this machine; it is measured again when the install ends.", claude.Detail);
+        Assert.Null(claude.Worker);
+        foreach (var command in Commands) bed.ReleaseOf(command).SetResult(true);
     }
 
     [Fact]
