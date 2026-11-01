@@ -80,6 +80,42 @@ while the instance's app is in use (its `clientId` is not answered), `saved` for
 null with none. The browser sign-in is refused for the default app, which registers no redirect URI;
 it signs in with a code.
 
+### Undoing a saved Microsoft or Google client
+
+A client saved with **Set up client** wins over the instance's own app until a person clears it. In
+Advanced → **Providers**, a built-in provider with a saved client offers **Use Yawble's app**
+(Microsoft, on an instance with an app of its own) or **Remove this app** (Google, or Microsoft on
+an instance with none), naming the connections that signed in through the saved app and so need
+**Reconnect** afterwards.
+
+- `DELETE /api/connections/providers/{id}/client` (people only, `google` or `microsoft`) forgets the
+  saved client ID and secret with a `connections.provider-cleared` tenant row in the same
+  transaction; when the row cannot be written nothing changes (500). Microsoft then signs in with the
+  instance's app again (`clientSource: "default"`), or reads not set up without one; Google reads not
+  set up. It answers `{ provider, reconnect: [{ id, name, account }] }`: the provider as the list
+  shows it and its sign-in connections (the Host does not record which client each signed in
+  through, so every one is named). 409 when nothing is saved; a custom provider answers 400 - remove
+  it instead.
+- `DELETE /api/connections/providers/{id}` on a built-in still answers 400, "clear its client instead".
+- The provider list answers `instanceClient` for Microsoft: whether the instance was started with an
+  app of its own, which signs in again once a saved client is cleared.
+
+### A directory ID saved as the client ID
+
+A Directory (tenant) ID pasted into **Client ID** makes every Microsoft sign-in fail on Microsoft's
+own page (AADSTS700016), which the Host never sees. So:
+
+- A Microsoft client save whose `clientId` equals its own `tenantId` (guided) or `tenant`
+  (Advanced), or any connection's directory, is refused with one sentence naming both fields
+  (`clientId` and the Directory (tenant) ID), and nothing is saved.
+- When Microsoft answers a saved client's code start, a poll or a browser sign-in's
+  code exchange with AADSTS700016 or `unauthorized_client` (what a directory's own endpoints answer),
+  or AADSTS50059 (what `common` answers for an app it cannot find), the sign-in ends with one sentence
+  (`ConnectionProviders.MicrosoftUnknownClient`): the saved app's client ID is not an app Microsoft
+  knows, it is often a directory ID pasted in the wrong box, so use the instance's own app instead
+  or set the app up again. Never the code alone. The console offers **Use Yawble's app** (or
+  **Remove this app**) under it.
+
 Every other provider needs its **client** - a client ID and a client secret you register at the
 provider - entered once, in the Connections dialog (**Set up client**). The secret is stored encrypted with the
 instance's Data Protection keys (`<dataRoot>/keys`); it is never in plain text, never in the
@@ -225,8 +261,13 @@ sign in again.
   is accepted: the connection keeps its name and id and holds the new account, which every member
   bound to it uses at its next run, and its `connections.reconnected` row names both accounts
   (`account`, `fromAccount`). The same account in two directories is two connections.
-- The solution wizard's Reconnect, in Your part and in the install step's refusal, signs a Microsoft
-  connection in with a code in place and keeps its directory.
+- A slot's **Reconnect** for a Microsoft connection - in a member's slot picker (a chosen connection
+  lacking a scope, a refused binding) and in the solution wizard (Your part and the install step's
+  refusal) - shows the same optional Directory field, with the username hint under it, and signs in
+  with a code in place. What is typed is sent as `tenant`; left empty, none is sent and the connection
+  keeps its directory. A connection made with none then signs in through `common`, where a personal
+  Microsoft account cannot get Azure tokens and Microsoft says "This username may be incorrect" -
+  so type the subscription's directory there.
 - From the operator's computer: `yawble connect microsoft --device --tenant <directory ID or domain>`.
 
 The redirect app with a client secret is under **Advanced** (the `tenant` field and the
@@ -248,8 +289,15 @@ which with `deviceFlow`.
 - `GET /api/connections/flows/{flowId}` (people only, the starter only: anyone else gets exactly what
   a missing flow gets) answers `{ state: "waiting" | "done" | "refused" | "expired", sentence,
   userCode, verificationUri, expiresAt, connection? }`, the code being the one to enter now and the
-  connection only when `done`. Closing the dialog cancels nothing; reading again gives the same
-  state. A flow is kept an hour past its expiry, and not across a Host restart.
+  connection only when `done`. Closing the dialog, or Back, cancels nothing; reading again gives the
+  same state. A flow is kept an hour past its expiry, and not across a Host restart.
+- **Cancel**, beside the code wherever one is shown (Add connection, a Connections tile's Reconnect,
+  a slot picker's Reconnect, the solution wizard), is `DELETE /api/connections/flows/{flowId}` (people
+  only, the starter only: anyone else gets what a missing flow gets). The flow leaves the Host at once:
+  its device code is forgotten, its poll stops, and nothing is stored - even if the person approves at
+  Microsoft afterwards. It is gone from `flows/open` and reads 404 from then on. 204; a flow that
+  already ended, or whose sign-in is being stored, answers 409 with its `state`. Add connection's
+  "the sign-in you started earlier" says Cancel ends it.
 - **A second code.** When Microsoft takes the first code but will not redeem it for a sign-in naming
   more than one API (`AADSTS28000`), the Host asks at once for a second code naming the first API's
   scopes and the sign-in scopes. The same flow stays `waiting` with the new `userCode`,
@@ -747,7 +795,8 @@ the team and binds it to the member in one go.
 - A Manager or Concierge hire may bind any connection assigned to its own team, and is refused one
   that is not (see above).
 - A connection lacking a scope the slot asks for is refused at binding, offering **Reconnect** with
-  the missing scope.
+  the missing scope. For a Microsoft connection the Reconnect has the optional Directory field (see
+  [A Microsoft connection's own directory](#a-microsoft-connections-own-directory)), sent only when typed.
 - A connection made from a slot's **Connect** is bound through the same route a person's binding
   uses, `PUT /api/teams/{team}/members/{member}/plugin-settings` with `connections: { <slot>: <id> }`:
   the same scope check, the same `member.connections-changed` row in the same transaction, and a

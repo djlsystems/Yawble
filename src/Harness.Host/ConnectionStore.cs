@@ -180,6 +180,23 @@ public sealed class ConnectionStore(string databasePath, IDataProtectionProvider
         return (true, []);
     }
 
+    public async Task ClearProviderAsync(string id, TriggerAudit audit, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "DELETE FROM oauth_providers WHERE id = $id";
+            command.Parameters.AddWithValue("$id", id);
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        await TenantAuditRow.AppendAsync(connection, transaction, audit, ct);
+        await transaction.CommitAsync(ct);
+    }
+
     // ---- connections ----------------------------------------------------------------------------
 
     /// <summary>A connection and, for a mailbox, its servers - never its password, only whether one is set.</summary>

@@ -81,6 +81,15 @@ public sealed record OpenDeviceFlow(string FlowId, string Provider, string UserC
 public sealed record DeviceFlowState(
     string State, string Sentence, string? ConnectionId, string UserCode, string VerificationUri, DateTimeOffset ExpiresAt);
 
+/// <summary>What cancelling a sign-in with a code did: it is gone, it had already ended, or its poll
+/// was already storing the sign-in.</summary>
+public enum CancelOutcome
+{
+    Cancelled,
+    Ended,
+    Finishing,
+}
+
 /// <summary>Who acts: a person's id and email, or the operator at the engine.</summary>
 public sealed record ConnectionActor(string Id, string? Email)
 {
@@ -255,6 +264,21 @@ public sealed partial class Connections(
             }
         }
 
+        if (id == ConnectionProviders.Microsoft)
+        {
+            // A DIRECTORY IS NOT AN APP: a tenant ID pasted into Client ID fails every sign-in on
+            // Microsoft's own page (AADSTS700016), which the Host never sees. Refused here instead.
+            var field = string.IsNullOrWhiteSpace(change.Audience) ? "tenant" : "tenantId";
+            if (tenant is not null && string.Equals(tenant.Trim(), clientId, StringComparison.OrdinalIgnoreCase))
+            {
+                return (null, ConnectionProviders.ClientIdIsDirectory(field, null));
+            }
+
+            var directoryOf = (await store.ListAsync(ct))
+                .FirstOrDefault(c => c.Tenant is not null && string.Equals(c.Tenant.Trim(), clientId, StringComparison.OrdinalIgnoreCase));
+            if (directoryOf is not null) return (null, ConnectionProviders.ClientIdIsDirectory(null, directoryOf.Named));
+        }
+
         IReadOnlyList<string> scopes = [];
 
         if (custom)
@@ -296,6 +320,48 @@ public sealed partial class Connections(
             ct);
 
         return (await ProviderAsync(id, ct), null);
+    }
+
+    /// <summary>
+    /// A person clears a built-in provider's saved client: Microsoft signs in with the instance's own
+    /// client again (<c>clientSource</c> <c>default</c>), or reads not set up without one; Google reads
+    /// not set up. The client, its secret and the <c>connections.provider-cleared</c> tenant row go in
+    /// one transaction, or nothing changes. Answers the provider as it is now and the provider's sign-in
+    /// connections, which signed in through the saved client and need Reconnect (the Host does not
+    /// record which client each signed in through, so every one of them is named).
+    /// </summary>
+    public async Task<(OAuthProvider? Provider, IReadOnlyList<ConnectionRecord> Reconnect, int Status, string? Error)> ClearProviderClientAsync(
+        string id, ConnectionActor actor, CancellationToken ct = default)
+    {
+        if (!ConnectionProviders.IsBuiltIn(id))
+        {
+            return ConnectionProviders.IsCustomId(id)
+                ? (null, [], StatusCodes.Status400BadRequest, $"'{id}' is a custom provider: remove it instead.")
+                : (null, [], StatusCodes.Status404NotFound, $"There is no provider '{id}'.");
+        }
+
+        var before = await ProviderAsync(id, ct);
+        if (before?.ClientSource != ConnectionProviders.ClientSourceSaved)
+        {
+            return (null, [], StatusCodes.Status409Conflict, $"{ConnectionProviders.Display(id)} has no saved client to clear.");
+        }
+
+        var reconnect = (await store.ListAsync(ct))
+            .Where(c => c.Provider == id && c.Kind == ConnectionKinds.OAuth)
+            .OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var after = ConnectionProviders.Resolve(id, null, _microsoftClient);
+        await store.ClearProviderAsync(id, actor.Row(
+            TenantActions.ConnectionProviderCleared, id, before.Name,
+            new
+            {
+                provider = id,
+                clientSource = after.ClientSource,
+                needsReconnect = reconnect.Select(c => new { connection = c.Id, name = c.Name }),
+            }), ct);
+
+        return (await ProviderAsync(id, ct), reconnect, StatusCodes.Status200OK, null);
     }
 
     // ---- flows ----------------------------------------------------------------------------------
@@ -459,6 +525,12 @@ public sealed partial class Connections(
 
         if (providerError is not null)
         {
+            if (await ProviderAsync(flow.Provider, ct) is { } refusing
+                && ConnectionProviders.UnknownSavedClient(refusing, providerError, providerErrorDescription))
+            {
+                return (null, false, ConnectionProviders.MicrosoftUnknownClient);
+            }
+
             if (ConnectionProviders.NotInDirectory(providerError, providerErrorDescription)
                 && (await ProviderAsync(flow.Provider, ct))?.Kind == ConnectionProviders.Microsoft)
             {
@@ -483,6 +555,11 @@ public sealed partial class Connections(
             : new ConnectionActor(flow.UserId, users is null ? null : (await users.FindByIdAsync(flow.UserId, ct))?.Email));
 
         var answer = await endpoints.ExchangeCodeAsync(provider, await ClientSecretAsync(provider, ct), code, flow.RedirectUri, flow.CodeVerifier, ct);
+        if (!answer.Ok && ConnectionProviders.UnknownSavedClient(provider, answer.Error, answer.ErrorDescription))
+        {
+            return (null, false, ConnectionProviders.MicrosoftUnknownClient);
+        }
+
         if (!answer.Ok && provider.Kind == ConnectionProviders.Microsoft && ConnectionProviders.NotInDirectory(answer.Error, answer.ErrorDescription))
         {
             return (null, false, ConnectionProviders.MicrosoftNotInDirectory);
@@ -639,6 +716,11 @@ public sealed partial class Connections(
             answer = await endpoints.DeviceAuthorizationAsync(provider, codeScopes, ct);
         }
 
+        if (!answer.Ok && ConnectionProviders.UnknownSavedClient(provider, answer.Error, answer.ErrorDescription))
+        {
+            return (null, ConnectionProviders.MicrosoftUnknownClient);
+        }
+
         if (!answer.Ok && provider.Kind == ConnectionProviders.Microsoft && ConnectionProviders.NeedsAdminApproval(answer.Error, answer.ErrorDescription))
         {
             return (null, ConnectionProviders.MicrosoftAdminApproval);
@@ -680,6 +762,21 @@ public sealed partial class Connections(
             .OfType<OpenDeviceFlow>()];
     }
 
+    /// <summary>
+    /// The starter cancels a sign-in with a code: it is gone from the Host at once - its device code
+    /// forgotten, its poll stopped, nothing stored even if the provider approves afterwards - and reads
+    /// as a missing flow from then on. Null for a flow that does not exist and, alike, for one somebody
+    /// else started. A flow that already ended, or whose poll is storing its sign-in, stays as it is.
+    /// </summary>
+    public (CancelOutcome Outcome, DeviceFlowState State)? CancelDeviceFlow(string flowId, ConnectionActor actor)
+    {
+        if (!_deviceFlows.TryGetValue(flowId, out var flow) || !string.Equals(flow.Actor.Id, actor.Id, StringComparison.Ordinal)) return null;
+
+        var outcome = flow.Cancel();
+        if (outcome == CancelOutcome.Cancelled) _deviceFlows.TryRemove(flowId, out _);
+        return (outcome, flow.Read());
+    }
+
     /// <summary>The first API's scopes and the sign-in scopes asked: what a Microsoft code that may
     /// name one API only asks for.</summary>
     private static IReadOnlyList<string> FirstApiScopes(IReadOnlyList<string> scopes)
@@ -702,7 +799,9 @@ public sealed partial class Connections(
     /// </summary>
     private async Task PollAsync(DeviceSignIn flow, OAuthProvider provider, TimeSpan interval)
     {
-        var ct = _stopping.Token;
+        // THE HOST STOPPING OR THE STARTER CANCELLING ends the wait and any request in flight.
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token, flow.Stopped);
+        var ct = linked.Token;
 
         try
         {
@@ -722,11 +821,23 @@ public sealed partial class Connections(
 
                 if (answer.Ok)
                 {
+                    // CANCELLED MEANWHILE: the provider approved after the starter cancelled, and
+                    // nothing is stored. Claimed, the flow can no longer be cancelled.
+                    if (!flow.TryClaim()) return;
+
                     var (connection, reconnected, refusal) = await FinishAsync(
                         provider, answer, flow.Actor.Id, flow.Scopes, flow.Name, flow.ReconnectId, flow.Tenant, flow.Actor, clock.GetUtcNow(), ct);
 
                     if (refusal is not null) flow.Settle(Refused, refusal);
                     else flow.Settle(Done, $"{(reconnected ? "Reconnected" : "Connected")} {connection!.Named}.", connection.Id);
+                    return;
+                }
+
+                if (flow.Cancelled) return;
+
+                if (ConnectionProviders.UnknownSavedClient(provider, answer.Error, answer.ErrorDescription))
+                {
+                    flow.Settle(Refused, ConnectionProviders.MicrosoftUnknownClient);
                     return;
                 }
 
@@ -753,8 +864,11 @@ public sealed partial class Connections(
                     var codeScopes = FirstApiScopes(flow.CodeScopes);
                     var second = await endpoints.DeviceAuthorizationAsync(provider, codeScopes, ct);
 
+                    if (flow.Cancelled) return;
+
                     if (!second.Ok)
                     {
+                        // Not the unknown-client sentence: Microsoft took this client for the first code.
                         flow.Settle(Refused, ConnectionProviders.NeedsAdminApproval(second.Error, second.ErrorDescription)
                             ? ConnectionProviders.MicrosoftAdminApproval
                             : $"{provider.Name} did not start the second code: {second.Reason}. Nothing was stored; try again.");
@@ -791,9 +905,9 @@ public sealed partial class Connections(
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            // The Host is stopping; nobody is left to read the flow.
+            // The Host is stopping, or the starter cancelled: nobody is left to read the flow.
         }
-        catch (Exception exception)
+        catch (Exception exception) when (!flow.Cancelled)
         {
             flow.Settle(Refused, exception is System.Data.Common.DbException fault
                 ? $"The connection could not be stored ({DatabaseFault.Code(fault)}). Try again."
@@ -844,6 +958,50 @@ public sealed partial class Connections(
 
         private bool _renewed;
 
+        /// <summary>The poll has tokens and is storing them: too late to cancel.</summary>
+        private bool _claimed;
+
+        /// <summary>The starter cancelled it: nothing is stored, whatever the provider answers next.</summary>
+        private bool _cancelled;
+
+        private readonly CancellationTokenSource _stop = new();
+
+        /// <summary>Cancelled when the starter cancels the flow: its poll stops waiting at once.</summary>
+        public CancellationToken Stopped => _stop.Token;
+
+        public bool Cancelled
+        {
+            get { lock (_lock) return _cancelled; }
+        }
+
+        /// <summary>The poll's one way to store: true once, while the flow waits and nobody cancelled it.</summary>
+        public bool TryClaim()
+        {
+            lock (_lock)
+            {
+                if (_cancelled || _claimed || _state.State != Waiting) return false;
+                _claimed = true;
+                return true;
+            }
+        }
+
+        /// <summary>Ends a waiting flow for its starter: the device code goes and the poll stops.
+        /// Refused (with the flow's state) once it has ended or its poll is already storing.</summary>
+        public CancelOutcome Cancel()
+        {
+            lock (_lock)
+            {
+                if (_cancelled) return CancelOutcome.Cancelled;
+                if (_state.State != Waiting) return CancelOutcome.Ended;
+                if (_claimed) return CancelOutcome.Finishing;
+                _cancelled = true;
+                _deviceCode = null;
+            }
+
+            _stop.Cancel();
+            return CancelOutcome.Cancelled;
+        }
+
         public string Id => id;
 
         public ConnectionActor Actor => actor;
@@ -885,6 +1043,7 @@ public sealed partial class Connections(
         {
             lock (_lock)
             {
+                if (_cancelled) return;
                 _codeScopes = codeScopes;
                 _deviceCode = deviceCode;
                 _renewed = true;
@@ -896,6 +1055,7 @@ public sealed partial class Connections(
         {
             lock (_lock)
             {
+                if (_cancelled) return;
                 _state = _state with { State = state, Sentence = sentence, ConnectionId = connectionId };
                 _deviceCode = null;
             }
@@ -906,7 +1066,7 @@ public sealed partial class Connections(
         {
             lock (_lock)
             {
-                return _state.State == Waiting
+                return _state.State == Waiting && !_cancelled
                     ? new OpenDeviceFlow(id, provider, _state.UserCode, _state.VerificationUri, _state.ExpiresAt, Waiting)
                     : null;
             }

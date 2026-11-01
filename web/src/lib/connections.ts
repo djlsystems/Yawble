@@ -1,4 +1,4 @@
-import type { Connection, ConnectionKind, ConnectionProvider, ConnectionSlot, CredentialPreset, MailServer } from '../api/types';
+import type { Connection, ConnectionKind, ConnectionProvider, ConnectionProviderCleared, ConnectionSlot, CredentialPreset, MailServer } from '../api/types';
 import { localTime, wireInstant } from './localTime';
 
 /**
@@ -504,6 +504,30 @@ export function refusalWords(text: string | null | undefined): string | null {
   if (text == null) return null;
   if (adminApprovalMarks.test(text)) return AdminApprovalSentence;
   return notInDirectoryMarks.test(text) ? NotInDirectorySentence : text;
+}
+
+/**
+ * What a person reads when Microsoft does not know the saved app's client ID (AADSTS700016) or will not
+ * let it sign in (`unauthorized_client`): one sentence, never the code alone. The Host's
+ * `MicrosoftUnknownClient`, word for word; ClearClientOffer is shown beside it.
+ */
+export const UnknownClientSentence =
+  "The saved app's client ID is not an app Microsoft knows - it is often a directory ID pasted in the wrong box - so use the instance's own app instead, or set the app up again with its Application (client) ID.";
+
+/** What clearing a built-in's saved app did, as ClearClientOffer and Add connection say it. */
+export function clearedClientWords(answer: ConnectionProviderCleared, product: string): string {
+  const now = answer.provider.clientSource === 'default'
+    ? `${answer.provider.name} signs in with ${product}'s app again.`
+    : `${answer.provider.name}'s app was removed: it is not set up until a client is set up again.`;
+  const count = answer.reconnect.length;
+  return count === 0
+    ? now
+    : `${now} ${count === 1 ? 'This connection' : 'These connections'} signed in through the saved app and need${count === 1 ? 's' : ''} Reconnect: ${answer.reconnect.map((entry) => entry.name).join(', ')}.`;
+}
+
+/** The Host ended a sign-in with the unknown-client sentence: the place showing it offers to clear the saved app. */
+export function unknownClientRefusal(text: string | null | undefined): boolean {
+  return !!text && text.includes(UnknownClientSentence);
 }
 
 /** The field a Microsoft connection's own directory is typed in, as the Host names it in a refusal. */

@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import FieldHelp from './FieldHelp.vue';
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import {
   ActionRefused,
   deleteConnectionProvider,
   disconnectConnection,
-  getConnectionFlow,
   getConnectionNeeds,
   listConnectionProviders,
   listConnections,
@@ -21,6 +20,7 @@ import {
 import type {
   Connection,
   ConnectionDeviceStart,
+  ConnectionFlow,
   ConnectionNeeds,
   ConnectionProvider,
   ConnectionProviderSave,
@@ -37,9 +37,10 @@ import ConnectionTest from './ConnectionTest.vue';
 import MailboxForm from './MailboxForm.vue';
 import DialogTabs from './DialogTabs.vue';
 import DirectoryField from './DirectoryField.vue';
+import ClearClientOffer from './ClearClientOffer.vue';
+import CodeSignIn from './CodeSignIn.vue';
 import {
   connectionSignInHref,
-  countdown,
   directoryRefusal,
   kindLabel,
   kindOf,
@@ -83,7 +84,12 @@ import {
  * only then leaves for the provider. The Host's callback comes back here, to this dialog, with a
  * message saying it worked or what failed. A MICROSOFT connection was made with a code - its app is a
  * public client with no redirect URI, so the browser sign-in would stop at Microsoft - and reconnects
- * with a code too: the Reconnect dialog shows it, reads the flow, and closes on the same message.
+ * with a code too: the Reconnect dialog shows it through CodeSignIn, as Add connection does (Cancel
+ * beside it ends the sign-in at the Host), reads the flow, and closes on the same message.
+ *
+ * A BUILT-IN PROVIDER'S SAVED CLIENT CAN BE UNDONE from its Providers tile (ClearClientOffer): "Use
+ * <product>'s app" for Microsoft on an instance with an app of its own, "Remove this app" otherwise,
+ * naming the connections that signed in through the saved app and need Reconnect.
  *
  * A MICROSOFT CONNECTION'S OWN DIRECTORY (`tenant`) shows on its tile when it has one. Reconnect shows
  * it in DirectoryField to change or clear: left as it was, nothing is sent and the Host keeps it;
@@ -150,7 +156,8 @@ watch(advanced, (showing) => {
 
 watch(open, async (showing) => {
   if (!showing) {
-    stopCode();
+    // Closed: a code shown stops being read (CodeSignIn unmounts); it is left waiting at the Host.
+    reconnecting.value = null;
     return;
   }
   codeNotice.value = null;
@@ -307,7 +314,6 @@ const reconnectAddPlugins = computed(() => [...new Set(reconnectAdds.value.flatM
 const reconnectWithCode = computed(() => reconnecting.value?.providerKind === 'microsoft');
 
 async function reconnect(connection: Connection) {
-  stopCode();
   reconnectCode.value = null;
   reconnecting.value = connection;
   reconnectNeeds.value = null;
@@ -342,30 +348,11 @@ async function continueReconnect() {
 
 // --- Reconnect with a code ------------------------------------------------------------------------
 
-/** How often the flow is read while it waits. The Host does the waiting at the provider. */
-const codeReadEvery = 3000;
-
+/** The code the Host gave; CodeSignIn shows it, reads the flow until it ends, and offers Cancel. */
 const reconnectCode = ref<ConnectionDeviceStart | null>(null);
-const codeNow = ref(Date.now());
-const codeLeft = computed(() => (reconnectCode.value ? countdown(reconnectCode.value.expiresAt, codeNow.value) : ''));
-let codeTimer: ReturnType<typeof setTimeout> | null = null;
-let codeClock: ReturnType<typeof setInterval> | null = null;
-
-/** Stops reading; a code still shown is left to expire at the Host. */
-function stopCode() {
-  if (codeTimer !== null) clearTimeout(codeTimer);
-  if (codeClock !== null) clearInterval(codeClock);
-  codeTimer = null;
-  codeClock = null;
-}
-
-onBeforeUnmount(stopCode);
 
 watch(reconnecting, (connection) => {
-  if (connection === null) {
-    stopCode();
-    reconnectCode.value = null;
-  }
+  if (connection === null) reconnectCode.value = null;
 });
 
 async function startCode(connection: Connection, scopes: string[]) {
@@ -373,15 +360,15 @@ async function startCode(connection: Connection, scopes: string[]) {
   reconnectProblem.value = '';
   reconnectDirectoryProblem.value = '';
   try {
-    reconnectCode.value = await startDeviceConnection({
-      reconnectId: connection.id,
-      scopes,
-      flow: 'device',
-      ...reconnectTenant(connection, reconnectDirectory.value),
-    });
-    codeNow.value = Date.now();
-    codeClock = setInterval(() => (codeNow.value = Date.now()), 1000);
-    codeTimer = setTimeout(() => void readCode(connection), codeReadEvery);
+    // A fresh object each time, so a second Show the code starts over.
+    reconnectCode.value = {
+      ...(await startDeviceConnection({
+        reconnectId: connection.id,
+        scopes,
+        flow: 'device',
+        ...reconnectTenant(connection, reconnectDirectory.value),
+      })),
+    };
   } catch (cause) {
     const text = cause instanceof Error ? cause.message : String(cause);
     if (directoryRefusal(text)) reconnectDirectoryProblem.value = text;
@@ -391,29 +378,10 @@ async function startCode(connection: Connection, scopes: string[]) {
   }
 }
 
-async function readCode(connection: Connection) {
-  const code = reconnectCode.value;
-  codeTimer = null;
-  if (!code || reconnecting.value !== connection) return;
-
-  let read;
-  try {
-    read = await getConnectionFlow(code.flowId);
-  } catch (cause) {
-    // A read that failed is not an ending: say so and read again.
-    reconnectProblem.value = cause instanceof Error ? cause.message : String(cause);
-    if (reconnectCode.value === code) codeTimer = setTimeout(() => void readCode(connection), codeReadEvery);
-    return;
-  }
-  // Cancelled while the read was out: this answer is for a code no longer shown.
-  if (reconnectCode.value !== code || reconnecting.value !== connection) return;
-
-  reconnectProblem.value = '';
-  if (read.state === 'waiting') {
-    codeTimer = setTimeout(() => void readCode(connection), codeReadEvery);
-    return;
-  }
-
+/** The code ended: the dialog closes on the same message, done or refused, and the list is read again. */
+async function codeEnded(read: ConnectionFlow) {
+  const connection = reconnecting.value;
+  if (!connection) return;
   const made = read.connection ?? connection;
   codeNotice.value = read.state === 'done'
     ? { refused: false, text: `Reconnected ${made.name} (${made.account}).` }
@@ -945,6 +913,15 @@ async function removeProvider(provider: ConnectionProvider) {
                 <dd data-provider-connections>{{ connectionsOf(provider) }}</dd>
               </dl>
 
+              <ClearClientOffer
+                v-if="provider.kind !== 'custom'"
+                class="q-mt-xs"
+                :provider-id="provider.id"
+                :provider="provider"
+                :connections="connections"
+                @cleared="load"
+              />
+
               <div class="conn-tile-actions">
                 <span class="row-btn-wrap">
                   <q-btn
@@ -1066,13 +1043,15 @@ async function removeProvider(provider: ConnectionProvider) {
         />
         <template v-if="reconnectCode">
           <div data-reconnect-code>
-            Open <a :href="reconnectCode.verificationUri" target="_blank" rel="noopener noreferrer" data-device-link>{{ reconnectCode.verificationUri }}</a>
-            and enter
-            <span class="mono text-weight-bold" data-device-code>{{ reconnectCode.userCode }}</span>
+            <CodeSignIn
+              :code="reconnectCode"
+              :provider-name="nameOf(reconnecting.provider)"
+              @ended="codeEnded"
+              @cancelled="reconnectCode = null"
+              @problem="(text: string) => (reconnectProblem = text)"
+            />
           </div>
-          <div class="text-caption os-text-muted">
-            The code expires in {{ codeLeft }}. This closes by itself once you have signed in.
-          </div>
+          <div class="text-caption os-text-muted">This closes by itself once you have signed in.</div>
         </template>
         <div v-else-if="reconnectWithCode" class="os-text-muted">This closes by itself once you have signed in.</div>
         <div v-else class="os-text-muted">You come back here when it is done.</div>

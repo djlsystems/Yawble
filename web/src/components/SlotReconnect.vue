@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from 'vue';
+import { onBeforeUnmount, ref, watch } from 'vue';
 import { listConnections, startConnection, startDeviceConnection } from '../api/client';
 import type { Connection, ConnectionDeviceStart, ConnectionFlow } from '../api/types';
 import CodeSignIn from './CodeSignIn.vue';
-import type { CallbackOutcome } from '../lib/connections';
+import DirectoryField from './DirectoryField.vue';
+import { type CallbackOutcome, directoryRefusal, UsernameIncorrectHint } from '../lib/connections';
 import { awaitProviderReturn, newSigninTag, signinTabAddress } from '../lib/providerReturn';
 
 /**
@@ -19,9 +20,12 @@ import { awaitProviderReturn, newSigninTag, signinTabAddress } from '../lib/prov
  *
  * WITH A CODE (`withCode`, a Microsoft connection): Microsoft has no consent page to send a tab to, so
  * Reconnect asks the Host for a code (`flow: "device"`, the connection's ID, the scopes) and shows it
- * here, in place, through CodeSignIn. No `tenant` is sent, so the Host keeps the connection's own
- * directory. Once approved the connection is read again as above; a refused or expired code stays
- * shown with the Host's sentence, and Reconnect starts over.
+ * here, in place, through CodeSignIn. Beside Reconnect is the same optional DirectoryField (with
+ * UsernameIncorrectHint under it) as Add connection: what is typed is sent as `tenant`; left empty,
+ * none is sent and the Host keeps the connection's own directory. The Host's refusal of it is shown at
+ * the field. Once approved the connection is read again as above; a refused or expired code stays
+ * shown with the Host's sentence, and Reconnect starts over. Cancel beside the code ends the sign-in at
+ * the Host and takes the code away.
  */
 const props = defineProps<{
   connectionId: string;
@@ -42,6 +46,13 @@ const problem = ref('');
 const lacking = ref<string[]>([]);
 /** The code shown for a reconnect with one; null when none is. */
 const code = ref<ConnectionDeviceStart | null>(null);
+/** The code shown ended (refused or expired): the directory may be changed and Reconnect pressed again. */
+const codeOver = ref(false);
+/** A Microsoft connection's directory, optional: sent as `tenant` only when typed. */
+const directory = ref('');
+const directoryProblem = ref('');
+
+watch(directory, () => (directoryProblem.value = ''));
 let stopReturn: (() => void) | null = null;
 
 function stopWaiting() {
@@ -55,11 +66,21 @@ async function reconnect() {
   if (starting.value) return;
   starting.value = true;
   problem.value = '';
+  directoryProblem.value = '';
   lacking.value = [];
   try {
     if (props.withCode) {
+      const tenant = directory.value.trim();
       // A fresh object each time, so pressing Reconnect again starts the code over.
-      code.value = { ...(await startDeviceConnection({ reconnectId: props.connectionId, scopes: props.scopes, flow: 'device' })) };
+      code.value = {
+        ...(await startDeviceConnection({
+          reconnectId: props.connectionId,
+          scopes: props.scopes,
+          flow: 'device',
+          ...(tenant ? { tenant } : {}),
+        })),
+      };
+      codeOver.value = false;
       return;
     }
     const flow = await startConnection({ reconnectId: props.connectionId, scopes: props.scopes });
@@ -68,7 +89,9 @@ async function reconnect() {
     tabUrl.value = signinTabAddress(tag);
     stopReturn = awaitProviderReturn(tag, flow.authorizationUrl, (outcome) => void returned(outcome));
   } catch (cause) {
-    problem.value = cause instanceof Error ? cause.message : String(cause);
+    const text = cause instanceof Error ? cause.message : String(cause);
+    if (props.withCode && directoryRefusal(text)) directoryProblem.value = text;
+    else problem.value = text;
   } finally {
     starting.value = false;
   }
@@ -87,7 +110,10 @@ async function returned(outcome: CallbackOutcome) {
 
 /** The code ended: approved, the connection is read again; refused or expired, CodeSignIn says so. */
 async function codeEnded(read: ConnectionFlow) {
-  if (read.state !== 'done') return;
+  if (read.state !== 'done') {
+    codeOver.value = true;
+    return;
+  }
   code.value = null;
   await readAgain(read.connection?.id);
 }
@@ -118,8 +144,18 @@ const quoted = (scopes: string[]) => scopes.map((scope) => `\`${scope}\``).join(
       <a :href="tabUrl" target="_blank" rel="noopener noreferrer" data-reconnect-link>Open {{ providerName }} to reconnect</a>
       in another tab, and leave {{ scopes.length === 1 ? 'the scope' : 'every scope' }} it asks for ticked. This waits here.
     </div>
+    <div v-if="withCode && (!code || codeOver)" class="q-mt-xs" data-reconnect-directory>
+      <DirectoryField v-model="directory" :error="directoryProblem" />
+      <div class="text-caption os-text-muted" data-reconnect-directory-hint>{{ UsernameIncorrectHint }}</div>
+    </div>
     <div v-if="code" class="q-mt-xs" data-reconnect-code>
-      <CodeSignIn :code="code" :provider-name="providerName" @ended="codeEnded" @problem="(text: string) => (problem = text)" />
+      <CodeSignIn
+        :code="code"
+        :provider-name="providerName"
+        @ended="codeEnded"
+        @cancelled="code = null"
+        @problem="(text: string) => (problem = text)"
+      />
     </div>
     <div v-if="lacking.length > 0" class="text-caption text-negative q-mt-xs" data-reconnect-short>
       The sign-in came back without {{ lacking.length === 1 ? 'the scope' : 'the scopes' }} {{ quoted(lacking) }}: it was

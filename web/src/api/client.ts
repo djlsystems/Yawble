@@ -66,6 +66,7 @@ import type {
   ConnectionDeviceStartRequest,
   ConnectionFlow,
   ConnectionOpenFlow,
+  ConnectionProviderCleared,
   MailboxAddRequest,
   MailboxPreset,
   MailboxSaved,
@@ -1608,6 +1609,13 @@ export const saveConnectionProvider = (id: string, body: ConnectionProviderSave)
 export const deleteConnectionProvider = (id: string) =>
   send(`/api/connections/providers/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(() => undefined)
 
+/**
+ * Undoes Set up client for Google or Microsoft: Microsoft signs in with the instance's own app again,
+ * Google reads not set up. Answers the provider and the connections that need Reconnect.
+ */
+export const clearConnectionProviderClient = (id: string) =>
+  json<ConnectionProviderCleared>(`/api/connections/providers/${encodeURIComponent(id)}/client`, { method: 'DELETE' })
+
 /** What the installed plugins' slots ask of a provider - or of one plugin's slot - with its scopes in words. */
 export const getConnectionNeeds = (provider: string, slot?: { plugin: string; slot: string }) => {
   const query = new URLSearchParams({ provider })
@@ -1669,6 +1677,10 @@ export const startDeviceConnection = (body: ConnectionDeviceStartRequest) =>
 /** A sign-in with a code: waiting, done (with the connection), refused or expired. Only its starter reads it. */
 export const getConnectionFlow = (flowId: string) =>
   json<ConnectionFlow>(`/api/connections/flows/${encodeURIComponent(flowId)}`)
+
+/** Cancels the caller's own sign-in with a code at the Host: its poll stops and nothing is stored. */
+export const cancelConnectionFlow = (flowId: string) =>
+  send(`/api/connections/flows/${encodeURIComponent(flowId)}`, { method: 'DELETE' }).then(() => undefined)
 
 /** The caller's own sign-ins with a code still open at the Host, so Add connection can pick one back up. */
 export const listOpenConnectionFlows = () => json<ConnectionOpenFlow[]>('/api/connections/flows/open')

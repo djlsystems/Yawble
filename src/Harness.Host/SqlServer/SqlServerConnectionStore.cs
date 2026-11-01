@@ -196,6 +196,17 @@ public sealed class SqlServerConnectionStore(string connectionString, IDataProte
         return removed ? (true, []) : (false, names);
     }
 
+    public Task ClearProviderAsync(string id, TriggerAudit audit, CancellationToken ct = default) =>
+        WriteAsync(
+            async (connection, transaction, token) =>
+            {
+                await using var delete = Command(connection, transaction, $"DELETE FROM oauth_providers WHERE {IdMatch}");
+                delete.Parameters.AddWithValue("@id", id);
+                await delete.ExecuteNonQueryAsync(token);
+                return true;
+            },
+            audit, ct);
+
     // ---- connections ----------------------------------------------------------------------------
 
     public Task<IReadOnlyList<ConnectionRecord>> ListAsync(CancellationToken ct = default) =>

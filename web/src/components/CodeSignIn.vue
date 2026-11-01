@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { getConnectionFlow } from '../api/client';
+import { cancelConnectionFlow, getConnectionFlow } from '../api/client';
 import type { ConnectionDeviceStart, ConnectionFlow } from '../api/types';
 import { copyText } from '../lib/clipboard';
-import { countdown, refusalWords } from '../lib/connections';
+import { countdown, refusalWords, unknownClientRefusal } from '../lib/connections';
+import { refusalStatus } from '../lib/forms';
+import ClearClientOffer from './ClearClientOffer.vue';
 
 /**
  * A SIGN-IN WITH A CODE, ONCE THE HOST HAS GIVEN THE CODE: the code (large and copyable), the link
@@ -21,6 +23,17 @@ import { countdown, refusalWords } from '../lib/connections';
  *
  * A new `code` (Try again) starts over; `reading` false stops the reads (its opener closed). The
  * provider's device code never reaches the browser: only the code the person types does.
+ *
+ * CANCEL, BESIDE THE CODE, ENDS THE SIGN-IN AT THE HOST (`DELETE /api/connections/flows/{flowId}`): its
+ * poll stops and nothing is stored, even if the person approves at Microsoft afterwards, and it is no
+ * longer offered when Add connection opens again. `cancelled` tells the opener, which goes back a
+ * step. Closing the opener still cancels nothing; only Cancel does. A flow that ended meanwhile is
+ * read once more and ends as it ended. Every place a code is shown shows it through this component -
+ * Add connection, a Connections tile's Reconnect, a slot picker's Reconnect and the solution wizard's -
+ * so Cancel is beside every code.
+ *
+ * A SIGN-IN MICROSOFT ENDED BECAUSE IT DOES NOT KNOW THE SAVED APP'S CLIENT ID (the Host's
+ * `UnknownClientSentence`) offers ClearClientOffer under the sentence: use the instance's app instead.
  */
 const props = withDefaults(defineProps<{
   code: ConnectionDeviceStart;
@@ -37,6 +50,8 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   /** The flow read done, refused or expired. */
   ended: [read: ConnectionFlow];
+  /** Cancel ended the sign-in at the Host: nothing was stored. */
+  cancelled: [];
   /** A read or a copy failed, in a sentence; empty once a read succeeds again. */
   problem: [text: string];
 }>();
@@ -56,6 +71,10 @@ let clock: ReturnType<typeof setInterval> | null = null;
 
 const state = computed(() => read.value?.state ?? 'waiting');
 const sentence = computed(() => refusalWords(read.value?.sentence));
+const unknownClient = computed(() => state.value === 'refused' && unknownClientRefusal(read.value?.sentence));
+const cancelling = ref(false);
+/** Cancel pressed: no read answer may show the code again. */
+let cancelledFlow: ConnectionDeviceStart | null = null;
 const left = computed(() => countdown(shown.value.expiresAt, now.value));
 const waitingWords = computed(() =>
   codeNumber.value === 1 ? 'Waiting for the first code…' : codeNumber.value === 2 ? 'Waiting for the second code…' : 'Waiting for you to sign in…');
@@ -91,8 +110,35 @@ watch(
   },
 );
 
-/** Still the code shown, and still shown: a Try again, a second code or a close since makes it stale. */
-const active = (flow: ConnectionDeviceStart) => shown.value === flow && props.reading;
+/** Still the code shown, and still shown: a Try again, a second code, a Cancel or a close since makes it stale. */
+const active = (flow: ConnectionDeviceStart) => shown.value === flow && props.reading && cancelledFlow !== flow;
+
+/** Ends the sign-in at the Host. A flow that ended meanwhile (409) is read again and ends as it did. */
+async function cancel() {
+  const flow = shown.value;
+  if (cancelling.value) return;
+  cancelling.value = true;
+  try {
+    await cancelConnectionFlow(flow.flowId);
+  } catch (cause) {
+    cancelling.value = false;
+    // Gone already (404): nothing is left to cancel, which is what Cancel asked for.
+    if (refusalStatus(cause) !== 404) {
+      if (refusalStatus(cause) === 409 && active(flow)) {
+        if (readTimer !== null) clearTimeout(readTimer);
+        readTimer = null;
+        void readFlow();
+      }
+      emit('problem', cause instanceof Error ? cause.message : String(cause));
+      return;
+    }
+  }
+  cancelling.value = false;
+  cancelledFlow = flow;
+  stop();
+  emit('problem', '');
+  emit('cancelled');
+}
 
 async function readFlow() {
   const flow = shown.value;
@@ -143,7 +189,7 @@ async function copy(value: string) {
     <template v-if="state === 'waiting'">
       <div v-if="resumed" class="q-mb-sm" data-device-resumed>
         This is the {{ providerName }} sign-in you started earlier, still waiting for you.
-        Back lets it go and starts again.
+        Cancel ends it.
       </div>
       <div v-if="codeNumber === 1" class="text-weight-medium" data-code-number="1">Code 1 of 2</div>
       <template v-else-if="codeNumber === 2">
@@ -162,6 +208,16 @@ async function copy(value: string) {
       <div class="row items-center q-gutter-sm q-my-sm">
         <span class="mono connect-device-code" data-device-code>{{ shown.userCode }}</span>
         <q-btn flat round dense icon="content_copy" aria-label="Copy the code" @click="copy(shown.userCode)" />
+        <q-btn
+          flat
+          dense
+          no-caps
+          size="sm"
+          label="Cancel"
+          :loading="cancelling"
+          data-device-cancel
+          @click="cancel"
+        />
       </div>
       <div class="text-caption os-text-muted" data-device-countdown>
         The code expires in {{ left }}. Sign in there and agree; this step moves on by itself.
@@ -172,7 +228,10 @@ async function copy(value: string) {
       </div>
     </template>
     <div v-else-if="state === 'done'" data-device-sentence>{{ sentence }}</div>
-    <div v-else class="text-negative code-sign-in-sentence" data-device-sentence>{{ sentence }}</div>
+    <template v-else>
+      <div class="text-negative code-sign-in-sentence" data-device-sentence>{{ sentence }}</div>
+      <ClearClientOffer v-if="unknownClient" class="q-mt-xs" provider-id="microsoft" />
+    </template>
   </div>
 </template>
 

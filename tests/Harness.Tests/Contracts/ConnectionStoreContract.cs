@@ -124,6 +124,22 @@ public abstract class ConnectionStoreContract : HostStoreContract
     }
 
     [Fact]
+    public async Task A_built_in_providers_client_is_cleared_with_its_row_and_its_connections_stay()
+    {
+        var database = await DatabaseAsync();
+        var store = await StoreAsync();
+        await store.SaveProviderAsync(Provider("microsoft"), "client-secret", Row(TenantActions.ConnectionProviderSaved, "microsoft"), Ct);
+        await InsertAsync(store, "conn-a", "Alpha", provider: "microsoft");
+
+        await store.ClearProviderAsync("microsoft", Row(TenantActions.ConnectionProviderCleared, "microsoft"), Ct);
+
+        Assert.Null(await store.ProviderAsync("microsoft", Ct));
+        Assert.Null(await store.ClientSecretAsync("microsoft", Ct));
+        Assert.NotNull(await store.GetAsync("conn-a", Ct));
+        Assert.Equal(1, await database.LongAsync($"SELECT COUNT(*) FROM tenant_events WHERE action = '{TenantActions.ConnectionProviderCleared}'"));
+    }
+
+    [Fact]
     public async Task A_connection_round_trips_and_its_tokens_are_sealed()
     {
         var database = await DatabaseAsync();
