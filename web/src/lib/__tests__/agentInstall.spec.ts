@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { AgentInstallation } from '../../api/types'
 import {
+  AgentInstalling,
   AgentNotInstalled,
   AgentUpdating,
   AgentsAction,
@@ -9,6 +10,7 @@ import {
   installGuidance,
   installStatus,
   installationFor,
+  isInstalling,
   isNotInstalled,
   isUpdating,
   listOf,
@@ -406,5 +408,45 @@ describe('a preset whose command the platform is updating', () => {
     expect(badge?.label).toBe(
       'copilot is not installed on this machine, and a team uses it. claude-headless is being updated on worker-1; its runs wait for it.',
     )
+  })
+})
+
+describe('a preset whose CLI the platform is installing', () => {
+  const at = '2026-11-01T09:00:00Z'
+  const installing = (agent: string, referenced = true) =>
+    installation({
+      agent,
+      state: AgentInstalling,
+      resolvedPath: null,
+      referenced,
+      message: `Installing ${agent} on worker-1; it is measured again when the install ends.`,
+      measuredOn: [{ worker: 'worker-1', installed: false, at }],
+      updating: { phase: 'updating', worker: 'worker-1', since: at, kind: 'install' },
+    })
+
+  it('is its own exact wire value, and never missing', () => {
+    expect(AgentInstalling).toBe('AgentInstalling')
+    expect(isInstalling(installing('claude'))).toBe(true)
+    expect(isNotInstalled(installing('claude'))).toBe(false)
+  })
+
+  it("reads 'Installing claude...' on the Agents screen, never not installed", () => {
+    const status = installStatus(installing('claude'))
+    expect(status).toEqual({ text: 'Installing claude...', icon: 'sync', tone: 'unknown' })
+    expect(status.text).not.toMatch(/not installed|not found/i)
+  })
+
+  it('is not counted by the badge, which says it is installing', () => {
+    expect(referencedNotInstalled([installing('claude')])).toEqual([])
+    expect(agentsBadge([installing('claude')])).toEqual({ count: 0, text: '↻', icon: 'sync', label: 'Installing claude... Its runs wait for it.' })
+    expect(agentsBadge([installing('claude', false)])).toBeNull()
+  })
+
+  it("reads 'Getting claude ready...' before a worker has said whether it is there", () => {
+    const checking = installation({
+      agent: 'claude', state: AgentUpdating, resolvedPath: null, measuredOn: [],
+      updating: { phase: 'waiting', worker: null, since: at, kind: 'check' },
+    })
+    expect(installStatus(checking).text).toBe('Getting claude ready...')
   })
 })

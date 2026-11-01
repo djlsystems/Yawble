@@ -4,7 +4,12 @@ namespace Harness.Host;
 /// <param name="SignedIn">True only when the probe measured a sign-in. A probe that could not
 /// measure (<see cref="AgentAuthReport.Authenticated"/> null) is false here, and
 /// <paramref name="Detail"/> says why.</param>
-public sealed record ConciergeAuth(bool Installed, bool SignedIn, string? Detail);
+/// <param name="HeldBy">Set while the platform holds the agent's CLI (<see cref="AgentUpdateKinds"/>): <c>install</c>
+/// while it is installed in the background, and the panel says Installing rather than not installed.</param>
+public sealed record ConciergeAuth(
+    bool Installed, bool SignedIn, string? Detail,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? HeldBy = null);
 
 /// <summary>
 /// What the Concierge launcher will actually use, after defaults: <c>GET /api/concierge</c>'s
@@ -25,7 +30,7 @@ public sealed record ConciergeEffective(
 /// <summary>
 /// Which agent and prompt the Concierge runs when nobody has chosen one. A fresh instance must open
 /// its first terminal without a settings visit, so the choice falls to the catalog: the first
-/// interactive preset that is authenticated, else the first that is installed. A chosen agent
+/// interactive preset that is authenticated, else the first that is installed or being installed. A chosen agent
 /// always wins. The prompt falls to the seeded Concierge prompt. The result is what the terminal
 /// shows in its header, so a person can see what was picked and change it.
 /// </summary>
@@ -62,7 +67,7 @@ public static class ConciergeAgentDefault
                 agent is null
                     ? "No interactive agent is installed."
                     : $"'{agent}' is not an agent this tenant has.")
-            : new ConciergeAuth(report.Installed == true, report.Authenticated == true, report.Detail);
+            : new ConciergeAuth(report.Installed == true, report.Authenticated == true, report.Detail, report.HeldBy);
 
         return new ConciergeEffective(
             agent,
@@ -81,6 +86,12 @@ public static class ConciergeAgentDefault
 
         // NOT "the first that exists" when nothing is installed: that launched a command that is not
         // on PATH and left a person a closed socket. Null lets the panel say so first.
-        return First(r => r.Authenticated == true) ?? First(r => r.Installed == true);
+        // A preset being installed keeps ITS OWN catalog place beside the installed ones: a later preset
+        // that finished first does not take the panel from an earlier one still installing, and when
+        // that install ends the panel stays on it (not on the next one still installing). Not a swap
+        // that ranks every install above every installed preset. Only a signed-in preset goes first.
+        return First(r => r.Authenticated == true)
+            ?? First(r => r.Installed == true || r.HeldBy == AgentUpdateKinds.Install)
+            ?? First(r => r.HeldBy == AgentUpdateKinds.Check);
     }
 }

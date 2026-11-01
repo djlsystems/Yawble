@@ -29,9 +29,25 @@ export const AgentNotInstalled = 'AgentNotInstalled'
  */
 export const AgentUpdating = 'AgentUpdating'
 
+/**
+ * The wire value for a preset whose CLI the platform is INSTALLING: a fresh volume, in the background after
+ * the worker connected. Never missing while it lasts - runs of it wait for it. Exact match.
+ */
+export const AgentInstalling = 'AgentInstalling'
+
 /** Whether the platform's update holds this preset's command now. */
 export function isUpdating(installation: AgentInstallation | undefined | null): boolean {
   return installation?.state === AgentUpdating
+}
+
+/** Whether the platform is installing this preset's command now. */
+export function isInstalling(installation: AgentInstallation | undefined | null): boolean {
+  return installation?.state === AgentInstalling
+}
+
+/** The sentence for an agent being installed, word for word: the Agents screen's and the Concierge's. */
+export function installingText(agent: string): string {
+  return `Installing ${agent}...`
 }
 
 /**
@@ -134,7 +150,16 @@ export function installStatus(
     return { text: 'Not checked', icon: 'help', tone: 'unknown' }
   }
 
-  // UPDATING COMES FIRST: the install is being replaced, so it is never "not installed" or "found".
+  // INSTALLING AND UPDATING COME FIRST: the install is arriving or being replaced, so it is never
+  // "not installed" or "found".
+  if (isInstalling(installation)) {
+    return { text: installingText(installation.agent), icon: 'sync', tone: 'unknown' }
+  }
+
+  if (isUpdating(installation) && installation.updating?.kind === 'check') {
+    return { text: `Getting ${installation.agent} ready...`, icon: 'sync', tone: 'unknown' }
+  }
+
   if (isUpdating(installation)) {
     const where = whereUpdating(installation)
     return {
@@ -251,11 +276,16 @@ export function agentsBadge(
   // - its runs wait - and never counted, so nobody is sent to install a CLI that is there.
   const updating = (installations ?? []).filter((entry) => entry.referenced && isUpdating(entry))
   const updates = updating.map((entry) => {
+    if (entry.updating?.kind === 'check') return `${entry.agent} is getting ready: the platform is checking it is installed, and its runs wait for it.`
     const where = whereUpdating(entry)
     return where
       ? `${entry.agent} is being updated on ${where}; its runs wait for it.`
       : `${entry.agent} is being updated once its runs finish; new runs wait for it.`
   })
+  // BEING INSTALLED IS NOT MISSING either: a fresh volume's CLI arriving in the background.
+  for (const entry of (installations ?? []).filter((e) => e.referenced && isInstalling(e))) {
+    updates.push(`${installingText(entry.agent)} Its runs wait for it.`)
+  }
 
   if (missing.length === 0) {
     return updates.length === 0

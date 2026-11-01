@@ -204,6 +204,13 @@ func newUpCommand(deps Deps) *cobra.Command {
 			if err := instance.Up(cmd.Context(), e, s, healthChecker(deps.HTTP), cmd.OutOrStdout()); err != nil {
 				return err
 			}
+			// Control answers and the workers are connected: the agent CLIs install after that, in the
+			// background. A short, bounded look at their progress, and never a failure for still installing.
+			if err := doctor.WaitForAgents(cmd.Context(), func(ctx context.Context) (*doctor.HostReport, error) {
+				return doctor.FetchHostReport(ctx, e, true)
+			}, instance.URL(s.Port), cmd.OutOrStdout()); err != nil {
+				return err
+			}
 			gitHubHint(deps, cmd.OutOrStdout())
 			// A person at a terminal gets the board opened; a script does not want a window.
 			if deps.Interactive && !noBrowser {
@@ -267,11 +274,11 @@ func newStatusCommand(deps Deps) *cobra.Command {
 				return err
 			}
 			stats, statsErr := containerStats(cmd.Context(), e, instance.ContainerName, st.Container)
-			workers := workersOf(cmd.Context(), e, st)
+			workers, installs := workersOf(cmd.Context(), e, st)
 			if asJSON {
 				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
-				return enc.Encode(statusJSON{Status: st, Stats: stats, StatsError: text.ErrorText(statsErr), Workers: workers})
+				return enc.Encode(statusJSON{Status: st, Stats: stats, StatsError: text.ErrorText(statsErr), Workers: workers, Agents: installs})
 			}
 			w := cmd.OutOrStdout()
 			fmt.Fprintf(w, "container  %s\n", st.Container)
@@ -299,6 +306,9 @@ func newStatusCommand(deps Deps) *cobra.Command {
 					fmt.Fprintf(w, "%-10s %s\n", "", statsLine(e, wk.Stats, errorOf(wk.StatsError)))
 				}
 			}
+			if line := agentsLine(installs); line != "" {
+				fmt.Fprintf(w, "agents     %s\n", line)
+			}
 			return nil
 		},
 	}
@@ -314,6 +324,22 @@ type statusJSON struct {
 	StatsError string        `json:"statsError,omitempty"`
 	// Workers is each worker container with the engine's stats of it and control's record.
 	Workers []workerJSON `json:"workers"`
+	// Agents is what the background install of the agent CLIs and Google Chrome is doing, as control
+	// recorded it; null when control is not running or records none.
+	Agents *doctor.AgentInstalls `json:"agents"`
+}
+
+// agentsLine is status's agents row: each CLI's install state and Chrome's, and when any is still
+// installing, that runs of it wait. "" when there is no record.
+func agentsLine(installs *doctor.AgentInstalls) string {
+	if installs == nil || (len(installs.Items) == 0 && installs.GoogleChrome == nil) {
+		return ""
+	}
+	line := installs.ProgressText()
+	if installs.InProgress() {
+		line += " (still being installed; runs of those agents wait for them)"
+	}
+	return line
 }
 
 // workerJSON is one worker in the status document: the engine's view, its stats, and what control
@@ -328,11 +354,13 @@ type workerJSON struct {
 
 // workersOf adds to each worker the engine's stats and control's record of it. Control's record
 // is asked only when control runs.
-func workersOf(ctx context.Context, e engine.Engine, st instance.Status) []workerJSON {
+func workersOf(ctx context.Context, e engine.Engine, st instance.Status) ([]workerJSON, *doctor.AgentInstalls) {
 	var record *doctor.WorkersRecord
+	var installs *doctor.AgentInstalls
 	if st.Container == engine.StateRunning {
 		if r, err := doctor.FetchHostReport(ctx, e, true); err == nil {
 			record = r.Workers
+			installs = r.AgentInstalls
 		}
 	}
 	out := make([]workerJSON, 0, len(st.Workers))
@@ -340,7 +368,7 @@ func workersOf(ctx context.Context, e engine.Engine, st instance.Status) []worke
 		stats, err := containerStats(ctx, e, w.Name, w.Container)
 		out = append(out, workerJSON{WorkerStatus: w, Stats: stats, StatsError: text.ErrorText(err), Control: record.Worker(w.ID), record: record})
 	}
-	return out
+	return out, installs
 }
 
 func errorOf(text string) error {

@@ -116,6 +116,31 @@ const cancelButton = (name: string) => row(name).querySelector<HTMLElement>('.ag
 const updateButton = (name: string) =>
   row(name).querySelector<HTMLButtonElement>(`[aria-label="Update the CLI ${name} runs"]`)!;
 
+describe('AgentsDialog, a CLI the platform is installing after the start', () => {
+  it("reads 'Installing claude...' on the row and its update line, never not installed", async () => {
+    listCatalog.mockResolvedValue({
+      agents: [preset('claude-headless', 'claude'), preset('grok-headless', 'grok')],
+      cliVersions: [],
+      installations: [{
+        agent: 'claude-headless', command: 'claude', state: 'AgentInstalling', resolvedPath: null, referenced: true,
+        message: 'Installing claude on worker-1; it is measured again when the install ends.', install: null,
+        measuredOn: [{ worker: 'worker-1', installed: false, at: '2026-11-01T09:00:00Z' }],
+        updating: { phase: 'updating', worker: 'worker-1', since: '2026-11-01T09:00:00Z', kind: 'install' },
+      }],
+    });
+    listAgentUpdates.mockResolvedValue([state({ phase: 'updating', kind: 'install', startedAt: '2026-11-01T09:00:00Z' })]);
+
+    const wrapper = await mountDialog(AgentsDialog);
+
+    const text = row('claude-headless').textContent ?? '';
+    expect(text).toContain('Installing claude-headless...');
+    expect(updateLine('claude-headless')!.textContent).toContain('Installing claude...');
+    expect(text).not.toMatch(/not installed|not found|choose another agent/i);
+
+    wrapper.unmount();
+  });
+});
+
 describe('AgentsDialog, an update waiting in the gate', () => {
   it('shows a waiting update with the team and member of each run, and the same after closing and opening', async () => {
     listAgentUpdates.mockResolvedValue([waiting]);

@@ -148,7 +148,7 @@ public sealed class ProcessAgentRunner : IAgentRunner, IRunWorkerClient
             share = await _gateHere.EnterRunAsync(
                 launching.FileName,
                 _reports?.Invoke() is { } reports
-                    ? () => reports.ProgressAsync(invocation.Container, HeldText(launching.FileName), CancellationToken.None)
+                    ? () => reports.ProgressAsync(invocation.Container, RunLauncher.HeldText(launching.FileName, _gateHere.Holding(launching.FileName)), CancellationToken.None)
                     : null,
                 ct,
                 new AgentRunHolder(invocation.Container.Team, invocation.Container.Name));

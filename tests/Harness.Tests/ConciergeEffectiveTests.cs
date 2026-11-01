@@ -88,6 +88,158 @@ public sealed class ConciergeEffectiveTests : IDisposable
             null, _catalog, new AgentAuthProbe(_catalog), TestContext.Current.CancellationToken));
     }
 
+    // ---- A PRESET BEING INSTALLED KEEPS ITS CATALOG PLACE ----
+    // Nobody chose. An installing preset ranks where it stands in the catalog beside the installed
+    // ones; only a signed-in preset goes before it. A later preset that finished first does not
+    // take the panel away from an earlier one still installing.
+
+    [Fact]
+    public async Task Nobody_chose_and_the_first_preset_is_installing_while_a_later_one_is_installed_the_first_is_the_default()
+    {
+        using var restore = await Machine(installed: [_interactive[1]], signedIn: null);
+        var gate = new AgentUpdateGate();
+        var install = Install(gate, _interactive[0]);
+
+        var effective = await Effective(null, gate);
+
+        Assert.Equal(_interactive[0].Name, effective.Agent);
+        Assert.Equal("default", effective.AgentSource);
+        Assert.Equal(AgentUpdateKinds.Install, effective.Auth.HeldBy);
+        Assert.False(effective.Auth.Installed);
+        install.SetResult(true);
+    }
+
+    [Fact]
+    public async Task Nobody_chose_and_the_first_preset_is_installed_while_a_later_one_is_installing_the_first_is_the_default_and_not_held()
+    {
+        using var restore = await Machine(installed: [_interactive[0]], signedIn: null);
+        var gate = new AgentUpdateGate();
+        var install = Install(gate, _interactive[1]);
+
+        var effective = await Effective(null, gate);
+
+        Assert.Equal(_interactive[0].Name, effective.Agent);
+        Assert.Equal("default", effective.AgentSource);
+        Assert.Null(effective.Auth.HeldBy);
+        Assert.True(effective.Auth.Installed);
+        install.SetResult(true);
+    }
+
+    [Fact]
+    public async Task When_the_first_presets_install_ends_it_stays_the_default_and_is_no_longer_held()
+    {
+        // The first is installing, the second is installed, the third is installing too.
+        Assert.True(_interactive.Count >= 3, "The seed needs three interactive presets for this test.");
+        using var restore = await Machine(installed: [_interactive[1]], signedIn: null);
+        var gate = new AgentUpdateGate();
+        var first = Install(gate, _interactive[0], writes: true);
+        var third = Install(gate, _interactive[2]);
+        var probe = new AgentAuthProbe(_catalog, gate: gate);
+        var ct = TestContext.Current.CancellationToken;
+
+        var before = await ConciergeAgentDefault.EffectiveAsync(null, _catalog, probe, ct);
+        Assert.Equal(_interactive[0].Name, before.Agent);
+        Assert.Equal(AgentUpdateKinds.Install, before.Auth.HeldBy);
+
+        first.SetResult(true);
+        await Ended(gate, _interactive[0]);
+
+        // The same agent, now neither held nor elsewhere: not the third, which is still installing.
+        var after = await ConciergeAgentDefault.EffectiveAsync(null, _catalog, probe, ct);
+        Assert.Equal(_interactive[0].Name, after.Agent);
+        Assert.Equal("default", after.AgentSource);
+        Assert.Null(after.Auth.HeldBy);
+        Assert.True(after.Auth.Installed);
+        third.SetResult(true);
+    }
+
+    [Fact]
+    public async Task Nobody_chose_and_a_later_preset_is_signed_in_while_the_first_is_installing_the_signed_in_one_is_the_default()
+    {
+        using var restore = await Machine(installed: [_interactive[1]], signedIn: _interactive[1]);
+        var gate = new AgentUpdateGate();
+        var install = Install(gate, _interactive[0]);
+
+        var effective = await Effective(null, gate);
+
+        Assert.Equal(_interactive[1].Name, effective.Agent);
+        Assert.Equal("default", effective.AgentSource);
+        Assert.True(effective.Auth.SignedIn);
+        install.SetResult(true);
+    }
+
+    [Fact]
+    public async Task A_chosen_agent_is_returned_as_chosen_while_other_presets_are_installed_or_installing()
+    {
+        Assert.True(_interactive.Count >= 3, "The seed needs three interactive presets for this test.");
+        using var restore = await Machine(installed: [_interactive[0], _interactive[1]], signedIn: null);
+        var gate = new AgentUpdateGate();
+        var install = Install(gate, _interactive[0]);
+
+        var effective = await Effective(_interactive[2].Name, gate);
+
+        Assert.Equal(_interactive[2].Name, effective.Agent);
+        Assert.Equal("chosen", effective.AgentSource);
+        Assert.False(effective.Auth.Installed);
+        install.SetResult(true);
+    }
+
+    [Fact]
+    public async Task When_the_first_presets_install_fails_the_default_falls_through_to_the_next_installed_preset()
+    {
+        using var restore = await Machine(installed: [_interactive[1]], signedIn: null);
+        var gate = new AgentUpdateGate();
+        var first = Install(gate, _interactive[0], writes: false);
+        var probe = new AgentAuthProbe(_catalog, gate: gate);
+        var ct = TestContext.Current.CancellationToken;
+
+        Assert.Equal(_interactive[0].Name, (await ConciergeAgentDefault.EffectiveAsync(null, _catalog, probe, ct)).Agent);
+
+        first.SetResult(true);
+        await Ended(gate, _interactive[0]);
+
+        var after = await ConciergeAgentDefault.EffectiveAsync(null, _catalog, probe, ct);
+        Assert.Equal(_interactive[1].Name, after.Agent);
+        Assert.Equal("default", after.AgentSource);
+        Assert.Null(after.Auth.HeldBy);
+        Assert.True(after.Auth.Installed);
+    }
+
+    private Task<ConciergeEffective> Effective(string? chosen, AgentUpdateGate gate) =>
+        ConciergeAgentDefault.EffectiveAsync(
+            chosen, _catalog, new AgentAuthProbe(_catalog, gate: gate), TestContext.Current.CancellationToken);
+
+    /// <summary>Holds <paramref name="preset"/>'s command for an install until the answer is set. With
+    /// <paramref name="writes"/> the install puts the command on PATH (it succeeded); without, it failed.</summary>
+    private TaskCompletionSource<bool> Install(AgentUpdateGate gate, AgentDefinition preset, bool writes = false)
+    {
+        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var command = preset.Launch.FileName;
+        var (_, started) = gate.Request(command, preset.Name, null, async _ =>
+        {
+            await release.Task;
+            if (writes)
+            {
+                await TestExecutable.WriteAsync(Path.Combine(_dataRoot, "bin", command), "#!/bin/sh\nexit 1\n");
+            }
+
+            return new AgentUpdateResult(preset.Name, command, writes, writes ? 0 : 1, null, writes ? "1" : null,
+                DateTimeOffset.UtcNow, writes ? "installed" : "the vendor could not be reached");
+        }, kind: AgentUpdateKinds.Install);
+        Assert.True(started);
+        return release;
+    }
+
+    private static async Task Ended(AgentUpdateGate gate, AgentDefinition preset)
+    {
+        var until = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(10);
+        while (gate.Holding(preset.Launch.FileName) is not null)
+        {
+            Assert.True(DateTimeOffset.UtcNow < until, $"{preset.Name}'s install never ended.");
+            await Task.Delay(20, TestContext.Current.CancellationToken);
+        }
+    }
+
     private Task<ConciergeView> Read(TenantConciergeSettings settings) =>
         ConciergeView.ReadAsync(
             settings, _catalog, new AgentAuthProbe(_catalog), TestContext.Current.CancellationToken);

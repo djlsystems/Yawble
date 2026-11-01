@@ -94,6 +94,12 @@ public sealed class DoctorReportCliContractTests : IDisposable
                 null, probedAt.AddMinutes(30), ConciergeActivity.Typed, null, null),
         ]).Write(_root);
 
+        // The Host's record of its background installs, which the operator CLI's up, status and doctor read:
+        // every CLI ready, as the sign-in record above has them, and Google Chrome part-way through its download.
+        new AgentInstallsRecord(probedAt, "worker-1",
+            [.. AgentAuthProbe.LoadSpecs().Keys.Select(c => new AgentInstallItem(c, c, AgentInstallWords.Ready, $"`{c} update` ran.", null, probedAt))],
+            new GoogleChromeStatus("installing", 40, null)).Write(_root);
+
         var fixtures = Path.Combine(FindRepoRoot(), "cli", "internal", "doctor", "testdata");
         foreach (var (name, memory) in mechanisms)
         {
@@ -123,6 +129,11 @@ public sealed class DoctorReportCliContractTests : IDisposable
             Assert.Equal("worker-1", session["worker"]!.GetValue<string>());
             Assert.Equal(probedAt.AddMinutes(20), session["lastActivityAt"]!.GetValue<DateTimeOffset>());
             Assert.Equal(probedAt.AddMinutes(80), session["wouldEndAt"]!.GetValue<DateTimeOffset>());
+
+            var installs = JsonNode.Parse(json)!["agentInstalls"]!;
+            Assert.Equal("worker-1", installs["worker"]!.GetValue<string>());
+            Assert.Equal("ready", installs["items"]![0]!["state"]!.GetValue<string>());
+            Assert.Equal(40, installs["googleChrome"]!["percent"]!.GetValue<int>());
 
             var path = Path.Combine(fixtures, $"host-doctor-{name}.json");
             if (Environment.GetEnvironmentVariable("HARNESS_WRITE_CLI_FIXTURES") == "1")

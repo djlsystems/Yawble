@@ -116,7 +116,8 @@ The product name, Yawble, lives in the web app's presentation layer
 
 - **Two images from one build.** The `Containerfile`'s `control` target holds the Host, git, gh and
   sqlite3, and no Node and no agent CLI; its `worker` target, the last stage, holds the toolchain
-  agents use and installs the agent CLIs onto the volume. Both run the one Host from the one build
+  agents use; the agent CLIs are installed onto the volume after the worker connects, by control
+  through its update gate (`AgentInstallsAtStart`), never before the Host starts. Both run the one Host from the one build
   stage, so a worker's version is control's, and both carry `harness`, `agent` and `worker` at the
   same ids. A release pushes `<image>:<version>` (control) and `<image>:<version>-worker`, then
   `latest` and `latest-worker`.

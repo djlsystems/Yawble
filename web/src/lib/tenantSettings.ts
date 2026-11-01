@@ -42,6 +42,7 @@ export const AgentsCommitAttribution = 'agents.commitAttribution'
 export const UpdatesCheck = 'updates.check'
 export const MarketplaceCheck = 'marketplace.check'
 export const LogRetentionDays = 'log.retentionDays'
+export const AgentsUpdateInterval = 'agents.updateInterval'
 
 /** This sentence is put in front of a person, word for word: what the pass removes, what it never removes, and that 0 turns it off. The Host's description of the setting starts with it. */
 export const LogRetentionSentence =
@@ -192,6 +193,13 @@ export const TenantSettingFields: readonly TenantSettingField[] = [
     hint: LogRetentionSentence,
     max: 36500,
     atLeastUnlessZero: 7,
+  },
+  {
+    name: AgentsUpdateInterval,
+    tab: 'system',
+    kind: 'duration',
+    label: 'Check agent CLIs for updates every',
+    hint: 'How often an installed agent CLI is checked for a newer version and updated in the background. Launches of that agent wait while it is replaced; other agents run. A restart inside this time updates nothing; a missing CLI is always installed. At least one hour, for example 1d or 12h.',
   },
   {
     name: AgentsCommitAttribution,

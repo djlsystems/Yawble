@@ -497,6 +497,10 @@ func instanceChecks(r *HostReport, err error, now time.Time, details bool) []Che
 	for _, a := range r.Agents {
 		var part string
 		switch {
+		case a.Install != "":
+			// Being installed in the background after the start: never "not installed", never a failure.
+			parts = append(parts, a.Agent+" "+a.Install)
+			continue
 		case a.Updating != nil:
 			// The platform's update holds it: not asked, never "not installed", never a failure.
 			parts = append(parts, a.Agent+" updating")

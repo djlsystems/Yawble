@@ -39,11 +39,20 @@ public static class AgentInstallStates
     /// ends. A wire value, like <see cref="NotInstalled"/>.
     /// </summary>
     public const string Updating = "AgentUpdating";
+
+    /// <summary>
+    /// What a preset whose command the platform is INSTALLING reports (<see cref="AgentUpdateKinds.Install"/>):
+    /// a CLI a fresh volume does not have yet, being installed in the background after the worker connected.
+    /// Never <see cref="NotInstalled"/> while it lasts. A wire value, like the other two.
+    /// </summary>
+    public const string Installing = "AgentInstalling";
 }
 
 /// <summary>The update holding a preset's command, as <c>GET /api/agents</c> carries it: <c>waiting</c> or
 /// <c>updating</c>, the worker it runs on (null until one is picked) and since when.</summary>
-public sealed record AgentUpdatingOn(string Phase, string? Worker, DateTimeOffset Since);
+/// <param name="Kind">What holds it: <c>update</c>, <c>install</c>, or <c>check</c> (control has just started and has not
+/// heard from a worker whether the CLI is there).</param>
+public sealed record AgentUpdatingOn(string Phase, string? Worker, DateTimeOffset Since, string Kind = AgentUpdateKinds.Update);
 
 /// <summary>
 /// What the probe answers for one preset - the payload the fourth state rides on.
@@ -65,8 +74,9 @@ public sealed record AgentInstallation(
     string Command,
 
     [property: Description(
-        "NULL when the command resolves, `AgentNotInstalled` when it does not, and `AgentUpdating` "
-        + "while the platform's update of the command holds it (then never `AgentNotInstalled`).\n\n"
+        "NULL when the command resolves, `AgentNotInstalled` when it does not, `AgentUpdating` "
+        + "while the platform's update of the command holds it, and `AgentInstalling` while the platform "
+        + "installs it (then never `AgentNotInstalled`).\n\n"
         + "A nullable STRING and deliberately not a new `ContainerState`: that enum crosses two "
         + "serialisers as a name and the SPA compares it. It is also NOT `MissingAgent`, which "
         + "keeps meaning 'the catalog has no such entry' - a different fact with a different "
@@ -299,13 +309,13 @@ public sealed class AgentInstallProbe
         new(
             definition.Name,
             command,
-            AgentInstallStates.Updating,
+            hold.Kind == AgentUpdateKinds.Install ? AgentInstallStates.Installing : AgentInstallStates.Updating,
             null,
             referenced,
             UpdatingOn.Text(hold, onThisMachine: _workers is null),
             LinkableInstall(definition.Install),
             _workers?.For(command.Trim()),
-            new AgentUpdatingOn(hold.Phase, _workers is null ? null : hold.Worker, hold.Since));
+            new AgentUpdatingOn(hold.Phase, _workers is null ? null : hold.Worker, hold.Since, hold.Kind));
 
     /// <summary>"a", "a and b", "a, b and c".</summary>
     private static string ListOf(IReadOnlyList<string> names) =>

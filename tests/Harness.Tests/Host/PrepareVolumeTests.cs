@@ -516,14 +516,14 @@ public sealed class PrepareVolumeTests : IDisposable
         var branches = Branches(entrypoint);
         var prepare = PrepareVolumeFunction(entrypoint);
 
-        // `all`: the volume, the packages, the CLIs, then the drop to harness - in that order.
+        // `all`: the volume, the packages, the background browser installs, then the drop to harness - in that order.
         var all = branches["all"];
         var ownership = all.IndexOf("prepare_volume", StringComparison.Ordinal);
         var packages = all.IndexOf("prepare-volume.sh packages", StringComparison.Ordinal);
-        var clis = all.IndexOf("ensure-agent-clis.sh", StringComparison.Ordinal);
+        var clis = all.IndexOf("ensure-agent-clis.sh chromium", StringComparison.Ordinal);
         var drop = all.IndexOf("exec /usr/bin/setpriv --reuid=harness", StringComparison.Ordinal);
         Assert.True(ownership >= 0 && ownership < packages && packages < clis && clis < drop, all);
-        Assert.Matches(@"exec /usr/bin/setpriv --reuid=agent[^\n]*\n?[^\n]*ensure-agent-clis\.sh", all);
+        Assert.Matches(@"/usr/bin/setpriv --reuid=agent[^\n]*\n?[^\n]*ensure-agent-clis\.sh chromium", all);
         Assert.Contains("-- /usr/bin/dotnet /app/Harness.Host.dll", all[drop..]);
         Assert.Contains("prepare-volume.sh ownership", prepare);
 
@@ -533,13 +533,13 @@ public sealed class PrepareVolumeTests : IDisposable
         var controlDrop = control.IndexOf("exec /usr/bin/setpriv --reuid=harness", StringComparison.Ordinal);
         Assert.True(controlOwnership >= 0 && controlOwnership < controlDrop, control);
         Assert.DoesNotContain("prepare-volume.sh packages", control);
-        Assert.DoesNotContain("ensure-agent-clis", control);
+        Assert.DoesNotContain("/bin/sh /opt/harness/ensure-agent-clis", control);
         Assert.Contains("-- /usr/bin/dotnet /app/Harness.Host.dll", control[controlDrop..]);
 
-        // worker: packages, the CLIs, then the drop to worker; no ownership.
+        // worker: packages, the background browser installs, then the drop to worker; no ownership.
         var worker = branches["worker"];
         var workerPackages = worker.IndexOf("prepare-volume.sh packages", StringComparison.Ordinal);
-        var workerClis = worker.IndexOf("ensure-agent-clis.sh", StringComparison.Ordinal);
+        var workerClis = worker.IndexOf("ensure-agent-clis.sh chromium", StringComparison.Ordinal);
         var workerDrop = worker.IndexOf("exec /usr/bin/setpriv --reuid=worker", StringComparison.Ordinal);
         Assert.True(workerPackages >= 0 && workerPackages < workerClis && workerClis < workerDrop, worker);
         Assert.Contains("-- /usr/bin/dotnet /app/Harness.Host.dll", worker[workerDrop..]);
@@ -562,8 +562,8 @@ public sealed class PrepareVolumeTests : IDisposable
         // Both steps that leave root run on it, with agent-home as HOME, the npm prefix, and none of
         // the root section's git and Python settings: the CLI install as agent, and the host.
         const string AgentSide = @"export PATH=""\$tool_path"" HOME=/data/agent-home NPM_CONFIG_PREFIX=/data/npm-global";
-        Assert.Matches(AgentSide + @" \\\n\s+&& unset GIT_CONFIG_GLOBAL PYTHONNOUSERSITE && exec /usr/bin/setpriv --reuid=agent", all);
-        Assert.Matches(AgentSide + @" HARNESS_UPDATE_AGENTS=0 \\\n\s+&& unset GIT_CONFIG_GLOBAL PYTHONNOUSERSITE && exec /usr/bin/flock ", worker);
+        Assert.Matches(AgentSide + @" \\\n\s+&& unset GIT_CONFIG_GLOBAL PYTHONNOUSERSITE && /usr/bin/setpriv --reuid=agent", all);
+        Assert.Matches(AgentSide + @" \\\n\s+&& unset GIT_CONFIG_GLOBAL PYTHONNOUSERSITE && /usr/bin/flock ", worker);
         foreach (var branch in new[] { all, worker })
         {
             Assert.Matches("(?m)^\\s*" + AgentSide + @"\n\s*unset GIT_CONFIG_GLOBAL PYTHONNOUSERSITE\n\s*umask 0007\n\s*exec /usr/bin/setpriv --reuid=", branch);
@@ -578,22 +578,41 @@ public sealed class PrepareVolumeTests : IDisposable
     }
 
     /// <summary>
-    /// The entrypoint installs and records the agent CLIs for a worker and for all, and not for
-    /// control, which starts no agent CLI. The role is read once, as the host reads it.
+    /// NO AGENT CLI IS INSTALLED OR UPDATED BEFORE THE HOST, in any role: the host installs a missing one and
+    /// updates an installed one after the worker connects, through its update gate, running the installer the
+    /// entrypoint names to it (HARNESS_AGENT_INSTALLER, in all and in control, whose workers run it). Only the
+    /// browsers' installs start here, every one in the background, so nothing between the role line and the
+    /// host's exec waits for a download. The role is read once, as the host reads it.
     /// </summary>
     [Fact]
-    public void The_entrypoint_installs_agent_clis_for_a_worker_and_all_and_not_for_control()
+    public void The_entrypoint_installs_no_agent_cli_before_the_host_and_names_the_installer_to_it()
     {
         var entrypoint = File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "container-entrypoint.sh"));
         var branches = Branches(entrypoint);
 
         Assert.Equal(["all", "control", "worker"], branches.Keys.Order(StringComparer.Ordinal));
         Assert.Matches(@"(?m)^case ""\$role"" in$", entrypoint);
-        Assert.Contains("echo \"agent cli: control role, no agent CLI is installed or recorded here\"", branches["control"]);
-        Assert.DoesNotContain("ensure-agent-clis", branches["control"]);
-        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(branches["all"], @"/opt/harness/ensure-agent-clis\.sh"));
-        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(branches["worker"], @"/opt/harness/ensure-agent-clis\.sh"));
-        Assert.Equal(2, System.Text.RegularExpressions.Regex.Count(entrypoint, @"/opt/harness/ensure-agent-clis\.sh"));
+        Assert.Contains("echo \"agent cli: control role, no agent CLI is installed here; control asks a worker to install them once one connects\"", branches["control"]);
+
+        // The installer is named to the host that asks for installs, and run by no branch itself but for the headless browser.
+        const string Named = "export HARNESS_AGENT_INSTALLER=/opt/harness/ensure-agent-clis.sh";
+        Assert.Contains(Named, branches["all"].Split('\n').Select(l => l.Trim()));
+        Assert.Contains(Named, branches["control"].Split('\n').Select(l => l.Trim()));
+        Assert.DoesNotContain("HARNESS_AGENT_INSTALLER", branches["worker"]);
+        Assert.Equal(0, System.Text.RegularExpressions.Regex.Count(entrypoint, @"/bin/sh /opt/harness/ensure-agent-clis\.sh(?! chromium)"));
+        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(branches["all"], @"/opt/harness/ensure-agent-clis\.sh chromium"));
+        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(branches["worker"], @"/opt/harness/ensure-agent-clis\.sh chromium"));
+        Assert.DoesNotContain(entrypoint.Split('\n'), line => !line.TrimStart().StartsWith('#') && line.Contains("HARNESS_UPDATE_AGENTS=0", StringComparison.Ordinal));
+
+        // Every install step is backgrounded: its subshell ends with `&`, so the host's exec comes at once.
+        foreach (var role in new[] { "all", "worker" })
+        {
+            var steps = branches[role].Replace("\\\n", " ", StringComparison.Ordinal).Split('\n')
+                .Where(line => !line.TrimStart().StartsWith('#') && (line.Contains("ensure-agent-clis.sh chromium", StringComparison.Ordinal) || line.Contains("install-google-chrome.sh", StringComparison.Ordinal)))
+                .ToList();
+            Assert.Equal(2, steps.Count);
+            Assert.All(steps, step => Assert.EndsWith(") &", step.TrimEnd()));
+        }
 
         // The role line itself, run by sh: trimmed and any case; unset and empty are all.
         var line = RoleLine(entrypoint);
@@ -1154,23 +1173,21 @@ public sealed class PrepareVolumeTests : IDisposable
             var step = Assert.Single(branch.Split('\n'), line => line.Contains("/opt/harness/install-google-chrome.sh", StringComparison.Ordinal));
             step = System.Text.RegularExpressions.Regex.Replace(step, @"\s+", " ");
 
-            Assert.Matches(@"exec /usr/bin/flock /data/tmp/\.google-chrome-install\.lock /usr/bin/setpriv --reuid=worker --regid=worker --init-groups --inh-caps=-all --ambient-caps=-all -- /bin/sh /opt/harness/install-google-chrome\.sh \)", step);
+            Assert.Matches(@"&& /usr/bin/flock /data/tmp/\.google-chrome-install\.lock /usr/bin/setpriv --reuid=worker --regid=worker --init-groups --inh-caps=-all --ambient-caps=-all -- /bin/sh /opt/harness/install-google-chrome\.sh \|\| echo ""google chrome: setup hit an error"" \) &$", step.TrimEnd());
         }
 
         Assert.Contains("scripts/install-google-chrome.sh", File.ReadAllText(Path.Combine(RepoRoot(), "Containerfile")));
     }
 
     [Fact]
-    public void The_worker_installs_missing_clis_only_under_the_volume_lock()
+    public void The_worker_installs_only_the_headless_browser_itself_in_the_background_under_the_volume_lock()
     {
         var worker = Branches(File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "container-entrypoint.sh")))["worker"]
             .Replace("\\\n", " ", StringComparison.Ordinal);
-        var step = Assert.Single(worker.Split('\n'), line => line.Contains("ensure-agent-clis.sh", StringComparison.Ordinal));
+        var step = Assert.Single(worker.Split('\n'), line => !line.TrimStart().StartsWith('#') && line.Contains("ensure-agent-clis.sh", StringComparison.Ordinal));
         step = System.Text.RegularExpressions.Regex.Replace(step, @"\s+", " ");
 
-        Assert.Contains("HARNESS_UPDATE_AGENTS=0", step);
-        Assert.Matches(@"exec /usr/bin/flock /data/tmp/\.agent-cli-install\.lock /usr/bin/setpriv --reuid=agent --regid=agent --init-groups --inh-caps=-all --ambient-caps=-all -- /bin/sh /opt/harness/ensure-agent-clis\.sh \)", step);
-        Assert.Contains("|| echo \"agent cli: setup hit an error; starting the host anyway\"", step);
+        Assert.Matches(@"&& /usr/bin/flock /data/tmp/\.agent-cli-install\.lock /usr/bin/setpriv --reuid=agent --regid=agent --init-groups --inh-caps=-all --ambient-caps=-all -- /bin/sh /opt/harness/ensure-agent-clis\.sh chromium \|\| echo ""agent cli: headless chromium hit an error"" \) &$", step.TrimEnd());
     }
 
     /// <summary>The worker's own state - its run process groups, health and drain files - is in the container and the worker user's alone.</summary>
@@ -1456,7 +1473,7 @@ public sealed class PrepareVolumeTests : IDisposable
         return (process.ExitCode, stdout.Result + stderr.Result);
     }
 
-    private static string RepoRoot()
+    internal static string RepoRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "Harness.slnx")))
