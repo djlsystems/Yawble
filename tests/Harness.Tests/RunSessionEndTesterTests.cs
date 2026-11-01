@@ -109,6 +109,8 @@ public sealed class RunSessionEndTesterTests : IDisposable
         }
 
         var bystander = await WaitForPid(bystanderFile);
+        // $! is written before the child has called setsid(), so its session is the launcher's for a moment.
+        await SessionLeaderWithin(bystander, TimeSpan.FromSeconds(5));
         Assert.Equal(bystander, Session(bystander));
 
         var pidFile = Path.Combine(_workspace, "child.pid");
@@ -234,6 +236,12 @@ public sealed class RunSessionEndTesterTests : IDisposable
         var pid = int.Parse(File.ReadAllText(pidFile).Trim(), CultureInfo.InvariantCulture);
         _started.Add(pid);
         return pid;
+    }
+
+    private static async Task SessionLeaderWithin(int pid, TimeSpan bound)
+    {
+        var until = DateTime.UtcNow + bound;
+        while (Session(pid) != pid && DateTime.UtcNow < until) await Task.Delay(20);
     }
 
     private static async Task GoneWithin(int pid, TimeSpan bound)
