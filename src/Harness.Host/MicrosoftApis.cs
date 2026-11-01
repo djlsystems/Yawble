@@ -76,6 +76,17 @@ public static class MicrosoftApis
         return apis.Count > 0 ? apis : [.. groups.Take(1).DefaultIfEmpty(new MicrosoftApi(Graph, NameOf(Graph), []))];
     }
 
+    /// <summary>The APIs a connection holding <paramref name="scopes"/> holds besides the sign-in: each API
+    /// <see cref="Tokens"/> names with a scope that is not a sign-in scope. None for a sign-in alone.</summary>
+    public static IReadOnlyList<MicrosoftApi> Held(IEnumerable<string> scopes) => [.. Tokens(scopes).Where(api => Own(api.Scopes).Count > 0)];
+
+    /// <summary>An API's own scopes: <paramref name="scopes"/> without the sign-in scopes.</summary>
+    public static IReadOnlyList<string> Own(IEnumerable<string> scopes) => [.. scopes.Where(s => !ConnectionProviders.IdentityScopes.Contains(s))];
+
+    /// <summary>What one API's refresh asks for: its own scopes plus <c>offline_access</c>, so the refresh
+    /// token comes back with the access token.</summary>
+    public static IReadOnlyList<string> RefreshScopes(IReadOnlyList<string> own) => [.. own, "offline_access"];
+
     /// <summary>Whether <paramref name="scopes"/> need tokens for more than one API.</summary>
     public static bool Several(IEnumerable<string> scopes) => Tokens(scopes).Count > 1;
 }

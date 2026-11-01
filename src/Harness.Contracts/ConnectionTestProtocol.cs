@@ -96,12 +96,24 @@ public sealed record MailboxProbe(string Account, string Username, ProbeServer I
 /// then one read of <see cref="ProfileUrl"/> with the access token, when the provider has one.
 /// <see cref="Provider"/> is the provider's name, as a sentence says it.
 /// </summary>
+/// <para>
+/// MICROSOFT says more. <see cref="AccountClaims"/> are the ID token claims that name the account
+/// (<c>preferred_username</c>, <c>email</c>, <c>upn</c>): with them, a profile the provider does not let
+/// be read while a token was issued is not a refusal, and the account is read from the same refresh's
+/// ID token instead. <see cref="Apis"/> are the APIs the connection holds besides the sign-in: each is
+/// renewed once with its own scopes, from the latest refresh token, as a run redeems it.
+/// </para>
 public sealed record OAuthProbe(
-    string Provider, string TokenUrl, string ClientId, string? ClientSecret, string RefreshToken, IReadOnlyList<string>? Scopes, string? ProfileUrl)
+    string Provider, string TokenUrl, string ClientId, string? ClientSecret, string RefreshToken, IReadOnlyList<string>? Scopes, string? ProfileUrl,
+    IReadOnlyList<string>? AccountClaims = null, IReadOnlyList<ProbeApi>? Apis = null)
     : ConnectionProbe
 {
     public override string ToString() => $"OAuthProbe {{ Provider = {Provider}, TokenUrl = {TokenUrl} }}";
 }
+
+/// <summary>One API a sign-in's test renews a token for: its name as a sentence says it, and the
+/// scopes its refresh asks for (its own scopes plus <c>offline_access</c>).</summary>
+public sealed record ProbeApi(string Name, IReadOnlyList<string> Scopes);
 
 /// <summary>
 /// One harmless GET a preset declares: <see cref="Url"/> with <see cref="Headers"/>. A 401 or 403 is a

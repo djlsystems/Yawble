@@ -41,6 +41,17 @@ public sealed class ConnectionTestTests : IAsyncLifetime
     private const string AccessToken = "access-token-issued-2233";
     private const string ClientSecret = "acme-client-secret-4455";
     private const string Wrong = "wrong-value-on-purpose";
+    private const string SignInAccess = "access-sign-in-6677";
+    private const string ManagementAccess = "access-management-8899";
+    private const string SqlAccess = "access-sql-aabb";
+    private const string StorageAccess = "access-storage-ccdd";
+    private const string GuestAccount = "dana@outlook.example";
+    private static readonly string IdToken = "eyJhbGciOiJub25lIn0." + Convert.ToBase64String(Encoding.UTF8.GetBytes(
+        $$"""{"preferred_username":"{{GuestAccount}}","tid":"guest-directory","sig":"id-token-secret-eeff"}""")).TrimEnd('=').Replace('+', '-').Replace('/', '_') + ".signature-id-token-0123";
+
+    private const string Management = "https://management.azure.com/user_impersonation";
+    private const string Sql = "https://database.windows.net/user_impersonation";
+    private const string Storage = "https://storage.azure.com/user_impersonation";
 
     private readonly string _dataRoot = Path.Combine(Path.GetTempPath(), $"harness-test-conn-{Guid.NewGuid():N}");
     private readonly FakeMailServer _mail = new(imapSecurity: "TLS", smtpSecurity: "STARTTLS") { Password = AppPassword };
@@ -55,7 +66,8 @@ public sealed class ConnectionTestTests : IAsyncLifetime
     private IServiceProvider Services => _factory.Services;
 
     private static readonly string[] Secrets =
-        [AppPassword, StripeKey, NamecheapKey, TwilioSecret, OtherToken, LoginPassword, RefreshToken, RotatedToken, AccessToken, ClientSecret, Wrong];
+        [AppPassword, StripeKey, NamecheapKey, TwilioSecret, OtherToken, LoginPassword, RefreshToken, RotatedToken, AccessToken, ClientSecret, Wrong,
+         SignInAccess, ManagementAccess, SqlAccess, StorageAccess, IdToken, "id-token-secret-eeff", "access-old"];
 
     public async ValueTask InitializeAsync()
     {
@@ -367,6 +379,152 @@ public sealed class ConnectionTestTests : IAsyncLifetime
         var id = await SignInAsync(RefreshToken);
 
         await RefusedAsync(id, "Could not reach auth.acme.test. The sign-in was not renewed.");
+    }
+
+    // ---- a Microsoft sign-in -----------------------------------------------------------------------------
+
+    /// <summary>
+    /// THE FEDORA CASE: a personal Microsoft account, a guest in the directory, holding Azure management,
+    /// SQL and Storage. Microsoft renews the sign-in (rotating the refresh token) and issues a token for
+    /// each API; its userinfo refuses the sign-in-scopes token with 401, as Graph does a token that is
+    /// not Graph's. The test is ok, names each API's token, says the profile was not read and names the
+    /// account from the ID token - and a connection that was ok stays ok, its access token kept.
+    /// </summary>
+    [Fact]
+    public async Task A_microsoft_sign_in_whose_userinfo_is_refused_tests_ok_naming_each_apis_token_and_stays_as_it_was()
+    {
+        var asked = MicrosoftAnswers(refused: []);
+
+        var id = await MicrosoftSignInAsync();
+        var store = Services.GetRequiredService<IConnectionStore>();
+
+        var sentence = "Connected: Microsoft renewed the sign-in for dana@outlook.example (read from its ID token); the account's profile was not read (HTTP 401). "
+            + "Azure management: a token was issued. Azure SQL: a token was issued. Azure Storage: a token was issued.";
+        await PassesAsync(id, sentence);
+        Assert.DoesNotContain("Reconnect", sentence, StringComparison.Ordinal);
+
+        // The sign-in's own scopes, then the profile, then one refresh per API with that API's scopes
+        // plus offline_access, each with the latest (rotated) refresh token.
+        Assert.Equal([
+            "POST login.microsoftonline.com/microsoftdjlsystems.onmicrosoft.com/oauth2/v2.0/token", "GET graph.microsoft.com/oidc/userinfo",
+            "POST login.microsoftonline.com/microsoftdjlsystems.onmicrosoft.com/oauth2/v2.0/token",
+            "POST login.microsoftonline.com/microsoftdjlsystems.onmicrosoft.com/oauth2/v2.0/token",
+            "POST login.microsoftonline.com/microsoftdjlsystems.onmicrosoft.com/oauth2/v2.0/token"], _services.Requests);
+        Assert.Equal([
+            ("openid email offline_access", RefreshToken),
+            ($"{Management} offline_access", RotatedToken), ($"{Sql} offline_access", RotatedToken), ($"{Storage} offline_access", RotatedToken)], asked);
+
+        // STAYS AS IT WAS: ok, no reason, the stored access token kept, the rotated refresh token stored.
+        var tokens = (await store.TokensAsync(id, Ct))!;
+        Assert.Equal(("access-old", RotatedToken), (tokens.AccessToken, tokens.RefreshToken));
+        var record = (await store.GetAsync(id, Ct))!;
+        Assert.Equal((ConnectionRecord.Ok, (string?)null), (record.Status, record.StatusReason));
+
+        // A second test says the same.
+        await PassesAsync(id, sentence);
+        Assert.Equal("access-old", (await store.TokensAsync(id, Ct))!.AccessToken);
+
+        await NothingLeakedAsync();
+    }
+
+    [Fact]
+    public async Task A_microsoft_refresh_that_is_refused_is_refused_and_says_reconnect_trying_no_api()
+    {
+        _services.On("login.microsoftonline.com", _ => Json(HttpStatusCode.BadRequest,
+            """{"error":"invalid_grant","error_description":"AADSTS70008: The provided authorization code or refresh token has expired."}"""));
+        _services.On("graph.microsoft.com", _ => Json(HttpStatusCode.Unauthorized, "{}"));
+
+        var id = await MicrosoftSignInAsync();
+
+        await RefusedAsync(id, "Microsoft refused to renew the sign-in (invalid_grant: AADSTS70008: The provided authorization code or refresh token has expired.). Reconnect it.");
+        Assert.Equal(["POST login.microsoftonline.com/microsoftdjlsystems.onmicrosoft.com/oauth2/v2.0/token"], _services.Requests);
+        Assert.Null((await Services.GetRequiredService<IConnectionStore>().TokensAsync(id, Ct))!.AccessToken);
+        await NothingLeakedAsync();
+    }
+
+    [Fact]
+    public async Task One_api_microsoft_refuses_is_named_trying_every_api_and_the_connection_is_not_refused()
+    {
+        MicrosoftAnswers(refused: [Sql], userinfo: HttpStatusCode.OK);
+
+        var id = await MicrosoftSignInAsync();
+
+        var sentence = await PassesAsync(id, "Connected: Microsoft renewed the sign-in and read the account's profile. "
+            + "Azure management: a token was issued. "
+            + "Azure SQL: Microsoft refused (invalid_grant: AADSTS65001: The user or administrator has not consented to use the application.). "
+            + "Azure Storage: a token was issued.");
+        Assert.DoesNotContain("Reconnect", sentence, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(5, _services.Requests.Count);
+        Assert.Equal("access-old", (await Services.GetRequiredService<IConnectionStore>().TokensAsync(id, Ct))!.AccessToken);
+        await NothingLeakedAsync();
+    }
+
+    [Fact]
+    public async Task Every_api_microsoft_refuses_is_a_refused_connection_naming_each()
+    {
+        MicrosoftAnswers(refused: [Management, Sql, Storage]);
+
+        var id = await MicrosoftSignInAsync();
+
+        const string Why = "Microsoft refused (invalid_grant: AADSTS65001: The user or administrator has not consented to use the application.).";
+        await RefusedAsync(id, "Microsoft renewed the sign-in for dana@outlook.example (read from its ID token); the account's profile was not read (HTTP 401). "
+            + $"Azure management: {Why} Azure SQL: {Why} Azure Storage: {Why} "
+            + "No API it holds gave a token: reconnect it and consent to them, or have an administrator consent to them for the app.");
+        await NothingLeakedAsync();
+    }
+
+    /// <summary>
+    /// The fake Microsoft: the sign-in's scopes answer a token, a rotated refresh token and an ID token
+    /// naming the guest account; each API's scopes answer that API's token, or AADSTS65001 for those in
+    /// <paramref name="refused"/>; userinfo answers <paramref name="userinfo"/> (401 by default). Answers
+    /// each token request's (scope, refresh token).
+    /// </summary>
+    private List<(string Scope, string Refresh)> MicrosoftAnswers(string[] refused, HttpStatusCode userinfo = HttpStatusCode.Unauthorized)
+    {
+        var asked = new List<(string, string)>();
+        _services.On("login.microsoftonline.com", request =>
+        {
+            var form = Form(request);
+            var scope = form.GetValueOrDefault("scope") ?? "";
+            var refresh = form.GetValueOrDefault("refresh_token") ?? "";
+            lock (asked) asked.Add((scope, refresh));
+
+            if (refresh is not (RefreshToken or RotatedToken) || form.GetValueOrDefault("client_id") != "fedora-client")
+            {
+                return Json(HttpStatusCode.BadRequest, """{"error":"invalid_grant","error_description":"AADSTS70008: expired."}""");
+            }
+
+            var api = scope.Split(' ').FirstOrDefault(s => s.StartsWith("https://", StringComparison.Ordinal));
+            if (api is not null && refused.Contains(api))
+            {
+                return Json(HttpStatusCode.BadRequest,
+                    """{"error":"invalid_grant","error_description":"AADSTS65001: The user or administrator has not consented to use the application."}""");
+            }
+
+            var access = api switch { Management => ManagementAccess, Sql => SqlAccess, Storage => StorageAccess, _ => SignInAccess };
+            return Json(HttpStatusCode.OK, $$"""{"access_token":"{{access}}","refresh_token":"{{RotatedToken}}","id_token":"{{IdToken}}","expires_in":3600}""");
+        });
+        _services.On("graph.microsoft.com", request => request.Headers.Authorization?.ToString() == $"Bearer {SignInAccess}" && userinfo == HttpStatusCode.OK
+            ? Json(HttpStatusCode.OK, $$"""{"email":"{{GuestAccount}}"}""")
+            : Json(HttpStatusCode.Unauthorized, "{}"));
+        return asked;
+    }
+
+    /// <summary>A Microsoft client for the directory, and an ok connection holding management, SQL and
+    /// Storage with the sign-in's scopes, an access token from an earlier run, and <see cref="RefreshToken"/>.</summary>
+    private async Task<string> MicrosoftSignInAsync()
+    {
+        var saved = await SendAsync(HttpMethod.Put, "/api/connections/providers/microsoft",
+            new { clientId = "fedora-client", tenant = "microsoftdjlsystems.onmicrosoft.com" });
+        Assert.True(saved.Status == HttpStatusCode.OK, saved.Body);
+
+        var record = new ConnectionRecord("conn-microsoft", "Microsoft account", "microsoft", GuestAccount,
+            [Management, Sql, Storage, "openid", "email", "offline_access"], DateTimeOffset.UtcNow, null, ConnectionRecord.Ok, null,
+            Tenant: "microsoftdjlsystems.onmicrosoft.com");
+        await Services.GetRequiredService<IConnectionStore>().InsertAsync(
+            record, new ConnectionTokens(RefreshToken, "access-old", DateTimeOffset.UtcNow.AddHours(1)), "u1",
+            new TriggerAudit(null, null, TenantActions.ConnectionConnected, record.Id, record.Name, "{}"), Ct);
+        return record.Id;
     }
 
     // ---- the protocol -------------------------------------------------------------------------------

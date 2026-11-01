@@ -260,20 +260,5 @@ public sealed class HttpOAuthEndpoints(HttpClient http) : IOAuthEndpoints
     /// <summary>The claims of an ID token, read WITHOUT verifying its signature: it came straight
     /// from the provider's token endpoint over TLS, in answer to this Host's own request, and only
     /// names the account. Null when it is not a JWT.</summary>
-    public static JsonElement? IdTokenClaims(string? idToken)
-    {
-        var parts = idToken?.Split('.');
-        if (parts is not { Length: 3 }) return null;
-
-        try
-        {
-            var payload = parts[1].Replace('-', '+').Replace('_', '/');
-            payload = payload.PadRight(payload.Length + ((4 - payload.Length % 4) % 4), '=');
-            return JsonDocument.Parse(Encoding.UTF8.GetString(Convert.FromBase64String(payload))).RootElement.Clone();
-        }
-        catch (Exception exception) when (exception is FormatException or JsonException or ArgumentException)
-        {
-            return null;
-        }
-    }
+    public static JsonElement? IdTokenClaims(string? idToken) => Harness.Contracts.IdTokens.Claims(idToken);
 }

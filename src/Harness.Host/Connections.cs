@@ -1213,8 +1213,8 @@ public sealed partial class Connections(
                 secret = await ClientSecretAsync(provider, ct);
             }
 
-            IReadOnlyList<string> apiScopes = [.. (granted.GetValueOrDefault(api.Api) ?? api.Scopes).Where(s => !ConnectionProviders.IdentityScopes.Contains(s))];
-            var answer = await endpoints.RefreshAsync(provider, secret, tokens.RefreshToken, ct, [.. apiScopes, "offline_access"]);
+            var apiScopes = MicrosoftApis.Own(granted.GetValueOrDefault(api.Api) ?? api.Scopes);
+            var answer = await endpoints.RefreshAsync(provider, secret, tokens.RefreshToken, ct, MicrosoftApis.RefreshScopes(apiScopes));
 
             if (!answer.Ok)
             {
@@ -1865,13 +1865,20 @@ public sealed partial class Connections(
         var provider = ConnectionProviders.InDirectory(found, connection.Tenant);
         var secret = await ClientSecretAsync(provider, ct);
 
-        // MICROSOFT answers one API's token per refresh: the sign-in's own scopes give the token its
-        // profile endpoint reads, whatever APIs the connection holds.
-        IReadOnlyList<string>? scopes = provider.Kind == ConnectionProviders.Microsoft
+        // MICROSOFT answers one API's token per refresh. The sign-in's own scopes renew the sign-in, whose
+        // ID token names the account when its userinfo is not to be read with that token (a personal
+        // account a guest in the directory); then each API the connection holds is renewed once with its
+        // own scopes, as a run redeems it (ApisGrantAsync), so the answer says which API gives a token.
+        var microsoft = provider.Kind == ConnectionProviders.Microsoft;
+        IReadOnlyList<string>? scopes = microsoft
             ? [.. provider.DefaultScopes.Where(ConnectionProviders.IdentityScopes.Contains).Union(["offline_access"], StringComparer.Ordinal)]
             : null;
+        IReadOnlyList<ProbeApi>? apis = microsoft
+            ? [.. MicrosoftApis.Held(connection.Scopes).Select(api => new ProbeApi(api.Name, MicrosoftApis.RefreshScopes(MicrosoftApis.Own(api.Scopes))))]
+            : null;
 
-        return (new OAuthProbe(provider.Name, provider.TokenUrl, provider.ClientId ?? "", secret, refresh, scopes, provider.UserinfoUrl),
+        return (new OAuthProbe(provider.Name, provider.TokenUrl, provider.ClientId ?? "", secret, refresh, scopes, provider.UserinfoUrl,
+                microsoft ? IdTokens.MicrosoftAccountClaims : null, apis),
             [refresh, .. secret is null ? Array.Empty<string>() : [secret]], null, null);
     }
 
@@ -2076,7 +2083,7 @@ public sealed partial class Connections(
         string[] keys = provider.Kind switch
         {
             ConnectionProviders.Google => ["email"],
-            ConnectionProviders.Microsoft => ["preferred_username", "email", "upn"],
+            ConnectionProviders.Microsoft => [.. IdTokens.MicrosoftAccountClaims],
             _ => ["email", "preferred_username", "name", "login", "sub"],
         };
 
@@ -2093,21 +2100,7 @@ public sealed partial class Connections(
         return Claim(HttpOAuthEndpoints.IdTokenClaims(answer.IdToken), keys) ?? "(unknown account)";
     }
 
-    private static string? Claim(JsonElement? claims, IEnumerable<string> keys)
-    {
-        if (claims is not { ValueKind: JsonValueKind.Object } found) return null;
-
-        foreach (var key in keys)
-        {
-            if (found.TryGetProperty(key, out var value))
-            {
-                if (value.ValueKind == JsonValueKind.String && value.GetString() is { Length: > 0 } text) return text.Trim();
-                if (value.ValueKind == JsonValueKind.Number) return value.GetRawText();
-            }
-        }
-
-        return null;
-    }
+    private static string? Claim(JsonElement? claims, IEnumerable<string> keys) => IdTokens.Claim(claims, keys);
 
     /// <summary>What was granted: the token response's <c>scope</c> when it has one, plus the identity
     /// scopes asked for (a provider often leaves <c>openid</c> and <c>offline_access</c> out).</summary>
