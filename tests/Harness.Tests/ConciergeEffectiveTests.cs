@@ -88,7 +88,7 @@ public sealed class ConciergeEffectiveTests : IDisposable
             null, _catalog, new AgentAuthProbe(_catalog), TestContext.Current.CancellationToken));
     }
 
-    // ---- A PRESET BEING INSTALLED KEEPS ITS CATALOG PLACE (card 24363) ----
+    // ---- A PRESET BEING INSTALLED KEEPS ITS CATALOG PLACE ----
     // Nobody chose. An installing preset ranks where it stands in the catalog beside the installed
     // ones; only a signed-in preset goes before it. A later preset that finished first does not
     // take the panel away from an earlier one still installing.
