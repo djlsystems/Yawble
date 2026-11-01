@@ -142,20 +142,24 @@ public sealed class RunSessionEndTesterTests : IDisposable
     }
 
     /// <summary>
-    /// REPRODUCTION, red at a6cfe07: the terminal's sweep runs only after its output has been delivered,
-    /// so while the worker's connection is down a background job in another group outlives the terminal's
-    /// end. Explicit, so it does not redden the suite; run it with <c>--explicit on</c>.
+    /// Red at a6cfe07, where the terminal's sweep ran only after its output had been delivered: while the
+    /// worker's connection is down, a background job in another group must not outlive the terminal's
+    /// CLI, and the held output and the terminal's end still go out once the connection is back.
     /// </summary>
-    [Fact(Explicit = true)]
+    [Fact]
     public async Task A_terminals_background_job_is_gone_when_it_ends_even_while_the_connection_is_down()
     {
         Assert.SkipUnless(OperatingSystem.IsLinux(), "Linux sessions and /proc.");
         var ct = TestContext.Current.CancellationToken;
         var pidFile = Path.Combine(_workspace, "job.pid");
         var sink = new DownSink();
-        var exited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var ended = new TaskCompletionSource<TerminalEnded>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        var terminals = new WorkerTerminals(sink, new PortaPtyEngine(), runAs: null, publish: _ => Task.CompletedTask);
+        var terminals = new WorkerTerminals(sink, new PortaPtyEngine(), runAs: null, publish: message =>
+        {
+            if (message is TerminalEnded end) ended.TrySetResult(end);
+            return Task.CompletedTask;
+        });
         await terminals.StartAsync(new StartTerminal("terminal:down", new TerminalLaunch(
             ["bash", "-c", $"{OtherGroupJob(pidFile)}; echo output; sleep 0.3"], _workspace,
             new Dictionary<string, string>(), [], null, null, null), 80, 24), ct);
@@ -167,6 +171,46 @@ public sealed class RunSessionEndTesterTests : IDisposable
             // The CLI has long exited after 3 s; its session should have been swept.
             await GoneWithin(job, TimeSpan.FromSeconds(3));
             Assert.False(IsAlive(job), $"pid {job} outlived its terminal while the connection was down");
+            Assert.False(ended.Task.IsCompleted, "the terminal's end is said only after its held output");
+
+            // Output delivery after the CLI's exit works as before: the held output, then the end.
+            sink.Up = true;
+            await ended.Task.WaitAsync(TimeSpan.FromSeconds(10), ct);
+            Assert.Contains("output", sink.Text);
+        }
+        finally
+        {
+            sink.Up = true;
+        }
+    }
+
+    /// <summary>
+    /// Red at a6cfe07: a worker that stops while its connection is down stopped each terminal's CLI only,
+    /// and the sweep waited on output that was never delivered. Stopping every terminal sweeps each live
+    /// terminal's session before it returns, whatever the connection's state.
+    /// </summary>
+    [Fact]
+    public async Task A_worker_stop_with_the_connection_down_takes_a_terminals_other_group_job()
+    {
+        Assert.SkipUnless(OperatingSystem.IsLinux(), "Linux sessions and /proc.");
+        var ct = TestContext.Current.CancellationToken;
+        var pidFile = Path.Combine(_workspace, "job.pid");
+        var sink = new DownSink();
+
+        var terminals = new WorkerTerminals(sink, new PortaPtyEngine(), runAs: null, publish: _ => Task.CompletedTask);
+        await terminals.StartAsync(new StartTerminal("terminal:stop", new TerminalLaunch(
+            ["bash", "-c", $"{OtherGroupJob(pidFile)}; echo output; sleep 120"], _workspace,
+            new Dictionary<string, string>(), [], null, null, null), 80, 24), ct);
+
+        try
+        {
+            var job = await WaitForPid(pidFile);
+            Assert.True(IsAlive(job));
+
+            await terminals.StopAllAsync().WaitAsync(TimeSpan.FromSeconds(10), ct);
+
+            // No grace period: the stop has returned, and the worker may exit now.
+            Assert.False(IsAlive(job), $"pid {job} outlived a worker stop while the connection was down");
         }
         finally
         {
@@ -217,8 +261,20 @@ public sealed class RunSessionEndTesterTests : IDisposable
 
     private sealed class DownSink : IRunStreamSink
     {
+        private readonly System.Text.StringBuilder _text = new();
+
         public volatile bool Up;
 
-        public ValueTask<bool> StreamAsync(StreamChunk chunk, CancellationToken ct = default) => ValueTask.FromResult(Up);
+        public string Text
+        {
+            get { lock (_text) return _text.ToString(); }
+        }
+
+        public ValueTask<bool> StreamAsync(StreamChunk chunk, CancellationToken ct = default)
+        {
+            if (!Up) return ValueTask.FromResult(false);
+            lock (_text) _text.Append(System.Text.Encoding.UTF8.GetString(chunk.Bytes ?? []));
+            return ValueTask.FromResult(true);
+        }
     }
 }
