@@ -521,8 +521,12 @@ async function choose(id: string) {
   needs.value = null;
   unticked.value = new Set();
   problem.value = '';
-  needsLoading.value = true;
+  await readNeeds(id);
+}
 
+/** Reads what the installed plugins (or the slot) ask this service for. */
+async function readNeeds(id: string) {
+  needsLoading.value = true;
   try {
     const need = props.need;
     needs.value = need ? orSlot(await getConnectionNeeds(id, { plugin: need.plugin, slot: need.slot }), id) : await getConnectionNeeds(id);
@@ -774,6 +778,9 @@ async function saveCustom() {
     customNew.value = false;
     clientSecret.value = '';
     emit('changed');
+    // A service named just now has had no needs read: ask for them, so the plugins' scopes are listed and asked for.
+    unticked.value = new Set();
+    await readNeeds(saved.id);
     step.value = 'signin';
   } catch (cause) {
     problem.value = cause instanceof Error ? cause.message : String(cause);

@@ -329,6 +329,39 @@ describe('ConnectionsDialog, an OAuth service through Add connection', () => {
     wrapper.unmount();
   });
 
+  // A service named just now has had no needs read yet: saving it reads them, so a plugin's scopes
+  // for it are asked for on its very first sign-in, as they are once it has its own tile.
+  it("asks a newly named custom service for the plugins' scopes on its first sign-in", async () => {
+    const wrapper = await mountConnections();
+    await toAppStep('custom-new');
+    await type('Service name', 'Acme');
+    await type('Authorization URL', 'https://id.acme.example.test/authorize');
+    await type('Token URL', 'https://id.acme.example.test/token');
+    await type('Client ID', 'acme-client');
+    saveConnectionProvider.mockResolvedValue(hostProvider({
+      id: 'custom-acme',
+      name: 'Acme',
+      clientId: 'acme-client',
+      configured: true,
+      authorizeUrl: 'https://id.acme.example.test/authorize',
+      tokenUrl: 'https://id.acme.example.test/token',
+    }));
+    getConnectionNeeds.mockResolvedValue({
+      provider: 'custom-acme',
+      needs: [{ plugin: 'acme-plugin', slot: 'acme', description: null, scopes: ['acme.read'] }],
+      scopes: [{ scope: 'acme.read', words: null, plugins: ['acme-plugin'] }],
+      apis: [],
+    });
+    await click(button('Save and continue'));
+
+    expect(getConnectionNeeds).toHaveBeenCalledWith('custom-acme');
+    expect(step()).toBe('signin');
+    await click(button('Sign in with Acme'));
+    expect(startConnection).toHaveBeenCalledWith({ provider: 'custom-acme', scopes: ['acme.read'] });
+
+    wrapper.unmount();
+  });
+
   // A provider checks the redirect URI's spelling when it is registered: a LAN address over http is
   // refused, so the step says so, and how to get one that is accepted, before anyone copies it.
   it('warns on the custom step that a LAN address will be refused, naming localhost on that port', async () => {
