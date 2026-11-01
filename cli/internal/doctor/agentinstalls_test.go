@@ -166,3 +166,22 @@ func TestWaitForAgentsWithNoRecordReturnsAtOnce(t *testing.T) {
 		}
 	}
 }
+
+// The Host's own report, written by DoctorReportCliContractTests from a real record, decodes its
+// agentInstalls section the same way.
+func TestTheHostsOwnAgentInstallsSectionDecodes(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "host-doctor-cgroup.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := doctor.ParseHostReport(string(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.AgentInstalls == nil || r.AgentInstalls.ProgressLine() != "worker worker-1: getting agents ready (claude done, codex done, copilot done, grok done, google-chrome 40%)" || !r.AgentInstalls.InProgress() {
+		t.Fatalf("agentInstalls %+v", r.AgentInstalls)
+	}
+	if claude := agentNamed(r, "claude"); claude.Install != "" || claude.InstallFailed != nil {
+		t.Errorf("claude %+v", claude)
+	}
+}

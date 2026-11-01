@@ -14,7 +14,7 @@ scripts\update.ps1 -Force    # does not wait
 2. `git pull --ff-only`. A local commit that is not on origin stops it here.
 3. Lists the agent CLIs (`claude`, `codex`, `copilot`, `grok`) running in control and in every worker container every 30 seconds (`-PollSeconds`) and names each one as `team/member`, or `concierge`, until none is left. Replacing the containers kills every agent in them. `-Force` skips the wait. An open Concierge terminal counts as a running agent, so close it or use `-Force`.
 4. Runs `scripts/dev-up.ps1 -Yes`, which builds the CLI and the images from this checkout and replaces the containers with `yawble up`.
-5. Waits for control's `/healthz` to answer 200 (asked from inside the container), then for each worker to report healthy (connected to control), within 15 minutes in all (`-HealthTimeoutMinutes`), because a first boot installs the agent CLIs. Then it prints what `GET /api/version` reports.
+5. Waits for control's `/healthz` to answer 200 (asked from inside the container), then for each worker to report healthy (connected to control), within 15 minutes in all (`-HealthTimeoutMinutes`). The agent CLIs install after the worker connects, so a first boot no longer holds this up. Then it prints what `GET /api/version` reports.
 
 To update an instance installed from a release, use `yawble update` instead (see [cli/README.md](../../cli/README.md#updating-remote-access-uninstalling)).
 

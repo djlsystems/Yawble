@@ -25,7 +25,7 @@ namespace Harness.Host;
 /// <c>HARNESS_UPDATE_AGENTS=0</c> turns the updates off (missing CLIs are still installed);
 /// <c>HARNESS_REINSTALL_AGENTS=1</c> installs every one again. Only with an installer configured
 /// (<c>HARNESS_AGENT_INSTALLER</c>, which the image's entrypoint sets): a Host run any other way installs nothing.
-/// What it is doing is recorded for the doctor and <c>yawble up</c> in <see cref="AgentInstallsRecord"/>.
+/// What it is doing is recorded for the doctor and the operator CLI's <c>up</c> in <see cref="AgentInstallsRecord"/>.
 /// </summary>
 public sealed class AgentInstallsAtStart : IDisposable
 {
@@ -219,8 +219,10 @@ public sealed class AgentInstallsAtStart : IDisposable
         Set(command.Name, state, null);
         if (!ask())
         {
-            // Another update of it was already waiting or running (a person's): that one stands.
+            // Another update of it was already waiting or running (a person's): that one stands, and the gate's
+            // hold says what is happening while it lasts. Nothing of this one is left reading in progress.
             _log?.LogInformation("Agent CLIs: {Command} already has an update asked for; this one was not added.", command.Name);
+            Set(command.Name, AgentInstallWords.Ready, "An update a person asked for was already in the gate.");
         }
     }
 
@@ -378,7 +380,7 @@ public sealed class AgentInstallsAtStart : IDisposable
     }
 }
 
-/// <summary>The words an item of <see cref="AgentInstallsRecord"/> takes for its state (the doctor and <c>yawble up</c> read them).</summary>
+/// <summary>The words an item of <see cref="AgentInstallsRecord"/> takes for its state (the doctor and the operator CLI's <c>up</c> read them).</summary>
 public static class AgentInstallWords
 {
     /// <summary>Being installed: launches of it wait.</summary>
@@ -433,7 +435,7 @@ public sealed record GoogleChromeStatus(string State, int? Percent, string? Deta
 }
 
 /// <summary>
-/// WHAT THE AGENT CLIS AND GOOGLE CHROME ARE DOING, for the doctor (another process) and <c>yawble up</c>, written to
+/// WHAT THE AGENT CLIS AND GOOGLE CHROME ARE DOING, for the doctor (another process) and the operator CLI's <c>up</c>, written to
 /// <see cref="FileName"/> whenever it changes. <see cref="Worker"/> is the worker that joined first, where they were measured.
 /// </summary>
 public sealed record AgentInstallsRecord(

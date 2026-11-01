@@ -317,6 +317,28 @@ public sealed class AgentInstallsAtStartTests : IDisposable
     }
 
     [Fact]
+    public async Task An_update_a_person_already_asked_for_stands_and_the_record_does_not_stay_in_progress()
+    {
+        var bed = new Bed();
+        foreach (var command in Commands) bed.Installed[command] = true;
+        using var installs = bed.Over(_root);
+        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        bed.Gate.Request("claude", "claude", "person@example.test", async _ =>
+        {
+            await release.Task;
+            return new AgentUpdateResult("claude", "claude", true, 0, "1", "2", DateTimeOffset.UtcNow, "updated");
+        });
+
+        await installs.StartAsync("worker-1", Ct).WaitAsync(Bound, Ct);
+        Assert.Equal(AgentInstallWords.Updating, Assert.Single(installs.Now().Items, i => i.Command == "claude").State);
+
+        release.SetResult(true);
+        await WaitUntil(() => bed.Gate.Holding("claude") is null);
+        Assert.Equal(AgentInstallWords.Ready, Assert.Single(installs.Now().Items, i => i.Command == "claude").State);
+        foreach (var command in Commands.Where(c => c != "claude")) bed.ReleaseOf(command).SetResult(true);
+    }
+
+    [Fact]
     public void Only_commands_the_built_ins_declare_an_update_for_are_installable()
     {
         var catalog = new AgentCatalog(
