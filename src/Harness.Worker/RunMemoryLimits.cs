@@ -526,10 +526,44 @@ public sealed class RunCgroup : IDisposable
         return 0;
     }
 
-    /// <summary>Removes the cgroup; its processes are gone by now (the run's group is killed when it ends).</summary>
+    /// <summary>How long <see cref="Dispose"/> waits for the killed cgroup to empty before removing it.</summary>
+    private static readonly TimeSpan EmptyBound = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// SIGKILLs every process in this cgroup (<c>cgroup.kill</c>, cgroup v2 since Linux 5.14): the
+    /// stronger form of a run's session sweep, since it also reaches a process that left the session
+    /// with <c>setsid</c>. Only this cgroup's processes, never another's. False when the kernel has no
+    /// <c>cgroup.kill</c> or it could not be written.
+    /// </summary>
+    public bool Kill() =>
+        File.Exists(Path.Combine(Directory, "cgroup.kill")) && TryWrite(Path.Combine(Directory, "cgroup.kill"), "1");
+
+    /// <summary>
+    /// Ends whatever is left in the cgroup (<see cref="Kill"/>) and removes it once it is empty, waiting
+    /// at most <see cref="EmptyBound"/>: a populated cgroup cannot be removed.
+    /// </summary>
     public void Dispose()
     {
+        if (Kill())
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            while (Populated() && clock.Elapsed < EmptyBound) Thread.Sleep(20);
+        }
+
         try { System.IO.Directory.Delete(Directory); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+    }
+
+    /// <summary>Whether any process is still in the cgroup (<c>cgroup.procs</c> not empty).</summary>
+    private bool Populated()
+    {
+        try
+        {
+            return File.ReadAllText(Path.Combine(Directory, "cgroup.procs")).Trim().Length > 0;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private static bool TryWrite(string path, string value)

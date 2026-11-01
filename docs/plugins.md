@@ -861,7 +861,7 @@ rows, `row.status`), `cli/internal/plugin/manifest_test.go` and `web/src/lib/__t
 - **Environment.** Only an allowlist is inherited: `PATH`, `HOME`, `LANG`, `LC_ALL`, `TZ`, `TMPDIR`,
   `DOTNET_ROOT`, `DOTNET_CLI_HOME`, plus `HARNESS_CAUSATION`. No provider key, no `HARNESS_KEY`, no
   agent-vendor variable.
-- **End of run.** When the run ends, its whole process group is killed.
+- **End of run.** When the run ends, every process of its session is killed: every process group of it, not only its own (a process that calls `setsid` itself leaves the session and is not reached, unless the run has its own cgroup).
 
 **stdin**: one JSON document, then EOF.
 
