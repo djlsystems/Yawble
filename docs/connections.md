@@ -606,8 +606,13 @@ marks nothing.
 member running the Web Credentials plugin, on every team, becomes a website connection named after its
 team and its entry (`Alpha supplier-admin`), assigned to that team, with its fields, its plugin's
 language and time zone, and its password, token, TOTP secret and saved session; one
-`connections.web-credentials-carried-over` row names how many. The plugin's own members, their hourly
-verify schedule and their `status.changed` event stay as they are.
+`connections.web-credentials-carried-over` row names how many, and which plugin ids it carried. Both ids
+the plugin runs under are carried: `web-credentials` (solution 1.0.0) and `web-credentials-plugin`
+(solution 1.1.0 and the plugin 1.0.0). An instance that already came over with v2026.10.31.1 or earlier,
+which carried `web-credentials` members only, carries its `web-credentials-plugin` members at its next
+start, once; the connections the first run made, and anything a person changed or removed since, are left
+as they are, and an entry whose `<team> <entry>` name a connection already has is not made again. The
+plugin's own members, their hourly verify schedule and their `status.changed` event stay as they are.
 
 ## Testing a connection
 
