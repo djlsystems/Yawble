@@ -188,6 +188,31 @@ public sealed class RunSessionEndTests : IDisposable
         Assert.False(IsAlive(job), $"pid {job}, a background job in another group of the terminal's session, outlived it");
     }
 
+    /// <summary>
+    /// WITH A CGROUP OF ITS OWN, the run's end kills that too (<c>cgroup.kill</c>), which also reaches a
+    /// process that left the session with <c>setsid</c>. Over a fixture tree: a kernel without
+    /// <c>cgroup.kill</c> gets none written.
+    /// </summary>
+    [Fact]
+    public void A_runs_own_cgroup_is_killed_through_cgroup_kill_when_the_run_ends()
+    {
+        var parent = Directory.CreateDirectory(Path.Combine(_workspace, "cgroup")).FullName;
+
+        var cgroup = RunCgroup.Create(parent, 64L * 1024 * 1024);
+        Assert.NotNull(cgroup);
+        File.WriteAllText(Path.Combine(cgroup.Directory, "cgroup.kill"), "");
+        File.WriteAllText(Path.Combine(cgroup.Directory, "cgroup.procs"), "");
+
+        cgroup.Dispose();
+
+        Assert.Equal("1", File.ReadAllText(Path.Combine(cgroup.Directory, "cgroup.kill")));
+
+        var older = RunCgroup.Create(parent, 64L * 1024 * 1024);
+        Assert.NotNull(older);
+        older.Dispose();
+        Assert.False(File.Exists(Path.Combine(older.Directory, "cgroup.kill")));
+    }
+
     private int Learn(string pidFile)
     {
         var pid = int.Parse(File.ReadAllText(pidFile).Trim(), CultureInfo.InvariantCulture);

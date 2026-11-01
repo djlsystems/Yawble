@@ -47,7 +47,10 @@ public sealed class WorkerTerminals(
     /// <summary>The sessions open on this worker.</summary>
     public IReadOnlyCollection<string> Sessions => [.. _terminals.Keys];
 
-    /// <summary>Each open terminal's process group, by session, for those whose child can be named.</summary>
+    /// <summary>
+    /// Each open terminal's session id (its child's pid, which leads its own session), by terminal, for
+    /// those whose child can be named. Measured over the whole session, every process group of it.
+    /// </summary>
     public IReadOnlyDictionary<string, int> Groups() =>
         _terminals
             .Where(entry => entry.Value.Session is IPtyProcess { ProcessId: > 0 })
@@ -72,7 +75,12 @@ public sealed class WorkerTerminals(
             throw;
         }
 
-        var terminal = new Terminal(this, start.Session, session, spec, mcp);
+        // The child's session, swept when the terminal ends. A PTY child leads its own session, so its
+        // pid is the session id; only a child this worker started counts, so a pid that names anything
+        // else is never signalled.
+        var leader = (session as IPtyProcess)?.ProcessId is { } pid && RunSession.StartedHere(pid) ? pid : (int?)null;
+
+        var terminal = new Terminal(this, start.Session, session, spec, mcp, leader);
         _terminals[start.Session] = terminal;
         terminal.Begin();
     }
@@ -126,7 +134,7 @@ public sealed class WorkerTerminals(
     }
 
     /// <summary>One terminal: its output queue, held while the connection is down, and its one end.</summary>
-    private sealed class Terminal(WorkerTerminals owner, string id, IPtySession session, PtySpec spec, McpLaunchConfig? mcp)
+    private sealed class Terminal(WorkerTerminals owner, string id, IPtySession session, PtySpec spec, McpLaunchConfig? mcp, int? leader)
     {
         private readonly Lock _gate = new();
         private readonly LinkedList<byte[]> _queue = new();
@@ -187,6 +195,11 @@ public sealed class WorkerTerminals(
 
                 owner._terminals.TryRemove(new KeyValuePair<string, Terminal>(id, this));
                 session.Output -= Enqueue;
+
+                // EVERY PROCESS OF THE TERMINAL'S SESSION, before its end is said: a background job
+                // the CLI or its shell moved into another process group outlives the CLI otherwise.
+                if (leader is { } sessionId) RunSession.End(sessionId);
+
                 Remove(spec, mcp);
                 await owner._publish(new TerminalEnded(id, await _exit.Task));
             }

@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using Harness.Contracts;
 using Harness.Pty;
 
@@ -8,7 +7,7 @@ namespace Harness.Host;
 /// <summary>
 /// HOW ANY MEMBER'S CHILD PROCESS IS LAUNCHED, whatever it is: in its own session through
 /// `setsid`, as the agent user when the Host can switch to it, with both pipes pumped before the
-/// wait, stdin written and closed, the whole process group killed when the run ends, and a bounded
+/// wait, stdin written and closed, every process of its session killed when the run ends, and a bounded
 /// drain for a grandchild still holding the pipe.
 ///
 /// EXTRACTED FROM <c>ProcessAgentRunner</c> so a plugin member runs under exactly the
@@ -122,7 +121,7 @@ public static class ChildProcess
     /// </param>
     /// <param name="run">The run this child is, registered in <paramref name="groups"/> (the Host's
     /// <see cref="Capacity.RunProcessGroups.Shared"/> when not given) from its start to its end, so
-    /// the capacity sampler can sum its process group under its team and member.</param>
+    /// the capacity sampler can sum its session under its team and member.</param>
     public static async Task<ChildOutcome> RunAsync(
         ProcessStartInfo start,
         string? stdin,
@@ -137,7 +136,8 @@ public static class ChildProcess
 
         // THE BACKSTOP FOR WHAT THE TREE WALK CANNOT REACH. Declared after `process` so
         // it disposes first: every exit from this method, including a run that completes
-        // normally, takes whatever is left in the child's process group with it.
+        // normally, takes whatever is left in the child's session with it - every process
+        // group of it, not only the child's own.
         using var group = new ProcessGroup(process.Id);
 
         // Named for the capacity sampler until the run ends, however it ends.
@@ -368,19 +368,15 @@ public static class ChildProcess
     }
 
     /// <summary>
-    /// Kills the child's process group when disposed. The group is the child's pid because the
-    /// child was started through `setsid`. A group that is already empty answers ESRCH, which is
-    /// the ordinary case and is ignored.
+    /// Ends the child's whole SESSION when disposed (<see cref="RunSession.End"/>): its own process
+    /// group, and every other group of the session a process moved itself into. The session is the
+    /// child's pid because the child was started through `setsid`. A session already empty is the
+    /// ordinary case and costs one look at /proc.
     /// </summary>
     private sealed class ProcessGroup(int id) : IDisposable
     {
-        public void Dispose() => _ = kill(-id, SigKill);
+        public void Dispose() => _ = RunSession.End(id);
     }
-
-    private const int SigKill = 9;
-
-    [DllImport("libc", SetLastError = true)]
-    private static extern int kill(int pid, int signal);
 }
 
 /// <summary>
