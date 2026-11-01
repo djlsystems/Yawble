@@ -27,7 +27,8 @@ public sealed record OAuthProvider(
     IReadOnlyDictionary<string, string> AuthorizeParameters,
     string Help,
     string? DeviceAuthorizationUrl = null,
-    string? ClientSource = null)
+    string? ClientSource = null,
+    bool InstanceClient = false)
 {
     public bool Configured => !string.IsNullOrWhiteSpace(ClientId)
         && !string.IsNullOrWhiteSpace(AuthorizeUrl) && !string.IsNullOrWhiteSpace(TokenUrl);
@@ -44,6 +45,9 @@ public sealed record OAuthProvider(
         // The default client's ID is the instance's, not a person's: the forms that edit a client never see it.
         clientId = ClientSource == ConnectionProviders.ClientSourceDefault ? null : ClientId,
         clientSource = ClientSource,
+        // Microsoft only: the instance was started with a client of its own, which signs in again
+        // once a saved client is cleared. False for Google, which then reads not set up.
+        instanceClient = InstanceClient,
         clientSecretSet = ClientSecretSet,
         configured = Configured,
         tenant = Kind == ConnectionProviders.Microsoft ? Tenant ?? ConnectionProviders.MicrosoftDefaultTenant : null,
@@ -161,6 +165,35 @@ public static class ConnectionProviders
     /// is an account that is not in the directory the sign-in used.</summary>
     public static bool NotInDirectory(string? error, string? description) =>
         NotInDirectoryMarks.IsMatch(error ?? "") || NotInDirectoryMarks.IsMatch(description ?? "");
+
+    /// <summary>
+    /// What a person reads when Microsoft does not know the saved app's client ID (AADSTS700016) or will
+    /// not let it sign in this way (<c>unauthorized_client</c>): one sentence, never the code alone. Its
+    /// usual cause is a Directory (tenant) ID pasted into Client ID, which Microsoft's own page turns
+    /// away without the Host hearing; the console offers the instance's app (or removing the app) beside it.
+    /// </summary>
+    public const string MicrosoftUnknownClient =
+        "The saved app's client ID is not an app Microsoft knows - it is often a directory ID pasted in the wrong box - "
+        + "so use the instance's own app instead, or set the app up again with its Application (client) ID.";
+
+    private static readonly System.Text.RegularExpressions.Regex UnknownClientMarks =
+        new(@"\bAADSTS700016\b|\bunauthorized_client\b", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>Whether Microsoft's refusal (<paramref name="error"/>, <paramref name="description"/>) is
+    /// the saved app's client ID it does not know, or will not let sign in: AADSTS700016 or
+    /// <c>unauthorized_client</c>, for a Microsoft provider whose client a person saved.</summary>
+    public static bool UnknownSavedClient(OAuthProvider provider, string? error, string? description) =>
+        provider.Kind == Microsoft && provider.ClientSource == ClientSourceSaved
+        && (UnknownClientMarks.IsMatch(error ?? "") || UnknownClientMarks.IsMatch(description ?? ""));
+
+    /// <summary>
+    /// A Microsoft client save whose client ID is a directory: <paramref name="field"/> is the save's own
+    /// tenant field, or null when the directory is a connection's (<paramref name="connection"/>). Both
+    /// fields are named, so the person knows which box the value belongs in.
+    /// </summary>
+    public static string ClientIdIsDirectory(string? field, string? connection) => field is not null
+        ? $"`clientId` (Application (client) ID) is the same as `{field}` (Directory (tenant) ID): the client ID is the app's own ID, not its directory. Copy the Application (client) ID from the app's Overview."
+        : $"`clientId` (Application (client) ID) is the Directory (tenant) ID of connection {connection}: the client ID is the app's own ID, not a directory. Copy the Application (client) ID from the app's Overview.";
 
     /// <summary>A GUID as Entra writes one: 8-4-4-4-12 hex digits.</summary>
     public static bool IsGuid(string? text) => Guid.TryParseExact(text?.Trim(), "D", out _);
@@ -294,7 +327,8 @@ public static class ConnectionProviders
                     + "(client) ID: you sign in with a code, and no secret or redirect URI is needed. Under Advanced, a "
                     + "\"Web\" app with a client secret and the redirect URIs shown here works as well.",
                     authority + "/devicecode",
-                    saved ? ClientSourceSaved : usesDefault ? ClientSourceDefault : null);
+                    saved ? ClientSourceSaved : usesDefault ? ClientSourceDefault : null,
+                    InstanceClient: !string.IsNullOrWhiteSpace(microsoftDefaultClient));
 
             default:
                 return new OAuthProvider(

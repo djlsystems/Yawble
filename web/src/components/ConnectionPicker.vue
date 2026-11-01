@@ -5,11 +5,13 @@ import type { Connection, ConnectionDeviceStart, ConnectionFlow, ConnectionProvi
 import { goTo } from '../lib/browserNavigation';
 import { refusedReconnect } from '../lib/slotBinding';
 import CodeSignIn from './CodeSignIn.vue';
+import DirectoryField from './DirectoryField.vue';
 import SlotConnect from './SlotConnect.vue';
 import SlotReconnect from './SlotReconnect.vue';
 import ConnectionSelect from './ConnectionSelect.vue';
 import {
   connectionsForSlot,
+  directoryRefusal,
   goneRefusal,
   guidedProviders,
   missingScopes,
@@ -17,6 +19,7 @@ import {
   scopeRefusal,
   slotHint,
   statusLabel,
+  UsernameIncorrectHint,
 } from '../lib/connections';
 
 /**
@@ -36,7 +39,14 @@ import {
  * asks the Host for a code (`flow: "device"`, the connection's ID, the scopes asked) and shows it
  * here through CodeSignIn, the same component Add connection shows its code with. Once approved the
  * connection is read again and bound as a connection made from this slot is (`connected`); a
- * refused or expired code says so in the Host's sentence and binds nothing.
+ * refused or expired code says so in the Host's sentence and binds nothing. Cancel beside the code ends
+ * the sign-in at the Host and takes the code away.
+ *
+ * A MICROSOFT RECONNECT NAMES ITS DIRECTORY: beside the Reconnect for a Microsoft connection is the same
+ * optional DirectoryField (with UsernameIncorrectHint under it) as Add connection and Admin ->
+ * Connections' Reconnect. What is typed is sent as `tenant`; left empty, no `tenant` is sent and the
+ * Host keeps the connection's own (a connection made with none signs in through `common`, where a
+ * personal Microsoft account cannot get Azure tokens). The Host's refusal of it is shown at the field.
  *
  * CONNECT <PROVIDER> comes first while nothing suitable is bound, given the slot's `plugin`: Add
  * connection, started from this slot. When its sign-in completes, `bind` (where the member exists)
@@ -185,25 +195,51 @@ function withCode(connectionId: string): boolean {
   return props.connections.find((connection) => connection.id === connectionId)?.providerKind === 'microsoft';
 }
 
+/** A Microsoft Reconnect's directory, optional: sent as `tenant` only when typed. */
+const reconnectDirectory = ref('');
+/** The Host's refusal of the directory typed, shown at the field. */
+const reconnectDirectoryProblem = ref('');
+
+watch(reconnectDirectory, () => (reconnectDirectoryProblem.value = ''));
+
+/** The connection a Reconnect offered here would sign in again, when it is a Microsoft one: the field shows. */
+const directoryFor = computed(() => {
+  if (reconnectCode.value && !reconnectEnded.value) return null;
+  if (bindRefusal.value && bindReconnect.value && !(props.reconnectInTab && !withCode(bindReconnect.value.connectionId))) {
+    return withCode(bindReconnect.value.connectionId) ? bindReconnect.value.connectionId : null;
+  }
+  if (refusal.value && missing.value.length > 0 && chosen.value) return withCode(chosen.value.id) ? chosen.value.id : null;
+  return null;
+});
+
 async function reconnect(asked?: { connectionId: string; scopes: string[] }) {
   const target = asked ?? (chosen.value ? { connectionId: chosen.value.id, scopes: missing.value } : null);
   if (!target || reconnecting.value) return;
 
   reconnecting.value = true;
   reconnectProblem.value = '';
+  reconnectDirectoryProblem.value = '';
   reconnectDone.value = '';
 
   try {
     if (withCode(target.connectionId)) {
+      const tenant = reconnectDirectory.value.trim();
       // A fresh object each time, so pressing Reconnect again starts the code over.
-      const code = await startDeviceConnection({ reconnectId: target.connectionId, scopes: target.scopes, flow: 'device' });
+      const code = await startDeviceConnection({
+        reconnectId: target.connectionId,
+        scopes: target.scopes,
+        flow: 'device',
+        ...(tenant ? { tenant } : {}),
+      });
       reconnectCode.value = { connectionId: target.connectionId, code: { ...code } };
       return;
     }
     const flow = await startConnection({ reconnectId: target.connectionId, scopes: target.scopes });
     goTo(flow.authorizationUrl);
   } catch (cause) {
-    reconnectProblem.value = cause instanceof Error ? cause.message : String(cause);
+    const text = cause instanceof Error ? cause.message : String(cause);
+    if (withCode(target.connectionId) && directoryRefusal(text)) reconnectDirectoryProblem.value = text;
+    else reconnectProblem.value = text;
   } finally {
     reconnecting.value = false;
   }
@@ -384,8 +420,14 @@ async function connected(connection: Connection) {
         :code="reconnectCode.code"
         :provider-name="providerOf(reconnectCode.connectionId)"
         @ended="codeEnded"
+        @cancelled="reconnectCode = null"
         @problem="(text: string) => (reconnectProblem = text)"
       />
+    </div>
+    <!-- A MICROSOFT RECONNECT'S DIRECTORY, optional: sent as `tenant` only when typed. -->
+    <div v-if="directoryFor" class="q-mt-xs" data-reconnect-directory>
+      <DirectoryField v-model="reconnectDirectory" :error="reconnectDirectoryProblem" />
+      <div class="text-caption os-text-muted" data-reconnect-directory-hint>{{ UsernameIncorrectHint }}</div>
     </div>
     <div v-if="reconnectDone" class="text-caption text-positive q-mt-xs" data-reconnect-done>{{ reconnectDone }}</div>
     <div v-if="reconnectProblem" class="text-caption text-negative q-mt-xs" data-reconnect-problem>

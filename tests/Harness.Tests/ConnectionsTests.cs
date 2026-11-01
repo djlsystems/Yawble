@@ -1276,6 +1276,22 @@ public sealed partial class ConnectionsTests : IAsyncLifetime
         /// <c>slow_down</c>, <c>approve</c>, or an OAuth error. A poll with nothing queued waits.</summary>
         public readonly Channel<string> DeviceAnswers = Channel.CreateUnbounded<string>();
 
+        /// <summary>The device endpoint's refusal (an OAuth error and Microsoft's description), or null to
+        /// answer a code: how a code start meets AADSTS700016 or <c>unauthorized_client</c>.</summary>
+        public (string Error, string Description)? DeviceStartRefusal;
+
+        /// <summary>The next poll, held at the provider until released, and answered then whether or not
+        /// the Host stopped waiting: Microsoft approving after the person cancelled.</summary>
+        public sealed class HeldPoll
+        {
+            public readonly TaskCompletionSource Entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            public readonly TaskCompletionSource<string> Answer = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        private HeldPoll? _heldPoll;
+
+        public HeldPoll HoldDevicePoll() => _heldPoll = new HeldPoll();
+
         private readonly Lock _lock = new();
 
         public Task<DeviceAuthorizationAnswer> DeviceAuthorizationAsync(OAuthProvider provider, IReadOnlyList<string> scopes, CancellationToken ct)
@@ -1283,6 +1299,11 @@ public sealed partial class ConnectionsTests : IAsyncLifetime
             lock (_lock)
             {
                 DeviceStarts.Add((provider.DeviceAuthorizationUrl, scopes));
+                if (DeviceStartRefusal is { } refusal)
+                {
+                    return Task.FromResult(new DeviceAuthorizationAnswer(null, null, null, null, null, refusal.Error, refusal.Description));
+                }
+
                 var code = $"devicecode-{Guid.NewGuid():N}";
                 DeviceCodes.Add(code);
                 return Task.FromResult(new DeviceAuthorizationAnswer(
@@ -1292,7 +1313,17 @@ public sealed partial class ConnectionsTests : IAsyncLifetime
 
         public async Task<OAuthTokenAnswer> DeviceTokenAsync(OAuthProvider provider, string? clientSecret, string deviceCode, CancellationToken ct)
         {
-            var answer = await DeviceAnswers.Reader.ReadAsync(ct);
+            string answer;
+            if (Interlocked.Exchange(ref _heldPoll, null) is { } held)
+            {
+                held.Entered.SetResult();
+                // Deaf to the Host's cancellation on purpose: the provider answers anyway.
+                answer = await held.Answer.Task;
+            }
+            else
+            {
+                answer = await DeviceAnswers.Reader.ReadAsync(ct);
+            }
 
             lock (_lock)
             {

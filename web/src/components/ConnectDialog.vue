@@ -42,6 +42,7 @@ import {
   refusalWords,
   rememberGuidedConnect,
   slotKinds,
+  unknownClientRefusal,
   UsernameIncorrectHint,
 } from '../lib/connections';
 import { listOf } from '../lib/agentInstall';
@@ -51,6 +52,7 @@ import { mailboxHint, OutlookHint, setupTime } from '../lib/mailboxHints';
 import MailboxForm from './MailboxForm.vue';
 import CredentialForm from './CredentialForm.vue';
 import ConnectionTest from './ConnectionTest.vue';
+import ClearClientOffer from './ClearClientOffer.vue';
 import CodeSignIn from './CodeSignIn.vue';
 import DirectoryField from './DirectoryField.vue';
 import { letGoSignIns } from '../lib/letGoSignIns';
@@ -97,7 +99,12 @@ import { letGoSignIns } from '../lib/letGoSignIns';
  * admin of that organisation approves it, never as Microsoft's error code alone (`refusalWords`).
  *
  * A SIGN-IN WITH A CODE STILL WAITING at the Host is picked back up on open: closing the dialog, or
- * reloading the page, does not lose the code the person may be typing at Microsoft.
+ * reloading the page, does not lose the code the person may be typing at Microsoft. Cancel beside the
+ * code (CodeSignIn) ends it at the Host, so it is not offered again; Back only puts it aside.
+ *
+ * MICROSOFT NOT KNOWING THE SAVED APP'S CLIENT ID - a code start refused with the Host's
+ * `UnknownClientSentence` - offers ClearClientOffer under the sentence, to sign in with the
+ * instance's app (or remove the saved one); `changed` then has the opener read the providers again.
  *
  * THE SERVICE STEP IS PROVIDER TILES: Gmail, Microsoft (Outlook, Microsoft 365, Azure), iCloud, Yahoo
  * and Other, each saying its way in. Microsoft's tile names every Microsoft service, since its one
@@ -261,6 +268,7 @@ let opening = 0;
 watch(open, (showing) => {
   if (!showing) {
     // Closing cancels nothing at the Host: it only stops reading the flow (CodeSignIn, on `open`).
+    // CodeSignIn's Cancel is what ends it there.
     stopWaiting();
     return;
   }
@@ -744,6 +752,19 @@ function back() {
   device.value = null;
   deviceEnded.value = null;
   step.value = 'service';
+}
+
+/** Cancel beside the code ended the sign-in at the Host: back to the step's start, to sign in again. */
+function deviceCancelled() {
+  resumed.value = false;
+  device.value = null;
+  deviceEnded.value = null;
+}
+
+/** The saved app was cleared from beside its refusal: the opener reads the providers again. */
+function clientCleared() {
+  problem.value = '';
+  emit('changed');
 }
 
 function deviceDone(read: ConnectionFlow) {
@@ -1243,6 +1264,7 @@ const stepLabels = computed(() => [
           :resumed="resumed"
           :reading="open"
           @ended="deviceDone"
+          @cancelled="deviceCancelled"
           @problem="(text: string) => (problem = text)"
         />
       </q-card-section>
@@ -1302,7 +1324,17 @@ const stepLabels = computed(() => [
         </template>
       </q-card-section>
 
-      <q-card-section v-if="problem" class="text-negative q-pt-none" data-guided-problem>{{ problem }}</q-card-section>
+      <q-card-section v-if="problem" class="text-negative q-pt-none" data-guided-problem>
+        {{ problem }}
+        <ClearClientOffer
+          v-if="unknownClientRefusal(problem) && provider"
+          class="q-mt-xs"
+          :provider-id="provider.id"
+          :provider="provider"
+          :connections="connections"
+          @cleared="clientCleared"
+        />
+      </q-card-section>
 
       <q-card-actions align="right">
         <template v-if="step === 'kind'">

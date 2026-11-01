@@ -506,6 +506,19 @@ export function refusalWords(text: string | null | undefined): string | null {
   return notInDirectoryMarks.test(text) ? NotInDirectorySentence : text;
 }
 
+/**
+ * What a person reads when Microsoft does not know the saved app's client ID (AADSTS700016) or will not
+ * let it sign in (`unauthorized_client`): one sentence, never the code alone. The Host's
+ * `MicrosoftUnknownClient`, word for word; ClearClientOffer is shown beside it.
+ */
+export const UnknownClientSentence =
+  "The saved app's client ID is not an app Microsoft knows - it is often a directory ID pasted in the wrong box - so use the instance's own app instead, or set the app up again with its Application (client) ID.";
+
+/** The Host ended a sign-in with the unknown-client sentence: the place showing it offers to clear the saved app. */
+export function unknownClientRefusal(text: string | null | undefined): boolean {
+  return !!text && text.includes(UnknownClientSentence);
+}
+
 /** The field a Microsoft connection's own directory is typed in, as the Host names it in a refusal. */
 export const DirectoryLabel = 'Directory (tenant) ID or domain';
 

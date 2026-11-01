@@ -3317,6 +3317,11 @@ export interface ConnectionProvider {
    * public app is in use (its ID is not answered), null with none.
    */
   clientSource?: 'default' | 'saved' | null
+  /**
+   * Microsoft only: the instance has a public app of its own, which signs in again once a saved client
+   * is cleared ("Use <product>'s app"). False for Google, which then reads not set up ("Remove this app").
+   */
+  instanceClient?: boolean
   clientSecretSet: boolean
   /** Its client is set up (and, for a custom one, its URLs): Connect is possible. */
   configured: boolean
@@ -3332,6 +3337,13 @@ export interface ConnectionProvider {
   tenant?: string | null
   /** How to set its client up, step by step. A built-in provider has one; no step carries a secret. */
   guide?: ConnectionGuide | null
+}
+
+/** A built-in provider's saved client, cleared: the provider as it is now, and the connections to reconnect. */
+export interface ConnectionProviderCleared {
+  provider: ConnectionProvider
+  /** Its sign-in connections, which signed in through the saved client and need Reconnect. */
+  reconnect: { id: string; name: string; account: string }[]
 }
 
 /** A provider's setup guide: its steps in the order a person takes them. */

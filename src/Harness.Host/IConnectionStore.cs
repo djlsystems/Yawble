@@ -21,6 +21,10 @@ public interface IConnectionStore
 
     Task<(bool Removed, IReadOnlyList<string> Connections)> DeleteProviderAsync(string id, TriggerAudit audit, CancellationToken ct = default);
 
+    /// <summary>Forgets a built-in provider's saved client and secret, with <paramref name="audit"/> in the
+    /// same transaction; its connections stay. Throws, changing nothing, when the row cannot be written.</summary>
+    Task ClearProviderAsync(string id, TriggerAudit audit, CancellationToken ct = default);
+
     Task<IReadOnlyList<ConnectionRecord>> ListAsync(CancellationToken ct = default);
 
     Task<ConnectionRecord?> GetAsync(string id, CancellationToken ct = default);

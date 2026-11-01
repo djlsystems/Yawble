@@ -28,6 +28,20 @@ public sealed class NotInDirectorySentenceTests
     }
 
     [Fact]
+    public void The_web_unknown_client_sentence_is_the_Hosts_word_for_word_and_names_no_code()
+    {
+        var web = WebConstant(File.ReadAllText(WebFile), "UnknownClientSentence");
+        var host = ConnectionProviders.MicrosoftUnknownClient;
+
+        Assert.True(
+            string.Equals(host, web, StringComparison.Ordinal),
+            $"The Host's ConnectionProviders.MicrosoftUnknownClient is \"{host}\" but the web's UnknownClientSentence ({WebFile}) is \"{web}\".");
+        Assert.DoesNotContain("AADSTS", host);
+        Assert.DoesNotContain("unauthorized_client", host);
+        Assert.Single(host.Split(". ", StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    [Fact]
     public void The_web_expiry_line_is_the_Hosts_word_for_word()
     {
         var web = WebConstant(File.ReadAllText(WebFile), "ExpiredNotInDirectoryLine");

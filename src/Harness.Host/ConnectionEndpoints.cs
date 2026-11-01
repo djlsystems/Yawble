@@ -129,7 +129,39 @@ public static class ConnectionEndpoints
             .WithTags(Area)
             .HumansOnly()
             .WithSummary("Remove a custom provider")
-            .WithDescription("204, or 409 naming its connections while any exists. A built-in answers 400.");
+            .WithDescription("204, or 409 naming its connections while any exists. A built-in answers 400: clear its client with `DELETE /api/connections/providers/{id}/client`.");
+
+        app.MapDelete("/api/connections/providers/{id}/client", async (
+            [Description("google or microsoft.")] string id,
+            Connections connections, PluginCatalog plugins, HttpContext context, CancellationToken ct) =>
+        {
+            try
+            {
+                var (provider, reconnect, status, error) = await connections.ClearProviderClientAsync(id, Actor(context), ct);
+                if (error is not null) return Results.Json(new { error }, statusCode: status);
+
+                return Results.Ok(new
+                {
+                    provider = provider!.View(Guide(provider, [], plugins, context)),
+                    reconnect = reconnect.Select(c => new { id = c.Id, name = c.Name, account = c.Account }),
+                });
+            }
+            catch (DbException exception)
+            {
+                return Unrecorded("The client was not cleared", exception);
+            }
+        })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Clear a built-in provider's saved client")
+            .WithDescription(
+                "Undoes Set up client for Google or Microsoft: the saved client ID and secret are forgotten, with a "
+                + "`connections.provider-cleared` tenant row in the same transaction; when the row cannot be written "
+                + "nothing changes (500). Microsoft then signs in with the instance's own client again (`clientSource` "
+                + "`default`), or reads not set up when the instance has none; Google reads not set up. Answers "
+                + "`{ provider, reconnect: [{ id, name, account }] }`: the provider as the list does, and its sign-in "
+                + "connections, which signed in through the saved client and need Reconnect. 409 with no saved client; "
+                + "a custom provider answers 400 (remove it instead).");
 
         app.MapGet("/api/connections", async (Connections connections, TeamRegistry teams, CancellationToken ct) =>
         {
@@ -393,6 +425,28 @@ public static class ConnectionEndpoints
                 + "is still `waiting` and not past `expiresAt`, soonest to expire first. Another person's are "
                 + "never listed. Never the device code, a client secret or a token.");
 
+        app.MapDelete("/api/connections/flows/{flowId}", (
+            [Description("The flowId a sign-in with a code started with.")] string flowId,
+            Connections connections, HttpContext context) =>
+        {
+            if (connections.CancelDeviceFlow(flowId, Actor(context)) is not { } cancelled) return Results.NotFound(new { error = MissingFlow });
+
+            return cancelled.Outcome switch
+            {
+                CancelOutcome.Cancelled => Results.NoContent(),
+                CancelOutcome.Finishing => Results.Conflict(new { error = "The sign-in is being stored now, so it can no longer be cancelled.", state = cancelled.State.State }),
+                _ => Results.Conflict(new { error = $"The sign-in already ended: {cancelled.State.Sentence}", state = cancelled.State.State }),
+            };
+        })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Cancel a sign-in with a code")
+            .WithDescription(
+                "The starter's only: anyone else gets exactly what a missing flow gets (404). Ends a waiting flow on the "
+                + "Host: its device code is forgotten, its poll stops, nothing is stored - even if the provider approves "
+                + "afterwards - and it is gone from `GET /api/connections/flows/open` and reads 404 from then on. 204. "
+                + "A flow that already ended, or whose sign-in is being stored, answers 409 with its `state`.");
+
         app.MapGet("/api/connections/flows/{flowId}", async (
             [Description("The flowId a sign-in with a code started with.")] string flowId,
             Connections connections, TeamRegistry teams, HttpContext context, CancellationToken ct) =>
@@ -409,7 +463,8 @@ public static class ConnectionEndpoints
                 + "`{ state: waiting|done|refused|expired, sentence, userCode, verificationUri, expiresAt, connection? }`, "
                 + "the connection only when `done`. The code is the one to enter now: when Microsoft takes the consent "
                 + "to several APIs but needs a second code to finish, the flow stays `waiting` with the new code and a "
-                + "sentence saying so. Closing the dialog cancels nothing: reading again gives the same state.");
+                + "sentence saying so. Closing the dialog cancels nothing: reading again gives the same state; "
+                + "`DELETE` on the same address cancels it.");
 
         app.MapGet(Connections.CallbackPath, async (
             [Description("The provider's authorization code.")] string? code,

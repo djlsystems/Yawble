@@ -232,6 +232,10 @@ public static class TenantActions
     /// <summary>A person removed a custom OAuth provider.</summary>
     public const string ConnectionProviderRemoved = "connections.provider-removed";
 
+    /// <summary>A person cleared a built-in provider's saved client. Detail: the provider, the client
+    /// source after (<c>default</c> or none) and the connections that need Reconnect.</summary>
+    public const string ConnectionProviderCleared = "connections.provider-cleared";
+
     /// <summary>A person connected an account. Detail: provider, account, scopes - never a token.</summary>
     public const string ConnectionConnected = "connections.connected";
 

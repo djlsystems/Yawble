@@ -717,6 +717,14 @@ const words: Record<string, Words> = {
     did: 'removed a sign-in provider',
     detail: (d) => sentence([`removed ${text(d, 'provider') ?? 'the provider'}`]),
   },
+  'connections.provider-cleared': {
+    did: "cleared a sign-in provider's saved app",
+    detail: (d) =>
+      sentence([
+        `cleared ${text(d, 'provider') ?? 'the provider'}'s saved app`,
+        text(d, 'clientSource') === 'default' ? "signing in with the instance's own app again" : 'now not set up',
+      ]),
+  },
   'connections.connected': {
     did: 'connected an account',
     detail: (d) =>

@@ -138,6 +138,38 @@ public sealed class MicrosoftDefaultClientTests
     }
 
     [Fact]
+    public async Task Clearing_the_saved_client_makes_the_next_code_sign_in_use_the_instances_client_and_writes_its_row()
+    {
+        await using var host = await Instance.StartAsync(InstanceClient);
+        var saved = await host.SendAsync(HttpMethod.Put, "/api/connections/providers/microsoft", new { clientId = SavedClient, audience = "common" });
+        Assert.True(saved.Status == HttpStatusCode.OK, saved.Body);
+        Assert.True(JsonDocument.Parse(saved.Body).RootElement.GetProperty("instanceClient").GetBoolean());
+
+        var flowId = (await host.StartDeviceAsync()).GetProperty("flowId").GetString()!;
+        Assert.Equal(SavedClient, host.Microsoft.Starts[^1].ClientId);
+        host.Microsoft.Answers.Writer.TryWrite("approve");
+        var connection = (await host.FlowAsync(flowId, until: "done")).GetProperty("connection");
+
+        var (status, body) = await host.SendAsync(HttpMethod.Delete, "/api/connections/providers/microsoft/client", null);
+
+        Assert.True(status == HttpStatusCode.OK, body);
+        var answer = JsonDocument.Parse(body).RootElement;
+        Assert.Equal("default", answer.GetProperty("provider").GetProperty("clientSource").GetString());
+        Assert.Equal(JsonValueKind.Null, answer.GetProperty("provider").GetProperty("clientId").ValueKind);
+        Assert.Equal([connection.GetProperty("name").GetString()], answer.GetProperty("reconnect").EnumerateArray().Select(c => c.GetProperty("name").GetString()));
+        Assert.Equal("default", (await host.MicrosoftViewAsync()).GetProperty("clientSource").GetString());
+
+        // The next code sign-in starts with the instance's client, at common, with no secret.
+        await host.StartDeviceAsync();
+        var start = host.Microsoft.Starts[^1];
+        Assert.Equal((InstanceClient, false, "https://login.microsoftonline.com/common/oauth2/v2.0/devicecode"), (start.ClientId, start.SecretSet, start.Url));
+
+        var row = Assert.Single(await host.TenantDetailsAsync(TenantActions.ConnectionProviderCleared));
+        var detail = JsonDocument.Parse(row).RootElement;
+        Assert.Equal(("microsoft", "default"), (detail.GetProperty("provider").GetString(), detail.GetProperty("clientSource").GetString()));
+    }
+
+    [Fact]
     public async Task A_refusal_needing_an_organisations_admin_ends_with_one_sentence_and_no_code()
     {
         await using var host = await Instance.StartAsync(InstanceClient);
@@ -224,6 +256,19 @@ public sealed class MicrosoftDefaultClientTests
                 if (DateTime.UtcNow > deadline) throw new TimeoutException($"The flow stayed {flow.GetProperty("state").GetString()}, not {until}.");
                 await Task.Delay(20, Ct);
             }
+        }
+
+        public async Task<IReadOnlyList<string>> TenantDetailsAsync(string action)
+        {
+            await using var connection = new SqliteConnection($"Data Source={Path.Combine(_dataRoot, "messages.db")};Pooling=False");
+            await connection.OpenAsync(Ct);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT detail FROM tenant_events WHERE action = $action ORDER BY seq";
+            command.Parameters.AddWithValue("$action", action);
+            var rows = new List<string>();
+            await using var reader = await command.ExecuteReaderAsync(Ct);
+            while (await reader.ReadAsync(Ct)) rows.Add(reader.IsDBNull(0) ? "" : reader.GetString(0));
+            return rows;
         }
 
         public async Task<JsonElement> GetAsync(string path)
