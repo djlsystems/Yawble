@@ -30,7 +30,7 @@ public sealed record ConciergeEffective(
 /// <summary>
 /// Which agent and prompt the Concierge runs when nobody has chosen one. A fresh instance must open
 /// its first terminal without a settings visit, so the choice falls to the catalog: the first
-/// interactive preset that is authenticated, else the first that is installed. A chosen agent
+/// interactive preset that is authenticated, else the first that is installed or being installed. A chosen agent
 /// always wins. The prompt falls to the seeded Concierge prompt. The result is what the terminal
 /// shows in its header, so a person can see what was picked and change it.
 /// </summary>
@@ -86,8 +86,12 @@ public static class ConciergeAgentDefault
 
         // NOT "the first that exists" when nothing is installed: that launched a command that is not
         // on PATH and left a person a closed socket. Null lets the panel say so first.
-        // A fresh volume has nothing installed yet: the agent being installed is the one that will open.
-        return First(r => r.Authenticated == true) ?? First(r => r.Installed == true)
-            ?? First(r => r.HeldBy == AgentUpdateKinds.Install) ?? First(r => r.HeldBy == AgentUpdateKinds.Check);
+        // A preset being installed keeps ITS OWN catalog place beside the installed ones: a later preset
+        // that finished first does not take the panel from an earlier one still installing, and when
+        // that install ends the panel stays on it (not on the next one still installing). Not a swap
+        // that ranks every install above every installed preset. Only a signed-in preset goes first.
+        return First(r => r.Authenticated == true)
+            ?? First(r => r.Installed == true || r.HeldBy == AgentUpdateKinds.Install)
+            ?? First(r => r.HeldBy == AgentUpdateKinds.Check);
     }
 }
