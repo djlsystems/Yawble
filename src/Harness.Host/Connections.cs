@@ -868,9 +868,8 @@ public sealed partial class Connections(
 
                     if (!second.Ok)
                     {
-                        flow.Settle(Refused, ConnectionProviders.UnknownSavedClient(provider, second.Error, second.ErrorDescription)
-                            ? ConnectionProviders.MicrosoftUnknownClient
-                            : ConnectionProviders.NeedsAdminApproval(second.Error, second.ErrorDescription)
+                        // Not the unknown-client sentence: Microsoft took this client for the first code.
+                        flow.Settle(Refused, ConnectionProviders.NeedsAdminApproval(second.Error, second.ErrorDescription)
                             ? ConnectionProviders.MicrosoftAdminApproval
                             : $"{provider.Name} did not start the second code: {second.Reason}. Nothing was stored; try again.");
                         return;

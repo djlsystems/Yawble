@@ -108,7 +108,7 @@ own page (AADSTS700016), which the Host never sees. So:
 - A Microsoft client save whose `clientId` equals its own `tenantId` (guided) or `tenant`
   (Advanced), or any connection's directory, is refused with one sentence naming both fields
   (`clientId` and the Directory (tenant) ID), and nothing is saved.
-- When Microsoft answers a saved client's code start, a poll, a second code or a browser sign-in's
+- When Microsoft answers a saved client's code start, a poll or a browser sign-in's
   code exchange with AADSTS700016 or `unauthorized_client` (what a directory's own endpoints answer),
   or AADSTS50059 (what `common` answers for an app it cannot find), the sign-in ends with one sentence
   (`ConnectionProviders.MicrosoftUnknownClient`): the saved app's client ID is not an app Microsoft
