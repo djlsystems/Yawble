@@ -3,7 +3,6 @@ import FieldHelp from './FieldHelp.vue';
 import { computed, ref, watch } from 'vue';
 import {
   ActionRefused,
-  deleteConnectionProvider,
   disconnectConnection,
   getConnectionNeeds,
   listConnectionProviders,
@@ -11,7 +10,6 @@ import {
   listCredentialPresets,
   listMailboxPresets,
   renameConnection,
-  saveConnectionProvider,
   startConnection,
   startDeviceConnection,
   testConnection,
@@ -23,21 +21,17 @@ import type {
   ConnectionFlow,
   ConnectionNeeds,
   ConnectionProvider,
-  ConnectionProviderSave,
   ConnectionUse,
   CredentialPreset,
   MailboxPreset,
 } from '../api/types';
 import { appPasswordWarning } from '../lib/appPasswordShape';
-import { currentOrigin, goTo } from '../lib/browserNavigation';
-import { productCli } from '../presentation/product';
+import { goTo } from '../lib/browserNavigation';
 import ConnectDialog from './ConnectDialog.vue';
 import CredentialForm from './CredentialForm.vue';
 import ConnectionTest from './ConnectionTest.vue';
 import MailboxForm from './MailboxForm.vue';
-import DialogTabs from './DialogTabs.vue';
 import DirectoryField from './DirectoryField.vue';
-import ClearClientOffer from './ClearClientOffer.vue';
 import CodeSignIn from './CodeSignIn.vue';
 import {
   connectionSignInHref,
@@ -45,12 +39,8 @@ import {
   kindLabel,
   kindOf,
   mailServerLabel,
-  parseScopes,
   permissionsOf,
-  providerHelp,
   providerName,
-  redirectUriFor,
-  redirectUriWarning,
   reconnectTenant,
   refusalWords,
   rememberReconnect,
@@ -63,7 +53,7 @@ import {
 } from '../lib/connections';
 
 /**
- * ADMIN > CONNECTIONS: the OAuth accounts the Host holds for plugins, and each provider's client.
+ * ADMIN > CONNECTIONS: the accounts the Host holds for plugins, and Add connection.
  *
  * EVERY CONNECTION, ONE STORE: each shows its kind (Sign-in, Mailbox, Website, API key, Username and
  * password), its provider or service, account, what it holds (a sign-in's granted scopes as the Host
@@ -87,34 +77,26 @@ import {
  * with a code too: the Reconnect dialog shows it through CodeSignIn, as Add connection does (Cancel
  * beside it ends the sign-in at the Host), reads the flow, and closes on the same message.
  *
- * A BUILT-IN PROVIDER'S SAVED CLIENT CAN BE UNDONE from its Providers tile (ClearClientOffer): "Use
- * <product>'s app" for Microsoft on an instance with an app of its own, "Remove this app" otherwise,
- * naming the connections that signed in through the saved app and need Reconnect.
- *
  * A MICROSOFT CONNECTION'S OWN DIRECTORY (`tenant`) shows on its tile when it has one. Reconnect shows
  * it in DirectoryField to change or clear: left as it was, nothing is sent and the Host keeps it;
- * changed, the new one is sent; emptied, `""` clears it. Connect an account offers the same field for
- * Microsoft. The Host's refusal of a directory is shown at the field.
+ * changed, the new one is sent; emptied, `""` clears it. Add connection's Microsoft sign-in offers the
+ * same field. The Host's refusal of a directory is shown at the field.
  *
  * THE DIALOG STAYS OPEN ON A ROUTE CHANGE (`no-route-dismiss`). Quasar closes a dialog whenever the
  * route changes; the Console takes the provider's answer off the address just after opening this
  * dialog with it, which closed it under the person and left them on the Kanban.
  *
- * ADD CONNECTION, at the top, is the guided way: `ConnectDialog` walks a person through the service,
- * setting its app up and signing in, with the scopes the plugins ask for. Everything below it as it
- * was before - the Providers tab and Connect an account - is under ADVANCED.
+ * ADD CONNECTION, at the top, is the one way to add a connection of any kind: `ConnectDialog` starts
+ * with the kind and walks a person through it. Every OAuth service's app - Microsoft's, Google's, a
+ * custom service's addresses and client - is a step of its own there, before sign-in: saved, cleared
+ * and signed in through on that step. There is no second door: no Advanced, no Providers tab.
  *
- * CONNECT AN ACCOUNT picks a provider - or sets up its client first - and scopes, and sends the
- * browser to the provider's consent page. The provider returns to the Host's callback, which answers
- * a redirect back to the Console; `notice` is what it came back with. The dialog shows the exact
- * redirect URI to register for the address in use, and one line of help per built-in provider.
+ * A SIGN-IN THAT LEAVES FOR THE PROVIDER (Reconnect of a web sign-in) comes back through the Host's
+ * callback to the Console; `notice` is what it came back with.
  *
  * A MAILBOX (kind `imap`) shows its servers and "set" for its app password instead of scopes, and
  * UPDATE PASSWORD instead of Reconnect: the Host logs in with the new password and only then stores
  * it, clearing needs-reconnect. The login's sentence shows on the tile; a refusal shows in the dialog.
- *
- * THE CLIENT SECRET IS WRITE-ONLY. No route answers it: the dialog says "set" or "not set", and its
- * input starts empty whatever is stored. An empty input on save keeps the stored secret.
  */
 const props = defineProps<{ notice?: CallbackOutcome | null }>();
 
@@ -144,16 +126,6 @@ async function load() {
   return false;
 }
 
-/** Which tab shows: the accounts, or the providers they are connected through. */
-const tab = ref<'connections' | 'providers'>('connections');
-
-/** Today's Providers tab and Connect form, out of the way of the guided Add connection. */
-const advanced = ref(false);
-
-watch(advanced, (showing) => {
-  if (!showing) tab.value = 'connections';
-});
-
 watch(open, async (showing) => {
   if (!showing) {
     // Closed: a code shown stops being read (CodeSignIn unmounts); it is left waiting at the Host.
@@ -181,16 +153,6 @@ function addConnection() {
   guidedReturned.value = null;
   guidedOpen.value = true;
 }
-
-/** How many of the accounts go through a provider, for its tile. */
-function connectionsOf(provider: ConnectionProvider) {
-  const count = connections.value.filter((connection) => connection.provider === provider.id).length;
-  return count === 0 ? 'None' : count === 1 ? '1 account' : `${count} accounts`;
-}
-
-/** The redirect URI for the address the person is using now. */
-const redirectUri = computed(() => redirectUriFor(currentOrigin()));
-const redirectWarning = computed(() => redirectUriWarning(currentOrigin(), productCli));
 
 const nameOf = (id: string) => providerName(id, providers.value);
 
@@ -229,59 +191,6 @@ async function sendToProvider(request: Parameters<typeof startConnection>[0], pr
     problem.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
     leaving.value = false;
-  }
-}
-
-// --- Connect an account ---------------------------------------------------------------------------
-
-const connectOpen = ref(false);
-const connectProvider = ref<string | null>(null);
-const connectScopes = ref('');
-const connectName = ref('');
-const connectProblem = ref('');
-const connectDirectory = ref('');
-const connectDirectoryProblem = ref('');
-
-watch(connectDirectory, () => (connectDirectoryProblem.value = ''));
-
-const chosenProvider = computed(() => providers.value.find((provider) => provider.id === connectProvider.value) ?? null);
-
-const providerOptions = computed(() =>
-  providers.value.map((provider) => ({
-    value: provider.id,
-    label: provider.configured ? provider.name : `${provider.name} (client not set up)`,
-  })),
-);
-
-function startConnect() {
-  connectProvider.value = providers.value.find((provider) => provider.configured)?.id ?? providers.value[0]?.id ?? null;
-  connectScopes.value = '';
-  connectName.value = '';
-  connectProblem.value = '';
-  connectDirectory.value = '';
-  connectDirectoryProblem.value = '';
-  connectOpen.value = true;
-}
-
-async function connect() {
-  const provider = chosenProvider.value;
-  if (!provider || !provider.configured || leaving.value) return;
-
-  const tenant = provider.kind === 'microsoft' ? connectDirectory.value.trim() : '';
-  connectDirectoryProblem.value = '';
-  await sendToProvider(
-    {
-      provider: provider.id,
-      scopes: parseScopes(connectScopes.value),
-      name: connectName.value.trim() || null,
-      ...(tenant ? { tenant } : {}),
-    },
-    connectProblem,
-  );
-  // A directory refused is said at its field.
-  if (directoryRefusal(connectProblem.value)) {
-    connectDirectoryProblem.value = connectProblem.value;
-    connectProblem.value = '';
   }
 }
 
@@ -553,88 +462,6 @@ async function disconnect() {
   }
 }
 
-// --- A provider's client --------------------------------------------------------------------------
-
-const clientOpen = ref(false);
-/** The provider being set up, or null for a new custom provider. */
-const clientFor = ref<ConnectionProvider | null>(null);
-const clientId = ref('');
-const clientSecret = ref('');
-const clearSecret = ref(false);
-const tenant = ref('');
-const customId = ref('');
-const customName = ref('');
-const authorizeUrl = ref('');
-const tokenUrl = ref('');
-const userinfoUrl = ref('');
-const defaultScopes = ref('');
-const clientProblem = ref('');
-const clientBusy = ref(false);
-
-const isCustom = computed(() => clientFor.value === null || clientFor.value.kind === 'custom');
-
-function setUpClient(provider: ConnectionProvider | null) {
-  clientFor.value = provider;
-  clientId.value = provider?.clientId ?? '';
-  // NEVER FILLED: the Host does not send the secret, and a person replaces it by typing a new one.
-  clientSecret.value = '';
-  clearSecret.value = false;
-  tenant.value = provider?.tenant ?? '';
-  customId.value = provider?.id ?? 'custom-';
-  customName.value = provider?.kind === 'custom' ? provider.name : '';
-  authorizeUrl.value = provider?.authorizeUrl ?? '';
-  tokenUrl.value = provider?.tokenUrl ?? '';
-  userinfoUrl.value = provider?.userinfoUrl ?? '';
-  defaultScopes.value = provider?.kind === 'custom' ? provider.defaultScopes.join(' ') : '';
-  clientProblem.value = '';
-  clientOpen.value = true;
-}
-
-async function saveClient() {
-  if (clientBusy.value) return;
-
-  const id = clientFor.value?.id ?? customId.value.trim();
-  const body: ConnectionProviderSave = { clientId: clientId.value.trim() };
-
-  // Left empty, the stored secret is kept; "clear" sends "" (a public client, PKCE only).
-  if (clearSecret.value) body.clientSecret = '';
-  else if (clientSecret.value !== '') body.clientSecret = clientSecret.value;
-
-  if (clientFor.value?.kind === 'microsoft' && tenant.value.trim() !== '') body.tenant = tenant.value.trim();
-
-  if (isCustom.value) {
-    body.name = customName.value.trim() || id;
-    body.authorizeUrl = authorizeUrl.value.trim();
-    body.tokenUrl = tokenUrl.value.trim();
-    if (userinfoUrl.value.trim() !== '') body.userinfoUrl = userinfoUrl.value.trim();
-    body.defaultScopes = parseScopes(defaultScopes.value);
-  }
-
-  clientBusy.value = true;
-  clientProblem.value = '';
-  try {
-    const saved = await saveConnectionProvider(id, body);
-    clientSecret.value = '';
-    clientOpen.value = false;
-    await load();
-    // Set up from Connect an account: go back to it with this provider chosen.
-    if (connectOpen.value) connectProvider.value = saved.id;
-  } catch (cause) {
-    clientProblem.value = cause instanceof Error ? cause.message : String(cause);
-  } finally {
-    clientBusy.value = false;
-  }
-}
-
-async function removeProvider(provider: ConnectionProvider) {
-  error.value = '';
-  try {
-    await deleteConnectionProvider(provider.id);
-    await load();
-  } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : String(cause);
-  }
-}
 </script>
 
 <template>
@@ -655,18 +482,6 @@ async function removeProvider(provider: ConnectionProvider) {
 
       <q-card-section class="row items-center q-gutter-x-sm q-py-sm">
         <q-btn color="primary" no-caps icon="add" label="Add connection" :disable="!loaded" @click="addConnection" />
-        <q-space />
-        <q-btn
-          flat
-          dense
-          no-caps
-          icon="tune"
-          label="Advanced"
-          :color="advanced ? 'primary' : undefined"
-          :aria-pressed="advanced ? 'true' : 'false'"
-          data-connections-advanced
-          @click="advanced = !advanced"
-        />
       </q-card-section>
 
       <q-card-section v-if="noticeText || error" class="q-py-none">
@@ -685,272 +500,187 @@ async function removeProvider(provider: ConnectionProvider) {
         </q-banner>
       </q-card-section>
 
-      <!-- TWO TABS: the accounts, and the providers whose clients they are connected through. -->
-      <DialogTabs v-model="tab" class="q-px-md">
-        <q-tab name="connections" :label="`Connections (${connections.length})`" data-connections-tab="connections" />
-        <q-tab v-if="advanced" name="providers" :label="`Providers (${providers.length})`" data-connections-tab="providers" />
-      </DialogTabs>
       <q-separator />
 
-      <q-tab-panels v-model="tab" class="connections-body">
-        <q-tab-panel name="connections" data-connections-panel="connections">
-          <div v-if="advanced" class="row items-center q-mb-sm">
-            <q-space />
-            <q-btn flat dense no-caps icon="add" label="Connect an account…" :disable="!loaded" @click="startConnect" />
-          </div>
+      <div class="connections-body q-pa-md" data-connections-panel="connections">
+        <div v-if="loading && !loaded" class="os-text-muted">Reading the connections…</div>
+        <div v-else-if="loaded && connections.length === 0" class="os-text-muted q-pa-lg text-center" data-no-connections>
+          No account is connected yet. Connect one to bind it to a plugin member.
+        </div>
 
-          <div v-if="loading && !loaded" class="os-text-muted">Reading the connections…</div>
-          <div v-else-if="loaded && connections.length === 0" class="os-text-muted q-pa-lg text-center" data-no-connections>
-            No account is connected yet. Connect one to bind it to a plugin member.
-          </div>
-
-          <div v-if="connections.length > 0" class="conn-tiles">
-            <div
-              v-for="connection in connections"
-              :key="connection.id"
-              class="conn-tile"
-              :data-connection="connection.id"
-            >
-              <div class="conn-tile-head">
-                <q-icon name="link" size="18px" aria-hidden="true" />
-                <span class="text-weight-medium" data-connection-name>{{ connection.name }}</span>
-                <q-badge outline color="grey-7" :label="kindLabel(connection)" data-connection-kind />
-                <q-space />
-                <q-badge
-                  :color="connection.status === 'ok' ? 'positive' : 'negative'"
-                  :label="statusLabel(connection)"
-                  data-connection-status
-                />
-              </div>
-              <div class="conn-tile-line">
-                <span class="os-text-muted" data-connection-provider>{{ nameOf(connection.provider) }}</span>
-                <template v-if="connection.account !== ''">
-                  · <span class="mono" data-connection-account>{{ connection.account }}</span>
-                </template>
-              </div>
-              <div v-if="connection.tenant" class="conn-tile-line os-text-muted" data-connection-directory>
-                Directory <span class="mono">{{ connection.tenant }}</span>
-              </div>
-
-              <div v-if="connection.status !== 'ok'" class="conn-tile-line text-negative" data-connection-reason>
-                <template v-if="isMailbox(connection)">
-                  {{ connection.statusReason ?? 'The server refused the login.' }} Update its password to clear this.
-                </template>
-                <template v-else-if="isCredential(connection)">
-                  {{ connection.statusReason ?? 'Its test was refused.' }} Edit it, then test it again, to clear this.
-                </template>
-                <template v-else>
-                  {{ connection.statusReason ?? 'The provider gave no reason.' }} Reconnect it to clear this.
-                </template>
-              </div>
-              <div v-else-if="rowNotice[connection.id]" class="conn-tile-line text-positive" data-row-notice>
-                {{ rowNotice[connection.id] }}
-              </div>
-
-              <dl class="conn-facts q-mt-xs">
-                <template v-if="isMailbox(connection)">
-                  <dt>Servers</dt>
-                  <dd data-connection-servers>
-                    <div class="mono">IMAP {{ mailServerLabel(connection.imap) }}</div>
-                    <div class="mono">SMTP {{ mailServerLabel(connection.smtp) }}</div>
-                  </dd>
-                  <dt>Username</dt>
-                  <dd class="mono" data-connection-username>{{ connection.username ?? connection.account }}</dd>
-                  <dt>App password</dt>
-                  <dd data-connection-password>{{ connection.passwordSet ? 'set' : 'not set' }}</dd>
-                </template>
-                <template v-else-if="isCredential(connection)">
-                  <template v-for="field in connection.fields ?? []" :key="field.name">
-                    <dt>{{ field.label }}</dt>
-                    <dd :class="{ mono: !field.masked }" :data-connection-field="field.name">
-                      {{ field.masked ? (field.set ? 'set' : 'not set') : field.value ?? 'not set' }}
-                    </dd>
-                  </template>
-                </template>
-                <template v-else>
-                  <dt>Allows</dt>
-                  <dd data-connection-scopes>
-                    <template v-if="permissionsOf(connection).length === 0">Nothing beyond signing in</template>
-                    <div v-for="permission in permissionsOf(connection)" :key="permission" class="conn-scope" data-connection-permission>
-                      {{ permission }}
-                    </div>
-                  </dd>
-                </template>
-                <dt>Connected</dt>
-                <dd data-connection-connected>{{ when(connection.connectedAt) }}</dd>
-                <dt>{{ isMailbox(connection) ? 'Last login' : 'Last refreshed' }}</dt>
-                <dd data-connection-refreshed>{{ when(connection.refreshedAt) }}</dd>
-                <dt>Used by</dt>
-                <dd data-connection-used-by>
-                  <template v-if="connection.usedBy.length === 0">No member</template>
-                  <div v-for="label in usedByLabels(connection)" :key="label">{{ label }}</div>
-                </dd>
-              </dl>
-
-              <div class="conn-tile-actions">
-                <span v-if="connection.testable" class="row-btn-wrap">
-                  <q-btn
-                    dense
-                    flat
-                    round
-                    icon="network_check"
-                    :loading="testingRow === connection.id"
-                    :disable="testingRow !== null"
-                    :aria-label="`Test connection ${connection.name}`"
-                    data-connection-test-row
-                    @click="testRow(connection)"
-                  />
-                  <q-tooltip>Test connection: try what is saved, now</q-tooltip>
-                </span>
-                <span v-if="kindOf(connection) === 'website'" class="row-btn-wrap">
-                  <q-btn
-                    dense
-                    flat
-                    round
-                    icon="language"
-                    :href="connectionSignInHref(connection)"
-                    target="_blank"
-                    rel="noopener"
-                    :aria-label="`Sign in ${connection.name}`"
-                    data-connection-sign-in
-                  />
-                  <q-tooltip>Sign in: open the site in the platform's browser and sign in yourself; the session is kept on this connection</q-tooltip>
-                </span>
-                <span v-if="isMailbox(connection)" class="row-btn-wrap">
-                  <q-btn
-                    dense
-                    flat
-                    round
-                    icon="key"
-                    :aria-label="`Update password ${connection.name}`"
-                    @click="startPasswordUpdate(connection)"
-                  />
-                  <q-tooltip>Update password: a new app password, tried before it is kept</q-tooltip>
-                </span>
-                <span v-if="isMailbox(connection) || isCredential(connection)" class="row-btn-wrap">
-                  <q-btn
-                    dense
-                    flat
-                    round
-                    icon="tune"
-                    :aria-label="`Edit ${connection.name}`"
-                    @click="startEdit(connection)"
-                  />
-                  <q-tooltip>Edit: a new value for every team and member using it</q-tooltip>
-                </span>
-                <span v-if="!isMailbox(connection) && !isCredential(connection)" class="row-btn-wrap">
-                  <q-btn
-                    dense
-                    flat
-                    round
-                    icon="sync"
-                    :disable="leaving"
-                    :aria-label="`Reconnect ${connection.name}`"
-                    @click="reconnect(connection)"
-                  />
-                  <q-tooltip>Reconnect: agree again at the provider</q-tooltip>
-                </span>
-                <span class="row-btn-wrap">
-                  <q-btn
-                    dense
-                    flat
-                    round
-                    icon="edit"
-                    :aria-label="`Rename ${connection.name}`"
-                    @click="startRename(connection)"
-                  />
-                  <q-tooltip>Rename</q-tooltip>
-                </span>
-                <span class="row-btn-wrap">
-                  <q-btn
-                    dense
-                    flat
-                    round
-                    color="negative"
-                    icon="link_off"
-                    :aria-label="`Delete ${connection.name}`"
-                    @click="startDisconnect(connection)"
-                  />
-                  <q-tooltip>Delete</q-tooltip>
-                </span>
-              </div>
-            </div>
-          </div>
-        </q-tab-panel>
-
-        <q-tab-panel name="providers" data-connections-panel="providers">
-          <div class="row items-center q-mb-sm">
-            <q-space />
-            <q-btn flat dense no-caps icon="add" label="Add a custom provider…" @click="setUpClient(null)" />
-          </div>
-
-          <div class="conn-tiles">
-            <div v-for="provider in providers" :key="provider.id" class="conn-tile" :data-provider="provider.id">
-              <div class="conn-tile-head">
-                <q-icon name="key" size="18px" aria-hidden="true" />
-                <span class="text-weight-medium">{{ provider.name }}</span>
-                <q-badge
-                  :outline="provider.kind === 'custom'"
-                  :color="provider.kind === 'custom' ? 'primary' : 'grey-7'"
-                  :label="provider.kind === 'custom' ? 'Custom' : 'Built-in'"
-                />
-                <q-space />
-                <q-badge
-                  :color="provider.configured ? 'positive' : 'grey-7'"
-                  :outline="!provider.configured"
-                >
-                  <span data-client-state>{{ provider.clientSource === 'default' ? 'This instance\'s app' : provider.configured ? 'Client set up' : 'Client not set up' }}</span>
-                </q-badge>
-              </div>
-              <div class="conn-tile-line mono os-text-muted">{{ provider.id }}</div>
-
-              <dl class="conn-facts q-mt-xs">
-                <dt>Client ID</dt>
-                <dd class="mono" data-client-id>{{ provider.clientId ?? (provider.clientSource === 'default' ? 'this instance\'s app, until you set one' : 'not set') }}</dd>
-                <dt>Client secret</dt>
-                <dd data-client-secret>{{ provider.clientSecretSet ? 'set' : 'not set' }}</dd>
-                <dt>Connections</dt>
-                <dd data-provider-connections>{{ connectionsOf(provider) }}</dd>
-              </dl>
-
-              <ClearClientOffer
-                v-if="provider.kind !== 'custom'"
-                class="q-mt-xs"
-                :provider-id="provider.id"
-                :provider="provider"
-                :connections="connections"
-                @cleared="load"
+        <div v-if="connections.length > 0" class="conn-tiles">
+          <div
+            v-for="connection in connections"
+            :key="connection.id"
+            class="conn-tile"
+            :data-connection="connection.id"
+          >
+            <div class="conn-tile-head">
+              <q-icon name="link" size="18px" aria-hidden="true" />
+              <span class="text-weight-medium" data-connection-name>{{ connection.name }}</span>
+              <q-badge outline color="grey-7" :label="kindLabel(connection)" data-connection-kind />
+              <q-space />
+              <q-badge
+                :color="connection.status === 'ok' ? 'positive' : 'negative'"
+                :label="statusLabel(connection)"
+                data-connection-status
               />
+            </div>
+            <div class="conn-tile-line">
+              <span class="os-text-muted" data-connection-provider>{{ nameOf(connection.provider) }}</span>
+              <template v-if="connection.account !== ''">
+                · <span class="mono" data-connection-account>{{ connection.account }}</span>
+              </template>
+            </div>
+            <div v-if="connection.tenant" class="conn-tile-line os-text-muted" data-connection-directory>
+              Directory <span class="mono">{{ connection.tenant }}</span>
+            </div>
 
-              <div class="conn-tile-actions">
-                <span class="row-btn-wrap">
-                  <q-btn
-                    dense
-                    flat
-                    round
-                    icon="settings"
-                    :aria-label="`Set up client… ${provider.name}`"
-                    @click="setUpClient(provider)"
-                  />
-                  <q-tooltip>Set up its client</q-tooltip>
-                </span>
-                <span v-if="provider.kind === 'custom'" class="row-btn-wrap">
-                  <q-btn
-                    dense
-                    flat
-                    round
-                    color="negative"
-                    icon="delete"
-                    :aria-label="`Remove ${provider.name}`"
-                    @click="removeProvider(provider)"
-                  />
-                  <q-tooltip>Remove this provider</q-tooltip>
-                </span>
-              </div>
+            <div v-if="connection.status !== 'ok'" class="conn-tile-line text-negative" data-connection-reason>
+              <template v-if="isMailbox(connection)">
+                {{ connection.statusReason ?? 'The server refused the login.' }} Update its password to clear this.
+              </template>
+              <template v-else-if="isCredential(connection)">
+                {{ connection.statusReason ?? 'Its test was refused.' }} Edit it, then test it again, to clear this.
+              </template>
+              <template v-else>
+                {{ connection.statusReason ?? 'The provider gave no reason.' }} Reconnect it to clear this.
+              </template>
+            </div>
+            <div v-else-if="rowNotice[connection.id]" class="conn-tile-line text-positive" data-row-notice>
+              {{ rowNotice[connection.id] }}
+            </div>
+
+            <dl class="conn-facts q-mt-xs">
+              <template v-if="isMailbox(connection)">
+                <dt>Servers</dt>
+                <dd data-connection-servers>
+                  <div class="mono">IMAP {{ mailServerLabel(connection.imap) }}</div>
+                  <div class="mono">SMTP {{ mailServerLabel(connection.smtp) }}</div>
+                </dd>
+                <dt>Username</dt>
+                <dd class="mono" data-connection-username>{{ connection.username ?? connection.account }}</dd>
+                <dt>App password</dt>
+                <dd data-connection-password>{{ connection.passwordSet ? 'set' : 'not set' }}</dd>
+              </template>
+              <template v-else-if="isCredential(connection)">
+                <template v-for="field in connection.fields ?? []" :key="field.name">
+                  <dt>{{ field.label }}</dt>
+                  <dd :class="{ mono: !field.masked }" :data-connection-field="field.name">
+                    {{ field.masked ? (field.set ? 'set' : 'not set') : field.value ?? 'not set' }}
+                  </dd>
+                </template>
+              </template>
+              <template v-else>
+                <dt>Allows</dt>
+                <dd data-connection-scopes>
+                  <template v-if="permissionsOf(connection).length === 0">Nothing beyond signing in</template>
+                  <div v-for="permission in permissionsOf(connection)" :key="permission" class="conn-scope" data-connection-permission>
+                    {{ permission }}
+                  </div>
+                </dd>
+              </template>
+              <dt>Connected</dt>
+              <dd data-connection-connected>{{ when(connection.connectedAt) }}</dd>
+              <dt>{{ isMailbox(connection) ? 'Last login' : 'Last refreshed' }}</dt>
+              <dd data-connection-refreshed>{{ when(connection.refreshedAt) }}</dd>
+              <dt>Used by</dt>
+              <dd data-connection-used-by>
+                <template v-if="connection.usedBy.length === 0">No member</template>
+                <div v-for="label in usedByLabels(connection)" :key="label">{{ label }}</div>
+              </dd>
+            </dl>
+
+            <div class="conn-tile-actions">
+              <span v-if="connection.testable" class="row-btn-wrap">
+                <q-btn
+                  dense
+                  flat
+                  round
+                  icon="network_check"
+                  :loading="testingRow === connection.id"
+                  :disable="testingRow !== null"
+                  :aria-label="`Test connection ${connection.name}`"
+                  data-connection-test-row
+                  @click="testRow(connection)"
+                />
+                <q-tooltip>Test connection: try what is saved, now</q-tooltip>
+              </span>
+              <span v-if="kindOf(connection) === 'website'" class="row-btn-wrap">
+                <q-btn
+                  dense
+                  flat
+                  round
+                  icon="language"
+                  :href="connectionSignInHref(connection)"
+                  target="_blank"
+                  rel="noopener"
+                  :aria-label="`Sign in ${connection.name}`"
+                  data-connection-sign-in
+                />
+                <q-tooltip>Sign in: open the site in the platform's browser and sign in yourself; the session is kept on this connection</q-tooltip>
+              </span>
+              <span v-if="isMailbox(connection)" class="row-btn-wrap">
+                <q-btn
+                  dense
+                  flat
+                  round
+                  icon="key"
+                  :aria-label="`Update password ${connection.name}`"
+                  @click="startPasswordUpdate(connection)"
+                />
+                <q-tooltip>Update password: a new app password, tried before it is kept</q-tooltip>
+              </span>
+              <span v-if="isMailbox(connection) || isCredential(connection)" class="row-btn-wrap">
+                <q-btn
+                  dense
+                  flat
+                  round
+                  icon="tune"
+                  :aria-label="`Edit ${connection.name}`"
+                  @click="startEdit(connection)"
+                />
+                <q-tooltip>Edit: a new value for every team and member using it</q-tooltip>
+              </span>
+              <span v-if="!isMailbox(connection) && !isCredential(connection)" class="row-btn-wrap">
+                <q-btn
+                  dense
+                  flat
+                  round
+                  icon="sync"
+                  :disable="leaving"
+                  :aria-label="`Reconnect ${connection.name}`"
+                  @click="reconnect(connection)"
+                />
+                <q-tooltip>Reconnect: agree again at the provider</q-tooltip>
+              </span>
+              <span class="row-btn-wrap">
+                <q-btn
+                  dense
+                  flat
+                  round
+                  icon="edit"
+                  :aria-label="`Rename ${connection.name}`"
+                  @click="startRename(connection)"
+                />
+                <q-tooltip>Rename</q-tooltip>
+              </span>
+              <span class="row-btn-wrap">
+                <q-btn
+                  dense
+                  flat
+                  round
+                  color="negative"
+                  icon="link_off"
+                  :aria-label="`Delete ${connection.name}`"
+                  @click="startDisconnect(connection)"
+                />
+                <q-tooltip>Delete</q-tooltip>
+              </span>
             </div>
           </div>
-        </q-tab-panel>
-      </q-tab-panels>
+        </div>
+      </div>
     </q-card>
   </q-dialog>
 
@@ -1070,199 +800,6 @@ async function removeProvider(provider: ConnectionProvider) {
           :disable="reconnectReading"
           data-reconnect-continue
           @click="continueReconnect"
-        />
-      </q-card-actions>
-    </q-card>
-  </q-dialog>
-
-  <!-- CONNECT AN ACCOUNT -->
-  <q-dialog v-model="connectOpen">
-    <q-card class="os-dialog-md" data-connect-dialog>
-      <q-card-section>
-        <div class="os-dialog-title">Connect an account</div>
-        <div class="text-caption os-text-muted">
-          The browser goes to the provider's consent page and comes back here when you have agreed.
-        </div>
-      </q-card-section>
-
-      <q-card-section class="q-gutter-md">
-        <q-select
-          v-model="connectProvider"
-          :options="providerOptions"
-          emit-value
-          map-options
-          outlined
-          dense
-          label="Provider"
-        />
-
-        <div v-if="chosenProvider && !chosenProvider.configured" class="row items-center q-gutter-x-sm" data-needs-client>
-          <span class="text-negative">Its client is not set up yet. Set it up first.</span>
-          <q-btn flat dense no-caps color="primary" label="Set up client…" @click="setUpClient(chosenProvider)" />
-        </div>
-
-        <q-input
-          v-model="connectScopes"
-          outlined
-          dense
-          autogrow
-          label="Scopes"
-          spellcheck="false"
-          autocomplete="off"
-        >
-          <template #append><FieldHelp :text="chosenProvider
-            ? `Added to ${chosenProvider.name}'s own: ${chosenProvider.defaultScopes.join(' ') || 'none'}. Separate with spaces or commas; a plugin's slot names the scopes it needs.`
-            : 'Separate with spaces or commas.'" /></template>
-        </q-input>
-        <q-input
-          v-model="connectName"
-          outlined
-          dense
-          label="Name"
-          autocomplete="off"
-        >
-          <template #append><FieldHelp text="Optional. Defaults to the account's name." /></template>
-        </q-input>
-        <DirectoryField
-          v-if="chosenProvider?.kind === 'microsoft'"
-          v-model="connectDirectory"
-          :error="connectDirectoryProblem"
-        />
-
-        <div class="connect-redirect" data-redirect-uri-block>
-          <div class="text-caption os-text-muted">Redirect URI to register at the provider for this address:</div>
-          <div class="mono" data-redirect-uri>{{ redirectUri }}</div>
-          <div v-if="redirectWarning" class="text-caption text-warning q-mt-xs" data-redirect-warning>{{ redirectWarning }}</div>
-          <div v-if="chosenProvider" class="text-caption os-text-muted q-mt-xs" data-provider-help>
-            {{ providerHelp(chosenProvider) }}
-          </div>
-          <div class="text-caption os-text-muted q-mt-xs">
-            If the provider will not accept this address, connect from the operator's computer with
-            <span class="mono">{{ productCli }} connect</span>.
-          </div>
-        </div>
-
-        <div v-if="connectProblem" class="text-negative" data-connect-problem>{{ connectProblem }}</div>
-      </q-card-section>
-
-      <q-card-actions align="right">
-        <q-btn v-close-popup flat no-caps label="Cancel" />
-        <q-btn
-          color="primary"
-          no-caps
-          label="Connect"
-          :loading="leaving"
-          :disable="!chosenProvider || !chosenProvider.configured || leaving"
-          @click="connect"
-        />
-      </q-card-actions>
-    </q-card>
-  </q-dialog>
-
-  <!-- A PROVIDER'S CLIENT. The secret is write-only: never filled, and "set" is all that is shown. -->
-  <q-dialog v-model="clientOpen">
-    <q-card class="os-dialog-md" data-client-dialog>
-      <q-card-section>
-        <div class="os-dialog-title">{{ clientFor ? `${clientFor.name} client` : 'Add a custom provider' }}</div>
-        <div class="text-caption os-text-muted">
-          The client ID and secret you registered at the provider. The Host stores the secret
-          encrypted and never shows it again.
-        </div>
-      </q-card-section>
-
-      <q-card-section class="q-gutter-md">
-        <template v-if="isCustom">
-          <q-input
-            v-if="!clientFor"
-            v-model="customId"
-            outlined
-            dense
-            label="Provider id"
-            spellcheck="false"
-            autocomplete="off"
-          >
-            <template #append><FieldHelp text="custom- then lowercase letters, digits and hyphens." /></template>
-          </q-input>
-          <q-input v-model="customName" outlined dense label="Display name" autocomplete="off" />
-          <q-input v-model="authorizeUrl" outlined dense label="Authorization URL" spellcheck="false" autocomplete="off" />
-          <q-input v-model="tokenUrl" outlined dense label="Token URL" spellcheck="false" autocomplete="off" />
-          <q-input
-            v-model="userinfoUrl"
-            outlined
-            dense
-            label="Userinfo URL"
-            spellcheck="false"
-            autocomplete="off"
-          >
-            <template #append><FieldHelp text="Optional: where the account's name is read." /></template>
-          </q-input>
-          <q-input
-            v-model="defaultScopes"
-            outlined
-            dense
-            label="Default scopes"
-            spellcheck="false"
-            autocomplete="off"
-          >
-            <template #append><FieldHelp text="Asked on every connection of this provider." /></template>
-          </q-input>
-        </template>
-
-        <q-input v-model="clientId" outlined dense label="Client ID" spellcheck="false" autocomplete="off" />
-        <q-input
-          v-model="clientSecret"
-          outlined
-          dense
-          type="password"
-          label="Client secret"
-          :disable="clearSecret"
-          autocomplete="new-password"
-          spellcheck="false"
-          data-client-secret-input
-        >
-          <template #append><FieldHelp :text="clientFor?.clientSecretSet
-            ? 'Set. Leave empty to keep it; type a new one to replace it.'
-            : 'Not set.'" /></template>
-          <template v-if="clientFor?.clientSecretSet" #append>
-            <q-badge outline color="positive" label="set" data-secret-set />
-          </template>
-        </q-input>
-        <q-checkbox
-          v-if="clientFor?.clientSecretSet"
-          v-model="clearSecret"
-          dense
-          label="Clear the secret (a public client, PKCE only)"
-        />
-        <q-input
-          v-if="clientFor?.kind === 'microsoft'"
-          v-model="tenant"
-          outlined
-          dense
-          label="Tenant"
-          autocomplete="off"
-        >
-          <template #append><FieldHelp text="Optional. Leave empty for common: work, school and personal accounts." /></template>
-        </q-input>
-
-        <div data-redirect-uri-block>
-          <div class="text-caption os-text-muted">Redirect URI to register at the provider for this address:</div>
-          <div class="mono">{{ redirectUri }}</div>
-          <div v-if="redirectWarning" class="text-caption text-warning q-mt-xs" data-redirect-warning>{{ redirectWarning }}</div>
-          <div v-if="clientFor" class="text-caption os-text-muted q-mt-xs">{{ providerHelp(clientFor) }}</div>
-        </div>
-
-        <div v-if="clientProblem" class="text-negative" data-client-problem>{{ clientProblem }}</div>
-      </q-card-section>
-
-      <q-card-actions align="right">
-        <q-btn v-close-popup flat no-caps label="Cancel" />
-        <q-btn
-          color="primary"
-          no-caps
-          label="Save client"
-          :loading="clientBusy"
-          :disable="clientBusy || clientId.trim() === ''"
-          @click="saveClient"
         />
       </q-card-actions>
     </q-card>
@@ -1440,9 +977,5 @@ async function removeProvider(provider: ConnectionProvider) {
 /* The tooltip lives on this WRAPPER because a disabled q-btn swallows pointer events. */
 .row-btn-wrap {
   display: inline-flex;
-}
-
-.connect-redirect {
-  word-break: break-all;
 }
 </style>

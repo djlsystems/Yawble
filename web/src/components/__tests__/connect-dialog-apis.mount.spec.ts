@@ -203,6 +203,7 @@ describe('A Microsoft connection spanning several APIs', () => {
 
     await click(group(sql)!.querySelector('[role="checkbox"]'));
     await click(button('Next'));
+    await click(button('Next'));
     await click(button('Sign in with Microsoft'));
 
     expect(startDeviceConnection).toHaveBeenCalledTimes(1);
@@ -250,6 +251,7 @@ describe('Two codes for a sign-in spanning several APIs', () => {
     const wrapper = await mountConnections();
     await choose('microsoft');
     await click(button('Next'));
+    await click(button('Next'));
 
     const told = bodyFind('[data-two-codes]')!.textContent!;
     expect(told).toContain('two short codes');
@@ -285,6 +287,7 @@ describe('Two codes for a sign-in spanning several APIs', () => {
     const wrapper = await mountConnections();
     await choose('microsoft');
     await click(button('Next'));
+    await click(button('Next'));
 
     expect(bodyFind('[data-two-codes]')).toBeNull();
     await click(button('Sign in with Microsoft'));
@@ -297,6 +300,7 @@ describe('Two codes for a sign-in spanning several APIs', () => {
     const wrapper = await mountConnections();
     await choose('microsoft');
     for (const api of [sql, storage, vault, logs, graph]) await click(group(api)!.querySelector('[role="checkbox"]'));
+    await click(button('Next'));
     await click(button('Next'));
 
     expect(bodyFind('[data-two-codes]')).toBeNull();

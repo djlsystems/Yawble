@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 //
 // ADD CONNECTION, MICROSOFT, WITH THE INSTANCE'S OWN APP: while the Host answers `clientSource:
-// 'default'`, Microsoft goes straight from the service to Sign in - no app to register - and Set up
-// the app is under Advanced… on that step, for an app of one's own. When the account's organisation
+// 'default'`, Microsoft's app step says that app is in use - no app to register - and setting up an
+// app of one's own is on that same step, never under an Advanced…. When the account's organisation
 // lets only an admin approve the app, Microsoft's refusal reads as one sentence saying an admin of
 // that organisation approves it, never as its error code alone.
 //
@@ -133,7 +133,8 @@ async function click(element: Element | null) {
 const step = () => bodyFind('[data-connect-step]')?.getAttribute('data-connect-step') ?? null;
 const stepList = () => bodyFind('.connect-steps')?.textContent ?? '';
 
-async function chooseMicrosoft() {
+/** To Microsoft's app step. */
+async function toApp() {
   await mountDialog(ConnectionsDialog, {});
   await settle();
   await click(button('Add connection'));
@@ -142,58 +143,72 @@ async function chooseMicrosoft() {
   await click(button('Next'));
 }
 
+/** Through the app step, on the instance's app, to Sign in. */
+async function chooseMicrosoft() {
+  await toApp();
+  await click(button('Next'));
+}
+
 describe("Microsoft with the instance's own app", () => {
-  it('goes straight to Sign in, with Set up the app under Advanced…', async () => {
-    await chooseMicrosoft();
+  it("says on its own app step that the instance's app is in use, with an app of one's own set up there", async () => {
+    await toApp();
 
-    expect(step()).toBe('signin');
-    expect(stepList()).not.toContain('Set up the app');
-    expect(button('Sign in with Microsoft')).not.toBeNull();
-    // Next did not read the guide: there is nothing to set up.
-    expect(listConnectionProviders).toHaveBeenCalledTimes(1);
+    expect(step()).toBe('setup');
+    expect(stepList()).toContain('App');
+    expect(bodyFind('[data-app-in-use]')!.getAttribute('data-app-in-use')).toBe('default');
+    expect(bodyFind('[data-app-in-use]')!.textContent).toContain('nothing to register');
+    // No saved app, so nothing to undo; the guide waits until asked for.
+    expect(bodyFind('[data-clear-client-button]')).toBeNull();
+    expect(bodyFind('[data-guide-step="credentials"]')).toBeNull();
 
-    await click(bodyFind('[data-connect-own-app]'));
+    await click(bodyFind('[data-own-app]'));
     expect(step()).toBe('setup');
     expect(bodyFind('[data-setup-own]')).not.toBeNull();
+    expect(bodyFind('[data-guide-audience]')).not.toBeNull();
     expect(bodyFind('[data-guide-step="credentials"]')).not.toBeNull();
 
-    await click(button('Back'));
+    await click(button('Next'));
     expect(step()).toBe('signin');
-
     await click(button('Sign in with Microsoft'));
     expect(startDeviceConnection).toHaveBeenCalledWith({ provider: 'microsoft', scopes: [mailRead], flow: 'device' });
     expect(startConnection).not.toHaveBeenCalled();
     expect(bodyFind('[data-device-code]')!.textContent).toContain('FAKE-CODE');
   });
 
-  it('offers Set up the app under the Microsoft tile too, and its Back returns to the service', async () => {
+  it('puts no Advanced… on the service step or the sign-in step, and Back from Sign in is the app step', async () => {
     await mountDialog(ConnectionsDialog, {});
     await settle();
     await click(button('Add connection'));
     await click(bodyFind('[data-connection-kind="oauth"]'));
-    expect(bodyFind('[data-connect-own-app-service]')).toBeNull();
-
     await click(bodyFind('[data-connect-service="microsoft"]'));
-    expect(bodyFind('[data-service-own-app]')!.textContent).toContain('one organisation');
+    expect(bodyFind('[data-service-own-app]')).toBeNull();
+    expect(bodyFind('[data-connect-own-app-service]')).toBeNull();
     // Gmail's own way in is not offered under the Microsoft tile.
     expect(bodyFind('[data-connect-advanced]')).toBeNull();
+    expect(bodyFind('[data-guided-connect]')!.textContent).not.toContain('Advanced');
 
-    await click(bodyFind('[data-connect-own-app-service]'));
+    await click(button('Next'));
+    await click(button('Next'));
+    expect(step()).toBe('signin');
+    expect(bodyFind('[data-connect-own-app]')).toBeNull();
+    expect(bodyFind('[data-signin-advanced]')).toBeNull();
+    expect(bodyFind('[data-guided-connect]')!.textContent).not.toContain('Advanced');
+
+    await click(button('Back'));
     expect(step()).toBe('setup');
-    expect(bodyFind('[data-setup-own]')).not.toBeNull();
-    expect(bodyFind('[data-guide-audience]')).not.toBeNull();
-
     await click(button('Back'));
     expect(step()).toBe('service');
   });
 
-  it('keeps Set up the app as its own step when there is no app at all', async () => {
+  it('shows the guide at once, and holds Next, when there is no app at all', async () => {
     listConnectionProviders.mockResolvedValue([google, hostProvider({ id: 'microsoft', guide })]);
-    await chooseMicrosoft();
+    await toApp();
 
     expect(step()).toBe('setup');
-    expect(stepList()).toContain('Set up the app');
-    expect(bodyFind('[data-connect-own-app]')).toBeNull();
+    expect(bodyFind('[data-app-in-use]')!.getAttribute('data-app-in-use')).toBe('none');
+    expect(bodyFind('[data-guide-step="credentials"]')).not.toBeNull();
+    expect(bodyFind('[data-own-app]')).toBeNull();
+    expect(button('Next').hasAttribute('disabled')).toBe(true);
   });
 });
 

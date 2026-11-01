@@ -142,6 +142,8 @@ describe('Solution wizard - Connect beside a connection input', () => {
     const connect = bodyFind('[data-connection-input="Scout/mail"] [data-slot-connect]');
     expect(connect?.textContent).toContain('Connect Microsoft');
     await click(connect?.querySelector('button'));
+    expect(bodyFind('[data-guided-connect] [data-connect-step]')?.getAttribute('data-connect-step')).toBe('setup');
+    await click(bodyFind('[data-app-next]'));
     expect(bodyFind('[data-guided-connect] [data-connect-step]')?.getAttribute('data-connect-step')).toBe('signin');
 
     await signIn();
@@ -168,6 +170,8 @@ describe('Solution wizard - Connect beside a connection input', () => {
     await click(connect?.querySelector('button'));
 
     expect(sent(calls, 'GET', '/api/connections/needs?provider=microsoft&plugin=job-board&slot=mail')).toHaveLength(1);
+    expect(bodyFind('[data-guided-connect] [data-connect-step]')?.getAttribute('data-connect-step')).toBe('setup');
+    await click(bodyFind('[data-app-next]'));
     expect(bodyFind('[data-guided-connect] [data-connect-step]')?.getAttribute('data-connect-step')).toBe('signin');
 
     vi.useFakeTimers({ now: new Date('2026-10-04T10:00:00Z'), toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });

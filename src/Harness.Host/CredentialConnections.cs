@@ -380,11 +380,25 @@ public static partial class CredentialForm
     }
 
     /// <summary>What a connection's account reads as: a login's username, an API key's first unmasked
-    /// field, else the service's name; a website's, its site's host.</summary>
-    public static string AccountOf(CredentialPreset preset, CredentialSettings settings) =>
-        preset.Kind == ConnectionKinds.Website ? WebsiteFields.AccountOf(settings)
-        : settings.Fields.FirstOrDefault(f => !f.Masked && f.Value is { Length: > 0 } && f.Name != "url")?.Value
-            ?? (preset.Kind == ConnectionKinds.ApiKey ? preset.Name : "");
+    /// field that is not a setting, else - with no unmasked field but its url - the service's name; a
+    /// website's, its site's host. A SETTING IS NOT AN ACCOUNT: a field a preset types <c>bool</c>, or an
+    /// Other field whose value is true or false (an autoSave), names nobody, so a key whose unmasked
+    /// fields are all settings has none.</summary>
+    public static string AccountOf(CredentialPreset preset, CredentialSettings settings)
+    {
+        if (preset.Kind == ConnectionKinds.Website) return WebsiteFields.AccountOf(settings);
+
+        var shown = settings.Fields.Where(f => !f.Masked && f.Value is { Length: > 0 } && f.Name != "url").ToList();
+        if (shown.FirstOrDefault(f => !IsSetting(preset, f)) is { } account) return account.Value!;
+        if (shown.Count > 0) return "";
+        return preset.Kind == ConnectionKinds.ApiKey ? preset.Name : "";
+    }
+
+    /// <summary>A field holding a setting, not a name: typed <c>bool</c>, or true or false where nothing types it.</summary>
+    private static bool IsSetting(CredentialPreset preset, CredentialField field) =>
+        preset.Fields.FirstOrDefault(spec => spec.Name == field.Name) is { } spec
+            ? spec.Type == CredentialFieldSpec.Bool
+            : field.Value is { } value && (value.Equals("true", StringComparison.OrdinalIgnoreCase) || value.Equals("false", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// A value as it is kept: a <c>url</c> field's bare address (<c>mysite.com/login</c>) given

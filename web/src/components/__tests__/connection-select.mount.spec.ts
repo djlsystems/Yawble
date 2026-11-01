@@ -22,6 +22,7 @@ const {
   startConnection,
   startDeviceConnection,
   getConnectionFlow,
+  listConnectionProviders,
   goTo,
 } = vi.hoisted(() => ({
   listConnections: vi.fn(),
@@ -33,6 +34,7 @@ const {
   startConnection: vi.fn(),
   startDeviceConnection: vi.fn(),
   getConnectionFlow: vi.fn(),
+  listConnectionProviders: vi.fn(),
   goTo: vi.fn(),
 }));
 
@@ -47,6 +49,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
   startConnection,
   startDeviceConnection,
   getConnectionFlow,
+  listConnectionProviders,
 }));
 
 vi.mock('../../lib/browserNavigation', () => ({
@@ -162,10 +165,12 @@ async function chooseNew(wrapper: Parameters<typeof select>[0]) {
 }
 
 beforeEach(() => {
-  for (const mock of [listConnections, listOpenConnectionFlows, listMailboxPresets, listCredentialPresets, addCredentialConnection, getConnectionNeeds, startConnection, startDeviceConnection, getConnectionFlow, goTo]) {
+  for (const mock of [listConnections, listOpenConnectionFlows, listMailboxPresets, listCredentialPresets, addCredentialConnection, getConnectionNeeds, startConnection, startDeviceConnection, getConnectionFlow, listConnectionProviders, goTo]) {
     mock.mockReset();
   }
   listConnections.mockResolvedValue([stripe, router, gmail, outlook]);
+  // The app step reads the guide again for what is ticked: none here, so the provider's own stands.
+  listConnectionProviders.mockResolvedValue([]);
   listOpenConnectionFlows.mockResolvedValue([]);
   listMailboxPresets.mockResolvedValue([]);
   listCredentialPresets.mockResolvedValue(presets);
@@ -331,6 +336,8 @@ describe('ConnectionSelect: New connection...', () => {
     await chooseNew(wrapper);
     expect(step()).toBe('service');
     await click(button('Next'));
+    expect(step()).toBe('setup');
+    await click(button('Next'));
     expect(step()).toBe('signin');
     await click(button('Sign in with Google'));
 
@@ -357,6 +364,7 @@ describe('ConnectionSelect: New connection...', () => {
     const wrapper = await mountDialog(Place, { connections: all, kinds: ['oauth'], providers: ['microsoft'] });
 
     await chooseNew(wrapper);
+    await click(button('Next'));
     await click(button('Next'));
     await click(button('Sign in with Microsoft'));
     await settle();

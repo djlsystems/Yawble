@@ -2,11 +2,11 @@
 //
 // ADMIN > CONNECTIONS > ADD CONNECTION: the guided dialog. Three steps - the service, with what the
 // installed plugins will ask of it in words, each line naming the plugin that wants it and any of
-// them untickable; setting up the provider's app, only when its client is not set up yet, as a
-// checklist of the provider's own guide; and signing in through the existing web flow, which comes
-// back to the dialog for an optional name. Microsoft's guided way, signing in with a code, is
-// connect-dialog-device.mount.spec.ts. Today's Providers tab and Connect form are under Advanced,
-// unchanged.
+// them untickable; its app, a step of its own - the app in use, or the provider's own guide as a
+// checklist when there is none; and signing in through the existing web flow, where a scope no plugin
+// asks for can be added, and which comes back to the dialog for an optional name. Microsoft's guided
+// way, signing in with a code, is connect-dialog-device.mount.spec.ts. There is no Advanced, no
+// Providers tab and no Connect an account.
 //
 // THE MOCK IS OF `api/client`, in the shapes the Host serves, of the one navigation the web makes
 // and of the clipboard, so where the browser would go and what was copied are asserted, not done.
@@ -263,6 +263,7 @@ describe('The service step', () => {
     expect(ticked(gmail)).toBe(true);
 
     await click(button('Next'));
+    await click(button('Next'));
     await click(button('Sign in with Google'));
 
     expect(startConnection).toHaveBeenCalledWith({ provider: 'google', scopes: [gmail, odd] });
@@ -274,13 +275,20 @@ describe('The service step', () => {
 });
 
 describe('The set-up step', () => {
-  it('is skipped when the client is set up', async () => {
+  it('is a step of its own when the client is set up: the app in use, the guide only when asked, then Sign in', async () => {
     const wrapper = await mountConnections();
     await chooseGoogle();
     await click(button('Next'));
 
-    expect(step()).toBe('signin');
+    expect(step()).toBe('setup');
+    expect(bodyFind('.connect-steps')!.textContent).toContain('2. App');
+    expect(bodyFind('[data-app-in-use="saved"]')!.textContent).toContain('123.apps.googleusercontent.com');
     expect(bodyFind('[data-guide-step]')).toBeNull();
+    await click(bodyFind('[data-own-app]'));
+    expect(bodyFind('[data-guide-step="credentials"]')).not.toBeNull();
+
+    await click(button('Next'));
+    expect(step()).toBe('signin');
 
     wrapper.unmount();
   });
@@ -470,6 +478,7 @@ describe('The sign-in step', () => {
     const first = await mountConnections();
     await chooseGoogle();
     await click(button('Next'));
+    await click(button('Next'));
     await click(button('Sign in with Google'));
     first.unmount();
     resetBody();
@@ -494,6 +503,7 @@ describe('The sign-in step', () => {
     const first = await mountConnections();
     await chooseGoogle();
     await click(button('Next'));
+    await click(button('Next'));
     await click(button('Sign in with Google'));
     first.unmount();
     resetBody();
@@ -506,7 +516,7 @@ describe('The sign-in step', () => {
     wrapper.unmount();
   });
 
-  it('a connection made from Advanced does not open the guided dialog on return', async () => {
+  it('a sign-in Add connection did not begin (a Reconnect) does not open the guided dialog on return', async () => {
     const wrapper = await mountConnections({ notice: { outcome: 'connected', id: 'conn-new' } });
 
     expect(bodyFind('[data-guided-connect]')).toBeNull();
@@ -515,22 +525,20 @@ describe('The sign-in step', () => {
   });
 });
 
-describe('Advanced', () => {
-  it("holds today's Providers tab and Connect form, unchanged", async () => {
+describe('A scope no plugin asks for', () => {
+  it('is added on the sign-in step, after those ticked, each once', async () => {
     const wrapper = await mountConnections();
+    await chooseGoogle();
+    await click(scopeLine(drive).querySelector('[role="checkbox"]'));
+    await click(button('Next'));
+    await click(button('Next'));
 
-    expect(bodyFind('[data-connections-tab="providers"]')).toBeNull();
-    expect(bodyText()).not.toContain('Connect an account…');
+    expect(bodyFind('[data-connect-step="signin"]')!.textContent).toContain('2 things are asked for');
+    await type('More scopes (optional)', `https://www.googleapis.com/auth/calendar.readonly, ${gmail}`);
+    expect(bodyFind('[data-connect-step="signin"]')!.textContent).toContain('3 things are asked for');
+    await click(button('Sign in with Google'));
 
-    await click(bodyFind('[data-connections-advanced]'));
-
-    expect(bodyFind('[data-connections-tab="providers"]')!.textContent).toContain('Providers (2)');
-    await click(button('Connect an account…'));
-    expect(bodyFind('[data-connect-dialog]')).not.toBeNull();
-    // Today's form: a provider, free-text scopes, a name, the redirect URI.
-    expect(field('Scopes')).toBeDefined();
-    expect(field('Name')).toBeDefined();
-    expect(bodyFind('[data-connect-dialog] [data-redirect-uri]')!.textContent).toBe('https://instance.example.test/api/connections/callback');
+    expect(startConnection).toHaveBeenCalledWith({ provider: 'google', scopes: [gmail, odd, 'https://www.googleapis.com/auth/calendar.readonly'] });
 
     wrapper.unmount();
   });
