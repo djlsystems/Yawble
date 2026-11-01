@@ -254,8 +254,11 @@ public sealed class TeamTokenRunsTests(TeamTokenRunsTests.Bed bed) : IClassFixtu
         Assert.True(reset.IsSuccessStatusCode, await reset.Content.ReadAsStringAsync(Ct));
         Assert.Null(await bed.Log.FindAsync(root.Seq, Ct));
 
-        Assert.Equal(Rows(before), Rows(await bed.RunsAsync(team, from, to)));
-        Assert.Equal(Rows(whole), Rows(await bed.RunsAsync(team)));
+        // A run that ends after the first read (a Manager woken late) may be added; none may go.
+        var afterPeriod = Rows(await bed.RunsAsync(team, from, to));
+        var afterWhole = Rows(await bed.RunsAsync(team));
+        Assert.All(Rows(before), row => Assert.Contains(row, afterPeriod));
+        Assert.All(Rows(whole), row => Assert.Contains(row, afterWhole));
     }
 
     private static string Url(string team, DateTimeOffset from, DateTimeOffset to) =>

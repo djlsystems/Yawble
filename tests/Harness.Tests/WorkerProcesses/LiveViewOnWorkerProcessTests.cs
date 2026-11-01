@@ -82,9 +82,17 @@ public sealed class LiveViewOnWorkerProcessTests
         }
 
         await bed.UntilWorkerAsync("w1", WorkersView.Connected);
-        using (var again = await bed.Person.GetAsync(route, HttpCompletionOption.ResponseHeadersRead, Ct))
+        // Connected is shown before the worker's socket is attached again; until then the route answers 503.
+        HttpResponseMessage? again = null;
+        await bed.UntilAsync("the live view answers again", async () =>
         {
-            Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+            again?.Dispose();
+            again = await bed.Person.GetAsync(route, HttpCompletionOption.ResponseHeadersRead, Ct);
+            return again.StatusCode == HttpStatusCode.OK;
+        });
+        using (again)
+        {
+            Assert.Equal(HttpStatusCode.OK, again!.StatusCode);
             using var lines = new StreamReader(await again.Content.ReadAsStreamAsync(Ct));
             Assert.Equal("\tuser\tUser: tick 1", await lines.ReadLineAsync(Ct).AsTask().WaitAsync(ProcessBed.Bound, Ct));
         }
