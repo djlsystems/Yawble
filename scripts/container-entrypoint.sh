@@ -134,14 +134,15 @@ case "$role" in
         -- /usr/bin/dotnet /app/Harness.Host.dll
     ;;
   worker)
-    # Control prepares the volume; until it has (the data root host:agent 0750, tmp and agent-home
-    # there), nothing below can work. A worker started first waits, and after the limit starts
+    # Control prepares the volume; until it has (the data root host:agent 0751, tmp and agent-home
+    # there), nothing below can work. The mode is prepare-volume.sh's for the root (0751 since MCP 3,
+    # so the mcp user can pass through); a mismatch here costs every worker start the whole limit. A worker started first waits, and after the limit starts
     # anyway, so a misread never keeps a worker down for good. The figures are for a test.
     wait_root="${HARNESS_DATA_ROOT:-/data}"
     wait_every="${HARNESS_VOLUME_WAIT_SECONDS:-10}"
     wait_limit="${HARNESS_VOLUME_WAIT_LIMIT:-600}"
     waited=0
-    until [ "$(stat -c '%u:%g %a' "$wait_root" 2>/dev/null)" = "${HARNESS_HOST_UID:-10001}:${HARNESS_AGENT_GID:-10002} 750" ] \
+    until [ "$(stat -c '%u:%g %a' "$wait_root" 2>/dev/null)" = "${HARNESS_HOST_UID:-10001}:${HARNESS_AGENT_GID:-10002} 751" ] \
         && [ -d "$wait_root/tmp" ] && [ -d "$wait_root/agent-home" ]; do
       if [ "$waited" -ge "$wait_limit" ]; then
         echo "worker: the volume is still not prepared by control after $waited s; starting anyway"

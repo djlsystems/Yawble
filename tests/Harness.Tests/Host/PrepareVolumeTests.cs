@@ -1049,7 +1049,9 @@ public sealed class PrepareVolumeTests : IDisposable
 
     /// <summary>
     /// A worker changes no ownership: it waits until control has prepared the volume (the data root
-    /// host:agent 0750, tmp and agent-home there), and after the limit starts anyway with a warning.
+    /// host:agent 0751, tmp and agent-home there), and after the limit starts anyway with a warning.
+    /// The mode it waits for is the one prepare-volume.sh gives the root: when MCP 3 moved the root to
+    /// 0751 and this stayed at 0750, every worker start waited the whole limit.
     /// </summary>
     [Fact]
     public void The_worker_waits_for_a_prepared_volume_then_starts()
@@ -1060,6 +1062,12 @@ public sealed class PrepareVolumeTests : IDisposable
         var start = Array.FindIndex(lines, line => line.TrimStart().StartsWith("wait_root=", StringComparison.Ordinal));
         var end = Array.FindIndex(lines, start, line => line.Trim() == "done");
         var wait = string.Join('\n', lines[start..(end + 1)]);
+
+        // THE SAME MODE prepare-volume.sh gives the data root, or every worker start waits the whole limit.
+        var prepareScript = File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "prepare-volume.sh"));
+        var rootMode = System.Text.RegularExpressions.Regex.Match(prepareScript, @"stat -c '%a' ""\$root""\)"" = (\d+) \]").Groups[1].Value;
+        Assert.Equal("751", rootMode);
+        Assert.Contains($"}} {rootMode}\" ]", wait);
 
         Dictionary<string, string> Volume(string root, int limit) => new()
         {
@@ -1073,7 +1081,7 @@ public sealed class PrepareVolumeTests : IDisposable
         var prepared = Path.Combine(_root, "prepared");
         Directory.CreateDirectory(Path.Combine(prepared, "tmp"));
         Directory.CreateDirectory(Path.Combine(prepared, "agent-home"));
-        File.SetUnixFileMode(prepared, (UnixFileMode)Convert.ToInt32("750", 8));
+        File.SetUnixFileMode(prepared, (UnixFileMode)Convert.ToInt32("751", 8));
         var straight = Exec("/bin/sh", ["-e", "-c", wait + "\necho started"], Volume(prepared, 30));
         Assert.Equal((0, "started"), (straight.Code, straight.Output.Trim()));
 
@@ -1090,7 +1098,7 @@ public sealed class PrepareVolumeTests : IDisposable
         // Prepared while it waits: it goes on then, with no warning. The mode alone is not enough.
         var later = Path.Combine(_root, "later");
         Directory.CreateDirectory(later);
-        File.SetUnixFileMode(later, (UnixFileMode)Convert.ToInt32("750", 8));
+        File.SetUnixFileMode(later, (UnixFileMode)Convert.ToInt32("751", 8));
         var prepare = $"( sleep 2; mkdir -p '{later}/tmp' '{later}/agent-home' ) &\n";
         var waited = Exec("/bin/sh", ["-e", "-c", prepare + wait + "\nwait\necho started"], Volume(later, 30));
         Assert.True(waited.Code == 0, waited.Output);
