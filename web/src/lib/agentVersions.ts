@@ -111,6 +111,9 @@ export function updateInGate(state: AgentUpdateState | undefined): boolean {
 export function updateStateLine(state: AgentUpdateState | undefined, format: (iso: string) => string = stamp): string | null {
   if (!state) return null
 
+  // AN INSTALL the platform runs after the start, for a CLI the volume did not have: said as such.
+  if (state.kind === 'install' && updateInGate(state)) return `Installing ${state.command}...`
+
   switch (state.phase) {
     case 'waiting': {
       if (state.running === 0) return `Waiting to start the ${state.command} update.`

@@ -76,4 +76,21 @@ describe('conciergePreflight', () => {
       conciergePreflight(settings({ auth: { installed: false, signedIn: false, detail: null } })),
     ).toMatchObject({ kind: 'blocked', lead: 'claude is not installed; choose another agent in' });
   });
+
+  /** A fresh volume: the agent's CLI installs in the background after the worker connected. */
+  it('says Installing while the agent is installed, never that it is not installed', () => {
+    const verdict = conciergePreflight(
+      settings({ auth: { installed: false, signedIn: false, detail: 'Installing claude on worker-1.', heldBy: 'install' } }),
+    );
+
+    expect(verdict).toEqual({ kind: 'installing', lead: 'Installing claude...', detail: 'Installing claude on worker-1.' });
+    expect(verdict.kind !== 'ready' && verdict.lead).not.toContain('not installed');
+  });
+
+  it('says Updating while it is replaced, and Getting ready before a worker has said', () => {
+    expect(conciergePreflight(settings({ auth: { installed: false, signedIn: false, detail: null, heldBy: 'update' } })))
+      .toEqual({ kind: 'installing', lead: 'Updating claude...', detail: null });
+    expect(conciergePreflight(settings({ auth: { installed: false, signedIn: false, detail: null, heldBy: 'check' } })))
+      .toEqual({ kind: 'installing', lead: 'Getting claude ready...', detail: null });
+  });
 });

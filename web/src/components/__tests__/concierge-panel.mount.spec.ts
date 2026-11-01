@@ -394,6 +394,65 @@ describe('the pre-flight', () => {
     });
   });
 
+  /**
+   * A fresh volume: the worker connected and its agent CLIs are installing in the background. The panel says
+   * Installing - never "not installed; choose another agent" - opens no socket, asks again, and attaches
+   * when the install is done, without a restart.
+   */
+  describe('while its agent is being installed', () => {
+    const installing = { ...effective, agent: 'claude', agentSource: 'default', auth: { installed: false, signedIn: false, detail: 'Installing claude on worker-1; it is measured again when the install ends.', heldBy: 'install' } };
+    const installed = { ...effective, agent: 'claude', agentSource: 'chosen', auth: { installed: true, signedIn: true, detail: null } };
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('says Installing, opens no socket, and attaches once the install is done', async () => {
+      concierge.mockResolvedValue({ agent: null, effective: installing });
+      await openPanel();
+
+      expect(bannerText()).toBe('Installing claude...');
+      expect(bannerText()).not.toContain('not installed');
+      expect(shell().querySelector('.concierge-preflight-link')).toBeNull();
+      expect(connectConcierge).not.toHaveBeenCalled();
+
+      // Still installing: said, and still no socket.
+      vi.advanceTimersByTime(3_000);
+      await flushPromises();
+      expect(bannerText()).toBe('Installing claude...');
+      expect(connectConcierge).not.toHaveBeenCalled();
+
+      concierge.mockResolvedValue({ agent: null, effective: installed });
+      vi.advanceTimersByTime(3_000);
+      await flushPromises();
+      await flushPromises();
+      expect(banner()).toBeNull();
+      expect(connectConcierge).toHaveBeenCalledTimes(1);
+
+      // Attached is the end of it: no more asking.
+      const asked = concierge.mock.calls.length;
+      vi.advanceTimersByTime(30_000);
+      await flushPromises();
+      expect(concierge.mock.calls.length).toBe(asked);
+    });
+
+    it('stops asking when the panel is closed', async () => {
+      concierge.mockResolvedValue({ agent: null, effective: installing });
+      await openPanel();
+      await wrapper!.setProps({ modelValue: false });
+      await flushPromises();
+
+      const asked = concierge.mock.calls.length;
+      vi.advanceTimersByTime(30_000);
+      await flushPromises();
+      expect(concierge.mock.calls.length).toBe(asked);
+      expect(connectConcierge).not.toHaveBeenCalled();
+    });
+  });
+
   it('with no agent, shows the sentence and the link and opens no socket', async () => {
     concierge.mockResolvedValue({
       agent: 'claude',

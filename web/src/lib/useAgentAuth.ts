@@ -67,7 +67,8 @@ export interface AuthStatus {
 export function authStatus(report: AgentAuthReport | undefined | null): AuthStatus {
   // THE PLATFORM'S UPDATE HOLDS THE CLI: not asked, and never signed out or not installed.
   if (report?.updating) {
-    return { text: 'Updating', icon: 'sync', tone: 'unknown', detail: report.updating }
+    const text = report.heldBy === 'install' ? 'Installing' : report.heldBy === 'check' ? 'Getting ready' : 'Updating'
+    return { text, icon: 'sync', tone: 'unknown', detail: report.updating }
   }
 
   // NOT MEASURED BECAUSE NO WORKER ANSWERED: whether the CLI is even installed is not known, and the

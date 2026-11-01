@@ -53,6 +53,7 @@ describe('the Admission field', () => {
     const names = TenantSettingFields.map((field) => field.name).sort();
     expect(names).toEqual([
       'agents.commitAttribution',
+      'agents.updateInterval',
       'causation.depthLimit',
       'concierge.idleTimeout',
       'concierge.mayArchive',
