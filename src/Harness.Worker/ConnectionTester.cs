@@ -9,7 +9,7 @@ namespace Harness.Host;
 /// <summary>
 /// A CONNECTION'S TEST, on this worker: a mailbox's IMAP login and SMTP authentication (the same
 /// <see cref="IMailLogin"/> a mailbox is saved with), a sign-in's refresh and one read of the account's
-/// profile, or the one harmless GET a credential's preset declares. Answers ok, refused or failed in one
+/// profile (for Microsoft, also one token per API it holds), or the one harmless GET a credential's preset declares. Answers ok, refused or failed in one
 /// sentence; a website's signed-in check (and Team Connections' commands on it) in the platform's browser
 /// (<see cref="WebsiteRunner"/>). No sentence carries a value the probe holds: each is taken out before it is answered, and
 /// nothing here logs. Tests point it at fake servers: <paramref name="mail"/> trusting a fake server's
@@ -96,21 +96,159 @@ public sealed class ConnectionTester(IMailLogin? mail = null, HttpMessageHandler
 
     private async Task<(string, string, string?)> OAuthAsync(OAuthProbe probe, CancellationToken ct)
     {
+        var renewed = await RefreshAsync(probe, probe.RefreshToken, probe.Scopes, ct);
+        if (renewed.Unreachable is { } unreachable) return (ConnectionTested.Failed, $"{unreachable} The sign-in was not renewed.", null);
+
+        if (renewed.NotJson)
+        {
+            return (ConnectionTested.Failed, $"{probe.Provider} answered HTTP {renewed.Status} without a token when asked to renew the sign-in. Try again later.", null);
+        }
+
+        if (renewed.Refusal is { } refusal)
+        {
+            return renewed.Refused
+                ? (ConnectionTested.Refused, $"{probe.Provider} refused to renew the sign-in ({refusal}). Reconnect it.", null)
+                : (ConnectionTested.Failed, $"{probe.Provider} could not renew the sign-in just now ({refusal}). Try again later.", null);
+        }
+
+        if (renewed.AccessToken is not { Length: > 0 } access)
+        {
+            return (ConnectionTested.Failed, $"{probe.Provider} renewed the sign-in but sent no access token. Try again later.", null);
+        }
+
+        // Every token this test was issued, taken out of every sentence it answers.
+        var issued = new List<string> { access };
+        if (renewed.IdToken is { Length: > 0 } idToken) issued.Add(idToken);
+
+        var latest = renewed.RefreshToken is { Length: > 0 } first && first != probe.RefreshToken ? first : probe.RefreshToken;
+
+        if (probe.AccountClaims is not { Count: > 0 } accountClaims)
+        {
+            var (outcome, sentence) = await OneProfileAsync(probe, access, ct);
+
+            // A ROTATED REFRESH TOKEN goes back whatever the profile said: the old one may no longer work.
+            return (outcome, Redact(sentence, issued), Rotated(probe, latest));
+        }
+
+        // MICROSOFT: the profile, read when the provider lets it be; the account from the same refresh's
+        // ID token when not. A token was issued, so a profile not read is said and is not a refusal.
+        var head = await MicrosoftProfileAsync(probe, access, renewed.IdToken, accountClaims, ct);
+
+        // THEN EACH API the connection holds, every one, each from the latest refresh token.
+        var parts = new List<string>();
+        int refused = 0, notReached = 0;
+        foreach (var api in probe.Apis ?? [])
+        {
+            var answer = await RefreshAsync(probe, latest, api.Scopes, ct);
+            if (answer.AccessToken is { Length: > 0 } apiAccess && answer is { Refusal: null, Unreachable: null, NotJson: false })
+            {
+                issued.Add(apiAccess);
+                if (answer.IdToken is { Length: > 0 } apiId) issued.Add(apiId);
+                if (answer.RefreshToken is { Length: > 0 } rotated) latest = rotated;
+                parts.Add($"{api.Name}: a token was issued.");
+            }
+            else if (answer.Refused)
+            {
+                refused++;
+                parts.Add($"{api.Name}: {probe.Provider} refused ({answer.Refusal}).");
+            }
+            else
+            {
+                notReached++;
+                var why = answer.Unreachable
+                    ?? (answer.NotJson ? $"HTTP {answer.Status} without a token" : answer.Refusal ?? "no access token was sent");
+                parts.Add($"{api.Name}: no token just now ({why.TrimEnd('.')}).");
+            }
+        }
+
+        var apis = parts.Count;
+        var named = string.Join(' ', parts);
+        var result =
+            apis > 0 && refused == apis
+                ? (ConnectionTested.Refused, $"{head} {named} No API it holds gave a token: reconnect it and consent to them, or have an administrator consent to them for the app.")
+            : apis > 0 && refused + notReached == apis
+                ? (ConnectionTested.Failed, $"{head} {named} Try again later.")
+                : (ConnectionTested.Ok, apis > 0 ? $"Connected: {head} {named}" : $"Connected: {head}");
+
+        return (result.Item1, Redact(result.Item2, issued.Append(latest)), Rotated(probe, latest));
+    }
+
+    private static string? Rotated(OAuthProbe probe, string latest) => latest != probe.RefreshToken ? latest : null;
+
+    /// <summary>A provider other than Microsoft: one read of the profile, a refusal of it the
+    /// connection's.</summary>
+    private async Task<(string, string)> OneProfileAsync(OAuthProbe probe, string access, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(probe.ProfileUrl)) return (ConnectionTested.Ok, $"Connected: {probe.Provider} renewed the sign-in.");
+
+        var (read, notRead) = await ProfileAsync(probe.ProfileUrl, probe.Provider, access, ct);
+
+        var sentence = notRead is not null ? $"{probe.Provider} renewed the sign-in, but its profile could not be read: {notRead}"
+            : read is 401 or 403 ? $"{probe.Provider} renewed the sign-in but refused to read the account's profile (HTTP {read}). Reconnect it."
+            : read is < 200 or >= 300 ? $"{probe.Provider} renewed the sign-in, but reading the account's profile answered HTTP {read}. Try again later."
+            : $"Connected: {probe.Provider} renewed the sign-in and read the account's profile.";
+
+        var outcome = notRead is null && read is >= 200 and < 300 ? ConnectionTested.Ok
+            : notRead is null && read is 401 or 403 ? ConnectionTested.Refused
+            : ConnectionTested.Failed;
+
+        return (outcome, sentence);
+    }
+
+    /// <summary>
+    /// What a Microsoft test says of the account, without "Connected: ": the profile read, or not read
+    /// with what was answered and the account named from the ID token when it carries one of
+    /// <paramref name="claims"/>. Microsoft's userinfo is a Graph API: a token asked for the sign-in's
+    /// scopes alone may not be one it takes, and reconnecting would not change that.
+    /// </summary>
+    private async Task<string> MicrosoftProfileAsync(OAuthProbe probe, string access, string? idToken, IReadOnlyList<string> claims, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(probe.ProfileUrl)) return $"{probe.Provider} renewed the sign-in.";
+
+        var (read, notRead) = await ProfileAsync(probe.ProfileUrl, probe.Provider, access, ct);
+        if (notRead is null && read is >= 200 and < 300) return $"{probe.Provider} renewed the sign-in and read the account's profile.";
+
+        var why = notRead is not null ? notRead.TrimEnd('.') : $"HTTP {read}";
+        return IdTokens.Claim(IdTokens.Claims(idToken), claims) is { } account
+            ? $"{probe.Provider} renewed the sign-in for {account} (read from its ID token); the account's profile was not read ({why})."
+            : $"{probe.Provider} renewed the sign-in; the account's profile was not read ({why}).";
+    }
+
+    private async Task<(int Status, string? NotRead)> ProfileAsync(string url, string provider, string access, CancellationToken ct)
+    {
+        using var profile = new HttpRequestMessage(HttpMethod.Get, url);
+        profile.Headers.Authorization = new AuthenticationHeaderValue("Bearer", access);
+        profile.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        var (read, _, notRead) = await SendAsync(profile, HostOf(url, provider), ct);
+        return (read, notRead);
+    }
+
+    /// <summary>One refresh's answer: its tokens; or <c>Refusal</c>, the reason (<c>Refused</c> when it is
+    /// the provider's no to the refresh token or the scopes); or <c>NotJson</c>, an answer with no token
+    /// body; or <c>Unreachable</c>, the host not answering.</summary>
+    private sealed record Refresh(
+        string? AccessToken = null, string? RefreshToken = null, string? IdToken = null,
+        string? Refusal = null, bool Refused = false, int? Status = null, string? Unreachable = null, bool NotJson = false);
+
+    /// <summary>One refresh token grant at the probe's token endpoint, asking for <paramref name="scopes"/> when named.</summary>
+    private async Task<Refresh> RefreshAsync(OAuthProbe probe, string refreshToken, IReadOnlyList<string>? scopes, CancellationToken ct)
+    {
         var form = new Dictionary<string, string>
         {
             ["grant_type"] = "refresh_token",
-            ["refresh_token"] = probe.RefreshToken,
+            ["refresh_token"] = refreshToken,
             ["client_id"] = probe.ClientId,
         };
 
         if (!string.IsNullOrEmpty(probe.ClientSecret)) form["client_secret"] = probe.ClientSecret;
-        if (probe.Scopes is { Count: > 0 } scopes) form["scope"] = string.Join(' ', scopes);
+        if (scopes is { Count: > 0 }) form["scope"] = string.Join(' ', scopes);
 
         using var token = new HttpRequestMessage(HttpMethod.Post, probe.TokenUrl) { Content = new FormUrlEncodedContent(form) };
         token.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
         var (status, body, unreachable) = await SendAsync(token, HostOf(probe.TokenUrl, probe.Provider), ct);
-        if (unreachable is not null) return (ConnectionTested.Failed, $"{unreachable} The sign-in was not renewed.", null);
+        if (unreachable is not null) return new Refresh(Unreachable: unreachable);
 
         JsonElement root;
         try
@@ -120,46 +258,17 @@ public sealed class ConnectionTester(IMailLogin? mail = null, HttpMessageHandler
         }
         catch (JsonException)
         {
-            return (ConnectionTested.Failed, $"{probe.Provider} answered HTTP {status} without a token when asked to renew the sign-in. Try again later.", null);
+            return new Refresh(Status: status, NotJson: true);
         }
 
         var error = Text(root, "error");
         if (error is not null || status is < 200 or >= 300)
         {
             var reason = error is null ? $"HTTP {status}" : Text(root, "error_description") is { Length: > 0 } description ? $"{error}: {Cut(description)}" : error;
-
-            return error is not null && status is >= 400 and < 500
-                ? (ConnectionTested.Refused, $"{probe.Provider} refused to renew the sign-in ({reason}). Reconnect it.", null)
-                : (ConnectionTested.Failed, $"{probe.Provider} could not renew the sign-in just now ({reason}). Try again later.", null);
+            return new Refresh(Refusal: reason, Refused: error is not null && status is >= 400 and < 500, Status: status);
         }
 
-        if (Text(root, "access_token") is not { Length: > 0 } access)
-        {
-            return (ConnectionTested.Failed, $"{probe.Provider} renewed the sign-in but sent no access token. Try again later.", null);
-        }
-
-        var rotated = Text(root, "refresh_token") is { Length: > 0 } issued && issued != probe.RefreshToken ? issued : null;
-
-        if (string.IsNullOrWhiteSpace(probe.ProfileUrl)) return (ConnectionTested.Ok, $"Connected: {probe.Provider} renewed the sign-in.", rotated);
-
-        using var profile = new HttpRequestMessage(HttpMethod.Get, probe.ProfileUrl);
-        profile.Headers.Authorization = new AuthenticationHeaderValue("Bearer", access);
-        profile.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-
-        var (read, _, notRead) = await SendAsync(profile, HostOf(probe.ProfileUrl, probe.Provider), ct);
-        var sentence = Redact(
-            notRead is not null ? $"{probe.Provider} renewed the sign-in, but its profile could not be read: {notRead}"
-            : read is 401 or 403 ? $"{probe.Provider} renewed the sign-in but refused to read the account's profile (HTTP {read}). Reconnect it."
-            : read is < 200 or >= 300 ? $"{probe.Provider} renewed the sign-in, but reading the account's profile answered HTTP {read}. Try again later."
-            : $"Connected: {probe.Provider} renewed the sign-in and read the account's profile.",
-            [access]);
-
-        var outcome = notRead is null && read is >= 200 and < 300 ? ConnectionTested.Ok
-            : notRead is null && read is 401 or 403 ? ConnectionTested.Refused
-            : ConnectionTested.Failed;
-
-        // A ROTATED REFRESH TOKEN goes back whatever the profile said: the old one may no longer work.
-        return (outcome, sentence, rotated);
+        return new Refresh(Text(root, "access_token"), Text(root, "refresh_token"), Text(root, "id_token"), Status: status);
     }
 
     // ---- a credential's declared request ------------------------------------------------------------
