@@ -163,22 +163,8 @@ public sealed partial class PluginMemberRunner
         string file;
         try
         {
-            var folder = Path.Combine(Paths.WorkspaceFor(to), HandoffFolder);
-            var made = Directory.CreateDirectory(folder);
-            if (!OperatingSystem.IsWindows()) made.UnixFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute;
-            SweepHandoffs(folder);
             var name = $"{FileName(connection)}-{Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(6))}.json";
-            file = Path.Combine(folder, name);
-            using (var stream = new FileStream(file, new FileStreamOptions
-            {
-                Mode = FileMode.CreateNew,
-                Access = FileAccess.Write,
-                UnixCreateMode = OperatingSystem.IsWindows() ? null : UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead,
-            }))
-            {
-                stream.Write(Encoding.UTF8.GetBytes(handoff.Value));
-            }
-
+            file = WriteHandoff(Paths.WorkspaceFor(to), name, handoff.Value, runAs);
             _ = DeleteAtAsync(file, until);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -191,6 +177,38 @@ public sealed partial class PluginMemberRunner
         return kind == "token"
             ? $"{connection}: a token handoff for {string.Join(", ", hosts)} is at {where}, header {header}, good until {good}. It is deleted when it expires."
             : $"{connection}: a browser session for {string.Join(", ", hosts)} is at {where}, good until {good}. Start your browser with its storageState; it is deleted when it expires.";
+    }
+
+    /// <summary>
+    /// Writes a handed-over session as <paramref name="name"/> in the <see cref="HandoffFolder"/> of the
+    /// member's <paramref name="workspace"/> and answers its path: the folder 0750 and the file 0640, both
+    /// of the AGENT'S group, because the member runs as the agent and reads it by its group. The folder
+    /// keeps setgid, so it takes the workspace's group (prepare-volume.sh makes every team folder setgid
+    /// to the agent's group) - a mode set without the bit would drop it and leave the file the Host's own
+    /// group - and <paramref name="runAs"/> gives both to the agent's group where the Host switches users,
+    /// as every other file the Host writes for an agent. Expired handoffs in the folder go first.
+    /// </summary>
+    public static string WriteHandoff(string workspace, string name, string value, AgentLaunchUser? runAs)
+    {
+        var folder = Path.Combine(workspace, HandoffFolder);
+        var made = Directory.CreateDirectory(folder);
+        if (!OperatingSystem.IsWindows())
+        {
+            made.UnixFileMode = UnixFileMode.SetGroup | UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute;
+            runAs?.Share(folder);
+        }
+
+        SweepHandoffs(folder);
+        var file = Path.Combine(folder, name);
+        using var stream = new FileStream(file, new FileStreamOptions
+        {
+            Mode = FileMode.CreateNew,
+            Access = FileAccess.Write,
+            UnixCreateMode = OperatingSystem.IsWindows() ? null : UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead,
+        });
+        stream.Write(Encoding.UTF8.GetBytes(value));
+        runAs?.Share(stream.SafeFileHandle);
+        return file;
     }
 
     /// <summary>Every handed-over session in <paramref name="folder"/> whose time is up, deleted.</summary>
