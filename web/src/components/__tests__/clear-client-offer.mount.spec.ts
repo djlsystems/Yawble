@@ -231,6 +231,14 @@ describe('Microsoft not knowing the saved app', () => {
     expect(problem.textContent).toContain(UnknownClientSentence);
     expect(problem.querySelector('[data-clear-client-button]')?.textContent).toContain(useInstance);
 
+    // Used from there: said in the dialog, the providers read again, the sentence gone.
+    clearConnectionProviderClient.mockResolvedValue(cleared(defaultMicrosoft, []));
+    listConnectionProviders.mockResolvedValue([savedGoogle, defaultMicrosoft]);
+    await click(problem.querySelector('[data-clear-client-button]'));
+    expect(clearConnectionProviderClient).toHaveBeenCalledWith('microsoft');
+    expect(bodyFind('[data-client-cleared]')?.textContent).toContain(`Microsoft signs in with ${productTitle}'s app again.`);
+    expect(bodyFind('[data-guided-problem]')).toBeNull();
+
     wrapper.unmount();
   });
 });

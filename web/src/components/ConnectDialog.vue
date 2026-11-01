@@ -23,6 +23,7 @@ import type {
   ConnectionOpenFlow,
   ConnectionProvider,
   ConnectionKind,
+  ConnectionProviderCleared,
   ConnectionProviderSave,
   CredentialPreset,
   MailboxPreset,
@@ -42,11 +43,12 @@ import {
   refusalWords,
   rememberGuidedConnect,
   slotKinds,
+  clearedClientWords,
   unknownClientRefusal,
   UsernameIncorrectHint,
 } from '../lib/connections';
 import { listOf } from '../lib/agentInstall';
-import { productCli } from '../presentation/product';
+import { productCli, productTitle } from '../presentation/product';
 import { awaitProviderReturn, newSigninTag, signinTabAddress } from '../lib/providerReturn';
 import { mailboxHint, OutlookHint, setupTime } from '../lib/mailboxHints';
 import MailboxForm from './MailboxForm.vue';
@@ -303,6 +305,7 @@ watch(open, (showing) => {
   tenantId.value = '';
   directory.value = '';
   directoryProblem.value = '';
+  clientClearedWords.value = '';
 
   void begin(++opening);
 });
@@ -712,6 +715,7 @@ async function startDevice() {
   leaving.value = true;
   problem.value = '';
   directoryProblem.value = '';
+  clientClearedWords.value = '';
   resumed.value = false;
   const tenant = directory.value.trim();
   try {
@@ -761,9 +765,13 @@ function deviceCancelled() {
   deviceEnded.value = null;
 }
 
-/** The saved app was cleared from beside its refusal: the opener reads the providers again. */
-function clientCleared() {
+/** What clearing the saved app from beside its refusal did; empty until then. */
+const clientClearedWords = ref('');
+
+/** The saved app was cleared from beside its refusal: said here, and the opener reads the providers again. */
+function clientCleared(answer: ConnectionProviderCleared) {
   problem.value = '';
+  clientClearedWords.value = clearedClientWords(answer, productTitle);
   emit('changed');
 }
 
@@ -1324,6 +1332,7 @@ const stepLabels = computed(() => [
         </template>
       </q-card-section>
 
+      <q-card-section v-if="clientClearedWords" class="text-positive q-pt-none" data-client-cleared>{{ clientClearedWords }}</q-card-section>
       <q-card-section v-if="problem" class="text-negative q-pt-none" data-guided-problem>
         {{ problem }}
         <ClearClientOffer

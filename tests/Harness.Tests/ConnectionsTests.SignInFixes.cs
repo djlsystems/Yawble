@@ -222,6 +222,8 @@ public sealed partial class ConnectionsTests
     [Theory]
     [InlineData("invalid_request", "AADSTS700016: Application with identifier '3b9e1c55-7a20-4f61-8d4e-2c6a9f0b1e77' was not found in the directory.")]
     [InlineData("unauthorized_client", "The client is not authorized.")]
+    // At common, Microsoft cannot place an unknown app in any directory: what its devicecode endpoint answers.
+    [InlineData("invalid_request", "AADSTS50059: No tenant-identifying information found in either the request or implied by any provided credentials.")]
     public async Task Microsoft_refusing_the_saved_apps_code_start_says_the_sentence(string error, string description)
     {
         await SetUpMicrosoftAsync();

@@ -109,7 +109,8 @@ own page (AADSTS700016), which the Host never sees. So:
   (Advanced), or any connection's directory, is refused with one sentence naming both fields
   (`clientId` and the Directory (tenant) ID), and nothing is saved.
 - When Microsoft answers a saved client's code start, a poll, a second code or a browser sign-in's
-  code exchange with AADSTS700016 or `unauthorized_client`, the sign-in ends with one sentence
+  code exchange with AADSTS700016 or `unauthorized_client` (what a directory's own endpoints answer),
+  or AADSTS50059 (what `common` answers for an app it cannot find), the sign-in ends with one sentence
   (`ConnectionProviders.MicrosoftUnknownClient`): the saved app's client ID is not an app Microsoft
   knows, it is often a directory ID pasted in the wrong box, so use the instance's own app instead
   or set the app up again. Never the code alone. The console offers **Use Yawble's app** (or

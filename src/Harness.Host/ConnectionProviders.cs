@@ -176,11 +176,15 @@ public static class ConnectionProviders
         "The saved app's client ID is not an app Microsoft knows - it is often a directory ID pasted in the wrong box - "
         + "so use the instance's own app instead, or set the app up again with its Application (client) ID.";
 
+    /// <summary>AADSTS700016 (the app is not in the directory asked) and <c>unauthorized_client</c> are what
+    /// a directory's own endpoints answer; at <c>common</c> or <c>organizations</c> Microsoft cannot place an
+    /// app it does not know in any directory and answers AADSTS50059 (no tenant-identifying information)
+    /// instead - measured at the devicecode endpoint with an unknown client ID.</summary>
     private static readonly System.Text.RegularExpressions.Regex UnknownClientMarks =
-        new(@"\bAADSTS700016\b|\bunauthorized_client\b", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        new(@"\bAADSTS(700016|50059)\b|\bunauthorized_client\b", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     /// <summary>Whether Microsoft's refusal (<paramref name="error"/>, <paramref name="description"/>) is
-    /// the saved app's client ID it does not know, or will not let sign in: AADSTS700016 or
+    /// the saved app's client ID it does not know, or will not let sign in: AADSTS700016, AADSTS50059 or
     /// <c>unauthorized_client</c>, for a Microsoft provider whose client a person saved.</summary>
     public static bool UnknownSavedClient(OAuthProvider provider, string? error, string? description) =>
         provider.Kind == Microsoft && provider.ClientSource == ClientSourceSaved

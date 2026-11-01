@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { clearConnectionProviderClient, listConnectionProviders } from '../api/client';
 import type { Connection, ConnectionProvider, ConnectionProviderCleared } from '../api/types';
 import { productTitle } from '../presentation/product';
+import { clearedClientWords } from '../lib/connections';
 
 /**
  * UNDO SET UP CLIENT for a built-in provider whose client a person saved: "Use <product>'s app" for
@@ -57,16 +58,7 @@ const affected = computed(() =>
 
 const names = (list: { name: string }[]) => list.map((entry) => entry.name).join(', ');
 
-const doneWords = computed(() => {
-  const answer = done.value;
-  if (!answer) return '';
-  const now = answer.provider.clientSource === 'default'
-    ? `${answer.provider.name} signs in with ${productTitle}'s app again.`
-    : `${answer.provider.name}'s app was removed: it is not set up until a client is set up again.`;
-  return answer.reconnect.length === 0
-    ? now
-    : `${now} ${answer.reconnect.length === 1 ? 'This connection' : 'These connections'} signed in through the saved app and need${answer.reconnect.length === 1 ? 's' : ''} Reconnect: ${names(answer.reconnect)}.`;
-});
+const doneWords = computed(() => (done.value ? clearedClientWords(done.value, productTitle) : ''));
 
 async function clear() {
   if (busy.value) return;
