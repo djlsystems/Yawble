@@ -114,6 +114,10 @@ public sealed class WorkerTerminals(
         }
 
         terminal.Exit(-1);
+
+        // The session is swept before the stop returns, whatever the connection's state: a stopping
+        // worker may exit as soon as this returns, and its held output may never be delivered.
+        await terminal.SweepAsync();
     }
 
     /// <summary>Stops every terminal: the worker is stopping.</summary>
@@ -143,6 +147,7 @@ public sealed class WorkerTerminals(
         private long _queued;
         private bool _gap;
         private long _n;
+        private Task? _sweep;
 
         public IPtySession Session => session;
 
@@ -150,7 +155,24 @@ public sealed class WorkerTerminals(
         {
             session.Output += Enqueue;
             session.Exited += Exit;
+
+            // EVERY PROCESS OF THE TERMINAL'S SESSION as soon as its CLI's exit is seen, independent of
+            // output delivery: a background job the CLI or its shell moved into another process group
+            // outlives the CLI otherwise, for as long as the connection is down.
+            _ = _exit.Task.ContinueWith(_ => SweepAsync(), TaskScheduler.Default);
             _ = Task.Run(PumpAsync);
+        }
+
+        /// <summary>Sweeps the terminal's session once; every caller waits on that one sweep.</summary>
+        public Task SweepAsync()
+        {
+            lock (_gate)
+            {
+                return _sweep ??= Task.Run(() =>
+                {
+                    if (leader is { } sessionId) RunSession.End(sessionId);
+                });
+            }
         }
 
         public void Exit(int code)
@@ -196,9 +218,8 @@ public sealed class WorkerTerminals(
                 owner._terminals.TryRemove(new KeyValuePair<string, Terminal>(id, this));
                 session.Output -= Enqueue;
 
-                // EVERY PROCESS OF THE TERMINAL'S SESSION, before its end is said: a background job
-                // the CLI or its shell moved into another process group outlives the CLI otherwise.
-                if (leader is { } sessionId) RunSession.End(sessionId);
+                // Its session is swept before its end is said (begun when the CLI exited).
+                await SweepAsync();
 
                 Remove(spec, mcp);
                 await owner._publish(new TerminalEnded(id, await _exit.Task));
