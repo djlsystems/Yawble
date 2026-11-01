@@ -305,7 +305,7 @@ func waitWorker(ctx context.Context, e engine.Engine, name string, out io.Writer
 			return fmt.Errorf("%s did not connect to control within %s; read `yawble logs %s`", name, healthTimeout, short)
 		},
 		func() {
-			fmt.Fprintf(out, "waiting for %s to connect to control (a first start installs the agent CLIs onto the volume, which takes a few minutes)\n", name)
+			fmt.Fprintf(out, "waiting for %s to connect to control (the agent CLIs are installed after it connects, not before)\n", name)
 		})
 }
 

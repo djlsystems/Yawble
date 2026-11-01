@@ -144,11 +144,41 @@ public sealed class AgentCliUpdater(
             prepared.Command, prepared.Agent, person, token => RunUpdateAsync(prepared, person, token), finished);
     }
 
+    /// <summary>
+    /// THE PLATFORM INSTALLS A CLI THE VOLUME DOES NOT HAVE, asked for and not awaited like a person's update and
+    /// through the same gate: launches of that command wait for it (<see cref="AgentUpdateKinds.Install"/>), other
+    /// commands launch as they always do, and it runs once, on one worker, as the agent:
+    /// <c>/bin/sh &lt;installer&gt; &lt;command&gt;</c>, the image's own <c>ensure-agent-clis.sh</c>, which knows how each
+    /// vendor installs (and with <paramref name="reinstall"/>, <c>HARNESS_REINSTALL_AGENTS=1</c>, downloads it again).
+    /// Null for an unknown preset.
+    /// </summary>
+    public (AgentUpdateState State, bool Started)? RequestInstall(
+        string agent, string installer, bool reinstall = false, Func<AgentUpdateState, Task>? finished = null)
+    {
+        if (catalog.Definition(agent) is not { Launch: { } launch } definition) return null;
+
+        var command = launch.FileName;
+        var prepared = new Prepared(
+            definition.Name, command, definition.Updates ?? AgentUpdates.ForCommand(command, catalog.Definitions),
+            ["/bin/sh", installer, command], null,
+            new Dictionary<string, string>
+            {
+                // Only the install: an installed CLI is updated through the preset's own update, on its own interval.
+                ["HARNESS_UPDATE_AGENTS"] = "0",
+                ["HARNESS_REINSTALL_AGENTS"] = reinstall ? "1" : "0",
+            },
+            AgentUpdateGate.InstallBound);
+
+        return gate.Request(
+            command, prepared.Agent, null, token => RunUpdateAsync(prepared, null, token), finished, AgentUpdateKinds.Install);
+    }
+
     /// <summary>The command a preset launches, for reading its update's state; null for an unknown one.</summary>
     public string? CommandOf(string agent) => catalog.Definition(agent)?.Launch?.FileName;
 
     private sealed record Prepared(
-        string Agent, string Command, AgentUpdates? Updates, IReadOnlyList<string> Update, AgentUpdateResult? Refused);
+        string Agent, string Command, AgentUpdates? Updates, IReadOnlyList<string> Update, AgentUpdateResult? Refused,
+        IReadOnlyDictionary<string, string>? Environment = null, TimeSpan? Limit = null);
 
     private Prepared? Prepare(string agent)
     {
@@ -175,15 +205,17 @@ public sealed class AgentCliUpdater(
         // The version with its update-off; the update WITHOUT it: that is for launches, and an
         // explicit update must not read it.
         var version = CliVersionsWhenWorkersChange.VersionRun(command, updates);
+        var limit = prepared.Limit ?? Timeout;
         var run = new AgentCliRun(
-            update[0], [.. update.Skip(1)], new Dictionary<string, string>(), [], (int)Timeout.TotalSeconds, WithUpdatesOn: true);
+            update[0], [.. update.Skip(1)], prepared.Environment ?? new Dictionary<string, string>(), [], (int)limit.TotalSeconds,
+            WithUpdatesOn: true);
 
         // Picked now, as it starts, and named to the gate: what reads "updating on <worker>" from here.
         if (_asks.Value.Pick() is not { } worker) throw new InvalidOperationException(NoWorkerText);
         gate.RunsOn(command, worker.Id.Value);
 
         var asked = await _asks.Value.AskAsync<AgentCommandsRan>(
-            worker, new RunAgentCommands(WorkerAsks.NewRequest(), [version, run, version]), Timeout + VersionTimeout * 2 + TimeSpan.FromSeconds(30), token);
+            worker, new RunAgentCommands(WorkerAsks.NewRequest(), [version, run, version]), limit + VersionTimeout * 2 + TimeSpan.FromSeconds(30), token);
 
         if (asked.Answer is not { Results: [var before, var ran, var after] })
         {
@@ -209,7 +241,8 @@ public sealed class AgentCliUpdater(
         return new AgentUpdateResult(
             prepared.Agent, command, exit == 0, exit, was, @is, at,
             exit == 0
-                ? was == @is ? $"`{string.Join(' ', update)}` ran; {command} is already the newest ({@is})."
+                ? was is null && @is is not null ? $"`{string.Join(' ', update)}` installed {command} ({@is})."
+                : was == @is ? $"`{string.Join(' ', update)}` ran; {command} is already the newest ({@is})."
                     : $"`{string.Join(' ', update)}` updated {command} from {was} to {@is}."
                 : $"`{string.Join(' ', update)}` exited {exit}: {Tail(output)}",
             now);

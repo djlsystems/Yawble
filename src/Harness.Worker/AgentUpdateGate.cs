@@ -31,6 +31,22 @@ public static class AgentUpdatePhases
     public const string Failed = "failed";
 }
 
+/// <summary>What the platform is doing to a command's install while it holds it: the words <see cref="AgentUpdateState.Kind"/> and <see cref="AgentUpdateHold.Kind"/> take.</summary>
+public static class AgentUpdateKinds
+{
+    /// <summary>Replacing an installed CLI with its newest version: a person's update, or the platform's daily one.</summary>
+    public const string Update = "update";
+
+    /// <summary>Installing a CLI that is not on the volume (or, with <c>HARNESS_REINSTALL_AGENTS=1</c>, again).</summary>
+    public const string Install = "install";
+
+    /// <summary>
+    /// Not yet known which: control has just started and holds launches until a worker has said whether the
+    /// CLI is there, so a run is never sent to a worker before its CLI is (<see cref="AgentUpdateGate.BeginPending"/>).
+    /// </summary>
+    public const string Check = "check";
+}
+
 /// <summary>
 /// WHAT THE GATE SAYS ABOUT ONE COMMAND'S UPDATE, read from the gate and never estimated: the update
 /// asked for (or the outcome of the last one), the runs in flight it waits for and the launches it holds.
@@ -51,7 +67,8 @@ public sealed record AgentUpdateState(
     DateTimeOffset? FinishedAt = null,
     AgentUpdateResult? Result = null,
     string? Error = null,
-    string? CancelledBy = null);
+    string? CancelledBy = null,
+    string Kind = AgentUpdateKinds.Update);
 
 /// <summary>
 /// WHO MAY USE A CLI'S INSTALL RIGHT NOW: runs share it, an update has it alone.
@@ -79,18 +96,30 @@ public sealed class AgentUpdateGate
         public readonly SemaphoreSlim OneUpdate = new(1, 1);
         public AgentUpdateHold? Hold;
         public long Turned;
+        public TaskCompletionSource? Pending;
+        public DateTimeOffset PendingSince;
     }
 
     /// <summary>A person's update, from asked to finished. Changed only under its state's lock.</summary>
-    private sealed class Asked(string agent, string? person)
+    private sealed class Asked(string agent, string? person, string kind = AgentUpdateKinds.Update)
     {
         public string Agent { get; } = agent;
+        public string Kind { get; } = kind;
         public string? Person { get; } = person;
         public DateTimeOffset At { get; } = DateTimeOffset.UtcNow;
         public string Phase = AgentUpdatePhases.Waiting;
         public DateTimeOffset? StartedAt;
         public readonly CancellationTokenSource Cancel = new();
     }
+
+    /// <summary>
+    /// THE MOST AN INSTALL HOLDS A LAUNCH: the installer's own time limit, and the longest a pending check
+    /// (<see cref="BeginPending"/>) is left before its holder ends it. A launch held longer than this starts.
+    /// </summary>
+    public static readonly TimeSpan InstallBound = TimeSpan.FromMinutes(15);
+
+    /// <summary><see cref="InstallBound"/> in words.</summary>
+    public const string InstallBoundText = "15 minutes";
 
     private readonly ConcurrentDictionary<string, State> _states = new(StringComparer.Ordinal);
     private long _next;
@@ -116,7 +145,7 @@ public sealed class AgentUpdateGate
     public bool HeldSince(string command, long turn)
     {
         if (!_states.TryGetValue(command, out var s)) return false;
-        lock (s) return s.Hold is not null || s.Turned > turn;
+        lock (s) return s.Hold is not null || s.Pending is not null || s.Turned > turn;
     }
 
     /// <summary>
@@ -126,7 +155,12 @@ public sealed class AgentUpdateGate
     public AgentUpdateHold? Holding(string command)
     {
         if (!_states.TryGetValue(command, out var s)) return null;
-        lock (s) return s.Hold is { } hold ? hold with { Runs = s.Running.Count } : null;
+        lock (s)
+        {
+            return s.Hold is { } hold ? hold with { Runs = s.Running.Count }
+                : s.Pending is not null ? new AgentUpdateHold(command, AgentUpdatePhases.Waiting, null, s.PendingSince, s.Running.Count, AgentUpdateKinds.Check)
+                : null;
+        }
     }
 
     /// <summary>The updater names the worker it picked for <paramref name="command"/>'s update, as it starts it.</summary>
@@ -151,7 +185,53 @@ public sealed class AgentUpdateGate
     }
 
     /// <summary>Whether an update of <paramref name="command"/> is asked for or running.</summary>
-    public bool Updating(string command) => _states.TryGetValue(command, out var s) && s.Updating is not null;
+    public bool Updating(string command) => _states.TryGetValue(command, out var s) && (s.Updating is not null || s.Pending is not null);
+
+    /// <summary>
+    /// HOLDS NEW LAUNCHES OF <paramref name="command"/> UNTIL <see cref="EndPending"/>, without waiting for the
+    /// runs in flight and without taking the install: nothing is replaced while it is pending. Control holds
+    /// each command from its start until a worker has said whether the CLI is installed, so a run queued for
+    /// an agent a fresh volume does not have yet waits for its install rather than failing as not installed.
+    /// An install or update asked for while it is pending holds the launches on from there, so ending the
+    /// pending hold after asking leaves no gap. Answers false when it was already pending.
+    /// </summary>
+    public bool BeginPending(string command)
+    {
+        var state = For(command);
+        lock (state)
+        {
+            if (state.Pending is not null) return false;
+            state.Pending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            state.PendingSince = DateTimeOffset.UtcNow;
+            Turned(state);
+            return true;
+        }
+    }
+
+    /// <summary>Ends <see cref="BeginPending"/>'s hold, letting what it held go (or on to an update asked meanwhile).</summary>
+    public void EndPending(string command)
+    {
+        if (!_states.TryGetValue(command, out var state)) return;
+        TaskCompletionSource? pending;
+        bool ended;
+        lock (state)
+        {
+            pending = state.Pending;
+            state.Pending = null;
+            if (pending is not null) Turned(state);
+            ended = pending is not null && state.Updating is null;
+        }
+
+        pending?.TrySetResult();
+        if (ended) Ended(command);
+    }
+
+    /// <summary>Whether <paramref name="command"/> is held by <see cref="BeginPending"/> now.</summary>
+    public bool Pending(string command)
+    {
+        if (!_states.TryGetValue(command, out var state)) return false;
+        lock (state) return state.Pending is not null;
+    }
 
     /// <summary>
     /// A run's share of <paramref name="command"/>'s install, held until disposed. While an update
@@ -174,7 +254,7 @@ public sealed class AgentUpdateGate
 
                 lock (state)
                 {
-                    wait = state.Updating?.Task;
+                    wait = state.Updating?.Task ?? state.Pending?.Task;
 
                     if (wait is null)
                     {
@@ -212,7 +292,7 @@ public sealed class AgentUpdateGate
         while (true)
         {
             Task? wait;
-            lock (state) wait = state.Updating?.Task;
+            lock (state) wait = state.Updating?.Task ?? state.Pending?.Task;
             if (wait is null) return;
             await wait.WaitAsync(ct);
         }
@@ -240,7 +320,8 @@ public sealed class AgentUpdateGate
         {
             updating = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             state.Updating = updating;
-            state.Hold = new AgentUpdateHold(command, AgentUpdatePhases.Waiting, null, DateTimeOffset.UtcNow);
+            state.Hold = new AgentUpdateHold(
+                command, AgentUpdatePhases.Waiting, null, DateTimeOffset.UtcNow, Kind: asked?.Kind ?? AgentUpdateKinds.Update);
             Turned(state);
 
             if (state.Running.Count == 0)
@@ -311,7 +392,8 @@ public sealed class AgentUpdateGate
         string agent,
         string? person,
         Func<CancellationToken, Task<AgentUpdateResult>> update,
-        Func<AgentUpdateState, Task>? finished = null)
+        Func<AgentUpdateState, Task>? finished = null,
+        string kind = AgentUpdateKinds.Update)
     {
         var state = For(command);
         Asked asked;
@@ -319,7 +401,7 @@ public sealed class AgentUpdateGate
         lock (state)
         {
             if (state.Current is not null) return (Snapshot(command, state), false);
-            asked = new Asked(agent, person);
+            asked = new Asked(agent, person, kind);
             state.Current = asked;
         }
 
@@ -451,7 +533,7 @@ public sealed class AgentUpdateGate
 
     private static AgentUpdateState StateFor(string command, State state, Asked asked) =>
         new(command, asked.Phase, asked.Agent, asked.Person, asked.At, state.Running.Count,
-            Holders(state.Running), Holders(state.Held), asked.StartedAt);
+            Holders(state.Running), Holders(state.Held), asked.StartedAt, Kind: asked.Kind);
 
     private static IReadOnlyList<AgentRunHolder> Holders(Dictionary<long, AgentRunHolder?> shares) =>
         [.. shares.OrderBy(s => s.Key).Select(s => s.Value).OfType<AgentRunHolder>()];
@@ -497,7 +579,10 @@ public sealed class AgentUpdateGate
 /// <see cref="AgentUpdatePhases.Updating"/>; <see cref="Worker"/> is the worker it runs on, null until
 /// one is picked, which is when it starts. Nothing in it is estimated.
 /// </summary>
-public sealed record AgentUpdateHold(string Command, string Phase, string? Worker, DateTimeOffset Since, int Runs = 0);
+/// <param name="Kind">What holds it (<see cref="AgentUpdateKinds"/>): an update, an install, or the check control
+/// makes at its start of whether the CLI is there.</param>
+public sealed record AgentUpdateHold(
+    string Command, string Phase, string? Worker, DateTimeOffset Since, int Runs = 0, string Kind = AgentUpdateKinds.Update);
 
 /// <summary>
 /// WHAT A COMMAND HELD BY AN UPDATE READS, everywhere it is read: the install state, the sign-in, the
@@ -509,6 +594,20 @@ public static class UpdatingOn
     /// <summary>The sentence for <paramref name="hold"/>; <paramref name="onThisMachine"/> in a Host that runs its runs itself.</summary>
     public static string Text(AgentUpdateHold hold, bool onThisMachine = false)
     {
+        if (hold.Kind == AgentUpdateKinds.Check)
+        {
+            return $"Getting {hold.Command} ready: the platform is checking whether it is installed, and installs it if it is not; "
+                   + "it is measured again when that ends.";
+        }
+
+        if (hold.Kind == AgentUpdateKinds.Install)
+        {
+            const string installed = "it is measured again when the install ends.";
+            return onThisMachine ? $"Installing {hold.Command} on this machine; {installed}"
+                : hold.Worker is { } on ? $"Installing {hold.Command} on {on}; {installed}"
+                : $"Installing {hold.Command}; {installed}";
+        }
+
         const string again = "it is measured again when the update ends.";
         if (hold.Phase == AgentUpdatePhases.Waiting)
         {

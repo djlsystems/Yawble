@@ -1,5 +1,6 @@
 import type { ConciergeSettings } from '../api/types';
 import { productCli } from '../presentation/product';
+import { installingText } from './agentInstall';
 
 /**
  * WHAT THE CONCIERGE PANEL SAYS BEFORE IT OPENS A SOCKET, decided from `GET /api/concierge`.
@@ -13,6 +14,10 @@ import { productCli } from '../presentation/product';
  * - `notice`: attach, and say one thing above the terminal (a default is in use, or the agent is
  *   not signed in).
  * - `blocked`: do not attach; the sentence is all there is.
+ * - `installing`: do not attach YET. The agent's CLI is being installed (a fresh volume, in the background
+ *   after the worker connected), or updated, or the server has not heard yet whether it is there. The panel
+ *   says so - never "not installed" - asks again every few seconds, and opens when it is done, without a
+ *   restart. Its sentence names no place to go: there is nothing to fix.
  *
  * `lead` is the sentence up to the link; the panel renders `{lead} Tenant Settings.` with those two
  * words as the link, so every sentence here ends by naming where to go.
@@ -20,7 +25,8 @@ import { productCli } from '../presentation/product';
 export type ConciergePreflight =
   | { kind: 'ready' }
   | { kind: 'notice'; lead: string; detail: string | null }
-  | { kind: 'blocked'; lead: string; detail: string | null };
+  | { kind: 'blocked'; lead: string; detail: string | null }
+  | { kind: 'installing'; lead: string; detail: string | null };
 
 export function conciergePreflight(settings: ConciergeSettings | null): ConciergePreflight {
   const effective = settings?.effective;
@@ -29,6 +35,15 @@ export function conciergePreflight(settings: ConciergeSettings | null): Concierg
 
   const { agent, auth } = effective;
   const detail = auth.detail;
+
+  // HELD COMES BEFORE NOT INSTALLED: while the platform installs (or replaces) the CLI, `installed` is false
+  // and means nothing.
+  if (agent !== null && auth.heldBy) {
+    const lead = auth.heldBy === 'install' ? installingText(agent)
+      : auth.heldBy === 'update' ? `Updating ${agent}...`
+      : `Getting ${agent} ready...`;
+    return { kind: 'installing', lead, detail };
+  }
 
   if (agent === null) {
     return { kind: 'blocked', lead: 'No installed agent can run the Concierge. Sign one in from a terminal or add a key, then choose it in', detail };

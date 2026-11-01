@@ -48,6 +48,9 @@ type HostReport struct {
 	// Concierge is what the Host recorded of its running Concierge sessions (concierge.go). Nil: an
 	// older Host, or nothing recorded yet.
 	Concierge *ConciergeRecord `json:"concierge"`
+	// AgentInstalls is what the Host's background install of the agent CLIs and Google Chrome is doing
+	// (agentinstalls.go). Nil: an older Host, one with no installer, or nothing recorded yet.
+	AgentInstalls *AgentInstalls `json:"agentInstalls"`
 }
 
 type Schema struct {
@@ -70,6 +73,11 @@ type Agent struct {
 	// Updating is the Host's sentence when its last probe found the command held by the platform's
 	// update, which it did not ask: the install is being replaced, never "not installed".
 	Updating *string `json:"updating"`
+	// Install is the background install's word for this agent while it is checked or installed
+	// (checking, installing), from the report's agentInstalls; InstallFailed its sentence when the install
+	// failed. Never "not installed" while Install is set. Not on the wire: ParseHostReport fills them.
+	Install       string  `json:"-"`
+	InstallFailed *string `json:"-"`
 	// Kind and LanguageModel are the Host's own words for what a member runs (MemberRef.KindOf,
 	// AgentLaunch.LanguageModel). The Host's report lists the auth-probes.json commands today, every
 	// one a model agent, and sends neither; an entry that says it is a plugin or runs no model has
@@ -94,7 +102,7 @@ type Agent struct {
 func (a Agent) IsInstalled() bool { return a.Installed != nil && *a.Installed }
 
 // NotInstalled is whether the Host measured the command as missing. Not measured is not.
-func (a Agent) NotInstalled() bool { return a.Installed != nil && !*a.Installed }
+func (a Agent) NotInstalled() bool { return a.Install == "" && a.Installed != nil && !*a.Installed }
 
 // MeasuredText says when the sign-in was measured and on which worker, "" when it was not.
 func (a Agent) MeasuredText() string {
@@ -114,7 +122,7 @@ func (a Agent) MeasuredText() string {
 // CanRun is whether a member run of this agent can start now, as the Host measured it: installed,
 // signed in, and its launch checked ok.
 func (a Agent) CanRun() bool {
-	return a.Updating == nil && a.IsInstalled() && a.Authenticated != nil && *a.Authenticated &&
+	return a.Install == "" && a.Updating == nil && a.IsInstalled() && a.Authenticated != nil && *a.Authenticated &&
 		a.Launch != nil && a.Launch.Result == "ok"
 }
 
@@ -136,7 +144,7 @@ func AnyCanRun(agents []Agent) bool {
 // launch is shown beside its sign-in, and a failed one is a fault whoever else can run.
 func (a Agent) NotInUse() bool {
 	switch {
-	case a.Updating != nil || a.Installed == nil:
+	case a.Install != "" || a.Updating != nil || a.Installed == nil:
 		return false
 	case !*a.Installed:
 		return true
@@ -249,9 +257,31 @@ func ParseHostReport(stdout string) (HostReport, error) {
 			}
 		}
 		r.Agents = agents
+		r.applyInstalls()
 		return r, nil
 	}
 	return r, ErrNoReport
+}
+
+// applyInstalls marks each agent the background install is checking or installing, or failed to
+// install, so neither the doctor nor `yawble agents` says "not installed" for one being installed.
+func (r *HostReport) applyInstalls() {
+	for i := range r.Agents {
+		item := r.AgentInstalls.Item(r.Agents[i].Agent)
+		if item == nil {
+			continue
+		}
+		switch {
+		case item.State == "checking" || item.State == "installing":
+			r.Agents[i].Install = item.State
+		case item.State == "failed":
+			why := "the install failed"
+			if item.Detail != nil && *item.Detail != "" {
+				why = *item.Detail
+			}
+			r.Agents[i].InstallFailed = &why
+		}
+	}
 }
 
 // OnSqlServer says whether the Host's database is SQL Server, whose backups are the server's own

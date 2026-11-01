@@ -85,7 +85,8 @@ public sealed record DoctorReport(
     AgentToolsRecord? AgentTools = null,
     DoctorWip? Wip = null,
     WorkersRecord? Workers = null,
-    ConciergeSessionsRecord? Concierge = null)
+    ConciergeSessionsRecord? Concierge = null,
+    AgentInstallsRecord? AgentInstalls = null)
 {
     /// <summary>The backups section, <see cref="DoctorBackups.None"/> on SQL Server. Not in the JSON,
     /// which carries <see cref="BackupFiles"/> as <c>backups</c>.</summary>
@@ -163,7 +164,10 @@ public static class HostDoctor
             WorkersRecord.Read(dataRoot),
             // The running Concierge sessions - whose, on which worker, last activity, when the idle
             // window would end each - as the Host last recorded them; null when it recorded none.
-            ConciergeSessionsRecord.Read(dataRoot));
+            ConciergeSessionsRecord.Read(dataRoot),
+            // What the agent CLIs and Google Chrome are doing after the start - checking, installing, updating,
+            // ready or failed - as the Host last recorded it (AgentInstallsAtStart); null when it recorded none.
+            AgentInstalls: AgentInstallsRecord.Read(dataRoot));
     }
 
     /// <summary>

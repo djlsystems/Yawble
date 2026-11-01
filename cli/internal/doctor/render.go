@@ -55,6 +55,8 @@ func RenderAgents(w io.Writer, agents []Agent, details bool) {
 			fmt.Fprintln(w, "  in use      no")
 		}
 		switch {
+		case a.Install != "":
+			fmt.Fprintf(w, "  installed   %s (runs of it wait for it; `yawble status` shows when it is ready)\n", a.Install)
 		case a.Updating != nil:
 			fmt.Fprintln(w, "  installed   updating")
 		case a.Installed == nil:
@@ -93,6 +95,9 @@ func RenderAgents(w io.Writer, agents []Agent, details bool) {
 				}
 			}
 		}
+		if a.InstallFailed != nil {
+			fmt.Fprintf(w, "  install     failed: %s\n", *a.InstallFailed)
+		}
 		if a.Detail != "" && details {
 			fmt.Fprintf(w, "  detail      %s\n", a.Detail)
 		}
@@ -121,7 +126,7 @@ func agentsSummary(agents []Agent, anyRuns bool) string {
 		case anyRuns && a.NotInUse():
 			idle = append(idle, a.Agent)
 		}
-		if a.Installed != nil && a.Updating == nil {
+		if a.Installed != nil && a.Updating == nil && a.Install == "" {
 			measured = true
 		}
 	}

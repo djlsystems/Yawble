@@ -5,13 +5,18 @@
 #              1. creates the volume directories the host expects;
 #              2. sets who owns what on the volume (prepare-volume.sh ownership), every start;
 #              3. installs the "System packages" setting with apt-get (prepare-volume.sh packages);
-#              4. installs any missing agent CLIs onto the volume, as `agent`, and updates present ones;
-#              5. drops to `harness` and execs the host.
+#              4. starts Google Chrome's and the headless Chromium's installs IN THE BACKGROUND;
+#              5. drops to `harness` and execs the host AT ONCE.
 #   control  steps 1, 2 and 5. It starts no agent CLI, so it installs no package and no CLI.
 #   worker   ends as `worker`. It changes no ownership on the volume - control does, and N workers
-#            share it - so it waits until control has prepared it, then steps 3 and 4 (missing CLIs
-#            only, under a lock on the volume: an update of a CLI another worker is running goes
-#            through control's update gate), then drops to `worker` and execs the host.
+#            share it - so it waits until control has prepared it, then steps 3 and 4, then drops to
+#            `worker` and execs the host, which connects to control at once.
+# NO AGENT CLI IS INSTALLED OR UPDATED BEFORE THE HOST. The host does it after the worker connects
+# (AgentInstallsAtStart): a missing CLI is installed, and an installed one updated at most once per
+# agents.updateInterval, each on its own and in parallel, through the update gate the Agents screen's
+# update goes through - launches of that agent wait, other agents launch. It runs the image's
+# installer, named to the host here as HARNESS_AGENT_INSTALLER. HARNESS_UPDATE_AGENTS=0 and
+# HARNESS_REINSTALL_AGENTS=1 reach the host in its environment and mean what they always did.
 # Steps 3 and 4 may fail; the host starts anyway, because the board is more useful than a
 # container that refuses to boot over one package or one vendor download.
 # The children's HOME is on the volume so an agent CLI login survives an image rebuild; root's is not.
@@ -118,7 +123,8 @@ case "$role" in
     prepare_volume
     # A control container starts no agent CLI - every one runs on a worker - so it installs no
     # package for agents and installs and records no CLI. Its PATH is the system folders alone.
-    echo "agent cli: control role, no agent CLI is installed or recorded here"
+    echo "agent cli: control role, no agent CLI is installed here; control asks a worker to install them once one connects"
+    export HARNESS_AGENT_INSTALLER=/opt/harness/ensure-agent-clis.sh
     export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/data/agent-home
     unset GIT_CONFIG_GLOBAL PYTHONNOUSERSITE
     umask 0007
@@ -149,22 +155,19 @@ case "$role" in
     # list is installed, into this container's own system folders.
     /bin/sh /opt/harness/prepare-volume.sh packages || echo "volume: system packages hit an error; starting the host anyway"
     rm -rf /var/lib/apt/lists/*
-    # MISSING CLIs ONLY, ONE WORKER AT A TIME. The CLIs are on the shared volume and other workers may
-    # be running members from them: replacing one in place would leave a member launched in that
-    # moment with no program. So a worker's start installs only what is missing
-    # (HARNESS_UPDATE_AGENTS=0), under a lock every worker takes; updates of present CLIs are
-    # control's, through the update gate, which waits for runs and holds launches.
-    ( umask 002 && export PATH="$tool_path" HOME=/data/agent-home NPM_CONFIG_PREFIX=/data/npm-global HARNESS_UPDATE_AGENTS=0 \
-        && unset GIT_CONFIG_GLOBAL PYTHONNOUSERSITE && exec /usr/bin/flock /data/tmp/.agent-cli-install.lock \
+    # NO AGENT CLI IS INSTALLED HERE, AND NOTHING BELOW IS WAITED FOR. Control asks this worker (or another)
+    # to install a missing CLI once it has connected, through its update gate. Only the headless Chromium
+    # agents test web apps with, as `agent`, and Google Chrome for the sign-in page, as the `worker` user
+    # that runs it into the folder that is that user's and no agent's (install-google-chrome.sh,
+    # prepare-volume.sh), start here - in the background, each under a lock every worker takes, while
+    # the host starts.
+    ( umask 002 && export PATH="$tool_path" HOME=/data/agent-home NPM_CONFIG_PREFIX=/data/npm-global \
+        && unset GIT_CONFIG_GLOBAL PYTHONNOUSERSITE && /usr/bin/flock /data/tmp/.agent-cli-install.lock \
         /usr/bin/setpriv --reuid=agent --regid=agent --init-groups --inh-caps=-all --ambient-caps=-all \
-        -- /bin/sh /opt/harness/ensure-agent-clis.sh ) \
-      || echo "agent cli: setup hit an error; starting the host anyway"
-    # Google Chrome for the sign-in page, as the `worker` user that runs it, into the folder that is
-    # that user's and no agent's (install-google-chrome.sh, prepare-volume.sh).
-    ( umask 027 && unset GIT_CONFIG_GLOBAL PYTHONNOUSERSITE && exec /usr/bin/flock /data/tmp/.google-chrome-install.lock \
+        -- /bin/sh /opt/harness/ensure-agent-clis.sh chromium || echo "agent cli: headless chromium hit an error" ) &
+    ( umask 027 && unset GIT_CONFIG_GLOBAL PYTHONNOUSERSITE && /usr/bin/flock /data/tmp/.google-chrome-install.lock \
         /usr/bin/setpriv --reuid=worker --regid=worker --init-groups --inh-caps=-all --ambient-caps=-all \
-        -- /bin/sh /opt/harness/install-google-chrome.sh ) \
-      || echo "google chrome: setup hit an error; starting the host anyway"
+        -- /bin/sh /opt/harness/install-google-chrome.sh || echo "google chrome: setup hit an error" ) &
     # The worker's own state - its run process groups, its health and drain files - in the container,
     # not on the volume, and the worker user's alone.
     mkdir -p /var/lib/harness-worker
@@ -186,20 +189,20 @@ case "$role" in
     # installed. The package lists are fetched per start and removed again so the layer stays small.
     /bin/sh /opt/harness/prepare-volume.sh packages || echo "volume: system packages hit an error; starting the host anyway"
     rm -rf /var/lib/apt/lists/*
-    # The CLIs live in agent-owned folders and are run by `agent`, so `agent` installs them, with
-    # agent-home as HOME and without the root section's git and Python settings. umask 002
-    # keeps what it writes group-writable for the host, as the ownership step left the rest.
-    # Not the host's 0007: installed CLIs hold no secrets, so they stay runnable by users in neither group.
+    # NO AGENT CLI IS INSTALLED HERE, AND NOTHING BELOW IS WAITED FOR. The host installs a missing CLI, and
+    # updates an installed one when its interval has passed, after it starts, through its update gate, by
+    # running the installer named here as `agent`. Only the headless Chromium agents test web apps with, as
+    # `agent` with agent-home as HOME (umask 002: group-writable for the host, runnable by users in neither
+    # group), and Google Chrome for the sign-in page, as the `worker` user that runs it into the folder that
+    # is that user's and no agent's (install-google-chrome.sh, prepare-volume.sh), start here - in the
+    # background, while the host starts.
+    export HARNESS_AGENT_INSTALLER=/opt/harness/ensure-agent-clis.sh
     ( umask 002 && export PATH="$tool_path" HOME=/data/agent-home NPM_CONFIG_PREFIX=/data/npm-global \
-        && unset GIT_CONFIG_GLOBAL PYTHONNOUSERSITE && exec /usr/bin/setpriv --reuid=agent --regid=agent --init-groups --inh-caps=-all --ambient-caps=-all \
-        -- /bin/sh /opt/harness/ensure-agent-clis.sh ) \
-      || echo "agent cli: setup hit an error; starting the host anyway"
-    # Google Chrome for the sign-in page, as the `worker` user that runs it, into the folder that is
-    # that user's and no agent's (install-google-chrome.sh, prepare-volume.sh).
-    ( umask 027 && unset GIT_CONFIG_GLOBAL PYTHONNOUSERSITE && exec /usr/bin/flock /data/tmp/.google-chrome-install.lock \
+        && unset GIT_CONFIG_GLOBAL PYTHONNOUSERSITE && /usr/bin/setpriv --reuid=agent --regid=agent --init-groups --inh-caps=-all --ambient-caps=-all \
+        -- /bin/sh /opt/harness/ensure-agent-clis.sh chromium || echo "agent cli: headless chromium hit an error" ) &
+    ( umask 027 && unset GIT_CONFIG_GLOBAL PYTHONNOUSERSITE && /usr/bin/flock /data/tmp/.google-chrome-install.lock \
         /usr/bin/setpriv --reuid=worker --regid=worker --init-groups --inh-caps=-all --ambient-caps=-all \
-        -- /bin/sh /opt/harness/install-google-chrome.sh ) \
-      || echo "google chrome: setup hit an error; starting the host anyway"
+        -- /bin/sh /opt/harness/install-google-chrome.sh || echo "google chrome: setup hit an error" ) &
     # The worker image sets no listen address (a worker dials out); `all` serves the board on 8080.
     export ASPNETCORE_URLS="${ASPNETCORE_URLS:-http://0.0.0.0:8080}"
     export PATH="$tool_path" HOME=/data/agent-home NPM_CONFIG_PREFIX=/data/npm-global

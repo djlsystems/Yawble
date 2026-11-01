@@ -76,6 +76,11 @@ internal static class AgentCliIsolation
 
         foreach (var variable in NpmPrefixVariables) Environment.SetEnvironmentVariable(variable, NpmPrefix);
 
+        // NOR THE IMAGE'S INSTALLER. A suite run inside the product image may inherit the installer the
+        // entrypoint names to its Host; a test Host that saw it would install CLIs for real. A test that
+        // wants installs names its own stub installer.
+        Environment.SetEnvironmentVariable(AgentInstallsAtStart.InstallerSetting, null);
+
         var path = Environment.GetEnvironmentVariable("PATH");
         Environment.SetEnvironmentVariable("PATH", string.Join(Path.PathSeparator, new[] { Root, UpdateRoot, path }.Where(p => !string.IsNullOrEmpty(p))));
 
@@ -100,6 +105,10 @@ internal static class AgentCliIsolation
         if (OperatingSystem.IsWindows()) return;
 
         foreach (var variable in NpmPrefixVariables) environment[variable] = NpmPrefix;
+        if (environment.TryGetValue(AgentInstallsAtStart.InstallerSetting, out var installer) && installer == "/opt/harness/ensure-agent-clis.sh")
+        {
+            environment.Remove(AgentInstallsAtStart.InstallerSetting);
+        }
 
         var path = environment.TryGetValue("PATH", out var given) ? given : null;
         if (path is null || !path.Split(Path.PathSeparator).Contains(UpdateRoot))

@@ -772,6 +772,14 @@ async function attach() {
     return;
   }
 
+  // ITS AGENT IS BEING INSTALLED: said, asked again, and attached when it is done - no restart, and a
+  // card's request is kept for the session that then starts.
+  if (preflight.value.kind === 'installing') {
+    startInstallRecheck();
+    return;
+  }
+  stopInstallRecheck();
+
   // NO SESSION RUNNING, AND A CARD ASKED: this attach starts one, so it starts on the card's team.
   // A running one is left on whatever team it is on - the request names its team.
   if (asks.asked && !aSessionIsRunning(running.value)) {
@@ -971,6 +979,39 @@ async function attach() {
 const SIGN_IN_RECHECK_MS = 15_000;
 let signInRecheck: ReturnType<typeof setInterval> | null = null;
 
+/**
+ * WHILE THE AGENT IS BEING INSTALLED, ASK AGAIN, more often than for a sign-in: an install ends by
+ * itself. At the first answer that is not installing, the panel attaches as it would have at first.
+ * Stops whenever the panel detaches.
+ */
+const INSTALL_RECHECK_MS = 3_000;
+let installRecheck: ReturnType<typeof setInterval> | null = null;
+
+function stopInstallRecheck() {
+  if (installRecheck !== null) clearInterval(installRecheck);
+  installRecheck = null;
+}
+
+function startInstallRecheck() {
+  if (installRecheck !== null) return;
+  installRecheck = setInterval(async () => {
+    let fresh: ConciergeSettings;
+    try {
+      fresh = await readConcierge();
+    } catch {
+      return; // asked again at the next tick
+    }
+    if (installRecheck === null) return;
+    const next = conciergePreflight(fresh);
+    if (next.kind === 'installing') {
+      preflight.value = next;
+      return;
+    }
+    stopInstallRecheck();
+    if (open.value) await attach();
+  }, INSTALL_RECHECK_MS);
+}
+
 function stopSignInRecheck() {
   if (signInRecheck !== null) clearInterval(signInRecheck);
   signInRecheck = null;
@@ -998,6 +1039,7 @@ function startSignInRecheck() {
 
 function detach() {
   stopSignInRecheck();
+  stopInstallRecheck();
   readyWatch?.dispose();
   readyWatch = null;
   sessionReady.value = false;
@@ -1327,10 +1369,12 @@ onBeforeUnmount(() => {
         :class="{ 'concierge-preflight-blocked': preflight.kind === 'blocked' }"
         role="status"
       >
-        <q-icon :name="preflight.kind === 'blocked' ? 'error' : 'info'" size="16px" class="q-mr-sm q-mt-xs" aria-hidden="true" />
-        <span class="concierge-preflight-text">
+        <q-icon :name="preflight.kind === 'blocked' ? 'error' : preflight.kind === 'installing' ? 'sync' : 'info'" size="16px" class="q-mr-sm q-mt-xs" aria-hidden="true" />
+        <span class="concierge-preflight-text" :data-concierge-installing="preflight.kind === 'installing' ? '' : undefined">
           {{ preflight.lead }}
-          <a href="#" class="concierge-preflight-link" @click.prevent="settingsOpen = true">Tenant Settings</a>.
+          <template v-if="preflight.kind !== 'installing'">
+            <a href="#" class="concierge-preflight-link" @click.prevent="settingsOpen = true">Tenant Settings</a>.
+          </template>
           <q-tooltip v-if="preflight.detail">{{ preflight.detail }}</q-tooltip>
         </span>
       </div>

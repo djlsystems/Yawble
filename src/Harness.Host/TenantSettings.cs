@@ -107,6 +107,7 @@ public sealed class TenantSettings
     public const string UpdatesCheckName = "updates.check";
     public const string MarketplaceCheckName = "marketplace.check";
     public const string LogRetentionDaysName = LogRetention.SettingName;
+    public const string AgentsUpdateIntervalName = "agents.updateInterval";
 
     /// <summary>
     /// <c>log.retentionDays</c>'s sentence, as the dialog shows it: what the pass removes, what it
@@ -311,6 +312,14 @@ public sealed class TenantSettings
                 LogRetention.DefaultDays.ToString(CultureInfo.InvariantCulture), "Log:RetentionDays",
                 LogRetentionSentence + " Applies at the next daily pass.",
                 Min: 0, Max: 36500, AtLeastUnlessZero: LogRetention.MinimumDays),
+            new(AgentsUpdateIntervalName, TenantSettingKind.Duration, "1.00:00:00", "Agents:UpdateInterval",
+                "How often an installed agent CLI (claude, codex, copilot, grok) is checked for a newer version and "
+                + "updated, in the background, through the same update as the Agents screen's: launches of that "
+                + "agent wait while it is replaced, and others run. A restart or redeploy inside the interval "
+                + "updates nothing; a CLI that is missing is installed after every start whatever this says. "
+                + "HARNESS_UPDATE_AGENTS=0 on the container turns the updates off. Applies at the next check, "
+                + "within the hour.",
+                MinDuration: TimeSpan.FromHours(1), MaxDuration: TimeSpan.FromDays(30)),
         ];
 
         _definitions = Definitions.ToDictionary(d => d.Name, StringComparer.Ordinal);
@@ -625,6 +634,9 @@ public sealed class TenantSettings
     /// <summary><c>log.retentionDays</c>: days of finished work the message log keeps; 0 keeps
     /// everything. Read through a delegate by <see cref="LogRetention"/> at every pass, never captured.</summary>
     public int LogRetentionDays => (int)Integer(LogRetentionDaysName);
+
+    /// <summary><c>agents.updateInterval</c>: the least time between two update checks of one installed agent CLI.</summary>
+    public TimeSpan AgentsUpdateInterval => Duration(AgentsUpdateIntervalName);
 
     /// <summary><c>system.packages</c>: what the entrypoint installs at the next start.</summary>
     public IReadOnlyList<string> SystemPackages =>

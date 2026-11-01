@@ -69,6 +69,21 @@ public sealed partial class RunLauncher(
         $"Waiting for the {command} update: the platform is updating `{command}`, and this run starts when it is done.";
 
     /// <summary>
+    /// What a launch held by <paramref name="hold"/> says, once: the update's sentence, or - for an agent being
+    /// installed, or not yet known to be there - that it waits for the install, for at most how long.
+    /// </summary>
+    public static string HeldText(string command, AgentUpdateHold? hold) => hold?.Kind switch
+    {
+        AgentUpdateKinds.Install =>
+            $"Waiting for {command} to be installed: the platform is installing `{command}`, and this run starts when it is "
+            + $"done, within {AgentUpdateGate.InstallBoundText}. If the install fails, the run starts then and says why.",
+        AgentUpdateKinds.Check =>
+            $"Waiting for {command} to be ready: the platform is checking whether `{command}` is installed and installs it if "
+            + $"it is not; this run starts when that is done, within {AgentUpdateGate.InstallBoundText}.",
+        _ => HeldText(command),
+    };
+
+    /// <summary>
     /// The run, holding a share of its CLI's install for as long as the child runs. While the
     /// platform updates that CLI the run WAITS - it is not failed - and says so once, the way a
     /// run waiting for a pool slot waits; an update in turn waits for the runs in flight.
@@ -92,7 +107,7 @@ public sealed partial class RunLauncher(
                 launching.FileName,
                 !reports
                     ? null
-                    : () => sink.ProgressAsync(HeldText(launching.FileName)),
+                    : () => sink.ProgressAsync(HeldText(launching.FileName, updates.Holding(launching.FileName))),
                 ct,
                 new AgentRunHolder(invocation.Container.Team, invocation.Container.Name));
         }

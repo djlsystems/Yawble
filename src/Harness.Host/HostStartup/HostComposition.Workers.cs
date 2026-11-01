@@ -110,11 +110,45 @@ internal sealed partial class HostComposition
             () => MeasureInstallsWhenAWorkerJoins.Commands(app.Services.GetRequiredService<AgentCatalog>()),
             app.Services.GetRequiredService<WorkerAsks>(), app.Services.GetRequiredService<WorkerInstalls>(),
             app.Services.GetRequiredService<ILogger<WorkerConnections>>(), app.Services.GetRequiredService<AgentUpdateGate>());
-        AgentUpdatesAtStart.Wire(
-            control, builder.Configuration["HARNESS_IMAGE"], builder.Configuration["HARNESS_UPDATE_AGENTS"], joined => workerConnections.Joined += joined,
-            () => AgentUpdatesAtStart.OnePerCommand(app.Services.GetRequiredService<AgentCatalog>()),
-            agent => app.Services.GetRequiredService<AgentCliUpdater>().Request(agent, person: null),
-            app.Services.GetRequiredService<ILogger<WorkerConnections>>());
+        // THE AGENT CLIS ARE INSTALLED AND UPDATED AFTER THE WORKER CONNECTS, in the background, through the update
+        // gate (AgentInstallsAtStart): held from now until a worker says each is there, then installed when missing
+        // and updated when its interval has passed. Only with the image's installer named (the entrypoint does).
+        if (builder.Configuration[AgentInstallsAtStart.InstallerSetting] is { Length: > 0 } installer)
+        {
+            var installsLog = app.Services.GetRequiredService<ILogger<AgentInstallsAtStart>>();
+            var catalogNow = app.Services.GetRequiredService<AgentCatalog>();
+            var asks = app.Services.GetRequiredService<WorkerAsks>();
+            var updater = app.Services.GetRequiredService<AgentCliUpdater>();
+            var installs = new AgentInstallsAtStart(
+                app.Services.GetRequiredService<AgentUpdateGate>(),
+                () => AgentInstallsAtStart.Installable(catalogNow),
+                async (command, ct) =>
+                {
+                    var asked = await asks.AskAsync<AgentCommandsRan>(
+                        new RunAgentCommands(WorkerAsks.NewRequest(), [CliVersionsWhenWorkersChange.VersionRun(command, AgentUpdates.ForCommand(command, catalogNow.Definitions))]),
+                        CliVersionsWhenWorkersChange.VersionTimeout + TimeSpan.FromSeconds(15), ct);
+                    return asked.Answer is { Results: [var ran] } ? ran.Installed : null;
+                },
+                (agent, reinstall, finished) => updater.RequestInstall(agent, installer, reinstall, finished)?.Started == true,
+                builder.Configuration["HARNESS_UPDATE_AGENTS"]?.Trim() == "0"
+                    ? null
+                    : (agent, finished) => updater.Request(agent, person: null, finished)?.Started == true,
+                () => tenantSettings.AgentsUpdateInterval,
+                builder.Configuration["HARNESS_REINSTALL_AGENTS"]?.Trim() == "1",
+                dataRoot,
+                builder.Configuration["HARNESS_SIGN_IN_CHROME"] is { Length: > 0 } chrome ? chrome : null,
+                log: installsLog);
+            installs.Hold();
+            if (control)
+            {
+                workerConnections.Joined += joined => _ = Task.Run(() => installs.StartAsync(joined.Value, app.Lifetime.ApplicationStopping));
+            }
+            else
+            {
+                app.Lifetime.ApplicationStarted.Register(() => _ = Task.Run(() => installs.StartAsync(null, app.Lifetime.ApplicationStopping)));
+            }
+            app.Lifetime.ApplicationStopping.Register(installs.Dispose);
+        }
         // EVERYTHING CONTROL MEASURES THROUGH A WORKER IS MEASURED AGAIN WHEN THE WORKERS CHANGE - the sign-in
         // probe, the launch check, the tool pre-flight and the CLI version record - as one pass once the
         // changes settle, and when an update ends, which also asks every placeable worker about that command.

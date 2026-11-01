@@ -1914,6 +1914,8 @@ export interface AgentUpdateState {
   /** Why it did not finish, when `failed`. */
   error: string | null
   cancelledBy: string | null
+  /** What it is: `update` (a person's, or the platform's daily one) or `install` (a CLI the volume did not have). Absent from an older server. */
+  kind?: 'update' | 'install'
 }
 
 /** What a finished update measured: an `AgentUpdateState`'s `result` once it is `done`. */
@@ -2029,6 +2031,12 @@ export interface AgentUpdatingOn {
   phase: 'waiting' | 'updating'
   worker: string | null
   since: string
+  /**
+   * What holds it: `update`, `install` (a CLI the volume does not have yet, installed in the background),
+   * or `check` (the server has just started and no worker has said yet whether the CLI is there).
+   * Absent from an older server, which only updates.
+   */
+  kind?: 'update' | 'install' | 'check'
 }
 
 /** One worker's answer to whether a command is on its PATH, and when it gave it. */
@@ -2081,6 +2089,9 @@ export interface AgentAuthReport {
    * asked, so `installed` and `authenticated` are null - never "not installed" or signed out.
    */
   updating?: string | null
+
+  /** What holds it, beside `updating`: `update`, `install` or `check`. Absent when nothing holds it, and from an older server. */
+  heldBy?: 'update' | 'install' | 'check' | null
 }
 
 /** What `GET /api/agents` answers. Launch definitions only: the prompt an agent is told is chosen by
@@ -2499,6 +2510,13 @@ export interface ConciergeAgentAuth {
   installed: boolean
   signedIn: boolean
   detail: string | null
+  /**
+   * Set while the platform holds the agent's CLI: `install` while it is being installed (a fresh volume,
+   * in the background after the worker connected), `update` while it is replaced, `check` while the server
+   * has not yet heard from a worker whether it is there. `installed` is false then and means nothing: the
+   * panel says Installing and opens when it is done. Absent otherwise, and from an older server.
+   */
+  heldBy?: 'update' | 'install' | 'check' | null
 }
 
 /**

@@ -5,7 +5,8 @@ namespace Harness.Tests;
 
 /// <summary>
 /// CONTROL AND A WORKER AS REAL PROCESSES, with the built-in catalog's own update commands: the update
-/// control asks of its gate when a worker joins (in the control image) reaches only the suite's stub,
+/// control asks of its gate when a worker joins (an installer named, every CLI on the worker and none
+/// checked within the interval) reaches only the suite's stub,
 /// and npm's prefix in the update's process is the suite's scratch one - so no test Host or worker writes
 /// the instance's npm install (see <see cref="AgentCliIsolation"/>).
 /// </summary>
@@ -44,8 +45,12 @@ public sealed class AgentCliUpdateIsolationTests
             ["npm_config_cache"] = Path.Combine(bed.Work, "npm-cache"),
         };
 
-        await bed.StartControlAsync(more: new Dictionary<string, string>(given) { ["HARNESS_IMAGE"] = AgentUpdatesAtStart.ControlImage });
-        bed.StartWorker("w1", more: new Dictionary<string, string>(given) { ["PATH"] = SystemPath });
+        // An installer that refuses: every CLI is on the worker (the suite's stubs first on its PATH), so
+        // each is measured installed and updated, never installed.
+        var installer = Path.Combine(bed.Work, "installer.sh");
+        File.WriteAllText(installer, "#!/bin/sh\necho 'the installer is not used here' >&2\nexit 1\n");
+        await bed.StartControlAsync(more: new Dictionary<string, string>(given) { [AgentInstallsAtStart.InstallerSetting] = installer });
+        bed.StartWorker("w1", more: new Dictionary<string, string>(given) { ["PATH"] = $"{AgentCliIsolation.Root}:{SystemPath}" });
 
         var finished = new Dictionary<string, JsonElement>();
         await bed.UntilAsync("each npm update control asked when w1 joined has finished", async () =>

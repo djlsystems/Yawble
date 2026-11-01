@@ -4,7 +4,12 @@ namespace Harness.Host;
 /// <param name="SignedIn">True only when the probe measured a sign-in. A probe that could not
 /// measure (<see cref="AgentAuthReport.Authenticated"/> null) is false here, and
 /// <paramref name="Detail"/> says why.</param>
-public sealed record ConciergeAuth(bool Installed, bool SignedIn, string? Detail);
+/// <param name="HeldBy">Set while the platform holds the agent's CLI (<see cref="AgentUpdateKinds"/>): <c>install</c>
+/// while it is installed in the background, and the panel says Installing rather than not installed.</param>
+public sealed record ConciergeAuth(
+    bool Installed, bool SignedIn, string? Detail,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? HeldBy = null);
 
 /// <summary>
 /// What the Concierge launcher will actually use, after defaults: <c>GET /api/concierge</c>'s
@@ -62,7 +67,7 @@ public static class ConciergeAgentDefault
                 agent is null
                     ? "No interactive agent is installed."
                     : $"'{agent}' is not an agent this tenant has.")
-            : new ConciergeAuth(report.Installed == true, report.Authenticated == true, report.Detail);
+            : new ConciergeAuth(report.Installed == true, report.Authenticated == true, report.Detail, report.HeldBy);
 
         return new ConciergeEffective(
             agent,
@@ -81,6 +86,8 @@ public static class ConciergeAgentDefault
 
         // NOT "the first that exists" when nothing is installed: that launched a command that is not
         // on PATH and left a person a closed socket. Null lets the panel say so first.
-        return First(r => r.Authenticated == true) ?? First(r => r.Installed == true);
+        // A fresh volume has nothing installed yet: the agent being installed is the one that will open.
+        return First(r => r.Authenticated == true) ?? First(r => r.Installed == true)
+            ?? First(r => r.HeldBy == AgentUpdateKinds.Install) ?? First(r => r.HeldBy == AgentUpdateKinds.Check);
     }
 }

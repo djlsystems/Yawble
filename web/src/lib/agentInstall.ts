@@ -29,9 +29,25 @@ export const AgentNotInstalled = 'AgentNotInstalled'
  */
 export const AgentUpdating = 'AgentUpdating'
 
+/**
+ * The wire value for a preset whose CLI the platform is INSTALLING: a fresh volume, in the background after
+ * the worker connected. Never missing while it lasts - runs of it wait for it. Exact match.
+ */
+export const AgentInstalling = 'AgentInstalling'
+
 /** Whether the platform's update holds this preset's command now. */
 export function isUpdating(installation: AgentInstallation | undefined | null): boolean {
   return installation?.state === AgentUpdating
+}
+
+/** Whether the platform is installing this preset's command now. */
+export function isInstalling(installation: AgentInstallation | undefined | null): boolean {
+  return installation?.state === AgentInstalling
+}
+
+/** The sentence for an agent being installed, word for word: the Agents screen's and the Concierge's. */
+export function installingText(agent: string): string {
+  return `Installing ${agent}...`
 }
 
 /**
@@ -134,7 +150,16 @@ export function installStatus(
     return { text: 'Not checked', icon: 'help', tone: 'unknown' }
   }
 
-  // UPDATING COMES FIRST: the install is being replaced, so it is never "not installed" or "found".
+  // INSTALLING AND UPDATING COME FIRST: the install is arriving or being replaced, so it is never
+  // "not installed" or "found".
+  if (isInstalling(installation)) {
+    return { text: installingText(installation.agent), icon: 'sync', tone: 'unknown' }
+  }
+
+  if (isUpdating(installation) && installation.updating?.kind === 'check') {
+    return { text: `Getting ${installation.agent} ready...`, icon: 'sync', tone: 'unknown' }
+  }
+
   if (isUpdating(installation)) {
     const where = whereUpdating(installation)
     return {

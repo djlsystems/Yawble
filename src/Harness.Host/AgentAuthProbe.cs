@@ -19,6 +19,7 @@ public sealed record AgentAuthProbeSpec(
 /// <param name="Updating">While the platform's update holds the preset's command: the gate's sentence
 /// (<see cref="UpdatingOn.Text"/>), with <c>installed</c> and <c>authenticated</c> null - not asked, and
 /// never "not installed" or signed out. Null otherwise.</param>
+/// <param name="HeldBy">Beside <paramref name="Updating"/>: what holds the command (<see cref="AgentUpdateKinds"/>).</param>
 public sealed record AgentAuthReport(
     string Agent,
     string Command,
@@ -28,7 +29,9 @@ public sealed record AgentAuthReport(
     bool Referenced = false,
     AgentLaunchReport? Launch = null,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    string? Updating = null)
+    string? Updating = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? HeldBy = null)
 {
     /// <summary>The reports, each marked with whether <paramref name="referenced"/> names it.</summary>
     public static IReadOnlyList<AgentAuthReport> MarkReferenced(
@@ -192,7 +195,7 @@ public sealed class AgentAuthProbe(
     private AgentAuthReport Held(string agent, string command, AgentUpdateHold hold)
     {
         var text = Text(hold);
-        return new AgentAuthReport(agent, command, null, null, text, Updating: text);
+        return new AgentAuthReport(agent, command, null, null, text, Updating: text, HeldBy: hold.Kind);
     }
 
     /// <summary>The gate's word on each report now: a command it holds reads updating, whatever was measured before.</summary>

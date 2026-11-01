@@ -1,28 +1,42 @@
 #!/bin/sh
-# Runs before the host, every start.
+# Installs the agent CLIs onto the data volume, as `agent`.
+#
+#   ensure-agent-clis.sh <name>...   the named ones only, one after another (claude, codex, copilot, grok, chromium)
+#   ensure-agent-clis.sh             all of them AT THE SAME TIME, then records the versions
 #
 # The image contains git, curl, and Node. The agent CLIs are downloaded onto the
 # data volume (/data), so replacing the image does not make the board forget them.
-# A download that fails is reported and does not stop the host: the board is more
-# useful than a container that refuses to boot because one vendor was unreachable.
 #
-# THIS IS ONE OF THE TWO PLACES AN AGENT CLI IS UPDATED. Every launch the Host makes
-# turns the CLI's own updater off (each preset's `updates` declaration), because the
-# install is shared and a CLI replacing it in place leaves a member launched in that
-# moment with no program. So a CLI already on the volume is brought to its newest
-# version here, before the Host runs and nothing can be launching from it; the other
-# place is a person's request on the Agents screen, which the Host holds launches for.
+# NOTHING WAITS FOR THIS. The container's start no longer runs it before the Host: the
+# Host starts at once, the worker connects, and then the Host asks for each CLI that is
+# missing to be installed, through the same update gate a person's update on the Agents
+# screen goes through, running `ensure-agent-clis.sh <name>` once on one worker, one
+# request per CLI so they download in parallel and one vendor failing holds no other.
+# Launches of that CLI wait for it; other agents launch as they always do.
+# The entrypoint runs `ensure-agent-clis.sh chromium` in the background for the
+# headless browser agents test web apps with.
 #
-# Set HARNESS_REINSTALL_AGENTS=1 to download them again, HARNESS_UPDATE_AGENTS=0 to
-# leave installed CLIs at the version they have.
+# Every launch the Host makes turns the CLI's own updater off (each preset's `updates`
+# declaration), because the install is shared and a CLI replacing it in place leaves a
+# member launched in that moment with no program. An installed CLI is updated by the
+# Host, at most once per `agents.updateInterval` (a day by default), through the same gate.
+#
+# Exits non-zero when a named CLI could not be installed (or updated), so the Host can
+# say which; the others are still installed. Set HARNESS_REINSTALL_AGENTS=1 to download
+# them again, HARNESS_UPDATE_AGENTS=0 to leave installed CLIs at the version they have.
+# HARNESS_DATA_ROOT moves every path off /data, for a test.
 
 set -u
+# What it writes stays group-writable for the host and runnable by users in neither group, whoever ran
+# it: the entrypoint, or a worker's Host (umask 0007) on the Host's request. Installed CLIs hold no secrets.
+umask 002
 
-export HOME="${HOME:-/data/agent-home}"
-export NPM_CONFIG_PREFIX=/data/npm-global
-export PATH="/data/agent-home/.grok/bin:/data/npm-global/bin:/data/bin:${PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
+data="${HARNESS_DATA_ROOT:-/data}"
+export HOME="${HOME:-$data/agent-home}"
+export NPM_CONFIG_PREFIX="$data/npm-global"
+export PATH="$HOME/.grok/bin:$data/npm-global/bin:$data/bin:${PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
 
-mkdir -p /data/bin /data/npm-global /data/agent-home/.grok/bin
+mkdir -p "$data/bin" "$data/npm-global" "$HOME/.grok/bin"
 
 reinstall=0
 if [ "${HARNESS_REINSTALL_AGENTS:-}" = "1" ]; then
@@ -43,7 +57,7 @@ export GROK_DISABLE_AUTOUPDATER=1
 install_npm() {
   name="$1"
   package="$2"
-  target="/data/npm-global/bin/$name"
+  target="$data/npm-global/bin/$name"
 
   if [ "$reinstall" -eq 0 ] && [ -x "$target" ]; then
     if [ "$update" -eq 0 ]; then
@@ -51,28 +65,29 @@ install_npm() {
       return 0
     fi
     echo "agent cli: updating $name ($package@latest)"
-    sh "$(dirname "$0")/npm-torn-install.sh" /data/npm-global "$package"
+    sh "$(dirname "$0")/npm-torn-install.sh" "$data/npm-global" "$package"
     if npm install -g "$package@latest"; then
       echo "agent cli: $name is at its newest version"
-    else
-      echo "agent cli: FAILED to update $name; the installed version stays. The board will still start."
+      return 0
     fi
-    return 0
+    echo "agent cli: FAILED to update $name; the installed version stays."
+    return 1
   fi
 
   echo "agent cli: installing $name ($package)"
   # An install interrupted part-way (a CLI updating itself when the container was replaced) leaves
   # a folder npm then fails to rename onto, on every start. See npm-torn-install.sh.
-  sh "$(dirname "$0")/npm-torn-install.sh" /data/npm-global "$package"
+  sh "$(dirname "$0")/npm-torn-install.sh" "$data/npm-global" "$package"
   if npm install -g "$package"; then
     if [ -x "$target" ]; then
       echo "agent cli: $name installed"
-    else
-      echo "agent cli: $package installed, but $target is not executable"
+      return 0
     fi
-  else
-    echo "agent cli: FAILED to install $name. The board will still start."
+    echo "agent cli: $package installed, but $target is not executable"
+    return 1
   fi
+  echo "agent cli: FAILED to install $name; the other agents are not held by it."
+  return 1
 }
 
 # Grok does not take Claude's --mcp-config flag. It reads MCP servers from its own
@@ -111,33 +126,32 @@ install_grok() {
     # Its own updater switch is for LAUNCHES; the explicit update must not read it.
     if env -u GROK_DISABLE_AUTOUPDATER timeout 300 "$target" update </dev/null; then
       echo "agent cli: grok is at its newest version"
-    else
-      echo "agent cli: FAILED to update grok; the installed version stays. The board will still start."
+      return 0
     fi
-    return 0
+    echo "agent cli: FAILED to update grok; the installed version stays."
+    return 1
   fi
 
   echo "agent cli: installing grok from https://x.ai/cli/install.sh"
-  if curl -fsSL https://x.ai/cli/install.sh | bash; then
+  # Downloaded first, then run: a pipe into bash would run a half-downloaded script, and hide curl's failure.
+  installer=$(mktemp) || return 1
+  if curl -fsSL --max-time 300 -o "$installer" https://x.ai/cli/install.sh && bash "$installer"; then
+    rm -f "$installer"
     if [ -x "$target" ]; then
       echo "agent cli: grok installed"
-    else
-      echo "agent cli: the grok installer finished, but $target is missing"
+      return 0
     fi
-  else
-    echo "agent cli: FAILED to install grok. The board will still start."
+    echo "agent cli: the grok installer finished, but $target is missing"
+    return 1
   fi
+  rm -f "$installer"
+  echo "agent cli: FAILED to install grok; the other agents are not held by it."
+  return 1
 }
-
-install_npm claude @anthropic-ai/claude-code
-install_npm codex @openai/codex
-install_npm copilot @github/copilot
-install_grok
-ensure_grok_mcp
 
 # Headless Chromium for agents testing web apps, onto the volume (PLAYWRIGHT_BROWSERS_PATH), once.
 install_browser() {
-  export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-/data/ms-playwright}"
+  export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$data/ms-playwright}"
   if [ "$reinstall" -eq 0 ] && ls -d "$PLAYWRIGHT_BROWSERS_PATH"/chromium_headless_shell-* >/dev/null 2>&1; then
     echo "agent cli: headless chromium is already installed"
     return 0
@@ -145,17 +159,53 @@ install_browser() {
   echo "agent cli: installing headless chromium into $PLAYWRIGHT_BROWSERS_PATH"
   if npx -y playwright install chromium; then
     echo "agent cli: headless chromium installed"
-  else
-    echo "agent cli: FAILED to install headless chromium. The board will still start."
+    return 0
   fi
+  echo "agent cli: FAILED to install headless chromium."
+  return 1
 }
-install_browser
+
+# One CLI, by the name the Host asks for (the command its presets launch).
+ensure_one() {
+  case "$1" in
+    claude) install_npm claude @anthropic-ai/claude-code ;;
+    codex) install_npm codex @openai/codex ;;
+    copilot) install_npm copilot @github/copilot ;;
+    grok) install_grok; status=$?; ensure_grok_mcp; return $status ;;
+    chromium) install_browser ;;
+    *) echo "agent cli: $1 is not a CLI this script installs (claude, codex, copilot, grok, chromium)"; return 2 ;;
+  esac
+}
+
+if [ $# -gt 0 ]; then
+  failed=0
+  for name in "$@"; do
+    ensure_one "$name"
+    code=$?
+    [ "$code" -le "$failed" ] || failed=$code
+  done
+  exit $failed
+fi
+
+# ALL OF THEM AT ONCE, each on its own: one vendor slow or unreachable holds no other. Each one's
+# exit status is kept in its own file, so a failure is reported by name once all have ended.
+results=$(mktemp -d) || exit 1
+for name in claude codex copilot grok chromium; do
+  ( ensure_one "$name"; echo $? > "$results/$name" ) &
+done
+wait
+failed=0
+for name in claude codex copilot grok chromium; do
+  code=$(cat "$results/$name" 2>/dev/null || echo 1)
+  [ "$code" = 0 ] || { echo "agent cli: $name did not install or update (exit $code); the others were not held by it"; failed=1; }
+done
+rm -rf "$results"
 
 # WHICH VERSIONS THIS START HAS, one JSON line per start, on the volume. The host reads
 # it for Admin > Diagnostics. A CLI that is not installed is null; one that prints nothing is said
 # so rather than left blank. Only the newest 200 starts are kept.
 record_versions() {
-  file="${CLI_VERSIONS_FILE:-/data/cli-versions.jsonl}"
+  file="${CLI_VERSIONS_FILE:-$data/cli-versions.jsonl}"
   line="{\"at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"versions\":{"
   sep=""
   for name in claude codex copilot grok gh git node; do
@@ -171,13 +221,13 @@ record_versions() {
     line="$line$sep\"$name\":$value"
     sep=","
   done
-  chromium=$(ls -d "${PLAYWRIGHT_BROWSERS_PATH:-/data/ms-playwright}"/chromium_headless_shell-* 2>/dev/null | tail -n 1)
+  chromium=$(ls -d "${PLAYWRIGHT_BROWSERS_PATH:-$data/ms-playwright}"/chromium_headless_shell-* 2>/dev/null | tail -n 1)
   if [ -n "$chromium" ]; then
     line="$line,\"chromium\":\"$(basename "$chromium" | tr -d '"\\')\""
   else
     line="$line,\"chromium\":null"
   fi
-  chrome=$(ls -d "${HARNESS_SIGN_IN_CHROME:-/data/google-chrome}"/[0-9]*/ 2>/dev/null | sed 's#/$##; s#.*/##' | sort -V | tail -n 1)
+  chrome=$(ls -d "${HARNESS_SIGN_IN_CHROME:-$data/google-chrome}"/[0-9]*/ 2>/dev/null | sed 's#/$##; s#.*/##' | sort -V | tail -n 1)
   if [ -n "$chrome" ]; then
     line="$line,\"googleChrome\":\"$(printf '%s' "$chrome" | tr -d '"\\')\""
   else
@@ -207,3 +257,4 @@ note_sign_in claude ANTHROPIC_API_KEY .claude/.credentials.json
 note_sign_in codex OPENAI_API_KEY .codex/auth.json
 [ -n "${GITHUB_TOKEN:-}" ] || note_sign_in copilot GH_TOKEN .copilot/config.json
 note_sign_in grok XAI_API_KEY .grok/auth.json
+exit $failed
