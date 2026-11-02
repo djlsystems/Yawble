@@ -21,6 +21,7 @@ using Harness.Contracts;
 using Harness.Host;
 using Harness.Host.Auth;
 using Harness.Host.Capacity;
+using Harness.Host.Link;
 using Harness.Host.Solutions;
 using Harness.Identity;
 using Harness.Kanban;
@@ -92,6 +93,8 @@ internal sealed partial class HostComposition
         builder.Services.AddSingleton(sp => new ConnectionStore(database, sp.GetRequiredService<IDataProtectionProvider>()));
         builder.Services.AddSingleton<IConnectionStore>(sp => sp.GetRequiredService<ConnectionStore>());
         builder.Services.AddSingleton<IMcpServerStore>(sp => new McpServerStore(database, sp.GetRequiredService<IDataProtectionProvider>()));
+        // The stored management link (link-001): one row or none, its credential already sealed.
+        builder.Services.AddSingleton<ILinkStore>(new LinkStore(database));
 
         // Order carries no schema obligation - SchemaMigrator above has already applied every step
         // and set journal_mode on the file. These are readers and writers over a database that exists.

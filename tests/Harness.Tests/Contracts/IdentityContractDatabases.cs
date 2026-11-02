@@ -2,6 +2,7 @@ using System.Data.Common;
 using Harness.Backlog;
 using Harness.Contracts;
 using Harness.Host;
+using Harness.Host.Link;
 using Harness.Host.SqlServer;
 using Harness.Identity;
 using Harness.Messaging;
@@ -82,6 +83,8 @@ public abstract class IdentityDatabase : IAsyncDisposable
     public abstract IPluginRemovalRows RemovalRows();
 
     public abstract IConnectionStore Connections(IDataProtectionProvider protection);
+
+    public abstract ILinkStore Links();
 
     public abstract IMcpServerStore McpServers(IDataProtectionProvider protection);
 
@@ -198,6 +201,8 @@ public sealed class SqliteIdentityDatabase : IdentityDatabase
 
     public override IConnectionStore Connections(IDataProtectionProvider protection) => new ConnectionStore(_database.Path, protection);
 
+    public override ILinkStore Links() => new LinkStore(_database.Path);
+
     public override IMcpServerStore McpServers(IDataProtectionProvider protection) => new McpServerStore(_database.Path, protection);
 
     public override IDatabaseHealth Health() => new SqliteDatabaseHealth(_database.Path);
@@ -292,6 +297,8 @@ public sealed class SqlServerIdentityDatabase : IdentityDatabase
     public override IPluginRemovalRows RemovalRows() => new SqlServerPluginRemovalRows(ConnectionString);
 
     public override IConnectionStore Connections(IDataProtectionProvider protection) => new SqlServerConnectionStore(ConnectionString, protection);
+
+    public override ILinkStore Links() => new SqlServerLinkStore(ConnectionString);
 
     public override IMcpServerStore McpServers(IDataProtectionProvider protection) => new SqlServerMcpServerStore(ConnectionString, protection);
 

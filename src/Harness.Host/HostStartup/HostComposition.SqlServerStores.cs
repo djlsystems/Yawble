@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Harness.Messaging;
 using Harness.Identity;
 using Harness.SqlServer;
+using Harness.Host.Link;
 using Harness.Host.SqlServer;
 using Harness.SqlServer.Backlog;
 using Harness.SqlServer.Host;
@@ -114,6 +115,7 @@ internal sealed partial class HostComposition
         builder.Services.AddSingleton<IPluginSecretMoveRows>(new SqlServerPluginSecretMoveRows(connection));
         builder.Services.AddSingleton<IConnectionStore>(sp => new SqlServerConnectionStore(connection, sp.GetRequiredService<IDataProtectionProvider>()));
         builder.Services.AddSingleton<IMcpServerStore>(sp => new SqlServerMcpServerStore(connection, sp.GetRequiredService<IDataProtectionProvider>()));
+        builder.Services.AddSingleton<ILinkStore>(new SqlServerLinkStore(connection));
 
         // THE DATABASE ITSELF: whether it answers (`SELECT 1`), and the housekeeping SQLite's file needs,
         // which here is nothing - the checkpoint is a no-op and the daily copy says that point-in-time
