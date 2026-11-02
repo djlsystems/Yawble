@@ -107,7 +107,7 @@ func TestConnectionSlots(t *testing.T) {
 		`,"connections":null`: "",
 		`,"connections":[]`:   "`connections` must be an object of slot name to slot.",
 		`,"connections":{"1mail":{"providers":["google"]}}`:                                "`connections.1mail` is not a usable slot name.",
-		`,"connections":{"mail":{"providers":[]}}`:                                         "`connections.mail.providers` must be a non-empty list",
+		`,"connections":{"mail":{"providers":[]}}`:                                         "`connections.mail.providers` must be a non-empty array",
 		`,"connections":{"mail":{"providers":["yahoo"]}}`:                                  "names 'yahoo', which is not a provider",
 		`,"connections":{"mail":{"providers":["google"],"scopes":{"microsoft":[]}}}`:       "has scopes for 'microsoft', which the slot's providers do not name.",
 		`,"connections":{"mail":{"providers":["google"],"scopes":"email"}}`:                "`connections.mail.scopes` must be a list of scopes",
@@ -345,6 +345,57 @@ func TestEachSharedReplacesFaultIsRefusedNamingTheField(t *testing.T) {
 		_, _, err := Parse(replacesManifest(cases.ID, c.Replaces))
 		if err == nil || err.Error() != c.Says {
 			t.Errorf("%s: got %v, want %q", c.Replaces, err, c.Says)
+		}
+	}
+}
+
+// connectionProvidersCases is tests/Fixtures/PluginConnectionProviders/cases.json, which the Host's
+// PluginConnectionProvidersManifestTests reads too: each slot's `providers`, website among them,
+// accepted and refused in the same sentences.
+type connectionProvidersCases struct {
+	Accepted []struct {
+		Connections json.RawMessage `json:"connections"`
+	} `json:"accepted"`
+	Refused []struct {
+		Secrets     json.RawMessage `json:"secrets"`
+		Connections json.RawMessage `json:"connections"`
+		Says        string          `json:"says"`
+	} `json:"refused"`
+}
+
+func readConnectionProvidersCases(t *testing.T) connectionProvidersCases {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "tests", "Fixtures", "PluginConnectionProviders", "cases.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases connectionProvidersCases
+	if err := json.Unmarshal(raw, &cases); err != nil {
+		t.Fatal(err)
+	}
+	if len(cases.Accepted) == 0 || len(cases.Refused) == 0 {
+		t.Fatal("cases.json holds no cases")
+	}
+	return cases
+}
+
+func TestEachSharedConnectionProvidersSlotIsAccepted(t *testing.T) {
+	for n, c := range readConnectionProvidersCases(t).Accepted {
+		if _, _, err := Parse(readsManifest(`,"connections":` + string(c.Connections))); err != nil {
+			t.Errorf("accepted[%d]: %v", n, err)
+		}
+	}
+}
+
+func TestEachSharedConnectionProvidersFaultIsRefusedNamingTheField(t *testing.T) {
+	for n, c := range readConnectionProvidersCases(t).Refused {
+		extra := `,"connections":` + string(c.Connections)
+		if len(c.Secrets) > 0 {
+			extra = `,"secrets":` + string(c.Secrets) + extra
+		}
+		_, _, err := Parse(readsManifest(extra))
+		if err == nil || err.Error() != c.Says {
+			t.Errorf("refused[%d]: got %v, want %q", n, err, c.Says)
 		}
 	}
 }

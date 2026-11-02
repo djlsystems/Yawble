@@ -1,0 +1,25 @@
+{
+  "_": "Manifest `connections.<slot>.providers` lists the Host (PluginConnectionProvidersManifestTests) and the CLI (cli/internal/plugin/manifest_test.go) both read. Each `accepted` block must load, each slot's providers read as `providers` gives them; each `refused` block (with `secrets` when given) must refuse the manifest with exactly `says`. `website` is a provider like `login` and `apikey`: scopes do not apply to it, and a secret still moves only into a slot whose providers is exactly [\"apikey\"].",
+  "accepted": [
+    { "connections": { "site": { "providers": [ "website" ] } }, "providers": { "site": [ "website" ] } },
+    { "connections": { "site": { "providers": [ "website" ], "required": true, "multiple": true, "description": "The shop's back office." } }, "providers": { "site": [ "website" ] } },
+    { "connections": { "any": { "providers": [ "login", "apikey", "website" ] } }, "providers": { "any": [ "login", "apikey", "website" ] } },
+    { "connections": { "any": { "providers": [ "google", "website" ], "scopes": [ "openid" ] } }, "providers": { "any": [ "google", "website" ] } },
+    { "connections": { "any": { "providers": [ "website", "website" ] } }, "providers": { "any": [ "website" ] } },
+    { "connections": { "mail": { "providers": [ "imap" ] }, "keys": { "providers": [ "apikey" ] } }, "providers": { "mail": [ "imap" ], "keys": [ "apikey" ] } },
+    { "connections": { "account": { "providers": [ "google", "microsoft", "custom", "custom-acme" ] } }, "providers": { "account": [ "google", "microsoft", "custom", "custom-acme" ] } }
+  ],
+  "refused": [
+    { "connections": { "site": { "providers": [ "yahoo" ] } }, "says": "`connections.site.providers` names 'yahoo', which is not a provider this Host knows (google, microsoft, custom, custom-<id>, imap for a mailbox, login for a username and password, apikey for an API key, or website for a website)." },
+    { "connections": { "site": { "providers": [ "Website" ] } }, "says": "`connections.site.providers` names 'Website', which is not a provider this Host knows (google, microsoft, custom, custom-<id>, imap for a mailbox, login for a username and password, apikey for an API key, or website for a website)." },
+    { "connections": { "site": { "providers": [ "web-site" ] } }, "says": "`connections.site.providers` names 'web-site', which is not a provider this Host knows (google, microsoft, custom, custom-<id>, imap for a mailbox, login for a username and password, apikey for an API key, or website for a website)." },
+    { "connections": { "site": { "providers": [ ] } }, "says": "`connections.site.providers` must be a non-empty array of provider names (google, microsoft, custom, custom-<id>, imap, login, apikey, website)." },
+    { "connections": { "site": { "providers": "website" } }, "says": "`connections.site.providers` must be a non-empty array of provider names (google, microsoft, custom, custom-<id>, imap, login, apikey, website)." },
+    { "connections": { "site": { "providers": [ "website", 7 ] } }, "says": "`connections.site.providers` must be a non-empty array of provider names (google, microsoft, custom, custom-<id>, imap, login, apikey, website)." },
+    { "connections": { "site": { "providers": [ "website" ], "scopes": { "website": [ "read" ] } } }, "says": "`connections.site.scopes` has an entry for 'website', but scopes do not apply to a website connection: it has no sign-in." },
+    { "connections": { "site": { "providers": [ "apikey" ], "scopes": { "apikey": [ "read" ] } } }, "says": "`connections.site.scopes` has an entry for 'apikey', but scopes do not apply to a API key connection: it has no sign-in." },
+    { "connections": { "site": { "providers": [ "login" ], "scopes": { "login": [ "read" ] } } }, "says": "`connections.site.scopes` has an entry for 'login', but scopes do not apply to a username and password connection: it has no sign-in." },
+    { "secrets": { "apiKey": { "movedTo": "site" } }, "connections": { "site": { "providers": [ "website" ] } }, "says": "`secrets.apiKey.movedTo` names 'site', which is not an API-key slot: a secret moves only into a slot whose `providers` is [\"apikey\"]." },
+    { "secrets": { "apiKey": { "movedTo": "site" } }, "connections": { "site": { "providers": [ "apikey", "website" ] } }, "says": "`secrets.apiKey.movedTo` names 'site', which is not an API-key slot: a secret moves only into a slot whose `providers` is [\"apikey\"]." }
+  ]
+}

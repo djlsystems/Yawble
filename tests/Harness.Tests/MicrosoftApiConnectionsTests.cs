@@ -466,8 +466,11 @@ public sealed class MicrosoftApiConnectionsTests : IAsyncLifetime
         var scopes = slot["scopes"]!.ToJsonString();
         Assert.Equal(["openid", "email", "offline_access", GraphMail], slot["scopes"]!.AsArray().Select(s => (string?)s));
 
-        // TODAY'S SLOT, member for member and byte for byte, then `tokens` as its last member.
-        var today = $"{{\"provider\":\"microsoft\",\"account\":\"{Account}\",\"accessToken\":\"{issued.Access}\",\"expiresAt\":\"{expiresAt}\",\"scopes\":{scopes}";
+        // TODAY'S SLOT, member for member and byte for byte but for `name` (the connection's stored
+        // name, just before `account`), then `tokens` as its last member.
+        var name = (await Services.GetRequiredService<Connections>().Store.GetAsync(id, Ct))!.Name;
+        Assert.False(string.IsNullOrEmpty(name));
+        var today = $"{{\"provider\":\"microsoft\",\"name\":{JsonSerializer.Serialize(name)},\"account\":\"{Account}\",\"accessToken\":\"{issued.Access}\",\"expiresAt\":\"{expiresAt}\",\"scopes\":{scopes}";
         var tokens = $"\"tokens\":{{\"https://graph.microsoft.com/\":{{\"accessToken\":\"{issued.Access}\",\"expiresAt\":\"{expiresAt}\",\"scopes\":{scopes}}}}}";
         Assert.Contains($"\"mail\":{today},{tokens}}}", line);
     }

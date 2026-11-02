@@ -211,10 +211,10 @@ public static class ConnectionProviders
 
     /// <summary>Every provider word a plugin manifest's <c>connections.&lt;slot&gt;.providers</c> may
     /// name, besides <c>custom-&lt;id&gt;</c>. The console's provider wording table has words for each.</summary>
-    public static IReadOnlyList<string> ManifestProviders { get; } = [Google, Microsoft, Custom, MailboxSettings.Kind, ConnectionKinds.Login, ConnectionKinds.ApiKey];
+    public static IReadOnlyList<string> ManifestProviders { get; } = [Google, Microsoft, Custom, MailboxSettings.Kind, ConnectionKinds.Login, ConnectionKinds.ApiKey, ConnectionKinds.Website];
 
     /// <summary>The manifest words for a connection with no OAuth sign-in, so no scopes: a mailbox, a
-    /// username and password, an API key.</summary>
+    /// username and password, an API key, a website.</summary>
     public static bool HasNoScopes(string provider) => provider == MailboxSettings.Kind || ConnectionKinds.IsCredential(provider);
 
     /// <summary>
@@ -230,6 +230,7 @@ public static class ConnectionProviders
         [Custom] = "custom sign-in",
         [ConnectionKinds.Login] = "username and password",
         [ConnectionKinds.ApiKey] = "API key",
+        [ConnectionKinds.Website] = "website",
     };
 
     /// <summary>
@@ -239,7 +240,7 @@ public static class ConnectionProviders
     /// </summary>
     public static string Spoken(string id, Func<string, string?>? named = null)
     {
-        if (id is MailboxSettings.Kind or ConnectionKinds.Login) return $"a {Words[id]}";
+        if (id is MailboxSettings.Kind or ConnectionKinds.Login or ConnectionKinds.Website) return $"a {Words[id]}";
         if (id == ConnectionKinds.ApiKey) return $"an {Words[id]}";
 
         var name = Words.TryGetValue(id, out var words) ? words

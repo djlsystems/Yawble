@@ -19,6 +19,12 @@ describe('the provider wording table', () => {
     }
   });
 
+  it('has words for the credential kinds a slot may name, website among them, as the Host says them', () => {
+    expect(PROVIDER_WORDS.login?.name).toBe('username and password')
+    expect(PROVIDER_WORDS.apikey?.name).toBe('API key')
+    expect(PROVIDER_WORDS.website?.name).toBe('website')
+  })
+
   it('reads an id it has no words for as itself, and never blank', () => {
     expect(providerWords('acme')).toBe('acme');
     expect(providerWords('custom-acme')).toBe('custom-acme');

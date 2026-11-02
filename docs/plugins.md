@@ -494,8 +494,8 @@ token, refreshes and rotates, and hands the plugin a fresh access token on each 
 |---|---|
 | slot name | The key the plugin reads in the request's `connections`. Same form as a config field's name. |
 | `description` | One line, shown beside the slot's picker. |
-| `providers` | Which providers' connections may be bound: `google`, `microsoft`, `custom` (any custom provider), `custom-<id>` (one custom provider), `imap` for a mailbox signed in with an app password (see [connections.md](connections.md#a-mailbox-with-an-app-password-imap)), `login` for a username and password, or `apikey` for an API key (see [connections.md](connections.md#websites-api-keys-usernames-and-passwords)). At least one. An unknown provider refuses the plugin, with the reason on the Plugins screen. |
-| `scopes` | Provider → the scopes the slot needs, or one list that applies to every OAuth provider the slot names. A `custom` entry applies to any custom provider. A connection lacking one of them is refused at binding, with a sentence that offers Reconnect. Scopes do not apply to `imap`, `login` or `apikey`: an entry for one refuses the plugin. |
+| `providers` | Which providers' connections may be bound: `google`, `microsoft`, `custom` (any custom provider), `custom-<id>` (one custom provider), `imap` for a mailbox signed in with an app password (see [connections.md](connections.md#a-mailbox-with-an-app-password-imap)), `login` for a username and password, `apikey` for an API key, or `website` for a website (see [connections.md](connections.md#websites-api-keys-usernames-and-passwords)); a bound website arrives as `{ kind, name, account, preset, fields }`, its masked values redacted, like the other credentials. At least one. An unknown provider refuses the plugin, with the reason on the Plugins screen. |
+| `scopes` | Provider → the scopes the slot needs, or one list that applies to every OAuth provider the slot names. A `custom` entry applies to any custom provider. A connection lacking one of them is refused at binding, with a sentence that offers Reconnect. Scopes do not apply to `imap`, `login`, `apikey` or `website`: an entry for one refuses the plugin. |
 | `required` | Default false. An unbound required slot blocks the member's runs with a sentence naming the slot, as a missing required secret does. |
 | `multiple` | Default false. True lets a member bind several connections to the slot, and a run receives them all as an array (see [A slot with several connections](#a-slot-with-several-connections-multiple)). Anything but true or false refuses the plugin. |
 
@@ -917,9 +917,9 @@ rows, `row.status`), `cli/internal/plugin/manifest_test.go` and `web/src/lib/__t
   "secrets": { "token": "…resolved now…" },
   "secretKeys": { "token": "SAMPLE_ECHO_TOKEN", "backup": "SAMPLE_ECHO_BACKUP" },
   "connections": {
-    "mail": { "provider": "google", "account": "person@example.com", "accessToken": "…fresh now…",
+    "mail": { "provider": "google", "name": "Work mail", "account": "person@example.com", "accessToken": "…fresh now…",
               "expiresAt": "2026-09-28T21:05:00Z", "scopes": ["https://mail.google.com/"] },
-    "azure": { "provider": "microsoft", "account": "ops@contoso.com", "accessToken": "…management's…",
+    "azure": { "provider": "microsoft", "name": "Contoso Azure", "account": "ops@contoso.com", "accessToken": "…management's…",
                "expiresAt": "2026-09-28T21:05:00Z", "scopes": ["openid", "email", "offline_access", "https://management.azure.com/user_impersonation", "https://database.windows.net/user_impersonation"],
                "tokens": {
                  "https://management.azure.com/": { "accessToken": "…fresh now…", "expiresAt": "2026-09-28T21:05:00Z",
@@ -967,8 +967,8 @@ rows, `row.status`), `cli/internal/plugin/manifest_test.go` and `web/src/lib/__t
   the member's names or a `secretKeys` name is refused before the run (it fails needs-person), since
   it would ride on stdin unredacted. A plugin that declares no block receives neither, and its request
   is byte for byte what it was.
-- **`connections`** holds one entry per slot this member has bound: the provider, the account name,
-  a fresh access token, when it expires and the scopes it was granted. The Host refreshes the token
+- **`connections`** holds one entry per slot this member has bound: the provider, the connection's
+  `name`, the account name, a fresh access token, when it expires and the scopes it was granted. The Host refreshes the token
   before the run when it would expire within 5 minutes, so a run always starts with at least that
   long. It is `{}` when the manifest declares no slot or the member has none bound; a plugin that ignores it
   is unaffected. A slot declared `"multiple": true` holds an array of these entries, one per bound
@@ -980,15 +980,24 @@ rows, `row.status`), `cli/internal/plugin/manifest_test.go` and `web/src/lib/__t
   granted; a slot with one API has one entry, holding the same token, and its other members are
   exactly as without `tokens`. Every token in `tokens` joins the run's redaction set. A Google or
   custom slot has no `tokens`. A slot bound to a **mailbox** (`imap`) holds
-  instead `{ "kind": "imap", "account", "username", "password", "imap": { "host", "port", "security" },
+  instead `{ "kind": "imap", "name", "account", "username", "password", "imap": { "host", "port", "security" },
   "smtp": { "host", "port", "security" } }`, `security` being `TLS` or `STARTTLS`. The app password is
   on stdin only, never in the environment or argv, and is redacted from everything the plugin writes,
   as an access token is. SMTP signs in with `username`, or with `account` when `username` has no @
-  (iCloud). A slot bound to a **username and password** (`login`) or an **API key** (`apikey`) holds
-  `{ "kind", "account", "preset", "fields": { "<name>": "<value>" } }` - a login's `username`,
-  `password` and `url` when set; an API key's preset fields (Stripe `key`; Namecheap `apiUser`,
-  `apiKey`, `clientIp`; Twilio `accountSid`, `apiKeySid`, `apiKeySecret`) or Other's own - and every masked value
-  is redacted from everything the plugin writes.
+  (iCloud). A slot bound to a **username and password** (`login`), an **API key** (`apikey`) or a
+  **website** (`website`) holds `{ "kind", "name", "account", "preset", "fields": { "<name>": "<value>" } }`
+  - a login's `username`, `password` and `url` when set; an API key's preset fields (Stripe `key`;
+  Namecheap `apiUser`, `apiKey`, `clientIp`; Twilio `accountSid`, `apiKeySid`, `apiKeySecret`) or
+  Other's own; a website's `siteUrl`, `method`, `username`, `password` and the rest it has set - and
+  every masked value is redacted from everything the plugin writes.
+- **`name`**, on every connection object - a single slot's and each element of a multiple slot's -
+  is that connection's stored name: what a person chose and sees in Admin → Connections and Team
+  settings → Connections, so two connections of one kind (two API keys whose preset is Other) are
+  told apart. It sits just before `account`; every other key keeps its order and its value. A name
+  is not a secret and is not redacted. A masked value this run is handed that is a bound connection's
+  name - a secret field's, a named secret's, a table's secret cell, or a connection's own masked
+  field, app password or token - is refused before the run starts (it fails needs-person), with one
+  sentence naming the field and never the value, since it would ride on stdin unredacted.
 - **`siteFiles`** names the files folder of every site of the member's OWN team, by name, as an
   absolute path; `[]` when the team has none. A file the plugin makes for a site's page goes under
   that folder, and the plugin stores the path RELATIVE to it in a document with `site.put`; the page

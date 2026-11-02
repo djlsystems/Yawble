@@ -323,11 +323,11 @@ export function usedByLabels(connection: Pick<Connection, 'usedBy'>): string[] {
  */
 /**
  * The providers of a slot Add connection connects: Google, Microsoft, a mailbox (`imap`), a username
- * and password (`login`) and an API key (`apikey`). A custom provider's account is connected in
- * Admin → Connections.
+ * and password (`login`), an API key (`apikey`) and a website (`website`). A custom provider's account
+ * is connected in Admin → Connections.
  */
 export function guidedProviders(spec: Pick<ConnectionSlot, 'providers'>): string[] {
-  return spec.providers.filter((id) => id === 'google' || id === 'microsoft' || id === 'imap' || id === 'login' || id === 'apikey');
+  return spec.providers.filter((id) => id === 'google' || id === 'microsoft' || id === 'imap' || id === 'login' || id === 'apikey' || id === 'website');
 }
 
 export type CallbackOutcome =

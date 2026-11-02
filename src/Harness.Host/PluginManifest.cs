@@ -1204,7 +1204,7 @@ public sealed record PluginConnectionSlot(
             || providersElement.GetArrayLength() == 0
             || providersElement.EnumerateArray().Any(p => p.ValueKind != JsonValueKind.String))
         {
-            return (null, $"`connections.{name}.providers` must be a non-empty array of provider names (google, microsoft, custom, imap, login, apikey).");
+            return (null, $"`connections.{name}.providers` must be a non-empty array of provider names (google, microsoft, custom, custom-<id>, imap, login, apikey, website).");
         }
 
         var providers = new List<string>();
@@ -1213,7 +1213,7 @@ public sealed record PluginConnectionSlot(
         {
             if (!ConnectionProviders.ManifestProviders.Contains(provider) && !ConnectionProviders.IsCustomId(provider))
             {
-                return (null, $"`connections.{name}.providers` names '{provider}', which is not a provider this Host knows (google, microsoft, custom, custom-<id>, imap for a mailbox, login for a username and password, or apikey for an API key).");
+                return (null, $"`connections.{name}.providers` names '{provider}', which is not a provider this Host knows (google, microsoft, custom, custom-<id>, imap for a mailbox, login for a username and password, apikey for an API key, or website for a website).");
             }
 
             if (!providers.Contains(provider, StringComparer.Ordinal)) providers.Add(provider);
