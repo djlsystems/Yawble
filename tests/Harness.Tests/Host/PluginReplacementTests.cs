@@ -162,6 +162,8 @@ public sealed class PluginReplacementTests : IAsyncLifetime
 
         var answer = await InstallNewAsync(Old, "never-installed-here");
 
+        Assert.Equal(Name, answer.GetProperty("name").GetString());
+
         // Only the installed id, with its version and its members, team by team.
         var replaced = Assert.Single(answer.GetProperty("replaces").EnumerateArray());
         Assert.Equal(Old, replaced.GetProperty("id").GetString());

@@ -124,6 +124,7 @@ public static class PluginEndpoints
                         connection = m.ConnectionId, connectionName = m.ConnectionName, key = m.Key, reason = m.Reason,
                     }),
                     replaces = replaced.Select(ReplacedAnswer),
+                    name = catalog.For(result.Id!)?.Manifest.Name,
                 });
             }
 
@@ -161,7 +162,7 @@ public static class PluginEndpoints
                 + "runs, naming the field, until a person fixes it. `replaces` is one entry per id the installed "
                 + "version's manifest names in `replaces` that is installed now - `{ id, version, name, members: [{ team, "
                 + "member, teamName, memberName }] }`, every member still on the old id, team by team; `[]` when it names "
-                + "none installed. Nothing is moved or removed: `POST /api/plugins/{id}/replaces/{old}/move` and "
+                + "none installed. `name` is the installed version's name, or null when it did not load. Nothing is moved or removed: `POST /api/plugins/{id}/replaces/{old}/move` and "
                 + "`DELETE /api/plugins/{old}` are the person's.");
 
         app.MapDelete("/api/plugins/{id}", async (
