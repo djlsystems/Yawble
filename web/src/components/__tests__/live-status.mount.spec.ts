@@ -4,7 +4,8 @@
 // up and grey, struck through, when not; the word beside it while the row has room and in its tooltip
 // otherwise; a click opens the service's own state, read from `GET /api/service-status` when the
 // dropdown opens (once) and said in the reader's words - the connection line, the uptime from the
-// Host's two instants, each check, each worker - with "not read" when the read fails.
+// Host's two instants, each check, each worker - with "not read" when the read fails. The management
+// link, once attached, is one read-only line under its own heading; never attached, it is absent.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
@@ -19,7 +20,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
 import LiveStatusControl from '../LiveStatusControl.vue';
 import { useConsoleStore } from '../../stores/console';
 import { localStamp, wireInstant } from '../../lib/localTime';
-import type { ServiceStatus } from '../../api/types';
+import type { ServiceManagement, ServiceStatus } from '../../api/types';
 import { resetBody } from '../../test/mountQuasar';
 
 let wrapper: VueWrapper | undefined;
@@ -38,6 +39,16 @@ const healthy: ServiceStatus = {
   workers: [
     { id: 'worker-1', version: '2026.10.19.1+30.abc1234', state: 'connected', connectedSince: '2026-10-20T08:02:10Z', droppedAt: null },
   ],
+  management: null,
+};
+
+const linked: ServiceManagement = {
+  state: 'connected',
+  since: '2026-10-20T09:00:00Z',
+  serviceName: 'Manage',
+  instanceName: 'office',
+  lastReportAt: null,
+  reason: null,
 };
 
 async function mountControl(props: { word?: boolean } = {}) {
@@ -174,5 +185,74 @@ describe('the dropdown', () => {
     await mountControl();
     await openPanel();
     expect(panelText()).toContain('Up not known');
+  });
+});
+
+describe('the management section', () => {
+  const management = () => panel()?.querySelector<HTMLElement>('[data-test="live-status-management"]') ?? null;
+  const managementText = () => management()?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+
+  it('shows no Management section when management is null', async () => {
+    await mountControl();
+    await openPanel();
+    expect(panelText()).toContain('Workers');
+    expect(management()).toBeNull();
+    expect(panelText()).not.toContain('Management');
+  });
+
+  it('shows the linked line with service and instance names', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-20T10:07:00Z'));
+    try {
+      serviceStatus.mockResolvedValue({ ...healthy, management: { ...linked, lastReportAt: '2026-10-20T10:05:00Z' } });
+      await mountControl();
+      await openPanel();
+      expect(managementText()).toContain('Management');
+      expect(managementText()).toContain('Linked to Manage as office · last report 2 minutes ago');
+    } finally {
+      vi.useRealTimers();
+    }
+
+    serviceStatus.mockResolvedValue({ ...healthy, management: linked });
+    [...document.body.querySelectorAll<HTMLElement>('[data-test="live-status-refresh"]')].pop()!.click();
+    await flushPromises();
+    expect(managementText()).toContain('Linked to Manage as office.');
+  });
+
+  it('shows not connected since a time', async () => {
+    serviceStatus.mockResolvedValue({ ...healthy, management: { ...linked, state: 'retrying', since: '2026-10-20T09:30:00Z' } });
+    await mountControl();
+    await openPanel();
+    expect(managementText()).toContain(`Not connected to Manage since ${localStamp(wireInstant('2026-10-20T09:30:00Z'))}`);
+
+    serviceStatus.mockResolvedValue({ ...healthy, management: { ...linked, state: 'connecting', since: '2026-10-20T09:40:00Z' } });
+    [...document.body.querySelectorAll<HTMLElement>('[data-test="live-status-refresh"]')].pop()!.click();
+    await flushPromises();
+    expect(managementText()).toContain(`Not connected to Manage since ${localStamp(wireInstant('2026-10-20T09:40:00Z'))}`);
+  });
+
+  it('shows refused with the reason', async () => {
+    serviceStatus.mockResolvedValue({ ...healthy, management: { ...linked, state: 'refused', reason: 'This instance was removed.' } });
+    await mountControl();
+    await openPanel();
+    expect(managementText()).toContain('Refused by Manage: This instance was removed.');
+
+    serviceStatus.mockResolvedValue({ ...healthy, management: { ...linked, state: 'refused', reason: null } });
+    [...document.body.querySelectorAll<HTMLElement>('[data-test="live-status-refresh"]')].pop()!.click();
+    await flushPromises();
+    expect(managementText()).toContain('Refused by Manage.');
+  });
+
+  it('has no control in the Management section', async () => {
+    serviceStatus.mockResolvedValue({ ...healthy, management: { ...linked, lastReportAt: '2026-10-20T10:05:00Z' } });
+    await mountControl();
+    await openPanel();
+    const section = management();
+    expect(section).not.toBeNull();
+    expect(section!.querySelectorAll('button, a, input, select, textarea, [role="button"], [tabindex]')).toHaveLength(0);
+    // The panel's own Read again stays where it was: after the sections, not inside one.
+    const refresh = panel()!.querySelector('[data-test="live-status-refresh"]');
+    expect(refresh).not.toBeNull();
+    expect(section!.contains(refresh)).toBe(false);
   });
 });

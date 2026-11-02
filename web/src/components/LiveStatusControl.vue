@@ -11,6 +11,7 @@ import {
   checkWords,
   connectionWords,
   liveWord,
+  managementWords,
   upWords,
   workerWords,
 } from '../lib/serviceStatus';
@@ -21,7 +22,8 @@ import FieldHelp from './FieldHelp.vue';
  * hub connection is up, grey and struck through when it is not, the word beside it while the row has
  * room (`word`, from `lib/headerFit.ts`) and in its tooltip otherwise. A click opens what the service
  * says of itself (`GET /api/service-status`): how long the instance has been up, whether it can serve,
- * which build, which workers - beside this window's own connection, which is a different fact.
+ * which build, which workers, and - once attached - a read-only line saying whether it is linked to a
+ * management service; all beside this window's own connection, which is a different fact.
  *
  * The chip's colour is the CONNECTION alone. A healthy instance this window has lost still reads
  * offline, because what is on this screen may be stale and that is what the person needs to know.
@@ -81,12 +83,30 @@ const connectionLine = computed(() =>
     connectionChangedAt.value === null ? null : localStamp(connectionChangedAt.value),
   ));
 
+const managementLine = computed(() => {
+  const management = status.value?.management;
+  return management ? managementWords(management, stamp(management.since)) : '';
+});
+
+// Linked is the running ink, refused the failed ink, and on the way (connecting, retrying) muted.
+const managementIcon = computed(() => {
+  switch (status.value?.management?.state) {
+    case 'connected':
+      return { name: 'check_circle', ink: 'live-ink' };
+    case 'refused':
+      return { name: 'cancel', ink: 'live-ink-failed' };
+    default:
+      return { name: 'sync_problem', ink: 'os-text-muted' };
+  }
+});
+
 const up = computed(() => (status.value ? upWords(status.value.startedAt, status.value.now) : ''));
 
 const HelpText =
   'Live means this window is receiving updates from the instance now; offline means it is not, and what is ' +
   'on screen may be out of date. Below it is the instance\'s own state: how long it has been up, the three ' +
-  'checks its health probe makes, which build it is and which workers it has, read when this opens.';
+  'checks its health probe makes, which build it is, which workers it has and, once attached, whether it is ' +
+  'linked to a management service, read when this opens.';
 </script>
 
 <template>
@@ -156,7 +176,7 @@ const HelpText =
             </div>
           </section>
 
-          <section class="q-mb-xs" data-test="live-status-workers">
+          <section :class="status.management ? 'q-mb-sm' : 'q-mb-xs'" data-test="live-status-workers">
             <div class="live-status-heading text-overline">Workers</div>
             <div v-if="status.workers.length === 0" class="text-body2 os-text-muted">
               No worker is connected: runs wait for one.
@@ -175,6 +195,14 @@ const HelpText =
                 :class="worker.state === 'connected' ? 'live-ink' : 'live-ink-failed'"
               />
               <span>{{ workerWords(worker, stamp(worker.connectedSince), stamp(worker.droppedAt)) }}</span>
+            </div>
+          </section>
+
+          <section v-if="status.management" class="q-mb-xs" data-test="live-status-management" :data-state="status.management.state">
+            <div class="live-status-heading text-overline">Management</div>
+            <div class="row items-center no-wrap text-body2">
+              <q-icon :name="managementIcon.name" size="16px" class="q-mr-xs" :class="managementIcon.ink" />
+              <span>{{ managementLine }}</span>
             </div>
           </section>
         </template>
