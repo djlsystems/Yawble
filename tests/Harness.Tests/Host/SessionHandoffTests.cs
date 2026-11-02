@@ -57,6 +57,26 @@ public sealed class SessionHandoffTests : IDisposable
         Assert.Equal(AgentGroup, Gid(second));
     }
 
+    /// <summary>
+    /// Seen on a live instance: a member had made the folder itself (agent:agent 2770), so the Host, not
+    /// its owner, was refused the mode change with EPERM and handed nothing over, though the folder let it
+    /// write. The refusal is played here, since the suite runs as root, which no chmod refuses.
+    /// </summary>
+    [Fact]
+    public void A_folder_the_host_may_not_change_the_mode_of_still_gets_the_session()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Unix modes only.");
+        var workspace = Directory.CreateDirectory(Path.Combine(_root, "workspaces", "Dev")).FullName;
+        var folder = Directory.CreateDirectory(Path.Combine(workspace, PluginMemberRunner.HandoffFolder));
+        var before = File.GetUnixFileMode(folder.FullName);
+
+        var file = PluginMemberRunner.WriteHandoff(workspace, "portal-abc.json", "{\"kind\":\"browser\"}", runAs: null,
+            static (_, _) => throw new UnauthorizedAccessException("Access to the path is denied."));
+
+        Assert.Equal("{\"kind\":\"browser\"}", File.ReadAllText(file));
+        Assert.Equal(before, File.GetUnixFileMode(folder.FullName));
+    }
+
     private static int Run(string tool, params string[] arguments)
     {
         try

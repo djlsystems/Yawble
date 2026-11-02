@@ -169,7 +169,7 @@ public sealed partial class PluginMemberRunner
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            return $"{connection}: the session could not be written to {to.Name}'s workspace, so none was handed over.";
+            return $"{connection}: the session could not be written to {to.Name}'s workspace ({HandoffFolder}: {exception.Message.TrimEnd('.')}), so none was handed over.";
         }
 
         var where = $"{to.Name}:{HandoffFolder}/{Path.GetFileName(file)}";
@@ -189,12 +189,28 @@ public sealed partial class PluginMemberRunner
     /// as every other file the Host writes for an agent. Expired handoffs in the folder go first.
     /// </summary>
     public static string WriteHandoff(string workspace, string name, string value, AgentLaunchUser? runAs)
+        => WriteHandoff(workspace, name, value, runAs, static (folder, mode) => folder.UnixFileMode = mode);
+
+    /// <summary>
+    /// <see cref="WriteHandoff(string, string, string, AgentLaunchUser?)"/> with the folder's mode set by
+    /// <paramref name="setMode"/>. A folder the Host does not own (one a member made, agent:agent) refuses
+    /// the mode with EPERM; that is no reason to hand nothing over, so the folder keeps its own mode and the
+    /// file is written if the folder lets the Host write - a member's 2770 folder of the agent's group does.
+    /// </summary>
+    public static string WriteHandoff(string workspace, string name, string value, AgentLaunchUser? runAs, Action<DirectoryInfo, UnixFileMode> setMode)
     {
         var folder = Path.Combine(workspace, HandoffFolder);
         var made = Directory.CreateDirectory(folder);
         if (!OperatingSystem.IsWindows())
         {
-            made.UnixFileMode = UnixFileMode.SetGroup | UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute;
+            try
+            {
+                setMode(made, UnixFileMode.SetGroup | UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+            }
+
             runAs?.Share(folder);
         }
 
