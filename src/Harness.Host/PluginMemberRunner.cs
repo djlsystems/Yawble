@@ -325,8 +325,8 @@ public sealed partial class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         // EACH TEST AND WEBSITE COMMAND TEAM CONNECTIONS ASKED FOR, now that its process has let go of the worker.
         if (outcome is { Killed: false, StartError: null, Refused: null })
         {
-            foreach (var name in gathered.TestsAsked) gathered.Answers.Add(await TestByNameAsync(invocation.Member, name, ct));
-            foreach (var asked in gathered.WebsitesAsked) gathered.Answers.Add(await WebsiteByNameAsync(invocation, asked, gathered, ct));
+            foreach (var (name, source) in gathered.TestsAsked) gathered.Answers.Add(new SourcedAnswer(source, await TestByNameAsync(invocation.Member, name, ct)));
+            foreach (var asked in gathered.WebsitesAsked) gathered.Answers.Add(new SourcedAnswer(asked.Source, await WebsiteByNameAsync(invocation, asked, gathered, ct)));
         }
 
         if (outcome.Refused is not null)
@@ -361,14 +361,20 @@ public sealed partial class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         foreach (var answer in gathered.Answers)
         {
             if (output.Length > 0) output.AppendLine();
-            output.Append(answer);
+            output.Append(answer.Text);
         }
 
+        // WHAT NO ONE ASKER OWNS - the plugin's other lines, the platform's notes, a held output, stderr -
+        // follows every asker's own answer as it follows the run's (CON 14).
+        var shared = new StringBuilder();
         if (gathered.Text.Length > 0)
         {
             if (output.Length > 0) output.AppendLine();
             output.Append(gathered.Text);
+            shared.AppendLine().Append(gathered.Text);
         }
+
+        var sharedFrom = output.Length;
 
         foreach (var note in gathered.Notes)
         {
@@ -390,6 +396,7 @@ public sealed partial class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             output.Append(outcome.Stderr);
         }
 
+        shared.Append(output.ToString(sharedFrom, output.Length - sharedFrom));
         var text = Redact(output.ToString().Trim(), redacted);
 
         string? reason = gathered.Result switch
@@ -437,7 +444,23 @@ public sealed partial class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         }
 
         // TEAM CONNECTIONS ANSWERS THE MEMBER THAT ASKED, in its own workflow, as an instruction to it.
-        if (gathered.TeamConnections) await AnswerAskersAsync(invocation, text, ct);
+        // Each is told only its own lines (CON 14); the run's output above lists them all, for the log.
+        if (gathered.TeamConnections)
+        {
+            await AnswerAskersAsync(invocation, source =>
+            {
+                var own = new StringBuilder(OwnAnswerOf(gathered, source)).Append(shared);
+                var told = Redact(own.ToString().Trim(), redacted);
+                // The run's reason leads, unless it is another asker's website: that is its answer, not this one's.
+                if (reason is not null && !told.Contains(reason, StringComparison.Ordinal)
+                    && (gathered.WebsiteFailure is null || string.Equals(gathered.WebsiteFailureSource, source, StringComparison.OrdinalIgnoreCase)))
+                {
+                    told = told.Length == 0 ? reason : reason + "\n" + told;
+                }
+
+                return told;
+            }, ct);
+        }
 
         // A WEBSITE THAT NEEDS A PERSON (CON 6) - a refused sign-in, an expired session, a CAPTCHA or a
         // device approval, or one already waiting - is a connection hold: the run waits for a person,
@@ -1201,6 +1224,16 @@ public sealed partial class PluginMemberRunner : IMemberRunner, IRunWorkerClient
                     record["quiet"]?.GetValueKind() == JsonValueKind.True,
                     record[RunConnectionFailures.SlotField]?.GetValueKind() == JsonValueKind.String ? (string?)record[RunConnectionFailures.SlotField] : null,
                     record[RunConnectionFailures.KindField]?.GetValueKind() == JsonValueKind.String ? (string?)record[RunConnectionFailures.KindField] : null);
+
+                // TEAM CONNECTIONS' OWN ANSWERS, each with the source of the work item it answers (CON 14):
+                // each asker is told only its own. Any other plugin's `answers` is not read.
+                if (gathered.TeamConnections && record["answers"] is JsonArray owned)
+                {
+                    gathered.OwnAnswers = [.. owned.OfType<JsonObject>()
+                        .Where(a => a["text"] is JsonValue t && t.TryGetValue<string>(out _))
+                        .Select(a => new SourcedAnswer(Words(a, "source"), (string)a["text"]!))];
+                }
+
                 break;
 
             case "publish":
@@ -1220,7 +1253,7 @@ public sealed partial class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             // Asked here, run once the process has ended: a test runs on a worker, and this worker is waiting
             // for this line to be read.
             case "connection.test" when gathered.TeamConnections && Words(record!, "name") is { } name:
-                gathered.TestsAsked.Add(name.Trim());
+                gathered.TestsAsked.Add((name.Trim(), Words(record!, "source")));
                 break;
 
             // A WEBSITE COMMAND (CON 6): check, session or act on a website connection, run the same way.
@@ -1687,7 +1720,7 @@ public sealed partial class PluginMemberRunner : IMemberRunner, IRunWorkerClient
     /// that member's workflow, from Team Connections, carrying the run's answer - names, kinds, health and
     /// test sentences, never a value. Best effort: the answer is still the run's <c>completed</c> row.
     /// </summary>
-    private async Task AnswerAskersAsync(MemberInvocation invocation, string text, CancellationToken ct)
+    private async Task AnswerAskersAsync(MemberInvocation invocation, Func<string?, string> textFor, CancellationToken ct)
     {
         if (Answers is null) return;
 
@@ -1701,6 +1734,7 @@ public sealed partial class PluginMemberRunner : IMemberRunner, IRunWorkerClient
                 continue;
             }
 
+            var text = textFor(item.Source);
             var answer = $"{TeamConnectionsMember.Label} answers your request:\n{(text.Length == 0 ? "(no answer)" : text)}";
             try
             {
@@ -1729,8 +1763,8 @@ public sealed partial class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         /// <summary>Whether this run is Team Connections', whose <c>connection.test</c> records are honoured.</summary>
         public bool TeamConnections;
 
-        /// <summary>Each connection a <c>connection.test</c> record named, in the order asked.</summary>
-        public readonly List<string> TestsAsked = [];
+        /// <summary>Each connection a <c>connection.test</c> record named, with the source it was asked for, in the order asked.</summary>
+        public readonly List<(string Name, string? Source)> TestsAsked = [];
 
         /// <summary>Each website command a <c>website</c> record asked for, in the order asked.</summary>
         public readonly List<WebsiteAsk> WebsitesAsked = [];
@@ -1738,11 +1772,35 @@ public sealed partial class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         /// <summary>The first website command that failed: the run fails with its sentence, and names the connection it held.</summary>
         public WebsiteAnswer? WebsiteFailure;
 
-        /// <summary>Each test's sentence, in the order asked: they follow the plugin's own output.</summary>
-        public readonly List<string> Answers = [];
+        /// <summary>The source of the work item whose website command is <see cref="WebsiteFailure"/>.</summary>
+        public string? WebsiteFailureSource;
+
+        /// <summary>The plugin's own answers by source (its result's <c>answers</c>), or null when it gave none.</summary>
+        public IReadOnlyList<SourcedAnswer>? OwnAnswers;
+
+        /// <summary>Each test's and website command's sentence with its asker, in the order asked: they follow the plugin's own output.</summary>
+        public readonly List<SourcedAnswer> Answers = [];
         public readonly StringBuilder Text = new();
         public readonly List<string> Notes = [];
         public readonly HashSet<string> Dropped = new(StringComparer.Ordinal);
+    }
+
+    /// <summary>One answer of a Team Connections run and the source of the work item it answers (null: none named).</summary>
+    private sealed record SourcedAnswer(string? Source, string Text);
+
+    /// <summary>
+    /// ONE ASKER'S OWN ANSWER (CON 14): the plugin's answers and the platform's sentences for the work item
+    /// <paramref name="source"/> sent, never another's. A plugin that named no sources (no <c>answers</c>)
+    /// gives its whole output, as before; the platform's sentences are always by source.
+    /// </summary>
+    private static string OwnAnswerOf(Gathered gathered, string? source)
+    {
+        bool Mine(SourcedAnswer a) => string.Equals(a.Source, source, StringComparison.OrdinalIgnoreCase);
+        var parts = new List<string>();
+        if (gathered.OwnAnswers is { } owned) parts.AddRange(owned.Where(Mine).Select(a => a.Text));
+        else if (gathered.Result?.Output is { Length: > 0 } output) parts.Add(output);
+        parts.AddRange(gathered.Answers.Where(Mine).Select(a => a.Text));
+        return string.Join("\n", parts.Where(p => p.Length > 0));
     }
 
     /// <summary>A <c>result</c> record. <see cref="Slot"/> and <see cref="Kind"/> are its

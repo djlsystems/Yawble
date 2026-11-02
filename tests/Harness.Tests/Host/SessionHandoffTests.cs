@@ -77,6 +77,35 @@ public sealed class SessionHandoffTests : IDisposable
         Assert.Equal(before, File.GetUnixFileMode(folder.FullName));
     }
 
+    /// <summary>
+    /// CON 14: a handoff's expiry is in its NAME, so a plain storage state - nothing inside to read - is swept
+    /// when its time is up, at a Host's start (whose last timers are gone) and at the next handoff alike.
+    /// </summary>
+    [Fact]
+    public void An_expired_hand_off_is_swept_by_the_expiry_in_its_name_and_one_still_good_is_kept()
+    {
+        var workspace = Directory.CreateDirectory(Path.Combine(_root, "workspaces", "Dev")).FullName;
+        const string Plain = "{\"cookies\":[],\"origins\":[]}";
+        var until = DateTimeOffset.UtcNow.AddMinutes(-1);
+        var good = PluginMemberRunner.WriteHandoff(workspace, PluginMemberRunner.HandoffName("Portal", DateTimeOffset.UtcNow.AddMinutes(30)), Plain, runAs: null);
+        var expired = PluginMemberRunner.WriteHandoff(workspace, PluginMemberRunner.HandoffName("Portal", until), Plain, runAs: null);
+        Assert.True(File.Exists(expired));
+        Assert.Equal(until.ToUnixTimeSeconds(), PluginMemberRunner.HandoffExpiry(expired)!.Value.ToUnixTimeSeconds());
+
+        PluginMemberRunner.SweepHandoffsAtStart(workspace);
+
+        Assert.False(File.Exists(expired));
+        Assert.True(File.Exists(good));
+        Assert.Equal(Plain, File.ReadAllText(good));
+
+        // And at the next handoff: the one written already expired goes.
+        var third = PluginMemberRunner.WriteHandoff(workspace, PluginMemberRunner.HandoffName("Portal", DateTimeOffset.UtcNow.AddMinutes(-1)), Plain, runAs: null);
+        Assert.True(File.Exists(third));
+        PluginMemberRunner.WriteHandoff(workspace, PluginMemberRunner.HandoffName("Portal", DateTimeOffset.UtcNow.AddMinutes(30)), Plain, runAs: null);
+        Assert.False(File.Exists(third));
+        Assert.True(File.Exists(good));
+    }
+
     private static int Run(string tool, params string[] arguments)
     {
         try
