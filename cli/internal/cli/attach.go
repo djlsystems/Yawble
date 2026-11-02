@@ -68,7 +68,10 @@ func newAttachCommand(deps Deps) *cobra.Command {
 			"The service URL must be https://, or http:// only to a loopback or private address.\n\n" +
 			"An instance with no CLI attaches at start instead from HARNESS_LINK_URL and HARNESS_LINK_TOKEN, once, " +
 			"and only while it is not attached.\n\n" +
-			"It reaches the Host the way `connect` does: through the container engine, by a request file the Host answers.",
+			"It reaches the Host the way `connect` does: through the container engine, by a request file the Host answers.\n\n" +
+			"Once attached, the instance opens the link to the service itself; nothing listens for the service. " +
+			"If the service refuses the credential (close 4401, or 401 on the upgrade), the link is marked refused " +
+			"and stops retrying until a new attach. The header's Management line is read-only, and absent until attached.",
 		Example: "  yawble attach https://manage.example.com 3f9c2a7e\n" +
 			"  yawble attach status\n" +
 			"  yawble detach",
@@ -87,8 +90,12 @@ func newAttachCommand(deps Deps) *cobra.Command {
 
 func newAttachStatusCommand(deps Deps) *cobra.Command {
 	return &cobra.Command{
-		Use:     "status",
-		Short:   "Which management service this instance is attached to, the link's state and its last report",
+		Use:   "status",
+		Short: "Which management service this instance is attached to, the link's state and its last report",
+		Long: "Says which management service this instance is attached to, the link's state and its last report, " +
+			"or \"Not attached.\" The instance opens the link itself; nothing listens for the service. A refused " +
+			"link (close 4401, or 401 on the upgrade) stays refused, without retrying, until a new attach. The " +
+			"header's Management line shows the same state, read-only, and is absent until attached.",
 		Example: "  yawble attach status",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -118,7 +125,8 @@ func newDetachCommand(deps Deps) *cobra.Command {
 		Use:   "detach",
 		Short: "Unlink this instance from its management service and forget the link's credential",
 		Long: "Detaches the running instance from its management service: the Host closes the link and forgets " +
-			"its credential. Attaching again needs a new token from the service.",
+			"its credential. Attaching again needs a new token from the service. The header's Management line " +
+			"disappears, and the instance opens no link until it is attached again.",
 		Example: "  yawble detach",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
