@@ -5,6 +5,7 @@ import type { ContainerSnapshot, InstalledPlugin, InstalledSolution, Marketplace
 import { pluginNeedWords, pluginUpdateFor, pluginUsedByWords, updateFor } from '../lib/marketplace';
 import { fetchIntoDocuments } from '../lib/marketplaceFetch';
 import { isBuiltInPlugin } from '../lib/teamConnections';
+import { replacedByWords, replacementFor, sharesName, type PluginReplacement } from '../lib/plugins';
 import { solutionMatches, stateBadge, stateChoices, teamChoices, whenWords } from '../lib/solutionPanel';
 import { localInstants } from '../lib/localTime';
 import DialogTabs from './DialogTabs.vue';
@@ -40,7 +41,10 @@ import SolutionWizard from './SolutionWizard.vue';
  * its name, version, who uses it, and each solution team that uses it with the oldest version that
  * team needs (`solutions`; an older one is refused at install) - with Update when the catalog lists a newer version, which
  * asks first with the same confirm Admin -> Plugins' upgrade shows (`PluginUpgradeDialog`), then
- * fetches and installs it in one go (PLG 2). Members are hired on a plugin
+ * fetches and installs it in one go (PLG 2). A plugin that a newer one says it REPLACES (that one's own
+ * manifest `replaces`, installed or in the catalog) is listed under the replacement's update instead:
+ * "Azure 1.1.4 is replaced by Azure 3.0.0 (azure-plugin)", with Get or Update for the replacement - its
+ * own Update is not offered. Two plugins sharing a name each show their id. Members are hired on a plugin
  * from Add member; Admin -> Plugins holds the rest.
  *
  * With no solution installed it says how solutions arrive: a package a team built, whose Review and
@@ -148,6 +152,32 @@ function updatePlugin(pkg: MarketplacePackage) {
 
   pluginUpdateRefused.value = null;
   pluginUpgrade.value = { pkg, plugin };
+}
+
+// --- Installed plugins: a newer plugin that says it replaces one -----------------------------------
+
+/** The replacement of an installed plugin, said by the newer one's own manifest, or null. */
+function replacementOf(plugin: InstalledPlugin): PluginReplacement | null {
+  return replacementFor(plugin, plugins.value, catalog.value);
+}
+
+/** Get the replacement (fetch, then the plugin install dialog), or Update it when it is installed. */
+async function getReplacement(plugin: InstalledPlugin, replacement: PluginReplacement) {
+  if (!replacement.pkg || updating.value) return;
+  if (replacement.installed) {
+    updatePlugin(replacement.pkg);
+    return;
+  }
+
+  updating.value = plugin.id;
+  pluginUpdateRefused.value = null;
+  try {
+    const fetched = await fetchIntoDocuments(replacement.pkg);
+    if (fetched.ok) pluginInstall.value = { open: true, folder: fetched.folder };
+    else pluginUpdateRefused.value = { id: plugin.id, text: fetched.text };
+  } finally {
+    updating.value = '';
+  }
 }
 
 function pluginUpgradeRefused(text: string) {
@@ -401,6 +431,7 @@ watch(() => pluginInstall.value.open, (showing, was) => {
                 <div class="text-caption os-text-muted solution-tile-version" data-tile-version>{{ plugin.version }}</div>
               </div>
             </div>
+            <div v-if="sharesName(plugin, plugins)" class="os-tile-line os-text-muted mono" data-tile-id>{{ plugin.id }}</div>
             <div class="os-tile-line os-text-muted" data-plugin-used-by>{{ pluginUsedByWords(plugin.members) }}</div>
             <!-- THE SOLUTION TEAMS THAT USE IT, each with the oldest version it needs: an older one is
                  refused at install while the team is installed. -->
@@ -410,13 +441,31 @@ watch(() => pluginInstall.value.open, (showing, was) => {
               class="os-tile-line os-text-muted"
               :data-plugin-solution="need.team"
             >{{ pluginNeedWords(need) }}</div>
-            <div v-if="pluginUpdateFor(plugin.id, catalog)" class="os-tile-line text-warning" data-tile-update-available>
+            <!-- REPLACED BY A NEWER PLUGIN, by that one's own manifest: its update stands in for this one's. -->
+            <div v-if="replacementOf(plugin)" class="os-tile-line text-warning" :data-tile-replaced-by="replacementOf(plugin)!.id">
+              {{ replacedByWords(plugin, replacementOf(plugin)!) }}{{ replacementOf(plugin)!.installed ? '. Move its members from Admin › Plugins.' : '.' }}
+            </div>
+            <div v-else-if="pluginUpdateFor(plugin.id, catalog)" class="os-tile-line text-warning" data-tile-update-available>
               Update available: {{ pluginUpdateFor(plugin.id, catalog)?.version }}
             </div>
             <div v-if="pluginUpdateRefused?.id === plugin.id" class="os-tile-line text-negative solution-tile-status" role="alert">
               {{ pluginUpdateRefused.text }}
             </div>
-            <div v-if="pluginUpdateFor(plugin.id, catalog)" class="solution-tile-actions">
+            <div v-if="replacementOf(plugin)?.pkg" class="solution-tile-actions">
+              <q-btn
+                unelevated
+                dense
+                no-caps
+                color="primary"
+                icon="upgrade"
+                :label="replacementOf(plugin)!.installed ? 'Update' : 'Get'"
+                :loading="updating === plugin.id"
+                :aria-label="`${replacementOf(plugin)!.installed ? 'Update' : 'Get'} ${replacementOf(plugin)!.name} ${replacementOf(plugin)!.version} (${replacementOf(plugin)!.id})`"
+                data-plugin-replacement-get
+                @click="getReplacement(plugin, replacementOf(plugin)!)"
+              />
+            </div>
+            <div v-else-if="!replacementOf(plugin) && pluginUpdateFor(plugin.id, catalog)" class="solution-tile-actions">
               <q-btn
                 unelevated
                 dense

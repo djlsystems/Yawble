@@ -11,7 +11,7 @@ namespace Harness.Host;
 /// REQUIRED NOW: <c>schemaVersion</c>, <c>id</c>, <c>name</c>, <c>description</c>, <c>version</c>,
 /// <c>protocol</c>, <c>executable</c>. OPTIONAL NOW: <c>timeoutSeconds</c>, <c>config</c>,
 /// <c>secrets</c>, <c>events.publishes</c>, <c>skills</c>, <c>platforms</c>, <c>requires</c>,
-/// <c>connections</c>, <c>reads</c>, <c>namedSecrets</c>.
+/// <c>connections</c>, <c>reads</c>, <c>namedSecrets</c>, <c>replaces</c>.
 /// RESERVED - kept as raw JSON, validated by nothing, acted on by nothing yet: <c>actions</c>,
 /// <c>consumes</c>, <c>health</c>, <c>signature</c>, <c>publisher</c>, <c>minHostVersion</c>,
 /// <c>permits</c>. A key this version does not know is IGNORED and named in
@@ -54,6 +54,18 @@ public sealed record PluginManifest(
     /// declares none, and then a run receives neither.</summary>
     public PluginNamedSecrets? NamedSecrets { get; init; }
 
+    /// <summary>
+    /// THE PLUGIN IDS THIS ONE SUCCEEDS, as its own manifest's <c>replaces</c> says - the only place it
+    /// is ever said: nothing is guessed from a name or an id. An id need not be installed (it may never
+    /// have been on this instance) and is never this plugin's own. Nothing acts on it by itself: an
+    /// install names each replaced id still installed and who runs it, and a person moves those members
+    /// and removes the old plugin (<see cref="PluginReplacements"/>). Empty when it names none.
+    /// </summary>
+    public IReadOnlyList<string> Replaces { get; init; } = [];
+
+    /// <summary>The most ids one manifest's <c>replaces</c> may name.</summary>
+    public const int MaxReplaces = 16;
+
     /// <summary>The most collections one plugin may declare in <c>reads</c>. A sanity bound: it also
     /// bounds what the run's request spends on their envelopes.</summary>
     public const int MaxReads = 32;
@@ -84,7 +96,7 @@ public sealed record PluginManifest(
     {
         "schemaVersion", "id", "name", "description", "version", "protocol", "executable",
         "timeoutSeconds", "config", "secrets", "events", "skills", "platforms", "requires", "connections",
-        "reads", "namedSecrets",
+        "reads", "namedSecrets", "replaces",
     };
 
     /// <summary>This machine's platform key, as the <c>platforms</c> map names it.</summary>
@@ -471,6 +483,9 @@ public sealed record PluginManifest(
                 namedSecrets = parsed;
             }
 
+            var (replaces, replacesRefusal) = ParseReplaces(root, id);
+            if (replacesRefusal is not null) return (null, replacesRefusal);
+
             var reserved = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
             var ignored = new List<string>();
 
@@ -491,8 +506,39 @@ public sealed record PluginManifest(
 
             return (new PluginManifest(
                 id, name, description, version, protocol, path, arguments, timeout, config, secrets,
-                publishes, skills, platforms, reserved, ignored) { Requires = requires, Connections = connections, Reads = reads, NamedSecrets = namedSecrets }, null);
+                publishes, skills, platforms, reserved, ignored) { Requires = requires, Connections = connections, Reads = reads, NamedSecrets = namedSecrets, Replaces = replaces }, null);
         }
+    }
+
+    /// <summary>The manifest's <c>replaces</c>: plugin ids, never its own, at most <see cref="MaxReplaces"/>,
+    /// duplicates dropped; or the refusal naming the field. The CLI refuses the same lists in the same
+    /// sentences (tests/Fixtures/PluginReplaces/cases.json).</summary>
+    private static (IReadOnlyList<string> Replaces, string? Refusal) ParseReplaces(JsonElement root, string id)
+    {
+        if (!root.TryGetProperty("replaces", out var element) || element.ValueKind == JsonValueKind.Null) return ([], null);
+
+        if (element.ValueKind != JsonValueKind.Array || element.EnumerateArray().Any(e => e.ValueKind != JsonValueKind.String))
+        {
+            return ([], "`replaces` must be an array of plugin ids.");
+        }
+
+        if (element.GetArrayLength() > MaxReplaces) return ([], $"`replaces` may name at most {MaxReplaces} ids.");
+
+        var replaces = new List<string>();
+
+        foreach (var named in element.EnumerateArray().Select(e => e.GetString()!))
+        {
+            if (!MemberRef.IsValidPluginId(named))
+            {
+                return ([], $"`replaces` names '{named}', which is not a plugin id (lower-case letters, digits and hyphens, at most 48).");
+            }
+
+            if (named == id) return ([], $"`replaces` names '{named}', this plugin's own id; a plugin cannot replace itself.");
+
+            if (!replaces.Contains(named, StringComparer.Ordinal)) replaces.Add(named);
+        }
+
+        return (replaces, null);
     }
 
     private static string? Text(JsonElement element, string name) =>

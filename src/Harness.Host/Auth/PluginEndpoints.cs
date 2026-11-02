@@ -18,8 +18,8 @@ public static class PluginEndpoints
     public static void Map(WebApplication app)
     {
         app.MapGet("/api/plugins", async (PluginCatalog plugins, TeamRegistry teams, Marketplace marketplace, ITeamSolutionStore solutions,
-                HttpContext context, CancellationToken ct) =>
-                Results.Ok(Listing(plugins, teams, marketplace, await solutions.ListAsync(ct), context)))
+                PluginReplacements replacements, HttpContext context, CancellationToken ct) =>
+                Results.Ok(Listing(plugins, teams, marketplace, await solutions.ListAsync(ct), replacements, context)))
             .WithTags(Area)
             .RequirePermit(Permits.Read)
             .WithSummary("The installed plugins")
@@ -36,7 +36,10 @@ public static class PluginEndpoints
                 + "`solutions`: each installed solution team whose package ships it (`team`, `teamName`, "
                 + "`packageId`, `package`, `version`) with the oldest version of it that team needs "
                 + "(`minimum`) - a version older than that is refused at install - for a person, `[]` "
-                + "for a machine caller. No disk path is disclosed.");
+                + "for a machine caller. `replaces` is each installed id its own manifest says it replaces "
+                + "(`id`, `version`, `name`, `members` still on it - `[]` for a machine caller), and `replacedBy` "
+                + "each installed plugin whose manifest says it replaces this one (`id`, `version`, `name`); never "
+                + "a guess from a name. No disk path is disclosed.");
 
         app.MapGet("/api/plugins/{id}/{version}/manifest", (
             [Description("The plugin's id.")] string id,
@@ -67,7 +70,8 @@ public static class PluginEndpoints
 
         app.MapPost("/api/plugins/install", async (
             InstallPlugin request, PluginInstaller installer, TenantLogging audit, PluginSecretMoves moves,
-            PluginUpgradeAttention attention, PluginCatalog catalog, HttpContext context, CancellationToken ct) =>
+            PluginUpgradeAttention attention, PluginCatalog catalog, PluginReplacements replacements, HttpContext context,
+            CancellationToken ct) =>
         {
             var result = await installer.InstallAsync(request.Path, request.Replace, ct);
 
@@ -99,6 +103,12 @@ public static class PluginEndpoints
                     ? await attention.ForAsync(upgraded, ct)
                     : [];
 
+                // A VERSION WHOSE MANIFEST SAYS IT REPLACES AN INSTALLED ID names that id, its version and
+                // every member still on it, team by team. Nothing is moved or removed: a person presses that.
+                var replaced = result.Installed && catalog.For(result.Id!)?.Manifest is { } installedManifest
+                    ? replacements.ReplacedBy(installedManifest)
+                    : [];
+
                 return Results.Ok(new
                 {
                     id = result.Id, version = result.Version, installed = result.Installed,
@@ -113,6 +123,8 @@ public static class PluginEndpoints
                         team = m.Member.Team, member = m.Member.Name, slot = m.Slot, outcome = m.Outcome, fields = m.Fields,
                         connection = m.ConnectionId, connectionName = m.ConnectionName, key = m.Key, reason = m.Reason,
                     }),
+                    replaces = replaced.Select(ReplacedAnswer),
+                    name = catalog.For(result.Id!)?.Manifest.Name,
                 });
             }
 
@@ -147,7 +159,11 @@ public static class PluginEndpoints
                 + "the wrong type or outside its bounds, a field the new version dropped, a secret binding or own value "
                 + "for a secret it does not declare. Field names and sentences, never a value. `[]` when every member's "
                 + "fit, and on any install that is not an upgrade. Nothing is removed or stopped: such a member fails its "
-                + "runs, naming the field, until a person fixes it.");
+                + "runs, naming the field, until a person fixes it. `replaces` is one entry per id the installed "
+                + "version's manifest names in `replaces` that is installed now - `{ id, version, name, members: [{ team, "
+                + "member, teamName, memberName }] }`, every member still on the old id, team by team; `[]` when it names "
+                + "none installed. `name` is the installed version's name, or null when it did not load. Nothing is moved or removed: `POST /api/plugins/{id}/replaces/{old}/move` and "
+                + "`DELETE /api/plugins/{old}` are the person's.");
 
         app.MapDelete("/api/plugins/{id}", async (
             [Description("The plugin's id.")] string id,
@@ -177,6 +193,48 @@ public static class PluginEndpoints
                 + "folder is gone, a `plugins.removed` tenant row is appended in the same transaction, and the "
                 + "catalog is rescanned. Answers `{ id, version, whole, versions }`. Deleting a team never "
                 + "removes a plugin.");
+
+        app.MapPost("/api/plugins/{id}/replaces/{old}/move", async (
+            [Description("The installed plugin whose manifest names `old` in `replaces`.")] string id,
+            [Description("The replaced plugin id the members are on now.")] string old,
+            MoveReplacedMembers? request, PluginReplacements replacements, HttpContext context, CancellationToken ct) =>
+        {
+            if (replacements.Refusal(id, old) is { } refusal)
+            {
+                return Results.Json(new { error = refusal.Reason, reason = refusal.Reason }, statusCode: refusal.Status);
+            }
+
+            var only = request?.Members?.Select(m => (m.Team ?? "", m.Member ?? "")).ToList();
+            var actor = new Solutions.SolutionActor(
+                context.User.FindFirstValue(ClaimTypes.NameIdentifier), context.User.FindFirstValue(ClaimTypes.Email));
+
+            var moved = await replacements.MoveAsync(id, old, only, actor, ct);
+
+            return Results.Ok(new
+            {
+                id,
+                old,
+                moves = moved.Select(m => new
+                {
+                    team = m.Team, member = m.Member, teamName = m.TeamName, memberName = m.MemberName, outcome = m.Outcome, reason = m.Reason,
+                }),
+                remaining = replacements.MembersOn(old).Select(m => new { team = m.Team, member = m.Member, teamName = m.TeamName, memberName = m.MemberName }),
+            });
+        })
+            .WithTags(Area)
+            .HumansOnly()
+            .WithSummary("Move the members on a replaced plugin onto the plugin that replaces it")
+            .WithDescription(
+                "A person's press, never automatic. `{id}` must be installed and its own manifest must name `{old}` in "
+                + "`replaces` (409 otherwise, 404 when `{id}` is not installed, 400 for a malformed id). Body optional: "
+                + "`{ \"members\": [{ \"team\", \"member\" }] }` moves only those; omitted moves every member on "
+                + "`plugin:{old}`. Each member is repointed to `plugin:{id}` exactly as a solution update moves one: its "
+                + "settings and its own secret values stay (they are keyed by team and member - a value for a setting "
+                + "the new manifest no longer declares is kept too), and a `member.changed` row naming `from` and `to` "
+                + "is written in the same transaction - when it cannot be written that member is not moved. Answers "
+                + "`{ id, old, moves: [{ team, member, teamName, memberName, outcome: moved|failed, reason }], remaining }`, "
+                + "`remaining` being the members still on `{old}`. The old plugin is not removed: "
+                + "`DELETE /api/plugins/{old}` is the person's, and refused while any member is on it.");
 
         app.MapGet("/api/teams/{team}/members/{member}/plugin-settings", async (
             [Description(Describe.Team)] string team,
@@ -748,7 +806,7 @@ public static class PluginEndpoints
 
         app.MapPost("/api/plugins/rescan", async (
             PluginCatalog plugins, TeamRegistry teams, Marketplace marketplace, ITeamSolutionStore solutions, TenantLogging audit,
-            HttpContext context, CancellationToken ct) =>
+            PluginReplacements replacements, HttpContext context, CancellationToken ct) =>
         {
             var scan = plugins.Rescan();
             Report(scan, Console.Out);
@@ -762,7 +820,7 @@ public static class PluginEndpoints
                 },
                 ct);
 
-            return Results.Ok(Listing(plugins, teams, marketplace, await solutions.ListAsync(ct), context));
+            return Results.Ok(Listing(plugins, teams, marketplace, await solutions.ListAsync(ct), replacements, context));
         })
             .WithTags(Area)
             .HumansOnly()
@@ -1014,8 +1072,23 @@ public static class PluginEndpoints
         s => s.Key,
         s => (object)new { description = s.Value.Description, required = s.Value.Required, label = s.Value.Label, masked = s.Value.Masked });
 
+    /// <summary>One replaced id as the install answer and the listing name it: with its members for a
+    /// person, none for a machine caller.</summary>
+    private static object ReplacedAnswer(ReplacedPlugin replaced) => ReplacedAnswer(replaced, person: true);
+
+    private static object ReplacedAnswer(ReplacedPlugin replaced, bool person) => new
+    {
+        id = replaced.Id,
+        version = replaced.Version,
+        name = replaced.Name,
+        members = person
+            ? replaced.Members.Select(m => new { team = m.Team, member = m.Member, teamName = m.TeamName, memberName = m.MemberName })
+            : [],
+    };
+
     private static object Listing(
-        PluginCatalog plugins, TeamRegistry teams, Marketplace marketplace, IReadOnlyList<TeamSolutionRow> solutions, HttpContext context)
+        PluginCatalog plugins, TeamRegistry teams, Marketplace marketplace, IReadOnlyList<TeamSolutionRow> solutions,
+        PluginReplacements replacements, HttpContext context)
     {
         // WHO IS HIRED ON EACH PLUGIN names members of every team: a person's answer only.
         var person = PrincipalClaims.From(context.User) is not { Kind: not PrincipalKind.User };
@@ -1065,6 +1138,10 @@ public static class PluginEndpoints
                 reserved = p.Manifest.Reserved.Keys,
                 ignored = p.Manifest.Ignored,
                 marketplaceUrl = p.BuiltIn ? null : marketplace.PluginPage(p.Manifest.Id),
+                replaces = p.BuiltIn ? [] : replacements.ReplacedBy(p.Manifest).Select(r => ReplacedAnswer(r, person)),
+                replacedBy = p.BuiltIn
+                    ? []
+                    : replacements.ReplacingOf(p.Manifest.Id).Select(r => new { id = r.Id, version = r.Version, name = r.Name }),
             }),
             refused = plugins.Refused.Select(r => new { id = r.Id, reason = r.Reason }),
             versions = Versions(plugins),
@@ -1187,6 +1264,13 @@ public static class PluginEndpoints
 
 /// <summary>Body of <c>POST /api/plugins/install</c>.</summary>
 public sealed record InstallPlugin(string? Path, bool Replace = false);
+
+/// <summary>Body of <c>POST /api/plugins/{id}/replaces/{old}/move</c>: the members to move, or null
+/// for every member on the old id.</summary>
+public sealed record MoveReplacedMembers(IReadOnlyList<MoveReplacedMember>? Members = null);
+
+/// <summary>One member to move, by its team and its member id.</summary>
+public sealed record MoveReplacedMember(string? Team, string? Member);
 
 /// <summary>Body of <c>PUT .../members/{member}/plugin-settings</c>: <c>config</c> replaces what is
 /// stored; <c>secrets</c> and <c>connections</c> replace it when given and keep it when omitted;

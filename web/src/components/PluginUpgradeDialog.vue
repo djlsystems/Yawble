@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import type { InstalledPlugin, MarketplacePackage, PluginInstallResult, PluginMemberRef } from '../api/types';
+import ReplacedPlugins from './ReplacedPlugins.vue';
 import { pluginNeedWords, pluginUsedByWords } from '../lib/marketplace';
 import {
   UPGRADE_WARNING, anythingMoved, codeParts, rollbackWords, secretMoveWords, upgradePlugin, upgradeTitle, upgradedWords,
@@ -116,6 +117,15 @@ async function upgrade() {
         <p v-if="result.previous" class="os-body os-text-muted" data-upgrade-rollback>
           {{ rollbackWords(result.id ?? pkg.id, result.previous) }}
         </p>
+
+        <!-- WHAT THE NEW VERSION SAYS IT REPLACES, and who is still on the old id: moved only on Move. -->
+        <div v-if="(result.replaces ?? []).length > 0" class="q-mb-md" data-upgrade-replaces>
+          <ReplacedPlugins
+            :plugin="{ id: result.id ?? pkg.id, name: result.name ?? name, version: result.version ?? pkg.version }"
+            :replaced="result.replaces ?? []"
+            @moved="emit('upgraded', result)"
+          />
+        </div>
 
         <div v-if="(result.moves ?? []).length > 0" class="q-mb-md" data-upgrade-moves>
           <div v-if="anythingMoved(result.moves)" class="text-weight-medium q-mb-xs" data-upgrade-moves-heading>Secrets moved into connections</div>

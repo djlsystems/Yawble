@@ -129,6 +129,11 @@ internal static class MemberEndpoints
                 {
                     id = p.Manifest.Id,
                     reference = MemberRef.ForPlugin(p.Manifest.Id),
+                    // NO TWO READ ALIKE: a name another installed plugin shares says its id and version too.
+                    name = p.Manifest.Name,
+                    version = p.Manifest.Version,
+                    label = PluginChoices.Label(p, plugins.Plugins),
+                    replaces = p.Manifest.Replaces,
                     description = p.Manifest.Description,
                     skill = PluginSkills.SkillOf(p),
                     connections = p.Manifest.Connections.ToDictionary(c => c.Key, c => c.Value.Summary),
@@ -144,7 +149,9 @@ internal static class MemberEndpoints
                 "Returns only this team's member-agent allowlist in order, each entry's tags, and the "
                 + "current per-tag counts on this team, plus `uncoveredTags`: the hire roles (developer, "
                 + "tester, researcher) that no allowed agent carries, and `plugins`: every plugin installed "
-                + "on this Host (id, reference, one line, its skill's name, and what each connection slot "
+                + "on this Host (id, reference, name, version, `label` - `Name (plugin)`, or "
+                + "`Name (plugin, <id> <version>)` when another installed plugin has the same name - `replaces`, "
+                + "the ids its manifest says it succeeds, one line, its skill's name, and what each connection slot "
                 + "needs), and `connections`: each connection a person has assigned to this team (`id`, `name`, "
                 + "`kind`, `provider`) - the only ones a Manager's hire may bind.\n\n"
                 + "This route never returns command lines, `env`, a token, or Agents outside this team's allowlist.");

@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Harness.Contracts;
 using Harness.Host;
@@ -606,6 +607,35 @@ public sealed class MarketplaceTests : IDisposable
         Assert.False(packages["other"].UpdateAvailable);
     }
 
+    [Fact]
+    public async Task A_plugin_package_says_what_it_replaces_only_as_the_catalog_writes_it_and_nothing_is_guessed()
+    {
+        static JsonNode WithReplaces(object entry, JsonNode? replaces)
+        {
+            var node = JsonSerializer.SerializeToNode(entry)!;
+            if (replaces is not null) node["replaces"] = replaces;
+            return node;
+        }
+
+        var feed = new FakeFeed
+        {
+            Catalog = Catalog(
+                // A bad entry, the package's own id and a duplicate are skipped, never refusing the catalog.
+                WithReplaces(Entry("cloud-plugin", "plugin", "3.0.0", MailZip), JsonNode.Parse("""["cloud", "Not An Id", 7, "cloud-plugin", "cloud"]""")),
+                // Same words in its id, but no `replaces`: it replaces nothing.
+                WithReplaces(Entry("cloud-extra", "plugin", "1.0.0", MailZip), null),
+                // A solution's `replaces` is not a plugin's.
+                WithReplaces(Entry("mail", "solution", "2.0.3", MailZip), JsonNode.Parse("""["cloud"]"""))),
+        };
+
+        var packages = (await Market(feed, plugins: id => id == "cloud" ? "1.1.4" : null).CheckAsync(Ct)).Packages.ToDictionary(p => p.Id);
+
+        Assert.Equal(["cloud"], packages["cloud-plugin"].Replaces);
+        Assert.Empty(packages["cloud-extra"].Replaces);
+        Assert.Empty(packages["mail"].Replaces);
+        Assert.Contains("\"replaces\":[\"cloud\"]", JsonSerializer.Serialize(packages["cloud-plugin"], HostJson.Web));
+    }
+
     // ---- fetching ----
 
     [Fact]
@@ -845,7 +875,7 @@ public sealed class MarketplaceTests : IDisposable
                 Assert.True(root.GetProperty("checked").GetBoolean());
                 var mail = root.GetProperty("packages")[0];
                 Assert.Equal(
-                    ["id", "kind", "name", "summary", "version", "needs", "installed", "installedVersion", "installedOn", "updateAvailable", "catalogNeeds", "description", "page", "contents"],
+                    ["id", "kind", "name", "summary", "version", "needs", "installed", "installedVersion", "installedOn", "updateAvailable", "catalogNeeds", "description", "page", "contents", "replaces"],
                     mail.EnumerateObject().Select(p => p.Name));
                 Assert.Equal("solution", mail.GetProperty("kind").GetString());
 

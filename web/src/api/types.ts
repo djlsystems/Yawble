@@ -3116,6 +3116,45 @@ export interface InstalledPlugin {
   /** Manifest keys reserved for a later Host, and unknown keys it ignored. */
   reserved: string[]
   ignored: string[]
+  /**
+   * Each INSTALLED id its own manifest says it replaces (`replaces`), with that plugin's version, name
+   * and the members still on it (empty to a machine principal). Never a guess from a name. Absent from
+   * an older Host.
+   */
+  replaces?: ReplacedPlugin[]
+  /** Each installed plugin whose manifest says it replaces this one. Absent from an older Host. */
+  replacedBy?: ReplacingPlugin[]
+}
+
+/** An installed plugin a newer one's manifest says it replaces, and who is still on it, team by team. */
+export interface ReplacedPlugin {
+  id: string
+  version: string
+  name: string
+  members: PluginMemberOn[]
+}
+
+/** An installed plugin whose manifest says it replaces another. */
+export interface ReplacingPlugin {
+  id: string
+  version: string
+  name: string
+}
+
+/** A member hired on a plugin id, with the names a person reads. */
+export interface PluginMemberOn {
+  team: string
+  member: string
+  teamName: string
+  memberName: string
+}
+
+/** `POST /api/plugins/{id}/replaces/{old}/move`: each member moved, or failed (and then unchanged), and who is still on the old id. */
+export interface ReplacementMoveResult {
+  id: string
+  old: string
+  moves: (PluginMemberOn & { outcome: 'moved' | 'failed'; reason: string | null })[]
+  remaining: PluginMemberOn[]
 }
 
 /** A plugin directory the Host did NOT load, with its sentence saying why. */
@@ -3167,6 +3206,13 @@ export interface PluginInstallResult {
    * member's fit, and on any install that is not an upgrade. Never a value.
    */
   attention?: PluginUpgradeAttention[]
+  /**
+   * Each installed id the installed version's manifest says it replaces, with its version and every
+   * member still on it. Nothing was moved or removed. Absent on a refusal and from an older Host.
+   */
+  replaces?: ReplacedPlugin[]
+  /** The installed version's name, or null when it did not load. Absent on a refusal and from an older Host. */
+  name?: string | null
 }
 
 /** One slot's secret move for one member on a plugin install (CON 7). */
@@ -4638,6 +4684,8 @@ export interface MarketplacePackage {
   /** What the package holds and asks for, as the catalog writes it; null or absent when the catalog
    *  has none, and the card then shows what it showed before. */
   contents?: CatalogContents | null
+  /** A plugin package's `replaces`, as its manifest says: the plugin ids it succeeds. Absent from an older Host. */
+  replaces?: string[]
 }
 
 /** A package's `contents` as the catalog writes it: a solution's plugins, members, skills, triggers
