@@ -664,8 +664,23 @@ plugin's words:
   answers its HTTP status, address, title, heading and text, with a screenshot saved in the team's
   documents as `Team Connections/<connection>-<time>.png`.
 - **`session <name> [for <minutes>]`** (1 to 120, default 30) hands a short-lived session to the member
-  that asked: a file in that member's own workspace, `.team-connections-sessions/<connection>-<random>.json`
-  - a Playwright `storageState` (or, for a token website, the header and value) for the site's hosts - deleted when it expires.
+  that asked: a file in that member's own workspace,
+  `.team-connections-sessions/<connection>-<random>.until-<yyyyMMddTHHmmssZ>.json`, deleted when it
+  expires. For a browser session the file is a plain Playwright storage state - `{ "cookies": [...],
+  "origins": [...] }` for the site's hosts and nothing else - so the member passes its path as it is:
+  `browser.newContext({ storageState: '<path>' })`. The answer says so in those words, and names the
+  site's hosts and the time it is good until: *"Portal: a browser session for portal.example.com is at
+  Dev:.team-connections-sessions/portal-3f9a1c2b7d4e.until-20261102T153000Z.json, good until
+  2026-11-02T15:30:00Z. It is a Playwright storageState file: pass its path as it is as `storageState`
+  (for example `browser.newContext({ storageState: '<path>' })`). It is deleted when it expires."* A
+  token website's file keeps its own shape - `{ "kind": "token", "header", "value", "hosts",
+  "expiresAt" }` - and the answer names the header to send `value` in. The expiry is in the file's name,
+  so a file is still deleted on time after the Host restarts: at its start the expired ones go and the
+  rest are deleted when their time is up, and every handoff sweeps the folder too. A hand-off that could
+  not be made (the member's workspace refused the file, say) is answered saying so.
+  When one Team Connections run answers several members at once, each member is told only its own
+  lines - its own file, never another member's; the run's own output, on its card and in its log,
+  lists them all.
 - **`act <name> <path> click "<selector>" | fill "<selector>" "<text>" | submit "<selector>"`**, steps
   joined by `then`, acts on the page and answers it as `check` does - only when **May act on pages** is
   on; otherwise it is refused with a sentence naming the switch.
@@ -675,7 +690,9 @@ the browser goes anywhere, and a redirect, a script or a click that leads elsewh
 browser. Every value of the connection - its password, token, TOTP secret, username and every part of
 its session - is taken out of what comes back; no value is in a route, a row, a log, an answer, a
 screenshot's name or a file other than the session handed over. Each command lands one
-`connections.website-used` row (the command, the outcome, the sentence). A refused sign-in or an
+`connections.website-used` row (the command, the outcome, the sentence; for a session, `handoff`: whether
+it was `made`, the member it was handed `to`, and why not - never a value or a path). A session the
+browser fetched but that could not be handed over is outcome `not-handed-over`, never `ok`. A refused sign-in or an
 expired session marks the website `needs reconnect` (Needs you, on every member using it), a CAPTCHA or
 a device approval the same, saying you sign in yourself with **Sign in**. Needs you then lists the
 connection once, naming the team and Team Connections; the run that asked waits for you, held by the

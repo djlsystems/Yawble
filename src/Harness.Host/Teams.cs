@@ -1201,6 +1201,10 @@ public sealed class TeamRegistry(
                 // refusal the teams pass above is split apart to avoid.
                 if (unreachableRoot is null) Directory.CreateDirectory(workspace);
 
+                // A SESSION HANDED OVER BEFORE THIS START (CON 14) outlived the timer that would have
+                // deleted it: the expired ones go now, the rest when their time is up - read from the name.
+                if (unreachableRoot is null) PluginMemberRunner.SweepHandoffsAtStart(workspace);
+
                 // NOT a refusal, and never a reason the Host will not boot. The catalog is
                 // configuration and the database is data, so the two can
                 // legitimately disagree after a restore. The container comes back, says which Agent

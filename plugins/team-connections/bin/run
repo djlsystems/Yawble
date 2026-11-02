@@ -36,27 +36,31 @@ process.stdin.on('end', () => {
     const verb = (command || '').toLowerCase();
     const source = typeof item.source === 'string' ? item.source : undefined;
 
+    // Each answer is the asker's own: `answers` carries it with its source, so the platform tells
+    // each member only its own lines (CON 14); `output` is all of them, for the run's log.
+    const answer = text => answers.push({ source, text });
+
     if (verb === '' || verb === 'list') {
-      answers.push(list(connections));
+      answer(list(connections));
     } else if (verb === 'test') {
       const name = unquote(rest.join(' '));
       if (name === '') {
-        answers.push('Say which connection to test: `test <name>`. ' + names(connections));
+        answer('Say which connection to test: `test <name>`. ' + names(connections));
       } else {
         // THE PLATFORM RUNS THE TEST (Admin -> Connections' own Test connection) and adds its
         // sentence to this run's output: this process never sees what the connection holds.
-        emit({ t: 'connection.test', name });
+        emit({ t: 'connection.test', name, source });
       }
     } else if (verb === 'check' || verb === 'session' || verb === 'act') {
       const asked = website(verb, words.slice(command.length).trim(), connections);
-      if (asked.error) answers.push(asked.error);
+      if (asked.error) answer(asked.error);
       else emit({ t: 'website', ...asked, source });
     } else {
-      answers.push(`'${words}' is not a command. ${Usage}`);
+      answer(`'${words}' is not a command. ${Usage}`);
     }
   }
 
-  emit({ t: 'result', ok: true, output: answers.join('\n\n') });
+  emit({ t: 'result', ok: true, output: answers.map(a => a.text).join('\n\n'), answers });
 });
 
 // A WEBSITE COMMAND'S WORDS: the connection's name - the longest run of leading words that names one

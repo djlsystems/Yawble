@@ -207,7 +207,7 @@ public sealed class WebsiteConnectionsTests : IAsyncLifetime
 
         // SESSION hands a short-lived session to the member that asked, in its own workspace, as Web Credentials does.
         var session = Output(await TellAndAwaitAsync(dev, "session Fake portal for 5"));
-        var handed = System.Text.RegularExpressions.Regex.Match(session, @"Dev:(\.team-connections-sessions/fake-portal-[0-9a-f]+\.json)").Groups[1].Value;
+        var handed = System.Text.RegularExpressions.Regex.Match(session, @"Dev:(\.team-connections-sessions/fake-portal-[0-9a-f]+\.until-\d{8}T\d{6}Z\.json)").Groups[1].Value;
         Assert.NotEqual("", handed);
         var file = Path.Combine(_dataRoot, "teams", _team, "workspaces", "Dev", handed);
         Assert.Contains(Session, await File.ReadAllTextAsync(file, Ct), StringComparison.Ordinal);
@@ -217,6 +217,247 @@ public sealed class WebsiteConnectionsTests : IAsyncLifetime
         // NO SECRET in any answer, row, log or file under the data root but the handoff itself.
         File.Delete(file);
         await AssertNowhereAsync(Session);
+    }
+
+    // ---- CON 14: a handed-over session is a file the browser loads as it is, each asker told only its own --
+
+    /// <summary>
+    /// The handed-over file is a PLAIN PLAYWRIGHT STORAGE STATE: Playwright's own
+    /// <c>newContext({ storageState: &lt;path&gt; })</c> loads it as it is and the dashboard reads signed in.
+    /// The wrapper the Host wrote before CON 14 (<c>{ kind, storageState, hosts, expiresAt }</c>) loads as
+    /// nobody, which is what two members met on a live instance. The sentence names the hosts, the expiry and
+    /// <c>storageState</c>; the expiry is in the file's name; the row says it was handed, to Dev.
+    /// </summary>
+    [Fact]
+    public async Task A_handed_over_browser_session_is_a_plain_storage_state_that_playwright_loads_signed_in()
+    {
+        Assert.SkipWhen(SignInBrowserChromiumTests.Chromium() is null, SignInBrowserChromiumTests.NoChrome);
+
+        var portal = await WebsiteAsync("Fake portal", ("siteUrl", _origin), ("method", "interactive"), ("checkUrl", "/dashboard"), ("checkText", "Signed in as"));
+        await AssignAsync(portal);
+        await SignInAsync(portal);
+        using var dev = await KeyClientAsync(new ContainerId(_team, "Dev").ToString());
+
+        var run = await TellAndAwaitAsync(dev, "session Fake portal for 5");
+        var told = await AnswersToAsync("Dev", run.CausationSeq!.Value);
+        var handed = System.Text.RegularExpressions.Regex.Match(told, @"Dev:(\.team-connections-sessions/fake-portal-[0-9a-f]+\.until-(\d{8}T\d{6}Z)\.json)");
+        Assert.True(handed.Success, told);
+        Assert.Contains("pass its path as it is as `storageState`", told, StringComparison.Ordinal);
+        Assert.Contains("127.0.0.1", told, StringComparison.Ordinal);
+        Assert.Matches(@"good until \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", told);
+
+        var file = Path.Combine(_dataRoot, "teams", _team, "workspaces", "Dev", handed.Groups[1].Value);
+        var state = JsonNode.Parse(await File.ReadAllTextAsync(file, Ct))!.AsObject();
+        Assert.Equal(["cookies", "origins"], state.Select(p => p.Key).Order(StringComparer.Ordinal));
+
+        var loaded = await PlaywrightLoadsAsync(file, "/dashboard");
+        Assert.Contains("Signed in as Pat", loaded, StringComparison.Ordinal);
+
+        // The file as the Host wrote it before CON 14: Playwright starts signed out with it.
+        var wrapped = Path.Combine(Path.GetDirectoryName(file)!, "wrapped.json");
+        await File.WriteAllTextAsync(wrapped, new JsonObject
+        {
+            ["kind"] = "storageState", ["storageState"] = state.DeepClone(), ["hosts"] = new JsonArray("127.0.0.1"), ["expiresAt"] = DateTimeOffset.UtcNow.AddMinutes(5).ToString("O"),
+        }.ToJsonString(), Ct);
+        Assert.DoesNotContain("Signed in as Pat", await PlaywrightLoadsAsync(wrapped, "/dashboard"), StringComparison.Ordinal);
+
+        var row = JsonNode.Parse((await DetailsAsync(TenantActions.ConnectionWebsiteUsed)).Last())!;
+        Assert.Equal(ConnectionTested.Ok, (string?)row["outcome"]);
+        Assert.True(row["handoff"]!["made"]!.GetValue<bool>());
+        Assert.Equal(new ContainerId(_team, "Dev").ToString(), (string?)row["handoff"]!["to"]);
+
+        File.Delete(file);
+        File.Delete(wrapped);
+        await AssertNowhereAsync(Session);
+    }
+
+    /// <summary>
+    /// THREE MEMBERS ASK FOR A SESSION, ANSWERED IN ONE RUN (CON 14): each is told only its own line - its
+    /// own file, never another member's path - while the run's own output still lists all three, for the
+    /// log. Seen on a live instance: every member received all three lines, another member's first.
+    /// </summary>
+    [Fact]
+    public async Task Three_members_session_requests_answered_in_one_run_are_each_told_only_their_own_path()
+    {
+        Assert.SkipWhen(SignInBrowserChromiumTests.Chromium() is null, SignInBrowserChromiumTests.NoChrome);
+
+        var portal = await WebsiteAsync("Fake portal", ("siteUrl", _origin), ("method", "interactive"), ("checkUrl", "/dashboard"), ("checkText", "Signed in as"));
+        await AssignAsync(portal);
+        await SignInAsync(portal);
+        string[] askers = ["Dev", "Dev2", "Dev3"];
+        foreach (var name in askers.Skip(1))
+        {
+            Assert.Equal(HttpStatusCode.OK, (await _person.PostAsJsonAsync($"/api/teams/{_team}/containers", new { name, agent = "claude-headless" }, Ct)).StatusCode);
+        }
+
+        var clients = new Dictionary<string, HttpClient>();
+        foreach (var name in askers) clients[name] = await KeyClientAsync(new ContainerId(_team, name).ToString());
+        try
+        {
+            // Team Connections is kept busy by Dev's check while the three ask in the same workflow, so the
+            // three are one run.
+            var log = Services.GetRequiredService<IMessageLog>();
+            var who = new ContainerId(_team, Tc);
+            async Task<long> TellAsync(HttpClient client, string instruction, long? causation)
+            {
+                var told = await client.PostAsJsonAsync($"/api/teams/{_team}/containers/{Tc}/tell",
+                    new { instruction, causation = causation?.ToString(System.Globalization.CultureInfo.InvariantCulture) }, Ct);
+                var body = await told.Content.ReadAsStringAsync(Ct);
+                Assert.True(told.IsSuccessStatusCode, body);
+                return (long)JsonNode.Parse(body)!["seq"]!;
+            }
+
+            var first = await TellAsync(clients["Dev"], "check Fake portal", null);
+            var deadline = DateTime.UtcNow.AddMinutes(2);
+            while (TeamConnections().State != ContainerState.Running && DateTime.UtcNow < deadline) await Task.Delay(10, Ct);
+            var asked = new Dictionary<string, long>();
+            for (var i = 0; i < askers.Length; i++) asked[askers[i]] = await TellAsync(clients[askers[i]], $"session Fake portal for {5 + i}", first);
+
+            var answers = new Dictionary<string, string>();
+            foreach (var name in askers) answers[name] = await AnswersToAsync(name, asked[name], TimeSpan.FromMinutes(4));
+
+            var paths = new Dictionary<string, string>();
+            foreach (var name in askers)
+            {
+                var own = System.Text.RegularExpressions.Regex.Matches(answers[name], @"(\w+):\.team-connections-sessions/[^\s,]+\.json");
+                var line = Assert.Single(own);
+                Assert.Equal(name, line.Groups[1].Value);
+                paths[name] = line.Value;
+            }
+
+            foreach (var name in askers)
+            {
+                foreach (var other in askers.Where(o => o != name)) Assert.DoesNotContain(paths[other], answers[name], StringComparison.Ordinal);
+            }
+
+            // One run answered all three: its own output, for the log, lists every path. Its completed row is
+            // written just after the answers.
+            bool OneRun(Message row) => paths.Values.All(p => Output(row).Contains(p, StringComparison.Ordinal));
+            var until = DateTime.UtcNow.AddSeconds(30);
+            List<Message> completed;
+            do
+            {
+                completed = [.. (await log.ReadAfterAsync(0, [MessageTypes.Completed], int.MaxValue, Ct)).Where(m => m.Source == who.ToString())];
+                if (completed.Any(OneRun)) break;
+                await Task.Delay(50, Ct);
+            }
+            while (DateTime.UtcNow < until);
+            Assert.Contains(completed, OneRun);
+
+            foreach (var name in askers) File.Delete(Path.Combine(_dataRoot, "teams", _team, "workspaces", name, paths[name][(name.Length + 1)..]));
+        }
+        finally
+        {
+            foreach (var client in clients.Values) client.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// A HAND-OFF THAT COULD NOT BE WRITTEN IS NOT OK (CON 14): Dev's workspace holds a FILE where the session
+    /// folder goes, so no session can be written there; Dev is told so, and the <c>connections.website-used</c>
+    /// row says it was not handed over, to Dev - never ok, and never a value. Seen on a live instance: the row
+    /// said ok.
+    /// </summary>
+    [Fact]
+    public async Task A_hand_off_that_could_not_be_written_records_a_website_used_row_saying_so()
+    {
+        Assert.SkipWhen(SignInBrowserChromiumTests.Chromium() is null, SignInBrowserChromiumTests.NoChrome);
+
+        var portal = await WebsiteAsync("Fake portal", ("siteUrl", _origin), ("method", "interactive"), ("checkUrl", "/dashboard"), ("checkText", "Signed in as"));
+        await AssignAsync(portal);
+        await SignInAsync(portal);
+        var workspace = Path.Combine(_dataRoot, "teams", _team, "workspaces", "Dev");
+        Directory.CreateDirectory(workspace);
+        await File.WriteAllTextAsync(Path.Combine(workspace, PluginMemberRunner.HandoffFolder), "in the way", Ct);
+        using var dev = await KeyClientAsync(new ContainerId(_team, "Dev").ToString());
+
+        var run = await TellAndAwaitAsync(dev, "session Fake portal for 5");
+        var told = await AnswersToAsync("Dev", run.CausationSeq!.Value);
+        Assert.Contains("could not be written to Dev's workspace", told, StringComparison.Ordinal);
+        Assert.Contains("none was handed over", told, StringComparison.Ordinal);
+
+        var row = JsonNode.Parse((await DetailsAsync(TenantActions.ConnectionWebsiteUsed)).Last())!;
+        Assert.Equal(HandedOver.NotHandedOver, (string?)row["outcome"]);
+        Assert.NotEqual(ConnectionTested.Ok, (string?)row["outcome"]);
+        Assert.False(row["handoff"]!["made"]!.GetValue<bool>());
+        Assert.Equal("not-written", (string?)row["handoff"]!["failure"]);
+        Assert.Equal(new ContainerId(_team, "Dev").ToString(), (string?)row["handoff"]!["to"]);
+        await AssertNowhereAsync(Session);
+    }
+
+    /// <summary>
+    /// A HOST RESTART LOSES THE TIMER THAT DELETES A HANDOFF, NOT THE DELETION (CON 14): the file is a plain
+    /// storage state with nothing inside to read an expiry from, so the expiry is in its name; at the next
+    /// start the expired one is deleted and the one still good is kept.
+    /// </summary>
+    [Fact]
+    public async Task Expired_hand_offs_are_deleted_after_a_host_restart_by_the_expiry_in_their_name()
+    {
+        var workspace = Path.Combine(_dataRoot, "teams", _team, "workspaces", "Dev");
+        const string Plain = "{\"cookies\":[],\"origins\":[]}";
+        // Written by the Host before this one, whose timers went with it: the last one written expired since.
+        var good = PluginMemberRunner.WriteHandoff(workspace, PluginMemberRunner.HandoffName("Fake portal", DateTimeOffset.UtcNow.AddMinutes(30)), Plain, runAs: null);
+        var expired = PluginMemberRunner.WriteHandoff(workspace, PluginMemberRunner.HandoffName("Fake portal", DateTimeOffset.UtcNow.AddMinutes(-1)), Plain, runAs: null);
+        Assert.True(File.Exists(expired));
+
+        await RestartAsync();
+
+        Assert.False(File.Exists(expired), "the expired handoff outlived the restart");
+        Assert.True(File.Exists(good), "a handoff still good was deleted at the restart");
+    }
+
+    /// <summary>Playwright's own <c>newContext({ storageState: file })</c>, in the platform's Chrome: the page's text.</summary>
+    private async Task<string> PlaywrightLoadsAsync(string file, string path)
+    {
+        var scripts = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "harness-storage-state-" + Guid.NewGuid().ToString("N"))).FullName;
+        try
+        {
+            var script = Path.Combine(scripts, "load.cjs");
+            await File.WriteAllTextAsync(script, """
+                const [, , modules, chrome, state, url] = process.argv;
+                const { chromium } = require(require('node:path').join(modules, 'playwright-core'));
+                (async () => {
+                  const browser = await chromium.launch({ executablePath: chrome, headless: true });
+                  try {
+                    const context = await browser.newContext({ storageState: state });
+                    const page = await context.newPage();
+                    await page.goto(url);
+                    process.stdout.write(await page.textContent('body'));
+                  } finally {
+                    await browser.close();
+                  }
+                })().catch(e => { process.stderr.write(String(e && e.message || e)); process.exit(2); });
+                """, Ct);
+            var start = new System.Diagnostics.ProcessStartInfo("node") { RedirectStandardOutput = true, RedirectStandardError = true };
+            foreach (var argument in (string[])[script, Path.Combine(AppContext.BaseDirectory, "plugins", "team-connections", "node_modules"),
+                SignInBrowserChromiumTests.Chromium()!, file, _origin + path])
+            {
+                start.ArgumentList.Add(argument);
+            }
+
+            using var process = System.Diagnostics.Process.Start(start)!;
+            var output = process.StandardOutput.ReadToEndAsync(Ct);
+            var error = process.StandardError.ReadToEndAsync(Ct);
+            await process.WaitForExitAsync(Ct);
+            return await output + "\n" + await error;
+        }
+        finally
+        {
+            Directory.Delete(scripts, recursive: true);
+        }
+    }
+
+    private async Task<IReadOnlyList<string>> DetailsAsync(string action)
+    {
+        await using var db = new SqliteConnection($"Data Source={Path.Combine(_dataRoot, "messages.db")}");
+        await db.OpenAsync(Ct);
+        var read = db.CreateCommand();
+        read.CommandText = "SELECT detail FROM tenant_events WHERE action = $action ORDER BY seq";
+        read.Parameters.AddWithValue("$action", action);
+        var rows = new List<string>();
+        await using var reader = await read.ExecuteReaderAsync(Ct);
+        while (await reader.ReadAsync(Ct)) rows.Add(reader.GetString(0));
+        return rows;
     }
 
     // ---- Done when 2 -----------------------------------------------------------------------------------
@@ -823,10 +1064,10 @@ public sealed class WebsiteConnectionsTests : IAsyncLifetime
         return ((string?)payload["output"] ?? "") + "\n" + ((string?)payload["error"] ?? "") + "\n" + ((string?)payload["reason"] ?? "");
     }
 
-    private async Task<string> AnswersToAsync(string member, long told)
+    private async Task<string> AnswersToAsync(string member, long told, TimeSpan? within = null)
     {
         var log = Services.GetRequiredService<IMessageLog>();
-        var deadline = DateTime.UtcNow.AddSeconds(30);
+        var deadline = DateTime.UtcNow + (within ?? TimeSpan.FromSeconds(30));
         while (DateTime.UtcNow < deadline)
         {
             var answer = (await log.ReadAfterAsync(0, [MessageTypes.InstructionFor(new ContainerId(_team, member))], int.MaxValue, Ct))
