@@ -96,20 +96,11 @@ public static class NeedsYou
                 return Results.BadRequest(new { error = $"`part` is `{LivePart}`, `{StoredPart}` or omitted for both." });
             }
 
-            var names = teams.All().ToDictionary(t => t.Id, t => t.Name, StringComparer.OrdinalIgnoreCase);
-            var items = new List<NeedsYouItem>();
-
-            if (part is null or LivePart)
+            return Results.Ok(new
             {
-                items.AddRange(await LiveAsync(names, host, backlog, solutions, installer, waiting, ct, setup));
-            }
-
-            if (part is null or StoredPart)
-            {
-                items.AddRange(await StoredAsync(names, teams, host, backlog, log, kanban, landedCache, removals, ct));
-            }
-
-            return Results.Ok(new { items = Newest(items) });
+                items = await ReadAsync(
+                    part, teams, host, backlog, log, kanban, landedCache, removals, solutions, installer, waiting, setup, ct),
+            });
         })
             .WithTags("Teams")
             .HumansOnly()
@@ -140,6 +131,47 @@ public static class NeedsYou
                 + "an empty list.\n\n"
                 + "**A person's read.**");
     }
+
+    /// <summary>
+    /// What <c>GET /api/needs-you</c> answers: <paramref name="part"/> <see cref="LivePart"/>,
+    /// <see cref="StoredPart"/> or null for both, newest first.
+    /// </summary>
+    public static async Task<IReadOnlyList<NeedsYouItem>> ReadAsync(
+        string? part,
+        TeamRegistry teams, ContainerHost host, IBacklogStore backlog, IMessageLog log,
+        KanbanStore kanban, BacklogLandedCache landedCache, UnfinishedRemovalRetry removals,
+        ITeamSolutionStore solutions, SolutionInstaller installer, SolutionWait waiting, PluginSetup setup,
+        CancellationToken ct = default)
+    {
+        var names = teams.All().ToDictionary(t => t.Id, t => t.Name, StringComparer.OrdinalIgnoreCase);
+        var items = new List<NeedsYouItem>();
+
+        if (part is null or LivePart)
+        {
+            items.AddRange(await LiveAsync(names, host, backlog, solutions, installer, waiting, ct, setup));
+        }
+
+        if (part is null or StoredPart)
+        {
+            items.AddRange(await StoredAsync(names, teams, host, backlog, log, kanban, landedCache, removals, ct));
+        }
+
+        return Newest(items);
+    }
+
+    /// <summary>
+    /// Both parts, as the route answers with no <c>part</c>: what the header's Needs you counts. Read
+    /// from the same services the route is handed.
+    /// </summary>
+    public static Task<IReadOnlyList<NeedsYouItem>> BothAsync(IServiceProvider services, CancellationToken ct = default) =>
+        ReadAsync(
+            null,
+            services.GetRequiredService<TeamRegistry>(), services.GetRequiredService<ContainerHost>(),
+            services.GetRequiredService<IBacklogStore>(), services.GetRequiredService<IMessageLog>(),
+            services.GetRequiredService<KanbanStore>(), services.GetRequiredService<BacklogLandedCache>(),
+            services.GetRequiredService<UnfinishedRemovalRetry>(), services.GetRequiredService<ITeamSolutionStore>(),
+            services.GetRequiredService<SolutionInstaller>(), services.GetRequiredService<SolutionWait>(),
+            services.GetRequiredService<PluginSetup>(), ct);
 
     /// <summary>Newest first by <c>since</c>; ties in a fixed order, so two reads list alike.</summary>
     public static IReadOnlyList<NeedsYouItem> Newest(IEnumerable<NeedsYouItem> items) =>

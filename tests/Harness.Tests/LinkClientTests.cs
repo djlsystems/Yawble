@@ -500,7 +500,7 @@ public sealed class LinkClientTests : IAsyncLifetime
     }
 
     /// <summary>A clock moved by hand, which says when its next timer is due.</summary>
-    private sealed class LinkClock(DateTimeOffset start) : TimeProvider
+    internal sealed class LinkClock(DateTimeOffset start) : TimeProvider
     {
         private readonly Lock _gate = new();
         private readonly List<Timer> _timers = [];
@@ -581,7 +581,7 @@ public sealed class LinkClientTests : IAsyncLifetime
     }
 
     /// <summary>Every line logged, formatted, so a test can count them and look for what must not be there.</summary>
-    private sealed class ListLogger<T> : ILogger<T>
+    internal sealed class ListLogger<T> : ILogger<T>
     {
         private readonly ConcurrentQueue<string> _lines = new();
 
@@ -599,7 +599,7 @@ public sealed class LinkClientTests : IAsyncLifetime
     /// A management service on loopback Kestrel speaking the pinned link: it records each upgrade, refuses
     /// it with <see cref="UpgradeStatus"/> when set, and otherwise hands the test the session to script.
     /// </summary>
-    private sealed class FakeLinkService : IAsyncDisposable
+    internal sealed class FakeLinkService : IAsyncDisposable
     {
         private readonly Channel<Session> _sessions = Channel.CreateUnbounded<Session>();
         private readonly ConcurrentQueue<Attempt> _attempts = new();

@@ -190,9 +190,10 @@ internal sealed partial class HostComposition
         builder.Services.AddHostedService(sp => sp.GetRequiredService<LinkRequests>());
 
         // THE MANAGEMENT LINK'S CLIENT: one outbound WebSocket to the stored service, and nothing while none
-        // is stored. It is the ILinkSignal attach and detach wake. The summary is a steady stand-in until
-        // the real one is wired; a down service never stops the Host.
-        builder.Services.AddSingleton<ILinkSummarySource, SteadyLinkSummary>();
+        // is stored. It is the ILinkSignal attach and detach wake. Its summary is the StatusSource, read
+        // once the workers' list exists (HostComposition.Workers); a down service never stops the Host.
+        builder.Services.AddSingleton(sp => new StatusSource(sp.GetRequiredService<TimeProvider>(), sp.GetRequiredService<ILogger<StatusSource>>()));
+        builder.Services.AddSingleton<ILinkSummarySource>(sp => sp.GetRequiredService<StatusSource>());
         builder.Services.AddSingleton(sp => new LinkClient(
             sp.GetRequiredService<ILinkStore>(), sp.GetRequiredService<IDataProtectionProvider>(), sp.GetRequiredService<ITenantLog>(),
             sp.GetRequiredService<ILinkSummarySource>(), sp.GetRequiredService<TimeProvider>(), sp.GetRequiredService<ILogger<LinkClient>>()));

@@ -25,20 +25,6 @@ public interface ILinkSummarySource
     event Action? Changed;
 }
 
-/// <summary>A summary that never changes: healthy, this build's version, nothing else. A stand-in until the real summary is wired.</summary>
-public sealed class SteadyLinkSummary : ILinkSummarySource
-{
-    private readonly StatusSummary _summary = new(StatusSummary.Healthy, BuildVersion.Current.Version, [], [], 0);
-
-    public event Action? Changed
-    {
-        add { }
-        remove { }
-    }
-
-    public StatusSummary Current() => _summary;
-}
-
 /// <summary>
 /// THE LINK CLIENT: one outbound WebSocket to the stored management service (docs/management-link.md).
 /// Nothing listens for the service. With no link stored it does nothing. It says hello, takes the

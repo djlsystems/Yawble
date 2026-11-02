@@ -21,6 +21,7 @@ using Harness.Contracts;
 using Harness.Host;
 using Harness.Host.Auth;
 using Harness.Host.Capacity;
+using Harness.Host.Link;
 using Harness.Host.Solutions;
 using Harness.Identity;
 using Harness.Kanban;
@@ -256,6 +257,14 @@ internal sealed partial class HostComposition
         WorkerEndpoints.MapList(app, workersNow);
         ServiceStatusEndpoints.Map(app, dataRoot, workersNow);
         app.Services.GetRequiredService<CapacitySampler>().Describe = workersNow;
+        // THE LINK'S STATUS SUMMARY reads what /api/service-status, the Teams list and Needs you read, in
+        // process, and hears every team, member and worker change; it announces at most one per 2 s.
+        var linkStatus = app.Services.GetRequiredService<StatusSource>();
+        linkStatus.Read = ct => LinkStatusFacts.ReadAsync(app.Services, dataRoot, workersNow, ct);
+        app.Services.GetRequiredService<TeamRegistry>().TeamChanged += _ => linkStatus.Notify();
+        app.Services.GetRequiredService<ContainerHost>().Changed += _ => linkStatus.Notify();
+        workerConnections.Changed += linkStatus.Notify;
+        linkStatus.Notify();
         if (control)
         {
             app.Logger.LogInformation(
