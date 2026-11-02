@@ -1227,6 +1227,28 @@ const words: Record<string, Words> = {
       ]);
     },
   },
+  'link.attached': {
+    did: 'attached to a management service',
+    detail: (d) =>
+      sentence([
+        `attached to ${text(d, 'service') ?? 'a management service'}${text(d, 'url') ? ` at ${text(d, 'url')}` : ''}`,
+        text(d, 'instance') && `as ${text(d, 'instance')}`,
+        text(d, 'via') === 'environment' && 'from HARNESS_LINK_URL at start',
+      ]),
+  },
+  'link.detached': {
+    did: 'detached from a management service',
+    detail: (d) =>
+      sentence([`detached from ${text(d, 'service') ?? 'a management service'}${text(d, 'url') ? ` at ${text(d, 'url')}` : ''}`]),
+  },
+  'link.refused': {
+    did: 'refused by a management service',
+    detail: (d) =>
+      sentence([
+        `refused by ${text(d, 'url') ?? 'a management service'}`,
+        text(d, 'reason')?.replace(/\.$/, ''),
+      ]),
+  },
 };
 
 /**
