@@ -15,6 +15,7 @@ import {
   slotKinds,
   kindLabel,
   credentialRows,
+  guidedProviders,
   named,
 } from '../connections'
 import { hostConnection, hostProvider, hostSlot } from '../../test/pluginFixtures'
@@ -138,6 +139,16 @@ describe('connection kinds', () => {
     expect(slotKinds(['microsoft', 'imap', 'login'])).toEqual(['oauth', 'imap', 'login'])
     expect(slotKinds(['apikey'])).toEqual(['apikey'])
     expect(slotKinds(['custom'])).toEqual([])
+  })
+
+  it('offers a website for a slot that names website, and lists only website connections for it', () => {
+    expect(slotKinds(['website'])).toEqual(['website'])
+    expect(guidedProviders({ providers: ['website'] })).toEqual(['website'])
+    expect(guidedProviders({ providers: ['apikey', 'website', 'custom'] })).toEqual(['apikey', 'website'])
+
+    const site = hostConnection({ id: 'portal', provider: 'website', providerKind: 'website', kind: 'website' })
+    const key = hostConnection({ id: 'key', provider: 'apikey', providerKind: 'apikey', kind: 'apikey' })
+    expect(connectionsForSlot(hostSlot({ providers: ['website'] }), [key, site]).map((c) => c.id)).toEqual(['portal'])
   })
 
   it('names a kind, and an older Host with no kind is a sign-in', () => {

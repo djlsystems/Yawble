@@ -80,6 +80,18 @@ public sealed partial class ConnectionsTests : IAsyncLifetime
             manifest: PluginInstall.Manifest("vault", edit: m => m["connections"] = JsonNode.Parse(
                 """{"keys":{"description":"The app secrets.","providers":["apikey"],"required":true,"multiple":true}}""")));
 
+        // A PLUGIN WITH ONE SLOT OF EVERY KIND and a multiple API-key slot, writing its request alike
+        // and printing it: what it prints is redacted, the connections' names are not (CON 15).
+        PluginInstall.Write(_dataRoot, "every",
+            script: $"req=$(cat); printf '%s\\n' \"$req\" >> '{Requests}'; printf '%s\\n' \"$req\"; echo '{{\"t\":\"result\",\"ok\":true,\"output\":\"named\"}}'",
+            manifest: PluginInstall.Manifest("every", edit: m => m["connections"] = JsonNode.Parse(
+                """
+                {"mail":{"providers":["imap"],"required":true},"key":{"providers":["apikey"],"required":true},
+                 "login":{"providers":["login"],"required":true},"site":{"providers":["website"],"required":true},
+                 "account":{"providers":["google"],"scopes":{"google":["MAIL_SCOPE"]},"required":true},
+                 "keys":{"providers":["apikey"],"multiple":true}}
+                """.Replace("MAIL_SCOPE", MailScope))));
+
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host => host
             .UseSetting("DataRoot", _dataRoot)
             .UseSetting("Logging:LogLevel:Default", "Warning")

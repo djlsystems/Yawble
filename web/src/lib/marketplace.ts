@@ -122,6 +122,7 @@ export const PROVIDER_WORDS: Readonly<Record<string, { name: string; mailboxes: 
   custom: { name: 'custom sign-in', mailboxes: [] },
   login: { name: 'username and password', mailboxes: [] },
   apikey: { name: 'API key', mailboxes: [] },
+  website: { name: 'website', mailboxes: [] },
 };
 
 /** The order mailboxes are named in, as the website names them. */

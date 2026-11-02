@@ -9,10 +9,12 @@ namespace Harness.Host;
 
 /// <summary>What a run is handed for one slot: the fresh access token and what it is for, or for a
 /// mailbox its servers and app password. A Microsoft slot also has <see cref="Tokens"/>: one fresh
-/// access token per API its scopes name, the first of them being <see cref="AccessToken"/>.</summary>
+/// access token per API its scopes name, the first of them being <see cref="AccessToken"/>.
+/// <see cref="Name"/> is the connection's stored name (<see cref="ConnectionRecord.Name"/>): what a
+/// person chose and sees, never a secret.</summary>
 public sealed record ConnectionGrant(
     string ConnectionId, string Provider, string Account, string AccessToken, DateTimeOffset? ExpiresAt, IReadOnlyList<string> Scopes,
-    MailboxGrant? Mailbox = null, IReadOnlyList<ApiToken>? Tokens = null, CredentialGrant? Credential = null)
+    MailboxGrant? Mailbox = null, IReadOnlyList<ApiToken>? Tokens = null, CredentialGrant? Credential = null, string Name = "")
 {
     /// <summary>The values the run's redaction set takes: every access token, the app password, or a
     /// credential's masked values.</summary>
@@ -1163,7 +1165,8 @@ public sealed partial class Connections(
     /// the one entry of <see cref="ConnectionGrant.Tokens"/>.</summary>
     private static ConnectionGrant OneApiGrant(ConnectionRecord connection, string accessToken, DateTimeOffset? expiresAt, bool microsoft) =>
         new(connection.Id, connection.Provider, connection.Account, accessToken, expiresAt, connection.Scopes,
-            Tokens: microsoft ? [new ApiToken(MicrosoftApis.Tokens(connection.Scopes)[0].Api, accessToken, expiresAt, connection.Scopes)] : null);
+            Tokens: microsoft ? [new ApiToken(MicrosoftApis.Tokens(connection.Scopes)[0].Api, accessToken, expiresAt, connection.Scopes)] : null,
+            Name: connection.Name);
 
     /// <summary>
     /// A MICROSOFT CONNECTION WITH SEVERAL APIS: one access token per API <paramref name="asked"/>
@@ -1243,7 +1246,7 @@ public sealed partial class Connections(
         }
 
         var first = handed[0];
-        return (new ConnectionGrant(connection.Id, connection.Provider, connection.Account, first.AccessToken, first.ExpiresAt, connection.Scopes, Tokens: handed), null);
+        return (new ConnectionGrant(connection.Id, connection.Provider, connection.Account, first.AccessToken, first.ExpiresAt, connection.Scopes, Tokens: handed, Name: connection.Name), null);
     }
 
     /// <summary>Microsoft's answers that refuse one API and not the refresh token: no consent to it
@@ -1424,7 +1427,7 @@ public sealed partial class Connections(
 
         return (new ConnectionGrant(
             connection.Id, connection.Provider, connection.Account, "", null, [],
-            new MailboxGrant(mailbox.Username, password, mailbox.Imap, mailbox.Smtp)), null);
+            new MailboxGrant(mailbox.Username, password, mailbox.Imap, mailbox.Smtp), Name: connection.Name), null);
     }
 
     /// <summary>
@@ -1700,7 +1703,7 @@ public sealed partial class Connections(
         return (new ConnectionGrant(
             connection.Id, connection.Provider, connection.Account, "", null, [],
             Credential: new CredentialGrant(connection.Kind, credential.Preset, values,
-                credential.Fields.Where(f => f.Masked).Select(f => f.Name).ToHashSet(StringComparer.Ordinal))), null);
+                credential.Fields.Where(f => f.Masked).Select(f => f.Name).ToHashSet(StringComparer.Ordinal)), Name: connection.Name), null);
     }
 
     private static MailboxAnswer Refusal400(string error) => new(StatusCodes.Status400BadRequest, null, error, null);

@@ -234,6 +234,13 @@ public sealed partial class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         // A short part of a saved sign-in session is redacted only as a whole token (SignInSessionValue.SecretParts).
         var (cells, maskedCells, maskedTokens) = TableSecrets(manifest, bound, own);
 
+        // A MASKED VALUE THAT IS A BOUND CONNECTION'S NAME is refused as a key name's is: each connection's
+        // `name` goes on stdin unredacted, so the value would ride beside it.
+        if (ValueIsAConnectionName(grants, resolvedSecrets, named, cells, manifest) is { } connectionNamed)
+        {
+            return MemberResult.NotRun(connectionNamed, FailureClasses.NeedsPerson);
+        }
+
         var redacted = ValueRedactor.For(
             [
                 .. resolvedSecrets.Where(s => manifest.Secrets.GetValueOrDefault(s.Key)?.Masked != false).Select(s => s.Value),
@@ -510,6 +517,7 @@ public sealed partial class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             ? new JsonObject
             {
                 ["kind"] = MailboxSettings.Kind,
+                ["name"] = grant.Name,
                 ["account"] = grant.Account,
                 ["username"] = mailbox.Username,
                 ["password"] = mailbox.Password,
@@ -521,6 +529,7 @@ public sealed partial class PluginMemberRunner : IMemberRunner, IRunWorkerClient
                 ? new JsonObject
                 {
                     ["kind"] = credential.Kind,
+                    ["name"] = grant.Name,
                     ["account"] = grant.Account,
                     ["preset"] = credential.Preset,
                     ["fields"] = new JsonObject(credential.Values.Select(v => KeyValuePair.Create(v.Key, (JsonNode?)JsonValue.Create(v.Value)))),
@@ -604,6 +613,8 @@ public sealed partial class PluginMemberRunner : IMemberRunner, IRunWorkerClient
 
             // EACH BOUND SLOT'S FRESH ACCESS TOKEN - never the refresh token, never the client secret -
             // or a mailbox's servers and app password.
+            // EACH CARRIES `name`, the connection's stored name, just before `account`: what a person
+            // chose and sees, so two of one kind are told apart. A name, never a value, and not redacted.
             // A SLOT DECLARED `"multiple": true` is handed an ARRAY of them, one per connection bound to
             // it in binding order; any other slot its one object, as before.
             ["connections"] = ConnectionsNode(manifest, grants ?? new Dictionary<string, ConnectionGrant>()),
@@ -640,6 +651,7 @@ public sealed partial class PluginMemberRunner : IMemberRunner, IRunWorkerClient
         var slot = new JsonObject
         {
             ["provider"] = grant.Provider,
+            ["name"] = grant.Name,
             ["account"] = grant.Account,
             ["accessToken"] = grant.AccessToken,
             ["expiresAt"] = Expiry(grant.ExpiresAt),
@@ -1053,6 +1065,70 @@ public sealed partial class PluginMemberRunner : IMemberRunner, IRunWorkerClient
 
             return $"The value handed for `{name}` is the name of a key or field this member's plugin is told, "
                 + "and names are not secret. Set a real value in the member's settings.";
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Why a masked value this run is handed - a secret field's, a named secret's, a table's secret cell,
+    /// or a bound connection's own (an app password, a masked credential field, an access token) - is the
+    /// stored name of a connection bound to it, or null. Connection names go on stdin unredacted as each
+    /// connection's <c>name</c>. The sentence names the field, never the value (nor the name, which is it).
+    /// </summary>
+    private static string? ValueIsAConnectionName(
+        IReadOnlyDictionary<string, ConnectionGrant> grants, IReadOnlyDictionary<string, string> resolved,
+        IReadOnlyDictionary<string, string>? named, JsonObject cells, PluginManifest manifest)
+    {
+        var names = grants.Values.Select(g => g.Name).Where(n => n.Length > 0).ToHashSet(StringComparer.Ordinal);
+        if (names.Count == 0) return null;
+
+        const string Because = "is the name of a connection this member's plugin is told, and connection names are not secret.";
+
+        foreach (var (field, value) in resolved.OrderBy(r => r.Key, StringComparer.Ordinal))
+        {
+            if (manifest.Secrets.GetValueOrDefault(field)?.Masked == false || !names.Contains(value)) continue;
+            return $"The value handed for `{field}` {Because} Set a real value in the member's settings.";
+        }
+
+        foreach (var (name, value) in (named ?? new Dictionary<string, string>()).OrderBy(n => n.Key, StringComparer.Ordinal))
+        {
+            if (names.Contains(value)) return $"The value of this member's secret `{name}` {Because} A person types the real value in the member's settings.";
+        }
+
+        foreach (var (table, field) in manifest.Config.OrderBy(c => c.Key, StringComparer.Ordinal))
+        {
+            if (field.Table is not { } declared || cells[table] is not JsonObject rows) continue;
+
+            foreach (var column in declared.SecretColumns.Where(c => c.Masked))
+            {
+                if (rows.Any(r => r.Value?[column.Name] is JsonValue cell && cell.TryGetValue<string>(out var value) && names.Contains(value)))
+                {
+                    return $"A value in column `{column.Name}` of table `{table}` {Because} Set a real value in the member's settings.";
+                }
+            }
+        }
+
+        foreach (var (binding, grant) in grants.OrderBy(g => g.Key, StringComparer.Ordinal))
+        {
+            var key = PluginConnectionSlot.BindingKey(binding)?.Slot ?? binding;
+
+            if (grant.Credential is { } credential)
+            {
+                foreach (var (field, value) in credential.Values.OrderBy(v => v.Key, StringComparer.Ordinal))
+                {
+                    if (credential.Masked.Contains(field) && names.Contains(value))
+                    {
+                        return $"The value of `{field}` in the connection bound for `{key}` {Because} Edit the connection in {Connections.Where}.";
+                    }
+                }
+            }
+            else if (grant.Secrets.FirstOrDefault(names.Contains) is not null)
+            {
+                return grant.Mailbox is not null
+                    ? $"The app password of the connection bound for `{key}` {Because} Update its password in {Connections.Where}."
+                    : $"The access token of the connection bound for `{key}` {Because} Reconnect it in {Connections.Where}.";
+            }
         }
 
         return null;
