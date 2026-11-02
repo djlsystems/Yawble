@@ -568,13 +568,13 @@ public static class TenantActions
     /// could not be removed. Written with the team's <c>team_solutions</c> row marked uninstalled.</summary>
     public const string SolutionUninstalled = "solution.uninstalled";
 
-    /// <summary>The instance was attached to a management service (<c>yawble attach</c>, or
+    /// <summary>The instance was attached to a management service (the attach command, or
     /// <c>HARNESS_LINK_URL</c> at start). Subject is the service URL, subject name the service's name;
     /// detail names the URL, the service, the instance's name there and how it was asked. Never the
     /// token or the credential.</summary>
     public const string LinkAttached = "link.attached";
 
-    /// <summary>The instance was detached from its management service (<c>yawble detach</c>): the link
+    /// <summary>The instance was detached from its management service (the detach command): the link
     /// and its credential are forgotten. Subject is the service URL, subject name the service's name.</summary>
     public const string LinkDetached = "link.detached";
 

@@ -177,7 +177,7 @@ internal sealed partial class HostComposition
             sp.GetRequiredService<TeamRegistry>(), sp.GetRequiredService<IMemberReports>()));
         builder.Services.AddHostedService(sp => sp.GetRequiredService<ConnectRequests>());
 
-        // THE MANAGEMENT LINK'S ATTACH AND DETACH: `yawble attach` and `yawble detach` through the same
+        // THE MANAGEMENT LINK'S ATTACH AND DETACH: the attach command and the detach command through the same
         // exchange as `connect`, and HARNESS_LINK_URL / HARNESS_LINK_TOKEN once at start while no link is
         // stored. Nothing is reached and nothing is shown until a link exists.
         builder.Services.AddHttpClient(nameof(LinkAttach), client => client.Timeout = TimeSpan.FromSeconds(30));

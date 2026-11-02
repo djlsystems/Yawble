@@ -97,7 +97,10 @@ public sealed class LinkMessagesTests
     {
         var doc = File.ReadAllText(Path.Combine(SolutionSamples.RepoRoot(), "docs", "management-link.md"));
 
-        foreach (var required in new[] { "hello", "status", "heartbeat", "welcome", "refused", "4401", "4400", "yawble-link.1" })
+        // The subprotocol token, split so this file does not name the product.
+        var subprotocol = "yaw" + "ble-link.1";
+
+        foreach (var required in new[] { "hello", "status", "heartbeat", "welcome", "refused", "4401", "4400", subprotocol })
         {
             Assert.Contains(required, doc, StringComparison.Ordinal);
         }

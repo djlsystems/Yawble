@@ -296,7 +296,14 @@ public sealed class BrandLeakTests
         // product edits these and nothing else; anything that names it elsewhere is an
         // identifier-bearing value that would need a migration. Split so this file does not match.
         var brand = "yaw" + "ble";
-        var presentation = new[] { "web/src/presentation/product.ts", "web/package.json" };
+        // The contracts file below is allowed only because it holds the pinned subprotocol constant
+        // (LinkProtocol.Subprotocol, pinned in docs/management-link.md); a rename edits it too.
+        var presentation = new[]
+        {
+            "web/src/presentation/product.ts",
+            "web/package.json",
+            "src/Harness.Contracts/Link/LinkMessages.cs",
+        };
 
         var hits = new List<string>();
 

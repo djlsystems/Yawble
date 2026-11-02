@@ -34,7 +34,7 @@ public sealed class LinkAttachTests : IAsyncLifetime
 
     private readonly FakeService _service = new();
 
-    private readonly string _dataRoot = Path.Combine(Path.GetTempPath(), "yawble-link-" + Guid.NewGuid().ToString("N"));
+    private readonly string _dataRoot = Path.Combine(Path.GetTempPath(), "link-attach-" + Guid.NewGuid().ToString("N"));
 
     private ILinkStore Store => _database.Links();
 
