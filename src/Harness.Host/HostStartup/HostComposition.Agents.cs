@@ -189,6 +189,16 @@ internal sealed partial class HostComposition
             sp.GetService<ILinkSignal>(), builder.Configuration[LinkRequests.UrlVariable], builder.Configuration[LinkRequests.TokenVariable]));
         builder.Services.AddHostedService(sp => sp.GetRequiredService<LinkRequests>());
 
+        // THE MANAGEMENT LINK'S CLIENT: one outbound WebSocket to the stored service, and nothing while none
+        // is stored. It is the ILinkSignal attach and detach wake. The summary is a steady stand-in until
+        // the real one is wired; a down service never stops the Host.
+        builder.Services.AddSingleton<ILinkSummarySource, SteadyLinkSummary>();
+        builder.Services.AddSingleton(sp => new LinkClient(
+            sp.GetRequiredService<ILinkStore>(), sp.GetRequiredService<IDataProtectionProvider>(), sp.GetRequiredService<ITenantLog>(),
+            sp.GetRequiredService<ILinkSummarySource>(), sp.GetRequiredService<TimeProvider>(), sp.GetRequiredService<ILogger<LinkClient>>()));
+        builder.Services.AddSingleton<ILinkSignal>(sp => sp.GetRequiredService<LinkClient>());
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<LinkClient>());
+
         // A PLUGIN UPDATE MOVES A MEMBER'S OWN SECRET INTO A CONNECTION (CON 7): run by an install, a
         // Replace and a solution install or update once a version declaring `movedTo` is active.
         builder.Services.AddSingleton(sp => new PluginSecretMoves(
