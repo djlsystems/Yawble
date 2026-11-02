@@ -162,3 +162,23 @@ public sealed class PluginReplacements(PluginCatalog catalog, TeamRegistry teams
             change => [actor.Row(TenantActions.MemberChanged, $"{team}/{id}", memberName, fields)]);
     }
 }
+
+/// <summary>
+/// NO TWO PLUGIN CHOICES READ ALIKE, wherever a plugin is chosen: a plugin whose name no other installed
+/// plugin has reads <c>Name (plugin)</c>, as it always did; one whose name another shares (compared
+/// trimmed, case-insensitively) reads <c>Name (plugin, &lt;id&gt; &lt;version&gt;)</c>, so two installed
+/// "Azure"s are told apart. The web's <c>pluginChoiceLabel</c> (web/src/lib/plugins.ts) says the same.
+/// </summary>
+public static class PluginChoices
+{
+    public static string Label(InstalledPlugin plugin, IEnumerable<InstalledPlugin> installed)
+    {
+        var name = plugin.Manifest.Name.Trim();
+        var shared = installed.Any(other =>
+            !other.BuiltIn
+            && other.Manifest.Id != plugin.Manifest.Id
+            && string.Equals(other.Manifest.Name.Trim(), name, StringComparison.OrdinalIgnoreCase));
+
+        return shared ? $"{name} (plugin, {plugin.Manifest.Id} {plugin.Manifest.Version})" : $"{name} (plugin)";
+    }
+}

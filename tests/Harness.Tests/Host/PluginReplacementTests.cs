@@ -71,7 +71,7 @@ public sealed class PluginReplacementTests : IAsyncLifetime
             m["config"] = JsonNode.Parse("""{ "region": { "type": "string" }, "legacy": { "type": "string" } }""")));
 
         // A plugin that names nothing in `replaces`, sharing nothing: it must take no members.
-        PluginInstall.Write(_dataRoot, "fixture-other", "1.0.0", manifest: Manifest("fixture-other", "1.0.0"));
+        PluginInstall.Write(_dataRoot, "fixture-other", "1.0.0", manifest: Manifest("fixture-other", "1.0.0", m => m["name"] = "Other Cloud"));
 
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host => host
             .UseSetting("DataRoot", _dataRoot)
@@ -185,6 +185,14 @@ public sealed class PluginReplacementTests : IAsyncLifetime
         Assert.Empty(Plugin("fixture-other").GetProperty("replaces").EnumerateArray());
         Assert.Empty(Plugin("fixture-other").GetProperty("replacedBy").EnumerateArray());
         Assert.Empty(Plugin(New).GetProperty("replacedBy").EnumerateArray());
+
+        // THE HIRING LIST TELLS THE TWO SAME-NAMED PLUGINS APART; a name nobody shares reads as before.
+        var hiring = JsonDocument.Parse(await _person.GetStringAsync($"/api/teams/{_alpha}/hiring", Ct)).RootElement;
+        var labels = hiring.GetProperty("plugins").EnumerateArray()
+            .ToDictionary(p => p.GetProperty("id").GetString()!, p => p.GetProperty("label").GetString());
+        Assert.Equal($"{Name} (plugin, {Old} 1.1.4)", labels[Old]);
+        Assert.Equal($"{Name} (plugin, {New} 3.0.0)", labels[New]);
+        Assert.Equal("Other Cloud (plugin)", labels["fixture-other"]);
     }
 
     [Fact]
