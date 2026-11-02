@@ -365,7 +365,7 @@ public static class PluginEndpoints
 
             // A PERSON BINDS: this route is HumansOnly, so any connection may be named - but it must
             // exist, suit the slot's providers and hold every scope the slot asks for.
-            if (await connections.BindingRefusalAsync(plugin.Manifest, changed.Connections, assignedToTeam: null, ct) is { } bindingRefusal)
+            if (await connections.BindingRefusalAsync(plugin.Manifest, changed.Connections, assignedToTeam: null, ct, stored: before.Connections) is { } bindingRefusal)
             {
                 return Results.BadRequest(bindingRefusal.Body());
             }
@@ -448,7 +448,9 @@ public static class PluginEndpoints
                 + "field names, types, `enum`, a number's `min`/`max`/`integer`, required fields and secrets, "
                 + "the logical key's form and that it is set - and refused 400 naming the field (and the bound), "
                 + "with nothing written. A value already stored outside bounds added later may be sent back "
-                + "unchanged: it is kept, and `outOfRange` names it. A masked value is never answered. Saved with a "
+                + "unchanged: it is kept, and `outOfRange` names it. A stored value, secret binding or connection binding "
+                + "for a field, secret or slot the active version no longer declares is kept when sent back unchanged or "
+                + "omitted, and not used; one the save introduces is refused. A masked value is never answered. Saved with a "
                 + "`member.plugin-settings-changed` tenant row in the same transaction, and read by the "
                 + "member's next run. Answers as GET does.");
 

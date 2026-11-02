@@ -896,7 +896,15 @@ public sealed partial class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             if (manifest.Config.TryGetValue(name, out var declared) && declared.BoundsRefusal(name, value) is { } outside) return outside;
         }
 
-        foreach (var (name, key) in settings.Secrets)
+        // A BINDING STORED FOR A SECRET A NEWER VERSION DROPPED, kept unchanged, is not checked - as a
+        // stored value for a dropped config field is not: a run never resolves it, and the settings
+        // form, which hides it, keeps it on every Save by omitting `secrets`. One this save introduces
+        // or rebinds is checked like any other.
+        var checkedSecrets = settings.Secrets
+            .Where(b => manifest.Secrets.ContainsKey(b.Key) || !(stored is not null && stored.Secrets.TryGetValue(b.Key, out var keptKey) && keptKey == b.Value))
+            .ToDictionary(b => b.Key, b => b.Value, StringComparer.Ordinal);
+
+        foreach (var (name, key) in checkedSecrets)
         {
             if (!manifest.Secrets.ContainsKey(name))
             {
@@ -912,7 +920,7 @@ public sealed partial class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             }
         }
 
-        if (KeyNamedByAValue(settings.Secrets, secrets) is { } named) return named;
+        if (KeyNamedByAValue(checkedSecrets, secrets) is { } named) return named;
 
         // A FIELD MOVED TO A SLOT (`movedTo`, CON 7) is required of its slot, not of the member's values.
         foreach (var (name, secret) in manifest.Secrets.Where(s => s.Value.Required && s.Value.MovedTo is null))

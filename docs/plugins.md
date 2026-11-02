@@ -1325,10 +1325,13 @@ chosen there; it is not a refusal, because the picker and Connect are right besi
   knows nothing of connections unbinds nothing. It is validated
   exactly as a hire is - field and secret names, types, `enum` (per item for a list), required fields,
   the key's form, a reserved or provider key, a required secret with no value and no set key, a value
-  too short to redact - and refused with a 400 naming the field, with nothing written. Two stored values are
-  kept when they are sent back unchanged: a number outside bounds added later (named in
-  `outOfRange`), and a value for a field the active version no longer declares (the run never
-  receives it).
+  too short to redact - and refused with a 400 naming the field, with nothing written. Stored values
+  are kept when they are sent back unchanged (or, for bindings, kept by omission): a number outside
+  bounds added later (named in `outOfRange`), a value for a field the active version no longer
+  declares, and a secret binding or connection binding for a secret or slot the active version no
+  longer declares (the run never receives any of them). So after an upgrade drops a bound secret or
+  slot, the settings form's Save - which omits `secrets` - is accepted. A binding the save introduces
+  or changes for an undeclared secret or slot is refused.
 - The save, its `member.plugin-settings-changed` row in `tenant_events` (the plugin and the NAMES of
   the fields and secret bindings that changed, never a value) and each value with its own
   `member.secret-*` row are one transaction.

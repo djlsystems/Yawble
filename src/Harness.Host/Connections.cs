@@ -1952,7 +1952,7 @@ public sealed partial class Connections(
     /// </summary>
     public async Task<BindingRefusal?> BindingRefusalAsync(
         PluginManifest manifest, IReadOnlyDictionary<string, string> bindings, IReadOnlySet<string>? assignedToTeam,
-        CancellationToken ct = default, string retry = BindAgain)
+        CancellationToken ct = default, string retry = BindAgain, IReadOnlyDictionary<string, string>? stored = null)
     {
         foreach (var (key, connectionId) in bindings)
         {
@@ -1962,6 +1962,12 @@ public sealed partial class Connections(
 
             if (!manifest.Connections.TryGetValue(slot, out var declared))
             {
+                // A BINDING STORED FOR A SLOT A NEWER VERSION DROPPED, kept unchanged, is not checked -
+                // as a kept secret binding or a stored value for a dropped config field is not
+                // (PluginMemberRunner.SettingsRefusal): a run never grants it, and refusing it would
+                // stop every other change to the member. One this save introduces is refused.
+                if (stored is not null && stored.TryGetValue(key, out var kept) && kept == connectionId) continue;
+
                 return new BindingRefusal($"`{key}` is not a connection slot of plugin '{manifest.Id}'. It has: "
                     + (manifest.Connections.Count == 0 ? "none" : string.Join(", ", manifest.Connections.Keys)) + ".");
             }
