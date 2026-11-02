@@ -87,7 +87,12 @@ public sealed class MarketplaceRefusal(string sentence, int status = StatusCodes
 public sealed record CatalogPackage(
     string Id, string Kind, string Name, string Summary, string Version, IReadOnlyList<string> Needs,
     Uri DownloadUrl, string Sha256, long Bytes, CatalogNeeds CatalogNeeds, string Description = "",
-    CatalogContents? Contents = null);
+    CatalogContents? Contents = null)
+{
+    /// <summary>A plugin package's <c>replaces</c>, as its manifest says: optional and forgiving - an entry
+    /// that is not a plugin id, or the package's own id, is skipped and never refuses the catalog.</summary>
+    public IReadOnlyList<string> Replaces { get; init; } = [];
+}
 
 /// <summary>
 /// What a package holds and asks for, as the catalog writes it (<c>contents</c>): a solution's
@@ -152,7 +157,12 @@ public sealed record MarketplacePackage(
     string Id, string Kind, string Name, string Summary, string Version, IReadOnlyList<string> Needs,
     bool Installed, string? InstalledVersion, IReadOnlyList<string> InstalledOn, bool UpdateAvailable,
     CatalogNeeds CatalogNeeds, string Description = "",
-    string? Page = null, CatalogContents? Contents = null);
+    string? Page = null, CatalogContents? Contents = null)
+{
+    /// <summary>The plugin ids this plugin package says it replaces, as the catalog copies them from its
+    /// manifest's <c>replaces</c>; empty when it says none. Never a guess from a name.</summary>
+    public IReadOnlyList<string> Replaces { get; init; } = [];
+}
 
 /// <summary>What <c>GET /api/marketplace</c> and its refresh answer. <paramref name="Checked"/> false
 /// is "not known", never an empty catalog, and <paramref name="Reason"/> says why.</summary>
@@ -524,7 +534,7 @@ public sealed partial class Marketplace(
             version is not null, version, on,
             version is not null && ReleaseCheck.Compare(package.Version, version) > 0,
             package.CatalogNeeds, package.Description,
-            PageFor(package.Id), package.Contents);
+            PageFor(package.Id), package.Contents) { Replaces = package.Replaces };
     }
 
     private static MarketplaceStatus NotChecked(string reason, DateTimeOffset? at) => new(false, reason, at, []);
@@ -624,7 +634,12 @@ public sealed partial class Marketplace(
             entry.TryGetProperty("description", out var description) && description.ValueKind == JsonValueKind.String
                 ? description.GetString()!
                 : "",
-            Contents(entry));
+            Contents(entry))
+        {
+            Replaces = kind == "plugin"
+                ? [.. Names(entry, "replaces").Where(r => r != id && MemberRef.IsValidPluginId(r)).Distinct(StringComparer.Ordinal)]
+                : [],
+        };
     }
 
     private static IEnumerable<JsonElement> Objects(JsonElement from, string field) =>
