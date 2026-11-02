@@ -186,7 +186,8 @@ public sealed class McpStdioServersTests : IDisposable
         Assert.Equal("{\"said\": \"hi\"}", answered.Result!["content"]![0]!["text"]!.GetValue<string>());
 
         var slow = await servers.AnswerAsync(Call(launch, "sleep", new JsonObject { ["seconds"] = 3 }, callSeconds: 1), Ct);
-        Assert.True(slow.NoAnswer);
+        // Says what came back instead, so a failure under the full suite's load names its cause.
+        Assert.True(slow.NoAnswer, $"Expected no answer; got result={slow.Result?.ToJsonString()} error={slow.Error} failure={slow.Failure}");
     }
 
     [Fact]
