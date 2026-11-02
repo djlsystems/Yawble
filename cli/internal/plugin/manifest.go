@@ -35,7 +35,13 @@ type Manifest struct {
 	// Executables are executable.path and every platforms entry, relative to the folder. The Host
 	// runs one of them, chosen by the container's processor, so the install marks them all.
 	Executables []string
+	// Replaces is the manifest's `replaces`: the plugin ids this one succeeds, duplicates dropped.
+	// Only the manifest says so; an id need not be installed and is never the plugin's own.
+	Replaces []string
 }
+
+// MaxReplaces is PluginManifest.MaxReplaces: the most ids one manifest's `replaces` may name.
+const MaxReplaces = 16
 
 var (
 	pluginID    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,47}$`)
@@ -322,7 +328,41 @@ func parse(root map[string]any) (Manifest, []string, string) {
 		}
 	}
 	ignored = append(ignored, ignoredInBlock...)
-	return Manifest{ID: id, Name: name, Version: version, Ignored: ignored, Executables: executables}, skills, ""
+	replaced, reason := replaces(root["replaces"], id)
+	if reason != "" {
+		return m, nil, reason
+	}
+	return Manifest{ID: id, Name: name, Version: version, Ignored: ignored, Executables: executables, Replaces: replaced}, skills, ""
+}
+
+// replaces is PluginManifest.ParseReplaces, in the same sentences
+// (tests/Fixtures/PluginReplaces/cases.json): plugin ids, never the manifest's own, at most
+// MaxReplaces, duplicates dropped.
+func replaces(v any, id string) ([]string, string) {
+	if v == nil {
+		return nil, ""
+	}
+	if !stringArray(v) {
+		return nil, "`replaces` must be an array of plugin ids."
+	}
+	list := v.([]any)
+	if len(list) > MaxReplaces {
+		return nil, fmt.Sprintf("`replaces` may name at most %d ids.", MaxReplaces)
+	}
+	var out []string
+	for _, item := range list {
+		named := item.(string)
+		if !ValidID(named) {
+			return nil, fmt.Sprintf("`replaces` names '%s', which is not a plugin id (lower-case letters, digits and hyphens, at most 48).", named)
+		}
+		if named == id {
+			return nil, fmt.Sprintf("`replaces` names '%s', this plugin's own id; a plugin cannot replace itself.", named)
+		}
+		if !slices.Contains(out, named) {
+			out = append(out, named)
+		}
+	}
+	return out, ""
 }
 
 // Named secrets' bounds: PluginNamedSecrets.DefaultMax and MostMax.

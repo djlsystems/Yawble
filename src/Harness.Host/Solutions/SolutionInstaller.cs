@@ -1808,17 +1808,12 @@ public sealed class SolutionInstaller(
     private async Task MoveAsync(
         string team, string id, SolutionMemberMove move, SolutionManifest manifest, SolutionActor actor, Run run, CancellationToken ct)
     {
+        // THE SAME REPOINT A REPLACEMENT'S MOVE MAKES (PluginReplacements.RepointAsync).
         try
         {
-            await teams.UpdateMemberAsync(
-                team, id, null, null, MemberRef.ForPlugin(move.To), actor.PromptSetter, ct,
-                change => [actor.Row(TenantActions.MemberChanged, $"{team}/{id}", move.Member, new
-                {
-                    from = MemberRef.ForPlugin(move.From),
-                    to = MemberRef.ForPlugin(move.To),
-                    solution = manifest.Id,
-                    version = manifest.Version,
-                })]);
+            await PluginReplacements.RepointAsync(
+                teams, team, id, move.Member, move.From, move.To, actor,
+                new { solution = manifest.Id, version = manifest.Version }, ct);
         }
         catch (NoSuchAgentException refused)
         {
@@ -1826,15 +1821,9 @@ public sealed class SolutionInstaller(
         }
 
         // THE UNDO SAYS SO TOO: the log keeps the move's row, so the move back writes its own.
-        run.Made($"member {move.Member} (moved to plugin {move.To})", () => teams.UpdateMemberAsync(
-            team, id, null, null, MemberRef.ForPlugin(move.From), actor.PromptSetter, CancellationToken.None,
-            change => [actor.Row(TenantActions.MemberChanged, $"{team}/{id}", move.Member, new
-            {
-                from = MemberRef.ForPlugin(move.To),
-                to = MemberRef.ForPlugin(move.From),
-                solution = manifest.Id,
-                undone = true,
-            })]));
+        run.Made($"member {move.Member} (moved to plugin {move.To})", () => PluginReplacements.RepointAsync(
+            teams, team, id, move.Member, move.To, move.From, actor,
+            new { solution = manifest.Id, undone = true }, CancellationToken.None));
     }
 
     /// <summary>

@@ -190,6 +190,11 @@ internal sealed partial class HostComposition
             sp.GetRequiredService<TeamRegistry>(), sp.GetRequiredService<IPluginMemberSettingsStore>(),
             sp.GetRequiredService<IPluginMemberSecretRows>()));
 
+        // A RENAMED PLUGIN SAYS WHAT IT REPLACES (its manifest's `replaces`): who is still on the old id,
+        // and a person's move of them onto the new one.
+        builder.Services.AddSingleton(sp => new PluginReplacements(
+            sp.GetRequiredService<PluginCatalog>(), sp.GetRequiredService<TeamRegistry>()));
+
         if (unmeasuredHeadlessPresets.Count > 0)
         {
             Console.WriteLine(

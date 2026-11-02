@@ -289,3 +289,62 @@ func TestEachSharedConnectionMoveFaultIsRefusedInTheHostsWords(t *testing.T) {
 		}
 	}
 }
+
+// replacesCases is tests/Fixtures/PluginReplaces/cases.json, which the Host's
+// PluginReplacesManifestTests reads too: the same `replaces` lists accepted and refused, in the same sentences.
+type replacesCases struct {
+	ID       string `json:"id"`
+	Accepted []struct {
+		Replaces json.RawMessage `json:"replaces"`
+		IDs      []string        `json:"ids"`
+	} `json:"accepted"`
+	Refused []struct {
+		Replaces json.RawMessage `json:"replaces"`
+		Says     string          `json:"says"`
+	} `json:"refused"`
+}
+
+func readReplacesCases(t *testing.T) replacesCases {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "tests", "Fixtures", "PluginReplaces", "cases.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases replacesCases
+	if err := json.Unmarshal(raw, &cases); err != nil {
+		t.Fatal(err)
+	}
+	if cases.ID == "" || len(cases.Accepted) == 0 || len(cases.Refused) == 0 {
+		t.Fatal("cases.json holds no cases")
+	}
+	return cases
+}
+
+func replacesManifest(id string, list json.RawMessage) []byte {
+	return []byte(`{"schemaVersion":1,"id":"` + id + `","name":"n","description":"d","version":"1","protocol":"harness.member/1",
+		"executable":{"path":"run"},"replaces":` + string(list) + `}`)
+}
+
+func TestEachSharedReplacesListIsAcceptedAsItsIds(t *testing.T) {
+	cases := readReplacesCases(t)
+	for _, c := range cases.Accepted {
+		m, _, err := Parse(replacesManifest(cases.ID, c.Replaces))
+		if err != nil {
+			t.Errorf("%s: %v", c.Replaces, err)
+			continue
+		}
+		if strings.Join(m.Replaces, ",") != strings.Join(c.IDs, ",") {
+			t.Errorf("%s: replaces %v, want %v", c.Replaces, m.Replaces, c.IDs)
+		}
+	}
+}
+
+func TestEachSharedReplacesFaultIsRefusedNamingTheField(t *testing.T) {
+	cases := readReplacesCases(t)
+	for _, c := range cases.Refused {
+		_, _, err := Parse(replacesManifest(cases.ID, c.Replaces))
+		if err == nil || err.Error() != c.Says {
+			t.Errorf("%s: got %v, want %q", c.Replaces, err, c.Says)
+		}
+	}
+}

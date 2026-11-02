@@ -1,0 +1,22 @@
+{
+  "_": "`replaces` lists the Host (PluginReplacesManifestTests) and the CLI (cli/internal/plugin/manifest_test.go) both read, on a manifest whose id is `id`. Each `accepted` list must parse to exactly `ids`, in order, duplicates dropped; each `refused` list must refuse the manifest with exactly `says`. An id that is not installed is accepted: the plugin it names may never have been on this instance.",
+  "id": "fixture-new",
+  "accepted": [
+    { "replaces": ["fixture-old"], "ids": ["fixture-old"] },
+    { "replaces": ["fixture-old", "fixture-older"], "ids": ["fixture-old", "fixture-older"] },
+    { "replaces": ["fixture-old", "fixture-old"], "ids": ["fixture-old"] },
+    { "replaces": ["never-installed-anywhere"], "ids": ["never-installed-anywhere"] },
+    { "replaces": [], "ids": [] },
+    { "replaces": null, "ids": [] }
+  ],
+  "refused": [
+    { "replaces": "fixture-old", "says": "`replaces` must be an array of plugin ids." },
+    { "replaces": { "id": "fixture-old" }, "says": "`replaces` must be an array of plugin ids." },
+    { "replaces": ["fixture-old", 7], "says": "`replaces` must be an array of plugin ids." },
+    { "replaces": ["Fixture-Old"], "says": "`replaces` names 'Fixture-Old', which is not a plugin id (lower-case letters, digits and hyphens, at most 48)." },
+    { "replaces": [""], "says": "`replaces` names '', which is not a plugin id (lower-case letters, digits and hyphens, at most 48)." },
+    { "replaces": ["plugin:fixture-old"], "says": "`replaces` names 'plugin:fixture-old', which is not a plugin id (lower-case letters, digits and hyphens, at most 48)." },
+    { "replaces": ["fixture-new"], "says": "`replaces` names 'fixture-new', this plugin's own id; a plugin cannot replace itself." },
+    { "replaces": ["a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9", "a10", "a11", "a12", "a13", "a14", "a15", "a16", "a17"], "says": "`replaces` may name at most 16 ids." }
+  ]
+}
