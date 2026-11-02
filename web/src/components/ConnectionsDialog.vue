@@ -478,6 +478,10 @@ async function disconnect() {
         refresh token and hands a plugin only a fresh access token on each run; for a mailbox it keeps
         the app password encrypted and hands it to a bound plugin's run alone. A person binds a
         connection to a member in the member's settings.
+        <div class="text-negative q-mt-sm" data-connections-team-note>
+          Note: a connection added here is not available to any team yet. To let a team use it, open
+          that team's Team settings, then Connections, and add it there.
+        </div>
       </q-card-section>
 
       <q-card-section class="row items-center q-gutter-x-sm q-py-sm">
