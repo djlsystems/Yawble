@@ -699,6 +699,43 @@ name. The install checks the same before it writes. When control and workers run
 image carries no runtime, so a runtime is the workers' to have: control does not look it up on its
 own `PATH`, and a run on a worker without it fails at launch.
 
+### Replacing another plugin: `replaces`
+
+A plugin that succeeds another under a new id - a package renamed from `cloud` to `cloud-plugin` -
+says so in its own manifest, and only there. Nothing is ever guessed from a name or an id: two
+installed plugins that merely share a name are two plugins, and neither replaces the other.
+
+```json
+"replaces": ["cloud"]
+```
+
+- **The field.** An array of plugin ids (lower-case letters, digits and hyphens, at most 48), at most
+  16, a duplicate dropped. An id that is not installed is allowed - it may never have been on this
+  instance. A plugin cannot name its own id. Anything else refuses the manifest naming the field, in
+  the same words from the Host (`PluginManifest.Replaces`) and the operator CLI
+  (`cli/internal/plugin`), off one cases file (`tests/Fixtures/PluginReplaces/cases.json`).
+- **The install says who is still on the old id.** Installing a version whose `replaces` names an
+  installed id answers `replaces: [{ id, version, name, members: [{ team, member, teamName,
+  memberName }] }]` - every member still running the old id, team by team. `GET /api/plugins` carries
+  the same `replaces` on the new plugin and `replacedBy: [{ id, version, name }]` on the old one, and
+  Admin -> Plugins shows both on the tiles. Nothing is moved or removed by the install.
+- **A person moves the members.** `POST /api/plugins/{id}/replaces/{old}/move` (a person's route;
+  body optional, `{ "members": [{ "team", "member" }] }` for some, every member on the old id
+  otherwise) repoints each member onto the new plugin exactly as a solution update moves one: its
+  settings and its own secret values stay as they are - a value for a setting the new manifest no
+  longer declares is kept too - and a `member.changed` row naming `from` and `to` is written in the
+  same transaction, so a member whose row cannot be written is not moved and is answered `failed`
+  with the sentence. Admin -> Plugins and the install and upgrade answers offer it as **Move members**,
+  which asks first and names the members.
+- **A person removes the old plugin**, from its own tile, once nothing runs it: Remove is refused
+  while any member is on it, naming them, as for any plugin.
+- **The Marketplace.** On Installed, a plugin a newer one says it replaces - an installed plugin, or
+  a catalog plugin package whose entry carries `replaces` - reads "Cloud 1.1.4 is replaced by
+  Cloud 3.0.0 (cloud-plugin)" and offers Get or Update for the replacement instead of its own update.
+- **No two choices read alike.** Wherever a plugin is chosen - Add member, Member settings' Agent, the
+  solution setup's list, the hiring list (`label`) - a plugin whose name another installed plugin has
+  reads `Cloud (plugin, cloud-plugin 3.0.0)`; a name nobody else has reads `Cloud (plugin)` as before.
+
 ### Named secrets: `namedSecrets`
 
 A plugin that hands secrets on to something it makes - an app it deploys, a service it configures -
@@ -1749,6 +1786,16 @@ Pinned by `TeamConnectionsTests` and `WebsiteConnectionsTests`.
   and a folder outside the data root, and a request the Host never answers being withdrawn; its
   request, report and withdraw scripts run under `sh`. `PluginInstallRouteTests` pins the Host's side,
   a copy staged under `.incoming` included (`A_copy_the_operator_cli_staged_under_incoming_installs_through_the_installer`).
+- **A plugin that replaces another, and two that share a name.** `PluginReplacesManifestTests` and
+  `cli/internal/plugin/manifest_test.go`'s `TestEachSharedReplacesListIsAcceptedAsItsIds` and
+  `TestEachSharedReplacesFaultIsRefusedNamingTheField` read one cases file. `PluginReplacementTests`
+  pins the install answer and listing (the old id, its version and every member, team by team; the
+  hiring list's labels), the person's move (settings, the dropped one too, and own secrets kept,
+  `member.changed` from and to), a move refused a row changing nothing, a plugin that does not say it
+  replaces the id, and Remove refused while a member runs the old one. `MarketplaceTests` pins a
+  catalog package's `replaces`. The web mount specs `plugins-same-name` (Add member and Member
+  settings labels, one Plugins tile per installed id even when `versions` lacks one, the replaces
+  line and Move, the install answer) and `marketplace-plugin-replaced`.
 - **Upgrading from the Marketplace.** `PluginUpgradeAttentionTests` pins the install answer's
   `attention`: an upgrade that adds a required field and drops another names each member and both
   fields, keeps 1.0.0 on disk inactive and every member with its settings; an upgrade every member
