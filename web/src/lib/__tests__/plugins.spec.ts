@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { PluginList } from '../../api/types';
 import { formatManifest, pluginEvents, pluginRows, pluginSkill } from '../plugins';
+import { pluginChoiceLabel } from '../plugins';
 import { hostList, hostPlugin } from '../../test/pluginFixtures';
 
 const echo = hostPlugin({
@@ -82,7 +83,8 @@ describe('pluginRows', () => {
   it('has no row for a built-in plugin, with or without a version row naming it', () => {
     const builtIn = hostPlugin({ id: 'team-connections', name: 'Team Connections', builtIn: true, locked: true });
 
-    expect(pluginRows({ plugins: [builtIn, echo], refused: [], versions: [] })).toEqual([]);
+    // Without a version row, the built-in still has none; an installed plugin always has its own (PLG 3, rename).
+    expect(pluginRows({ plugins: [builtIn, echo], refused: [], versions: [] }).map((row) => row.id)).toEqual(['sample-echo']);
     expect(pluginRows(hostList([builtIn, echo])).map((row) => row.id)).toEqual(['sample-echo']);
   });
 
@@ -123,5 +125,24 @@ describe('formatManifest', () => {
 
   it('keeps one that does not parse exactly as the Host holds it', () => {
     expect(formatManifest('{"id": ')).toBe('{"id": ');
+  });
+});
+
+describe('pluginChoiceLabel: no two plugin choices read alike', () => {
+  const installed = [
+    { id: 'fixture-old', name: 'Fixture Cloud', version: '1.1.4' },
+    { id: 'fixture-new', name: ' fixture cloud ', version: '3.0.0' },
+    { id: 'fixture-mail', name: 'Fixture Mail', version: '2.0.0' },
+    { id: 'team-connections', name: 'Fixture Mail', version: '1.0.0', builtIn: true },
+  ];
+
+  it('names id and version when another installed plugin shares the name, trimmed and in any case', () => {
+    expect(pluginChoiceLabel(installed[0]!, installed)).toBe('Fixture Cloud (plugin, fixture-old 1.1.4)');
+    expect(pluginChoiceLabel(installed[1]!, installed)).toBe('fixture cloud (plugin, fixture-new 3.0.0)');
+  });
+
+  it('reads as before for a name nobody else has - a built-in sharing it does not count', () => {
+    expect(pluginChoiceLabel(installed[2]!, installed)).toBe('Fixture Mail (plugin)');
+    expect(pluginChoiceLabel(installed[0]!, [installed[0]!])).toBe('Fixture Cloud (plugin)');
   });
 });

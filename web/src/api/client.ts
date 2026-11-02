@@ -72,6 +72,7 @@ import type {
   MailboxSaved,
   PluginList,
   PluginInstallResult,
+  ReplacementMoveResult,
   PluginRemoveResult,
   PluginMemberSettings,
   PluginNamedSecretList,
@@ -1496,6 +1497,18 @@ export const addMember = (
  * never a value. The Add member dialog offers them beside the Agent presets.
  */
 export const listPlugins = () => json<PluginList>('/api/plugins')
+
+/**
+ * Moves the members on a replaced plugin onto the installed plugin whose manifest says it replaces it -
+ * those named, or every one. Each keeps its settings and own secret values; one that cannot be moved is
+ * answered `failed` and is unchanged. A person's.
+ */
+export const moveReplacedMembers = (id: string, old: string, members?: { team: string; member: string }[]) =>
+  json<ReplacementMoveResult>(`/api/plugins/${encodeURIComponent(id)}/replaces/${encodeURIComponent(old)}/move`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(members ? { members } : {}),
+  })
 
 /** Re-reads the plugins directory on the Host and answers the list as `listPlugins` does. A person's. */
 export const rescanPlugins = () => json<PluginList>('/api/plugins/rescan', { method: 'POST' })

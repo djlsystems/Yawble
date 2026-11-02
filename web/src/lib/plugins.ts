@@ -1,4 +1,4 @@
-import type { InstalledPlugin, PluginEvent, PluginList, PluginVersion, RefusedPlugin } from '../api/types';
+import type { InstalledPlugin, MarketplaceCatalog, MarketplacePackage, PluginEvent, PluginList, PluginVersion, RefusedPlugin } from '../api/types';
 import { isBuiltInPlugin } from './teamConnections';
 
 /**
@@ -59,6 +59,10 @@ export function pluginRows(list: PluginList): PluginRow[] {
 
     if (plugin) return isBuiltInPlugin(plugin) ? [] : [installedRow(plugin)];
 
+    // An `installed` verdict whose version `plugins` does not hold is not a second installed tile:
+    // the installed plugin of that id gets its own below, from `plugins`.
+    if (entry.verdict === 'installed' && list.plugins.some((candidate) => candidate.id === entry.id)) return [];
+
     return [{
       key: `${entry.verdict}:${entry.id}@${entry.version ?? ''}#${index}`,
       verdict: entry.verdict === 'inactive' ? 'inactive' : 'refused',
@@ -70,7 +74,99 @@ export function pluginRows(list: PluginList): PluginRow[] {
     }];
   });
 
-  return [...rows, ...unshownRefusals(list.refused, rows)].sort(byId);
+  return [...rows, ...unlistedInstalled(list.plugins, rows), ...unshownRefusals(list.refused, rows)].sort(byId);
+}
+
+/**
+ * EVERY INSTALLED PLUGIN IS A ROW, whatever `versions` says. Add member and the Marketplace list
+ * `plugins`; this screen joined `plugins` only onto `versions`, so an installed plugin with no installed
+ * version row of its own - two plugins sharing a name, one of them read from a `versions` that does not
+ * carry it - was in Add member and missing here, where it is managed. Each installed id no row already
+ * shows becomes its own installed row, so this screen never lists fewer plugins than Add member offers.
+ */
+function unlistedInstalled(plugins: InstalledPlugin[], rows: PluginRow[]): PluginRow[] {
+  const shown = new Set(rows.flatMap((row) => (row.verdict === 'installed' ? [`${row.id}@${row.version}`] : [])));
+  return plugins
+    .filter((plugin) => !isBuiltInPlugin(plugin) && !shown.has(`${plugin.id}@${plugin.version}`))
+    .map(installedRow);
+}
+
+/**
+ * NO TWO PLUGIN CHOICES READ ALIKE, wherever a person picks a plugin (Add member, Member settings'
+ * Agent, the solution wizard; the Host's hiring list says the same, `PluginChoices.Label`): a name no
+ * other installed plugin has reads `Name (plugin)`, as it always did; a name another one shares (trimmed,
+ * case-insensitive) reads `Name (plugin, <id> <version>)`.
+ */
+export function pluginChoiceLabel(
+  plugin: Pick<InstalledPlugin, 'id' | 'name' | 'version'>,
+  installed: readonly Pick<InstalledPlugin, 'id' | 'name' | 'builtIn'>[],
+): string {
+  const name = plugin.name.trim();
+  return sharesName(plugin, installed) ? `${name} (plugin, ${plugin.id} ${plugin.version})` : `${name} (plugin)`;
+}
+
+/** Whether another installed plugin (not a built-in) has `plugin`'s name, trimmed and case-insensitively. */
+export function sharesName(
+  plugin: Pick<InstalledPlugin, 'id' | 'name'>,
+  installed: readonly Pick<InstalledPlugin, 'id' | 'name' | 'builtIn'>[],
+): boolean {
+  const name = plugin.name.trim().toLowerCase();
+  return installed.some((other) => other.builtIn !== true && other.id !== plugin.id && other.name.trim().toLowerCase() === name);
+}
+
+/** A plugin as a person tells it apart in a sentence: `Fixture Cloud 1.1.4 (fixture-old)`. */
+export function pluginWords(plugin: { id: string; name: string; version: string }): string {
+  return `${plugin.name} ${plugin.version} (${plugin.id})`;
+}
+
+/** "Alpha / Builder, Beta / Deployer", or that none is. */
+export function membersOnWords(members: readonly { teamName: string; memberName: string }[]): string {
+  return members.length === 0 ? 'No member is on it.' : members.map((m) => `${m.teamName} / ${m.memberName}`).join(', ');
+}
+
+/**
+ * THE MARKETPLACE'S REPLACEMENT FOR AN INSTALLED PLUGIN, said only by the newer one's own manifest: an
+ * installed plugin whose `replaces` names it (shown with the catalog's newer version of that one when it
+ * lists one), else a catalog plugin package whose `replaces` names it and that is not installed, or is
+ * newer than what is installed. Null when nothing says it replaces `plugin`. Never a guess from a name.
+ */
+export interface PluginReplacement {
+  id: string
+  name: string
+  version: string
+  /** The catalog's package to fetch, when there is something to get or update; null when installed and current. */
+  pkg: MarketplacePackage | null
+  /** Whether the replacement is installed already. */
+  installed: boolean
+}
+
+export function replacementFor(
+  plugin: Pick<InstalledPlugin, 'id' | 'replacedBy'>,
+  installed: readonly InstalledPlugin[],
+  catalog: MarketplaceCatalog | null,
+): PluginReplacement | null {
+  const listed = (id: string) =>
+    catalog?.checked ? catalog.packages.find((candidate) => candidate.kind === 'plugin' && candidate.id === id) ?? null : null;
+
+  const local = (plugin.replacedBy ?? [])[0] ?? installed.find((other) => other.id !== plugin.id && (other.replaces ?? []).some((r) => r.id === plugin.id));
+  if (local) {
+    const pkg = listed(local.id);
+    return pkg && pkg.updateAvailable
+      ? { id: local.id, name: pkg.name, version: pkg.version, pkg, installed: true }
+      : { id: local.id, name: local.name, version: local.version, pkg: null, installed: true };
+  }
+
+  const offered = catalog?.checked
+    ? catalog.packages.find((candidate) => candidate.kind === 'plugin' && candidate.id !== plugin.id && (candidate.replaces ?? []).includes(plugin.id))
+    : undefined;
+  if (!offered) return null;
+
+  return { id: offered.id, name: offered.name, version: offered.version, pkg: offered.installed && !offered.updateAvailable ? null : offered, installed: offered.installed };
+}
+
+/** "Fixture Cloud 1.1.4 is replaced by Fixture Cloud 3.0.0 (fixture-new)". */
+export function replacedByWords(plugin: { name: string; version: string }, replacement: { id: string; name: string; version: string }): string {
+  return `${plugin.name} ${plugin.version} is replaced by ${replacement.name} ${replacement.version} (${replacement.id})`;
 }
 
 /**

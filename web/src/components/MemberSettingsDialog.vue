@@ -4,7 +4,10 @@ import { memberStateOf } from '../lib/memberState';
 import FieldHelp from './FieldHelp.vue';
 import { computed, ref, watch } from 'vue';
 import { useQuasar, type QForm } from 'quasar';
-import { getMember, getNamedSecrets, getPluginSettings, listCatalog, savePluginSettings, updateMember } from '../api/client';
+import { getMember, getNamedSecrets, getPluginSettings, listCatalog, listPlugins, savePluginSettings, updateMember } from '../api/client';
+import type { InstalledPlugin } from '../api/types';
+import { pluginChoiceLabel } from '../lib/plugins';
+import { isBuiltInPlugin } from '../lib/teamConnections';
 import {
   agentsForMode,
   isManagerContainer,
@@ -114,6 +117,41 @@ const agents = computed(() => {
   const names = headless.value.map((a) => a.name);
   return allowedAgentOptions(names, teamAllowlist.value);
 });
+
+/**
+ * A PLUGIN MEMBER'S AGENT IS A PLUGIN: it is repointed only onto another installed plugin (never across
+ * kinds), and each reads as Add member reads it - with its id and version when another installed plugin
+ * has the same name (`pluginChoiceLabel`). Its current plugin is always a choice, installed or not.
+ */
+const installedPlugins = ref<InstalledPlugin[]>([]);
+
+const pluginAgentOptions = computed(() => {
+  const options = installedPlugins.value.map((plugin) => ({
+    label: pluginChoiceLabel(plugin, installedPlugins.value),
+    value: plugin.reference,
+  }));
+  return options.some((option) => option.value === props.snapshot.agent)
+    ? options
+    : [{ label: props.snapshot.agent, value: props.snapshot.agent }, ...options];
+});
+
+const agentOptions = computed(() => (props.snapshot.kind === 'plugin' ? pluginAgentOptions.value : agents.value));
+
+async function loadInstalledPlugins() {
+  if (props.snapshot.kind !== 'plugin') return;
+  try {
+    installedPlugins.value = (await listPlugins()).plugins.filter((plugin) => !isBuiltInPlugin(plugin));
+  } catch {
+    // Left empty: the member's own plugin stays the one choice, so nothing is repointed by accident.
+    installedPlugins.value = [];
+  }
+}
+
+/** The plugin a plugin member is about to be moved onto, or null when it stays. */
+const movingOnto = computed(() =>
+  props.snapshot.kind === 'plugin' && agent.value !== props.snapshot.agent
+    ? pluginAgentOptions.value.find((option) => option.value === agent.value)?.label ?? agent.value
+    : null);
 
 /** A plugin member has no prompt, so it has no instructions to show. */
 const hasInstructions = computed(() => props.snapshot.kind !== 'plugin');
@@ -298,7 +336,8 @@ const valid = computed(
     passes(agent.value, agentRules) &&
     // A plugin member kept on its plugin is not held to the team's Agent allowlist - a person may
     // hire any installed plugin, and editing its settings is not a repoint.
-    ((isPlugin.value && agent.value === props.snapshot.agent) || allowlistIncludes(teamAllowlist.value, agent.value)) &&
+    ((isPlugin.value && (agent.value === props.snapshot.agent || installedPlugins.value.some((plugin) => plugin.reference === agent.value)))
+      || allowlistIncludes(teamAllowlist.value, agent.value)) &&
     pluginMissing.value.length === 0 && pluginOutOfRange.value.length === 0 && !pluginNamedHeld.value && !pluginTableHeld.value,
 );
 
@@ -346,6 +385,7 @@ watch(open, (showing) => {
   errorStatus.value = undefined;
 
   void loadAgents();
+  void loadInstalledPlugins();
   void loadInstructions();
   void loadPluginSettings();
 }, { immediate: true });
@@ -502,7 +542,8 @@ async function submit() {
 
         <q-select
           v-model="agent"
-          :options="agents"
+          :options="agentOptions"
+          data-member-agent
           outlined
           dense
           emit-value
@@ -515,6 +556,10 @@ async function submit() {
         >
           <template #append><FieldHelp text="Headless presets only - a member is woken by a message, never typed at. Takes effect on the member's next wake, with no restart." /></template>
         </q-select>
+
+        <div v-if="movingOnto" class="os-body os-text-muted" data-member-moving>
+          Saving moves this member onto {{ movingOnto }}. Its settings and its own secret values are kept.
+        </div>
 
         <div v-if="agent && getAgentStatus(agent)">
           <q-icon

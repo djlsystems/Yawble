@@ -11,6 +11,7 @@ import {
   listConnectionProviders,
   listConnections,
   listMailboxPresets,
+  listPlugins,
   previewSolution,
   runScheduleNow,
   solutionPanel,
@@ -53,6 +54,8 @@ import { capWords, settingInputKind, settingKey, slotKey, triggerSource } from '
 import { boundsHint, boundsProblem } from '../lib/numberBounds';
 import { bindSlot, saveSettingValues } from '../lib/slotBinding';
 import { useConsoleStore } from '../stores/console';
+import { sharesName } from '../lib/plugins';
+import type { InstalledPlugin } from '../api/types';
 
 /**
  * THE GUIDED SETUP WIZARD, for a package with a `setup` block: one plain question per screen, a
@@ -166,6 +169,24 @@ const storedMembers = ref<Record<string, string>>({});
 const storedMember = (member: string) => storedMembers.value[member] ?? member;
 
 onMounted(() => void load());
+
+/**
+ * THE PLUGINS ALREADY INSTALLED, read once, only so a plugin this package adds is told apart from one
+ * of the same name (`sharesName`): `Plugin Azure (azure-plugin 3.0.0)` beside an installed `azure`. A
+ * name nobody else has reads as before. Unread or failed reads as none.
+ */
+const installedPlugins = ref<InstalledPlugin[]>([]);
+onMounted(() => {
+  listPlugins().then(
+    (read) => (installedPlugins.value = read.plugins ?? []),
+    () => (installedPlugins.value = []),
+  );
+});
+
+function addsPluginWords(plugin: { id: string; name: string; version: string }) {
+  const others = [...installedPlugins.value, ...props.plan.plugins.map((p) => ({ id: p.id, name: p.name }))];
+  return sharesName(plugin, others) ? `Plugin ${plugin.name} (${plugin.id} ${plugin.version})` : `Plugin ${plugin.name} ${plugin.version}`;
+}
 
 async function load() {
   loading.value = true;
@@ -684,7 +705,7 @@ const isLast = computed(() => screen.value.kind === 'ready');
             {{ member.name }} - {{ member.kind === 'plugin' ? `plugin ${member.pluginId ?? ''}` : 'agent' }}{{ member.role === 'manager' ? ', the Manager' : '' }}
           </div>
           <div v-for="plugin in plan.plugins" :key="plugin.id" :data-setup-adds-plugin="plugin.id">
-            Plugin {{ plugin.name }} {{ plugin.version }}
+            {{ addsPluginWords(plugin) }}
           </div>
           <div class="setup-heading">Schedules and daily caps</div>
           <div v-for="trigger in schedules" :key="trigger.name" :data-setup-schedule="trigger.name">

@@ -4,7 +4,7 @@ import { getMarketplace, getPluginManifest, listPlugins, removePlugin, rescanPlu
 import type { ContainerSnapshot, InstalledPlugin, MarketplaceCatalog, MarketplacePackage, PluginList, PluginMemberRef } from '../api/types';
 import { pluginUpdateFor } from '../lib/marketplace';
 import { upgradeLabel } from '../lib/pluginUpgrade';
-import { formatManifest, pluginEvents, pluginRows, pluginSkill, type PluginRow } from '../lib/plugins';
+import { formatManifest, pluginEvents, pluginRows, pluginSkill, pluginWords, type PluginRow } from '../lib/plugins';
 import { defaultLabel, setByPerson } from '../lib/pluginSettings';
 import { slotSummary } from '../lib/connections';
 import { useConsoleStore } from '../stores/console';
@@ -14,6 +14,7 @@ import PluginInstallDialog from './PluginInstallDialog.vue';
 import MemberSettingsDialog from './MemberSettingsDialog.vue';
 import SolutionWizard from './SolutionWizard.vue';
 import PluginUpgradeDialog from './PluginUpgradeDialog.vue';
+import ReplacedPlugins from './ReplacedPlugins.vue';
 import type { SolutionCheck } from '../api/types';
 
 /**
@@ -41,6 +42,12 @@ import type { SolutionCheck } from '../api/types';
  * lists a newer version (`pluginUpdateFor`) - not when it does not list the plugin, lists the same or
  * an older version, or has not been checked. It opens one confirm (`PluginUpgradeDialog`), which is the
  * install press: fetch and install in one go. A refusal shows on the tile; the installed version stays.
+ *
+ * EVERY INSTALLED PLUGIN IS A TILE (PLG 3, rename): two plugins sharing a name are two tiles, each with
+ * its id, and an installed plugin `versions` does not carry still gets its own (`pluginRows`). A plugin
+ * whose own manifest says it `replaces` an installed id names that id, its version and who is still on
+ * it, with the person's Move (`ReplacedPlugins`); the old one's tile says what replaces it. Removing the
+ * old one stays its own Remove, refused by the Host while a member runs it.
  */
 const open = defineModel<boolean>({ required: true });
 
@@ -415,6 +422,18 @@ async function confirmRemove() {
               <!-- WHAT IT DECLARES, COUNTED: the whole of it is in Details, where a plugin with
                    seventeen settings has the room they need. -->
               <div class="os-tile-line plugin-tile-line os-text-muted q-mt-xs" data-plugin-summary>{{ declaresSummary(row.plugin) }}</div>
+
+              <!-- WHAT IT REPLACES, by its own manifest, and who is still on the old id; and, on the old
+                   one, what replaces it. -->
+              <div v-if="(row.plugin.replaces ?? []).length > 0" class="os-tile-line plugin-tile-line q-mt-xs" data-plugin-replaces>
+                <ReplacedPlugins :plugin="row.plugin" :replaced="row.plugin.replaces ?? []" @moved="load" />
+              </div>
+              <div
+                v-for="by in row.plugin.replacedBy ?? []"
+                :key="by.id"
+                class="os-tile-line plugin-tile-line text-warning q-mt-xs"
+                :data-plugin-replaced-by="by.id"
+              >Replaced by {{ pluginWords(by) }}. Its members can be moved from that plugin's tile.</div>
 
               <!-- WHO IS HIRED ON IT, on the tile: each a link to that member's settings. -->
               <div class="os-tile-line plugin-tile-line" data-members-summary>

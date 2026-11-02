@@ -4,6 +4,7 @@ import { ActionRefused, checkSolution, installPlugin } from '../api/client';
 import type { PluginInstallResult, SolutionCheck } from '../api/types';
 import { isNotAPackage } from '../lib/solutions';
 import InstallFromFolderDialog from './InstallFromFolderDialog.vue';
+import ReplacedPlugins from './ReplacedPlugins.vue';
 
 /**
  * INSTALL A PLUGIN FROM A FOLDER: the install dialog Admin > Plugins opens, and Marketplace > Browse
@@ -98,5 +99,14 @@ const verdictText = computed(() => {
       <template #avatar><q-icon :name="verdict.installed ? 'check_circle' : 'error'" /></template>
       {{ verdictText }}
     </q-banner>
+    <!-- WHAT IT REPLACES, by its own manifest: the old id, its version and who is still on it - moved
+         only when the person presses Move. -->
+    <div v-if="verdict?.installed && (verdict.replaces ?? []).length > 0" class="q-mt-sm" data-install-replaces>
+      <ReplacedPlugins
+        :plugin="{ id: verdict.id ?? '', name: verdict.name ?? verdict.id ?? '', version: verdict.version ?? '' }"
+        :replaced="verdict.replaces ?? []"
+        @moved="emit('settled')"
+      />
+    </div>
   </InstallFromFolderDialog>
 </template>

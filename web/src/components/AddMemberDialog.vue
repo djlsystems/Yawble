@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue';
 import { useQuasar, type QForm } from 'quasar';
 import { addMember, listCatalog, listPlugins } from '../api/client';
 import { isBuiltInPlugin } from '../lib/teamConnections';
+import { pluginChoiceLabel } from '../lib/plugins';
 import { agentsForMode, type Agent, type InstalledPlugin } from '../api/types';
 import { allowedAgentOptions, allowlistIncludes, normalizeAllowlist } from '../lib/memberAllowlist';
 import { installStatus, installationFor } from '../lib/agentInstall';
@@ -118,10 +119,11 @@ const plugin = computed(() => plugins.value.find((entry) => entry.reference === 
 /** Presets first, as before, then each installed plugin by reference. */
 const options = computed(() => [...agents.value, ...plugins.value.map((entry) => entry.reference)]);
 
-/** A plugin reads by its name in the picker; a preset by its own. */
+/** A plugin reads by its name in the picker - with its id and version when another installed plugin
+ *  has the same name (`pluginChoiceLabel`), so no two choices read alike; a preset by its own. */
 function optionLabel(option: string) {
   const entry = plugins.value.find((candidate) => candidate.reference === option);
-  return entry ? `${entry.name} (plugin)` : option;
+  return entry ? pluginChoiceLabel(entry, plugins.value) : option;
 }
 
 /** The chosen plugin's config values and secret values, reset to its manifest whenever the choice changes. */
