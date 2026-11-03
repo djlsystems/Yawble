@@ -5,22 +5,49 @@ budgets set for them, and only then in the tokens behind it. It is shown in four
 **summary** above the Teams list, the **Estimated Execution Cost** tile on the team's page, the
 dialog that tile opens, and the **Estimated Execution Cost · 8 weeks** column of the Teams list.
 
-**It is an estimate, not money paid.** It is the time agents ran (**Agent Hours**) times the
-instance's current agent hourly rate. It is not what was paid or owed to any vendor, and none of
-these screens call it spend.
+**It is an estimate, not money paid.** Each run is priced from the snapshot taken at its start:
+its hours times the rate it started with. It is not what was paid or owed to any vendor, and none
+of these screens call it spend.
 
 Every figure comes from the usage ledger, over the last eight weeks (Monday-start weeks in UTC,
 oldest first, the same weeks the Outcomes dashboard uses). The hours are measured; only the money
 is an estimate.
 
+## How a run is priced
+
+- **Each run is priced from the snapshot taken at its start**, at the rate that snapshot records,
+  rounded to the cent. The snapshot is described below.
+- **An agent with no rate of its own** inherited the tenant rate at that start. With no tenant rate
+  then, its run is unavailable: its time is in Agent Hours, and it adds no money.
+- **A plugin with no rate of its own is not priced** and is not in Agent Hours.
+- **A plugin with its own rate** adds its estimate to the headline only. Its time is still not in
+  Agent Hours.
+- **A rate or a link changed later does not move the run.** Changing the tenant rate or a member's
+  rate prices only the runs that start afterwards, so **past weeks do not move when the rate
+  changes**. A run stays on the outcome its workflow's link named when it started.
+- **A run that crosses a week is split by overlap.** Each week gets the part of the run inside it,
+  priced and rounded to the cent on its own. Tokens are reported when a run ends, so they stay in
+  the week it ended.
+- **A run from before snapshots is unavailable and is not reconstructed.** Its time is in Agent
+  Hours, and it adds no money, whatever the rate is now. It keeps the outcome its workflow's newest
+  link names.
+- **The line under the figure** reads `<N> Agent Hours at <R>/h`. N is the agent time; R is the
+  rate of the priced agent time alone, its estimates divided by its hours. **The headline need not
+  equal N times R**: a priced plugin is in the headline and not in N, and an unpriced agent hour is
+  in N and not in the money. With no priced agent time the line gives the hours alone.
+- **One currency.** Money in another currency than the instance's is left out of the figure, never
+  converted or added.
+
 ## Where the rate and budgets are set
 
-- **The rate.** Estimated Execution Cost is Agent Hours times the instance's **agent hourly rate**,
-  in its currency. The rate is read when the figure is shown, so changing it re-prices every past
-  week too. A run is placed wholly in the week it ended. A person sets both in **Admin → Outcomes**, with **change** beside the rate line (the **Pricing
-  agent time** dialog). The Estimated Execution Cost dialog's **Change in Outcomes** link opens the same place.
-- **No rate, no dollars.** Until a rate is set, every figure is Agent Hours instead. Nothing
-  shows `$0` for time that has no price.
+- **The rate.** The instance's **agent hourly rate** is the tenant default an agent inherits when
+  its run starts, in the instance's currency. A person sets both in **Admin → Outcomes**, with
+  **change** beside the rate line (the **Pricing agent time** dialog). The Estimated Execution Cost
+  dialog's **Change in Outcomes** link opens the same place. No figure is that rate times hours: a
+  change prices the runs that start afterwards.
+- **No price, no dollars.** When no run in a figure has an estimate, the figure is Agent Hours
+  instead. Nothing shows `$0` for time that has no price. This is not the same as the tenant rate
+  being unset: a member's own rate still prices its runs.
 - **Budgets.** An outcome's **Budget** (in Admin → Outcomes, on the outcome, or when creating one)
   is what achieving it is worth: what it may spend. An outcome with no budget, and the team's work
   linked to no outcome at all ("No outcome"), have none.
@@ -54,10 +81,8 @@ either.
 
 Runs that started before snapshots existed have none, and none is made for them afterwards.
 
-A snapshot is recorded at start and is **not yet what these screens read**. The Teams list, its
-summary and the team page still work as described above: Agent Hours times the instance's current
-rate, a run placed wholly in the week it ended, over the last eight weeks. Until they read
-snapshots, they still count a plugin's run time at the current agent rate.
+The Teams list, its summary, the team page and the Outcomes dashboard price every run from this
+snapshot, as **How a run is priced** says.
 
 ## A shared budget is measured across every team
 
@@ -79,9 +104,9 @@ list is unchanged.
 
 - **Estimated Execution Cost** (`8 wk`): the eight weeks' estimate in the instance's currency; `▲ <n>%` or `▼ <n>%`
   `vs prior 8 wk`, the change on the eight weeks before (no line when those weeks had none);
-  `<h> Agent Hours at <rate>/h`; and the eight weeks as columns, one series, with each week's date and
-  figure on hover. **Without a rate** it reads Agent Hours, the change is in hours, and the line
-  says `no rate set`. Clicking it opens Outcomes.
+  `<h> Agent Hours at <rate>/h`, the rate being the priced agent time's own; and the eight weeks as
+  columns, one series, with each week's date and figure on hover. **With no priced run** it reads
+  Agent Hours, the change is in hours, and the line says `no rate set`. Clicking it opens Outcomes.
 - **Budgets** (`<n> outcomes`, how many carry a budget): the share used across every budgeted
   outcome, `<estimate> of <budget>` and a bar. Each outcome's estimate is its total across every
   team, as on the team page's tile. Then `All inside budget`, or, in the critical colour,
@@ -109,7 +134,7 @@ The team page's **Estimated Execution Cost · last 8 weeks** tile, beside Activi
 Status, shows:
 
 - **The team's estimate in dollars** over the eight weeks, with `<h> Agent Hours at <rate>/h`
-  under it.
+  under it, the rate being the priced agent time's own.
 - **A small stacked weekly chart**, one colour per outcome, "No outcome" in neutral gray at the
   bottom of each week.
 - **With budgets** - when any outcome the team serves has one - a bar and
@@ -119,15 +144,16 @@ Status, shows:
 - **Over budget.** When any outcome's total estimate passes its budget, the bar turns the critical
   colour and the line ends `⚠ <n> over`, `<n>` being how many outcomes are over.
 - **No budgets.** No bar, and `No outcome budget set`.
-- **No rate.** Agent Hours instead of dollars, the chart in hours, and
+- **No priced run.** Agent Hours instead of dollars, the chart in hours, and
   `Set an agent hourly rate in Outcomes to see dollars`.
 
 Clicking the tile opens the team's Estimated Execution Cost dialog.
 
 ## The Estimated Execution Cost dialog
 
-Titled **Estimated Execution Cost · <team>**, with the rate line on the right (`Agent time at
-$60/h (USD) · Change in Outcomes`). It has two tabs.
+Titled **Estimated Execution Cost · <team>**, with the instance's default rate as set now on the
+right (`Agent time at $60/h (USD) · Change in Outcomes`). That is the rate new agent runs inherit,
+not the rate the figures were priced at. It has two tabs.
 
 **Estimated Execution Cost** (the tab it opens on):
 
@@ -139,9 +165,9 @@ $60/h (USD) · Change in Outcomes`). It has two tabs.
 - A table: one row per outcome, then "No outcome", then **Team total**, with **Outcome**,
   **Agent Hours**, **Estimated Execution Cost**, **Budget** (a small bar and `<outcome total> / <budget>`, `⚠ over` when the
   outcome is over, `None set` when it has none), **Billable tokens** and **$ / 1M tokens**.
-- A note under the table: the estimate is agent time at the current rate, not money paid, and the
-  per-million figure explains the dollars against the tokens behind them. Tokens are not billed
-  here.
+- A note under the table: the estimate prices each run at the rate it started with, not money
+  paid, and the per-million figure explains the dollars against the tokens behind them. Tokens are
+  not billed here.
 
 **Tokens** is what the Tokens dialog showed before: the chart of the team's runs from the usage
 ledger with its metric switch, then the team total from the message log with its in, cache read,
@@ -179,9 +205,9 @@ Colour is never the only cue: the dialog's table carries every figure the chart 
 
 | Route | Answers |
 |---|---|
-| `GET /api/teams/{team}/cost` | One team: `money` (`currency`, `agentHourlyRate`), the eight `weeks`, and per outcome (`id` null for No outcome) its `weekly` figures, `totals`, `value` (its budget), `outcomeTotalCost` (its cost across all teams) and `rank` (its place in the order shared by every team, which picks its colour; null for No outcome); then the team's `totals`. `cost` is null, never 0, when no rate is set. Every `cost` is the estimate, never money paid. |
+| `GET /api/teams/{team}/cost` | One team: `money` (`currency`, and `agentHourlyRate`, the tenant default as set now), the eight `weeks`, and per outcome (`id` null for No outcome) its `weekly` figures, `totals`, `value` (its budget), `outcomeTotalCost` (its estimate across all teams and all time) and `rank` (its place in the order shared by every team, which picks its colour; null for No outcome); then the team's `totals`. `totals` carry `agentSeconds` (agent time only), `cost` (every priced run) and `agentRate` (the priced agent time's rate). `cost` is null, never 0, when no run was priced. Every `cost` is the estimate, never money paid. |
 | `GET /api/teams/cost` | The same for every team at once (`money`, `weeks`, `teams[]`), for the Teams list. |
-| `GET /api/teams/cost/summary` | The summary above the Teams list: `rate` (null without one); the eight `weeks` (`weekStart`, `agentSeconds`, `cost`), `periodStart` and `periodEnd`; the eight weeks' `total` and the eight before as `prior`; per outcome (`id` null for No outcome) its `name`, `rank`, `agentSeconds`, `cost`, `budget` and `outcomeTotalCost` (its cost across every team; this field was `spentTotal` before); and `rightNow` (`openWorkflows`, `membersRunning`, `waitingOnYou`). `cost` is null, never 0, when no rate is set. |
+| `GET /api/teams/cost/summary` | The summary above the Teams list: `rate` (the tenant default as set now, null without one); the eight `weeks` (`weekStart`, `agentSeconds`, `cost`), `periodStart` and `periodEnd`; the eight weeks' `total` and the eight before as `prior`, each with `agentRate`; per outcome (`id` null for No outcome) its `name`, `rank`, `agentSeconds`, `cost`, `budget` and `outcomeTotalCost` (its cost across every team; this field was `spentTotal` before); and `rightNow` (`openWorkflows`, `membersRunning`, `waitingOnYou`). `cost` is null, never 0, when no run was priced. |
 
 In the web app, one module decides every outcome's colour: `web/src/lib/outcomeColours.ts`. Its
 `outcomeColour({ id, rank })` returns the colour for one outcome entry, `outcomeColours(entries)` builds
