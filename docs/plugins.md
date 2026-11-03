@@ -149,7 +149,12 @@ listed, not only the first:
 - a required field with no saved value and no default;
 - a saved value of the wrong type, or outside the field's bounds;
 - a saved value for a field the new version no longer declares (kept, and not used);
-- a secret binding, or the member's own secret value, for a secret the new version does not declare.
+- a secret binding, or the member's own secret value, for a secret the new version does not declare;
+- a connection binding the new version cannot use, named by its binding key (`appSecrets#2`): its slot
+  gone, a second binding of a slot that now takes one, or a connection of a kind the slot no longer
+  takes (`PluginBindingFit`). The binding is kept, never removed, and the same words hold the member
+  on Needs you as a `connection` row until a person binds it to a slot that takes it or unbinds it.
+  An upgrade rewrites no binding: one the new version still takes, of any kind, is used as before.
 
 The checks are the ones a run and a save already make (`PluginMemberRunner.EffectiveConfig`,
 `PluginConfigField.Refusal` and `BoundsRefusal`), gathered by `PluginUpgradeAttention`. Only field
@@ -537,6 +542,18 @@ PUT /api/teams/{team}/members/{member}/plugin-settings
   refused ("Slot `x` takes one connection, so `x#2` cannot bind another. ..."). A multiple slot
   refuses the same connection bound twice, and a key such as `<slot>#1` or `<slot>#x` is not a slot.
 - **`required`** is met by any one binding.
+- **A save keeps what the person did not remove.** On `PUT .../plugin-settings` a multiple slot is a
+  set: every connection stored for it stays bound unless `removedConnections` names it
+  (`{ "removedConnections": { "appSecrets": ["<id A>"] } }`), and every connection the body names for
+  it is added; the result is re-keyed `<slot>`, `<slot>#2`... in the order the person left them: the
+  body's order when it names every connection still kept, else stored first. So a body naming only the
+  connection just chosen, or `"connections": {}`, unbinds none of a multiple slot's connections.
+- **Member settings** shows a multiple slot as a list of every bound connection, each with its own
+  Remove, and an **Add a connection to `<slot>`** picker below. Save sends every connection still
+  listed, and names each one removed. A slot's description should say to bind its connections there,
+  in the member's settings: Team settings → Connections lists who uses a connection but does not bind one.
+  The list leaves out a description sentence that says to bind in Team settings → Connections
+  (`withoutBindElsewhere`) and says in its own line how the list works.
 
 #### A secret moved to a connection: `movedTo`
 

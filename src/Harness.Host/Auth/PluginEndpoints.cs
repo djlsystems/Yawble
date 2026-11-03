@@ -157,7 +157,10 @@ public static class PluginEndpoints
                 + "hired on the plugin whose saved settings do not fit the new version - `{ team, member, teamName, "
                 + "memberName, fields: [{ field, reason }] }`: a required field with no value and no default, a value of "
                 + "the wrong type or outside its bounds, a field the new version dropped, a secret binding or own value "
-                + "for a secret it does not declare. Field names and sentences, never a value. `[]` when every member's "
+                + "for a secret it does not declare, or a connection binding it cannot use - its slot gone, a second binding "
+                + "of a slot that now takes one, or a connection of a kind the slot no longer takes - named by its binding "
+                + "key; such a binding is kept, not removed, and the same words hold the member on Needs you. "
+                + "Field names and sentences, never a value. `[]` when every member's "
                 + "fit, and on any install that is not an upgrade. Nothing is removed or stopped: such a member fails its "
                 + "runs, naming the field, until a person fixes it. `replaces` is one entry per id the installed "
                 + "version's manifest names in `replaces` that is installed now - `{ id, version, name, members: [{ team, "
@@ -240,13 +243,13 @@ public static class PluginEndpoints
             [Description(Describe.Team)] string team,
             [Description("The member, as addressed in its route.")] string member,
             TeamRegistry teams, PluginCatalog plugins, IPluginMemberSettingsStore settings, MemberSecretReads reads,
-            CancellationToken ct) =>
+            Connections connections, CancellationToken ct) =>
         {
             var (found, plugin, refusal) = await PluginMemberAsync(teams, plugins, team, member, ct);
             if (refusal is not null) return refusal;
 
             var id = new ContainerId(found!.Team, found.Name);
-            return Results.Ok(await SettingsAsync(id, plugin!, await settings.ForAsync(id, ct), reads, ct));
+            return Results.Ok(await SettingsAsync(id, plugin!, await settings.ForAsync(id, ct), reads, connections.Store, ct));
         })
             .WithTags("Members")
             .HumansOnly()
@@ -303,7 +306,13 @@ public static class PluginEndpoints
             {
                 // OMITTED KEEPS what is bound, so a form that knows nothing of connections cannot unbind
                 // them by saving; `{}` unbinds every slot.
-                Connections = request.Connections ?? before.Connections,
+                //
+                // A MULTIPLE SLOT IS A SET: a connection the person did not remove (`removedConnections`)
+                // stays bound, whatever else the body names for it (PluginSlotBindings).
+                Connections = request.Connections is null && request.RemovedConnections is null
+                    ? before.Connections
+                    : PluginSlotBindings.Merge(
+                        plugin.Manifest, before.Connections, request.Connections ?? before.Connections, request.RemovedConnections),
             };
 
             // THE MEMBER'S OWN VALUES: a string sets or replaces, null clears, a field not named stays.
@@ -365,6 +374,14 @@ public static class PluginEndpoints
 
             // A PERSON BINDS: this route is HumansOnly, so any connection may be named - but it must
             // exist, suit the slot's providers and hold every scope the slot asks for.
+            // The body as sent is checked too: a multiple slot's merge (PluginSlotBindings) folds a connection
+            // named twice into one, and a person is still told the body named it twice.
+            if (request.Connections is { } asSent
+                && await connections.BindingRefusalAsync(plugin.Manifest, asSent, assignedToTeam: null, ct, stored: before.Connections) is { } sentRefusal)
+            {
+                return Results.BadRequest(sentRefusal.Body());
+            }
+
             if (await connections.BindingRefusalAsync(plugin.Manifest, changed.Connections, assignedToTeam: null, ct, stored: before.Connections) is { } bindingRefusal)
             {
                 return Results.BadRequest(bindingRefusal.Body());
@@ -421,7 +438,7 @@ public static class PluginEndpoints
             // A PERSON'S BINDING MAY HAVE ASSIGNED the team its first connection: Team Connections shows.
             await teams.RefreshConnectionPresenceAsync(CancellationToken.None);
 
-            return Results.Ok(await SettingsAsync(id, plugin, changed, reads, ct));
+            return Results.Ok(await SettingsAsync(id, plugin, changed, reads, connections.Store, ct));
         })
             .WithTags("Members")
             .HumansOnly()
@@ -430,7 +447,10 @@ public static class PluginEndpoints
                 "Body `{ config, secrets?, secretValues?, namedSecretValues?, tableSecretValues?, connections? }` REPLACES the member's configuration, its "
                 + "secret key bindings when `secrets` is given (omitted keeps them; `{}` unbinds every key), and its "
                 + "connection bindings (slot to connection id) when `connections` is given "
-                + "(omitted keeps them; `{}` unbinds every slot). `secretValues` sets the member's OWN value for each "
+                + "(omitted keeps them; `{}` unbinds every slot that takes one connection). A slot declared `multiple` is a set: "
+                + "each connection stored for it stays bound unless `removedConnections` (slot to connection ids) names it, "
+                + "and each connection the body names for it is added, so a save naming only the one just chosen unbinds none. "
+                + "The answer's `unusableConnections` names each stored binding the active version cannot use, in words. `secretValues` sets the member's OWN value for each "
                 + "secret field named (null clears it; a field not named is left), checked as "
                 + "`PUT .../secrets/{field}` checks it, each with its `member.secret-*` row in the same transaction "
                 + "as the settings. `namedSecretValues` sets or replaces each NAMED secret given (null removes it; a "
@@ -822,6 +842,10 @@ public static class PluginEndpoints
                 },
                 ct);
 
+            // A RESCAN MAY MAKE A NEWER VERSION ACTIVE: every plugin member is read again, so a binding it
+            // cannot use is on Needs you at once (PluginBindingFit).
+            if (context.RequestServices.GetService<PluginSetup>() is { } setup) await setup.RefreshAllAsync(ct);
+
             return Results.Ok(Listing(plugins, teams, marketplace, await solutions.ListAsync(ct), replacements, context));
         })
             .WithTags(Area)
@@ -974,7 +998,8 @@ public static class PluginEndpoints
     }
 
     private static async Task<object> SettingsAsync(
-        ContainerId id, InstalledPlugin plugin, PluginMemberSettings stored, MemberSecretReads reads, CancellationToken ct) => new
+        ContainerId id, InstalledPlugin plugin, PluginMemberSettings stored, MemberSecretReads reads, IConnectionStore? connectionStore,
+        CancellationToken ct) => new
     {
         team = id.Team,
         member = id.Name,
@@ -993,6 +1018,13 @@ public static class PluginEndpoints
         // EACH TABLE'S SECRET CELLS THAT HOLD A VALUE: who set each and when; a value only for an unmasked column.
         tableSecretStates = await reads.TableStatesAsync(id, plugin.Manifest, stored, ct),
         connectionFields = ConnectionFields(plugin.Manifest),
+
+        // EACH STORED BINDING THE ACTIVE VERSION CANNOT USE, in words, where the person is looking: it is
+        // kept, not removed, and the same sentence holds the member on Needs you (PluginBindingFit).
+        unusableConnections = connectionStore is null
+            ? []
+            : (await PluginBindingFit.UnusableAsync(plugin.Manifest, stored.Connections, connectionStore, ct))
+                .Select(u => new { key = u.Key, slot = u.Slot, connection = u.ConnectionId, name = u.ConnectionName, reason = u.Reason }),
         outOfRange = PluginMemberRunner.OutOfRange(plugin.Manifest, stored),
         marketplaceUrl = reads.MarketplacePage(plugin.Manifest.Id),
     };
@@ -1039,6 +1071,8 @@ public static class PluginEndpoints
             providers = c.Value.Providers,
             scopes = c.Value.Scopes,
             required = c.Value.Required,
+            // A slot that takes several connections, bound under `<slot>`, `<slot>#2`...: the settings show a list.
+            multiple = c.Value.Multiple,
             summary = c.Value.Summary,
             // Each Microsoft API the slot needs a token for, with its scopes; null when it does not admit Microsoft.
             microsoftApis = c.Value.Admits(ConnectionProviders.Microsoft)
@@ -1278,13 +1312,16 @@ public sealed record MoveReplacedMember(string? Team, string? Member);
 /// stored; <c>secrets</c> and <c>connections</c> replace it when given and keep it when omitted;
 /// <c>secretValues</c> sets (a string) or clears (null) the member's own value of each field named;
 /// <c>namedSecretValues</c> sets (a string) or removes (null) each named secret given;
-/// <c>tableSecretValues</c> sets (a string) or clears (null) each table secret cell given.</summary>
+/// <c>tableSecretValues</c> sets (a string) or clears (null) each table secret cell given;
+/// <c>removedConnections</c> (slot to connection ids) unbinds those from a multiple slot, which otherwise
+/// keeps every connection stored (<see cref="PluginSlotBindings"/>).</summary>
 public sealed record PluginSettingsChange(
     Dictionary<string, JsonElement>? Config, Dictionary<string, string>? Secrets,
     Dictionary<string, string>? Connections = null,
     Dictionary<string, string?>? SecretValues = null,
     Dictionary<string, string?>? NamedSecretValues = null,
-    Dictionary<string, Dictionary<string, Dictionary<string, string?>>>? TableSecretValues = null);
+    Dictionary<string, Dictionary<string, Dictionary<string, string?>>>? TableSecretValues = null,
+    Dictionary<string, string[]>? RemovedConnections = null);
 
 /// <summary>Body of <c>PUT /api/secrets/{key}</c>: the value, which no answer ever carries.</summary>
 public sealed record SecretSubmission(string? Value);

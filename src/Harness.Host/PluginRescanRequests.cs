@@ -38,7 +38,7 @@ namespace Harness.Host;
 /// </summary>
 public sealed class PluginRescanRequests(
     PluginCatalog plugins, TeamRegistry teams, TenantLogging audit, ILogger<PluginRescanRequests> logger,
-    PluginInstaller installer, PluginSecretMoves? moves = null)
+    PluginInstaller installer, PluginSecretMoves? moves = null, PluginSetup? setup = null)
     : BackgroundService
 {
     public const string RequestFile = ".rescan";
@@ -99,6 +99,9 @@ public sealed class PluginRescanRequests(
                 refused = scan.Refused.Select(r => r.Id).ToArray(),
             },
             ct);
+
+        // A RESCAN MAY MAKE A NEWER VERSION ACTIVE: every plugin member is read again (PluginBindingFit).
+        if (setup is not null) await setup.RefreshAllAsync(ct);
 
         var report = new
         {

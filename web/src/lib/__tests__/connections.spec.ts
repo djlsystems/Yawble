@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  withoutBindElsewhere,
   permissionsOf,
   bindingsBody,
   callbackOutcome,
@@ -184,3 +185,41 @@ describe('connection kinds', () => {
     expect(named({ name: 'Router', account: 'admin' })).toBe("'Router' (admin)")
   })
 })
+
+describe('a multiple slot\'s bindings (workflow 26256)', () => {
+  const slots = {
+    appSecrets: { description: null, providers: ['imap', 'apikey'], scopes: {}, required: false, summary: '', multiple: true },
+    mail: { description: null, providers: ['imap'], scopes: {}, required: false, summary: '' },
+  };
+
+  it('sends every connection of a multiple slot, re-keyed in order, and one for any other slot', async () => {
+    const { bindingsBody } = await import('../connections');
+    expect(bindingsBody(slots, { appSecrets: 'a', 'appSecrets#3': 'c', 'appSecrets#2': 'b', mail: 'm', stray: 'x' }))
+      .toEqual({ appSecrets: 'a', 'appSecrets#2': 'b', 'appSecrets#3': 'c', mail: 'm' });
+  });
+
+  it('starts from every stored connection of a multiple slot', async () => {
+    const { initialBindings } = await import('../connections');
+    expect(initialBindings(slots, { appSecrets: 'a', 'appSecrets#2': 'b' })).toEqual({ appSecrets: 'a', 'appSecrets#2': 'b', mail: '' });
+    expect(initialBindings(slots, {})).toEqual({ appSecrets: '', mail: '' });
+  });
+
+  it('names as removed only what the person took off a multiple slot', async () => {
+    const { removedBindings } = await import('../connections');
+    const stored = { appSecrets: 'a', 'appSecrets#2': 'b', mail: 'm' };
+    expect(removedBindings(slots, stored, { appSecrets: 'a', 'appSecrets#2': 'b' })).toBeUndefined();
+    expect(removedBindings(slots, stored, { appSecrets: 'b' })).toEqual({ appSecrets: ['a'] });
+  });
+});
+
+describe('withoutBindElsewhere', () => {
+  it('drops only the sentence that sends the person to bind in Team settings -> Connections', () => {
+    expect(withoutBindElsewhere(
+      'Fields are their own. Bind as many as needed in Team settings -> Connections; an Update password reaches the app. '
+      + '<connection> is the name the connection has in Team settings -> Connections.',
+    )).toBe('Fields are their own. An Update password reaches the app. <connection> is the name the connection has in Team settings -> Connections.');
+    expect(withoutBindElsewhere('Bind them in Team settings → Connections.')).toBe('');
+    expect(withoutBindElsewhere(null)).toBe('');
+    expect(withoutBindElsewhere('A mailbox.')).toBe('A mailbox.');
+  });
+});

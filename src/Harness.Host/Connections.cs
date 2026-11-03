@@ -1995,6 +1995,15 @@ public sealed partial class Connections(
                 return new BindingRefusal($"There is no connection '{connectionId}'. A person connects an account in {Where}.");
             }
 
+            // A STORED BINDING OF A KIND ITS SLOT NO LONGER TAKES, kept unchanged in the same slot, is not
+            // checked either: it is kept and not used, said on the settings and on Needs you
+            // (PluginBindingFit), and refusing it would stop every other change to the member.
+            if (!declared.Admits(connection.Provider) && stored is not null
+                && stored.Any(b => b.Value == connectionId && (PluginConnectionSlot.BindingKey(b.Key)?.Slot ?? b.Key) == slot))
+            {
+                continue;
+            }
+
             if (ScopeRefusal(slot, declared, connection, retry) is { } refusal) return refusal;
         }
 

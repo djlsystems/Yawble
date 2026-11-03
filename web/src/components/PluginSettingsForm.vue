@@ -25,6 +25,8 @@ import {
 } from '../lib/pluginSettings';
 import ChipListInput from './ChipListInput.vue';
 import ConnectionPicker from './ConnectionPicker.vue';
+import MultiConnectionPicker from './MultiConnectionPicker.vue';
+import { slotConnections, withSlotConnections } from '../lib/connections';
 import NamedSecretsTable from './NamedSecretsTable.vue';
 import PluginTableField from './PluginTableField.vue';
 
@@ -51,7 +53,9 @@ import PluginTableField from './PluginTableField.vue';
  * a text box showing the saved value. What is typed waits in `values` for the dialog's own button,
  * which sends it as `secretValues` with the hire or the Save. A key name the member is bound to (the
  * old binding, still honoured by the Host) is never on the screen: only "As JSON" shows it. Connection
- * slots are one picker each (`ConnectionPicker`), storing a connection's id, never a token.
+ * slots are one picker each (`ConnectionPicker`), storing a connection's id, never a token; a slot that
+ * takes several (`multiple`) is a list of every connection bound to it, with Add and Remove
+ * (`MultiConnectionPicker`).
  *
  * A PLUGIN THAT DECLARES A `namedSecrets` BLOCK gets one table after its secret fields
  * (`NamedSecretsTable`): names a person chooses, each value typed masked beside it, waiting in
@@ -402,9 +406,23 @@ function text(name: string): string {
       <!-- CONNECTION SLOTS: one picker each, listing connections of an allowed provider. The member
            stores the connection's id, never a token. -->
       <div v-else-if="row.kind === 'slots'" class="plugin-settings-slots">
+        <template v-for="(declared, key) in shape.connections" :key="`connection-${key}`">
+        <!-- A SLOT THAT TAKES SEVERAL is a list with Add and Remove, never a single picker that
+             would replace the others at the next save. -->
+        <MultiConnectionPicker
+          v-if="declared.multiple"
+          :model-value="slotConnections(connections, String(key))"
+          :slot-name="String(key)"
+          :spec="declared"
+          :connections="available"
+          :assigned="assigned"
+          :providers="providers"
+          :plugin="plugin"
+          :bind="bindSlot ? (id: string) => bindSlot!(String(key), id) : undefined"
+          @update:model-value="(ids: string[]) => (connections = withSlotConnections(connections, String(key), ids))"
+        />
         <ConnectionPicker
-          v-for="(declared, key) in shape.connections"
-          :key="`connection-${key}`"
+          v-else
           :model-value="connections[key] ?? ''"
           :slot-name="String(key)"
           :spec="declared"
@@ -416,6 +434,7 @@ function text(name: string): string {
           @update:model-value="(value: string) => (connections = { ...connections, [key]: value })"
           @connected="loadConnections"
         />
+        </template>
         <div v-if="connectionsProblem" class="text-caption text-negative" data-connections-problem>
           {{ connectionsProblem }}
         </div>

@@ -112,7 +112,13 @@ public sealed class PluginSecretMoves(
             .GroupBy(s => s.Value.MovedTo!, StringComparer.Ordinal)
             .OrderBy(g => g.Key, StringComparer.Ordinal)
             .ToList();
-        if (targets.Count == 0) return [];
+        // NEEDS YOU, read again for EVERY member on the plugin, moves or not: the version now active may
+        // not use a binding it kept (PluginBindingFit), and that is said at once, not at a refused run.
+        if (targets.Count == 0)
+        {
+            if (setup is not null) await setup.RefreshPluginAsync(pluginId, ct);
+            return [];
+        }
 
         var results = new List<SecretMoveResult>();
 

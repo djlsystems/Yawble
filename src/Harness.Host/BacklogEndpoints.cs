@@ -47,12 +47,45 @@ internal sealed record BacklogView(IReadOnlySet<string>? Teams, bool Unlinked);
 public static class BacklogEndpoints
 {
     /// <summary>
-    /// The two principal kinds that may reach the tenant backlog at all: a person and the tenant
-    /// Concierge. A member container reaches NONE of this - see
-    /// the team-scoped read below for how a Manager gets the one item it was given.
+    /// The principal kinds that may reach the tenant backlog at all: a person, the tenant Concierge
+    /// (admitted as a person's own door) and a person's own API key, which acts as its owner the way
+    /// the Concierge does. What either machine kind then sees is settled by
+    /// <see cref="TeamAccess.MayAdministerBacklogAsync"/>: as its person while that person exists,
+    /// otherwise no unlinked item. A key is still not a signed-in person - starting and deleting an
+    /// item refuse it (<see cref="RefuseKeyStart"/>, <see cref="RefuseKeyDelete"/>), and HumansOnly
+    /// routes refuse it as they always have.
+    ///
+    /// A member container reaches NONE of this, and is told so in <see cref="NotReachable"/> so it
+    /// does not go looking for another credential - see the team-scoped read below for how a
+    /// Manager gets the one item it was given.
     /// </summary>
     private static bool MayReach(Principal principal) =>
-        principal.Kind is PrincipalKind.User or PrincipalKind.TenantConcierge;
+        principal.Kind is PrincipalKind.User or PrincipalKind.TenantConcierge or PrincipalKind.ApiKey;
+
+    /// <summary>
+    /// WHAT A PERSON'S KEY IS TOLD WHEN IT TRIES TO START AN ITEM. Not the member sentence: the key
+    /// reaches the backlog, and telling it otherwise would be false. Dispatching hands work to a team
+    /// and is kept to a signed-in person and the tenant Concierge.
+    /// </summary>
+    private const string KeyMayNotStart =
+        "Starting a backlog item on a team stays a signed-in person's or the tenant Concierge's. "
+        + "A person's API key lists, reads, creates, edits, reorders, archives and restores items, "
+        + "but does not dispatch them - ask the person to start it.";
+
+    /// <summary>The same, for permanently deleting an item.</summary>
+    private const string KeyMayNotDelete =
+        "Deleting a backlog item stays a signed-in person's or the tenant Concierge's. "
+        + "A person's API key may archive it - ask the person to delete it.";
+
+    private static IResult? RefuseKeyStart(Principal principal) =>
+        principal.Kind == PrincipalKind.ApiKey
+            ? Results.Json(new { error = KeyMayNotStart }, statusCode: StatusCodes.Status403Forbidden)
+            : null;
+
+    private static IResult? RefuseKeyDelete(Principal principal) =>
+        principal.Kind == PrincipalKind.ApiKey
+            ? Results.Json(new { error = KeyMayNotDelete }, statusCode: StatusCodes.Status403Forbidden)
+            : null;
 
     /// <summary>
     /// WHAT THE KIND REFUSAL SAYS. A bare 403 with no body reads to a member as "wrong
@@ -153,8 +186,9 @@ public static class BacklogEndpoints
                 "Ordered by position over the WHOLE backlog - filtering to a team shows the global "
                 + "order restricted to those items, never a per-filter order that would be several "
                 + "orders disagreeing.\n\n"
-                + "A person - or a tenant Concierge acting for one - sees every item, linked "
-                + "and unlinked. A machine principal sees items linked to teams it reaches. An item they "
+                + "A person - or a tenant Concierge or the person's own API key, acting for one - "
+                + "sees every item, linked and unlinked. A member container reaches none of this "
+                + "route; any other machine principal sees items linked to teams it reaches. An item they "
                 + "may not see is ABSENT rather than refused.\n\n"
                 + "The `#` a person reads on the screen is computed CLIENT-SIDE from this order. It "
                 + "is never sent, never stored, and never addresses anything - the `id` is what "
@@ -447,9 +481,10 @@ public static class BacklogEndpoints
             .WithTags("Backlog")
             .WithSummary("Add an item")
             .WithDescription(
-                "A person - or a tenant Concierge acting for one - creates items with NO team; "
-                + "a machine principal must name a team it reaches, chosen from a pre-made team rather than "
-                + "typed.\n\n"
+                "A person - or a tenant Concierge or the person's own API key, acting for one - "
+                + "creates items with NO team; any other machine principal must name a team it "
+                + "reaches, chosen from a pre-made team rather than typed. A row written through a "
+                + "key names the person and carries `viaApiKey`, the key's id.\n\n"
                 + "THE TEAM LINK IS A VISIBILITY LINK AND NOT A CONFIDENTIALITY BOUNDARY. "
                 + "Dispatching an item to a team puts its title and body on that team's board and "
                 + "lets its Manager read it, whatever this says.");
@@ -505,7 +540,7 @@ public static class BacklogEndpoints
             var actorEmail = await ActorEmailOfAsync(context, principal, users, ct);
             TriggerAudit Row(string action, object detail) => new(
                 principal.Id, actorEmail, action, PlatformBacklogId.Format(id), request.Title ?? item.Title,
-                JsonSerializer.Serialize(detail));
+                DetailOf(principal, detail));
 
             var rows = new List<TriggerAudit>
             {
@@ -553,7 +588,8 @@ public static class BacklogEndpoints
                 + "`pending` means NOT REVIEWED - a draft nobody has read - and is where every item "
                 + "starts. `ready` means somebody has read the body and judges that a Manager could "
                 + "cut it into cards without follow-up questions, and it is the ONLY state that "
-                + "dispatches. Nothing infers it: a person sets it, or a Concierge sets it when the "
+                + "dispatches. Nothing infers it: a person sets it (signed in or through their own "
+                + "API key, whose rows carry `viaApiKey`), or a Concierge sets it when the "
                 + "person tells it which items to mark. A team's credential cannot reach this route.");
 
         app.MapPost("/api/backlog/{id:long}/position", async (
@@ -642,6 +678,7 @@ public static class BacklogEndpoints
         {
             if (PrincipalClaims.From(context.User) is not { } principal) return Results.Unauthorized();
             if (!MayReach(principal)) return RefuseKind();
+            if (RefuseKeyDelete(principal) is { } keyRefused) return keyRefused;
 
             var view = await ViewFor(principal, access, ct);
 
@@ -682,6 +719,9 @@ public static class BacklogEndpoints
             .WithSummary("Delete an archived item permanently")
             .WithDescription(
                 "Permanent, and it takes the execution record with it.\n\n"
+                + "A SIGNED-IN PERSON'S AND THE TENANT CONCIERGE'S. A person's API key reaches the "
+                + "rest of the backlog but is refused this, 403 with a sentence saying so, and "
+                + "nothing is deleted.\n\n"
                 + "THE CARDS OUTLIVE IT AND THAT IS ACCEPTED. A dispatched item's planned cards name "
                 + "it as their parent on the APPEND-ONLY log, so they cannot be removed. A card "
                 + "whose parent item is gone renders `B000H (deleted)` rather than a blank header.");
@@ -714,6 +754,7 @@ public static class BacklogEndpoints
         {
             if (PrincipalClaims.From(context.User) is not { } principal) return Results.Unauthorized();
             if (!MayReach(principal)) return RefuseKind();
+            if (RefuseKeyStart(principal) is { } keyRefused) return keyRefused;
 
             if (teams.ExistingName(team) is not { } stored)
             {
@@ -760,7 +801,10 @@ public static class BacklogEndpoints
             .WithTags("Backlog")
             .WithSummary("Hand an item to a team")
             .WithDescription(
-                "ONLY A `ready` ITEM IS DISPATCHED. Anything else is 409, naming the state the item "
+                "A SIGNED-IN PERSON'S AND THE TENANT CONCIERGE'S. A person's API key reaches the "
+                + "rest of the backlog but is refused this, 403 with a sentence saying so, and "
+                + "nothing is dispatched.\n\n"
+                + "ONLY A `ready` ITEM IS DISPATCHED. Anything else is 409, naming the state the item "
                 + "is in and how to move it - the same refusal `dispatch-to-new` gives, from one "
                 + "place, because a boundary a route call can bypass is not a boundary. `ready` "
                 + "means a PERSON read the body; the state SURVIVES the dispatch.\n\n"
@@ -809,6 +853,7 @@ public static class BacklogEndpoints
         {
             if (PrincipalClaims.From(context.User) is not { } principal) return Results.Unauthorized();
             if (!MayReach(principal)) return RefuseKind();
+            if (RefuseKeyStart(principal) is { } keyRefused) return keyRefused;
 
             // THE SECOND PERMIT. Bounds machine principals only, exactly as `PermitGate` does - a
             // person reaches every team, which `MayReach` and the checks below settle.
@@ -1021,7 +1066,10 @@ public static class BacklogEndpoints
             .WithTags("Backlog")
             .WithSummary("Hand an item to a team created for it")
             .WithDescription(
-                "ONLY A `ready` ITEM IS DISPATCHED, asked BEFORE the team is made and in the same "
+                "A SIGNED-IN PERSON'S AND THE TENANT CONCIERGE'S. A person's API key reaches the "
+                + "rest of the backlog but is refused this, 403 with a sentence saying so, and no "
+                + "team is made.\n\n"
+                + "ONLY A `ready` ITEM IS DISPATCHED, asked BEFORE the team is made and in the same "
                 + "words the team route uses - one gate, two doors, because a boundary a route call "
                 + "can bypass is not a boundary. A refusal here leaves no team behind.\n\n"
                 + "Creates a team from the settings in the body and dispatches the item into it, in "
@@ -1369,7 +1417,22 @@ public static class BacklogEndpoints
             action,
             subject,
             subjectName,
-            detail is null ? null : System.Text.Json.JsonSerializer.Serialize(detail));
+            detail is null ? null : DetailOf(principal, detail));
+
+    /// <summary>
+    /// A backlog tenant row's detail, saying when it came THROUGH A PERSON'S API KEY: `viaApiKey`
+    /// is the key's principal id (`apikey-...`), never its secret. The actor email already names
+    /// the person, so this is what lets a reader tell the key from a signed-in session without
+    /// guessing from the actor id's shape - the same spirit as `viaConcierge`. Absent otherwise.
+    /// </summary>
+    private static string DetailOf(Principal principal, object detail)
+    {
+        if (principal.Kind != PrincipalKind.ApiKey) return JsonSerializer.Serialize(detail);
+
+        var node = JsonSerializer.SerializeToNode(detail)!.AsObject();
+        node["viaApiKey"] = principal.Id;
+        return node.ToJsonString();
+    }
 
     private static async Task WriteAuditAsync(
         HttpContext context,
@@ -1678,7 +1741,7 @@ public static class BacklogEndpoints
 }
 
 /// <param name="Team">
-/// Absent or empty means unlinked, which only a person - or a tenant Concierge acting for one -
+/// Absent or empty means unlinked, which only a person - or a tenant Concierge or the person's own API key, acting for one -
 /// may ask for. It is a team a person CHOSE from the ones that exist, never free text.
 /// </param>
 /// <summary>The one field dispatch-to-a-new-team needs that dispatch-to-an-existing-one does not.</summary>

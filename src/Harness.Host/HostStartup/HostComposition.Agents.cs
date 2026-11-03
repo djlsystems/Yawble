@@ -188,7 +188,7 @@ internal sealed partial class HostComposition
         // only, never a value, after the install and its secret moves.
         builder.Services.AddSingleton(sp => new PluginUpgradeAttention(
             sp.GetRequiredService<TeamRegistry>(), sp.GetRequiredService<IPluginMemberSettingsStore>(),
-            sp.GetRequiredService<IPluginMemberSecretRows>()));
+            sp.GetRequiredService<IPluginMemberSecretRows>(), sp.GetService<IConnectionStore>()));
 
         // A RENAMED PLUGIN SAYS WHAT IT REPLACES (its manifest's `replaces`): who is still on the old id,
         // and a person's move of them onto the new one.
