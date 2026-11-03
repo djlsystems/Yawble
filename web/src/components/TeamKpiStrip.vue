@@ -825,7 +825,7 @@ function showThread(row: WorkflowRow) {
       </template>
       <div v-else-if="costFailed" class="team-kpi-value team-kpi-unavailable">unavailable</div>
       <div v-else class="team-kpi-value team-kpi-unavailable">—</div>
-      <q-tooltip>{{ EstimateTitle }} by outcome - agent hours at the current rate, not money paid - and the tokens behind it. Click for the breakdown</q-tooltip>
+      <q-tooltip>{{ EstimateTitle }} by outcome - each run at the rate it started with, not money paid - and the tokens behind it. Click for the breakdown</q-tooltip>
     </button>
   </div>
 

@@ -58,6 +58,27 @@ describe('the Estimated Execution Cost tile', () => {
     expect(spend.get('[data-cost-week="0"] title').text()).toBe('Week of Sep 7: $275');
   });
 
+  it('reads "at R/h" from the route\'s weighted agent rate, never the tenant setting', () => {
+    const changed = tile(mountTiles({ rate: 60, tenantRate: 90 }), 'spend');
+    expect(changed.get('[data-summary-value]').text()).toBe('$2,200');
+    expect(changed.get('[data-summary-detail]').text()).toBe('36.7 Agent Hours at $60/h');
+
+    // A member rate priced the runs while no tenant rate is set: dollars, not the no-rate state.
+    const unset = tile(mountTiles({ rate: 60, tenantRate: null }), 'spend');
+    expect(unset.get('[data-summary-value]').text()).toBe('$2,200');
+    expect(unset.get('[data-summary-detail]').text()).toBe('36.7 Agent Hours at $60/h');
+    expect(tile(wrapper!, 'budgets').text()).not.toContain('Set an agent hourly rate');
+  });
+
+  it('with priced plugin time and no priced agent time, gives the hours without inventing a rate', () => {
+    const summary = costSummary();
+    summary.total = { ...summary.total, agentRate: null };
+    wrapper = mount(CostSummary, { props: { summary, currency: 'USD' } });
+
+    expect(tile(wrapper, 'spend').get('[data-summary-value]').text()).toBe('$2,200');
+    expect(tile(wrapper, 'spend').get('[data-summary-detail]').text()).toBe('36.7 Agent Hours');
+  });
+
   it('says a fall with ▼', () => {
     const summary = costSummary();
     summary.prior = { agentSeconds: 50 * 3600, cost: 3000 };

@@ -122,6 +122,19 @@ describe('the Cost tile', () => {
     expect(squash(tile().find('.team-kpi-label').text())).toBe('Estimated Execution Cost · last 8 weeks');
   });
 
+  it('reads "at R/h" from the route\'s weighted agent rate, never the tenant setting', async () => {
+    await mountStrip({ rate: 60, tenantRate: 90 });
+    expect(squash(tile().find('[data-cost-value]').text())).toBe('$1,080');
+    expect(squash(tile().find('[data-cost-detail]').text())).toBe('18.0 Agent Hours at $60/h');
+  });
+
+  it('prices from the route when no tenant rate is set: a member rate is still dollars, not the no-rate state', async () => {
+    await mountStrip({ rate: 60, tenantRate: null });
+    expect(squash(tile().find('[data-cost-value]').text())).toBe('$1,080');
+    expect(squash(tile().find('[data-cost-detail]').text())).toBe('18.0 Agent Hours at $60/h');
+    expect(tile().text()).not.toContain('Set an agent hourly rate');
+  });
+
   it('with budgets: dollars, hours at the rate, the bar and spent of budget over the budgeted outcomes', async () => {
     await mountStrip();
 

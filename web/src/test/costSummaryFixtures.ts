@@ -8,7 +8,10 @@ import type { CostSummary, CostSummaryOutcome } from '../api/outcomes';
  * budget, Ops 2 h = $120 with no budget, No outcome 3 h = $180. The prior eight weeks: 30 h = $1,800.
  */
 export interface SummaryOptions {
+  /** The rate every run was snapshotted at; null is no priced run. */
   rate?: number | null;
+  /** The tenant default rate as set now (`rate`); the run rate unless given. No figure uses it. */
+  tenantRate?: number | null;
   budgets?: boolean;
   over?: boolean;
   waiting?: number;
@@ -47,12 +50,12 @@ export function costSummary(options: SummaryOptions = {}): CostSummary {
   });
 
   return {
-    rate,
+    rate: options.tenantRate === undefined ? rate : options.tenantRate,
     weeks,
     periodStart: '2026-09-07',
     periodEnd: '2026-11-01',
-    total: { agentSeconds: seconds, cost: rate === null ? null : (seconds / 3600) * rate },
-    prior: { agentSeconds: 30 * 3600, cost: rate === null ? null : 30 * rate },
+    total: { agentSeconds: seconds, cost: rate === null ? null : (seconds / 3600) * rate, agentRate: rate },
+    prior: { agentSeconds: 30 * 3600, cost: rate === null ? null : 30 * rate, agentRate: rate },
     outcomes,
     rightNow: { openWorkflows: 4, membersRunning: 2, waitingOnYou: options.waiting ?? 3 },
   };

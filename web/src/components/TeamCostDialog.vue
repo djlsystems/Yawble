@@ -219,7 +219,7 @@ function changeRate() {
               </tbody>
             </table>
             <div class="text-caption os-text-muted q-mt-sm" data-cost-note>
-              The Estimated Execution Cost is agent time at the current rate, not money paid. The $ / 1M
+              The Estimated Execution Cost prices each run at the rate it started with, not money paid. The $ / 1M
               tokens figure explains the dollars against the tokens behind them; tokens are not billed here.
             </div>
           </q-card-section>

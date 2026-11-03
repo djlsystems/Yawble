@@ -11,8 +11,10 @@ import type { TeamCost, TeamCostOutcome, TeamCostWeek } from '../api/outcomes';
 export const Weeks = Array.from({ length: 8 }, (_, i) => new Date(Date.UTC(2026, 8, 7 + 7 * i)).toISOString());
 
 export interface CostOptions {
-  /** The agent hourly rate; null is no rate, and every cost is null. */
+  /** The rate every run was snapshotted at; null is no priced run, and every cost is null. */
   rate?: number | null;
+  /** The tenant default rate as set now (`money.agentHourlyRate`); the run rate unless given. No figure uses it. */
+  tenantRate?: number | null;
   /** Whether the budgeted outcomes keep their budgets. */
   budgets?: boolean;
   /** Docs refresh's all-team total passes its $500 budget. */
@@ -43,6 +45,7 @@ function outcome(id: string | null, name: string, hoursPerWeek: number, billable
       measuredRuns: 16,
       unmeasuredRuns: 0,
       cost: rate === null ? null : (agentSeconds / 3600) * rate,
+      agentRate: rate,
     },
     outcomeTotalCost: id === null || rate === null ? null : outcomeTotal,
     rank: id === null ? null : rank,
@@ -64,7 +67,7 @@ export function teamCost(options: CostOptions = {}): TeamCost {
 
   return {
     team: options.team ?? 'alpha',
-    money: { currency: 'USD', agentHourlyRate: rate },
+    money: { currency: 'USD', agentHourlyRate: options.tenantRate === undefined ? rate : options.tenantRate },
     weeks: Weeks,
     outcomes,
     totals: {
@@ -73,6 +76,7 @@ export function teamCost(options: CostOptions = {}): TeamCost {
       measuredRuns: 64,
       unmeasuredRuns: 0,
       cost: rate === null ? null : (agentSeconds / 3600) * rate,
+      agentRate: rate,
     },
   };
 }

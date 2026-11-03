@@ -42,7 +42,7 @@ import TeamCostDialog from './TeamCostDialog.vue';
 import CostWeeksChart from './CostWeeksChart.vue';
 import CostSummary from './CostSummary.vue';
 import { getCostSummary, getTeamsCost, type CostSummary as CostSummaryAnswer, type TeamCost, type TeamsCost } from '../api/outcomes';
-import { EstimateTitle, costSeries, overCount, priced, spendText, weekValue } from '../lib/teamCost';
+import { EstimateTitle, costSeries, anyPriced, overCount, priced, spendText, weekValue } from '../lib/teamCost';
 import { periodLine } from '../lib/costSummary';
 import TeamStatusIcon from './TeamStatusIcon.vue';
 import { vResizableColumns } from '../lib/resizableColumns';
@@ -128,7 +128,7 @@ function setSameScale(value: boolean) {
 const sharedTop = computed<number | null>(() => {
   const answer = teamsCost.value;
   if (!sameScale.value || !answer) return null;
-  const money = priced(answer);
+  const money = anyPriced(answer);
   let top = 0;
   for (const team of answer.teams) {
     answer.weeks.forEach((_, week) => {
@@ -155,7 +155,8 @@ function costCell(team: string) {
   return {
     cost,
     series: costSeries(cost.outcomes),
-    money: priced(cost),
+    // ONE UNIT FOR THE LIST: money when any team's run was priced, so Same scale compares like with like.
+    money: teamsCost.value ? anyPriced(teamsCost.value) : priced(cost),
     total: spendText(cost.totals, cost.money.currency),
     over: overCount(cost.outcomes),
   };

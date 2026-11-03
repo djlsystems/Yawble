@@ -361,11 +361,15 @@ export interface TeamCostWeek {
 
 /** Totals over the eight weeks, the same shape for an outcome and for the team. */
 export interface TeamCostTotals {
+  /** Agent-kind time only, priced or not: a plugin's time is never Agent Hours. */
   agentSeconds: number
   billable: number
   measuredRuns: number
   unmeasuredRuns: number
+  /** Every priced run's estimate, agent and plugin, each from its own snapshot; null - never 0 - when none was priced. */
   cost: number | null
+  /** The priced agent time's own rate: its estimates over its hours. Null when no agent time was priced. */
+  agentRate?: number | null
 }
 
 /** One outcome the team's workflows served, or `id: null` for its unlinked workflows ("No outcome"). */
@@ -420,10 +424,12 @@ export interface CostSummaryWeek {
   cost: number | null
 }
 
-/** Agent seconds and cost over a period; `cost` is null when no rate is set, never 0. */
+/** Agent seconds and cost over a period; `cost` is null when no run was priced, never 0. */
 export interface CostSummaryTotals {
   agentSeconds: number
   cost: number | null
+  /** The priced agent time's own rate: its estimates over its hours. Null when no agent time was priced. */
+  agentRate?: number | null
 }
 
 /** One outcome's eight weeks across every team, or `id: null` for work linked to no outcome. */
@@ -442,7 +448,7 @@ export interface CostSummaryOutcome {
 
 /** `GET /api/teams/cost/summary`: the four tiles above the teams list, in one answer. */
 export interface CostSummary {
-  /** The agent hourly rate; null when none is set. */
+  /** The tenant default agent rate as set now; null when none is set. No figure is this rate times hours. */
   rate: number | null
   /** The instance's currency, when the route sends it; the teams cost route's otherwise. */
   currency?: string

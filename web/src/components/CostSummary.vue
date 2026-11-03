@@ -35,7 +35,7 @@ const now = computed(() => props.summary.rightNow);
 
 <template>
   <div class="cost-summary" data-cost-summary>
-    <!-- ESTIMATED EXECUTION COST - agent hours times the current rate, never money paid: the period's total, its change on the eight weeks before, and the weeks as columns. -->
+    <!-- ESTIMATED EXECUTION COST - each run priced at the rate it started with, never money paid: the period's total, its change on the eight weeks before, and the weeks as columns. -->
     <button type="button" class="cost-summary-tile" data-summary-tile="spend" @click="emit('open-outcome', null)">
       <span class="cost-summary-head"><span class="cost-summary-title">{{ EstimateTitle }}</span><span class="cost-summary-aside">8 wk</span></span>
       <span class="cost-summary-value mono" data-summary-value>{{ spend.value }}</span>

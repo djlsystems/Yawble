@@ -7,15 +7,17 @@ import { moneyText } from './outcomes'
  * dialog and the teams list's column read. Pure functions of the cost route's answer (`api/outcomes.ts`).
  *
  * EVERY FIGURE IS THE ROUTE'S, and the only sums here are over what the route answered: the budgets
- * and their outcomes' all-team totals, and the team's estimated cost of unbudgeted work.
+ * and their outcomes' all-team totals, and the team's estimated cost of unbudgeted work. Nothing here
+ * multiplies hours by a rate: the route prices each run from the snapshot taken at its start, and the
+ * "at R/h" line is the route's own weighted agent rate (`totals.agentRate`), never the tenant setting.
  *
- * NO RATE IS NO DOLLARS, NEVER $0. The route's `cost` is null when no agent hourly rate is set; every
- * figure then falls back to agent hours, and nothing here prints a money amount for it.
+ * NO PRICE IS NO DOLLARS, NEVER $0. The route's `cost` is null when no run in the figure was priced;
+ * every figure then falls back to agent hours, and nothing here prints a money amount for it.
  */
 
 /**
- * WHAT THESE FIGURES ARE CALLED: agent hours times the instance's current rate is an ESTIMATE of what
- * the execution cost, never money paid or owed. No cost surface titles it Spend, Spent or Cost alone.
+ * WHAT THESE FIGURES ARE CALLED: each run's hours times the rate it started with is an ESTIMATE of
+ * what the execution cost, never money paid or owed. No cost surface titles it Spend, Spent or Cost alone.
  */
 export const EstimateTitle = 'Estimated Execution Cost'
 
@@ -32,9 +34,25 @@ export interface CostSeries {
   weekly: TeamCostWeek[]
 }
 
-/** Whether the instance prices agent time: then figures are money, otherwise agent hours. */
-export function priced(cost: { money: TeamCostMoney }): boolean {
-  return cost.money.agentHourlyRate !== null
+/** Whether any run in the figure was priced: then figures are money, otherwise agent hours. */
+export function priced(cost: { totals: Pick<TeamCostTotals, 'cost'> }): boolean {
+  return cost.totals.cost !== null
+}
+
+/** Whether any team on the list had a priced run: the whole list is then drawn in money, one unit for every row. */
+export function anyPriced(answer: { teams: ReadonlyArray<{ totals: Pick<TeamCostTotals, 'cost'> }> }): boolean {
+  return answer.teams.some((team) => priced(team))
+}
+
+/**
+ * `12.5 Agent Hours at $60/h`: the hours and the route's weighted agent rate. With no priced agent time
+ * - only priced plugin time, say - the rate is left out rather than invented.
+ */
+export function agentRateLine(totals: Pick<TeamCostTotals, 'agentSeconds' | 'agentRate'>, currency: string): string {
+  const rate = totals.agentRate ?? null
+  return rate === null
+    ? `${hoursFigure(totals.agentSeconds)} Agent Hours`
+    : `${hoursFigure(totals.agentSeconds)} Agent Hours at ${moneyText(rate, currency)}/h`
 }
 
 /**
@@ -148,9 +166,8 @@ export const NoBudgetNote = 'No outcome budget set'
 
 export function costTile(cost: TeamCost): CostTile {
   const currency = cost.money.currency
-  const rate = cost.money.agentHourlyRate
 
-  if (rate === null || cost.totals.cost === null) {
+  if (cost.totals.cost === null) {
     return {
       state: 'no-rate',
       value: agentHours(cost.totals.agentSeconds),
@@ -164,7 +181,7 @@ export function costTile(cost: TeamCost): CostTile {
   }
 
   const value = moneyText(cost.totals.cost, currency)
-  const detail = `${hoursFigure(cost.totals.agentSeconds)} Agent Hours at ${moneyText(rate, currency)}/h`
+  const detail = agentRateLine(cost.totals, currency)
   const use = budgetUse(cost)
 
   if (!use) {

@@ -1,7 +1,7 @@
 import type { CostSummary, CostSummaryOutcome } from '../api/outcomes';
 import { NoOutcomeColour, outcomeColour } from './outcomeColours';
 import { moneyText } from './outcomes';
-import { EstimateTitle, agentHours, hoursFigure, percentText, weekLabel, type CostSeries } from './teamCost';
+import { EstimateTitle, agentHours, agentRateLine, percentText, weekLabel, type CostSeries } from './teamCost';
 
 /**
  * THE FOUR TILES ABOVE THE TEAMS LIST, WORDED: Estimated Execution Cost, Budgets, Where it goes and Right now, each a
@@ -10,8 +10,9 @@ import { EstimateTitle, agentHours, hoursFigure, percentText, weekLabel, type Co
  * EVERY FIGURE IS THE ROUTE'S. The only sums here are over what the route answered: the budgeted
  * outcomes' budgets and estimated cost, the estimate with no budget, and the outcomes past the top three.
  *
- * NO RATE IS NO DOLLARS, NEVER $0: the route's `cost` is null without a rate, and every figure then
- * falls back to agent hours or a dash.
+ * NO PRICE IS NO DOLLARS, NEVER $0: the route's `cost` is null when no run was priced, and every
+ * figure then falls back to agent hours or a dash. Nothing here multiplies hours by a rate: each run is
+ * priced by the route from its own snapshot, and "at R/h" is the route's weighted agent rate.
  *
  * COLOURS ARE `outcomeColours`'s, by each outcome's global rank, so an outcome is the same colour here
  * as on every list row and the team page. Other / no outcome is the neutral gray.
@@ -23,9 +24,9 @@ export const SpendColour = 'var(--os-ink-muted)';
 export const BudgetsNoRateNote = 'Set an agent hourly rate in Outcomes to measure Estimated Execution Cost against budgets.';
 export const NoBudgetsNote = 'Give an outcome a value to track it here.';
 
-/** Whether the instance prices agent time. */
-export function summaryPriced(summary: Pick<CostSummary, 'rate'>): boolean {
-  return summary.rate !== null;
+/** Whether any run behind the summary was priced: in the weeks, or in an outcome's all-time total. */
+export function summaryPriced(summary: Pick<CostSummary, 'total' | 'outcomes'>): boolean {
+  return summary.total.cost !== null || summary.outcomes.some((o) => o.cost !== null || o.outcomeTotalCost !== null);
 }
 
 /** A day of the period, `Sep 7`, read in UTC as the route's dates are. */
@@ -53,7 +54,7 @@ export interface SpendTile {
 }
 
 export function spendTile(summary: CostSummary, currency: string): SpendTile {
-  const priced = summaryPriced(summary) && summary.total.cost !== null;
+  const priced = summary.total.cost !== null;
   const now = priced ? summary.total.cost! : summary.total.agentSeconds;
   const before = priced ? summary.prior.cost ?? 0 : summary.prior.agentSeconds;
 
@@ -71,7 +72,7 @@ export function spendTile(summary: CostSummary, currency: string): SpendTile {
     change,
     direction,
     detail: priced
-      ? `${hoursFigure(summary.total.agentSeconds)} Agent Hours at ${moneyText(summary.rate, currency)}/h`
+      ? agentRateLine(summary.total, currency)
       : 'no rate set',
     series: [{
       key: 'spend',
