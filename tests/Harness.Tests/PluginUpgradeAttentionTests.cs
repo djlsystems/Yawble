@@ -65,7 +65,7 @@ public sealed class PluginUpgradeAttentionTests : IAsyncLifetime
 
     private string Built(
         string version, string config = FirstConfig, string secrets = """{"token":{"description":"A demo credential.","required":false}}""",
-        string? folder = null)
+        string? folder = null, string? connections = null)
     {
         folder ??= Path.Combine(_dataRoot, "teams", "t", "repos", "R", "wt_x", Id, "out", version);
         Directory.CreateDirectory(Path.Combine(folder, "bin"));
@@ -73,6 +73,7 @@ public sealed class PluginUpgradeAttentionTests : IAsyncLifetime
         {
             m["config"] = JsonNode.Parse(config);
             m["secrets"] = JsonNode.Parse(secrets);
+            if (connections is not null) m["connections"] = JsonNode.Parse(connections);
         });
         File.WriteAllText(Path.Combine(folder, PluginManifest.FileName), manifest.ToJsonString());
         File.WriteAllText(Path.Combine(folder, "bin", "run"), "#!/bin/sh\ncat >/dev/null; echo '{\"t\":\"result\",\"ok\":true,\"output\":\"ok\"}'\n");
@@ -238,6 +239,114 @@ public sealed class PluginUpgradeAttentionTests : IAsyncLifetime
         var fromBuild = await InstallAsync(person, Built("1.0.0"), replace: true);
         Assert.Equal("1.1.0", fromBuild.GetProperty("previous").GetString());
         Assert.Equal("1.0.0\n", await File.ReadAllTextAsync(Path.Combine(Plugins, Id, PluginCatalog.ActiveFile), Ct));
+    }
+
+    // ---- a save after an upgrade ------------------------------------------------------------------
+
+    /// <summary>1.0.0 as Built, with a second optional secret `appSecret1` that 1.1.0 drops.</summary>
+    private const string TwoSecrets = """
+        {"token":{"description":"A demo credential.","required":false},
+         "appSecret1":{"description":"An app secret a later version drops.","required":false}}
+        """;
+
+    private async Task<HttpResponseMessage> SaveAsync(HttpClient person, string member, object body) =>
+        await person.PutAsJsonAsync($"/api/teams/{_team}/members/{member}/plugin-settings", body, Ct);
+
+    /// <summary>
+    /// AN UPGRADE THAT DROPS A BOUND SECRET leaves the member saveable. The settings form's Save omits
+    /// `secrets`, so the Host keeps the stored bindings - including `appSecret1`, which 1.1.0 no longer
+    /// declares. That kept binding is kept and not used, as the upgrade's attention says, and it does
+    /// not refuse the save, as a stored value for a dropped config field does not. A secret 1.1.0 still
+    /// declares is still checked, and a binding the save itself introduces for an undeclared secret is
+    /// still refused.
+    /// </summary>
+    [Fact]
+    public async Task An_upgrade_that_drops_a_bound_secret_leaves_a_settings_save_that_omits_secrets_accepted()
+    {
+        using var person = await PersonAsync();
+        await InstallAsync(person, Built("1.0.0", secrets: TwoSecrets));
+        var hired = await person.PostAsJsonAsync($"/api/teams/{_team}/containers", new
+        {
+            name = "Echo",
+            agent = $"plugin:{Id}",
+            config = new { mode = "reverse" },
+            secrets = new { token = TokenKey, appSecret1 = TokenKey },
+        }, Ct);
+        Assert.True(hired.IsSuccessStatusCode, await hired.Content.ReadAsStringAsync(Ct));
+
+        // 1.1.0 declares `token` only.
+        var upgraded = await InstallAsync(person, Built("1.1.0"));
+        Assert.Contains(Attention(upgraded), a => a.Member == "Echo" && a.Fields.Contains("appSecret1"));
+
+        // THE FORM'S SAVE: config only, no `secrets` - accepted, the stored bindings kept as they were.
+        var saved = await SaveAsync(person, "Echo", new { config = new { mode = "upper" } });
+        Assert.True(saved.StatusCode == HttpStatusCode.OK, await saved.Content.ReadAsStringAsync(Ct));
+        var stored = await Services.GetRequiredService<IPluginMemberSettingsStore>().ForAsync(new ContainerId(_team, "Echo"), Ct);
+        Assert.Equal("upper", stored.Config["mode"].GetString());
+        Assert.Equal(TokenKey, stored.Secrets["token"]);
+        Assert.Equal(TokenKey, stored.Secrets["appSecret1"]);
+
+        // The same bindings sent back unchanged are accepted too.
+        var sentBack = await SaveAsync(person, "Echo", new { config = new { mode = "upper" }, secrets = new { token = TokenKey, appSecret1 = TokenKey } });
+        Assert.True(sentBack.StatusCode == HttpStatusCode.OK, await sentBack.Content.ReadAsStringAsync(Ct));
+
+        // A SECRET 1.1.0 STILL DECLARES is still checked: a key of the wrong form is refused.
+        var badKey = await SaveAsync(person, "Echo", new { config = new { mode = "upper" }, secrets = new { token = "not a key", appSecret1 = TokenKey } });
+        Assert.Equal(HttpStatusCode.BadRequest, badKey.StatusCode);
+
+        // A BINDING THIS SAVE INTRODUCES for a secret 1.1.0 does not declare is refused, naming it -
+        // a new name, and a dropped name bound to another key alike.
+        var introduced = await SaveAsync(person, "Echo", new { config = new { mode = "upper" }, secrets = new { token = TokenKey, appSecret2 = TokenKey } });
+        Assert.Equal(HttpStatusCode.BadRequest, introduced.StatusCode);
+        Assert.Contains("`appSecret2` is not a secret plugin", await introduced.Content.ReadAsStringAsync(Ct));
+
+        var rebound = await SaveAsync(person, "Echo", new { config = new { mode = "upper" }, secrets = new { token = TokenKey, appSecret1 = "OTHER_KEY" } });
+        Assert.Equal(HttpStatusCode.BadRequest, rebound.StatusCode);
+        Assert.Contains("`appSecret1` is not a secret plugin", await rebound.Content.ReadAsStringAsync(Ct));
+
+        // Nothing refused changed what is stored.
+        stored = await Services.GetRequiredService<IPluginMemberSettingsStore>().ForAsync(new ContainerId(_team, "Echo"), Ct);
+        Assert.Equal(TokenKey, stored.Secrets["appSecret1"]);
+        Assert.False(stored.Secrets.ContainsKey("appSecret2"));
+    }
+
+    /// <summary>
+    /// AN UPGRADE THAT DROPS A BOUND CONNECTION SLOT - here its only one, so the form sends no
+    /// `connections` and the Host keeps the stored binding - leaves the member saveable by the same
+    /// rule; a binding the save introduces for a slot 1.1.0 does not declare is still refused.
+    /// </summary>
+    [Fact]
+    public async Task An_upgrade_that_drops_a_bound_connection_slot_leaves_a_settings_save_that_omits_connections_accepted()
+    {
+        using var person = await PersonAsync();
+        var mailId = $"conn-{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+        await Services.GetRequiredService<ConnectionStore>().InsertMailboxAsync(
+            new ConnectionRecord(mailId, "Shop mail", MailboxSettings.Kind, "shop@example.test", [], now, now, ConnectionRecord.Ok, null),
+            new MailboxSettings("shop@example.test", new MailServer("imap.example.test", 993, "TLS"), new MailServer("smtp.example.test", 465, "TLS"), "other", true),
+            "shop-app-password-0001", Email, new TriggerAudit(null, Email, TenantActions.ConnectionConnected, mailId, null, null), Ct);
+
+        await InstallAsync(person, Built("1.0.0", connections: """{"mail":{"providers":["imap"],"required":false}}"""));
+        var hired = await person.PostAsJsonAsync($"/api/teams/{_team}/containers", new
+        {
+            name = "Echo",
+            agent = $"plugin:{Id}",
+            config = new { mode = "reverse" },
+            secrets = new { token = TokenKey },
+            connections = new { mail = mailId },
+        }, Ct);
+        Assert.True(hired.IsSuccessStatusCode, await hired.Content.ReadAsStringAsync(Ct));
+
+        await InstallAsync(person, Built("1.1.0"));
+
+        var saved = await SaveAsync(person, "Echo", new { config = new { mode = "upper" } });
+        Assert.True(saved.StatusCode == HttpStatusCode.OK, await saved.Content.ReadAsStringAsync(Ct));
+        var stored = await Services.GetRequiredService<IPluginMemberSettingsStore>().ForAsync(new ContainerId(_team, "Echo"), Ct);
+        Assert.Equal(mailId, stored.Connections["mail"]);
+
+        var introduced = await SaveAsync(person, "Echo", new { config = new { mode = "upper" }, connections = new { mail = mailId, inbox = mailId } });
+        Assert.Equal(HttpStatusCode.BadRequest, introduced.StatusCode);
+        Assert.Contains("`inbox` is not a connection slot", await introduced.Content.ReadAsStringAsync(Ct));
     }
 
     // ---- the check ---------------------------------------------------------------------------------
