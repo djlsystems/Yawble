@@ -268,6 +268,115 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
         Assert.Equal(narrowRanks[third.Id], allNarrow[third.Id]);
     }
 
+    // ---- priced from the snapshot ----
+
+    [Fact]
+    public async Task A_run_is_priced_from_its_snapshot_and_a_later_rate_or_link_change_does_not_move_it()
+    {
+        var person = await host.PersonAsync();
+        var team = await NewTeamAsync("Cost snapshot");
+        var first = await CreateAsync(person, "Snapshot first");
+        var second = await CreateAsync(person, "Snapshot second");
+        var now = DateTimeOffset.UtcNow;
+
+        // One workflow, linked to the first outcome: a run snapshotted at 60 then, and one from before snapshots.
+        var workflow = await LinkedAsync(first.Id, team);
+        await RunAsync(workflow, team, now.AddHours(-3), now.AddHours(-2), rate: "60");
+        await RunAsync(workflow, team, now.AddHours(-2), now.AddHours(-1));
+
+        try
+        {
+            // THE TENANT RATE CHANGES AND THE WORKFLOW MOVES, BOTH AFTER THE RUNS STARTED.
+            await SetOkAsync(person, TenantSettings.OutcomesAgentHourlyRateName, 90);
+            await RelinkAsync(workflow, second.Id, team);
+
+            var read = await CostAsync(person, team);
+            var byId = read.GetProperty("outcomes").EnumerateArray().ToDictionary(o => o.GetProperty("id").GetString()!);
+
+            // The snapshotted run stays on the outcome its link named at start, at the rate it started with.
+            Assert.Equal(3600, byId[first.Id].GetProperty("totals").GetProperty("agentSeconds").GetDouble(), 3);
+            Assert.Equal(60m, byId[first.Id].GetProperty("totals").GetProperty("cost").GetDecimal());
+            Assert.Equal(60m, byId[first.Id].GetProperty("outcomeTotalCost").GetDecimal());
+
+            // The run from before snapshots keeps the newest-link rule, and is time without money.
+            Assert.Equal(3600, byId[second.Id].GetProperty("totals").GetProperty("agentSeconds").GetDouble(), 3);
+            Assert.Equal(JsonValueKind.Null, byId[second.Id].GetProperty("totals").GetProperty("cost").ValueKind);
+            Assert.Equal(JsonValueKind.Null, byId[second.Id].GetProperty("outcomeTotalCost").ValueKind);
+
+            // Each run in one bucket: the team's figure is the two runs, once each, priced as they started.
+            var totals = read.GetProperty("totals");
+            Assert.Equal(7200, totals.GetProperty("agentSeconds").GetDouble(), 3);
+            Assert.Equal(60m, totals.GetProperty("cost").GetDecimal());
+            Assert.Equal(60m, totals.GetProperty("agentRate").GetDecimal());
+            Assert.Equal(90, read.GetProperty("money").GetProperty("agentHourlyRate").GetInt32());
+
+            // The outcomes dashboard reads the same run in the same place.
+            var list = await JsonAsync(await person.GetAsync("/api/outcomes", Ct));
+            decimal? CostOf(string id) => list.GetProperty("outcomes").EnumerateArray()
+                .Single(o => o.GetProperty("id").GetString() == id).GetProperty("figures").GetProperty("cost").GetProperty("amount")
+                is { ValueKind: JsonValueKind.Number } amount ? amount.GetDecimal() : null;
+            Assert.Equal(60m, CostOf(first.Id));
+            Assert.Null(CostOf(second.Id));
+        }
+        finally
+        {
+            await SetAsync(person, TenantSettings.OutcomesAgentHourlyRateName, null);
+        }
+    }
+
+    [Fact]
+    public async Task A_plugin_without_its_own_rate_is_not_priced_nor_Agent_Hours_and_one_with_its_own_rate_is_in_the_headline_only()
+    {
+        var person = await host.PersonAsync();
+        var team = await NewTeamAsync("Cost plugin");
+        var now = DateTimeOffset.UtcNow;
+
+        try
+        {
+            // A tenant agent rate is set: no plugin is priced at it.
+            await SetOkAsync(person, TenantSettings.OutcomesAgentHourlyRateName, 60);
+
+            await RunAsync(NextCorrelation(), team, now.AddHours(-3), now.AddHours(-1), rate: "60");
+            await RunAsync(NextCorrelation(), team, now.AddHours(-2), now.AddHours(-1), kind: MemberRef.PluginKind, snapshot: true);
+            await RunAsync(NextCorrelation(), team, now.AddHours(-2), now.AddHours(-1), kind: MemberRef.PluginKind);
+            await RunAsync(NextCorrelation(), team, now.AddHours(-2), now.AddHours(-1), kind: MemberRef.PluginKind, rate: "15");
+            // An agent hour with no price: Agent Hours, and no money.
+            await RunAsync(NextCorrelation(), team, now.AddHours(-2), now.AddHours(-1), snapshot: true);
+
+            var totals = (await CostAsync(person, team)).GetProperty("totals");
+
+            Assert.Equal(3 * 3600, totals.GetProperty("agentSeconds").GetDouble(), 3);
+            Assert.Equal(135m, totals.GetProperty("cost").GetDecimal());
+            Assert.Equal(60m, totals.GetProperty("agentRate").GetDecimal());
+        }
+        finally
+        {
+            await SetAsync(person, TenantSettings.OutcomesAgentHourlyRateName, null);
+        }
+    }
+
+    [Fact]
+    public async Task A_run_crossing_a_week_is_split_between_the_weeks_it_overlaps()
+    {
+        var person = await host.PersonAsync();
+        var team = await NewTeamAsync("Cost split");
+        var monday = OutcomeFigures.WeekOf(DateTimeOffset.UtcNow);
+
+        await RunAsync(NextCorrelation(), team, monday.AddHours(-1), monday.AddHours(2), rate: "60");
+
+        var read = await CostAsync(person, team);
+        var weekly = Single(read).GetProperty("weekly").EnumerateArray().ToList();
+
+        Assert.Equal(3600, weekly[^2].GetProperty("agentSeconds").GetDouble(), 3);
+        Assert.Equal(60m, weekly[^2].GetProperty("cost").GetDecimal());
+        Assert.Equal(7200, weekly[^1].GetProperty("agentSeconds").GetDouble(), 3);
+        Assert.Equal(120m, weekly[^1].GetProperty("cost").GetDecimal());
+        // Tokens are reported when a run ends: in the week it ended.
+        Assert.Equal(0, weekly[^2].GetProperty("measuredRuns").GetInt32());
+        Assert.Equal(1, weekly[^1].GetProperty("measuredRuns").GetInt32());
+        Assert.Equal(180m, read.GetProperty("totals").GetProperty("cost").GetDecimal());
+    }
+
     [Fact]
     public async Task An_unknown_team_is_not_found()
     {
@@ -593,6 +702,12 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
             new TriggerAudit(null, Email, TenantActions.WorkflowOutcomeChanged, null, null, null), Ct)).Ok);
         return correlation;
     }
+
+    /// <summary>A person's move of an already-linked workflow to <paramref name="outcome"/>: a newer link row.</summary>
+    private async Task RelinkAsync(long correlation, string outcome, string team) =>
+        Assert.True((await Outcomes.LinkAsync(correlation, outcome, team, new OutcomeActor(Email, OutcomeActorKind.Person),
+            OutcomeLinkHow.Person, agentRule: false,
+            new TriggerAudit(null, Email, TenantActions.WorkflowOutcomeChanged, null, null, null), Ct)).Ok);
 
     private Task<HttpResponseMessage> SetAsync(HttpClient person, string name, object? value) =>
         person.PutAsJsonAsync("/api/tenant/settings", new Dictionary<string, object?> { [name] = value }, Ct);
