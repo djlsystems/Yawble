@@ -70,17 +70,57 @@ public abstract class ExecutionCostReadContract : ProviderContract
     }
 
     [Fact]
-    public async Task Priced_only_answers_just_the_runs_whose_snapshot_carries_a_rate()
+    public async Task Priced_only_answers_the_runs_whose_snapshot_carries_a_rate_and_the_agent_runs_from_before_snapshots()
     {
         var stores = await StoresAsync();
         await RunAsync(stores, 20, From.AddHours(1), From.AddHours(2), snapshot: ("agent", "60", "USD", "tenant", null));
         await RunAsync(stores, 21, From.AddHours(1), From.AddHours(2), snapshot: ("agent", null, null, "none", null));
+        // From before snapshots: an agent run may be priced from the rate's history; a plugin run, or a
+        // run that never started, never is.
         await RunAsync(stores, 22, From.AddHours(1), From.AddHours(2));
         await RunAsync(stores, 23, From.AddDays(-30), From.AddDays(-30).AddHours(1), snapshot: ("plugin", "15", "USD", "member", null));
+        await RunAsync(stores, 24, From.AddHours(1), From.AddHours(2), kind: "plugin");
+        await RunAsync(stores, 25, null, From.AddHours(2));
 
-        Assert.Equal([20L, 23], (await stores.Outcomes.ReadExecutionRunsAsync(null, null, pricedOnly: true, Ct)).Runs.Select(r => r.Run.RunSeq));
-        Assert.Equal([20L], (await stores.Outcomes.ReadExecutionRunsAsync(From, To, pricedOnly: true, Ct)).Runs.Select(r => r.Run.RunSeq));
+        Assert.Equal([20L, 22, 23], (await stores.Outcomes.ReadExecutionRunsAsync(null, null, pricedOnly: true, Ct)).Runs.Select(r => r.Run.RunSeq));
+        Assert.Equal([20L, 22], (await stores.Outcomes.ReadExecutionRunsAsync(From, To, pricedOnly: true, Ct)).Runs.Select(r => r.Run.RunSeq));
     }
+
+    [Fact]
+    public async Task The_read_answers_the_rate_epoch_and_every_change_of_the_agent_rate_oldest_first()
+    {
+        var stores = await StoresAsync();
+
+        // Nothing recorded yet: no epoch and no change.
+        var empty = (await stores.Outcomes.ReadExecutionRunsAsync(From, To, pricedOnly: false, Ct)).Timeline!;
+        Assert.Null(empty.Epoch);
+        Assert.Empty(empty.Changes);
+
+        await stores.ExecuteAsync(
+            "INSERT INTO rate_epochs (id, recorded_at, rate_amount, rate_currency, rate_source) "
+            + $"VALUES (1, {Sql(From.AddDays(-60))}, '45', 'USD', 'configuration')");
+
+        await EventAsync(stores, From.AddDays(-10), TenantActions.TenantSettingChanged, "outcomes.agentHourlyRate", "\"old\":null,\"new\":\"40\"");
+        await EventAsync(stores, From.AddDays(-9), TenantActions.TenantSettingChanged, "outcomes.currency", "\"old\":null,\"new\":\"eur\"");
+        await EventAsync(stores, From.AddDays(-8), TenantActions.TenantSettingReset, "outcomes.agentHourlyRate", "\"old\":\"40\",\"new\":null,\"change\":\"reset to default\"");
+        await EventAsync(stores, From.AddDays(-7), TenantActions.TenantSettingChanged, "outcomes.agentHourlyRate", "\"old\":null,\"new\":\"62.5\"");
+
+        var timeline = (await stores.Outcomes.ReadExecutionRunsAsync(From, To, pricedOnly: false, Ct)).Timeline!;
+
+        Assert.Equal(new RateEpoch(From.AddDays(-60), "45", "USD", "configuration"), timeline.Epoch);
+        Assert.Equal(
+            [(From.AddDays(-10), (string?)"40"), (From.AddDays(-8), null), (From.AddDays(-7), "62.5")],
+            timeline.Changes.Select(c => (c.At, c.NewValue)));
+        Assert.True(timeline.Changes.Select(c => c.Seq).SequenceEqual(timeline.Changes.Select(c => c.Seq).Order()));
+    }
+
+    /// <summary>A tenant row for <paramref name="setting"/>, as a settings write leaves one: <paramref name="detail"/>
+    /// is the JSON after <c>setting</c>.</summary>
+    private static Task EventAsync(ContractStores stores, DateTimeOffset at, string action, string setting, string detail) =>
+        stores.ExecuteAsync(
+            "INSERT INTO tenant_events (occurred_at, actor_id, actor_email, action, subject, subject_name, detail) "
+            + $"VALUES ({Sql(at)}, NULL, 'person@example.test', '{action}', '{setting}', '{setting}', "
+            + $"'{{\"setting\":\"{setting}\",{detail}}}')");
 
     // ---- fixtures ----
 

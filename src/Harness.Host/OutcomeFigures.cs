@@ -116,8 +116,10 @@ public static class OutcomeFigures
     public sealed record Week(
         DateTimeOffset WeekStart, double AgentSeconds, long Billable, int MeasuredRuns, int UnmeasuredRuns, decimal? Cost);
 
-    /// <summary>An amount of <see cref="Currency"/>; a null amount is "not priced", never 0.</summary>
-    public sealed record Money(decimal? Amount, string Currency);
+    /// <summary>An amount of <see cref="Currency"/>; a null amount is "not priced", never 0.
+    /// <see cref="LegacyRates"/> is its footnote: <c>reconstructed</c> and <c>fallback-at-upgrade</c>, each when
+    /// a run in it was priced that way.</summary>
+    public sealed record Money(decimal? Amount, string Currency, IReadOnlyList<string> LegacyRates);
 
     /// <summary>The instance's settings the dashboard is read with.</summary>
     public sealed record Pricing(string Currency, int AgentHourlyRate, string DeclaredCountsAs)
@@ -234,7 +236,7 @@ public static class OutcomeFigures
             BlockedSeconds = blockedSeconds,
             Efficiency = total > 0 ? figures.AgentSeconds / total : null,
             Weekly = weekly,
-            Cost = new Money(costs.Of(outcome), pricing.Currency),
+            Cost = new Money(costs.Of(outcome), pricing.Currency, costs.LegacyRatesOf(outcome)),
         };
     }
 

@@ -805,6 +805,7 @@ function showThread(row: WorkflowRow) {
           />
         </div>
         <div v-if="costTileWords.detail" class="team-kpi-detail mono" data-cost-detail>{{ costTileWords.detail }}</div>
+        <div v-if="costTileWords.footnote" class="team-kpi-detail os-text-muted" data-cost-footnote>{{ costTileWords.footnote }}</div>
         <template v-if="costTileWords.bar !== null">
           <div
             class="team-kpi-cost-bar"

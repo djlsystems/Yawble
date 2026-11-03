@@ -70,6 +70,23 @@ describe('the Estimated Execution Cost tile', () => {
     expect(tile(wrapper!, 'budgets').text()).not.toContain('Set an agent hourly rate');
   });
 
+  it('footnotes a total priced in part at a reconstructed or fallback rate, and never an unpriced one', () => {
+    const summary = costSummary();
+    summary.total = { ...summary.total, legacyRates: ['reconstructed', 'fallback-at-upgrade'] };
+    wrapper = mount(CostSummary, { props: { summary, currency: 'USD' } });
+
+    const spend = tile(wrapper, 'spend');
+    expect(spend.get('[data-summary-value]').text()).toBe('$2,200*');
+    expect(spend.get('[data-summary-footnote]').text()).toBe('* Includes reconstructed and fallback rates');
+    expect(spend.get('.cost-summary-title').text()).toBe('Estimated Execution Cost');
+    wrapper.unmount();
+
+    // Priced from snapshots alone: no marker and no footnote.
+    const plain = tile(mountTiles(), 'spend');
+    expect(plain.get('[data-summary-value]').text()).toBe('$2,200');
+    expect(plain.find('[data-summary-footnote]').exists()).toBe(false);
+  });
+
   it('with priced plugin time and no priced agent time, gives the hours without inventing a rate', () => {
     const summary = costSummary();
     summary.total = { ...summary.total, agentRate: null };

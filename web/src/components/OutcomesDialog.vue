@@ -56,6 +56,7 @@ import {
   when,
   type Period,
 } from '../lib/outcomes';
+import { legacyRateNote, markedMoney } from '../lib/teamCost';
 import { itemLabel } from '../lib/backlog';
 import { vResizableColumns } from '../lib/resizableColumns';
 import BacklogDialog from './BacklogDialog.vue';
@@ -175,7 +176,13 @@ watch(() => [period.value.kind, period.value.customFrom, period.value.customTo],
 // --- A tile's figures, worded ------------------------------------------------------------------
 
 function costText(figures: OutcomeFigures) {
-  return moneyText(figures.cost.amount, figures.cost.currency);
+  const text = moneyText(figures.cost.amount, figures.cost.currency);
+  return figures.cost.amount === null ? text : markedMoney(text, figures.cost.legacyRates);
+}
+
+/** The cost's footnote, as its title: a reconstructed or fallback rate priced part of it. */
+function costNote(figures: OutcomeFigures) {
+  return figures.cost.amount === null ? undefined : legacyRateNote(figures.cost.legacyRates) ?? undefined;
 }
 
 function valueText(value: string | null) {
@@ -768,7 +775,7 @@ const history = computed<HistoryLine[]>(() => {
             <div class="outcome-stat__label">Budget</div>
           </div>
           <div class="outcome-stat" data-outcome-cost>
-            <div class="outcome-stat__figure">{{ costText(current.figures) }}</div>
+            <div :title="costNote(current.figures)" class="outcome-stat__figure">{{ costText(current.figures) }}</div>
             <div class="outcome-stat__label">
               Cost · {{ agentHoursText(current.figures.agentSeconds) }}<template v-if="money.agentHourlyRate !== null"> at {{ moneyText(money.agentHourlyRate, money.currency) }}/h</template>
             </div>
@@ -992,7 +999,7 @@ const history = computed<HistoryLine[]>(() => {
               </div>
 
               <div class="outcome-tile__money" data-outcome-tile-money>
-                <span class="outcome-tile__cost">{{ costText(o.figures) }}</span>
+                <span :title="costNote(o.figures)" class="outcome-tile__cost">{{ costText(o.figures) }}</span>
                 <span class="os-text-muted">
                   spent<template v-if="valueText(o.value)"> of {{ valueText(o.value) }} budget</template>
                   · {{ agentHoursText(o.figures.agentSeconds) }}
@@ -1047,7 +1054,7 @@ const history = computed<HistoryLine[]>(() => {
                 <span class="text-weight-medium text-italic">{{ list.noOutcome.name }}</span>
               </div>
               <div class="outcome-tile__money">
-                <span class="outcome-tile__cost">{{ costText(list.noOutcome.figures) }}</span>
+                <span :title="costNote(list.noOutcome.figures)" class="outcome-tile__cost">{{ costText(list.noOutcome.figures) }}</span>
                 <span class="os-text-muted">spent · {{ agentHoursText(list.noOutcome.figures.agentSeconds) }}</span>
               </div>
               <div class="outcome-weeks" data-outcome-weeks>

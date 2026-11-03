@@ -658,14 +658,35 @@ public sealed class SqlServerOutcomeStore(
                      LEFT JOIN workflow_outcome_links l ON l.id = s.link_id
                      WHERE ((u.started_at IS NOT NULL AND u.started_at < @to AND u.ended_at > @from)
                             OR (u.ended_at >= @from AND u.ended_at < @to))
-                       AND (@priced = 0 OR s.rate_amount IS NOT NULL)
+                       AND (@priced = 0 OR s.rate_amount IS NOT NULL
+                            OR (s.start_seq IS NULL AND u.started_at IS NOT NULL AND COALESCE(u.member_kind, N'') <> @plugin))
                      ORDER BY u.run_seq
                      """;
                 runs.Parameters.AddWithValue("@from", Instant.Stamp(from ?? DateTimeOffset.MinValue));
                 runs.Parameters.AddWithValue("@to", Instant.Stamp(to ?? DateTimeOffset.MaxValue));
                 runs.Parameters.AddWithValue("@priced", pricedOnly ? 1 : 0);
+                runs.Parameters.AddWithValue("@plugin", MemberRef.PluginKind);
+                var rows = await LedgerFacts.ReadExecutionRunsAsync(runs, token);
 
-                return new ExecutionRunRows(current, await LedgerFacts.ReadExecutionRunsAsync(runs, token));
+                // THE TENANT RATE'S HISTORY, as the SQLite store reads it.
+                await using var epoch = connection.CreateCommand();
+                epoch.CommandText = "SELECT recorded_at, rate_amount, rate_currency, rate_source FROM rate_epochs WHERE id = 1";
+
+                await using var changes = connection.CreateCommand();
+                changes.CommandText =
+                    """
+                    SELECT seq, occurred_at, detail FROM tenant_events
+                    WHERE action IN (@changed, @reset) AND subject = @setting
+                    ORDER BY seq
+                    """;
+                changes.Parameters.AddWithValue("@changed", TenantActions.TenantSettingChanged);
+                changes.Parameters.AddWithValue("@reset", TenantActions.TenantSettingReset);
+                changes.Parameters.AddWithValue("@setting", ExecutionSnapshotFacts.AgentHourlyRateSetting);
+
+                var timeline = new RateTimeline(
+                    await RateEpochFacts.ReadEpochAsync(epoch, token), await RateEpochFacts.ReadChangesAsync(changes, token));
+
+                return new ExecutionRunRows(current, rows, timeline);
             },
             ct);
 

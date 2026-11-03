@@ -105,6 +105,50 @@ public sealed class SqliteLedgerStartRows(string databasePath) : ILedgerStartRow
         return new LedgerStartResult(runs, workflows, instanceId, startedAt);
     }
 
+    public async Task<RateEpoch> RecordRateEpochAsync(RateEpochConfiguration configured, CancellationToken ct = default)
+    {
+        await using var connection = new SqliteConnection(SqliteOpen.ConnectionString(databasePath));
+        await connection.OpenAsync(ct);
+        await SqlitePragmas.ApplyAsync(connection, ct: ct);
+
+        // IMMEDIATE, so two starts on one file cannot both find the table empty.
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
+
+        await using (var read = connection.CreateCommand())
+        {
+            read.Transaction = transaction;
+            read.CommandText = "SELECT recorded_at, rate_amount, rate_currency, rate_source FROM rate_epochs WHERE id = 1";
+            if (await RateEpochFacts.ReadEpochAsync(read, ct) is { } existing)
+            {
+                await transaction.CommitAsync(ct);
+                return existing;
+            }
+        }
+
+        var (amount, currency, source) = RateEpochFacts.Decide(
+            await SettingAsync(connection, transaction, ExecutionSnapshotFacts.AgentHourlyRateSetting, ct),
+            await SettingAsync(connection, transaction, ExecutionSnapshotFacts.CurrencySetting, ct),
+            configured.AgentHourlyRate,
+            configured.Currency);
+
+        var now = Instant.Now();
+        await using (var insert = connection.CreateCommand())
+        {
+            insert.Transaction = transaction;
+            insert.CommandText =
+                "INSERT INTO rate_epochs (id, recorded_at, rate_amount, rate_currency, rate_source) VALUES (1, $at, $amount, $currency, $source)";
+            insert.Parameters.AddWithValue("$at", now);
+            insert.Parameters.AddWithValue("$amount", (object?)amount ?? DBNull.Value);
+            insert.Parameters.AddWithValue("$currency", (object?)currency ?? DBNull.Value);
+            insert.Parameters.AddWithValue("$source", source);
+            await insert.ExecuteNonQueryAsync(ct);
+        }
+
+        await transaction.CommitAsync(ct);
+
+        return new RateEpoch(Instant.Parse(now), amount, currency, source);
+    }
+
     private static async Task<(int Runs, int Workflows)> BackfillAsync(
         SqliteConnection connection, SqliteTransaction transaction, CancellationToken ct)
     {

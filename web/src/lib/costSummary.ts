@@ -1,7 +1,7 @@
 import type { CostSummary, CostSummaryOutcome } from '../api/outcomes';
 import { NoOutcomeColour, outcomeColour } from './outcomeColours';
 import { moneyText } from './outcomes';
-import { EstimateTitle, agentHours, agentRateLine, percentText, weekLabel, type CostSeries } from './teamCost';
+import { EstimateTitle, agentHours, agentRateLine, legacyRateNote, markedMoney, percentText, weekLabel, type CostSeries } from './teamCost';
 
 /**
  * THE FOUR TILES ABOVE THE TEAMS LIST, WORDED: Estimated Execution Cost, Budgets, Where it goes and Right now, each a
@@ -48,6 +48,8 @@ export interface SpendTile {
   /** Up, down or flat, for the arrow's reader; null with no change line. */
   direction: 'up' | 'down' | 'flat' | null;
   detail: string;
+  /** The footnote when a reconstructed or fallback rate priced part of the figure; null otherwise. */
+  footnote: string | null;
   /** The weekly chart, as one series. */
   series: CostSeries[];
   weeks: string[];
@@ -68,12 +70,13 @@ export function spendTile(summary: CostSummary, currency: string): SpendTile {
   }
 
   return {
-    value: priced ? moneyText(summary.total.cost, currency) : agentHours(summary.total.agentSeconds),
+    value: priced ? markedMoney(moneyText(summary.total.cost, currency), summary.total.legacyRates) : agentHours(summary.total.agentSeconds),
     change,
     direction,
     detail: priced
       ? agentRateLine(summary.total, currency)
       : 'no rate set',
+    footnote: priced ? legacyRateNote(summary.total.legacyRates) : null,
     series: [{
       key: 'spend',
       name: priced ? EstimateTitle : 'Agent Hours',

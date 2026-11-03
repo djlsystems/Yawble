@@ -41,6 +41,7 @@ const now = computed(() => props.summary.rightNow);
       <span class="cost-summary-value mono" data-summary-value>{{ spend.value }}</span>
       <span v-if="spend.change" class="cost-summary-line" data-summary-change :data-direction="spend.direction">{{ spend.change }}</span>
       <span class="cost-summary-line os-text-muted" data-summary-detail>{{ spend.detail }}</span>
+      <span v-if="spend.footnote" class="cost-summary-line os-text-muted" data-summary-footnote>{{ spend.footnote }}</span>
       <CostWeeksChart
         class="cost-summary-chart"
         :weeks="spend.weeks"

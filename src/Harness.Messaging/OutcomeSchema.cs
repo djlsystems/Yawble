@@ -348,5 +348,29 @@ public static class OutcomeSchema
 
             ALTER TABLE usage_ledger ADD COLUMN start_seq INTEGER NULL;
             """),
+
+        // THE RATE IN FORCE WHEN THIS STEP WAS APPLIED, one row, written once by the start that applies
+        // it (`RateEpochFacts`) and never again: a positive stored `outcomes.agentHourlyRate`, else - with
+        // no such row - a positive `Outcomes:AgentHourlyRate` from configuration, else no rate. It prices
+        // a run from before snapshots that started before every recorded rate change
+        // (`fallback-at-upgrade`). `id` is 1 and only 1, so a second row cannot be written; the triggers
+        // refuse every UPDATE and DELETE, so a later rate change never moves it.
+        new MigrationStep(
+            "outcome-012",
+            """
+            CREATE TABLE rate_epochs (
+                id            INTEGER PRIMARY KEY CHECK (id = 1),
+                recorded_at   TEXT    NOT NULL,
+                rate_amount   TEXT    NULL,
+                rate_currency TEXT    NULL,
+                rate_source   TEXT    NOT NULL
+            );
+
+            CREATE TRIGGER rate_epochs_no_update BEFORE UPDATE ON rate_epochs
+            BEGIN SELECT RAISE(ABORT, 'rate_epochs is append-only'); END;
+
+            CREATE TRIGGER rate_epochs_no_delete BEFORE DELETE ON rate_epochs
+            BEGIN SELECT RAISE(ABORT, 'rate_epochs is append-only'); END;
+            """),
     ];
 }

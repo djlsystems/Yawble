@@ -13,6 +13,8 @@ import {
   costSeries,
   defaultRateText,
   hoursFigure,
+  legacyRateNote,
+  markedMoney,
   overBudget,
   percentText,
   perMillionText,
@@ -143,8 +145,11 @@ function changeRate() {
           <!-- THE HEADLINE FIGURES. The Estimated Execution Cost is money only when there is a rate: never $0 for unpriced time. -->
           <q-card-section class="cost-figures" data-cost-figures>
             <div class="cost-figure" data-cost-figure="spent">
-              <div class="cost-figure-value mono">{{ isPriced ? costCell(cost.totals.cost) : '—' }}</div>
+              <div class="cost-figure-value mono">{{ isPriced ? markedMoney(costCell(cost.totals.cost), cost.totals.legacyRates) : '—' }}</div>
               <div class="text-caption os-text-muted">{{ EstimateTitle }}{{ isPriced ? '' : ' · no rate set' }}</div>
+              <div v-if="isPriced && legacyRateNote(cost.totals.legacyRates)" class="text-caption os-text-muted" data-cost-footnote>
+                {{ legacyRateNote(cost.totals.legacyRates) }}
+              </div>
             </div>
             <div class="cost-figure" data-cost-figure="agent-time">
               <div class="cost-figure-value mono">{{ agentHours(cost.totals.agentSeconds) }}</div>

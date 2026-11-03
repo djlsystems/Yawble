@@ -45,6 +45,25 @@ export function anyPriced(answer: { teams: ReadonlyArray<{ totals: Pick<TeamCost
 }
 
 /**
+ * A FIGURE PRICED IN PART FROM THE RATE'S HISTORY SAYS SO: the route's `legacyRates` as a footnote's
+ * words - `* Includes reconstructed rates`, `* Includes a fallback rate`, or both - and null when the
+ * figure was priced from snapshots alone (or the route did not say).
+ */
+export function legacyRateNote(rates: readonly string[] | null | undefined): string | null {
+  const reconstructed = rates?.includes('reconstructed') ?? false
+  const fallback = rates?.includes('fallback-at-upgrade') ?? false
+  if (reconstructed && fallback) return '* Includes reconstructed and fallback rates'
+  if (reconstructed) return '* Includes reconstructed rates'
+  if (fallback) return '* Includes a fallback rate'
+  return null
+}
+
+/** A money figure with its footnote marker: `$90*` when a reconstructed or fallback rate priced part of it. */
+export function markedMoney(text: string, rates: readonly string[] | null | undefined): string {
+  return legacyRateNote(rates) === null ? text : `${text}*`
+}
+
+/**
  * `12.5 Agent Hours at $60/h`: the hours and the route's weighted agent rate. With no priced agent time
  * - only priced plugin time, say - the rate is left out rather than invented.
  */
@@ -108,9 +127,10 @@ export function valueText(value: number, money: boolean, currency: string): stri
   return money ? moneyText(value, currency) : `${value < 100 ? value.toFixed(1) : Math.round(value).toLocaleString()} h`
 }
 
-/** A figure that is money when priced and hours when not: never $0 for an unpriced one. */
-export function spendText(totals: Pick<TeamCostTotals, 'cost' | 'agentSeconds'>, currency: string): string {
-  return totals.cost === null ? agentHours(totals.agentSeconds) : moneyText(totals.cost, currency)
+/** A figure that is money when priced and hours when not: never $0 for an unpriced one. Money carries its
+ * footnote marker when a reconstructed or fallback rate priced part of it. */
+export function spendText(totals: Pick<TeamCostTotals, 'cost' | 'agentSeconds' | 'legacyRates'>, currency: string): string {
+  return totals.cost === null ? agentHours(totals.agentSeconds) : markedMoney(moneyText(totals.cost, currency), totals.legacyRates)
 }
 
 /** Whether one outcome's spend across every team has passed its budget. */
@@ -169,6 +189,8 @@ export interface CostTile {
   unbudgetedLine: string | null
   overLine: string | null
   note: string | null
+  /** The footnote when a reconstructed or fallback rate priced part of the figure; null otherwise. */
+  footnote: string | null
 }
 
 export const NoRateNote = 'Set an agent hourly rate in Outcomes to see dollars'
@@ -187,15 +209,17 @@ export function costTile(cost: TeamCost): CostTile {
       unbudgetedLine: null,
       overLine: null,
       note: NoRateNote,
+      footnote: null,
     }
   }
 
-  const value = moneyText(cost.totals.cost, currency)
+  const footnote = legacyRateNote(cost.totals.legacyRates)
+  const value = markedMoney(moneyText(cost.totals.cost, currency), cost.totals.legacyRates)
   const detail = agentRateLine(cost.totals, currency)
   const use = budgetUse(cost)
 
   if (!use) {
-    return { state: 'no-budgets', value, detail, bar: null, budgetLine: null, unbudgetedLine: null, overLine: null, note: NoBudgetNote }
+    return { state: 'no-budgets', value, detail, bar: null, budgetLine: null, unbudgetedLine: null, overLine: null, note: NoBudgetNote, footnote }
   }
 
   const unbudgeted = unbudgetedSpend(cost) ?? 0
@@ -209,6 +233,7 @@ export function costTile(cost: TeamCost): CostTile {
     unbudgetedLine: unbudgeted > 0 ? `+ ${moneyText(unbudgeted, currency)} on work with no budget` : null,
     overLine: use.over > 0 ? `⚠ ${use.over} over` : null,
     note: null,
+    footnote,
   }
 }
 

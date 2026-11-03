@@ -213,6 +213,21 @@ public static class SqlServerOutcomeSchema
 
              ALTER TABLE usage_ledger ADD start_seq BIGINT NULL;
              """),
+
+        // `OutcomeSchema`'s outcome-012: the one rate row the start that applies it writes, never moved.
+        new MigrationStep(
+            "outcome-012",
+            $"""
+             CREATE TABLE rate_epochs (
+                 id            INT           NOT NULL PRIMARY KEY CHECK (id = 1),
+                 recorded_at   NVARCHAR(40)  NOT NULL,
+                 rate_amount   NVARCHAR(MAX) NULL,
+                 rate_currency NVARCHAR(MAX) NULL,
+                 rate_source   NVARCHAR(MAX) NOT NULL
+             );
+
+             {AppendOnly("rate_epochs")}
+             """),
     ];
 
     /// <summary>The two triggers that make <paramref name="table"/> append-only, as SQLite's

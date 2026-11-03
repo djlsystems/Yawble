@@ -36,27 +36,134 @@ public sealed class ExecutionCostTests
     }
 
     [Fact]
-    public void A_run_from_before_snapshots_or_with_no_snapshot_rate_is_unavailable_never_zero_and_never_the_tenant_rate()
+    public void A_snapshot_with_no_rate_is_unavailable_never_zero_and_never_filled_from_the_rate_history()
     {
-        var legacy = Of(Row(Monday, Monday.AddHours(1)), snapshot: null);
-        var none = Run(Monday, Monday.AddHours(1), rate: null);
-        // A stored zero is never written; were one read, it is still no money.
-        var zero = Run(Monday, Monday.AddHours(1), rate: "0");
+        // A history that would price an agent run at 90 at that moment, and an epoch at 50.
+        var history = Timeline(epoch: "50", (Monday.AddDays(-30), "90"));
 
-        foreach (var run in new[] { legacy, none, zero })
+        var none = Of(Row(Monday, Monday.AddHours(1)), Snapshot(rate: null), history);
+        // A stored zero is never written; were one read, it is still no money.
+        var zero = Of(Row(Monday, Monday.AddHours(1)), Snapshot(rate: "0"), history);
+        // From before snapshots with no history at all: nothing to price it from.
+        var legacy = Of(Row(Monday, Monday.AddHours(1)), snapshot: null);
+
+        foreach (var run in new[] { none, zero, legacy })
         {
             Assert.Null(run.Rate);
             Assert.Null(run.Estimate);
+            Assert.False(run.IsRebuilt);
             Assert.Equal(3600, run.Seconds, 3);
         }
 
-        Assert.Null(legacy.RateSource);
         Assert.Equal(ExecutionSnapshotFacts.RateSourceNone, none.RateSource);
+        Assert.Equal(ExecutionSnapshotFacts.RateSourceNone, legacy.RateSource);
 
-        var total = ExecutionCost.Total(ExecutionCost.Weeks([legacy, none, zero], Weeks, Usd), Usd);
+        var total = ExecutionCost.Total(ExecutionCost.Weeks([none, zero, legacy], Weeks, Usd), Usd);
         Assert.Null(total.Cost);
         Assert.Null(total.AgentRate);
+        Assert.Empty(total.LegacyRates);
         Assert.Equal(3 * 3600, total.AgentSeconds, 3);
+    }
+
+    [Fact]
+    public void A_legacy_agent_run_is_priced_at_the_tenant_rate_in_effect_at_its_start_and_a_later_change_does_not_move_it()
+    {
+        // 40 from a month back, 60 from two hours into Monday, 90 set today, after both runs.
+        var history = Timeline(epoch: "25", (Monday.AddDays(-30), "40"), (Monday.AddHours(2), "60"), (Now, "90"));
+
+        var early = Of(Row(Monday, Monday.AddHours(1)), snapshot: null, history, currency: "usd");
+        var atChange = Of(Row(Monday.AddHours(2), Monday.AddHours(3)), snapshot: null, history);
+
+        Assert.Equal(40m, early.Rate);
+        Assert.Equal(40m, early.Estimate);
+        Assert.Equal(RateEpochFacts.RateSourceReconstructed, early.RateSource);
+        // The instance's currency now, upper-case, as a snapshot's.
+        Assert.Equal(Usd, early.Currency);
+        // A change AT the start is in effect at it.
+        Assert.Equal(60m, atChange.Estimate);
+        Assert.True(early.IsRebuilt);
+    }
+
+    [Fact]
+    public void A_zero_an_empty_value_or_a_reset_in_effect_at_start_is_unavailable_and_never_falls_through_to_the_epoch()
+    {
+        foreach (var value in new[] { "0", "", null })
+        {
+            var history = Timeline(epoch: "50", (Monday.AddDays(-1), value));
+            var run = Of(Row(Monday, Monday.AddHours(1)), snapshot: null, history);
+
+            Assert.Null(run.Rate);
+            Assert.Null(run.Estimate);
+            Assert.Equal(ExecutionSnapshotFacts.RateSourceNone, run.RateSource);
+        }
+    }
+
+    [Fact]
+    public void A_legacy_agent_run_before_every_recorded_change_takes_the_epoch_rate_and_none_without_one()
+    {
+        var withEpoch = Timeline(epoch: "50", (Monday.AddDays(1), "70"));
+        var noEpochRate = Timeline(epoch: null, (Monday.AddDays(1), "70"));
+        var noEpoch = new RateTimeline(null, [new RateChange(Monday.AddDays(1), 1, "70")]);
+
+        var fallback = Of(Row(Monday, Monday.AddHours(1)), snapshot: null, withEpoch);
+        Assert.Equal(50m, fallback.Estimate);
+        Assert.Equal(RateEpochFacts.RateSourceFallback, fallback.RateSource);
+        Assert.True(fallback.IsRebuilt);
+
+        // A later row is never read for what came before it: no epoch rate is no money, never 70.
+        foreach (var history in new[] { noEpochRate, noEpoch })
+        {
+            var run = Of(Row(Monday, Monday.AddHours(1)), snapshot: null, history);
+            Assert.Null(run.Estimate);
+            Assert.Equal(ExecutionSnapshotFacts.RateSourceNone, run.RateSource);
+        }
+    }
+
+    [Fact]
+    public void A_legacy_plugin_run_is_never_priced_and_never_Agent_Hours_and_a_legacy_run_with_no_start_adds_nothing()
+    {
+        var history = Timeline(epoch: "50", (Monday.AddDays(-1), "60"));
+
+        var plugin = Of(Row(Monday, Monday.AddHours(2), kind: MemberRef.PluginKind), snapshot: null, history);
+        var unstarted = Of(Row(null, Monday.AddHours(1)), snapshot: null, history);
+        var agent = Of(Row(Monday, Monday.AddHours(1)), snapshot: null, history);
+
+        Assert.Null(plugin.Rate);
+        Assert.Equal(ExecutionSnapshotFacts.RateSourceNone, plugin.RateSource);
+        Assert.Null(unstarted.Rate);
+
+        var total = ExecutionCost.Total(ExecutionCost.Weeks([plugin, unstarted, agent], Weeks, Usd), Usd);
+        Assert.Equal(3600, total.AgentSeconds, 3);
+        Assert.Equal(60m, total.Cost);
+        Assert.Equal(60m, total.AgentRate);
+    }
+
+    [Fact]
+    public void A_rebuilt_run_crossing_a_week_is_split_at_its_one_rate_and_the_figure_names_how_it_was_priced()
+    {
+        // Sunday 23:59:15 to Monday 00:00:30 at a reconstructed 10/h; an hour at the epoch's 30 on Monday.
+        var history = Timeline(epoch: "30", (Monday.AddDays(-1), "10"));
+        var crossing = Of(Row(Monday.AddSeconds(-45), Monday.AddSeconds(30)), snapshot: null, history);
+        var old = Of(Row(Monday.AddDays(-2), Monday.AddDays(-2).AddHours(1)), snapshot: null, history);
+        var snapshotted = Run(Monday, Monday.AddHours(1), rate: "100");
+
+        var weeks = ExecutionCost.Weeks([crossing], Weeks, Usd);
+        Assert.Equal(0.12m, weeks[^2].Tally.Cost);
+        Assert.Equal(0.08m, weeks[^1].Tally.Cost);
+        Assert.Equal(crossing.Seconds, weeks.Sum(w => w.Tally.AgentSeconds), 3);
+        Assert.Equal([RateEpochFacts.RateSourceReconstructed], weeks[^1].Tally.LegacyRates);
+
+        var total = ExecutionCost.Total(ExecutionCost.Weeks([crossing, old, snapshotted], Weeks, Usd), Usd);
+        Assert.Equal([RateEpochFacts.RateSourceReconstructed, RateEpochFacts.RateSourceFallback], total.LegacyRates);
+        // The weighted rate takes the rebuilt agent hours in: (0.20 + 30 + 100) over 75 s and 2 h.
+        Assert.Equal(130.20m, total.Cost);
+        Assert.Equal(decimal.Round(130.20m / ((decimal)(75 + 7200) / 3600m), 2), total.AgentRate);
+
+        // A figure of snapshots alone has no footnote.
+        Assert.Empty(ExecutionCost.Total(ExecutionCost.Weeks([snapshotted], Weeks, Usd), Usd).LegacyRates);
+
+        var costs = ExecutionCost.CostsOf([crossing, old, snapshotted], null, null, Usd);
+        Assert.Equal([RateEpochFacts.RateSourceReconstructed, RateEpochFacts.RateSourceFallback], costs.LegacyRatesOf(null));
     }
 
     [Fact]
@@ -166,7 +273,7 @@ public sealed class ExecutionCostTests
                 new ExecutionRunRow(Row(Monday, Monday.AddHours(1)), null, null),
             ]);
 
-        var runs = ExecutionCost.Of(rows, outcomes);
+        var runs = ExecutionCost.Of(rows, outcomes, Usd);
 
         // Linked at start to an outcome merged since: where its figures live now, not the newer link.
         Assert.Equal("older", runs[0].OutcomeId);
@@ -259,9 +366,16 @@ public sealed class ExecutionCostTests
         string source = ExecutionSnapshotFacts.RateSourceMember) =>
         Of(Row(started, ended, kind), Snapshot(rate, kind, source: rate is null ? ExecutionSnapshotFacts.RateSourceNone : source));
 
-    private static ExecutionCost.Run Of(UsageLedgerRow row, ExecutionRunSnapshot? snapshot) =>
+    private static ExecutionCost.Run Of(
+        UsageLedgerRow row, ExecutionRunSnapshot? snapshot, RateTimeline? timeline = null, string currency = Usd) =>
         ExecutionCost.Of(new ExecutionRunRow(row, snapshot is null ? null : row.RunSeq, snapshot),
-            new Dictionary<string, string>(), new Dictionary<long, string>());
+            new Dictionary<string, string>(), new Dictionary<long, string>(), timeline ?? RateTimeline.Empty, currency);
+
+    /// <summary>A rate history: the epoch's rate (null: none) and each change's time and new value (null: a reset).</summary>
+    private static RateTimeline Timeline(string? epoch, params (DateTimeOffset At, string? Value)[] changes) =>
+        new(
+            new RateEpoch(Monday.AddDays(-365), epoch, epoch is null ? null : Usd, epoch is null ? ExecutionSnapshotFacts.RateSourceNone : RateEpochFacts.SourceTenant),
+            [.. changes.Select((c, i) => new RateChange(c.At, i + 1, c.Value))]);
 
     private static ExecutionRunSnapshot Snapshot(
         string? rate, string kind = MemberRef.AgentKind, string currency = Usd, string? source = null,

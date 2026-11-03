@@ -63,7 +63,7 @@ public static class OutcomeEndpoints
                 }
 
                 var all = await outcomes.ListAsync(ct);
-                var executions = ExecutionCost.Of(await outcomes.ReadExecutionRunsAsync(from, to, pricedOnly: false, ct), all);
+                var executions = ExecutionCost.Of(await outcomes.ReadExecutionRunsAsync(from, to, pricedOnly: false, ct), all, settings.OutcomesCurrency);
                 var book = OutcomeFigures.Open(await outcomes.ReadLedgerAsync(from, to, ct), all, from, to, executions);
                 var open = await log.OpenWorkflowsAmongAsync([.. book.InWindow], ct);
 
@@ -157,7 +157,7 @@ public static class OutcomeEndpoints
                 var all = await outcomes.ListAsync(ct);
                 var resolution = OutcomeFigures.Resolution(all);
                 var holder = resolution.GetValueOrDefault(outcome.Id, outcome.Id);
-                var executions = ExecutionCost.Of(await outcomes.ReadExecutionRunsAsync(null, null, pricedOnly: false, ct), all);
+                var executions = ExecutionCost.Of(await outcomes.ReadExecutionRunsAsync(null, null, pricedOnly: false, ct), all, settings.OutcomesCurrency);
                 var book = OutcomeFigures.Open(await outcomes.ReadLedgerAsync(null, null, ct), all, null, null, executions);
                 var open = await log.OpenWorkflowsAmongAsync([.. book.InWindow], ct);
                 var items = await outcomes.ReadBacklogAsync(ct);
@@ -317,7 +317,8 @@ public static class OutcomeEndpoints
         app.MapPost("/api/outcomes/{id}/merge", async (
                 string id,
                 [Description("true answers what would move and changes nothing.")] bool? preview,
-                MergeOutcome request, HttpContext context, IOutcomeStore outcomes, IMessageLog log, CancellationToken ct) =>
+                MergeOutcome request, HttpContext context, IOutcomeStore outcomes, IMessageLog log, TenantSettings settings,
+                CancellationToken ct) =>
             {
                 if (string.IsNullOrWhiteSpace(request.Into)) return Results.BadRequest(new { error = "Say which outcome to merge into (`into`)." });
 
@@ -330,7 +331,7 @@ public static class OutcomeEndpoints
                 if (preview == true)
                 {
                     var all = await outcomes.ListAsync(ct);
-                    var executions = ExecutionCost.Of(await outcomes.ReadExecutionRunsAsync(null, null, pricedOnly: false, ct), all);
+                    var executions = ExecutionCost.Of(await outcomes.ReadExecutionRunsAsync(null, null, pricedOnly: false, ct), all, settings.OutcomesCurrency);
                     var book = OutcomeFigures.Open(await outcomes.ReadLedgerAsync(null, null, ct), all, null, null, executions);
                     var open = await log.OpenWorkflowsAmongAsync([.. book.InWindow], ct);
                     var resolution = OutcomeFigures.Resolution(all);
@@ -650,7 +651,7 @@ public static class OutcomeEndpoints
             var pricing = OutcomeFigures.Pricing.Of(settings);
 
             var weeks = OutcomeFigures.WeekStarts(now);
-            var weekRuns = ExecutionCost.Of(await outcomes.ReadExecutionRunsAsync(weeks[0], weeks[^1].AddDays(7), pricedOnly: false, ct), all);
+            var weekRuns = ExecutionCost.Of(await outcomes.ReadExecutionRunsAsync(weeks[0], weeks[^1].AddDays(7), pricedOnly: false, ct), all, settings.OutcomesCurrency);
 
             return new Dashboard(
                 pricing, whole, items, OutcomeFigures.Resolution(all),

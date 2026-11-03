@@ -128,6 +128,26 @@ describe('the Cost tile', () => {
     expect(squash(tile().find('[data-cost-detail]').text())).toBe('18.0 Agent Hours at $60/h');
   });
 
+  it('footnotes a figure priced in part at a reconstructed or fallback rate, keeping its title', async () => {
+    const cost = teamCost();
+    cost.totals = { ...cost.totals, legacyRates: ['reconstructed'] };
+    await mountStrip({}, cost);
+
+    expect(squash(tile().find('.team-kpi-label').text())).toBe('Estimated Execution Cost · last 8 weeks');
+    expect(squash(tile().find('[data-cost-value]').text())).toBe('$1,080*');
+    expect(squash(tile().find('[data-cost-detail]').text())).toBe('18.0 Agent Hours at $60/h');
+    expect(squash(tile().find('[data-cost-footnote]').text())).toBe('* Includes reconstructed rates');
+
+    await openDialog();
+    expect(words(dialog()!.querySelector('[data-cost-figure="spent"]'))).toBe(
+      '$1,080* Estimated Execution Cost * Includes reconstructed rates');
+  });
+
+  it('gives no footnote to a figure priced from snapshots alone', async () => {
+    await mountStrip();
+    expect(tile().find('[data-cost-footnote]').exists()).toBe(false);
+  });
+
   it('prices from the route when no tenant rate is set: a member rate is still dollars, not the no-rate state', async () => {
     await mountStrip({ rate: 60, tenantRate: null });
     expect(squash(tile().find('[data-cost-value]').text())).toBe('$1,080');

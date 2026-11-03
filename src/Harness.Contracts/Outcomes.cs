@@ -375,8 +375,30 @@ public sealed record ExecutionRunSnapshot(
 /// <summary>One ledger row and its snapshot, or null for a run from before snapshots.</summary>
 public sealed record ExecutionRunRow(UsageLedgerRow Run, long? StartSeq, ExecutionRunSnapshot? Snapshot);
 
-/// <summary>What the cost read answers: the runs and every workflow's newest link.</summary>
-public sealed record ExecutionRunRows(IReadOnlyList<OutcomeLink> CurrentLinks, IReadOnlyList<ExecutionRunRow> Runs);
+/// <summary>What the cost read answers: the runs, every workflow's newest link, and the tenant rate's
+/// history a run from before snapshots is priced from (<see cref="RateTimeline"/>).</summary>
+public sealed record ExecutionRunRows(
+    IReadOnlyList<OutcomeLink> CurrentLinks, IReadOnlyList<ExecutionRunRow> Runs, RateTimeline? Timeline = null);
+
+/// <summary>
+/// The one <c>rate_epochs</c> row (<c>outcome-012</c>): the tenant agent rate in force when that step was
+/// applied, canonical decimal text or null, its currency upper-case or null, and where it came from
+/// (<c>tenant</c>, <c>configuration</c> or <c>none</c>). Written once and never moved.
+/// </summary>
+public sealed record RateEpoch(DateTimeOffset RecordedAt, string? RateAmount, string? RateCurrency, string RateSource);
+
+/// <summary>One <c>tenant.settingChanged</c> or <c>tenant.setting-reset</c> row for
+/// <c>outcomes.agentHourlyRate</c>: when, its seq, and the value it set - null for a reset.</summary>
+public sealed record RateChange(DateTimeOffset At, long Seq, string? NewValue);
+
+/// <summary>
+/// THE TENANT AGENT RATE'S HISTORY, as a run from before snapshots is priced from it: every recorded
+/// change, oldest first, and the epoch row for a run that started before all of them.
+/// </summary>
+public sealed record RateTimeline(RateEpoch? Epoch, IReadOnlyList<RateChange> Changes)
+{
+    public static readonly RateTimeline Empty = new(null, []);
+}
 
 /// <summary>The ledger rows the figures are computed from.</summary>
 public sealed record OutcomeLedgerRows(

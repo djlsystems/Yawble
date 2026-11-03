@@ -12,8 +12,18 @@ namespace Harness.Host;
 /// A RUN IS PRICED FROM ITS SNAPSHOT (<c>execution_snapshots</c>, written at start): its seconds
 /// (<c>ended_at - started_at</c>, 0 with no start) times the snapshot's <c>rate_amount</c> an hour,
 /// rounded to the cent (<see cref="Price"/>), in the snapshot's <c>rate_currency</c>. A snapshot with no
-/// rate, or a run from before snapshots, is UNAVAILABLE: no amount - never 0, never today's tenant rate,
-/// never a rate rebuilt from history. A rate changed after a run started never reaches it.
+/// rate is UNAVAILABLE: no amount - never 0, never today's tenant rate, and never filled from history.
+/// A rate changed after a run started never reaches it.
+/// </para>
+///
+/// <para>
+/// A RUN FROM BEFORE SNAPSHOTS (no <c>start_seq</c>, or no snapshot row) IS PRICED FROM THE RATE'S HISTORY
+/// (<see cref="RateTimeline"/>, <see cref="Harness.Messaging.RateEpochFacts.RateAt"/>): an agent run at
+/// the tenant rate in effect at its <c>started_at</c> - the latest <c>outcomes.agentHourlyRate</c> change
+/// at or before it, <c>reconstructed</c> - or, before every recorded change, the rate captured when
+/// <c>outcome-012</c> was applied, <c>fallback-at-upgrade</c>; a zero, an empty value or a reset is
+/// unavailable. Either is in the instance's currency now. A plugin run from before snapshots is never
+/// priced, and is never Agent Hours. Nothing here is written back: it is a read.
 /// </para>
 ///
 /// <para>
@@ -52,6 +62,11 @@ public static class ExecutionCost
         /// <summary>Whether its seconds are Agent Hours: everything that is not a plugin.</summary>
         public bool IsAgent => Kind != MemberRef.PluginKind;
 
+        /// <summary>Whether it is priced from the rate's history rather than a snapshot: <c>reconstructed</c>
+        /// or <c>fallback-at-upgrade</c>.</summary>
+        public bool IsRebuilt => Rate is not null
+            && RateSource is Harness.Messaging.RateEpochFacts.RateSourceReconstructed or Harness.Messaging.RateEpochFacts.RateSourceFallback;
+
         /// <summary>The whole run's estimate, or null when it is unavailable.</summary>
         public decimal? Estimate => Rate is { } rate ? Price(Seconds, rate) : null;
 
@@ -84,28 +99,38 @@ public static class ExecutionCost
     /// </summary>
     public static decimal Price(double seconds, decimal rate) => decimal.Round((decimal)seconds / 3600m * rate, 2);
 
-    /// <summary>Each row of <paramref name="rows"/> as a <see cref="Run"/>: its kind, its snapshot rate and
-    /// the outcome it serves, with <paramref name="outcomes"/> as they are now.</summary>
-    public static IReadOnlyList<Run> Of(ExecutionRunRows rows, IReadOnlyList<Outcome> outcomes)
+    /// <summary>Each row of <paramref name="rows"/> as a <see cref="Run"/>: its kind, its rate and the
+    /// outcome it serves, with <paramref name="outcomes"/> as they are now and a run from before snapshots
+    /// priced in <paramref name="currency"/>, the instance's currency now.</summary>
+    public static IReadOnlyList<Run> Of(ExecutionRunRows rows, IReadOnlyList<Outcome> outcomes, string currency)
     {
         var resolution = OutcomeFigures.Resolution(outcomes);
         var newest = OutcomeFigures.CurrentOutcomes(rows.CurrentLinks, resolution);
+        var timeline = rows.Timeline ?? RateTimeline.Empty;
 
-        return rows.Runs.Select(row => Of(row, resolution, newest)).ToList();
+        return rows.Runs.Select(row => Of(row, resolution, newest, timeline, currency)).ToList();
     }
 
-    /// <summary>One row as a <see cref="Run"/>, with the outcomes resolved and each workflow's newest link's
-    /// outcome given.</summary>
+    /// <summary>One row as a <see cref="Run"/>, with the outcomes resolved, each workflow's newest link's
+    /// outcome given, and the rate's history a run from before snapshots is priced from.</summary>
     public static Run Of(
-        ExecutionRunRow row, IReadOnlyDictionary<string, string> resolution, IReadOnlyDictionary<long, string> newest)
+        ExecutionRunRow row, IReadOnlyDictionary<string, string> resolution, IReadOnlyDictionary<long, string> newest,
+        RateTimeline timeline, string currency)
     {
         var ledger = row.Run;
         var seconds = OutcomeFigures.AgentSeconds(ledger);
 
         if (row.Snapshot is not { } snapshot)
         {
+            // FROM BEFORE SNAPSHOTS: the ledger row's own kind, never the roster's; a plugin is not priced,
+            // and a run with no start has no span to price.
+            var kind = ledger.MemberKind ?? MemberRef.AgentKind;
+            var (rebuilt, source) = kind == MemberRef.PluginKind || ledger.StartedAt is not { } started
+                ? (null, Harness.Messaging.ExecutionSnapshotFacts.RateSourceNone)
+                : Harness.Messaging.RateEpochFacts.RateAt(timeline, started);
+
             return new Run(
-                ledger, seconds, ledger.MemberKind ?? MemberRef.AgentKind, null, null, null,
+                ledger, seconds, kind, rebuilt, rebuilt is null ? null : currency.ToUpperInvariant(), source,
                 newest.GetValueOrDefault(ledger.Correlation));
         }
 
@@ -140,6 +165,18 @@ public static class ExecutionCost
         private bool _priced;
         private decimal _agentMoney;
         private double _agentPricedSeconds;
+        private bool _reconstructed;
+        private bool _fallback;
+
+        /// <summary>
+        /// THE FIGURE'S FOOTNOTE: <c>reconstructed</c> and <c>fallback-at-upgrade</c>, each when a priced part
+        /// of it was priced that way, in that order; empty when every priced part was a snapshot's.
+        /// </summary>
+        public IReadOnlyList<string> LegacyRates =>
+            [
+                .. _reconstructed ? [Harness.Messaging.RateEpochFacts.RateSourceReconstructed] : Array.Empty<string>(),
+                .. _fallback ? [Harness.Messaging.RateEpochFacts.RateSourceFallback] : Array.Empty<string>(),
+            ];
 
         /// <summary>The money, or null - never 0 - when no part of it was priced.</summary>
         public decimal? Cost => _priced ? _money : null;
@@ -162,6 +199,8 @@ public static class ExecutionCost
             var money = Price(seconds, rate);
             _money += money;
             _priced = true;
+            _reconstructed |= run.RateSource == Harness.Messaging.RateEpochFacts.RateSourceReconstructed;
+            _fallback |= run.RateSource == Harness.Messaging.RateEpochFacts.RateSourceFallback;
 
             if (!run.IsAgent) return;
             _agentMoney += money;
@@ -193,6 +232,8 @@ public static class ExecutionCost
             _priced |= other._priced;
             _agentMoney += other._agentMoney;
             _agentPricedSeconds += other._agentPricedSeconds;
+            _reconstructed |= other._reconstructed;
+            _fallback |= other._fallback;
         }
     }
 
@@ -245,6 +286,7 @@ public static class ExecutionCost
         var byOutcome = new Dictionary<string, decimal>(StringComparer.Ordinal);
         decimal? unattributed = null;
         var windowed = from is not null || to is not null;
+        var legacy = new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal);
 
         foreach (var run in runs)
         {
@@ -256,15 +298,37 @@ public static class ExecutionCost
             var money = Price(seconds, rate);
             if (run.OutcomeId is { } outcome) byOutcome[outcome] = byOutcome.GetValueOrDefault(outcome) + money;
             else unattributed = (unattributed ?? 0) + money;
+
+            if (run.IsRebuilt)
+            {
+                var key = run.OutcomeId ?? "";
+                if (!legacy.TryGetValue(key, out var set)) legacy[key] = set = new SortedSet<string>(LegacyOrder);
+                set.Add(run.RateSource!);
+            }
         }
 
-        return new Costs(byOutcome, unattributed);
+        return new Costs(
+            byOutcome, unattributed,
+            legacy.ToDictionary(e => e.Key, e => (IReadOnlyList<string>)[.. e.Value], StringComparer.Ordinal));
     }
 
-    /// <summary>Money by outcome, and the money of the runs that served none; null - never 0 - when none was priced.</summary>
-    public sealed record Costs(IReadOnlyDictionary<string, decimal> ByOutcome, decimal? Unattributed)
+    /// <summary>reconstructed before fallback-at-upgrade, as <see cref="Tally.LegacyRates"/> lists them.</summary>
+    private static readonly Comparer<string> LegacyOrder = Comparer<string>.Create((a, b) =>
+        (a == Harness.Messaging.RateEpochFacts.RateSourceReconstructed ? 0 : 1)
+        .CompareTo(b == Harness.Messaging.RateEpochFacts.RateSourceReconstructed ? 0 : 1));
+
+    /// <summary>Money by outcome, and the money of the runs that served none; null - never 0 - when none was
+    /// priced. <see cref="LegacyRatesOf"/> is each one's footnote: which rates from before snapshots priced it.</summary>
+    public sealed record Costs(
+        IReadOnlyDictionary<string, decimal> ByOutcome, decimal? Unattributed,
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? Legacy = null)
     {
         public decimal? Of(string? outcome) =>
             outcome is null ? Unattributed : ByOutcome.TryGetValue(outcome, out var money) ? money : null;
+
+        /// <summary><c>reconstructed</c> and <c>fallback-at-upgrade</c>, each when a run of <paramref name="outcome"/>
+        /// (null: no outcome) was priced that way; empty otherwise.</summary>
+        public IReadOnlyList<string> LegacyRatesOf(string? outcome) =>
+            Legacy?.GetValueOrDefault(outcome ?? "") ?? [];
     }
 }

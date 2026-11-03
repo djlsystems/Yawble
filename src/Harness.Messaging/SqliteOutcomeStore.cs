@@ -673,14 +673,36 @@ public sealed class SqliteOutcomeStore(
             LEFT JOIN workflow_outcome_links l ON l.id = s.link_id
             WHERE ((u.started_at IS NOT NULL AND u.started_at < $to AND u.ended_at > $from)
                    OR (u.ended_at >= $from AND u.ended_at < $to))
-              AND ($priced = 0 OR s.rate_amount IS NOT NULL)
+              AND ($priced = 0 OR s.rate_amount IS NOT NULL
+                   OR (s.start_seq IS NULL AND u.started_at IS NOT NULL AND COALESCE(u.member_kind, '') <> $plugin))
             ORDER BY u.run_seq
             """;
         runs.Parameters.AddWithValue("$from", Stamp(from ?? DateTimeOffset.MinValue));
         runs.Parameters.AddWithValue("$to", Stamp(to ?? DateTimeOffset.MaxValue));
         runs.Parameters.AddWithValue("$priced", pricedOnly ? 1 : 0);
+        runs.Parameters.AddWithValue("$plugin", MemberRef.PluginKind);
+        var rows = await LedgerFacts.ReadExecutionRunsAsync(runs, ct);
 
-        return new ExecutionRunRows(current, await LedgerFacts.ReadExecutionRunsAsync(runs, ct));
+        // THE TENANT RATE'S HISTORY, for the runs from before snapshots: the epoch row and every change
+        // of outcomes.agentHourlyRate, oldest first.
+        await using var epoch = connection.CreateCommand();
+        epoch.CommandText = "SELECT recorded_at, rate_amount, rate_currency, rate_source FROM rate_epochs WHERE id = 1";
+
+        await using var changes = connection.CreateCommand();
+        changes.CommandText =
+            """
+            SELECT seq, occurred_at, detail FROM tenant_events
+            WHERE action IN ($changed, $reset) AND subject = $setting
+            ORDER BY seq
+            """;
+        changes.Parameters.AddWithValue("$changed", TenantActions.TenantSettingChanged);
+        changes.Parameters.AddWithValue("$reset", TenantActions.TenantSettingReset);
+        changes.Parameters.AddWithValue("$setting", ExecutionSnapshotFacts.AgentHourlyRateSetting);
+
+        var timeline = new RateTimeline(
+            await RateEpochFacts.ReadEpochAsync(epoch, ct), await RateEpochFacts.ReadChangesAsync(changes, ct));
+
+        return new ExecutionRunRows(current, rows, timeline);
     }
 
     // ---- helpers ----

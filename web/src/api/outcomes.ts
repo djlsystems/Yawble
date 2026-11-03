@@ -56,7 +56,7 @@ export interface OutcomeFigures {
   /** The last eight weeks, oldest first, Monday-start UTC, whatever the period. */
   weekly: OutcomeWeek[]
   /** Agent hours times the rate; `amount` is null when no rate is set, never 0. */
-  cost: { amount: number | null; currency: string }
+  cost: { amount: number | null; currency: string; legacyRates?: string[] }
 }
 
 export interface OutcomeWeek {
@@ -370,6 +370,11 @@ export interface TeamCostTotals {
   cost: number | null
   /** The priced agent time's own rate: its estimates over its hours. Null when no agent time was priced. */
   agentRate?: number | null
+  /**
+   * The figure's footnote: `reconstructed` and `fallback-at-upgrade`, each when a run from before snapshots
+   * was priced into it that way. Empty, or absent from an older Host, when none was.
+   */
+  legacyRates?: string[]
 }
 
 /** One outcome the team's workflows served, or `id: null` for its unlinked workflows ("No outcome"). */
@@ -430,6 +435,11 @@ export interface CostSummaryTotals {
   cost: number | null
   /** The priced agent time's own rate: its estimates over its hours. Null when no agent time was priced. */
   agentRate?: number | null
+  /**
+   * The figure's footnote: `reconstructed` and `fallback-at-upgrade`, each when a run from before snapshots
+   * was priced into it that way. Empty, or absent from an older Host, when none was.
+   */
+  legacyRates?: string[]
 }
 
 /** One outcome's eight weeks across every team, or `id: null` for work linked to no outcome. */
@@ -444,6 +454,11 @@ export interface CostSummaryOutcome {
   budget: number | null
   /** What it has spent across every team, the figure its budget is measured against. */
   outcomeTotalCost: number | null
+  /**
+   * The figure's footnote: `reconstructed` and `fallback-at-upgrade`, each when a run from before snapshots
+   * was priced into it that way. Empty, or absent from an older Host, when none was.
+   */
+  legacyRates?: string[]
 }
 
 /** `GET /api/teams/cost/summary`: the four tiles above the teams list, in one answer. */

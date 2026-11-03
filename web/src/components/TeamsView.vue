@@ -42,7 +42,7 @@ import TeamCostDialog from './TeamCostDialog.vue';
 import CostWeeksChart from './CostWeeksChart.vue';
 import CostSummary from './CostSummary.vue';
 import { getCostSummary, getTeamsCost, type CostSummary as CostSummaryAnswer, type TeamCost, type TeamsCost } from '../api/outcomes';
-import { EstimateTitle, costSeries, anyPriced, overCount, priced, spendText, weekValue } from '../lib/teamCost';
+import { EstimateTitle, costSeries, anyPriced, legacyRateNote, overCount, priced, spendText, weekValue } from '../lib/teamCost';
 import { periodLine } from '../lib/costSummary';
 import TeamStatusIcon from './TeamStatusIcon.vue';
 import { vResizableColumns } from '../lib/resizableColumns';
@@ -158,6 +158,8 @@ function costCell(team: string) {
     // ONE UNIT FOR THE LIST: money when any team's run was priced, so Same scale compares like with like.
     money: teamsCost.value ? anyPriced(teamsCost.value) : priced(cost),
     total: spendText(cost.totals, cost.money.currency),
+    // The total's footnote, as its title: a reconstructed or fallback rate priced part of it.
+    footnote: cost.totals.cost === null ? null : legacyRateNote(cost.totals.legacyRates),
     over: overCount(cost.outcomes),
   };
 }
@@ -903,7 +905,11 @@ async function setPaused(team: Team | null, paused: boolean) {
                   :scale-max="sharedTop"
                   size="row"
                 />
-                <span class="teams-cost-total mono" data-teams-cost-total>{{ costCell(row.id)!.total }}</span>
+                <span
+                  class="teams-cost-total mono"
+                  data-teams-cost-total
+                  :title="costCell(row.id)!.footnote ?? undefined"
+                >{{ costCell(row.id)!.total }}</span>
                 <span
                   v-if="costCell(row.id)!.over > 0"
                   class="teams-cost-over"

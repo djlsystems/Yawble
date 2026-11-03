@@ -28,13 +28,32 @@ is an estimate.
 - **A run that crosses a week is split by overlap.** Each week gets the part of the run inside it,
   priced and rounded to the cent on its own. Tokens are reported when a run ends, so they stay in
   the week it ended.
-- **A run from before snapshots is unavailable and is not reconstructed.** Its time is in Agent
-  Hours, and it adds no money, whatever the rate is now. It keeps the outcome its workflow's newest
-  link names.
+- **A run from before snapshots** has no snapshot, and is priced from the rate's history instead:
+  - **An agent run is priced at the tenant rate in effect at its start**, the value of the latest
+    change to the agent hourly rate at or before it, labelled **reconstructed**. It is in the
+    instance's currency now.
+  - **A run from before every recorded rate change** uses the one rate captured when the rate
+    history began (when this version first started), labelled **fallback**. That captured rate is
+    the stored tenant rate then or, with none stored, a rate given in the Host's configuration. It
+    is written once and does not move: a later start or a later rate change leaves it as it was.
+  - **A zero or a missing rate is unavailable.** A run that started while the rate was 0, empty or
+    reset is unavailable even when the captured rate is set; so is a run before every change when
+    nothing was captured. Its time is in Agent Hours, and it adds no money, never `$0`.
+  - **A plugin run from before snapshots is not priced**, never at the agent rate, and is not in
+    Agent Hours.
+  - **A run that already has a snapshot is not reconstructed**, including one whose snapshot
+    records no rate: that run stays unavailable.
+  - **A later rate change does not move a past run**: the change is in effect only for runs that
+    start after it.
+  - It keeps the outcome its workflow's newest link names.
+- **A figure that used a reconstructed or fallback rate says so**, with a footnote under it:
+  `* Includes reconstructed rates`, `* Includes a fallback rate`, or
+  `* Includes reconstructed and fallback rates`. The title and the figure are unchanged.
 - **The line under the figure** reads `<N> Agent Hours at <R>/h`. N is the agent time; R is the
-  rate of the priced agent time alone, its estimates divided by its hours. **The headline need not
-  equal N times R**: a priced plugin is in the headline and not in N, and an unpriced agent hour is
-  in N and not in the money. With no priced agent time the line gives the hours alone.
+  rate of the priced agent time alone, its estimates divided by its hours, reconstructed and
+  fallback agent time included. **The headline need not equal N times R**: a priced plugin is in the
+  headline and not in N, and an unpriced agent hour is in N and not in the money. A reconstructed or
+  fallback agent hour is in both. With no priced agent time the line gives the hours alone.
 - **One currency.** Money in another currency than the instance's is left out of the figure, never
   converted or added.
 - **On the Outcomes dashboard** an outcome's agent time, tokens and money are the runs that serve
@@ -75,7 +94,9 @@ member's effective rate:
 - A plugin with no rate of its own is not priced, never at the agent rate.
 - A rate of 0 is not priced. A member's own 0 does not fall back to the tenant default. A snapshot
   never records a rate of 0.
-- Only the stored setting counts. A rate given only in the Host's configuration is not recorded.
+- Only the stored setting counts. A rate given only in the Host's configuration is not recorded on
+  a snapshot. It is read once, when the rate history begins, as the fallback for runs from before
+  snapshots, and nowhere else.
 
 **The configuration at start covers the whole run.** Changing the member's rate or billing
 account, or the tenant rate, during a run leaves that run's snapshot unchanged; the next run's
@@ -83,10 +104,16 @@ snapshot carries the new effective rate. An agent with its own rate does not pic
 tenant rate. Linking the workflow to another outcome during a run does not move that run's link
 either.
 
-Runs that started before snapshots existed have none, and none is made for them afterwards.
+Runs that started before snapshots existed have none, and none is made for them afterwards. They
+are priced from the rate's history when a figure is read, as **How a run is priced** says; nothing
+is written back.
 
 The Teams list, its summary, the team page and the Outcomes dashboard price every run from this
-snapshot, as **How a run is priced** says.
+snapshot, and a run with none from the rate's history, as **How a run is priced** says.
+
+`GET /api/ledger/export` gives each run its `rateSource` (`member`, `tenant` or `none` for a run
+with a snapshot; `reconstructed`, `fallback-at-upgrade` or `none` for one without) and its
+`estimate` (`amount` and `currency`, both null when it is not priced), from the same pricing.
 
 ## A shared budget is measured across every team
 
