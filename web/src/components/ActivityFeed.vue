@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue';
 import { getMessagesBefore } from '../api/client';
 import type { Message } from '../api/types';
-import { dateTimeOf, detail, ownerOf, summarise, timeOf } from '../lib/summarise';
+import { clockOf, dateTimeOf, detail, ownerOf, summarise, timeOf } from '../lib/summarise';
 import { eventWords, toneInk } from '../lib/eventWords';
 import { solutionNoticeOf } from '../lib/solutionNotice';
 import { runMarkOf } from '../lib/runMarks';
@@ -157,10 +157,17 @@ function inkOf(message: Message): string {
       :aria-label="`Open ${said(message).words} at ${timeOf(message.occurredAt)}`"
       @click="show(message)"
     >
-      <q-item-section side top>
+      <!-- The chip, and under it the row's time: time of day alone, so the summary beside them keeps
+           the width; the full date and time is the time's tooltip. Tabular numerals stop the column
+           jittering as digits change. -->
+      <q-item-section side top class="feed-lead">
         <span class="feed-chip" :style="{ '--feed-tone': inkOf(message) }" data-feed-chip>
           <q-icon :name="said(message).icon" size="12px" class="feed-chip-icon" /><span data-feed-words>{{ said(message).words }}</span>
           <q-tooltip><span class="mono" data-feed-chip-type>{{ message.type }}</span></q-tooltip>
+        </span>
+        <span class="feed-time mono" data-feed-time>
+          {{ clockOf(message.occurredAt) }}
+          <q-tooltip><span class="mono" data-feed-time-full>{{ dateTimeOf(message.occurredAt) }}</span></q-tooltip>
         </span>
       </q-item-section>
 
@@ -206,12 +213,6 @@ function inkOf(message: Message): string {
             <div class="q-mt-xs" data-workflow-number-hint>{{ WORKFLOW_NUMBER_HINT }}</div>
           </q-tooltip>
         </q-btn>
-      </q-item-section>
-
-      <!-- Absolute wall-clock, so a row can be lined up against what the console
-           printed. Tabular numerals stop the column jittering as digits change. -->
-      <q-item-section side top class="feed-time">
-        <q-item-label caption class="mono">{{ timeOf(message.occurredAt) }}</q-item-label>
       </q-item-section>
     </q-item>
 
@@ -328,10 +329,18 @@ function inkOf(message: Message): string {
   font-weight: 600;
 }
 
+/* The chip with the row's time under it, left-aligned to the chip's edge. */
+.feed-lead {
+  align-items: flex-start;
+}
+
 .feed-time {
+  margin-top: 2px;
+  font-size: 0.6875rem;
+  line-height: 1.3;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  padding-left: 8px;
+  color: var(--os-ink-muted);
 }
 
 /* A ROW'S CHIP: the table's words on the page's ink, the tone as its edge and a tint of its ground,
