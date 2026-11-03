@@ -128,8 +128,13 @@ public sealed class PluginSetup(
     /// connection a run of it failed held up by (<see cref="RunEndedAsync"/>, and after a restart the
     /// failed mark's <see cref="MemberRuntime.HeldByConnection"/>) while that still needs a person.
     /// </summary>
+    ///
+    /// A BINDING THE ACTIVE VERSION CANNOT USE (<see cref="PluginBindingFit"/>) holds the member the same
+    /// way, in its own words - a newer version dropped its slot, made it take one, or no longer takes its
+    /// kind. It is kept, not removed, so a person is told here and decides; binding it again or
+    /// unbinding it clears the hold at that save.
     private async Task<IReadOnlyList<(string Id, string Name, string Sentence)>> HoldingAsync(
-        PluginMemberSettings bound, MemberRuntime runtime, CancellationToken ct)
+        PluginManifest manifest, PluginMemberSettings bound, MemberRuntime runtime, CancellationToken ct)
     {
         if (connections is null) return [];
 
@@ -161,7 +166,24 @@ public sealed class PluginSetup(
             }
         }
 
+        foreach (var unusable in await PluginBindingFit.UnusableAsync(manifest, bound.Connections, connections, ct))
+        {
+            var at = holding.FindIndex(h => h.Item1 == unusable.ConnectionId);
+            if (at < 0) holding.Add((unusable.ConnectionId, unusable.ConnectionName, unusable.Reason));
+            else holding[at] = (holding[at].Item1, holding[at].Item2, holding[at].Item3 + " " + unusable.Reason);
+        }
+
         return holding;
+    }
+
+    /// <summary>Every plugin member hired on <paramref name="pluginId"/>: read again after a version of it
+    /// is installed or registered, so what the active version cannot use is on Needs you at once.</summary>
+    public async Task RefreshPluginAsync(string pluginId, CancellationToken ct = default)
+    {
+        foreach (var snapshot in host.Snapshots().Where(s => MemberRef.IsPlugin(s.Agent, out var hired) && hired == pluginId))
+        {
+            await RefreshAsync(new ContainerId(snapshot.Team, snapshot.Id), ct);
+        }
     }
 
     /// <summary>Records what holds <paramref name="member"/> up now; answers the connections that held it and no longer do.</summary>
@@ -208,7 +230,7 @@ public sealed class PluginSetup(
             var bound = await settings.ForAsync(member, ct);
             var valued = (await memberSecrets.StatesAsync(member, ct)).Keys.ToHashSet(StringComparer.Ordinal);
             var missing = PluginReadyNotice.Missing(plugin.Manifest, bound, secrets, valued);
-            var holding = await HoldingAsync(bound, runtime, ct);
+            var holding = await HoldingAsync(plugin.Manifest, bound, runtime, ct);
             var released = Hold(member, holding);
 
             runtime.MarkNeedsPerson(Words(missing, holding));

@@ -24,14 +24,17 @@ public sealed record UpgradeAttention(string Team, string Member, string TeamNam
 /// <item>a required field with no saved value and no default;</item>
 /// <item>a saved value of the wrong type, or outside the field's bounds;</item>
 /// <item>a saved value for a field the new version no longer declares;</item>
-/// <item>a secret binding, or the member's own secret value, for a secret the new version does not declare.</item>
+/// <item>a secret binding, or the member's own secret value, for a secret the new version does not declare;</item>
+/// <item>a connection binding the new version cannot use - its slot gone, a second binding of a slot that
+/// now takes one, or a connection of a kind the slot no longer takes (<see cref="PluginBindingFit"/>).</item>
 /// </list>
 ///
 /// It changes nothing: a member is never removed or stopped by an upgrade. One whose settings need
 /// attention fails its runs, naming the field, until a person fixes it - as before. Never a value:
 /// only field names and sentences.
 /// </summary>
-public sealed class PluginUpgradeAttention(TeamRegistry teams, IPluginMemberSettings settings, IPluginMemberSecretRows? secretRows = null)
+public sealed class PluginUpgradeAttention(
+    TeamRegistry teams, IPluginMemberSettings settings, IPluginMemberSecretRows? secretRows = null, IConnectionStore? connections = null)
 {
     /// <summary>Each member hired on <paramref name="manifest"/>'s plugin whose saved settings do not
     /// fit it, in team then member order. Empty when every member's fit.</summary>
@@ -50,6 +53,15 @@ public sealed class PluginUpgradeAttention(TeamRegistry teams, IPluginMemberSett
             var own = secretRows is null ? [] : (await secretRows.RowsAsync(id, ct)).Select(r => r.Field).ToList();
 
             var fields = Problems(manifest, bound, own);
+
+            // A BINDING THE NEW VERSION CANNOT USE is kept, and said here by its binding key.
+            if (connections is not null)
+            {
+                var unusable = await PluginBindingFit.UnusableAsync(manifest, bound.Connections, connections, ct);
+                fields = [.. fields.Concat(unusable.Select(u => new AttentionField(u.Key, u.Reason)))
+                    .DistinctBy(p => p.Field, StringComparer.Ordinal).OrderBy(p => p.Field, StringComparer.Ordinal)];
+            }
+
             if (fields.Count > 0) found.Add(new UpgradeAttention(team.Id, member.Id, team.Name, member.Name, fields));
         }
 

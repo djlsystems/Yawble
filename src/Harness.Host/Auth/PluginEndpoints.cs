@@ -157,7 +157,10 @@ public static class PluginEndpoints
                 + "hired on the plugin whose saved settings do not fit the new version - `{ team, member, teamName, "
                 + "memberName, fields: [{ field, reason }] }`: a required field with no value and no default, a value of "
                 + "the wrong type or outside its bounds, a field the new version dropped, a secret binding or own value "
-                + "for a secret it does not declare. Field names and sentences, never a value. `[]` when every member's "
+                + "for a secret it does not declare, or a connection binding it cannot use - its slot gone, a second binding "
+                + "of a slot that now takes one, or a connection of a kind the slot no longer takes - named by its binding "
+                + "key; such a binding is kept, not removed, and the same words hold the member on Needs you. "
+                + "Field names and sentences, never a value. `[]` when every member's "
                 + "fit, and on any install that is not an upgrade. Nothing is removed or stopped: such a member fails its "
                 + "runs, naming the field, until a person fixes it. `replaces` is one entry per id the installed "
                 + "version's manifest names in `replaces` that is installed now - `{ id, version, name, members: [{ team, "
@@ -821,6 +824,10 @@ public static class PluginEndpoints
                     refused = scan.Refused.Select(r => r.Id).ToArray(),
                 },
                 ct);
+
+            // A RESCAN MAY MAKE A NEWER VERSION ACTIVE: every plugin member is read again, so a binding it
+            // cannot use is on Needs you at once (PluginBindingFit).
+            if (context.RequestServices.GetService<PluginSetup>() is { } setup) await setup.RefreshAllAsync(ct);
 
             return Results.Ok(Listing(plugins, teams, marketplace, await solutions.ListAsync(ct), replacements, context));
         })

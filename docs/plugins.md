@@ -149,7 +149,12 @@ listed, not only the first:
 - a required field with no saved value and no default;
 - a saved value of the wrong type, or outside the field's bounds;
 - a saved value for a field the new version no longer declares (kept, and not used);
-- a secret binding, or the member's own secret value, for a secret the new version does not declare.
+- a secret binding, or the member's own secret value, for a secret the new version does not declare;
+- a connection binding the new version cannot use, named by its binding key (`appSecrets#2`): its slot
+  gone, a second binding of a slot that now takes one, or a connection of a kind the slot no longer
+  takes (`PluginBindingFit`). The binding is kept, never removed, and the same words hold the member
+  on Needs you as a `connection` row until a person binds it to a slot that takes it or unbinds it.
+  An upgrade rewrites no binding: one the new version still takes, of any kind, is used as before.
 
 The checks are the ones a run and a save already make (`PluginMemberRunner.EffectiveConfig`,
 `PluginConfigField.Refusal` and `BoundsRefusal`), gathered by `PluginUpgradeAttention`. Only field
