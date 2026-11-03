@@ -64,7 +64,7 @@ public static class TeamCost
     public sealed record SummaryWeek(string WeekStart, double AgentSeconds, decimal? Cost);
 
     public sealed record SummaryOutcome(
-        string? Id, string Name, int? Rank, double AgentSeconds, decimal? Cost, decimal? Budget, decimal? SpentTotal);
+        string? Id, string Name, int? Rank, double AgentSeconds, decimal? Cost, decimal? Budget, decimal? OutcomeTotalCost);
 
     public sealed record RightNow(int OpenWorkflows, int MembersRunning, int WaitingOnYou);
 
@@ -363,17 +363,17 @@ public static class TeamCost
                 + "week - the same weeks as an outcome's `weekly`. `periodStart`: the first week's Monday; "
                 + "`periodEnd`: today (UTC). `total`: `{ agentSeconds, cost }` over the 8 weeks; `prior`: the same "
                 + "over the 8 weeks before them.\n\n"
-                + "`outcomes`: `{ id, name, rank, agentSeconds, cost, budget, spentTotal }` for each outcome the "
+                + "`outcomes`: `{ id, name, rank, agentSeconds, cost, budget, outcomeTotalCost }` for each outcome the "
                 + "runs served in the weeks, and each live outcome with a budget even with none; `No outcome` "
                 + "(`id` null) first for unlinked work when there is some, then the outcomes in the order they "
                 + "were created. `rank` is the global rank `GET /api/teams/cost` gives (null for No outcome and "
                 + "for an outcome no team served in the weeks); `budget` is the outcome's `value` as a number; "
-                + "`spentTotal` is its cost across every team and all time, what its budget is measured against "
-                + "(`outcomeTotalCost` there) - both null for No outcome.\n\n"
+                + "`outcomeTotalCost` is its cost across every team and all time, what its budget is measured against "
+                + "(the same field there) - both null for No outcome.\n\n"
                 + "`rightNow`: `openWorkflows` and `membersRunning`, the sums of `GET /api/teams/rollup`'s "
                 + "`openWorkflows.openCount` and `running` over the active teams reached, and `waitingOnYou`, "
                 + "the number of items `GET /api/needs-you` lists.\n\n"
-                + "Cost is agent hours times the rate, rounded to the cent, and null - never 0 - when no rate is set.");
+                + "Cost is an estimate, never money paid: agent hours times the rate, rounded to the cent, and null - never 0 - when no rate is set.");
     }
 
     private const string Description =

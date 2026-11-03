@@ -29,11 +29,12 @@ import { useWorkflowNavStore } from '../../stores/workflowNav';
 import { asTeamId, type TeamTokenTotals } from '../../api/types';
 import { resetBody } from '../../test/mountQuasar';
 import { teamCost, type CostOptions } from '../../test/costFixtures';
+import { misnamed, readOff } from '../../test/estimateLabels';
 
 const teamId = asTeamId('alpha');
 const squash = (text: string | null | undefined) => (text ?? '').replace(/\s+/g, ' ').trim();
 
-/** An element's text nodes joined by spaces, as a person reads separate blocks: `$1,080 Spent`. */
+/** An element's text nodes joined by spaces, as a person reads separate blocks: `$1,080 Estimated Execution Cost`. */
 function words(element: Element | null | undefined): string {
   if (!element) return '';
   const parts: string[] = [];
@@ -88,19 +89,44 @@ async function openDialog() {
   await flushPromises();
 }
 
+describe('what the estimate is called', () => {
+  // AGENT HOURS TIMES THE CURRENT RATE IS AN ESTIMATE, never money paid: neither the tile nor the
+  // dialog's estimate tab titles it Spend, Spent or Cost alone, or says `agent h`.
+  it.each([
+    ['priced', {}],
+    ['over budget', { over: true }],
+    ['no budgets', { budgets: false }],
+    ['no rate', { rate: null }],
+  ] as [string, CostOptions][])('never names it spend, %s', async (_, options) => {
+    await mountStrip(options);
+
+    expect(misnamed([tile().find('.team-kpi-label').text()], { titles: true })).toEqual([]);
+    expect(misnamed(readOff(tile().element))).toEqual([]);
+
+    await openDialog();
+    const titles = [
+      dialog()!.querySelector('[data-cost-title]')!.textContent,
+      ...[...dialog()!.querySelectorAll('[data-cost-tab], [data-cost-figure] .text-caption, [data-cost-table] th')]
+        .map((e) => e.textContent),
+    ];
+    expect(misnamed(titles, { titles: true })).toEqual([]);
+    expect(misnamed(readOff(dialog()))).toEqual([]);
+  });
+});
+
 describe('the Cost tile', () => {
-  it('reads one cost route for its team, and is labelled Cost - last 8 weeks', async () => {
+  it('reads one cost route for its team, and is labelled Estimated Execution Cost · last 8 weeks', async () => {
     await mountStrip();
 
     expect(getTeamCost).toHaveBeenCalledWith('alpha');
-    expect(squash(tile().find('.team-kpi-label').text())).toBe('Cost - last 8 weeks');
+    expect(squash(tile().find('.team-kpi-label').text())).toBe('Estimated Execution Cost · last 8 weeks');
   });
 
   it('with budgets: dollars, hours at the rate, the bar and spent of budget over the budgeted outcomes', async () => {
     await mountStrip();
 
     expect(squash(tile().find('[data-cost-value]').text())).toBe('$1,080');
-    expect(squash(tile().find('[data-cost-detail]').text())).toBe('18.0 agent h at $60/h');
+    expect(squash(tile().find('[data-cost-detail]').text())).toBe('18.0 Agent Hours at $60/h');
     // Ship billing's $700 and Docs refresh's $300 are their totals across ALL teams, not this team's part.
     expect(squash(tile().find('[data-cost-budget]').text())).toBe('$1,000 of $1,500 budget (67%)');
     expect(squash(tile().find('[data-cost-unbudgeted]').text())).toBe('+ $360 on work with no budget');
@@ -153,7 +179,7 @@ describe('the Cost tile', () => {
   it('no rate: agent hours, never $0, and a pointer to the rate in Outcomes', async () => {
     await mountStrip({ rate: null });
 
-    expect(squash(tile().find('[data-cost-value]').text())).toBe('18.0 agent h');
+    expect(squash(tile().find('[data-cost-value]').text())).toBe('18.0 Agent Hours');
     expect(tile().text()).not.toContain('$');
     expect(tile().find('[data-cost-bar]').exists()).toBe(false);
     expect(squash(tile().find('[data-cost-note]').text())).toBe('Set an agent hourly rate in Outcomes to see dollars');
@@ -180,11 +206,11 @@ describe('the Cost tile', () => {
 });
 
 describe('the Cost dialog', () => {
-  it('is titled Cost · <team>, with the rate line linking to the Outcomes rate', async () => {
+  it('is titled Estimated Execution Cost · <team>, with the rate line linking to the Outcomes rate', async () => {
     await mountStrip();
     await openDialog();
 
-    expect(squash(dialog()!.querySelector('[data-cost-title]')!.textContent)).toBe('Cost · Alpha');
+    expect(squash(dialog()!.querySelector('[data-cost-title]')!.textContent)).toBe('Estimated Execution Cost · Alpha');
     expect(squash(dialog()!.querySelector('[data-cost-rate]')!.textContent)).toBe('Agent time at $60/h (USD) · Change in Outcomes');
 
     const nav = useWorkflowNavStore();
@@ -199,18 +225,18 @@ describe('the Cost dialog', () => {
     await openDialog();
 
     const tabs = [...dialog()!.querySelectorAll('[data-cost-tab]')].map((t) => squash(t.textContent));
-    expect(tabs).toEqual(['Cost', 'Tokens']);
+    expect(tabs).toEqual(['Estimated Execution Cost', 'Tokens']);
     expect(dialog()!.querySelector('[data-cost-figures]')).not.toBeNull();
     expect(dialog()!.querySelector('[data-tokens-panel]')).toBeNull();
   });
 
-  it('heads the Cost tab with Spent, Agent time, Budget used and Per 1M billable tokens', async () => {
+  it('heads the Cost tab with Estimated Execution Cost, Agent time, Budget used and Per 1M billable tokens', async () => {
     await mountStrip();
     await openDialog();
 
     const figure = (name: string) => words(dialog()!.querySelector(`[data-cost-figure="${name}"]`));
-    expect(figure('spent')).toBe('$1,080 Spent');
-    expect(figure('agent-time')).toBe('18.0 agent h Agent time');
+    expect(figure('spent')).toBe('$1,080 Estimated Execution Cost');
+    expect(figure('agent-time')).toBe('18.0 Agent Hours Agent time');
     expect(figure('budget-used')).toBe('67% Budget used · $1,000 of $1,500');
     // $1,080 over 3.4M billable tokens.
     expect(figure('per-million')).toBe('$318 Per 1M billable tokens');
@@ -228,9 +254,9 @@ describe('the Cost dialog', () => {
     await flushPromises();
 
     const tip = dialog()!.querySelector('[data-cost-tooltip]')!;
-    expect(words(tip.querySelector('[data-cost-tooltip-row="o-billing"]'))).toBe('Ship billing $60 1.0 agent h');
-    expect(words(tip.querySelector('[data-cost-tooltip-row="none"]'))).toBe('No outcome $30 0.5 agent h');
-    expect(words(tip.querySelector('[data-cost-tooltip-total]'))).toBe('Week total $135 · 2.3 agent h');
+    expect(words(tip.querySelector('[data-cost-tooltip-row="o-billing"]'))).toBe('Ship billing $60 1.0 Agent Hours');
+    expect(words(tip.querySelector('[data-cost-tooltip-row="none"]'))).toBe('No outcome $30 0.5 Agent Hours');
+    expect(words(tip.querySelector('[data-cost-tooltip-total]'))).toBe('Week total $135 · 2.3 Agent Hours');
   });
 
   it('tables each outcome, then No outcome and a Team total row', async () => {
@@ -267,7 +293,7 @@ describe('the Cost dialog', () => {
     await openDialog();
 
     expect(dialog()!.querySelector('[data-cost-figure="budget-used"]')).toBeNull();
-    expect(words(dialog()!.querySelector('[data-cost-figure="spent"]'))).toBe('— Spent · no rate set');
+    expect(words(dialog()!.querySelector('[data-cost-figure="spent"]'))).toBe('— Estimated Execution Cost · no rate set');
     expect(squash(dialog()!.querySelector('[data-cost-row="total"] [data-cell="cost"]')!.textContent)).toBe('—');
     expect(squash(dialog()!.querySelector('[data-cost-rate]')!.textContent)).toBe('No rate set for agent time (USD) · Change in Outcomes');
     expect(dialog()!.querySelector('[data-cost-no-rate]')).not.toBeNull();

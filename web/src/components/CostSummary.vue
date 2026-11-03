@@ -2,10 +2,11 @@
 import { computed } from 'vue';
 import type { CostSummary } from '../api/outcomes';
 import { budgetsTile, spendTile, summaryPriced, whereBars } from '../lib/costSummary';
+import { EstimateTitle } from '../lib/teamCost';
 import CostWeeksChart from './CostWeeksChart.vue';
 
 /**
- * THE INSTANCE AT A GLANCE, above the teams list: what it is costing (Spend), whether it is inside
+ * THE INSTANCE AT A GLANCE, above the teams list: what it is estimated to cost (Estimated Execution Cost), whether it is inside
  * budget (Budgets), where the money goes (Where it goes) and whether anything needs a person
  * (Right now). One row of four, two on a narrower screen, one on a phone.
  *
@@ -34,9 +35,9 @@ const now = computed(() => props.summary.rightNow);
 
 <template>
   <div class="cost-summary" data-cost-summary>
-    <!-- SPEND: the period's total, its change on the eight weeks before, and the weeks as columns. -->
+    <!-- ESTIMATED EXECUTION COST - agent hours times the current rate, never money paid: the period's total, its change on the eight weeks before, and the weeks as columns. -->
     <button type="button" class="cost-summary-tile" data-summary-tile="spend" @click="emit('open-outcome', null)">
-      <span class="cost-summary-head"><span class="cost-summary-title">Spend</span><span class="cost-summary-aside">8 wk</span></span>
+      <span class="cost-summary-head"><span class="cost-summary-title">{{ EstimateTitle }}</span><span class="cost-summary-aside">8 wk</span></span>
       <span class="cost-summary-value mono" data-summary-value>{{ spend.value }}</span>
       <span v-if="spend.change" class="cost-summary-line" data-summary-change :data-direction="spend.direction">{{ spend.change }}</span>
       <span class="cost-summary-line os-text-muted" data-summary-detail>{{ spend.detail }}</span>

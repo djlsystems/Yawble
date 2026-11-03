@@ -42,7 +42,7 @@ import TeamCostDialog from './TeamCostDialog.vue';
 import CostWeeksChart from './CostWeeksChart.vue';
 import CostSummary from './CostSummary.vue';
 import { getCostSummary, getTeamsCost, type CostSummary as CostSummaryAnswer, type TeamCost, type TeamsCost } from '../api/outcomes';
-import { costSeries, overCount, priced, spendText, weekValue } from '../lib/teamCost';
+import { EstimateTitle, costSeries, overCount, priced, spendText, weekValue } from '../lib/teamCost';
 import { periodLine } from '../lib/costSummary';
 import TeamStatusIcon from './TeamStatusIcon.vue';
 import { vResizableColumns } from '../lib/resizableColumns';
@@ -800,7 +800,7 @@ async function setPaused(team: Team | null, paused: boolean) {
           <!-- NOT SORTABLE: eight weeks by outcome have no single value to order by. -->
           <th data-col="cost" class="text-left">
             <div class="teams-cost-head">
-              <span>Cost · 8 weeks</span>
+              <span>{{ EstimateTitle }} · 8 weeks</span>
               <!-- SAME SCALE, remembered in this browser: every row on the largest team's scale. -->
               <q-toggle
                 dense
@@ -880,7 +880,7 @@ async function setPaused(team: Team | null, paused: boolean) {
             </div>
           </td>
 
-          <!-- COST · 8 WEEKS: the team's stacked weekly chart by outcome at row height, the period's
+          <!-- ESTIMATED EXECUTION COST · 8 WEEKS: the team's stacked weekly chart by outcome at row height, the period's
                total beside it (agent hours without a rate) and ⚠ when one of its outcomes is over
                budget. A click on it opens that team's Cost dialog, not the team; the status icon and
                the room around it open the team as the rest of the row does. -->
@@ -891,7 +891,7 @@ async function setPaused(team: Team | null, paused: boolean) {
                 type="button"
                 class="teams-cost-button"
                 data-teams-cost
-                :aria-label="`Cost of ${row.name}, last 8 weeks: ${costCell(row.id)!.total}`"
+                :aria-label="`${EstimateTitle} of ${row.name}, last 8 weeks: ${costCell(row.id)!.total}`"
                 @click.stop="costTeam = row.id"
               >
                 <CostWeeksChart

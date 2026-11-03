@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// THE FOUR TILES ABOVE THE TEAMS LIST: Spend, Budgets, Where it goes and Right now, in every state
+// THE FOUR TILES ABOVE THE TEAMS LIST: Estimated Execution Cost, Budgets, Where it goes and Right now, in every state
 // the summary can be in - budgets inside, over budget, no budgets, no rate - each opening what it
 // says, and every outcome in its one instance-wide colour.
 import { afterEach, describe, expect, it } from 'vitest';
@@ -8,6 +8,7 @@ import { mount, type VueWrapper } from '@vue/test-utils';
 import CostSummary from '../CostSummary.vue';
 import { costSummary, type SummaryOptions } from '../../test/costSummaryFixtures';
 import { NoOutcomeColour, colourForRank } from '../../lib/outcomeColours';
+import { misnamed, readOff } from '../../test/estimateLabels';
 
 let wrapper: VueWrapper | undefined;
 
@@ -23,16 +24,33 @@ function mountTiles(options: SummaryOptions = {}) {
 
 const tile = (view: VueWrapper, which: string) => view.get(`[data-summary-tile="${which}"]`);
 
-describe('the Spend tile', () => {
+describe('what the estimate is called', () => {
+  // AGENT HOURS TIMES THE CURRENT RATE IS AN ESTIMATE, never money paid: no tile titles it Spend,
+  // Spent or Cost alone, or says `agent h`, priced or not, inside budget or over it.
+  it.each([
+    ['priced', {}],
+    ['over budget', { over: true }],
+    ['no budgets', { budgets: false }],
+    ['no rate', { rate: null }],
+  ] as [string, SummaryOptions][])('never names it spend, %s', (_, options) => {
+    const view = mountTiles(options);
+
+    expect(tile(view, 'spend').get('.cost-summary-title').text()).toBe('Estimated Execution Cost');
+    expect(misnamed(view.findAll('.cost-summary-title').map((t) => t.text()), { titles: true })).toEqual([]);
+    expect(misnamed(readOff(view.element))).toEqual([]);
+  });
+});
+
+describe('the Estimated Execution Cost tile', () => {
   it('shows the total, its change on the prior eight weeks, the hours at the rate and a weekly column chart', () => {
     const spend = tile(mountTiles(), 'spend');
 
-    expect(spend.text()).toContain('Spend');
+    expect(spend.text()).toContain('Estimated Execution Cost');
     expect(spend.text()).toContain('8 wk');
     expect(spend.get('[data-summary-value]').text()).toBe('$2,200');
     expect(spend.get('[data-summary-change]').text()).toBe('▲ 22% vs prior 8 wk');
     expect(spend.get('[data-summary-change]').attributes('data-direction')).toBe('up');
-    expect(spend.get('[data-summary-detail]').text()).toBe('36.7 agent h at $60/h');
+    expect(spend.get('[data-summary-detail]').text()).toBe('36.7 Agent Hours at $60/h');
 
     // One series, no legend, and a per-week hover text.
     expect(spend.findAll('[data-cost-segment]')).toHaveLength(8);
@@ -51,7 +69,7 @@ describe('the Spend tile', () => {
   it('without a rate, reads agent hours and "no rate set", never $0', () => {
     const spend = tile(mountTiles({ rate: null }), 'spend');
 
-    expect(spend.get('[data-summary-value]').text()).toBe('36.7 agent h');
+    expect(spend.get('[data-summary-value]').text()).toBe('36.7 Agent Hours');
     expect(spend.get('[data-summary-detail]').text()).toBe('no rate set');
     expect(spend.get('[data-summary-change]').text()).toBe('▲ 22% vs prior 8 wk');
     expect(spend.text()).not.toContain('$');
@@ -106,7 +124,7 @@ describe('the Budgets tile', () => {
 
     expect(budgets.attributes('data-state')).toBe('no-rate');
     expect(budgets.get('[data-summary-value]').text()).toBe('—');
-    expect(budgets.get('[data-summary-note]').text()).toBe('Set an agent hourly rate in Outcomes to measure spend against budgets.');
+    expect(budgets.get('[data-summary-note]').text()).toBe('Set an agent hourly rate in Outcomes to measure Estimated Execution Cost against budgets.');
     expect(budgets.text()).not.toContain('$');
   });
 
@@ -157,7 +175,7 @@ describe('the Where it goes tile', () => {
     const where = tile(mountTiles({ rate: null }), 'where');
 
     expect(where.findAll('[data-summary-where-amount]').map((a) => a.text()))
-      .toEqual(['20.0 agent h', '6.7 agent h', '5.0 agent h', '5.0 agent h']);
+      .toEqual(['20.0 Agent Hours', '6.7 Agent Hours', '5.0 Agent Hours', '5.0 Agent Hours']);
     expect(where.find('[data-summary-where-tick]').exists()).toBe(false);
   });
 

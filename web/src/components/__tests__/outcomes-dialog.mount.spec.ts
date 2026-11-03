@@ -258,7 +258,7 @@ describe('Manage Outcomes: tabs and figures', () => {
     const money = bodyFind('[data-outcome-row="o-1"] [data-outcome-tile-money]')?.textContent?.replace(/\s+/g, ' ') ?? '';
     expect(money).toContain('$1,240');
     expect(money).toContain('of $20,000 budget');
-    expect(money).toContain('3.1 agent h');
+    expect(money).toContain('3.1 Agent Hours');
 
     const counts = (key: string) => bodyFind(`[data-outcome-row="o-1"] [data-outcome-bucket-count="${key}"]`)?.textContent?.trim();
     expect([counts('notStarted'), counts('inProgress'), counts('achieved')]).toEqual(['2 not started', '3 in progress', '5 achieved']);

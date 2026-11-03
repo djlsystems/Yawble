@@ -6,6 +6,7 @@ import { getTeamTokens } from '../api/client';
 import type { TeamCost, TeamCostOutcome } from '../api/outcomes';
 import { moneyText, rateText } from '../lib/outcomes';
 import {
+  EstimateTitle,
   CriticalColour,
   agentHours,
   budgetUse,
@@ -118,7 +119,7 @@ function changeRate() {
   <q-dialog v-model="open">
     <q-card class="token-dialog-card cost-dialog-card os-dialog-lg" data-cost-dialog>
       <q-card-section class="q-pb-none cost-dialog-head">
-        <div class="os-dialog-title" data-cost-title>Cost · {{ teamName }}</div>
+        <div class="os-dialog-title" data-cost-title>{{ EstimateTitle }} · {{ teamName }}</div>
         <div v-if="cost" class="text-caption os-text-muted cost-rate" data-cost-rate>
           {{ rateText(cost.money) }} ·
           <a href="#" class="os-name-link" data-cost-rate-change @click.prevent="changeRate">Change in Outcomes</a>
@@ -127,7 +128,7 @@ function changeRate() {
 
       <q-card-section class="q-py-none">
         <DialogTabs v-model="tab" data-cost-tabs>
-          <q-tab name="cost" label="Cost" data-cost-tab="cost" />
+          <q-tab name="cost" :label="EstimateTitle" data-cost-tab="cost" />
           <q-tab name="tokens" label="Tokens" data-cost-tab="tokens" />
         </DialogTabs>
       </q-card-section>
@@ -138,11 +139,11 @@ function changeRate() {
         </q-card-section>
 
         <template v-else>
-          <!-- THE HEADLINE FIGURES. Spent is money only when there is a rate: never $0 for unpriced time. -->
+          <!-- THE HEADLINE FIGURES. The Estimated Execution Cost is money only when there is a rate: never $0 for unpriced time. -->
           <q-card-section class="cost-figures" data-cost-figures>
             <div class="cost-figure" data-cost-figure="spent">
               <div class="cost-figure-value mono">{{ isPriced ? costCell(cost.totals.cost) : '—' }}</div>
-              <div class="text-caption os-text-muted">Spent{{ isPriced ? '' : ' · no rate set' }}</div>
+              <div class="text-caption os-text-muted">{{ EstimateTitle }}{{ isPriced ? '' : ' · no rate set' }}</div>
             </div>
             <div class="cost-figure" data-cost-figure="agent-time">
               <div class="cost-figure-value mono">{{ agentHours(cost.totals.agentSeconds) }}</div>
@@ -175,8 +176,8 @@ function changeRate() {
               <thead>
                 <tr>
                   <th class="token-name-col">Outcome</th>
-                  <th class="token-num">Agent h</th>
-                  <th class="token-num">Cost</th>
+                  <th class="token-num">Agent Hours</th>
+                  <th class="token-num">{{ EstimateTitle }}</th>
                   <th>Budget</th>
                   <th class="token-num">Billable tokens</th>
                   <th class="token-num">$ / 1M tokens</th>
@@ -218,8 +219,8 @@ function changeRate() {
               </tbody>
             </table>
             <div class="text-caption os-text-muted q-mt-sm" data-cost-note>
-              Cost is agent time at the rate. The $ / 1M tokens figure explains the dollars against the
-              tokens behind them; tokens are not billed here.
+              The Estimated Execution Cost is agent time at the current rate, not money paid. The $ / 1M
+              tokens figure explains the dollars against the tokens behind them; tokens are not billed here.
             </div>
           </q-card-section>
         </template>

@@ -226,11 +226,11 @@ export function shareOfValueText(cost: number | null, value: number | null): str
   return share > 0 && share < 1 ? '<1%' : `${Math.round(share)}%`
 }
 
-/** Agent hours from the route's seconds: `13.8 agent h`, `45 agent min`. */
+/** Agent hours from the route's seconds: `13.8 Agent Hours`, `45 agent min`. */
 export function agentHoursText(seconds: number): string {
   if (seconds < 3600) return `${Math.round(seconds / 60)} agent min`
   const hours = seconds / 3600
-  return `${hours < 100 ? hours.toFixed(1) : Math.round(hours).toLocaleString()} agent h`
+  return `${hours < 100 ? hours.toFixed(1) : Math.round(hours).toLocaleString()} Agent Hours`
 }
 
 /** The efficiency figure, `78%`, or `—` when the route has none: no time is no efficiency, never 0%. */
@@ -282,7 +282,7 @@ export function weekHeights(weekly: OutcomeFigures['weekly']): number[] {
   return values.map((v) => (max > 0 ? (v / max) * 100 : 0))
 }
 
-/** A week's hover text: `Week of Sep 29: $240 · 2.7 agent h · 3 runs`. */
+/** A week's hover text: `Week of Sep 29: $240 · 2.7 Agent Hours · 3 runs`. */
 export function weekText(week: OutcomeFigures['weekly'][number], currency: string): string {
   const start = new Date(week.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' })
   const runs = week.measuredRuns + week.unmeasuredRuns

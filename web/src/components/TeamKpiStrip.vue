@@ -37,7 +37,7 @@ import type { TeamStatus } from '../lib/teamKpis';
 import TeamCostDialog from './TeamCostDialog.vue';
 import CostWeeksChart from './CostWeeksChart.vue';
 import { getTeamCost, type TeamCost } from '../api/outcomes';
-import { costSeries, costTile, priced } from '../lib/teamCost';
+import { EstimateTitle, costSeries, costTile, priced } from '../lib/teamCost';
 import WakeLines from './WakeLines.vue';
 import WorkflowName from './WorkflowName.vue';
 
@@ -788,11 +788,11 @@ function showThread(row: WorkflowRow) {
       </template>
     </TeamStatisticsTile>
 
-    <!-- COST, LAST 8 WEEKS: dollars by outcome against the budgets of what the team serves, or agent
+    <!-- ESTIMATED EXECUTION COST, LAST 8 WEEKS: dollars by outcome against the budgets of what the team serves, or agent
          hours while no rate is set - never $0 for unpriced time. The whole tile opens the Cost
          dialog, whose Tokens tab is what this tile used to show. -->
     <button type="button" class="team-kpi team-kpi--cost" data-cost-tile @click="openCost">
-      <div class="team-kpi-label">Cost - last 8 weeks</div>
+      <div class="team-kpi-label">{{ EstimateTitle }} · last 8 weeks</div>
       <template v-if="cost && costTileWords">
         <div class="team-kpi-cost-row">
           <div class="team-kpi-value mono" data-cost-value>{{ costTileWords.value }}</div>
@@ -825,7 +825,7 @@ function showThread(row: WorkflowRow) {
       </template>
       <div v-else-if="costFailed" class="team-kpi-value team-kpi-unavailable">unavailable</div>
       <div v-else class="team-kpi-value team-kpi-unavailable">—</div>
-      <q-tooltip>Cost by outcome, and the tokens behind it — click for the breakdown</q-tooltip>
+      <q-tooltip>{{ EstimateTitle }} by outcome - agent hours at the current rate, not money paid - and the tokens behind it. Click for the breakdown</q-tooltip>
     </button>
   </div>
 

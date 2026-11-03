@@ -38,7 +38,7 @@ describe('the dashboard wording', () => {
   });
 
   it('reads agent time in hours, and efficiency as a percentage or a dash, never 0%', () => {
-    expect(agentHoursText(49_680)).toBe('13.8 agent h');
+    expect(agentHoursText(49_680)).toBe('13.8 Agent Hours');
     expect(agentHoursText(2700)).toBe('45 agent min');
     expect(efficiencyText(0.78)).toBe('78%');
     expect(efficiencyText(null)).toBe('—');
@@ -60,7 +60,7 @@ describe('the dashboard wording', () => {
 
   it('says what a week cost, how long agents worked and how many runs it had', () => {
     expect(weekText({ weekStart: '2026-09-28T00:00:00Z', agentSeconds: 9720, billable: 0, measuredRuns: 2, unmeasuredRuns: 1, cost: 243 }, 'USD'))
-      .toBe('Week of Sep 28: $243 · 2.7 agent h · 3 runs · + 1 unmeasured run');
+      .toBe('Week of Sep 28: $243 · 2.7 Agent Hours · 3 runs · + 1 unmeasured run');
   });
 
   it('names the rate, or that none is set', () => {

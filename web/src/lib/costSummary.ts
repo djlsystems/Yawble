@@ -1,14 +1,14 @@
 import type { CostSummary, CostSummaryOutcome } from '../api/outcomes';
 import { NoOutcomeColour, outcomeColour } from './outcomeColours';
 import { moneyText } from './outcomes';
-import { agentHours, hoursFigure, percentText, weekLabel, type CostSeries } from './teamCost';
+import { EstimateTitle, agentHours, hoursFigure, percentText, weekLabel, type CostSeries } from './teamCost';
 
 /**
- * THE FOUR TILES ABOVE THE TEAMS LIST, WORDED: Spend, Budgets, Where it goes and Right now, each a
+ * THE FOUR TILES ABOVE THE TEAMS LIST, WORDED: Estimated Execution Cost, Budgets, Where it goes and Right now, each a
  * pure function of `GET /api/teams/cost/summary` (`api/outcomes.ts`).
  *
  * EVERY FIGURE IS THE ROUTE'S. The only sums here are over what the route answered: the budgeted
- * outcomes' budgets and spend, the spend with no budget, and the outcomes past the top three.
+ * outcomes' budgets and estimated cost, the estimate with no budget, and the outcomes past the top three.
  *
  * NO RATE IS NO DOLLARS, NEVER $0: the route's `cost` is null without a rate, and every figure then
  * falls back to agent hours or a dash.
@@ -17,10 +17,10 @@ import { agentHours, hoursFigure, percentText, weekLabel, type CostSeries } from
  * as on every list row and the team page. Other / no outcome is the neutral gray.
  */
 
-/** The Spend chart's one series: not an outcome, so no outcome's hue. */
+/** The Estimated Execution Cost chart's one series: not an outcome, so no outcome's hue. */
 export const SpendColour = 'var(--os-ink-muted)';
 
-export const BudgetsNoRateNote = 'Set an agent hourly rate in Outcomes to measure spend against budgets.';
+export const BudgetsNoRateNote = 'Set an agent hourly rate in Outcomes to measure Estimated Execution Cost against budgets.';
 export const NoBudgetsNote = 'Give an outcome a value to track it here.';
 
 /** Whether the instance prices agent time. */
@@ -38,7 +38,7 @@ export function periodLine(summary: Pick<CostSummary, 'periodStart' | 'periodEnd
   return `Last 8 weeks · ${dayLabel(summary.periodStart)} – ${dayLabel(summary.periodEnd)}`;
 }
 
-// ---- Spend -------------------------------------------------------------------------------------
+// ---- Estimated Execution Cost -------------------------------------------------------------------------------------
 
 export interface SpendTile {
   value: string;
@@ -71,11 +71,11 @@ export function spendTile(summary: CostSummary, currency: string): SpendTile {
     change,
     direction,
     detail: priced
-      ? `${hoursFigure(summary.total.agentSeconds)} agent h at ${moneyText(summary.rate, currency)}/h`
+      ? `${hoursFigure(summary.total.agentSeconds)} Agent Hours at ${moneyText(summary.rate, currency)}/h`
       : 'no rate set',
     series: [{
       key: 'spend',
-      name: priced ? 'Spend' : 'Agent hours',
+      name: priced ? EstimateTitle : 'Agent Hours',
       colour: SpendColour,
       none: false,
       weekly: summary.weeks.map((w) => ({ ...w, billable: 0, measuredRuns: 0, unmeasuredRuns: 0 })),
@@ -86,12 +86,12 @@ export function spendTile(summary: CostSummary, currency: string): SpendTile {
 
 // ---- Budgets -----------------------------------------------------------------------------------
 
-/** What an outcome's budget is measured against: its spend across every team. */
+/** What an outcome's budget is measured against: its estimated cost across every team. */
 function spent(outcome: CostSummaryOutcome): number | null {
-  return outcome.spentTotal ?? outcome.cost;
+  return outcome.outcomeTotalCost ?? outcome.cost;
 }
 
-/** Whether an outcome's spend across every team has passed its budget. */
+/** Whether an outcome's estimated cost across every team has passed its budget. */
 export function summaryOver(outcome: CostSummaryOutcome): boolean {
   const total = spent(outcome);
   return outcome.id !== null && outcome.budget !== null && total !== null && total > outcome.budget;
@@ -169,7 +169,7 @@ function share(outcome: CostSummaryOutcome, priced: boolean): number {
 }
 
 /**
- * THE TOP THREE OUTCOMES BY SPEND, THEN OTHER / NO OUTCOME (every other outcome plus unlinked work),
+ * THE TOP THREE OUTCOMES BY ESTIMATED COST, THEN OTHER / NO OUTCOME (every other outcome plus unlinked work),
  * on ONE scale across the four bars that a budget tick also fits on.
  */
 export function whereBars(summary: CostSummary, currency: string): WhereBar[] {

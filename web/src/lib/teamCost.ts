@@ -3,15 +3,21 @@ import { outcomeColour } from './outcomeColours'
 import { moneyText } from './outcomes'
 
 /**
- * A TEAM'S COST, BY OUTCOME, WORDED AND STACKED: what the Cost tile, the Cost dialog and the teams
- * list's Cost column read. Pure functions of the cost route's answer (`api/outcomes.ts`).
+ * A TEAM'S ESTIMATED EXECUTION COST, BY OUTCOME, WORDED AND STACKED: what the team page's tile, its
+ * dialog and the teams list's column read. Pure functions of the cost route's answer (`api/outcomes.ts`).
  *
  * EVERY FIGURE IS THE ROUTE'S, and the only sums here are over what the route answered: the budgets
- * and their outcomes' all-team totals, and the team's spend on unbudgeted work.
+ * and their outcomes' all-team totals, and the team's estimated cost of unbudgeted work.
  *
  * NO RATE IS NO DOLLARS, NEVER $0. The route's `cost` is null when no agent hourly rate is set; every
  * figure then falls back to agent hours, and nothing here prints a money amount for it.
  */
+
+/**
+ * WHAT THESE FIGURES ARE CALLED: agent hours times the instance's current rate is an ESTIMATE of what
+ * the execution cost, never money paid or owed. No cost surface titles it Spend, Spent or Cost alone.
+ */
+export const EstimateTitle = 'Estimated Execution Cost'
 
 /** The critical colour: an outcome over its budget. */
 export const CriticalColour = 'var(--os-error)'
@@ -64,9 +70,9 @@ export function hoursFigure(seconds: number): string {
   return hours < 100 ? hours.toFixed(1) : Math.round(hours).toLocaleString()
 }
 
-/** `12.5 agent h`. */
+/** `12.5 Agent Hours`. */
 export function agentHours(seconds: number): string {
-  return `${hoursFigure(seconds)} agent h`
+  return `${hoursFigure(seconds)} Agent Hours`
 }
 
 /** A chart value as its axis or tooltip says it: money in the currency, or hours. */
@@ -158,7 +164,7 @@ export function costTile(cost: TeamCost): CostTile {
   }
 
   const value = moneyText(cost.totals.cost, currency)
-  const detail = `${hoursFigure(cost.totals.agentSeconds)} agent h at ${moneyText(rate, currency)}/h`
+  const detail = `${hoursFigure(cost.totals.agentSeconds)} Agent Hours at ${moneyText(rate, currency)}/h`
   const use = budgetUse(cost)
 
   if (!use) {

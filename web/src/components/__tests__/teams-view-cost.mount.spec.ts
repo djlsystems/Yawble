@@ -42,6 +42,7 @@ import { asTeamId, type TeamId, type TeamTokenTotals } from '../../api/types';
 import type { TeamsCost } from '../../api/outcomes';
 import { resetBody } from '../../test/mountQuasar';
 import { teamCost, Weeks, type CostOptions } from '../../test/costFixtures';
+import { misnamed, readOff } from '../../test/estimateLabels';
 
 const teamId = asTeamId('alpha');
 const iso = (minutes: number) => new Date(Date.UTC(2026, 9, 7, 14, minutes)).toISOString();
@@ -121,12 +122,12 @@ async function mountView(latest: string | null = null, roster = members) {
 
 const row = (view: VueWrapper, id: string) => view.find(`tr[data-team="${id}"]`);
 
-describe('the Cost · 8 weeks column', () => {
+describe('the Estimated Execution Cost · 8 weeks column', () => {
   it('replaces Activity, with no Same time span switch and no legend; its heading carries Same scale', async () => {
     const { view } = await mountView();
 
     const headings = view.findAll('thead th').map((th) => th.text().replace(/arrow_(up|down)ward/, '').replace(/\s+/g, ' ').trim());
-    expect(headings).toEqual(['Team', 'Members', 'Status', 'Cost · 8 weeksSame scale', '']);
+    expect(headings).toEqual(['Team', 'Members', 'Status', 'Estimated Execution Cost · 8 weeksSame scale', '']);
     expect(view.find('thead th[data-col="cost"] [data-teams-cost-scale]').exists()).toBe(true);
     expect(view.find('thead th[data-col="activity"]').exists()).toBe(false);
     expect(view.find('[data-activity-relative]').exists()).toBe(false);
@@ -181,9 +182,24 @@ describe('the Cost · 8 weeks column', () => {
     getTeamsCost.mockResolvedValue(teamsCost({ rate: null }));
     const { view } = await mountView();
 
-    expect(row(view, 'alpha').find('[data-teams-cost-total]').text()).toBe('18.0 agent h');
+    expect(row(view, 'alpha').find('[data-teams-cost-total]').text()).toBe('18.0 Agent Hours');
     expect(row(view, 'alpha').find('[data-teams-cost]').text()).not.toContain('$');
   });
+
+  it.each([['priced', {}], ['no rate', { rate: null }]] as [string, CostOptions][])(
+    'never names the estimate spend or Cost alone, %s',
+    async (_, options) => {
+      getTeamsCost.mockResolvedValue(teamsCost(options));
+      const { view } = await mountView();
+
+      const heading = view.get('thead th[data-col="cost"] .teams-cost-head > span').text();
+      expect(heading).toBe('Estimated Execution Cost · 8 weeks');
+      expect(misnamed([heading], { titles: true })).toEqual([]);
+      for (const cell of view.findAll('td.teams-cost')) expect(misnamed(readOff(cell.element))).toEqual([]);
+      expect(row(view, 'alpha').get('[data-teams-cost]').attributes('aria-label'))
+        .toMatch(/^Estimated Execution Cost of .+, last 8 weeks: /);
+    },
+  );
 
   it('shows a dash for a team the answer does not carry', async () => {
     getTeamsCost.mockResolvedValue({ ...teamsCost(), teams: [] });
@@ -202,7 +218,7 @@ describe('the Cost · 8 weeks column', () => {
     const dialog = view.findComponent(TeamCostDialog);
     expect(dialog.props('modelValue')).toBe(true);
     expect(dialog.props('teamId')).toBe('beta');
-    expect(document.body.querySelector('[data-cost-title]')?.textContent?.trim()).toBe('Cost · Beta');
+    expect(document.body.querySelector('[data-cost-title]')?.textContent?.trim()).toBe('Estimated Execution Cost · Beta');
     expect(document.body.querySelector('[data-cost-row="o-docs"] [data-cost-over]')).not.toBeNull();
     // Still the one call: the dialog reads the list's own answer.
     expect(getTeamsCost).toHaveBeenCalledTimes(1);

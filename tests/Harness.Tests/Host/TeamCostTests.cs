@@ -346,17 +346,17 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
             Assert.Equal(10800, entry.GetProperty("agentSeconds").GetDouble(), 3);
             Assert.Equal(180m, entry.GetProperty("cost").GetDecimal());
             Assert.Equal(500m, entry.GetProperty("budget").GetDecimal());
-            Assert.Equal(240m, entry.GetProperty("spentTotal").GetDecimal());
+            Assert.Equal(240m, entry.GetProperty("outcomeTotalCost").GetDecimal());
 
             // THE SAME FIGURES COST 1 GIVES: the outcomes dashboard's cost, and the all-teams read's
             // total cost and rank.
             var list = await JsonAsync(await person.GetAsync("/api/outcomes", Ct));
             var figures = list.GetProperty("outcomes").EnumerateArray()
                 .Single(o => o.GetProperty("id").GetString() == shared.Id).GetProperty("figures");
-            Assert.Equal(figures.GetProperty("cost").GetProperty("amount").GetDecimal(), entry.GetProperty("spentTotal").GetDecimal());
+            Assert.Equal(figures.GetProperty("cost").GetProperty("amount").GetDecimal(), entry.GetProperty("outcomeTotalCost").GetDecimal());
             var perTeam = (await CostAsync(person, alpha)).GetProperty("outcomes").EnumerateArray()
                 .Single(o => o.GetProperty("id").GetString() == shared.Id);
-            Assert.Equal(perTeam.GetProperty("outcomeTotalCost").GetDecimal(), entry.GetProperty("spentTotal").GetDecimal());
+            Assert.Equal(perTeam.GetProperty("outcomeTotalCost").GetDecimal(), entry.GetProperty("outcomeTotalCost").GetDecimal());
             Assert.Equal(perTeam.GetProperty("rank").GetInt32(), entry.GetProperty("rank").GetInt32());
 
             // A BUDGET WITH NO SPEND IN THE WEEKS IS STILL LISTED, at nothing.
@@ -364,7 +364,7 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
             Assert.Equal(0, idle.GetProperty("agentSeconds").GetDouble());
             Assert.Equal(0m, idle.GetProperty("cost").GetDecimal());
             Assert.Equal(75m, idle.GetProperty("budget").GetDecimal());
-            Assert.Equal(0m, idle.GetProperty("spentTotal").GetDecimal());
+            Assert.Equal(0m, idle.GetProperty("outcomeTotalCost").GetDecimal());
             Assert.Equal(JsonValueKind.Null, idle.GetProperty("rank").ValueKind);
         }
         finally
@@ -399,7 +399,7 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
         Assert.Equal(5400, none.GetProperty("agentSeconds").GetDouble() - before, 3);
         Assert.Equal(JsonValueKind.Null, none.GetProperty("rank").ValueKind);
         Assert.Equal(JsonValueKind.Null, none.GetProperty("budget").ValueKind);
-        Assert.Equal(JsonValueKind.Null, none.GetProperty("spentTotal").ValueKind);
+        Assert.Equal(JsonValueKind.Null, none.GetProperty("outcomeTotalCost").ValueKind);
         Assert.Equal(1800, OutcomeOf(summary, outcome.Id).GetProperty("agentSeconds").GetDouble(), 3);
     }
 
@@ -426,7 +426,7 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
         Assert.All(summary.GetProperty("outcomes").EnumerateArray(), o =>
         {
             Assert.Equal(JsonValueKind.Null, o.GetProperty("cost").ValueKind);
-            Assert.Equal(JsonValueKind.Null, o.GetProperty("spentTotal").ValueKind);
+            Assert.Equal(JsonValueKind.Null, o.GetProperty("outcomeTotalCost").ValueKind);
         });
         Assert.Equal(100m, OutcomeOf(summary, outcome.Id).GetProperty("budget").GetDecimal());
     }
@@ -462,6 +462,71 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
     }
 
     // ---- fixtures ----
+
+    // ---- what the estimate is called ----
+
+    /// <summary>
+    /// THE ESTIMATE IS NEVER NAMED SPEND. Every money figure these routes answer is agent hours times
+    /// the current rate - an estimate of execution cost, never money paid - so no field of theirs is
+    /// named spend or spent. The per-workflow token budget's fields (<c>tokensSpent</c>, a workflow's
+    /// <c>spend</c>) are the runaway safeguard, answered by other routes, and keep their names.
+    /// </summary>
+    [Fact]
+    public async Task No_cost_or_estimate_route_names_a_money_field_spend()
+    {
+        var person = await host.PersonAsync();
+        var team = await NewTeamAsync("Estimate names");
+        var outcome = await CreateAsync(person, "Estimate names", value: "500");
+        var now = DateTimeOffset.UtcNow;
+
+        await RunAsync(await LinkedAsync(outcome.Id, team), team, now.AddHours(-2), now.AddHours(-1));
+        await RunAsync(NextCorrelation(), team, now.AddHours(-3), now.AddHours(-2));
+
+        try
+        {
+            await SetOkAsync(person, TenantSettings.OutcomesAgentHourlyRateName, 60);
+
+            foreach (var route in new[]
+            {
+                $"/api/teams/{team}/cost", "/api/teams/cost", "/api/teams/cost/summary",
+                "/api/outcomes", $"/api/outcomes/{outcome.Id}",
+            })
+            {
+                var named = new List<string>();
+                NamesOf(await JsonAsync(await person.GetAsync(route, Ct)), "", named);
+
+                // THE ROUTE ANSWERED MONEY: a walk that found no cost field proves nothing.
+                Assert.Contains(named, n => n.EndsWith(".cost", StringComparison.Ordinal) || n.EndsWith("Cost", StringComparison.Ordinal));
+                Assert.DoesNotContain(named, n => SpendWord.IsMatch(n));
+            }
+        }
+        finally
+        {
+            await SetAsync(person, TenantSettings.OutcomesAgentHourlyRateName, null);
+        }
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex SpendWord =
+        new("spen[dt]", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    /// <summary>Every property name in a JSON answer, as a dotted path.</summary>
+    private static void NamesOf(JsonElement element, string path, List<string> into)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                foreach (var property in element.EnumerateObject())
+                {
+                    var at = $"{path}.{property.Name}";
+                    into.Add(at);
+                    NamesOf(property.Value, at, into);
+                }
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray()) NamesOf(item, path, into);
+                break;
+        }
+    }
 
     private static JsonElement Single(JsonElement read) => Assert.Single(read.GetProperty("outcomes").EnumerateArray().ToList());
 

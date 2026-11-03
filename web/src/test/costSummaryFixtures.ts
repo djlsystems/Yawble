@@ -26,7 +26,7 @@ export function costSummary(options: SummaryOptions = {}): CostSummary {
     agentSeconds: hours * 3600,
     cost: rate === null ? null : hours * rate,
     budget: budgets ? budget : null,
-    spentTotal: rate === null || id === null ? null : hours * rate,
+    outcomeTotalCost: rate === null || id === null ? null : hours * rate,
   });
 
   const outcomes = [

@@ -437,7 +437,7 @@ export interface CostSummaryOutcome {
   /** What achieving it is worth, in the instance's currency; null when none is set. */
   budget: number | null
   /** What it has spent across every team, the figure its budget is measured against. */
-  spentTotal: number | null
+  outcomeTotalCost: number | null
 }
 
 /** `GET /api/teams/cost/summary`: the four tiles above the teams list, in one answer. */
