@@ -611,8 +611,10 @@ export const useConsoleStore = defineStore('console', {
       const changed = this.activeTeamId !== id;
       this.activeTeamId = id;
       const picked = this.choosableTeams.find((team) => team.id === id);
-      if (id && picked && !this.openTeamTabs.includes(id)) {
-        this.openTeamTabs.push(id);
+      // ONE OPEN TEAM. There is no tab per team any more - the Teams button's list opens one board -
+      // so the open team is the one shown, and its pushes are the only team pushes a board hears.
+      if (id && picked && (this.openTeamTabs.length !== 1 || this.openTeamTabs[0] !== id)) {
+        this.openTeamTabs = [id];
       }
       this.rememberTabs();
       if (changed) {
@@ -867,11 +869,10 @@ export const useConsoleStore = defineStore('console', {
         choosable.has(id) && all.indexOf(id) === index,
       );
 
-      // An archived team never gets a tab back, even while it is the active one.
+      // An archived team never gets a tab back, even while it is the active one. ONE OPEN TEAM: the
+      // active one, else the first left from a strip of tabs a browser remembered from before.
       const active = this.choosableTeams.find((team) => team.id === this.activeTeamId) ?? null;
-      if (active !== null && !this.openTeamTabs.includes(active.id)) {
-        this.openTeamTabs.push(active.id);
-      }
+      this.openTeamTabs = active !== null ? [active.id] : this.openTeamTabs.slice(0, 1);
 
       // NOT WHILE THE TEAMS VIEW IS SHOWING. Everything below exists to keep a BOARD pointing at a
       // team that exists; on the Teams table there is deliberately no active team, and forcing one

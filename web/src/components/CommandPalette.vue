@@ -6,7 +6,7 @@ import { useConsoleStore } from '../stores/console';
 import { useKanbanStore } from '../stores/kanban';
 import { useWorkflowNavStore } from '../stores/workflowNav';
 import { follow, memberHref } from '../lib/consoleLinks';
-import { Ribbon } from '../lib/ribbon';
+import { PaletteRibbon } from '../lib/ribbon';
 import { teamLogFacts, teamStatus, teamTabChip } from '../lib/teamKpis';
 import {
   PaletteShortcut,
@@ -91,7 +91,8 @@ const entries = computed<PaletteEntry[]>(() =>
     })),
     items: items.value ?? [],
     outcomes: kanban.outcomes,
-    ribbon: Ribbon,
+    // The ribbon's commands and the team bar's, on the team in scope.
+    ribbon: PaletteRibbon,
     activeWorkTeamId: board.activeWorkTeamId || undefined,
     activeTeamName: board.activeWorkTeam?.name,
   }),

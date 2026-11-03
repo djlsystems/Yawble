@@ -917,7 +917,7 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
             "A document a team wrote is in the Documents dialog: Documents on the ribbon, then the team's folder, then the file by its name.",
             "Say it in those words, never as a path inside the container (`/data/...`): the person cannot open one.",
             "A document is not in a repository, so never send the person to the Git dialog for one.",
-            "Repository work is in the team's Git dialog (Git, under Active Team on the ribbon). Name each step by its button's words: Fetch origin, Bring current, Push, Merge to main (it names the default branch), Bring current and merge, Open pull request, Clean up worktrees.",
+            "Repository work is in the team's Git dialog (Git, on the team's bar under its name on its board). Name each step by its button's words: Fetch origin, Bring current, Push, Merge to main (it names the default branch), Bring current and merge, Open pull request, Clean up worktrees.",
         })
         {
             Assert.Contains(Flat(line), concierge, StringComparison.Ordinal);
@@ -932,7 +932,7 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
         var ribbon = File.ReadAllText(Path.Combine(SolutionSamples.RepoRoot(), "web", "src", "lib", "ribbon.ts"));
         Assert.Contains("label: 'Documents'", ribbon, StringComparison.Ordinal);
         Assert.Contains("action: 'team-git', label: 'Git'", ribbon, StringComparison.Ordinal);
-        Assert.Contains("label: 'Active Team'", ribbon, StringComparison.Ordinal);
+        Assert.Contains("export const TeamBar", ribbon, StringComparison.Ordinal);
     }
 
     /// <summary>

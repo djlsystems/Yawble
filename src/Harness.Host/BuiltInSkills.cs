@@ -1012,8 +1012,8 @@ public static class BuiltInSkills
             the container (`/data/...`): the person cannot open one. A document is not in a
             repository, so never send the person to the Git dialog for one.
 
-            Repository work is in the team's Git dialog (Git, under Active Team on the ribbon). Name
-            each step by its button's words: Fetch origin, Bring current, Push, Merge to main (it
+            Repository work is in the team's Git dialog (Git, on the team's bar under its name on its
+            board). Name each step by its button's words: Fetch origin, Bring current, Push, Merge to main (it
             names the default branch), Bring current and merge, Open pull request, Clean up
             worktrees.
 

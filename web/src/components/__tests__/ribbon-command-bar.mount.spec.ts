@@ -259,44 +259,6 @@ describe('the one header row', () => {
     expect(wrapper.find('[aria-label="More commands"]').exists()).toBe(false);
   });
 
-  /**
-   * STEPS FIVE AND SIX CAP THE ACTIVE TEAM'S TITLE at 3rem with an ellipsis; the full name stays its
-   * aria-label and tooltip. Without `tight` the title keeps its 12rem room.
-   */
-  it('caps the active team title only when tight, the full name in its aria-label and tooltip', async () => {
-    const name = 'A team whose name runs well past twelve rem';
-    useConsoleStore().$patch({ teams: [{ id: 'long' as TeamId, name, memberAgents: [], repos: [] }], activeTeamId: 'long' as TeamId });
-
-    const wrapper = await withCluster(1000, 250);
-    const title = () => wrapper.get('[data-test="ribbon-group-title"]');
-    const tooltip = async () => {
-      const tip = title().findComponent({ name: 'QTooltip' });
-      (tip.vm as unknown as { show: () => void }).show();
-      await flushPromises();
-      const text = document.body.querySelector('.q-tooltip')?.textContent ?? '';
-      (tip.vm as unknown as { hide: () => void }).hide();
-      await flushPromises();
-      return text;
-    };
-
-    expect(title().classes()).not.toContain('ribbon-group-title--capped');
-    expect(title().text()).toBe(name);
-    expect(title().attributes('aria-label')).toBe(name);
-
-    await wrapper.setProps({ tight: true });
-    await flushPromises();
-
-    expect(title().classes()).toContain('ribbon-group-title--capped');
-    expect(ribbonSource).toMatch(/\.ribbon-group-title--capped\s*\{\s*max-width:\s*3rem;\s*\}/);
-    expect(title().text()).toBe(name);
-    expect(title().attributes('aria-label')).toBe(name);
-    expect(await tooltip()).toContain(name);
-
-    await wrapper.setProps({ tight: false });
-    await flushPromises();
-    expect(title().classes()).not.toContain('ribbon-group-title--capped');
-  });
-
   it('puts the logo at the start and the cluster at the end, outside the commands toolbar', async () => {
     const wrapper = await withCluster(entries.length * EntryWidth, 0);
     const row = wrapper.find('.ribbon');

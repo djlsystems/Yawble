@@ -62,7 +62,9 @@ import {
   Ribbon,
   SitesAction,
   SolutionsAction,
+  TeamBacklogAction,
   TeamBoardAction,
+  TeamDocumentsAction,
   TeamSitesAction,
   TenantSettingsAction,
 } from '../lib/ribbon';
@@ -372,9 +374,8 @@ const teamSettingsTabs: Record<string, 'general' | 'members'> = {
 };
 
 /**
- * `team` is only ever sent by a documents row - see `RibbonBar`'s emit. Every other action names
- * one thing and needs no argument, which is why it is optional rather than a second parameter
- * every branch has to thread.
+ * `team` is sent by a command on one team (the team bar, the Teams list's row menu). Without it a
+ * team command acts on the active team, and every other action needs no team.
  */
 function onRibbonAction(action: string, team: TeamId | null = null) {
   // THE TEAM A TEAM DIALOG IS FOR: the Teams list's row menu names one, the ribbon acts on the active team.
@@ -399,23 +400,25 @@ function onRibbonAction(action: string, team: TeamId | null = null) {
     return;
   }
 
-  // BOARD IS NOT A DIALOG: the active team's board, the same door its console tab is. There is no
-  // Kanban here - the console strip's Kanban tab opens it filtered to the active team.
+  // A TEAM COMMAND names the team it is for (the team bar, the Teams list's row menu), else it is
+  // the active team's (the command palette).
+  const forTeam = team ?? (board.activeWorkTeamId || null);
+
+  // BOARD IS NOT A DIALOG: the team's board, the same door the Teams button's list is.
   if (action === TeamBoardAction) {
-    if (board.activeWorkTeamId) workflowNav.openBoard(board.activeWorkTeamId);
+    if (forTeam) workflowNav.openBoard(forTeam);
   }
   else if (action === 'team-git') gitOpen.value = true;
   else if (action === 'team-reset') resetOpen.value = true;
-  else if (action === TeamSitesAction) openSites(board.activeWorkTeamId || null);
-  // UNPREFIXED, deliberately, and for the same reasons as `backlog` below - see `lib/ribbon.ts`.
-  // Documents live under one tenant root, so this needs no active team: it opens at the team whose
-  // board is showing, else the root (and the dialog falls back to the root when that team has no folder).
-  else if (action === DocumentsAction) {
-    openDocuments(board.view === 'board' && board.activeWorkTeamId ? asDocumentsFolderKey(board.activeWorkTeamId) : null);
+  else if (action === TeamSitesAction) openSites(forTeam);
+  else if (action === TeamDocumentsAction) openDocuments(forTeam ? asDocumentsFolderKey(forTeam) : null);
+  else if (action === TeamBacklogAction) {
+    if (forTeam) workflowNav.openBacklogFor(forTeam);
   }
-  // NOT A DIALOG - this action selects the permanent Teams tab, the same door `IndexPage`'s own
-  // Teams tab click uses.
-  else if (action === 'admin-teams') board.showTeamsView();
+  // UNPREFIXED, deliberately, and for the same reasons as `backlog` below - see `lib/ribbon.ts`.
+  // Documents live under one tenant root, so this needs no active team, and the ribbon's always
+  // opens at the root: a team's own folder is its team bar's Documents.
+  else if (action === DocumentsAction) openDocuments(null);
   // UNPREFIXED, deliberately - see `lib/ribbon.ts`. The backlog needs no active team, so the
   // `team-` disable predicate does not apply to it by construction.
   else if (action === 'backlog') workflowNav.openBacklog();
@@ -440,8 +443,8 @@ function onRibbonAction(action: string, team: TeamId | null = null) {
 }
 
 /**
- * A command from the Teams list's row menu, on that row's team. Board opens its board; every other
- * command opens its dialog on that team over the Teams list, and the active team does not change.
+ * A command on one team, from the Teams list's row menu or the team bar on its board. Board opens
+ * its board; every other command opens its dialog on that team, and the active team does not change.
  */
 watch(
   () => workflowNav.teamCommandAsks,
@@ -451,11 +454,10 @@ watch(
     const { team, action } = command;
     conciergeOpen.value = false;
 
-    if (action === TeamSitesAction) openSites(team);
-    else if (action === DocumentsAction) openDocuments(asDocumentsFolderKey(team));
-    else if (action === 'backlog') workflowNav.openBacklogFor(team);
-    else if (action === TeamBoardAction) workflowNav.openBoard(team);
-    // Git, Settings and Reset open on the row's team over the Teams list, without opening its board.
+    // The row menu's Documents and Backlog are the unprefixed actions; on a team they mean its own.
+    if (action === DocumentsAction) onRibbonAction(TeamDocumentsAction, team);
+    else if (action === 'backlog') onRibbonAction(TeamBacklogAction, team);
+    // Git, Settings and Reset open on the team without changing the active team.
     else onRibbonAction(action, team);
   },
 );

@@ -283,7 +283,8 @@ describe('board store', () => {
       expect(board.activeTeamId).toBe('TestTeam');
     });
 
-    it('setting active team on an open tab switches instead of duplicating', () => {
+    /** One open team: the board shown is the only one whose pushes a board hears. */
+    it('setting the active team leaves only that team open', () => {
       const board = useConsoleStore();
       board.teams = [team(asTeamId('Alpha')), team(asTeamId('Beta'))];
       board.reconcileActiveTeam();
@@ -292,7 +293,7 @@ describe('board store', () => {
       board.setActiveTeam(asTeamId('Beta'));
       board.setActiveTeam(asTeamId('Alpha'));
 
-      expect(board.openTeamTabs).toEqual(['Alpha', 'Beta']);
+      expect(board.openTeamTabs).toEqual(['Alpha']);
       expect(board.activeTeamId).toBe('Alpha');
     });
 
@@ -403,7 +404,7 @@ describe('board store', () => {
     const beta = asTeamId('Beta');
     const gamma = asTeamId('Gamma');
 
-    it('closing the active middle tab removes it', () => {
+    it('closing the active middle tab removes it, leaving the one team it moves to open', () => {
       const board = useConsoleStore();
       board.teams = [team(alpha), team(beta), team(gamma)];
       board.openTeamTabs = [alpha, beta, gamma];
@@ -411,7 +412,7 @@ describe('board store', () => {
 
       board.closeTeamTab(beta);
 
-      expect(board.openTeamTabs).toEqual([alpha, gamma]);
+      expect(board.openTeamTabs).toEqual([gamma]);
     });
 
     it('closing the active tab picks the neighbour at the same index as new active', () => {
@@ -490,7 +491,7 @@ describe('board store', () => {
       expect(setCurrentTeam).not.toHaveBeenCalled();
     });
 
-    it('reconcileActiveTeam still repairs an active team that exists but has no tab', () => {
+    it('reconcileActiveTeam keeps the active team the one open team', () => {
       const board = useConsoleStore();
       board.teams = [team(alpha), team(beta)];
       board.openTeamTabs = [alpha];
@@ -498,7 +499,7 @@ describe('board store', () => {
 
       board.reconcileActiveTeam();
 
-      expect(board.openTeamTabs).toEqual([alpha, beta]);
+      expect(board.openTeamTabs).toEqual([beta]);
       expect(board.activeTeamId).toBe(beta);
     });
 

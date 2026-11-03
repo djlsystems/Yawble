@@ -22,6 +22,8 @@ import TeamSiteLinks from '../components/TeamSiteLinks.vue';
 import { panelPath } from '../lib/solutionPanel';
 import { stripScrollToShow } from '../lib/consoleStrip';
 import { useKanbanStore } from '../stores/kanban';
+import { useWorkflowNavStore } from '../stores/workflowNav';
+import { TeamBar } from '../lib/ribbon';
 import { useCapacityStore } from '../stores/capacity';
 import { useNeedsYouStore } from '../stores/needsYou';
 import { useAgentUpdatesStore } from '../stores/agentUpdates';
@@ -52,6 +54,7 @@ const boardDisplayOpen = ref(false);
  * "back to the team" a single click and what the default team filter is taken from.
  */
 const kanban = useKanbanStore();
+const workflowNav = useWorkflowNavStore();
 
 // Back and Forward move between the Teams table, a team's board and the Kanban.
 useConsoleHistory();
@@ -59,8 +62,11 @@ useConsoleHistory();
 useConsoleTitle();
 const capacity = useCapacityStore();
 const needsYou = useNeedsYouStore();
-const { hasTeams, error, signedOut, activeTeam, openTeams, connected, connectionEstablished } =
+const { hasTeams, error, signedOut, activeTeam, choosableTeams, openTeams, connected, connectionEstablished } =
   storeToRefs(board);
+
+/** The team last opened, kept while the Teams list, the Kanban or the Monitor shows. */
+const lastTeam = computed(() => openTeams.value[0] ?? null);
 
 const session = useSessionStore();
 const router = useRouter();
@@ -269,10 +275,6 @@ function selectTeamTab(teamId: TeamId) {
   board.setActiveTeam(teamId);
 }
 
-async function closeTab(teamId: TeamId) {
-  board.closeTeamTab(teamId);
-  await syncHubTeams();
-}
 
 onMounted(async () => {
   // THE RELOAD CASE FOR THE BOARD, and the board's half of the one the Teams table has below.
@@ -440,58 +442,90 @@ onUnmounted(() => {
     <!-- UNCONDITIONAL. The Teams tab below is permanent, so the strip always holds at least one
          thing and there is always a way back to a team.
 
-         THE STRIP SHOWS SCOPE. Left, the places: Teams, then the open team tabs with their chips.
+         THE STRIP SHOWS SCOPE. Left, the Teams button: the list, or a team's board from its menu.
          Right, at the strip's end, the views of every team at once - Kanban and Monitor - as one
          segmented control in one style. The active element in either group takes the primary
          underline the ribbon's active team title uses. On a phone the strip scrolls sideways and
          keeps the active tab in view. -->
     <div ref="strip" class="console-tabs q-mb-md">
       <div class="console-places" role="group" aria-label="Places" data-test="console-places">
-        <!-- THE TEAMS TAB. First, permanent, and not a team: it has no status chip and no close
-             icon, and selecting it leaves NO ACTIVE TEAM - which is the one way it differs from the
-             Kanban tab beside it, whose whole point is that it is a view change and not a team
-             switch. -->
-        <q-btn
+        <!-- THE TEAMS BUTTON. First and permanent, and a split button: the word opens the Teams
+             list, which leaves NO ACTIVE TEAM; the arrow lists every active team with its status
+             chip, and picking one opens its board. There is no tab per team: one button stays one
+             button however many teams there are. -->
+        <q-btn-dropdown
+          split
           unelevated
           no-caps
           class="console-tab console-tab--teams"
           :class="{ active: board.view === 'teams' }"
+          content-class="above-concierge"
           icon="groups"
           :aria-pressed="board.view === 'teams' ? 'true' : 'false'"
+          dropdown-icon="arrow_drop_down"
+          :disable-dropdown="choosableTeams.length === 0"
+          data-test="teams-button"
           @click="board.showTeamsView()"
         >
-          <span class="console-tab-label">Teams</span>
-        </q-btn>
+          <template #label>
+            <span class="console-tab-label">Teams</span>
+          </template>
 
+          <q-list class="teams-menu" data-test="teams-menu">
+            <q-item
+              v-for="team in choosableTeams"
+              :key="team.id"
+              v-close-popup
+              clickable
+              :active="board.view === 'board' && team.id === activeTeam?.id"
+              active-class="text-primary"
+              data-test="teams-menu-team"
+              @click="selectTeamTab(team.id)"
+            >
+              <q-item-section>{{ team.name }}</q-item-section>
+              <q-item-section side class="row no-wrap items-center">
+                <span v-if="teamPaused(team)" class="console-tab-status console-tab-status--paused team-pause-chip">
+                  PAUSED
+                </span>
+                <span class="console-tab-status" :class="`console-tab-status--${tabChip(team).token}`">
+                  <span
+                    v-if="teamRunning(team)"
+                    class="container-running-dot"
+                    aria-hidden="true"
+                  ></span>
+                  {{ tabChip(team).text }}
+                  <q-tooltip v-if="tabChip(team).text === 'COMPLETED'">{{ EndingFact.workflow }}</q-tooltip>
+                </span>
+              </q-item-section>
+            </q-item>
+          </q-list>
+        </q-btn-dropdown>
+
+        <!-- THE LAST TEAM: one button for the team last opened, so its board is one click away from
+             the Teams list, the Kanban or the Monitor. It is the open team (`openTeams`), which
+             outlasts a visit to the Teams list; picking another team in the menu replaces it. -->
         <q-btn
-          v-for="team in openTeams"
-          :key="team.id"
+          v-if="lastTeam"
           unelevated
           no-caps
-          class="console-tab"
-          :class="{ active: board.view === 'board' && team.id === activeTeam?.id }"
-          @click="selectTeamTab(team.id)"
+          class="console-tab console-tab--last-team"
+          :class="{ active: board.view === 'board' && !kanban.active && lastTeam.id === activeTeam?.id }"
+          data-test="last-team"
+          @click="selectTeamTab(lastTeam.id)"
         >
-          <span class="console-tab-label">{{ team.name }}</span>
-          <span v-if="teamPaused(team)" class="console-tab-status console-tab-status--paused team-pause-chip">
+          <span class="console-tab-label">{{ lastTeam.name }}</span>
+          <span v-if="teamPaused(lastTeam)" class="console-tab-status console-tab-status--paused team-pause-chip">
             PAUSED
           </span>
-          <span class="console-tab-status" :class="`console-tab-status--${tabChip(team).token}`">
+          <span class="console-tab-status" :class="`console-tab-status--${tabChip(lastTeam).token}`">
             <span
-              v-if="teamRunning(team)"
+              v-if="teamRunning(lastTeam)"
               class="container-running-dot"
               aria-hidden="true"
             ></span>
-            {{ tabChip(team).text }}
-            <q-tooltip v-if="tabChip(team).text === 'COMPLETED'">{{ EndingFact.workflow }}</q-tooltip>
+            {{ tabChip(lastTeam).text }}
+            <q-tooltip v-if="tabChip(lastTeam).text === 'COMPLETED'">{{ EndingFact.workflow }}</q-tooltip>
           </span>
-          <q-icon
-            name="close"
-            size="16px"
-            class="console-tab-close"
-            aria-label="Close this view"
-            @click.stop="closeTab(team.id)"
-          />
         </q-btn>
       </div>
 
@@ -627,6 +661,24 @@ onUnmounted(() => {
       </div>
 
 
+      <!-- THE TEAM BAR: the commands on this team, under its name. The ribbon holds what is the
+           instance's; what is one team's is here, on its board (`TeamBar`). -->
+      <div class="team-bar row items-center no-wrap q-mb-sm" role="toolbar" :aria-label="`${activeTeam.name} commands`" data-test="team-bar">
+        <q-btn
+          v-for="command in TeamBar"
+          :key="command.action"
+          flat
+          dense
+          no-caps
+          size="sm"
+          class="team-bar-btn"
+          :icon="command.icon"
+          :label="command.label"
+          :data-team-command="command.action"
+          @click="workflowNav.runTeamCommand(activeTeam.id, command.action)"
+        />
+      </div>
+
       <!-- HOW WORK REACHES A TEAM, where people look for it: a person who opened a team to give it
            work found no input. The box tells the Manager; its hint names the Concierge as another way in. -->
       <TellManagerBox :team="activeTeam.id" :workflows="board.workflowsFor(activeTeam.id)?.workflows ?? []" />
@@ -657,6 +709,18 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* The team bar: one row of this team's commands under its name, sideways-scrolling on a phone. */
+.team-bar {
+  gap: 4px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--os-rule);
+}
+
+.team-bar-btn {
+  flex: none;
+}
+
 .console-tabs {
   display: flex;
   align-items: center;

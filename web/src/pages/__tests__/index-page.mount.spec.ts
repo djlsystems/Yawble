@@ -35,6 +35,8 @@ import { useConsoleStore } from '../../stores/console';
 import { useKanbanStore } from '../../stores/kanban';
 import { useSessionStore } from '../../stores/session';
 import { useNeedsYouStore } from '../../stores/needsYou';
+import { useWorkflowNavStore } from '../../stores/workflowNav';
+import { TeamBar } from '../../lib/ribbon';
 import { StalledBadgeGrace } from '../../lib/teamKpis';
 import { resetBody } from '../../test/mountQuasar';
 
@@ -112,11 +114,6 @@ async function mountPage(
   return wrapper;
 }
 
-/** The tab strip, one entry per tab, left to right, across both of its groups. */
-function tabs(page: VueWrapper) {
-  return page.findAll('.console-tabs .console-tab');
-}
-
 function labels(group: ReturnType<VueWrapper['find']>) {
   return group.findAll('.console-tab').map((tab) => tab.find('.console-tab-label').text());
 }
@@ -127,20 +124,53 @@ function blocks(page: VueWrapper): string[] {
     .map((found) => found.element.tagName.toLowerCase());
 }
 
+/** The Teams button's list, opened: one row per active team, left in the document body. */
+async function openTeamsMenu(page: VueWrapper): Promise<HTMLElement[]> {
+  (page.findComponent({ name: 'QBtnDropdown' }).vm as unknown as { show: () => void }).show();
+  await flushPromises();
+  return [...document.body.querySelectorAll<HTMLElement>('[data-test="teams-menu-team"]')];
+}
+
 describe('the tab strip', () => {
-  it('puts the Teams tab first, then the open teams, then the Kanban and Monitor tabs', async () => {
-    const page = await mountPage([team('alpha'), team('beta')]);
-
-    expect(tabs(page).map((tab) => tab.find('.console-tab-label').text())).toEqual(['Teams', 'Alpha', 'Beta', 'Kanban', 'Monitor']);
-  });
-
-  /** Only the teams a person has open get a tab. */
-  it('shows tabs only for open teams', async () => {
+  /** No tab per team: the Teams button, the last team's button, then the Kanban and Monitor tabs. */
+  it('holds the Teams button, the last team, then the Kanban and Monitor tabs, and no tab per other team', async () => {
     const page = await mountPage([team('alpha'), team('beta')]);
     board.openTeamTabs = ['alpha' as never];
     await flushPromises();
 
-    expect(tabs(page).map((tab) => tab.find('.console-tab-label').text())).toEqual(['Teams', 'Alpha', 'Kanban', 'Monitor']);
+    expect(labels(page.find('.console-tabs'))).toEqual(['Teams', 'Alpha', 'Kanban', 'Monitor']);
+    expect(page.find('.console-tabs').text()).not.toContain('Beta');
+  });
+
+  /**
+   * THE LAST TEAM STAYS ONE CLICK AWAY from the Teams list, the Kanban and the Monitor, and its
+   * click goes back to its board.
+   */
+  it.each(['teams', 'kanban', 'monitor'] as const)("keeps the last team's button on the %s view and goes back to its board", async (view) => {
+    const page = await mountPage([team('alpha'), team('beta')], { view, active: view === 'teams' ? '' : 'alpha' });
+    board.openTeamTabs = ['beta' as never];
+    await flushPromises();
+    const showBoard = vi.spyOn(board, 'showBoard');
+    const setActiveTeam = vi.spyOn(board, 'setActiveTeam').mockImplementation(() => {});
+
+    const last = page.get('[data-test="last-team"]');
+    expect(last.find('.console-tab-label').text()).toBe('Beta');
+    expect(last.classes()).not.toContain('active');
+
+    await last.trigger('click');
+
+    expect(showBoard).toHaveBeenCalled();
+    expect(setActiveTeam).toHaveBeenCalledWith('beta');
+  });
+
+  /** The Teams button's arrow lists every active team with its status chip; an archived team is not offered. */
+  it("lists every active team with its status chip in the Teams button's menu", async () => {
+    const page = await mountPage([team('alpha'), team('beta', { paused: true }), team('gamma', { archived: true })]);
+    const rows = await openTeamsMenu(page);
+
+    expect(rows.map((row) => row.querySelector('.q-item__section--main')?.textContent?.trim())).toEqual(['Alpha', 'Beta']);
+    expect(rows.every((row) => row.querySelector('.console-tab-status') !== null)).toBe(true);
+    expect(rows[1]!.querySelector('.console-tab-status--paused')?.textContent?.trim()).toBe('PAUSED');
   });
 
   /** Neither the Teams tab nor the Kanban tab is a team: no status chip, no close icon. */
@@ -156,7 +186,7 @@ describe('the tab strip', () => {
     const page = await mountPage([team('alpha')]);
     const showTeamsView = vi.spyOn(board, 'showTeamsView').mockImplementation(() => {});
 
-    await page.find('.console-tab--teams').trigger('click');
+    await page.find('[data-test="teams-button"] .q-btn').trigger('click');
 
     expect(showTeamsView).toHaveBeenCalled();
   });
@@ -170,16 +200,17 @@ describe('the tab strip', () => {
   });
 
   /**
-   * Clicking a team leaves the board, and tells the kanban store nothing: a board narrowed to one
-   * team stays narrowed while you go and look at another.
+   * Picking a team leaves the Kanban for its board, and tells the kanban store nothing: a Kanban
+   * narrowed to one team stays narrowed while you go and look at another.
    */
-  it('leaves the board when a team tab is clicked, and tells the kanban store nothing', async () => {
+  it("opens the picked team's board from the Teams button, and tells the kanban store nothing", async () => {
     const page = await mountPage([team('alpha'), team('beta')], { view: 'kanban' });
     const showBoard = vi.spyOn(board, 'showBoard');
     const setActiveTeam = vi.spyOn(board, 'setActiveTeam').mockImplementation(() => {});
     vi.mocked(kanban.showKanban).mockClear();
 
-    await tabs(page)[2]!.trigger('click');
+    (await openTeamsMenu(page))[1]!.click();
+    await flushPromises();
 
     expect(showBoard).toHaveBeenCalled();
     expect(setActiveTeam).toHaveBeenCalledWith('beta');
@@ -187,10 +218,10 @@ describe('the tab strip', () => {
     expect(kanban.refreshIfActive).not.toHaveBeenCalled();
   });
 
-  it('does not mark a team tab active while the board is showing', async () => {
+  it('does not mark the Teams button active while the Kanban is showing', async () => {
     const page = await mountPage([team('alpha')], { view: 'kanban' });
 
-    expect(tabs(page)[1]!.classes()).not.toContain('active');
+    expect(page.find('.console-tab--teams').classes()).not.toContain('active');
     expect(page.find('.console-tab--kanban').classes()).toContain('active');
   });
 
@@ -204,11 +235,11 @@ describe('the tab strip', () => {
     expect(board.view).toBe('monitor');
     expect(setActiveTeam).not.toHaveBeenCalled();
     expect(page.find('[data-monitor-tab]').classes()).toContain('active');
-    expect(tabs(page)[1]!.classes()).not.toContain('active');
+    expect(page.find('.console-tab--teams').classes()).not.toContain('active');
   });
 
   /**
-   * THE STRIP SHOWS SCOPE: the places at the left (Teams, then the open teams), the views of every
+   * THE STRIP SHOWS SCOPE: the Teams button at the left, the views of every
    * team at the right as one segmented control - and nothing else in either.
    */
   it('renders two groups: places on the left, and Kanban and Monitor on the right', async () => {
@@ -217,23 +248,12 @@ describe('the tab strip', () => {
     const groups = strip.findAll(':scope > div');
 
     expect(groups.map((group) => group.attributes('data-test'))).toEqual(['console-places', 'console-views']);
-    expect(labels(groups[0]!)).toEqual(['Teams', 'Alpha', 'Beta']);
+    expect(labels(groups[0]!)).toEqual(['Teams', 'Alpha']);
     expect(labels(groups[1]!)).toEqual(['Kanban', 'Monitor']);
     expect(groups[1]!.attributes('role')).toBe('group');
     // One style: both are segments of the same control.
     expect(groups[1]!.findAll('.console-tab').every((tab) => tab.classes().includes('console-view'))).toBe(true);
     expect(groups[0]!.findAll('.console-view')).toHaveLength(0);
-  });
-
-  /**
-   * THE STRIP'S TEAM TAB CARRIES THE WHOLE NAME. The header row caps the active team's title at 3rem
-   * when it is short of room (`RibbonBar` tight); the strip is where the full name stays read.
-   */
-  it('shows a team tab\'s full name, however long', async () => {
-    const name = 'A team whose name runs well past twelve rem';
-    const page = await mountPage([team('alpha', { name })]);
-
-    expect(labels(page.find('[data-test="console-places"]'))).toEqual(['Teams', name]);
   });
 
   /** One element is active across both groups, whichever group it is in. */
@@ -270,16 +290,16 @@ describe('the tab strip', () => {
     const page = await mountPage([team('alpha'), team('beta'), team('gamma')]);
     const strip = page.find('.console-tabs').element as HTMLElement;
 
-    // Monitor is the sixth tab: 600px to 720px. Shown whole, its right edge at the strip's end.
+    // Monitor is the fourth tab: 360px to 480px. Shown whole, its right edge at the strip's end.
     await page.find('[data-monitor-tab]').trigger('click');
     await flushPromises();
-    expect(strip.scrollLeft).toBe(720 - 300);
+    expect(strip.scrollLeft).toBe(480 - 300);
 
     // Back to Teams, the first: the strip scrolls back to its start.
     vi.spyOn(board, 'showTeamsView').mockImplementation(() => {
       board.view = 'teams';
     });
-    await page.find('.console-tab--teams').trigger('click');
+    await page.find('[data-test="teams-button"] .q-btn').trigger('click');
     await flushPromises();
     expect(strip.scrollLeft).toBe(0);
 
@@ -321,11 +341,26 @@ describe('which view replaces the cards', () => {
 });
 
 describe('a team\'s marks', () => {
-  it('marks a paused team PAUSED on its tab and in the heading', async () => {
+  it('marks a paused team PAUSED in the heading', async () => {
     const page = await mountPage([team('alpha', { paused: true })]);
 
-    expect(tabs(page)[1]!.find('.console-tab-status--paused').text()).toBe('PAUSED');
     expect(page.find('.team-heading-pause').text()).toBe('PAUSED');
+  });
+
+  /**
+   * THE TEAM BAR, under the team's name: Git, Sites, Documents, Settings, Reset and Backlog, each a
+   * command on this team through the one door the Teams list's row menu uses.
+   */
+  it("puts the team's commands in a bar under its name, each run on this team", async () => {
+    const page = await mountPage([team('alpha'), team('beta')], { active: 'beta' });
+    const bar = page.get('[data-test="team-bar"]');
+    const run = vi.spyOn(useWorkflowNavStore(), 'runTeamCommand');
+
+    expect(bar.findAll('.q-btn').map((button) => button.find('.block').text())).toEqual(TeamBar.map((item) => item.label));
+    expect(bar.element.previousElementSibling?.textContent).toContain('Beta');
+
+    await bar.get('[data-team-command="team-documents"]').trigger('click');
+    expect(run).toHaveBeenCalledWith('beta', 'team-documents');
   });
 
   it('links a team installed from a solution package to its control panel', async () => {

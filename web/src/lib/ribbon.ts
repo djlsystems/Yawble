@@ -84,16 +84,12 @@ export const OutcomesAction = 'admin-outcomes';
 export const SitesAction = 'admin-sites';
 
 /**
- * Active Team > Board: the active team's board, the member cards its console tab shows. It was
- * "Members" and opened the same team; it is named for what it is.
- *
- * THERE IS NO KANBAN HERE, AND THAT IS ONE DOOR PER VIEW. The console strip's Kanban tab opens the
- * Kanban filtered to the active team, exactly what the ribbon's Kanban button did (`showKanban`):
- * the ribbon acts on the team, the strip chooses the view.
+ * Board: a team's board, its member cards. On the Teams list's row menu; not on the team bar, which
+ * is on the board.
  */
 export const TeamBoardAction = 'team-board';
 
-/** Active Team > Sites, the same screen filtered to the active team. `team-`, so it needs one. */
+/** The team bar's Sites, the Sites screen filtered to that team. `team-`, so it needs one. */
 export const TeamSitesAction = 'team-sites';
 
 /**
@@ -130,30 +126,6 @@ export const Ribbon: RibbonSpec = {
         },
       ],
     },
-    {
-      id: 'teams',
-      label: 'Teams',
-      items: [{ kind: 'team-switcher', label: 'Choose Team', icon: 'groups', size: 'large' }],
-    },
-    /**
-     * Board, Git, Sites, Settings, Reset - in that order, every one `team-`.
-     *
-     * NO DOCUMENTS HERE. Projects > Documents is the one Documents button: it opens at the open
-     * board's team folder, else the root, so every folder - a gone team's included - stays reachable.
-     */
-    {
-      id: 'active',
-      label: 'Active Team',
-      title: 'No team',
-      titleFrom: 'active-team',
-      items: [
-        { kind: 'button', action: TeamBoardAction, label: 'Board', icon: 'groups', size: 'small' },
-        { kind: 'button', action: 'team-git', label: 'Git', icon: 'account_tree', size: 'small' },
-        { kind: 'button', action: TeamSitesAction, label: 'Sites', icon: 'public', size: 'small' },
-        { kind: 'button', action: 'team-settings', label: 'Settings', icon: 'settings', size: 'small' },
-        { kind: 'button', action: 'team-reset', label: 'Reset', icon: 'restart_alt', size: 'small' },
-      ],
-    },
     /**
      * NO `title`, AND THAT IS THE EDIT RATHER THAN AN OMISSION. It read `Backlog` over a group
      * whose only button was already labelled Backlog - the heading repeated the control. With
@@ -167,10 +139,11 @@ export const Ribbon: RibbonSpec = {
       id: 'projects',
       label: 'Projects',
       items: [
+        // THE WHOLE BACKLOG AND THE DOCUMENTS ROOT, wherever the person is. A team's own backlog and
+        // folder are on that team's bar, under its name on its board (`TeamBar`).
         { kind: 'button', action: 'backlog', label: 'Backlog', icon: 'checklist', size: 'large' },
-        // NOT UNDER ACTIVE TEAM: documents are a TENANT's, held in
-        // one root with a folder per team, and they outlive the team that wrote them. A control
-        // under a heading naming the active team says the opposite.
+        // Documents are a TENANT's, held in one root with a folder per team, and they outlive the
+        // team that wrote them.
         //
         // IT CARRIES AN ACTION. See `needsActiveWorkTeam` below: the prefix IS the gate, and an
         // item with no action at all cannot be gated by it - so it would need a hard-coded
@@ -182,8 +155,8 @@ export const Ribbon: RibbonSpec = {
       id: 'admin',
       label: 'Admin',
       items: [
-        { kind: 'button', action: 'admin-teams', label: 'Teams', icon: 'groups', size: 'large' },
-        // What the work is for, beside the teams that do it.
+        // NO TEAMS BUTTON: the console strip's Teams button is the one door to the Teams list.
+        // What the work is for, first.
         { kind: 'button', action: OutcomesAction, label: 'Outcomes', icon: 'flag', size: 'large' },
         { kind: 'button', action: 'admin-users', label: 'Users', icon: 'manage_accounts', size: 'large' },
         { kind: 'button', action: 'admin-agents', label: 'Agents', icon: 'smart_toy', size: 'large' },
@@ -209,8 +182,8 @@ export const Ribbon: RibbonSpec = {
         { kind: 'button', action: PluginsAction, label: 'Plugins', icon: 'extension', size: 'large' },
         // DIRECTLY AFTER Plugins, and Settings follows: the OAuth accounts plugins act on.
         { kind: 'button', action: ConnectionsAction, label: 'Connections', icon: 'link', size: 'large' },
-        // THE GEAR. Every instance-wide setting - the WIP limit among them - in one dialog. The
-        // Active Team group's own Settings is that team's; this one names no team.
+        // THE GEAR. Every instance-wide setting - the WIP limit among them - in one dialog. The team
+        // bar's own Settings is that team's; this one names no team.
         {
           kind: 'button',
           action: TenantSettingsAction,
@@ -238,8 +211,8 @@ export const Ribbon: RibbonSpec = {
  * documents root is the TENANT's, holding a folder per team; the screen names which team's folder
  * it is showing. Requiring an active team to open it would make the folders of every OTHER team
  * unreachable, including the ones whose team is gone - which is the case that matters
- * most. SO IT IS DELIBERATELY NOT `team-...`: it opens at the open board's team folder when a board
- * is showing, and at the root otherwise, and is never disabled.
+ * most. SO IT IS DELIBERATELY NOT `team-...`: it always opens at the root, and is never disabled. A
+ * team's own folder is the team bar's Documents (`TeamDocumentsAction`).
  *
  * DO NOT NAME EITHER OF THEM `projects-...`. A prefix that names the TAB rather than a REQUIREMENT
  * breaks the rule `team-` rests on - the prefix IS the rule - and the next reader would reasonably
@@ -247,7 +220,7 @@ export const Ribbon: RibbonSpec = {
  */
 
 /**
- * The Teams list's per-row menu: the Active Team commands, Documents and Backlog, in that order,
+ * The Teams list's per-row menu: Board, then the team bar's commands, in the team bar's order,
  * each acting on the row's team rather than the active one. Labels and icons are the ribbon's.
  */
 export interface TeamMenuItem {
@@ -267,6 +240,42 @@ export const TeamMenu: readonly TeamMenuItem[] = [
   { action: 'team-reset', label: 'Reset', icon: 'restart_alt', needsBoard: true },
   { action: 'backlog', label: 'Backlog', icon: 'checklist', needsBoard: false },
 ];
+
+/** The team bar's Documents: the documents explorer at that team's folder. */
+export const TeamDocumentsAction = 'team-documents';
+
+/** The team bar's Backlog: the backlog filtered to that team. */
+export const TeamBacklogAction = 'team-backlog';
+
+/**
+ * THE TEAM BAR: the commands on one team, in a row under its name on its board. There is no team
+ * group on the ribbon - the ribbon holds what is the instance's, and the board holds what is the
+ * team's. Board is not on it, because the bar is on the board. The Teams list's row menu
+ * (`TeamMenu`) is the same commands with Board, in the same order.
+ */
+export const TeamBar: readonly TeamMenuItem[] = [
+  { action: 'team-git', label: 'Git', icon: 'account_tree', needsBoard: true },
+  { action: TeamSitesAction, label: 'Sites', icon: 'public', needsBoard: false },
+  { action: TeamDocumentsAction, label: 'Documents', icon: 'folder_open', needsBoard: false },
+  { action: 'team-settings', label: 'Settings', icon: 'settings', needsBoard: true },
+  { action: 'team-reset', label: 'Reset', icon: 'restart_alt', needsBoard: true },
+  { action: TeamBacklogAction, label: 'Backlog', icon: 'checklist', needsBoard: false },
+];
+
+/**
+ * The team bar as a ribbon tab, for the command palette, which offers the ribbon's commands and
+ * these on the team in scope. It is NOT in `Ribbon`: nothing draws it on the header.
+ */
+export const TeamBarTab: RibbonTab = {
+  id: 'team',
+  label: 'Team',
+  title: 'No team',
+  titleFrom: 'active-team',
+  items: TeamBar.map((item) => ({ kind: 'button', action: item.action, label: item.label, icon: item.icon, size: 'small' })),
+};
+
+/** What the command palette offers: the ribbon's commands, then the team bar's. */
+export const PaletteRibbon: RibbonSpec = { tabs: [...Ribbon.tabs, TeamBarTab] };
 
 /** What a disabled `team-` command says on hover, and on a phone under its row. */
 export const NoTeamHint = 'Pick or create a team first';

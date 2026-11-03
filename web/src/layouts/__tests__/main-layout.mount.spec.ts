@@ -67,7 +67,7 @@ import SitesDialog from '../../components/SitesDialog.vue';
 import TeamGitDialog from '../../components/TeamGitDialog.vue';
 import TeamSettingsDialog from '../../components/TeamSettingsDialog.vue';
 import { useWorkflowNavStore } from '../../stores/workflowNav';
-import { DocumentsAction, Ribbon, SitesAction, TeamBoardAction, TeamSitesAction, needsActiveWorkTeam } from '../../lib/ribbon';
+import { DocumentsAction, Ribbon, SitesAction, TeamBacklogAction, TeamBoardAction, TeamDocumentsAction, TeamSitesAction, needsActiveWorkTeam } from '../../lib/ribbon';
 import type { Team, TeamId } from '../../api/types';
 import { resetBody } from '../../test/mountQuasar';
 
@@ -412,20 +412,29 @@ describe('MainLayout ribbon actions', () => {
     wrapper.unmount();
   });
 
-  /** The one Documents button opens at the team whose board is showing, and at the root otherwise. */
-  it("opens Documents at the open board's team folder, and at the root from the Teams list", async () => {
+  /** The ribbon's Documents always opens at the root; a team's folder is its team bar's Documents. */
+  it("opens the ribbon's Documents at the root, and the team bar's at that team's folder", async () => {
     const { wrapper } = await ribbonAction(DocumentsAction);
     const documents = wrapper.findComponent({ name: 'DocumentsDialog' });
     expect(documents.props('modelValue')).toBe(true);
-    expect(documents.props('start')).toBe('alpha');
+    expect(documents.props('start')).toBeNull();
 
     await documents.vm.$emit('update:modelValue', false);
-    useConsoleStore().$patch({ view: 'teams', activeTeamId: '' });
-    wrapper.findComponent(RibbonBar).vm.$emit('action', DocumentsAction);
+    useWorkflowNavStore().runTeamCommand(team.id, TeamDocumentsAction);
     await flushPromises();
 
     expect(documents.props('modelValue')).toBe(true);
-    expect(documents.props('start')).toBeNull();
+    expect(documents.props('start')).toBe('alpha');
+
+    wrapper.unmount();
+  });
+
+  /** The team bar's Backlog opens the backlog filtered to that team, and the palette's to the active one. */
+  it("opens the team bar's Backlog filtered to its team", async () => {
+    const { wrapper } = await ribbonAction(TeamBacklogAction);
+    const nav = useWorkflowNavStore();
+    expect(nav.backlogOpen).toBe(true);
+    expect(nav.backlogTeam).toBe('alpha');
 
     wrapper.unmount();
   });
@@ -481,11 +490,11 @@ describe('MainLayout ribbon actions', () => {
     wrapper.unmount();
   });
 
-  /** `team-` is the prefix that means "needs an active team", and Board inherits it. */
-  it('keeps Board a ribbon action that needs an active team, and offers no ribbon Kanban', () => {
+  /** `team-` is the prefix that means "needs an active team", and Board inherits it; the ribbon has neither. */
+  it('keeps Board a team command that needs an active team, and the ribbon offers no team command or Kanban', () => {
     const actions = Ribbon.tabs.flatMap((tab) => tab.items.map((item) => item.action));
 
-    expect(actions).toContain(TeamBoardAction);
+    expect(actions).not.toContain(TeamBoardAction);
     expect(actions).not.toContain('team-kanban');
     expect(needsActiveWorkTeam(TeamBoardAction, undefined)).toBe(true);
   });

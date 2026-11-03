@@ -9,7 +9,11 @@ import {
   RepositoriesAction,
   Ribbon,
   SitesAction,
+  TeamBacklogAction,
+  TeamBar,
+  TeamBarTab,
   TeamBoardAction,
+  TeamDocumentsAction,
   TeamSitesAction,
   TeamMenu,
   TenantSettingsAction,
@@ -43,26 +47,36 @@ describe('the ribbon', () => {
   })
 
   /**
-   * THE RIBBON ACTS ON THE TEAM; THE STRIP CHOOSES THE VIEW. Active Team is Board, Git, Sites,
-   * Settings, Reset - in that order, every one gated by `team-` - and no Kanban: the
-   * console strip's Kanban tab is the one door to it, opening it filtered to the active team.
+   * THE RIBBON IS THE INSTANCE'S; A TEAM'S COMMANDS ARE ON ITS BOARD. No team chooser and no team
+   * group on the ribbon, and no Kanban: the console strip's Teams button chooses the team, and its
+   * Kanban tab is the one door to the Kanban.
    */
-  it('lists Board, Git, Sites, Settings, Reset under Active Team, and no Kanban', () => {
-    const active = Ribbon.tabs.find((tab) => tab.id === 'active')!
-
-    expect(active.items.map((item) => item.label)).toEqual(['Board', 'Git', 'Sites', 'Settings', 'Reset'])
-    expect(active.items[0]!.action).toBe(TeamBoardAction)
-    expect(active.items.every((item) => item.action?.startsWith('team-'))).toBe(true)
-
+  it('carries no team chooser, no team group and no Kanban', () => {
     const everything = Ribbon.tabs.flatMap((tab) => tab.items)
-    expect(everything.map((item) => item.action)).not.toContain('team-kanban')
+
+    expect(everything.some((item) => item.kind === 'team-switcher')).toBe(false)
+    expect(everything.some((item) => item.action?.startsWith('team-'))).toBe(false)
     expect(everything.map((item) => item.label)).not.toContain('Kanban')
     expect(everything.map((item) => item.label)).not.toContain('Members')
   })
 
+  /**
+   * THE TEAM BAR, under the team's name on its board: Git, Sites, Documents, Settings, Reset and
+   * Backlog, every one on that team (`team-`), and no Board - the bar is on the board. The palette
+   * offers the same commands as a tab of its own.
+   */
+  it('lists Git, Sites, Documents, Settings, Reset and Backlog on the team bar, each on the team', () => {
+    expect(TeamBar.map((item) => item.label)).toEqual(['Git', 'Sites', 'Documents', 'Settings', 'Reset', 'Backlog'])
+    expect(TeamBar.every((item) => item.action.startsWith('team-'))).toBe(true)
+    expect(TeamBar.map((item) => item.action)).not.toContain(TeamBoardAction)
+    expect(TeamBar.find((item) => item.label === 'Documents')!.action).toBe(TeamDocumentsAction)
+    expect(TeamBar.find((item) => item.label === 'Backlog')!.action).toBe(TeamBacklogAction)
+    expect(TeamBarTab.items.map((item) => item.action)).toEqual(TeamBar.map((item) => item.action))
+  })
+
   /** Every other group is as it was, in the same order. */
   it('keeps the tab order', () => {
-    expect(Ribbon.tabs.map((tab) => tab.id)).toEqual(['new', 'solutions', 'teams', 'active', 'projects', 'admin'])
+    expect(Ribbon.tabs.map((tab) => tab.id)).toEqual(['new', 'solutions', 'projects', 'admin'])
   })
 
   /**
@@ -144,19 +158,10 @@ describe('the ribbon', () => {
     expect(TeamMenu.find((item) => item.label === 'Backlog')!.action).toBe('backlog')
   })
 
-  /**
-   * A DOCUMENT OUTLIVES THE TEAM THAT WROTE IT, so the control cannot sit under a heading naming
-   * the active team.
-   *
-   * ASSERTED ON THE ACTION, NOT THE KIND. The item is an ordinary button, so a kind test would
-   * assert `false` on BOTH tabs and pass the half that matters by accident. WHERE it lives is the
-   * claim; how it renders is not.
-   */
-  it('puts documents in Projects beside the backlog, not under the active team', () => {
-    const active = Ribbon.tabs.find((tab) => tab.id === 'active')
+  /** A DOCUMENT OUTLIVES THE TEAM THAT WROTE IT: the ribbon's Documents is the root, beside the backlog. */
+  it('puts documents in Projects beside the backlog', () => {
     const projects = Ribbon.tabs.find((tab) => tab.id === 'projects')
 
-    expect(active?.items.some((item) => item.action === DocumentsAction)).toBe(false)
     expect(projects?.items.some((item) => item.action === DocumentsAction)).toBe(true)
     expect(projects?.items.some((item) => item.action === 'backlog')).toBe(true)
   })
@@ -205,11 +210,12 @@ describe('the ribbon', () => {
   })
 
   /** Admin › Outcomes, the Manage Outcomes dialog: beside Teams, needing no active team. */
-  it('puts Outcomes in the Admin group directly after Teams, needing no active team', () => {
+  it('puts Outcomes first in the Admin group, needing no active team, and no Teams button there', () => {
     const admin = Ribbon.tabs.find((tab) => tab.id === 'admin')
     const actions = admin?.items.map((item) => item.action) ?? []
 
-    expect(actions.indexOf(OutcomesAction)).toBe(actions.indexOf('admin-teams') + 1)
+    expect(actions.indexOf(OutcomesAction)).toBe(0)
+    expect(actions).not.toContain('admin-teams')
     expect(admin?.items.find((item) => item.action === OutcomesAction)?.label).toBe('Outcomes')
     expect(needsActiveWorkTeam(OutcomesAction, undefined)).toBe(false)
   })
@@ -226,9 +232,9 @@ describe('the ribbon', () => {
 
   /**
    * Admin › Sites, every team's sites: between Repositories and Plugins, so before Settings, needing
-   * no active team. Active Team › Sites is the same screen for one team, and needs one.
+   * no active team. The team bar's Sites is the same screen for one team, and needs one.
    */
-  it('puts Sites in the Admin group before Settings, and a team-scoped Sites under Active Team', () => {
+  it('puts Sites in the Admin group before Settings, and a team-scoped Sites on the team bar', () => {
     const admin = Ribbon.tabs.find((tab) => tab.id === 'admin')
     const actions = admin?.items.map((item) => item.action) ?? []
 
@@ -239,16 +245,14 @@ describe('the ribbon', () => {
     expect(actions.indexOf(SitesAction)).toBeLessThan(actions.indexOf(TenantSettingsAction))
     expect(needsActiveWorkTeam(SitesAction, undefined)).toBe(false)
 
-    const active = Ribbon.tabs.find((tab) => tab.id === 'active')
-    expect(active?.items.map((item) => item.action)).toContain(TeamSitesAction)
+    expect(TeamBar.map((item) => item.action)).toContain(TeamSitesAction)
     expect(needsActiveWorkTeam(TeamSitesAction, undefined)).toBe(true)
   })
 
   /** Projects sits BEFORE Admin. */
-  it('puts Projects between the active team and Admin', () => {
+  it('puts Projects before Admin', () => {
     const ids = Ribbon.tabs.map((tab) => tab.id)
 
-    expect(ids.indexOf('projects')).toBeGreaterThan(ids.indexOf('active'))
     expect(ids.indexOf('projects')).toBeLessThan(ids.indexOf('admin'))
   })
 

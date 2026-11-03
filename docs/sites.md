@@ -354,7 +354,7 @@ does. The delete answers 409 with what would be lost until it is confirmed.
 The Admin group's **Sites** button lists every site across teams: name, team, live version,
 published at and by, and data size. Each row has **Open** (a new tab, through the entry above),
 **Versions** (roll back), **Unpublish** (keeps files and data), **Delete** (asks first, showing what
-would be lost) and a read-only view of each collection. The Active Team group's **Sites** button opens
+would be lost) and a read-only view of each collection. The team bar's **Sites** button (under the team's name on its board) opens
 the same list filtered to that team.
 
 ## For plugins

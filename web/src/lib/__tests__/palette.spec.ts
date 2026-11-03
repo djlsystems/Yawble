@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
 import { itemLabel } from '../backlog';
-import { Ribbon, needsActiveWorkTeam, ribbonEntries } from '../ribbon';
+import { PaletteRibbon, needsActiveWorkTeam, ribbonEntries } from '../ribbon';
 import { inTextField, matchPalette, opensPalette, paletteEntries, type PaletteKeyPress, type PaletteSource } from '../palette';
 
 function source(patch: Partial<PaletteSource> = {}): PaletteSource {
@@ -19,7 +19,7 @@ function source(patch: Partial<PaletteSource> = {}): PaletteSource {
       { id: 'o-1', name: 'Faster replies', status: 'active' },
       { id: 'o-2', name: 'Cleaner archive', status: 'proposed' },
     ],
-    ribbon: Ribbon,
+    ribbon: PaletteRibbon,
     activeWorkTeamId: 'alpha',
     activeTeamName: 'Alpha',
     ...patch,
@@ -104,7 +104,7 @@ describe('the palette matches by citation', () => {
 });
 
 describe('ribbon commands are gated as the ribbon gates them', () => {
-  const teamActions = ribbonEntries(Ribbon)
+  const teamActions = ribbonEntries(PaletteRibbon)
     .map((entry) => entry.item.action)
     .filter((action): action is string => action?.startsWith('team-') === true);
 
@@ -116,16 +116,16 @@ describe('ribbon commands are gated as the ribbon gates them', () => {
     expect(offered).toContain('action:admin-new-team');
   });
 
-  it('offers every team- command with one, said under the active team', () => {
+  it('offers every team bar command with one, said under the active team', () => {
     const entries = paletteEntries(source());
     for (const action of teamActions) expect(entries.map((entry) => entry.key)).toContain(`action:${action}`);
-    expect(entries.find((entry) => entry.key === 'action:team-settings')?.detail).toBe('Active Team · Alpha');
+    expect(entries.find((entry) => entry.key === 'action:team-settings')?.detail).toBe('Team · Alpha');
     expect(entries.find((entry) => entry.key === 'action:admin-settings')?.detail).toBe('Admin');
   });
 
-  it('offers exactly the ribbon buttons the ribbon itself enables', () => {
+  it('offers exactly the ribbon and team bar buttons enabled for the team in scope', () => {
     for (const active of ['alpha', undefined]) {
-      const enabled = ribbonEntries(Ribbon)
+      const enabled = ribbonEntries(PaletteRibbon)
         .filter((entry) => entry.item.kind === 'button' && !needsActiveWorkTeam(entry.item.action, active))
         .map((entry) => `action:${entry.item.action}`);
       const offered = paletteEntries(source({ activeWorkTeamId: active }))
