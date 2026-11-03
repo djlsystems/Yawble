@@ -37,10 +37,10 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
         var now = DateTimeOffset.UtcNow;
         var onAlpha = await LinkedAsync(shared.Id, alpha);
         var onBeta = await LinkedAsync(shared.Id, beta);
-        await RunAsync(onAlpha, alpha, now.AddHours(-2), now.AddHours(-1), billable: 400);
-        await RunAsync(onBeta, beta, now.AddHours(-3), now.AddHours(-1), billable: 100);
+        await RunAsync(onAlpha, alpha, now.AddHours(-2), now.AddHours(-1), billable: 400, rate: "60");
+        await RunAsync(onBeta, beta, now.AddHours(-3), now.AddHours(-1), billable: 100, rate: "60");
         // OUTSIDE THE EIGHT WEEKS: in the outcome's total, never in the team's.
-        await RunAsync(onAlpha, alpha, now.AddDays(-70).AddHours(-1), now.AddDays(-70), billable: 1000);
+        await RunAsync(onAlpha, alpha, now.AddDays(-70).AddHours(-1), now.AddDays(-70), billable: 1000, rate: "60");
 
         try
         {
@@ -61,6 +61,7 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
             Assert.Equal(60m, alphaShared.GetProperty("totals").GetProperty("cost").GetDecimal());
             Assert.Equal(240m, alphaShared.GetProperty("outcomeTotalCost").GetDecimal());
             Assert.Equal(60m, alphaCost.GetProperty("totals").GetProperty("cost").GetDecimal());
+            Assert.Equal(60m, alphaCost.GetProperty("totals").GetProperty("agentRate").GetDecimal());
 
             var betaShared = Single(betaCost);
             Assert.Equal(120m, betaShared.GetProperty("totals").GetProperty("cost").GetDecimal());
@@ -78,7 +79,9 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
             Assert.Equal(OutcomeFigures.WeekOf(DateTimeOffset.UtcNow), weeks[^1]);
             var weekly = alphaShared.GetProperty("weekly").EnumerateArray().ToList();
             Assert.Equal(weeks, weekly.Select(w => w.GetProperty("weekStart").GetDateTimeOffset()));
-            Assert.Equal(60m, weekly.Sum(w => w.GetProperty("cost").GetDecimal()));
+            // A week with no priced run has no money, never 0.
+            Assert.Equal(60m, weekly.Sum(w => w.GetProperty("cost") is { ValueKind: JsonValueKind.Number } c ? c.GetDecimal() : 0m));
+            Assert.Contains(weekly, w => w.GetProperty("cost").ValueKind == JsonValueKind.Null);
             Assert.Equal(400, weekly.Sum(w => w.GetProperty("billable").GetInt64()));
         }
         finally
@@ -188,10 +191,10 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
         var own = await CreateAsync(person, "Alpha's own");
         var now = DateTimeOffset.UtcNow;
 
-        await RunAsync(await LinkedAsync(shared.Id, alpha), alpha, now.AddDays(-20).AddHours(-1), now.AddDays(-20), billable: 30);
-        await RunAsync(await LinkedAsync(own.Id, alpha), alpha, now.AddHours(-4), now.AddHours(-1), billable: 40);
-        await RunAsync(NextCorrelation(), alpha, now.AddHours(-2), now.AddHours(-1), measured: false);
-        await RunAsync(await LinkedAsync(shared.Id, beta), beta, now.AddDays(-9).AddHours(-2), now.AddDays(-9), billable: 50);
+        await RunAsync(await LinkedAsync(shared.Id, alpha), alpha, now.AddDays(-20).AddHours(-1), now.AddDays(-20), billable: 30, rate: "24");
+        await RunAsync(await LinkedAsync(own.Id, alpha), alpha, now.AddHours(-4), now.AddHours(-1), billable: 40, rate: "24");
+        await RunAsync(NextCorrelation(), alpha, now.AddHours(-2), now.AddHours(-1), measured: false, rate: "24");
+        await RunAsync(await LinkedAsync(shared.Id, beta), beta, now.AddDays(-9).AddHours(-2), now.AddDays(-9), billable: 50, rate: "24");
 
         try
         {
@@ -212,7 +215,8 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
 
             var quietEntry = all.GetProperty("teams").EnumerateArray().Single(t => t.GetProperty("team").GetString() == quiet);
             Assert.Empty(quietEntry.GetProperty("outcomes").EnumerateArray());
-            Assert.Equal(0m, quietEntry.GetProperty("totals").GetProperty("cost").GetDecimal());
+            // NOTHING PRICED IS NO MONEY, NEVER 0.
+            Assert.Equal(JsonValueKind.Null, quietEntry.GetProperty("totals").GetProperty("cost").ValueKind);
 
             var alphaOutcomes = all.GetProperty("teams").EnumerateArray()
                 .Single(t => t.GetProperty("team").GetString() == alpha).GetProperty("outcomes").EnumerateArray().ToList();
@@ -285,11 +289,11 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
             await SetOkAsync(person, TenantSettings.OutcomesAgentHourlyRateName, 30);
             var before = await SummaryAsync(person);
 
-            await RunAsync(NextCorrelation(), team, now.AddHours(-2), now.AddHours(-1));
+            await RunAsync(NextCorrelation(), team, now.AddHours(-2), now.AddHours(-1), rate: "30");
             // THE EIGHT WEEKS BEFORE: in prior, never in total.
-            await RunAsync(NextCorrelation(), team, now.AddDays(-80).AddHours(-2), now.AddDays(-80));
+            await RunAsync(NextCorrelation(), team, now.AddDays(-80).AddHours(-2), now.AddDays(-80), rate: "30");
             // OLDER STILL: in neither.
-            await RunAsync(NextCorrelation(), team, now.AddDays(-150).AddHours(-4), now.AddDays(-150));
+            await RunAsync(NextCorrelation(), team, now.AddDays(-150).AddHours(-4), now.AddDays(-150), rate: "30");
 
             var after = await SummaryAsync(person);
 
@@ -331,10 +335,10 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
         var unspent = await CreateAsync(person, "Summary unspent", value: "75");
         var now = DateTimeOffset.UtcNow;
 
-        await RunAsync(await LinkedAsync(shared.Id, alpha), alpha, now.AddHours(-2), now.AddHours(-1));
-        await RunAsync(await LinkedAsync(shared.Id, beta), beta, now.AddHours(-3), now.AddHours(-1));
+        await RunAsync(await LinkedAsync(shared.Id, alpha), alpha, now.AddHours(-2), now.AddHours(-1), rate: "60");
+        await RunAsync(await LinkedAsync(shared.Id, beta), beta, now.AddHours(-3), now.AddHours(-1), rate: "60");
         // OUTSIDE THE EIGHT WEEKS: in what the budget is measured against, never in the weeks.
-        await RunAsync(await LinkedAsync(shared.Id, alpha), alpha, now.AddDays(-70).AddHours(-1), now.AddDays(-70));
+        await RunAsync(await LinkedAsync(shared.Id, alpha), alpha, now.AddDays(-70).AddHours(-1), now.AddDays(-70), rate: "60");
 
         try
         {
@@ -359,12 +363,12 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
             Assert.Equal(perTeam.GetProperty("outcomeTotalCost").GetDecimal(), entry.GetProperty("outcomeTotalCost").GetDecimal());
             Assert.Equal(perTeam.GetProperty("rank").GetInt32(), entry.GetProperty("rank").GetInt32());
 
-            // A BUDGET WITH NO SPEND IN THE WEEKS IS STILL LISTED, at nothing.
+            // A BUDGET WITH NO WORK IN THE WEEKS IS STILL LISTED, with no estimate - never 0.
             var idle = OutcomeOf(summary, unspent.Id);
             Assert.Equal(0, idle.GetProperty("agentSeconds").GetDouble());
-            Assert.Equal(0m, idle.GetProperty("cost").GetDecimal());
+            Assert.Equal(JsonValueKind.Null, idle.GetProperty("cost").ValueKind);
             Assert.Equal(75m, idle.GetProperty("budget").GetDecimal());
-            Assert.Equal(0m, idle.GetProperty("outcomeTotalCost").GetDecimal());
+            Assert.Equal(JsonValueKind.Null, idle.GetProperty("outcomeTotalCost").ValueKind);
             Assert.Equal(JsonValueKind.Null, idle.GetProperty("rank").ValueKind);
         }
         finally
@@ -416,19 +420,16 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
 
         var summary = await SummaryAsync(person);
 
+        // The instance-wide totals carry the other tests' priced runs on this shared host; a summary
+        // with no priced run at all is ExecutionCostTests'. Here: the unpriced outcome and the rate.
         Assert.Equal(JsonValueKind.Null, summary.GetProperty("rate").ValueKind);
-        Assert.Equal(JsonValueKind.Null, summary.GetProperty("total").GetProperty("cost").ValueKind);
-        Assert.Equal(JsonValueKind.Null, summary.GetProperty("prior").GetProperty("cost").ValueKind);
         Assert.True(Seconds(summary, "total") >= 7200);
         Assert.True(Seconds(summary, "prior") >= 3600);
-        Assert.All(summary.GetProperty("weeks").EnumerateArray(),
-            w => Assert.Equal(JsonValueKind.Null, w.GetProperty("cost").ValueKind));
-        Assert.All(summary.GetProperty("outcomes").EnumerateArray(), o =>
-        {
-            Assert.Equal(JsonValueKind.Null, o.GetProperty("cost").ValueKind);
-            Assert.Equal(JsonValueKind.Null, o.GetProperty("outcomeTotalCost").ValueKind);
-        });
-        Assert.Equal(100m, OutcomeOf(summary, outcome.Id).GetProperty("budget").GetDecimal());
+        var entry = OutcomeOf(summary, outcome.Id);
+        Assert.Equal(JsonValueKind.Null, entry.GetProperty("cost").ValueKind);
+        Assert.Equal(JsonValueKind.Null, entry.GetProperty("outcomeTotalCost").ValueKind);
+        Assert.Equal(3600, entry.GetProperty("agentSeconds").GetDouble(), 3);
+        Assert.Equal(100m, entry.GetProperty("budget").GetDecimal());
     }
 
     [Fact]
@@ -541,7 +542,9 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
 
     private static double Seconds(JsonElement summary, string amount) => summary.GetProperty(amount).GetProperty("agentSeconds").GetDouble();
 
-    private static decimal Cost(JsonElement summary, string amount) => summary.GetProperty(amount).GetProperty("cost").GetDecimal();
+    /// <summary>A summary amount's cost, 0 when it has none: for differences across a shared host.</summary>
+    private static decimal Cost(JsonElement summary, string amount) =>
+        summary.GetProperty(amount).GetProperty("cost") is { ValueKind: JsonValueKind.Number } cost ? cost.GetDecimal() : 0m;
 
     private static string Day(DateTimeOffset at) => at.UtcDateTime.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
 
@@ -606,18 +609,43 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
 
     private static long _run = 9_000_000_000 + Random.Shared.Next(1_000_000);
 
-    private Task RunAsync(
-        long correlation, string team, DateTimeOffset started, DateTimeOffset ended, long billable = 10, bool measured = true) =>
-        ExecuteAsync(
+    /// <summary>
+    /// A ledger row for a run of <paramref name="kind"/>. With <paramref name="snapshot"/> (implied by a
+    /// <paramref name="rate"/>), it names an execution snapshot written as the writer writes one at start:
+    /// that rate (none without one) and the workflow's newest link then. Without, it is a run from before
+    /// snapshots.
+    /// </summary>
+    private async Task RunAsync(
+        long correlation, string team, DateTimeOffset started, DateTimeOffset ended, long billable = 10, bool measured = true,
+        string? rate = null, string kind = MemberRef.AgentKind, bool snapshot = false, string currency = "USD")
+    {
+        object start = DBNull.Value;
+        if (rate is not null || snapshot)
+        {
+            start = Interlocked.Increment(ref _run);
+            await ExecuteAsync(
+                """
+                INSERT INTO execution_snapshots (start_seq, correlation, team_id, team_name, member, member_kind,
+                    rate_amount, rate_currency, rate_source, link_id, started_at)
+                VALUES ($start, $c, $team, $team, 'Dev', $kind, $rate, $currency, $source,
+                    (SELECT MAX(id) FROM workflow_outcome_links WHERE correlation = $c), $started)
+                """,
+                ("$start", start), ("$c", correlation), ("$team", team), ("$kind", kind),
+                ("$rate", rate ?? (object)DBNull.Value), ("$currency", rate is null ? DBNull.Value : currency),
+                ("$source", rate is null ? "none" : "member"), ("$started", started.ToString("O")));
+        }
+
+        await ExecuteAsync(
             """
-            INSERT INTO usage_ledger (run_seq, correlation, team_id, team_name, member, run_outcome,
-                started_at, ended_at, measured, tokens_in, tokens_out, billable)
-            VALUES ($seq, $c, $team, $team, 'Dev', 'completed', $started, $ended, $measured, $in, $out, $billable)
+            INSERT INTO usage_ledger (run_seq, correlation, team_id, team_name, member, member_kind, run_outcome,
+                started_at, ended_at, measured, tokens_in, tokens_out, billable, start_seq)
+            VALUES ($seq, $c, $team, $team, 'Dev', $kind, 'completed', $started, $ended, $measured, $in, $out, $billable, $start)
             """,
-            ("$seq", Interlocked.Increment(ref _run)), ("$c", correlation), ("$team", team),
+            ("$seq", Interlocked.Increment(ref _run)), ("$c", correlation), ("$team", team), ("$kind", kind),
             ("$started", started.ToString("O")), ("$ended", ended.ToString("O")), ("$measured", measured ? 1 : 0),
             ("$in", measured ? billable : (object)DBNull.Value), ("$out", measured ? 0L : (object)DBNull.Value),
-            ("$billable", measured ? billable : (object)DBNull.Value));
+            ("$billable", measured ? billable : (object)DBNull.Value), ("$start", start));
+    }
 
     private async Task ExecuteAsync(string sql, params (string Name, object Value)[] parameters)
     {

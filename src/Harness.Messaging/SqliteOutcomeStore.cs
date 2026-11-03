@@ -648,6 +648,41 @@ public sealed class SqliteOutcomeStore(
         return new OutcomeLedgerRows(current, runRows, closeRows, names);
     }
 
+    public async Task<ExecutionRunRows> ReadExecutionRunsAsync(
+        DateTimeOffset? from, DateTimeOffset? to, bool pricedOnly, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+
+        await using var links = connection.CreateCommand();
+        links.CommandText =
+            $"""
+             SELECT {OutcomeLinks.Columns} FROM workflow_outcome_links l
+             WHERE l.id = (SELECT MAX(n.id) FROM workflow_outcome_links n WHERE n.correlation = l.correlation)
+             ORDER BY l.correlation
+             """;
+        var current = await ReadLinksAsync(links, ct);
+
+        // OVERLAP, NOT END: a run is in the window when its [started_at, ended_at) meets it; a run that
+        // never started has no span, so it is in the window it ended in.
+        await using var runs = connection.CreateCommand();
+        runs.CommandText =
+            $"""
+            SELECT {LedgerFacts.ExecutionRunColumns}
+            FROM usage_ledger u
+            LEFT JOIN execution_snapshots s ON s.start_seq = u.start_seq
+            LEFT JOIN workflow_outcome_links l ON l.id = s.link_id
+            WHERE ((u.started_at IS NOT NULL AND u.started_at < $to AND u.ended_at > $from)
+                   OR (u.ended_at >= $from AND u.ended_at < $to))
+              AND ($priced = 0 OR s.rate_amount IS NOT NULL)
+            ORDER BY u.run_seq
+            """;
+        runs.Parameters.AddWithValue("$from", Stamp(from ?? DateTimeOffset.MinValue));
+        runs.Parameters.AddWithValue("$to", Stamp(to ?? DateTimeOffset.MaxValue));
+        runs.Parameters.AddWithValue("$priced", pricedOnly ? 1 : 0);
+
+        return new ExecutionRunRows(current, await LedgerFacts.ReadExecutionRunsAsync(runs, ct));
+    }
+
     // ---- helpers ----
 
     private async Task<OutcomeWrite> TransitionAsync(

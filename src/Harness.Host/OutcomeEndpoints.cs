@@ -69,7 +69,7 @@ public static class OutcomeEndpoints
                 // THE DASHBOARD READS EVERY WORKFLOW: the weekly series is the last weeks whatever the
                 // period, and a blocked span ends at the member's next run, which may be after it.
                 var whole = from is null && to is null ? book : OutcomeFigures.Open(await outcomes.ReadLedgerAsync(null, null, ct), all, null, null);
-                var dashboard = Dashboard.Of(settings, all, whole, await outcomes.ReadBacklogAsync(ct), from, to);
+                var dashboard = await Dashboard.OfAsync(settings, all, whole, await outcomes.ReadBacklogAsync(ct), from, to, outcomes, ct);
 
                 var shown = all.Where(o => statuses.Length == 0 ? o.Status != OutcomeStatus.Merged : statuses.Contains(o.Status));
 
@@ -130,8 +130,12 @@ public static class OutcomeEndpoints
                 + "its backlog items, `declared` counted as `outcomes.declaredCountsAs` says), `blockedSeconds` "
                 + "(time its workflows were blocked on a person, from the ledger), `efficiency` (agent time over "
                 + "agent time plus blocked time, null when both are 0), `weekly` (the last 8 weeks, Monday-start "
-                + "UTC, whatever the period) and `cost` (agent hours times `outcomes.agentHourlyRate`; `amount` "
-                + "null when no rate is set). `money` names the currency, the rate and `declaredCountsAs`. "
+                + "UTC, whatever the period: agent-kind time and money split by overlap, tokens in the week a run ended) "
+                + "and `cost` (the sum of each run's estimate, priced from the snapshot taken when it started; a run "
+                + "with no snapshot rate adds nothing; `amount` null - never 0 - when no run was priced; with a "
+                + "window, the part of each run inside it). A run with a snapshot serves the outcome its link named "
+                + "when it started; `weekly` and `cost` count it there. `money` names the currency, the tenant "
+                + "default rate as set now (no figure multiplies by it) and `declaredCountsAs`. "
                 + "A workflow counts toward the outcome its newest link names, "
                 + "followed through `mergedInto`. `noOutcome` carries every workflow with no link. "
                 + "`ledgerStartedAt` is when the ledger began: work before it was recovered from the log. "
@@ -153,7 +157,7 @@ public static class OutcomeEndpoints
                 var book = OutcomeFigures.Open(await outcomes.ReadLedgerAsync(null, null, ct), all, null, null);
                 var open = await log.OpenWorkflowsAmongAsync([.. book.InWindow], ct);
                 var items = await outcomes.ReadBacklogAsync(ct);
-                var dashboard = Dashboard.Of(settings, all, book, items, null, null);
+                var dashboard = await Dashboard.OfAsync(settings, all, book, items, null, null, outcomes, ct);
 
                 var lines = new List<OutcomeFigures.WorkflowLine>();
                 foreach (var correlation in book.WorkflowsOf(holder).Order())
@@ -617,7 +621,8 @@ public static class OutcomeEndpoints
     /// <summary>What a read prices and counts the dashboard with, read once per request.</summary>
     private sealed record Dashboard(
         OutcomeFigures.Pricing Pricing, OutcomeFigures.Book Whole, IReadOnlyList<OutcomeBacklogItem> Items,
-        IReadOnlyDictionary<string, string> Resolution, IReadOnlyDictionary<long, double> Blocked, DateTimeOffset Now)
+        IReadOnlyDictionary<string, string> Resolution, IReadOnlyDictionary<long, double> Blocked, DateTimeOffset Now,
+        IReadOnlyList<ExecutionCost.Run> WeekRuns, ExecutionCost.Costs Costs)
     {
         public object Money => new
         {
@@ -626,19 +631,31 @@ public static class OutcomeEndpoints
             declaredCountsAs = Pricing.DeclaredCountsAs,
         };
 
-        public static Dashboard Of(
+        /// <summary>
+        /// The dashboard at now: the runs overlapping the last weeks, priced, for the weekly series, and
+        /// the priced runs of the period - all time with no window - for each outcome's cost, both read
+        /// windowed (<see cref="IOutcomeStore.ReadExecutionRunsAsync"/>).
+        /// </summary>
+        public static async Task<Dashboard> OfAsync(
             TenantSettings settings, IReadOnlyList<Outcome> all, OutcomeFigures.Book whole,
-            IReadOnlyList<OutcomeBacklogItem> items, DateTimeOffset? from, DateTimeOffset? to)
+            IReadOnlyList<OutcomeBacklogItem> items, DateTimeOffset? from, DateTimeOffset? to,
+            IOutcomeStore outcomes, CancellationToken ct)
         {
             var now = DateTimeOffset.UtcNow;
             var pricing = OutcomeFigures.Pricing.Of(settings);
+
+            var weeks = OutcomeFigures.WeekStarts(now);
+            var weekRuns = ExecutionCost.Of(await outcomes.ReadExecutionRunsAsync(weeks[0], weeks[^1].AddDays(7), pricedOnly: false, ct), all);
+            var priced = ExecutionCost.Of(await outcomes.ReadExecutionRunsAsync(from, to, pricedOnly: true, ct), all);
+
             return new Dashboard(
                 pricing, whole, items, OutcomeFigures.Resolution(all),
-                OutcomeFigures.BlockedByWorkflow(whole.Rows, now, from, to), now);
+                OutcomeFigures.BlockedByWorkflow(whole.Rows, now, from, to), now,
+                weekRuns, ExecutionCost.CostsOf(priced, from, to, pricing.Currency));
         }
 
         public OutcomeFigures.Figures Figures(OutcomeFigures.Figures figures, string? outcome) =>
-            OutcomeFigures.Dashboard(figures, Whole, outcome, Items, Resolution, Blocked, Pricing, Now);
+            OutcomeFigures.Dashboard(figures, Whole, outcome, Items, Resolution, Blocked, Pricing, Now, WeekRuns, Costs);
     }
 
     /// <summary>A delete that failed part way changed nothing - it is one transaction - and says so.</summary>

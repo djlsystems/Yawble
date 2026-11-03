@@ -3,7 +3,7 @@ using Harness.Contracts;
 namespace Harness.Host;
 
 /// <summary>
-/// WHAT AN OUTCOME'S WORK COST, READ FROM THE LEDGER, NEVER ESTIMATED.
+/// WHAT AN OUTCOME'S WORK TOOK, READ FROM THE LEDGER; ITS MONEY IS <see cref="ExecutionCost"/>'S.
 ///
 /// <para>
 /// A workflow counts toward the outcome its NEWEST link names, followed through <c>merged_into</c>,
@@ -104,13 +104,15 @@ public static class OutcomeFigures
         /// <summary>The last <see cref="Weeks"/> weeks, oldest first, whatever the period.</summary>
         public IReadOnlyList<Week>? Weekly { get; init; }
 
-        /// <summary>Agent hours times the rate; its amount is null when no rate is set.</summary>
+        /// <summary>The estimate of the runs that served it, each priced from its snapshot (<see cref="ExecutionCost"/>);
+        /// its amount is null - never 0 - when none was priced.</summary>
         public Money? Cost { get; init; }
     }
 
     public sealed record BacklogCounts(int NotStarted, int InProgress, int Achieved);
 
-    /// <summary>One week, Monday 00:00 UTC on: runs that ended in it.</summary>
+    /// <summary>One week, Monday 00:00 UTC on: the agent time and money of the part of each run inside it,
+    /// and the tokens of the runs that ended in it (<see cref="ExecutionCost.Weekly"/>).</summary>
     public sealed record Week(
         DateTimeOffset WeekStart, double AgentSeconds, long Billable, int MeasuredRuns, int UnmeasuredRuns, decimal? Cost);
 
@@ -127,8 +129,6 @@ public static class OutcomeFigures
         public static Pricing Of(TenantSettings settings) =>
             new(settings.OutcomesCurrency, settings.OutcomesAgentHourlyRate, settings.OutcomesDeclaredCountsAs);
 
-        public decimal? CostOf(double agentSeconds) =>
-            AgentHourlyRate <= 0 ? null : decimal.Round((decimal)agentSeconds / 3600m * AgentHourlyRate, 2);
     }
 
     public const string NotStarted = "notStarted";
@@ -209,13 +209,15 @@ public static class OutcomeFigures
     /// <summary>
     /// The dashboard's figures on top of <paramref name="figures"/>: backlog counts from the items
     /// whose outcome resolves to <paramref name="outcome"/> (null: items with none), blocked time and
-    /// efficiency, the weekly series from <paramref name="all"/> (every workflow, whatever the
-    /// period) and the cost. Nothing is estimated: no rate is no price, no time is no efficiency.
+    /// efficiency from <paramref name="all"/> (every workflow, whatever the period), and the money read
+    /// by <see cref="ExecutionCost"/>: the weekly series from <paramref name="weekRuns"/> - the runs over
+    /// the last weeks, each in the one outcome it serves, split by overlap - and the cost from
+    /// <paramref name="costs"/>. A run with no snapshot rate is not priced, never 0.
     /// </summary>
     public static Figures Dashboard(
         Figures figures, Book all, string? outcome, IReadOnlyList<OutcomeBacklogItem> items,
         IReadOnlyDictionary<string, string> resolution, IReadOnlyDictionary<long, double> blocked,
-        Pricing pricing, DateTimeOffset now)
+        Pricing pricing, DateTimeOffset now, IReadOnlyList<ExecutionCost.Run> weekRuns, ExecutionCost.Costs costs)
     {
         var mine = ItemsOf(items, outcome, resolution).Select(i => Bucket(i, pricing.DeclaredCountsAs)).ToList();
         var counts = new BacklogCounts(mine.Count(b => b == NotStarted), mine.Count(b => b == InProgress), mine.Count(b => b == Achieved));
@@ -224,7 +226,7 @@ public static class OutcomeFigures
         var blockedSeconds = workflows.Sum(c => blocked.GetValueOrDefault(c));
         var total = figures.AgentSeconds + blockedSeconds;
 
-        var weekly = Weekly(workflows.SelectMany(c => all.RunsOf[c]).ToList(), pricing, now);
+        var weekly = ExecutionCost.Weekly(weekRuns.Where(r => r.OutcomeId == outcome), WeekStarts(now), pricing.Currency);
 
         return figures with
         {
@@ -232,7 +234,7 @@ public static class OutcomeFigures
             BlockedSeconds = blockedSeconds,
             Efficiency = total > 0 ? figures.AgentSeconds / total : null,
             Weekly = weekly,
-            Cost = new Money(pricing.CostOf(figures.AgentSeconds), pricing.Currency),
+            Cost = new Money(costs.Of(outcome), pricing.Currency),
         };
     }
 
@@ -243,23 +245,6 @@ public static class OutcomeFigures
         var thisWeek = WeekOf(now);
         return Enumerable.Range(0, Weeks).Select(i => thisWeek.AddDays(-7 * (Weeks - 1 - i))).ToList();
     }
-
-    /// <summary>
-    /// <paramref name="runs"/> by the week they ended in, over <see cref="WeekStarts"/>: agent time,
-    /// billable tokens of the measured runs, the measured and unmeasured runs counted, and the cost at
-    /// the rate (null with none). A run outside the weeks is not counted.
-    /// </summary>
-    public static IReadOnlyList<Week> Weekly(IReadOnlyList<UsageLedgerRow> runs, Pricing pricing, DateTimeOffset now) =>
-        WeekStarts(now)
-            .Select(start =>
-            {
-                var inWeek = runs.Where(r => r.EndedAt >= start && r.EndedAt < start.AddDays(7)).ToList();
-                var seconds = inWeek.Sum(AgentSeconds);
-                return new Week(
-                    start, seconds, inWeek.Where(r => r.Measured).Sum(r => r.Billable ?? 0),
-                    inWeek.Count(r => r.Measured), inWeek.Count(r => !r.Measured), pricing.CostOf(seconds));
-            })
-            .ToList();
 
     /// <summary>The items whose own outcome, followed through merges, is <paramref name="outcome"/>
     /// (null: the items with no outcome).</summary>

@@ -634,6 +634,41 @@ public sealed class SqlServerOutcomeStore(
             },
             ct);
 
+    public Task<ExecutionRunRows> ReadExecutionRunsAsync(
+        DateTimeOffset? from, DateTimeOffset? to, bool pricedOnly, CancellationToken ct = default) =>
+        RunAsync(
+            async (connection, token) =>
+            {
+                await using var links = connection.CreateCommand();
+                links.CommandText =
+                    $"""
+                     SELECT {OutcomeFacts.LinkColumns} FROM workflow_outcome_links l
+                     WHERE l.id = (SELECT MAX(n.id) FROM workflow_outcome_links n WHERE n.correlation = l.correlation)
+                     ORDER BY l.correlation
+                     """;
+                var current = await OutcomeFacts.ReadLinksAsync(links, token);
+
+                // OVERLAP, NOT END, as the SQLite store reads it.
+                await using var runs = connection.CreateCommand();
+                runs.CommandText =
+                    $"""
+                     SELECT {LedgerFacts.ExecutionRunColumns}
+                     FROM usage_ledger u
+                     LEFT JOIN execution_snapshots s ON s.start_seq = u.start_seq
+                     LEFT JOIN workflow_outcome_links l ON l.id = s.link_id
+                     WHERE ((u.started_at IS NOT NULL AND u.started_at < @to AND u.ended_at > @from)
+                            OR (u.ended_at >= @from AND u.ended_at < @to))
+                       AND (@priced = 0 OR s.rate_amount IS NOT NULL)
+                     ORDER BY u.run_seq
+                     """;
+                runs.Parameters.AddWithValue("@from", Instant.Stamp(from ?? DateTimeOffset.MinValue));
+                runs.Parameters.AddWithValue("@to", Instant.Stamp(to ?? DateTimeOffset.MaxValue));
+                runs.Parameters.AddWithValue("@priced", pricedOnly ? 1 : 0);
+
+                return new ExecutionRunRows(current, await LedgerFacts.ReadExecutionRunsAsync(runs, token));
+            },
+            ct);
+
     // ---- helpers ----
 
     private async Task<OutcomeWrite> TransitionAsync(

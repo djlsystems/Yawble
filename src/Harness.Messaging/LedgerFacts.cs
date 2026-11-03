@@ -165,6 +165,41 @@ public static class LedgerFacts
             Text(reader, 7),
             reader.GetInt64(8) != 0);
 
+    /// <summary>
+    /// The cost read's columns over <c>usage_ledger u LEFT JOIN execution_snapshots s ON s.start_seq =
+    /// u.start_seq LEFT JOIN workflow_outcome_links l ON l.id = s.link_id</c>, in the order
+    /// <see cref="ReadExecutionRun"/> reads them: the run's own columns, then its snapshot's.
+    /// </summary>
+    public static readonly string ExecutionRunColumns =
+        string.Join(", ", RunColumns.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Select(c => $"u.{c}"))
+        + ", u.start_seq, s.start_seq, s.member_kind, s.rate_amount, s.rate_currency, s.rate_source, s.link_id, l.id, l.outcome_id";
+
+    /// <summary>One row of <see cref="ExecutionRunColumns"/>: the run, and its snapshot when it has one.</summary>
+    public static ExecutionRunRow ReadExecutionRun(DbDataReader reader) =>
+        new(
+            ReadRun(reader),
+            Long(reader, 21),
+            reader.IsDBNull(22)
+                ? null
+                : new ExecutionRunSnapshot(
+                    Text(reader, 23),
+                    Text(reader, 24),
+                    Text(reader, 25),
+                    reader.GetString(26),
+                    Long(reader, 27),
+                    !reader.IsDBNull(28),
+                    Text(reader, 29)));
+
+    public static async Task<IReadOnlyList<ExecutionRunRow>> ReadExecutionRunsAsync(DbCommand command, CancellationToken ct)
+    {
+        var rows = new List<ExecutionRunRow>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+
+        while (await reader.ReadAsync(ct)) rows.Add(ReadExecutionRun(reader));
+
+        return rows;
+    }
+
     public static async Task<IReadOnlyList<UsageLedgerRow>> ReadRunsAsync(DbCommand command, CancellationToken ct)
     {
         var rows = new List<UsageLedgerRow>();

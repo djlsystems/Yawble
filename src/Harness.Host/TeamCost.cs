@@ -9,23 +9,31 @@ using Harness.Kanban;
 namespace Harness.Host;
 
 /// <summary>
-/// WHAT A TEAM COST, BY OUTCOME, OVER THE LAST EIGHT WEEKS: the outcome figures
-/// (<see cref="OutcomeFigures"/>) cut by team, for the team page's Cost tile and the teams list.
+/// WHAT A TEAM'S EXECUTION IS ESTIMATED TO HAVE COST, BY OUTCOME, OVER THE LAST EIGHT WEEKS, for the team
+/// page's tile and the teams list. Every run is priced by <see cref="ExecutionCost"/>, and nothing here
+/// prices one another way.
 ///
 /// <para>
-/// Nothing here has its own rule. A workflow serves the outcome its newest link names, followed
-/// through <c>merged_into</c> (<see cref="OutcomeFigures.Open"/>); a link to an outcome that no longer
-/// exists, an unlink, or no link at all is No outcome. The weeks are <see cref="OutcomeFigures.WeekStarts"/>
-/// and each week is <see cref="OutcomeFigures.Weekly"/>. Cost is <see cref="OutcomeFigures.Pricing.CostOf"/>:
-/// agent hours times the rate, null - never 0 - with no rate. A run that reported no usage is counted
-/// in <c>unmeasuredRuns</c> and adds nothing to <c>billable</c>.
+/// A RUN IS PRICED FROM THE SNAPSHOT TAKEN AT ITS START, never from the rate set now: a rate changed
+/// later does not move a past run, and a run with no snapshot rate - a plugin with no rate of its own,
+/// or a run from before snapshots - adds no money, never 0. <c>agentSeconds</c> is agent-kind time
+/// only; <c>cost</c> is every priced run, agent and plugin; <c>agentRate</c> is the priced agent time's
+/// weighted rate. The weeks are <see cref="OutcomeFigures.WeekStarts"/>, and a run crossing one is split
+/// by overlap. A run that reported no usage is counted in <c>unmeasuredRuns</c> and adds nothing to
+/// <c>billable</c>.
+/// </para>
+///
+/// <para>
+/// A RUN SERVES ONE OUTCOME: a snapshotted run the one its link named at start, followed through
+/// <c>merged_into</c>; a run from before snapshots its workflow's newest link. No link, an unlink, or
+/// an outcome that is gone is No outcome.
 /// </para>
 ///
 /// <para>
 /// A TEAM'S WORK is its runs: the ledger rows carrying its id, above the team's floor
 /// (<see cref="TeamRegistry.FloorFor"/>, as the Tokens tile reads them, so a team recreated under the
-/// same id never shows its predecessor's spend) that ended in the eight weeks. An outcome is listed for
-/// a team when at least one such run served it.
+/// same id never shows its predecessor's work) that overlap the eight weeks. An outcome is listed for a
+/// team when at least one such run served it.
 /// </para>
 ///
 /// <para>
@@ -41,9 +49,9 @@ namespace Harness.Host;
 /// </para>
 ///
 /// <para>
-/// <c>outcomeTotalCost</c> is the outcome's own cost - every team's work on it, all time, the figure
-/// <c>GET /api/outcomes</c> answers as its <c>cost</c> with no window - because a budget is shared by
-/// every team serving the outcome and is measured against all of it.
+/// <c>outcomeTotalCost</c> is the outcome's own estimate - every team's priced runs on it, all time, the
+/// figure <c>GET /api/outcomes</c> answers as its <c>cost</c> with no window - because a budget is shared
+/// by every team serving the outcome and is measured against all of it.
 /// </para>
 /// </summary>
 public static class TeamCost
@@ -53,13 +61,16 @@ public static class TeamCost
 
     public sealed record MoneyShape(string Currency, int? AgentHourlyRate);
 
-    public sealed record Totals(double AgentSeconds, long Billable, int MeasuredRuns, int UnmeasuredRuns, decimal? Cost);
+    /// <summary>A figure's totals. <c>agentSeconds</c> is agent-kind time only; <c>cost</c> is every priced run's
+    /// estimate, agent and plugin, null - never 0 - when none was priced; <c>agentRate</c> is the weighted rate
+    /// of the priced agent time, null when there was none.</summary>
+    public sealed record Totals(double AgentSeconds, long Billable, int MeasuredRuns, int UnmeasuredRuns, decimal? Cost, decimal? AgentRate);
 
     public sealed record OutcomeEntry(
         string? Id, string Name, decimal? Value,
         IReadOnlyList<OutcomeFigures.Week> Weekly, Totals Totals, decimal? OutcomeTotalCost, int? Rank);
 
-    public sealed record Amount(double AgentSeconds, decimal? Cost);
+    public sealed record Amount(double AgentSeconds, decimal? Cost, decimal? AgentRate);
 
     public sealed record SummaryWeek(string WeekStart, double AgentSeconds, decimal? Cost);
 
@@ -74,48 +85,56 @@ public static class TeamCost
 
     public sealed record TeamEntry(string Team, IReadOnlyList<OutcomeEntry> Outcomes, Totals Totals);
 
-    /// <summary>One read of everything every team's figures need: the whole ledger once, the
-    /// outcomes once, and each outcome's all-teams cost summed in one pass.</summary>
+    /// <summary>One read of everything every team's figures need: the runs that overlap the weeks (and,
+    /// for the summary, the eight before them) once, priced by <see cref="ExecutionCost"/>; the outcomes
+    /// once; and each outcome's all-time, all-teams estimate from the priced runs alone.</summary>
     public sealed class Reading
     {
         public required OutcomeFigures.Pricing Pricing { get; init; }
         public required DateTimeOffset Now { get; init; }
         public required IReadOnlyList<DateTimeOffset> Weeks { get; init; }
-        public required OutcomeFigures.Book Book { get; init; }
+        public required IReadOnlyList<ExecutionCost.Run> Runs { get; init; }
         public required IReadOnlyDictionary<string, Outcome> OutcomesById { get; init; }
-        public required IReadOnlyDictionary<string, decimal?> OutcomeTotalCost { get; init; }
+        public required IReadOnlyDictionary<string, decimal> OutcomeTotalCost { get; init; }
 
         /// <summary>Each outcome any team's runs served in the eight weeks, by its 1-based place in the
         /// fixed order (created, oldest first, ties by id): the same for every team.</summary>
         public required IReadOnlyDictionary<string, int> Ranks { get; init; }
 
+        /// <summary>The currency and the TENANT DEFAULT rate as set now - what the Outcomes dialog edits. No
+        /// figure here is that rate times hours: each run is priced from its own snapshot.</summary>
         public MoneyShape Money => new(Pricing.Currency, Pricing.AgentHourlyRate > 0 ? Pricing.AgentHourlyRate : null);
 
-        public static async Task<Reading> ReadAsync(IOutcomeStore store, TenantSettings settings, DateTimeOffset now, CancellationToken ct)
+        private string Currency => Pricing.Currency;
+
+        /// <summary>
+        /// The reading at <paramref name="now"/>: the runs overlapping the eight weeks - from the eight
+        /// before them too with <paramref name="withPrior"/> - in one windowed read, and the priced runs of
+        /// all time in another, for each outcome's total.
+        /// </summary>
+        public static async Task<Reading> ReadAsync(
+            IOutcomeStore store, TenantSettings settings, DateTimeOffset now, CancellationToken ct, bool withPrior = false)
         {
             var outcomes = await store.ListAsync(ct);
-            var book = OutcomeFigures.Open(await store.ReadLedgerAsync(null, null, ct), outcomes, null, null);
             var pricing = OutcomeFigures.Pricing.Of(settings);
 
-            // EVERY RUN OF EVERY TEAM, BY THE OUTCOME IT SERVES NOW: what OutcomeFigures.For sums as an
-            // outcome's agentSeconds with no window, read in one pass instead of one per outcome.
-            var seconds = new Dictionary<string, double>(StringComparer.Ordinal);
-            foreach (var run in book.Rows.Runs)
-            {
-                if (book.OutcomeOf.TryGetValue(run.Correlation, out var outcome))
-                {
-                    seconds[outcome] = seconds.GetValueOrDefault(outcome) + OutcomeFigures.AgentSeconds(run);
-                }
-            }
-
-            // THE GLOBAL ORDER: every outcome served in the weeks by any team's run, whatever team asks.
             var weeks = OutcomeFigures.WeekStarts(now);
             var from = weeks[0];
             var to = weeks[^1].AddDays(7);
+            var readFrom = withPrior ? from.AddDays(-7 * OutcomeFigures.Weeks) : from;
+
+            var runs = ExecutionCost.Of(await store.ReadExecutionRunsAsync(readFrom, to, pricedOnly: false, ct), outcomes);
+
+            // EVERY PRICED RUN OF EVERY TEAM, ALL TIME, BY THE OUTCOME IT SERVES: what an outcome's budget is
+            // measured against, and what GET /api/outcomes answers as its cost with no window.
+            var priced = ExecutionCost.Of(await store.ReadExecutionRunsAsync(null, null, pricedOnly: true, ct), outcomes);
+            var totals = ExecutionCost.CostsOf(priced, null, null, pricing.Currency);
+
+            // THE GLOBAL ORDER: every outcome served in the weeks by any team's run, whatever team asks.
             var byId = outcomes.ToDictionary(o => o.Id, StringComparer.Ordinal);
-            var ranks = book.Rows.Runs
-                .Where(r => r.TeamId is not null && r.EndedAt >= from && r.EndedAt < to)
-                .Select(r => book.OutcomeOf.GetValueOrDefault(r.Correlation))
+            var ranks = runs
+                .Where(r => r.Ledger.TeamId is not null && r.Overlaps(from, to))
+                .Select(r => r.OutcomeId)
                 .OfType<string>()
                 .Distinct(StringComparer.Ordinal)
                 .Select(id => byId.GetValueOrDefault(id))
@@ -130,28 +149,28 @@ public static class TeamCost
                 Pricing = pricing,
                 Now = now,
                 Weeks = weeks,
-                Book = book,
+                Runs = runs,
                 OutcomesById = byId,
                 Ranks = ranks,
-                OutcomeTotalCost = seconds.ToDictionary(e => e.Key, e => pricing.CostOf(e.Value), StringComparer.Ordinal),
+                OutcomeTotalCost = totals.ByOutcome,
             };
         }
 
-        /// <summary>Every team's runs in the eight weeks, above its floor, in one pass over the ledger.</summary>
-        public IReadOnlyDictionary<string, List<UsageLedgerRow>> RunsByTeam(IReadOnlyDictionary<string, long> floors) =>
+        /// <summary>Every team's runs in the eight weeks, above its floor.</summary>
+        public IReadOnlyDictionary<string, List<ExecutionCost.Run>> RunsByTeam(IReadOnlyDictionary<string, long> floors) =>
             RunsByTeam(floors, Weeks[0], Weeks[^1].AddDays(7));
 
-        /// <summary>Every team's runs above its floor that ended in [<paramref name="from"/>,
-        /// <paramref name="to"/>), in one pass over the ledger.</summary>
-        public IReadOnlyDictionary<string, List<UsageLedgerRow>> RunsByTeam(
+        /// <summary>Every team's runs above its floor that overlap [<paramref name="from"/>,
+        /// <paramref name="to"/>), in one pass.</summary>
+        public IReadOnlyDictionary<string, List<ExecutionCost.Run>> RunsByTeam(
             IReadOnlyDictionary<string, long> floors, DateTimeOffset from, DateTimeOffset to)
         {
-            var byTeam = new Dictionary<string, List<UsageLedgerRow>>(StringComparer.OrdinalIgnoreCase);
+            var byTeam = new Dictionary<string, List<ExecutionCost.Run>>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var run in Book.Rows.Runs)
+            foreach (var run in Runs)
             {
-                if (run.TeamId is not { } team || !floors.TryGetValue(team, out var floor)) continue;
-                if (run.RunSeq <= floor || run.EndedAt < from || run.EndedAt >= to) continue;
+                if (run.Ledger.TeamId is not { } team || !floors.TryGetValue(team, out var floor)) continue;
+                if (run.Ledger.RunSeq <= floor || !run.Overlaps(from, to)) continue;
 
                 if (!byTeam.TryGetValue(team, out var list)) byTeam[team] = list = [];
                 list.Add(run);
@@ -161,25 +180,29 @@ public static class TeamCost
         }
 
         /// <summary>One team's entry from its runs in the eight weeks.</summary>
-        public TeamEntry Team(string team, IReadOnlyList<UsageLedgerRow> runs)
+        public TeamEntry Team(string team, IReadOnlyList<ExecutionCost.Run> runs)
         {
             var entries = runs
-                .GroupBy(r => Book.OutcomeOf.GetValueOrDefault(r.Correlation))
+                .GroupBy(r => r.OutcomeId)
                 .Select(g => (Outcome: g.Key is null ? null : OutcomesById.GetValueOrDefault(g.Key), Runs: g.ToList()))
                 .OrderBy(e => e.Outcome is null ? 0 : 1)
                 .ThenBy(e => e.Outcome?.CreatedAt)
                 .ThenBy(e => e.Outcome?.Id, StringComparer.Ordinal)
-                .Select(e => new OutcomeEntry(
-                    e.Outcome?.Id,
-                    e.Outcome?.Name ?? NoOutcomeName,
-                    BudgetOf(e.Outcome),
-                    OutcomeFigures.Weekly(e.Runs, Pricing, Now),
-                    TotalsOf(e.Runs),
-                    e.Outcome is null ? null : OutcomeTotalCost.GetValueOrDefault(e.Outcome.Id, Pricing.CostOf(0)),
-                    e.Outcome is null ? null : Ranks.GetValueOrDefault(e.Outcome.Id)))
+                .Select(e =>
+                {
+                    var weeks = ExecutionCost.Weeks(e.Runs, Weeks, Currency);
+                    return new OutcomeEntry(
+                        e.Outcome?.Id,
+                        e.Outcome?.Name ?? NoOutcomeName,
+                        BudgetOf(e.Outcome),
+                        WeeklyOf(weeks),
+                        TotalsOf(ExecutionCost.Total(weeks, Currency)),
+                        e.Outcome is null ? null : TotalCostOf(e.Outcome.Id),
+                        e.Outcome is null ? null : Ranks.GetValueOrDefault(e.Outcome.Id));
+                })
                 .ToList();
 
-            return new TeamEntry(team, entries, TotalsOf(runs));
+            return new TeamEntry(team, entries, TotalsOf(ExecutionCost.Total(ExecutionCost.Weeks(runs, Weeks, Currency), Currency)));
         }
 
         /// <summary>
@@ -191,15 +214,15 @@ public static class TeamCost
         {
             var runs = RunsByTeam(floors).Values.SelectMany(r => r).ToList();
             var priorTo = Weeks[0];
+            var priorWeeks = Weeks.Select(w => w.AddDays(-7 * OutcomeFigures.Weeks)).ToList();
             var prior = RunsByTeam(floors, priorTo.AddDays(-7 * OutcomeFigures.Weeks), priorTo).Values.SelectMany(r => r).ToList();
 
-            var weeks = OutcomeFigures.Weekly(runs, Pricing, Now)
-                .Select(w => new SummaryWeek(Day(w.WeekStart), w.AgentSeconds, w.Cost))
-                .ToList();
+            var weeks = ExecutionCost.Weeks(runs, Weeks, Currency);
+            var weekly = weeks.Select(w => new SummaryWeek(Day(w.WeekStart), w.Tally.AgentSeconds, w.Tally.Cost)).ToList();
 
             var served = runs
-                .GroupBy(r => Book.OutcomeOf.GetValueOrDefault(r.Correlation) is { } id && OutcomesById.ContainsKey(id) ? id : null)
-                .ToDictionary(g => g.Key ?? "", g => g.Sum(OutcomeFigures.AgentSeconds), StringComparer.Ordinal);
+                .GroupBy(r => r.OutcomeId ?? "")
+                .ToDictionary(g => g.Key, g => ExecutionCost.Total(ExecutionCost.Weeks(g, Weeks, Currency), Currency), StringComparer.Ordinal);
 
             // AN OUTCOME WITH A BUDGET STAYS, spent in the weeks or not, while it is live - so Budgets
             // can measure it; an outcome merged away carries no budget of its own.
@@ -214,45 +237,44 @@ public static class TeamCost
                 .ThenBy(o => o.Id, StringComparer.Ordinal)
                 .Select(o =>
                 {
-                    var seconds = served.GetValueOrDefault(o.Id);
+                    var tally = served.GetValueOrDefault(o.Id);
                     return new SummaryOutcome(
-                        o.Id, o.Name, Ranks.TryGetValue(o.Id, out var rank) ? rank : null, seconds, Pricing.CostOf(seconds),
-                        BudgetOf(o), OutcomeTotalCost.GetValueOrDefault(o.Id, Pricing.CostOf(0)));
+                        o.Id, o.Name, Ranks.TryGetValue(o.Id, out var rank) ? rank : null, tally?.AgentSeconds ?? 0, tally?.Cost,
+                        BudgetOf(o), TotalCostOf(o.Id));
                 })
                 .ToList();
 
             if (served.TryGetValue("", out var unlinked))
             {
-                outcomes.Insert(0, new SummaryOutcome(null, NoOutcomeName, null, unlinked, Pricing.CostOf(unlinked), null, null));
+                outcomes.Insert(0, new SummaryOutcome(null, NoOutcomeName, null, unlinked.AgentSeconds, unlinked.Cost, null, null));
             }
 
             return new Summary(
                 Money.AgentHourlyRate,
-                weeks,
+                weekly,
                 Day(Weeks[0]),
                 Day(Now),
-                AmountOf(runs),
-                AmountOf(prior),
+                AmountOf(ExecutionCost.Total(weeks, Currency)),
+                AmountOf(ExecutionCost.Total(ExecutionCost.Weeks(prior, priorWeeks, Currency), Currency)),
                 outcomes,
                 rightNow);
         }
 
-        private Amount AmountOf(IReadOnlyList<UsageLedgerRow> runs)
-        {
-            var seconds = runs.Sum(OutcomeFigures.AgentSeconds);
-            return new Amount(seconds, Pricing.CostOf(seconds));
-        }
+        /// <summary>An outcome's estimate across every team and all time; null - never 0 - when no priced run served it.</summary>
+        private decimal? TotalCostOf(string outcome) => OutcomeTotalCost.TryGetValue(outcome, out var cost) ? cost : null;
+
+        private static IReadOnlyList<OutcomeFigures.Week> WeeklyOf(IEnumerable<(DateTimeOffset WeekStart, ExecutionCost.Tally Tally)> weeks) =>
+            weeks.Select(w => new OutcomeFigures.Week(
+                    w.WeekStart, w.Tally.AgentSeconds, w.Tally.Billable, w.Tally.MeasuredRuns, w.Tally.UnmeasuredRuns, w.Tally.Cost))
+                .ToList();
+
+        private static Amount AmountOf(ExecutionCost.Tally tally) => new(tally.AgentSeconds, tally.Cost, tally.AgentRate);
 
         private static string Day(DateTimeOffset at) =>
             at.ToUniversalTime().UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
-        private Totals TotalsOf(IReadOnlyList<UsageLedgerRow> runs)
-        {
-            var seconds = runs.Sum(OutcomeFigures.AgentSeconds);
-            return new Totals(
-                seconds, runs.Where(r => r.Measured).Sum(r => r.Billable ?? 0),
-                runs.Count(r => r.Measured), runs.Count(r => !r.Measured), Pricing.CostOf(seconds));
-        }
+        private static Totals TotalsOf(ExecutionCost.Tally tally) =>
+            new(tally.AgentSeconds, tally.Billable, tally.MeasuredRuns, tally.UnmeasuredRuns, tally.Cost, tally.AgentRate);
 
         /// <summary>An outcome's budget as a number: its <see cref="Outcome.Value"/>, kept canonical
         /// (<see cref="OutcomeValue"/>); null when none is set.</summary>
@@ -347,7 +369,7 @@ public static class TeamCost
                 var needsYou = (await NeedsYou.LiveAsync(names, host, backlog, solutions, installer, waiting, ct, setup)).Count
                     + (await NeedsYou.StoredAsync(names, teams, host, backlog, log, kanban, landedCache, removals, ct)).Count;
 
-                var reading = await Reading.ReadAsync(outcomes, settings, DateTimeOffset.UtcNow, ct);
+                var reading = await Reading.ReadAsync(outcomes, settings, DateTimeOffset.UtcNow, ct, withPrior: true);
                 var floors = reached.ToDictionary(t => t.Id, t => teams.FloorFor(t.Id), StringComparer.OrdinalIgnoreCase);
 
                 return Results.Ok(reading.SummaryOf(floors, new RightNow(open, running, needsYou)));
@@ -358,10 +380,11 @@ public static class TeamCost
             .WithDescription(
                 "The teams list's summary, over every team the caller reaches (archived ones included for "
                 + "spend), read in one pass from the same ledger rows `GET /api/teams/cost` answers.\n\n"
-                + "`rate`: the agent hourly rate, null when none is set. `weeks`: 8 of `{ weekStart, agentSeconds, "
+                + "`rate`: the tenant default agent rate as set now, null when none is set; no figure is that rate "
+                + "times hours. `weeks`: 8 of `{ weekStart, agentSeconds, "
                 + "cost }`, oldest first, Monday 00:00 UTC on, `weekStart` as `YYYY-MM-DD`, the last the current "
                 + "week - the same weeks as an outcome's `weekly`. `periodStart`: the first week's Monday; "
-                + "`periodEnd`: today (UTC). `total`: `{ agentSeconds, cost }` over the 8 weeks; `prior`: the same "
+                + "`periodEnd`: today (UTC). `total`: `{ agentSeconds, cost, agentRate }` over the 8 weeks; `prior`: the same "
                 + "over the 8 weeks before them.\n\n"
                 + "`outcomes`: `{ id, name, rank, agentSeconds, cost, budget, outcomeTotalCost }` for each outcome the "
                 + "runs served in the weeks, and each live outcome with a budget even with none; `No outcome` "
@@ -373,26 +396,33 @@ public static class TeamCost
                 + "`rightNow`: `openWorkflows` and `membersRunning`, the sums of `GET /api/teams/rollup`'s "
                 + "`openWorkflows.openCount` and `running` over the active teams reached, and `waitingOnYou`, "
                 + "the number of items `GET /api/needs-you` lists.\n\n"
-                + "Cost is an estimate, never money paid: agent hours times the rate, rounded to the cent, and null - never 0 - when no rate is set.");
+                + "Cost is an estimate, never money paid: each run priced from the snapshot taken at its start, as "
+                + "`GET /api/teams/cost` describes, and null - never 0 - when no run was priced.");
     }
 
     private const string Description =
         "The last 8 weeks, Monday 00:00 UTC on, oldest first - the same weeks as an outcome's `weekly` - "
-        + "of the team's runs that ended in them, by the outcome each workflow serves now (its newest link, "
-        + "followed through `mergedInto`).\n\n"
-        + "`money`: `currency` and `agentHourlyRate` (null when no rate is set). `weeks`: the 8 week starts. "
+        + "of the team's runs that overlap them, a run that crosses a week split by overlap. A run with a "
+        + "snapshot serves the outcome its link named when it started, followed through `mergedInto`; a run "
+        + "from before snapshots serves its workflow's newest link.\n\n"
+        + "`money`: `currency`, and `agentHourlyRate`, the tenant default rate as set now (null when none is "
+        + "set) - no figure is that rate times hours. `weeks`: the 8 week starts. "
         + "`outcomes`: one entry per outcome the team's runs served in the weeks, and `No outcome` "
         + "(`id` null) for its unlinked work, listed FIRST and only when there is some; the outcomes follow "
         + "in the order they were created, oldest first. Each entry: `id`, `name`, `value` (its budget as a "
         + "number, null when none is set), `weekly` (8 of `weekStart`, `agentSeconds`, `billable`, "
         + "`measuredRuns`, `unmeasuredRuns`, `cost`), `totals` (the team's own over the 8 weeks: "
-        + "`agentSeconds`, `billable`, `measuredRuns`, `unmeasuredRuns`, `cost`) and `outcomeTotalCost` - "
-        + "the outcome's cost across EVERY team and all time, what `GET /api/outcomes` gives as its `cost`, "
-        + "the figure its budget is measured against; null for No outcome - and `rank`, the outcome's 1-based "
-        + "place in that same order among every outcome ANY team served in the weeks, the same on every team "
-        + "(the web's colour for it); null for No outcome. `totals`: the team's over all "
-        + "of it.\n\n"
-        + "Cost is agent hours times `outcomes.agentHourlyRate`, rounded to the cent, and null - never 0 - "
-        + "when no rate is set. `billable` sums measured runs only; a run that reported no usage is counted "
+        + "`agentSeconds`, `billable`, `measuredRuns`, `unmeasuredRuns`, `cost`, `agentRate`) and `outcomeTotalCost` - "
+        + "the outcome's estimate across EVERY team and all time, what `GET /api/outcomes` gives as its `cost`, "
+        + "the figure its budget is measured against; null for No outcome and when no priced run served it - "
+        + "and `rank`, the outcome's 1-based place in that same order among every outcome ANY team served in "
+        + "the weeks, the same on every team (the web's colour for it); null for No outcome. `totals`: the "
+        + "team's over all of it.\n\n"
+        + "Each run is priced from the snapshot taken at its start: its hours times the snapshot's rate, rounded "
+        + "to the cent, a week's part priced on its own. A run with no snapshot rate - a plugin with no rate of "
+        + "its own, or a run from before snapshots - adds no money. `cost` is every priced run, agent and "
+        + "plugin, and null - never 0 - when none was priced. `agentSeconds` is agent-kind time only, priced or "
+        + "not. `agentRate` is the priced agent time's money over its hours, null when none was priced. "
+        + "`billable` sums measured runs only, in the week each ended; a run that reported no usage is counted "
         + "in `unmeasuredRuns`, never as zero tokens.";
 }

@@ -296,6 +296,17 @@ public interface IOutcomeStore
     /// narrowed to the window.</summary>
     Task<OutcomeLedgerRows> ReadLedgerAsync(DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct = default);
 
+    /// <summary>
+    /// WHAT A RUN'S ESTIMATE IS PRICED FROM: each <c>usage_ledger</c> row LEFT JOIN its
+    /// <c>execution_snapshots</c> row on <c>start_seq</c>, with the outcome the snapshot's
+    /// <c>link_id</c> names, and every workflow's newest link for a run with no snapshot. Windowed in
+    /// the query: only runs whose [started_at, ended_at) overlaps [<paramref name="from"/>,
+    /// <paramref name="to"/>), or - with no start - that ended in it. With <paramref name="pricedOnly"/>,
+    /// only runs whose snapshot carries a rate: the rows a money total can come from.
+    /// </summary>
+    Task<ExecutionRunRows> ReadExecutionRunsAsync(
+        DateTimeOffset? from, DateTimeOffset? to, bool pricedOnly, CancellationToken ct = default);
+
     /// <summary>Every backlog item with its outcome and its newest dispatch: what an outcome's
     /// Not started, In progress and Achieved are counted from.</summary>
     Task<IReadOnlyList<OutcomeBacklogItem>> ReadBacklogAsync(CancellationToken ct = default);
@@ -345,6 +356,27 @@ public sealed record OutcomeBacklogItem(
     long? Correlation,
     DateTimeOffset? DispatchedAt,
     DateTimeOffset? LandedAt);
+
+/// <summary>
+/// One run's snapshot as the cost read sees it (<c>outcome-008</c>): the member's kind, the rate it was
+/// priced at when it started - canonical decimal text, never "0" - its currency and where it came from,
+/// and the link current at start: its id, whether that row still exists, and the outcome it names (null
+/// for an unlink).
+/// </summary>
+public sealed record ExecutionRunSnapshot(
+    string? MemberKind,
+    string? RateAmount,
+    string? RateCurrency,
+    string RateSource,
+    long? LinkId,
+    bool LinkFound,
+    string? LinkOutcomeId);
+
+/// <summary>One ledger row and its snapshot, or null for a run from before snapshots.</summary>
+public sealed record ExecutionRunRow(UsageLedgerRow Run, long? StartSeq, ExecutionRunSnapshot? Snapshot);
+
+/// <summary>What the cost read answers: the runs and every workflow's newest link.</summary>
+public sealed record ExecutionRunRows(IReadOnlyList<OutcomeLink> CurrentLinks, IReadOnlyList<ExecutionRunRow> Runs);
 
 /// <summary>The ledger rows the figures are computed from.</summary>
 public sealed record OutcomeLedgerRows(
