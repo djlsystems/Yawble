@@ -194,6 +194,28 @@ public sealed class SteeringOverTests(HostFixture host) : IClassFixture<HostFixt
         Assert.Single(lines.Lines);
     }
 
+    /// <summary>A RENAME REACHES A RUNNING CONCIERGE: its STEERING.md names the team by its new name.</summary>
+    [Fact]
+    public async Task Renaming_the_steered_workflows_team_rewrites_the_running_workspaces_note_with_the_new_name()
+    {
+        using var client = await host.PersonAsync();
+        var user = await UserAsync();
+        var workflow = await SteeringBed.OpenWorkflowAsync(host, "Before Rename", Ct);
+
+        (await client.PutAsJsonAsync("/api/me/steering", new { correlationId = workflow.Seq }, Ct)).EnsureSuccessStatusCode();
+        var spec = await HostLaunchAsync(user);
+        var note = Path.Combine(spec.StartingFolder, "STEERING.md");
+        Assert.Contains($"(team {workflow.Label},", await File.ReadAllTextAsync(note, Ct));
+
+        var renamed = $"After Rename {Guid.NewGuid():N}"[..20];
+        var answer = await client.PutAsJsonAsync($"/api/teams/{workflow.Team}/name", new { name = renamed }, Ct);
+        Assert.True(answer.IsSuccessStatusCode, await answer.Content.ReadAsStringAsync(Ct));
+
+        var text = await File.ReadAllTextAsync(note, Ct);
+        Assert.Contains($"looking at workflow {workflow.Seq} (team {renamed},", text);
+        Assert.Equal(workflow.Seq.ToString(CultureInfo.InvariantCulture), SteeringFile.Read(host.DataRoot, user));
+    }
+
     [Fact]
     public async Task A_refusal_of_the_stored_workflow_drops_it_and_rewrites_the_running_workspaces_note()
     {

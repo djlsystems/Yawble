@@ -13,7 +13,8 @@ namespace Harness.Host;
 /// </summary>
 [McpServerToolType]
 public sealed partial class PlatformMcpTools(
-    IHttpContextAccessor http, IPrincipalStore principals, AgentCatalog catalog, IHttpClientFactory clients)
+    IHttpContextAccessor http, IPrincipalStore principals, AgentCatalog catalog, IHttpClientFactory clients,
+    TeamNames? names = null)
 {
     /// <summary>
     /// The named client every tool calls the platform through. Its base address is
@@ -230,7 +231,7 @@ public sealed partial class PlatformMcpTools(
         [Description("Team id.")] string team,
         CancellationToken cancellationToken = default)
     {
-        var path = "/api/teams/" + Uri.EscapeDataString(team.Trim());
+        var path = "/api/teams/" + Uri.EscapeDataString(await TeamAsync(team, cancellationToken) ?? team.Trim());
         return action.Trim().ToLowerInvariant() switch
         {
             "check" => await SendAsync(HttpMethod.Get, path + "/archive-check", null, cancellationToken),
@@ -566,9 +567,25 @@ public sealed partial class PlatformMcpTools(
             ct);
     }
 
+    /// <summary>
+    /// The team a tool acts on. A team named by its current or an earlier NAME is taken to its
+    /// identifier (<see cref="TeamNames"/>), so a Concierge that heard a team's new name from the
+    /// person, or kept its old one in its notes, still reaches it; by an earlier name, the tool's
+    /// answer starts with a note saying what the team is called now. A name nothing answers to is
+    /// passed on as it was given.
+    /// </summary>
     private async Task<string?> TeamAsync(string? requested, CancellationToken ct)
     {
-        if (!string.IsNullOrWhiteSpace(requested)) return requested.Trim();
+        if (!string.IsNullOrWhiteSpace(requested))
+        {
+            if (names is not null && await names.ResolveAsync(requested, ct) is { } found)
+            {
+                if (found.Note is not null && http.HttpContext is { } current) current.Items[TeamNoteKey] = found.Note;
+                return found.Id;
+            }
+
+            return requested.Trim();
+        }
 
         var context = http.HttpContext;
         if (context is null) return null;
@@ -598,6 +615,16 @@ public sealed partial class PlatformMcpTools(
 
         using var response = await client.SendAsync(request, ct);
         var text = await response.Content.ReadAsStringAsync(ct);
-        return $"HTTP {(int)response.StatusCode}{Environment.NewLine}{text}";
+        var answer = $"HTTP {(int)response.StatusCode}{Environment.NewLine}{text}";
+
+        // A team named by an earlier name: said once, ahead of the first answer that acted on it.
+        if (context.Items.Remove(TeamNoteKey, out var note) && note is string said)
+        {
+            answer = said + Environment.NewLine + Environment.NewLine + answer;
+        }
+
+        return answer;
     }
+
+    private const string TeamNoteKey = "harness.mcp.team-note";
 }

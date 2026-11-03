@@ -751,6 +751,11 @@ public static class BuiltInSkills
               an error.
             - `team_list` says what there is. `team_current` reports which team the person is
               looking at in their browser: a default to PROPOSE, never one to assume.
+            - A team's id never changes; its name can. A person may rename a team at any time, and
+              the id stays the same: keep teams by their id in your notes and on every call, and
+              say their names to the person as `team_list` shows them now. A tool given a team's
+              current or earlier name still reaches it; given an earlier name, its answer starts
+              with a note saying what the team is called now. Use that name from then on.
             - `team_create` makes a team when the person asks for one ("spin up a team to ...").
               Give it the name they used, and leave the agent to its default unless they said
               otherwise. Pass `additionalInstructions` only with words the person gave you for

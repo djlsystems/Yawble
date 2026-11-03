@@ -9,12 +9,14 @@ const {
   setMemberAgents,
   setTeamAdditionalInstructions,
   setTeamRepos,
+  renameTeam,
 } = vi.hoisted(() => ({
   listCatalog: vi.fn(),
   getTeamEnv: vi.fn(),
   setMemberAgents: vi.fn(),
   setTeamAdditionalInstructions: vi.fn(),
   setTeamRepos: vi.fn(),
+  renameTeam: vi.fn(),
 }));
 
 const fetchUnexpected = vi.fn();
@@ -31,6 +33,7 @@ vi.mock('../../api/client', async (importOriginal) => ({
   setMemberAgents,
   setTeamAdditionalInstructions,
   setTeamRepos,
+  renameTeam,
 }));
 
 import TeamSettingsDialog from '../TeamSettingsDialog.vue';
@@ -73,6 +76,7 @@ beforeEach(() => {
   setMemberAgents.mockReset();
   setTeamAdditionalInstructions.mockReset();
   setTeamRepos.mockReset();
+  renameTeam.mockReset();
 });
 
 afterEach(() => {
@@ -159,39 +163,72 @@ describe('TeamSettingsDialog, Members', () => {
   });
 });
 
-describe('TeamSettingsDialog, mounted, and the removed team rename', () => {
-  it('ignores a typed team name and saves only the field route that actually changed', async () => {
+describe('TeamSettingsDialog, mounted, and the team rename', () => {
+  const nameField = (wrapper: VueWrapper) =>
+    wrapper.findAllComponents({ name: 'QInput' }).find((input) => input.props('label') === 'Team name');
+
+  it('saves a typed name through the rename route, and only that route', async () => {
+    renameTeam.mockResolvedValue({ team: team.id, name: 'Beta Team' });
     const { wrapper, refresh } = await mountSettings();
 
-    const name = wrapper.findAllComponents({ name: 'QInput' })
-      .find((input) => input.props('label') === 'Team name');
-
+    const name = nameField(wrapper);
     expect(name, 'no team name input in the rendered dialog').toBeTruthy();
-    expect(name!.props('readonly')).toBe(true);
+    expect(name!.props('readonly')).toBeFalsy();
 
-    await name!.setValue('Beta Team');
+    await name!.setValue('  Beta Team  ');
     await flushPromises();
-
-    expect(saveButton().hasAttribute('disabled')).toBe(true);
-
-    await chooseTab('Team instructions');
-    const instructions = instructionsBox(wrapper);
-    expect(instructions, 'no Team instructions box in the rendered dialog').toBeTruthy();
-
-    await instructions!.setValue('Prefer small commits.');
-    await flushPromises();
-
     expect(saveButton().hasAttribute('disabled')).toBe(false);
 
     saveButton().click();
     await flushPromises();
 
-    expect(fetchUnexpected).not.toHaveBeenCalled();
+    expect(renameTeam).toHaveBeenCalledOnce();
+    expect(renameTeam).toHaveBeenCalledWith(team.id, '  Beta Team  ');
     expect(refresh).toHaveBeenCalledOnce();
+    expect(fetchUnexpected).not.toHaveBeenCalled();
     expect(setMemberAgents).not.toHaveBeenCalled();
-    expect(setTeamAdditionalInstructions).toHaveBeenCalledOnce();
-    expect(setTeamAdditionalInstructions).toHaveBeenCalledWith(team.id, 'Prefer small commits.');
+    expect(setTeamAdditionalInstructions).not.toHaveBeenCalled();
     expect(setTeamRepos).not.toHaveBeenCalled();
+
+    wrapper.unmount();
+  });
+
+  it('does not rename when only another field changed, and holds Save while the name is blank', async () => {
+    const { wrapper } = await mountSettings();
+
+    await nameField(wrapper)!.setValue('   ');
+    await flushPromises();
+    expect(saveButton().hasAttribute('disabled')).toBe(true);
+
+    await nameField(wrapper)!.setValue(team.name);
+    await chooseTab('Team instructions');
+    await instructionsBox(wrapper)!.setValue('Prefer small commits.');
+    await flushPromises();
+
+    saveButton().click();
+    await flushPromises();
+
+    expect(renameTeam).not.toHaveBeenCalled();
+    expect(setTeamAdditionalInstructions).toHaveBeenCalledWith(team.id, 'Prefer small commits.');
+
+    wrapper.unmount();
+  });
+
+  it("shows the Host's refusal and saves nothing after it", async () => {
+    renameTeam.mockRejectedValue(new Error("Another team is already called 'Gamma'. Choose another name."));
+    const { wrapper, refresh } = await mountSettings();
+
+    await nameField(wrapper)!.setValue('Gamma');
+    await chooseTab('Team instructions');
+    await instructionsBox(wrapper)!.setValue('Prefer small commits.');
+    await flushPromises();
+
+    saveButton().click();
+    await flushPromises();
+
+    expect(document.body.textContent).toContain("Another team is already called 'Gamma'.");
+    expect(setTeamAdditionalInstructions).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
 
     wrapper.unmount();
   });

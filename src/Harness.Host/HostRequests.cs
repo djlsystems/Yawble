@@ -259,6 +259,11 @@ internal sealed record CloneTeam(
         + "name deriving to one that is taken is refused with 409 naming the existing team.")]
     string? Name);
 
+/// <summary>A team's new name: a label only; its identifier is kept.</summary>
+internal sealed record TeamRenameRequest(
+    [property: Description("What the team is to be called, 1 to 60 characters once trimmed.")]
+    string? Name);
+
 /// <summary>A team's additional instructions.</summary>
 internal sealed record SetAdditionalInstructions(
     [property: Description(

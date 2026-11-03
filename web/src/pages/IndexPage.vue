@@ -9,7 +9,7 @@ import { useConsoleStore } from '../stores/console';
 import { useSessionStore } from '../stores/session';
 import { connectHub } from '../lib/hub';
 import { fileWatch } from '../lib/monitor/workspace';
-import { pauseTeam, resumeTeam } from '../api/client';
+import { MaximumTeamNameLength, pauseTeam, renameTeam, resumeTeam, teamNameRefusal } from '../api/client';
 import BoardGrid from '../components/BoardGrid.vue';
 import BoardDisplayDialog from '../components/BoardDisplayDialog.vue';
 import TeamKpiStrip from '../components/TeamKpiStrip.vue';
@@ -104,6 +104,62 @@ function teamRunning(team: Team): boolean {
 }
 
 const pauseBusy = ref(false);
+
+/**
+ * RENAMING IN PLACE: the team's name on its board is a button; a click turns it into a box holding
+ * the name. Enter or leaving the box saves it through `renameTeam`, the route Team settings' name
+ * uses; Escape puts it back. A refusal stays under the box, the name still being edited. A label
+ * only: the team's folder, workspaces and branches keep the name it was created with.
+ */
+const renaming = ref(false);
+const nameDraft = ref('');
+const renameError = ref('');
+const renameBusy = ref(false);
+
+function startRename() {
+  if (!activeTeam.value) return;
+  nameDraft.value = activeTeam.value.name;
+  renameError.value = '';
+  renaming.value = true;
+}
+
+function cancelRename() {
+  renaming.value = false;
+  renameError.value = '';
+}
+
+async function saveRename() {
+  const team = activeTeam.value;
+  if (!renaming.value || renameBusy.value || !team) return;
+
+  if (nameDraft.value.trim() === team.name.trim()) {
+    cancelRename();
+    return;
+  }
+
+  const refused = teamNameRefusal(nameDraft.value);
+  if (refused) {
+    renameError.value = refused;
+    return;
+  }
+
+  renameBusy.value = true;
+  renameError.value = '';
+
+  try {
+    await renameTeam(team.id, nameDraft.value);
+    await board.refresh();
+    board.refreshRollupIfShowing();
+    renaming.value = false;
+  } catch (cause) {
+    renameError.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    renameBusy.value = false;
+  }
+}
+
+// Another team's board shown: whatever was being typed for this one is dropped.
+watch(() => activeTeam.value?.id, () => cancelRename());
 
 /**
  * WHAT PAUSE PROMISES, said where the control is.
@@ -592,7 +648,35 @@ onUnmounted(() => {
       <div class="row items-center q-mb-sm q-gutter-sm">
         <!-- The LABEL. The shell-level Concierge is launched from this team's `.id`, so the heading binds
              to the same identifier rather than to a separately-derived name. -->
-        <div class="text-h6">{{ activeTeam.name }}</div>
+        <q-input
+          v-if="renaming"
+          v-model="nameDraft"
+          dense
+          outlined
+          autofocus
+          class="team-name-edit"
+          aria-label="Team name"
+          data-test="team-name-input"
+          :maxlength="MaximumTeamNameLength"
+          :loading="renameBusy"
+          :error="!!renameError"
+          :error-message="renameError"
+          @keydown.enter.prevent="saveRename"
+          @keydown.esc.prevent.stop="cancelRename"
+          @blur="saveRename"
+        />
+        <button
+          v-else
+          type="button"
+          class="text-h6 team-name-button"
+          data-test="team-name"
+          :aria-label="`${activeTeam.name}: rename this team`"
+          @click="startRename"
+        >
+          {{ activeTeam.name }}
+          <q-icon name="edit" size="16px" class="team-name-button-icon" aria-hidden="true" />
+          <q-tooltip>Rename this team</q-tooltip>
+        </button>
         <!-- The team's published sites, a globe each: its site cards leave the board once done. -->
         <TeamSiteLinks :team="activeTeam.id" />
         <span v-if="teamPaused(activeTeam)" class="console-tab-status console-tab-status--paused team-heading-pause">
@@ -838,6 +922,40 @@ onUnmounted(() => {
 
 /* A SMALL OUTLINE BUTTON, NOT A PRIMARY ONE. The heading's job is to say which team you are
    watching; the brake belongs there but must not compete with the name for attention. */
+.team-name-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  margin: 0 -4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: text;
+}
+
+.team-name-button:hover,
+.team-name-button:focus-visible {
+  border-color: var(--os-ink-faint);
+}
+
+.team-name-button-icon {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.team-name-button:hover .team-name-button-icon,
+.team-name-button:focus-visible .team-name-button-icon {
+  opacity: 0.6;
+}
+
+.team-name-edit {
+  min-width: 18rem;
+  font-size: 1.25rem;
+}
+
 .team-heading-pause-btn {
   flex: 0 0 auto;
 }

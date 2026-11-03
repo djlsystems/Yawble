@@ -703,6 +703,20 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
     }
 
     /// <summary>
+    /// A team can be renamed and its id never changes: the Concierge keeps teams by id, says their names
+    /// as `team_list` shows them now, and takes the note an earlier name comes back with.
+    /// </summary>
+    [Fact]
+    public void The_concierge_keeps_teams_by_id_and_follows_a_rename()
+    {
+        var concierge = Flat(BuiltInSkills.Find("concierge")!.Body);
+        Assert.Contains("A team's id never changes; its name can.", concierge, StringComparison.Ordinal);
+        Assert.Contains("keep teams by their id in your notes and on every call", concierge, StringComparison.Ordinal);
+        Assert.Contains("say their names to the person as `team_list` shows them now", concierge, StringComparison.Ordinal);
+        Assert.Contains("its answer starts with a note saying what the team is called now", concierge, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The Concierge lets the person try a team's app only on their own request, from its own worktree,
     /// with the team's environment loaded from the `preview` tool's file and never printed, on the app
     /// port behind a published port, and gives the link on the published port. Project-neutral: it

@@ -13,6 +13,9 @@ import {
   setMemberAgents,
   setTeamAdditionalInstructions,
   setTeamRepos,
+  renameTeam,
+  teamNameRefusal,
+  MaximumTeamNameLength,
   setRepoDefaultBranch,
   setRepoContributor,
   setTeamWorkflowBudget,
@@ -537,14 +540,20 @@ async function remove() {
 // Every write on this dialog is open to any signed-in person - every person is an administrator -
 // and refused for a machine principal on the server, whatever this shows.
 
-// A local copy for the read-only name field, reset from the board on each opening.
+// The name field, reset from the board on each opening. Saved through `renameTeam`: a label only.
 const displayName = ref('');
+
+/** Trimmed, as the server stores it: trailing spaces are not a rename. */
+const nameChanged = computed(() => displayName.value.trim() !== (team.value?.name ?? '').trim());
+
+const nameRules = [(value: string) => teamNameRefusal(value ?? '') ?? true];
 const saving = ref(false);
 const saveError = ref('');
 
 /** Whether every field Save writes passes its rules. Read by the button and by `save()` alike. */
 const valid = computed(() => {
   if (memberAgents.value.length === 0) return false;
+  if (teamNameRefusal(displayName.value) !== null) return false;
 
   // A NEGATIVE OR A FRACTION IS REFUSED RATHER THAN CORRECTED - see `budgetFieldIsLegal`. The route
   // answers 400 for a negative regardless, and a fraction never reaches its handler at all, so a
@@ -559,6 +568,7 @@ const valid = computed(() => {
 /** Whether anything Save writes differs from what is stored. */
 const changed = computed(
   () =>
+    nameChanged.value ||
     memberAgentsChanged.value ||
     additionalInstructionsChanged.value ||
     reposChanged.value ||
@@ -631,6 +641,8 @@ function moveMemberAgent(index: number, direction: -1 | 1) {
  */
 const saveTooltip = computed(() => {
   if (memberAgents.value.length === 0) return 'A team must allow at least one Agent for new members.';
+  const nameRefused = teamNameRefusal(displayName.value);
+  if (nameRefused) return nameRefused;
   if (!reposAreLegal.value) return 'A repository URL on the GitHub Repos tab needs fixing.';
   if (!branchesAreLegal.value) return 'A default branch on the GitHub Repos tab needs fixing.';
   if (!contributorsAreLegal.value) return 'An upstream setting on the GitHub Repos tab needs fixing.';
@@ -654,6 +666,11 @@ async function save() {
     if (memberAgents.value.length === 0) {
       saveError.value = 'A team must allow at least one Agent for new members.';
       return;
+    }
+
+    // The name first: a refusal (another team already shows it) stops before anything else moves.
+    if (nameChanged.value) {
+      await renameTeam(team.value.id, displayName.value);
     }
 
     let unresolvedAgents: UnresolvedAgent[] = [];
@@ -873,9 +890,12 @@ watch(open, (showing) => {
               outlined
               dense
               class="q-mb-md"
-              readonly
+              data-test="team-name"
+              :maxlength="MaximumTeamNameLength"
+              :rules="nameRules"
+              hide-bottom-space
             >
-              <template #append><FieldHelp text="Chosen when the team was created and fixed after that. A full rename would also have to move the identifier, folders and member ids." /></template>
+              <template #append><FieldHelp text="What this team is called on every screen and by its Manager and members. Renaming changes the name only: the team's folder, workspaces and branches keep the name it was created with." /></template>
             </q-input>
 
             <q-input

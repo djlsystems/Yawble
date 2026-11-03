@@ -1636,15 +1636,17 @@ public sealed class TeamRegistry(
     /// own spelling so a caller who reached this route with different casing cannot create a second
     /// entry the lookup would then miss.
     ///
-    /// Re-prompts the team's manager on the way out. The manager's system prompt names the team it
-    /// manages, so without this it goes on introducing itself by the old name in the console for the
-    /// rest of the process - visible to the person talking to it and to nothing else.
+    /// Re-prompts the team's Manager and members on the way out. Each prompt names the team, so without
+    /// this they go on calling it by the old name for the rest of the process.
     ///
     /// THE STORE FIRST, then the cache - the same ordering CreateAsync uses and for the same reason:
     /// a failed <see cref="ITeamStore.SetNameAsync"/> must not leave the cache (and so the board)
     /// relabelled while the row is not, which is a rename that silently reverts at the next restart.
+    /// With <paramref name="audit"/>, its tenant row lands in the same transaction as the row: both or
+    /// neither. Every open window is told through <see cref="TeamChanged"/>.
     /// </summary>
-    public async Task SetLabelAsync(string team, string label, CancellationToken ct = default)
+    public async Task SetLabelAsync(
+        string team, string label, CancellationToken ct = default, Func<string, TriggerAudit>? audit = null)
     {
         var stored = ExistingName(team) ?? throw new InvalidOperationException($"No team '{team}'.");
 
@@ -1654,16 +1656,20 @@ public sealed class TeamRegistry(
         {
             // NULL, never a copy of the identifier - "never relabelled" and "relabelled back" are one
             // state in the row exactly as they are in the cache below.
-            await teams.SetNameAsync(stored, null, ct);
+            await teams.SetNameAsync(stored, null, audit?.Invoke(stored), ct);
             _labels.Remove(stored);
         }
         else
         {
-            await teams.SetNameAsync(stored, trimmed, ct);
+            await teams.SetNameAsync(stored, trimmed, audit?.Invoke(stored), ct);
             _labels[stored] = trimmed;
         }
 
-        await RepromptManagerAsync(stored, ct);
+        // Every container, not the Manager alone: a member's prompt names its team too.
+        await RepromptTeamAsync(stored, ct);
+
+        host.RepublishTeam(stored);
+        TeamChanged?.Invoke(SummaryFor(stored, withRoot: false));
     }
 
     /// <summary>

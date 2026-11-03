@@ -860,6 +860,31 @@ export const setTeamAdditionalInstructions = (team: TeamId, additionalInstructio
     body: JSON.stringify({ additionalInstructions: additionalInstructions.trim() || null }),
   })
 
+/** The longest name a team may be given; the Host's `TeamRegistry.MaximumLabelLength`. */
+export const MaximumTeamNameLength = 60
+
+/**
+ * Renames a team: what it is shown by, everywhere. Its identifier - folder, workspaces, branches,
+ * member ids - is kept. A blank or over-long name is 400 and a name another team shows is 409, each
+ * with a sentence.
+ */
+export const renameTeam = (team: TeamId, name: string) =>
+  json<{ team: string; name: string }>(`/api/teams/${encodeURIComponent(team)}/name`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: name.trim() }),
+  })
+
+/** Why a team cannot be called this, or null when it can; the Host's first two refusals, said early. */
+export function teamNameRefusal(name: string): string | null {
+  const trimmed = name.trim()
+  if (trimmed === '') return 'A team needs a name.'
+  if (trimmed.length > MaximumTeamNameLength) {
+    return `A team name cannot be longer than ${MaximumTeamNameLength} characters.`
+  }
+  return null
+}
+
 /** Stops new work being delivered to this team until somebody resumes it. */
 export const pauseTeam = (team: TeamId) =>
   send(`/api/teams/${encodeURIComponent(team)}/pause`, { method: 'POST' })

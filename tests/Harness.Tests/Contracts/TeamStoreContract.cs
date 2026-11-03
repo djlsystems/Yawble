@@ -124,7 +124,7 @@ public abstract class TeamStoreContract : IdentityContract
         var store = await CreateAsync();
         await store.SaveTeamAsync(new PersistedTeam("Alpha", "Alpha", "claude", ["claude"], "Keep it short.", Repos: ["r1"], Env: new Dictionary<string, string> { ["A"] = "1" }), Ct);
 
-        await store.SetNameAsync("ALPHA", "New name", Ct);
+        await store.SetNameAsync("ALPHA", "New name", Audit(TenantActions.TeamRelabelled, "Alpha"), Ct);
         await store.SetReposAsync("alpha", ["r2", "r3"], ct: Ct);
         await store.SetEnvAsync("alpha", new Dictionary<string, string> { ["B"] = "2" }, ct: Ct);
         await store.SetMemberAgentsAsync("alpha", ["codex"], Audit(TenantActions.TeamMemberAgentChanged, "Alpha"), Ct);
@@ -137,7 +137,7 @@ public abstract class TeamStoreContract : IdentityContract
         Assert.Equal(new Dictionary<string, string> { ["B"] = "2" }, team.Env);
 
         await store.SetAdditionalInstructionsAsync("Alpha", "   ", ct: Ct);
-        await store.SetNameAsync("Alpha", null, Ct);
+        await store.SetNameAsync("Alpha", null, ct: Ct);
         await store.SetMemberAgentsAsync("Alpha", [], Audit(TenantActions.TeamMemberAgentChanged, "Alpha"), Ct);
         var cleared = Assert.Single(await store.TeamsAsync(Ct));
         Assert.Equal(((string?)null, (string?)null, (string?)null), (cleared.AdditionalInstructions, cleared.Name, cleared.MemberAgent));

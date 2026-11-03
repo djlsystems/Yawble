@@ -25,6 +25,13 @@ vi.mock('quasar', async (importOriginal) => ({
   useQuasar: () => ({ notify: vi.fn() }),
 }));
 
+const { renameTeam } = vi.hoisted(() => ({ renameTeam: vi.fn() }));
+
+vi.mock('../../api/client', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  renameTeam,
+}));
+
 vi.mock('../../lib/hub', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   connectHub,
@@ -645,5 +652,80 @@ describe('who is on the team', () => {
 
     expect(page.find('[data-team-members]').exists()).toBe(false);
     expect(page.text()).not.toContain('2 members');
+  });
+});
+
+/**
+ * THE TEAM'S NAME ON ITS BOARD RENAMES IT IN PLACE: a click makes it a box, Enter saves through the
+ * rename route, Escape puts it back, and the Host's refusal stays under the box.
+ */
+describe("renaming a team from its board's heading", () => {
+  beforeEach(() => {
+    renameTeam.mockReset();
+  });
+
+  async function startEditing(page: VueWrapper) {
+    await page.get('[data-test="team-name"]').trigger('click');
+    await flushPromises();
+    return page.get('input[data-test="team-name-input"]');
+  }
+
+  it('turns the name into a box holding it, and Enter saves the new name', async () => {
+    renameTeam.mockResolvedValue({ team: 'alpha', name: 'Gamma' });
+    const page = await mountPage([team('alpha')]);
+
+    const input = await startEditing(page);
+    expect((input.element as HTMLInputElement).value).toBe('Alpha');
+
+    await input.setValue('Gamma');
+    await input.trigger('keydown', { key: 'Enter' });
+    await flushPromises();
+
+    expect(renameTeam).toHaveBeenCalledWith('alpha', 'Gamma');
+    expect(board.refresh).toHaveBeenCalled();
+    expect(page.find('[data-test="team-name-input"]').exists()).toBe(false);
+    expect(page.find('[data-test="team-name"]').exists()).toBe(true);
+  });
+
+  it('puts the name back on Escape and sends nothing', async () => {
+    const page = await mountPage([team('alpha')]);
+
+    const input = await startEditing(page);
+    await input.setValue('Gamma');
+    await input.trigger('keydown', { key: 'Escape' });
+    await flushPromises();
+
+    expect(renameTeam).not.toHaveBeenCalled();
+    expect(page.get('[data-test="team-name"]').text()).toContain('Alpha');
+  });
+
+  it('sends nothing for an unchanged or blank name, and says why a blank one cannot be saved', async () => {
+    const page = await mountPage([team('alpha')]);
+
+    let input = await startEditing(page);
+    await input.trigger('keydown', { key: 'Enter' });
+    await flushPromises();
+    expect(page.find('[data-test="team-name-input"]').exists()).toBe(false);
+
+    input = await startEditing(page);
+    await input.setValue('   ');
+    await input.trigger('keydown', { key: 'Enter' });
+    await flushPromises();
+
+    expect(renameTeam).not.toHaveBeenCalled();
+    expect(page.text()).toContain('A team needs a name.');
+  });
+
+  it("keeps the box open with the Host's refusal under it", async () => {
+    renameTeam.mockRejectedValue(new Error("Another team is already called 'Beta'. Choose another name."));
+    const page = await mountPage([team('alpha'), team('beta')]);
+
+    const input = await startEditing(page);
+    await input.setValue('Beta');
+    await input.trigger('keydown', { key: 'Enter' });
+    await flushPromises();
+
+    expect(page.find('[data-test="team-name-input"]').exists()).toBe(true);
+    expect(page.text()).toContain("Another team is already called 'Beta'.");
   });
 });

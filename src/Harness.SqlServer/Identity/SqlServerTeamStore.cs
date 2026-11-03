@@ -151,15 +151,17 @@ public sealed class SqlServerTeamStore(string connectionString) : ITeamStore
         await command.ExecuteNonQueryAsync(ct);
     }
 
-    public Task SetNameAsync(string team, string? name, CancellationToken ct = default) =>
-        ExecuteAsync(
+    public Task SetNameAsync(string team, string? name, TriggerAudit? audit = null, CancellationToken ct = default) =>
+        WriteAsync(
             "UPDATE teams SET name = @name WHERE id = @id",
             command =>
             {
                 command.Parameters.AddWithValue("@name", TeamRows.Text(name));
                 command.Parameters.AddWithValue("@id", team);
             },
+            audit,
             ct);
+
 
     public Task<TenantConciergeSettings> ConciergeSettingsAsync(CancellationToken ct = default) =>
         RunAsync(

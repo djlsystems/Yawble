@@ -203,8 +203,9 @@ public interface ITeamStore
     Task SaveTeamAsync(PersistedTeam team, Func<DbConnection, DbTransaction, CancellationToken, Task> withRow, CancellationToken ct = default);
 
     /// <summary>Sets a team's name; <paramref name="name"/> of null means "never relabelled" and
-    /// removes any stored name rather than storing a copy of the identifier.</summary>
-    Task SetNameAsync(string team, string? name, CancellationToken ct = default);
+    /// removes any stored name rather than storing a copy of the identifier. The
+    /// <paramref name="audit"/> row, when given, lands in the same transaction: both or neither.</summary>
+    Task SetNameAsync(string team, string? name, TriggerAudit? audit = null, CancellationToken ct = default);
 
     /// <summary>
     /// Gets the tenant-wide Concierge settings.

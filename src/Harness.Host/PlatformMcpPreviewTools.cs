@@ -26,7 +26,7 @@ public sealed partial class PlatformMcpTools
 
         return await SendAsync(
             HttpMethod.Post,
-            $"/api/teams/{Uri.EscapeDataString(team.Trim())}/preview-env",
+            $"/api/teams/{Uri.EscapeDataString(await TeamAsync(team, cancellationToken) ?? team.Trim())}/preview-env",
             null,
             cancellationToken);
     }

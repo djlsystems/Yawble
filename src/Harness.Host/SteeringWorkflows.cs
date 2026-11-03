@@ -119,6 +119,33 @@ public sealed class SteeringWorkflows(
     }
 
     /// <summary>
+    /// After <paramref name="team"/> is renamed: every person whose stored steering is an open workflow
+    /// of that team has their existing Concierge workspace's <c>STEERING.md</c> rewritten, so a running
+    /// Concierge reads the team's new name. Nothing else is changed.
+    /// </summary>
+    public async Task TeamRenamedAsync(string team, CancellationToken ct = default)
+    {
+        var folder = Path.GetDirectoryName(SteeringFile.PathFor(paths.DataRoot, "x"))!;
+        if (!Directory.Exists(folder)) return;
+
+        foreach (var file in Directory.EnumerateFiles(folder, "*.txt"))
+        {
+            var userId = Path.GetFileNameWithoutExtension(file);
+            if (SteeringFile.Read(paths.DataRoot, userId) is not { } text
+                || !long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var workflow))
+            {
+                continue;
+            }
+
+            var (open, _) = await JudgeAsync(workflow, ct);
+            if (open is not null && string.Equals(open.Team, team, StringComparison.OrdinalIgnoreCase))
+            {
+                WriteNote(userId, open);
+            }
+        }
+    }
+
+    /// <summary>
     /// Rewrites the person's existing Concierge workspace's <c>STEERING.md</c>, which a running
     /// Concierge reads. Does not create a workspace to hold it.
     /// </summary>

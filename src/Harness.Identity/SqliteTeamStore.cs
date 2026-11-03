@@ -95,17 +95,16 @@ public sealed class SqliteTeamStore : ITeamStore
         await command.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task SetNameAsync(string team, string? name, CancellationToken ct = default)
-    {
-        await using var connection = Open();
-        await using var command = connection.CreateCommand();
-
-        command.CommandText = "UPDATE teams SET name = $name WHERE id = $id";
-        command.Parameters.AddWithValue("$name", (object?)name ?? DBNull.Value);
-        command.Parameters.AddWithValue("$id", team);
-
-        await command.ExecuteNonQueryAsync(ct);
-    }
+    public Task SetNameAsync(string team, string? name, TriggerAudit? audit = null, CancellationToken ct = default) =>
+        WriteAsync(
+            command =>
+            {
+                command.CommandText = "UPDATE teams SET name = $name WHERE id = $id";
+                command.Parameters.AddWithValue("$name", (object?)name ?? DBNull.Value);
+                command.Parameters.AddWithValue("$id", team);
+            },
+            audit,
+            ct);
 
     public async Task<TenantConciergeSettings> ConciergeSettingsAsync(
         CancellationToken ct = default)

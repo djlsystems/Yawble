@@ -893,6 +893,77 @@ internal static class TeamEndpoints
                 + "`defaultBranchNotKnown` names each repository whose default branch is not known, for "
                 + "which that reset is refused. Reads only; changes nothing. 404 for an unknown team.");
 
+        // A TEAM'S NAME IS A LABEL. Renaming changes what the team is called on every screen and in its
+        // Manager's prompt; its identifier - the team folder, workspaces, branches, member ids - is
+        // kept. The label and its tenant row are one transaction, or nothing changes.
+        app.MapPut("/api/teams/{team}/name", async (
+            [Description(Describe.Team)] string team,
+            TeamRenameRequest body,
+            TeamRegistry teams, SteeringWorkflows steering, HttpContext context, CancellationToken ct) =>
+        {
+            if (teams.ExistingName(team) is not { } stored)
+            {
+                return Refusals.NoTeam(team);
+            }
+
+            var name = (body.Name ?? "").Trim();
+
+            if (name.Length == 0)
+            {
+                return Results.BadRequest(new { error = "A team needs a name." });
+            }
+
+            if (name.Length > TeamRegistry.MaximumLabelLength)
+            {
+                return Results.BadRequest(new
+                {
+                    error = $"A team name cannot be longer than {TeamRegistry.MaximumLabelLength} characters.",
+                });
+            }
+
+            if (teams.TeamAnsweringTo(name, except: stored) is { } other)
+            {
+                return Results.Conflict(new
+                {
+                    error = $"Another team is already called '{teams.LabelFor(other)}'. Choose another name.",
+                });
+            }
+
+            var before = teams.LabelFor(stored);
+
+            if (string.Equals(before, name, StringComparison.Ordinal))
+            {
+                return Results.Ok(new { team = stored, name });
+            }
+
+            try
+            {
+                await teams.SetLabelAsync(
+                    stored, name, ct,
+                    id => TenantLogging.Row(context, TenantActions.TeamRelabelled, id, name, new { from = before, to = name }));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return Results.Json(
+                    new { error = $"'{before}' was not renamed: its tenant log row could not be written ({ex.Message})." },
+                    statusCode: StatusCodes.Status500InternalServerError);
+            }
+
+            // A running Concierge reads the workflow it is steered at, team name included, from its
+            // STEERING.md: rewritten so it does not go on naming the team by its old name.
+            await steering.TeamRenamedAsync(stored, ct);
+
+            return Results.Ok(new { team = stored, name = teams.LabelFor(stored) });
+        })
+            .WithTags("Teams")
+            .HumansOnly()
+            .WithSummary("Rename this team")
+            .WithDescription(
+                "Changes the name the team is shown by, everywhere, and in its Manager's prompt. The team's "
+                + "identifier - its folder, workspaces, branches and member ids - is kept. A blank name or one "
+                + "over the length limit is 400; a name another team already shows (ignoring case) is 409. The "
+                + "change and its `team.renamed` tenant row land together or not at all.");
+
         app.MapPost("/api/teams/{team}/pause", async (
             [Description(Describe.Team)] string team,
             TeamRegistry teams, HttpContext context, CancellationToken ct) =>

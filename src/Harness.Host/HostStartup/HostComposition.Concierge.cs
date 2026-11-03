@@ -292,6 +292,7 @@ internal sealed partial class HostComposition
             log: sp.GetRequiredService<ILogger<WorkerPtyEngine>>()));
         builder.Services.AddSingleton<IPtyEngine>(sp => sp.GetRequiredService<WorkerPtyEngine>());
         builder.Services.AddSingleton<SteeringWorkflows>();
+        builder.Services.AddSingleton<TeamNames>();
         builder.Services.AddSingleton<ConciergeLaunches>();
         builder.Services.AddSingleton(sp => new ConciergeLaunchFactory(
             sp.GetRequiredService<TeamPaths>(),
