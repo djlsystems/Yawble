@@ -278,6 +278,26 @@ export function slotHint(slot: ConnectionSlot, providers: ConnectionProvider[] =
   return slot.required ? sentence : `${sentence} Optional.`;
 }
 
+/**
+ * A multiple slot's description without a sentence sending the person to bind it in Team settings ->
+ * Connections: that page lists who uses a connection and Remove, and cannot bind one. The member's own
+ * list (`MultiConnectionPicker`) is where a slot that takes several is bound, and it says so in our words.
+ * The rest of the plugin's description is kept as written.
+ */
+export function withoutBindElsewhere(description: string | null | undefined): string {
+  const text = description ?? '';
+  const elsewhere = /\bBind\b[^.;]*\bTeam settings\s*(?:->|→|›|>)\s*Connections\b[^.;]*[.;]?\s*/gi;
+  let out = '';
+  let from = 0;
+  for (const match of text.matchAll(elsewhere)) {
+    out += text.slice(from, match.index);
+    from = match.index + match[0].length;
+  }
+  out += text.slice(from);
+  // A clause removed from mid-sentence leaves its successor starting lower-case after a full stop.
+  return out.replace(/(^|[.!?]\s+)([a-z])/g, (_all, lead: string, letter: string) => lead + letter.toUpperCase()).trim();
+}
+
 /** The slot a binding key names: `appSecrets#2` is `appSecrets`. */
 export function slotOfKey(key: string): string {
   const at = key.indexOf('#');

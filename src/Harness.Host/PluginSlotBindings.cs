@@ -7,7 +7,7 @@ namespace Harness.Host;
 /// a CLI call naming the one just chosen - used to replace the rest with nothing, and nobody was told. Now
 /// a multiple slot's bindings are a set: every stored connection stays unless the body names it in
 /// <c>removedConnections</c> for that slot, and every other connection the body names for the slot is added. The
-/// result is re-keyed <c>&lt;slot&gt;</c>, <c>&lt;slot&gt;#2</c>... in that order (stored first). A slot that
+/// result is re-keyed <c>&lt;slot&gt;</c>, <c>&lt;slot&gt;#2</c>... in the order the person left them: the body's order when it names every connection still kept, else stored first and the new ones after. A slot that
 /// takes one connection, and a slot the active version does not declare, are as the body says, as before.
 /// </summary>
 public static class PluginSlotBindings
@@ -41,8 +41,16 @@ public static class PluginSlotBindings
             var kept = InKeyOrder(stored.Where(b => SlotOf(b.Key) == slot)).Select(b => b.Value);
             var added = InKeyOrder(sent.Where(b => SlotOf(b.Key) == slot)).Select(b => b.Value);
 
+            // In the order the person left them: a body naming every connection still kept is the whole list,
+            // as the dialog sends it, so its order wins. A body naming only some (the one just chosen) keeps
+            // the stored ones where they were and adds the rest after them.
+            bool Live(string id) => !string.IsNullOrEmpty(id) && !gone.Contains(id);
+            var keptLive = kept.Where(Live).ToHashSet(StringComparer.Ordinal);
+            var whole = keptLive.IsSubsetOf(added);
+            var ordered = whole ? added.Concat(kept) : kept.Concat(added);
+
             var index = 1;
-            foreach (var id in kept.Concat(added).Where(id => !string.IsNullOrEmpty(id) && !gone.Contains(id)).Distinct(StringComparer.Ordinal))
+            foreach (var id in ordered.Where(Live).Distinct(StringComparer.Ordinal))
             {
                 merged[index == 1 ? slot : $"{slot}#{index}"] = id;
                 index++;

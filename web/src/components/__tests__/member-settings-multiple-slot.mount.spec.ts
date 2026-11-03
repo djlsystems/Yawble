@@ -54,7 +54,9 @@ const cloud: InstalledPlugin = hostPlugin({
   config: { region: hostField({ type: 'string', description: 'Where apps run.' }) },
   connections: {
     appSecrets: hostSlot({
-      description: 'Connections a deployed app may use.',
+      // As azure-plugin words it: the binding sentence points at a page that cannot bind.
+      description: 'Connections a deployed app may use. <connection> is the name the connection has in Team settings -> Connections. '
+        + 'Bind as many as needed in Team settings -> Connections; an Update password on a connection reaches the app at its next create.',
       providers: ['imap', 'login', 'apikey', 'website'],
       multiple: true,
       summary: 'needs a mailbox, login, API key or website connection',
@@ -139,7 +141,9 @@ describe('a multiple connection slot in Member settings', () => {
 
     // The help describes this control, and never sends the person to a page that cannot bind.
     expect(text).toContain('Every connection listed here is bound to appSecrets');
-    expect(text).not.toContain('Team settings');
+    expect(text).not.toMatch(/Bind[^.;]*Team settings/);
+    expect(text).toContain('Connections a deployed app may use.');
+    expect(text).toContain('An Update password on a connection reaches the app at its next create.');
 
     wrapper.unmount();
   });

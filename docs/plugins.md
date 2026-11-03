@@ -545,12 +545,15 @@ PUT /api/teams/{team}/members/{member}/plugin-settings
 - **A save keeps what the person did not remove.** On `PUT .../plugin-settings` a multiple slot is a
   set: every connection stored for it stays bound unless `removedConnections` names it
   (`{ "removedConnections": { "appSecrets": ["<id A>"] } }`), and every connection the body names for
-  it is added; the result is re-keyed `<slot>`, `<slot>#2`... (stored first). So a body naming only the
+  it is added; the result is re-keyed `<slot>`, `<slot>#2`... in the order the person left them: the
+  body's order when it names every connection still kept, else stored first. So a body naming only the
   connection just chosen, or `"connections": {}`, unbinds none of a multiple slot's connections.
 - **Member settings** shows a multiple slot as a list of every bound connection, each with its own
   Remove, and an **Add a connection to `<slot>`** picker below. Save sends every connection still
   listed, and names each one removed. A slot's description should say to bind its connections there,
   in the member's settings: Team settings → Connections lists who uses a connection but does not bind one.
+  The list leaves out a description sentence that says to bind in Team settings → Connections
+  (`withoutBindElsewhere`) and says in its own line how the list works.
 
 #### A secret moved to a connection: `movedTo`
 

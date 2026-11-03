@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { Connection, ConnectionProvider, ConnectionSlot } from '../api/types';
-import { providerName, statusLabel } from '../lib/connections';
+import { providerName, statusLabel, withoutBindElsewhere } from '../lib/connections';
 import ConnectionPicker from './ConnectionPicker.vue';
 
 /**
@@ -53,6 +53,12 @@ async function bindOne(connectionId: string) {
   add(connectionId);
 }
 
+/** The slot as this control shows it: the plugin's words, less any telling the person to bind elsewhere. */
+const shown = computed<ConnectionSlot>(() => {
+  const description = withoutBindElsewhere(props.spec.description);
+  return { ...props.spec, description: description === '' ? null : description };
+});
+
 const help = computed(
   () =>
     `Every connection listed here is bound to ${props.slotName}. Add another with the picker below; `
@@ -64,7 +70,7 @@ const help = computed(
   <div class="multi-connection-picker" :data-connection-slot="slotName" data-connection-multiple>
     <div class="text-caption text-weight-medium" data-multiple-label>Connections for {{ slotName }}</div>
     <!-- An optional slot's description is the picker's own line below; a required one's is here. -->
-    <div v-if="spec.required && spec.description" class="text-caption os-text-muted q-mb-xs" data-slot-description>{{ spec.description }}</div>
+    <div v-if="shown.required && shown.description" class="text-caption os-text-muted q-mb-xs" data-slot-description>{{ shown.description }}</div>
 
     <q-list v-if="bound.length > 0" dense bordered separator class="rounded-borders q-mb-xs" data-bound-connections>
       <q-item v-for="id in bound" :key="id" data-bound-connection :data-connection-id="id">
@@ -93,7 +99,7 @@ const help = computed(
       :key="bound.join(',')"
       model-value=""
       :slot-name="slotName"
-      :spec="{ ...spec, required: spec.required && bound.length === 0 }"
+      :spec="{ ...shown, required: shown.required && bound.length === 0 }"
       :connections="addable"
       :assigned="assigned"
       :providers="providers"

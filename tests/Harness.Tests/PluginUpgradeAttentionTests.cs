@@ -375,13 +375,22 @@ public sealed class PluginUpgradeAttentionTests : IAsyncLifetime
         Assert.True(one.StatusCode == HttpStatusCode.OK, await one.Content.ReadAsStringAsync(Ct));
         Assert.Equal(both, await BindingsAsync());
 
-        // Both named, in either order: both stay.
+        // Both named: both stay, in the order the person left them.
         var two = await SaveAsync(person, "Echo", new
         {
             config = new { mode = "reverse" },
             connections = new Dictionary<string, string> { ["appSecrets"] = key, ["appSecrets#2"] = mail },
         });
         Assert.True(two.StatusCode == HttpStatusCode.OK, await two.Content.ReadAsStringAsync(Ct));
+        Assert.Equal(new Dictionary<string, string> { ["appSecrets"] = key, ["appSecrets#2"] = mail }, await BindingsAsync());
+        var back = await SaveAsync(person, "Echo", new { config = new { mode = "reverse" }, connections = both });
+        Assert.True(back.StatusCode == HttpStatusCode.OK, await back.Content.ReadAsStringAsync(Ct));
+        Assert.Equal(both, await BindingsAsync());
+
+        // Only the mailbox named, under the bare key, as the dropdown saved it while it showed the mailbox
+        // (the 02:57-to-17:10 shape): the API key under appSecrets#2 stays bound.
+        var mailOnly = await SaveAsync(person, "Echo", new { config = new { mode = "reverse" }, connections = new { appSecrets = mail } });
+        Assert.True(mailOnly.StatusCode == HttpStatusCode.OK, await mailOnly.Content.ReadAsStringAsync(Ct));
         Assert.Equal(both, await BindingsAsync());
 
         // `{}` names no connection and removes none: a multiple slot is unbound only by removing.

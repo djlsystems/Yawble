@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  withoutBindElsewhere,
   permissionsOf,
   bindingsBody,
   callbackOutcome,
@@ -208,5 +209,17 @@ describe('a multiple slot\'s bindings (workflow 26256)', () => {
     const stored = { appSecrets: 'a', 'appSecrets#2': 'b', mail: 'm' };
     expect(removedBindings(slots, stored, { appSecrets: 'a', 'appSecrets#2': 'b' })).toBeUndefined();
     expect(removedBindings(slots, stored, { appSecrets: 'b' })).toEqual({ appSecrets: ['a'] });
+  });
+});
+
+describe('withoutBindElsewhere', () => {
+  it('drops only the sentence that sends the person to bind in Team settings -> Connections', () => {
+    expect(withoutBindElsewhere(
+      'Fields are their own. Bind as many as needed in Team settings -> Connections; an Update password reaches the app. '
+      + '<connection> is the name the connection has in Team settings -> Connections.',
+    )).toBe('Fields are their own. An Update password reaches the app. <connection> is the name the connection has in Team settings -> Connections.');
+    expect(withoutBindElsewhere('Bind them in Team settings → Connections.')).toBe('');
+    expect(withoutBindElsewhere(null)).toBe('');
+    expect(withoutBindElsewhere('A mailbox.')).toBe('A mailbox.');
   });
 });
