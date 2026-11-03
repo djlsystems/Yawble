@@ -15,7 +15,22 @@ namespace Harness.Host;
 /// </summary>
 public sealed record WebsiteAnswer(
     string Sentence, string? Report = null, byte[]? Screenshot = null, ConnectionTestSecret? Handoff = null, string? Held = null,
-    bool Failed = false, string? ConnectionId = null);
+    bool Failed = false, string? ConnectionId = null)
+{
+    /// <summary>The session's handoff, when one was made or tried by the caller's hand-over (CON 14).</summary>
+    public HandedOver? HandedOver { get; init; }
+}
+
+/// <summary>
+/// WHETHER A SESSION WAS HANDED OVER (CON 14): <see cref="Made"/>, the member it was handed (or was to be
+/// handed) to as <see cref="To"/>, why not as <see cref="Failure"/> (<c>unreadable</c>, <c>not-a-member</c>
+/// or <c>not-written</c>), and the sentence the asker is told. Never a value, never a path in the row.
+/// </summary>
+public sealed record HandedOver(bool Made, string? To, string? Failure, string Sentence)
+{
+    /// <summary>The outcome a <c>connections.website-used</c> row records for a session that was not handed over.</summary>
+    public const string NotHandedOver = "not-handed-over";
+}
 
 public sealed partial class Connections
 {
@@ -63,11 +78,14 @@ public sealed partial class Connections
     /// person (the member never signs in again over a refusal), and an act while May act on pages is off.
     /// A refused sign-in or an expired session marks it Needs you, a CAPTCHA or device approval marks it
     /// Needs you saying the person signs in with Sign in (CON 4); a site that does not answer marks
-    /// nothing. One <c>connections.website-used</c> row, never a value.
+    /// nothing. One <c>connections.website-used</c> row, never a value. A session's handoff is made by
+    /// <paramref name="handOver"/> before the row is written, so the row says whether it was made and to
+    /// whom (CON 14): a handoff that was not made is outcome <see cref="HandedOver.NotHandedOver"/>, never ok.
     /// </summary>
     public async Task<WebsiteAnswer> WebsiteAsync(
         ContainerId member, string id, string command, WorkerAsks asks, CancellationToken ct = default,
-        string? path = null, string? expect = null, int? minutes = null, IReadOnlyList<WebsiteStep>? steps = null)
+        string? path = null, string? expect = null, int? minutes = null, IReadOnlyList<WebsiteStep>? steps = null,
+        Func<ConnectionTestSecret, HandedOver>? handOver = null)
     {
         if (await store.GetAsync(id, ct) is not { } connection || connection.Credential is not { } settings || connection.Kind != ConnectionKinds.Website)
         {
@@ -114,9 +132,15 @@ public sealed partial class Connections
             ? ran.Failure == WebsiteFailures.Captcha ? RunConnectionFailures.SignIn : RunConnectionFailures.Refused
             : null;
 
+        var handed = ran.Handoff is { } handoff && handOver is not null ? handOver(handoff) : null;
+        var outcome = handed is { Made: false } && ran.Outcome == ConnectionTested.Ok ? HandedOver.NotHandedOver : ran.Outcome;
         await store.RecordAsync(ConnectionActor.ForMember(member).Row(
             TenantActions.ConnectionWebsiteUsed, id, connection.Name,
-            new { connection = id, member = member.ToString(), command, path, outcome = ran.Outcome, failure = ran.Failure, sentence }), ct);
+            new
+            {
+                connection = id, member = member.ToString(), command, path, outcome, failure = ran.Failure, sentence,
+                handoff = handed is null ? null : new { made = handed.Made, to = handed.To, failure = handed.Failure },
+            }), ct);
 
         if (held is not null)
         {
@@ -124,7 +148,10 @@ public sealed partial class Connections
             await MarkFromRunAsync(id, RunConnectionFailures.Sentence(held, sentence), held, member, TeamConnectionsMember.Label, ct);
         }
 
-        return new WebsiteAnswer(sentence, report, ran.Screenshot, ran.Handoff, held, ran.Outcome != ConnectionTested.Ok, id);
+        return new WebsiteAnswer(handed?.Sentence ?? sentence, report, ran.Screenshot, handed is null ? ran.Handoff : null, held, ran.Outcome != ConnectionTested.Ok, id)
+        {
+            HandedOver = handed,
+        };
     }
 
     /// <summary>

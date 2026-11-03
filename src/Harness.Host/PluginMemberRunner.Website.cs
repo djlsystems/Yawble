@@ -83,14 +83,19 @@ public sealed partial class PluginMemberRunner
         WebsiteAnswer answer;
         try
         {
-            answer = await connections!.WebsiteAsync(member, connection.Id, ask.Command, ConnectionTests, ct, ask.Path, ask.Expect, ask.Minutes, ask.Steps);
+            answer = await connections!.WebsiteAsync(member, connection.Id, ask.Command, ConnectionTests, ct, ask.Path, ask.Expect, ask.Minutes, ask.Steps,
+                handoff => Handoff(invocation, ask, connection.Name, handoff));
         }
         catch (System.Data.Common.DbException)
         {
             return $"{Capital(what)}: its result could not be recorded. Nothing was changed; try again.";
         }
 
-        if (answer.Failed && gathered.WebsiteFailure is null) gathered.WebsiteFailure = answer;
+        if (answer.Failed && gathered.WebsiteFailure is null)
+        {
+            gathered.WebsiteFailure = answer;
+            gathered.WebsiteFailureSource = ask.Source;
+        }
 
         var text = new StringBuilder(answer.Report ?? answer.Sentence);
         if (answer.Screenshot is { Length: > 0 } png && Screenshot(member.Team, connection.Name, png) is { } shot)
@@ -98,9 +103,9 @@ public sealed partial class PluginMemberRunner
             text.Append('\n').Append("  screenshot: ").Append(shot).Append(" (in the team's documents)");
         }
 
-        if (answer.Handoff is { } handoff)
+        if (answer.HandedOver is { } handed)
         {
-            text.Clear().Append(Handoff(invocation, ask, connection.Name, handoff));
+            text.Clear().Append(handed.Sentence);
         }
 
         return text.ToString();
@@ -134,9 +139,16 @@ public sealed partial class PluginMemberRunner
     /// never in documents, a site file, a commit, the card or the ledger, deleted when it expires. A member
     /// of another team, a person or a schedule is handed none.
     /// </summary>
-    private string Handoff(MemberInvocation invocation, WebsiteAsk ask, string connection, ConnectionTestSecret handoff)
+    /// <remarks>
+    /// CON 14: a browser session's file is the PLAIN PLAYWRIGHT STORAGE STATE, <c>{ cookies, origins }</c>,
+    /// and nothing else, so the member passes its path as it is as <c>storageState</c>; its hosts and expiry
+    /// are in the sentence, and the expiry in the file's name (<see cref="HandoffName"/>), which the sweep
+    /// reads after a Host restart. A token's file keeps its own shape - <c>{ kind, header, value, hosts,
+    /// expiresAt }</c> - with the header named in the sentence.
+    /// </remarks>
+    private HandedOver Handoff(MemberInvocation invocation, WebsiteAsk ask, string connection, ConnectionTestSecret handoff)
     {
-        string? kind = null, header = null, expires = null;
+        string? kind = null, header = null, expires = null, state = null;
         IReadOnlyList<string> hosts = [];
         try
         {
@@ -146,37 +158,72 @@ public sealed partial class PluginMemberRunner
             header = root.TryGetProperty("header", out var h) ? h.GetString() : null;
             expires = root.TryGetProperty("expiresAt", out var e) ? e.GetString() : null;
             if (root.TryGetProperty("hosts", out var list) && list.ValueKind == JsonValueKind.Array) hosts = [.. list.EnumerateArray().Select(x => x.GetString() ?? "")];
+            if (kind != "token")
+            {
+                state = root.TryGetProperty("storageState", out var s) && s.ValueKind == JsonValueKind.Object ? s.GetRawText() : null;
+                if (state is null) throw new JsonException("no storageState");
+            }
         }
         catch (JsonException)
         {
-            return $"{connection}: the session could not be read, so none was handed over.";
+            return new HandedOver(false, null, "unreadable", $"{connection}: the session could not be read, so none was handed over.");
         }
 
         var asker = invocation.Work.Select(w => w.Source).FirstOrDefault(s => string.Equals(s, ask.Source, StringComparison.OrdinalIgnoreCase));
         if (Paths is null || asker is null || !ContainerId.TryParse(asker, out var to)
             || !string.Equals(to.Team, invocation.Member.Team, StringComparison.OrdinalIgnoreCase) || to.Equals(invocation.Member))
         {
-            return $"{connection}: a session is handed only to a member of this team that asks for one; none was handed over.";
+            return new HandedOver(false, ask.Source, "not-a-member",
+                $"{connection}: a session is handed only to a member of this team that asks for one; none was handed over.");
         }
 
         var until = DateTimeOffset.TryParse(expires, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var at) ? at : DateTimeOffset.UtcNow.AddMinutes(30);
         string file;
         try
         {
-            var name = $"{FileName(connection)}-{Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(6))}.json";
-            file = WriteHandoff(Paths.WorkspaceFor(to), name, handoff.Value, runAs);
+            file = WriteHandoff(Paths.WorkspaceFor(to), HandoffName(connection, until), state ?? handoff.Value, runAs);
             _ = DeleteAtAsync(file, until);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            return $"{connection}: the session could not be written to {to.Name}'s workspace ({HandoffFolder}: {exception.Message.TrimEnd('.')}), so none was handed over.";
+            return new HandedOver(false, to.ToString(), "not-written",
+                $"{connection}: the session could not be written to {to.Name}'s workspace ({HandoffFolder}: {exception.Message.TrimEnd('.')}), so none was handed over.");
         }
 
-        var where = $"{to.Name}:{HandoffFolder}/{Path.GetFileName(file)}";
+        return new HandedOver(true, to.ToString(), null, HandoffSentence(connection, kind, header, hosts, $"{to.Name}:{HandoffFolder}/{Path.GetFileName(file)}", until));
+    }
+
+    /// <summary>
+    /// The sentence a handoff is answered with (CON 14): where the file is, the site's hosts, until when -
+    /// and, for a browser session, in plain words, that the path is passed as it is as <c>storageState</c>;
+    /// for a token, the header to send its value in.
+    /// </summary>
+    internal static string HandoffSentence(string connection, string? kind, string? header, IReadOnlyList<string> hosts, string where, DateTimeOffset until)
+    {
         var good = until.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
         return kind == "token"
-            ? $"{connection}: a token handoff for {string.Join(", ", hosts)} is at {where}, header {header}, good until {good}. It is deleted when it expires."
-            : $"{connection}: a browser session for {string.Join(", ", hosts)} is at {where}, good until {good}. Start your browser with its storageState; it is deleted when it expires.";
+            ? $"{connection}: a token handoff for {string.Join(", ", hosts)} is at {where}, good until {good}: a JSON file whose `value` you send as the {header} header. It is deleted when it expires."
+            : $"{connection}: a browser session for {string.Join(", ", hosts)} is at {where}, good until {good}. It is a Playwright storageState file: pass its path as it is as `storageState` (for example `browser.newContext({{ storageState: '<path>' }})`). It is deleted when it expires.";
+    }
+
+    /// <summary>
+    /// A handoff's file name, <c>&lt;connection&gt;-&lt;random&gt;.until-&lt;yyyyMMddTHHmmssZ&gt;.json</c>: the
+    /// expiry is in the name, so the sweep needs nothing from inside the file (CON 14).
+    /// </summary>
+    public static string HandoffName(string connection, DateTimeOffset until) =>
+        $"{FileName(connection)}-{Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(6))}"
+        + $".until-{until.ToUniversalTime().ToString(HandoffExpiryFormat, CultureInfo.InvariantCulture)}.json";
+
+    private const string HandoffExpiryFormat = "yyyyMMdd'T'HHmmss'Z'";
+
+    /// <summary>The expiry a handoff's name carries (<see cref="HandoffName"/>), or null when it carries none.</summary>
+    public static DateTimeOffset? HandoffExpiry(string file)
+    {
+        var match = HandoffExpiryRun().Match(Path.GetFileName(file));
+        return match.Success && DateTimeOffset.TryParseExact(match.Groups[1].Value, HandoffExpiryFormat, CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var until)
+            ? until
+            : null;
     }
 
     /// <summary>
@@ -227,14 +274,25 @@ public sealed partial class PluginMemberRunner
         return file;
     }
 
-    /// <summary>Every handed-over session in <paramref name="folder"/> whose time is up, deleted.</summary>
-    internal static void SweepHandoffs(string folder)
+    /// <summary>
+    /// Every handed-over session in <paramref name="folder"/> whose time is up, deleted: the expiry read
+    /// from the file's NAME (<see cref="HandoffExpiry"/>), so a plain storage state is swept after a Host
+    /// restart as well as the Host's own timer would have (CON 14). A file named before CON 14 carries its
+    /// expiry inside, as <c>expiresAt</c>; one with neither is deleted.
+    /// </summary>
+    public static void SweepHandoffs(string folder)
     {
         if (!Directory.Exists(folder)) return;
         foreach (var file in Directory.EnumerateFiles(folder, "*.json"))
         {
             try
             {
+                if (HandoffExpiry(file) is { } named)
+                {
+                    if (named <= DateTimeOffset.UtcNow) File.Delete(file);
+                    continue;
+                }
+
                 using var document = JsonDocument.Parse(File.ReadAllText(file));
                 if (!document.RootElement.TryGetProperty("expiresAt", out var at)
                     || !DateTimeOffset.TryParse(at.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var until)
@@ -246,6 +304,29 @@ public sealed partial class PluginMemberRunner
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
             {
             }
+        }
+    }
+
+    /// <summary>
+    /// AT THE HOST'S START, a member's handed-over sessions (CON 14): every one whose time is up is deleted
+    /// (<see cref="SweepHandoffs"/>), and each still good is deleted when its time is up, read from its name -
+    /// the timer the last Host set went with it. Never throws: a folder that cannot be read is left for the
+    /// next handoff's sweep.
+    /// </summary>
+    public static void SweepHandoffsAtStart(string workspace)
+    {
+        var folder = Path.Combine(workspace, HandoffFolder);
+        try
+        {
+            SweepHandoffs(folder);
+            if (!Directory.Exists(folder)) return;
+            foreach (var file in Directory.EnumerateFiles(folder, "*.json"))
+            {
+                if (HandoffExpiry(file) is { } until) _ = DeleteAtAsync(file, until);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
         }
     }
 
@@ -275,4 +356,7 @@ public sealed partial class PluginMemberRunner
 
     [GeneratedRegex("[^a-z0-9_-]+")]
     private static partial Regex FileNameRun();
+
+    [GeneratedRegex(@"\.until-(\d{8}T\d{6}Z)\.json$")]
+    private static partial Regex HandoffExpiryRun();
 }

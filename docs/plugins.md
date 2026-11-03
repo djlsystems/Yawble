@@ -1747,7 +1747,9 @@ How it is done, for the record: the run's stdin carries `teamConnections` (`[{ n
 reason, testable, mayAct }]`, never a value) and only this built-in's run is handed it; its `{"t":"connection.test",
 "name":"..."}` and `{"t":"website","command":"check|session|act","name":"...",...}` records are honoured
 only for it (from any other plugin they are text), and each runs after its process has ended, its
-answer added to the run's output. A website's runs are not this process's: the worker runs the
+answer added to the run's output. Each record carries the `source` of the work item it answers, and
+the `result` carries `answers` (`[{ source, text }]`) beside `output`, so a run that answers several
+members tells each only its own lines; `output` lists them all for the run's log (CON 14). A website's runs are not this process's: the worker runs the
 plugin's `website/run.mjs` (the Web Credentials plugin's Node and Playwright code, moved here) as its
 own user, so neither the connection's values nor its browser profile reach the agent the plugin runs as.
 Pinned by `TeamConnectionsTests` and `WebsiteConnectionsTests`.
