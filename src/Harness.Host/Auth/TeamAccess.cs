@@ -20,8 +20,9 @@ public sealed class TeamAccess(
     {
         if (principal.Kind == PrincipalKind.User) return true;
 
-        // A tenant-wide Concierge acts for a person - provided that person still exists.
-        if (principal.Kind == PrincipalKind.TenantConcierge
+        // A tenant-wide Concierge acts for a person, and so does that person's own API key -
+        // provided that person still exists. A key with no owner administers nothing.
+        if (principal.Kind is PrincipalKind.TenantConcierge or PrincipalKind.ApiKey
             && principal.OwnerUserId is { } owner)
         {
             return await users.FindByIdAsync(owner, ct) is not null;
