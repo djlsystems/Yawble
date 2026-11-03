@@ -441,6 +441,17 @@ export function timeOf(occurredAt: string, now: number = Date.now()): string {
 }
 
 /**
+ * A member card's feed row: the time of day ALONE, with seconds, whatever day it was, so the row's
+ * summary keeps the width. The date is one hover away - the row's time carries `dateTimeOf` as its
+ * tooltip - and in the opened message's header. Empty for what is not a time.
+ */
+export function clockOf(occurredAt: string): string {
+  const at = wireInstant(occurredAt)
+
+  return Number.isNaN(at) ? '' : localTime(at)
+}
+
+/**
  * The same instant with its date always in front: the opened message, which can be days old, where a
  * time of day alone cannot say whether it was today.
  */
