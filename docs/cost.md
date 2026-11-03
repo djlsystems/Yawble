@@ -115,6 +115,37 @@ snapshot, and a run with none from the rate's history, as **How a run is priced*
 with a snapshot; `reconstructed`, `fallback-at-upgrade` or `none` for one without) and its
 `estimate` (`amount` and `currency`, both null when it is not priced), from the same pricing.
 
+## Billing accounts
+
+A **billing account** is a named vendor account the instance is billed through: a
+`subscription`, a `metered` account or a `service`, from a vendor, billed `monthly` or
+`annual`, in **its own currency**. That currency is the account's, stored as three upper-case
+letters; it need not be the instance's currency and is never converted. An account may carry a
+recurring amount (zero or more; a zero is a zero) and the dates it is effective from and to.
+
+- **It is not a connection.** It holds no credential, no key and no login, and nothing in its tenant
+  log rows is secret.
+- **Actual Spend is not computed from it yet.** A recurring amount is stored as it was given. It is
+  not projected over a period and it is not added to any estimate. Hours are never Actual Spend:
+  every figure on these screens is still an **Estimated Execution Cost**.
+- **A person's only.** Listing, reading, creating and changing accounts are people's acts; no agent
+  or key may read or write one, whatever it holds.
+- **Never deleted.** An account is deactivated, and may be reactivated. A deactivated account is
+  still listed. Deactivating one does not clear the members who name it and does not rewrite any
+  run's snapshot.
+- **Every change has its tenant row.** A create, an edit, a deactivate and a reactivate each append
+  `billing.account-created`, `-changed`, `-deactivated` or `-reactivated`, naming the account and
+  each field that moved as old and new, in the same transaction: when that row cannot be written,
+  the change does not happen. A save that changes nothing writes nothing.
+
+**A member's billing account** (`billingAccountId` on the member PATCH) is blank, or the id of a
+billing account; a deactivated one counts. An id that names no account is refused and nothing is
+written. A save that does not send the field keeps what is stored, even an id saved before any
+account existed. A new run's snapshot copies the member's stored account, as it always has, and a
+run is never refused for it.
+
+There is no screen for billing accounts yet; they are reached through the routes below.
+
 ## A shared budget is measured across every team
 
 An outcome's budget belongs to the outcome, not to one team. When two teams both serve an outcome,
@@ -238,6 +269,8 @@ Colour is never the only cue: the dialog's table carries every figure the chart 
 | Route | Answers |
 |---|---|
 | `GET /api/teams/{team}/cost` | One team: `money` (`currency`, and `agentHourlyRate`, the tenant default as set now), the eight `weeks`, and per outcome (`id` null for No outcome) its `weekly` figures, `totals`, `value` (its budget), `outcomeTotalCost` (its estimate across all teams and all time) and `rank` (its place in the order shared by every team, which picks its colour; null for No outcome); then the team's `totals`. `totals` carry `agentSeconds` (agent time only), `cost` (every priced run) and `agentRate` (the priced agent time's rate). `cost` is null, never 0, when no run was priced. Every `cost` is the estimate, never money paid. |
+| `GET /api/billing-accounts`, `GET /api/billing-accounts/{id}` | Every billing account, active and deactivated, oldest first (an empty list on a fresh instance), or one; 404 for an id that names none. Each has `id`, `name`, `vendor`, `billingType`, `currency`, `billingPeriod`, `recurringAmount`, `effectiveFrom`, `effectiveTo`, `active`, `description`, `scope` (`tenant`), `instanceId`, `createdBy`, `createdAt` and `updatedAt`. People only. |
+| `POST /api/billing-accounts`, `POST /api/billing-accounts/{id}`, `.../deactivate`, `.../reactivate` | Create an account, edit the fields sent (null clears only `description`, `effectiveTo` and `recurringAmount`), and turn `active` off or on. People only; there is no delete. |
 | `GET /api/teams/cost` | The same for every team at once (`money`, `weeks`, `teams[]`), for the Teams list. |
 | `GET /api/teams/cost/summary` | The summary above the Teams list: `rate` (the tenant default as set now, null without one); the eight `weeks` (`weekStart`, `agentSeconds`, `cost`), `periodStart` and `periodEnd`; the eight weeks' `total` and the eight before as `prior`, each with `agentRate`; per outcome (`id` null for No outcome) its `name`, `rank`, `agentSeconds`, `cost`, `budget` and `outcomeTotalCost` (its cost across every team; this field was `spentTotal` before); and `rightNow` (`openWorkflows`, `membersRunning`, `waitingOnYou`). `cost` is null, never 0, when no run was priced. |
 

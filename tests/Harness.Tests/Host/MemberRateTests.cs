@@ -21,7 +21,6 @@ namespace Harness.Tests.Host;
 public sealed class MemberRateTests(HostFixture host) : IClassFixture<HostFixture>
 {
     private const string Person = "person@example.test";
-    private const string Account = "3F2B8C1E-9A4D-4E2F-B6A1-0C5D7E8F9A10";
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -72,19 +71,20 @@ public sealed class MemberRateTests(HostFixture host) : IClassFixture<HostFixtur
     public async Task A_billing_account_is_stored_lower_case_and_null_or_blank_clears_it()
     {
         using var person = await host.PersonAsync();
+        var account = await AccountAsync(person);
         var route = await HireAsync(person, "Accounted");
 
-        await person.PatchAsJsonAsync(route, new { billingAccountId = Account }, Ct);
-        Assert.Equal(Account.ToLowerInvariant(), (await ReadAsync(person, route)).GetProperty("billingAccountId").GetString());
+        await person.PatchAsJsonAsync(route, new { billingAccountId = account }, Ct);
+        Assert.Equal(account.ToLowerInvariant(), (await ReadAsync(person, route)).GetProperty("billingAccountId").GetString());
 
         // Absent leaves it.
         await person.PatchAsJsonAsync(route, new { hourlyRate = 10 }, Ct);
-        Assert.Equal(Account.ToLowerInvariant(), (await ReadAsync(person, route)).GetProperty("billingAccountId").GetString());
+        Assert.Equal(account.ToLowerInvariant(), (await ReadAsync(person, route)).GetProperty("billingAccountId").GetString());
 
         await person.PatchAsJsonAsync(route, new { billingAccountId = "" }, Ct);
         Assert.Equal(JsonValueKind.Null, (await ReadAsync(person, route)).GetProperty("billingAccountId").ValueKind);
 
-        await person.PatchAsJsonAsync(route, new { billingAccountId = Account }, Ct);
+        await person.PatchAsJsonAsync(route, new { billingAccountId = account }, Ct);
         await person.PatchAsJsonAsync(route, new { billingAccountId = (string?)null }, Ct);
         var read = await ReadAsync(person, route);
         Assert.Equal(JsonValueKind.Null, read.GetProperty("billingAccountId").ValueKind);
@@ -105,9 +105,10 @@ public sealed class MemberRateTests(HostFixture host) : IClassFixture<HostFixtur
     public async Task A_negative_or_unreadable_rate_or_account_refuses_the_request_and_writes_nothing(string body, string refusal)
     {
         using var person = await host.PersonAsync();
+        var account = await AccountAsync(person);
         var member = "Refused" + Math.Abs(body.GetHashCode(StringComparison.Ordinal)).ToString(CultureInfo.InvariantCulture);
         var route = await HireAsync(person, member);
-        await person.PatchAsJsonAsync(route, new { hourlyRate = 40, billingAccountId = Account }, Ct);
+        await person.PatchAsJsonAsync(route, new { hourlyRate = 40, billingAccountId = account }, Ct);
         var tenantRows = (await EventsAsync()).Count;
 
         using var content = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
@@ -118,7 +119,7 @@ public sealed class MemberRateTests(HostFixture host) : IClassFixture<HostFixtur
 
         var read = await ReadAsync(person, route);
         Assert.Equal("40", read.GetProperty("hourlyRate").GetString());
-        Assert.Equal(Account.ToLowerInvariant(), read.GetProperty("billingAccountId").GetString());
+        Assert.Equal(account.ToLowerInvariant(), read.GetProperty("billingAccountId").GetString());
         Assert.Equal(member, read.GetProperty("name").GetString());
         Assert.Equal(tenantRows, (await EventsAsync()).Count);
     }
@@ -127,10 +128,11 @@ public sealed class MemberRateTests(HostFixture host) : IClassFixture<HostFixtur
     public async Task A_rate_or_account_change_writes_member_billing_changed_with_the_stored_old_and_new_and_a_name_only_save_does_not()
     {
         using var person = await host.PersonAsync();
+        var account = await AccountAsync(person);
         var route = await HireAsync(person, "Audited");
         var subject = $"{host.Alpha}/Audited";
 
-        await person.PatchAsJsonAsync(route, new { hourlyRate = 62.5m, billingAccountId = Account }, Ct);
+        await person.PatchAsJsonAsync(route, new { hourlyRate = 62.5m, billingAccountId = account }, Ct);
 
         var first = Assert.Single(Billing(await EventsAsync(), subject));
         Assert.Equal(Person, first.ActorEmail);
@@ -139,14 +141,14 @@ public sealed class MemberRateTests(HostFixture host) : IClassFixture<HostFixtur
             Assert.Equal(JsonValueKind.Null, detail.RootElement.GetProperty("rate").GetProperty("old").ValueKind);
             Assert.Equal("62.5", detail.RootElement.GetProperty("rate").GetProperty("new").GetString());
             Assert.Equal(JsonValueKind.Null, detail.RootElement.GetProperty("billingAccount").GetProperty("old").ValueKind);
-            Assert.Equal(Account.ToLowerInvariant(), detail.RootElement.GetProperty("billingAccount").GetProperty("new").GetString());
+            Assert.Equal(account.ToLowerInvariant(), detail.RootElement.GetProperty("billingAccount").GetProperty("new").GetString());
         }
 
         // A billing-only save is no member.changed.
         Assert.Empty(Changed(await EventsAsync(), subject));
 
         // The same values again change nothing and write nothing.
-        await person.PatchAsJsonAsync(route, new { hourlyRate = "62.50", billingAccountId = Account }, Ct);
+        await person.PatchAsJsonAsync(route, new { hourlyRate = "62.50", billingAccountId = account }, Ct);
         Assert.Single(Billing(await EventsAsync(), subject));
 
         // A name-only save writes member.changed and no billing row.
@@ -160,7 +162,7 @@ public sealed class MemberRateTests(HostFixture host) : IClassFixture<HostFixtur
         using var cleared = JsonDocument.Parse(clear.Detail!);
         Assert.Equal("62.5", cleared.RootElement.GetProperty("rate").GetProperty("old").GetString());
         Assert.Equal(JsonValueKind.Null, cleared.RootElement.GetProperty("rate").GetProperty("new").ValueKind);
-        Assert.Equal(Account.ToLowerInvariant(), cleared.RootElement.GetProperty("billingAccount").GetProperty("new").GetString());
+        Assert.Equal(account.ToLowerInvariant(), cleared.RootElement.GetProperty("billingAccount").GetProperty("new").GetString());
         Assert.Equal(2, Billing(await EventsAsync(), subject).Count);
     }
 
@@ -198,11 +200,12 @@ public sealed class MemberRateTests(HostFixture host) : IClassFixture<HostFixtur
     public async Task An_agent_cannot_set_a_rate_or_an_account()
     {
         using var person = await host.PersonAsync();
+        var account = await AccountAsync(person);
         var route = await HireAsync(person, "Guarded");
 
         using var manager = host.Container(await host.Services.GetRequiredService<IPrincipalStore>().MintAsync(
             new ContainerId(host.Alpha, "Rates-Manager").ToString(), PrincipalKind.Container, host.Alpha, Permits.All, ct: Ct));
-        var refused = await manager.PatchAsJsonAsync(route, new { hourlyRate = 99, billingAccountId = Account }, Ct);
+        var refused = await manager.PatchAsJsonAsync(route, new { hourlyRate = 99, billingAccountId = account }, Ct);
 
         Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
         Assert.Equal(PermitGate.HumansOnlyMessage, (await refused.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("error").GetString());
@@ -214,6 +217,17 @@ public sealed class MemberRateTests(HostFixture host) : IClassFixture<HostFixtur
     }
 
     // ---- fixtures ----
+
+    /// <summary>A new billing account's id, upper-cased, so a test can see the PATCH store it lower-case.</summary>
+    private static async Task<string> AccountAsync(HttpClient person)
+    {
+        var created = await person.PostAsJsonAsync(
+            "/api/billing-accounts",
+            new { name = "Rates", vendor = "Anthropic", billingType = "metered", currency = "USD", billingPeriod = "monthly", effectiveFrom = "2026-11-01" },
+            Ct);
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        return (await created.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("id").GetString()!.ToUpperInvariant();
+    }
 
     private async Task<string> HireAsync(HttpClient person, string name)
     {

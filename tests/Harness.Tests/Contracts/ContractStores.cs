@@ -45,6 +45,8 @@ public abstract class ContractStores : IAsyncDisposable
 
     public abstract IOutcomeStore Outcomes { get; }
 
+    public abstract ISpendStore Spend { get; }
+
     public abstract IOutcomeLinkRows OutcomeLinkRows { get; }
 
     public abstract ILedger Ledger(IPluginEventRegistry? plugins = null);
@@ -118,6 +120,8 @@ public sealed class SqliteContractStores : ContractStores
     public override IOutcomeStartRows OutcomeStart => new SqliteOutcomeStartRows(_database.Path);
 
     public override IOutcomeStore Outcomes => new SqliteOutcomeStore(_database.Path, TenantAuditRow.AppendAsync);
+
+    public override ISpendStore Spend => new SqliteSpendStore(_database.Path, TenantAuditRow.AppendAsync);
 
     public override IOutcomeLinkRows OutcomeLinkRows => new SqliteOutcomeLinkRows();
 
@@ -225,6 +229,8 @@ public sealed class SqlServerContractStores : ContractStores
     public override IOutcomeStartRows OutcomeStart => new SqlServerOutcomeStartRows(ConnectionString);
 
     public override IOutcomeStore Outcomes => new SqlServerOutcomeStore(ConnectionString, SqlServerTenantAuditRow.AppendAsync);
+
+    public override ISpendStore Spend => new SqlServerSpendStore(ConnectionString, SqlServerTenantAuditRow.AppendAsync);
 
     public override IOutcomeLinkRows OutcomeLinkRows => new SqlServerOutcomeLinkRows();
 

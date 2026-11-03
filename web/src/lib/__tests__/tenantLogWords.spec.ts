@@ -90,6 +90,34 @@ describe("a member's rate or billing account row", () => {
   });
 });
 
+describe('a billing account row', () => {
+  const id = '3f2b8c1e-9a4d-4e2f-b6a1-0c5d7e8f9a10';
+  const detail = (changes: Record<string, [unknown, unknown]>) =>
+    JSON.stringify({ account: id, changes: Object.fromEntries(Object.entries(changes).map(([k, [o, n]]) => [k, { old: o, new: n }])) });
+
+  it('names a created account, its kind and its own currency, and says its recurring amount is not an estimate', () => {
+    const words = detailWords({
+      action: 'billing.account-created',
+      subjectName: 'Claude Team',
+      detail: detail({ name: [null, 'Claude Team'], vendor: [null, 'Anthropic'], billingType: [null, 'subscription'], billingPeriod: [null, 'monthly'], currency: [null, 'EUR'], recurringAmount: [null, '30'] }),
+    });
+    expect(words).toBe('Created Claude Team (Anthropic subscription); billed monthly in EUR; recurring amount 30 recorded, not added to any estimate.');
+  });
+
+  it('names each changed field as from and to, and a clear as a clear', () => {
+    expect(detailWords({ action: 'billing.account-changed', detail: detail({ vendor: ['Anthropic', 'Anthropic PBC'], description: ['Seats', null] }) }))
+      .toBe('Vendor set from Anthropic to Anthropic PBC; description Seats cleared.');
+  });
+
+  it('never calls an account Spend or Actual Spend', () => {
+    const actions = ['billing.account-created', 'billing.account-changed', 'billing.account-deactivated', 'billing.account-reactivated'];
+    for (const action of actions) {
+      const words = `${didWords({ action, detail: null })} ${detailWords({ action, detail: detail({ name: [null, 'X'] }) })}`;
+      expect(words, action).not.toMatch(/spen[dt]/i);
+    }
+  });
+});
+
 describe('a deleted outcome', () => {
   const detail = (cascade: { id: string; name: string } | null) =>
     JSON.stringify({

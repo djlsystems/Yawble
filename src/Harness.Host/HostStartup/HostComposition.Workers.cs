@@ -50,6 +50,7 @@ internal sealed partial class HostComposition
         WorkspaceFileChangeEndpoints.Map(app);
         AgentStepEndpoints.Map(app);
         OutcomeEndpoints.Map(app);
+        SpendEndpoints.Map(app);
         TeamCost.Map(app);
         SignInEndpoints.Map(app);
         HealthEndpoints.Map(app, dataRoot);

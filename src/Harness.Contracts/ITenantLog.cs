@@ -536,6 +536,21 @@ public static class TenantActions
     /// outcome's id; detail names the workflow.</summary>
     public const string WorkflowOutcomeChanged = "workflow.outcome-changed";
 
+    /// <summary>A person created a billing account. Subject is its id, the subject name its name;
+    /// detail is <c>{account, changes: {field: {old, new}}}</c>, every field set from null. A billing
+    /// account holds no credential, so no detail carries one.</summary>
+    public const string BillingAccountCreated = "billing.account-created";
+
+    /// <summary>A person edited a billing account. Detail names the account id and each field that
+    /// moved, as old and new.</summary>
+    public const string BillingAccountChanged = "billing.account-changed";
+
+    /// <summary>A person deactivated a billing account. Members who point at it keep it.</summary>
+    public const string BillingAccountDeactivated = "billing.account-deactivated";
+
+    /// <summary>A person reactivated a deactivated billing account.</summary>
+    public const string BillingAccountReactivated = "billing.account-reactivated";
+
     public const string SiteCreated = "site.created";
 
     /// <summary>A new version of a site was copied and made live. Detail carries the version, the

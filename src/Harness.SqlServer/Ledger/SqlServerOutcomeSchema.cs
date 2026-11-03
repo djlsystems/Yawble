@@ -228,6 +228,37 @@ public static class SqlServerOutcomeSchema
 
              {AppendOnly("rate_epochs")}
              """),
+
+        // `OutcomeSchema`'s outcome-009: the billing accounts, edited in place and never deleted. The id
+        // is NVARCHAR(36), a lower-case GUID in "D" form.
+        new MigrationStep(
+            "outcome-009",
+            """
+            CREATE TABLE billing_accounts (
+                id               NVARCHAR(36)  NOT NULL PRIMARY KEY,
+                name             NVARCHAR(MAX) NOT NULL,
+                vendor           NVARCHAR(MAX) NOT NULL,
+                billing_type     NVARCHAR(MAX) NOT NULL,
+                currency         NVARCHAR(MAX) NOT NULL,
+                billing_period   NVARCHAR(MAX) NOT NULL,
+                recurring_amount NVARCHAR(MAX) NULL,
+                effective_from   NVARCHAR(40)  NOT NULL,
+                effective_to     NVARCHAR(40)  NULL,
+                active           INT           NOT NULL,
+                description      NVARCHAR(MAX) NULL,
+                scope            NVARCHAR(MAX) NOT NULL,
+                instance_id      NVARCHAR(MAX) NOT NULL,
+                created_by       NVARCHAR(MAX) NOT NULL,
+                created_at       NVARCHAR(40)  NOT NULL,
+                updated_at       NVARCHAR(40)  NOT NULL
+            );
+
+            EXEC(N'CREATE TRIGGER billing_accounts_no_delete ON billing_accounts AFTER DELETE AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM deleted) THROW 51001, N''billing_accounts rows are deactivated, never deleted'', 1;
+            END');
+            """),
     ];
 
     /// <summary>The two triggers that make <paramref name="table"/> append-only, as SQLite's

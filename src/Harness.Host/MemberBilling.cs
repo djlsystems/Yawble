@@ -29,6 +29,10 @@ public static class MemberBilling
     public const string AccountRefused =
         "The billing account id must be an id like 3f2b8c1e-9a4d-4e2f-b6a1-0c5d7e8f9a10, or blank to clear it.";
 
+    /// <summary>A well-formed account id that names no billing account.</summary>
+    public static string AccountMissing(string id) =>
+        BillingAccountRules.Missing(id);
+
     /// <summary>The edit, or the one sentence that refuses the request.</summary>
     public static (MemberBillingEdit? Edit, string? Refusal) Read(JsonElement hourlyRate, JsonElement billingAccountId)
     {

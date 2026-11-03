@@ -41,7 +41,7 @@ public sealed record LedgerStartResult(
 /// </summary>
 public static class LedgerStart
 {
-    public const string InstanceIdName = "instance.id";
+    public const string InstanceIdName = BillingAccountRules.InstanceIdSetting;
     public const string LedgerStartedAtName = "ledger.startedAt";
     public const string LedgerBackfilledRunsName = "ledger.backfilledRuns";
 

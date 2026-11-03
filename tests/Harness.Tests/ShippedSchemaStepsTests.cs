@@ -73,6 +73,7 @@ public sealed class ShippedSchemaStepsTests
         ["outcome-007"] = "e2e0821cc3ea0c631c24778b2987e500ac94c8b59ac57469d5e6183e42ed22db",
         ["outcome-008"] = "b979068c0229ee6cf9e01b2cde1be83064b028d85365196b81b98bdbc1169c1e",
         ["outcome-012"] = "d1134e6c77faf2db9a1e9689b3ac54d9e87bd800b027eab88b46d6892b482751",
+        ["outcome-009"] = "ec585b69de13fddefdf00f7f6dcbda96544a32e127d76c8d7381dcbb0abc228c",
     };
 
     [Fact]

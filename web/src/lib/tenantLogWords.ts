@@ -41,6 +41,12 @@ const tokens = (value: unknown) => (typeof value === 'number' ? `${value.toLocal
 const shown = (value: unknown) =>
   value === null || value === undefined || value === '' ? 'nothing' : localInstants(typeof value === 'string' ? value : JSON.stringify(value));
 
+/** One field of a billing account row's `changes`, as from and to, or null when it is not there. */
+function billingChange(detail: Detail | null | undefined, key: string): { from: unknown; to: unknown } | null {
+  const pair = objectOf(objectOf(get(detail, 'changes'))?.[key]);
+  return pair ? { from: get(pair, 'old'), to: get(pair, 'new') } : null;
+}
+
 /** One field of a trigger change, in words. */
 function fieldWords(change: FieldChange): string {
   switch (change.field) {
@@ -1126,6 +1132,37 @@ const words: Record<string, Words> = {
     detail: (d) => sentence([`merged into ${text(d, 'intoName') ?? text(d, 'into') ?? 'another outcome'}`]),
   },
   'outcome.retired': { did: 'retired an outcome', detail: () => 'Retired.' },
+  'billing.account-created': {
+    did: 'created a billing account',
+    detail: (d, row) => {
+      const to = (key: string) => billingChange(d, key)?.to;
+      const kind = [to('vendor'), to('billingType')].filter((part) => typeof part === 'string' && part !== '').join(' ');
+      return sentence([
+        `created ${row.subjectName || 'the account'}${kind ? ` (${kind})` : ''}`,
+        typeof to('billingPeriod') === 'string' && `billed ${to('billingPeriod')}${typeof to('currency') === 'string' ? ` in ${to('currency')}` : ''}`,
+        typeof to('recurringAmount') === 'string' && `recurring amount ${to('recurringAmount')} recorded, not added to any estimate`,
+      ]);
+    },
+  },
+  'billing.account-changed': {
+    did: 'changed a billing account',
+    detail: (d) => {
+      const changes = objectOf(get(d, 'changes'));
+      const parts = Object.keys(changes ?? {}).map((key) => {
+        const change = billingChange(d, key);
+        if (!change) return null;
+        return change.to === null || change.to === undefined || change.to === ''
+          ? `${keyWords(key)} ${shown(change.from)} cleared`
+          : `${keyWords(key)} set from ${shown(change.from)} to ${shown(change.to)}`;
+      });
+      return sentence(parts) || 'Saved with nothing changed.';
+    },
+  },
+  'billing.account-deactivated': {
+    did: 'deactivated a billing account',
+    detail: () => 'Deactivated; members that name it keep it.',
+  },
+  'billing.account-reactivated': { did: 'reactivated a billing account', detail: () => 'Reactivated.' },
   'outcome.deleted': {
     did: 'deleted an outcome',
     detail: (d, row) => {

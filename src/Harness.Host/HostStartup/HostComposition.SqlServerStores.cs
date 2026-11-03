@@ -53,6 +53,7 @@ internal sealed partial class HostComposition
 
         var outcomeStore = new SqlServerOutcomeStore(connection, SqlServerTenantAuditRow.AppendAsync);
         builder.Services.AddSingleton<IOutcomeStore>(outcomeStore);
+        builder.Services.AddSingleton<ISpendStore>(new SqlServerSpendStore(connection, SqlServerTenantAuditRow.AppendAsync));
         builder.Services.AddSingleton<IOutcomeLinkRows>(new SqlServerOutcomeLinkRows());
         OutcomesAndBoard(outcomeStore, messages);
 

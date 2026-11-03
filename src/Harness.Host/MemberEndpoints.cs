@@ -718,12 +718,21 @@ internal static class MemberEndpoints
             [Description("The member's current identifier, as addressed in its route.")] string name,
             UpdateContainer request, TeamRegistry teams, AgentInstallProbe probe,
             AgentCatalog catalog, HttpContext context, IUserStore users, ITenantSettingsStore settings,
-            CancellationToken ct) =>
+            ISpendStore spend, CancellationToken ct) =>
         {
             // REFUSED BEFORE ANYTHING IS WRITTEN: a rate or account that cannot be stored leaves the
             // row, its tenant rows and every other field of the request alone.
             var (billing, refusal) = MemberBilling.Read(request.HourlyRate, request.BillingAccountId);
             if (refusal is not null) return Results.BadRequest(new { error = refusal });
+
+            // A SENT ACCOUNT MUST NAME A BILLING ACCOUNT, a deactivated one included. Read before the
+            // write and not under its lock: an account is never deleted, so one found here is still
+            // there when the member row lands. A save that does not send the field is not checked, so a
+            // dangling id stored before any account existed stays until a person changes it.
+            if (billing!.Account is { } account && await spend.FindAccountAsync(account, ct) is null)
+            {
+                return Results.BadRequest(new { error = MemberBilling.AccountMissing(account) });
+            }
 
             try
             {
@@ -833,8 +842,9 @@ internal static class MemberEndpoints
                 + "records the effective rate at its start; a later change does not alter it.\n\n"
                 + MemberBillingView.Described
                 + "400 when `agent` names a preset this tenant does not have, or an interactive one, or when "
-                + "`hourlyRate` is negative or not a number, or `billingAccountId` is not an id: nothing is "
-                + "written.\n\n"
+                + "`hourlyRate` is negative or not a number, or `billingAccountId` is not an id or names no "
+                + "billing account (a deactivated one is an account, and may be stored): nothing is written. "
+                + "A save that does not send `billingAccountId` keeps the stored id, checked or not.\n\n"
                 + "404 for an unknown team or member.");
 
         // The ORDER the work happens in is MemberDeletion's, and its doc comment is where the reasoning

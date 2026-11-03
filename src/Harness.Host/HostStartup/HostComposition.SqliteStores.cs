@@ -54,6 +54,9 @@ internal sealed partial class HostComposition
         // row in one transaction, written with the tenant log's own columns.
         var outcomeStore = new SqliteOutcomeStore(database, TenantAuditRow.AppendAsync);
         builder.Services.AddSingleton<IOutcomeStore>(outcomeStore);
+
+        // THE BILLING ACCOUNTS, in the same file, each write with its tenant_events row in one transaction.
+        builder.Services.AddSingleton<ISpendStore>(new SqliteSpendStore(database, TenantAuditRow.AppendAsync));
         builder.Services.AddSingleton<IOutcomeLinkRows>(new SqliteOutcomeLinkRows());
         OutcomesAndBoard(outcomeStore, store);
 

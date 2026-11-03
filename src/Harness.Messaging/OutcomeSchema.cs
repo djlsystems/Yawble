@@ -372,5 +372,42 @@ public static class OutcomeSchema
             CREATE TRIGGER rate_epochs_no_delete BEFORE DELETE ON rate_epochs
             BEGIN SELECT RAISE(ABORT, 'rate_epochs is append-only'); END;
             """),
+
+        // THE VENDOR ACCOUNTS THE INSTANCE IS BILLED THROUGH, a definition table like `outcomes`: many
+        // rows, edited in place, never deleted (the trigger refuses it), and no row seeded. `id` is a
+        // lower-case GUID the store assigns; `billing_type` (subscription, metered, service),
+        // `billing_period` (monthly, annual) and `scope` are closed sets the stores hold
+        // (`BillingAccountRules`) - `scope` has no CHECK, so a later scope needs no edit here.
+        // `currency` is the account's own, never converted. `recurring_amount` is canonical decimal
+        // text or NULL, never projected and never added to an estimate. `instance_id` is the
+        // `instance.id` setting, copied once at create. Not a connection: no credential column.
+        //
+        // Numbered 009 though it follows 012: the number was reserved for this table before 012
+        // shipped, and the steps apply in list order.
+        new MigrationStep(
+            "outcome-009",
+            """
+            CREATE TABLE billing_accounts (
+                id               TEXT    PRIMARY KEY,
+                name             TEXT    NOT NULL,
+                vendor           TEXT    NOT NULL,
+                billing_type     TEXT    NOT NULL,
+                currency         TEXT    NOT NULL,
+                billing_period   TEXT    NOT NULL,
+                recurring_amount TEXT    NULL,
+                effective_from   TEXT    NOT NULL,
+                effective_to     TEXT    NULL,
+                active           INTEGER NOT NULL,
+                description      TEXT    NULL,
+                scope            TEXT    NOT NULL,
+                instance_id      TEXT    NOT NULL,
+                created_by       TEXT    NOT NULL,
+                created_at       TEXT    NOT NULL,
+                updated_at       TEXT    NOT NULL
+            );
+
+            CREATE TRIGGER billing_accounts_no_delete BEFORE DELETE ON billing_accounts
+            BEGIN SELECT RAISE(ABORT, 'billing_accounts rows are deactivated, never deleted'); END;
+            """),
     ];
 }
