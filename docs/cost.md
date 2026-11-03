@@ -28,19 +28,31 @@ is an estimate.
 ## What a run records when it starts
 
 Each run records, when it starts, a **snapshot** of how it was configured: whether the member is
-an agent or a plugin, its agent preset, the instance's agent hourly rate and currency at that
-moment, and the outcome link the workflow had at that moment. The run's usage ledger row names that
-snapshot. A snapshot is never changed afterwards.
+an agent or a plugin, its agent preset, the estimated hourly rate it is priced at and where that
+rate came from, the member's billing account, and the outcome link the workflow had at that moment.
+The run's usage ledger row names that snapshot. A snapshot is never changed afterwards.
 
-**The configuration at start covers the whole run.** Changing the tenant rate during a run leaves
-that run's snapshot unchanged; the next run's snapshot carries the new rate. Linking the workflow to
-another outcome during a run does not move that run's link either.
+### The member's estimated hourly rate
 
-- An agent's snapshot takes the instance's agent hourly rate. With no rate, or a rate of 0, the
-  snapshot records no rate, never a rate of 0.
-- A plugin's snapshot records no rate, even when the agent rate is set. A plugin is not priced at
-  the agent rate.
-- Runs that started before snapshots existed have none, and none is made for them afterwards.
+A member, agent or plugin, can carry its own estimated hourly rate, set by a person on the member
+(`PATCH /api/teams/{team}/containers/{name}`, `hourlyRate`). The snapshot at start records the
+member's effective rate:
+
+- A member with its own rate above 0 is priced at that rate, in the instance's currency.
+- An agent with no rate of its own inherits the tenant default, the instance's agent hourly rate.
+  With no tenant rate, or a tenant rate of 0, the snapshot records no rate.
+- A plugin with no rate of its own is not priced, never at the agent rate.
+- A rate of 0 is not priced. A member's own 0 does not fall back to the tenant default. A snapshot
+  never records a rate of 0.
+- Only the stored setting counts. A rate given only in the Host's configuration is not recorded.
+
+**The configuration at start covers the whole run.** Changing the member's rate or billing
+account, or the tenant rate, during a run leaves that run's snapshot unchanged; the next run's
+snapshot carries the new effective rate. An agent with its own rate does not pick up a change to the
+tenant rate. Linking the workflow to another outcome during a run does not move that run's link
+either.
+
+Runs that started before snapshots existed have none, and none is made for them afterwards.
 
 A snapshot is recorded at start and is **not yet what these screens read**. The Teams list, its
 summary and the team page still work as described above: Agent Hours times the instance's current

@@ -164,13 +164,29 @@ public static class SqlServerLedgerRows
     {
         var (teamId, member) = Split(started.Source);
 
-        var agent = teamId is null ? null : await TextAsync(
-            connection, transaction, "SELECT agent FROM team_members WHERE team = @p AND name = @q", teamId, member, ct);
+        EffectiveCost.Member? row = null;
 
-        var kind = agent is null ? null : MemberRef.KindOf(agent);
+        if (teamId is not null)
+        {
+            await using var lookup = connection.CreateCommand();
+            lookup.Transaction = transaction;
+            lookup.CommandText =
+                "SELECT agent, est_hourly_rate, billing_account_id FROM team_members WHERE team = @team AND name = @name";
+            lookup.Parameters.AddWithValue("@team", teamId);
+            lookup.Parameters.AddWithValue("@name", member);
 
-        var rate = ExecutionSnapshotFacts.RateOf(
-            kind,
+            await using var reader = await lookup.ExecuteReaderAsync(ct);
+            if (await reader.ReadAsync(ct))
+            {
+                row = new EffectiveCost.Member(
+                    reader.GetString(0),
+                    reader.IsDBNull(1) ? null : reader.GetString(1),
+                    reader.IsDBNull(2) ? null : reader.GetString(2));
+            }
+        }
+
+        var cost = EffectiveCost.Of(
+            row,
             await TextAsync(connection, transaction, "SELECT value FROM tenant_settings WHERE name = @p", ExecutionSnapshotFacts.AgentHourlyRateSetting, null, ct),
             await TextAsync(connection, transaction, "SELECT value FROM tenant_settings WHERE name = @p", ExecutionSnapshotFacts.CurrencySetting, null, ct));
 
@@ -182,21 +198,22 @@ public static class SqlServerLedgerRows
             $"""
              INSERT INTO execution_snapshots (
                  start_seq, correlation, team_id, team_name, member, member_kind, agent_preset,
-                 rate_amount, rate_currency, rate_source, link_id, started_at)
+                 rate_amount, rate_currency, rate_source, billing_account_id, link_id, started_at)
              VALUES (
                  @seq, @correlation, @team, {TeamNameSql}, @member, @kind, @agent,
-                 @amount, @currency, @source, @link, @at);
+                 @amount, @currency, @source, @account, @link, @at);
              """;
 
         insert.Parameters.AddWithValue("@seq", started.Seq);
         insert.Parameters.AddWithValue("@correlation", started.CorrelationId);
         insert.Parameters.AddWithValue("@team", (object?)teamId ?? DBNull.Value);
         insert.Parameters.AddWithValue("@member", member);
-        insert.Parameters.AddWithValue("@kind", (object?)kind ?? DBNull.Value);
-        insert.Parameters.AddWithValue("@agent", (object?)agent ?? DBNull.Value);
-        insert.Parameters.AddWithValue("@amount", (object?)rate.Amount ?? DBNull.Value);
-        insert.Parameters.AddWithValue("@currency", (object?)rate.Currency ?? DBNull.Value);
-        insert.Parameters.AddWithValue("@source", rate.Source);
+        insert.Parameters.AddWithValue("@kind", (object?)cost.Kind ?? DBNull.Value);
+        insert.Parameters.AddWithValue("@agent", (object?)cost.Preset ?? DBNull.Value);
+        insert.Parameters.AddWithValue("@amount", (object?)cost.Amount ?? DBNull.Value);
+        insert.Parameters.AddWithValue("@currency", (object?)cost.Currency ?? DBNull.Value);
+        insert.Parameters.AddWithValue("@source", cost.Source);
+        insert.Parameters.AddWithValue("@account", (object?)cost.BillingAccountId ?? DBNull.Value);
         Long(insert, "@link", link?.Id);
         insert.Parameters.AddWithValue("@at", Instant.Stamp(started.OccurredAt));
 

@@ -41,7 +41,7 @@ public sealed class FreshVolumeTests : IDisposable
     public void The_steps_are_the_squash_and_the_steps_added_after_it()
     {
         Assert.Equal(
-            ["messages-001", "messages-002", "messages-003", "messages-004", "messages-005", "messages-006", "auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "auth-014", "auth-015", "auth-016", "auth-017", "auth-018", "auth-019", "auth-020", "auth-021", "auth-022", "auth-023", "auth-024", "auth-025", "auth-026", "auth-027", "auth-028", "auth-029", "auth-030", "auth-031", "auth-032", "auth-033", "skill-001", "skill-002", "skill-003", "skill-004", "backlog-001", "backlog-002", "backlog-003", "backlog-004", "outcome-001", "outcome-002", "outcome-003", "outcome-004", "outcome-005", "outcome-006", "outcome-007", "outcome-008"],
+            ["messages-001", "messages-002", "messages-003", "messages-004", "messages-005", "messages-006", "auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "auth-014", "auth-015", "auth-016", "auth-017", "auth-018", "auth-019", "auth-020", "auth-021", "auth-022", "auth-023", "auth-024", "auth-025", "auth-026", "auth-027", "auth-028", "auth-029", "auth-030", "auth-031", "auth-032", "auth-033", "auth-034", "skill-001", "skill-002", "skill-003", "skill-004", "backlog-001", "backlog-002", "backlog-003", "backlog-004", "outcome-001", "outcome-002", "outcome-003", "outcome-004", "outcome-005", "outcome-006", "outcome-007", "outcome-008"],
             SchemaModules.All.Select(s => s.Id));
     }
 
@@ -53,7 +53,7 @@ public sealed class FreshVolumeTests : IDisposable
         await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
 
         Assert.Equal(
-            ["auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "auth-014", "auth-015", "auth-016", "auth-017", "auth-018", "auth-019", "auth-020", "auth-021", "auth-022", "auth-023", "auth-024", "auth-025", "auth-026", "auth-027", "auth-028", "auth-029", "auth-030", "auth-031", "auth-032", "auth-033", "backlog-001", "backlog-002", "backlog-003", "backlog-004", "messages-001", "messages-002", "messages-003", "messages-004", "messages-005", "messages-006", "outcome-001", "outcome-002", "outcome-003", "outcome-004", "outcome-005", "outcome-006", "outcome-007", "outcome-008", "skill-001", "skill-002", "skill-003", "skill-004"],
+            ["auth-001", "auth-002", "auth-003", "auth-004", "auth-005", "auth-006", "auth-007", "auth-008", "auth-009", "auth-010", "auth-011", "auth-012", "auth-013", "auth-014", "auth-015", "auth-016", "auth-017", "auth-018", "auth-019", "auth-020", "auth-021", "auth-022", "auth-023", "auth-024", "auth-025", "auth-026", "auth-027", "auth-028", "auth-029", "auth-030", "auth-031", "auth-032", "auth-033", "auth-034", "backlog-001", "backlog-002", "backlog-003", "backlog-004", "messages-001", "messages-002", "messages-003", "messages-004", "messages-005", "messages-006", "outcome-001", "outcome-002", "outcome-003", "outcome-004", "outcome-005", "outcome-006", "outcome-007", "outcome-008", "skill-001", "skill-002", "skill-003", "skill-004"],
             await migrator.AppliedAsync(ct: Ct));
 
         // Nothing pending on the second start, so no backup and no change.
@@ -885,6 +885,34 @@ public sealed class FreshVolumeTests : IDisposable
         }
 
         Assert.Contains(plan, step => step.Contains("ix_usage_ledger_team_ended", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// `auth-034` applies to a volume with members: each row stays as it was, and its estimated hourly
+    /// rate, billing account and who set them read NULL - no override, so an agent keeps the tenant
+    /// default and a plugin stays unpriced. Nothing is back-filled.
+    /// </summary>
+    [Fact]
+    public async Task The_member_rate_step_leaves_existing_members_with_no_rate_and_no_account()
+    {
+        var migrator = new SchemaMigrator(Database);
+        await migrator.ApplyAsync([.. SchemaModules.All.Where(s => s.Id != "auth-034")], ct: Ct);
+        await ExecuteAsync(
+            """
+            INSERT INTO teams (id, created_utc) VALUES ('Alpha', '2026-10-01T00:00:00Z');
+            INSERT INTO team_members (team, name, agent, subscribes, permits, floor_seq, created_utc)
+            VALUES ('Alpha', 'Dev', 'claude', '[]', '[]', 7, '2026-10-01T00:00:00Z');
+            """);
+
+        await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
+
+        Assert.Contains("auth-034", await migrator.AppliedAsync(ct: Ct));
+        Assert.Equal(
+            ["Dev|claude|7|null|null|null|null"],
+            await ColumnAsync(
+                "SELECT name || '|' || agent || '|' || floor_seq || '|' || COALESCE(est_hourly_rate, 'null') || '|' "
+                + "|| COALESCE(billing_account_id, 'null') || '|' || COALESCE(billing_set_by, 'null') || '|' "
+                + "|| COALESCE(billing_set_at, 'null') FROM team_members"));
     }
 
     /// <summary>

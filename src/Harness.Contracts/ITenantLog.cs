@@ -155,6 +155,11 @@ public static class TenantActions
     /// and whether they were cleared - never the words, which are somebody's and can be long.</summary>
     public const string MemberInstructionsChanged = "member.instructions-changed";
 
+    /// <summary>A member's own estimated hourly rate or billing account changed, a clear included.
+    /// Detail is <c>{team, rate: {old, new}, billingAccount: {old, new}}</c>, the stored text or null -
+    /// never the effective rate.</summary>
+    public const string MemberBillingChanged = "member.billing-changed";
+
     public const string AgentsSaved = "agents.saved";
 
     /// <summary>A person had the platform update an agent CLI. Subject is the preset; detail names the

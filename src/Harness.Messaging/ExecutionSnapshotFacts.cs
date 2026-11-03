@@ -16,15 +16,16 @@ namespace Harness.Messaging;
 /// </para>
 ///
 /// <para>
-/// NO RATE IS NEVER A PRICED ZERO. An agent takes the tenant default rate; a missing or zero rate is
-/// <see cref="RateSourceNone"/> with no amount. A plugin is never priced at the agent rate: until a
-/// member can carry its own rate, every plugin snapshot is <see cref="RateSourceNone"/>. A member that
-/// is not on the roster has no kind and is not priced either.
+/// NO RATE IS NEVER A PRICED ZERO. A member's own positive rate is <see cref="RateSourceMember"/>; an
+/// own rate of "0" is not priced. An agent with no own rate takes the tenant default; a missing or zero
+/// rate is <see cref="RateSourceNone"/> with no amount. A plugin with no own rate is never priced at the
+/// agent rate. A member that is not on the roster has no kind and is not priced either. The member
+/// rules are <see cref="EffectiveCost"/>'s; <see cref="RateOf"/> is its tenant-default arm.
 /// </para>
 /// </summary>
 public static class ExecutionSnapshotFacts
 {
-    /// <summary>The member's own rate. Nothing writes it yet: no member carries a rate.</summary>
+    /// <summary>The member's own positive rate, <c>team_members.est_hourly_rate</c> (<c>auth-034</c>).</summary>
     public const string RateSourceMember = "member";
 
     /// <summary>The tenant default, <see cref="AgentHourlyRateSetting"/>.</summary>

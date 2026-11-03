@@ -135,6 +135,13 @@ public sealed class LedgerParityTests : IDisposable
             "SELECT u.run_seq FROM usage_ledger u LEFT JOIN execution_snapshots s ON s.start_seq = u.start_seq "
             + "WHERE s.start_seq IS NULL OR s.start_seq >= u.run_seq OR s.member <> u.member OR s.correlation <> u.correlation"));
         Assert.Empty(await RowsAsync("SELECT start_seq FROM usage_ledger GROUP BY start_seq HAVING COUNT(*) > 1"));
+
+        // Every snapshot is priced by EffectiveCost's rules: a known source, an amount exactly when it is
+        // priced, never a priced zero, and never a plugin at the tenant agent rate.
+        Assert.Empty(await RowsAsync(
+            "SELECT start_seq FROM execution_snapshots "
+            + "WHERE rate_source NOT IN ('member', 'tenant', 'none') OR (rate_source = 'none') <> (rate_amount IS NULL) "
+            + "OR rate_amount = '0' OR (member_kind = 'plugin' AND rate_source = 'tenant')"));
     }
 
     /// <summary>A query's rows over the fixture's database, each as its first column.</summary>

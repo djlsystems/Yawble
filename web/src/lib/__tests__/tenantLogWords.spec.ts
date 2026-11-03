@@ -74,6 +74,22 @@ describe('every action the Host writes reads in words', () => {
   });
 });
 
+describe("a member's rate or billing account row", () => {
+  const detail = (rate: [string | null, string | null], account: [string | null, string | null]) =>
+    JSON.stringify({ team: 'alpha', rate: { old: rate[0], new: rate[1] }, billingAccount: { old: account[0], new: account[1] } });
+
+  it('names the rate set, from its stored text, and leaves an unchanged account out', () => {
+    const acct = '3f2b8c1e-9a4d-4e2f-b6a1-0c5d7e8f9a10';
+    expect(detailWords({ action: 'member.billing-changed', detail: detail([null, '62.5'], [acct, acct]) }))
+      .toBe('Hourly rate set from nothing to 62.5.');
+  });
+
+  it('says a clear is a clear', () => {
+    expect(detailWords({ action: 'member.billing-changed', detail: detail(['60', null], ['3f2b8c1e-9a4d-4e2f-b6a1-0c5d7e8f9a10', null]) }))
+      .toBe('Hourly rate 60 cleared; billing account 3f2b8c1e-9a4d-4e2f-b6a1-0c5d7e8f9a10 cleared.');
+  });
+});
+
 describe('a deleted outcome', () => {
   const detail = (cascade: { id: string; name: string } | null) =>
     JSON.stringify({

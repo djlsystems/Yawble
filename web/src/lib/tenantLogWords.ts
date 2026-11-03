@@ -541,6 +541,24 @@ const words: Record<string, Words> = {
         bySolution(d),
       ]) || 'Saved with nothing changed.',
   },
+  'member.billing-changed': {
+    did: "changed member's rate or billing account",
+    detail: (d) => {
+      const change = (key: string) => {
+        const pair = get(d, key);
+        if (!pair || typeof pair !== 'object') return null;
+        const from = get(pair as Detail, 'old');
+        const to = get(pair as Detail, 'new');
+        return from === to ? null : { from, to };
+      };
+      const rate = change('rate');
+      const account = change('billingAccount');
+      return sentence([
+        rate && `hourly rate ${rate.to == null ? `${shown(rate.from)} cleared` : `set from ${shown(rate.from)} to ${shown(rate.to)}`}`,
+        account && `billing account ${account.to == null ? `${shown(account.from)} cleared` : `set from ${shown(account.from)} to ${shown(account.to)}`}`,
+      ]) || 'Saved with nothing changed.';
+    },
+  },
   'member.deleted': {
     did: 'removed member',
     detail: (d) =>

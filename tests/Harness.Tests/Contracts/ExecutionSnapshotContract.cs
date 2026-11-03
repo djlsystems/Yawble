@@ -210,9 +210,102 @@ public abstract class ExecutionSnapshotContract : ProviderContract
         Assert.Equal(started, await stores.LongAsync($"SELECT start_seq FROM usage_ledger WHERE run_seq = {terminal}"));
     }
 
+    private const string Account = "3f2b8c1e-9a4d-4e2f-b6a1-0c5d7e8f9a10";
+
+    [Fact]
+    public async Task A_members_own_positive_rate_is_snapshotted_as_member_agent_or_plugin_with_its_billing_account()
+    {
+        var stores = await StoresAsync();
+        await HireAsync(stores, Dev, "claude", rate: "62.5", account: Account);
+        await HireAsync(stores, Fx, "plugin:fixture", rate: "15");
+        await SettingAsync(stores, ExecutionSnapshotFacts.AgentHourlyRateSetting, "60");
+        await SettingAsync(stores, ExecutionSnapshotFacts.CurrencySetting, "eur");
+
+        var agent = await RunAsync(stores, Dev);
+        var plugin = await RunAsync(stores, Fx);
+
+        Assert.Equal(
+            [MemberRef.AgentKind, "62.5", "EUR", ExecutionSnapshotFacts.RateSourceMember, Account],
+            Normalised(Assert.Single(await stores.RowsAsync(
+                $"SELECT member_kind, rate_amount, rate_currency, rate_source, billing_account_id FROM execution_snapshots WHERE start_seq = {agent}"))));
+        Assert.Equal(
+            [MemberRef.PluginKind, "15", "EUR", ExecutionSnapshotFacts.RateSourceMember, null],
+            Normalised(Assert.Single(await stores.RowsAsync(
+                $"SELECT member_kind, rate_amount, rate_currency, rate_source, billing_account_id FROM execution_snapshots WHERE start_seq = {plugin}"))));
+    }
+
+    [Fact]
+    public async Task An_own_zero_is_not_priced_and_does_not_fall_through_to_the_tenant_rate()
+    {
+        var stores = await StoresAsync();
+        await HireAsync(stores, Dev, "claude", rate: "0");
+        await HireAsync(stores, Fx, "plugin:fixture", rate: "0");
+        await SettingAsync(stores, ExecutionSnapshotFacts.AgentHourlyRateSetting, "60");
+
+        foreach (var start in new[] { await RunAsync(stores, Dev), await RunAsync(stores, Fx) })
+        {
+            Assert.Equal(
+                [null, null, ExecutionSnapshotFacts.RateSourceNone],
+                Normalised(Assert.Single(await stores.RowsAsync(
+                    $"SELECT rate_amount, rate_currency, rate_source FROM execution_snapshots WHERE start_seq = {start}"))));
+        }
+
+        Assert.Equal(0, await stores.LongAsync("SELECT COUNT(*) FROM execution_snapshots WHERE rate_amount = '0'"));
+    }
+
+    [Fact]
+    public async Task A_member_rate_or_account_changed_during_a_run_leaves_that_snapshot_and_the_next_run_carries_the_new_one()
+    {
+        var stores = await StoresAsync();
+        await HireAsync(stores, Dev, "claude", rate: "50", account: Account);
+        await SettingAsync(stores, ExecutionSnapshotFacts.AgentHourlyRateSetting, "60");
+
+        var delivery = await stores.Log.AppendAsync(Instruction(Dev, "first"), Ct);
+        var first = await StartAsync(stores, Dev, delivery.Seq);
+
+        // Under way: the member's rate and account change, and the run ends.
+        await stores.ExecuteAsync($"UPDATE team_members SET est_hourly_rate = '70', billing_account_id = NULL WHERE team = '{Dev.Team}' AND name = '{Dev.Name}'");
+        await stores.Log.AppendAsync(Completed(Dev, delivery.Seq), Ct);
+
+        var next = await RunAsync(stores, Dev);
+
+        // Cleared altogether: the agent inherits the tenant default from its next run.
+        await stores.ExecuteAsync($"UPDATE team_members SET est_hourly_rate = NULL WHERE team = '{Dev.Team}' AND name = '{Dev.Name}'");
+        var inherited = await RunAsync(stores, Dev);
+
+        Assert.Equal(
+            ["50", ExecutionSnapshotFacts.RateSourceMember, Account],
+            Normalised(Assert.Single(await stores.RowsAsync($"SELECT rate_amount, rate_source, billing_account_id FROM execution_snapshots WHERE start_seq = {first.Seq}"))));
+        Assert.Equal(
+            ["70", ExecutionSnapshotFacts.RateSourceMember, null],
+            Normalised(Assert.Single(await stores.RowsAsync($"SELECT rate_amount, rate_source, billing_account_id FROM execution_snapshots WHERE start_seq = {next}"))));
+        Assert.Equal(
+            ["60", ExecutionSnapshotFacts.RateSourceTenant, null],
+            Normalised(Assert.Single(await stores.RowsAsync($"SELECT rate_amount, rate_source, billing_account_id FROM execution_snapshots WHERE start_seq = {inherited}"))));
+    }
+
+    [Fact]
+    public async Task An_agent_with_its_own_rate_does_not_pick_up_a_tenant_rate_change()
+    {
+        var stores = await StoresAsync();
+        await HireAsync(stores, Dev, "claude", rate: "45");
+        await SettingAsync(stores, ExecutionSnapshotFacts.AgentHourlyRateSetting, "60");
+
+        var before = await RunAsync(stores, Dev);
+        await SettingAsync(stores, ExecutionSnapshotFacts.AgentHourlyRateSetting, "90");
+        var after = await RunAsync(stores, Dev);
+
+        foreach (var start in new[] { before, after })
+        {
+            Assert.Equal(
+                ["45", ExecutionSnapshotFacts.RateSourceMember],
+                Normalised(Assert.Single(await stores.RowsAsync($"SELECT rate_amount, rate_source FROM execution_snapshots WHERE start_seq = {start}"))));
+        }
+    }
+
     // ---- fixtures ----
 
-    private static async Task HireAsync(ContractStores stores, ContainerId member, string agent)
+    private static async Task HireAsync(ContractStores stores, ContainerId member, string agent, string? rate = null, string? account = null)
     {
         if (await stores.LongAsync($"SELECT COUNT(*) FROM teams WHERE id = '{member.Team}'") == 0)
         {
@@ -220,9 +313,11 @@ public abstract class ExecutionSnapshotContract : ProviderContract
                 $"INSERT INTO teams (id, name, created_utc) VALUES ('{member.Team}', '{member.Team} Squad', '2026-10-01T00:00:00.0000000+00:00')");
         }
 
+        static string Sql(string? value) => value is null ? "NULL" : $"'{value}'";
+
         await stores.ExecuteAsync(
-            "INSERT INTO team_members (team, name, agent, subscribes, permits, floor_seq, created_utc) "
-            + $"VALUES ('{member.Team}', '{member.Name}', '{agent}', '[]', '[]', 0, '2026-10-01T00:00:00.0000000+00:00')");
+            "INSERT INTO team_members (team, name, agent, subscribes, permits, floor_seq, created_utc, est_hourly_rate, billing_account_id) "
+            + $"VALUES ('{member.Team}', '{member.Name}', '{agent}', '[]', '[]', 0, '2026-10-01T00:00:00.0000000+00:00', {Sql(rate)}, {Sql(account)})");
     }
 
     /// <summary>A tenant setting as its store leaves it: the row replaced.</summary>

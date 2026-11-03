@@ -303,10 +303,12 @@ public sealed class SqliteTeamStore : ITeamStore
             """
             INSERT INTO team_members
                 (team, name, label, agent, system_prompt, subscribes, permits, floor_seq, hired_for,
-                 system_prompt_set_by, system_prompt_set_by_kind, system_prompt_set_at, created_utc)
+                 system_prompt_set_by, system_prompt_set_by_kind, system_prompt_set_at,
+                 est_hourly_rate, billing_account_id, billing_set_by, billing_set_at, created_utc)
             VALUES
                 ($team, $name, $label, $agent, $systemPrompt, $subscribes, $permits,
-                 $floorSeq, $hiredFor, $setBy, $setByKind, $setAt, $createdUtc)
+                 $floorSeq, $hiredFor, $setBy, $setByKind, $setAt,
+                 $rate, $account, $billingSetBy, $billingSetAt, $createdUtc)
             ON CONFLICT(team, name) DO UPDATE SET
                 label                     = excluded.label,
                 agent                     = excluded.agent,
@@ -317,7 +319,11 @@ public sealed class SqliteTeamStore : ITeamStore
                 hired_for                 = excluded.hired_for,
                 system_prompt_set_by      = excluded.system_prompt_set_by,
                 system_prompt_set_by_kind = excluded.system_prompt_set_by_kind,
-                system_prompt_set_at      = excluded.system_prompt_set_at
+                system_prompt_set_at      = excluded.system_prompt_set_at,
+                est_hourly_rate           = excluded.est_hourly_rate,
+                billing_account_id        = excluded.billing_account_id,
+                billing_set_by            = excluded.billing_set_by,
+                billing_set_at            = excluded.billing_set_at
             """;
 
         command.Parameters.AddWithValue("$team", member.Team);
@@ -334,6 +340,10 @@ public sealed class SqliteTeamStore : ITeamStore
         command.Parameters.AddWithValue(
             "$setAt",
             member.SystemPromptSetBy is { } setBy ? Instant.Stamp(setBy.At) : DBNull.Value);
+        command.Parameters.AddWithValue("$rate", (object?)member.EstHourlyRate ?? DBNull.Value);
+        command.Parameters.AddWithValue("$account", (object?)member.BillingAccountId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$billingSetBy", (object?)member.BillingSetBy ?? DBNull.Value);
+        command.Parameters.AddWithValue("$billingSetAt", TeamRows.Stamp(member.BillingSetAt));
         command.Parameters.AddWithValue("$createdUtc", Instant.Now());
     }
 

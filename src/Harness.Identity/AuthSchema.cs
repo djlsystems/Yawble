@@ -791,5 +791,20 @@ public static class AuthSchema
                 PRIMARY KEY (team, server_id)
             );
             """),
+
+        // A MEMBER'S OWN ESTIMATED HOURLY RATE AND BILLING ACCOUNT, set by a person on the member's
+        // PATCH and read by the execution-snapshot writer in a run's start transaction
+        // (`EffectiveCost`). `est_hourly_rate` is canonical decimal text: NULL is no override (an agent
+        // inherits the tenant default, a plugin is not priced), and "0" is explicitly not priced.
+        // `billing_account_id` is a lower-case GUID or NULL; nothing checks that the account exists yet.
+        // `billing_set_by` / `billing_set_at` are who last changed either, a clear included.
+        new MigrationStep(
+            "auth-034",
+            """
+            ALTER TABLE team_members ADD COLUMN est_hourly_rate    TEXT NULL;
+            ALTER TABLE team_members ADD COLUMN billing_account_id TEXT NULL;
+            ALTER TABLE team_members ADD COLUMN billing_set_by     TEXT NULL;
+            ALTER TABLE team_members ADD COLUMN billing_set_at     TEXT NULL;
+            """),
     ];
 }
