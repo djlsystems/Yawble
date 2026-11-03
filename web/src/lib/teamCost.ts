@@ -82,6 +82,16 @@ export function weekValue(week: Pick<TeamCostWeek, 'cost' | 'agentSeconds'>, mon
   return money ? week.cost ?? 0 : week.agentSeconds / 3600
 }
 
+/**
+ * THE COST DIALOG'S RATE LINE: the tenant default as set now, named as the default - the rate a new agent
+ * run inherits - because the figures under it were each priced at the rate their run started with.
+ */
+export function defaultRateText(money: TeamCostMoney): string {
+  return money.agentHourlyRate === null
+    ? `No default agent rate set (${money.currency})`
+    : `Default agent rate ${moneyText(money.agentHourlyRate, money.currency)}/h (${money.currency})`
+}
+
 /** Agent hours, one decimal: `12.5`. */
 export function hoursFigure(seconds: number): string {
   const hours = seconds / 3600

@@ -37,6 +37,10 @@ is an estimate.
   in N and not in the money. With no priced agent time the line gives the hours alone.
 - **One currency.** Money in another currency than the instance's is left out of the figure, never
   converted or added.
+- **On the Outcomes dashboard** an outcome's agent time, tokens and money are the runs that serve
+  it, each run once, as above. Its workflow counts and elapsed times still follow each workflow's
+  newest link, so a workflow moved after a run started is counted under its new outcome while that
+  run's time and money stay with the old one.
 
 ## Where the rate and budgets are set
 
@@ -152,8 +156,9 @@ Clicking the tile opens the team's Estimated Execution Cost dialog.
 ## The Estimated Execution Cost dialog
 
 Titled **Estimated Execution Cost · <team>**, with the instance's default rate as set now on the
-right (`Agent time at $60/h (USD) · Change in Outcomes`). That is the rate new agent runs inherit,
-not the rate the figures were priced at. It has two tabs.
+right (`Default agent rate $60/h (USD) · Change in Outcomes`, or `No default agent rate set (USD)`).
+That is the rate a new agent run with no rate of its own inherits, not the rate the figures were
+priced at. It has two tabs.
 
 **Estimated Execution Cost** (the tab it opens on):
 

@@ -63,13 +63,14 @@ public static class OutcomeEndpoints
                 }
 
                 var all = await outcomes.ListAsync(ct);
-                var book = OutcomeFigures.Open(await outcomes.ReadLedgerAsync(from, to, ct), all, from, to);
+                var executions = ExecutionCost.Of(await outcomes.ReadExecutionRunsAsync(from, to, pricedOnly: false, ct), all);
+                var book = OutcomeFigures.Open(await outcomes.ReadLedgerAsync(from, to, ct), all, from, to, executions);
                 var open = await log.OpenWorkflowsAmongAsync([.. book.InWindow], ct);
 
                 // THE DASHBOARD READS EVERY WORKFLOW: the weekly series is the last weeks whatever the
                 // period, and a blocked span ends at the member's next run, which may be after it.
                 var whole = from is null && to is null ? book : OutcomeFigures.Open(await outcomes.ReadLedgerAsync(null, null, ct), all, null, null);
-                var dashboard = await Dashboard.OfAsync(settings, all, whole, await outcomes.ReadBacklogAsync(ct), from, to, outcomes, ct);
+                var dashboard = await Dashboard.OfAsync(settings, all, whole, await outcomes.ReadBacklogAsync(ct), from, to, outcomes, executions, ct);
 
                 var shown = all.Where(o => statuses.Length == 0 ? o.Status != OutcomeStatus.Merged : statuses.Contains(o.Status));
 
@@ -121,7 +122,9 @@ public static class OutcomeEndpoints
             .WithSummary("List outcomes with the figures of the work that served them")
             .WithDescription(
                 "Each outcome with `figures` read from the usage ledger: `workflows` (open, completed, "
-                + "closed, total), `agentSeconds` (the sum over runs; parallel runs add up), "
+                + "closed, total; a workflow counts toward its newest link's outcome), `agentSeconds` (the sum "
+                + "over the agent runs that serve it - a run with a snapshot serves the outcome its link named "
+                + "at start - parallel runs adding up; a plugin's time is not agent time), "
                 + "`waitingSeconds` (the sum of time runs waited for a slot), `elapsed` (per workflow, "
                 + "`medianSeconds` and `longestSeconds` of the closed ones; never summed), `tokens` "
                 + "(`billable` over measured runs, and `unmeasuredRuns`, counted and never zero), "
@@ -154,10 +157,11 @@ public static class OutcomeEndpoints
                 var all = await outcomes.ListAsync(ct);
                 var resolution = OutcomeFigures.Resolution(all);
                 var holder = resolution.GetValueOrDefault(outcome.Id, outcome.Id);
-                var book = OutcomeFigures.Open(await outcomes.ReadLedgerAsync(null, null, ct), all, null, null);
+                var executions = ExecutionCost.Of(await outcomes.ReadExecutionRunsAsync(null, null, pricedOnly: false, ct), all);
+                var book = OutcomeFigures.Open(await outcomes.ReadLedgerAsync(null, null, ct), all, null, null, executions);
                 var open = await log.OpenWorkflowsAmongAsync([.. book.InWindow], ct);
                 var items = await outcomes.ReadBacklogAsync(ct);
-                var dashboard = await Dashboard.OfAsync(settings, all, book, items, null, null, outcomes, ct);
+                var dashboard = await Dashboard.OfAsync(settings, all, book, items, null, null, outcomes, executions, ct);
 
                 var lines = new List<OutcomeFigures.WorkflowLine>();
                 foreach (var correlation in book.WorkflowsOf(holder).Order())
@@ -326,7 +330,8 @@ public static class OutcomeEndpoints
                 if (preview == true)
                 {
                     var all = await outcomes.ListAsync(ct);
-                    var book = OutcomeFigures.Open(await outcomes.ReadLedgerAsync(null, null, ct), all, null, null);
+                    var executions = ExecutionCost.Of(await outcomes.ReadExecutionRunsAsync(null, null, pricedOnly: false, ct), all);
+                    var book = OutcomeFigures.Open(await outcomes.ReadLedgerAsync(null, null, ct), all, null, null, executions);
                     var open = await log.OpenWorkflowsAmongAsync([.. book.InWindow], ct);
                     var resolution = OutcomeFigures.Resolution(all);
                     var links = (await outcomes.ReadLinksAsync(ct))
@@ -632,26 +637,25 @@ public static class OutcomeEndpoints
         };
 
         /// <summary>
-        /// The dashboard at now: the runs overlapping the last weeks, priced, for the weekly series, and
-        /// the priced runs of the period - all time with no window - for each outcome's cost, both read
-        /// windowed (<see cref="IOutcomeStore.ReadExecutionRunsAsync"/>).
+        /// The dashboard at now: the runs overlapping the last weeks, read windowed
+        /// (<see cref="IOutcomeStore.ReadExecutionRunsAsync"/>), for the weekly series, and each outcome's
+        /// cost from <paramref name="executions"/> - the period's runs, all time with no window.
         /// </summary>
         public static async Task<Dashboard> OfAsync(
             TenantSettings settings, IReadOnlyList<Outcome> all, OutcomeFigures.Book whole,
             IReadOnlyList<OutcomeBacklogItem> items, DateTimeOffset? from, DateTimeOffset? to,
-            IOutcomeStore outcomes, CancellationToken ct)
+            IOutcomeStore outcomes, IReadOnlyList<ExecutionCost.Run> executions, CancellationToken ct)
         {
             var now = DateTimeOffset.UtcNow;
             var pricing = OutcomeFigures.Pricing.Of(settings);
 
             var weeks = OutcomeFigures.WeekStarts(now);
             var weekRuns = ExecutionCost.Of(await outcomes.ReadExecutionRunsAsync(weeks[0], weeks[^1].AddDays(7), pricedOnly: false, ct), all);
-            var priced = ExecutionCost.Of(await outcomes.ReadExecutionRunsAsync(from, to, pricedOnly: true, ct), all);
 
             return new Dashboard(
                 pricing, whole, items, OutcomeFigures.Resolution(all),
                 OutcomeFigures.BlockedByWorkflow(whole.Rows, now, from, to), now,
-                weekRuns, ExecutionCost.CostsOf(priced, from, to, pricing.Currency));
+                weekRuns, ExecutionCost.CostsOf(executions, from, to, pricing.Currency));
         }
 
         public OutcomeFigures.Figures Figures(OutcomeFigures.Figures figures, string? outcome) =>

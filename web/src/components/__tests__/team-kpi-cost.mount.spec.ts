@@ -224,7 +224,7 @@ describe('the Cost dialog', () => {
     await openDialog();
 
     expect(squash(dialog()!.querySelector('[data-cost-title]')!.textContent)).toBe('Estimated Execution Cost · Alpha');
-    expect(squash(dialog()!.querySelector('[data-cost-rate]')!.textContent)).toBe('Agent time at $60/h (USD) · Change in Outcomes');
+    expect(squash(dialog()!.querySelector('[data-cost-rate]')!.textContent)).toBe('Default agent rate $60/h (USD) · Change in Outcomes');
 
     const nav = useWorkflowNavStore();
     const asks = nav.outcomeRateAsks;
@@ -308,7 +308,7 @@ describe('the Cost dialog', () => {
     expect(dialog()!.querySelector('[data-cost-figure="budget-used"]')).toBeNull();
     expect(words(dialog()!.querySelector('[data-cost-figure="spent"]'))).toBe('— Estimated Execution Cost · no rate set');
     expect(squash(dialog()!.querySelector('[data-cost-row="total"] [data-cell="cost"]')!.textContent)).toBe('—');
-    expect(squash(dialog()!.querySelector('[data-cost-rate]')!.textContent)).toBe('No rate set for agent time (USD) · Change in Outcomes');
+    expect(squash(dialog()!.querySelector('[data-cost-rate]')!.textContent)).toBe('No default agent rate set (USD) · Change in Outcomes');
     expect(dialog()!.querySelector('[data-cost-no-rate]')).not.toBeNull();
     expect(dialog()!.querySelector('[data-cost-table]')!.textContent).not.toMatch(/\$\s*0\b/);
   });

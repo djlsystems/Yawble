@@ -317,6 +317,15 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
                 is { ValueKind: JsonValueKind.Number } amount ? amount.GetDecimal() : null;
             Assert.Equal(60m, CostOf(first.Id));
             Assert.Null(CostOf(second.Id));
+
+            // AND ITS TIME WITH ITS MONEY: each run's hours under the outcome it serves, once - while the
+            // workflow itself, counted by its newest link, is the second outcome's.
+            JsonElement FiguresOf(string id) => list.GetProperty("outcomes").EnumerateArray()
+                .Single(o => o.GetProperty("id").GetString() == id).GetProperty("figures");
+            Assert.Equal(3600, FiguresOf(first.Id).GetProperty("agentSeconds").GetDouble(), 3);
+            Assert.Equal(3600, FiguresOf(second.Id).GetProperty("agentSeconds").GetDouble(), 3);
+            Assert.Equal(0, FiguresOf(first.Id).GetProperty("workflows").GetProperty("total").GetInt32());
+            Assert.Equal(1, FiguresOf(second.Id).GetProperty("workflows").GetProperty("total").GetInt32());
         }
         finally
         {

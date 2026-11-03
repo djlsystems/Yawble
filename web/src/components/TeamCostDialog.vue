@@ -4,13 +4,14 @@ import type { ContainerSnapshot, TeamTokenTotals } from '../api/types';
 import { asTeamId } from '../api/types';
 import { getTeamTokens } from '../api/client';
 import type { TeamCost, TeamCostOutcome } from '../api/outcomes';
-import { moneyText, rateText } from '../lib/outcomes';
+import { moneyText } from '../lib/outcomes';
 import {
   EstimateTitle,
   CriticalColour,
   agentHours,
   budgetUse,
   costSeries,
+  defaultRateText,
   hoursFigure,
   overBudget,
   percentText,
@@ -121,7 +122,7 @@ function changeRate() {
       <q-card-section class="q-pb-none cost-dialog-head">
         <div class="os-dialog-title" data-cost-title>{{ EstimateTitle }} · {{ teamName }}</div>
         <div v-if="cost" class="text-caption os-text-muted cost-rate" data-cost-rate>
-          {{ rateText(cost.money) }} ·
+          {{ defaultRateText(cost.money) }} ·
           <a href="#" class="os-name-link" data-cost-rate-change @click.prevent="changeRate">Change in Outcomes</a>
         </div>
       </q-card-section>

@@ -293,12 +293,33 @@ public static class OutcomeFigures
         public required ILookup<long, UsageLedgerRow> RunsOf { get; init; }
         public required IReadOnlyDictionary<long, WorkflowLedgerRow> CloseOf { get; init; }
 
+        /// <summary>Each run as <see cref="ExecutionCost"/> read it, by its <c>run_seq</c>: the outcome it serves
+        /// and its kind. A run not in it is read by its workflow's newest link and its ledger row's kind.</summary>
+        public IReadOnlyDictionary<long, ExecutionCost.Run> Executions { get; init; } = new Dictionary<long, ExecutionCost.Run>();
+
+        /// <summary>The workflows whose newest link serves <paramref name="outcome"/> (null: none): what the
+        /// workflow counts, elapsed times and the detail's workflow list are read over.</summary>
         public IEnumerable<long> WorkflowsOf(string? outcome) =>
             InWindow.Where(c => outcome is null ? !OutcomeOf.ContainsKey(c) : OutcomeOf.GetValueOrDefault(c) == outcome);
+
+        /// <summary>
+        /// THE OUTCOME ONE RUN SERVES: a snapshotted run the one its link named at start, a run from before
+        /// snapshots its workflow's newest link (<see cref="ExecutionCost"/>). Each run is in one place.
+        /// </summary>
+        public string? OutcomeOfRun(UsageLedgerRow run) =>
+            Executions.TryGetValue(run.RunSeq, out var execution) ? execution.OutcomeId : OutcomeOf.GetValueOrDefault(run.Correlation);
+
+        /// <summary>Whether a run's time is agent time: anything but a plugin, by its snapshot's kind, else its ledger row's.</summary>
+        public bool IsAgent(UsageLedgerRow run) =>
+            Executions.TryGetValue(run.RunSeq, out var execution) ? execution.IsAgent : run.MemberKind != MemberRef.PluginKind;
+
+        /// <summary>The runs that serve <paramref name="outcome"/> (null: none), each run once.</summary>
+        public IEnumerable<UsageLedgerRow> RunsServing(string? outcome) => Rows.Runs.Where(r => OutcomeOfRun(r) == outcome);
     }
 
     public static Book Open(
-        OutcomeLedgerRows rows, IReadOnlyList<Outcome> outcomes, DateTimeOffset? from, DateTimeOffset? to)
+        OutcomeLedgerRows rows, IReadOnlyList<Outcome> outcomes, DateTimeOffset? from, DateTimeOffset? to,
+        IReadOnlyList<ExecutionCost.Run>? executions = null)
     {
         var resolution = Resolution(outcomes);
         var outcomeOf = CurrentOutcomes(rows.CurrentLinks, resolution);
@@ -322,13 +343,20 @@ public static class OutcomeFigures
             InWindow = inWindow,
             RunsOf = rows.Runs.ToLookup(r => r.Correlation),
             CloseOf = closeOf,
+            Executions = (executions ?? []).GroupBy(e => e.Ledger.RunSeq).ToDictionary(g => g.Key, g => g.First()),
         };
     }
 
+    /// <summary>
+    /// One outcome's figures (null: the work serving none). WORKFLOW FIGURES - the counts and elapsed
+    /// times - are the workflows whose newest link serves it. RUN FIGURES - agent time, waiting, tokens
+    /// and runs - are the runs that serve it, each run once (<see cref="Book.OutcomeOfRun"/>), so they
+    /// match the money; agent time is agent-kind runs only, never a plugin's.
+    /// </summary>
     public static Figures For(Book book, string? outcome, IReadOnlySet<long> open)
     {
         var workflows = book.WorkflowsOf(outcome).ToList();
-        var runs = workflows.SelectMany(c => book.RunsOf[c]).ToList();
+        var runs = book.RunsServing(outcome).ToList();
 
         var completed = workflows.Count(c => !open.Contains(c)
             && book.CloseOf.TryGetValue(c, out var close) && close.HowClosed == WorkflowLedgerRow.Completed);
@@ -348,7 +376,7 @@ public static class OutcomeFigures
 
         return new Figures(
             new WorkflowCounts(workflows.Count(open.Contains), completed, closed, workflows.Count),
-            runs.Sum(AgentSeconds),
+            runs.Where(book.IsAgent).Sum(AgentSeconds),
             runs.Sum(r => r.StartedAt is { } started && r.QueuedAt is { } queued ? Math.Max(0, (started - queued).TotalSeconds) : 0),
             new Elapsed(Median(elapsed), elapsed.Count == 0 ? null : elapsed[^1], elapsed.Count),
             new Tokens(
@@ -372,7 +400,7 @@ public static class OutcomeFigures
             isOpen ? "open" : close?.HowClosed ?? "open",
             close?.RootAt ?? startedAt,
             isOpen ? null : close?.ElapsedSeconds,
-            runs.Sum(AgentSeconds),
+            runs.Where(book.IsAgent).Sum(AgentSeconds),
             runs.Where(r => r.Measured).Sum(r => r.Billable ?? 0),
             runs.Count(r => r.Measured),
             runs.Count(r => !r.Measured),
