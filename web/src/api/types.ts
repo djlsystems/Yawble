@@ -3270,6 +3270,11 @@ export interface PluginMemberSettings {
   connections?: Record<string, string>
   /** The manifest's connection slots, as `GET /api/plugins` lists them. */
   connectionFields?: Record<string, ConnectionSlot>
+  /**
+   * Each stored binding the active version cannot use - its slot gone, a second binding of a slot that
+   * now takes one, a kind its slot no longer takes - with the Host's sentence. Kept, not removed.
+   */
+  unusableConnections?: UnusableConnection[]
   /** The manifest's `namedSecrets` block of the version the member runs; null or absent when it declares none. */
   namedSecrets?: PluginNamedSecrets | null
   /**
@@ -3316,14 +3321,29 @@ export interface PluginSecretState {
  * JSON" shows one; omitted on Save, which keeps them), and the secret values typed on the form -
  * the member's own: a string sets or replaces one, null clears it.
  */
+/** A stored connection binding the member's active plugin version cannot use, in the Host's words. */
+export interface UnusableConnection {
+  key: string
+  slot: string
+  connection: string
+  name: string
+  reason: string
+}
+
 export interface PluginHire {
   config: Record<string, PluginSettingValue>
   secrets?: Record<string, string>
   secretValues?: Record<string, string | null>
   /** Named secrets typed or removed on the form, the member's own: name -> value, null removes. */
   namedSecretValues?: Record<string, string | null>
-  /** Slot -> connection id. Sent only for a plugin that declares slots; `{}` unbinds every slot. */
+  /**
+   * Binding key -> connection id: `<slot>`, and for a multiple slot `<slot>#2`, `<slot>#3`... Sent only
+   * for a plugin that declares slots; `{}` unbinds every slot that takes one connection. A multiple slot
+   * keeps every connection stored that `removedConnections` does not name.
+   */
   connections?: Record<string, string>
+  /** Multiple slot -> the connection ids the person removed from it on the form. */
+  removedConnections?: Record<string, string[]>
   /** Table -> row -> secret column -> value typed (null clears). A cell not here keeps what is saved. */
   tableSecretValues?: Record<string, Record<string, Record<string, string | null>>>
 }
@@ -3339,6 +3359,8 @@ export interface ConnectionSlot {
   /** Provider (or `custom`) -> the scopes the slot needs from a connection of it. */
   scopes: Record<string, string[]>
   required: boolean
+  /** The slot takes several connections, bound under `<slot>`, `<slot>#2`...: the settings show a list. */
+  multiple?: boolean
   /** The Host's own words: "needs a Google or Microsoft connection", naming each Microsoft API when there are several. */
   summary: string
   /** Each Microsoft API the slot needs a token for, with its scopes; null when it does not admit Microsoft. */

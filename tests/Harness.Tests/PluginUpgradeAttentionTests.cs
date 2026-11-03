@@ -351,6 +351,55 @@ public sealed class PluginUpgradeAttentionTests : IAsyncLifetime
 
     // ---- connection bindings across an upgrade -----------------------------------------------------
 
+    /// <summary>
+    /// A SAVE KEEPS EVERY CONNECTION OF A MULTIPLE SLOT THE PERSON DID NOT REMOVE (message 26265's shape):
+    /// `appSecrets` holds a mailbox and an API key (Other). A save naming only the API key - what a
+    /// single-select form sent - keeps both; a save naming both keeps both. Only an explicit removal
+    /// (`removedConnections`) unbinds one, and the other stays. The settings answer the slot as multiple.
+    /// </summary>
+    [Fact]
+    public async Task A_save_keeps_both_connections_of_a_multiple_slot_unless_the_person_removes_one()
+    {
+        using var person = await PersonAsync();
+        var (mail, key) = await MailboxAndApiKeyAsync();
+        await InstallAsync(person, Built("1.0.0", connections: AppSecrets));
+        await HireBoundAsync(person, new Dictionary<string, string> { ["appSecrets"] = mail, ["appSecrets#2"] = key });
+        var both = new Dictionary<string, string> { ["appSecrets"] = mail, ["appSecrets#2"] = key };
+
+        var shown = await person.GetFromJsonAsync<JsonElement>($"/api/teams/{_team}/members/Echo/plugin-settings", Ct);
+        Assert.True(shown.GetProperty("connectionFields").GetProperty("appSecrets").GetProperty("multiple").GetBoolean());
+        Assert.Empty(shown.GetProperty("unusableConnections").EnumerateArray());
+
+        // Only the one just picked, as the single-select dropdown sent it: the mailbox stays bound.
+        var one = await SaveAsync(person, "Echo", new { config = new { mode = "reverse" }, connections = new { appSecrets = key } });
+        Assert.True(one.StatusCode == HttpStatusCode.OK, await one.Content.ReadAsStringAsync(Ct));
+        Assert.Equal(both, await BindingsAsync());
+
+        // Both named, in either order: both stay.
+        var two = await SaveAsync(person, "Echo", new
+        {
+            config = new { mode = "reverse" },
+            connections = new Dictionary<string, string> { ["appSecrets"] = key, ["appSecrets#2"] = mail },
+        });
+        Assert.True(two.StatusCode == HttpStatusCode.OK, await two.Content.ReadAsStringAsync(Ct));
+        Assert.Equal(both, await BindingsAsync());
+
+        // `{}` names no connection and removes none: a multiple slot is unbound only by removing.
+        var none = await SaveAsync(person, "Echo", new { config = new { mode = "reverse" }, connections = new { } });
+        Assert.True(none.StatusCode == HttpStatusCode.OK, await none.Content.ReadAsStringAsync(Ct));
+        Assert.Equal(both, await BindingsAsync());
+
+        // An explicit removal of the mailbox keeps the API key.
+        var removed = await SaveAsync(person, "Echo", new
+        {
+            config = new { mode = "reverse" },
+            connections = new { appSecrets = key },
+            removedConnections = new { appSecrets = new[] { mail } },
+        });
+        Assert.True(removed.StatusCode == HttpStatusCode.OK, await removed.Content.ReadAsStringAsync(Ct));
+        Assert.Equal(new Dictionary<string, string> { ["appSecrets"] = key }, await BindingsAsync());
+    }
+
     /// <summary>A mailbox and an API-key connection (preset Other), as a team's appSecrets slot binds them.</summary>
     private async Task<(string Mail, string Key)> MailboxAndApiKeyAsync()
     {
@@ -450,13 +499,24 @@ public sealed class PluginUpgradeAttentionTests : IAsyncLifetime
         Assert.All(holds, h => Assert.Equal([new ContainerId(_team, "Echo")], h.Members));
         Assert.Equal(words["appSecrets#2"], holds.Single(h => h.Id == key).Sentence);
 
+        // THE MEMBER'S SETTINGS say it too, where the person is looking when they open them.
+        var shown = await person.GetFromJsonAsync<JsonElement>($"/api/teams/{_team}/members/Echo/plugin-settings", Ct);
+        var unusable = shown.GetProperty("unusableConnections").EnumerateArray()
+            .ToDictionary(u => u.GetProperty("key").GetString()!, u => u.GetProperty("reason").GetString()!);
+        Assert.Equal(words, unusable);
+
         var needsYou = await person.GetFromJsonAsync<JsonElement>("/api/needs-you", Ct);
         var items = needsYou.GetProperty("items").EnumerateArray().Where(i => i.GetProperty("kind").GetString() == "connection").ToList();
         Assert.Contains(items, i => i.GetProperty("connection").GetProperty("id").GetString() == key
             && i.GetProperty("words").GetString() == words["appSecrets#2"]);
 
         // A PERSON'S SAVE that unbinds them clears the holds.
-        var saved = await SaveAsync(person, "Echo", new { config = new { mode = "reverse" }, connections = new { appSecrets = mail } });
+        var saved = await SaveAsync(person, "Echo", new
+        {
+            config = new { mode = "reverse" },
+            connections = new { appSecrets = mail },
+            removedConnections = new { appSecrets = new[] { key } },
+        });
         Assert.True(saved.StatusCode == HttpStatusCode.OK, await saved.Content.ReadAsStringAsync(Ct));
         Assert.Empty(Services.GetRequiredService<PluginSetup>().Holds());
     }

@@ -278,22 +278,81 @@ export function slotHint(slot: ConnectionSlot, providers: ConnectionProvider[] =
   return slot.required ? sentence : `${sentence} Optional.`;
 }
 
-/** The bindings to send: each slot with a connection chosen. An unbound slot is left out. */
+/** The slot a binding key names: `appSecrets#2` is `appSecrets`. */
+export function slotOfKey(key: string): string {
+  const at = key.indexOf('#');
+  return at < 0 ? key : key.slice(0, at);
+}
+
+/** A binding key's place among its slot's connections: `appSecrets` is 1, `appSecrets#3` is 3; 0 when malformed. */
+function indexOfKey(key: string): number {
+  const at = key.indexOf('#');
+  if (at < 0) return 1;
+  const number = key.slice(at + 1);
+  return /^[1-9][0-9]{0,2}$/.test(number) && Number(number) >= 2 ? Number(number) : 0;
+}
+
+/** Each connection bound to `slot`, in order: `<slot>`, `<slot>#2`, `<slot>#3`... */
+export function slotConnections(bound: Record<string, string>, slot: string): string[] {
+  return Object.entries(bound)
+    .filter(([key, id]) => slotOfKey(key) === slot && indexOfKey(key) > 0 && id !== '')
+    .sort(([a], [b]) => indexOfKey(a) - indexOfKey(b))
+    .map(([, id]) => id)
+    .filter((id, at, ids) => ids.indexOf(id) === at);
+}
+
+/** `bound` with `slot` holding exactly `ids`, keyed `<slot>`, `<slot>#2`... in that order. */
+export function withSlotConnections(bound: Record<string, string>, slot: string, ids: string[]): Record<string, string> {
+  const others = Object.fromEntries(Object.entries(bound).filter(([key]) => slotOfKey(key) !== slot));
+  const kept = ids.filter((id, at) => id !== '' && ids.indexOf(id) === at);
+  return { ...others, ...Object.fromEntries(kept.map((id, at) => [at === 0 ? slot : `${slot}#${at + 1}`, id])) };
+}
+
+/**
+ * The bindings to send: each slot with a connection chosen. An unbound slot is left out. A slot that
+ * takes several connections (`multiple`) sends every one, as `<slot>`, `<slot>#2`...
+ */
 export function bindingsBody(
   slots: Record<string, ConnectionSlot> | undefined,
   bound: Record<string, string>,
 ): Record<string, string> {
   return Object.fromEntries(
-    Object.keys(slots ?? {}).flatMap((name) => ((bound[name] ?? '') !== '' ? [[name, bound[name]!]] : [])),
+    Object.entries(slots ?? {}).flatMap(([name, slot]) => {
+      if (slot.multiple) return Object.entries(withSlotConnections({}, name, slotConnections(bound, name)));
+      return (bound[name] ?? '') !== '' ? [[name, bound[name]!]] : [];
+    }),
   );
 }
 
-/** Each slot's stored binding, or empty until a person picks one. */
+/** Each slot's stored binding, or empty until a person picks one; a multiple slot's every connection. */
 export function initialBindings(
   slots: Record<string, ConnectionSlot> | undefined,
   stored: Record<string, string> = {},
 ): Record<string, string> {
-  return Object.fromEntries(Object.keys(slots ?? {}).map((name) => [name, stored[name] ?? '']));
+  return Object.fromEntries(
+    Object.entries(slots ?? {}).flatMap(([name, slot]) => {
+      const kept = slot.multiple ? Object.entries(withSlotConnections({}, name, slotConnections(stored, name))) : [];
+      return kept.length > 0 ? kept : [[name, stored[name] ?? '']];
+    }),
+  );
+}
+
+/**
+ * What a save removes from each multiple slot: the connections `stored` binds to it that `current`
+ * no longer does - only what the person took off the list. The Host keeps every other one.
+ */
+export function removedBindings(
+  slots: Record<string, ConnectionSlot> | undefined,
+  stored: Record<string, string>,
+  current: Record<string, string>,
+): Record<string, string[]> | undefined {
+  const removed = Object.entries(slots ?? {}).flatMap(([name, slot]) => {
+    if (!slot.multiple) return [];
+    const now = new Set(slotConnections(current, name));
+    const gone = slotConnections(stored, name).filter((id) => !now.has(id));
+    return gone.length > 0 ? [[name, gone] as const] : [];
+  });
+  return removed.length > 0 ? Object.fromEntries(removed) : undefined;
 }
 
 /** Scopes as a person types them: separated by commas, spaces or new lines, each once. */

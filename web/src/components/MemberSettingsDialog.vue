@@ -17,6 +17,7 @@ import {
   type PluginHire,
   type PluginNamedSecretState,
   type PluginSecretState,
+  type UnusableConnection,
 } from '../api/types';
 import { allowedAgentOptions, allowlistIncludes, normalizeAllowlist } from '../lib/memberAllowlist';
 import { installStatus, installationFor } from '../lib/agentInstall';
@@ -43,7 +44,7 @@ import {
   type PluginSettingsShape,
   type SecretValues,
 } from '../lib/pluginSettings';
-import { bindingsBody, initialBindings } from '../lib/connections';
+import { bindingsBody, initialBindings, removedBindings, slotConnections, withSlotConnections } from '../lib/connections';
 import { bindSlot } from '../lib/slotBinding';
 import { emptyNamedSecretsDraft, namedSecretValuesBody, namedSecretsHeld, type NamedSecretsDraft } from '../lib/namedSecrets';
 import PluginAbout from './PluginAbout.vue';
@@ -230,8 +231,12 @@ const memberContext = computed(() => ({ team: props.snapshot.team, member: props
 /** The plugin's marketplace page, or null when the catalog does not list it. */
 const pluginUrl = ref<string | null>(null);
 const pluginDescription = ref<string | null>(null);
-/** Slot -> connection id; saved with the settings, which replace the bindings whole. */
+/** Binding key -> connection id; saved with the settings. A multiple slot holds `<slot>`, `<slot>#2`... */
 const pluginConnections = ref<Record<string, string>>({});
+/** The bindings as the Host last answered them: what a Remove on a multiple slot is measured from. */
+const pluginStoredConnections = ref<Record<string, string>>({});
+/** Each stored binding the active version cannot use, in the Host's words: said here, and on Needs you. */
+const pluginUnusable = ref<UnusableConnection[]>([]);
 const pluginSaved = ref('');
 const pluginProblem = ref<string | null>(null);
 /** The plugin it runs, for a slot's Connect. */
@@ -242,10 +247,17 @@ const pluginId = ref('');
  * counted as saved - the rest of the form stays as the person left it.
  */
 async function bindPluginSlot(slot: string, connectionId: string) {
-  await bindSlot(props.snapshot.team, props.snapshot.id, slot, connectionId);
-  pluginConnections.value = { ...pluginConnections.value, [slot]: connectionId };
+  const answer = await bindSlot(props.snapshot.team, props.snapshot.id, slot, connectionId);
+  // A SLOT THAT TAKES SEVERAL gains the connection beside the others; any other slot is replaced.
+  const add = (bound: Record<string, string>) =>
+    pluginShape.value?.connections?.[slot]?.multiple
+      ? withSlotConnections(bound, slot, [...slotConnections(bound, slot), connectionId])
+      : { ...bound, [slot]: connectionId };
+  pluginConnections.value = add(pluginConnections.value);
+  pluginStoredConnections.value = answer?.connections ?? add(pluginStoredConnections.value);
+  if (answer?.unusableConnections) pluginUnusable.value = answer.unusableConnections;
   const saved = JSON.parse(pluginSaved.value) as PluginHire;
-  saved.connections = bindingsBody(pluginShape.value?.connections, { ...(saved.connections ?? {}), [slot]: connectionId });
+  saved.connections = bindingsBody(pluginShape.value?.connections, add(saved.connections ?? {}));
   pluginSaved.value = JSON.stringify(saved);
 }
 
@@ -317,6 +329,8 @@ async function loadPluginSettings() {
     pluginConfig.value = initialConfig(shape, settings.config);
     pluginSecrets.value = initialSecrets(shape, settings.secrets);
     pluginConnections.value = initialBindings(shape.connections, settings.connections ?? {});
+    pluginStoredConnections.value = { ...(settings.connections ?? {}) };
+    pluginUnusable.value = settings.unusableConnections ?? [];
     pluginStates.value = settings.secretStates ?? [];
     pluginValues.value = {};
     pluginTableStates.value = settings.tableSecretStates ?? {};
@@ -423,11 +437,13 @@ async function submit() {
     // and the settings land together or not at all. No `secrets`: the Host keeps the key bindings.
     // A refusal naming a field leaves the rest of the dialog unsaved too.
     if (pluginShape.value && pluginChanged.value && pluginBody.value) {
-      const answer = await savePluginSettings(
-        props.snapshot.team,
-        props.snapshot.id,
-        saveBody(pluginShape.value, pluginConfig.value, pluginValues.value, pluginConnections.value, pluginNamed.value, pluginTableSecrets.value),
-      );
+      // EVERY CONNECTION STILL LISTED is sent, and a multiple slot's Remove is named as removed: the
+      // Host keeps any connection of such a slot the person did not remove.
+      const removedConnections = removedBindings(pluginShape.value.connections, pluginStoredConnections.value, pluginConnections.value);
+      const answer = await savePluginSettings(props.snapshot.team, props.snapshot.id, {
+        ...saveBody(pluginShape.value, pluginConfig.value, pluginValues.value, pluginConnections.value, pluginNamed.value, pluginTableSecrets.value),
+        ...(removedConnections ? { removedConnections } : {}),
+      });
       pluginSaved.value = JSON.stringify(pluginBody.value);
       pluginValues.value = {};
       pluginTableSecrets.value = {};
@@ -439,6 +455,8 @@ async function submit() {
         pluginShape.value = { ...pluginShape.value, stored: { config: pluginConfig.value, outOfRange: answer.outOfRange ?? {} } };
         if (answer.secretStates) pluginStates.value = answer.secretStates;
         if (answer.tableSecretStates) pluginTableStates.value = answer.tableSecretStates;
+        if (answer.connections) pluginStoredConnections.value = { ...answer.connections };
+        if (answer.unusableConnections) pluginUnusable.value = answer.unusableConnections;
       }
     }
 
@@ -620,6 +638,19 @@ async function submit() {
             :plugin="pluginId"
             :bind-slot="bindPluginSlot"
           />
+          <!-- A BINDING THE ACTIVE VERSION CANNOT USE is kept, not removed, and said here in the Host's
+               words - the same words hold the member on Needs you. -->
+          <q-banner
+            v-for="unusable in pluginUnusable"
+            :key="`unusable-${unusable.key}`"
+            dense
+            class="os-bg-tint-warn text-body2"
+            data-unusable-connection
+            :data-binding-key="unusable.key"
+          >
+            <template #avatar><q-icon name="link_off" /></template>
+            {{ unusable.reason }}
+          </q-banner>
           <div v-if="pluginShape && pluginNamedProblem" class="text-negative text-caption" data-named-secrets-problem>{{ pluginNamedProblem }}</div>
           <div v-else-if="pluginProblem" class="text-negative text-caption">{{ pluginProblem }}</div>
           <div v-else class="text-caption os-text-muted">Reading its settings…</div>
