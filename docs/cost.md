@@ -25,6 +25,28 @@ is an estimate.
   is what achieving it is worth: what it may spend. An outcome with no budget, and the team's work
   linked to no outcome at all ("No outcome"), have none.
 
+## What a run records when it starts
+
+Each run records, when it starts, a **snapshot** of how it was configured: whether the member is
+an agent or a plugin, its agent preset, the instance's agent hourly rate and currency at that
+moment, and the outcome link the workflow had at that moment. The run's usage ledger row names that
+snapshot. A snapshot is never changed afterwards.
+
+**The configuration at start covers the whole run.** Changing the tenant rate during a run leaves
+that run's snapshot unchanged; the next run's snapshot carries the new rate. Linking the workflow to
+another outcome during a run does not move that run's link either.
+
+- An agent's snapshot takes the instance's agent hourly rate. With no rate, or a rate of 0, the
+  snapshot records no rate, never a rate of 0.
+- A plugin's snapshot records no rate, even when the agent rate is set. A plugin is not priced at
+  the agent rate.
+- Runs that started before snapshots existed have none, and none is made for them afterwards.
+
+A snapshot is recorded at start and is **not yet what these screens read**. The Teams list, its
+summary and the team page still work as described above: Agent Hours times the instance's current
+rate, a run placed wholly in the week it ended, over the last eight weeks. Until they read
+snapshots, they still count a plugin's run time at the current agent rate.
+
 ## A shared budget is measured across every team
 
 An outcome's budget belongs to the outcome, not to one team. When two teams both serve an outcome,

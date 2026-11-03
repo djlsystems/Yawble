@@ -6,8 +6,8 @@ using static Harness.Messaging.LedgerFacts;
 namespace Harness.Messaging;
 
 /// <summary>
-/// THE ONE WRITER OF <c>usage_ledger</c>, <c>workflow_ledger</c>, <c>delivery_ledger</c> AND
-/// <c>nudge_ledger</c> (see <see cref="OutcomeSchema"/>).
+/// THE ONE WRITER OF <c>usage_ledger</c>, <c>workflow_ledger</c>, <c>delivery_ledger</c>,
+/// <c>nudge_ledger</c> AND <c>execution_snapshots</c> (see <see cref="OutcomeSchema"/>).
 ///
 /// <para>
 /// CALLED FROM <c>SqliteMessageStore.InsertAsync</c>, inside the append's own transaction, which is
@@ -37,6 +37,10 @@ public static class LedgerRows
         CancellationToken ct)
     {
         if (IsRunTerminal(stored)) return await WriteRunAsync(connection, transaction, stored, backfilled, ct);
+
+        // A RUN'S START WRITES ITS SNAPSHOT, live only: a backfill would price history at today's
+        // configuration, which is exactly what a snapshot exists not to do.
+        if (stored.Type == MessageTypes.Started) return !backfilled && await WriteSnapshotAsync(connection, transaction, stored, ct);
 
         if (stored.Type is MessageTypes.WorkflowCompleted or MessageTypes.WorkflowClosed)
         {
@@ -136,12 +140,12 @@ public static class LedgerRows
                  run_seq, correlation, team_id, team_name, member, member_kind, agent_preset,
                  run_outcome, queued_at, started_at, ended_at, measured,
                  tokens_in, tokens_cached_in, tokens_cache_creation, tokens_out, tokens_combined, billable,
-                 trigger_source, trigger_fired_at, backfilled)
+                 trigger_source, trigger_fired_at, backfilled, start_seq)
              VALUES (
                  $seq, $correlation, $team, {TeamNameSql}, $member, $kind, $agent,
                  $outcome, $queued, $started, $ended, $measured,
                  $in, $cachedIn, $cacheCreation, $out, $combined, $billable,
-                 $trigger, $firedAt, $backfilled)
+                 $trigger, $firedAt, $backfilled, $startSeq)
              """;
 
         insert.Parameters.AddWithValue("$seq", terminal.Seq);
@@ -164,9 +168,67 @@ public static class LedgerRows
         insert.Parameters.AddWithValue("$trigger", (object?)triggerSource ?? DBNull.Value);
         insert.Parameters.AddWithValue("$firedAt", (object?)triggerFiredAt ?? DBNull.Value);
         insert.Parameters.AddWithValue("$backfilled", backfilled ? 1 : 0);
+        insert.Parameters.AddWithValue("$startSeq", (object?)started?.Seq ?? DBNull.Value);
 
         return await insert.ExecuteNonQueryAsync(ct) > 0;
     }
+
+    /// <summary>
+    /// A RUN'S CONFIGURATION AT START (<c>execution_snapshots</c>, <c>outcome-008</c>): the member's
+    /// roster row, the tenant's rate and currency, and the workflow's current outcome link, all read
+    /// in this append's transaction, decided by <see cref="ExecutionSnapshotFacts"/>. One per
+    /// `started` row; never updated, so nothing after start changes what it says.
+    /// </summary>
+    private static async Task<bool> WriteSnapshotAsync(
+        SqliteConnection connection, SqliteTransaction transaction, Message started, CancellationToken ct)
+    {
+        var (teamId, member) = LedgerFacts.Split(started.Source);
+
+        var agent = teamId is null ? null : await ScalarTextAsync(
+            connection, transaction,
+            "SELECT agent FROM team_members WHERE team = $team AND name = $name",
+            ct, ("$team", teamId), ("$name", member));
+
+        var kind = agent is null ? null : MemberRef.KindOf(agent);
+
+        var rate = ExecutionSnapshotFacts.RateOf(
+            kind,
+            await SettingAsync(connection, transaction, ExecutionSnapshotFacts.AgentHourlyRateSetting, ct),
+            await SettingAsync(connection, transaction, ExecutionSnapshotFacts.CurrencySetting, ct));
+
+        var link = await OutcomeLinks.CurrentAsync(connection, transaction, started.CorrelationId, ct);
+
+        await using var insert = connection.CreateCommand();
+        insert.Transaction = transaction;
+        insert.CommandText =
+            $"""
+             INSERT INTO execution_snapshots (
+                 start_seq, correlation, team_id, team_name, member, member_kind, agent_preset,
+                 rate_amount, rate_currency, rate_source, link_id, started_at)
+             VALUES (
+                 $seq, $correlation, $team, {TeamNameSql}, $member, $kind, $agent,
+                 $amount, $currency, $source, $link, $at)
+             """;
+
+        insert.Parameters.AddWithValue("$seq", started.Seq);
+        insert.Parameters.AddWithValue("$correlation", started.CorrelationId);
+        insert.Parameters.AddWithValue("$team", (object?)teamId ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$member", member);
+        insert.Parameters.AddWithValue("$kind", (object?)kind ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$agent", (object?)agent ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$amount", (object?)rate.Amount ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$currency", (object?)rate.Currency ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$source", rate.Source);
+        insert.Parameters.AddWithValue("$link", (object?)link?.Id ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$at", Instant.Stamp(started.OccurredAt));
+
+        return await insert.ExecuteNonQueryAsync(ct) > 0;
+    }
+
+    /// <summary>A <c>tenant_settings</c> row's stored value, or null when there is no row.</summary>
+    private static Task<string?> SettingAsync(
+        SqliteConnection connection, SqliteTransaction transaction, string name, CancellationToken ct) =>
+        ScalarTextAsync(connection, transaction, "SELECT value FROM tenant_settings WHERE name = $name", ct, ("$name", name));
 
     private static async Task<bool> WriteWorkflowAsync(
         SqliteConnection connection, SqliteTransaction transaction, Message close, bool backfilled,

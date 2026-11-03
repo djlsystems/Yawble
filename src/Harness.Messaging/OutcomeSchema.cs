@@ -299,5 +299,54 @@ public static class OutcomeSchema
             """
             ALTER TABLE outcomes ADD COLUMN value_amount TEXT NULL;
             """),
+
+        // WHAT A RUN WAS CONFIGURED AS WHEN IT STARTED, one row per `agentContainer.started` row,
+        // written in that row's own append transaction (`LedgerRows`, decided by
+        // `ExecutionSnapshotFacts`). The member's kind and preset, the rate it is priced at and where
+        // that rate came from (`member`, `tenant` or `none`; `none` has no amount, never a zero),
+        // and `link_id`, the `workflow_outcome_links` row current for the workflow at start (an
+        // unlink row's id too; NULL only when the workflow had no link). `model`,
+        // `billing_account_id` and the `origin_*` columns are not known yet and stay NULL.
+        //
+        // IMMUTABLE: the configuration at start covers the whole run, so a rate changed or a link
+        // written later never reaches this row; the triggers refuse every UPDATE and DELETE.
+        //
+        // `usage_ledger.start_seq` names the run's snapshot. An ADD COLUMN rewrites no row and fires
+        // no trigger: a row written before this step reads NULL, and nothing back-fills it.
+        new MigrationStep(
+            "outcome-008",
+            """
+            CREATE TABLE execution_snapshots (
+                start_seq          INTEGER PRIMARY KEY,
+                correlation        INTEGER NOT NULL,
+                team_id            TEXT    NULL COLLATE NOCASE,
+                team_name          TEXT    NULL,
+                member             TEXT    NOT NULL COLLATE NOCASE,
+                member_kind        TEXT    NULL,
+                agent_preset       TEXT    NULL,
+                model              TEXT    NULL,
+                rate_amount        TEXT    NULL,
+                rate_currency      TEXT    NULL,
+                rate_source        TEXT    NOT NULL,
+                billing_account_id TEXT    NULL,
+                link_id            INTEGER NULL,
+                started_at         TEXT    NOT NULL,
+                origin_kind        TEXT    NULL,
+                origin_actor_id    TEXT    NULL,
+                origin_actor_email TEXT    NULL,
+                origin_trigger     TEXT    NULL
+            );
+
+            CREATE INDEX ix_execution_snapshots_correlation ON execution_snapshots(correlation);
+            CREATE INDEX ix_execution_snapshots_team_started ON execution_snapshots(team_id, started_at);
+
+            CREATE TRIGGER execution_snapshots_no_update BEFORE UPDATE ON execution_snapshots
+            BEGIN SELECT RAISE(ABORT, 'execution_snapshots is append-only'); END;
+
+            CREATE TRIGGER execution_snapshots_no_delete BEFORE DELETE ON execution_snapshots
+            BEGIN SELECT RAISE(ABORT, 'execution_snapshots is append-only'); END;
+
+            ALTER TABLE usage_ledger ADD COLUMN start_seq INTEGER NULL;
+            """),
     ];
 }

@@ -121,6 +121,34 @@ public sealed class LedgerParityTests : IDisposable
         {
             Assert.Equal(await OldRecentAsync(old, member), await cost.RecentAsync(member, "agent", Ct));
         }
+
+        // ---- the snapshots: one per start, and each run's row names its own run's start ----
+        Assert.Empty(await RowsAsync(
+            "SELECT m.seq FROM messages m LEFT JOIN execution_snapshots s ON s.start_seq = m.seq "
+            + $"WHERE m.type = '{MessageTypes.Started}' AND s.start_seq IS NULL"));
+        Assert.Equal(
+            await RowsAsync($"SELECT seq FROM messages WHERE type = '{MessageTypes.Started}' ORDER BY seq"),
+            await RowsAsync("SELECT start_seq FROM execution_snapshots ORDER BY start_seq"));
+
+        // Every ledger row names a start that ran before it, of its own member, and no start is named twice.
+        Assert.Empty(await RowsAsync(
+            "SELECT u.run_seq FROM usage_ledger u LEFT JOIN execution_snapshots s ON s.start_seq = u.start_seq "
+            + "WHERE s.start_seq IS NULL OR s.start_seq >= u.run_seq OR s.member <> u.member OR s.correlation <> u.correlation"));
+        Assert.Empty(await RowsAsync("SELECT start_seq FROM usage_ledger GROUP BY start_seq HAVING COUNT(*) > 1"));
+    }
+
+    /// <summary>A query's rows over the fixture's database, each as its first column.</summary>
+    private async Task<IReadOnlyList<long>> RowsAsync(string sql)
+    {
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Database, Pooling = false }.ToString());
+        await connection.OpenAsync(Ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+
+        var rows = new List<long>();
+        await using var reader = await command.ExecuteReaderAsync(Ct);
+        while (await reader.ReadAsync(Ct)) rows.Add(reader.GetInt64(0));
+        return rows;
     }
 
     /// <summary>`TriggerCost.RecentAsync` as it read the log before the ledger.</summary>

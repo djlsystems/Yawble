@@ -178,6 +178,41 @@ public static class SqlServerOutcomeSchema
                  IF EXISTS (SELECT 1 FROM deleted) THROW 51001, N''admission_holds is append-only'', 1;
              END');
              """),
+
+        // `OutcomeSchema`'s outcome-008: every run's configuration at start, immutable, and the
+        // ledger row's link to it. `link_id` is BIGINT, as `workflow_outcome_links.id`; the keyed
+        // columns are NVARCHAR(200) and NVARCHAR(40) so the (team_id, started_at) index fits.
+        new MigrationStep(
+            "outcome-008",
+            $"""
+             CREATE TABLE execution_snapshots (
+                 start_seq          BIGINT        NOT NULL PRIMARY KEY,
+                 correlation        BIGINT        NOT NULL,
+                 team_id            NVARCHAR(200) COLLATE {SqlServerSql.NoCase} NULL,
+                 team_name          NVARCHAR(MAX) NULL,
+                 member             NVARCHAR(200) COLLATE {SqlServerSql.NoCase} NOT NULL,
+                 member_kind        NVARCHAR(MAX) NULL,
+                 agent_preset       NVARCHAR(MAX) NULL,
+                 model              NVARCHAR(MAX) NULL,
+                 rate_amount        NVARCHAR(MAX) NULL,
+                 rate_currency      NVARCHAR(MAX) NULL,
+                 rate_source        NVARCHAR(MAX) NOT NULL,
+                 billing_account_id NVARCHAR(MAX) NULL,
+                 link_id            BIGINT        NULL,
+                 started_at         NVARCHAR(40)  NOT NULL,
+                 origin_kind        NVARCHAR(MAX) NULL,
+                 origin_actor_id    NVARCHAR(MAX) NULL,
+                 origin_actor_email NVARCHAR(MAX) NULL,
+                 origin_trigger     NVARCHAR(MAX) NULL
+             );
+
+             CREATE INDEX ix_execution_snapshots_correlation ON execution_snapshots(correlation);
+             CREATE INDEX ix_execution_snapshots_team_started ON execution_snapshots(team_id, started_at);
+
+             {AppendOnly("execution_snapshots")}
+
+             ALTER TABLE usage_ledger ADD start_seq BIGINT NULL;
+             """),
     ];
 
     /// <summary>The two triggers that make <paramref name="table"/> append-only, as SQLite's
