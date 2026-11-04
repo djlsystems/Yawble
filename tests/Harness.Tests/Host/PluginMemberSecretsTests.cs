@@ -463,6 +463,48 @@ public sealed class PluginMemberSecretsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task An_api_key_never_sees_an_unmasked_value_a_key_supplies_from_the_store_or_the_environment()
+    {
+        // An unmasked `account` with no value of the member's own: one member's is bound to a STORED key,
+        // the other's to a key only the ENVIRONMENT holds. The value reaches the read from the key, not the member.
+        var storedKey = Key();
+        var environmentKey = Key();
+        var fromStore = Value("stored-account");
+        var fromEnvironment = Value("environment-account");
+        Assert.Equal(HttpStatusCode.OK, (await SendAsync(HttpMethod.Put, $"/api/secrets/{storedKey}", new { value = fromStore })).Status);
+        SetEnvironment(environmentKey, fromEnvironment);
+
+        await HireAsync("Stored", new() { ["token"] = Value("token") }, bindings: new() { ["account"] = storedKey });
+        await HireAsync("Ambient", new() { ["token"] = Value("token") }, bindings: new() { ["account"] = environmentKey });
+
+        var cases = new[] { ("Stored", fromStore, "key"), ("Ambient", fromEnvironment, "environment") };
+        using var key = await ApiKeyClientAsync();
+
+        foreach (var (member, value, source) in cases)
+        {
+            var path = $"/api/teams/{_team}/members/{member}/plugin-settings";
+
+            // A PERSON reads the key's value, as before.
+            var person = SettingsState(await GetAsync(path), "account");
+            Assert.Equal(source, person.GetProperty("source").GetString());
+            Assert.Equal(value, person.GetProperty("value").GetString());
+
+            // AN API KEY reads its state and no value anywhere in the raw body.
+            using var answer = await key.GetAsync(path, Ct);
+            var raw = await answer.Content.ReadAsStringAsync(Ct);
+            Assert.True(answer.StatusCode == HttpStatusCode.OK, raw);
+            Assert.DoesNotContain(fromStore, raw, StringComparison.Ordinal);
+            Assert.DoesNotContain(fromEnvironment, raw, StringComparison.Ordinal);
+
+            var state = SettingsState(Json(raw), "account");
+            Assert.True(state.GetProperty("set").GetBoolean(), member);
+            Assert.Equal(source, state.GetProperty("source").GetString());
+            Assert.Equal(person.GetProperty("setAt").ToString(), state.GetProperty("setAt").ToString());
+            Assert.False(state.TryGetProperty("value", out _), $"{member}'s `account` carries a value to an API key");
+        }
+    }
+
+    [Fact]
     public async Task An_api_key_without_read_is_told_it_lacks_read_on_the_settings_read()
     {
         await HireAsync("Narrow", new() { ["token"] = Value("narrow") });

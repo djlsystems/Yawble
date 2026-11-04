@@ -30,11 +30,14 @@ public sealed record HumansOrApiKeyMarker(string Permit);
 /// The five things a route can say about who may call it, and it must say exactly one -
 /// <c>RouteMarkerTests</c> fails the build otherwise.
 ///
-/// THREE rather than two, and the third is not a convenience. Most of this product's route table is
+/// Three are the base set: <see cref="PermitRequirement"/>, <see cref="PermitExemption"/> and
+/// <see cref="HumansOnlyMarker"/>. Humans-only is not a convenience. Most of this product's route table is
 /// neither "needs a permit" nor "anyone may": it is user administration, the tenant log, the
 /// catalog, somebody's own password. Marking those <see cref="NoPermitRequired"/> would say the
 /// opposite of what is meant and would read, to the next person, as a considered exemption rather
-/// than as a wall.
+/// than as a wall. The other two, <see cref="HumansOrConciergeMarker"/> and
+/// <see cref="HumansOrApiKeyMarker"/>, are humans-only routes with ONE named machine principal let
+/// through holding a permit; every other machine principal is still refused as humans-only refuses it.
 ///
 /// A per-route declaration is exactly the shape <c>TeamGate</c>'s doc comment rejects, on the
 /// grounds that "its failure mode is silence, so a new team route without the filter is ungated and
