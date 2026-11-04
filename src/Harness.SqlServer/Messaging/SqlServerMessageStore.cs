@@ -230,6 +230,13 @@ public sealed class SqlServerMessageStore : IMessageLog, ICursors, ISubscription
         // its LedgerRows and OutcomeLinks: when either throws, the row is not stored either.
         await _appendRows.OnAppendAsync(connection, transaction, stored, ct);
 
+        // A PERSON'S ACT WITH ITS LOG ROW, after the outcome link this row may make, as SqliteMessageStore.
+        if (context?.Intervention is { } act)
+        {
+            await SqlServerInterventionLedgerRow.AppendAsync(
+                connection, transaction, act, stored.CorrelationId, stored.Seq, occurredAt, ct);
+        }
+
         return stored;
     }
 

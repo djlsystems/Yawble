@@ -302,6 +302,30 @@ public static class SqlServerOutcomeSchema
             """
             ALTER TABLE usage_ledger ADD reason_code NVARCHAR(MAX) NULL;
             """),
+
+        // `OutcomeSchema`'s outcome-010: one row per meaningful act by a person, append-only.
+        new MigrationStep(
+            "outcome-010",
+            $"""
+             CREATE TABLE intervention_ledger (
+                 id                  BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                 occurred_at         NVARCHAR(40)  NOT NULL,
+                 actor_id            NVARCHAR(200) NOT NULL,
+                 actor_email         NVARCHAR(MAX) NULL,
+                 kind                NVARCHAR(64)  NOT NULL,
+                 team_id             NVARCHAR(200) COLLATE {SqlServerSql.NoCase} NULL,
+                 correlation         BIGINT        NULL,
+                 outcome_id_at_event NVARCHAR(MAX) NULL,
+                 related_seq         BIGINT        NULL,
+                 duration_seconds    BIGINT        NULL,
+                 duration_measured   INT           NOT NULL DEFAULT 0 CHECK (duration_measured IN (0, 1))
+             );
+
+             CREATE INDEX ix_intervention_ledger_team ON intervention_ledger(team_id, occurred_at);
+             CREATE INDEX ix_intervention_ledger_actor ON intervention_ledger(actor_id, occurred_at);
+
+             {AppendOnly("intervention_ledger")}
+             """),
     ];
 
     /// <summary>The two triggers that make <paramref name="table"/> append-only, as SQLite's

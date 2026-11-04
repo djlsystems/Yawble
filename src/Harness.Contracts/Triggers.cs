@@ -99,7 +99,15 @@ public sealed record TriggerAudit(
     string Action,
     string? Subject,
     string? SubjectName,
-    string? Detail);
+    string? Detail)
+{
+    /// <summary>
+    /// THE PERSON'S ACT THIS TENANT ROW RECORDS, or null: the tenant log's one writer
+    /// (<c>TenantAuditRow</c> on each provider) writes its <c>intervention_ledger</c> row in the same
+    /// transaction. Set only by server code, from the request's principal (<see cref="InterventionAct"/>).
+    /// </summary>
+    public InterventionAct? Intervention { get; init; }
+}
 
 /// <summary>
 /// What a folder watch remembers between polls that the trigger row does not show: the listing the

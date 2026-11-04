@@ -48,7 +48,21 @@ public sealed record AppendContext(
     PrincipalKind Kind,
     string PrincipalId,
     string? OwnerUserId = null,
-    string? Email = null);
+    string? Email = null)
+{
+    /// <summary>
+    /// THE PERSON'S ACT THIS APPEND RECORDS, or null: the store writes its <c>intervention_ledger</c> row in
+    /// the append's own transaction, naming the row as <c>related_seq</c> and its workflow. Set only by a
+    /// route, server side, through <see cref="Intervening"/> - and null for any principal that is not a
+    /// person (<see cref="InterventionAct.Of"/>).
+    /// </summary>
+    public InterventionAct? Intervention { get; init; }
+
+    /// <summary>This principal, recording <paramref name="kind"/> on <paramref name="team"/> with the row
+    /// it is appended with. A principal that is no person records nothing.</summary>
+    public AppendContext Intervening(string kind, string? team) =>
+        this with { Intervention = InterventionAct.Of(kind, this, team) };
+}
 
 /// <summary>
 /// A ROW'S DERIVED ORIGIN AND ITS PUBLISHER'S KIND, as the store writes them.

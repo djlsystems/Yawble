@@ -57,6 +57,10 @@ internal sealed partial class HostComposition
 
         // THE BILLING ACCOUNTS, in the same file, each write with its tenant_events row in one transaction.
         builder.Services.AddSingleton<ISpendStore>(new SqliteSpendStore(database, TenantAuditRow.AppendAsync));
+
+        // THE ACTS THE HOST RECORDS WITH NO LOG ROW (a Concierge session ended). Every other act is written
+        // with its log row by the store's own append or tenant insert.
+        builder.Services.AddSingleton<IInterventionLedger>(new SqliteInterventionLedger(database));
         builder.Services.AddSingleton<IOutcomeLinkRows>(new SqliteOutcomeLinkRows());
         OutcomesAndBoard(outcomeStore, store);
 

@@ -59,9 +59,16 @@ public sealed class SqlServerLedgerStartRows(string connectionString) : ILedgerS
                         runs.Value.ToString(System.Globalization.CultureInfo.InvariantCulture), now, token);
                 }
 
+                var interventionsAt = await SettingAsync(connection, transaction, LedgerStart.InterventionsStartedAtName, token);
+                if (interventionsAt is null)
+                {
+                    interventionsAt = now;
+                    await WriteSettingAsync(connection, transaction, LedgerStart.InterventionsStartedAtName, now, now, token);
+                }
+
                 await SqlServerOpen.CommitAsync(transaction, token);
 
-                return new LedgerStartResult(runs, workflows, instanceId, startedAt);
+                return new LedgerStartResult(runs, workflows, instanceId, startedAt) { InterventionsStartedAt = interventionsAt };
             },
             ct);
 

@@ -466,5 +466,37 @@ public static class OutcomeSchema
             """
             ALTER TABLE usage_ledger ADD COLUMN reason_code TEXT NULL;
             """),
+
+        // ONE ROW PER MEANINGFUL ACT BY A PERSON: who (a person's id and email, a key's owner as they
+        // stood then), which act (InterventionKinds), on which team and workflow, the workflow's outcome
+        // at that moment and the log row it went with. Written by the route, server side, in the same
+        // transaction as that log row; nothing publishes one. Only a Concierge session carries a
+        // measured duration. Append-only, as the other ledgers are; nothing back-fills it from the log.
+        new MigrationStep(
+            "outcome-010",
+            """
+            CREATE TABLE intervention_ledger (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                occurred_at         TEXT    NOT NULL,
+                actor_id            TEXT    NOT NULL,
+                actor_email         TEXT    NULL,
+                kind                TEXT    NOT NULL,
+                team_id             TEXT    NULL,
+                correlation         INTEGER NULL,
+                outcome_id_at_event TEXT    NULL,
+                related_seq         INTEGER NULL,
+                duration_seconds    INTEGER NULL,
+                duration_measured   INTEGER NOT NULL DEFAULT 0 CHECK (duration_measured IN (0, 1))
+            );
+
+            CREATE INDEX ix_intervention_ledger_team ON intervention_ledger(team_id, occurred_at);
+            CREATE INDEX ix_intervention_ledger_actor ON intervention_ledger(actor_id, occurred_at);
+
+            CREATE TRIGGER intervention_ledger_no_update BEFORE UPDATE ON intervention_ledger
+            BEGIN SELECT RAISE(ABORT, 'intervention_ledger is append-only'); END;
+
+            CREATE TRIGGER intervention_ledger_no_delete BEFORE DELETE ON intervention_ledger
+            BEGIN SELECT RAISE(ABORT, 'intervention_ledger is append-only'); END;
+            """),
     ];
 }

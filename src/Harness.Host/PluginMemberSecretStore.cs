@@ -398,6 +398,9 @@ public sealed class PluginMemberSecretStore(IPluginMemberSecretRows rows, IDataP
             ? new TriggerAudit(
                 actor.Id, actor.Email, action, $"{member.Team}/{member.Name}", label,
                 JsonSerializer.Serialize(new { team = member.Team, member = member.Name, plugin, field = cell.Table, row = cell.Row, column = cell.Column }))
+            {
+                Intervention = actor.Supplied(action, member.Team),
+            }
             : fieldAudit(field, action));
     }
 
@@ -409,7 +412,10 @@ public sealed class PluginMemberSecretStore(IPluginMemberSecretRows rows, IDataP
             changes.ToDictionary(c => c.Key, c => c.Value is null ? null : _namedProtector.Protect(c.Value), StringComparer.Ordinal),
             (name, action) => new TriggerAudit(
                 actor.Id, actor.Email, action, $"{member.Team}/{member.Name}", label,
-                JsonSerializer.Serialize(new { team = member.Team, member = member.Name, plugin, name })));
+                JsonSerializer.Serialize(new { team = member.Team, member = member.Name, plugin, name }))
+            {
+                Intervention = actor.Supplied(action, member.Team),
+            });
 
     /// <summary>Seals each value (null stays null, a clear) before it reaches the rows.</summary>
     private Dictionary<string, string?> Protect(IReadOnlyDictionary<string, string?> changes) =>
@@ -419,7 +425,10 @@ public sealed class PluginMemberSecretStore(IPluginMemberSecretRows rows, IDataP
     private static Func<string, string, TriggerAudit> AuditFor(ContainerId member, string label, string plugin, CredentialActor actor) =>
         (field, action) => new TriggerAudit(
             actor.Id, actor.Email, action, $"{member.Team}/{member.Name}", label,
-            JsonSerializer.Serialize(new { team = member.Team, member = member.Name, plugin, field }));
+            JsonSerializer.Serialize(new { team = member.Team, member = member.Name, plugin, field }))
+        {
+            Intervention = actor.Supplied(action, member.Team),
+        };
 
     private string? Unprotect(string protectedValue) => Unprotect(_protector, protectedValue);
 

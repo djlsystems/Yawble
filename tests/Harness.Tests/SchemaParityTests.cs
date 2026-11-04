@@ -164,6 +164,38 @@ public sealed class SchemaParityTests
         }
     }
 
+    /// <summary><c>outcome-010</c> is one id on both providers, and creates <c>intervention_ledger</c>,
+    /// its two indexes and its two append-only triggers, and nothing else: no other table is touched.
+    /// <see cref="Tables_match"/> holds the columns themselves alike.</summary>
+    [Fact]
+    public void The_intervention_step_creates_only_the_append_only_ledger_on_both_providers()
+    {
+        var sqlite = Assert.Single(SchemaModules.All, s => s.Id == "outcome-010").Sql;
+        var sqlServer = Assert.Single(SqlServerSchemaModules.All, s => s.Id == "outcome-010").Sql;
+
+        foreach (var sql in new[] { sqlite, sqlServer })
+        {
+            Assert.Single(Regex.Matches(sql, "CREATE TABLE", RegexOptions.None));
+            Assert.Contains("CREATE TABLE intervention_ledger", sql, StringComparison.Ordinal);
+            foreach (var column in new[]
+            {
+                "id", "occurred_at", "actor_id", "actor_email", "kind", "team_id", "correlation",
+                "outcome_id_at_event", "related_seq", "duration_seconds", "duration_measured",
+            })
+            {
+                Assert.Matches($@"\n\s*{column}\s", sql);
+            }
+
+            Assert.Contains("CREATE INDEX ix_intervention_ledger_team ON intervention_ledger(team_id, occurred_at)", sql, StringComparison.Ordinal);
+            Assert.Contains("CREATE INDEX ix_intervention_ledger_actor ON intervention_ledger(actor_id, occurred_at)", sql, StringComparison.Ordinal);
+            Assert.Contains("CREATE TRIGGER intervention_ledger_no_update", sql, StringComparison.Ordinal);
+            Assert.Contains("CREATE TRIGGER intervention_ledger_no_delete", sql, StringComparison.Ordinal);
+            Assert.Matches(@"duration_seconds\s+\w+\s+NULL,", sql);
+            Assert.DoesNotContain("ALTER TABLE", sql, StringComparison.Ordinal);
+            Assert.DoesNotContain("INSERT", sql, StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public async Task Tables_match()
     {

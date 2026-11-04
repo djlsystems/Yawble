@@ -252,6 +252,15 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         // and a trigger's fire to its trigger's. See OutcomeLinks.
         await OutcomeLinks.OnAppendAsync(connection, transaction, stored, ct);
 
+        // A PERSON'S ACT, WITH THE ROW IT WENT WITH, IN THIS SAME TRANSACTION: a route hands it over on
+        // the append context (AppendContext.Intervention), never in the message, so no publisher can
+        // write one. Written after the outcome link above, so a dispatch's row names the outcome it set.
+        if (context?.Intervention is { } act)
+        {
+            await InterventionLedgerRow.AppendAsync(
+                connection, transaction, act, stored.CorrelationId, stored.Seq, occurredAt, ct);
+        }
+
         return stored;
     }
 

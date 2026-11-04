@@ -312,6 +312,7 @@ internal sealed partial class HostComposition
             var launcher = sp.GetRequiredService<ConciergeLaunchFactory>();
             var leaseActions = sp.GetRequiredService<LeaseActions>();
             var launches = sp.GetRequiredService<ConciergeLaunches>();
+            var interventions = sp.GetService<IInterventionLedger>();
 
             return new ConciergeSessionStore(
                 sp.GetRequiredService<IPtyEngine>(),
@@ -326,7 +327,9 @@ internal sealed partial class HostComposition
                             leaseActions.Releasing((key, ct) => launcher.RevokeAsync(key.User, ct))))),
                 sp.GetRequiredService<TimeProvider>(),
                 launches.FloorOf,
-                sp.GetRequiredService<ILogger<ConciergeSessionStore>>());
+                sp.GetRequiredService<ILogger<ConciergeSessionStore>>(),
+                // ONE concierge_session INTERVENTION PER SESSION, measured open to close (intervention_ledger).
+                interventions is null ? null : ConciergeSessionRecord.Writing(interventions));
         });
 
         // HOW DEEP ONE CHAIN OF CAUSATION MAY GO before the platform stops it.

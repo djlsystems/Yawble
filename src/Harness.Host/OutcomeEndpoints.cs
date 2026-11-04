@@ -506,7 +506,8 @@ public static class OutcomeEndpoints
                     workflow!.Value, outcome.Id, stored, ActorOf(context, principal),
                     person ? OutcomeLinkHow.Person : OutcomeLinkHow.Manager,
                     agentRule: !person,
-                    AuditOf(context, principal, TenantActions.WorkflowOutcomeChanged, new { team = stored, workflow }),
+                    AuditOf(context, principal, TenantActions.WorkflowOutcomeChanged, new { team = stored, workflow })
+                        with { Intervention = OutcomeChangedBy(context, stored, workflow.Value) },
                     ct);
 
                 return write.Ok ? Results.Ok(write.Link) : Refusal(write);
@@ -539,7 +540,8 @@ public static class OutcomeEndpoints
 
                 var write = await outcomes.UnlinkAsync(
                     workflow!.Value, stored, PersonOf(context),
-                    TenantLogging.Row(context, TenantActions.WorkflowOutcomeChanged, null, null, null),
+                    TenantLogging.Row(context, TenantActions.WorkflowOutcomeChanged, null, null, null)
+                        with { Intervention = OutcomeChangedBy(context, stored, workflow.Value) },
                     ct);
 
                 return write.Ok ? Results.Ok(write.Link) : Refusal(write);
@@ -617,6 +619,14 @@ public static class OutcomeEndpoints
         principal.Kind == PrincipalKind.User
             ? PersonOf(context)
             : new OutcomeActor(principal.Id, OutcomeActorKind.Member, principal.Id);
+
+    /// <summary>
+    /// A PERSON'S CHANGE OF ONE WORKFLOW'S OUTCOME, recorded with its <c>workflow.outcome-changed</c> tenant
+    /// row in the link's own transaction (intervention_ledger): a person, or a person's key as its owner.
+    /// A member or a Concierge records none (<see cref="InterventionAct.Of"/>).
+    /// </summary>
+    private static InterventionAct? OutcomeChangedBy(HttpContext context, string team, long workflow) =>
+        InterventionAct.Of(InterventionKinds.OutcomeChanged, AppendContexts.From(context.User), team, workflow);
 
     /// <summary>A person's row names the person; an agent's names the member.</summary>
     private static TriggerAudit AuditOf(HttpContext context, Principal principal, string action, object detail) =>

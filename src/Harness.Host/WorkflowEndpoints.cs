@@ -601,7 +601,8 @@ internal static class WorkflowEndpoints
                     JsonSerializer.Serialize(new { team = stored, reason }),
                     from,
                     correlation),
-                AppendContexts.From(context.User), ct);
+                // The person's close, recorded with its row (intervention_ledger); the wake cancels above are not acts of their own.
+                AppendContexts.From(context.User)?.Intervening(InterventionKinds.Close, stored), ct);
 
             return Results.NoContent();
         })
@@ -745,7 +746,7 @@ internal static class WorkflowEndpoints
                     }),
                     from,
                     correlation),
-                AppendContexts.From(context.User), ct);
+                AppendContexts.From(context.User)?.Intervening(InterventionKinds.Nudge, stored), ct);
 
             if (!teams.IsPaused(stored))
             {
@@ -862,7 +863,8 @@ internal static class WorkflowEndpoints
                     }),
                     from,
                     correlation),
-                AppendContexts.From(context.User), ct);
+                // The person's release, recorded with the workflow.resumed row; the Manager's instruction after it is no second act.
+                AppendContexts.From(context.User)?.Intervening(InterventionKinds.Resume, stored), ct);
 
             const string resumeText =
                 "A person resumed this workflow after it paused for reaching its spend limit. Its spend "

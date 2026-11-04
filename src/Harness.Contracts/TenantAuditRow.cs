@@ -38,6 +38,13 @@ public static class TenantAuditRow
         Add(command, "$detail", audit.Detail);
 
         await command.ExecuteNonQueryAsync(ct);
+
+        // A PERSON'S ACT GOES WITH ITS TENANT ROW, in the same transaction: written here, the one insert
+        // every store's tenant row goes through, so no store can land the row and skip the act.
+        if (audit.Intervention is { } act)
+        {
+            await InterventionLedgerRow.AppendAsync(connection, transaction, act, act.Correlation, null, at, ct);
+        }
     }
 
     private static void Add(DbCommand command, string name, string? value)

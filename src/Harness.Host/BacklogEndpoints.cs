@@ -1518,7 +1518,9 @@ public static class BacklogEndpoints
                     title = item.Title,
                 }),
                 actor),
-            who.Append,
+            // THE PERSON'S DISPATCH IS RECORDED WITH ITS ROW (intervention_ledger), in its transaction.
+            // The Manager's instruction below goes with no act: one dispatch is one intervention.
+            who.Append?.Intervening(InterventionKinds.Dispatch, stored),
             ct);
 
         var record = await backlog.AddDispatchAsync(

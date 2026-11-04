@@ -10,7 +10,11 @@ namespace Harness.Host;
 /// already begun and nothing was backfilled), the instance's id and when the ledger began - what the
 /// export names itself by.</summary>
 public sealed record LedgerStartResult(
-    int? BackfilledRuns, int? BackfilledWorkflows, string InstanceId, string? LedgerStartedAt);
+    int? BackfilledRuns, int? BackfilledWorkflows, string InstanceId, string? LedgerStartedAt)
+{
+    /// <summary>When <c>intervention_ledger</c> began recording people's acts (<c>interventions.startedAt</c>).</summary>
+    public string? InterventionsStartedAt { get; init; }
+}
 
 /// <summary>
 /// THE LEDGER'S ONE-TIME START, and the instance's id. Run once per boot, after the schema is
@@ -44,6 +48,14 @@ public static class LedgerStart
     public const string InstanceIdName = BillingAccountRules.InstanceIdSetting;
     public const string LedgerStartedAtName = "ledger.startedAt";
     public const string LedgerBackfilledRunsName = "ledger.backfilledRuns";
+
+    /// <summary>
+    /// WHEN PEOPLE'S ACTS BEGAN TO BE RECORDED (<c>intervention_ledger</c>, outcome-010): written once, at
+    /// the first start with that step applied, and never moved - as <see cref="LedgerStartedAtName"/>. Acts
+    /// before it were never recorded, and nothing reconstructs them from the log, so a human figure begins
+    /// here. Not a setting a person can change.
+    /// </summary>
+    public const string InterventionsStartedAtName = "interventions.startedAt";
 
     /// <summary>Who the tenant log says wrote these rows: the platform itself, at start.</summary>
     public const string Actor = "platform";
@@ -100,9 +112,16 @@ public sealed class SqliteLedgerStartRows(string databasePath) : ILedgerStartRow
                 runs.Value.ToString(CultureInfo.InvariantCulture), now, ct);
         }
 
+        var interventionsAt = await SettingAsync(connection, transaction, LedgerStart.InterventionsStartedAtName, ct);
+        if (interventionsAt is null)
+        {
+            interventionsAt = now;
+            await WriteSettingAsync(connection, transaction, LedgerStart.InterventionsStartedAtName, now, now, ct);
+        }
+
         await transaction.CommitAsync(ct);
 
-        return new LedgerStartResult(runs, workflows, instanceId, startedAt);
+        return new LedgerStartResult(runs, workflows, instanceId, startedAt) { InterventionsStartedAt = interventionsAt };
     }
 
     public async Task<RateEpoch> RecordRateEpochAsync(RateEpochConfiguration configured, CancellationToken ct = default)

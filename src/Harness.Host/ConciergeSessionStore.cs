@@ -26,6 +26,13 @@ public sealed record ConciergeBrowser(string? PublicUrl, string? TimeZone);
 /// session ends everything the launch created for it.</summary>
 public delegate Task ConciergeRevoke(ConciergeSessionKey key, CancellationToken ct);
 
+/// <summary>
+/// A session has ended: the Host records it as one <c>concierge_session</c> intervention, measured from
+/// <paramref name="openedAt"/> to <paramref name="endedAt"/>. Raised once per session, however it ended.
+/// </summary>
+public delegate Task ConciergeSessionEnded(
+    ConciergeSessionKey key, string? team, DateTimeOffset openedAt, DateTimeOffset endedAt, CancellationToken ct);
+
 /// <summary>The spec is kept because its TempFiles outlive the spawn: a system-prompt file has to
 /// survive as long as the child that may still read it, and be deleted when the session retires
 /// rather than never - otherwise every console leaks one.</summary>
@@ -44,6 +51,12 @@ public sealed record ConciergeSession(
 
     /// <summary>The terminal's session id on its worker, or null when it does not run on one.</summary>
     public string? TerminalId => Terminal is WorkerPtySession remote ? remote.Id : null;
+
+    /// <summary>When the session was spawned: where its measured attention begins.</summary>
+    public DateTimeOffset OpenedAt { get; init; }
+
+    /// <summary>The team the session was opened on, or null.</summary>
+    public string? Team { get; init; }
 }
 
 /// <summary>
@@ -99,7 +112,8 @@ public sealed record ConciergeReaped(
 /// <param name="floorOf">The output floor a session launched by a spec must pass; the platform default when null.</param>
 public sealed class ConciergeSessionStore(
     IPtyEngine engine, ConciergeLaunch launch, ConciergeRevoke revoke,
-    TimeProvider? clock = null, Func<PtySpec, OutputFloor>? floorOf = null, ILogger? log = null) : IAsyncDisposable
+    TimeProvider? clock = null, Func<PtySpec, OutputFloor>? floorOf = null, ILogger? log = null,
+    ConciergeSessionEnded? ended = null) : IAsyncDisposable
 {
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
 
@@ -163,7 +177,11 @@ public sealed class ConciergeSessionStore(
             var console = new ConciergeSession(
                 key, spec, typing, record,
                 new PtyAttachment(typing, record, spec.Cols, spec.Rows, _clock, activity.Attach),
-                activity, session);
+                activity, session)
+            {
+                OpenedAt = _clock.GetUtcNow(),
+                Team = string.IsNullOrWhiteSpace(team) ? null : team,
+            };
             _sessions[key] = console;
 
             // A CLI THAT EXITS BY ITSELF ENDS ITS SESSION, viewer or not: otherwise what it held
@@ -193,7 +211,10 @@ public sealed class ConciergeSessionStore(
         await EndAsync(console);
     }
 
-    private async Task EndAsync(ConciergeSession console)
+    /// <param name="endedAt">Where the session's measured attention ends: now for an explicit end or the
+    /// CLI's own exit; its last activity for a session the reaper or the Host's shutdown ended, so the
+    /// unattended time before either is not counted as a person's.</param>
+    private async Task EndAsync(ConciergeSession console, DateTimeOffset? endedAt = null)
     {
         // Removed only if it is still the one stored, so a late exit of an ended session cannot
         // end the session that replaced it, and a second end of one session does nothing.
@@ -219,6 +240,21 @@ public sealed class ConciergeSessionStore(
             // that no longer exists.
             await revoke(console.Key, CancellationToken.None);
             Changed?.Invoke();
+
+            // ONE ROW PER SESSION, measured open to close, once: only the call that removed the session
+            // reaches here. Best effort - a ledger that cannot be written must not stop a session ending.
+            if (ended is not null)
+            {
+                var end = endedAt ?? _clock.GetUtcNow();
+                try
+                {
+                    await ended(console.Key, console.Team, console.OpenedAt, end < console.OpenedAt ? console.OpenedAt : end, CancellationToken.None);
+                }
+                catch (Exception exception)
+                {
+                    (log ?? NullLogger.Instance).LogWarning(exception, "The Concierge session of {User} was not recorded.", console.Key.User);
+                }
+            }
         }
     }
 
@@ -238,7 +274,7 @@ public sealed class ConciergeSessionStore(
     /// </summary>
     public async Task<IReadOnlyList<ConciergeReaped>> ReapIdleAsync(TimeSpan window, DateTimeOffset now)
     {
-        List<ConciergeReaped> ended = [];
+        List<ConciergeReaped> reaped = [];
 
         foreach (var (key, console) in _sessions)
         {
@@ -248,16 +284,19 @@ public sealed class ConciergeSessionStore(
             var (last, kind) = console.Activity.Last(now);
             if (now - last < window) continue;
 
-            await EndAsync(console);
-            ended.Add(new ConciergeReaped(key, console.Worker, since, !console.Activity.EverViewed, last, kind, window));
+            await EndAsync(console, last);
+            reaped.Add(new ConciergeReaped(key, console.Worker, since, !console.Activity.EverViewed, last, kind, window));
         }
 
-        return ended;
+        return reaped;
     }
 
     public async ValueTask DisposeAsync()
     {
-        foreach (var key in _sessions.Keys) await EndAsync(key);
+        // AT SHUTDOWN a session ends where its last activity was: nobody closed it, so the time since is
+        // not a person's attention.
+        var now = _clock.GetUtcNow();
+        foreach (var console in _sessions.Values) await EndAsync(console, console.Activity.Last(now).At);
 
         _gate.Dispose();
     }
