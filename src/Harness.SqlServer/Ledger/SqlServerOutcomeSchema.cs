@@ -326,6 +326,14 @@ public static class SqlServerOutcomeSchema
 
              {AppendOnly("intervention_ledger")}
              """),
+
+        // `OutcomeSchema`'s outcome-011: how a person reads an outcome, nullable, held to the closed set.
+        new MigrationStep(
+            "outcome-011",
+            """
+            ALTER TABLE outcomes ADD presentation NVARCHAR(32) NULL
+                CONSTRAINT ck_outcomes_presentation CHECK (presentation IN (N'project', N'operational'));
+            """),
     ];
 
     /// <summary>The two triggers that make <paramref name="table"/> append-only, as SQLite's

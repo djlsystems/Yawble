@@ -34,9 +34,35 @@ public sealed record Outcome(
     DateTimeOffset UpdatedAt,
     string? ConfirmedBy,
     DateTimeOffset? ConfirmedAt,
-    string? Value = null)
+    string? Value = null,
+    string? Presentation = null)
 {
     public bool IsLive => OutcomeStatus.IsLive(Status);
+}
+
+/// <summary>
+/// HOW A PERSON READS AN OUTCOME (<c>outcomes.presentation</c>, <c>outcome-011</c>): a <c>project</c> is
+/// read as a whole - cumulative Agent Hours and Estimated Execution Cost, backlog progress, a cumulative
+/// chart - and an <c>operational</c> one week by week - cost, throughput (closed workflows) and cost per
+/// completed workflow. Stored NULL until a person picks one, and NULL reads as project. One model, two
+/// readings: nothing about the figures changes, only how the Outcomes dialog lays them out. A person sets
+/// it through the outcome edit route; nothing else writes it.
+/// </summary>
+public static class OutcomePresentation
+{
+    public const string Project = "project";
+    public const string Operational = "operational";
+
+    /// <summary>The closed set, as the column's CHECK constraint holds it on both providers.</summary>
+    public static readonly IReadOnlyList<string> All = [Project, Operational];
+
+    public const string Refusal = "An outcome's presentation is project or operational.";
+
+    /// <summary>Whether <paramref name="value"/> is one of <see cref="All"/>, exactly.</summary>
+    public static bool IsKnown(string? value) => value is Project or Operational;
+
+    /// <summary>How a stored value reads: NULL (never picked) is project.</summary>
+    public static string Read(string? stored) => stored ?? Project;
 }
 
 /// <summary>
@@ -173,7 +199,7 @@ public sealed record OutcomeWrite(
 public sealed record OutcomeEdit(
     string? Name = null, string? Description = null,
     string? TargetMetric = null, string? TargetUnit = null, string? TargetValue = null,
-    string? Value = null);
+    string? Value = null, string? Presentation = null);
 
 /// <summary>An outcome's value as the store keeps it: a non-negative decimal, invariant, no
 /// exponent. The one check, so the route and the store say the same.</summary>

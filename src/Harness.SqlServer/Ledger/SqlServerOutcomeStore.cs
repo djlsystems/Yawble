@@ -246,6 +246,7 @@ public sealed class SqlServerOutcomeStore(
                 }
 
                 if (OutcomeRules.ValueRefusal(edit.Value) is { } badValue) return OutcomeWrite.Refused(400, badValue);
+                if (OutcomeRules.PresentationRefusal(edit.Presentation) is { } badPresentation) return OutcomeWrite.Refused(400, badPresentation);
 
                 var next = OutcomeRules.Edited(outcome, edit);
 
@@ -262,7 +263,7 @@ public sealed class SqlServerOutcomeStore(
                         """
                         UPDATE outcomes SET name = @name, name_key = @key, description = @description,
                             target_metric = @metric, target_unit = @unit, target_value = @value,
-                            value_amount = @amount, updated_at = @at
+                            value_amount = @amount, presentation = @presentation, updated_at = @at
                         WHERE id = @id
                         """;
                     update.Parameters.AddWithValue("@id", id);
@@ -273,12 +274,13 @@ public sealed class SqlServerOutcomeStore(
                     update.Parameters.AddWithValue("@unit", (object?)next.TargetUnit ?? DBNull.Value);
                     update.Parameters.AddWithValue("@value", (object?)next.TargetValue ?? DBNull.Value);
                     update.Parameters.AddWithValue("@amount", (object?)next.Value ?? DBNull.Value);
+                    update.Parameters.AddWithValue("@presentation", (object?)next.Presentation ?? DBNull.Value);
                     update.Parameters.AddWithValue("@at", Now());
                     await update.ExecuteNonQueryAsync(token);
                 }
 
                 var row = isRename ? renamed : changed;
-                await audit(connection, transaction, row with { Subject = id, SubjectName = next.Name }, token);
+                await audit(connection, transaction, row with { Subject = id, SubjectName = next.Name, Detail = OutcomeRules.EditDetail(row.Detail, outcome, next) }, token);
 
                 return new OutcomeWrite(next);
             },

@@ -28,7 +28,7 @@ namespace Harness.Host;
 /// <para>
 /// A RUN SERVES ONE OUTCOME: a snapshotted run the one its link named at start, followed through
 /// <c>merged_into</c>; a run from before snapshots its workflow's newest link. No link, an unlink, or
-/// an outcome that is gone is No outcome.
+/// an outcome that is gone is Unattributed.
 /// </para>
 ///
 /// <para>
@@ -39,7 +39,7 @@ namespace Harness.Host;
 /// </para>
 ///
 /// <para>
-/// THE ORDER IS FIXED: No outcome first when the team has any, then the outcomes by when each was
+/// THE ORDER IS FIXED: Unattributed first when the team has any, then the outcomes by when each was
 /// created (<see cref="Outcome.CreatedAt"/>), oldest first, ties by id - so a chart's series keep their
 /// place from one week, and one team, to the next.
 /// </para>
@@ -58,8 +58,8 @@ namespace Harness.Host;
 /// </summary>
 public static class TeamCost
 {
-    /// <summary>The name of the entry carrying a team's unlinked work.</summary>
-    public const string NoOutcomeName = "No outcome";
+    /// <summary>The name of the entry carrying a team's work that serves no outcome.</summary>
+    public const string UnattributedName = OutcomeFigures.UnattributedName;
 
     public sealed record MoneyShape(string Currency, int? AgentHourlyRate);
 
@@ -200,7 +200,7 @@ public static class TeamCost
                     var weeks = ExecutionCost.Weeks(e.Runs, Weeks, Currency);
                     return new OutcomeEntry(
                         e.Outcome?.Id,
-                        e.Outcome?.Name ?? NoOutcomeName,
+                        e.Outcome?.Name ?? UnattributedName,
                         BudgetOf(e.Outcome),
                         WeeklyOf(weeks),
                         TotalsOf(ExecutionCost.Total(weeks, Currency)),
@@ -253,7 +253,7 @@ public static class TeamCost
 
             if (served.TryGetValue("", out var unlinked))
             {
-                outcomes.Insert(0, new SummaryOutcome(null, NoOutcomeName, null, unlinked.AgentSeconds, unlinked.Cost, null, null, unlinked.LegacyRates));
+                outcomes.Insert(0, new SummaryOutcome(null, UnattributedName, null, unlinked.AgentSeconds, unlinked.Cost, null, null, unlinked.LegacyRates));
             }
 
             return new Summary(
@@ -394,12 +394,12 @@ public static class TeamCost
                 + "`periodEnd`: today (UTC). `total`: `{ agentSeconds, cost, agentRate, legacyRates }` over the 8 weeks; `prior`: the same "
                 + "over the 8 weeks before them.\n\n"
                 + "`outcomes`: `{ id, name, rank, agentSeconds, cost, budget, outcomeTotalCost, legacyRates }` for each outcome the "
-                + "runs served in the weeks, and each live outcome with a budget even with none; `No outcome` "
+                + "runs served in the weeks, and each live outcome with a budget even with none; `Unattributed` "
                 + "(`id` null) first for unlinked work when there is some, then the outcomes in the order they "
-                + "were created. `rank` is the global rank `GET /api/teams/cost` gives (null for No outcome and "
+                + "were created. `rank` is the global rank `GET /api/teams/cost` gives (null for Unattributed and "
                 + "for an outcome no team served in the weeks); `budget` is the outcome's `value` as a number; "
                 + "`outcomeTotalCost` is its cost across every team and all time, what its budget is measured against "
-                + "(the same field there) - both null for No outcome.\n\n"
+                + "(the same field there) - both null for Unattributed.\n\n"
                 + "`rightNow`: `openWorkflows` and `membersRunning`, the sums of `GET /api/teams/rollup`'s "
                 + "`openWorkflows.openCount` and `running` over the active teams reached, and `waitingOnYou`, "
                 + "the number of items `GET /api/needs-you` lists.\n\n"
@@ -414,16 +414,16 @@ public static class TeamCost
         + "from before snapshots serves its workflow's newest link.\n\n"
         + "`money`: `currency`, and `agentHourlyRate`, the tenant default rate as set now (null when none is "
         + "set) - no figure is that rate times hours. `weeks`: the 8 week starts. "
-        + "`outcomes`: one entry per outcome the team's runs served in the weeks, and `No outcome` "
+        + "`outcomes`: one entry per outcome the team's runs served in the weeks, and `Unattributed` "
         + "(`id` null) for its unlinked work, listed FIRST and only when there is some; the outcomes follow "
         + "in the order they were created, oldest first. Each entry: `id`, `name`, `value` (its budget as a "
         + "number, null when none is set), `weekly` (8 of `weekStart`, `agentSeconds`, `billable`, "
         + "`measuredRuns`, `unmeasuredRuns`, `cost`), `totals` (the team's own over the 8 weeks: "
         + "`agentSeconds`, `billable`, `measuredRuns`, `unmeasuredRuns`, `cost`, `agentRate`, `legacyRates`) and `outcomeTotalCost` - "
         + "the outcome's estimate across EVERY team and all time, what `GET /api/outcomes` gives as its `cost`, "
-        + "the figure its budget is measured against; null for No outcome and when no priced run served it - "
+        + "the figure its budget is measured against; null for Unattributed and when no priced run served it - "
         + "and `rank`, the outcome's 1-based place in that same order among every outcome ANY team served in "
-        + "the weeks, the same on every team (the web's colour for it); null for No outcome. `totals`: the "
+        + "the weeks, the same on every team (the web's colour for it); null for Unattributed. `totals`: the "
         + "team's over all of it.\n\n"
         + "Each run is priced from the snapshot taken at its start: its hours times the snapshot's rate, rounded "
         + "to the cent, a week's part priced on its own. A snapshot with no rate - a plugin with no rate of "

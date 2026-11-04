@@ -288,7 +288,7 @@ public sealed class OutcomeDashboardTests(HostFixture host) : IClassFixture<Host
         Assert.Null((await Outcomes.FindAsync(outcome.Id, Ct))!.Value);
 
         var list = await JsonAsync(await person.GetAsync("/api/outcomes", Ct));
-        Assert.Equal("No outcome assigned", list.GetProperty("noOutcome").GetProperty("name").GetString());
+        Assert.Equal("Unattributed", list.GetProperty("noOutcome").GetProperty("name").GetString());
     }
 
     // ---- fixtures ----

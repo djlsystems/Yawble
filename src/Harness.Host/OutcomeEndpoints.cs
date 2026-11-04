@@ -20,7 +20,9 @@ internal sealed record CreateOutcome(
 internal sealed record EditOutcome(
     string? Name = null, string? Description = null,
     string? TargetMetric = null, string? TargetUnit = null, string? TargetValue = null,
-    string? Value = null);
+    string? Value = null,
+    [property: Description("How the Outcomes dialog reads it: `project` or `operational`. Absent leaves it alone; anything else is refused.")]
+    string? Presentation = null);
 
 internal sealed record MergeOutcome(
     [property: Description("The id of the active or proposed outcome this one's figures move to.")] string? Into);
@@ -112,7 +114,7 @@ public static class OutcomeEndpoints
                     outcomes = list,
                     noOutcome = new
                     {
-                        name = OutcomeFigures.NoOutcomeName,
+                        name = OutcomeFigures.UnattributedName,
                         figures = dashboard.Figures(OutcomeFigures.For(book, null, open), null),
                     },
                 });
@@ -136,11 +138,15 @@ public static class OutcomeEndpoints
                 + "UTC, whatever the period: agent-kind time and money split by overlap, tokens in the week a run ended) "
                 + "and `cost` (the sum of each run's estimate, priced from the snapshot taken when it started; a run "
                 + "with no snapshot rate adds nothing; `amount` null - never 0 - when no run was priced; with a "
-                + "window, the part of each run inside it). A run with a snapshot serves the outcome its link named "
-                + "when it started; `weekly` and `cost` count it there. `money` names the currency, the tenant "
+                + "window, the part of each run inside it; `agentRate` the weighted rate of its priced agent time - "
+                + "its money over its hours - null when none was priced, never the tenant rate), `throughput` (the "
+                + "same 8 weeks as `weekly`: `{ weekStart, closed, completed }`, its workflows whose close fell in "
+                + "each week, every one and those completed). A run with a snapshot serves the outcome its link named "
+                + "when it started; `weekly` and `cost` count it there. EACH RUN IS COUNTED ONCE, in one bucket: an "
+                + "outcome or `noOutcome` (Unattributed); nothing is split between outcomes. `money` names the currency, the tenant "
                 + "default rate as set now (no figure multiplies by it) and `declaredCountsAs`. "
                 + "A workflow counts toward the outcome its newest link names, "
-                + "followed through `mergedInto`. `noOutcome` carries every workflow with no link. "
+                + "followed through `mergedInto`. `noOutcome` carries the work that serves no outcome - no link, an unlink, a deleted outcome - named `Unattributed`: computed on every read, never an outcome row. "
                 + "`ledgerStartedAt` is when the ledger began: work before it was recovered from the log. "
                 + "Each outcome also carries `linkedWorkflows` (how many workflows reach it now, through "
                 + "`mergedInto`, whatever the window: what a delete would unlink) and `endedAt` (when a retired "
@@ -283,7 +289,9 @@ public static class OutcomeEndpoints
                 var detail = new { request.Name, request.Description, request.TargetMetric, request.TargetUnit, request.TargetValue, request.Value };
                 var write = await outcomes.EditAsync(
                     id,
-                    new OutcomeEdit(request.Name, request.Description, request.TargetMetric, request.TargetUnit, request.TargetValue, request.Value),
+                    new OutcomeEdit(
+                        request.Name, request.Description, request.TargetMetric, request.TargetUnit, request.TargetValue, request.Value,
+                        request.Presentation),
                     TenantLogging.Row(context, TenantActions.OutcomeRenamed, id, request.Name, detail),
                     TenantLogging.Row(context, TenantActions.OutcomeChanged, id, null, detail),
                     ct);
@@ -292,12 +300,15 @@ public static class OutcomeEndpoints
             })
             .WithTags("Outcomes")
             .HumansOnly()
-            .WithSummary("Rename, describe or value an outcome")
+            .WithSummary("Rename, describe, value or present an outcome")
             .WithDescription(
                 "Absent fields are left alone; an empty target or `value` clears it. `value` is the "
                 + "outcome's budget, what it may spend, an amount of `outcomes.currency`, 0 or more; anything "
-                + "else is refused (400) with a sentence. A rename appends "
-                + "`outcome.renamed`, any other change `outcome.changed`. A RENAME NEVER REWRITES A LINK: "
+                + "else is refused (400) with a sentence. `presentation` is how the Outcomes dialog reads it, "
+                + "`project` or `operational` (a stored null reads as project); anything else is refused (400) "
+                + "and nothing is stored. A rename appends "
+                + "`outcome.renamed`, any other change `outcome.changed`; a presentation change adds "
+                + "`presentation: { old, new }` to that row's detail. A RENAME NEVER REWRITES A LINK: "
                 + "each keeps the name it was made under. 409 for a name another live outcome holds, or "
                 + "for a merged outcome.");
 
@@ -421,7 +432,7 @@ public static class OutcomeEndpoints
                 + "unknown one, refuses the whole request with a sentence naming it, and nothing changes. "
                 + "Every outcome merged into one asked for is deleted with it (`cascadedFrom` names the "
                 + "outcome it went with). Every workflow whose outcome now, followed through `mergedInto`, is "
-                + "one deleted gets an unlink row (`how: person`) and counts under No outcome afterwards; no "
+                + "one deleted gets an unlink row (`how: person`) and counts under Unattributed afterwards; no "
                 + "link is rewritten or removed. Each backlog item and trigger naming one loses its outcome. "
                 + "The answer lists each outcome deleted (`id`, `name`, `status`, `mergedInto`, `cascadedFrom`, "
                 + "`workflowsUnlinked`, `backlogItemsCleared`, `triggersCleared`) and the totals "
@@ -551,7 +562,7 @@ public static class OutcomeEndpoints
             .WithSummary("Set a workflow to no outcome")
             .WithDescription(
                 "A person's \"None\": appends a link row that names no outcome (`outcomeId` null, "
-                + "`how: person`), so the workflow counts under No outcome. Nothing is deleted: the links "
+                + "`how: person`), so the workflow counts under Unattributed. Nothing is deleted: the links "
                 + "before it stay, and the outcome it served lists the unlink in its history. 409 when the "
                 + "workflow serves no outcome. Appends `workflow.outcome-changed` with `from` (the outcome "
                 + "it served) and `to: null`; nothing is unlinked when that row cannot be written.");
@@ -723,6 +734,7 @@ public static class OutcomeEndpoints
         outcome.TargetUnit,
         outcome.TargetValue,
         outcome.Value,
+        outcome.Presentation,
         outcome.CreatedBy,
         outcome.CreatedByKind,
         outcome.CreatedAt,

@@ -498,5 +498,14 @@ public static class OutcomeSchema
             CREATE TRIGGER intervention_ledger_no_delete BEFORE DELETE ON intervention_ledger
             BEGIN SELECT RAISE(ABORT, 'intervention_ledger is append-only'); END;
             """),
+
+        // HOW A PERSON READS AN OUTCOME: project or operational (OutcomePresentation), NULL until a person
+        // picks one, and NULL reads as project. The CHECK holds the closed set; an ADD COLUMN rewrites no
+        // row, so every outcome from before reads NULL, and nothing back-fills it.
+        new MigrationStep(
+            "outcome-011",
+            """
+            ALTER TABLE outcomes ADD COLUMN presentation TEXT NULL CHECK (presentation IN ('project', 'operational'));
+            """),
     ];
 }

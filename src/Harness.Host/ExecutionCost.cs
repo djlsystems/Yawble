@@ -287,6 +287,7 @@ public static class ExecutionCost
         decimal? unattributed = null;
         var windowed = from is not null || to is not null;
         var legacy = new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal);
+        var agent = new Dictionary<string, (decimal Money, double Seconds)>(StringComparer.Ordinal);
 
         foreach (var run in runs)
         {
@@ -299,6 +300,12 @@ public static class ExecutionCost
             if (run.OutcomeId is { } outcome) byOutcome[outcome] = byOutcome.GetValueOrDefault(outcome) + money;
             else unattributed = (unattributed ?? 0) + money;
 
+            if (run.IsAgent)
+            {
+                var (agentMoney, agentSeconds) = agent.GetValueOrDefault(run.OutcomeId ?? "");
+                agent[run.OutcomeId ?? ""] = (agentMoney + money, agentSeconds + seconds);
+            }
+
             if (run.IsRebuilt)
             {
                 var key = run.OutcomeId ?? "";
@@ -309,7 +316,8 @@ public static class ExecutionCost
 
         return new Costs(
             byOutcome, unattributed,
-            legacy.ToDictionary(e => e.Key, e => (IReadOnlyList<string>)[.. e.Value], StringComparer.Ordinal));
+            legacy.ToDictionary(e => e.Key, e => (IReadOnlyList<string>)[.. e.Value], StringComparer.Ordinal),
+            agent);
     }
 
     /// <summary>reconstructed before fallback-at-upgrade, as <see cref="Tally.LegacyRates"/> lists them.</summary>
@@ -321,8 +329,19 @@ public static class ExecutionCost
     /// priced. <see cref="LegacyRatesOf"/> is each one's footnote: which rates from before snapshots priced it.</summary>
     public sealed record Costs(
         IReadOnlyDictionary<string, decimal> ByOutcome, decimal? Unattributed,
-        IReadOnlyDictionary<string, IReadOnlyList<string>>? Legacy = null)
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? Legacy = null,
+        IReadOnlyDictionary<string, (decimal Money, double Seconds)>? Agent = null)
     {
+        /// <summary>
+        /// THE WEIGHTED AGENT RATE of <paramref name="outcome"/> (null: Unattributed): its priced agent runs'
+        /// money over their hours, to the cent, as <see cref="Tally.AgentRate"/> says it; null when none of
+        /// its agent time was priced. Never the tenant rate.
+        /// </summary>
+        public decimal? AgentRateOf(string? outcome) =>
+            Agent?.GetValueOrDefault(outcome ?? "") is { Seconds: > 0 } part
+                ? decimal.Round(part.Money / ((decimal)part.Seconds / 3600m), 2)
+                : null;
+
         public decimal? Of(string? outcome) =>
             outcome is null ? Unattributed : ByOutcome.TryGetValue(outcome, out var money) ? money : null;
 

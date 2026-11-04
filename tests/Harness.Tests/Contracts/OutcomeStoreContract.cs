@@ -100,6 +100,39 @@ public abstract class OutcomeStoreContract : ProviderContract
             (await outcomes.ReadEventsAsync([outcome.Id], Ct)).Select(e => e.Action));
     }
 
+    /// <summary><c>OutcomeRollupTests</c>' presentation, asked of the store: NULL until set, a change's row names the
+    /// old and new value, the same value again writes nothing, and a value outside the set is a 400 that stores
+    /// nothing - not even the rename beside it.</summary>
+    [Fact]
+    public async Task A_presentation_is_stored_from_the_closed_set_and_its_row_names_the_old_and_new_value()
+    {
+        var outcomes = await CreateAsync();
+        var outcome = (await outcomes.CreateAsync("Presented", new OutcomeEdit(), Person, Audit(TenantActions.OutcomeCreated), Ct)).Outcome!;
+        Assert.Null(outcome.Presentation);
+
+        var set = await outcomes.EditAsync(
+            outcome.Id, new OutcomeEdit(Presentation: OutcomePresentation.Operational),
+            Audit(TenantActions.OutcomeRenamed), Audit(TenantActions.OutcomeChanged), Ct);
+        Assert.Equal(OutcomePresentation.Operational, set.Outcome!.Presentation);
+        Assert.Equal(OutcomePresentation.Operational, (await outcomes.FindAsync(outcome.Id, Ct))!.Presentation);
+
+        Assert.Equal(set.Outcome, (await outcomes.EditAsync(
+            outcome.Id, new OutcomeEdit(Presentation: OutcomePresentation.Operational),
+            Audit(TenantActions.OutcomeRenamed), Audit(TenantActions.OutcomeChanged), Ct)).Outcome);
+
+        var refused = await outcomes.EditAsync(
+            outcome.Id, new OutcomeEdit(Name: "Never", Presentation: "Weekly"),
+            Audit(TenantActions.OutcomeRenamed), Audit(TenantActions.OutcomeChanged), Ct);
+        Assert.Equal((400, OutcomePresentation.Refusal), (refused.Status, refused.Refusal));
+        Assert.Equal(("Presented", OutcomePresentation.Operational), ((await outcomes.FindAsync(outcome.Id, Ct))!.Name, (await outcomes.FindAsync(outcome.Id, Ct))!.Presentation));
+
+        var events = await outcomes.ReadEventsAsync([outcome.Id], Ct);
+        Assert.Equal([TenantActions.OutcomeCreated, TenantActions.OutcomeChanged], events.Select(e => e.Action));
+        var presentation = JsonDocument.Parse(events[1].Detail!).RootElement.GetProperty("presentation");
+        Assert.Equal(JsonValueKind.Null, presentation.GetProperty("old").ValueKind);
+        Assert.Equal(OutcomePresentation.Operational, presentation.GetProperty("new").GetString());
+    }
+
     [Fact]
     public async Task A_merge_moves_the_figures_without_rewriting_a_link_and_a_chain_ends_at_the_last_outcome()
     {

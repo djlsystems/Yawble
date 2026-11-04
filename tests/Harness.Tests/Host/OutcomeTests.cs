@@ -666,7 +666,7 @@ public sealed class OutcomeTests(HostFixture host) : IClassFixture<HostFixture>
         Assert.False(alpha.GetProperty("deleted").GetBoolean());
 
         var none = list.GetProperty("noOutcome");
-        Assert.Equal(OutcomeFigures.NoOutcomeName, none.GetProperty("name").GetString());
+        Assert.Equal(OutcomeFigures.UnattributedName, none.GetProperty("name").GetString());
         Assert.Equal(1, none.GetProperty("figures").GetProperty("workflows").GetProperty("total").GetInt32());
         Assert.Equal(3, none.GetProperty("figures").GetProperty("tokens").GetProperty("billable").GetInt64());
         Assert.True(list.TryGetProperty("ledgerStartedAt", out _));

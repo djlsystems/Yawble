@@ -16,8 +16,12 @@ namespace Harness.Host;
 /// </summary>
 public static class OutcomeFigures
 {
-    /// <summary>The name of the entry that carries every unlinked workflow.</summary>
-    public const string NoOutcomeName = "No outcome assigned";
+    /// <summary>
+    /// THE BUCKET FOR WORK THAT SERVES NO OUTCOME, wherever an outcome breakdown is shown: a run with no
+    /// link, an unlink, or an outcome that was deleted. Computed from the runs on every read, never stored:
+    /// there is no Unattributed outcome row.
+    /// </summary>
+    public const string UnattributedName = "Unattributed";
 
     /// <summary>How many weeks the weekly series covers, ending with the current one.</summary>
     public const int Weeks = 8;
@@ -107,7 +111,16 @@ public static class OutcomeFigures
         /// <summary>The estimate of the runs that served it, each priced from its snapshot (<see cref="ExecutionCost"/>);
         /// its amount is null - never 0 - when none was priced.</summary>
         public Money? Cost { get; init; }
+
+        /// <summary>The same <see cref="Weeks"/> weeks as <see cref="Weekly"/>: how many of its workflows closed in
+        /// each (see <see cref="ThroughputOf"/>).</summary>
+        public IReadOnlyList<WeekThroughput>? Throughput { get; init; }
     }
+
+    /// <summary>One week's throughput: the workflows serving the outcome whose close fell in it - <see cref="Closed"/>
+    /// every one, <see cref="Completed"/> those completed rather than closed. What an operational outcome's cost per
+    /// completed workflow divides by; with none completed it is not measurable, never a division by zero.</summary>
+    public sealed record WeekThroughput(DateTimeOffset WeekStart, int Closed, int Completed);
 
     public sealed record BacklogCounts(int NotStarted, int InProgress, int Achieved);
 
@@ -118,8 +131,9 @@ public static class OutcomeFigures
 
     /// <summary>An amount of <see cref="Currency"/>; a null amount is "not priced", never 0.
     /// <see cref="LegacyRates"/> is its footnote: <c>reconstructed</c> and <c>fallback-at-upgrade</c>, each when
-    /// a run in it was priced that way.</summary>
-    public sealed record Money(decimal? Amount, string Currency, IReadOnlyList<string> LegacyRates);
+    /// a run in it was priced that way. <see cref="AgentRate"/> is the weighted rate of its priced agent time
+    /// (<see cref="ExecutionCost.Costs.AgentRateOf"/>), null when none was priced - never the tenant rate.</summary>
+    public sealed record Money(decimal? Amount, string Currency, IReadOnlyList<string> LegacyRates, decimal? AgentRate = null);
 
     /// <summary>The instance's settings the dashboard is read with.</summary>
     public sealed record Pricing(string Currency, int AgentHourlyRate, string DeclaredCountsAs)
@@ -236,8 +250,32 @@ public static class OutcomeFigures
             BlockedSeconds = blockedSeconds,
             Efficiency = total > 0 ? figures.AgentSeconds / total : null,
             Weekly = weekly,
-            Cost = new Money(costs.Of(outcome), pricing.Currency, costs.LegacyRatesOf(outcome)),
+            Cost = new Money(costs.Of(outcome), pricing.Currency, costs.LegacyRatesOf(outcome), costs.AgentRateOf(outcome)),
+            Throughput = ThroughputOf(all, outcome, now),
         };
+    }
+
+    /// <summary>
+    /// THROUGHPUT OVER THE LAST <see cref="Weeks"/> WEEKS, whatever the period: for each week, the workflows whose
+    /// newest link serves <paramref name="outcome"/> (null: none) - read over every workflow, <paramref name="book"/>
+    /// unwindowed - and whose close (<c>workflow_ledger</c>) fell in it. A workflow is counted once, in the week it
+    /// closed; an open one is in no week.
+    /// </summary>
+    public static IReadOnlyList<WeekThroughput> ThroughputOf(Book book, string? outcome, DateTimeOffset now)
+    {
+        var closes = book.WorkflowsOf(outcome)
+            .Select(c => book.CloseOf.GetValueOrDefault(c))
+            .OfType<WorkflowLedgerRow>()
+            .ToList();
+
+        return WeekStarts(now)
+            .Select(start =>
+            {
+                var end = start.AddDays(7);
+                var inWeek = closes.Where(c => c.ClosedAt >= start && c.ClosedAt < end).ToList();
+                return new WeekThroughput(start, inWeek.Count, inWeek.Count(c => c.HowClosed == WorkflowLedgerRow.Completed));
+            })
+            .ToList();
     }
 
     /// <summary>The Monday 00:00 UTC starts of the last <see cref="Weeks"/> weeks, oldest first, the
@@ -285,7 +323,7 @@ public static class OutcomeFigures
         DateTimeOffset? SetAt);
 
     /// <summary>What the figures are computed over: the workflows in the window, grouped by outcome
-    /// (null is "No outcome").</summary>
+    /// (null is Unattributed).</summary>
     public sealed class Book
     {
         public required OutcomeLedgerRows Rows { get; init; }

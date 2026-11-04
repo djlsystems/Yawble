@@ -114,7 +114,7 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
 
         Assert.Equal([null, older.Id, newer.Id], outcomes.Select(o => o.GetProperty("id").GetString()));
         var none = outcomes[0];
-        Assert.Equal("No outcome", none.GetProperty("name").GetString());
+        Assert.Equal("Unattributed", none.GetProperty("name").GetString());
         Assert.Equal(JsonValueKind.Null, none.GetProperty("value").ValueKind);
         Assert.Equal(JsonValueKind.Null, none.GetProperty("outcomeTotalCost").ValueKind);
         Assert.Equal(5400, none.GetProperty("totals").GetProperty("agentSeconds").GetDouble(), 3);
@@ -517,7 +517,7 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
         var summary = await SummaryAsync(person);
         var none = NoOutcome(summary);
         Assert.Equal(none.GetRawText(), summary.GetProperty("outcomes").EnumerateArray().First().GetRawText());
-        Assert.Equal("No outcome", none.GetProperty("name").GetString());
+        Assert.Equal("Unattributed", none.GetProperty("name").GetString());
         Assert.Equal(5400, none.GetProperty("agentSeconds").GetDouble() - before, 3);
         Assert.Equal(JsonValueKind.Null, none.GetProperty("rank").ValueKind);
         Assert.Equal(JsonValueKind.Null, none.GetProperty("budget").ValueKind);

@@ -196,6 +196,66 @@ public sealed class SchemaParityTests
         }
     }
 
+    /// <summary><c>outcome-011</c> is one id on both providers and adds <c>outcomes.presentation</c>, nullable,
+    /// held to the closed set <see cref="Harness.Contracts.OutcomePresentation.All"/> by a CHECK, and nothing else.
+    /// <see cref="Tables_match"/> holds the column itself alike.</summary>
+    [Fact]
+    public void The_presentation_step_adds_only_a_nullable_checked_column_on_both_providers()
+    {
+        var sqlite = Assert.Single(SchemaModules.All, s => s.Id == "outcome-011").Sql;
+        var sqlServer = Assert.Single(SqlServerSchemaModules.All, s => s.Id == "outcome-011").Sql;
+
+        foreach (var sql in new[] { sqlite, sqlServer })
+        {
+            Assert.Single(Regex.Matches(sql, "ALTER TABLE", RegexOptions.None));
+            Assert.Contains("ALTER TABLE outcomes ADD", sql, StringComparison.Ordinal);
+            Assert.Matches(@"\bpresentation\s+\w+(\(\d+\))?\s+NULL\b", sql);
+            Assert.Matches(@"CHECK \(presentation IN \(N?'project', N?'operational'\)\)", sql);
+            Assert.DoesNotContain("CREATE", sql, StringComparison.Ordinal);
+            Assert.DoesNotContain("UPDATE", sql, StringComparison.Ordinal);
+            Assert.DoesNotContain("NOT NULL", sql, StringComparison.Ordinal);
+        }
+
+        Assert.Equal(["project", "operational"], Harness.Contracts.OutcomePresentation.All);
+    }
+
+    /// <summary>On SQLite the CHECK refuses a presentation outside the set, and NULL - never picked - is kept.</summary>
+    [Fact]
+    public async Task The_presentation_column_refuses_a_value_outside_the_set()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"presentation-{Guid.NewGuid():N}.db");
+        try
+        {
+            await new Harness.Messaging.SchemaMigrator(path).ApplyAsync(SchemaModules.All, ct: TestContext.Current.CancellationToken);
+            await using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={path};Pooling=False");
+            await connection.OpenAsync(TestContext.Current.CancellationToken);
+
+            async Task<int> InsertAsync(string id, string? presentation)
+            {
+                await using var insert = connection.CreateCommand();
+                insert.CommandText =
+                    """
+                    INSERT INTO outcomes (id, name, name_key, status, created_by, created_by_kind, created_at, updated_at, presentation)
+                    VALUES ($id, $id, $id, 'active', 'p', 'person', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', $presentation)
+                    """;
+                insert.Parameters.AddWithValue("$id", id);
+                insert.Parameters.AddWithValue("$presentation", (object?)presentation ?? DBNull.Value);
+                return await insert.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+            }
+
+            Assert.Equal(1, await InsertAsync("a", null));
+            Assert.Equal(1, await InsertAsync("b", "project"));
+            Assert.Equal(1, await InsertAsync("c", "operational"));
+            var refused = await Assert.ThrowsAsync<Microsoft.Data.Sqlite.SqliteException>(() => InsertAsync("d", "Operational"));
+            Assert.Contains("CHECK", refused.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            File.Delete(path);
+        }
+    }
+
     [Fact]
     public async Task Tables_match()
     {
