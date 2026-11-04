@@ -1577,14 +1577,6 @@ function showThread(row: WorkflowRow) {
   color: var(--os-ink-faint);
 }
 
-.team-kpi-claim {
-  margin-top: 2px;
-  font-size: 0.7rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--os-ink-faint);
-}
-
 /* A CAP WITH ITS OWN SCROLL, the same shape `AgentsDialog`'s `.agents-body` uses: a team running
    several workflows at once makes this list longer than the per-member table it sits above, and
    without a bound the dialog grows past the viewport with no way to reach its Close button. The
