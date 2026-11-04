@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Team picture</title>
+  <link id="tp-css" rel="stylesheet" href="picture.css">
+  <!-- The platform's helper script: site.data reaches this site's _api/ and nothing else. -->
+  <script src="/sites/_sdk/site.js"></script>
+  <script src="draw.js" defer></script>
+  <script src="page.js" defer></script>
+</head>
+<body>
+  <header class="tp-header">
+    <h1>Team picture <span id="tp-team" class="tp-team"></span></h1>
+    <p class="tp-subtitle">What the team is building or running, kept current from the platform's own figures.</p>
+  </header>
+  <p id="tp-status" class="tp-status" role="status" hidden></p>
+  <main id="tp-main">
+    <p class="tp-note">Reading the team's figures&hellip;</p>
+  </main>
+  <noscript><p class="tp-note">The Team picture needs scripts to draw.</p></noscript>
+</body>
+</html>

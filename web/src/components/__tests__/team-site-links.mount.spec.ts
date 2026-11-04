@@ -42,6 +42,9 @@ beforeEach(() => {
           (call) => (call.method === 'POST' && call.url === '/api/teams/JobTracker/sites/jobs/open'
             ? reply(200, { url: '/sites/JobTracker/jobs/_c/CfDJ8tok/' })
             : undefined),
+          (call) => (call.method === 'POST' && call.url === '/api/teams/Pictured/sites/team-picture/open'
+            ? reply(200, { url: '/sites/Pictured/team-picture/_c/CfDJ8pic/' })
+            : undefined),
           (call) => {
             const match = /^\/api\/teams\/([^/]+)\/sites$/.exec(call.url);
             if (!match || call.method !== 'GET') return undefined;
@@ -136,6 +139,45 @@ describe("the team's site links", () => {
     await settle();
 
     expect(wrapper.findAll('[data-team-site]').map((a) => a.attributes('data-team-site'))).toEqual(['status']);
+    wrapper.unmount();
+  });
+
+  it('links the Team picture like any live site, named as the Team picture, and nothing once it is off', async () => {
+    sites.Pictured = [site('Pictured', 'team-picture', 3), site('Pictured', 'jobs', 1)];
+    const wrapper = await links('Pictured');
+
+    const picture = wrapper.find('[data-team-site="team-picture"]');
+    expect(picture.attributes('href')).toBe('/sites/Pictured/team-picture/');
+    expect(picture.attributes('target')).toBe('_blank');
+    expect(picture.attributes('aria-label')).toBe('Open the Team picture');
+    expect(wrapper.find('[data-team-site="jobs"]').attributes('aria-label')).toBe('Open the jobs site');
+
+    // Turned off: unpublished, so no link, though the site and its data are kept.
+    sites.Pictured = [site('Pictured', 'team-picture', null), site('Pictured', 'jobs', 1)];
+    window.dispatchEvent(new Event('focus'));
+    await settle();
+    expect(wrapper.find('[data-team-site="team-picture"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  // W27510 holds for the Team picture's globe too: a plain click opens it through `openSiteTab`,
+  // on a capability the app asks for, never as a bare link that needs the session cookie.
+  it("opens the Team picture on a plain click through a capability, like any site", async () => {
+    sites.Pictured = [site('Pictured', 'team-picture', 3)];
+    const wrapper = await links('Pictured');
+    const tab = { opener: 'the app' as unknown, location: { replace: vi.fn() } };
+    const opened = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+    wrapper.find('[data-team-site="team-picture"]').element.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(true);
+    expect(opened).toHaveBeenCalledWith('about:blank', '_blank');
+    expect(tab.opener).toBeNull();
+    await settle();
+
+    expect(calls.filter((call) => call.method === 'POST').map((call) => call.url)).toEqual(['/api/teams/Pictured/sites/team-picture/open']);
+    expect(tab.location.replace).toHaveBeenCalledWith(new URL('/sites/Pictured/team-picture/_c/CfDJ8pic/', window.location.href).href);
+    opened.mockRestore();
     wrapper.unmount();
   });
 });

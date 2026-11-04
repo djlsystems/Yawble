@@ -229,6 +229,18 @@ public sealed class SqliteTeamStore : ITeamStore
             audit,
             ct);
 
+    /// <summary>Narrow, single column. See <see cref="ITeamStore.SetTeamPictureAsync"/>.</summary>
+    public Task SetTeamPictureAsync(string team, bool on, TriggerAudit? audit = null, CancellationToken ct = default) =>
+        WriteAsync(
+            command =>
+            {
+                command.CommandText = "UPDATE teams SET team_picture = $on WHERE id = $id COLLATE NOCASE";
+                command.Parameters.AddWithValue("$on", on ? 1 : 0);
+                command.Parameters.AddWithValue("$id", team);
+            },
+            audit,
+            ct);
+
     /// <summary>Narrow: the two archive columns and, when archiving, <c>paused</c>. See
     /// <see cref="ITeamStore.SetArchivedAsync"/>.</summary>
     public Task SetArchivedAsync(

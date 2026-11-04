@@ -639,6 +639,13 @@ export const createTeam = (
    * `team.connection-assigned` row. Omitted when empty: the team starts with none.
    */
   connections?: string[],
+
+  /**
+   * The Team picture (`lib/teamPicture.ts`): true makes and publishes the team's `team-picture`
+   * site in this request. Omitted when false. A publish that fails leaves the team made, and the
+   * answer says so in `teamPictureError`.
+   */
+  teamPicture?: boolean,
 ) =>
   json<TeamCreated>('/api/teams', {
     method: 'POST',
@@ -659,6 +666,7 @@ export const createTeam = (
       localRepository,
       repoChoices: repoChoices && Object.keys(repoChoices).length > 0 ? repoChoices : undefined,
       connections: connections && connections.length > 0 ? connections : undefined,
+      teamPicture: teamPicture === true ? true : undefined,
     }),
   })
 
@@ -846,6 +854,18 @@ export const setTeamWorkflowBudget = (team: TeamId, budgetTokens: number | null)
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ budgetTokens }),
+  })
+
+/**
+ * Turns the team's Team picture on or off. ITS OWN ROUTE, as the budget's is. On publishes the
+ * platform's template as the team's `team-picture` site; off unpublishes it and keeps its data.
+ * Answers the whole `TeamSummary`, `teamPicture` in it.
+ */
+export const setTeamPicture = (team: TeamId, teamPicture: boolean) =>
+  json<Team>(`/api/teams/${encodeURIComponent(team)}/team-picture`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ teamPicture }),
   })
 
 /**

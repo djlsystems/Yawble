@@ -252,5 +252,12 @@ public static class SqlServerAuthPluginsSchema
                 billing_set_by     NVARCHAR(MAX) NULL,
                 billing_set_at     NVARCHAR(40)  NULL;
             """),
+
+        // `AuthSchema`'s auth-035: whether the team keeps its Team picture, 0 or 1, as `paused` is.
+        new MigrationStep(
+            "auth-035",
+            """
+            ALTER TABLE teams ADD team_picture BIGINT NOT NULL CONSTRAINT df_teams_team_picture DEFAULT 0;
+            """),
     ];
 }

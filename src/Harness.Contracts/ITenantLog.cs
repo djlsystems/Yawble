@@ -75,6 +75,10 @@ public static class TenantActions
     /// <summary>A person changed what this team may spend on ONE workflow.</summary>
     public const string TeamBudgetChanged = "team.budgetChanged";
 
+    /// <summary>A person turned a team's Team picture on or off (<c>{teamPicture}</c>). Written in the
+    /// same transaction as the change.</summary>
+    public const string TeamPictureChanged = "team.picture-changed";
+
     /// <summary>A team's substrate was reset under its Agent Containers. Its own verb rather than a
     /// flavour of a change, because it is the one act short of deletion that can permanently remove
     /// message rows - and an audit asking "who wiped this team's history" has to find it by name.

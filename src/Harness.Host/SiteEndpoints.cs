@@ -420,7 +420,7 @@ public static class SiteEndpoints
         return await GrantAsync(team, site, capability, context, sites, capabilities, ct);
     }
 
-    private static SiteActor Person(SiteGrant grant) => SiteActor.Person(grant.UserId, grant.Email);
+    private static SiteActor Person(SiteGrant grant) => SiteActor.Page(grant.UserId, grant.Email);
 
     private static string Origin(HttpRequest request) => $"{request.Scheme}://{request.Host.Value}";
 

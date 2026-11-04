@@ -166,7 +166,9 @@ public static class SiteApiEndpoints
 
             default:
                 var owner = principal.OwnerUserId is { } id ? await users.FindByIdAsync(id, ct) : null;
-                return SiteActor.Unbound(principal.Id, owner?.Email);
+                return principal.Kind is PrincipalKind.Concierge or PrincipalKind.TenantConcierge
+                    ? SiteActor.Concierge(principal.Id, owner?.Email)
+                    : SiteActor.Unbound(principal.Id, owner?.Email);
         }
     }
 

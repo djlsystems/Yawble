@@ -19,9 +19,11 @@ import {
   setRepoDefaultBranch,
   setRepoContributor,
   setTeamWorkflowBudget,
+  setTeamPicture,
   getTeamEnv,
   setTeamEnv,
 } from '../api/client';
+import { TeamPictureHint, TeamPictureLabel } from '../lib/teamPicture';
 import {
   agentsForMode,
   isManagerContainer,
@@ -574,7 +576,8 @@ const changed = computed(
     reposChanged.value ||
     changedBranches.value.length > 0 ||
     changedContributors.value.length > 0 ||
-    budgetChanged.value,
+    budgetChanged.value ||
+    teamPictureChanged.value,
 );
 
 /** Whether anything on this tab differs from what is stored and can actually be saved from here. */
@@ -587,6 +590,14 @@ const additionalInstructionsChanged = computed(
 
 /** Whether the box holds something other than what it was opened with - see `budgetOpened`. */
 const budgetChanged = computed(() => budgetFieldValue(budgetTokens.value) !== budgetOpened.value);
+
+/**
+ * THE TEAM PICTURE, saved by Save like everything here. On publishes the team's `team-picture`
+ * site from the platform's template; off unpublishes it and keeps its data (and its Concierge
+ * customizations), so on again brings the same page back.
+ */
+const teamPicture = ref(false);
+const teamPictureChanged = computed(() => teamPicture.value !== (team.value?.teamPicture === true));
 
 /** The field's own rule, so the refusal appears on the box rather than only in a dead button. The
  *  WORDING is `teamBudget`'s and never this dialog's - the New Team dialog renders the same
@@ -739,6 +750,10 @@ async function save() {
       await setTeamWorkflowBudget(team.value.id, budgetFieldValue(budgetTokens.value));
     }
 
+    if (teamPictureChanged.value) {
+      await setTeamPicture(team.value.id, teamPicture.value);
+    }
+
     // Refetched rather than patched in place. The ribbon heading, the switcher and this dialog all
     // read the same team object, and the response is the team - but `refresh()` is what every other
     // "a team changed" path in this app does, and one of them holding a hand-assembled copy is how
@@ -817,6 +832,8 @@ watch(open, (showing) => {
 
   budgetOpened.value = stored === null ? board.workflowSpendLimit : stored;
   budgetTokens.value = budgetOpened.value;
+
+  teamPicture.value = team.value?.teamPicture === true;
 
   void loadHeadlessAgents();
 
@@ -1053,6 +1070,13 @@ watch(open, (showing) => {
             >
               <template #append><FieldHelp text="What ONE workflow on this team may spend before it pauses — not a total across the team. Empty follows the instance figure; 0 is unlimited." /></template>
             </q-input>
+
+            <!-- THE TEAM PICTURE: the same words as New Team and the install wizard. Saved by Save. -->
+            <div class="text-subtitle2 q-mt-lg">{{ TeamPictureLabel }}</div>
+            <div class="row items-center no-wrap" data-team-picture-option>
+              <q-toggle v-model="teamPicture" dense :label="teamPicture ? 'On' : 'Off'" data-team-picture />
+              <FieldHelp :text="TeamPictureHint" />
+            </div>
 
             <q-banner v-if="saveError" dense class="os-bg-tint-error text-negative q-mt-md">
               <template #avatar><q-icon name="error" /></template>

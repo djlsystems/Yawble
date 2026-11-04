@@ -1094,6 +1094,12 @@ export interface Team {
   paused?: boolean
 
   /**
+   * The team's Team picture is on: its `team-picture` site is published from the platform's
+   * template. Absent reads as off.
+   */
+  teamPicture?: boolean
+
+  /**
    * Put away: kept whole, doing no work, out of the tabs, the team chooser and the Kanban, and still
    * a source to clone from. Absent reads as active.
    */
@@ -3807,6 +3813,8 @@ export type TeamCreated = Team & {
   localRepository?: TeamLocalRepository
   /** The github.com URLs a `create-on-github` choice created. Absent when none. */
   createdOnGitHub?: string[]
+  /** The Team picture was asked for and could not be published: the Host's sentence. The team is made. */
+  teamPictureError?: string
 }
 
 /** The team's local repository, as a create or `POST /api/teams/{team}/local-repo` attached it. */
@@ -4283,6 +4291,8 @@ export interface SolutionInstallRequest extends SolutionInstallInputs {
   teamName?: string
   agent?: string
   localRepository?: boolean
+  /** The new team's Team picture, on the install's team step. Omitted when off. */
+  teamPicture?: boolean
 }
 
 export interface SolutionUpdateRequest extends SolutionInstallInputs {

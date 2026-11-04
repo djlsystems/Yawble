@@ -403,6 +403,19 @@ const words: Record<string, Words> = {
   },
   'team.paused': { did: 'paused team', detail: () => 'Paused: no new work is delivered.' },
   'team.resumed': { did: 'resumed team', detail: () => 'Resumed.' },
+  'team.picture-changed': {
+    did: 'changed the Team picture',
+    detail: (d) => {
+      const on = get(d, 'teamPicture');
+      return (
+        sentence([
+          on === true ? 'Team picture turned on' : on === false ? 'Team picture turned off' : null,
+          text(d, 'clonedFrom') && `carried over when cloned from ${text(d, 'clonedFrom')}`,
+          text(d, 'solution') && `chosen when installing solution ${text(d, 'solution')}`,
+        ]) || 'The Team picture was changed.'
+      );
+    },
+  },
   'team.archived': {
     did: 'archived team',
     detail: (d) => sentence([`archived and paused${get(d, 'viaConcierge') === true ? ' through the Concierge' : ''}`]),

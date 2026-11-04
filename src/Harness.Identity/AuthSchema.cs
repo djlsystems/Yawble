@@ -806,5 +806,14 @@ public static class AuthSchema
             ALTER TABLE team_members ADD COLUMN billing_set_by     TEXT NULL;
             ALTER TABLE team_members ADD COLUMN billing_set_at     TEXT NULL;
             """),
+
+        // `team_picture` is whether the team keeps its Team picture: the platform's reserved site
+        // `team-picture`, published from the shipped template, with its live collections kept from
+        // the team's own figures (`TeamPicture`). 0 off, 1 on; off unpublishes and keeps its data.
+        new MigrationStep(
+            "auth-035",
+            """
+            ALTER TABLE teams ADD COLUMN team_picture INTEGER NOT NULL DEFAULT 0;
+            """),
     ];
 }

@@ -86,7 +86,11 @@ public sealed record PersistedTeam(
 
     /// <summary>Who archived it: the person's email, or the Concierge on a person's behalf. Null for
     /// an active team.</summary>
-    string? ArchivedBy = null);
+    string? ArchivedBy = null,
+
+    /// <summary>Whether this team keeps its Team picture (the reserved site <c>team-picture</c>).
+    /// Optional and last for the reason <see cref="Paused"/> is.</summary>
+    bool TeamPicture = false);
 
 /// <summary>
 /// Tenant-wide Concierge launch settings. The one store of them: a team has no Concierge
@@ -293,6 +297,12 @@ public interface ITeamStore
     /// <remarks>With <paramref name="audit"/>, that row is appended to `tenant_events` in the same
     /// transaction: both land or neither does.</remarks>
     Task SetBudgetAsync(string team, long? budgetTokens, TriggerAudit? audit = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Turns this team's Team picture on or off: one narrow column, and the <paramref name="audit"/>
+    /// row in the same transaction. REQUIRED, for the reason <see cref="SetEnvAsync"/> gives.
+    /// </summary>
+    Task SetTeamPictureAsync(string team, bool on, TriggerAudit? audit = null, CancellationToken ct = default);
 
 
     Task SaveMemberAsync(PersistedMember member, CancellationToken ct = default);

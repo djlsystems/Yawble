@@ -154,6 +154,39 @@ describe('Solution wizard - Team', () => {
     expect(install).not.toHaveProperty('localRepository');
   });
 
+  it('offers the Team picture for the new team, off unless ticked, and sends it with the install', async () => {
+    const installed = (call: Call) =>
+      call.url === '/api/solutions/install'
+        ? reply(200, { ok: true, team: 'job-tracker', teamName: 'Job Tracker', version: '1.1.0', missing: [], steps: steps(8) })
+        : undefined;
+    const readBack = (call: Call) =>
+      call.url === '/api/teams/job-tracker/solution' ? reply(200, { team: 'job-tracker', missing: [] }) : undefined;
+
+    async function install(tick: boolean) {
+      serve([installed, readBack]);
+      await open();
+      const option = bodyFind('[data-team-picture]') as HTMLElement | null;
+      expect(option).not.toBeNull();
+      expect(option!.textContent).toContain('Team picture');
+      expect(option!.getAttribute('aria-checked')).toBe('false');
+      if (tick) {
+        option!.click();
+        await settle();
+      }
+      for (let index = 0; index < 3; index++) {
+        button('Next').click();
+        await settle();
+      }
+      button('Install').click();
+      await settle();
+      return sent(calls, 'POST', '/api/solutions/install')[0]!.body as Record<string, unknown>;
+    }
+
+    expect(await install(false)).not.toHaveProperty('teamPicture');
+    resetBody();
+    expect(await install(true)).toMatchObject({ teamName: 'Job Tracker', teamPicture: true });
+  });
+
   it('offers to update only a team on an older version; the same or a newer one is shown disabled, saying why', async () => {
     serve([], {
       installed: [
