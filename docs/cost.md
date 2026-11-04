@@ -209,6 +209,69 @@ never added to an estimate. Several members naming one account never multiply it
 No screen shows expenses or projections yet; expenses are reached through the routes below. Hours
 are never Actual Spend.
 
+## People's acts: the intervention ledger
+
+`intervention_ledger` (`outcome-010`, on both providers) records one row per meaningful act by a
+person. Nothing is priced from it and no screen, route or report reads it yet. Each row holds:
+
+| Column | What it is |
+|---|---|
+| `id`, `occurred_at` | The row, and when the act happened (its log row's time) |
+| `actor_id`, `actor_email` | The person (below) |
+| `kind` | One of the closed set `InterventionKinds` |
+| `team_id` | The team the act was on, or NULL (a tenant-level credential, a Concierge opened on no team) |
+| `correlation` | The workflow the act was in, or NULL (a team resume, a credential, a Concierge session) |
+| `outcome_id_at_event` | The workflow's outcome at that moment (its newest link, after the act), or NULL |
+| `related_seq` | The message log row the act was written with, or NULL when its log row is a tenant row (or none) |
+| `duration_seconds`, `duration_measured` | Measured time, and 1 when it was measured; NULL and 0 for every kind but a Concierge session |
+
+The table is append-only: an UPDATE or DELETE is refused by trigger, as on the other ledgers. No
+content is stored: no instruction text, prompt, answer, secret, connection value or connection
+field.
+
+**Who acted.** The route builds the act from its own signed-in principal, never from the request
+body. A person signed in is their user id and email. An API key is its owner: the owner's id, and
+their email read from `users` in the same transaction, so the row still reads after the key is
+revoked and the owner deleted. A member, a member's key, the Concierge, a trigger, a schedule, a
+wake and the Host are no person and write no row; so does any act through a route a member calls.
+
+**Where each kind is written.** Each row lands in the same transaction as its log row, so the act is
+recorded with it or not at all.
+
+| Kind | Written when | Route | With the log row |
+|---|---|---|---|
+| `dispatch` | A person dispatches a backlog item to a team (existing or new) | `POST /api/teams/{team}/backlog/{id}/dispatch`, `POST /api/backlog/{id}/dispatch-to-new` | `backlog.item.dispatched`; the Manager's instruction after it is no second act |
+| `instruction` | A person tells a member, which starts a workflow when it names no causation | `POST /api/teams/{team}/containers/{name}/tell` | the instruction row |
+| `decision_answered` | A person's tell that answers a decision: it names the `needsDecision` row, or joins a workflow in which a member of the team is waiting on one | the same tell route | the instruction row |
+| `resume` | A person releases a paused workflow, or a paused team | `POST /api/teams/{team}/workflows/{correlation}/resume`; `POST /api/teams/{team}/resume` | `workflow.resumed`; the `team.resumed` tenant row (only when the team was paused) |
+| `nudge` | A person nudges a stalled workflow's Manager | `POST /api/teams/{team}/workflows/{correlation}/nudge` | the Manager's instruction |
+| `close` | A person closes a workflow | `POST /api/teams/{team}/workflows/{correlation}/close` | `workflow.closed` |
+| `outcome_changed` | A person, or a person's key, sets, changes or clears a workflow's outcome | `PUT` and `DELETE /api/teams/{team}/workflows/{correlation}/outcome` | the `workflow.outcome-changed` tenant row |
+| `credential_supplied` | A person saves a connection's value, or a secret a member runs with: one row per value set or replaced | the connection routes that save a value (credential, mailbox, IMAP, password, an OAuth sign-in's completion), `PUT /api/secrets/{key}`, `PUT .../members/{member}/secrets/{field}`, `PUT .../named-secrets/{name}`, and a member's settings save carrying values | that save's tenant row (`connections.connected`, `.reconnected`, `.password-updated`, `.credentials-changed`, `secrets.set`, `.replaced`, `member.secret-set`, `.secret-replaced`, `member.named-secret-set`, `.named-secret-replaced`) |
+| `access_resolved` | Nothing today: no run waits on an access grant a person resolves. The kind is in the set for later | none | none |
+| `concierge_session` | A person's Concierge session ends | the Host, at the session's end | none: written alone |
+
+A tell that also names an outcome is one act (`instruction`), not two. A clear of a secret, a rename,
+a test, a team's connection assignment, a stop, a wake cancel, a card move or comment, a kanban
+plan, a repository action, and deleting or merging an outcome (which may unlink workflows) are not
+recorded. A Run now pressed by a person starts its workflow as its trigger, and writes no row.
+`InterventionSites` lists every writer site, and a test fails when a Host route hands the log a
+person's principal without recording an act and is not named as recording none.
+
+**The Concierge session.** A session opens when the Host spawns a person's Concierge, and is one row
+when it ends, however many chat messages it held, with `duration_seconds` measured open to close and
+`duration_measured` 1. It ends when the person ends it, when its CLI exits, when the idle reaper ends
+it, or when the Host stops. The person's end and the CLI's exit close it then. An abandoned session
+(the reaper's, or one still open when the Host stops) closes at its last activity, so the unattended
+time before it is not counted as the person's.
+
+**Waiting is not attention.** Only a measured duration is attention. `blockedSeconds` stays the time
+work waited on a person and is never added to an intervention's duration.
+
+**Where it begins.** The start that applies `outcome-010` records `interventions.startedAt` once, a
+`tenant_settings` row with its tenant row, as `ledger.startedAt` is; it never moves. Acts before it
+were never recorded, and nothing reconstructs them from the log, so a human figure begins there.
+
 ## A shared budget is measured across every team
 
 An outcome's budget belongs to the outcome, not to one team. When two teams both serve an outcome,

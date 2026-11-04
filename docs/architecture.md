@@ -85,6 +85,15 @@ The product name, Yawble, lives in the web app's presentation layer
   interruption and has no code. Rows from before codes existed have no `reasonCode` and still read;
   a reader takes the same default for them. A run that ends interrupted copies its code onto its
   usage ledger row (see [cost.md](cost.md)).
+- **Human interventions are recorded by the route, never published.** Each meaningful act by a
+  person is one row in `intervention_ledger`, written by the route that performs it, server side, in
+  the same transaction as the log row the act went with: a person's dispatch, tell, answer to a
+  decision, resume, nudge, close, change of a workflow's outcome and saved credential, and one row
+  per Concierge session. The person is the route's signed-in principal (an API key is its owner); a
+  member, a member's key, the Concierge, a trigger, a schedule, a wake or the Host writes no row. No
+  request body, message, tell, member tool or key can write one or pick its kind, person or
+  duration, and nothing in it is the act's content. The kinds, each writer and the rules are in
+  [cost.md](cost.md#peoples-acts-the-intervention-ledger).
 - **Steering the Concierge.** The workflow a person highlights on the board is the one their
   Concierge continues: its next launch carries it in `HARNESS_CAUSATION`, and a running Concierge
   reads it from `STEERING.md`. Only an open workflow of a team that exists and is not archived can
