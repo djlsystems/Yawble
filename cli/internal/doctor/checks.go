@@ -109,12 +109,15 @@ func statsRow(o Observed) Check {
 
 // cgroupsRow is whether the engine can apply the containers' memory and CPU limits, from its own
 // report. Any of memory, cpu or pids missing FAILs, naming what is missing and the fix, and says
-// that `up` starts without the limits meanwhile. Not measured stays not measured.
+// that `up` starts without the limits meanwhile. Not measured stays not measured, and is never
+// ok: with control made without its limits it warns that the cause could not be measured.
 func cgroupsRow(o Observed) Check {
 	c := o.Cgroups
 	switch {
 	case c == nil:
 		return Check{"cgroups", Skip, "the engine could not be asked", ""}
+	case !c.Measured && o.ControlNoLimits:
+		return Check{"cgroups", Warn, "the instance runs without container limits (no memory or CPU limit is applied to any container), and the cause could not be measured: " + c.Reason, "make `" + c.Source + "` answer, then run yawble doctor again: this row then says which controllers are missing, and yawble up applies the limits if it can"}
 	case !c.Measured:
 		return Check{"cgroups", Skip, "not measured: " + c.Reason, ""}
 	}
@@ -123,7 +126,7 @@ func cgroupsRow(o Observed) Check {
 		if len(c.Controllers) > 0 {
 			have = strings.Join(c.Controllers, ", ")
 		}
-		return Check{"cgroups", Fail, fmt.Sprintf("%s reports no %s cgroup controller (it has: %s), so the engine cannot apply a container's memory or CPU limit; `yawble up` starts the instance WITHOUT them, and no memory or CPU limit is applied to any container", c.Source, strings.Join(missing, ", "), have), instance.LimitsFix(o.EngineName)}
+		return Check{"cgroups", Fail, fmt.Sprintf("%s reports no %s cgroup controller (it has: %s), so the engine cannot apply a container's %s; `yawble up` starts the instance WITHOUT the containers' limits, and no memory or CPU limit is applied to any container", c.Source, strings.Join(missing, ", "), have, instance.LimitsOf(missing)), instance.LimitsFix(o.EngineName)}
 	}
 	if o.ControlNoLimits {
 		return Check{"cgroups", Warn, fmt.Sprintf("%s reports memory, cpu and pids, but the instance was started without its memory and CPU limits", c.Source), "yawble up (it makes the containers again with their limits)"}

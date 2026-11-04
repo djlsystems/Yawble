@@ -98,8 +98,9 @@ func TestCgroupEdgeOlderStoppedLabelNotMeasuredJustStarts(t *testing.T) {
 	}
 }
 
-// Control running without limits, engine report not measured: kept without limits. Is it said?
-func TestCgroupEdgeNoLimitsControlNotMeasuredIsKeptAndObserved(t *testing.T) {
+// Control running without limits, engine report not measured: kept without limits, and up says
+// the instance runs without container limits and the cause could not be measured.
+func TestUpWarnsWhenTheReportCannotBeReadAndControlHasNoLimits(t *testing.T) {
 	st := keyed()
 	was := st
 	was.NoLimits = true
@@ -114,13 +115,31 @@ func TestCgroupEdgeNoLimitsControlNotMeasuredIsKeptAndObserved(t *testing.T) {
 	if len(runsOf(s, "podman run -d")) != 0 {
 		t.Errorf("remade: %q", s.Calls)
 	}
-	t.Logf("up output (no-limits control, report not measured):\n%s", out.String())
+	text := out.String()
+	if !strings.Contains(text, "warning: the instance runs without container limits") || !strings.Contains(text, "the cause could not be measured: podman info --format: Error: cannot connect (exit 125)") {
+		t.Errorf("output:\n%s", text)
+	}
 }
 
-// Observation, not a Done-when line: a worker that alone was refused the limits (control has
-// them) is removed and remade on EVERY later up ("limits can be applied now"), though no
-// engine report was consulted. It ends running without limits again.
-func TestCgroupEdgeWorkerMadeWithoutLimitsBesideALimitedControlIsRemadeEachUp(t *testing.T) {
+// Report not measured but control made with its limits: nothing to warn about.
+func TestUpSaysNothingOfLimitsWhenTheReportCannotBeReadAndControlHasThem(t *testing.T) {
+	st := keyed()
+	s := engine.NewScripted()
+	s.On(inspect, engine.Result{Stdout: "exited|" + img + "|" + label(st) + "\n"})
+	workerAs(s, "running", st, 1)
+	s.On("podman info --format json", engine.Result{Stderr: "Error: cannot connect", ExitCode: 125})
+	var out bytes.Buffer
+	if err := instance.Up(context.Background(), engine.NewPodman(s), st, healthy, &out); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "without container limits") || strings.Contains(out.String(), "WITHOUT") {
+		t.Errorf("output:\n%s", out.String())
+	}
+}
+
+// A worker made without limits beside a limited control by an older yawble (its label records
+// no report) is made again once; the worker refused again then records the report.
+func TestCgroupEdgeWorkerFromAnOlderLabelBesideALimitedControlIsRemadeOnce(t *testing.T) {
 	st := keyed()
 	w := st
 	w.NoLimits = true
@@ -132,8 +151,9 @@ func TestCgroupEdgeWorkerMadeWithoutLimitsBesideALimitedControlIsRemadeEachUp(t 
 	if err := instance.Up(context.Background(), engine.NewPodman(s), st, healthy, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "memory/CPU limits can be applied now") || len(runsOf(s, "podman run -d --name yawble-worker-1")) != 2 {
-		t.Errorf("behaviour changed (good?):\n%s", out.String())
+	runs := runsOf(s, "podman run -d --name yawble-worker-1")
+	if !strings.Contains(out.String(), "memory/CPU limits can be applied now") || len(runs) != 2 || !strings.Contains(runs[1], `"cgroups":"not measured"`) {
+		t.Errorf("runs %q\n%s", runs, out.String())
 	}
 }
 

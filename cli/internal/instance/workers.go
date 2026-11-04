@@ -118,11 +118,18 @@ type workerApplied struct {
 	KeyHash string `json:"keyHash"`
 	// NoLimits is a worker made without its memory and CPU limits; omitted otherwise.
 	NoLimits bool `json:"noLimits,omitempty"`
+	// Cgroups is the engine's report when the worker was made without limits (CgroupsSeen);
+	// omitted otherwise.
+	Cgroups string `json:"cgroups,omitempty"`
 }
 
 // WorkerSettingsLabel is the label value stamped on worker i.
 func WorkerSettingsLabel(s Settings, i int, ref string) string {
-	b, _ := json.Marshal(workerApplied{RoleWorker, i, s.Memory, s.CPUs, ref, s.EnvFileHash, s.KeyHash, s.NoLimits})
+	seen := ""
+	if s.NoLimits {
+		seen = s.CgroupsSeen
+	}
+	b, _ := json.Marshal(workerApplied{RoleWorker, i, s.Memory, s.CPUs, ref, s.EnvFileHash, s.KeyHash, s.NoLimits, seen})
 	return string(b)
 }
 
@@ -230,14 +237,19 @@ func upWorkers(ctx context.Context, e engine.Engine, s Settings, ref string, ste
 // made without its limits, said, and s records it for the workers after it.
 func upWorker(ctx context.Context, e engine.Engine, sp *Settings, i int, ref string, step workerStep, pulled *bool, out io.Writer) error {
 	s := *sp
-	defer func() { sp.NoLimits = s.NoLimits }()
+	defer func() { sp.NoLimits, sp.CgroupsSeen = s.NoLimits, s.CgroupsSeen }()
 	name := WorkerName(i)
 	info, err := e.Inspect(ctx, name)
 	if err != nil {
 		return err
 	}
 	if info.State != engine.StateAbsent {
-		diff := append(WorkerChanges(info.Label, s, i, ref), limitsChange(info.Label, s)...)
+		diff := WorkerChanges(info.Label, s, i, ref)
+		if len(diff) == 0 && !step.recreate && keptWithoutLimits(ctx, e, info.Label, s) {
+			fmt.Fprintf(out, "%s runs WITHOUT memory or CPU limits: the engine refused them for it alone; it is kept as it is until the cgroup controllers or its settings change\n", name)
+		} else {
+			diff = append(diff, limitsChange(info.Label, s)...)
+		}
 		if step.recreate && len(diff) == 0 {
 			diff = []string{"control was made again, and a worker shares control's network"}
 		}
@@ -258,8 +270,8 @@ func upWorker(ctx context.Context, e engine.Engine, sp *Settings, i int, ref str
 		if err := e.Start(ctx, name); err == nil {
 			fmt.Fprintf(out, "started %s\n", name)
 		} else if CgroupError(err) && !s.NoLimits {
-			fmt.Fprintln(out, NoLimitsLine(e.Name(), nil))
-			s.NoLimits = true
+			fmt.Fprintln(out, refusedLine(e.Name(), err))
+			s.NoLimits, s.CgroupsSeen = true, CgroupsSeen(e.Cgroups(ctx))
 			if err := e.Remove(ctx, name); err != nil {
 				return err
 			}
@@ -288,8 +300,8 @@ func upWorker(ctx context.Context, e engine.Engine, sp *Settings, i int, ref str
 		err := e.Run(ctx, workerSpec(s, i, ref))
 		if err != nil && CgroupError(err) && !s.NoLimits {
 			_ = e.Remove(ctx, name)
-			fmt.Fprintln(out, NoLimitsLine(e.Name(), nil))
-			s.NoLimits = true
+			fmt.Fprintln(out, refusedLine(e.Name(), err))
+			s.NoLimits, s.CgroupsSeen = true, CgroupsSeen(e.Cgroups(ctx))
 			err = e.Run(ctx, workerSpec(s, i, ref))
 		}
 		if err != nil {
@@ -306,6 +318,20 @@ func upWorker(ctx context.Context, e engine.Engine, sp *Settings, i int, ref str
 		}
 	}
 	return nil
+}
+
+// keptWithoutLimits is whether a worker made without limits beside a control that has them stays
+// as it is: the engine refused it the limits on its own, and its report of the controllers is
+// what it was then. Without this the worker would be made again, and refused again, on every up.
+func keptWithoutLimits(ctx context.Context, e engine.Engine, label string, s Settings) bool {
+	if s.NoLimits || !NoLimitsOf(label) {
+		return false
+	}
+	var was workerApplied
+	if json.Unmarshal([]byte(label), &was) != nil || was.Cgroups == "" {
+		return false
+	}
+	return was.Cgroups == CgroupsSeen(e.Cgroups(ctx))
 }
 
 // waitWorker waits until the engine reads the worker healthy, which its image's health check

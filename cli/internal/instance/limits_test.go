@@ -104,7 +104,7 @@ func TestUpRefusedTheLimitsStartsWithoutThemAndWarnsAndKeepsThePreviewPorts(t *t
 	if strings.Contains(text, "preview ports could not be published") {
 		t.Errorf("the preview ports are blamed:\n%s", text)
 	}
-	if !strings.Contains(text, "starting WITHOUT them: no memory or CPU limit is applied") || !strings.Contains(text, "NO memory or CPU limit") || !strings.Contains(text, "Yawble is up at") {
+	if !strings.Contains(text, "starting WITHOUT the containers' limits: no memory or CPU limit is applied") || !strings.Contains(text, "NO memory or CPU limit") || !strings.Contains(text, "Yawble is up at") {
 		t.Errorf("output:\n%s", text)
 	}
 	control := runsOf(s, "podman run -d --name yawble --pod")
@@ -191,7 +191,7 @@ func TestAStoppedControlTheEngineCannotStartForTheLimitsIsMadeAgainWithoutThem(t
 	if err := instance.Up(context.Background(), engine.NewPodman(s), st, healthy, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "starting WITHOUT them") {
+	if !strings.Contains(out.String(), "starting WITHOUT the containers' limits") {
 		t.Errorf("output:\n%s", out.String())
 	}
 	if c := runsOf(s, "podman run -d --name yawble --pod"); len(c) != 1 || strings.Contains(c[0], "--memory") {
@@ -212,7 +212,7 @@ func TestAWorkerRefusedForTheLimitsIsMadeWithoutThem(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := runsOf(s, "podman run -d --name yawble-worker-1")
-	if len(w) != 2 || !strings.Contains(w[0], "--memory 12288m") || strings.Contains(w[1], "--memory") || !strings.Contains(out.String(), "starting WITHOUT them") {
+	if len(w) != 2 || !strings.Contains(w[0], "--memory 12288m") || strings.Contains(w[1], "--memory") || !strings.Contains(out.String(), "starting WITHOUT the containers' limits") {
 		t.Errorf("worker runs %q\n%s", w, out.String())
 	}
 }
@@ -231,5 +231,174 @@ func TestWithPreviewPortsTheMemoryMaxErrorIsStillTheControllers(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "preview ports could not be published") {
 		t.Errorf("the preview ports are blamed:\n%s", out.String())
+	}
+}
+
+// crunPidsNotAvailable is crun's words for --pids-limit on a rootless WSL Podman machine with no
+// controllers (measured: podman 6.1.4, cgroupfs, cgroupControllers=[]): a different error from
+// memory.max's, exit 126 like a libpod port error.
+var crunPidsNotAvailable = engine.Result{Stderr: "crun: controller `pids` is not available under .../cgroup.controllers", ExitCode: 126}
+
+// The runtimes' "controller not available" wordings are cgroup errors, never the port: crun's
+// as measured, the same with its path cut, and runc's under Docker.
+func TestAControllerNotAvailableErrorIsACgroupError(t *testing.T) {
+	for _, text := range []string{
+		"podman run -d: crun: controller `pids` is not available under .../cgroup.controllers (exit 126)",
+		"Error: crun: controller `pids` is not available",
+		"docker: Error response from daemon: failed to create task for container: runc create failed: unable to start container process: unable to apply cgroup configuration: controller \"pids\" not available",
+		"docker: Error response from daemon: runc create failed: unable to start container process: can't set pids limit: no such file or directory",
+	} {
+		if !instance.CgroupError(errors.New(text)) {
+			t.Errorf("not read as a cgroup error: %s", text)
+		}
+	}
+	for _, text := range []string{
+		"podman run -d: Error: starting some containers: internal libpod error (exit 126)",
+		"Error: rootlessport listen tcp 0.0.0.0:8080: bind: address already in use",
+		"Error: network controller is not available: netavark failed",
+	} {
+		if instance.CgroupError(errors.New(text)) {
+			t.Errorf("read as a cgroup error: %s", text)
+		}
+	}
+}
+
+// up reads crun's pids error (exit 126) as the controllers, never the port: it starts without
+// the limits, naming the pids controller; refused every time, the error is the controllers'.
+func TestUpTreatsCrunsPidsControllerNotAvailableAsACgroupErrorNeverThePort(t *testing.T) {
+	s := fresh("podman", healthPrefix, 1)
+	s.OnSequence("podman run -d --name yawble --pod", crunPidsNotAvailable, engine.Result{})
+	var out bytes.Buffer
+	if err := instance.Up(context.Background(), engine.NewPodman(s), keyed(), healthy, &out); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	if !strings.Contains(text, "the engine refused the containers' process (pids) limit: no pids cgroup controller is delegated to it; starting WITHOUT the containers' limits") || strings.Contains(text, "port 8080 is") || strings.Contains(text, "usual cause is port") {
+		t.Errorf("output:\n%s", text)
+	}
+	if c := runsOf(s, "podman run -d --name yawble --pod"); len(c) != 2 || strings.Contains(c[1], "--memory") {
+		t.Errorf("control runs %q", c)
+	}
+
+	s = fresh("podman", healthPrefix, 1)
+	s.On("podman run -d --name yawble --pod", crunPidsNotAvailable)
+	err := instance.Up(context.Background(), engine.NewPodman(s), keyed(), healthy, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "crun: controller `pids` is not available under .../cgroup.controllers (exit 126)") || !strings.Contains(err.Error(), "this is not the port") || strings.Contains(err.Error(), "usual cause is port") || strings.Contains(err.Error(), "config set port") {
+		t.Errorf("%v", err)
+	}
+}
+
+// The degraded start drops every limit yawble sets: no --memory, --cpus or --pids-limit on any
+// container, whether the report said so or the engine refused a run.
+func TestTheDegradedStartPassesNoMemoryCpusOrPidsLimit(t *testing.T) {
+	report := fresh("podman", healthPrefix, 2)
+	report.On("podman info --format json", engine.Result{Stdout: `{"host":{"cgroupControllers":[]}}`})
+	refused := fresh("podman", healthPrefix, 2)
+	refused.OnSequence("podman run -d --name yawble --pod", crunPidsNotAvailable, engine.Result{})
+	st := keyed()
+	st.Workers = 2
+	for name, s := range map[string]*engine.Scripted{"report": report, "refused": refused} {
+		if err := instance.Up(context.Background(), engine.NewPodman(s), st, healthy, &bytes.Buffer{}); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		runs := runsOf(s, "podman run -d")
+		if name == "refused" {
+			runs = runs[1:]
+		}
+		if len(runs) != 3 {
+			t.Errorf("%s: runs %q", name, runs)
+		}
+		for _, r := range runs {
+			for _, flag := range []string{"--memory", "--cpus", "--pids-limit"} {
+				if strings.Contains(r, flag) {
+					t.Errorf("%s: %s in %s", name, flag, r)
+				}
+			}
+		}
+	}
+}
+
+// Only pids missing: the warning names pids and the process limit alone, never memory or CPU as
+// the controllers missing, and still says no container limit is applied.
+func TestOnlyPidsMissingTheWarningNamesThePidsControllerAlone(t *testing.T) {
+	s := fresh("podman", healthPrefix, 1)
+	s.On("podman info --format json", engine.Result{Stdout: `{"host":{"cgroupControllers":["cpu","memory"]}}`})
+	var out bytes.Buffer
+	if err := instance.Up(context.Background(), engine.NewPodman(s), keyed(), healthy, &out); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	if !strings.Contains(text, "warning: podman info reports no pids cgroup controller, so it cannot apply the containers' process (pids) limit; starting WITHOUT the containers' limits: no memory or CPU limit is applied to any container") {
+		t.Errorf("output:\n%s", text)
+	}
+	for _, wrong := range []string{"no memory, cpu", "no memory cgroup", "cannot apply the containers' memory"} {
+		if strings.Contains(text, wrong) {
+			t.Errorf("says %q:\n%s", wrong, text)
+		}
+	}
+}
+
+// settingsLabelOf is the settings label a scripted run was given.
+func settingsLabelOf(t *testing.T, run string) string {
+	t.Helper()
+	const mark = "--label yawble.settings="
+	at := strings.Index(run, mark)
+	if at < 0 {
+		t.Fatalf("no settings label in %s", run)
+	}
+	rest := run[at+len(mark):]
+	return rest[:strings.Index(rest, " --label ")]
+}
+
+// A worker refused the limits on its own beside a control that has them is made again once,
+// without them, said; a second up with nothing changed leaves it as it is.
+func TestASecondUpWithNothingChangedDoesNotRemakeAWorkerRefusedOnItsOwn(t *testing.T) {
+	st := keyed()
+	first := fresh("podman", healthPrefix, 1)
+	first.OnSequence("podman run -d --name yawble-worker-1", crunMemoryMax, engine.Result{})
+	var out bytes.Buffer
+	if err := instance.Up(context.Background(), engine.NewPodman(first), st, healthy, &out); err != nil {
+		t.Fatal(err)
+	}
+	made := runsOf(first, "podman run -d --name yawble-worker-1")
+	if len(made) != 2 || !strings.Contains(out.String(), "the engine refused the containers' memory limit") {
+		t.Fatalf("first up: runs %q\n%s", made, out.String())
+	}
+	workerLabel := settingsLabelOf(t, made[1])
+	ref, _ := st.WorkerRef()
+
+	second := engine.NewScripted()
+	second.On(inspect+"-worker-1", engine.Result{Stdout: "running|" + ref + "|" + workerLabel + "\n"})
+	second.On(healthPrefix+"yawble-worker-1", engine.Result{Stdout: "healthy\n"})
+	second.On(inspect, engine.Result{Stdout: "running|" + img + "|" + label(st) + "\n"})
+	out.Reset()
+	if err := instance.Up(context.Background(), engine.NewPodman(second), st, healthy, &out); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	if n := len(runsOf(second, "podman run -d")); n != 0 || len(runsOf(second, "podman rm")) != 0 || strings.Contains(text, "replacing") {
+		t.Errorf("remade on the second up: %q\n%s", second.Calls, text)
+	}
+	if !strings.Contains(text, "yawble-worker-1 runs WITHOUT memory or CPU limits: the engine refused them for it alone; it is kept as it is until the cgroup controllers or its settings change") {
+		t.Errorf("output:\n%s", text)
+	}
+}
+
+// The same worker is made again once the engine's report of its controllers changes.
+func TestAWorkerKeptWithoutLimitsIsMadeAgainWhenTheControllersChange(t *testing.T) {
+	st := keyed()
+	w := st
+	w.NoLimits, w.CgroupsSeen = true, "not measured"
+	s := engine.NewScripted()
+	s.On(inspect, engine.Result{Stdout: "running|" + img + "|" + label(st) + "\n"})
+	workerAs(s, "running", w, 1)
+	s.On("podman info --format json", engine.Result{Stdout: `{"host":{"cgroupControllers":["cpu","memory","pids"]}}`})
+	var out bytes.Buffer
+	if err := instance.Up(context.Background(), engine.NewPodman(s), st, healthy, &out); err != nil {
+		t.Fatal(err)
+	}
+	runs := runsOf(s, "podman run -d --name yawble-worker-1")
+	if len(runs) != 1 || !strings.Contains(runs[0], "--memory 12288m") || !strings.Contains(out.String(), "memory/CPU limits can be applied now") {
+		t.Errorf("runs %q\n%s", runs, out.String())
 	}
 }
