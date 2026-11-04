@@ -660,7 +660,8 @@ public static class OutcomeEndpoints
     private sealed record Dashboard(
         OutcomeFigures.Pricing Pricing, OutcomeFigures.Book Whole, IReadOnlyList<OutcomeBacklogItem> Items,
         IReadOnlyDictionary<string, string> Resolution, IReadOnlyDictionary<long, double> Blocked, DateTimeOffset Now,
-        IReadOnlyList<ExecutionCost.Run> WeekRuns, ExecutionCost.Costs Costs)
+        IReadOnlyList<ExecutionCost.Run> WeekRuns, ExecutionCost.Costs Costs,
+        IReadOnlyList<InterventionEntry> Interventions, DateTimeOffset? From, DateTimeOffset? To)
     {
         public object Money => new
         {
@@ -685,14 +686,19 @@ public static class OutcomeEndpoints
             var weeks = OutcomeFigures.WeekStarts(now);
             var weekRuns = ExecutionCost.Of(await outcomes.ReadExecutionRunsAsync(weeks[0], weeks[^1].AddDays(7), pricedOnly: false, ct), all, settings.OutcomesCurrency);
 
+            // EVERY PERSON'S ACT, ALL TIME: the window's figures and the weekly frequency are both read from it.
+            var interventions = await outcomes.ReadInterventionsAsync(null, null, ct);
+
             return new Dashboard(
                 pricing, whole, items, OutcomeFigures.Resolution(all),
                 OutcomeFigures.BlockedByWorkflow(whole.Rows, now, from, to), now,
-                weekRuns, ExecutionCost.CostsOf(executions, from, to, pricing.Currency));
+                weekRuns, ExecutionCost.CostsOf(executions, from, to, pricing.Currency),
+                interventions, from, to);
         }
 
         public OutcomeFigures.Figures Figures(OutcomeFigures.Figures figures, string? outcome) =>
-            OutcomeFigures.Dashboard(figures, Whole, outcome, Items, Resolution, Blocked, Pricing, Now, WeekRuns, Costs);
+            OutcomeFigures.Dashboard(
+                figures, Whole, outcome, Items, Resolution, Blocked, Pricing, Now, WeekRuns, Costs, Interventions, From, To);
     }
 
     /// <summary>A delete that failed part way changed nothing - it is one transaction - and says so.</summary>

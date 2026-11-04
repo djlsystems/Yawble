@@ -650,6 +650,27 @@ public sealed class SqliteOutcomeStore(
         return new OutcomeLedgerRows(current, runRows, closeRows, names);
     }
 
+    public async Task<IReadOnlyList<InterventionEntry>> ReadInterventionsAsync(
+        DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            $"""
+            SELECT {InterventionEntry.Columns}
+            FROM intervention_ledger
+            WHERE occurred_at >= $from AND occurred_at < $to
+            ORDER BY id
+            """;
+        command.Parameters.AddWithValue("$from", Stamp(from ?? DateTimeOffset.MinValue));
+        command.Parameters.AddWithValue("$to", Stamp(to ?? DateTimeOffset.MaxValue));
+
+        var rows = new List<InterventionEntry>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct)) rows.Add(InterventionEntry.Read(reader));
+        return rows;
+    }
+
     public async Task<ExecutionRunRows> ReadExecutionRunsAsync(
         DateTimeOffset? from, DateTimeOffset? to, bool pricedOnly, CancellationToken ct = default)
     {

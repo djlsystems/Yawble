@@ -336,6 +336,46 @@ public interface IOutcomeStore
     /// <summary>Every backlog item with its outcome and its newest dispatch: what an outcome's
     /// Not started, In progress and Achieved are counted from.</summary>
     Task<IReadOnlyList<OutcomeBacklogItem>> ReadBacklogAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// WHAT THE HUMAN FIGURES ARE COUNTED FROM: every <c>intervention_ledger</c> row whose
+    /// <c>occurred_at</c> is in [<paramref name="from"/>, <paramref name="to"/>), oldest first - each row once,
+    /// and none of its actor's identity. Read only; nothing writes through this.
+    /// </summary>
+    Task<IReadOnlyList<InterventionEntry>> ReadInterventionsAsync(
+        DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct = default);
+}
+
+/// <summary>
+/// One <c>intervention_ledger</c> row as the human figures read it: when, which kind, the team and workflow
+/// it was on, the workflow's outcome at that moment (<c>outcome_id_at_event</c>, as stored - a reader follows
+/// it through <c>merged_into</c>), and its duration, which counts only when <paramref name="DurationMeasured"/>.
+/// The actor is not read: no figure names a person.
+/// </summary>
+public sealed record InterventionEntry(
+    long Id,
+    DateTimeOffset OccurredAt,
+    string Kind,
+    string? TeamId,
+    long? Correlation,
+    string? OutcomeIdAtEvent,
+    long? DurationSeconds,
+    bool DurationMeasured)
+{
+    /// <summary>The columns <see cref="Read"/> takes, in order.</summary>
+    public const string Columns =
+        "id, occurred_at, kind, team_id, correlation, outcome_id_at_event, duration_seconds, duration_measured";
+
+    /// <summary>One row, read from <see cref="Columns"/>.</summary>
+    public static InterventionEntry Read(System.Data.Common.DbDataReader reader) => new(
+        reader.GetInt64(0),
+        Instant.Parse(reader.GetString(1)),
+        reader.GetString(2),
+        reader.IsDBNull(3) ? null : reader.GetString(3),
+        reader.IsDBNull(4) ? null : reader.GetInt64(4),
+        reader.IsDBNull(5) ? null : reader.GetString(5),
+        reader.IsDBNull(6) ? null : reader.GetInt64(6),
+        !reader.IsDBNull(7) && Convert.ToInt32(reader.GetValue(7), System.Globalization.CultureInfo.InvariantCulture) == 1);
 }
 
 /// <summary>One outcome a delete removes: as it was, the outcome it came with when it was merged into

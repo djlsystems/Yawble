@@ -142,6 +142,29 @@ public abstract class InterventionLedgerContract : ProviderContract
     }
 
     [Fact]
+    public async Task The_human_figures_read_each_row_in_the_window_once_with_its_measured_duration_and_no_actor()
+    {
+        var stores = await StoresAsync();
+        var at = new DateTimeOffset(2026, 10, 5, 12, 0, 0, TimeSpan.Zero);
+
+        await stores.Interventions.RecordAsync(new InterventionAct(InterventionKinds.Dispatch, "user-1", null, "Alpha", 41), at.AddDays(-1), Ct);
+        await stores.Interventions.RecordAsync(new InterventionAct(InterventionKinds.Close, "user-1", null, "Alpha", 41), at, Ct);
+        await stores.Interventions.RecordAsync(InterventionAct.Session("user-1", null, 754), at.AddHours(1), Ct);
+        await stores.Interventions.RecordAsync(new InterventionAct(InterventionKinds.Nudge, "user-1", null, "Alpha"), at.AddDays(1), Ct);
+
+        var read = await stores.Outcomes.ReadInterventionsAsync(at, at.AddDays(1), Ct);
+
+        Assert.Equal(
+            [
+                (InterventionKinds.Close, (string?)"Alpha", (long?)41L, (long?)null, false),
+                (InterventionKinds.ConciergeSession, null, null, 754L, true),
+            ],
+            read.Select(r => (r.Kind, r.TeamId, r.Correlation, r.DurationSeconds, r.DurationMeasured)).ToList());
+        Assert.Equal(at, read[0].OccurredAt);
+        Assert.Equal(4, (await stores.Outcomes.ReadInterventionsAsync(null, null, Ct)).Count);
+    }
+
+    [Fact]
     public async Task A_kind_outside_the_set_or_a_duration_on_an_unmeasured_kind_is_refused_and_nothing_is_written()
     {
         var stores = await StoresAsync();

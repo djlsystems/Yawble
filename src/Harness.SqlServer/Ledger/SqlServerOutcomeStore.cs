@@ -636,6 +636,29 @@ public sealed class SqlServerOutcomeStore(
             },
             ct);
 
+    public Task<IReadOnlyList<InterventionEntry>> ReadInterventionsAsync(
+        DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct = default) =>
+        RunAsync<IReadOnlyList<InterventionEntry>>(
+            async (connection, token) =>
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText =
+                    $"""
+                     SELECT {InterventionEntry.Columns}
+                     FROM intervention_ledger
+                     WHERE occurred_at >= @from AND occurred_at < @to
+                     ORDER BY id
+                     """;
+                command.Parameters.AddWithValue("@from", Instant.Stamp(from ?? DateTimeOffset.MinValue));
+                command.Parameters.AddWithValue("@to", Instant.Stamp(to ?? DateTimeOffset.MaxValue));
+
+                var rows = new List<InterventionEntry>();
+                await using var reader = await command.ExecuteReaderAsync(token);
+                while (await reader.ReadAsync(token)) rows.Add(InterventionEntry.Read(reader));
+                return rows;
+            },
+            ct);
+
     public Task<ExecutionRunRows> ReadExecutionRunsAsync(
         DateTimeOffset? from, DateTimeOffset? to, bool pricedOnly, CancellationToken ct = default) =>
         RunAsync(

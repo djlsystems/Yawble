@@ -74,7 +74,12 @@ public static class TeamCost
 
     public sealed record OutcomeEntry(
         string? Id, string Name, decimal? Value,
-        IReadOnlyList<OutcomeFigures.Week> Weekly, Totals Totals, decimal? OutcomeTotalCost, int? Rank);
+        IReadOnlyList<OutcomeFigures.Week> Weekly, Totals Totals, decimal? OutcomeTotalCost, int? Rank)
+    {
+        /// <summary>The team's Human Interventions and Human Attention Time (measured only) under this entry's outcome
+        /// (Unattributed's: those serving none) over the eight weeks (<see cref="HumanFigures"/>). Never priced.</summary>
+        public HumanFigures.Figures Human { get; init; } = HumanFigures.Figures.None;
+    }
 
     public sealed record Amount(double AgentSeconds, decimal? Cost, decimal? AgentRate, IReadOnlyList<string> LegacyRates);
 
@@ -82,15 +87,29 @@ public static class TeamCost
 
     public sealed record SummaryOutcome(
         string? Id, string Name, int? Rank, double AgentSeconds, decimal? Cost, decimal? Budget, decimal? OutcomeTotalCost,
-        IReadOnlyList<string> LegacyRates);
+        IReadOnlyList<string> LegacyRates)
+    {
+        /// <summary>The reached teams' Human Interventions and Human Attention Time under this outcome over the eight weeks.</summary>
+        public HumanFigures.Figures Human { get; init; } = HumanFigures.Figures.None;
+    }
 
     public sealed record RightNow(int OpenWorkflows, int MembersRunning, int WaitingOnYou);
 
     public sealed record Summary(
         int? Rate, IReadOnlyList<SummaryWeek> Weeks, string PeriodStart, string PeriodEnd,
-        Amount Total, Amount Prior, IReadOnlyList<SummaryOutcome> Outcomes, RightNow RightNow);
+        Amount Total, Amount Prior, IReadOnlyList<SummaryOutcome> Outcomes, RightNow RightNow)
+    {
+        /// <summary>The reached teams' human figures over the eight weeks, Unattributed's count and Waiting on a person
+        /// beside them, never added in (<see cref="HumanFigures.Team"/>).</summary>
+        public HumanFigures.Team? Human { get; init; }
+    }
 
-    public sealed record TeamEntry(string Team, IReadOnlyList<OutcomeEntry> Outcomes, Totals Totals);
+    /// <summary>One team's entry. <see cref="Human"/> is its human figures over the eight weeks, with Waiting on a
+    /// person beside them.</summary>
+    public sealed record TeamEntry(string Team, IReadOnlyList<OutcomeEntry> Outcomes, Totals Totals)
+    {
+        public HumanFigures.Team? Human { get; init; }
+    }
 
     /// <summary>One read of everything every team's figures need: the runs that overlap the weeks (and,
     /// for the summary, the eight before them) once, priced by <see cref="ExecutionCost"/>; the outcomes
@@ -103,6 +122,15 @@ public static class TeamCost
         public required IReadOnlyList<ExecutionCost.Run> Runs { get; init; }
         public required IReadOnlyDictionary<string, Outcome> OutcomesById { get; init; }
         public required IReadOnlyDictionary<string, decimal> OutcomeTotalCost { get; init; }
+
+        /// <summary>Every person's act whose <c>occurred_at</c> is in the eight weeks (<see cref="HumanFigures"/>).</summary>
+        public IReadOnlyList<InterventionEntry> Interventions { get; init; } = [];
+
+        /// <summary>Every outcome id followed through <c>merged_into</c>: where an act counts.</summary>
+        public IReadOnlyDictionary<string, string> Resolution { get; init; } = new Dictionary<string, string>();
+
+        /// <summary>The whole ledger, for Waiting on a person: a blocked span may start before the weeks.</summary>
+        public OutcomeLedgerRows? Ledger { get; init; }
 
         /// <summary>Each outcome any team's runs served in the eight weeks, by its 1-based place in the
         /// fixed order (created, oldest first, ties by id): the same for every team.</summary>
@@ -160,6 +188,9 @@ public static class TeamCost
                 OutcomesById = byId,
                 Ranks = ranks,
                 OutcomeTotalCost = totals.ByOutcome,
+                Interventions = await store.ReadInterventionsAsync(from, to, ct),
+                Resolution = OutcomeFigures.Resolution(outcomes),
+                Ledger = await store.ReadLedgerAsync(null, null, ct),
             };
         }
 
@@ -186,9 +217,21 @@ public static class TeamCost
             return byTeam;
         }
 
-        /// <summary>One team's entry from its runs in the eight weeks.</summary>
-        public TeamEntry Team(string team, IReadOnlyList<ExecutionCost.Run> runs)
+        /// <summary>
+        /// WAITING ON A PERSON over the eight weeks, per team in <paramref name="floors"/>: the blocked spans of its
+        /// runs above its floor (<see cref="OutcomeFigures.BlockedByTeam"/>). Carried beside the human figures, never
+        /// added to Human Attention Time.
+        /// </summary>
+        public IReadOnlyDictionary<string, double> Waiting(IReadOnlyDictionary<string, long> floors) =>
+            Ledger is null
+                ? new Dictionary<string, double>()
+                : OutcomeFigures.BlockedByTeam(Ledger, Now, Weeks[0], Weeks[^1].AddDays(7), floors);
+
+        /// <summary>One team's entry from its runs in the eight weeks, its acts and <paramref name="waitingSeconds"/>.</summary>
+        public TeamEntry Team(string team, IReadOnlyList<ExecutionCost.Run> runs, double waitingSeconds = 0)
         {
+            var acts = HumanFigures.OfTeam(Interventions, team).ToList();
+
             var entries = runs
                 .GroupBy(r => r.OutcomeId)
                 .Select(g => (Outcome: g.Key is null ? null : OutcomesById.GetValueOrDefault(g.Key), Runs: g.ToList()))
@@ -205,11 +248,17 @@ public static class TeamCost
                         WeeklyOf(weeks),
                         TotalsOf(ExecutionCost.Total(weeks, Currency)),
                         e.Outcome is null ? null : TotalCostOf(e.Outcome.Id),
-                        e.Outcome is null ? null : Ranks.GetValueOrDefault(e.Outcome.Id));
+                        e.Outcome is null ? null : Ranks.GetValueOrDefault(e.Outcome.Id))
+                    {
+                        Human = HumanFigures.Of(HumanFigures.Serving(acts, e.Outcome?.Id, Resolution)),
+                    };
                 })
                 .ToList();
 
-            return new TeamEntry(team, entries, TotalsOf(ExecutionCost.Total(ExecutionCost.Weeks(runs, Weeks, Currency), Currency)));
+            return new TeamEntry(team, entries, TotalsOf(ExecutionCost.Total(ExecutionCost.Weeks(runs, Weeks, Currency), Currency)))
+            {
+                Human = HumanFigures.ForTeam(acts, team, Resolution, waitingSeconds),
+            };
         }
 
         /// <summary>
@@ -219,6 +268,8 @@ public static class TeamCost
         /// </summary>
         public Summary SummaryOf(IReadOnlyDictionary<string, long> floors, RightNow rightNow)
         {
+            var acts = Interventions.Where(r => r.TeamId is not null && floors.ContainsKey(r.TeamId)).ToList();
+
             var runs = RunsByTeam(floors).Values.SelectMany(r => r).ToList();
             var priorTo = Weeks[0];
             var priorWeeks = Weeks.Select(w => w.AddDays(-7 * OutcomeFigures.Weeks)).ToList();
@@ -247,14 +298,26 @@ public static class TeamCost
                     var tally = served.GetValueOrDefault(o.Id);
                     return new SummaryOutcome(
                         o.Id, o.Name, Ranks.TryGetValue(o.Id, out var rank) ? rank : null, tally?.AgentSeconds ?? 0, tally?.Cost,
-                        BudgetOf(o), TotalCostOf(o.Id), tally?.LegacyRates ?? []);
+                        BudgetOf(o), TotalCostOf(o.Id), tally?.LegacyRates ?? [])
+                    {
+                        Human = HumanFigures.Of(HumanFigures.Serving(acts, o.Id, Resolution)),
+                    };
                 })
                 .ToList();
 
             if (served.TryGetValue("", out var unlinked))
             {
-                outcomes.Insert(0, new SummaryOutcome(null, UnattributedName, null, unlinked.AgentSeconds, unlinked.Cost, null, null, unlinked.LegacyRates));
+                outcomes.Insert(0, new SummaryOutcome(null, UnattributedName, null, unlinked.AgentSeconds, unlinked.Cost, null, null, unlinked.LegacyRates)
+                {
+                    Human = HumanFigures.Of(HumanFigures.Serving(acts, null, Resolution)),
+                });
             }
+
+            // THE REACHED TEAMS' ACTS, each row once (by its team_id; a Concierge session has none), and their waiting.
+            var all = HumanFigures.Of(acts);
+            var human = new HumanFigures.Team(
+                all.Interventions, all.MeasuredInterventions, all.AttentionSeconds,
+                HumanFigures.Of(HumanFigures.Serving(acts, null, Resolution)), Waiting(floors).Values.Sum());
 
             return new Summary(
                 Money.AgentHourlyRate,
@@ -264,7 +327,10 @@ public static class TeamCost
                 AmountOf(ExecutionCost.Total(weeks, Currency)),
                 AmountOf(ExecutionCost.Total(ExecutionCost.Weeks(prior, priorWeeks, Currency), Currency)),
                 outcomes,
-                rightNow);
+                rightNow)
+            {
+                Human = human,
+            };
         }
 
         /// <summary>An outcome's estimate across every team and all time; null - never 0 - when no priced run served it.</summary>
@@ -300,8 +366,9 @@ public static class TeamCost
                 if (teams.ExistingName(team) is not { } stored) return Refusals.NoTeam(team);
 
                 var reading = await Reading.ReadAsync(outcomes, settings, DateTimeOffset.UtcNow, ct);
-                var runs = reading.RunsByTeam(new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase) { [stored] = teams.FloorFor(stored) });
-                var entry = reading.Team(stored, runs.GetValueOrDefault(stored) ?? []);
+                var floors = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase) { [stored] = teams.FloorFor(stored) };
+                var runs = reading.RunsByTeam(floors);
+                var entry = reading.Team(stored, runs.GetValueOrDefault(stored) ?? [], reading.Waiting(floors).GetValueOrDefault(stored));
 
                 return Results.Ok(new
                 {
@@ -310,6 +377,7 @@ public static class TeamCost
                     weeks = reading.Weeks,
                     outcomes = entry.Outcomes,
                     totals = entry.Totals,
+                    human = entry.Human,
                 });
             })
             .WithTags("Activity")
@@ -331,12 +399,13 @@ public static class TeamCost
                 var reading = await Reading.ReadAsync(outcomes, settings, DateTimeOffset.UtcNow, ct);
                 var floors = reached.ToDictionary(t => t, teams.FloorFor, StringComparer.OrdinalIgnoreCase);
                 var runs = reading.RunsByTeam(floors);
+                var waiting = reading.Waiting(floors);
 
                 return Results.Ok(new
                 {
                     money = reading.Money,
                     weeks = reading.Weeks,
-                    teams = reached.Select(t => reading.Team(t, runs.GetValueOrDefault(t) ?? [])).ToList(),
+                    teams = reached.Select(t => reading.Team(t, runs.GetValueOrDefault(t) ?? [], waiting.GetValueOrDefault(t))).ToList(),
                 });
             })
             .WithTags("Activity")

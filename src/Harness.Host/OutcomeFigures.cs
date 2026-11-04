@@ -123,6 +123,14 @@ public static class OutcomeFigures
         /// <summary>The project reading's cumulative series, on one outcome's detail only: everything up to the end of each
         /// of the same weeks (see <see cref="CumulativeOf"/>).</summary>
         public IReadOnlyList<CumulativeWeek>? Cumulative { get; init; }
+
+        /// <summary>Human Interventions and Human Attention Time (measured only) of the people's acts that count under it,
+        /// over the read's window (<see cref="HumanFigures"/>). Waiting on a person is <see cref="BlockedSeconds"/>, never
+        /// added to it.</summary>
+        public HumanFigures.Figures? Human { get; init; }
+
+        /// <summary>Intervention frequency over the same <see cref="Weeks"/> weeks as <see cref="Weekly"/>, whatever the period.</summary>
+        public IReadOnlyList<HumanFigures.Week>? HumanWeekly { get; init; }
     }
 
     /// <summary>One week's throughput: the workflows serving the outcome whose close fell in it - <see cref="Closed"/>
@@ -194,6 +202,35 @@ public static class OutcomeFigures
         OutcomeLedgerRows rows, DateTimeOffset now, DateTimeOffset? from, DateTimeOffset? to)
     {
         var blocked = new Dictionary<long, double>();
+        foreach (var (run, seconds) in BlockedSpans(rows, now, from, to))
+        {
+            blocked[run.Correlation] = blocked.GetValueOrDefault(run.Correlation) + seconds;
+        }
+
+        return blocked;
+    }
+
+    /// <summary>
+    /// WAITING ON A PERSON, per team: the same spans as <see cref="BlockedByWorkflow"/>, credited to the team of
+    /// the run that ended blocked, counting only a team in <paramref name="floors"/> and a run above its floor.
+    /// </summary>
+    public static IReadOnlyDictionary<string, double> BlockedByTeam(
+        OutcomeLedgerRows rows, DateTimeOffset now, DateTimeOffset? from, DateTimeOffset? to, IReadOnlyDictionary<string, long> floors)
+    {
+        var blocked = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (run, seconds) in BlockedSpans(rows, now, from, to))
+        {
+            if (run.TeamId is not { } team || !floors.TryGetValue(team, out var floor) || run.RunSeq <= floor) continue;
+            blocked[team] = blocked.GetValueOrDefault(team) + seconds;
+        }
+
+        return blocked;
+    }
+
+    /// <summary>Each run that ended blocked, with how long its work then waited on a person, clipped to the window.</summary>
+    private static IEnumerable<(UsageLedgerRow Run, double Seconds)> BlockedSpans(
+        OutcomeLedgerRows rows, DateTimeOffset now, DateTimeOffset? from, DateTimeOffset? to)
+    {
         var closeOf = rows.Closes.GroupBy(c => c.Correlation).ToDictionary(g => g.Key, g => g.Max(c => c.ClosedAt));
 
         foreach (var member in rows.Runs.GroupBy(r => (Team: r.TeamId?.ToLowerInvariant(), Member: r.Member.ToLowerInvariant())))
@@ -220,11 +257,9 @@ public static class OutcomeFigures
                 if (to is { } t && t < end) end = t;
                 if (end <= start) continue;
 
-                blocked[run.Correlation] = blocked.GetValueOrDefault(run.Correlation) + (end - start).TotalSeconds;
+                yield return (run, (end - start).TotalSeconds);
             }
         }
-
-        return blocked;
     }
 
     /// <summary>The Monday 00:00 UTC that starts <paramref name="at"/>'s week.</summary>
@@ -246,7 +281,8 @@ public static class OutcomeFigures
     public static Figures Dashboard(
         Figures figures, Book all, string? outcome, IReadOnlyList<OutcomeBacklogItem> items,
         IReadOnlyDictionary<string, string> resolution, IReadOnlyDictionary<long, double> blocked,
-        Pricing pricing, DateTimeOffset now, IReadOnlyList<ExecutionCost.Run> weekRuns, ExecutionCost.Costs costs)
+        Pricing pricing, DateTimeOffset now, IReadOnlyList<ExecutionCost.Run> weekRuns, ExecutionCost.Costs costs,
+        IReadOnlyList<InterventionEntry>? interventions = null, DateTimeOffset? from = null, DateTimeOffset? to = null)
     {
         var mine = ItemsOf(items, outcome, resolution).Select(i => Bucket(i, pricing.DeclaredCountsAs)).ToList();
         var counts = new BacklogCounts(mine.Count(b => b == NotStarted), mine.Count(b => b == InProgress), mine.Count(b => b == Achieved));
@@ -266,6 +302,8 @@ public static class OutcomeFigures
             Weekly = weekly,
             Cost = new Money(costs.Of(outcome), pricing.Currency, costs.LegacyRatesOf(outcome), costs.AgentRateOf(outcome)),
             Throughput = throughput,
+            Human = HumanFigures.Of(HumanFigures.Within(HumanFigures.Serving(interventions ?? [], outcome, resolution), from, to)),
+            HumanWeekly = HumanFigures.Weekly(HumanFigures.Serving(interventions ?? [], outcome, resolution), WeekStarts(now)),
             CostPerCompleted = PerCompleted(weekly.Where(w => w.Cost is not null).Select(w => w.Cost!.Value).DefaultIfEmpty().Sum(),
                 weekly.Any(w => w.Cost is not null), throughput.Sum(w => w.Completed)),
         };
