@@ -76,14 +76,17 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
     /// and a source is a <c>ContainerId</c>, neither of which any code path composes from a URL.
     /// </para>
     /// </summary>
-    public async Task<Message> AppendAsync(NewMessage message, CancellationToken ct = default)
+    public Task<Message> AppendAsync(NewMessage message, CancellationToken ct = default) =>
+        AppendAsync(message, null, ct);
+
+    public async Task<Message> AppendAsync(NewMessage message, AppendContext? context, CancellationToken ct = default)
     {
         MessageAppend.Validate(message);
 
         await using var connection = Open();
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
 
-        var stored = await InsertAsync(connection, transaction, message, ct);
+        var stored = await InsertAsync(connection, transaction, message, context, ct);
 
         await transaction.CommitAsync(ct);
 
@@ -92,9 +95,16 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         return stored;
     }
 
+    public Task<Message?> AppendWithinAsync(
+        Func<System.Data.Common.DbConnection, System.Data.Common.DbTransaction, CancellationToken, Task<NewMessage?>> before,
+        Func<System.Data.Common.DbConnection, System.Data.Common.DbTransaction, Message, CancellationToken, Task> after,
+        CancellationToken ct = default) =>
+        AppendWithinAsync(before, after, null, ct);
+
     public async Task<Message?> AppendWithinAsync(
         Func<System.Data.Common.DbConnection, System.Data.Common.DbTransaction, CancellationToken, Task<NewMessage?>> before,
         Func<System.Data.Common.DbConnection, System.Data.Common.DbTransaction, Message, CancellationToken, Task> after,
+        AppendContext? context,
         CancellationToken ct = default)
     {
         await using var connection = Open();
@@ -109,7 +119,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         {
             MessageAppend.Validate(message);
 
-            stored = await InsertAsync(connection, transaction, message, ct);
+            stored = await InsertAsync(connection, transaction, message, context, ct);
             await after(connection, transaction, stored, ct);
         }
 
@@ -123,12 +133,17 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
 
     /// <summary>The row itself, inside the caller's transaction. Nothing is published here.</summary>
     private static async Task<Message> InsertAsync(
-        SqliteConnection connection, SqliteTransaction transaction, NewMessage message, CancellationToken ct)
+        SqliteConnection connection, SqliteTransaction transaction, NewMessage message, AppendContext? context,
+        CancellationToken ct)
     {
         var payload = MessageAppend.Redacted(message);
 
         long correlation = 0;
         var depth = 0;
+
+        // A ROOT'S ORIGIN IS ITS PRINCIPAL'S, else its source's; a caused row's is read from its parent
+        // below, which holds the root's (MessageOrigin). Nothing in the payload is read.
+        var origin = MessageOrigin.ForRoot(message.Source, context);
 
         // A cause is resolved INSIDE the transaction, so a message cannot inherit from a parent that
         // is being written concurrently and might not commit.
@@ -136,7 +151,17 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         {
             await using var parent = connection.CreateCommand();
             parent.Transaction = transaction;
-            parent.CommandText = "SELECT correlation_id, depth FROM messages WHERE seq = $seq";
+
+            // THE PARENT CARRIES ITS ROOT'S ORIGIN, so reading it is reading the root's - and it is still
+            // there when the purge has taken the root. A parent from before messages-007 has none: its
+            // root's source (or its own, when the root is gone) is derived as a root's would be.
+            parent.CommandText =
+                """
+                SELECT p.correlation_id, p.depth, p.origin_kind, p.origin_actor_id, p.origin_actor_email,
+                       p.origin_trigger, COALESCE(r.source, p.source)
+                FROM messages p LEFT JOIN messages r ON r.seq = p.correlation_id
+                WHERE p.seq = $seq
+                """;
             parent.Parameters.AddWithValue("$seq", cause);
 
             await using var reader = await parent.ExecuteReaderAsync(ct);
@@ -145,6 +170,28 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
 
             correlation = reader.GetInt64(0);
             depth = reader.GetInt32(1) + 1;
+
+            var root = reader.IsDBNull(2)
+                ? MessageOrigin.ForRoot(reader.GetString(6), null)
+                : new MessageOrigin(
+                    reader.GetString(2),
+                    reader.IsDBNull(3) ? null : reader.GetString(3),
+                    reader.IsDBNull(4) ? null : reader.GetString(4),
+                    reader.IsDBNull(5) ? null : reader.GetString(5),
+                    PublisherKinds.Host);
+
+            origin = MessageOrigin.Inherited(root, message.Source, context);
+        }
+
+        // A PERSON'S EMAIL AS IT STANDS NOW, read in this transaction: a key's owner, or a person whose
+        // ticket carried none. Stored on the row, so it still reads once the key or the user is gone.
+        if (origin.ResolveEmailOf is { } user)
+        {
+            await using var lookup = connection.CreateCommand();
+            lookup.Transaction = transaction;
+            lookup.CommandText = "SELECT email FROM users WHERE id = $id";
+            lookup.Parameters.AddWithValue("$id", user);
+            origin = origin with { ActorEmail = await lookup.ExecuteScalarAsync(ct) as string ?? origin.ActorEmail };
         }
 
         var occurredAt = DateTimeOffset.UtcNow;
@@ -153,10 +200,18 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         insert.Transaction = transaction;
         insert.CommandText =
             """
-            INSERT INTO messages (type, payload, source, correlation_id, causation_seq, depth, occurred_at)
-            VALUES ($type, $payload, $source, $correlation, $causation, $depth, $at)
+            INSERT INTO messages (type, payload, source, correlation_id, causation_seq, depth, occurred_at,
+                                  origin_kind, origin_actor_id, origin_actor_email, origin_trigger, publisher_kind)
+            VALUES ($type, $payload, $source, $correlation, $causation, $depth, $at,
+                    $originKind, $originActor, $originEmail, $originTrigger, $publisher)
             RETURNING seq
             """;
+
+        insert.Parameters.AddWithValue("$originKind", origin.Kind);
+        insert.Parameters.AddWithValue("$originActor", (object?)origin.ActorId ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$originEmail", (object?)origin.ActorEmail ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$originTrigger", (object?)origin.Trigger ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$publisher", origin.PublisherKind);
 
         insert.Parameters.AddWithValue("$type", message.Type);
         insert.Parameters.AddWithValue("$payload", MessageAppend.RowPayload(payload));

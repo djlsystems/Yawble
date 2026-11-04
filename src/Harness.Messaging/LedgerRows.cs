@@ -140,13 +140,19 @@ public static class LedgerRows
                  run_seq, correlation, team_id, team_name, member, member_kind, agent_preset,
                  run_outcome, queued_at, started_at, ended_at, measured,
                  tokens_in, tokens_cached_in, tokens_cache_creation, tokens_out, tokens_combined, billable,
-                 trigger_source, trigger_fired_at, backfilled, start_seq)
+                 trigger_source, trigger_fired_at, backfilled, start_seq, origin_kind, origin_actor_id)
              VALUES (
                  $seq, $correlation, $team, {TeamNameSql}, $member, $kind, $agent,
                  $outcome, $queued, $started, $ended, $measured,
                  $in, $cachedIn, $cacheCreation, $out, $combined, $billable,
-                 $trigger, $firedAt, $backfilled, $startSeq)
+                 $trigger, $firedAt, $backfilled, $startSeq, $originKind, $originActor)
              """;
+
+        // THE WORKFLOW'S ORIGIN, as the terminal row carries it (its root's, messages-007): a live row
+        // only, as a backfill reads rows from before origins were derived.
+        var origin = backfilled ? null : await OriginOfAsync(connection, transaction, terminal.Seq, ct);
+        insert.Parameters.AddWithValue("$originKind", (object?)origin?.Kind ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$originActor", (object?)origin?.ActorId ?? DBNull.Value);
 
         insert.Parameters.AddWithValue("$seq", terminal.Seq);
         insert.Parameters.AddWithValue("$correlation", terminal.CorrelationId);
@@ -219,11 +225,20 @@ public static class LedgerRows
             $"""
              INSERT INTO execution_snapshots (
                  start_seq, correlation, team_id, team_name, member, member_kind, agent_preset,
-                 rate_amount, rate_currency, rate_source, billing_account_id, link_id, started_at)
+                 rate_amount, rate_currency, rate_source, billing_account_id, link_id, started_at,
+                 origin_kind, origin_actor_id, origin_actor_email, origin_trigger)
              VALUES (
                  $seq, $correlation, $team, {TeamNameSql}, $member, $kind, $agent,
-                 $amount, $currency, $source, $account, $link, $at)
+                 $amount, $currency, $source, $account, $link, $at,
+                 $originKind, $originActor, $originEmail, $originTrigger)
              """;
+
+        // THE WORKFLOW'S ORIGIN, as the started row carries it: its root's, derived at append.
+        var origin = await OriginOfAsync(connection, transaction, started.Seq, ct);
+        insert.Parameters.AddWithValue("$originKind", (object?)origin?.Kind ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$originActor", (object?)origin?.ActorId ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$originEmail", (object?)origin?.ActorEmail ?? DBNull.Value);
+        insert.Parameters.AddWithValue("$originTrigger", (object?)origin?.Trigger ?? DBNull.Value);
 
         insert.Parameters.AddWithValue("$seq", started.Seq);
         insert.Parameters.AddWithValue("$correlation", started.CorrelationId);
@@ -407,6 +422,28 @@ public static class LedgerRows
         command.Parameters.AddWithValue("$terminal", terminal.Seq);
 
         return (long)(await command.ExecuteScalarAsync(ct))! != 0;
+    }
+
+    /// <summary>The origin row <paramref name="seq"/> was stored with (messages-007), or null for a row
+    /// from before it.</summary>
+    private static async Task<MessageOrigin?> OriginOfAsync(
+        SqliteConnection connection, SqliteTransaction transaction, long seq, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText =
+            "SELECT origin_kind, origin_actor_id, origin_actor_email, origin_trigger, publisher_kind FROM messages WHERE seq = $seq";
+        command.Parameters.AddWithValue("$seq", seq);
+
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct) || reader.IsDBNull(0)) return null;
+
+        return new MessageOrigin(
+            reader.GetString(0),
+            reader.IsDBNull(1) ? null : reader.GetString(1),
+            reader.IsDBNull(2) ? null : reader.GetString(2),
+            reader.IsDBNull(3) ? null : reader.GetString(3),
+            reader.IsDBNull(4) ? PublisherKinds.Host : reader.GetString(4));
     }
 
     private static async Task<string?> ScalarTextAsync(

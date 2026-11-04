@@ -447,7 +447,7 @@ public static partial class RepoEndpoints
                         }),
                         PrincipalClaims.From(httpContext.User)?.Id ?? "console",
                         null),
-                    ct);
+                    AppendContexts.From(httpContext.User), ct);
 
                 said = $"{branch} brought current from upstream/{branch}, and the fork's {branch} was fast-forwarded to it";
             }
@@ -680,7 +680,7 @@ public static partial class RepoEndpoints
                 JsonSerializer.Serialize(new { instruction, subject = parts.Subject, body = parts.Body }),
                 from,
                 null),
-            ct);
+            AppendContexts.From(httpContext.User), ct);
 
         await log.WriteAsync(userId, email, TenantActions.RepoAskTeam, $"{stored}/{name}", null,
             JsonSerializer.Serialize(new { conflicts, seq = message.Seq }), ct);

@@ -111,6 +111,13 @@ is written back.
 The Teams list, its summary, the team page and the Outcomes dashboard price every run from this
 snapshot, and a run with none from the rate's history, as **How a run is priced** says.
 
+A snapshot also records who the run's workflow began with: the origin the log derived for the
+workflow's first row (`person`, `agent`, `trigger` or `system`, with the person's or member's id
+and email, or the trigger's source). When the run ends, its usage ledger row records the same
+origin's kind and actor id. Both are copies, so they stay after the log's 90-day purge takes the
+rows they came from. Nothing prices, filters or shows them yet. Runs and ledger rows from before
+origins were recorded have none, and none is written back.
+
 `GET /api/ledger/export` gives each run its `rateSource` (`member`, `tenant` or `none` for a run
 with a snapshot; `reconstructed`, `fallback-at-upgrade` or `none` for one without) and its
 `estimate` (`amount` and `currency`, both null when it is not priced), from the same pricing.

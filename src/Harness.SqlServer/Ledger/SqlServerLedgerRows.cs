@@ -123,14 +123,19 @@ public static class SqlServerLedgerRows
             run_seq, correlation, team_id, team_name, member, member_kind, agent_preset,
             run_outcome, queued_at, started_at, ended_at, measured,
             tokens_in, tokens_cached_in, tokens_cache_creation, tokens_out, tokens_combined, billable,
-            trigger_source, trigger_fired_at, backfilled, start_seq
+            trigger_source, trigger_fired_at, backfilled, start_seq, origin_kind, origin_actor_id
             """,
             $"""
              @seq, @correlation, @team, {TeamNameSql}, @member, @kind, @agent,
              @outcome, @queued, @started, @ended, @measured,
              @in, @cachedIn, @cacheCreation, @out, @combined, @billable,
-             @trigger, @firedAt, @backfilled, @startSeq
+             @trigger, @firedAt, @backfilled, @startSeq, @originKind, @originActor
              """);
+
+        // The workflow's origin, as SQLite's LedgerRows copies it: a live row only.
+        var origin = backfilled ? null : await OriginOfAsync(connection, transaction, terminal.Seq, ct);
+        Text(insert, "@originKind", origin?.Kind);
+        Text(insert, "@originActor", origin?.ActorId);
 
         insert.Parameters.AddWithValue("@seq", terminal.Seq);
         insert.Parameters.AddWithValue("@correlation", terminal.CorrelationId);
@@ -198,11 +203,19 @@ public static class SqlServerLedgerRows
             $"""
              INSERT INTO execution_snapshots (
                  start_seq, correlation, team_id, team_name, member, member_kind, agent_preset,
-                 rate_amount, rate_currency, rate_source, billing_account_id, link_id, started_at)
+                 rate_amount, rate_currency, rate_source, billing_account_id, link_id, started_at,
+                 origin_kind, origin_actor_id, origin_actor_email, origin_trigger)
              VALUES (
                  @seq, @correlation, @team, {TeamNameSql}, @member, @kind, @agent,
-                 @amount, @currency, @source, @account, @link, @at);
+                 @amount, @currency, @source, @account, @link, @at,
+                 @originKind, @originActor, @originEmail, @originTrigger);
              """;
+
+        var origin = await OriginOfAsync(connection, transaction, started.Seq, ct);
+        Text(insert, "@originKind", origin?.Kind);
+        Text(insert, "@originActor", origin?.ActorId);
+        Text(insert, "@originEmail", origin?.ActorEmail);
+        Text(insert, "@originTrigger", origin?.Trigger);
 
         insert.Parameters.AddWithValue("@seq", started.Seq);
         insert.Parameters.AddWithValue("@correlation", started.CorrelationId);
@@ -219,6 +232,31 @@ public static class SqlServerLedgerRows
 
         return await insert.ExecuteNonQueryAsync(ct) > 0;
     }
+
+    /// <summary>The origin row <paramref name="seq"/> was stored with, as SQLite's LedgerRows reads it.</summary>
+    private static async Task<MessageOrigin?> OriginOfAsync(
+        SqlConnection connection, SqlTransaction transaction, long seq, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText =
+            "SELECT origin_kind, origin_actor_id, origin_actor_email, origin_trigger, publisher_kind FROM messages WHERE seq = @seq";
+        command.Parameters.AddWithValue("@seq", seq);
+
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct) || reader.IsDBNull(0)) return null;
+
+        return new MessageOrigin(
+            reader.GetString(0),
+            reader.IsDBNull(1) ? null : reader.GetString(1),
+            reader.IsDBNull(2) ? null : reader.GetString(2),
+            reader.IsDBNull(3) ? null : reader.GetString(3),
+            reader.IsDBNull(4) ? PublisherKinds.Host : reader.GetString(4));
+    }
+
+    /// <summary>A nullable NVARCHAR(MAX) parameter.</summary>
+    private static void Text(SqlCommand command, string name, string? value) =>
+        command.Parameters.Add(name, System.Data.SqlDbType.NVarChar, -1).Value = (object?)value ?? DBNull.Value;
 
     /// <summary>One text value with up to two parameters, <c>@p</c> and <c>@q</c>; null for no row.</summary>
     private static async Task<string?> TextAsync(

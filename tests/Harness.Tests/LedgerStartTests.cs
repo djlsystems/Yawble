@@ -32,11 +32,11 @@ public sealed class LedgerStartTests : IDisposable
     [Fact]
     public async Task The_backfill_recovers_every_terminal_row_and_close_once_and_records_when_the_ledger_began()
     {
-        // A volume from before the ledger: every step but outcome-001 (and outcome-005 and outcome-008,
-        // which index and extend its table), and a log holding two workflows' runs - a batched run, an unmeasured run, a
+        // A volume from before the ledger: every step but outcome-001 (and outcome-005, outcome-008 and
+        // outcome-014, which index and extend its table), and a log holding two workflows' runs - a batched run, an unmeasured run, a
         // plugin's run - a completion, a close, and a second completion of the same workflow.
         await new SchemaMigrator(Database).ApplyAsync(
-            [.. SchemaModules.All.Where(s => s.Id is not ("outcome-001" or "outcome-005" or "outcome-008"))], ct: Ct);
+            [.. SchemaModules.All.Where(s => s.Id is not ("outcome-001" or "outcome-005" or "outcome-008" or "outcome-014"))], ct: Ct);
 
         var root = await InsertAsync(MessageTypes.InstructionFor(new ContainerId("Alpha", "Dev")), """{"instruction":"go"}""", "console", null);
         await InsertAsync(MessageTypes.Started, "{}", "Alpha/Dev", root);

@@ -142,6 +142,19 @@ public sealed class LedgerParityTests : IDisposable
             "SELECT start_seq FROM execution_snapshots "
             + "WHERE rate_source NOT IN ('member', 'tenant', 'none') OR (rate_source = 'none') <> (rate_amount IS NULL) "
             + "OR rate_amount = '0' OR (member_kind = 'plugin' AND rate_source = 'tenant')"));
+
+        // ---- the origin: every snapshot and every run's ledger row carries its workflow root's ----
+        Assert.Empty(await RowsAsync(
+            "SELECT s.start_seq FROM execution_snapshots s "
+            + "JOIN messages m ON m.seq = s.start_seq JOIN messages r ON r.seq = m.correlation_id "
+            + "WHERE s.origin_kind IS NULL OR s.origin_kind IS NOT r.origin_kind OR s.origin_actor_id IS NOT r.origin_actor_id "
+            + "OR s.origin_actor_email IS NOT r.origin_actor_email OR s.origin_trigger IS NOT r.origin_trigger"));
+        Assert.Empty(await RowsAsync(
+            "SELECT u.run_seq FROM usage_ledger u JOIN messages r ON r.seq = u.correlation "
+            + "WHERE u.origin_kind IS NULL OR u.origin_kind IS NOT r.origin_kind OR u.origin_actor_id IS NOT r.origin_actor_id"));
+        Assert.Equal(
+            await RowsAsync("SELECT COUNT(*) FROM execution_snapshots"),
+            await RowsAsync("SELECT COUNT(*) FROM execution_snapshots s JOIN messages m ON m.seq = s.start_seq JOIN messages r ON r.seq = m.correlation_id"));
     }
 
     /// <summary>A query's rows over the fixture's database, each as its first column.</summary>

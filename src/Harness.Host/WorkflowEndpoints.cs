@@ -601,7 +601,7 @@ internal static class WorkflowEndpoints
                     JsonSerializer.Serialize(new { team = stored, reason }),
                     from,
                     correlation),
-                ct);
+                AppendContexts.From(context.User), ct);
 
             return Results.NoContent();
         })
@@ -657,7 +657,7 @@ internal static class WorkflowEndpoints
             if (teams.ExistingName(team) is not { } stored) return Refusals.NoTeam(team);
 
             var by = context.User.FindFirstValue(ClaimTypes.Email) ?? PrincipalClaims.From(context.User)?.Id ?? "console";
-            var cancelled = await wakes.CancelAsync(id, by, "cancelled by a person", team: stored, ct: ct);
+            var cancelled = await wakes.CancelAsync(id, by, "cancelled by a person", team: stored, ct: ct, principal: AppendContexts.From(context.User));
 
             return cancelled is null
                 ? Results.NotFound(new { error = $"No pending wake {id} on this team. It has fired or been cancelled." })
@@ -745,7 +745,7 @@ internal static class WorkflowEndpoints
                     }),
                     from,
                     correlation),
-                ct);
+                AppendContexts.From(context.User), ct);
 
             if (!teams.IsPaused(stored))
             {
@@ -862,7 +862,7 @@ internal static class WorkflowEndpoints
                     }),
                     from,
                     correlation),
-                ct);
+                AppendContexts.From(context.User), ct);
 
             const string resumeText =
                 "A person resumed this workflow after it paused for reaching its spend limit. Its spend "
@@ -889,7 +889,7 @@ internal static class WorkflowEndpoints
                     // its very next wake. The value is not caller-suppliable: it is the correlation
                     // `WorkflowTeamOwnership` has just verified belongs to this team.
                     correlation),
-                ct);
+                AppendContexts.From(context.User), ct);
 
             // AND EVERY OTHER BROWSER HOLDING THIS TEAM IS TOLD TO COME AND RE-READ.
             //

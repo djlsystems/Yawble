@@ -22,6 +22,7 @@ public sealed class ShippedSchemaStepsTests
         ["messages-004"] = "0f253b2352fb1d0c6dc63d4e6e9bdae795e7d8cd3d4b8f362c1fa0b5c5ed9617",
         ["messages-005"] = "b5afce13c4f46e19bacfd783158015c0a468015d046428dec4539a883fa37b07",
         ["messages-006"] = "c4e771b1609a9af3f3234aa4d9a05915339de032ae559da3644069c15a22ca7d",
+        ["messages-007"] = "971bd922af71118f266e8295690a1e81e19f0bffb8d0305434e06812fa691135",
         ["auth-001"] = "c2e86a37e99a689f95c32134db882b3add91e4775c1516c759ee1758482d374d",
         ["auth-002"] = "e1b6b1e9b3dab445585d7658667e95067126053948aaf4a0e3ebfd6f500605b4",
         ["auth-003"] = "a632d0adfee1aae846161316f552e5d72a91a586935a7c51dc45c39d624869d5",
@@ -75,6 +76,7 @@ public sealed class ShippedSchemaStepsTests
         ["outcome-012"] = "d1134e6c77faf2db9a1e9689b3ac54d9e87bd800b027eab88b46d6892b482751",
         ["outcome-009"] = "ec585b69de13fddefdf00f7f6dcbda96544a32e127d76c8d7381dcbb0abc228c",
         ["outcome-013"] = "8718754d44d87bbfeb2e72c4a3fcc282aff36d592cb062c6fe8f94410b26c66b",
+        ["outcome-014"] = "9d9d813ed7a3f04bc12c18e5f9275a60472661cf57360d46ac7ce71192855377",
     };
 
     [Fact]

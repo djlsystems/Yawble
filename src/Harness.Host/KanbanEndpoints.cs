@@ -417,7 +417,7 @@ public static class KanbanEndpoints
                     payload,
                     from,
                     card.WorkflowSeq),
-                ct);
+                AppendContexts.From(context.User), ct);
 
             return Results.Ok(new { cardId = id, laneId, message = "Card move recorded" });
         }
@@ -596,7 +596,7 @@ public static class KanbanEndpoints
                     payload,
                     from,
                     card.WorkflowSeq),
-                ct);
+                AppendContexts.From(context.User), ct);
 
             return Results.Ok(new
             {
@@ -653,7 +653,7 @@ public static class KanbanEndpoints
                     payload,
                     from,
                     card.WorkflowSeq),
-                ct);
+                AppendContexts.From(context.User), ct);
 
             return Results.Ok(new { cardId = id, text = request.Text, message = "Comment recorded" });
         }

@@ -37,6 +37,17 @@ The product name, Yawble, lives in the web app's presentation layer
   follow-up instructions join it. The member the root instruction addressed owns the workflow and
   declares it complete; the Manager may declare it for an idle member that owns it, and the platform
   declares one a plugin member owns. Only a person closes a workflow.
+- **Origin is derived, never published.** Each log row records who its workflow began with
+  (`origin_kind`: `person`, `agent`, `trigger` or `system`, with the actor's id and email, or the
+  trigger's source) and what kind of actor published the row itself (`publisher_kind`: `person`,
+  `agent` or `host`). The log works both out when it stores the row, the way it works out the
+  correlation and depth. A workflow's first row takes its origin from the signed-in principal the
+  route hands the log: a person is themselves, an API key is stored as its owner (their id and email
+  as they stood then, so the row still reads after the key or the person is gone), a member or the
+  Concierge is an agent. With no principal, the source decides: `schedule:`, `trigger:` and `wake:`
+  are a trigger with no person, a member's `team/member` is an agent, anything else is the system.
+  Every later row in the workflow carries the first row's origin, whoever publishes it. No request
+  body, payload field or header can set any of these; rows from before this have none.
 - **Steering the Concierge.** The workflow a person highlights on the board is the one their
   Concierge continues: its next launch carries it in `HARNESS_CAUSATION`, and a running Concierge
   reads it from `STEERING.md`. Only an open workflow of a team that exists and is not archived can

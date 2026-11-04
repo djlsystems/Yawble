@@ -121,5 +121,17 @@ public static class SqlServerMessagingSchema
             CREATE INDEX ix_run_steps_at ON run_steps(at, id);
             CREATE INDEX ix_run_steps_member ON run_steps(team, member);
             """),
+
+        // `MessageSchema`'s messages-007: a row's derived origin and its publisher's kind, nullable.
+        new MigrationStep(
+            "messages-007",
+            """
+            ALTER TABLE messages ADD
+                origin_kind        NVARCHAR(MAX) NULL,
+                origin_actor_id    NVARCHAR(MAX) NULL,
+                origin_actor_email NVARCHAR(MAX) NULL,
+                origin_trigger     NVARCHAR(MAX) NULL,
+                publisher_kind     NVARCHAR(MAX) NULL;
+            """),
     ];
 }

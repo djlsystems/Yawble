@@ -117,6 +117,32 @@ public sealed class SchemaParityTests
         }
     }
 
+    /// <summary>The origin steps are one id each on both providers, and add the nullable columns and
+    /// nothing else: <c>messages-007</c> the five on <c>messages</c>, <c>outcome-014</c> the two on
+    /// <c>usage_ledger</c>. <see cref="Tables_match"/> holds the columns themselves alike.</summary>
+    [Fact]
+    public void The_origin_steps_add_only_nullable_columns_on_both_providers()
+    {
+        foreach (var (id, table, columns) in new[]
+        {
+            ("messages-007", "messages", new[] { "origin_kind", "origin_actor_id", "origin_actor_email", "origin_trigger", "publisher_kind" }),
+            ("outcome-014", "usage_ledger", new[] { "origin_kind", "origin_actor_id" }),
+        })
+        {
+            var sqlite = Assert.Single(SchemaModules.All, s => s.Id == id).Sql;
+            var sqlServer = Assert.Single(SqlServerSchemaModules.All, s => s.Id == id).Sql;
+
+            foreach (var sql in new[] { sqlite, sqlServer })
+            {
+                Assert.Contains($"ALTER TABLE {table} ADD", sql, StringComparison.Ordinal);
+                foreach (var column in columns) Assert.Matches($@"\b{column}\s+\w+(\(MAX\))?\s+NULL", sql);
+                Assert.DoesNotContain("CREATE", sql, StringComparison.Ordinal);
+                Assert.DoesNotContain("UPDATE", sql, StringComparison.Ordinal);
+                Assert.DoesNotContain("NOT NULL", sql, StringComparison.Ordinal);
+            }
+        }
+    }
+
     [Fact]
     public async Task Tables_match()
     {

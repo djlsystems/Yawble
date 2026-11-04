@@ -305,8 +305,8 @@ public static class OutcomeSchema
         // `ExecutionSnapshotFacts`). The member's kind and preset, the rate it is priced at and where
         // that rate came from (`member`, `tenant` or `none`; `none` has no amount, never a zero),
         // and `link_id`, the `workflow_outcome_links` row current for the workflow at start (an
-        // unlink row's id too; NULL only when the workflow had no link). `model`,
-        // `billing_account_id` and the `origin_*` columns are not known yet and stay NULL.
+        // unlink row's id too; NULL only when the workflow had no link). `model` is not known yet and
+        // stays NULL; the `origin_*` columns carry the workflow's derived origin since messages-007.
         //
         // IMMUTABLE: the configuration at start covers the whole run, so a rate changed or a link
         // written later never reaches this row; the triggers refuse every UPDATE and DELETE.
@@ -444,6 +444,17 @@ public static class OutcomeSchema
 
             CREATE TRIGGER expenses_no_delete BEFORE DELETE ON expenses
             BEGIN SELECT RAISE(ABORT, 'expenses is append-only'); END;
+            """),
+
+        // WHO A RUN'S WORKFLOW BEGAN WITH, on the run's ledger row: the kind and the actor id of the
+        // workflow's derived origin (messages-007), copied when the run ends, so the attribution
+        // survives the log's purge. An ADD COLUMN rewrites no row and fires no trigger: a row written
+        // before this step reads NULL, and nothing back-fills it.
+        new MigrationStep(
+            "outcome-014",
+            """
+            ALTER TABLE usage_ledger ADD COLUMN origin_kind TEXT NULL;
+            ALTER TABLE usage_ledger ADD COLUMN origin_actor_id TEXT NULL;
             """),
     ];
 }

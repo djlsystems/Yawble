@@ -285,8 +285,11 @@ internal static class MemberReportEndpoints
             // `workflow.outcome-changed` row names the person, or the member for an agent's tell; when it
             // cannot be written, neither the instruction nor the link lands.
             var tellerIsPerson = callerPrincipal?.Kind == PrincipalKind.User;
+            // THE PRINCIPAL REACHES THE LOG AS AN ARGUMENT, from the request's ticket: the row's origin is
+            // derived from it there, and no field of this body can set one (AGENTS.md: origin is derived).
+            var appendContext = AppendContexts.From(context.User);
             var message = rootOutcome is null
-                ? await log.AppendAsync(instructionRow, ct)
+                ? await log.AppendAsync(instructionRow, appendContext, ct)
                 : (await log.AppendWithinAsync(
                     (_, _, _) => Task.FromResult<NewMessage?>(instructionRow),
                     async (connection, transaction, stored, token) =>
@@ -303,6 +306,7 @@ internal static class MemberReportEndpoints
                                     JsonSerializer.Serialize(detail)),
                             token);
                     },
+                    appendContext,
                     ct))!;
             var paused = teams.IsPaused(stored);
             return Results.Ok(new

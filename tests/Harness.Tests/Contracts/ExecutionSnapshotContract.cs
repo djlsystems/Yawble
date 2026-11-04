@@ -37,7 +37,7 @@ public abstract class ExecutionSnapshotContract : ProviderContract
         var row = Assert.Single(await stores.RowsAsync($"SELECT {Columns} FROM execution_snapshots WHERE start_seq = {started.Seq}"));
         Assert.Equal(
             [delivery.CorrelationId, "Alpha", "Alpha Squad", "Dev", MemberRef.AgentKind, "claude", null, "60", "EUR",
-             ExecutionSnapshotFacts.RateSourceTenant, null, null, Instant.Stamp(started.OccurredAt), null, null, null, null],
+             ExecutionSnapshotFacts.RateSourceTenant, null, null, Instant.Stamp(started.OccurredAt), OriginKinds.System, null, null, null],
             Normalised(row));
 
         Assert.Equal(1, await stores.LongAsync("SELECT COUNT(*) FROM execution_snapshots"));
