@@ -34,6 +34,17 @@ namespace Harness.Host;
 /// </para>
 ///
 /// <para>
+/// ACROSS INSTANCES: every row carries <c>instance_id</c> and, LAST, <c>scope</c>, so files from two instances can
+/// be put side by side without counting a row twice - nothing here aggregates them. <c>instance_id</c> is the
+/// exporting instance's <c>instance.id</c>, except on the billing accounts file, where it is the account's own (copied
+/// at create). An expense row also carries its account's <c>scope</c> and <c>billing_account_instance_id</c>, so a
+/// shared account's expenses are identified by (<c>billing_account_instance_id</c>, <c>billing_account_id</c>,
+/// <c>expense_id</c>) and counted once. A summary spend row's <c>scope</c> is the scopes of the accounts it adds
+/// together; an estimate row's is empty (<see cref="NoScope"/>). Columns are only ever appended: the ones before
+/// <c>scope</c> keep their names and order.
+/// </para>
+///
+/// <para>
 /// FORMULA INJECTION: a text cell whose first character is <c>=</c>, <c>+</c>, <c>-</c>, <c>@</c>, a tab or a
 /// carriage return is written with a single quote (<c>'</c>) before it, so a spreadsheet reads it as text and
 /// never as a formula (<see cref="Neutral"/>). A plain number - an optional minus, digits and an optional
@@ -54,7 +65,7 @@ public static class SpendExport
     [
         "instance_id", "period_start", "period_end", "billing_account_id", "name", "vendor", "billing_type",
         "fixed_or_variable", "currency", "billing_period", "recurring_amount", "effective_from", "effective_to",
-        "is_active", "description", "created_by", "created_at", "updated_at",
+        "is_active", "description", "created_by", "created_at", "updated_at", "scope",
     ];
 
     public static readonly IReadOnlyList<string> ExpenseColumns =
@@ -62,21 +73,28 @@ public static class SpendExport
         "instance_id", "period_start", "period_end", "expense_id", "billing_account_id", "billing_account_name", "vendor",
         "kind", "status", "amount", "currency", "service_period_start", "service_period_end", "supersedes_expense_id",
         "superseded_by_expense_id", "is_current", "counts_in_actual_spend", "reference", "note", "recorded_by",
-        "recorded_at",
+        "recorded_at", "scope", "billing_account_instance_id",
     ];
 
     public static readonly IReadOnlyList<string> SummaryColumns =
     [
         "instance_id", "period_start", "period_end", "measure", "billing_type", "fixed_or_variable", "currency",
-        "amount", "item_count", "agent_seconds", "agent_hours", "agent_rate", "rate_source",
+        "amount", "item_count", "agent_seconds", "agent_hours", "agent_rate", "rate_source", "scope",
     ];
 
     public static readonly IReadOnlyList<string> EstimateColumns =
     [
         "instance_id", "period_start", "period_end", "rollup", "team_id", "team_name", "outcome_id", "outcome_name",
         "rate_source", "currency", "estimated_agent_cost", "estimated_plugin_cost", "estimated_execution_cost",
-        "agent_seconds", "agent_hours", "agent_rate",
+        "agent_seconds", "agent_hours", "agent_rate", "scope",
     ];
+
+    /// <summary>
+    /// AN ESTIMATE ROW'S <c>scope</c>: empty. Scope is a billing account's (<c>tenant</c>, with room for a shared
+    /// account across instances); an Estimated Execution Cost is this instance's own runs priced here, never shared,
+    /// so <c>instance_id</c> is its whole identity and two instances' estimate rows never count the same run.
+    /// </summary>
+    public const string NoScope = "";
 
     /// <summary>The summary's <c>measure</c> values.</summary>
     public const string MeasureActual = "actual_spend";
@@ -118,7 +136,7 @@ public static class SpendExport
                 Text(a.InstanceId), Stamp(period.From), Stamp(period.To), Text(a.Id), Text(a.Name), Text(a.Vendor),
                 Text(a.BillingType), Text(SpendOverview.GroupOf(a.BillingType)), Text(a.Currency), Text(a.BillingPeriod),
                 Number(a.RecurringAmount), Stamp(a.EffectiveFrom), Stamp(a.EffectiveTo), Bool(a.Active), Text(a.Description),
-                Text(a.CreatedBy), Stamp(a.CreatedAt), Stamp(a.UpdatedAt));
+                Text(a.CreatedBy), Stamp(a.CreatedAt), Stamp(a.UpdatedAt), Text(a.Scope));
         }
 
         return csv.ToString();
@@ -164,7 +182,8 @@ public static class SpendExport
                 Text(account?.Vendor), Text(e.Kind), Text(e.Status), Number(e.Amount), Text(e.Currency),
                 Stamp(e.ServicePeriodStart), Stamp(e.ServicePeriodEnd), Text(e.Supersedes), Text(e.SupersededBy),
                 Bool(e.Current), Bool(SpendOverview.Counts(e) && SpendOverview.InPeriod(e, period.From, period.To)),
-                Text(e.Reference), Text(e.Note), Text(e.RecordedBy), Stamp(e.RecordedAt));
+                Text(e.Reference), Text(e.Note), Text(e.RecordedBy), Stamp(e.RecordedAt), Text(account?.Scope),
+                Text(account?.InstanceId));
         }
 
         return csv.ToString();
@@ -175,37 +194,47 @@ public static class SpendExport
     /// Projected per currency, each billing type's actual and projected per currency, and Estimated Execution Cost
     /// with Agent Hours. <paramref name="rateSources"/> are the rate sources of the runs priced into the estimate.
     /// </summary>
-    public static string SummaryCsv(Period period, SpendOverview.Overview overview, IReadOnlyList<string> rateSources)
+    public static string SummaryCsv(
+        Period period, SpendOverview.Overview overview, IReadOnlyList<string> rateSources, IReadOnlyList<BillingAccount> accounts)
     {
         var csv = new Writer(SummaryColumns);
+
+        // The stored scopes of the accounts a row adds together: that currency's, and that billing type's for a by-type row.
+        string Scopes(string currency, string? type) => Text(string.Join(";", accounts
+            .Where(a => string.Equals(a.Currency, currency, StringComparison.OrdinalIgnoreCase))
+            .Where(a => type is null || string.Equals(a.BillingType, type, StringComparison.Ordinal))
+            .Select(a => a.Scope)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)));
+
         string[] Head(string measure, string? type, string? group, string? currency) =>
             [Text(period.InstanceId), Stamp(period.From), Stamp(period.To), measure, Text(type), Text(group), Text(currency)];
 
         foreach (var a in overview.Actual)
         {
-            csv.Row([.. Head(MeasureActual, null, null, a.Currency), Money(a.Amount), Count(a.Count), "", "", "", ""]);
+            csv.Row([.. Head(MeasureActual, null, null, a.Currency), Money(a.Amount), Count(a.Count), "", "", "", "", Scopes(a.Currency, null)]);
         }
 
         foreach (var p in overview.Projected)
         {
-            csv.Row([.. Head(MeasureProjected, null, null, p.Currency), Money(p.Amount), Count(p.Count), "", "", "", ""]);
+            csv.Row([.. Head(MeasureProjected, null, null, p.Currency), Money(p.Amount), Count(p.Count), "", "", "", "", Scopes(p.Currency, null)]);
         }
 
         foreach (var t in overview.BillingTypes.Where(t => t.Actual is not null))
         {
-            csv.Row([.. Head(MeasureActualByType, t.BillingType, t.Group, t.Currency), Money(t.Actual), "", "", "", "", ""]);
+            csv.Row([.. Head(MeasureActualByType, t.BillingType, t.Group, t.Currency), Money(t.Actual), "", "", "", "", "", Scopes(t.Currency, t.BillingType)]);
         }
 
         foreach (var t in overview.BillingTypes.Where(t => t.Projected is not null))
         {
-            csv.Row([.. Head(MeasureProjectedByType, t.BillingType, t.Group, t.Currency), Money(t.Projected), "", "", "", "", ""]);
+            csv.Row([.. Head(MeasureProjectedByType, t.BillingType, t.Group, t.Currency), Money(t.Projected), "", "", "", "", "", Scopes(t.Currency, t.BillingType)]);
         }
 
         var estimate = overview.Estimate;
         csv.Row(
         [
             .. Head(MeasureEstimate, null, null, estimate.Currency.ToUpperInvariant()), Cents(estimate.Cost), "",
-            Seconds(estimate.AgentSeconds), Hours(estimate.AgentSeconds), Cents(estimate.AgentRate), Text(string.Join(";", rateSources)),
+            Seconds(estimate.AgentSeconds), Hours(estimate.AgentSeconds), Cents(estimate.AgentRate), Text(string.Join(";", rateSources)), NoScope,
         ]);
 
         return csv.ToString();
@@ -273,7 +302,7 @@ public static class SpendExport
         public string[] Cells(string source) =>
         [
             Text(source), Text(Agent.Currency.ToUpperInvariant()), Cents(Agent.Cost), Cents(Plugin.Cost), Cents(Execution),
-            Seconds(Agent.AgentSeconds), Hours(Agent.AgentSeconds), Cents(Agent.AgentRate),
+            Seconds(Agent.AgentSeconds), Hours(Agent.AgentSeconds), Cents(Agent.AgentRate), NoScope,
         ];
     }
 

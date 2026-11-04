@@ -186,7 +186,9 @@ The product name, Yawble, lives in the web app's presentation layer
   recurring charges (never in Actual Spend) and **Estimated Execution Cost · Agent Hours** from the
   same pricing path as every cost figure, side by side with the sentence that they need not reconcile.
   Its tabs manage billing accounts and expenses (void or replace, never edit or delete), and Export
-  CSV downloads the period's accounts, expenses, summary and estimates by team and outcome. Every
+  CSV downloads the period's accounts, expenses, summary and estimates by team and outcome; every
+  row carries `instance_id` and `scope`, so two instances' files can be put side by side without
+  counting a shared account's expense twice (nothing aggregates them yet). Every
   write it makes is `HumansOnly`. Its reads are a person's, and an agent's only while it holds the
   `Spend` permit (`RequirePermit(Spend)`). That permit is never stored or minted:
   `SpendReading.Apply` gives it to a team's container or a Concierge on each request only while a

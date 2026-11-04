@@ -219,8 +219,9 @@ public static class SpendEndpoints
         + "snake_case columns that do not change; timestamps ISO-8601 UTC (`yyyy-MM-ddTHH:mm:ss.fffZ`); ISO 4217 "
         + "currency codes; ids as stored; amounts as plain decimal text with no symbol and no thousands separator "
         + "(stored amounts as stored, estimates to the cent); `instance_id`, `period_start` and `period_end` on every "
-        + "row. A text cell starting with `=`, `+`, `-`, `@`, a tab or a carriage return is written with a single "
-        + "quote before it, so a spreadsheet never runs it; a plain number is written as it is. The period is "
+        + "row, and `scope` last (a billing account's stored scope; on a summary spend row the scopes of the accounts it "
+        + "adds; empty on an estimate row, which is this instance's own); columns are only ever appended. A text cell "
+        + "starting with `=`, `+`, `-`, `@`, a tab or a carriage return is written with a single quote before it, so a spreadsheet never runs it; a plain number is written as it is. The period is "
         + "`?from=YYYY-MM-DD&to=YYYY-MM-DD` (midnight UTC, `to` exclusive), the current UTC month when neither is sent, "
         + "as `GET /api/spend/overview` reads it; anything else is refused (400) with one sentence. Currencies are never "
         + "converted or added together. A person's, and an agent's while a person has turned on `reporting.agentsMayReadSpend` (the Spend permit); every write stays a person's.";
@@ -263,7 +264,9 @@ public static class SpendEndpoints
                 + "current, voided and superseded alike - in the order recorded: `" + string.Join("`, `", SpendExport.ExpenseColumns) + "`. "
                 + "`supersedes_expense_id` and `superseded_by_expense_id` rebuild the chain; `counts_in_actual_spend` is "
                 + "true only for the current confirmed row whose service period starts in the period, so a voided or "
-                + "replaced expense counts once, by its current row. " + ExportFormat);
+                + "replaced expense counts once, by its current row. `scope` and `billing_account_instance_id` are the account's "
+                + "stored scope and instance id, so a shared account's expense is identified across instances by "
+                + "`billing_account_instance_id`, `billing_account_id` and `expense_id`. " + ExportFormat);
 
         app.MapGet("/api/spend/export/period-summary", async (
                 string? from, string? to, ISpendStore spend, IOutcomeStore outcomes, TenantSettings settings, LedgerIdentity identity,
@@ -273,7 +276,8 @@ public static class SpendEndpoints
 
                 var (overview, runs) = await OverviewAsync(period, spend, outcomes, settings, ct);
                 var csv = SpendExport.SummaryCsv(
-                    new(period.From, period.To, identity.InstanceId ?? ""), overview, SpendExport.RateSourcesOf(runs, period.From, period.To));
+                    new(period.From, period.To, identity.InstanceId ?? ""), overview, SpendExport.RateSourcesOf(runs, period.From, period.To),
+                    await spend.ListAccountsAsync(ct));
                 return Csv(SpendExport.Summary, csv, period);
             })
             .WithTags("Billing")

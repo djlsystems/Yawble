@@ -29,26 +29,26 @@ public sealed class SpendExportRuleTests
 
         Assert.Equal(
             "instance_id,period_start,period_end,billing_account_id,name,vendor,billing_type,fixed_or_variable,currency,"
-            + "billing_period,recurring_amount,effective_from,effective_to,is_active,description,created_by,created_at,updated_at\r\n",
+            + "billing_period,recurring_amount,effective_from,effective_to,is_active,description,created_by,created_at,updated_at,scope\r\n",
             SpendExport.AccountsCsv(Period, []));
         Assert.Equal(
             "instance_id,period_start,period_end,expense_id,billing_account_id,billing_account_name,vendor,kind,status,amount,"
             + "currency,service_period_start,service_period_end,supersedes_expense_id,superseded_by_expense_id,is_current,"
-            + "counts_in_actual_spend,reference,note,recorded_by,recorded_at\r\n",
+            + "counts_in_actual_spend,reference,note,recorded_by,recorded_at,scope,billing_account_instance_id\r\n",
             SpendExport.ExpensesCsv(Period, [], []));
         Assert.Equal(
             "instance_id,period_start,period_end,rollup,team_id,team_name,outcome_id,outcome_name,rate_source,currency,"
-            + "estimated_agent_cost,estimated_plugin_cost,estimated_execution_cost,agent_seconds,agent_hours,agent_rate\r\n",
+            + "estimated_agent_cost,estimated_plugin_cost,estimated_execution_cost,agent_seconds,agent_hours,agent_rate,scope\r\n",
             SpendExport.EstimatesCsv(Period, [], [], [], new Dictionary<string, long>(), "usd"));
 
         // The summary always has its estimate row: an estimate that priced nothing is empty, never 0.
-        var summary = Lines(SpendExport.SummaryCsv(Period, empty, []));
+        var summary = Lines(SpendExport.SummaryCsv(Period, empty, [], []));
         Assert.Equal(
             "instance_id,period_start,period_end,measure,billing_type,fixed_or_variable,currency,amount,item_count,"
-            + "agent_seconds,agent_hours,agent_rate,rate_source",
+            + "agent_seconds,agent_hours,agent_rate,rate_source,scope",
             summary[0]);
         Assert.Equal(
-            "instance-1,2031-03-01T00:00:00.000Z,2031-04-01T00:00:00.000Z,estimated_execution_cost,,,USD,,,0,0,,",
+            "instance-1,2031-03-01T00:00:00.000Z,2031-04-01T00:00:00.000Z,estimated_execution_cost,,,USD,,,0,0,,,",
             Assert.Single(summary.Skip(1)));
 
         // No column calls an estimate spend or cost alone, and none names a value word.

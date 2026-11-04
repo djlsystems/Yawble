@@ -113,7 +113,8 @@ rows and figures the page reads. Nothing is priced again, converted or inferred.
   a CR or an LF is put in double quotes, with each quote doubled.
 - **Header row.** Always there, even when the file has no data rows.
 - **Column names.** Lower-case snake_case. They do not change: renaming or reordering one is a
-  breaking change, and a golden header test holds them.
+  breaking change, and a golden header test holds them. A new column is only ever appended at the
+  end.
 - **Timestamps.** ISO-8601 UTC, `yyyy-MM-ddTHH:mm:ss.fffZ`.
 - **Currencies.** ISO 4217 codes, upper case.
 - **Ids.** As stored: GUIDs for accounts, expenses and outcomes, and team ids as the team has them.
@@ -122,7 +123,8 @@ rows and figures the page reads. Nothing is priced again, converted or inferred.
   keep the stored digits. Estimates are to the cent. An estimate with nothing priced is an empty
   cell, never 0.
 - **On every row.** `instance_id` (the instance's `instance.id`; on a billing account, the one it
-  copied at create), `period_start` and `period_end` (the period exported).
+  copied at create), `period_start` and `period_end` (the period exported), and `scope`, the last
+  column (see [Across instances](#across-instances)).
 - **Per currency, never converted.** No row adds two currencies together.
 - **Formula injection.** A text cell whose first character is `=`, `+`, `-`, `@`, a tab or a
   carriage return is written with a single quote (`'`) before it, so a spreadsheet shows it as text
@@ -139,7 +141,8 @@ Every billing account, active and inactive, by name.
 `instance_id`, `period_start`, `period_end`, `billing_account_id`, `name`, `vendor`, `billing_type`,
 `fixed_or_variable` (`fixed` for a subscription, `variable` for metered and service), `currency`,
 `billing_period`, `recurring_amount`, `effective_from`, `effective_to`, `is_active`, `description`,
-`created_by`, `created_at`, `updated_at`.
+`created_by`, `created_at`, `updated_at`, `scope` (the account's stored scope; only `tenant` can
+be written today).
 
 ### `expenses`
 
@@ -151,7 +154,8 @@ moved the service period into or out of the period still brings the rest of its 
 `billing_account_name`, `vendor`, `kind`, `status` (`confirmed` or `void`), `amount`, `currency`,
 `service_period_start`, `service_period_end` (exclusive), `supersedes_expense_id`,
 `superseded_by_expense_id`, `is_current`, `counts_in_actual_spend`, `reference`, `note`,
-`recorded_by`, `recorded_at`.
+`recorded_by`, `recorded_at`, `scope` (the account's stored scope), `billing_account_instance_id`
+(the account's stored `instance_id`; `instance_id` is the instance that exported the row).
 
 `supersedes_expense_id` and `superseded_by_expense_id` rebuild the chain. `counts_in_actual_spend`
 is `true` only for a current confirmed row whose service period starts in the period (the
@@ -164,7 +168,9 @@ therefore counted once, by its current row, and the rows marked `true` add up to
 overview object with the same code, so the figures cannot differ.
 
 `instance_id`, `period_start`, `period_end`, `measure`, `billing_type`, `fixed_or_variable`,
-`currency`, `amount`, `item_count`, `agent_seconds`, `agent_hours`, `agent_rate`, `rate_source`.
+`currency`, `amount`, `item_count`, `agent_seconds`, `agent_hours`, `agent_rate`, `rate_source`,
+`scope` (on a spend row, the stored scopes of the accounts the row adds together - that currency's,
+and that billing type's on a by-type row - `;`-separated; empty on the estimate row).
 
 | `measure` | One row per | Filled |
 |---|---|---|
@@ -181,7 +187,7 @@ counts the part of its span inside it, priced on its own by the one pricing path
 
 `instance_id`, `period_start`, `period_end`, `rollup`, `team_id`, `team_name`, `outcome_id`,
 `outcome_name`, `rate_source`, `currency`, `estimated_agent_cost`, `estimated_plugin_cost`,
-`estimated_execution_cost`, `agent_seconds`, `agent_hours`, `agent_rate`.
+`estimated_execution_cost`, `agent_seconds`, `agent_hours`, `agent_rate`, `scope` (always empty).
 
 - **`rollup` `team`.** Each team the caller reaches that has runs in the period. Its runs are read as
   every team figure reads them: the ledger rows carrying its id, above the team's floor.
@@ -206,6 +212,40 @@ counts the part of its span inside it, priced on its own by the one pricing path
 - **The weekly team reads.** These split a run that crosses a Monday into weekly parts, each
   rounded on its own. For the same span they can therefore differ from this file by a cent per run
   that crosses a Monday, as described in [cost.md](cost.md).
+
+### Across instances
+
+The files are ready to be put beside another instance's files. Nothing reads two instances' files
+together yet; that is later work.
+
+- **Ids that do not change.** `instance_id` is a GUID written once at the first start and never
+  changed. Accounts and expenses have GUIDs the store assigns, and expenses are never edited (a
+  correction is a new row). Team and outcome ids are stored ids; Unattributed is always the empty
+  `outcome_id`. Two exports of the same period are the same bytes, before and after a restart.
+- **No row id on a summary row.** A `period-summary` row is identified by `instance_id`,
+  `period_start`, `period_end`, `measure`, `billing_type` and `currency`. An
+  `estimated-execution-cost` row is identified by `instance_id`, the period, `rollup`, `team_id` or
+  `outcome_id`, and `rate_source`. No file lists runs.
+- **`scope` is a billing account's.** It is `tenant` on every account today; any other value is
+  refused when an account is created or edited. The column leaves room for an account shared
+  between instances.
+- **Counting a shared account once.** An account is identified across instances by
+  `billing_account_instance_id` and `billing_account_id` (on the `billing-accounts` file, by
+  `instance_id` and `billing_account_id`, since there `instance_id` is the account's own). An
+  expense whose `scope` is `tenant` belongs to the instance that exported it. Any other `scope` is
+  counted once by `billing_account_instance_id`, `billing_account_id` and `expense_id`, however many
+  instances exported it. Actual Spend across instances is added up from the `expenses` files' rows
+  with `counts_in_actual_spend` `true`, never from the `period-summary` files, whose spend rows add
+  every account of a currency together.
+- **Estimates have no scope.** An Estimated Execution Cost is one instance's own runs priced on that
+  instance. It is never shared, so `instance_id` identifies it and `scope` is empty.
+
+`SpendExportIdentityRuleTests` holds the column order (each file's columns before `scope` are
+unchanged; only the new ones are appended) and shows a shared account's expense exported by two
+instances is one row by those three ids. `SpendExportIdentityTests` checks, on a real Host started
+twice over one data root, that `instance_id` is the stored `instance.id`, that each account's
+`scope` and instance are its stored row's, and that every file is the same after a second export
+and after a restart.
 
 ## Routes
 
