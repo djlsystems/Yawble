@@ -45,6 +45,9 @@ type Observed struct {
 	Pending                   []string
 	URL                       string
 	Healthy                   *bool
+	// Workers is each worker as instance.Workers found it, with its check already run where the
+	// engine's record said starting or unhealthy. Set with ContainerKnown.
+	Workers []instance.WorkerStatus
 	Port                      int
 	PortFree                  *bool
 	ExeDir                    string

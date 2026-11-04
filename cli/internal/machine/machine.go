@@ -185,3 +185,37 @@ func WSLAnswers(ctx context.Context, r engine.Runner) bool {
 	res, err := r.Run(ctx, "wsl", "--status")
 	return err == nil && res.ExitCode == 0
 }
+
+// Linger answers the user rootless Podman runs as and whether systemd keeps that user's manager
+// running without a login session (loginctl's Linger). Rootless Podman runs each container's
+// health check from a transient timer in that manager. With a machine name it is asked inside the
+// machine (`podman machine ssh`); with none, on this computer. ok is false when either answer
+// could not be read: not measured, never guessed.
+func Linger(ctx context.Context, r engine.Runner, machineName string) (user string, linger, ok bool) {
+	ask := func(args ...string) (string, bool) {
+		name := args[0]
+		if machineName != "" {
+			name, args = "podman", append([]string{"machine", "ssh", machineName}, args...)
+		} else {
+			args = args[1:]
+		}
+		res, err := r.Run(ctx, name, args...)
+		if err != nil || res.ExitCode != 0 {
+			return "", false
+		}
+		answer := strings.TrimSpace(res.Stdout)
+		return answer, answer != ""
+	}
+	user, ok = ask("id", "-un")
+	if !ok {
+		return "", false, false
+	}
+	value, ok := ask("loginctl", "show-user", user, "--property=Linger", "--value")
+	switch value {
+	case "yes":
+		return user, true, ok
+	case "no":
+		return user, false, ok
+	}
+	return user, false, false
+}

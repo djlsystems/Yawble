@@ -38,13 +38,16 @@ type Status struct {
 	PreviewPublished []int  `json:"previewPublished"`
 }
 
-// WorkerStatus is one worker container as the engine sees it. Health is the engine's verdict
-// from the image's health check, which reads healthy exactly while the worker is connected.
+// WorkerStatus is one worker container as the engine sees it. Health is the verdict of the
+// image's health check, which reads healthy exactly while the worker is connected. EngineHealth
+// is set only when the engine's own record said starting or unhealthy and yawble ran the check
+// itself (CurrentHealth): Health is then that run's answer, and EngineHealth what the engine read.
 type WorkerStatus struct {
-	Name      string        `json:"name"`
-	ID        string        `json:"id"`
-	Container engine.State  `json:"container"`
-	Health    engine.Health `json:"health,omitempty"`
+	Name         string        `json:"name"`
+	ID           string        `json:"id"`
+	Container    engine.State  `json:"container"`
+	Health       engine.Health `json:"health,omitempty"`
+	EngineHealth engine.Health `json:"engineHealth,omitempty"`
 	Image     string        `json:"image"`
 	Pending   []string      `json:"pending,omitempty"`
 }
@@ -791,7 +794,7 @@ func Workers(ctx context.Context, e engine.Engine, s Settings) ([]WorkerStatus, 
 			w.Pending = append(w.Pending, fmt.Sprintf("beyond the configured %d (yawble workers %d removes it)", s.Workers, s.Workers))
 		}
 		if info.State == engine.StateRunning {
-			if w.Health, err = e.Health(ctx, w.Name); err != nil {
+			if w.Health, w.EngineHealth, err = CurrentHealth(ctx, e, w.Name); err != nil {
 				return out, err
 			}
 		}

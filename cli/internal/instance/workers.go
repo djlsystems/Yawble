@@ -334,14 +334,36 @@ func keptWithoutLimits(ctx context.Context, e engine.Engine, label string, s Set
 	return was.Cgroups == CgroupsSeen(e.Cgroups(ctx))
 }
 
-// waitWorker waits until the engine reads the worker healthy, which its image's health check
-// makes exactly "connected to control". A worker image without a health check cannot say, and is
-// not waited for; one that stops is reported at once, not after the whole wait.
+// CurrentHealth is a container's health check verdict now. The engine's record is read first;
+// when it says starting or unhealthy the check is run here (RunHealthCheck) and that answer is
+// taken, because rootless Podman updates its record only from a timer that does not fire on
+// every machine. Docker's daemon keeps its record on time, so there the record is the answer.
+// said is the engine's record when the check was run here, and empty when it was not.
+func CurrentHealth(ctx context.Context, e engine.Engine, name string) (h, said engine.Health, err error) {
+	h, err = e.Health(ctx, name)
+	if err != nil || (h != engine.HealthStarting && h != engine.HealthUnhealthy) {
+		return h, "", err
+	}
+	ran, err := e.RunHealthCheck(ctx, name)
+	if err != nil {
+		return h, "", err
+	}
+	if ran == engine.HealthNone {
+		// The check could not be run after all: the engine's record stands.
+		return h, "", nil
+	}
+	return ran, h, nil
+}
+
+// waitWorker waits until the worker's health check passes, which its image makes exactly
+// "connected to control". Each poll takes CurrentHealth, so a check the engine never runs on its
+// own is run here and its pass is seen at once. A worker image without a health check cannot
+// say, and is not waited for; one that stops is reported at once, not after the whole wait.
 func waitWorker(ctx context.Context, e engine.Engine, name string, out io.Writer) error {
 	short := strings.TrimPrefix(name, ContainerName+"-")
 	return waitUntil(ctx, e, name,
 		func() (bool, error) {
-			h, err := e.Health(ctx, name)
+			h, _, err := CurrentHealth(ctx, e, name)
 			if err != nil {
 				return false, err
 			}

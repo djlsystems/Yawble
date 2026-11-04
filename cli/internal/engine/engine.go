@@ -113,6 +113,12 @@ type Engine interface {
 	// Health is the engine's verdict from the image's HEALTHCHECK. A container with none, or a
 	// missing container, is HealthNone: never read as healthy.
 	Health(ctx context.Context, name string) (Health, error)
+	// RunHealthCheck runs the image's health check now, where the engine leaves running it to a
+	// timer (Podman), and answers the verdict. Docker runs checks in its daemon: there it is Health.
+	RunHealthCheck(ctx context.Context, name string) (Health, error)
+	// HealthTimes is when the container started, its check's start period and interval, and when
+	// the engine last ran the check.
+	HealthTimes(ctx context.Context, name string) (HealthTimes, error)
 	// StopWithin stops a container, giving its process grace seconds before it is killed.
 	StopWithin(ctx context.Context, name string, grace int) error
 	// Exec runs a program inside a running container and answers its output. A non-zero exit
