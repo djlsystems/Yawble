@@ -119,6 +119,9 @@ public sealed class PluginNeedsPersonTests : IAsyncLifetime
             $"/api/teams/{_team}/members/Keyed/plugin-settings", new { config = new { }, secrets = new Dictionary<string, string> { ["token"] = key } }, Ct);
         Assert.True(saved.IsSuccessStatusCode, await saved.Content.ReadAsStringAsync(Ct));
 
+        // The key's value was supplied once, by the person, on no team; binding it supplied no value.
+        Assert.Equal([(Email, (string?)null)], await CredentialSuppliedAsync());
+
         var notices = await NoticesAsync();
         var notice = Assert.Single(notices);
         Assert.Equal(failed.CorrelationId, notice.CorrelationId);
@@ -165,9 +168,13 @@ public sealed class PluginNeedsPersonTests : IAsyncLifetime
         var notice = Assert.Single(await NoticesAsync());
         Assert.Equal(failed.CorrelationId, notice.CorrelationId);
 
+        // THE PERSON'S SAVE IS AN INTERVENTION (credential_supplied), on the member's team; never the value.
+        Assert.Equal([(Email, _team)], await CredentialSuppliedAsync());
+
         // Replacing it says nothing more, and the member now runs.
         Assert.True((await _person.PutAsJsonAsync($"/api/teams/{_team}/members/Keyed/secrets/token", new { value = $"value-{Guid.NewGuid():N}" }, Ct)).IsSuccessStatusCode);
         Assert.Single(await NoticesAsync());
+        Assert.Equal([(Email, _team), (Email, _team)], await CredentialSuppliedAsync());
         Assert.Equal(MessageTypes.Completed, (await TellAndAwaitAsync("Keyed")).Type);
     }
 
@@ -188,6 +195,7 @@ public sealed class PluginNeedsPersonTests : IAsyncLifetime
         Assert.True(saved.IsSuccessStatusCode, await saved.Content.ReadAsStringAsync(Ct));
         var notice = Assert.Single(await NoticesAsync());
         Assert.Equal(failed.CorrelationId, notice.CorrelationId);
+        Assert.Equal([(Email, _team)], await CredentialSuppliedAsync());
 
         // A second Save replacing it says nothing more, and the member now runs.
         Assert.True((await _person.PutAsJsonAsync($"/api/teams/{_team}/members/Saved/plugin-settings", new
@@ -210,6 +218,21 @@ public sealed class PluginNeedsPersonTests : IAsyncLifetime
         Assert.Contains("`[needs-person]`", prompt);
         Assert.Contains("Report it to the person once with `blocked`", prompt);
         Assert.Contains("send the instruction again", prompt);
+    }
+
+    /// <summary>The <c>credential_supplied</c> interventions recorded, oldest first: whose, and on which team.</summary>
+    private async Task<List<(string? Email, string? Team)>> CredentialSuppliedAsync()
+    {
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection(
+            new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = Path.Combine(_dataRoot, "messages.db"), Pooling = false }.ToString());
+        await connection.OpenAsync(Ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT actor_email, team_id FROM intervention_ledger WHERE kind = '{InterventionKinds.CredentialSupplied}' ORDER BY id";
+
+        var rows = new List<(string?, string?)>();
+        await using var reader = await command.ExecuteReaderAsync(Ct);
+        while (await reader.ReadAsync(Ct)) rows.Add((reader.IsDBNull(0) ? null : reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1)));
+        return rows;
     }
 
     /// <summary>Waits until the Manager the failure woke has run and is idle again.</summary>

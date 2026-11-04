@@ -87,6 +87,26 @@ public sealed class LedgerStartTests : IDisposable
         Assert.Null((await LedgerStart.RunAsync(Database, Ct)).BackfilledRuns);
     }
 
+    /// <summary>
+    /// WHEN PEOPLE'S ACTS BEGAN TO BE RECORDED is written once, at the first start with outcome-010 applied,
+    /// with its tenant row, and never moves: <c>interventions.startedAt</c>, as <c>ledger.startedAt</c> is.
+    /// </summary>
+    [Fact]
+    public async Task Interventions_started_at_is_recorded_once_at_the_first_start_and_never_moves()
+    {
+        await StartAsync();
+
+        var startedAt = await SettingAsync(LedgerStart.InterventionsStartedAtName);
+        Assert.NotNull(startedAt);
+        Assert.Equal(startedAt, (await LedgerStart.RunAsync(Database, Ct)).InterventionsStartedAt);
+
+        await StartAsync();
+
+        Assert.Equal(startedAt, await SettingAsync(LedgerStart.InterventionsStartedAtName));
+        Assert.Equal(1, await CountAsync(
+            $"SELECT COUNT(*) FROM tenant_events WHERE action = '{TenantActions.TenantSettingChanged}' AND subject = '{LedgerStart.InterventionsStartedAtName}'"));
+    }
+
     [Fact]
     public async Task The_instance_id_is_created_once_and_unchanged_across_restarts()
     {
