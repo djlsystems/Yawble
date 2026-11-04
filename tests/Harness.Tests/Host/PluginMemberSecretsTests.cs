@@ -68,6 +68,36 @@ public sealed class PluginMemberSecretsTests : IAsyncLifetime
                     """);
             }));
 
+        // A SECOND PLUGIN WITH A TABLE: an unmasked secret column `login` and a masked `password`, beside the
+        // same masked `token` and unmasked `account` fields - every kind of value an API key must never see.
+        PluginInstall.Write(_dataRoot, "shown",
+            script: "cat > /dev/null; echo '{\"t\":\"result\",\"ok\":true,\"output\":\"read\"}'",
+            manifest: PluginInstall.Manifest("shown", edit: m =>
+            {
+                m["secrets"] = JsonNode.Parse(
+                    """
+                    {
+                      "token": { "description": "The service's token.", "required": true },
+                      "account": { "description": "The account's name.", "masked": false }
+                    }
+                    """);
+                m["config"] = new JsonObject
+                {
+                    ["entries"] = JsonNode.Parse(
+                        """
+                        {
+                          "type": "table",
+                          "key": "name",
+                          "columns": [
+                            { "name": "name", "type": "string", "required": true },
+                            { "name": "login", "type": "secret", "masked": false },
+                            { "name": "password", "type": "secret" }
+                          ]
+                        }
+                        """),
+                };
+            }));
+
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host => host
             .UseSetting("DataRoot", _dataRoot)
             .UseSetting("Logging:LogLevel:Default", "Warning")
@@ -296,7 +326,7 @@ public sealed class PluginMemberSecretsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task A_machine_principal_is_refused_every_route_and_an_agents_hire_cannot_carry_a_value()
+    public async Task A_machine_principal_is_refused_every_write_and_an_agents_hire_cannot_carry_a_value()
     {
         var first = Value("person");
         await HireAsync("Guarded", new() { ["token"] = first });
@@ -306,21 +336,36 @@ public sealed class PluginMemberSecretsTests : IAsyncLifetime
             new ContainerId(_team, TeamRegistry.DefaultManagerName).ToString(), PrincipalKind.Container,
             _team, Permits.All, ct: Ct));
 
-        var routes = new (HttpMethod Method, string Path, object? Body)[]
+        // A PERSON'S OWN API KEY, holding every permit a key is minted with.
+        using var key = await ApiKeyClientAsync();
+
+        var writes = new (HttpMethod Method, string Path, object? Body)[]
         {
-            (HttpMethod.Get, $"/api/teams/{_team}/members/Guarded/secrets", null),
             (HttpMethod.Put, $"/api/teams/{_team}/members/Guarded/secrets/token", new { value = Value("machine") }),
             (HttpMethod.Delete, $"/api/teams/{_team}/members/Guarded/secrets/token", null),
-            (HttpMethod.Get, $"/api/teams/{_team}/members/Guarded/plugin-settings", null),
             (HttpMethod.Put, $"/api/teams/{_team}/members/Guarded/plugin-settings", new { config = new { }, secretValues = new Dictionary<string, string?> { ["token"] = Value("machine-save") } }),
         };
 
-        foreach (var (method, path, body) in routes)
+        // The Manager keeps exactly what it had: both reads refused too. The key reads plugin-settings
+        // (state only, pinned below) but not `.../secrets`.
+        var refused = new List<(HttpClient Client, HttpMethod Method, string Path, object? Body)>();
+        foreach (var write in writes)
         {
+            refused.Add((manager, write.Method, write.Path, write.Body));
+            refused.Add((key, write.Method, write.Path, write.Body));
+        }
+
+        refused.Add((manager, HttpMethod.Get, $"/api/teams/{_team}/members/Guarded/secrets", null));
+        refused.Add((manager, HttpMethod.Get, $"/api/teams/{_team}/members/Guarded/plugin-settings", null));
+        refused.Add((key, HttpMethod.Get, $"/api/teams/{_team}/members/Guarded/secrets", null));
+
+        foreach (var (client, method, path, body) in refused)
+        {
+            var who = client == key ? "api key" : "manager";
             using var request = new HttpRequestMessage(method, path);
             if (body is not null) request.Content = JsonContent.Create(body);
-            using var response = await manager.SendAsync(request, Ct);
-            Assert.True(response.StatusCode == HttpStatusCode.Forbidden, $"{method} {path}: {response.StatusCode}");
+            using var response = await client.SendAsync(request, Ct);
+            Assert.True(response.StatusCode == HttpStatusCode.Forbidden, $"{who} {method} {path}: {response.StatusCode}");
             Assert.Equal(PermitGate.HumansOnlyMessage, Json(await response.Content.ReadAsStringAsync(Ct)).GetProperty("error").GetString());
         }
 
@@ -337,6 +382,100 @@ public sealed class PluginMemberSecretsTests : IAsyncLifetime
         Assert.Contains("An agent's hire cannot carry a secret value", await hire.Content.ReadAsStringAsync(Ct));
         Assert.Null(Services.GetRequiredService<Harness.Containers.ContainerHost>().Find(new ContainerId(_team, "Steered")));
         Assert.Equal([TenantActions.MemberSecretSet], await SecretRowsAsync("Guarded"));
+    }
+
+    [Fact]
+    public async Task An_api_key_never_sees_a_secret_value_only_each_secrets_state_and_a_person_still_reads_the_values()
+    {
+        var token = Value("token");
+        var account = Value("account");
+        var login = Value("login");
+        var password = Value("password");
+
+        var hired = await _person.PostAsJsonAsync($"/api/teams/{_team}/containers", new
+        {
+            name = "Shown",
+            agent = "plugin:shown",
+            secretValues = new Dictionary<string, string> { ["token"] = token, ["account"] = account },
+        }, Ct);
+        Assert.True(hired.IsSuccessStatusCode, await hired.Content.ReadAsStringAsync(Ct));
+
+        var saved = await SendAsync(HttpMethod.Put, $"/api/teams/{_team}/members/Shown/plugin-settings", new
+        {
+            config = new Dictionary<string, JsonElement> { ["entries"] = Json("""[{"name":"alpha"}]""") },
+            tableSecretValues = new Dictionary<string, object>
+            {
+                ["entries"] = new Dictionary<string, object> { ["alpha"] = new Dictionary<string, string> { ["login"] = login, ["password"] = password } },
+            },
+        });
+        Assert.True(saved.Status == HttpStatusCode.OK, saved.Body);
+
+        var path = $"/api/teams/{_team}/members/Shown/plugin-settings";
+
+        // A PERSON reads the unmasked values as before; the masked ones never.
+        var person = await GetAsync(path);
+        Assert.Equal(account, SettingsState(person, "account").GetProperty("value").GetString());
+        Assert.Equal(login, person.GetProperty("tableSecretStates").GetProperty("entries").GetProperty("alpha").GetProperty("login").GetProperty("value").GetString());
+        Assert.False(person.GetProperty("tableSecretStates").GetProperty("entries").GetProperty("alpha").GetProperty("password").TryGetProperty("value", out _));
+
+        // AN API KEY reads 200, every secret's state and no value anywhere in the body.
+        using var key = await ApiKeyClientAsync();
+        using var answer = await key.GetAsync(path, Ct);
+        var raw = await answer.Content.ReadAsStringAsync(Ct);
+        Assert.True(answer.StatusCode == HttpStatusCode.OK, raw);
+
+        foreach (var value in new[] { token, account, login, password })
+        {
+            Assert.DoesNotContain(value, raw, StringComparison.Ordinal);
+        }
+
+        var read = Json(raw);
+        foreach (var name in new[] { "plugin", "version", "description", "config", "fields", "secretFields", "outOfRange", "marketplaceUrl" })
+        {
+            Assert.True(read.TryGetProperty(name, out _), $"the key's answer has no `{name}`");
+        }
+
+        Assert.Equal("shown", read.GetProperty("plugin").GetString());
+        Assert.Equal("alpha", read.GetProperty("config").GetProperty("entries")[0].GetProperty("name").GetString());
+
+        foreach (var field in new[] { "token", "account" })
+        {
+            var state = SettingsState(read, field);
+            Assert.True(state.GetProperty("set").GetBoolean(), field);
+            Assert.Equal(Email, state.GetProperty("setBy").GetString());
+            Assert.Equal(JsonValueKind.String, state.GetProperty("setAt").ValueKind);
+            Assert.Equal("member", state.GetProperty("source").GetString());
+            Assert.False(state.TryGetProperty("value", out _), $"`{field}` carries a value to an API key");
+        }
+
+        var cells = read.GetProperty("tableSecretStates").GetProperty("entries").GetProperty("alpha");
+        foreach (var column in new[] { "login", "password" })
+        {
+            var cell = cells.GetProperty(column);
+            Assert.True(cell.GetProperty("set").GetBoolean(), column);
+            Assert.Equal(Email, cell.GetProperty("setBy").GetString());
+            Assert.Equal(JsonValueKind.String, cell.GetProperty("setAt").ValueKind);
+            Assert.False(cell.TryGetProperty("value", out _), $"cell `{column}` carries a value to an API key");
+        }
+
+        // And the person's read after the key's is unchanged.
+        Assert.Equal(account, SettingsState(await GetAsync(path), "account").GetProperty("value").GetString());
+    }
+
+    [Fact]
+    public async Task An_api_key_without_read_is_told_it_lacks_read_on_the_settings_read()
+    {
+        await HireAsync("Narrow", new() { ["token"] = Value("narrow") });
+        var owner = (await Services.GetRequiredService<IUserStore>().FindAsync(Email, Ct))!.Id;
+
+        using var key = _factory.CreateClient();
+        key.DefaultRequestHeaders.Add(ApiKeyAuthenticationHandler.Header, await Services.GetRequiredService<IPrincipalStore>().MintAsync(
+            $"apikey-{Guid.NewGuid():N}", PrincipalKind.ApiKey, team: null, new HashSet<string>([Permits.Tell], StringComparer.Ordinal),
+            ownerUserId: owner, ct: Ct));
+
+        using var answer = await key.GetAsync($"/api/teams/{_team}/members/Narrow/plugin-settings", Ct);
+        Assert.Equal(HttpStatusCode.Forbidden, answer.StatusCode);
+        Assert.Equal(PermitGate.Missing(Permits.Read), Json(await answer.Content.ReadAsStringAsync(Ct)).GetProperty("error").GetString());
     }
 
     [Theory]
@@ -429,6 +568,9 @@ public sealed class PluginMemberSecretsTests : IAsyncLifetime
     private static JsonElement State(JsonElement read, string field) =>
         read.GetProperty("secrets").EnumerateArray().Single(e => e.GetProperty("field").GetString() == field);
 
+    private static JsonElement SettingsState(JsonElement settings, string field) =>
+        settings.GetProperty("secretStates").EnumerateArray().Single(e => e.GetProperty("field").GetString() == field);
+
     private async Task<string?> OwnValueAsync(string member, string field) =>
         (await Services.GetRequiredService<PluginMemberSecretStore>().ValuesAsync(new ContainerId(_team, member), Ct)).GetValueOrDefault(field);
 
@@ -444,6 +586,18 @@ public sealed class PluginMemberSecretsTests : IAsyncLifetime
         var body = await hired.Content.ReadAsStringAsync(Ct);
         _responses.Add(body);
         Assert.True(hired.StatusCode == HttpStatusCode.OK, body);
+    }
+
+    /// <summary>A client signed in with the person's own API key, minted as the person mints one.</summary>
+    private async Task<HttpClient> ApiKeyClientAsync()
+    {
+        var minted = await _person.PostAsJsonAsync("/api/keys", new { label = $"tool {Guid.NewGuid():N}" }, Ct);
+        var body = await minted.Content.ReadAsStringAsync(Ct);
+        Assert.True(minted.IsSuccessStatusCode, body);
+
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add(ApiKeyAuthenticationHandler.Header, Json(body).GetProperty("credential").GetString());
+        return client;
     }
 
     private async Task<Message> TellAndAwaitAsync(string member)
