@@ -275,7 +275,7 @@ public static class BuiltInSkills
 
                 site  action: data  op: put  site: team-picture  collection: tp-picture  id: <item>  doc: {...}
 
-            The id is the item's key as `tp-items` names it: a backlog item's id (`B0089`), or
+            The id is the item's key as `tp-items` names it: a backlog item's id (`B000H`), or
             `w<workflow>` for told work with no backlog item; an operational team keeps one
             document, id `ongoing`. A build item's document is `kind` `build` with `architecture` (a
             diagram focused on what the item adds or changes, the rest of the product `unchanged`),

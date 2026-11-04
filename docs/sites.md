@@ -403,7 +403,7 @@ Any other collection name on this site is refused for everybody, and the page it
 Each refusal is a sentence (403).
 
 Every item has a **key**, the document id in `tp-items`, `tp-picture` and `tp-history`: a backlog
-item's id (`B0089`), `w<workflow>` for told work with no backlog item (`w27613`), and `ongoing` for an
+item's id (`B000H`), `w<workflow>` for told work with no backlog item (`w27613`), and `ongoing` for an
 operational team's single picture. Before the Manager has drawn an item, the page shows the live
 parts and says "The picture is drawn when the team plans its work."
 
@@ -473,7 +473,7 @@ Missing or unknown status reads `todo`.
 
 #### `tp-picture` - one document per item (Manager)
 
-Document id: the item's key as `tp-items` names it (`B0089`, or `w<workflow>` for told work). An
+Document id: the item's key as `tp-items` names it (`B000H`, or `w<workflow>` for told work). An
 operational team keeps ONE document, id `ongoing`.
 
 ```json
