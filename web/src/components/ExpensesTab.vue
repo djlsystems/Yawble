@@ -126,9 +126,12 @@ function accountName(id: string): string {
   return accountsById.value.get(id)?.name ?? id;
 }
 
+/** A row's state: confirmed, void, or - superseded - voided or replaced, by what superseded it. */
 function statusOf(row: Expense): string {
   if (row.status === 'void') return 'Void';
-  return row.current ? 'Confirmed' : 'Replaced';
+  if (row.current) return 'Confirmed';
+  const next = props.expenses.find((e) => e.id === row.supersededBy);
+  return next?.status === 'void' ? 'Voided' : 'Replaced';
 }
 </script>
 
@@ -154,18 +157,23 @@ function statusOf(row: Expense): string {
           <tr :data-expense="chain.current.id" :data-expense-status="chain.current.status">
             <td>{{ accountName(chain.current.accountId) }}</td>
             <td>{{ KindWords[chain.current.kind] ?? chain.current.kind }}</td>
-            <td>{{ servicePeriodText(chain.current.servicePeriodStart, chain.current.servicePeriodEnd) }}</td>
+            <td class="no-wrap">{{ servicePeriodText(chain.current.servicePeriodStart, chain.current.servicePeriodEnd) }}</td>
             <td class="text-right" :class="{ 'text-strike os-text-muted': chain.current.status === 'void' }">{{ amountText(chain.current.amount, chain.current.currency) }}</td>
-            <td><q-badge :outline="chain.current.status === 'void'" :color="chain.current.status === 'void' ? 'grey' : 'primary'" :label="statusOf(chain.current)" /></td>
-            <td>{{ chain.current.reference ?? '' }}<div v-if="chain.current.note" class="text-caption os-text-muted">{{ chain.current.note }}</div></td>
-            <td class="text-caption">{{ dayText(chain.current.recordedAt) }} · {{ chain.current.recordedBy }}</td>
-            <td class="text-right no-wrap">
-              <q-btn v-if="chain.history.length" flat dense no-caps :icon="expanded[chain.current.id] ? 'keyboard_arrow_up' : 'history'"
+            <td>
+              <q-badge outline :color="chain.current.status === 'void' ? 'grey-7' : 'positive'" :label="statusOf(chain.current)" />
+              <div>
+                <q-btn v-if="chain.history.length" flat dense no-caps size="sm" :icon="expanded[chain.current.id] ? 'keyboard_arrow_up' : 'history'"
                 :label="`History (${chain.history.length})`" data-expense-history-toggle
                 @click="expanded[chain.current.id] = !expanded[chain.current.id]" />
+              </div>
+            </td>
+            <td>{{ chain.current.reference ?? '' }}<div v-if="chain.current.note" class="text-caption os-text-muted">{{ chain.current.note }}</div></td>
+            <td><div class="text-caption">{{ dayText(chain.current.recordedAt) }}</div><div class="text-caption os-text-muted ellipsis expense-by" :title="chain.current.recordedBy">{{ chain.current.recordedBy }}</div></td>
+            <td class="text-right no-wrap">
+
               <template v-if="correctable(chain.current)">
-                <q-btn flat dense no-caps icon="edit" label="Replace" data-expense-replace @click="replace(chain.current)" />
-                <q-btn flat dense no-caps icon="block" label="Void" data-expense-void @click="askVoid(chain.current)" />
+                <q-btn flat dense no-caps size="sm" icon="edit" label="Replace" data-expense-replace @click="replace(chain.current)" />
+                <q-btn flat dense no-caps size="sm" icon="block" label="Void" data-expense-void @click="askVoid(chain.current)" />
               </template>
             </td>
           </tr>
@@ -177,7 +185,7 @@ function statusOf(row: Expense): string {
               <td class="text-right text-strike">{{ amountText(old.amount, old.currency) }}</td>
               <td>{{ statusOf(old) }}</td>
               <td>{{ old.reference ?? '' }}<div v-if="old.note" class="text-caption">{{ old.note }}</div></td>
-              <td class="text-caption">{{ dayText(old.recordedAt) }} · {{ old.recordedBy }}</td>
+              <td><div class="text-caption">{{ dayText(old.recordedAt) }}</div><div class="text-caption ellipsis expense-by" :title="old.recordedBy">{{ old.recordedBy }}</div></td>
               <td />
             </tr>
           </template>
@@ -224,3 +232,7 @@ function statusOf(row: Expense): string {
     </q-dialog>
   </div>
 </template>
+
+<style scoped>
+.expense-by { max-width: 9rem; }
+</style>

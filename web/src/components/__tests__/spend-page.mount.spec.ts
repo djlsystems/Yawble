@@ -204,6 +204,9 @@ describe('the Spend page', () => {
     (current.querySelector('[data-expense-history-toggle]') as HTMLElement).click();
     await flushPromises();
     expect(bodyFind('[data-expense-history="old"]')!.textContent).toMatch(/180\.00.*Replaced/s);
+    (voided.querySelector('[data-expense-history-toggle]') as HTMLElement).click();
+    await flushPromises();
+    expect(bodyFind('[data-expense-history="gone"]')!.textContent).toMatch(/50\.00.*Voided/s);
 
     expect(bodyText()).not.toMatch(/\bDelete\b/);
 

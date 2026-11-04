@@ -117,14 +117,14 @@ function money(value: number | null, currency: string): string {
     <p class="text-caption os-text-muted q-mb-md" data-spend-edge-rule>{{ EdgeRule }} Currencies are shown apart and never converted.</p>
 
     <div class="row q-col-gutter-md q-mb-md" data-spend-trend>
-      <div v-for="chart in actualCharts" :key="chart.currency" class="col-12 col-md-6">
+      <div v-for="chart in actualCharts" :key="chart.currency" class="col-12 col-md">
         <SpendMonthsChart :title="chart.title" :months="months" :values="chart.values" :currency="chart.currency" :empty="'no confirmed expenses'" :series="1" />
       </div>
-      <div v-if="!actualCharts.length" class="col-12 col-md-6">
+      <div v-if="!actualCharts.length" class="col-12 col-md">
         <div class="text-subtitle2 q-mb-xs">{{ ActualSpendTitle }} per month</div>
         <div class="text-body2 os-text-muted" data-spend-trend-none>{{ NoActualSpend }} in these months.</div>
       </div>
-      <div class="col-12 col-md-6">
+      <div class="col-12 col-md">
         <SpendMonthsChart :title="estimateChart.title" :months="months" :values="estimateChart.values" :currency="estimate.currency" :empty="'nothing priced'" :series="2" />
       </div>
     </div>
