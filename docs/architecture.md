@@ -31,7 +31,9 @@ The product name, Yawble, lives in the web app's presentation layer
   the agent process exits after each run, the subscription does not.
 - **Context comes from the ledger,** a projection of the log, not from an agent's transcript.
 - **Agents talk to the platform through MCP tools only** (`tell`, `progress`, `handback`,
-  `blocked`, `backlog`, `kanban`, `repo`, ...), authenticated with a per-member key. There is no
+  `blocked`, `backlog`, `kanban`, `repo`, `report`, ...), authenticated with a per-member key.
+  `report` is read-only: each action relays one GET a screen makes, with the caller's own key
+  ([cost.md](cost.md#reporting-the-report-tool)). There is no
   agent-facing CLI and no HTTP fallback.
 - **Workflows.** An instruction roots a workflow; `HARNESS_CAUSATION` carries it into each run so
   follow-up instructions join it. The member the root instruction addressed owns the workflow and
@@ -180,7 +182,10 @@ The product name, Yawble, lives in the web app's presentation layer
   same pricing path as every cost figure, side by side with the sentence that they need not reconcile.
   Its tabs manage billing accounts and expenses (void or replace, never edit or delete), and Export
   CSV downloads the period's accounts, expenses, summary and estimates by team and outcome. Every
-  route it uses is `HumansOnly`. See [spend.md](spend.md).
+  write it makes is `HumansOnly`. Its reads are a person's, and an agent's only while it holds the
+  `Spend` permit (`RequirePermit(Spend)`). That permit is never stored or minted:
+  `SpendReading.Apply` gives it to a team's container or a Concierge on each request only while a
+  person has turned on `reporting.agentsMayReadSpend`. See [spend.md](spend.md).
 - **Archived teams.** Archive (in the Teams view) keeps everything a team has - members, settings,
   documents, repositories, sites and history - and stops its work: it is paused, every trigger
   skips with the reason "team archived", and a tell, a backlog dispatch, a new card or a site action

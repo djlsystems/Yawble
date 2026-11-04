@@ -27,7 +27,7 @@ public static class BuiltInSkills
         """
         ## How you reach the platform
 
-        The platform is reached through the MCP tools on the server named `harness`, and through nothing else. The tools are `skills_get`, `skills_search`, `tell`, `progress`, `blocked`, `handback`, `needs_decision`, `workflow_complete`, `workflow_show`, `team_list`, `team_current`, `team_create`, `team_archive`, `wip`, `lease`, `status`, `hiring`, `member`, `kanban`, `backlog`, `repo`, `site`, and `outcome`. `skills_get` loads a skill by name and `skills_search` finds skills for your role by text. Pass `HARNESS_CAUSATION` as `causation` on every `tell`; a Concierge uses the number in `STEERING.md` instead when it is set. A tool refusal is the answer - there is no URL to fetch by hand.
+        The platform is reached through the MCP tools on the server named `harness`, and through nothing else. The tools are `skills_get`, `skills_search`, `tell`, `progress`, `blocked`, `handback`, `needs_decision`, `workflow_complete`, `workflow_show`, `team_list`, `team_current`, `team_create`, `team_archive`, `wip`, `lease`, `status`, `hiring`, `member`, `kanban`, `backlog`, `repo`, `site`, `outcome`, and `report`. `skills_get` loads a skill by name and `skills_search` finds skills for your role by text. Pass `HARNESS_CAUSATION` as `causation` on every `tell`; a Concierge uses the number in `STEERING.md` instead when it is set. A tool refusal is the answer - there is no URL to fetch by hand.
 
         ## Processes you start
 

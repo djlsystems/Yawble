@@ -1152,7 +1152,7 @@ public sealed class OutcomeTests(HostFixture host) : IClassFixture<HostFixture>
         Assert.Contains("the Outcome filter", Flat(BuiltInSkills.Find("kanban")!.Body), StringComparison.Ordinal);
 
         // THE TRANSPORT PREAMBLE, on every built-in, names the tool.
-        Assert.All(BuiltInSkills.Bodies(), body => Assert.Contains("`site`, and `outcome`.", body, StringComparison.Ordinal));
+        Assert.All(BuiltInSkills.Bodies(), body => Assert.Contains("`site`, `outcome`, and `report`.", body, StringComparison.Ordinal));
     }
 
     private static string Flat(string text) =>

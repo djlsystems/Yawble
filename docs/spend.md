@@ -69,13 +69,33 @@ covering both months counts it once. The monthly trend follows the same rule.
 - **Export CSV** (in the header): four CSV files for the period the page shows. See
   [CSV export](#csv-export).
 
-## People only
+## Who may read it, and who may write
 
-The Spend page is a person's. Every route it reads or writes is `HumansOnly`, including its own two
-reads and its four CSV files. A machine principal is refused with the humans-only sentence, even one holding every permit:
-an agent, a member key, a Manager, a Concierge acting as an agent, or a person's API key. There is no
-Spend permit and no MCP tool for it yet; an agent may get a read permit for reporting later, but not
-before then.
+The Spend page is a person's. Every write it makes is `HumansOnly`: adding, editing, deactivating
+and reactivating a billing account, and recording, voiding and replacing an expense. A machine
+principal is refused each one with the humans-only sentence, whatever it holds. Rates, a member's
+cost settings and an outcome's stored value are a person's writes too.
+
+**Agents may read it for a report, only when a person says so.** The reads are the page's
+overview, the members linked to each account, the four CSV files, and the billing account and
+expense lists. They need the `Spend` permit of a machine principal. A person always passes, so
+their answers are unchanged.
+
+- **How an agent gets the permit.** No key is minted or stored with it. On every request an agent
+  is given it only while the tenant setting **Let agents read Actual Spend for reports**
+  (`reporting.agentsMayReadSpend`, Admin → Settings → Spend) is on. An agent is a team's Manager or
+  member, or a Concierge.
+- **Off by default.** Only a person can turn the setting on, and turning it off refuses the
+  agent's next request.
+- **Who never gets it.** A person's API key and the worker key never get it.
+- **What an agent without it sees.** "Reading Actual Spend is a person's unless a person turns on
+  reporting.agentsMayReadSpend in Admin > Settings > Spend; no credential changes that, so report
+  what you need and ask a person."
+
+Agents read these figures through the read-only `report` MCP tool
+([cost.md](cost.md#reporting-the-report-tool)). The overview's `estimate` is the tenant's
+Estimated Execution Cost across every team, as a person sees it. Agents can already read the same
+figures across every team in `GET /api/outcomes`.
 
 ## CSV export
 
@@ -188,11 +208,11 @@ counts the part of its span inside it, priced on its own by the one pricing path
 
 | Route | Answers |
 |---|---|
-| `GET /api/spend/overview?from=YYYY-MM-DD&to=YYYY-MM-DD` | The period's `actual` and `projected` (`{ currency, amount, count }` per currency), `projections`, `billingTypes` (`group` `fixed` or `variable`), `estimate` (`{ currency, cost, agentSeconds, agentRate, legacyRates }`; `cost` is null, never 0, when nothing was priced), `accounts` and `vendors` (Actual Spend and Projected apart, null when there is none), and `months` (`{ monthStart, actual, estimate }`). With neither date it uses the current UTC month. `to` is exclusive. A bad period is a 400 with one sentence. People only. |
-| `GET /api/spend/export/billing-accounts?from=&to=` | The [`billing-accounts`](#billing-accounts) CSV file. People only. |
-| `GET /api/spend/export/expenses?from=&to=` | The [`expenses`](#expenses) CSV file. People only. |
-| `GET /api/spend/export/period-summary?from=&to=` | The [`period-summary`](#period-summary) CSV file. People only. |
-| `GET /api/spend/export/estimated-execution-cost?from=&to=` | The [`estimated-execution-cost`](#estimated-execution-cost) CSV file. People only. |
-| `GET /api/spend/linked-members` | `{ accountId, team, teamName, member, label }` for every member on a team the caller reaches whose billing account is set. People only. |
+| `GET /api/spend/overview?from=YYYY-MM-DD&to=YYYY-MM-DD` | The period's `actual` and `projected` (`{ currency, amount, count }` per currency), `projections`, `billingTypes` (`group` `fixed` or `variable`), `estimate` (`{ currency, cost, agentSeconds, agentRate, legacyRates }`; `cost` is null, never 0, when nothing was priced), `accounts` and `vendors` (Actual Spend and Projected apart, null when there is none), and `months` (`{ monthStart, actual, estimate }`). With neither date it uses the current UTC month. `to` is exclusive. A bad period is a 400 with one sentence. People, and agents holding `Spend`. |
+| `GET /api/spend/export/billing-accounts?from=&to=` | The [`billing-accounts`](#billing-accounts) CSV file. People, and agents holding `Spend`. |
+| `GET /api/spend/export/expenses?from=&to=` | The [`expenses`](#expenses) CSV file. People, and agents holding `Spend`. |
+| `GET /api/spend/export/period-summary?from=&to=` | The [`period-summary`](#period-summary) CSV file. People, and agents holding `Spend`. |
+| `GET /api/spend/export/estimated-execution-cost?from=&to=` | The [`estimated-execution-cost`](#estimated-execution-cost) CSV file. People, and agents holding `Spend`. |
+| `GET /api/spend/linked-members` | `{ accountId, team, teamName, member, label }` for every member on a team the caller reaches whose billing account is set. People, and agents holding `Spend`. |
 
 The billing account and expense routes are listed in [cost.md](cost.md#routes).

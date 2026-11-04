@@ -155,7 +155,7 @@ public sealed class ExpenseTests(HostFixture host) : IClassFixture<HostFixture>
     }
 
     [Fact]
-    public async Task A_machine_principal_is_refused_every_expense_route_with_the_humans_only_sentence_even_holding_every_permit()
+    public async Task A_machine_principal_is_refused_every_expense_write_with_the_humans_only_sentence_and_every_read_without_the_Spend_permit()
     {
         using var person = await host.PersonAsync();
         var account = await AccountAsync(person, "Guarded expenses");
@@ -165,7 +165,8 @@ public sealed class ExpenseTests(HostFixture host) : IClassFixture<HostFixture>
         var principals = host.Services.GetRequiredService<IPrincipalStore>();
         var apiKey = await principals.MintAsync($"apikey-{Guid.NewGuid():N}", PrincipalKind.ApiKey, null, Permits.All, ct: Ct);
         var manager = await principals.MintAsync(
-            new ContainerId(host.Alpha, TeamRegistry.DefaultManagerName).ToString(), PrincipalKind.Container, host.Alpha, Permits.All, ct: Ct);
+            new ContainerId(host.Alpha, TeamRegistry.DefaultManagerName).ToString(), PrincipalKind.Container, host.Alpha,
+            new HashSet<string>(Permits.All) { Permits.Spend }, ct: Ct);
 
         foreach (var key in new[] { apiKey, manager, host.AlphaContainerKey })
         {
@@ -182,10 +183,13 @@ public sealed class ExpenseTests(HostFixture host) : IClassFixture<HostFixture>
                     await machine.PostAsJsonAsync($"/api/expenses/{target}/replace", new { amount = 1 }, Ct),
                 };
 
-                foreach (var answer in answers)
+                // THE READS first: without the Spend permit, refused with its sentence; the writes with the humans-only one.
+                foreach (var (answer, index) in answers.Select((a, i) => (a, i)))
                 {
                     Assert.Equal(HttpStatusCode.Forbidden, answer.StatusCode);
-                    Assert.Equal(PermitGate.HumansOnlyMessage, (await answer.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("error").GetString());
+                    Assert.Equal(
+                        index < 3 ? SpendReading.Refused : PermitGate.HumansOnlyMessage,
+                        (await answer.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("error").GetString());
                 }
             }
         }
