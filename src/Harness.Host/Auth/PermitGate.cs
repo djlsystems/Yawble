@@ -95,6 +95,23 @@ public static class PermitGate
             return;
         }
 
+        // A PERSON'S OWN KEY, and no other machine principal: the rest keep the humans-only sentence,
+        // and a key without the permit is told which one it lacks, as RequirePermit tells it.
+        if (endpoint.Metadata.GetMetadata<HumansOrApiKeyMarker>() is { } keyDoor)
+        {
+            if (principal.Kind != PrincipalKind.ApiKey)
+            {
+                await Refuse(context, HumansOnlyMessage);
+                return;
+            }
+
+            if (!principal.May(keyDoor.Permit))
+            {
+                await Refuse(context, Missing(keyDoor.Permit));
+                return;
+            }
+        }
+
         if (endpoint.Metadata.GetMetadata<PermitRequirement>() is { } required
             && !principal.May(required.Permit))
         {

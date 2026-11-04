@@ -243,19 +243,31 @@ public static class PluginEndpoints
             [Description(Describe.Team)] string team,
             [Description("The member, as addressed in its route.")] string member,
             TeamRegistry teams, PluginCatalog plugins, IPluginMemberSettingsStore settings, MemberSecretReads reads,
-            Connections connections, CancellationToken ct) =>
+            Connections connections, HttpContext context, CancellationToken ct) =>
         {
             var (found, plugin, refusal) = await PluginMemberAsync(teams, plugins, team, member, ct);
             if (refusal is not null) return refusal;
 
+            // A VALUE ONLY TO A PERSON. Whoever else the gate let through (a person's own API key) reads
+            // every secret's state and never a value - not an unmasked field's, not an unmasked table
+            // cell's. Decided from the principal's kind, so anything that is not a person fails closed.
+            var values = PrincipalClaims.From(context.User) is { Kind: PrincipalKind.User };
+
             var id = new ContainerId(found!.Team, found.Name);
-            return Results.Ok(await SettingsAsync(id, plugin!, await settings.ForAsync(id, ct), reads, connections.Store, ct));
+            return Results.Ok(await SettingsAsync(id, plugin!, await settings.ForAsync(id, ct), reads, connections.Store, ct, values));
         })
             .WithTags("Members")
-            .HumansOnly()
-            .WithSummary("A plugin member's settings")
+            .HumansOrApiKey(Permits.Read)
+            .WithSummary("A plugin member's settings (a person's API key reads every secret's state, never a value)")
             .WithDescription(
-                "`{ team, member, plugin, version, description, config, secrets, secretStates, fields, secretFields, "
+                "A person reads it, and so does that person's own API key holding `Read` (under the person's reach); "
+                + "every other machine principal - a Manager, a member, a plugin, a Concierge - is refused as a "
+                + "person's action. AN API KEY NEVER GETS A SECRET VALUE: its answer is the same shape with every "
+                + "`value` removed on the server - no `secretStates[].value` for a field declared `masked: false`, "
+                + "no `value` on an unmasked table secret cell in `tableSecretStates` - so it reads only each "
+                + "secret's state (`set`, `setBy`, `setAt`, `source`). Writes (PUT here, PUT and DELETE of "
+                + "`.../secrets/{field}`) stay a person's. "
+                + "`{ team, member, plugin, version, description, config, secrets, secretStates, fields, secretFields, "
                 + "namedSecrets, namedSecretStates, outOfRange, marketplaceUrl }`: `namedSecrets` is the manifest's "
                 + "`namedSecrets` block (`label`, `description`, `max`) or null, and `namedSecretStates` each named secret the "
                 + "member holds (`name`, `setBy`, `setAt`; never a value). What is stored for this plugin member - its configuration, each secret's bound "
@@ -999,7 +1011,7 @@ public static class PluginEndpoints
 
     private static async Task<object> SettingsAsync(
         ContainerId id, InstalledPlugin plugin, PluginMemberSettings stored, MemberSecretReads reads, IConnectionStore? connectionStore,
-        CancellationToken ct) => new
+        CancellationToken ct, bool values = true) => new
     {
         team = id.Team,
         member = id.Name,
@@ -1008,7 +1020,7 @@ public static class PluginEndpoints
         description = string.IsNullOrWhiteSpace(plugin.Manifest.Description) ? null : plugin.Manifest.Description,
         config = stored.Config,
         secrets = stored.Secrets,
-        secretStates = await reads.StatesAsync(id, plugin.Manifest, stored, ct),
+        secretStates = await reads.StatesAsync(id, plugin.Manifest, stored, ct, values),
         connections = stored.Connections,
         fields = Fields(plugin.Manifest),
         secretFields = SecretFields(plugin.Manifest),
@@ -1016,7 +1028,7 @@ public static class PluginEndpoints
         namedSecretStates = plugin.Manifest.NamedSecrets is null ? [] : await reads.NamedStatesAsync(id, ct),
 
         // EACH TABLE'S SECRET CELLS THAT HOLD A VALUE: who set each and when; a value only for an unmasked column.
-        tableSecretStates = await reads.TableStatesAsync(id, plugin.Manifest, stored, ct),
+        tableSecretStates = await reads.TableStatesAsync(id, plugin.Manifest, stored, ct, values),
         connectionFields = ConnectionFields(plugin.Manifest),
 
         // EACH STORED BINDING THE ACTIVE VERSION CANNOT USE, in words, where the person is looking: it is

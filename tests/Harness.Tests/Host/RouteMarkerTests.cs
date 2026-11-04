@@ -7,7 +7,7 @@ namespace Harness.Tests.Host;
 
 /// <summary>
 /// AGENTS.md, Authorization and <see cref="PermitMarkers"/>: every endpoint says exactly one of
-/// RequirePermit, NoPermitRequired, HumansOnly or HumansOrConcierge. A route with none is ungated for machine
+/// RequirePermit, NoPermitRequired, HumansOnly, HumansOrConcierge or HumansOrApiKey. A route with none is ungated for machine
 /// principals and nothing complains; a route with two says contradictory things. This walk of the
 /// real host's <see cref="EndpointDataSource"/> is the only thing that closes that silence.
 /// </summary>
@@ -25,7 +25,8 @@ public sealed class RouteMarkerTests(HostFixture host) : IClassFixture<HostFixtu
                 e.Metadata.GetOrderedMetadata<PermitRequirement>().Count
                 + e.Metadata.GetOrderedMetadata<PermitExemption>().Count
                 + e.Metadata.GetOrderedMetadata<HumansOnlyMarker>().Count
-                + e.Metadata.GetOrderedMetadata<HumansOrConciergeMarker>().Count))
+                + e.Metadata.GetOrderedMetadata<HumansOrConciergeMarker>().Count
+                + e.Metadata.GetOrderedMetadata<HumansOrApiKeyMarker>().Count))
             .Where(e => e.Count != 1)
             .Select(e => $"{e.Name}: {e.Count} markers")
             .ToList();
@@ -48,6 +49,21 @@ public sealed class RouteMarkerTests(HostFixture host) : IClassFixture<HostFixtu
                 ["POST /api/teams/{team}/repos/{repo}/bring-current-and-merge"] = Harness.Contracts.Permits.Merge,
                 ["POST /api/teams/{team}/repos/{repo}/merge-to-main"] = Harness.Contracts.Permits.Merge,
                 ["POST /api/teams/{team}/unarchive"] = Harness.Contracts.Permits.Archive,
+            },
+            doors);
+    }
+
+    [Fact]
+    public void Only_a_plugin_members_settings_read_opens_a_door_to_an_api_key_for_read()
+    {
+        var doors = host.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .Where(e => e.Metadata.GetMetadata<HumansOrApiKeyMarker>() is not null)
+            .ToDictionary(Describe, e => e.Metadata.GetMetadata<HumansOrApiKeyMarker>()!.Permit);
+
+        Assert.Equal(
+            new Dictionary<string, string>
+            {
+                ["GET /api/teams/{team}/members/{member}/plugin-settings"] = Harness.Contracts.Permits.Read,
             },
             doors);
     }

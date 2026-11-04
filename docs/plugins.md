@@ -1374,8 +1374,15 @@ chosen there; it is not a refusal, because the picker and Connect are right besi
   the fields and secret bindings that changed, never a value) and each value with its own
   `member.secret-*` row are one transaction.
 - It takes effect on the member's next run: the runner reads the settings at every run.
-- Both routes are humans-only. A Manager cannot change a member's settings after hire, as it cannot
+- The `PUT` is humans-only. A Manager cannot change a member's settings after hire, as it cannot
   change a member's instructions.
+- The `GET` is a person's, and also readable by that person's own **API key** (`X-Api-Key`, holding
+  `Read`, under the person's reach). An API key never gets a secret value: its answer is the same
+  shape with every `value` removed on the server - no `secretStates[].value` for a field declared
+  `"masked": false`, no `value` on an unmasked table secret cell in `tableSecretStates` - so it reads
+  each secret's state only (`set`, `setBy`, `setAt`, `source`). A Manager, a member, a plugin and a
+  Concierge are refused it as before, and every write (`PUT` here, `PUT`/`DELETE .../secrets/{field}`)
+  and `GET .../secrets` stay a person's.
 
 ### Signing in to a site: the interactive sign-in page
 
