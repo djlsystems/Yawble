@@ -161,6 +161,12 @@ The product name, Yawble, lives in the web app's presentation layer
   cost, throughput, cost per completed workflow); that choice is `outcomes.presentation`
   (`outcome-011`), and only a person sets it. A team's cost by outcome, against the outcomes'
   budgets, is its page's Cost tile and the Teams list's Cost column ([cost.md](cost.md)).
+- **Spend.** Admin → Spend (`#/spend`) is the tenant's Spend page, a person's only. It shows
+  **Actual Spend** (confirmed vendor expenses, per currency, never converted), **Projected**
+  recurring charges (never in Actual Spend) and **Estimated Execution Cost · Agent Hours** from the
+  same pricing path as every cost figure, side by side with the sentence that they need not reconcile.
+  Its tabs manage billing accounts and expenses (void or replace, never edit or delete). Every route
+  it uses is `HumansOnly`. See [spend.md](spend.md).
 - **Archived teams.** Archive (in the Teams view) keeps everything a team has - members, settings,
   documents, repositories, sites and history - and stops its work: it is paused, every trigger
   skips with the reason "team archived", and a tell, a backlog dispatch, a new card or a site action

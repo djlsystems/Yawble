@@ -144,11 +144,11 @@ recurring amount (zero or more; a zero is a zero) and the dates it is effective 
 
 - **It is not a connection.** It holds no credential, no key and no login, and nothing in its tenant
   log rows is secret.
-- **Actual Spend is not computed from it yet.** A recurring amount is stored as it was given and is
+- **It never makes Actual Spend by itself.** A recurring amount is stored as it was given and is
   not added to any estimate. It is projected over periods only when read (see
   [Projected recurring charges](#projected-recurring-charges)), and a projection is never Actual
-  Spend. Hours are never Actual Spend: every figure on these screens is still an **Estimated
-  Execution Cost**.
+  Spend. Only confirmed expenses are Actual Spend, on [the Spend page](spend.md). Hours are never
+  Actual Spend: every figure on the Teams list and team page is an **Estimated Execution Cost**.
 - **A person's only.** Listing, reading, creating and changing accounts are people's acts; no agent
   or key may read or write one, whatever it holds.
 - **Never deleted.** An account is deactivated, and may be reactivated. A deactivated account is
@@ -165,7 +165,7 @@ written. A save that does not send the field keeps what is stored, even an id sa
 account existed. A new run's snapshot copies the member's stored account, as it always has, and a
 run is never refused for it.
 
-There is no screen for billing accounts yet; they are reached through the routes below.
+Billing accounts are listed, added, edited and deactivated on [the Spend page](spend.md)'s Billing accounts tab, with the members linked to each, and through the routes below.
 
 ## Expenses
 
@@ -206,8 +206,10 @@ longer covers its period, and a replaced one covers by its replacement's period.
 labelled projected, kept apart from recorded expenses, and is **never counted as Actual Spend** and
 never added to an estimate. Several members naming one account never multiply its charge.
 
-No screen shows expenses or projections yet; expenses are reached through the routes below. Hours
-are never Actual Spend.
+[The Spend page](spend.md) shows expenses and projections: Actual Spend is the current confirmed
+expenses whose service period starts in the period, each counted whole there (never split by days),
+per currency and never converted; Projected is apart and is never in it. Hours are never Actual
+Spend.
 
 ## People's acts: the intervention ledger
 
@@ -518,6 +520,7 @@ Colour is never the only cue: the dialog's table carries every figure the chart 
 | `POST /api/billing-accounts`, `POST /api/billing-accounts/{id}`, `.../deactivate`, `.../reactivate` | Create an account, edit the fields sent (null clears only `description`, `effectiveTo` and `recurringAmount`), and turn `active` off or on. People only; there is no delete. |
 | `GET /api/expenses`, `GET /api/expenses/{id}` | Every expense row, current and superseded, oldest recorded first (`?accountId=` for one account's; an empty list on a fresh instance), or one; 404 for an id that names none. Each has `id`, `accountId`, `amount`, `currency`, `servicePeriodStart`, `servicePeriodEnd` (exclusive), `kind`, `status` (`confirmed` or `void`), `supersedes`, `reference`, `note`, `recordedBy`, `recordedAt`, `supersededBy` and `current`. People only. |
 | `POST /api/expenses`, `POST /api/expenses/{id}/void`, `POST /api/expenses/{id}/replace` | Record a confirmed expense; void one (an optional `note`); replace one with the fields sent over the old row's, on the same account. Each answers the new row. People only; there is no edit and no delete. |
+| `GET /api/spend/overview`, `GET /api/spend/linked-members` | The Spend page's reads: Actual Spend, Projected, fixed vs variable, Estimated Execution Cost · Agent Hours and the monthly trend for a period, and the members linked to each billing account. See [spend.md](spend.md#routes). People only. |
 | `GET /api/teams/cost` | The same for every team at once (`money`, `weeks`, `teams[]`), for the Teams list. Each entry and each team also carry `human` (above). |
 | `GET /api/teams/cost/summary` | The summary above the Teams list: `rate` (the tenant default as set now, null without one); the eight `weeks` (`weekStart`, `agentSeconds`, `cost`), `periodStart` and `periodEnd`; the eight weeks' `total` and the eight before as `prior`, each with `agentRate`; per outcome (`id` null for Unattributed) its `name`, `rank`, `agentSeconds`, `cost`, `budget` and `outcomeTotalCost` (its cost across every team; this field was `spentTotal` before); and `rightNow` (`openWorkflows`, `membersRunning`, `waitingOnYou`); `human` (the reached teams' human figures, with `unattributed` and `waitingSeconds`) and each outcome's `human`. `cost` is null, never 0, when no run was priced. |
 
