@@ -54,7 +54,8 @@ describe('the breakdowns', () => {
     const bare = period.members.find((m) => m.member === 'Bare')!;
     period.members.push({ ...bare, member: 'Old', unpriced: 'unavailable' });
     // A plugin with no `unpriced` (an older Host) and no money still reads Not priced; a priced plugin reads its money.
-    period.members.push({ ...bare, member: 'Older', unpriced: undefined });
+    const { unpriced: _unsaid, ...older } = bare;
+    period.members.push({ ...older, member: 'Older' });
 
     expect(memberRows(period).plugins.map((r) => [r.name, r.estimate])).toEqual([
       ['Bare', NotPriced], ['Tool', '$30'], ['Old', EstimateUnavailable], ['Older', NotPriced]]);
