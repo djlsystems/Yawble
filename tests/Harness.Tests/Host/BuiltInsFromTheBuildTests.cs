@@ -292,6 +292,7 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
         Assert.Contains("when you create a team, ask the person whether to turn the Team picture on", concierge, StringComparison.Ordinal);
         Assert.Contains("or turn it on when they have already said so: `team_create` with `teamPicture: true`", concierge, StringComparison.Ordinal);
         Assert.Contains("never turn it on unasked", concierge, StringComparison.Ordinal);
+        Assert.Contains("For a team that already exists, turning it on or off is the person's control in Team settings: send them there.", concierge, StringComparison.Ordinal);
         Assert.Contains("Customize it through the `site` tool by writing the page's settings, one document in the `tp-settings` collection", concierge, StringComparison.Ordinal);
         Assert.Contains("The settings are a layer over the template, never a fork of it", concierge, StringComparison.Ordinal);
         Assert.Contains("never publish, copy or rebuild the `team-picture` site, and never write its files", concierge, StringComparison.Ordinal);
