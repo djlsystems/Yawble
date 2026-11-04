@@ -1,6 +1,6 @@
 // THE OUTCOMES DASHBOARD'S WORDING. Each helper formats a figure the route answered and computes
-// none: a cost with no rate is "not set", never $0; no time is no efficiency, never 0%; a share of
-// the value needs both figures; a week says its cost, its agent time and its runs.
+// none: a cost with no rate is "not set", never $0; no time is no efficiency, never 0%; a week says its
+// cost, its agent time and its runs.
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -9,8 +9,6 @@ import {
   efficiencyText,
   moneyText,
   rateText,
-  shareOfValueText,
-  valueAmount,
   weekHeights,
   weekText,
 } from '../outcomes';
@@ -21,20 +19,6 @@ describe('the dashboard wording', () => {
     expect(moneyText(12.5, 'USD')).toBe('$12.50');
     expect(moneyText(null, 'USD')).toBe('not set');
     expect(moneyText(20000, 'EUR')).toContain('20,000');
-  });
-
-  it('takes a value only when one was given', () => {
-    expect(valueAmount('20000')).toBe(20000);
-    expect(valueAmount(null)).toBeNull();
-    expect(valueAmount('')).toBeNull();
-  });
-
-  it('gives the share of the value only with both figures and a value above 0', () => {
-    expect(shareOfValueText(1240, 20000)).toBe('6%');
-    expect(shareOfValueText(10, 20000)).toBe('<1%');
-    expect(shareOfValueText(null, 20000)).toBe('');
-    expect(shareOfValueText(1240, null)).toBe('');
-    expect(shareOfValueText(1240, 0)).toBe('');
   });
 
   it('reads agent time in hours, and efficiency as a percentage or a dash, never 0%', () => {

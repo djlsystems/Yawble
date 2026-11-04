@@ -1,14 +1,14 @@
 import type { CostBucket, CostSummary, CostSummaryOutcome, TeamsCostPeriod } from '../api/outcomes';
 import { NoOutcomeColour, outcomeColour } from './outcomeColours';
 import { moneyText } from './outcomes';
-import { EstimateTitle, agentHours, agentRateLine, legacyRateNote, markedMoney, percentText, weekLabel, type CostSeries } from './teamCost';
+import { EstimateTitle, agentHours, agentRateLine, legacyRateNote, markedMoney, weekLabel, type CostSeries } from './teamCost';
 
 /**
- * THE FOUR TILES ABOVE THE TEAMS LIST, WORDED: Estimated Execution Cost, Budgets, Where it goes and Right now, each a
- * pure function of `GET /api/teams/cost/summary` (`api/outcomes.ts`).
+ * THE TILES ABOVE THE TEAMS LIST, WORDED: Estimated Execution Cost, Where it goes and Right now, each a pure
+ * function of what the route answered (`api/outcomes.ts`). There is no outcome budget tile: an outcome's stored
+ * `value` is kept and readable, but no screen measures an estimate against it.
  *
- * EVERY FIGURE IS THE ROUTE'S. The only sums here are over what the route answered: the budgeted
- * outcomes' budgets and estimated cost, the estimate with no budget, and the outcomes past the top three.
+ * EVERY FIGURE IS THE ROUTE'S. The only sum here is over what the route answered: the outcomes past the top three.
  *
  * NO PRICE IS NO DOLLARS, NEVER $0: the route's `cost` is null when no run was priced, and every
  * figure then falls back to agent hours or a dash. Nothing here multiplies hours by a rate: each run is
@@ -20,9 +20,6 @@ import { EstimateTitle, agentHours, agentRateLine, legacyRateNote, markedMoney, 
 
 /** The Estimated Execution Cost chart's one series: not an outcome, so no outcome's hue. */
 export const SpendColour = 'var(--os-ink-muted)';
-
-export const BudgetsNoRateNote = 'Set an agent hourly rate in Outcomes to measure Estimated Execution Cost against budgets.';
-export const NoBudgetsNote = 'Give an outcome a value to track it here.';
 
 /** Whether any run behind the summary was priced: in the weeks, or in an outcome's all-time total. */
 export function summaryPriced(summary: Pick<CostSummary, 'total' | 'outcomes'>): boolean {
@@ -135,68 +132,6 @@ export function bucketAside(bucket: CostBucket): string {
   return bucket === 'day' ? 'by day' : 'by month';
 }
 
-// ---- Budgets -----------------------------------------------------------------------------------
-
-/** What an outcome's budget is measured against: its estimated cost across every team. */
-function spent(outcome: CostSummaryOutcome): number | null {
-  return outcome.outcomeTotalCost ?? outcome.cost;
-}
-
-/** Whether an outcome's estimated cost across every team has passed its budget. */
-export function summaryOver(outcome: CostSummaryOutcome): boolean {
-  const total = spent(outcome);
-  return outcome.id !== null && outcome.budget !== null && total !== null && total > outcome.budget;
-}
-
-/** The outcomes carrying a budget. Unattributed never does. */
-export function summaryBudgeted(outcomes: readonly CostSummaryOutcome[]): CostSummaryOutcome[] {
-  return outcomes.filter((o) => o.id !== null && o.budget !== null);
-}
-
-export interface BudgetsTile {
-  state: 'budgets' | 'over' | 'no-budgets' | 'no-rate';
-  /** `3 outcomes`: how many carry a budget. */
-  count: string;
-  value: string;
-  /** `$1,200 of $2,000`, with budgets. */
-  line: string | null;
-  /** The bar's fill, 0..1, with budgets. */
-  bar: number | null;
-  /** `All inside budget`, or `⚠ Docs refresh over` in the critical colour. */
-  status: string | null;
-  /** `· $360 unbudgeted`, when unbudgeted outcomes or no outcome spent. */
-  unbudgeted: string | null;
-  note: string | null;
-}
-
-export function budgetsTile(summary: CostSummary, currency: string): BudgetsTile {
-  const withBudget = summaryBudgeted(summary.outcomes);
-  const count = `${withBudget.length} outcome${withBudget.length === 1 ? '' : 's'}`;
-  const blank = { count, line: null, bar: null, status: null, unbudgeted: null };
-
-  if (!summaryPriced(summary)) return { ...blank, state: 'no-rate', value: '—', note: BudgetsNoRateNote };
-  if (withBudget.length === 0) return { ...blank, state: 'no-budgets', value: 'None set', note: NoBudgetsNote };
-
-  const spentSum = withBudget.reduce((sum, o) => sum + (spent(o) ?? 0), 0);
-  const budgetSum = withBudget.reduce((sum, o) => sum + o.budget!, 0);
-  const share = budgetSum > 0 ? spentSum / budgetSum : spentSum > 0 ? Infinity : 0;
-  const over = withBudget.filter(summaryOver);
-  const unbudgeted = summary.outcomes
-    .filter((o) => o.id === null || o.budget === null)
-    .reduce((sum, o) => sum + (o.cost ?? 0), 0);
-
-  return {
-    state: over.length > 0 ? 'over' : 'budgets',
-    count,
-    value: percentText(share),
-    line: `${moneyText(spentSum, currency)} of ${moneyText(budgetSum, currency)}`,
-    bar: Math.min(1, Number.isFinite(share) ? share : 1),
-    status: over.length > 0 ? `⚠ ${over.map((o) => o.name).join(', ')} over` : 'All inside budget',
-    unbudgeted: unbudgeted > 0 ? `· ${moneyText(unbudgeted, currency)} unbudgeted` : null,
-    note: null,
-  };
-}
-
 // ---- Where it goes -----------------------------------------------------------------------------
 
 export interface WhereBar {
@@ -209,9 +144,6 @@ export interface WhereBar {
   amount: string;
   /** The bar's length on the tile's one scale, 0..1. */
   fill: number;
-  /** Where its budget falls on the same scale, 0..1, or null without one. */
-  tick: number | null;
-  over: boolean;
 }
 
 /** The figure an outcome is ranked and drawn by: its cost, or its hours without a rate. */
@@ -224,8 +156,8 @@ export const UnattributedName = 'Unattributed';
 
 /**
  * THE TOP THREE OUTCOMES BY ESTIMATED COST, THEN OTHER OUTCOMES (every outcome past the top three), THEN
- * UNATTRIBUTED (the work serving none, computed by the route, never an outcome), on ONE scale across the bars
- * that a budget tick also fits on. Every run is in exactly one of them, so they add up to the period's figure.
+ * UNATTRIBUTED (the work serving none, computed by the route, never an outcome), on ONE scale across the bars.
+ * Every run is in exactly one of them, so they add up to the period's figure.
  */
 export function whereBars(summary: Pick<CostSummary, 'total' | 'outcomes'>, currency: string): WhereBar[] {
   const priced = summaryPriced(summary);
@@ -243,9 +175,8 @@ export function whereBars(summary: Pick<CostSummary, 'total' | 'outcomes'>, curr
   const unattributed = sumOf(none);
 
   const text = (value: number, seconds: number) => (priced ? moneyText(value, currency) : agentHours(seconds));
-  const budgetOf = (o: CostSummaryOutcome) => (priced && o.budget !== null ? o.budget : null);
   const scale = Math.max(
-    ...top.map((o) => Math.max(share(o, priced), budgetOf(o) ?? 0)),
+    ...top.map((o) => share(o, priced)),
     other.value,
     unattributed.value,
     0,
@@ -259,8 +190,6 @@ export function whereBars(summary: Pick<CostSummary, 'total' | 'outcomes'>, curr
     colour: outcomeColour(o),
     amount: text(share(o, priced), o.agentSeconds),
     fill: on(share(o, priced)),
-    tick: budgetOf(o) === null ? null : on(budgetOf(o)!),
-    over: priced && summaryOver(o),
   }));
 
   const grouped = (key: string, name: string, part: { value: number; seconds: number }): WhereBar => ({
@@ -270,8 +199,6 @@ export function whereBars(summary: Pick<CostSummary, 'total' | 'outcomes'>, curr
     colour: NoOutcomeColour,
     amount: text(part.value, part.seconds),
     fill: on(part.value),
-    tick: null,
-    over: false,
   });
 
   if (other.value > 0) bars.push(grouped('other', 'Other outcomes', other));

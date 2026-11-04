@@ -438,11 +438,11 @@ export interface TeamCostTotals {
 export interface TeamCostOutcome {
   id: string | null
   name: string
-  /** The outcome's budget (what achieving it is worth), or null when none is set. */
+  /** The outcome's stored value (`outcomes.value_amount`), or null when none is set. No screen reads it: it is no budget. */
   value: number | null
   weekly: TeamCostWeek[]
   totals: TeamCostTotals
-  /** The outcome's total across ALL teams: the figure its budget is measured against. */
+  /** The outcome's Estimated Execution Cost across ALL teams, all time. */
   outcomeTotalCost: number | null
   /**
    * The outcome's 1-based place in the fixed order (created, oldest first, ties by id) among every
@@ -511,9 +511,9 @@ export interface CostSummaryOutcome {
   rank: number | null
   agentSeconds: number
   cost: number | null
-  /** What achieving it is worth, in the instance's currency; null when none is set. */
+  /** The outcome's stored value, in the instance's currency; null when none is set. No screen reads it: it is no budget. */
   budget: number | null
-  /** What it has spent across every team, the figure its budget is measured against. */
+  /** Its Estimated Execution Cost across every team, all time. */
   outcomeTotalCost: number | null
   /**
    * The figure's footnote: `reconstructed` and `fallback-at-upgrade`, each when a run from before snapshots
@@ -628,7 +628,7 @@ export interface TeamPeriodTotals extends CostSummaryTotals {
   activeMembers: number
 }
 
-/** One outcome the team's runs served (or Unattributed, `id` null): the list row's entry, budget and all-time total beside it. */
+/** One outcome the team's runs served (or Unattributed, `id` null): the list row's entry, its stored value and all-time total beside it. */
 export interface TeamPeriodOutcome extends CostPeriodTeamOutcome {
   value: number | null
   outcomeTotalCost: number | null

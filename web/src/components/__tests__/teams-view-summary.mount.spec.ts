@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 //
-// THE SUMMARY ABOVE THE TEAMS LIST: the shared period control at the right of the Teams title, then the four
+// THE SUMMARY ABOVE THE TEAMS LIST: the shared period control at the right of the Teams title, then the three
 // tiles, each opening what it says. Estimated Execution Cost and Where it goes are the period's
-// (`GET /api/teams/cost/period`); Budgets and Right now are the summary's (`GET /api/teams/cost/summary`).
+// (`GET /api/teams/cost/period`); Right now is the summary's (`GET /api/teams/cost/summary`). No Budgets tile.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
@@ -44,7 +44,7 @@ import { resetBody } from '../../test/mountQuasar';
 import { teamCost, Weeks } from '../../test/costFixtures';
 import { costSummary } from '../../test/costSummaryFixtures';
 import { teamsCostPeriod } from '../../test/costPeriodFixtures';
-import { misnamedOnTeamsList, readOff } from '../../test/estimateLabels';
+import { budgetWordsOn, misnamedOnTeamsList, readWords } from '../../test/estimateLabels';
 
 /** Every figure of an outcome times `by`: Beta works twice as much as Alpha. */
 function scaled(outcome: TeamCostOutcome, by: number): TeamCostOutcome {
@@ -103,7 +103,7 @@ async function mountView() {
 }
 
 describe('the summary above the teams list', () => {
-  it('reads one call and shows the period control at the right of the Teams title, then the four tiles above the list', async () => {
+  it('reads one call and shows the period control at the right of the Teams title, then the three tiles above the list', async () => {
     const view = await mountView();
 
     expect(getCostSummary).toHaveBeenCalledTimes(1);
@@ -111,7 +111,7 @@ describe('the summary above the teams list', () => {
     expect(view.get('.teams-title').text()).toBe('Teams');
     expect(view.get('[data-teams-period]').text()).toMatch(/^Last two months · .+ UTC$/);
     expect(view.findAll('[data-summary-tile]').map((t) => t.attributes('data-summary-tile')))
-      .toEqual(['spend', 'budgets', 'where', 'now']);
+      .toEqual(['spend', 'where', 'now']);
 
     const html = view.html();
     expect(html.indexOf('data-teams-period-control')).toBeLessThan(html.indexOf('data-cost-summary'));
@@ -149,11 +149,13 @@ describe('the summary above the teams list', () => {
     expect(where.get('[data-summary-where="unattributed"] [data-summary-where-amount]').text()).toBe('$540');
   });
 
-  it('keeps Budgets and Right now on the summary\'s own figures', async () => {
+  it('keeps Right now on the summary\'s own figures, and shows no Budgets tile or budget word though the answers carry budgets', async () => {
     const view = await mountView();
 
-    expect(view.get('[data-summary-tile="budgets"] [data-summary-budget-line]').text()).toBe('$1,600 of $2,500');
     expect(view.get('[data-summary-now="waiting"]').text()).toContain('3');
+    expect(view.find('[data-summary-tile="budgets"]').exists()).toBe(false);
+    expect(budgetWordsOn(readWords(view.get('[data-cost-summary]').element))).toEqual([]);
+    expect(view.text()).not.toContain('Give an outcome a value to track it here.');
   });
 
   it('never names the period\'s tiles spend, a value word, or Cost alone', async () => {
@@ -163,7 +165,7 @@ describe('the summary above the teams list', () => {
       for (const tile of ['spend', 'where']) {
         const element = view.get(`[data-summary-tile="${tile}"]`).element;
         const title = element.querySelector('.cost-summary-title')?.textContent ?? '';
-        expect(misnamedOnTeamsList(readOff(element), [title])).toEqual([]);
+        expect(misnamedOnTeamsList(readWords(element), [title])).toEqual([]);
       }
       view.unmount();
     }
@@ -185,7 +187,7 @@ describe('the summary above the teams list', () => {
     expect(view.find('.teams-table').exists()).toBe(true);
   });
 
-  it('opens Outcomes from Spend and Budgets, an outcome from its bar, and Needs you from waiting on you', async () => {
+  it('opens Outcomes from Estimated Execution Cost, an outcome from its bar, and Needs you from waiting on you', async () => {
     const view = await mountView();
     const nav = useWorkflowNavStore();
 
@@ -196,10 +198,6 @@ describe('the summary above the teams list', () => {
     await view.get('[data-summary-where="o-billing"]').trigger('click');
     expect(nav.outcomeAsks).toBe(2);
     expect(nav.outcomeAt).toBe('o-billing');
-
-    await view.get('[data-summary-tile="budgets"]').trigger('click');
-    expect(nav.outcomeAsks).toBe(3);
-    expect(nav.outcomeAt).toBeNull();
 
     await view.get('[data-summary-now="waiting"]').trigger('click');
     expect(nav.needsYouAsks).toBe(1);

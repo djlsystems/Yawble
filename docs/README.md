@@ -6,7 +6,7 @@ Start with the [README](../README.md) to install and start Yawble. These pages c
 
 | Doc | What it covers |
 |---|---|
-| [cost.md](cost.md) | What a team costs: the Cost tile, the Cost dialog and the Teams list's Cost · 8 weeks column, where the agent hourly rate and outcome budgets are set, and how a budget shared by several teams is measured. |
+| [cost.md](cost.md) | What a team's work is estimated to cost: the Teams list's period, columns and summary tiles, the team page's Estimated Execution Cost tile and its dialog, where the agent hourly rate is set, and why an outcome's stored value is no budget. |
 | [triggers.md](triggers.md) | Triggers and what they cost: the measured cost line, waking the Manager, the daily token cap, why polling belongs to plugins, and where a scheduled team's activity view begins. |
 | [ops/folder-change-triggers.md](ops/folder-change-triggers.md) | Folder-change triggers: watching the team's documents or a mounted share. |
 | [local-repositories.md](local-repositories.md) | Local repositories: git repositories kept only on the instance, `local:<name>`, creating and deleting them, and getting the code out with `yawble repo`. |

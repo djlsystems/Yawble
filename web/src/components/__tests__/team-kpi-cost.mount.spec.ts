@@ -3,8 +3,9 @@
 // THE TEAM PAGE'S ESTIMATED EXECUTION COST TILE AND ITS DIALOG, MOUNTED, over the period the Teams list and the team page
 // share: the tile's figure, Agent Hours at the weighted rate, footnote and chart on the team's own scale; the dialog's
 // headline, per-1M figure and breakdowns by outcome, by member (agent and plugin apart) and by workflow - each the
-// period read's figure unchanged, for Daily, Monthly and a custom range, priced, unpriced and with no runs. The budget
-// words still read the eight-week answer (`test/costFixtures.ts`); the period read is `test/teamPeriodFixtures.ts`.
+// period read's figure unchanged, for Daily, Monthly and a custom range, priced, unpriced and with no runs. No outcome
+// budget shows on either: the eight-week answer (`test/costFixtures.ts`) still carries budgets and is read only for the
+// dialog's rate line; the period read is `test/teamPeriodFixtures.ts`.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { getTeamCost, getTeamCostPeriod, getTeamCostWorkflows } = vi.hoisted(() => ({
@@ -38,9 +39,9 @@ import { useWorkflowNavStore } from '../../stores/workflowNav';
 import { asTeamId, type TeamTokenTotals } from '../../api/types';
 import type { TeamCostPeriod } from '../../api/outcomes';
 import { resetBody } from '../../test/mountQuasar';
-import { teamCost } from '../../test/costFixtures';
+import { teamCost, type CostOptions } from '../../test/costFixtures';
 import { teamCostPeriod, type TeamPeriodOptions } from '../../test/teamPeriodFixtures';
-import { misnamedOnTeamsList, readWords as readOff } from '../../test/estimateLabels';
+import { budgetWordsOn, misnamedOnTeamsList, readWords as readOff } from '../../test/estimateLabels';
 import { TeamsPeriodKey, lastTwoMonths } from '../../lib/teamsPeriod';
 import { perMillionText } from '../../lib/teamCost';
 
@@ -226,13 +227,27 @@ describe('the Estimated Execution Cost tile over the period', () => {
     expect(squash(tile().find('[data-cost-detail]').text())).toBe('0.0 Agent Hours');
   });
 
-  it('keeps the budget bar and lines on the eight-week answer, unchanged', async () => {
-    await mountStrip();
+  // NOTHING ON THE TILE IS AN OUTCOME BUDGET, AND NOTHING ON IT READS THE EIGHT WEEKS: no bar, no `<x> of <y> budget`,
+  // no ⚠ n over, no `+ X on work with no budget`, no No outcome budget set, and no Set an agent hourly rate note - in
+  // any state of the period, while the eight-week answer has budgets, an outcome over its stored value, or no rate.
+  it.each([
+    ['priced, an outcome past its stored value', {}, { over: true }],
+    ['priced, no stored values', {}, { budgets: false }],
+    ['unpriced period, eight weeks unpriced too', { unpriced: true }, { rate: null }],
+    ['no runs in the period, eight weeks unpriced', { empty: true }, { rate: null }],
+  ] as [string, TeamPeriodOptions, CostOptions][])('shows no outcome budget and reads nothing of the eight weeks, %s', async (_, period, eight) => {
+    getTeamCost.mockResolvedValue(teamCost(eight));
+    await mountStrip(teamCostPeriod(period));
 
-    expect(squash(tile().find('[data-cost-budget]').text())).toBe('$1,000 of $1,500 budget (67%)');
-    expect(squash(tile().find('[data-cost-unbudgeted]').text())).toBe('+ $360 on work with no budget');
-    expect(tile().find('[data-cost-bar]').exists()).toBe(true);
-    expect(getTeamCost).toHaveBeenCalledWith('alpha');
+    for (const hook of ['[data-cost-bar]', '[data-cost-budget]', '[data-cost-over]', '[data-cost-unbudgeted]', '[data-cost-note]']) {
+      expect(tile().find(hook).exists()).toBe(false);
+    }
+    expect(budgetWordsOn(readOff(tile().element))).toEqual([]);
+    expect(tile().text()).not.toContain('No outcome budget set');
+    expect(tile().text()).not.toContain('Set an agent hourly rate');
+    expect(tile().text()).not.toContain('⚠');
+    // The tile does not even read the eight-week route; only the dialog does, for its rate line.
+    expect(getTeamCost).not.toHaveBeenCalled();
   });
 
   it('says unavailable when the period cannot be read', async () => {
@@ -257,7 +272,7 @@ describe('the Estimated Execution Cost dialog over the period', () => {
     expect(nav.outcomeRateAsks).toBe(asks + 1);
   });
 
-  it('heads with the period\'s Estimated Execution Cost, Agent Hours, Budget used and Per 1M billable tokens', async () => {
+  it('heads with the period\'s Estimated Execution Cost, Agent Hours and Per 1M billable tokens, and no Budget used', async () => {
     const period = teamCostPeriod();
     await mountStrip(period);
     await openDialog();
@@ -265,8 +280,11 @@ describe('the Estimated Execution Cost dialog over the period', () => {
     const figure = (name: string) => words(dialog()!.querySelector(`[data-cost-figure="${name}"]`));
     expect(figure('estimate')).toBe('$750 Estimated Execution Cost · last two months');
     expect(figure('agent-hours')).toBe('12.0 Agent Hours 12.0 Agent Hours at $60/h');
-    // Budget used still reads the eight-week answer's budgeted outcomes.
-    expect(figure('budget-used')).toBe('67% Budget used · $1,000 of $1,500');
+    expect(dialog()!.querySelector('[data-cost-figure="budget-used"]')).toBeNull();
+    expect([...dialog()!.querySelectorAll('[data-cost-figure]')].map((f) => f.getAttribute('data-cost-figure')))
+      .toEqual(['estimate', 'agent-hours', 'per-million']);
+    // The eight-week read is made when the dialog opens, for its rate line only.
+    expect(getTeamCost).toHaveBeenCalledWith('alpha');
     expect(figure('per-million')).toBe(`${perMillionText(period.totals, 'USD')} Per 1M billable tokens`);
     expect(figure('per-million')).toBe('$166,667 Per 1M billable tokens');
   });
@@ -301,24 +319,45 @@ describe('the Estimated Execution Cost dialog over the period', () => {
     expect(labels.slice(0, 2)).toEqual(['Oct 1', 'Oct 8']);
   });
 
-  it('breaks it down by outcome: each outcome, then Unattributed, then the Team total, budgets as before', async () => {
+  it('breaks it down by outcome: each outcome, then Unattributed, then the Team total, with no Budget column', async () => {
     await mountStrip();
     await openDialog();
 
+    expect([...dialog()!.querySelectorAll('[data-cost-breakdown="outcome"] th')].map((th) => squash(th.textContent)))
+      .toEqual(['Outcome', 'Executions', 'Agent Hours', 'Estimated Execution Cost', 'Billable tokens', '$ / 1M tokens']);
     expect(table('[data-cost-breakdown="outcome"]')).toEqual([
-      ['Ship billing', '3', '6.0', '$360', '$900 / $2,000', '3,000', '$120,000'],
-      ['Docs refresh', '1', '3.0', '$180', 'None set', '500', '$360,000'],
-      ['Unattributed', '4', '3.0', '$210', '—', '1,000', '$210,000'],
-      ['Team total', '8', '12.0', '$750', '', '4,500', '$166,667'],
+      ['Ship billing', '3', '6.0', '$360', '3,000', '$120,000'],
+      ['Docs refresh', '1', '3.0', '$180', '500', '$360,000'],
+      ['Unattributed', '4', '3.0', '$210', '1,000', '$210,000'],
+      ['Team total', '8', '12.0', '$750', '4,500', '$166,667'],
     ]);
   });
 
-  it('marks an outcome over its budget ⚠ over by its all-time total', async () => {
+  it('marks no outcome over its budget, though one is past its stored value: no ⚠ over, no None set, no budget word', async () => {
+    getTeamCost.mockResolvedValue(teamCost({ over: true }));
     await mountStrip(teamCostPeriod({ over: true }));
     await openDialog();
 
-    const billing = dialog()!.querySelector('[data-cost-row="o-billing"] [data-cell="budget"]')!;
-    expect(squash(billing.textContent)).toBe('$2,400 / $2,000 ⚠ over');
+    for (const label of ['By outcome', 'By member', 'By workflow']) {
+      await showBreakdown(label);
+      expect(dialog()!.querySelector('[data-cell="budget"], [data-cost-over], .cost-mini-bar')).toBeNull();
+      expect(budgetWordsOn(readOff(dialog()))).toEqual([]);
+      expect(dialog()!.textContent).not.toContain('⚠');
+    }
+  });
+
+  it('names each outcome and the column total in the large chart\'s per-column tooltip, and no budget', async () => {
+    await mountStrip();
+    await openDialog();
+
+    const large = wrapper!.findAllComponents(CostWeeksChart).find((c) => c.props('size') === 'large')!;
+    await large.get('[data-cost-week="0"]').trigger('mouseenter');
+    const tip = dialog()!.querySelector('[data-cost-tooltip]')!;
+    expect(tip).not.toBeNull();
+    expect([...tip.querySelectorAll('[data-cost-tooltip-row]')].map((r) => r.getAttribute('data-cost-tooltip-row')))
+      .toEqual(expect.arrayContaining(['o-billing', 'o-docs', 'none']));
+    expect(squash(tip.querySelector('[data-cost-tooltip-total]')!.textContent)).toMatch(/total \$[\d,]+/);
+    expect(budgetWordsOn(readOff(tip as HTMLElement))).toEqual([]);
   });
 
   it('breaks it down by member, agent and plugin members apart: an unpriced plugin is Not priced, never the agent default', async () => {
@@ -371,7 +410,7 @@ describe('the Estimated Execution Cost dialog over the period', () => {
     await openDialog();
 
     expect(words(dialog()!.querySelector('[data-cost-figure="estimate"]'))).toBe('— Estimated Execution Cost · last two months');
-    expect(table('[data-cost-breakdown="outcome"]')).toEqual([['Team total', '0', '0.0', '—', '', '0', '—']]);
+    expect(table('[data-cost-breakdown="outcome"]')).toEqual([['Team total', '0', '0.0', '—', '0', '—']]);
     await showBreakdown('By member');
     expect(squash(dialog()!.querySelector('[data-cost-breakdown="agent-members"] tbody')!.textContent)).toBe('No agent member ran in this period.');
     await showBreakdown('By workflow');

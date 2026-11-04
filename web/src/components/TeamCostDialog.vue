@@ -3,17 +3,13 @@ import { computed, ref, watch } from 'vue';
 import type { ContainerSnapshot, TeamTokenTotals } from '../api/types';
 import { asTeamId } from '../api/types';
 import { getTeamTokens } from '../api/client';
-import { getTeamCostPeriod, type TeamCost, type TeamCostPeriod, type TeamPeriodOutcome } from '../api/outcomes';
+import { getTeamCostPeriod, type TeamCost, type TeamCostPeriod } from '../api/outcomes';
 import { moneyText } from '../lib/outcomes';
 import {
   EstimateTitle,
-  CriticalColour,
   agentHours,
-  budgetUse,
   defaultRateText,
   hoursFigure,
-  overBudget,
-  percentText,
   perMillionText,
 } from '../lib/teamCost';
 import { useCostPeriodChoice } from '../lib/costPeriodChoice';
@@ -34,15 +30,11 @@ import TeamTokensPanel from './TeamTokensPanel.vue';
  * it. Opened from the team page's Cost tile and from the teams list's column.
  *
  * EVERY FIGURE IS `GET /api/teams/{team}/cost/period`'s (`lib/teamPeriod.ts` words them). Each run's part inside the
- * period is priced once there, so each breakdown's rows add up to the headline exactly. Budget used and the Budget
- * column still read the eight-week answer and each outcome's all-time total, as before (outcome budgets are not
- * settled yet).
+ * period is priced once there, so each breakdown's rows add up to the headline exactly. Nothing here is an outcome
+ * budget: an outcome's stored value is kept and readable on the outcome routes, and no figure is measured against it.
  *
  * It replaces the Tokens dialog: the Tokens tab is that dialog's content, unchanged
  * (`TeamTokensPanel.vue`).
- *
- * A BUDGET IS SHARED: an outcome's budget is measured against its total across EVERY team serving
- * it (`outcomeTotalCost`), so the Budget column reads that total, not this team's part of it.
  */
 const open = defineModel<boolean>({ required: true });
 
@@ -50,7 +42,7 @@ const props = defineProps<{
   teamId: string;
   teamName: string;
   containers: ContainerSnapshot[];
-  /** The cost route's answer, or null while it is read (or when it could not be). */
+  /** The eight-week cost route's answer - read here only for its default-rate line - or null while it is read. */
   cost: TeamCost | null;
   /** True when the cost route could not be read. */
   costFailed?: boolean;
@@ -135,9 +127,6 @@ const columnTitle = computed(() => {
 });
 const periodWords = computed(() => periodName(choice.value));
 
-/** Budget used: the eight-week answer's budgeted outcomes against their all-time totals, unchanged. */
-const use = computed(() => (props.cost ? budgetUse(props.cost) : null));
-
 /** Which breakdown shows under the chart. */
 type Breakdown = 'outcome' | 'member' | 'workflow';
 const breakdown = ref<Breakdown>('outcome');
@@ -152,18 +141,6 @@ const byOutcome = computed(() => {
 });
 const byMember = computed(() => (period.value ? memberRows(period.value) : { agents: [], plugins: [] }));
 const byWorkflow = computed(() => (period.value ? workflowRows(period.value) : []));
-
-function budgetCell(o: TeamPeriodOutcome): { text: string; fill: number | null; over: boolean } | null {
-  if (o.id === null) return null;
-  if (o.value === null) return { text: 'None set', fill: null, over: false };
-  const total = o.outcomeTotalCost;
-  const over = overBudget(o);
-  return {
-    text: `${total === null ? '—' : moneyText(total, currency.value)} / ${moneyText(o.value, currency.value)}`,
-    fill: total === null ? null : o.value > 0 ? Math.min(1, total / o.value) : 1,
-    over,
-  };
-}
 
 const costCell = (cost: number | null) => (cost === null ? '—' : moneyText(cost, currency.value));
 
@@ -215,14 +192,6 @@ function changeRate() {
               <div class="cost-figure-value mono">{{ agentHours(period.totals.agentSeconds) }}</div>
               <div class="text-caption os-text-muted">{{ headline.detail }}</div>
             </div>
-            <div v-if="use" class="cost-figure" data-cost-figure="budget-used">
-              <div class="cost-figure-value mono" :style="use.over > 0 ? { color: CriticalColour } : undefined">
-                {{ percentText(use.share) }}<template v-if="use.over > 0"> ⚠</template>
-              </div>
-              <div class="text-caption os-text-muted">
-                Budget used · {{ moneyText(use.spent, currency) }} of {{ moneyText(use.budget, currency) }}
-              </div>
-            </div>
             <div class="cost-figure" data-cost-figure="per-million">
               <div class="cost-figure-value mono">{{ perMillionText(period.totals, currency) }}</div>
               <div class="text-caption os-text-muted">Per 1M billable tokens</div>
@@ -268,7 +237,6 @@ function changeRate() {
                   <th class="token-num">Executions</th>
                   <th class="token-num">Agent Hours</th>
                   <th class="token-num">{{ EstimateTitle }}</th>
-                  <th>Budget</th>
                   <th class="token-num">Billable tokens</th>
                   <th class="token-num">$ / 1M tokens</th>
                 </tr>
@@ -282,20 +250,6 @@ function changeRate() {
                   <td class="token-num mono" data-cell="executions">{{ row.executions.toLocaleString() }}</td>
                   <td class="token-num mono" data-cell="hours">{{ row.hours }}</td>
                   <td class="token-num mono" data-cell="cost" :title="row.footnote ?? undefined">{{ row.estimate }}</td>
-                  <td class="cost-budget" data-cell="budget">
-                    <template v-if="budgetCell(row.outcome)">
-                      <div v-if="budgetCell(row.outcome)!.fill !== null" class="cost-mini-bar" aria-hidden="true">
-                        <div
-                          class="cost-mini-bar__fill"
-                          :class="{ 'cost-mini-bar__fill--over': budgetCell(row.outcome)!.over }"
-                          :style="{ width: `${budgetCell(row.outcome)!.fill! * 100}%` }"
-                        />
-                      </div>
-                      <span class="mono" :class="{ 'os-text-muted': budgetCell(row.outcome)!.fill === null }">{{ budgetCell(row.outcome)!.text }}</span>
-                      <span v-if="budgetCell(row.outcome)!.over" class="cost-over" data-cost-over> ⚠ over</span>
-                    </template>
-                    <span v-else class="os-text-muted">—</span>
-                  </td>
                   <td class="token-num mono" data-cell="billable">{{ row.outcome.figures.billable.toLocaleString() }}</td>
                   <td class="token-num mono" data-cell="per-million">{{ perMillionText(row.outcome.figures, currency) }}</td>
                 </tr>
@@ -304,7 +258,6 @@ function changeRate() {
                   <td class="token-num mono" data-cell="executions">{{ period.totals.executions.toLocaleString() }}</td>
                   <td class="token-num mono" data-cell="hours">{{ hoursFigure(period.totals.agentSeconds) }}</td>
                   <td class="token-num mono" data-cell="cost">{{ headline.value }}</td>
-                  <td data-cell="budget"></td>
                   <td class="token-num mono" data-cell="billable">{{ period.totals.billable.toLocaleString() }}</td>
                   <td class="token-num mono" data-cell="per-million">{{ perMillionText(period.totals, currency) }}</td>
                 </tr>
@@ -472,32 +425,5 @@ function changeRate() {
   margin-right: 6px;
   border-radius: 2px;
   vertical-align: baseline;
-}
-
-.cost-budget {
-  white-space: nowrap;
-}
-
-.cost-mini-bar {
-  width: 4rem;
-  height: 4px;
-  margin-bottom: 3px;
-  border-radius: 2px;
-  overflow: hidden;
-  background: var(--os-rule);
-}
-
-.cost-mini-bar__fill {
-  height: 100%;
-  background: var(--os-ink-muted);
-}
-
-.cost-mini-bar__fill--over {
-  background: var(--os-error);
-}
-
-.cost-over {
-  color: var(--os-error);
-  font-weight: 600;
 }
 </style>

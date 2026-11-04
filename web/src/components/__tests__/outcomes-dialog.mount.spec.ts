@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 //
-// OUTCOMES AS A DASHBOARD. The tabs; each outcome as a tile with the route's cost against its value,
-// its eight weeks of spend, its backlog by where it stands and a summary line - never a figure the
+// OUTCOMES AS A DASHBOARD. The tabs; each outcome as a tile with the route's Estimated Execution Cost - never
+// against its stored value, which is no budget on any screen - its eight weeks of estimate, its backlog by where it stands and a summary line - never a figure the
 // route did not send, "not set" for a cost with no rate, no efficiency for no time; the "Accounting
 // since" note; the always-shown Unattributed tile; the rate editor writing its three settings;
-// and an outcome opened: its money row, its backlog columns, its value edited, and the actions -
+// and an outcome opened: its money row, its backlog columns, its name and description edited (never its stored
+// value, which a save leaves as stored), and the actions -
 // confirm, retire and reactivate send their routes, Merge into… shows the route's preview before it
 // merges, Reject is offered only with no links, and Move sends the link route. Retired & merged is a
 // table - sortable, rows selectable one by one or all shown at once - whose Delete shows the route's
@@ -45,6 +46,7 @@ import type { Outcome, OutcomeDetail, OutcomeFigures, OutcomeList } from '../../
 import { bodyFind, bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
 import { localStamp, wireInstant } from '../../lib/localTime';
 import { button, settle, type } from '../../test/formProbe';
+import { budgetWordsOn, misnamed, readWords } from '../../test/estimateLabels';
 import type { VueWrapper } from '@vue/test-utils';
 
 function figures(over: Partial<OutcomeFigures> = {}): OutcomeFigures {
@@ -243,7 +245,7 @@ describe('Manage Outcomes: tabs and figures', () => {
     expect(document.body.querySelector('[data-outcomes-dialog] [data-outcome-tiles] table')).toBeNull();
   });
 
-  it('shows the route\'s cost against the value, the backlog by where it stands and one summary line', async () => {
+  it('shows the route\'s Estimated Execution Cost, never against the stored value, the backlog by where it stands and one summary line', async () => {
     api.listOutcomes.mockResolvedValue(listing({
       money: { currency: 'USD', agentHourlyRate: 90, declaredCountsAs: 'achieved' },
       outcomes: [outcome('o-1', 'Current job pipeline', 'active', {
@@ -260,8 +262,10 @@ describe('Manage Outcomes: tabs and figures', () => {
 
     const money = bodyFind('[data-outcome-row="o-1"] [data-outcome-tile-money]')?.textContent?.replace(/\s+/g, ' ') ?? '';
     expect(money).toContain('$1,240');
-    expect(money).toContain('of $20,000 budget');
-    expect(money).toContain('3.1 Agent Hours');
+    expect(money).toContain('Estimated Execution Cost · 3.1 Agent Hours');
+    expect(money).not.toContain('$20,000');
+    expect(misnamed([money])).toEqual([]);
+    expect(budgetWordsOn([money])).toEqual([]);
 
     const counts = (key: string) => bodyFind(`[data-outcome-row="o-1"] [data-outcome-bucket-count="${key}"]`)?.textContent?.trim();
     expect([counts('notStarted'), counts('inProgress'), counts('achieved')]).toEqual(['2 not started', '3 in progress', '5 achieved']);
@@ -346,6 +350,8 @@ describe('Manage Outcomes: tabs and figures', () => {
 
     const none = bodyFind('[data-no-outcome-row]')?.textContent ?? '';
     expect(none).toContain('Unattributed');
+    expect(none).toContain('Estimated Execution Cost ·');
+    expect(misnamed([none])).toEqual([]);
     expect(none).toContain('7 workflows completed · 0 active');
     expect(none).toContain('+ 1 unmeasured run');
 
@@ -397,7 +403,7 @@ describe('Manage Outcomes: tabs and figures', () => {
 });
 
 describe('Manage Outcomes: an outcome opened', () => {
-  it('opens at the outcome it was given, with its value, its money, its backlog and its workflows', async () => {
+  it('opens at the outcome it was given, with its money, its backlog and its workflows, and no budget though a value is stored', async () => {
     api.getOutcome.mockImplementation(async (id: string) => {
       const found = listing().outcomes.find((o) => o.id === id)!;
       const detail = detailOf({
@@ -419,14 +425,16 @@ describe('Manage Outcomes: an outcome opened', () => {
     expect(bodyFind('[data-outcome-detail]')?.getAttribute('data-outcome-id')).toBe('o-1');
     expect(bodyFind('[data-outcome-title]')?.textContent).toBe('Current job pipeline');
 
-    expect(bodyFind('[data-outcome-value]')?.textContent).toContain('$20,000');
-    expect(bodyFind('[data-outcome-value]')?.textContent).toContain('Budget');
-    expect(bodyFind('[data-outcome-share]')?.textContent).toContain('Of its budget spent');
+    // NO BUDGET, NO SHARE OF IT: the stored $20,000 is not shown or measured against.
+    expect(bodyFind('[data-outcome-value]')).toBeNull();
+    expect(bodyFind('[data-outcome-share]')).toBeNull();
+    expect(bodyFind('[data-outcome-detail]')?.textContent).not.toContain('$20,000');
+    expect(budgetWordsOn(readWords(bodyFind('[data-outcome-money]')))).toEqual([]);
+    expect(misnamed(readWords(bodyFind('[data-outcome-money]')))).toEqual([]);
     expect(bodyFind('[data-outcome-cost]')?.textContent).toContain('$1,240');
     // ESTIMATED EXECUTION COST, with the route's weighted rate - never the tenant rate ($90/h) as if it priced it.
     expect(bodyFind('[data-outcome-cost]')?.textContent).toContain('Estimated Execution Cost · 3.1 Agent Hours at $62.50/h');
     expect(bodyFind('[data-outcome-cost]')?.textContent).not.toContain('$90');
-    expect(bodyFind('[data-outcome-share]')?.textContent).toContain('6%');
     expect(bodyFind('[data-outcome-efficiency]')?.textContent).toContain('50%');
     // WAITING ON A PERSON is its own figure, labelled as such, beside - never inside - agents working.
     expect(bodyFind('[data-outcome-efficiency]')?.textContent).not.toMatch(/waiting/i);
@@ -446,7 +454,9 @@ describe('Manage Outcomes: an outcome opened', () => {
     expect(bodyFind('[data-outcome-history-open]')?.textContent).toContain('History (5)');
 
     await click('[data-outcome-settings-open]');
-    expect(bodyFind('[data-outcome-settings] [data-outcome-field="value"]')).not.toBeNull();
+    expect(bodyFind('[data-outcome-settings] [data-outcome-field="name"]')).not.toBeNull();
+    expect(bodyFind('[data-outcome-settings] [data-outcome-field="value"]')).toBeNull();
+    expect(budgetWordsOn(readWords(bodyFind('[data-outcome-settings]')))).toEqual([]);
     expect(bodyText()).not.toContain('Target metric');
 
     await click('[data-outcome-workflows-open]');
@@ -467,26 +477,29 @@ describe('Manage Outcomes: an outcome opened', () => {
     expect(settings).toBe(retire + 1);
   });
 
-  it('budgets an outcome from its settings dialog through the edit route, sending only the budget, and closes it', async () => {
+  it('saves a description from its settings dialog without sending the stored value, which stays as stored, and closes it', async () => {
+    api.getOutcome.mockImplementation(async (id: string) => detailOf({ ...listing().outcomes.find((o) => o.id === id)!, value: '20000' }));
     await open({ outcome: 'o-1' });
 
     await click('[data-outcome-settings-open]');
-    await type('Budget (USD)', '20000');
+    expect(bodyFind('[data-outcome-settings] [data-outcome-field="value"]')).toBeNull();
+    await type('Description', 'Jobs in, jobs out');
     await click('[data-outcome-save]');
 
-    expect(api.editOutcome).toHaveBeenCalledWith('o-1', { value: '20000' });
+    expect(api.editOutcome).toHaveBeenCalledWith('o-1', { description: 'Jobs in, jobs out' });
+    expect(api.editOutcome.mock.calls.every(([, fields]) => !('value' in (fields as object)))).toBe(true);
     expect(bodyFind('[data-outcome-settings]')).toBeNull();
   });
 
   it('keeps the settings dialog open with the route\'s refusal when a save is refused', async () => {
-    api.editOutcome.mockRejectedValue(new Error("An outcome's budget is an amount of the instance's currency, 0 or more, such as 20000 or 1250.50."));
+    api.editOutcome.mockRejectedValue(new Error('An outcome needs a name.'));
     await open({ outcome: 'o-1' });
 
     await click('[data-outcome-settings-open]');
-    await type('Budget (USD)', 'lots');
+    await type('Name', ' ');
     await click('[data-outcome-save]');
 
-    expect(bodyFind('[data-outcome-settings-problem]')?.textContent).toContain("An outcome's budget is an amount");
+    expect(bodyFind('[data-outcome-settings-problem]')?.textContent).toContain('An outcome needs a name.');
     expect(bodyFind('[data-outcome-settings]')).not.toBeNull();
   });
 
@@ -538,6 +551,22 @@ describe('Manage Outcomes: an outcome opened', () => {
     expect(lines.find((l) => l.includes('Reactivated'))).toContain('by ada@example.com');
     // Oldest first, links among them by time.
     expect(lines.findIndex((l) => l.includes('Retired'))).toBeLessThan(lines.findIndex((l) => l.includes('Workflow 4100')));
+  });
+
+  it('words a stored value or description change in the history as Details changed, never as a budget', async () => {
+    api.getOutcome.mockImplementation(async (id: string) => {
+      const detail = detailOf(listing().outcomes.find((o) => o.id === id)!);
+      detail.events = [...detail.events, {
+        seq: 99, at: '2026-09-04T08:00:00Z', action: 'outcome.changed', outcomeId: id, name: null, from: null, by: 'grace@example.com', detail: { value: '20000' },
+      }];
+      return detail;
+    });
+    await open({ outcome: 'o-1' });
+    await click('[data-outcome-history-open]');
+
+    const lines = [...document.body.querySelectorAll('[data-outcome-history] li')].map((li) => li.textContent ?? '');
+    expect(lines.find((l) => l.includes('Details changed'))).toContain('by grace@example.com');
+    expect(budgetWordsOn(lines)).toEqual([]);
   });
 
   it('renames through the edit route, sending only what changed', async () => {
@@ -686,6 +715,9 @@ describe('Manage Outcomes: an outcome opened', () => {
     await open();
 
     await click('[data-outcome-new]');
+    // A NEW OUTCOME ASKS FOR NO BUDGET: name and description only.
+    expect(bodyFind('[data-outcome-create-value]')).toBeNull();
+    expect(budgetWordsOn(readWords(bodyFind('[data-outcome-create]')))).toEqual([]);
     await type('Name', 'Current job pipeline');
     await click('[data-outcome-create-confirm]');
 
@@ -939,9 +971,10 @@ describe('Manage Outcomes: two presentations of one outcome', () => {
     expect(bars.at(-1)?.style.height).toBe('100%');
     expect(bars[0]?.style.height).toBe('0%');
 
-    // The budget words stay as they are, and no human figure is shown or stood in for.
-    expect(bodyFind('[data-outcome-value]')?.textContent).toContain('Budget');
-    expect(bodyFind('[data-outcome-share]')?.textContent).toContain('Of its budget spent');
+    // No budget in either reading, and no human figure is shown or stood in for.
+    expect(bodyFind('[data-outcome-value]')).toBeNull();
+    expect(bodyFind('[data-outcome-share]')).toBeNull();
+    expect(budgetWordsOn(readWords(bodyFind('[data-outcome-detail]')))).toEqual([]);
     expect(bodyText()).not.toMatch(/intervention/i);
   });
 

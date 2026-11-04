@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 //
 // THE TEAMS LIST'S ESTIMATED EXECUTION COST AND AGENT HOURS COLUMNS over the shared period: each team's stacked
-// chart by outcome at row height, every row on ONE relative scale, its period total and Agent Hours beside it and
-// ⚠ when one of its outcomes is over budget, all from ONE call for the whole list; a click on the chart opens that
+// chart by outcome at row height, every row on ONE relative scale, its period total and Agent Hours beside it, all
+// from ONE call for the whole list, and no outcome budget mark; a click on the chart opens that
 // team's Cost dialog rather than the team. Same scale and its stored key are gone; both figures sort.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
@@ -46,7 +46,7 @@ import { asTeamId, type TeamId, type TeamTokenTotals } from '../../api/types';
 import type { TeamsCost } from '../../api/outcomes';
 import { resetBody } from '../../test/mountQuasar';
 import { teamCost, Weeks, type CostOptions } from '../../test/costFixtures';
-import { misnamedOnTeamsList, readOff } from '../../test/estimateLabels';
+import { budgetWordsOn, misnamedOnTeamsList, readWords } from '../../test/estimateLabels';
 import { teamsCostPeriod } from '../../test/costPeriodFixtures';
 import { teamCostPeriod } from '../../test/teamPeriodFixtures';
 import { lastTwoMonths } from '../../lib/teamsPeriod';
@@ -220,12 +220,16 @@ describe('the Estimated Execution Cost column over the period', () => {
     expect(fillOf('beta', 'none')).toContain('var(--os-ink-faint)');
   });
 
-  it('shows ⚠ only on a team with an outcome over budget', async () => {
+  it('marks no row over budget, though one team\'s outcome is past its stored value in the eight-week answer', async () => {
     getTeamsCost.mockResolvedValue(teamsCost({ betaOver: true }));
     const { view } = await mountView();
 
-    expect(row(view, 'alpha').find('[data-teams-cost-over]').exists()).toBe(false);
-    expect(row(view, 'beta').find('[data-teams-cost-over]').text()).toBe('⚠');
+    for (const team of ['alpha', 'beta']) {
+      const cell = row(view, team).get('td.teams-cost');
+      expect(cell.find('[data-teams-cost-over]').exists()).toBe(false);
+      expect(cell.text()).not.toContain('⚠');
+      expect(budgetWordsOn(readWords(cell.element))).toEqual([]);
+    }
   });
 
   it.each([['priced', {}], ['no rate', { rate: null }]] as [string, { rate?: number | null }][])(
@@ -235,9 +239,9 @@ describe('the Estimated Execution Cost column over the period', () => {
       const { view } = await mountView();
 
       const titles = view.findAll('thead th').map((th) => th.text());
-      expect(misnamedOnTeamsList(readOff(view.get('[data-teams-period-control]').element), titles)).toEqual([]);
+      expect(misnamedOnTeamsList(readWords(view.get('[data-teams-period-control]').element), titles)).toEqual([]);
       for (const cell of view.findAll('td.teams-cost, td[data-teams-hours]')) {
-        expect(misnamedOnTeamsList(readOff(cell.element))).toEqual([]);
+        expect(misnamedOnTeamsList(readWords(cell.element))).toEqual([]);
       }
       expect(row(view, 'alpha').get('[data-teams-cost]').attributes('aria-label'))
         .toMatch(/^Estimated Execution Cost of Alpha, Last two months · .+: /);
@@ -267,7 +271,8 @@ describe('the Estimated Execution Cost column over the period', () => {
     expect(document.body.querySelector('[data-cost-title]')?.textContent?.trim()).toBe('Estimated Execution Cost · Beta');
     // THE DIALOG READS THE TEAM OVER THE LIST'S PERIOD: the row's figures, in more detail.
     expect(getTeamCostPeriod).toHaveBeenCalledWith('beta', lastTwoMonths(), 'day');
-    expect(document.body.querySelector('[data-cost-row="o-billing"] [data-cost-over]')).not.toBeNull();
+    expect(document.body.querySelector('[data-cost-row="o-billing"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-cost-over], [data-cell="budget"]')).toBeNull();
     expect(getTeamsCost).toHaveBeenCalledTimes(1);
     expect(getTeamCost).not.toHaveBeenCalled();
   });

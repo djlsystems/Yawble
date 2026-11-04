@@ -40,7 +40,7 @@ import {
   getTeamCost, getTeamCostPeriod, getTeamCostWorkflows,
   type TeamCost, type TeamCostPeriod, type TeamPeriodWorkflow,
 } from '../api/outcomes';
-import { EstimateTitle, costTile } from '../lib/teamCost';
+import { EstimateTitle } from '../lib/teamCost';
 import { useCostPeriodChoice } from '../lib/costPeriodChoice';
 import { bucketLabel, rangeOfChoice } from '../lib/teamsPeriod';
 import {
@@ -228,9 +228,9 @@ watch(() => [workflowNav.workflowsAsks, props.teamId], takeWorkflowsAsk);
  */
 
 /**
- * THE COST TILE: what the team cost over the last eight weeks, by outcome, against the
- * budgets of the outcomes it serves - read from `GET /api/teams/{team}/cost` when the strip mounts,
- * when the team changes and each time the Cost dialog opens. The tokens behind it are the Cost
+ * THE EIGHT-WEEK COST READ, FOR THE DIALOG ONLY: `GET /api/teams/{team}/cost` gives the dialog its default-rate line
+ * ("Change in Outcomes"). Nothing on the tile reads it - the tile follows the period read below - so it is read each
+ * time the dialog opens, and again when the team changes while it is open. The tokens behind the tile are the
  * dialog's Tokens tab, from the log as before (`usage`).
  */
 const costOpen = ref(false);
@@ -256,20 +256,14 @@ async function readCost() {
 
 watch(() => props.teamId, () => {
   cost.value = null;
-  void readCost();
-}, { immediate: true });
+  if (costOpen.value) void readCost();
+});
 
 function openCost() {
   costOpen.value = true;
   void readCost();
   void readPeriod();
 }
-
-/**
- * THE BUDGET WORDS STILL READ THE EIGHT WEEKS: the bar, the budget line, `⚠ n over`, `+ X on work with no budget` and
- * the notes come from `costTile` over `GET /api/teams/{team}/cost`, unchanged until outcome budgets are settled.
- */
-const costTileWords = computed(() => (cost.value ? costTile(cost.value) : null));
 
 /**
  * THE PERIOD THE TEAM PAGE SHOWS: the Teams list's own choice (`harness.teamsCostPeriod`), picked through the same
@@ -893,8 +887,8 @@ function showThread(row: WorkflowRow) {
 
     <!-- ESTIMATED EXECUTION COST OVER THE PERIOD: the team's figure, Agent Hours at the weighted rate and the trend by
          outcome on the team's own scale, from the period read; Estimate unavailable when it ran unpriced - never $0.
-         The budget bar and lines under it still read the eight weeks (outcome budgets are not settled yet). The whole
-         tile opens the dialog, whose Tokens tab is what this tile used to show. -->
+         Nothing on it is an outcome budget, and nothing on it reads the eight weeks. The whole tile opens the dialog,
+         whose Tokens tab is what this tile used to show. -->
     <button type="button" class="team-kpi team-kpi--cost" data-cost-tile @click="openCost">
       <div class="team-kpi-label" data-cost-label>{{ tileHeading }}</div>
       <template v-if="period && periodWords">
@@ -914,25 +908,6 @@ function showThread(row: WorkflowRow) {
       </template>
       <div v-else-if="periodFailed" class="team-kpi-value team-kpi-unavailable">unavailable</div>
       <div v-else class="team-kpi-value team-kpi-unavailable">—</div>
-      <template v-if="cost && costTileWords">
-        <template v-if="costTileWords.bar !== null">
-          <div
-            class="team-kpi-cost-bar"
-            :class="{ 'team-kpi-cost-bar--over': costTileWords.state === 'over' }"
-            data-cost-bar
-            :data-over="costTileWords.state === 'over' ? '' : undefined"
-            aria-hidden="true"
-          >
-            <div class="team-kpi-cost-bar__fill" :style="{ width: `${costTileWords.bar * 100}%` }" />
-          </div>
-          <div class="team-kpi-detail" data-cost-budget>
-            {{ costTileWords.budgetLine }}
-            <span v-if="costTileWords.overLine" class="team-kpi-cost-over" data-cost-over>{{ costTileWords.overLine }}</span>
-          </div>
-          <div v-if="costTileWords.unbudgetedLine" class="team-kpi-detail" data-cost-unbudgeted>{{ costTileWords.unbudgetedLine }}</div>
-        </template>
-        <div v-if="costTileWords.note" class="team-kpi-claim team-kpi-cost-note" data-cost-note>{{ costTileWords.note }}</div>
-      </template>
       <q-tooltip>{{ EstimateTitle }} by outcome - each run at the rate it started with, not money paid - and the tokens behind it. Click for the breakdown</q-tooltip>
     </button>
   </div>
@@ -1592,35 +1567,6 @@ function showThread(row: WorkflowRow) {
   align-items: flex-end;
   justify-content: space-between;
   gap: 8px;
-}
-
-/* The budget bar: spent against budget, the critical colour once any outcome is over. */
-.team-kpi-cost-bar {
-  height: 4px;
-  margin-top: 6px;
-  border-radius: 2px;
-  overflow: hidden;
-  background: var(--os-rule);
-}
-
-.team-kpi-cost-bar__fill {
-  height: 100%;
-  background: var(--q-primary);
-}
-
-.team-kpi-cost-bar--over .team-kpi-cost-bar__fill {
-  background: var(--os-error);
-}
-
-.team-kpi-cost-over {
-  margin-left: 4px;
-  font-weight: 600;
-  color: var(--os-error);
-}
-
-.team-kpi-cost-note {
-  text-transform: none;
-  letter-spacing: normal;
 }
 
 .team-kpi-unavailable {

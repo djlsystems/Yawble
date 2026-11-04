@@ -221,20 +221,6 @@ export function moneyText(amount: number | null, currency: string): string {
   }
 }
 
-/** An outcome's budget (the API's `value`) as a number, or null when nobody has set one. */
-export function valueAmount(value: string | null | undefined): number | null {
-  if (value === null || value === undefined || value.trim() === '') return null
-  const amount = Number(value)
-  return Number.isFinite(amount) ? amount : null
-}
-
-/** What share of the budget the cost is, `6%` - or nothing when either is not known or the budget is 0. */
-export function shareOfValueText(cost: number | null, value: number | null): string {
-  if (cost === null || value === null || value <= 0) return ''
-  const share = (cost / value) * 100
-  return share > 0 && share < 1 ? '<1%' : `${Math.round(share)}%`
-}
-
 /** Agent hours from the route's seconds: `13.8 Agent Hours`, `45 agent min`. */
 export function agentHoursText(seconds: number): string {
   if (seconds < 3600) return `${Math.round(seconds / 60)} agent min`

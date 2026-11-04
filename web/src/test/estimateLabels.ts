@@ -65,7 +65,7 @@ export function misnamedOnMemberRate(texts: readonly (string | null | undefined)
 /**
  * THE TEAMS LIST'S LINT, for its period control, its Estimated Execution Cost and Agent Hours columns, and the
  * Estimated Execution Cost and Where it goes tiles: no spend word, no `agent h`, no value word, and no title of
- * Cost alone. (The Budgets tile keeps its budget words until outcome budgets are settled; it is not linted here.)
+ * Cost alone.
  */
 export function misnamedOnTeamsList(texts: readonly (string | null | undefined)[], titles: readonly string[] = []): string[] {
   const words = texts
@@ -88,4 +88,19 @@ export function readWords(root: Element | null | undefined): string[] {
     if (text) parts.push(text);
   }
   return [...parts, ...readOff(root).slice(1)];
+}
+
+/**
+ * AN OUTCOME BUDGET'S WORDS, which no cost surface shows any more: an outcome's stored value is kept and readable on
+ * the outcome routes, but nothing measures an estimate against it. Budget in any form (budget, budgets, budgeted,
+ * unbudgeted), a spending limit, `None set`, `⚠ … over`, and the old Budgets tile's setup note. (`spent` is
+ * `misnamed`'s.)
+ * The per-workflow TOKEN budget is a different figure and keeps its words: lint only the cost surfaces with this.
+ */
+export const OutcomeBudgetWords =
+  /\b(budget|budgets|budgeted|unbudgeted)\b|\bspending limit\b|\bnone set\b|⚠[^⚠]*\bover\b|give an outcome a value/i;
+
+/** Every text that shows an outcome budget. */
+export function budgetWordsOn(texts: readonly (string | null | undefined)[]): string[] {
+  return texts.map((t) => (t ?? '').replace(/\s+/g, ' ').trim()).filter((t) => OutcomeBudgetWords.test(t));
 }

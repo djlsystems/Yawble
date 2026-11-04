@@ -1,4 +1,4 @@
-import type { TeamCost, TeamCostMoney, TeamCostOutcome, TeamCostTotals, TeamCostWeek } from '../api/outcomes'
+import type { TeamCostMoney, TeamCostOutcome, TeamCostTotals, TeamCostWeek } from '../api/outcomes'
 import { outcomeColour } from './outcomeColours'
 import { moneyText } from './outcomes'
 
@@ -6,10 +6,9 @@ import { moneyText } from './outcomes'
  * A TEAM'S ESTIMATED EXECUTION COST, BY OUTCOME, WORDED AND STACKED: what the team page's tile, its
  * dialog and the teams list's column read. Pure functions of the cost route's answer (`api/outcomes.ts`).
  *
- * EVERY FIGURE IS THE ROUTE'S, and the only sums here are over what the route answered: the budgets
- * and their outcomes' all-team totals, and the team's estimated cost of unbudgeted work. Nothing here
- * multiplies hours by a rate: the route prices each run from the snapshot taken at its start, and the
- * "at R/h" line is the route's own weighted agent rate (`totals.agentRate`), never the tenant setting.
+ * EVERY FIGURE IS THE ROUTE'S, and nothing here adds figures up or measures them against an outcome's stored
+ * value (there are no outcome budgets on any screen). Nothing here multiplies hours by a rate: the route prices
+ * each run from the snapshot taken at its start, and the "at R/h" line is the route's own weighted agent rate (`totals.agentRate`), never the tenant setting.
  *
  * NO PRICE IS NO DOLLARS, NEVER $0. The route's `cost` is null when no run in the figure was priced;
  * every figure then falls back to agent hours, and nothing here prints a money amount for it.
@@ -20,9 +19,6 @@ import { moneyText } from './outcomes'
  * what the execution cost, never money paid or owed. No cost surface titles it Spend, Spent or Cost alone.
  */
 export const EstimateTitle = 'Estimated Execution Cost'
-
-/** The critical colour: an outcome over its budget. */
-export const CriticalColour = 'var(--os-error)'
 
 /** One stacked series: an outcome (or Unattributed), its colour and its eight weeks. */
 export interface CostSeries {
@@ -131,110 +127,6 @@ export function valueText(value: number, money: boolean, currency: string): stri
  * footnote marker when a reconstructed or fallback rate priced part of it. */
 export function spendText(totals: Pick<TeamCostTotals, 'cost' | 'agentSeconds' | 'legacyRates'>, currency: string): string {
   return totals.cost === null ? agentHours(totals.agentSeconds) : markedMoney(moneyText(totals.cost, currency), totals.legacyRates)
-}
-
-/** Whether one outcome's spend across every team has passed its budget. */
-export function overBudget(outcome: Pick<TeamCostOutcome, 'id' | 'value' | 'outcomeTotalCost'>): boolean {
-  return outcome.id !== null && outcome.value !== null && outcome.outcomeTotalCost !== null && outcome.outcomeTotalCost > outcome.value
-}
-
-/** The outcomes this team serves that carry a budget. Unattributed never does. */
-export function budgeted(outcomes: readonly TeamCostOutcome[]): TeamCostOutcome[] {
-  return outcomes.filter((o) => o.id !== null && o.value !== null)
-}
-
-/** How many of the team's outcomes are over budget. */
-export function overCount(outcomes: readonly TeamCostOutcome[]): number {
-  return outcomes.filter(overBudget).length
-}
-
-/**
- * SPENT AGAINST BUDGET, over the budgeted outcomes only, each outcome's spent its TOTAL ACROSS ALL
- * TEAMS: a budget is shared by every team serving the outcome. Null without a budget or a rate.
- */
-export function budgetUse(cost: TeamCost): { spent: number; budget: number; share: number; over: number } | null {
-  if (!priced(cost)) return null
-  const withBudget = budgeted(cost.outcomes)
-  if (withBudget.length === 0) return null
-
-  const spent = withBudget.reduce((sum, o) => sum + (o.outcomeTotalCost ?? 0), 0)
-  const budget = withBudget.reduce((sum, o) => sum + o.value!, 0)
-
-  return { spent, budget, share: budget > 0 ? spent / budget : spent > 0 ? Infinity : 0, over: overCount(cost.outcomes) }
-}
-
-/** What this team spent on work with no budget: unbudgeted outcomes and Unattributed. Null unpriced. */
-export function unbudgetedSpend(cost: TeamCost): number | null {
-  if (!priced(cost)) return null
-  return cost.outcomes
-    .filter((o) => o.id === null || o.value === null)
-    .reduce((sum, o) => sum + (o.totals.cost ?? 0), 0)
-}
-
-/** A share as a whole percent: `42%`, `<1%`. */
-export function percentText(share: number): string {
-  if (!Number.isFinite(share)) return '—'
-  const percent = share * 100
-  return percent > 0 && percent < 1 ? '<1%' : `${Math.round(percent)}%`
-}
-
-/** The tile's words, in one of its four states: budgets, over budget, no budgets, no rate. */
-export interface CostTile {
-  state: 'budgets' | 'over' | 'no-budgets' | 'no-rate'
-  value: string
-  detail: string
-  /** The budget bar's fill, 0..1, or null without one. */
-  bar: number | null
-  budgetLine: string | null
-  unbudgetedLine: string | null
-  overLine: string | null
-  note: string | null
-  /** The footnote when a reconstructed or fallback rate priced part of the figure; null otherwise. */
-  footnote: string | null
-}
-
-export const NoRateNote = 'Set an agent hourly rate in Outcomes to see dollars'
-export const NoBudgetNote = 'No outcome budget set'
-
-export function costTile(cost: TeamCost): CostTile {
-  const currency = cost.money.currency
-
-  if (cost.totals.cost === null) {
-    return {
-      state: 'no-rate',
-      value: agentHours(cost.totals.agentSeconds),
-      detail: '',
-      bar: null,
-      budgetLine: null,
-      unbudgetedLine: null,
-      overLine: null,
-      note: NoRateNote,
-      footnote: null,
-    }
-  }
-
-  const footnote = legacyRateNote(cost.totals.legacyRates)
-  const value = markedMoney(moneyText(cost.totals.cost, currency), cost.totals.legacyRates)
-  const detail = agentRateLine(cost.totals, currency)
-  const use = budgetUse(cost)
-
-  if (!use) {
-    return { state: 'no-budgets', value, detail, bar: null, budgetLine: null, unbudgetedLine: null, overLine: null, note: NoBudgetNote, footnote }
-  }
-
-  const unbudgeted = unbudgetedSpend(cost) ?? 0
-
-  return {
-    state: use.over > 0 ? 'over' : 'budgets',
-    value,
-    detail,
-    bar: Math.min(1, Number.isFinite(use.share) ? use.share : 1),
-    budgetLine: `${moneyText(use.spent, currency)} of ${moneyText(use.budget, currency)} budget (${percentText(use.share)})`,
-    unbudgetedLine: unbudgeted > 0 ? `+ ${moneyText(unbudgeted, currency)} on work with no budget` : null,
-    overLine: use.over > 0 ? `⚠ ${use.over} over` : null,
-    note: null,
-    footnote,
-  }
 }
 
 /** Cost per million billable tokens, or null when unpriced or no tokens were measured. */

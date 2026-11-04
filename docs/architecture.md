@@ -159,8 +159,10 @@ The product name, Yawble, lives in the web app's presentation layer
   computed, never an outcome row), keyed by the run, never the team. A person reads an outcome as
   a **Project** (cumulative figures, backlog progress) or as **Operational** (week by week:
   cost, throughput, cost per completed workflow); that choice is `outcomes.presentation`
-  (`outcome-011`), and only a person sets it. A team's cost by outcome, against the outcomes'
-  budgets, is its page's Cost tile and the Teams list's Cost column ([cost.md](cost.md)). The Teams
+  (`outcome-011`), and only a person sets it. A team's Estimated Execution Cost by outcome is its
+  page's tile and the Teams list's column ([cost.md](cost.md)); an outcome's stored `value` is kept
+  and readable on the outcome routes but shown and measured nowhere, so no screen has an outcome
+  budget. The Teams
   list reads its columns and its first and third summary tiles over a period a person picks (Daily or
   Monthly, the last two months or a custom range) from `GET /api/teams/cost/period`, a read over the
   same `ExecutionCost` pricing as every other cost figure; the eight-week reads are unchanged. A team

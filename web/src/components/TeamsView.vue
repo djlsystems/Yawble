@@ -46,7 +46,7 @@ import {
   getCostSummary, getTeamsCost, getTeamsCostPeriod,
   type CostSummary as CostSummaryAnswer, type TeamCost, type TeamsCost, type TeamsCostPeriod,
 } from '../api/outcomes';
-import { EstimateTitle, overCount } from '../lib/teamCost';
+import { EstimateTitle } from '../lib/teamCost';
 import {
   bucketLabel, estimateFootnote, estimateText, hoursText, periodHeading, periodPriced,
   periodSeries, periodTop, rangeOfChoice,
@@ -79,7 +79,7 @@ const sort = ref<TeamSort>(storedSort());
 
 /**
  * EVERY TEAM'S EIGHT WEEKS BY OUTCOME, from ONE call for the whole list - never one per row: what a row's Cost
- * dialog opens on and what its over-budget mark reads. The column itself follows the period below.
+ * dialog opens on (its rate line). The column itself follows the period below.
  */
 const teamsCost = ref<TeamsCost | null>(null);
 
@@ -92,7 +92,7 @@ async function readTeamsCost() {
 }
 
 /**
- * THE SUMMARY ABOVE THE LIST: budgets and what is going on now, from one call. Not read, the tiles are not shown.
+ * THE SUMMARY ABOVE THE LIST: what is going on now, from one call. Not read, the tiles are not shown.
  * The first tile and Where it goes follow the period instead.
  */
 const summary = ref<CostSummaryAnswer | null>(null);
@@ -159,11 +159,10 @@ function costFor(team: string): TeamCost | null {
   return { team, money: answer.money, weeks: answer.weeks, outcomes: entry.outcomes, totals: entry.totals };
 }
 
-/** The row's chart and total over the period, its over-budget marker from the eight weeks, or null without figures. */
+/** The row's chart and total over the period, or null without figures. */
 function costCell(team: string) {
   const entry = periodFor(team);
   if (!entry || !period.value) return null;
-  const weeks = costFor(team);
   return {
     buckets: period.value.buckets,
     series: periodSeries(entry),
@@ -172,7 +171,6 @@ function costCell(team: string) {
     // The total's footnote, as its title: a reconstructed or fallback rate priced part of it.
     footnote: estimateFootnote(entry),
     hours: hoursText(entry),
-    over: weeks ? overCount(weeks.outcomes) : 0,
   };
 }
 
@@ -883,7 +881,7 @@ async function setPaused(team: Team | null, paused: boolean) {
           </td>
 
           <!-- ESTIMATED EXECUTION COST over the period: the team's stacked chart by outcome at row height, every row on
-               ONE relative scale, the period's total beside it and ⚠ when one of its outcomes is over budget. A click
+               ONE relative scale, the period's total beside it. A click
                on it opens that team's Cost dialog, not the team; the status icon and the room around it open the team
                as the rest of the row does. -->
           <td class="teams-cost">
@@ -910,12 +908,6 @@ async function setPaused(team: Team | null, paused: boolean) {
                   data-teams-cost-total
                   :title="costCell(row.id)!.footnote ?? undefined"
                 >{{ costCell(row.id)!.total }}</span>
-                <span
-                  v-if="costCell(row.id)!.over > 0"
-                  class="teams-cost-over"
-                  data-teams-cost-over
-                  :title="`${costCell(row.id)!.over} outcome${costCell(row.id)!.over === 1 ? '' : 's'} over budget`"
-                >⚠</span>
               </button>
               <span v-else class="os-text-muted" data-teams-cost-none>—</span>
               <TeamStatusIcon :status="row.status" :held="row.held" :workflows="board.workflowsFor(row.id)" />
@@ -1337,11 +1329,6 @@ async function setPaused(team: Team | null, paused: boolean) {
 
 .teams-cost-total {
   white-space: nowrap;
-}
-
-.teams-cost-over {
-  color: var(--os-error);
-  font-weight: 600;
 }
 
 .teams-table [data-col-actions] {
