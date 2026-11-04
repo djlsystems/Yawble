@@ -105,6 +105,9 @@ public sealed class MemberReports : IMemberReports, IRunWorkerClient
 
         reason = Redacted(member, reason.Trim());
 
+        // A MEMBER'S OWN BLOCKED CALL IS `failure`, the documented default: nothing the platform knows
+        // classifies a member giving up more precisely, and its free-text reason is never read for one.
+
         // ONE ITEM OF A BATCH: that delivery is closed by this row instead of by the run's terminal
         // row, and the member is not marked - the rest of its batch may still complete.
         if (item is { } index)
@@ -117,7 +120,7 @@ public sealed class MemberReports : IMemberReports, IRunWorkerClient
             await log.AppendAsync(
                 new NewMessage(
                     MessageTypes.Blocked,
-                    JsonSerializer.Serialize(new { reason, item = index }),
+                    JsonSerializer.Serialize(new { reason, reasonCode = InterruptionReasons.Failure, item = index }),
                     container.Id.ToString(),
                     cause),
                 ct);
@@ -127,7 +130,7 @@ public sealed class MemberReports : IMemberReports, IRunWorkerClient
             var row = await log.AppendAsync(
                 new NewMessage(
                     MessageTypes.Blocked,
-                    JsonSerializer.Serialize(new { reason }),
+                    JsonSerializer.Serialize(new { reason, reasonCode = InterruptionReasons.Failure }),
                     container.Id.ToString(),
                     container.CurrentCausation),
                 ct);
@@ -157,6 +160,7 @@ public sealed class MemberReports : IMemberReports, IRunWorkerClient
                 JsonSerializer.Serialize(new Dictionary<string, string>
                 {
                     [PayloadFields.Reason] = reason,
+                    [PayloadFields.ReasonCode] = InterruptionReasons.ForFailureClass(FailureClasses.NeedsPerson),
                     [PayloadFields.FailureClass] = FailureClasses.NeedsPerson,
                 }),
                 container.Id.ToString(),
@@ -215,7 +219,7 @@ public sealed class MemberReports : IMemberReports, IRunWorkerClient
         var row = await log.AppendAsync(
             new NewMessage(
                 MessageTypes.NeedsDecision,
-                JsonSerializer.Serialize(new { question }),
+                JsonSerializer.Serialize(new { question, reasonCode = InterruptionReasons.DecisionRequired }),
                 container.Id.ToString(),
                 container.CurrentCausation),
             ct);

@@ -7,7 +7,7 @@ namespace Harness.Tests.Host;
 
 /// <summary>
 /// AGENTS.md, Authorization and <see cref="PermitMarkers"/>: every endpoint says exactly one of
-/// RequirePermit, NoPermitRequired, HumansOnly or HumansOrConcierge. A route with none is ungated for machine
+/// RequirePermit, NoPermitRequired, HumansOnly, HumansOrConcierge or HumansOrApiKey. A route with none is ungated for machine
 /// principals and nothing complains; a route with two says contradictory things. This walk of the
 /// real host's <see cref="EndpointDataSource"/> is the only thing that closes that silence.
 /// </summary>
@@ -25,7 +25,8 @@ public sealed class RouteMarkerTests(HostFixture host) : IClassFixture<HostFixtu
                 e.Metadata.GetOrderedMetadata<PermitRequirement>().Count
                 + e.Metadata.GetOrderedMetadata<PermitExemption>().Count
                 + e.Metadata.GetOrderedMetadata<HumansOnlyMarker>().Count
-                + e.Metadata.GetOrderedMetadata<HumansOrConciergeMarker>().Count))
+                + e.Metadata.GetOrderedMetadata<HumansOrConciergeMarker>().Count
+                + e.Metadata.GetOrderedMetadata<HumansOrApiKeyMarker>().Count))
             .Where(e => e.Count != 1)
             .Select(e => $"{e.Name}: {e.Count} markers")
             .ToList();
@@ -50,6 +51,60 @@ public sealed class RouteMarkerTests(HostFixture host) : IClassFixture<HostFixtu
                 ["POST /api/teams/{team}/unarchive"] = Harness.Contracts.Permits.Archive,
             },
             doors);
+    }
+
+    [Fact]
+    public void Only_a_plugin_members_settings_read_opens_a_door_to_an_api_key_for_read()
+    {
+        var doors = host.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .Where(e => e.Metadata.GetMetadata<HumansOrApiKeyMarker>() is not null)
+            .ToDictionary(Describe, e => e.Metadata.GetMetadata<HumansOrApiKeyMarker>()!.Permit);
+
+        Assert.Equal(
+            new Dictionary<string, string>
+            {
+                ["GET /api/teams/{team}/members/{member}/plugin-settings"] = Harness.Contracts.Permits.Read,
+            },
+            doors);
+    }
+
+    /// <summary>
+    /// THE SPEND PERMIT OPENS READS ONLY: exactly the Spend page's reads require it - a person passes as
+    /// before - and every billing account and expense write stays HumansOnly.
+    /// </summary>
+    [Fact]
+    public void Exactly_the_Actual_Spend_reads_require_the_Spend_permit_and_every_spend_write_stays_humans_only()
+    {
+        var endpoints = host.Services.GetRequiredService<EndpointDataSource>().Endpoints;
+
+        var spend = endpoints
+            .Where(e => e.Metadata.GetMetadata<PermitRequirement>()?.Permit == Harness.Contracts.Permits.Spend)
+            .Select(Describe)
+            .Order(StringComparer.Ordinal);
+
+        Assert.Equal(
+            [
+                "GET /api/billing-accounts",
+                "GET /api/billing-accounts/{id}",
+                "GET /api/expenses",
+                "GET /api/expenses/{id}",
+                "GET /api/spend/export/billing-accounts",
+                "GET /api/spend/export/estimated-execution-cost",
+                "GET /api/spend/export/expenses",
+                "GET /api/spend/export/period-summary",
+                "GET /api/spend/linked-members",
+                "GET /api/spend/overview",
+            ],
+            spend);
+
+        var writes = endpoints
+            .Where(e => Describe(e) is var name && !name.StartsWith("GET ", StringComparison.Ordinal)
+                && (name.Contains(" /api/billing-accounts", StringComparison.Ordinal) || name.Contains(" /api/expenses", StringComparison.Ordinal)
+                    || name.Contains(" /api/spend", StringComparison.Ordinal) || name == "PUT /api/tenant/settings"))
+            .ToList();
+
+        Assert.Equal(8, writes.Count);
+        Assert.All(writes, e => Assert.NotNull(e.Metadata.GetMetadata<HumansOnlyMarker>()));
     }
 
     private static string Describe(Endpoint endpoint)

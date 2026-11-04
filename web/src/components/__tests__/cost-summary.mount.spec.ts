@@ -1,13 +1,14 @@
 // @vitest-environment happy-dom
 //
-// THE FOUR TILES ABOVE THE TEAMS LIST: Spend, Budgets, Where it goes and Right now, in every state
-// the summary can be in - budgets inside, over budget, no budgets, no rate - each opening what it
-// says, and every outcome in its one instance-wide colour.
+// THE THREE TILES ABOVE THE TEAMS LIST: Estimated Execution Cost, Where it goes and Right now, in every state the
+// summary can be in - priced, an outcome past its stored value, no stored values, no rate - each opening what it says,
+// and every outcome in its one instance-wide colour. No tile shows an outcome budget.
 import { afterEach, describe, expect, it } from 'vitest';
 import { mount, type VueWrapper } from '@vue/test-utils';
 import CostSummary from '../CostSummary.vue';
 import { costSummary, type SummaryOptions } from '../../test/costSummaryFixtures';
 import { NoOutcomeColour, colourForRank } from '../../lib/outcomeColours';
+import { budgetWordsOn, misnamed, readOff, readWords } from '../../test/estimateLabels';
 
 let wrapper: VueWrapper | undefined;
 
@@ -23,21 +24,97 @@ function mountTiles(options: SummaryOptions = {}) {
 
 const tile = (view: VueWrapper, which: string) => view.get(`[data-summary-tile="${which}"]`);
 
-describe('the Spend tile', () => {
+describe('what the estimate is called', () => {
+  // AGENT HOURS TIMES THE CURRENT RATE IS AN ESTIMATE, never money paid: no tile titles it Spend,
+  // Spent or Cost alone, or says `agent h`, priced or not, inside budget or over it.
+  it.each([
+    ['priced', {}],
+    ['over budget', { over: true }],
+    ['no budgets', { budgets: false }],
+    ['no rate', { rate: null }],
+  ] as [string, SummaryOptions][])('never names it spend, %s', (_, options) => {
+    const view = mountTiles(options);
+
+    expect(tile(view, 'spend').get('.cost-summary-title').text()).toBe('Estimated Execution Cost');
+    expect(misnamed(view.findAll('.cost-summary-title').map((t) => t.text()), { titles: true })).toEqual([]);
+    expect(misnamed(readOff(view.element))).toEqual([]);
+  });
+});
+
+describe('no outcome budget on the tiles', () => {
+  // AN OUTCOME'S STORED VALUE IS NO BUDGET ON THIS SCREEN, whatever the summary carries: no Budgets tile, no budget
+  // tick or ⚠ over in Where it goes, no budget word, priced or not - even when an outcome is past its stored value.
+  it.each([
+    ['priced', {}],
+    ['an outcome past its stored value', { over: true }],
+    ['no stored values', { budgets: false }],
+    ['no rate', { rate: null }],
+  ] as [string, SummaryOptions][])('three tiles and no budget word, %s', (_, options) => {
+    const view = mountTiles(options);
+
+    expect(view.findAll('[data-summary-tile]').map((t) => t.attributes('data-summary-tile'))).toEqual(['spend', 'where', 'now']);
+    expect(view.find('[data-summary-tile="budgets"]').exists()).toBe(false);
+    expect(view.find('[data-summary-where-tick]').exists()).toBe(false);
+    expect(view.find('[data-summary-where-over]').exists()).toBe(false);
+    expect(budgetWordsOn(readWords(view.element))).toEqual([]);
+    expect(view.text()).not.toContain('Give an outcome a value to track it here.');
+    expect(view.text()).not.toContain('Set an agent hourly rate');
+  });
+});
+
+describe('the Estimated Execution Cost tile', () => {
   it('shows the total, its change on the prior eight weeks, the hours at the rate and a weekly column chart', () => {
     const spend = tile(mountTiles(), 'spend');
 
-    expect(spend.text()).toContain('Spend');
+    expect(spend.text()).toContain('Estimated Execution Cost');
     expect(spend.text()).toContain('8 wk');
     expect(spend.get('[data-summary-value]').text()).toBe('$2,200');
     expect(spend.get('[data-summary-change]').text()).toBe('▲ 22% vs prior 8 wk');
     expect(spend.get('[data-summary-change]').attributes('data-direction')).toBe('up');
-    expect(spend.get('[data-summary-detail]').text()).toBe('36.7 agent h at $60/h');
+    expect(spend.get('[data-summary-detail]').text()).toBe('36.7 Agent Hours at $60/h');
 
     // One series, no legend, and a per-week hover text.
     expect(spend.findAll('[data-cost-segment]')).toHaveLength(8);
     expect(spend.find('[data-cost-legend]').exists()).toBe(false);
     expect(spend.get('[data-cost-week="0"] title').text()).toBe('Week of Sep 7: $275');
+  });
+
+  it('reads "at R/h" from the route\'s weighted agent rate, never the tenant setting', () => {
+    const changed = tile(mountTiles({ rate: 60, tenantRate: 90 }), 'spend');
+    expect(changed.get('[data-summary-value]').text()).toBe('$2,200');
+    expect(changed.get('[data-summary-detail]').text()).toBe('36.7 Agent Hours at $60/h');
+
+    // A member rate priced the runs while no tenant rate is set: dollars, not the no-rate state.
+    const unset = tile(mountTiles({ rate: 60, tenantRate: null }), 'spend');
+    expect(unset.get('[data-summary-value]').text()).toBe('$2,200');
+    expect(unset.get('[data-summary-detail]').text()).toBe('36.7 Agent Hours at $60/h');
+    expect(wrapper!.text()).not.toContain('Set an agent hourly rate');
+  });
+
+  it('footnotes a total priced in part at a reconstructed or fallback rate, and never an unpriced one', () => {
+    const summary = costSummary();
+    summary.total = { ...summary.total, legacyRates: ['reconstructed', 'fallback-at-upgrade'] };
+    wrapper = mount(CostSummary, { props: { summary, currency: 'USD' } });
+
+    const spend = tile(wrapper, 'spend');
+    expect(spend.get('[data-summary-value]').text()).toBe('$2,200*');
+    expect(spend.get('[data-summary-footnote]').text()).toBe('* Includes reconstructed and fallback rates');
+    expect(spend.get('.cost-summary-title').text()).toBe('Estimated Execution Cost');
+    wrapper.unmount();
+
+    // Priced from snapshots alone: no marker and no footnote.
+    const plain = tile(mountTiles(), 'spend');
+    expect(plain.get('[data-summary-value]').text()).toBe('$2,200');
+    expect(plain.find('[data-summary-footnote]').exists()).toBe(false);
+  });
+
+  it('with priced plugin time and no priced agent time, gives the hours without inventing a rate', () => {
+    const summary = costSummary();
+    summary.total = { ...summary.total, agentRate: null };
+    wrapper = mount(CostSummary, { props: { summary, currency: 'USD' } });
+
+    expect(tile(wrapper, 'spend').get('[data-summary-value]').text()).toBe('$2,200');
+    expect(tile(wrapper, 'spend').get('[data-summary-detail]').text()).toBe('36.7 Agent Hours');
   });
 
   it('says a fall with ▼', () => {
@@ -51,7 +128,7 @@ describe('the Spend tile', () => {
   it('without a rate, reads agent hours and "no rate set", never $0', () => {
     const spend = tile(mountTiles({ rate: null }), 'spend');
 
-    expect(spend.get('[data-summary-value]').text()).toBe('36.7 agent h');
+    expect(spend.get('[data-summary-value]').text()).toBe('36.7 Agent Hours');
     expect(spend.get('[data-summary-detail]').text()).toBe('no rate set');
     expect(spend.get('[data-summary-change]').text()).toBe('▲ 22% vs prior 8 wk');
     expect(spend.text()).not.toContain('$');
@@ -65,74 +142,25 @@ describe('the Spend tile', () => {
   });
 });
 
-describe('the Budgets tile', () => {
-  it('inside budget: the share used, spent of budget, a bar, All inside budget and the unbudgeted spend', () => {
-    const budgets = tile(mountTiles(), 'budgets');
-
-    expect(budgets.attributes('data-state')).toBe('budgets');
-    expect(budgets.get('[data-summary-count]').text()).toBe('2 outcomes');
-    expect(budgets.get('[data-summary-value]').text()).toBe('64%');
-    expect(budgets.get('[data-summary-budget-line]').text()).toBe('$1,600 of $2,500');
-    expect(budgets.get('.cost-summary-bar-fill').attributes('style')).toContain('width: 64%');
-    expect(budgets.get('[data-summary-status]').text()).toBe('All inside budget');
-    expect(budgets.get('[data-summary-status]').attributes('data-over')).toBeUndefined();
-    expect(budgets.get('[data-summary-unbudgeted]').text()).toBe('· $600 unbudgeted');
-    expect(budgets.element.textContent).toContain('All inside budget · $600 unbudgeted');
-  });
-
-  it('over budget: names the outcomes over, with ⚠, in the critical colour', () => {
-    const budgets = tile(mountTiles({ over: true }), 'budgets');
-
-    expect(budgets.attributes('data-state')).toBe('over');
-    expect(budgets.get('[data-summary-value]').text()).toBe('72%');
-    expect(budgets.get('[data-summary-budget-line]').text()).toBe('$1,800 of $2,500');
-    expect(budgets.get('[data-summary-status]').text()).toBe('⚠ Docs refresh over');
-    expect(budgets.get('[data-summary-status]').attributes('data-over')).toBe('true');
-    expect(budgets.get('.cost-summary-bar-fill').attributes('data-over')).toBe('true');
-    expect(budgets.element.textContent).toContain('⚠ Docs refresh over · ');
-  });
-
-  it('no budgets: None set, and how to set one', () => {
-    const budgets = tile(mountTiles({ budgets: false }), 'budgets');
-
-    expect(budgets.attributes('data-state')).toBe('no-budgets');
-    expect(budgets.get('[data-summary-value]').text()).toBe('None set');
-    expect(budgets.get('[data-summary-note]').text()).toBe('Give an outcome a value to track it here.');
-    expect(budgets.find('.cost-summary-bar').exists()).toBe(false);
-  });
-
-  it('no rate: a dash and how to set a rate, never $0', () => {
-    const budgets = tile(mountTiles({ rate: null }), 'budgets');
-
-    expect(budgets.attributes('data-state')).toBe('no-rate');
-    expect(budgets.get('[data-summary-value]').text()).toBe('—');
-    expect(budgets.get('[data-summary-note]').text()).toBe('Set an agent hourly rate in Outcomes to measure spend against budgets.');
-    expect(budgets.text()).not.toContain('$');
-  });
-
-  it('opens Outcomes', async () => {
-    const view = mountTiles();
-    await tile(view, 'budgets').trigger('click');
-
-    expect(view.emitted('open-outcome')).toEqual([[null]]);
-  });
-});
-
 describe('the Where it goes tile', () => {
-  it('shows the top three outcomes, then Other / no outcome, on one scale with a budget tick', () => {
+  it('shows the top three outcomes, then Other outcomes, then Unattributed, on one scale of their own figures', () => {
     const where = tile(mountTiles(), 'where');
     const bars = where.findAll('[data-summary-where]');
 
-    expect(bars.map((b) => b.attributes('data-summary-where'))).toEqual(['o-billing', 'o-docs', 'o-research', 'other']);
-    expect(bars.map((b) => b.get('[data-summary-where-amount]').text())).toEqual(['$1,200', '$400', '$300', '$300']);
-    expect(bars[3]!.text()).toContain('Other / no outcome');
+    expect(bars.map((b) => b.attributes('data-summary-where'))).toEqual(['o-billing', 'o-docs', 'o-research', 'other', 'unattributed']);
+    expect(bars.map((b) => b.get('[data-summary-where-amount]').text())).toEqual(['$1,200', '$400', '$300', '$120', '$180']);
+    expect(bars[3]!.text()).toContain('Other outcomes');
+    expect(bars[4]!.text()).toContain('Unattributed');
+    expect(where.text()).not.toMatch(/no outcome/i);
 
-    // One scale: Ship billing's $2,000 budget is the top, so its $1,200 is 60% and its tick at 100%.
-    expect(bars[0]!.get('[data-summary-where-fill]').attributes('style')).toContain('width: 60%');
-    expect(bars[0]!.get('[data-summary-where-tick]').attributes('style')).toContain('left: 100%');
-    expect(bars[1]!.get('[data-summary-where-fill]').attributes('style')).toContain('width: 20%');
-    expect(bars[1]!.get('[data-summary-where-tick]').attributes('style')).toContain('left: 25%');
-    expect(bars[2]!.find('[data-summary-where-tick]').exists()).toBe(false);
+    // One scale, the largest bar's: Ship billing's $1,200 is the top (its stored $2,000 no longer stretches it).
+    const width = (index: number) => bars[index]!.get('[data-summary-where-fill]').attributes('style');
+    expect(width(0)).toContain('width: 100%');
+    expect(width(1)).toContain('width: 33.3');
+    expect(width(2)).toContain('width: 25%');
+    expect(width(3)).toContain('width: 10%');
+    expect(width(4)).toContain('width: 15%');
+    expect(where.find('[data-summary-where-tick]').exists()).toBe(false);
   });
 
   it("colours each outcome by its instance-wide rank, and Other in the neutral gray", () => {
@@ -145,28 +173,30 @@ describe('the Where it goes tile', () => {
     expect(background(3)).toContain(NoOutcomeColour);
   });
 
-  it('puts ⚠ after an outcome over its budget', () => {
+  it('marks no outcome past its stored value: no ⚠, and a bar reads only its name and amount', () => {
     const bars = tile(mountTiles({ over: true }), 'where').findAll('[data-summary-where]');
 
     expect(bars[1]!.attributes('data-summary-where')).toBe('o-docs');
-    expect(bars[1]!.find('[data-summary-where-over]').exists()).toBe(true);
-    expect(bars[0]!.find('[data-summary-where-over]').exists()).toBe(false);
+    expect(bars[1]!.text()).not.toContain('⚠');
+    expect(bars[1]!.attributes('aria-label')).toBe('Docs refresh: $600');
+    expect(bars.some((b) => b.find('[data-summary-where-over]').exists())).toBe(false);
   });
 
-  it('without a rate, reads hours and draws no budget ticks', () => {
+  it('without a rate, reads hours', () => {
     const where = tile(mountTiles({ rate: null }), 'where');
 
     expect(where.findAll('[data-summary-where-amount]').map((a) => a.text()))
-      .toEqual(['20.0 agent h', '6.7 agent h', '5.0 agent h', '5.0 agent h']);
+      .toEqual(['20.0 Agent Hours', '6.7 Agent Hours', '5.0 Agent Hours', '2.0 Agent Hours', '3.0 Agent Hours']);
     expect(where.find('[data-summary-where-tick]').exists()).toBe(false);
   });
 
-  it('opens the outcome a bar is, and the Outcomes list from Other', async () => {
+  it('opens the outcome a bar is, and the Outcomes list from Other and Unattributed', async () => {
     const view = mountTiles();
     await view.get('[data-summary-where="o-docs"]').trigger('click');
     await view.get('[data-summary-where="other"]').trigger('click');
+    await view.get('[data-summary-where="unattributed"]').trigger('click');
 
-    expect(view.emitted('open-outcome')).toEqual([['o-docs'], [null]]);
+    expect(view.emitted('open-outcome')).toEqual([['o-docs'], [null], [null]]);
   });
 });
 

@@ -164,6 +164,36 @@ public abstract class TeamStoreContract : IdentityContract
         Assert.Null(members["Nobody"].SystemPromptSetBy);
     }
 
+    /// <summary>A member's own rate, billing account, and who set them round-trip; none reads back as none.</summary>
+    [Fact]
+    public async Task A_members_rate_and_billing_account_round_trip_and_none_reads_back_as_none()
+    {
+        var store = await CreateAsync();
+        await store.SaveTeamAsync(new PersistedTeam("Alpha", null, "claude-headless", ["claude-headless"], null), Ct);
+
+        var at = new DateTimeOffset(2026, 11, 3, 10, 11, 12, TimeSpan.Zero);
+        await store.SaveMemberAsync(
+            new PersistedMember("Alpha", "Priced", null, "claude-headless", null, [], [], 0,
+                EstHourlyRate: "62.5", BillingAccountId: "3f2b8c1e-9a4d-4e2f-b6a1-0c5d7e8f9a10",
+                BillingSetBy: "person@example.test", BillingSetAt: at), Ct);
+        await store.SaveMemberAsync(
+            new PersistedMember("Alpha", "Unpriced", null, "claude-headless", null, [], [], 0), Ct);
+
+        var members = (await store.MembersAsync(Ct)).ToDictionary(m => m.Name);
+
+        Assert.Equal(
+            ("62.5", "3f2b8c1e-9a4d-4e2f-b6a1-0c5d7e8f9a10", "person@example.test", (DateTimeOffset?)at),
+            (members["Priced"].EstHourlyRate, members["Priced"].BillingAccountId, members["Priced"].BillingSetBy, members["Priced"].BillingSetAt));
+        Assert.Equal(
+            ((string?)null, (string?)null, (string?)null, (DateTimeOffset?)null),
+            (members["Unpriced"].EstHourlyRate, members["Unpriced"].BillingAccountId, members["Unpriced"].BillingSetBy, members["Unpriced"].BillingSetAt));
+
+        // Cleared, who set it stays.
+        await store.SaveMemberAsync(members["Priced"] with { EstHourlyRate = null, BillingAccountId = null }, Ct);
+        var cleared = await store.MemberAsync("Alpha", "Priced", Ct);
+        Assert.Equal(((string?)null, (string?)null, "person@example.test"), (cleared!.EstHourlyRate, cleared.BillingAccountId, cleared.BillingSetBy));
+    }
+
     /// <summary>A member saved again under any case is the same member: the stored spelling stays, the rest is replaced.</summary>
     [Fact]
     public async Task A_member_re_saved_in_another_case_is_one_member_and_its_floor_moves_alone()

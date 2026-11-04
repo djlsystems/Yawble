@@ -3,34 +3,38 @@ import { computed, ref, watch } from 'vue';
 import type { ContainerSnapshot, TeamTokenTotals } from '../api/types';
 import { asTeamId } from '../api/types';
 import { getTeamTokens } from '../api/client';
-import type { TeamCost, TeamCostOutcome } from '../api/outcomes';
-import { moneyText, rateText } from '../lib/outcomes';
+import { getTeamCostPeriod, type TeamCost, type TeamCostPeriod } from '../api/outcomes';
+import { moneyText } from '../lib/outcomes';
 import {
-  CriticalColour,
+  EstimateTitle,
   agentHours,
-  budgetUse,
-  costSeries,
+  defaultRateText,
   hoursFigure,
-  overBudget,
-  percentText,
   perMillionText,
-  priced,
 } from '../lib/teamCost';
+import { useCostPeriodChoice } from '../lib/costPeriodChoice';
+import { bucketLabel, rangeOfChoice } from '../lib/teamsPeriod';
+import {
+  memberRows, outcomeRows, periodName, teamPeriodPriced, teamPeriodSeries, teamPeriodTile, workflowRows,
+} from '../lib/teamPeriod';
+import CostPeriodControl from './CostPeriodControl.vue';
 import { useWorkflowNavStore } from '../stores/workflowNav';
 import CostWeeksChart from './CostWeeksChart.vue';
 import DialogTabs from './DialogTabs.vue';
 import TeamTokensPanel from './TeamTokensPanel.vue';
 
 /**
- * THE COST DIALOG: what a team cost over the last eight weeks, in money by outcome against
- * the budgets set for them, and - on its second tab - the tokens behind it. Opened from the team
- * page's Cost tile and from the teams list's Cost column.
+ * THE ESTIMATED EXECUTION COST DIALOG: a team's Estimated Execution Cost over the period the Teams list and the team
+ * page share, with Agent Hours and the per-1M billable tokens figure, its trend on the team's own scale, and breakdowns
+ * by outcome, by member (agent and plugin members apart) and by workflow - and, on its second tab, the tokens behind
+ * it. Opened from the team page's Cost tile and from the teams list's column.
+ *
+ * EVERY FIGURE IS `GET /api/teams/{team}/cost/period`'s (`lib/teamPeriod.ts` words them). Each run's part inside the
+ * period is priced once there, so each breakdown's rows add up to the headline exactly. Nothing here is an outcome
+ * budget: an outcome's stored value is kept and readable on the outcome routes, and no figure is measured against it.
  *
  * It replaces the Tokens dialog: the Tokens tab is that dialog's content, unchanged
  * (`TeamTokensPanel.vue`).
- *
- * A BUDGET IS SHARED: an outcome's budget is measured against its total across EVERY team serving
- * it (`outcomeTotalCost`), so the Budget column reads that total, not this team's part of it.
  */
 const open = defineModel<boolean>({ required: true });
 
@@ -38,10 +42,17 @@ const props = defineProps<{
   teamId: string;
   teamName: string;
   containers: ContainerSnapshot[];
-  /** The cost route's answer, or null while it is read (or when it could not be). */
+  /** The eight-week cost route's answer - read here only for its default-rate line - or null while it is read. */
   cost: TeamCost | null;
   /** True when the cost route could not be read. */
   costFailed?: boolean;
+  /**
+   * The period read's answer, as the team page holds it; `undefined` when the opener has none (the teams list), and
+   * the dialog then reads it itself while it is open.
+   */
+  period?: TeamCostPeriod | null;
+  /** True when the opener's period read failed. */
+  periodFailed?: boolean;
   /**
    * The team's token totals from the log, as the board holds them; `undefined` when the opener has
    * none (the teams list), and the dialog then reads them itself when the Tokens tab opens.
@@ -77,31 +88,59 @@ const usage = computed(() => (props.usage !== undefined ? props.usage : readUsag
 
 // --- The Cost tab ---------------------------------------------------------------------------------
 
-const isPriced = computed(() => (props.cost ? priced(props.cost) : false));
-const currency = computed(() => props.cost?.money.currency ?? 'USD');
-const series = computed(() => costSeries(props.cost?.outcomes ?? []));
-const colourOf = computed(() => new Map(series.value.map((s) => [s.key, s.colour])));
-const use = computed(() => (props.cost ? budgetUse(props.cost) : null));
+// --- The period, read here only when the opener has none ------------------------------------------
 
-/** The table's rows: each outcome in the chart's order, then No outcome. The Team total follows. */
-const rows = computed(() => {
-  const outcomes = props.cost?.outcomes ?? [];
-  return [...outcomes.filter((o) => o.id !== null), ...outcomes.filter((o) => o.id === null)];
+const { choice } = useCostPeriodChoice();
+const readPeriod = ref<TeamCostPeriod | null>(null);
+const readFailed = ref(false);
+let periodSeq = 0;
+
+watch([open, () => props.teamId, choice], async ([showing, team]) => {
+  if (!showing || props.period !== undefined) return;
+  const seq = ++periodSeq;
+  const asked = choice.value;
+  readFailed.value = false;
+  try {
+    const answer = await getTeamCostPeriod(team, rangeOfChoice(asked), asked.bucket);
+    if (seq === periodSeq) readPeriod.value = answer;
+  } catch {
+    if (seq === periodSeq) {
+      readPeriod.value = null;
+      readFailed.value = true;
+    }
+  }
+}, { immediate: true });
+
+const period = computed(() => (props.period !== undefined ? props.period : readPeriod.value));
+const periodFailed = computed(() => (props.period !== undefined ? props.periodFailed ?? false : readFailed.value));
+
+// --- The Estimated Execution Cost tab ---------------------------------------------------------------
+
+const isPriced = computed(() => (period.value ? teamPeriodPriced(period.value) : false));
+const currency = computed(() => period.value?.money.currency ?? props.cost?.money.currency ?? 'USD');
+const headline = computed(() => (period.value ? teamPeriodTile(period.value) : null));
+const series = computed(() => (period.value ? teamPeriodSeries(period.value) : []));
+const colourOf = computed(() => new Map(series.value.map((s) => [s.key, s.colour])));
+const columnTitle = computed(() => {
+  const bucket = period.value?.period.bucket ?? choice.value.bucket;
+  return (start: string) => bucketLabel(start, bucket);
+});
+const periodWords = computed(() => periodName(choice.value));
+
+/** Which breakdown shows under the chart. */
+type Breakdown = 'outcome' | 'member' | 'workflow';
+const breakdown = ref<Breakdown>('outcome');
+watch(open, (showing) => {
+  if (showing) breakdown.value = 'outcome';
 });
 
-const rowKey = (o: TeamCostOutcome) => o.id ?? 'none';
-
-function budgetCell(o: TeamCostOutcome): { text: string; fill: number | null; over: boolean } | null {
-  if (o.id === null) return null;
-  if (o.value === null) return { text: 'None set', fill: null, over: false };
-  const total = o.outcomeTotalCost;
-  const over = overBudget(o);
-  return {
-    text: `${total === null ? '—' : moneyText(total, currency.value)} / ${moneyText(o.value, currency.value)}`,
-    fill: total === null ? null : o.value > 0 ? Math.min(1, total / o.value) : 1,
-    over,
-  };
-}
+/** By outcome: each outcome in the chart's order, then Unattributed. The Team total follows. */
+const byOutcome = computed(() => {
+  const rows = period.value ? outcomeRows(period.value) : [];
+  return [...rows.filter((r) => r.outcome.id !== null), ...rows.filter((r) => r.outcome.id === null)];
+});
+const byMember = computed(() => (period.value ? memberRows(period.value) : { agents: [], plugins: [] }));
+const byWorkflow = computed(() => (period.value ? workflowRows(period.value) : []));
 
 const costCell = (cost: number | null) => (cost === null ? '—' : moneyText(cost, currency.value));
 
@@ -116,110 +155,179 @@ function changeRate() {
 
 <template>
   <q-dialog v-model="open">
-    <q-card class="token-dialog-card cost-dialog-card os-dialog-lg" data-cost-dialog>
+    <q-card class="token-dialog-card cost-dialog-card os-dialog-xl" data-cost-dialog>
       <q-card-section class="q-pb-none cost-dialog-head">
-        <div class="os-dialog-title" data-cost-title>Cost · {{ teamName }}</div>
+        <div class="os-dialog-title" data-cost-title>{{ EstimateTitle }} · {{ teamName }}</div>
         <div v-if="cost" class="text-caption os-text-muted cost-rate" data-cost-rate>
-          {{ rateText(cost.money) }} ·
+          {{ defaultRateText(cost.money) }} ·
           <a href="#" class="os-name-link" data-cost-rate-change @click.prevent="changeRate">Change in Outcomes</a>
         </div>
       </q-card-section>
 
       <q-card-section class="q-py-none">
         <DialogTabs v-model="tab" data-cost-tabs>
-          <q-tab name="cost" label="Cost" data-cost-tab="cost" />
+          <q-tab name="cost" :label="EstimateTitle" data-cost-tab="cost" />
           <q-tab name="tokens" label="Tokens" data-cost-tab="tokens" />
         </DialogTabs>
       </q-card-section>
 
       <template v-if="tab === 'cost'">
-        <q-card-section v-if="!cost" class="os-text-muted">
-          {{ costFailed ? 'The cost could not be read.' : 'Reading…' }}
+        <q-card-section class="q-pb-none" data-cost-period-row>
+          <CostPeriodControl />
+        </q-card-section>
+
+        <q-card-section v-if="!period || !headline" class="os-text-muted">
+          {{ periodFailed ? 'The Estimated Execution Cost could not be read.' : 'Reading…' }}
         </q-card-section>
 
         <template v-else>
-          <!-- THE HEADLINE FIGURES. Spent is money only when there is a rate: never $0 for unpriced time. -->
+          <!-- THE HEADLINE FIGURES over the period. Money only when a run was priced: never $0 for unpriced time. -->
           <q-card-section class="cost-figures" data-cost-figures>
-            <div class="cost-figure" data-cost-figure="spent">
-              <div class="cost-figure-value mono">{{ isPriced ? costCell(cost.totals.cost) : '—' }}</div>
-              <div class="text-caption os-text-muted">Spent{{ isPriced ? '' : ' · no rate set' }}</div>
+            <div class="cost-figure" data-cost-figure="estimate">
+              <div class="cost-figure-value mono" data-cost-headline>{{ headline.value }}</div>
+              <div class="text-caption os-text-muted">{{ EstimateTitle }} · {{ periodWords }}</div>
+              <div v-if="headline.footnote" class="text-caption os-text-muted" data-cost-footnote>{{ headline.footnote }}</div>
             </div>
-            <div class="cost-figure" data-cost-figure="agent-time">
-              <div class="cost-figure-value mono">{{ agentHours(cost.totals.agentSeconds) }}</div>
-              <div class="text-caption os-text-muted">Agent time</div>
-            </div>
-            <div v-if="use" class="cost-figure" data-cost-figure="budget-used">
-              <div class="cost-figure-value mono" :style="use.over > 0 ? { color: CriticalColour } : undefined">
-                {{ percentText(use.share) }}<template v-if="use.over > 0"> ⚠</template>
-              </div>
-              <div class="text-caption os-text-muted">
-                Budget used · {{ moneyText(use.spent, currency) }} of {{ moneyText(use.budget, currency) }}
-              </div>
+            <div class="cost-figure" data-cost-figure="agent-hours">
+              <div class="cost-figure-value mono">{{ agentHours(period.totals.agentSeconds) }}</div>
+              <div class="text-caption os-text-muted">{{ headline.detail }}</div>
             </div>
             <div class="cost-figure" data-cost-figure="per-million">
-              <div class="cost-figure-value mono">{{ perMillionText(cost.totals, currency) }}</div>
+              <div class="cost-figure-value mono">{{ perMillionText(period.totals, currency) }}</div>
               <div class="text-caption os-text-muted">Per 1M billable tokens</div>
             </div>
           </q-card-section>
 
           <q-card-section class="q-pt-none">
-            <CostWeeksChart :weeks="cost.weeks" :series="series" :in-money="isPriced" :currency="currency" size="large" />
-            <div v-if="!isPriced" class="text-caption os-text-muted q-mt-xs" data-cost-no-rate>
-              Set an agent hourly rate in Outcomes to see dollars
-            </div>
+            <CostWeeksChart
+              :weeks="period.buckets"
+              :series="series"
+              :in-money="isPriced"
+              :currency="currency"
+              :column-title="columnTitle"
+              size="large"
+            />
           </q-card-section>
 
-          <!-- THE TABLE IS THE ACCESSIBLE VIEW: every figure the chart draws, in words. -->
+          <!-- THE BREAKDOWNS ARE THE ACCESSIBLE VIEW: every figure the chart draws, in words, three ways. -->
           <q-card-section class="q-pt-none">
-            <table class="token-table cost-table" data-cost-table>
+            <q-btn-toggle
+              v-model="breakdown"
+              dense
+              no-caps
+              unelevated
+              toggle-color="primary"
+              class="q-mb-sm"
+              :options="[
+                { label: 'By outcome', value: 'outcome' },
+                { label: 'By member', value: 'member' },
+                { label: 'By workflow', value: 'workflow' },
+              ]"
+              data-cost-breakdowns
+            />
+
+            <div v-if="breakdown === 'outcome'" class="cost-table-scroll">
+            <table class="token-table cost-table" data-cost-table data-cost-breakdown="outcome">
               <thead>
                 <tr>
                   <th class="token-name-col">Outcome</th>
-                  <th class="token-num">Agent h</th>
-                  <th class="token-num">Cost</th>
-                  <th>Budget</th>
+                  <th class="token-num">Executions</th>
+                  <th class="token-num">Agent Hours</th>
+                  <th class="token-num">{{ EstimateTitle }}</th>
                   <th class="token-num">Billable tokens</th>
                   <th class="token-num">$ / 1M tokens</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="row in rows" :key="rowKey(row)" :data-cost-row="rowKey(row)">
+                <tr v-for="row in byOutcome" :key="row.key" :data-cost-row="row.key">
                   <td class="token-name">
-                    <span class="cost-swatch" :style="{ background: colourOf.get(rowKey(row)) }" aria-hidden="true"></span>
+                    <span class="cost-swatch" :style="{ background: colourOf.get(row.key) }" aria-hidden="true"></span>
                     {{ row.name }}
                   </td>
-                  <td class="token-num mono" data-cell="hours">{{ hoursFigure(row.totals.agentSeconds) }}</td>
-                  <td class="token-num mono" data-cell="cost">{{ costCell(row.totals.cost) }}</td>
-                  <td class="cost-budget" data-cell="budget">
-                    <template v-if="budgetCell(row)">
-                      <div v-if="budgetCell(row)!.fill !== null" class="cost-mini-bar" aria-hidden="true">
-                        <div
-                          class="cost-mini-bar__fill"
-                          :class="{ 'cost-mini-bar__fill--over': budgetCell(row)!.over }"
-                          :style="{ width: `${budgetCell(row)!.fill! * 100}%` }"
-                        />
-                      </div>
-                      <span class="mono" :class="{ 'os-text-muted': budgetCell(row)!.fill === null }">{{ budgetCell(row)!.text }}</span>
-                      <span v-if="budgetCell(row)!.over" class="cost-over" data-cost-over> ⚠ over</span>
-                    </template>
-                    <span v-else class="os-text-muted">—</span>
-                  </td>
-                  <td class="token-num mono" data-cell="billable">{{ row.totals.billable.toLocaleString() }}</td>
-                  <td class="token-num mono" data-cell="per-million">{{ perMillionText(row.totals, currency) }}</td>
+                  <td class="token-num mono" data-cell="executions">{{ row.executions.toLocaleString() }}</td>
+                  <td class="token-num mono" data-cell="hours">{{ row.hours }}</td>
+                  <td class="token-num mono" data-cell="cost" :title="row.footnote ?? undefined">{{ row.estimate }}</td>
+                  <td class="token-num mono" data-cell="billable">{{ row.outcome.figures.billable.toLocaleString() }}</td>
+                  <td class="token-num mono" data-cell="per-million">{{ perMillionText(row.outcome.figures, currency) }}</td>
                 </tr>
                 <tr class="cost-total-row" data-cost-row="total">
                   <td class="token-name">Team total</td>
-                  <td class="token-num mono" data-cell="hours">{{ hoursFigure(cost.totals.agentSeconds) }}</td>
-                  <td class="token-num mono" data-cell="cost">{{ costCell(cost.totals.cost) }}</td>
-                  <td data-cell="budget"></td>
-                  <td class="token-num mono" data-cell="billable">{{ cost.totals.billable.toLocaleString() }}</td>
-                  <td class="token-num mono" data-cell="per-million">{{ perMillionText(cost.totals, currency) }}</td>
+                  <td class="token-num mono" data-cell="executions">{{ period.totals.executions.toLocaleString() }}</td>
+                  <td class="token-num mono" data-cell="hours">{{ hoursFigure(period.totals.agentSeconds) }}</td>
+                  <td class="token-num mono" data-cell="cost">{{ headline.value }}</td>
+                  <td class="token-num mono" data-cell="billable">{{ period.totals.billable.toLocaleString() }}</td>
+                  <td class="token-num mono" data-cell="per-million">{{ perMillionText(period.totals, currency) }}</td>
                 </tr>
               </tbody>
             </table>
+            </div>
+
+            <template v-else-if="breakdown === 'member'">
+              <table class="token-table cost-table" data-cost-breakdown="agent-members">
+                <thead>
+                  <tr>
+                    <th class="token-name-col">Agent member</th>
+                    <th class="token-num">Executions</th>
+                    <th class="token-num">Agent Hours</th>
+                    <th class="token-num">Estimated Agent Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in byMember.agents" :key="row.key" :data-cost-member="row.name">
+                    <td class="token-name">{{ row.name }}</td>
+                    <td class="token-num mono" data-cell="executions">{{ row.executions.toLocaleString() }}</td>
+                    <td class="token-num mono" data-cell="hours">{{ row.hours }}</td>
+                    <td class="token-num mono" data-cell="cost" :title="row.footnote ?? undefined">{{ row.estimate }}</td>
+                  </tr>
+                  <tr v-if="byMember.agents.length === 0"><td colspan="4" class="os-text-muted">No agent member ran in this period.</td></tr>
+                </tbody>
+              </table>
+              <table class="token-table cost-table q-mt-md" data-cost-breakdown="plugin-members">
+                <thead>
+                  <tr>
+                    <th class="token-name-col">Plugin member</th>
+                    <th class="token-num">Executions</th>
+                    <th class="token-num">Estimated Plugin Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in byMember.plugins" :key="row.key" :data-cost-member="row.name">
+                    <td class="token-name">{{ row.name }}</td>
+                    <td class="token-num mono" data-cell="executions">{{ row.executions.toLocaleString() }}</td>
+                    <td class="token-num mono" data-cell="cost" :title="row.footnote ?? undefined">{{ row.estimate }}</td>
+                  </tr>
+                  <tr v-if="byMember.plugins.length === 0"><td colspan="3" class="os-text-muted">No plugin member ran in this period.</td></tr>
+                </tbody>
+              </table>
+              <div class="text-caption os-text-muted q-mt-sm">
+                A plugin member's time is never Agent Hours. A plugin member with no rate of its own is not priced, and its runs from before estimates were recorded read Estimate unavailable.
+              </div>
+            </template>
+
+            <table v-else class="token-table cost-table" data-cost-breakdown="workflow">
+              <thead>
+                <tr>
+                  <th class="token-name-col">Workflow</th>
+                  <th class="token-num">Executions</th>
+                  <th class="token-num">Agent Hours</th>
+                  <th class="token-num">{{ EstimateTitle }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in byWorkflow" :key="row.key" :data-cost-workflow="row.workflow">
+                  <td class="token-name">{{ row.name }}</td>
+                  <td class="token-num mono" data-cell="executions">{{ row.executions.toLocaleString() }}</td>
+                  <td class="token-num mono" data-cell="hours">{{ row.hours }}</td>
+                  <td class="token-num mono" data-cell="cost" :title="row.footnote ?? undefined">{{ row.estimate }}</td>
+                </tr>
+                <tr v-if="byWorkflow.length === 0"><td colspan="4" class="os-text-muted">No workflow ran in this period.</td></tr>
+              </tbody>
+            </table>
+
             <div class="text-caption os-text-muted q-mt-sm" data-cost-note>
-              Cost is agent time at the rate. The $ / 1M tokens figure explains the dollars against the
-              tokens behind them; tokens are not billed here.
+              The Estimated Execution Cost prices each run at the rate it started with, not money paid; a run crossing the
+              period's edge counts only its part inside it. Each breakdown's rows add up to the Team total. The $ / 1M tokens
+              figure explains the dollars against the tokens behind them; tokens are not billed here.
             </div>
           </q-card-section>
         </template>
@@ -291,6 +399,16 @@ function changeRate() {
   min-width: 10ch;
 }
 
+/* THE OUTCOME BREAKDOWN'S SEVEN COLUMNS scroll sideways in a narrow dialog rather than squeeze its names letter by letter. */
+.cost-table-scroll {
+  overflow-x: auto;
+}
+
+.cost-table .token-name {
+  min-width: 14ch;
+  overflow-wrap: normal;
+}
+
 .cost-total-row td {
   border-top: 1px solid var(--os-rule-strong);
   border-bottom: none;
@@ -304,32 +422,5 @@ function changeRate() {
   margin-right: 6px;
   border-radius: 2px;
   vertical-align: baseline;
-}
-
-.cost-budget {
-  white-space: nowrap;
-}
-
-.cost-mini-bar {
-  width: 4rem;
-  height: 4px;
-  margin-bottom: 3px;
-  border-radius: 2px;
-  overflow: hidden;
-  background: var(--os-rule);
-}
-
-.cost-mini-bar__fill {
-  height: 100%;
-  background: var(--os-ink-muted);
-}
-
-.cost-mini-bar__fill--over {
-  background: var(--os-error);
-}
-
-.cost-over {
-  color: var(--os-error);
-  font-weight: 600;
 }
 </style>

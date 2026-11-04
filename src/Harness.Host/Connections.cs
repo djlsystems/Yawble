@@ -104,7 +104,17 @@ public sealed record ConnectionActor(string Id, string? Email)
     private const string MemberPrefix = "member:";
 
     public TriggerAudit Row(string action, string? subject, string? subjectName, object detail) =>
-        new(this == Operator || Id.StartsWith(MemberPrefix, StringComparison.Ordinal) ? null : Id, Email, action, subject, subjectName, JsonSerializer.Serialize(detail));
+        new(this == Operator || Id.StartsWith(MemberPrefix, StringComparison.Ordinal) ? null : Id, Email, action, subject, subjectName, JsonSerializer.Serialize(detail))
+        {
+            // A PERSON SAVING A CONNECTION'S VALUE is a credential_supplied intervention, written with this
+            // row in its transaction. The operator at the engine and a member asking are no person.
+            Intervention = Person && InterventionSites.SuppliesCredential(action)
+                ? InterventionAct.ForPerson(InterventionKinds.CredentialSupplied, Id, Email, null)
+                : null,
+        };
+
+    /// <summary>Whether a person acts: not the operator, not a member asking through Team Connections.</summary>
+    private bool Person => this != Operator && !string.IsNullOrEmpty(Id) && !Id.StartsWith(MemberPrefix, StringComparison.Ordinal);
 }
 
 /// <summary>

@@ -1104,6 +1104,7 @@ public sealed class MemberRuntime : IAsyncDisposable
                     JsonSerializer.Serialize(new
                     {
                         reason = "queue is at its ceiling",
+                        reasonCode = InterruptionReasons.Admission,
                         ceiling = Ceiling,
                         refused = message.Type,
                         refusedSeq = message.Seq,

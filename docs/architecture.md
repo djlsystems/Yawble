@@ -31,12 +31,86 @@ The product name, Yawble, lives in the web app's presentation layer
   the agent process exits after each run, the subscription does not.
 - **Context comes from the ledger,** a projection of the log, not from an agent's transcript.
 - **Agents talk to the platform through MCP tools only** (`tell`, `progress`, `handback`,
-  `blocked`, `backlog`, `kanban`, `repo`, ...), authenticated with a per-member key. There is no
+  `blocked`, `backlog`, `kanban`, `repo`, `report`, ...), authenticated with a per-member key.
+  `report` is read-only: each action relays one GET a screen makes, with the caller's own key
+  ([cost.md](cost.md#reporting-the-report-tool)). There is no
   agent-facing CLI and no HTTP fallback.
+- **Built-in skills come from the build.** Each is an entry in `src/Harness.Host/BuiltInSkills.cs`
+  naming the roles it is offered to; the skill index is rebuilt from them on every start, and
+  `skills_get` and `skills_search` serve a role only its own. `outcome-reporting` (Manager,
+  Member) is how a member writes a report from `report` alone
+  ([cost.md](cost.md#writing-a-report-the-outcome-reporting-skill)).
 - **Workflows.** An instruction roots a workflow; `HARNESS_CAUSATION` carries it into each run so
   follow-up instructions join it. The member the root instruction addressed owns the workflow and
   declares it complete; the Manager may declare it for an idle member that owns it, and the platform
   declares one a plugin member owns. Only a person closes a workflow.
+- **Origin is derived, never published.** Each log row records who its workflow began with
+  (`origin_kind`: `person`, `agent`, `trigger` or `system`, with the actor's id and email, or the
+  trigger's source) and what kind of actor published the row itself (`publisher_kind`: `person`,
+  `agent` or `host`). The log works both out when it stores the row, the way it works out the
+  correlation and depth. A workflow's first row takes its origin from the signed-in principal the
+  route hands the log: a person is themselves, an API key is stored as its owner (their id and email
+  as they stood then, so the row still reads after the key or the person is gone), a member or the
+  Concierge is an agent. With no principal, the source decides: `schedule:`, `trigger:` and `wake:`
+  are a trigger with no person, a member's `team/member` is an agent, anything else is the system.
+  Every later row in the workflow carries the first row's origin, whoever publishes it. No request
+  body, payload field or header can set any of these; rows from before this have none.
+- **Interruption reasons come from the closed set.** Every `agentContainer.blocked`,
+  `agentContainer.needsDecision`, `agentContainer.rejected`, `workflow.paused` and
+  `agentContainer.scheduleSkipped` row carries a `reasonCode` beside its free-text `reason` (a
+  decision request carries its `question`). The code is exactly one of `InterruptionReasons`:
+  `token_cap`, `workflow_budget`, `auth`, `permission`, `approval_required`, `decision_required`,
+  `paused_by_person`, `team_archived`, `busy`, `admission` or `failure`. The platform picks it from
+  what caused the interruption, never from the words:
+
+  | Row | Cause | Code |
+  |---|---|---|
+  | `scheduleSkipped` | the trigger's daily token cap is reached | `token_cap` |
+  | `rejected` and `workflow.paused` | the workflow spent over its team or instance per-workflow budget | `workflow_budget` |
+  | `rejected` | the member's queue is at its ceiling | `admission` |
+  | `scheduleSkipped` | the team is archived | `team_archived` |
+  | `scheduleSkipped` | a person paused the team | `paused_by_person` |
+  | `scheduleSkipped` | an idle-only trigger's member is busy | `busy` |
+  | `scheduleSkipped` | a solution team waits for a connection or a file a person supplies | `auth` |
+  | `blocked` | the Host marked the member blocked for a connection a person must set (`failureClass: needs-person`) | `auth` |
+  | `needsDecision` | the member called `needs_decision` | `decision_required` |
+  | `blocked` | the member called `blocked` itself, for the whole run or one batch item | `failure` |
+
+  `failure` is the default for a member's own `blocked` call: nothing the platform knows says more
+  about why a member gave up. `permission` and `approval_required` are in the set, but nothing
+  writes them yet. An admission hold, a run waiting for a slot or memory, writes no interruption
+  row; it is recorded in `admission_holds`.
+
+  The log enforces the set when it stores a row, on both databases. A code outside the set, a code
+  that is not text, or a second code is refused, and the row is not written. A row that names no
+  code gets its type's default from its structured fields: `needsDecision` is `decision_required`,
+  `blocked` is mapped from its `failureClass` (`failure` when it has none), a `workflow.paused` with a
+  `limitSource` is `workflow_budget`, and anything else is `failure`.
+
+  `agentContainer.failed` gains no field: its code is mapped from its `failureClass`. `needs-person`
+  is `auth`; every other class, and a row with no class, is `failure`. `workflow.resumed` is not an
+  interruption and has no code. Rows from before codes existed have no `reasonCode` and still read;
+  a reader takes the same default for them. A run that ends interrupted copies its code onto its
+  usage ledger row (see [cost.md](cost.md)).
+- **Human interventions are recorded by the route, never published.** Each meaningful act by a
+  person is one row in `intervention_ledger`, written by the route that performs it, server side, in
+  the same transaction as the log row the act went with: a person's dispatch, tell, answer to a
+  decision, resume, nudge, close, change of a workflow's outcome and saved credential, and one row
+  per Concierge session. The person is the route's signed-in principal (an API key is its owner); a
+  member, a member's key, the Concierge, a trigger, a schedule, a wake or the Host writes no row. No
+  request body, message, tell, member tool or key can write one or pick its kind, person or
+  duration, and nothing in it is the act's content. The kinds, each writer and the rules are in
+  [cost.md](cost.md#peoples-acts-the-intervention-ledger).
+- **Human figures are read, never priced.** The outcome reads (`GET /api/outcomes`,
+  `/api/outcomes/{id}`) and the cost reads (`GET /api/teams/{team}/cost`, `/api/teams/cost`,
+  `/api/teams/cost/summary`) carry three figures beside their money, computed on every read by
+  `HumanFigures`: **Human Interventions** (the `intervention_ledger` rows in the window, each once),
+  **Human Attention Time** (measured durations only, null when none was measured) and **Waiting on a
+  person** (`blockedSeconds`, time work waited on a person, never added to attention). For an outcome,
+  a row counts under its `outcome_id_at_event` followed through `merged_into`, or Unattributed; for a
+  team, by its `team_id`, so a team's counts leave out Concierge sessions, which name no team. No
+  route reads the ledger on its own and nothing writes through these reads. The rules are in
+  [cost.md](cost.md#human-figures-human-interventions-human-attention-time-waiting-on-a-person).
 - **Steering the Concierge.** The workflow a person highlights on the board is the one their
   Concierge continues: its next launch carries it in `HARNESS_CAUSATION`, and a running Concierge
   reads it from `STEERING.md`. Only an open workflow of a team that exists and is not archived can
@@ -87,9 +161,38 @@ The product name, Yawble, lives in the web app's presentation layer
   backlog dispatch or a trigger links its workflows to one; a Manager or the Concierge may propose
   one, or link a workflow that has none. Only a person creates, confirms, renames, merges,
   retires or rejects an outcome. Its figures (agent time, elapsed time, tokens, time blocked on a
-  person, cost at a rate a person sets) come from the ledger and are never estimated. A team's
-  cost by outcome, against the outcomes' budgets, is its page's Cost tile and the Teams list's
-  Cost column ([cost.md](cost.md)).
+  person) come from the ledger, and its Estimated Execution Cost is the sum of its runs' own
+  estimates. Each run counts once, in one outcome or **Unattributed** (work serving none,
+  computed, never an outcome row), keyed by the run, never the team. A person reads an outcome as
+  a **Project** (cumulative figures, backlog progress) or as **Operational** (week by week:
+  cost, throughput, cost per completed workflow); that choice is `outcomes.presentation`
+  (`outcome-011`), and only a person sets it. A team's Estimated Execution Cost by outcome is its
+  page's tile and the Teams list's column ([cost.md](cost.md)); an outcome's stored `value` is kept
+  and readable on the outcome routes but shown and measured nowhere, so no screen has an outcome
+  budget. The Teams
+  list reads its columns and its first and third summary tiles over a period a person picks (Daily or
+  Monthly, the last two months or a custom range) from `GET /api/teams/cost/period`, a read over the
+  same `ExecutionCost` pricing as every other cost figure; the eight-week reads are unchanged. A team
+  page shares that period choice: its Cost tile, dialog breakdowns (by outcome, member and workflow) and
+  Activity line read `GET /api/teams/{team}/cost/period` (the team's Teams list row, broken down), and
+  each workflow's line in the Workflows dialog and a Kanban card's detail reads
+  `GET /api/teams/{team}/cost/workflows`, both over the same pricing. The Workflow tile's Needs you
+  count is the app bar's Needs you list filtered to the team. A plugin member is priced only from its
+  own estimated hourly rate, by duration, as recorded at its run's start: with none it is not priced on
+  every read and screen, a plugin run from before snapshots is unavailable, and neither ever takes the
+  agent rate. A plugin manifest's `cost.type` may only be `duration` ([plugins.md](plugins.md#cost-type-cost)).
+- **Spend.** Admin → Spend (`#/spend`) is the tenant's Spend page, a person's only. It shows
+  **Actual Spend** (confirmed vendor expenses, per currency, never converted), **Projected**
+  recurring charges (never in Actual Spend) and **Estimated Execution Cost · Agent Hours** from the
+  same pricing path as every cost figure, side by side with the sentence that they need not reconcile.
+  Its tabs manage billing accounts and expenses (void or replace, never edit or delete), and Export
+  CSV downloads the period's accounts, expenses, summary and estimates by team and outcome; every
+  row carries `instance_id` and `scope`, so two instances' files can be put side by side without
+  counting a shared account's expense twice (nothing aggregates them yet). Every
+  write it makes is `HumansOnly`. Its reads are a person's, and an agent's only while it holds the
+  `Spend` permit (`RequirePermit(Spend)`). That permit is never stored or minted:
+  `SpendReading.Apply` gives it to a team's container or a Concierge on each request only while a
+  person has turned on `reporting.agentsMayReadSpend`. See [spend.md](spend.md).
 - **Archived teams.** Archive (in the Teams view) keeps everything a team has - members, settings,
   documents, repositories, sites and history - and stops its work: it is paused, every trigger
   skips with the reason "team archived", and a tell, a backlog dispatch, a new card or a site action

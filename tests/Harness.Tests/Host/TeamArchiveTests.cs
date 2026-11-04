@@ -342,6 +342,7 @@ public sealed class TeamArchiveTests : IAsyncLifetime
         Assert.Equal(MessageTypes.ScheduleSkippedArchivedReason, run.GetProperty("reason").GetString());
         var skipped = Assert.Single(await Log.ReadAfterAsync(0, [MessageTypes.ScheduleSkipped], int.MaxValue, Ct), m => m.Source == $"schedule:{id}");
         Assert.Equal("team archived", ReasonOf(skipped));
+        Assert.Equal(InterruptionReasons.TeamArchived, ReasonCodeOf(skipped));
         Assert.Equal("team archived", DetailReason(Assert.Single(await TriggerRowsAsync(TenantActions.ScheduleSkipped, id))));
         Assert.Empty(await InstructionsForDevAsync());
     }
@@ -572,6 +573,7 @@ public sealed class TeamArchiveTests : IAsyncLifetime
     {
         var skipped = await AwaitRowAsync([MessageTypes.ScheduleSkipped], m => m.Source == source, "the skip");
         Assert.Equal("team archived", ReasonOf(skipped));
+        Assert.Equal(InterruptionReasons.TeamArchived, ReasonCodeOf(skipped));
 
         await UntilAsync(async () => (await TriggerRowsAsync(TenantActions.ScheduleSkipped, id)).Count > 0, "the tenant row");
         Assert.Equal("team archived", DetailReason(Assert.Single(await TriggerRowsAsync(TenantActions.ScheduleSkipped, id))));
@@ -621,6 +623,9 @@ public sealed class TeamArchiveTests : IAsyncLifetime
 
     private static string ReasonOf(Message skipped) =>
         JsonDocument.Parse(skipped.Payload).RootElement.GetProperty("reason").GetString()!;
+
+    private static string ReasonCodeOf(Message skipped) =>
+        JsonDocument.Parse(skipped.Payload).RootElement.GetProperty(PayloadFields.ReasonCode).GetString()!;
 
     private static string? DetailReason(TenantEvent row) =>
         JsonDocument.Parse(row.Detail!).RootElement.GetProperty("reason").GetString();

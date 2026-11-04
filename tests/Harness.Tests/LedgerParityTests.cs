@@ -73,6 +73,17 @@ public sealed class LedgerParityTests : IDisposable
         var afterNudge = await store.AppendAsync(Instruction(Dev, "after", "console", root.Seq), Ct);
         await RunAsync(store, Dev, afterNudge.Seq, new { tokensIn = 20, tokensOut = 5, tokensCacheCreation = 7, tokensSource = "claude" });
 
+        // A run that asked a person to decide, and one the Host marked blocked for a person: both end blocked.
+        var asking = await store.AppendAsync(Instruction(Dev, "ask", "console", root.Seq), Ct);
+        var askingStart = await store.AppendAsync(new NewMessage(MessageTypes.Started, "{}", Dev.ToString(), asking.Seq), Ct);
+        await store.AppendAsync(new NewMessage(MessageTypes.NeedsDecision, """{"question":"which?"}""", Dev.ToString(), askingStart.Seq), Ct);
+        await store.AppendAsync(new NewMessage(MessageTypes.Completed, "{}", Dev.ToString(), asking.Seq), Ct);
+        var waiting = await store.AppendAsync(Instruction(Echo, "wait", "console", root.Seq), Ct);
+        var waitingStart = await store.AppendAsync(new NewMessage(MessageTypes.Started, "{}", Echo.ToString(), waiting.Seq), Ct);
+        await store.AppendAsync(new NewMessage(MessageTypes.Blocked,
+            """{"reason":"bind it","failureClass":"needs-person"}""", Echo.ToString(), waitingStart.Seq), Ct);
+        await store.AppendAsync(new NewMessage(MessageTypes.Failed, """{"failureClass":"needs-person"}""", Echo.ToString(), waiting.Seq), Ct);
+
         // ---- a trigger's day: a fire before the window, then two inside it ----
         var early = await store.AppendAsync(Instruction(Dev, "poll", "schedule:t1"), Ct);
         await RunAsync(store, Dev, early.Seq, new { tokensIn = 5000, tokensOut = 5000, tokensSource = "claude" });
@@ -121,6 +132,76 @@ public sealed class LedgerParityTests : IDisposable
         {
             Assert.Equal(await OldRecentAsync(old, member), await cost.RecentAsync(member, "agent", Ct));
         }
+
+        // ---- the snapshots: one per start, and each run's row names its own run's start ----
+        Assert.Empty(await RowsAsync(
+            "SELECT m.seq FROM messages m LEFT JOIN execution_snapshots s ON s.start_seq = m.seq "
+            + $"WHERE m.type = '{MessageTypes.Started}' AND s.start_seq IS NULL"));
+        Assert.Equal(
+            await RowsAsync($"SELECT seq FROM messages WHERE type = '{MessageTypes.Started}' ORDER BY seq"),
+            await RowsAsync("SELECT start_seq FROM execution_snapshots ORDER BY start_seq"));
+
+        // Every ledger row names a start that ran before it, of its own member, and no start is named twice.
+        Assert.Empty(await RowsAsync(
+            "SELECT u.run_seq FROM usage_ledger u LEFT JOIN execution_snapshots s ON s.start_seq = u.start_seq "
+            + "WHERE s.start_seq IS NULL OR s.start_seq >= u.run_seq OR s.member <> u.member OR s.correlation <> u.correlation"));
+        Assert.Empty(await RowsAsync("SELECT start_seq FROM usage_ledger GROUP BY start_seq HAVING COUNT(*) > 1"));
+
+        // Every snapshot is priced by EffectiveCost's rules: a known source, an amount exactly when it is
+        // priced, never a priced zero, and never a plugin at the tenant agent rate.
+        Assert.Empty(await RowsAsync(
+            "SELECT start_seq FROM execution_snapshots "
+            + "WHERE rate_source NOT IN ('member', 'tenant', 'none') OR (rate_source = 'none') <> (rate_amount IS NULL) "
+            + "OR rate_amount = '0' OR (member_kind = 'plugin' AND rate_source = 'tenant')"));
+
+        // ---- the origin: every snapshot and every run's ledger row carries its workflow root's ----
+        Assert.Empty(await RowsAsync(
+            "SELECT s.start_seq FROM execution_snapshots s "
+            + "JOIN messages m ON m.seq = s.start_seq JOIN messages r ON r.seq = m.correlation_id "
+            + "WHERE s.origin_kind IS NULL OR s.origin_kind IS NOT r.origin_kind OR s.origin_actor_id IS NOT r.origin_actor_id "
+            + "OR s.origin_actor_email IS NOT r.origin_actor_email OR s.origin_trigger IS NOT r.origin_trigger"));
+        Assert.Empty(await RowsAsync(
+            "SELECT u.run_seq FROM usage_ledger u JOIN messages r ON r.seq = u.correlation "
+            + "WHERE u.origin_kind IS NULL OR u.origin_kind IS NOT r.origin_kind OR u.origin_actor_id IS NOT r.origin_actor_id"));
+        Assert.Equal(
+            await RowsAsync("SELECT COUNT(*) FROM execution_snapshots"),
+            await RowsAsync("SELECT COUNT(*) FROM execution_snapshots s JOIN messages m ON m.seq = s.start_seq JOIN messages r ON r.seq = m.correlation_id"));
+
+        // ---- the reason code: a completed or quiet run's is NULL, a failed run's is its class's, a blocked
+        // run's is its newest run-level blocked or needsDecision row's, and every one is in the set ----
+        Assert.Empty(await RowsAsync(
+            "SELECT run_seq FROM usage_ledger WHERE run_outcome IN ('completed', 'quiet') AND reason_code IS NOT NULL"));
+        Assert.Empty(await RowsAsync(
+            "SELECT u.run_seq FROM usage_ledger u JOIN messages t ON t.seq = u.run_seq WHERE u.run_outcome = 'failed' "
+            + "AND u.reason_code IS NOT CASE json_extract(t.payload, '$.failureClass') WHEN 'needs-person' THEN 'auth' ELSE 'failure' END"));
+        Assert.Empty(await RowsAsync(
+            "SELECT u.run_seq FROM usage_ledger u WHERE u.run_outcome = 'blocked' AND u.reason_code IS NOT ("
+            + "SELECT json_extract(b.payload, '$.reasonCode') FROM messages b "
+            + $"WHERE b.source = (u.team_id || '/' || u.member) AND b.type IN ('{MessageTypes.Blocked}', '{MessageTypes.NeedsDecision}') "
+            + "AND b.seq > u.start_seq AND b.seq < u.run_seq AND json_extract(b.payload, '$.item') IS NULL ORDER BY b.seq DESC LIMIT 1)"));
+        Assert.Empty(await RowsAsync(
+            "SELECT run_seq FROM usage_ledger WHERE reason_code IS NOT NULL AND reason_code NOT IN ("
+            + string.Join(", ", InterruptionReasons.All.Select(code => $"'{code}'")) + ")"));
+        Assert.Equal(
+            [1L, 1L, 1L],
+            await RowsAsync(
+                "SELECT COUNT(*) FROM usage_ledger WHERE run_outcome = 'blocked' AND reason_code = 'decision_required' "
+                + "UNION ALL SELECT COUNT(*) FROM usage_ledger WHERE run_outcome = 'failed' AND reason_code = 'auth' "
+                + "UNION ALL SELECT COUNT(*) FROM usage_ledger WHERE run_outcome = 'failed' AND reason_code = 'failure'"));
+    }
+
+    /// <summary>A query's rows over the fixture's database, each as its first column.</summary>
+    private async Task<IReadOnlyList<long>> RowsAsync(string sql)
+    {
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Database, Pooling = false }.ToString());
+        await connection.OpenAsync(Ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+
+        var rows = new List<long>();
+        await using var reader = await command.ExecuteReaderAsync(Ct);
+        while (await reader.ReadAsync(Ct)) rows.Add(reader.GetInt64(0));
+        return rows;
     }
 
     /// <summary>`TriggerCost.RecentAsync` as it read the log before the ledger.</summary>

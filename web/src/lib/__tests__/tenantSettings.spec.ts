@@ -62,6 +62,7 @@ describe('the Admission field', () => {
       'log.retentionDays',
       'marketplace.check',
       'quiet.window',
+      'reporting.agentsMayReadSpend',
       'resume.maxAutomatic',
       'runs.memoryLimitMb',
       'system.packages',

@@ -138,7 +138,8 @@ describe('MemberSettingsDialog, mounted', () => {
     const wrapper = await mountSettings();
 
     const labels = wrapper.findAllComponents({ name: 'QSelect' }).map((select) => select.props('label'));
-    expect(labels).toEqual(['Agent']);
+    // The Agent and the member's billing account - no Prompt picker.
+    expect(labels).toEqual(['Agent', 'Billing account']);
 
     await type('Member name', 'Scout Two');
     button('Save').click();
@@ -311,7 +312,8 @@ describe('MemberSettingsDialog, the member\'s own instructions', () => {
     expect(document.body.querySelector('[data-member-instructions]')).toBeNull();
     expect(bodyText()).not.toContain('Instructions (optional)');
     expect(bodyText()).not.toContain('Takes effect on its next run.');
-    expect(getMember).not.toHaveBeenCalled();
+    // Its row is still read, for its estimated hourly rate and billing account - never for a prompt.
+    expect(getMember).toHaveBeenCalledWith('alpha', 'scout');
 
     wrapper.unmount();
   });

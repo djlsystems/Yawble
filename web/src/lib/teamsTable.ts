@@ -50,6 +50,14 @@ export interface TeamRow {
    */
   workflows: TeamChip | null
 
+  /**
+   * THE PERIOD'S FIGURES, from `GET /api/teams/cost/period` (`withPeriodFigures`): the team's Estimated Execution
+   * Cost - null when nothing in the period was priced, or the figures have not landed - and its Agent Hours in
+   * seconds, null until the figures land. Absent on a row built before them.
+   */
+  estimate?: number | null
+  agentSeconds?: number | null
+
   /** The backlog items the team's open workflows work on, newest first, one per item. Empty when
    *  none is, or before the payload lands: "no item in flight" is nothing, not a word. */
   items: WorkflowItem[]
@@ -80,7 +88,8 @@ export function openWorkflowItems(workflows: TeamWorkflows | null): WorkflowItem
 // The sortable columns the Teams list shows. Its Activity column draws each team's lanes and is not
 // a sort: a picture over time has no single value to order by. The Workflows and Last workflow
 // columns it replaced went with their sort keys; a stored sort naming either reads back as the default.
-export type TeamSort = TableSort<'name' | 'members' | 'status'>
+// Estimated Execution Cost and Agent Hours sort on the period's figures (`withPeriodFigures`).
+export type TeamSort = TableSort<'name' | 'members' | 'status' | 'estimate' | 'hours'>
 
 /** Name ascending. A person looking for a team looks for its name. */
 export const DefaultTeamSort: TeamSort = { column: 'name', descending: false }
@@ -148,7 +157,7 @@ export function nextSort(current: TeamSort, column: TeamSort['column']): TeamSor
  * and a string here that is NOT a column compiles happily and admits a value the comparator has
  * no arm for.
  */
-const Columns: TeamSort['column'][] = ['name', 'members', 'status']
+const Columns: TeamSort['column'][] = ['name', 'members', 'status', 'estimate', 'hours']
 
 /**
  * THE RANKING, and it is the chip's own order rather than the alphabet: a column that sorted
@@ -301,9 +310,36 @@ function comparePrimary(a: TeamRow, b: TeamRow, sort: TeamSort): number {
       return (a.members - b.members) * direction
     case 'status':
       return (StatusOrder[a.status] - StatusOrder[b.status]) * direction
+    case 'estimate':
+      return figureOrder(a.estimate, b.estimate, direction)
+    case 'hours':
+      return figureOrder(a.agentSeconds, b.agentSeconds, direction)
     default:
       return byName(a, b) * direction
   }
+}
+
+/**
+ * A PERIOD FIGURE'S ORDER: by the number in the column's direction, and a row WITHOUT one - no priced run in the
+ * period, or the figures not landed - after every row with one, in BOTH directions, so flipping the arrow never
+ * floats the teams with nothing to the top. Rows tied, and rows without, fall to the name (`compareTeams`).
+ */
+function figureOrder(a: number | null | undefined, b: number | null | undefined, direction: number): number {
+  const aKnown = a !== null && a !== undefined
+  const bKnown = b !== null && b !== undefined
+  if (!aKnown || !bKnown) return aKnown === bKnown ? 0 : aKnown ? -1 : 1
+  return (a - b) * direction
+}
+
+/**
+ * A ROW WITH THE PERIOD'S FIGURES for the two figure columns: the route's own total and agent seconds, never
+ * recomputed. A team the answer does not carry (or no answer) has neither.
+ */
+export function withPeriodFigures(
+  row: TeamRow,
+  team: { totals: { cost: number | null; agentSeconds: number } } | null | undefined,
+): TeamRow {
+  return { ...row, estimate: team?.totals.cost ?? null, agentSeconds: team ? team.totals.agentSeconds : null }
 }
 
 /**

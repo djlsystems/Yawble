@@ -62,6 +62,8 @@ const hostile: SiteDocument = {
   updatedBy: 'visitor',
 };
 
+const Capability = '/sites/alpha/shop/_c/CfDJ8-cap_1/';
+
 const DeleteSentence = 'Deleting shop removes 3 versions and 12 documents, and cannot be undone.';
 
 interface Call {
@@ -87,6 +89,7 @@ function host(url: string, init?: RequestInit): Response {
   if (method === 'GET' && url === '/api/sites') return reply(200, [shop, draft]);
   if (method === 'GET' && url === '/api/teams/alpha/sites/shop') return reply(200, shopDetail);
   if (method === 'GET' && url === '/api/teams/alpha/sites/shop/data/notes') return reply(200, [hostile]);
+  if (method === 'POST' && url === '/api/teams/alpha/sites/shop/open') return reply(200, { url: Capability });
   if (method === 'POST' && url.endsWith('/rollback')) return reply(200, { ...shop, liveVersion: 2 });
   if (method === 'POST' && url.endsWith('/unpublish')) return reply(200, { ...shop, liveVersion: null });
   if (method === 'DELETE' && url === '/api/teams/alpha/sites/shop') return reply(409, { error: DeleteSentence });
@@ -177,11 +180,19 @@ describe('Admin > Sites', () => {
   });
 
   it('opens a published site in a new tab, and offers nothing to open or unpublish when it is not', async () => {
-    const opened = vi.spyOn(window, 'open').mockReturnValue(null);
+    // W27510: the tab is opened in the click, cut from its opener, and sent to the capability the
+    // app asked for - not to the entry, which needs the browser to send the cookie with the tab.
+    const tab = { opener: 'the app' as unknown, location: { replace: vi.fn() } };
+    const opened = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
     await open();
 
     action('Open shop').click();
-    expect(opened).toHaveBeenCalledWith('/sites/alpha/shop/', '_blank', 'noopener');
+    expect(opened).toHaveBeenCalledWith('about:blank', '_blank');
+    expect(tab.opener).toBeNull();
+    await settle();
+
+    expect(sent('POST').map((call) => call.url)).toEqual(['/api/teams/alpha/sites/shop/open']);
+    expect(tab.location.replace).toHaveBeenCalledWith(new URL(Capability, window.location.href).href);
 
     expect(action('Open draft').hasAttribute('disabled')).toBe(true);
     expect(action('Unpublish draft').hasAttribute('disabled')).toBe(true);

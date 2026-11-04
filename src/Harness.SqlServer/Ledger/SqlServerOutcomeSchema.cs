@@ -178,6 +178,162 @@ public static class SqlServerOutcomeSchema
                  IF EXISTS (SELECT 1 FROM deleted) THROW 51001, N''admission_holds is append-only'', 1;
              END');
              """),
+
+        // `OutcomeSchema`'s outcome-008: every run's configuration at start, immutable, and the
+        // ledger row's link to it. `link_id` is BIGINT, as `workflow_outcome_links.id`; the keyed
+        // columns are NVARCHAR(200) and NVARCHAR(40) so the (team_id, started_at) index fits.
+        new MigrationStep(
+            "outcome-008",
+            $"""
+             CREATE TABLE execution_snapshots (
+                 start_seq          BIGINT        NOT NULL PRIMARY KEY,
+                 correlation        BIGINT        NOT NULL,
+                 team_id            NVARCHAR(200) COLLATE {SqlServerSql.NoCase} NULL,
+                 team_name          NVARCHAR(MAX) NULL,
+                 member             NVARCHAR(200) COLLATE {SqlServerSql.NoCase} NOT NULL,
+                 member_kind        NVARCHAR(MAX) NULL,
+                 agent_preset       NVARCHAR(MAX) NULL,
+                 model              NVARCHAR(MAX) NULL,
+                 rate_amount        NVARCHAR(MAX) NULL,
+                 rate_currency      NVARCHAR(MAX) NULL,
+                 rate_source        NVARCHAR(MAX) NOT NULL,
+                 billing_account_id NVARCHAR(MAX) NULL,
+                 link_id            BIGINT        NULL,
+                 started_at         NVARCHAR(40)  NOT NULL,
+                 origin_kind        NVARCHAR(MAX) NULL,
+                 origin_actor_id    NVARCHAR(MAX) NULL,
+                 origin_actor_email NVARCHAR(MAX) NULL,
+                 origin_trigger     NVARCHAR(MAX) NULL
+             );
+
+             CREATE INDEX ix_execution_snapshots_correlation ON execution_snapshots(correlation);
+             CREATE INDEX ix_execution_snapshots_team_started ON execution_snapshots(team_id, started_at);
+
+             {AppendOnly("execution_snapshots")}
+
+             ALTER TABLE usage_ledger ADD start_seq BIGINT NULL;
+             """),
+
+        // `OutcomeSchema`'s outcome-012: the one rate row the start that applies it writes, never moved.
+        new MigrationStep(
+            "outcome-012",
+            $"""
+             CREATE TABLE rate_epochs (
+                 id            INT           NOT NULL PRIMARY KEY CHECK (id = 1),
+                 recorded_at   NVARCHAR(40)  NOT NULL,
+                 rate_amount   NVARCHAR(MAX) NULL,
+                 rate_currency NVARCHAR(MAX) NULL,
+                 rate_source   NVARCHAR(MAX) NOT NULL
+             );
+
+             {AppendOnly("rate_epochs")}
+             """),
+
+        // `OutcomeSchema`'s outcome-009: the billing accounts, edited in place and never deleted. The id
+        // is NVARCHAR(36), a lower-case GUID in "D" form.
+        new MigrationStep(
+            "outcome-009",
+            """
+            CREATE TABLE billing_accounts (
+                id               NVARCHAR(36)  NOT NULL PRIMARY KEY,
+                name             NVARCHAR(MAX) NOT NULL,
+                vendor           NVARCHAR(MAX) NOT NULL,
+                billing_type     NVARCHAR(MAX) NOT NULL,
+                currency         NVARCHAR(MAX) NOT NULL,
+                billing_period   NVARCHAR(MAX) NOT NULL,
+                recurring_amount NVARCHAR(MAX) NULL,
+                effective_from   NVARCHAR(40)  NOT NULL,
+                effective_to     NVARCHAR(40)  NULL,
+                active           INT           NOT NULL,
+                description      NVARCHAR(MAX) NULL,
+                scope            NVARCHAR(MAX) NOT NULL,
+                instance_id      NVARCHAR(MAX) NOT NULL,
+                created_by       NVARCHAR(MAX) NOT NULL,
+                created_at       NVARCHAR(40)  NOT NULL,
+                updated_at       NVARCHAR(40)  NOT NULL
+            );
+
+            EXEC(N'CREATE TRIGGER billing_accounts_no_delete ON billing_accounts AFTER DELETE AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM deleted) THROW 51001, N''billing_accounts rows are deactivated, never deleted'', 1;
+            END');
+            """),
+
+        // `OutcomeSchema`'s outcome-013: the expenses, append-only. The unique index on `supersedes` is
+        // filtered, because SQL Server lets a plain unique index hold only one NULL.
+        new MigrationStep(
+            "outcome-013",
+            $"""
+             CREATE TABLE expenses (
+                 id                   NVARCHAR(36)  NOT NULL PRIMARY KEY,
+                 account_id           NVARCHAR(36)  NOT NULL,
+                 amount               NVARCHAR(MAX) NOT NULL,
+                 currency             NVARCHAR(MAX) NOT NULL,
+                 service_period_start NVARCHAR(40)  NOT NULL,
+                 service_period_end   NVARCHAR(40)  NOT NULL,
+                 kind                 NVARCHAR(MAX) NOT NULL,
+                 status               NVARCHAR(MAX) NOT NULL,
+                 supersedes           NVARCHAR(36)  NULL,
+                 reference            NVARCHAR(MAX) NULL,
+                 note                 NVARCHAR(MAX) NULL,
+                 recorded_by          NVARCHAR(MAX) NOT NULL,
+                 recorded_at          NVARCHAR(40)  NOT NULL
+             );
+
+             CREATE UNIQUE INDEX ux_expenses_supersedes ON expenses(supersedes) WHERE supersedes IS NOT NULL;
+             CREATE INDEX ix_expenses_account ON expenses(account_id, recorded_at);
+
+             {AppendOnly("expenses")}
+             """),
+
+        // `OutcomeSchema`'s outcome-014: the workflow's origin on a run's ledger row, nullable.
+        new MigrationStep(
+            "outcome-014",
+            """
+            ALTER TABLE usage_ledger ADD
+                origin_kind     NVARCHAR(MAX) NULL,
+                origin_actor_id NVARCHAR(MAX) NULL;
+            """),
+
+        // `OutcomeSchema`'s outcome-015: why a run ended interrupted, on its ledger row, nullable.
+        new MigrationStep(
+            "outcome-015",
+            """
+            ALTER TABLE usage_ledger ADD reason_code NVARCHAR(MAX) NULL;
+            """),
+
+        // `OutcomeSchema`'s outcome-010: one row per meaningful act by a person, append-only.
+        new MigrationStep(
+            "outcome-010",
+            $"""
+             CREATE TABLE intervention_ledger (
+                 id                  BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                 occurred_at         NVARCHAR(40)  NOT NULL,
+                 actor_id            NVARCHAR(200) NOT NULL,
+                 actor_email         NVARCHAR(MAX) NULL,
+                 kind                NVARCHAR(64)  NOT NULL,
+                 team_id             NVARCHAR(200) COLLATE {SqlServerSql.NoCase} NULL,
+                 correlation         BIGINT        NULL,
+                 outcome_id_at_event NVARCHAR(MAX) NULL,
+                 related_seq         BIGINT        NULL,
+                 duration_seconds    BIGINT        NULL,
+                 duration_measured   INT           NOT NULL DEFAULT 0 CHECK (duration_measured IN (0, 1))
+             );
+
+             CREATE INDEX ix_intervention_ledger_team ON intervention_ledger(team_id, occurred_at);
+             CREATE INDEX ix_intervention_ledger_actor ON intervention_ledger(actor_id, occurred_at);
+
+             {AppendOnly("intervention_ledger")}
+             """),
+
+        // `OutcomeSchema`'s outcome-011: how a person reads an outcome, nullable, held to the closed set.
+        new MigrationStep(
+            "outcome-011",
+            """
+            ALTER TABLE outcomes ADD presentation NVARCHAR(32) NULL
+                CONSTRAINT ck_outcomes_presentation CHECK (presentation IN (N'project', N'operational'));
+            """),
     ];
 
     /// <summary>The two triggers that make <paramref name="table"/> append-only, as SQLite's

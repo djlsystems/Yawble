@@ -45,7 +45,7 @@ import { TenantSettingRejected } from '../../api/client';
 import { useConsoleStore } from '../../stores/console';
 import { useTerminalDisplayStore } from '../../stores/terminalDisplay';
 import type { TenantSetting } from '../../api/types';
-import { LogRetentionSentence, normaliseTenantSettings } from '../../lib/tenantSettings';
+import { LogRetentionSentence, ReportingAgentsMayReadSpendSentence, normaliseTenantSettings } from '../../lib/tenantSettings';
 import { mountDialog, resetBody, textAndHelp } from '../../test/mountQuasar';
 import { addButtonIn, addChips, addDialogProblem, chipsIn } from '../../test/chipList';
 
@@ -79,6 +79,7 @@ function settings() {
         description: 'Megabytes of a per-process data limit. 0 (the default) sets no per-run cap there.',
       }),
       setting('workflow.spendLimit', 100000000),
+      setting('reporting.agentsMayReadSpend', 'off', { default: 'off', defaultSource: 'builtIn' }),
       setting('concierge.idleTimeout', '08:00:00'),
       // As the server lists it: the word, never a boolean, with its built-in default.
       setting('concierge.mayMerge', 'off', { default: 'off', defaultSource: 'builtIn' }),
@@ -584,6 +585,36 @@ describe('Concierge', () => {
     expect(saveButton().disabled).toBe(true);
   });
 
+  /**
+   * Whether agents may read Actual Spend for reports is a person's choice: a toggle on the Spend tab
+   * with its one sentence, never the key, sent as the word the server reads.
+   */
+  it('shows whether agents may read Actual Spend, off, on the Spend tab with its one sentence and never the key', async () => {
+    const wrapper = await openDialog();
+    await showTab(wrapper, 'spend');
+
+    const toggle = wrapper.findAllComponents({ name: 'QToggle' }).find((t) => t.props('label') === 'Let agents read Actual Spend for reports');
+    expect(toggle).toBeDefined();
+    expect(toggle!.props('modelValue')).toBe(false);
+    expect(textAndHelp()).toContain(ReportingAgentsMayReadSpendSentence);
+    expect(ReportingAgentsMayReadSpendSentence).toContain('never add or change an account, an expense, a rate');
+    expect(ReportingAgentsMayReadSpendSentence).toContain('It is off unless a person turns it on.');
+    expect(textAndHelp()).not.toContain('reporting.agentsMayReadSpend');
+    expect(saveButton().disabled).toBe(true);
+  });
+
+  it('sends the word on when a person lets agents read Actual Spend', async () => {
+    const wrapper = await openDialog();
+    await showTab(wrapper, 'spend');
+
+    wrapper.findAllComponents({ name: 'QToggle' }).find((t) => t.props('label') === 'Let agents read Actual Spend for reports')!.vm.$emit('update:modelValue', true);
+    await flushPromises();
+    saveButton().click();
+    await flushPromises();
+
+    expect(api.saveTenantSettings).toHaveBeenCalledWith({ 'reporting.agentsMayReadSpend': 'on' });
+  });
+
   /** The Concierge tab also holds this browser's terminal display. */
   it('holds this browser\'s terminal display, saved as it changes and never by Save', async () => {
     const wrapper = await openDialog();
@@ -775,8 +806,8 @@ describe('every tab', () => {
 
     expect([...seen.keys()].sort()).toEqual(
       [
-        'causation.depthLimit', 'concierge.idleTimeout', 'concierge.mayArchive', 'concierge.mayMerge', 'quiet.window', 'resume.maxAutomatic', 'runs.memoryLimitMb',
-        'theme.default', 'wip.maxRunning', 'wip.memoryPerRunMb', 'workflow.spendLimit',
+        'causation.depthLimit', 'concierge.idleTimeout', 'concierge.mayArchive', 'concierge.mayMerge', 'quiet.window', 'reporting.agentsMayReadSpend', 'resume.maxAutomatic',
+        'runs.memoryLimitMb', 'theme.default', 'wip.maxRunning', 'wip.memoryPerRunMb', 'workflow.spendLimit',
       ],
     );
     for (const [name, source] of seen) {

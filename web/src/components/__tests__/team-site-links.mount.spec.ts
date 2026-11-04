@@ -39,6 +39,12 @@ beforeEach(() => {
     vi.fn(
       fakeHost(
         [
+          (call) => (call.method === 'POST' && call.url === '/api/teams/JobTracker/sites/jobs/open'
+            ? reply(200, { url: '/sites/JobTracker/jobs/_c/CfDJ8tok/' })
+            : undefined),
+          (call) => (call.method === 'POST' && call.url === '/api/teams/Pictured/sites/team-picture/open'
+            ? reply(200, { url: '/sites/Pictured/team-picture/_c/CfDJ8pic/' })
+            : undefined),
           (call) => {
             const match = /^\/api\/teams\/([^/]+)\/sites$/.exec(call.url);
             if (!match || call.method !== 'GET') return undefined;
@@ -72,6 +78,41 @@ describe("the team's site links", () => {
     expect(anchors[0]!.attributes('target')).toBe('_blank');
     expect(anchors[0]!.attributes('rel')).toContain('noopener');
     expect(anchors[0]!.attributes('aria-label')).toBe('Open the jobs site');
+  });
+
+  // W27510: a plain click opens the site through a capability the app asks for, so the tab does
+  // not depend on the browser sending the session cookie with its first request.
+  it('opens the site on a plain click through a capability, in a tab cut from its opener', async () => {
+    const wrapper = await links('JobTracker');
+    const tab = { opener: 'the app' as unknown, location: { replace: vi.fn() } };
+    const opened = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+    wrapper.find('[data-team-site="jobs"]').element.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(true);
+    expect(opened).toHaveBeenCalledWith('about:blank', '_blank');
+    expect(tab.opener).toBeNull();
+    await settle();
+
+    expect(calls.filter((call) => call.method === 'POST').map((call) => call.url)).toEqual(['/api/teams/JobTracker/sites/jobs/open']);
+    expect(tab.location.replace).toHaveBeenCalledWith(new URL('/sites/JobTracker/jobs/_c/CfDJ8tok/', window.location.href).href);
+    opened.mockRestore();
+  });
+
+  it('leaves a modified click to the browser\'s own link', async () => {
+    const wrapper = await links('JobTracker');
+    const opened = vi.spyOn(window, 'open').mockReturnValue(null);
+    // The test page has no browser to follow the link with: stop it after the component has seen it.
+    const anchor = wrapper.find('[data-team-site="jobs"]').element;
+    anchor.addEventListener('click', (event) => event.preventDefault(), { once: true });
+
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, ctrlKey: true });
+    anchor.dispatchEvent(click);
+    await settle();
+
+    expect(opened).not.toHaveBeenCalled();
+    expect(calls.some((call) => call.method === 'POST')).toBe(false);
+    opened.mockRestore();
   });
 
   it('shows nothing for a team with no site, and nothing when the read fails', async () => {
@@ -116,6 +157,27 @@ describe("the team's site links", () => {
     window.dispatchEvent(new Event('focus'));
     await settle();
     expect(wrapper.find('[data-team-site="team-picture"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  // W27510 holds for the Team picture's globe too: a plain click opens it through `openSiteTab`,
+  // on a capability the app asks for, never as a bare link that needs the session cookie.
+  it("opens the Team picture on a plain click through a capability, like any site", async () => {
+    sites.Pictured = [site('Pictured', 'team-picture', 3)];
+    const wrapper = await links('Pictured');
+    const tab = { opener: 'the app' as unknown, location: { replace: vi.fn() } };
+    const opened = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+    wrapper.find('[data-team-site="team-picture"]').element.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(true);
+    expect(opened).toHaveBeenCalledWith('about:blank', '_blank');
+    expect(tab.opener).toBeNull();
+    await settle();
+
+    expect(calls.filter((call) => call.method === 'POST').map((call) => call.url)).toEqual(['/api/teams/Pictured/sites/team-picture/open']);
+    expect(tab.location.replace).toHaveBeenCalledWith(new URL('/sites/Pictured/team-picture/_c/CfDJ8pic/', window.location.href).href);
+    opened.mockRestore();
     wrapper.unmount();
   });
 });

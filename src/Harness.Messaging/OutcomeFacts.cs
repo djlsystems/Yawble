@@ -23,7 +23,8 @@ public static class OutcomeFacts
     public const string OutcomeColumns =
         """
         id, name, description, status, merged_into, source, target_metric, target_unit, target_value,
-        created_by, created_by_kind, created_at, updated_at, confirmed_by, confirmed_at, value_amount
+        created_by, created_by_kind, created_at, updated_at, confirmed_by, confirmed_at, value_amount,
+        presentation
         """;
 
     /// <summary>The <c>tenant_events</c> columns, in the order <see cref="ReadEvent"/> reads them.</summary>
@@ -125,7 +126,8 @@ public static class OutcomeFacts
             reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
             Text(reader, 4), reader.GetString(5), Text(reader, 6), Text(reader, 7), Text(reader, 8),
             reader.GetString(9), reader.GetString(10), MessageRows.ReadStamp(reader.GetString(11)),
-            MessageRows.ReadStamp(reader.GetString(12)), Text(reader, 13), At(reader, 14), Text(reader, 15));
+            MessageRows.ReadStamp(reader.GetString(12)), Text(reader, 13), At(reader, 14), Text(reader, 15),
+            Text(reader, 16));
 
     public static TenantEvent ReadEvent(DbDataReader reader) =>
         new(
@@ -184,6 +186,32 @@ public static class OutcomeRules
     public static string? ValueRefusal(string? value) =>
         !string.IsNullOrWhiteSpace(value) && OutcomeValue.Canonical(value) is null ? OutcomeValue.Refusal : null;
 
+    /// <summary>A presentation given that is not one of <see cref="OutcomePresentation.All"/>, or null. Absent
+    /// (null) leaves it alone; anything else - an empty string, another case, another word - is refused,
+    /// and nothing is stored.</summary>
+    public static string? PresentationRefusal(string? presentation) =>
+        presentation is not null && !OutcomePresentation.IsKnown(presentation) ? OutcomePresentation.Refusal : null;
+
+    /// <summary>
+    /// THE EDIT'S TENANT ROW DETAIL, NAMING A PRESENTATION CHANGE: <paramref name="detail"/> (the route's
+    /// JSON object) with <c>presentation: {old, new}</c> added when <paramref name="before"/> and
+    /// <paramref name="after"/> differ in it - <c>old</c> as stored, null when it was never picked (read
+    /// as project). Unchanged otherwise.
+    /// </summary>
+    public static string? EditDetail(string? detail, Outcome before, Outcome after)
+    {
+        if (before.Presentation == after.Presentation) return detail;
+
+        var node = (detail is null ? null : System.Text.Json.Nodes.JsonNode.Parse(detail) as System.Text.Json.Nodes.JsonObject)
+            ?? new System.Text.Json.Nodes.JsonObject();
+        node["presentation"] = new System.Text.Json.Nodes.JsonObject
+        {
+            ["old"] = before.Presentation,
+            ["new"] = after.Presentation,
+        };
+        return node.ToJsonString();
+    }
+
     public static string Taken(Outcome taken) =>
         $"An {taken.Status} outcome is already named \"{taken.Name}\" ({taken.Id}); names are unique among active and proposed outcomes.";
 
@@ -225,6 +253,7 @@ public static class OutcomeRules
             TargetUnit = Target(edit.TargetUnit, outcome.TargetUnit),
             TargetValue = Target(edit.TargetValue, outcome.TargetValue),
             Value = edit.Value is null ? outcome.Value : string.IsNullOrWhiteSpace(edit.Value) ? null : OutcomeValue.Canonical(edit.Value),
+            Presentation = edit.Presentation ?? outcome.Presentation,
         };
 
     public static string? ConfirmRefusal(Outcome outcome, Outcome? taken) =>

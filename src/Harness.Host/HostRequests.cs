@@ -602,7 +602,16 @@ internal sealed record UpdateContainer(
         + "interactive. Omit or send blank to leave it unchanged. Changing it takes effect on the "
         + "member's next wake, with no restart: the catalog entry the runner resolves is updated in "
         + "the same operation.")]
-    string? Agent = null);
+    string? Agent = null,
+    [property: Description(
+        "The member's own estimated hourly rate, a number of zero or more (60, 62.5), in the tenant "
+        + "currency. Omit to leave it unchanged; null or blank clears it, so an agent inherits the "
+        + "tenant default and a plugin is not priced. 0 is explicitly not priced.")]
+    JsonElement HourlyRate = default,
+    [property: Description(
+        "The member's billing account id, an id in the 8-4-4-4-12 hex form outcome ids use, stored "
+        + "lower-case. Omit to leave it unchanged; null or blank clears it.")]
+    JsonElement BillingAccountId = default);
 
 /// <remarks>
 /// There is no `From`. A caller-supplied sender is never validated, so it could name any container

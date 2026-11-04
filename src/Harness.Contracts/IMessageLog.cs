@@ -18,6 +18,14 @@ public interface IMessageLog
     Task<Message> AppendAsync(NewMessage message, CancellationToken ct = default);
 
     /// <summary>
+    /// As <see cref="AppendAsync(NewMessage, CancellationToken)"/>, for the authenticated principal
+    /// <paramref name="context"/> (null: none, and the row's source decides). The row's origin and
+    /// publisher kind are DERIVED here (<see cref="MessageOrigin"/>), never read from the message: a
+    /// root takes its origin from the principal, a caused row inherits its root's.
+    /// </summary>
+    Task<Message> AppendAsync(NewMessage message, AppendContext? context, CancellationToken ct = default);
+
+    /// <summary>
     /// An append and the caller's own writes to the same database, in ONE transaction: all of it
     /// commits, or none of it does. <paramref name="before"/> runs first and answers the message to
     /// append, or null to append nothing (its writes still commit); <paramref name="after"/> runs
@@ -34,6 +42,14 @@ public interface IMessageLog
     Task<Message?> AppendWithinAsync(
         Func<DbConnection, DbTransaction, CancellationToken, Task<NewMessage?>> before,
         Func<DbConnection, DbTransaction, Message, CancellationToken, Task> after,
+        CancellationToken ct = default);
+
+    /// <summary>The append-within above, for the authenticated principal <paramref name="context"/>; the
+    /// row's origin is derived as the <c>AppendAsync</c> overload with a context says.</summary>
+    Task<Message?> AppendWithinAsync(
+        Func<DbConnection, DbTransaction, CancellationToken, Task<NewMessage?>> before,
+        Func<DbConnection, DbTransaction, Message, CancellationToken, Task> after,
+        AppendContext? context,
         CancellationToken ct = default);
 
     /// <summary>

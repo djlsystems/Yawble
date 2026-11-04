@@ -116,6 +116,20 @@ public static class LedgerFacts
                 ? "blocked"
                 : Bool(terminal.Payload, PayloadFields.Quiet) ? "quiet" : "completed";
 
+    /// <summary>
+    /// WHY A RUN ENDED INTERRUPTED, as <c>usage_ledger.reason_code</c>: a failed run's code mapped from its
+    /// <c>failureClass</c>, a blocked run's from the run-level <c>blocked</c> or <c>needsDecision</c> row
+    /// that blocked it (<paramref name="blocking"/>, its newest), and null for a completed or quiet run.
+    /// Both ledger writers call this, so their values cannot differ.
+    /// </summary>
+    public static string? ReasonCode(Message terminal, string outcome, (string Type, string Payload)? blocking) =>
+        outcome switch
+        {
+            "failed" => InterruptionReasons.Of(terminal.Type, terminal.Payload),
+            "blocked" when blocking is { } row => InterruptionReasons.Of(row.Type, row.Payload),
+            _ => null,
+        };
+
     /// <summary>The member's kind from its roster agent; a member no longer on the roster still has a
     /// kind when it ran no model.</summary>
     public static string? MemberKind(string? agent, LedgerRows.Usage usage) =>
@@ -164,6 +178,41 @@ public static class LedgerFacts
             reader.GetString(6),
             Text(reader, 7),
             reader.GetInt64(8) != 0);
+
+    /// <summary>
+    /// The cost read's columns over <c>usage_ledger u LEFT JOIN execution_snapshots s ON s.start_seq =
+    /// u.start_seq LEFT JOIN workflow_outcome_links l ON l.id = s.link_id</c>, in the order
+    /// <see cref="ReadExecutionRun"/> reads them: the run's own columns, then its snapshot's.
+    /// </summary>
+    public static readonly string ExecutionRunColumns =
+        string.Join(", ", RunColumns.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Select(c => $"u.{c}"))
+        + ", u.start_seq, s.start_seq, s.member_kind, s.rate_amount, s.rate_currency, s.rate_source, s.link_id, l.id, l.outcome_id";
+
+    /// <summary>One row of <see cref="ExecutionRunColumns"/>: the run, and its snapshot when it has one.</summary>
+    public static ExecutionRunRow ReadExecutionRun(DbDataReader reader) =>
+        new(
+            ReadRun(reader),
+            Long(reader, 21),
+            reader.IsDBNull(22)
+                ? null
+                : new ExecutionRunSnapshot(
+                    Text(reader, 23),
+                    Text(reader, 24),
+                    Text(reader, 25),
+                    reader.GetString(26),
+                    Long(reader, 27),
+                    !reader.IsDBNull(28),
+                    Text(reader, 29)));
+
+    public static async Task<IReadOnlyList<ExecutionRunRow>> ReadExecutionRunsAsync(DbCommand command, CancellationToken ct)
+    {
+        var rows = new List<ExecutionRunRow>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+
+        while (await reader.ReadAsync(ct)) rows.Add(ReadExecutionRun(reader));
+
+        return rows;
+    }
 
     public static async Task<IReadOnlyList<UsageLedgerRow>> ReadRunsAsync(DbCommand command, CancellationToken ct)
     {

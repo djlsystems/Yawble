@@ -232,6 +232,29 @@ export interface MemberDetail {
 
   /** When `systemPrompt` was last set, ISO-8601 UTC. */
   systemPromptSetAt?: string | null
+
+  /** The member's OWN estimated hourly rate as stored: canonical text, null for no override, "0" for
+   *  explicitly not priced. */
+  hourlyRate?: string | null
+
+  /** The member's billing account id as stored, or null. It may name no account (stored before
+   *  billing accounts existed). */
+  billingAccountId?: string | null
+
+  /** Who last changed the rate or the account, and when (ISO-8601 UTC). */
+  billingSetBy?: string | null
+  billingSetAt?: string | null
+
+  /** What a run starting now is snapshotted at, as the Host decided it. */
+  effectiveRate?: MemberEffectiveRate
+}
+
+/** A member's effective estimated hourly rate: `amount` canonical text and `currency` only when priced;
+ *  `source` is `member` (its own override), `tenant` (the default) or `none` (not priced). */
+export interface MemberEffectiveRate {
+  amount: string | null
+  currency: string | null
+  source: 'member' | 'tenant' | 'none'
 }
 
 /**

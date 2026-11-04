@@ -241,9 +241,21 @@ public static class SqlServerAuthPluginsSchema
              );
              """),
 
-        // `AuthSchema`'s auth-034: whether the team keeps its Team picture, 0 or 1, as `paused` is.
+        // `AuthSchema`'s auth-034: a member's own estimated hourly rate (canonical decimal text, NULL
+        // no override, "0" not priced), its billing account id, and who last changed either and when.
         new MigrationStep(
             "auth-034",
+            """
+            ALTER TABLE team_members ADD
+                est_hourly_rate    NVARCHAR(64)  NULL,
+                billing_account_id NVARCHAR(64)  NULL,
+                billing_set_by     NVARCHAR(MAX) NULL,
+                billing_set_at     NVARCHAR(40)  NULL;
+            """),
+
+        // `AuthSchema`'s auth-035: whether the team keeps its Team picture, 0 or 1, as `paused` is.
+        new MigrationStep(
+            "auth-035",
             """
             ALTER TABLE teams ADD team_picture BIGINT NOT NULL CONSTRAINT df_teams_team_picture DEFAULT 0;
             """),

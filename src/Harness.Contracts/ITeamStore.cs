@@ -126,7 +126,23 @@ public sealed record PersistedMember(
     /// Who last set <see cref="SystemPrompt"/>, or null when nobody is known to have: a member
     /// from before `auth-009`, or a plugin. See <see cref="SystemPromptSetter"/>.
     /// </summary>
-    SystemPromptSetter? SystemPromptSetBy = null);
+    SystemPromptSetter? SystemPromptSetBy = null,
+
+    /// <summary>
+    /// The member's own estimated hourly rate (<c>auth-034</c>) as canonical decimal text: null is no
+    /// override, "0" is explicitly not priced. Read with the tenant settings by <c>EffectiveCost</c>.
+    /// </summary>
+    string? EstHourlyRate = null,
+
+    /// <summary>The member's billing account id, a lower-case GUID, or null.</summary>
+    string? BillingAccountId = null,
+
+    /// <summary>Who last changed <see cref="EstHourlyRate"/> or <see cref="BillingAccountId"/>, a clear
+    /// included: a person's email, as the tenant log names them. Kept when the values are cleared.</summary>
+    string? BillingSetBy = null,
+
+    /// <summary>When <see cref="BillingSetBy"/> made that change, in UTC.</summary>
+    DateTimeOffset? BillingSetAt = null);
 
 /// <summary>
 /// Who last set a member's own instructions, and when. Written at hire - the hiring principal -

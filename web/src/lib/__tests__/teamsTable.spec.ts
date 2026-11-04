@@ -8,8 +8,10 @@ import {
   proposeCloneName,
   readTeamSort,
   teamRowFrom,
+  withPeriodFigures,
   writeTeamSort,
   type TeamRow,
+  type TeamSort,
 } from '../teamsTable';
 import { asTeamId, type Team, type TeamWorkflows, type TeamWorkflowTiming } from '../../api/types';
 
@@ -232,6 +234,39 @@ describe('compareTeams', () => {
     const sort = { column: 'status', descending: true } as const;
 
     expect(compareTeams(row({ name: 'alpha' }), row({ name: 'Bravo' }), sort)).toBeLessThan(0);
+  });
+});
+
+describe('sorting by the period\'s figures', () => {
+  const sorted = (rows: TeamRow[], sort: TeamSort) => [...rows].sort((a, b) => compareTeams(a, b, sort)).map((r) => r.name);
+  const rows = [
+    row({ name: 'Delta', estimate: 30, agentSeconds: 3600 }),
+    row({ name: 'Alpha', estimate: 30, agentSeconds: 7200 }),
+    row({ name: 'Echo', estimate: null, agentSeconds: 0 }),
+    row({ name: 'Bravo', estimate: 90, agentSeconds: 1800 }),
+    row({ name: 'Charlie', estimate: null, agentSeconds: 600 }),
+    row({ name: 'Foxtrot', estimate: null, agentSeconds: null }),
+  ];
+
+  it('sorts by Estimated Execution Cost, ties by name, and a team with no priced figure after the rest both ways', () => {
+    expect(sorted(rows, { column: 'estimate', descending: false })).toEqual(['Alpha', 'Delta', 'Bravo', 'Charlie', 'Echo', 'Foxtrot']);
+    expect(sorted(rows, { column: 'estimate', descending: true })).toEqual(['Bravo', 'Alpha', 'Delta', 'Charlie', 'Echo', 'Foxtrot']);
+  });
+
+  it('sorts by Agent Hours, a team with no runs at 0, and one whose figures have not landed last both ways', () => {
+    expect(sorted(rows, { column: 'hours', descending: false })).toEqual(['Echo', 'Charlie', 'Bravo', 'Delta', 'Alpha', 'Foxtrot']);
+    expect(sorted(rows, { column: 'hours', descending: true })).toEqual(['Alpha', 'Delta', 'Bravo', 'Charlie', 'Echo', 'Foxtrot']);
+  });
+
+  it('takes the route\'s own total and seconds onto the row, and neither for a team the answer does not carry', () => {
+    expect(withPeriodFigures(row(), { totals: { cost: 12.5, agentSeconds: 900 } })).toMatchObject({ estimate: 12.5, agentSeconds: 900 });
+    expect(withPeriodFigures(row(), { totals: { cost: null, agentSeconds: 0 } })).toMatchObject({ estimate: null, agentSeconds: 0 });
+    expect(withPeriodFigures(row(), null)).toMatchObject({ estimate: null, agentSeconds: null });
+  });
+
+  it('round-trips a stored sort on either figure', () => {
+    expect(readTeamSort(writeTeamSort({ column: 'estimate', descending: true }))).toEqual({ column: 'estimate', descending: true });
+    expect(readTeamSort(writeTeamSort({ column: 'hours', descending: false }))).toEqual({ column: 'hours', descending: false });
   });
 });
 

@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { useSessionStore } from '../stores/session';
 import { doorFor } from '../lib/door';
-import { goOnward } from '../router/guard';
+import { goOnward, siteEntry } from '../router/guard';
 import AuthForm from '../components/AuthForm.vue';
 import VersionTag from '../components/VersionTag.vue';
 import { productLogoFor, productTagline, productTitle } from '../presentation/product';
@@ -22,11 +22,19 @@ const session = useSessionStore();
 const router = useRouter();
 const route = useRoute();
 
+const door = computed(() => doorFor(session));
+
 /** Where signing in continues to: the route or site entry a signed-out visitor asked for, else the Console. */
 const left = { done: false };
-const onward = () => goOnward(route.query, (path) => router.replace(path), left);
+const refusal = ref('');
+const onward = () => {
+  refusal.value = '';
+  return goOnward(route.query, (path) => router.replace(path), left, (why) => { refusal.value = why; });
+};
 
-const door = computed(() => doorFor(session));
+/** Signed in with a site entry in `next`: the door is on its way to the site, not asking to sign in. */
+const opening = computed(() => door.value === 'console' && siteEntry(route.query) !== null);
+const toConsole = () => void router.replace('/console');
 
 watch(
   door,
@@ -49,7 +57,22 @@ const mode = computed<'create' | 'login'>(() => (door.value === 'create' ? 'crea
       <div class="door-version"><VersionTag /></div>
       <p class="tagline">{{ productTagline }}</p>
 
-      <q-card flat bordered class="door-card q-pa-md">
+      <q-card v-if="opening" flat bordered class="door-card q-pa-md" data-door-opening-site>
+        <q-card-section>
+          <div class="text-h6">Opening the site</div>
+          <div v-if="refusal" class="q-mt-sm" role="alert" data-door-site-refusal>{{ refusal }}</div>
+          <div v-else class="row items-center q-gutter-sm q-mt-sm" role="status">
+            <q-spinner size="1.25em" aria-hidden="true" />
+            <span>One moment…</span>
+          </div>
+        </q-card-section>
+        <q-card-actions v-if="refusal" align="right">
+          <q-btn flat no-caps label="Try again" data-door-site-retry @click="onward" />
+          <q-btn unelevated no-caps color="primary" label="Go to the Console" data-door-site-console @click="toConsole" />
+        </q-card-actions>
+      </q-card>
+
+      <q-card v-else flat bordered class="door-card q-pa-md">
         <q-card-section class="q-pb-none">
           <div class="text-h6">
             {{ mode === 'create' ? 'Create the first account' : 'Log in' }}

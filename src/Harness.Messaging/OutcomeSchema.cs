@@ -299,5 +299,213 @@ public static class OutcomeSchema
             """
             ALTER TABLE outcomes ADD COLUMN value_amount TEXT NULL;
             """),
+
+        // WHAT A RUN WAS CONFIGURED AS WHEN IT STARTED, one row per `agentContainer.started` row,
+        // written in that row's own append transaction (`LedgerRows`, decided by
+        // `ExecutionSnapshotFacts`). The member's kind and preset, the rate it is priced at and where
+        // that rate came from (`member`, `tenant` or `none`; `none` has no amount, never a zero),
+        // and `link_id`, the `workflow_outcome_links` row current for the workflow at start (an
+        // unlink row's id too; NULL only when the workflow had no link). `model` is not known yet and
+        // stays NULL; the `origin_*` columns carry the workflow's derived origin since messages-007.
+        //
+        // IMMUTABLE: the configuration at start covers the whole run, so a rate changed or a link
+        // written later never reaches this row; the triggers refuse every UPDATE and DELETE.
+        //
+        // `usage_ledger.start_seq` names the run's snapshot. An ADD COLUMN rewrites no row and fires
+        // no trigger: a row written before this step reads NULL, and nothing back-fills it.
+        new MigrationStep(
+            "outcome-008",
+            """
+            CREATE TABLE execution_snapshots (
+                start_seq          INTEGER PRIMARY KEY,
+                correlation        INTEGER NOT NULL,
+                team_id            TEXT    NULL COLLATE NOCASE,
+                team_name          TEXT    NULL,
+                member             TEXT    NOT NULL COLLATE NOCASE,
+                member_kind        TEXT    NULL,
+                agent_preset       TEXT    NULL,
+                model              TEXT    NULL,
+                rate_amount        TEXT    NULL,
+                rate_currency      TEXT    NULL,
+                rate_source        TEXT    NOT NULL,
+                billing_account_id TEXT    NULL,
+                link_id            INTEGER NULL,
+                started_at         TEXT    NOT NULL,
+                origin_kind        TEXT    NULL,
+                origin_actor_id    TEXT    NULL,
+                origin_actor_email TEXT    NULL,
+                origin_trigger     TEXT    NULL
+            );
+
+            CREATE INDEX ix_execution_snapshots_correlation ON execution_snapshots(correlation);
+            CREATE INDEX ix_execution_snapshots_team_started ON execution_snapshots(team_id, started_at);
+
+            CREATE TRIGGER execution_snapshots_no_update BEFORE UPDATE ON execution_snapshots
+            BEGIN SELECT RAISE(ABORT, 'execution_snapshots is append-only'); END;
+
+            CREATE TRIGGER execution_snapshots_no_delete BEFORE DELETE ON execution_snapshots
+            BEGIN SELECT RAISE(ABORT, 'execution_snapshots is append-only'); END;
+
+            ALTER TABLE usage_ledger ADD COLUMN start_seq INTEGER NULL;
+            """),
+
+        // THE RATE IN FORCE WHEN THIS STEP WAS APPLIED, one row, written once by the start that applies
+        // it (`RateEpochFacts`) and never again: a positive stored `outcomes.agentHourlyRate`, else - with
+        // no such row - a positive `Outcomes:AgentHourlyRate` from configuration, else no rate. It prices
+        // a run from before snapshots that started before every recorded rate change
+        // (`fallback-at-upgrade`). `id` is 1 and only 1, so a second row cannot be written; the triggers
+        // refuse every UPDATE and DELETE, so a later rate change never moves it.
+        new MigrationStep(
+            "outcome-012",
+            """
+            CREATE TABLE rate_epochs (
+                id            INTEGER PRIMARY KEY CHECK (id = 1),
+                recorded_at   TEXT    NOT NULL,
+                rate_amount   TEXT    NULL,
+                rate_currency TEXT    NULL,
+                rate_source   TEXT    NOT NULL
+            );
+
+            CREATE TRIGGER rate_epochs_no_update BEFORE UPDATE ON rate_epochs
+            BEGIN SELECT RAISE(ABORT, 'rate_epochs is append-only'); END;
+
+            CREATE TRIGGER rate_epochs_no_delete BEFORE DELETE ON rate_epochs
+            BEGIN SELECT RAISE(ABORT, 'rate_epochs is append-only'); END;
+            """),
+
+        // THE VENDOR ACCOUNTS THE INSTANCE IS BILLED THROUGH, a definition table like `outcomes`: many
+        // rows, edited in place, never deleted (the trigger refuses it), and no row seeded. `id` is a
+        // lower-case GUID the store assigns; `billing_type` (subscription, metered, service),
+        // `billing_period` (monthly, annual) and `scope` are closed sets the stores hold
+        // (`BillingAccountRules`) - `scope` has no CHECK, so a later scope needs no edit here.
+        // `currency` is the account's own, never converted. `recurring_amount` is canonical decimal
+        // text or NULL, never projected and never added to an estimate. `instance_id` is the
+        // `instance.id` setting, copied once at create. Not a connection: no credential column.
+        //
+        // Numbered 009 though it follows 012: the number was reserved for this table before 012
+        // shipped, and the steps apply in list order.
+        new MigrationStep(
+            "outcome-009",
+            """
+            CREATE TABLE billing_accounts (
+                id               TEXT    PRIMARY KEY,
+                name             TEXT    NOT NULL,
+                vendor           TEXT    NOT NULL,
+                billing_type     TEXT    NOT NULL,
+                currency         TEXT    NOT NULL,
+                billing_period   TEXT    NOT NULL,
+                recurring_amount TEXT    NULL,
+                effective_from   TEXT    NOT NULL,
+                effective_to     TEXT    NULL,
+                active           INTEGER NOT NULL,
+                description      TEXT    NULL,
+                scope            TEXT    NOT NULL,
+                instance_id      TEXT    NOT NULL,
+                created_by       TEXT    NOT NULL,
+                created_at       TEXT    NOT NULL,
+                updated_at       TEXT    NOT NULL
+            );
+
+            CREATE TRIGGER billing_accounts_no_delete BEFORE DELETE ON billing_accounts
+            BEGIN SELECT RAISE(ABORT, 'billing_accounts rows are deactivated, never deleted'); END;
+            """),
+
+        // THE CHARGES RECORDED ON A BILLING ACCOUNT, append-only: the triggers refuse every UPDATE and
+        // DELETE, so a correction is a new row whose `supersedes` names the row it corrects - a void
+        // (status `void`) or a replace (a new `confirmed` row). `supersedes` is unique, so a row is
+        // corrected at most once even when two corrections race. `account_id` names a
+        // `billing_accounts` row and `currency` is that account's; `amount` is canonical decimal text,
+        // negative only for an adjustment. `kind` and `status` are closed sets the stores hold
+        // (`ExpenseRules`), with no CHECK, so a later kind needs no edit here. No row is seeded.
+        new MigrationStep(
+            "outcome-013",
+            """
+            CREATE TABLE expenses (
+                id                   TEXT PRIMARY KEY,
+                account_id           TEXT NOT NULL,
+                amount               TEXT NOT NULL,
+                currency             TEXT NOT NULL,
+                service_period_start TEXT NOT NULL,
+                service_period_end   TEXT NOT NULL,
+                kind                 TEXT NOT NULL,
+                status               TEXT NOT NULL,
+                supersedes           TEXT NULL,
+                reference            TEXT NULL,
+                note                 TEXT NULL,
+                recorded_by          TEXT NOT NULL,
+                recorded_at          TEXT NOT NULL
+            );
+
+            CREATE UNIQUE INDEX ux_expenses_supersedes ON expenses(supersedes) WHERE supersedes IS NOT NULL;
+            CREATE INDEX ix_expenses_account ON expenses(account_id, recorded_at);
+
+            CREATE TRIGGER expenses_no_update BEFORE UPDATE ON expenses
+            BEGIN SELECT RAISE(ABORT, 'expenses is append-only'); END;
+
+            CREATE TRIGGER expenses_no_delete BEFORE DELETE ON expenses
+            BEGIN SELECT RAISE(ABORT, 'expenses is append-only'); END;
+            """),
+
+        // WHO A RUN'S WORKFLOW BEGAN WITH, on the run's ledger row: the kind and the actor id of the
+        // workflow's derived origin (messages-007), copied when the run ends, so the attribution
+        // survives the log's purge. An ADD COLUMN rewrites no row and fires no trigger: a row written
+        // before this step reads NULL, and nothing back-fills it.
+        new MigrationStep(
+            "outcome-014",
+            """
+            ALTER TABLE usage_ledger ADD COLUMN origin_kind TEXT NULL;
+            ALTER TABLE usage_ledger ADD COLUMN origin_actor_id TEXT NULL;
+            """),
+
+        // WHY A RUN ENDED INTERRUPTED, on its ledger row: one code from InterruptionReasons, written
+        // when a run ends failed (mapped from its failureClass) or blocked (its blocked or
+        // needsDecision row's code); NULL for a completed or quiet run. An ADD COLUMN rewrites no row
+        // and fires no trigger: a row written before this step reads NULL, and nothing back-fills it.
+        new MigrationStep(
+            "outcome-015",
+            """
+            ALTER TABLE usage_ledger ADD COLUMN reason_code TEXT NULL;
+            """),
+
+        // ONE ROW PER MEANINGFUL ACT BY A PERSON: who (a person's id and email, a key's owner as they
+        // stood then), which act (InterventionKinds), on which team and workflow, the workflow's outcome
+        // at that moment and the log row it went with. Written by the route, server side, in the same
+        // transaction as that log row; nothing publishes one. Only a Concierge session carries a
+        // measured duration. Append-only, as the other ledgers are; nothing back-fills it from the log.
+        new MigrationStep(
+            "outcome-010",
+            """
+            CREATE TABLE intervention_ledger (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                occurred_at         TEXT    NOT NULL,
+                actor_id            TEXT    NOT NULL,
+                actor_email         TEXT    NULL,
+                kind                TEXT    NOT NULL,
+                team_id             TEXT    NULL COLLATE NOCASE,
+                correlation         INTEGER NULL,
+                outcome_id_at_event TEXT    NULL,
+                related_seq         INTEGER NULL,
+                duration_seconds    INTEGER NULL,
+                duration_measured   INTEGER NOT NULL DEFAULT 0 CHECK (duration_measured IN (0, 1))
+            );
+
+            CREATE INDEX ix_intervention_ledger_team ON intervention_ledger(team_id, occurred_at);
+            CREATE INDEX ix_intervention_ledger_actor ON intervention_ledger(actor_id, occurred_at);
+
+            CREATE TRIGGER intervention_ledger_no_update BEFORE UPDATE ON intervention_ledger
+            BEGIN SELECT RAISE(ABORT, 'intervention_ledger is append-only'); END;
+
+            CREATE TRIGGER intervention_ledger_no_delete BEFORE DELETE ON intervention_ledger
+            BEGIN SELECT RAISE(ABORT, 'intervention_ledger is append-only'); END;
+            """),
+
+        // HOW A PERSON READS AN OUTCOME: project or operational (OutcomePresentation), NULL until a person
+        // picks one, and NULL reads as project. The CHECK holds the closed set; an ADD COLUMN rewrites no
+        // row, so every outcome from before reads NULL, and nothing back-fills it.
+        new MigrationStep(
+            "outcome-011",
+            """
+            ALTER TABLE outcomes ADD COLUMN presentation TEXT NULL CHECK (presentation IN ('project', 'operational'));
+            """),
     ];
 }

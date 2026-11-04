@@ -666,7 +666,7 @@ public sealed class OutcomeTests(HostFixture host) : IClassFixture<HostFixture>
         Assert.False(alpha.GetProperty("deleted").GetBoolean());
 
         var none = list.GetProperty("noOutcome");
-        Assert.Equal(OutcomeFigures.NoOutcomeName, none.GetProperty("name").GetString());
+        Assert.Equal(OutcomeFigures.UnattributedName, none.GetProperty("name").GetString());
         Assert.Equal(1, none.GetProperty("figures").GetProperty("workflows").GetProperty("total").GetInt32());
         Assert.Equal(3, none.GetProperty("figures").GetProperty("tokens").GetProperty("billable").GetInt64());
         Assert.True(list.TryGetProperty("ledgerStartedAt", out _));
@@ -1152,7 +1152,7 @@ public sealed class OutcomeTests(HostFixture host) : IClassFixture<HostFixture>
         Assert.Contains("the Outcome filter", Flat(BuiltInSkills.Find("kanban")!.Body), StringComparison.Ordinal);
 
         // THE TRANSPORT PREAMBLE, on every built-in, names the tool.
-        Assert.All(BuiltInSkills.Bodies(), body => Assert.Contains("`site`, and `outcome`.", body, StringComparison.Ordinal));
+        Assert.All(BuiltInSkills.Bodies(), body => Assert.Contains("`site`, `outcome`, and `report`.", body, StringComparison.Ordinal));
     }
 
     private static string Flat(string text) =>

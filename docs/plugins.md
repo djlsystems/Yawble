@@ -395,6 +395,7 @@ Content-Type: application/json
 | `skills` | optional | Files inside the plugin, in the same front-matter format as a skill. Indexed at load and on every rescan. See [Skills](#skills). |
 | `requires` | optional | The runtimes the plugin needs from the image: `dotnet`, `node`, `python3`. See [Runtimes](#runtimes-requires). |
 | `platforms` | optional | `{"linux-x64": "bin/x64/p", "linux-arm64": "bin/arm64/p"}`, each a relative path inside the version directory. The entry for this machine's processor, when there is one, is run instead of `executable.path`. |
+| `cost` | optional | `{"type": "duration"}`: how the plugin's runs are priced. Duration is the only type, and a manifest with no `cost` (or no `cost.type`) is duration. See [Cost type: `cost`](#cost-type-cost). |
 | `actions`, `consumes`, `health`, `signature`, `publisher`, `minHostVersion`, `permits` | reserved | Kept, and not acted on. |
 
 Any other key is ignored and named on the start-up line. This lets a manifest written for a later
@@ -752,6 +753,26 @@ installed plugins that merely share a name are two plugins, and neither replaces
 - **No two choices read alike.** Wherever a plugin is chosen - Add member, Member settings' Agent, the
   solution setup's list, the hiring list (`label`) - a plugin whose name another installed plugin has
   reads `Cloud (plugin, cloud-plugin 3.0.0)`; a name nobody else has reads `Cloud (plugin)` as before.
+
+### Cost type: `cost`
+
+```json
+"cost": { "type": "duration" }
+```
+
+- **Duration is the only cost type.** A plugin run's estimate is its time at its member's own
+  estimated hourly rate, set by a person in Member settings and recorded when the run starts, the
+  same way as an agent run. A plugin member with no rate of its own is **not priced**: it never takes
+  the agent default, and it is never `$0`. A plugin run from before estimates were recorded is
+  **unavailable**, never priced at the agent rate. See [cost.md](cost.md#how-a-run-is-priced).
+- **Absent means duration.** A manifest with no `cost`, `"cost": null`, or `"cost": {}` is duration.
+  Nothing is priced from the field: it states the pricing that already applies.
+- **Any other type is refused.** `"type"` must be exactly `"duration"`; per invocation, per
+  transaction, per unit, a fixed service charge and a provider-reported cost are not built, so a
+  manifest naming one is refused, in one sentence naming the field - the same words from the Host
+  (`PluginManifest.CostType`) and the operator CLI (`cli/internal/plugin`), off one cases file
+  (`tests/Fixtures/PluginCost/cases.json`). A key inside `cost` other than `type` is ignored and named
+  on the start-up line as `cost.<key>`.
 
 ### Named secrets: `namedSecrets`
 
@@ -1353,8 +1374,15 @@ chosen there; it is not a refusal, because the picker and Connect are right besi
   the fields and secret bindings that changed, never a value) and each value with its own
   `member.secret-*` row are one transaction.
 - It takes effect on the member's next run: the runner reads the settings at every run.
-- Both routes are humans-only. A Manager cannot change a member's settings after hire, as it cannot
+- The `PUT` is humans-only. A Manager cannot change a member's settings after hire, as it cannot
   change a member's instructions.
+- The `GET` is a person's, and also readable by that person's own **API key** (`X-Api-Key`, holding
+  `Read`, under the person's reach). An API key never gets a secret value: its answer is the same
+  shape with every `value` removed on the server - no `secretStates[].value` for a field declared
+  `"masked": false`, no `value` on an unmasked table secret cell in `tableSecretStates` - so it reads
+  each secret's state only (`set`, `setBy`, `setAt`, `source`). A Manager, a member, a plugin and a
+  Concierge are refused it as before, and every write (`PUT` here, `PUT`/`DELETE .../secrets/{field}`)
+  and `GET .../secrets` stay a person's.
 
 ### Signing in to a site: the interactive sign-in page
 
@@ -1827,6 +1855,9 @@ Pinned by `TeamConnectionsTests` and `WebsiteConnectionsTests`.
   catalog package's `replaces`. The web mount specs `plugins-same-name` (Add member and Member
   settings labels, one Plugins tile per installed id even when `versions` lacks one, the replaces
   line and Move, the install answer) and `marketplace-plugin-replaced`.
+- **A plugin's cost type.** `PluginCostManifestTests` (every built-in plugin's manifest still loads) and
+  `cli/internal/plugin/manifest_test.go`'s `TestEachSharedCostIsAcceptedAsDuration`,
+  `TestEachOtherSharedCostIsRefusedNamingTheField` and `TestAnExplicitNullCostIsDuration` read one cases file.
 - **Upgrading from the Marketplace.** `PluginUpgradeAttentionTests` pins the install answer's
   `attention`: an upgrade that adds a required field and drops another names each member and both
   fields, keeps 1.0.0 on disk inactive and every member with its settings; an upgrade every member

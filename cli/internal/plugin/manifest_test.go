@@ -399,3 +399,81 @@ func TestEachSharedConnectionProvidersFaultIsRefusedNamingTheField(t *testing.T)
 		}
 	}
 }
+
+// costCases is tests/Fixtures/PluginCost/cases.json, which the Host's PluginCostManifestTests reads
+// too: each `cost` accepted as duration or refused, in the same sentences. A null accepted value is a
+// manifest with no `cost` at all.
+type costCases struct {
+	Accepted []struct {
+		Cost    json.RawMessage `json:"cost"`
+		Ignored []string        `json:"ignored"`
+	} `json:"accepted"`
+	Refused []struct {
+		Cost json.RawMessage `json:"cost"`
+		Says string          `json:"says"`
+	} `json:"refused"`
+}
+
+func readCostCases(t *testing.T) costCases {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "tests", "Fixtures", "PluginCost", "cases.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases costCases
+	if err := json.Unmarshal(raw, &cases); err != nil {
+		t.Fatal(err)
+	}
+	return cases
+}
+
+func costManifest(cost json.RawMessage) []byte {
+	field := ""
+	if len(cost) > 0 && string(cost) != "null" {
+		field = `,"cost":` + string(cost)
+	}
+	return []byte(`{"schemaVersion":1,"id":"fixture-cost","name":"n","description":"d","version":"1","protocol":"harness.member/1",
+		"executable":{"path":"run"}` + field + `}`)
+}
+
+func TestEachSharedCostIsAcceptedAsDuration(t *testing.T) {
+	cases := readCostCases(t)
+	for _, c := range cases.Accepted {
+		m, _, err := Parse(costManifest(c.Cost))
+		if err != nil {
+			t.Errorf("%s: %v", c.Cost, err)
+			continue
+		}
+		if m.CostType != DurationCost {
+			t.Errorf("%s: cost type %q, want %q", c.Cost, m.CostType, DurationCost)
+		}
+		var named []string
+		for _, key := range m.Ignored {
+			if strings.HasPrefix(key, "cost") {
+				named = append(named, key)
+			}
+		}
+		if strings.Join(named, ",") != strings.Join(c.Ignored, ",") {
+			t.Errorf("%s: ignored %v, want %v", c.Cost, named, c.Ignored)
+		}
+	}
+}
+
+func TestEachOtherSharedCostIsRefusedNamingTheField(t *testing.T) {
+	cases := readCostCases(t)
+	for _, c := range cases.Refused {
+		_, _, err := Parse(costManifest(c.Cost))
+		if err == nil || err.Error() != c.Says {
+			t.Errorf("%s: got %v, want %q", c.Cost, err, c.Says)
+		}
+	}
+}
+
+func TestAnExplicitNullCostIsDuration(t *testing.T) {
+	raw := []byte(`{"schemaVersion":1,"id":"fixture-cost","name":"n","description":"d","version":"1","protocol":"harness.member/1",
+		"executable":{"path":"run"},"cost":null}`)
+	m, _, err := Parse(raw)
+	if err != nil || m.CostType != DurationCost {
+		t.Fatalf("got %q, %v", m.CostType, err)
+	}
+}

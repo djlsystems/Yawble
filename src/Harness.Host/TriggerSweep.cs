@@ -123,9 +123,10 @@ public sealed class TriggerSweep(
         // A scheduled message type is matched under BINARY collation while ContainerId equality folds
         // case, so every type and identity-bearing payload field is built from the FOUND container.
         var found = container.Id;
-        if (await SkipReasonAsync(row, container, ct) is { } reason)
+        if (await SkipReasonAsync(row, container, ct) is { } skip)
         {
-            var skipped = await AppendSkippedAsync(found, reason, source, ct);
+            var reason = skip.Reason;
+            var skipped = await AppendSkippedAsync(found, skip, source, ct);
 
             await schedules.RecordOutcomeAsync(row.Id, firedAt: null, next, "skipped", skipped.Seq, row.MissedCount, ct);
             await tenant.WriteAsAsync(
@@ -245,9 +246,10 @@ public sealed class TriggerSweep(
         var found = container.Id;
         var moves = next != row.NextDueAt;
 
-        if (await SkipReasonAsync(row, container, ct) is { } reason)
+        if (await SkipReasonAsync(row, container, ct) is { } skip)
         {
-            var skipped = await AppendSkippedAsync(found, reason, source, ct);
+            var reason = skip.Reason;
+            var skipped = await AppendSkippedAsync(found, skip, source, ct);
             if (moves) await schedules.RecordOutcomeAsync(row.Id, firedAt: null, next, "skipped", skipped.Seq, row.MissedCount, ct);
             else await schedules.RecordSkipAsync(row.Id, "skipped", skipped.Seq, ct);
             await WriteFireRowAsync(TenantActions.ScheduleSkipped, row, found, now, next, instructionSeq: null, reason, ct);
@@ -292,24 +294,45 @@ public sealed class TriggerSweep(
 
     /// <summary>Why a fire of <paramref name="row"/> is skipped before its cap is asked: the team
     /// is archived (asked first: an archived team is paused too, and this says why), the team is paused, the team waits for a missing required input ("waiting for …", see
-    /// <see cref="SolutionWait"/>), or an idle-only trigger's member is busy. Null when none.</summary>
-    private async Task<string?> SkipReasonAsync(TriggerRow row, MemberRuntime container, CancellationToken ct)
+    /// <see cref="SolutionWait"/>), or an idle-only trigger's member is busy. Null when none. Each
+    /// carries its <see cref="InterruptionReasons"/> code, chosen here from the cause and never from the
+    /// sentence.</summary>
+    private async Task<Skip?> SkipReasonAsync(TriggerRow row, MemberRuntime container, CancellationToken ct)
     {
-        if (archive?.IsArchived(container.Id.Team) == true) return MessageTypes.ScheduleSkippedArchivedReason;
-        if (host.IsPaused(container.Id.Team)) return MessageTypes.ScheduleSkippedPausedReason;
-        if (waiting is not null && await waiting.WaitingForAsync(container.Id.Team, ct) is { } input) return input;
-        if (row.IdleOnly && await IsBusyAsync(container, ct)) return MessageTypes.ScheduleSkippedBusyReason;
+        if (archive?.IsArchived(container.Id.Team) == true)
+        {
+            return new(MessageTypes.ScheduleSkippedArchivedReason, InterruptionReasons.TeamArchived);
+        }
+
+        if (host.IsPaused(container.Id.Team))
+        {
+            return new(MessageTypes.ScheduleSkippedPausedReason, InterruptionReasons.PausedByPerson);
+        }
+
+        if (waiting is not null && await waiting.WaitingForAsync(container.Id.Team, ct) is { } input)
+        {
+            return new(input, SolutionWait.ReasonCode);
+        }
+
+        if (row.IdleOnly && await IsBusyAsync(container, ct))
+        {
+            return new(MessageTypes.ScheduleSkippedBusyReason, InterruptionReasons.Busy);
+        }
+
         return null;
     }
+
+    /// <summary>Why one fire is skipped: the sentence a person reads and the code beside it.</summary>
+    private sealed record Skip(string Reason, string Code);
 
     // `member`, not `container`: this row's own Source is `schedule:<id>` (see SourceOf below),
     // never the member's identity, so this field is the ONLY carrier of it - not a duplicate of the
     // Source the way the other publishers' copies are. See EventCatalog's ScheduleSkipped entry.
-    private Task<Message> AppendSkippedAsync(ContainerId found, string reason, string source, CancellationToken ct) =>
+    private Task<Message> AppendSkippedAsync(ContainerId found, Skip skip, string source, CancellationToken ct) =>
         log.AppendAsync(
             new NewMessage(
                 MessageTypes.ScheduleSkipped,
-                JsonSerializer.Serialize(new { member = found.ToString(), reason }),
+                JsonSerializer.Serialize(new { member = found.ToString(), reason = skip.Reason, reasonCode = skip.Code }),
                 source),
             ct);
 

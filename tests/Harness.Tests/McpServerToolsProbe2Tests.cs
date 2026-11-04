@@ -200,7 +200,7 @@ public sealed class McpServerToolsProbe2Tests
         [
             "skills_get", "skills_search", "tell", "progress", "blocked", "handback", "needs_decision", "wake_me",
             "workflow_complete", "workflow_show", "team_list", "team_current", "team_create", "team_archive", "wip",
-            "lease", "status", "hiring", "member", "kanban", "backlog", "repo", "preview", "site", "outcome",
+            "lease", "status", "hiring", "member", "kanban", "backlog", "repo", "preview", "site", "outcome", "report",
         ];
         Assert.Equal(expected.Order(), McpToolNames.Platform.Order());
     }

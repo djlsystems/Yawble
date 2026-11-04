@@ -18,14 +18,26 @@ public sealed record HumansOnlyMarker;
 public sealed record HumansOrConciergeMarker(string Permit);
 
 /// <summary>
-/// The four things a route can say about who may call it, and it must say exactly one -
+/// A person's READ that one more machine principal may also call: a person's own API key holding
+/// <paramref name="Permit"/>, the credential a person mints to act for themselves, under that
+/// person's reach. Every other machine principal - a Manager, a member, a plugin, a Concierge - is
+/// refused exactly as <see cref="HumansOnlyMarker"/> refuses it, whatever it holds. The handler still
+/// decides what the key sees (for a plugin member's settings: every secret's state, never a value).
+/// </summary>
+public sealed record HumansOrApiKeyMarker(string Permit);
+
+/// <summary>
+/// The five things a route can say about who may call it, and it must say exactly one -
 /// <c>RouteMarkerTests</c> fails the build otherwise.
 ///
-/// THREE rather than two, and the third is not a convenience. Most of this product's route table is
+/// Three are the base set: <see cref="PermitRequirement"/>, <see cref="PermitExemption"/> and
+/// <see cref="HumansOnlyMarker"/>. Humans-only is not a convenience. Most of this product's route table is
 /// neither "needs a permit" nor "anyone may": it is user administration, the tenant log, the
 /// catalog, somebody's own password. Marking those <see cref="NoPermitRequired"/> would say the
 /// opposite of what is meant and would read, to the next person, as a considered exemption rather
-/// than as a wall.
+/// than as a wall. The other two, <see cref="HumansOrConciergeMarker"/> and
+/// <see cref="HumansOrApiKeyMarker"/>, are humans-only routes with ONE named machine principal let
+/// through holding a permit; every other machine principal is still refused as humans-only refuses it.
 ///
 /// A per-route declaration is exactly the shape <c>TeamGate</c>'s doc comment rejects, on the
 /// grounds that "its failure mode is silence, so a new team route without the filter is ungated and
@@ -75,6 +87,17 @@ public static class PermitMarkers
         where TBuilder : IEndpointConventionBuilder
     {
         builder.Add(endpoint => endpoint.Metadata.Add(new HumansOrConciergeMarker(permit)));
+        return builder;
+    }
+
+    /// <summary>
+    /// HumansOnly, with one door: a person's own API key holding <paramref name="permit"/>. Only for
+    /// a read whose handler answers a non-person without anything a key must never carry.
+    /// </summary>
+    public static TBuilder HumansOrApiKey<TBuilder>(this TBuilder builder, string permit)
+        where TBuilder : IEndpointConventionBuilder
+    {
+        builder.Add(endpoint => endpoint.Metadata.Add(new HumansOrApiKeyMarker(permit)));
         return builder;
     }
 

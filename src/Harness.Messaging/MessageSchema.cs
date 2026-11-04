@@ -168,6 +168,21 @@ public static class MessageSchema
             -- A workflow's rows of one type, newest first: what the open-workflow and standing reads ask.
             CREATE INDEX ix_messages_correlation_type ON messages(correlation_id, type, seq);
             """),
+
+        // messages-007: WHO A ROW'S WORKFLOW BEGAN WITH AND WHO PUBLISHED THE ROW, derived by the store at
+        // append the way correlation_id and depth are, never taken from a publisher (MessageOrigin). A root
+        // takes its origin from the authenticated principal its append was handed, else from its source; a
+        // caused row inherits its root's. `publisher_kind` is always the row's own publisher. An ADD
+        // COLUMN rewrites no row: a row written before this step reads NULL, and nothing back-fills it.
+        new MigrationStep(
+            "messages-007",
+            """
+            ALTER TABLE messages ADD COLUMN origin_kind TEXT NULL;
+            ALTER TABLE messages ADD COLUMN origin_actor_id TEXT NULL;
+            ALTER TABLE messages ADD COLUMN origin_actor_email TEXT NULL;
+            ALTER TABLE messages ADD COLUMN origin_trigger TEXT NULL;
+            ALTER TABLE messages ADD COLUMN publisher_kind TEXT NULL;
+            """),
     ];
 
     /// <summary>How <c>file_changes.at</c> and <c>run_steps.at</c> spell an instant: round-trip UTC text of one width, so

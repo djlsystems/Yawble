@@ -1213,7 +1213,7 @@ public static class BacklogEndpoints
                     }),
                     PrincipalClaims.From(context.User)?.Id ?? "console",
                     request.Causation),
-                ct);
+                AppendContexts.From(context.User), ct);
 
             // THE CARD'S ID IS THIS ROW'S SEQ, which is why it is answered here: the caller needs it
             // to pass to `tell --card`, and deriving it anywhere else would be a second store of the
@@ -1518,6 +1518,9 @@ public static class BacklogEndpoints
                     title = item.Title,
                 }),
                 actor),
+            // THE PERSON'S DISPATCH IS RECORDED WITH ITS ROW (intervention_ledger), in its transaction.
+            // The Manager's instruction below goes with no act: one dispatch is one intervention.
+            who.Append?.Intervening(InterventionKinds.Dispatch, stored),
             ct);
 
         var record = await backlog.AddDispatchAsync(
@@ -1553,20 +1556,24 @@ public static class BacklogEndpoints
                 }),
                 actor,
                 dispatched.Seq),
+            who.Append,
             ct);
 
         return (dispatched.Seq, record.Id);
     }
 
     /// <summary>Who made a dispatch, as its rows name them: read from the request before the work.</summary>
-    private sealed record DispatchActor(string Actor, string PrincipalId, string? Email)
+    /// <summary>Who dispatched, read from the request before the dispatch runs; <see cref="Append"/> is
+    /// the principal the log derives the dispatch's origin from.</summary>
+    private sealed record DispatchActor(string Actor, string PrincipalId, string? Email, AppendContext? Append)
     {
         public static async Task<DispatchActor> OfAsync(
             HttpContext context, Principal principal, IUserStore users, CancellationToken ct) =>
             new(
                 await ActorOfAsync(context, principal, users, ct),
                 principal.Id,
-                await ActorEmailOfAsync(context, principal, users, ct));
+                await ActorEmailOfAsync(context, principal, users, ct),
+                AppendContexts.From(context.User));
     }
 
     private const string StartDescription =

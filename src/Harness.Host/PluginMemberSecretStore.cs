@@ -398,6 +398,9 @@ public sealed class PluginMemberSecretStore(IPluginMemberSecretRows rows, IDataP
             ? new TriggerAudit(
                 actor.Id, actor.Email, action, $"{member.Team}/{member.Name}", label,
                 JsonSerializer.Serialize(new { team = member.Team, member = member.Name, plugin, field = cell.Table, row = cell.Row, column = cell.Column }))
+            {
+                Intervention = actor.Supplied(action, member.Team),
+            }
             : fieldAudit(field, action));
     }
 
@@ -409,7 +412,10 @@ public sealed class PluginMemberSecretStore(IPluginMemberSecretRows rows, IDataP
             changes.ToDictionary(c => c.Key, c => c.Value is null ? null : _namedProtector.Protect(c.Value), StringComparer.Ordinal),
             (name, action) => new TriggerAudit(
                 actor.Id, actor.Email, action, $"{member.Team}/{member.Name}", label,
-                JsonSerializer.Serialize(new { team = member.Team, member = member.Name, plugin, name })));
+                JsonSerializer.Serialize(new { team = member.Team, member = member.Name, plugin, name }))
+            {
+                Intervention = actor.Supplied(action, member.Team),
+            });
 
     /// <summary>Seals each value (null stays null, a clear) before it reaches the rows.</summary>
     private Dictionary<string, string?> Protect(IReadOnlyDictionary<string, string?> changes) =>
@@ -419,7 +425,10 @@ public sealed class PluginMemberSecretStore(IPluginMemberSecretRows rows, IDataP
     private static Func<string, string, TriggerAudit> AuditFor(ContainerId member, string label, string plugin, CredentialActor actor) =>
         (field, action) => new TriggerAudit(
             actor.Id, actor.Email, action, $"{member.Team}/{member.Name}", label,
-            JsonSerializer.Serialize(new { team = member.Team, member = member.Name, plugin, field }));
+            JsonSerializer.Serialize(new { team = member.Team, member = member.Name, plugin, field }))
+        {
+            Intervention = actor.Supplied(action, member.Team),
+        };
 
     private string? Unprotect(string protectedValue) => Unprotect(_protector, protectedValue);
 
@@ -481,7 +490,10 @@ public sealed class MemberSecretReads(PluginMemberSecretStore members, PluginSec
 
     /// <summary>Each table field to its rows' secret cells that hold a value (<see cref="PluginMemberSecretStore.CellStatesAsync"/>):
     /// <c>{ set, setBy, setAt }</c>, and <c>value</c> only for an unmasked column. <c>{}</c> for a plugin with no table.</summary>
-    public async Task<Dictionary<string, object>> TableStatesAsync(ContainerId id, PluginManifest manifest, PluginMemberSettings stored, CancellationToken ct)
+    /// <remarks>With <paramref name="values"/> false no cell carries a value, masked or not: what a
+    /// non-person reads.</remarks>
+    public async Task<Dictionary<string, object>> TableStatesAsync(
+        ContainerId id, PluginManifest manifest, PluginMemberSettings stored, CancellationToken ct, bool values = true)
     {
         var tables = new Dictionary<string, object>(StringComparer.Ordinal);
 
@@ -494,7 +506,7 @@ public sealed class MemberSecretReads(PluginMemberSecretStore members, PluginSec
                 r => r.Key,
                 r => r.Value.ToDictionary(
                     c => c.Key,
-                    c => c.Value.Value is null
+                    c => c.Value.Value is null || !values
                         ? (object)new { set = true, setBy = c.Value.SetBy, setAt = c.Value.SetAt }
                         : new { set = true, setBy = c.Value.SetBy, setAt = c.Value.SetAt, value = c.Value.Value },
                     StringComparer.Ordinal),
@@ -504,13 +516,15 @@ public sealed class MemberSecretReads(PluginMemberSecretStore members, PluginSec
         return tables;
     }
 
+    /// <remarks>With <paramref name="withValues"/> false no entry carries a value, even for a field
+    /// declared <c>masked: false</c>, and no value is read: what a non-person reads.</remarks>
     public async Task<IReadOnlyList<Dictionary<string, object?>>> StatesAsync(
-        ContainerId id, PluginManifest manifest, PluginMemberSettings stored, CancellationToken ct)
+        ContainerId id, PluginManifest manifest, PluginMemberSettings stored, CancellationToken ct, bool withValues = true)
     {
         var own = await members.StatesAsync(id, ct);
-        var values = manifest.Secrets.Values.Any(s => !s.Masked) ? await members.ValuesAsync(id, ct) : null;
+        var values = withValues && manifest.Secrets.Values.Any(s => !s.Masked) ? await members.ValuesAsync(id, ct) : null;
 
-        return [.. manifest.Secrets.Select(s => Entry(s.Key, s.Value, manifest, stored, own, values))];
+        return [.. manifest.Secrets.Select(s => Entry(s.Key, s.Value, manifest, stored, own, values, withValues))];
     }
 
     public async Task<Dictionary<string, object?>> StateAsync(
@@ -519,7 +533,7 @@ public sealed class MemberSecretReads(PluginMemberSecretStore members, PluginSec
 
     private Dictionary<string, object?> Entry(
         string field, PluginSecret secret, PluginManifest manifest, PluginMemberSettings stored,
-        IReadOnlyDictionary<string, MemberSecretState> own, IReadOnlyDictionary<string, string>? values)
+        IReadOnlyDictionary<string, MemberSecretState> own, IReadOnlyDictionary<string, string>? values, bool withValues = true)
     {
         var key = stored.Secrets.GetValueOrDefault(field);
         bool set;
@@ -535,7 +549,7 @@ public sealed class MemberSecretReads(PluginMemberSecretStore members, PluginSec
         {
             (set, setBy, setAt) = (true, status.SetBy, status.SetAt);
             source = status.Source == SecretStatus.Stored ? Key : Environment;
-            if (!secret.Masked) value = keys.TryGet(key);
+            if (!secret.Masked && withValues) value = keys.TryGet(key);
         }
         else
         {

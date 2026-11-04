@@ -164,6 +164,12 @@ public static class EventCatalog
     private static readonly EventField Change =
         new(PayloadFields.Change, EventFieldKind.String, "What changed, composed by the route and carrying both values.");
 
+    private static readonly EventField ReasonCode =
+        new(PayloadFields.ReasonCode, EventFieldKind.String,
+            "Why, as one code from the closed set InterruptionReasons (token_cap, workflow_budget, auth, permission, "
+            + "approval_required, decision_required, paused_by_person, team_archived, busy, admission, failure), "
+            + "chosen by the platform. Absent on rows written before it existed.");
+
     private static readonly EventField Note =
         new(PayloadFields.Note, EventFieldKind.String, "What the person typed. Optional.");
 
@@ -239,6 +245,7 @@ public static class EventCatalog
             [
                 Source,
                 new(PayloadFields.Reason, EventFieldKind.String, "Why the work was refused."),
+                ReasonCode,
                 new(PayloadFields.Ceiling, EventFieldKind.Integer, "The queue depth it was refused at."),
                 new(PayloadFields.Refused, EventFieldKind.String, "The message TYPE that could not be queued."),
                 new(PayloadFields.RefusedSeq, EventFieldKind.Integer, "The seq of the message that could not be queued."),
@@ -259,13 +266,14 @@ public static class EventCatalog
             [
                 Source,
                 new(PayloadFields.Reason, EventFieldKind.String, "Why the agent stopped."),
+                ReasonCode,
                 new(PayloadFields.Item, EventFieldKind.Integer,
                     "Which batched prompt item (1-based) is abandoned, when only one is. Optional."),
             ],
             "The AGENT reporting that it has stopped without finishing, and why."),
 
         new(MessageTypes.NeedsDecision, EventPublisher.Agent, HighVolume: false, InLedger: true,
-            [Source, new(PayloadFields.Question, EventFieldKind.String, "What needs answering.")],
+            [Source, new(PayloadFields.Question, EventFieldKind.String, "What needs answering."), ReasonCode],
             "A member asking a person for a decision before it can continue."),
 
         // THE HAND-BACK, AND IT SITS BESIDE `blocked` RATHER THAN BESIDE `workflow.completed`
@@ -318,6 +326,7 @@ public static class EventCatalog
                 Team,
                 new(PayloadFields.Reason, EventFieldKind.String,
                     "Why it paused, naming the figure and which of the two bounds it was."),
+                ReasonCode,
                 new(PayloadFields.Limit, EventFieldKind.Integer,
                     "The per-workflow figure that was in force."),
                 new(PayloadFields.Spent, EventFieldKind.Integer,
@@ -349,6 +358,7 @@ public static class EventCatalog
                 new(PayloadFields.Member, EventFieldKind.String,
                     "The member whose scheduled wake was skipped."),
                 new(PayloadFields.Reason, EventFieldKind.String, "Why the wake was skipped."),
+                ReasonCode,
             ],
             "A scheduled wake deliberately not queued because the member was busy and the schedule was idle-only."),
 

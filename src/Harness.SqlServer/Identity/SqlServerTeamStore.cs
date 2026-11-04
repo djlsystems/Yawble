@@ -308,12 +308,14 @@ public sealed class SqlServerTeamStore(string connectionString) : ITeamStore
         WHEN MATCHED THEN UPDATE SET
             label = @label, agent = @agent, system_prompt = @systemPrompt, subscribes = @subscribes,
             permits = @permits, floor_seq = @floorSeq, hired_for = @hiredFor,
-            system_prompt_set_by = @setBy, system_prompt_set_by_kind = @setByKind, system_prompt_set_at = @setAt
+            system_prompt_set_by = @setBy, system_prompt_set_by_kind = @setByKind, system_prompt_set_at = @setAt,
+            est_hourly_rate = @rate, billing_account_id = @account, billing_set_by = @billingSetBy, billing_set_at = @billingSetAt
         WHEN NOT MATCHED THEN INSERT
             (team, name, label, agent, system_prompt, subscribes, permits, floor_seq, hired_for,
-             system_prompt_set_by, system_prompt_set_by_kind, system_prompt_set_at, created_utc)
+             system_prompt_set_by, system_prompt_set_by_kind, system_prompt_set_at,
+             est_hourly_rate, billing_account_id, billing_set_by, billing_set_at, created_utc)
             VALUES (@team, @name, @label, @agent, @systemPrompt, @subscribes, @permits, @floorSeq, @hiredFor,
-             @setBy, @setByKind, @setAt, @createdUtc);
+             @setBy, @setByKind, @setAt, @rate, @account, @billingSetBy, @billingSetAt, @createdUtc);
         """;
 
     private static void BindMember(SqlCommand command, PersistedMember member)
@@ -330,6 +332,10 @@ public sealed class SqlServerTeamStore(string connectionString) : ITeamStore
         command.Parameters.AddWithValue("@setBy", TeamRows.Text(member.SystemPromptSetBy?.By));
         command.Parameters.AddWithValue("@setByKind", TeamRows.Text(member.SystemPromptSetBy?.Kind));
         command.Parameters.AddWithValue("@setAt", TeamRows.Stamp(member.SystemPromptSetBy?.At));
+        command.Parameters.AddWithValue("@rate", TeamRows.Text(member.EstHourlyRate));
+        command.Parameters.AddWithValue("@account", TeamRows.Text(member.BillingAccountId));
+        command.Parameters.AddWithValue("@billingSetBy", TeamRows.Text(member.BillingSetBy));
+        command.Parameters.AddWithValue("@billingSetAt", TeamRows.Stamp(member.BillingSetAt));
         command.Parameters.AddWithValue("@createdUtc", Instant.Now());
     }
 

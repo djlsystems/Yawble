@@ -5,6 +5,7 @@ using Harness.Contracts;
 using Harness.Host;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Harness.Tests;
@@ -140,6 +141,56 @@ public sealed class TriggerRunNowTests : IAsyncLifetime
     private async Task<IReadOnlyList<Message>> InstructionsAsync(string id) =>
         [.. (await Log.ReadAfterAsync(0, [MessageTypes.InstructionFor(Dev)], int.MaxValue, Ct)).Where(m => m.Source == $"schedule:{id}")];
 
+    /// <summary>
+    /// A SCHEDULED RUN IS A TRIGGER'S, WITH NO PERSON, through the real sweep: the fired instruction, every row that
+    /// follows from it, the run's snapshot and its ledger row carry <c>origin_kind = trigger</c> and the trigger's
+    /// source, and no actor - though a person set the schedule up.
+    /// </summary>
+    [Fact]
+    public async Task A_scheduled_fire_and_every_row_after_it_carry_the_trigger_and_no_person()
+    {
+        var id = await DailyAsync();
+        var due = (await Services.GetRequiredService<ITriggerStore>().FindAsync(id, Ct))!.NextDueAt!.Value;
+        var after = await Log.HighestSeqAsync(Ct);
+
+        await Services.GetRequiredService<TriggerSweep>().FireDueAsync(due, Ct);
+        await SettleAsync(after);
+
+        var instruction = Assert.Single(await InstructionsAsync(id));
+        var source = $"schedule:{id}";
+
+        await using var connection = new SqliteConnection($"Data Source={Path.Combine(_dataRoot, "messages.db")};Pooling=false");
+        await connection.OpenAsync(Ct);
+
+        async Task<List<object?[]>> RowsAsync(string sql)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = sql;
+            command.Parameters.AddWithValue("$c", instruction.CorrelationId);
+            await using var reader = await command.ExecuteReaderAsync(Ct);
+            var rows = new List<object?[]>();
+            while (await reader.ReadAsync(Ct))
+            {
+                rows.Add([.. Enumerable.Range(0, reader.FieldCount).Select(i => reader.IsDBNull(i) ? null : reader.GetValue(i))]);
+            }
+
+            return rows;
+        }
+
+        var workflow = await RowsAsync(
+            "SELECT origin_kind, origin_actor_id, origin_actor_email, origin_trigger, depth FROM messages WHERE correlation_id = $c ORDER BY seq");
+        // The fire itself, and the run's started and terminal rows caused by it.
+        Assert.True(workflow.Count >= 3, $"{workflow.Count} rows");
+        Assert.Contains(workflow, r => Convert.ToInt64(r[4]) >= 1);
+        Assert.All(workflow, r => Assert.Equal(new object?[] { OriginKinds.Trigger, null, null, source }, r[..4]));
+
+        var snapshot = Assert.Single(await RowsAsync(
+            "SELECT origin_kind, origin_actor_id, origin_actor_email, origin_trigger FROM execution_snapshots WHERE correlation = $c AND member = 'Dev'"));
+        Assert.Equal(new object?[] { OriginKinds.Trigger, null, null, source }, snapshot);
+        var ledger = Assert.Single(await RowsAsync("SELECT origin_kind, origin_actor_id FROM usage_ledger WHERE correlation = $c AND member = 'Dev'"));
+        Assert.Equal(new object?[] { OriginKinds.Trigger, null }, ledger);
+    }
+
     [Fact]
     public async Task Run_now_fires_the_schedules_own_instruction_and_writes_a_tenant_row_naming_the_person()
     {
@@ -197,6 +248,7 @@ public sealed class TriggerRunNowTests : IAsyncLifetime
             MessageTypes.ScheduleSkippedCapReason,
             JsonDocument.Parse(skip.Payload).RootElement.GetProperty("reason").GetString(),
             StringComparison.Ordinal);
+        Assert.Equal(InterruptionReasons.TokenCap, JsonDocument.Parse(skip.Payload).RootElement.GetProperty(PayloadFields.ReasonCode).GetString());
         Assert.Single(await TenantRowsAsync(TenantActions.ScheduleSkipped, id));
 
         Assert.Single(await InstructionsAsync(id));
@@ -205,6 +257,66 @@ public sealed class TriggerRunNowTests : IAsyncLifetime
         var runs = await TenantRowsAsync(TenantActions.ScheduleRunNow, id);
         Assert.Equal(2, runs.Count);
         Assert.Contains(runs, e => JsonDocument.Parse(e.Detail!).RootElement.GetProperty("outcome").GetString() == "capped");
+    }
+
+    /// <summary>A person's pause and a busy member skip a Run now, each with its own code from the closed set
+    /// beside the sentence: the code is the cause the sweep found, never read off the words.</summary>
+    [Fact]
+    public async Task A_paused_team_and_a_busy_member_skip_with_paused_by_person_and_busy()
+    {
+        var daily = await DailyAsync();
+        var idle = await CreateAsync(new
+        {
+            name = "Idle only",
+            kind = "cron",
+            expression = "0 0 3 * * *",
+            timezone = "UTC",
+            container = "Dev",
+            idleOnly = true,
+            instruction = "look",
+            wakeManager = "never",
+        });
+
+        (await _person.PostAsync($"/api/teams/{_team}/pause", null, Ct)).EnsureSuccessStatusCode();
+        var paused = await RunNowAsync(daily);
+        Assert.Equal(("skipped", MessageTypes.ScheduleSkippedPausedReason),
+            (paused.GetProperty("outcome").GetString(), paused.GetProperty("reason").GetString()));
+        Assert.Equal(InterruptionReasons.PausedByPerson, await SkipCodeAsync(daily));
+        (await _person.PostAsync($"/api/teams/{_team}/resume", null, Ct)).EnsureSuccessStatusCode();
+
+        // Dev is mid-run until the gate opens, so the idle-only trigger finds it busy.
+        var gate = new TaskCompletionSource();
+        var running = new TaskCompletionSource();
+        var behaviour = _agents.Behaviour;
+        _agents.Behaviour = async invocation =>
+        {
+            if (invocation.Container.Name == "Dev")
+            {
+                running.TrySetResult();
+                await gate.Task;
+            }
+
+            return await behaviour(invocation);
+        };
+
+        var after = await Log.HighestSeqAsync(Ct);
+        await Log.AppendAsync(new NewMessage(MessageTypes.InstructionFor(Dev), """{"instruction":"work"}""", "console"), Ct);
+        await running.Task.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+
+        var busy = await RunNowAsync(idle);
+        Assert.Equal(("skipped", MessageTypes.ScheduleSkippedBusyReason),
+            (busy.GetProperty("outcome").GetString(), busy.GetProperty("reason").GetString()));
+        Assert.Equal(InterruptionReasons.Busy, await SkipCodeAsync(idle));
+
+        gate.SetResult();
+        await SettleAsync(after);
+    }
+
+    private async Task<string?> SkipCodeAsync(string id)
+    {
+        var skip = Assert.Single(
+            await Log.ReadAfterAsync(0, [MessageTypes.ScheduleSkipped], int.MaxValue, Ct), m => m.Source == $"schedule:{id}");
+        return JsonDocument.Parse(skip.Payload).RootElement.GetProperty(PayloadFields.ReasonCode).GetString();
     }
 
     /// <summary>A solution's run-at-install is this same call with its own action and the clock

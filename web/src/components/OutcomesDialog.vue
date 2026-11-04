@@ -21,9 +21,12 @@ import {
   type OutcomeDetail,
   type OutcomeEvent,
   type OutcomeFields,
+  type HumanWeek,
   type OutcomeFigures,
   type OutcomeList,
   type OutcomeMoney,
+  type OutcomePresentation,
+  type OutcomeThroughputWeek,
   type OutcomeTransition,
   type OutcomeWorkflowLine,
 } from '../api/outcomes';
@@ -32,6 +35,22 @@ import {
   BucketLabel,
   LinkHowLabel,
   PeriodOptions,
+  PresentationOptions,
+  backlogProgressText,
+  attentionText,
+  humanLineText,
+  interventionsText,
+  waitingText,
+  HumanAttentionLabel,
+  HumanInterventionsLabel,
+  WaitingOnAPersonLabel,
+  cumulativeText,
+  estimateLabel,
+  perCompletedText,
+  presentationOf,
+  seriesHeights,
+  throughputText,
+  weekStartText,
   StatusLabel,
   accountingSinceText,
   actionsFor,
@@ -47,15 +66,14 @@ import {
   periodRange,
   rateText,
   reachesBeforeLedger,
-  shareOfValueText,
   tileSummaryText,
   unmeasuredText,
-  valueAmount,
   weekHeights,
   weekText,
   when,
   type Period,
 } from '../lib/outcomes';
+import { EstimateTitle, legacyRateNote, markedMoney } from '../lib/teamCost';
 import { itemLabel } from '../lib/backlog';
 import { vResizableColumns } from '../lib/resizableColumns';
 import BacklogDialog from './BacklogDialog.vue';
@@ -65,9 +83,9 @@ import { ariaSort, nextSort, type TableSort } from '../lib/tableSort';
 import { localStamp, wireInstant } from '../lib/localTime';
 
 /**
- * OUTCOMES, AS A PRODUCT OWNER READS THEM: a tile per outcome - what it has cost against what it is
- * worth, how its spend moved over eight weeks, where its backlog stands and how much of its time
- * waited on a person - and one outcome opened, with its budget, its spend by week, its backlog by
+ * OUTCOMES, AS A PRODUCT OWNER READS THEM: a tile per outcome - its Estimated Execution Cost and Agent Hours,
+ * how the estimate moved over eight weeks, where its backlog stands and how much of its time
+ * waited on a person - and one outcome opened, with its estimate, its weeks, its backlog by
  * where each item stands, and its workflows and history folded below.
  *
  * EVERY FIGURE IS THE ROUTE'S. `GET /api/outcomes` answers each tile's figures and `money` (the
@@ -175,12 +193,13 @@ watch(() => [period.value.kind, period.value.customFrom, period.value.customTo],
 // --- A tile's figures, worded ------------------------------------------------------------------
 
 function costText(figures: OutcomeFigures) {
-  return moneyText(figures.cost.amount, figures.cost.currency);
+  const text = moneyText(figures.cost.amount, figures.cost.currency);
+  return figures.cost.amount === null ? text : markedMoney(text, figures.cost.legacyRates);
 }
 
-function valueText(value: string | null) {
-  const amount = valueAmount(value);
-  return amount === null ? '' : moneyText(amount, money.value.currency);
+/** The cost's footnote, as its title: a reconstructed or fallback rate priced part of it. */
+function costNote(figures: OutcomeFigures) {
+  return figures.cost.amount === null ? undefined : legacyRateNote(figures.cost.legacyRates) ?? undefined;
 }
 
 /** "Awaiting you" only when a declared item is counted as in progress: otherwise it is achieved. */
@@ -195,12 +214,17 @@ const detailError = ref('');
 const actionProblem = ref('');
 const busy = ref(false);
 
-type Draft = Required<Pick<OutcomeFields, 'name' | 'description' | 'value'>>;
+/**
+ * WHAT A PERSON EDITS HERE: name and description. An outcome's stored `value` (outcomes.value_amount) is no budget and
+ * no screen asks for it: it stays stored, readable and settable through the outcome routes, and a save here never
+ * sends it, so whatever is stored is kept.
+ */
+type Draft = Required<Pick<OutcomeFields, 'name' | 'description'>>;
 
-const draft = ref<Draft>({ name: '', description: '', value: '' });
+const draft = ref<Draft>({ name: '', description: '' });
 
-function draftOf(o: { name: string; description: string | null; value: string | null }): Draft {
-  return { name: o.name, description: o.description ?? '', value: o.value ?? '' };
+function draftOf(o: { name: string; description: string | null }): Draft {
+  return { name: o.name, description: o.description ?? '' };
 }
 
 async function select(id: string) {
@@ -226,6 +250,37 @@ function closeDetail() {
 
 const current = computed(() => detail.value?.outcome ?? null);
 const readOnly = computed(() => current.value?.status === 'merged');
+
+/** How the opened outcome is read: its stored choice, project when nobody has picked one. */
+const presentation = computed<OutcomePresentation>(() => (current.value ? presentationOf(current.value) : 'project'));
+
+/** A person's pick, saved at once through the edit route; a refusal shows as the action's problem. */
+function setPresentation(next: OutcomePresentation) {
+  if (!current.value || next === presentation.value) return;
+  void act(() => editOutcome(current.value!.id, { presentation: next }));
+}
+
+const cumulative = computed(() => current.value?.figures.cumulative ?? []);
+const cumulativePriced = computed(() => cumulative.value.some((w) => w.cost !== null));
+const weeklyPriced = computed(() => (current.value?.figures.weekly ?? []).some((w) => w.cost !== null));
+
+/** The operational table: each of the eight weeks with its cost and agent time, and its throughput and people's acts
+ *  (intervention frequency) when the route sent them. */
+/** Whether the route sent intervention frequency: an older Host sends none, and then no column stands in for it. */
+const humanWeekly = computed(() => current.value?.figures.humanWeekly !== undefined);
+
+const periodRows = computed(() => {
+  const weekly = current.value?.figures.weekly ?? [];
+  const throughput = new Map<string, OutcomeThroughputWeek>((current.value?.figures.throughput ?? []).map((t) => [t.weekStart, t]));
+  const human = new Map<string, HumanWeek>((current.value?.figures.humanWeekly ?? []).map((h) => [h.weekStart, h]));
+  return weekly.map((w) => ({
+    weekStart: w.weekStart,
+    cost: w.cost,
+    agentSeconds: w.agentSeconds,
+    throughput: throughput.get(w.weekStart) ?? null,
+    human: human.get(w.weekStart) ?? null,
+  }));
+});
 // Reject is refused while a link names the outcome OR another outcome is merged into it, so
 // both count as what holds it.
 const actions = computed(() => (current.value
@@ -314,7 +369,7 @@ function itemNote(item: OutcomeBacklogItem) {
 const showWorkflows = ref(false);
 const showHistory = ref(false);
 
-/** The outcome settings dialog: name, description and budget, from what is stored now. */
+/** The outcome settings dialog: name and description, from what is stored now. */
 const editing = ref(false);
 
 function askEdit() {
@@ -448,14 +503,12 @@ async function confirmMove() {
 const creating = ref(false);
 const newName = ref('');
 const newDescription = ref('');
-const newValue = ref('');
 const createProblem = ref('');
 
 function askCreate() {
   creating.value = true;
   newName.value = '';
   newDescription.value = '';
-  newValue.value = '';
   createProblem.value = '';
 }
 
@@ -467,7 +520,6 @@ async function confirmCreate() {
 
   try {
     const fields: OutcomeFields = { name: newName.value.trim(), description: newDescription.value.trim() };
-    if (newValue.value.trim()) fields.value = newValue.value.trim();
     const made = await createOutcome(fields);
     creating.value = false;
     emit('changed');
@@ -631,7 +683,7 @@ function eventText(e: OutcomeEvent): string {
     case 'outcome.renamed':
       return e.from ? `Renamed from "${e.from}" to "${name}"` : `Renamed to "${name}"`;
     case 'outcome.changed':
-      return 'Description or budget changed';
+      return 'Details changed';
     case 'outcome.confirmed':
       return 'Confirmed';
     case 'outcome.retired':
@@ -751,7 +803,7 @@ const history = computed<HistoryLine[]>(() => {
               data-outcome-settings-open
               @click="askEdit"
             >
-              <q-tooltip>Name, description and budget</q-tooltip>
+              <q-tooltip>Name and description</q-tooltip>
             </q-btn>
           </div>
         </div>
@@ -760,44 +812,123 @@ const history = computed<HistoryLine[]>(() => {
           Merged into {{ outcomeName(current.mergedInto) }}. Its workflows and figures count there now; it is read-only.
         </div>
 
-        <!-- BUDGET AND COST: the budget a person keeps (the API's `value`), the route's cost at the
-             instance's rate, how much of the budget it is, and how much of its time waited on a person. -->
+        <!-- HOW IT IS READ: a person's choice, project or operational, saved through the edit route. One model,
+             two readings: the figures are the same, only what is laid out changes. -->
+        <div class="row items-center q-gutter-sm q-mt-sm" data-outcome-presentation>
+          <span class="os-body os-text-muted">Read as</span>
+          <q-btn-toggle
+            :model-value="presentation"
+            :options="PresentationOptions"
+            :disable="readOnly || busy"
+            dense
+            unelevated
+            no-caps
+            toggle-color="primary"
+            aria-label="Read this outcome as a project or as operational work"
+            @update:model-value="setPresentation"
+          />
+        </div>
+
+        <!-- THE ESTIMATE: the route's Estimated Execution Cost - each run priced from its own snapshot, the rate named
+             the weighted one - and how much of its time waited on a person. No budget: nothing is measured against the
+             outcome's stored value. -->
         <div class="outcome-money q-mt-md" data-outcome-money>
-          <div class="outcome-stat" data-outcome-value>
-            <div class="outcome-stat__figure">{{ valueText(current.value) || 'not set' }}</div>
-            <div class="outcome-stat__label">Budget</div>
-          </div>
           <div class="outcome-stat" data-outcome-cost>
-            <div class="outcome-stat__figure">{{ costText(current.figures) }}</div>
-            <div class="outcome-stat__label">
-              Cost · {{ agentHoursText(current.figures.agentSeconds) }}<template v-if="money.agentHourlyRate !== null"> at {{ moneyText(money.agentHourlyRate, money.currency) }}/h</template>
-            </div>
-          </div>
-          <div class="outcome-stat" data-outcome-share>
-            <div class="outcome-stat__figure">{{ shareOfValueText(current.figures.cost.amount, valueAmount(current.value)) || '—' }}</div>
-            <div class="outcome-stat__label">Of its budget spent</div>
+            <div :title="costNote(current.figures)" class="outcome-stat__figure">{{ costText(current.figures) }}</div>
+            <div class="outcome-stat__label">{{ estimateLabel(current.figures) }}</div>
           </div>
           <div class="outcome-stat" data-outcome-efficiency>
             <div class="outcome-stat__figure">{{ efficiencyText(current.figures.efficiency) }}</div>
-            <div class="outcome-stat__label">
-              Agents working<template v-if="current.figures.efficiency !== null">, {{ duration(current.figures.blockedSeconds) }} waiting on a person</template>
-            </div>
+            <div class="outcome-stat__label">Agents working</div>
             <div v-if="current.figures.efficiency !== null" class="outcome-split" aria-hidden="true">
               <div class="outcome-split__working" :style="{ width: `${current.figures.efficiency * 100}%` }" />
               <div class="outcome-split__waiting" :style="{ width: `${(1 - current.figures.efficiency) * 100}%` }" />
             </div>
+          </div>
+          <!-- WAITING ON A PERSON: time the work waited on a person (the route's blockedSeconds). Not attention: it is
+               never added to Human Attention Time, and nothing here joins the two. -->
+          <div class="outcome-stat" data-outcome-waiting>
+            <div class="outcome-stat__figure">{{ waitingText(current.figures.blockedSeconds) }}</div>
+            <div class="outcome-stat__label">{{ WaitingOnAPersonLabel }}</div>
           </div>
         </div>
         <div v-if="current.figures.tokens.unmeasuredRuns > 0" class="text-caption os-text-muted q-mt-xs" data-outcome-unmeasured>
           {{ current.figures.tokens.unmeasuredRuns }} run{{ current.figures.tokens.unmeasuredRuns === 1 ? '' : 's' }} reported no usage and {{ current.figures.tokens.unmeasuredRuns === 1 ? 'is' : 'are' }} counted, not estimated.
         </div>
 
-        <!-- SPEND BY WEEK: one series, so the title names it and there is no legend. -->
-        <div class="q-mt-md">
-          <div class="row items-baseline">
-            <div class="text-subtitle2">Spend by week</div>
+        <!-- PROJECT: read as a whole - cumulative Agent Hours and Estimated Execution Cost, backlog progress and a
+             cumulative chart. Every figure is the route's; the chart's last bar is the outcome's all-time figure. -->
+        <div v-if="presentation === 'project'" class="q-mt-md" data-outcome-project>
+          <div class="outcome-money" data-outcome-project-figures>
+            <div class="outcome-stat" data-outcome-cumulative-hours>
+              <div class="outcome-stat__figure">{{ agentHoursText(current.figures.agentSeconds) }}</div>
+              <div class="outcome-stat__label">Agent Hours, all time</div>
+            </div>
+            <div class="outcome-stat" data-outcome-cumulative-cost>
+              <div :title="costNote(current.figures)" class="outcome-stat__figure">{{ costText(current.figures) }}</div>
+              <div class="outcome-stat__label">Estimated Execution Cost, all time</div>
+            </div>
+            <div class="outcome-stat" data-outcome-progress>
+              <div class="outcome-stat__figure">{{ backlogProgressText(current.figures.backlog) }}</div>
+              <div class="outcome-bar" aria-hidden="true">
+                <div
+                  v-for="segment in backlogSegments(current.figures.backlog)"
+                  :key="segment.key"
+                  class="outcome-bar__segment"
+                  :data-swatch="segment.key"
+                  :style="{ width: `${segment.share}%` }"
+                />
+              </div>
+              <div class="outcome-stat__label">Backlog progress</div>
+            </div>
+            <!-- PEOPLE'S ACTS, all time: each intervention once; attention is measured durations only, and says
+                 so when none was measured - never 0. Nothing is priced. -->
+            <div v-if="current.figures.human" class="outcome-stat" data-outcome-interventions>
+              <div class="outcome-stat__figure">{{ interventionsText(current.figures.human) }}</div>
+              <div class="outcome-stat__label">{{ HumanInterventionsLabel }}, all time</div>
+            </div>
+            <div v-if="current.figures.human" class="outcome-stat" data-outcome-attention>
+              <div class="outcome-stat__figure">{{ attentionText(current.figures.human) }}</div>
+              <div class="outcome-stat__label">{{ HumanAttentionLabel }}, all time</div>
+            </div>
+          </div>
+
+          <div class="row items-baseline q-mt-md">
+            <div class="text-subtitle2">Cumulative {{ cumulativePriced ? 'Estimated Execution Cost' : 'Agent Hours' }}</div>
             <q-space />
-            <div class="text-caption os-text-muted">{{ money.agentHourlyRate === null ? 'agent time' : 'cost' }}, last 8 weeks</div>
+            <div class="text-caption os-text-muted">to the end of each week, last 8 weeks</div>
+          </div>
+          <div class="outcome-weeks outcome-weeks--large" data-outcome-cumulative>
+            <div v-for="(week, index) in cumulative" :key="week.weekStart" class="outcome-week">
+              <div class="outcome-week__bar" :style="{ height: `${seriesHeights(cumulative)[index]}%` }" />
+              <q-tooltip>{{ cumulativeText(week, money.currency) }}</q-tooltip>
+            </div>
+          </div>
+          <div class="row text-caption os-text-muted">
+            <span>8 weeks ago</span>
+            <q-space />
+            <span>this week</span>
+          </div>
+        </div>
+
+        <!-- OPERATIONAL: read week by week - cost, throughput (closed workflows) and cost per completed workflow,
+             over the existing eight weekly buckets. "not measurable" where nothing completed: never a division by zero. -->
+        <div v-else class="q-mt-md" data-outcome-operational>
+          <div class="outcome-money" data-outcome-operational-figures>
+            <div class="outcome-stat" data-outcome-per-completed>
+              <div class="outcome-stat__figure">{{ perCompletedText(current.figures.costPerCompleted, money.currency) }}</div>
+              <div class="outcome-stat__label">Cost per completed workflow, last 8 weeks</div>
+            </div>
+            <div v-if="current.figures.human" class="outcome-stat" data-outcome-attention>
+              <div class="outcome-stat__figure">{{ attentionText(current.figures.human) }}</div>
+              <div class="outcome-stat__label">{{ HumanAttentionLabel }}, all time</div>
+            </div>
+          </div>
+
+          <div class="row items-baseline q-mt-md">
+            <div class="text-subtitle2">Estimated Execution Cost by week</div>
+            <q-space />
+            <div class="text-caption os-text-muted">{{ weeklyPriced ? 'cost' : 'Agent Hours' }}, last 8 weeks</div>
           </div>
           <div class="outcome-weeks outcome-weeks--large" data-outcome-weeks>
             <div v-for="(week, index) in current.figures.weekly" :key="week.weekStart" class="outcome-week">
@@ -810,6 +941,35 @@ const history = computed<HistoryLine[]>(() => {
             <q-space />
             <span>this week</span>
           </div>
+
+          <table class="outcome-periods q-mt-md" data-outcome-periods>
+            <thead>
+              <tr>
+                <th scope="col">Week of</th>
+                <th scope="col">Estimated Execution Cost</th>
+                <th scope="col">Agent Hours</th>
+                <th scope="col">Throughput</th>
+                <th scope="col">Cost per completed workflow</th>
+                <template v-if="humanWeekly">
+                  <th scope="col">{{ HumanInterventionsLabel }}</th>
+                  <th scope="col">{{ HumanAttentionLabel }}</th>
+                </template>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in periodRows" :key="row.weekStart" :data-outcome-period-row="row.weekStart">
+                <td>{{ weekStartText(row.weekStart) }}</td>
+                <td>{{ row.cost === null ? '—' : moneyText(row.cost, money.currency) }}</td>
+                <td>{{ agentHoursText(row.agentSeconds) }}</td>
+                <td>{{ row.throughput === null ? '—' : throughputText(row.throughput) }}</td>
+                <td>{{ row.throughput === null ? '—' : perCompletedText(row.throughput.costPerCompleted, money.currency) }}</td>
+                <template v-if="humanWeekly">
+                  <td data-outcome-period-interventions>{{ row.human === null ? '—' : interventionsText(row.human) }}</td>
+                  <td data-outcome-period-attention>{{ row.human === null ? '—' : attentionText(row.human) }}</td>
+                </template>
+              </tr>
+            </tbody>
+          </table>
         </div>
 
         <!-- THE BACKLOG, by where each item stands. Each opens in the Backlog dialog. -->
@@ -992,11 +1152,8 @@ const history = computed<HistoryLine[]>(() => {
               </div>
 
               <div class="outcome-tile__money" data-outcome-tile-money>
-                <span class="outcome-tile__cost">{{ costText(o.figures) }}</span>
-                <span class="os-text-muted">
-                  spent<template v-if="valueText(o.value)"> of {{ valueText(o.value) }} budget</template>
-                  · {{ agentHoursText(o.figures.agentSeconds) }}
-                </span>
+                <span :title="costNote(o.figures)" class="outcome-tile__cost">{{ costText(o.figures) }}</span>
+                <span class="os-text-muted">{{ EstimateTitle }} · {{ agentHoursText(o.figures.agentSeconds) }}</span>
               </div>
 
               <div class="outcome-weeks" data-outcome-weeks>
@@ -1047,8 +1204,8 @@ const history = computed<HistoryLine[]>(() => {
                 <span class="text-weight-medium text-italic">{{ list.noOutcome.name }}</span>
               </div>
               <div class="outcome-tile__money">
-                <span class="outcome-tile__cost">{{ costText(list.noOutcome.figures) }}</span>
-                <span class="os-text-muted">spent · {{ agentHoursText(list.noOutcome.figures.agentSeconds) }}</span>
+                <span :title="costNote(list.noOutcome.figures)" class="outcome-tile__cost">{{ costText(list.noOutcome.figures) }}</span>
+                <span class="os-text-muted">{{ EstimateTitle }} · {{ agentHoursText(list.noOutcome.figures.agentSeconds) }}</span>
               </div>
               <div class="outcome-weeks" data-outcome-weeks>
                 <div v-for="(week, index) in list.noOutcome.figures.weekly" :key="week.weekStart" class="outcome-week">
@@ -1057,6 +1214,7 @@ const history = computed<HistoryLine[]>(() => {
                 </div>
               </div>
               <div class="os-tile-line os-text-muted q-mt-xs" data-outcome-summary>{{ tileSummaryText(list.noOutcome.figures) }}</div>
+              <div v-if="list.noOutcome.figures.human" class="os-tile-line os-text-muted" data-outcome-human>{{ humanLineText(list.noOutcome.figures.human) }}</div>
               <div class="os-tile-line os-text-muted" data-outcome-tokens>
                 <template v-if="list.noOutcome.figures.tokens.unmeasuredRuns > 0">{{ unmeasuredText(list.noOutcome.figures.tokens.unmeasuredRuns) }}</template>
               </div>
@@ -1067,7 +1225,7 @@ const history = computed<HistoryLine[]>(() => {
     </q-card>
   </q-dialog>
 
-  <!-- SETTINGS: the outcome's name, description and budget, saved through the edit route. -->
+  <!-- SETTINGS: the outcome's name and description, saved through the edit route. Its stored value is not asked for. -->
   <q-dialog :model-value="editing" @update:model-value="(showing) => (editing = showing)">
     <q-card v-if="current" class="os-dialog-md" data-outcome-settings>
       <q-card-section>
@@ -1084,17 +1242,6 @@ const history = computed<HistoryLine[]>(() => {
             :readonly="readOnly"
             data-outcome-field="description"
           />
-          <q-input
-            v-model="draft.value"
-            dense
-            outlined
-            inputmode="decimal"
-            :label="`Budget (${money.currency})`"
-            :readonly="readOnly"
-            data-outcome-field="value"
-          >
-            <template #append><FieldHelp text="What this outcome may spend. Its cost is set against it." /></template>
-          </q-input>
         </div>
         <div v-if="readOnly" class="os-body os-text-muted q-mt-sm">A merged outcome is read-only.</div>
         <div v-if="actionProblem" class="os-body text-negative q-mt-sm" data-outcome-settings-problem>{{ actionProblem }}</div>
@@ -1329,7 +1476,7 @@ const history = computed<HistoryLine[]>(() => {
             </li>
           </ul>
           <ul class="outcome-history q-mt-sm" data-outcome-delete-counts>
-            <li data-outcome-delete-workflows>{{ plural(deletePreview.workflowsUnlinked, 'workflow', 'workflows') }} will count under No outcome</li>
+            <li data-outcome-delete-workflows>{{ plural(deletePreview.workflowsUnlinked, 'workflow', 'workflows') }} will count under Unattributed</li>
             <li data-outcome-delete-items>{{ plural(deletePreview.backlogItemsCleared, 'backlog item loses its', 'backlog items lose their') }} outcome</li>
             <li data-outcome-delete-triggers>{{ plural(deletePreview.triggersCleared, 'trigger loses its', 'triggers lose their') }} outcome</li>
           </ul>
@@ -1361,7 +1508,6 @@ const history = computed<HistoryLine[]>(() => {
         <div class="os-body os-text-muted q-mt-sm">Name the result the work produces, not the activity. It is active at once.</div>
         <q-input v-model="newName" dense outlined label="Name" class="q-mt-sm" />
         <q-input v-model="newDescription" dense outlined autogrow type="textarea" label="Description" class="q-mt-sm" />
-        <q-input v-model="newValue" dense outlined inputmode="decimal" :label="`Budget (${money.currency}, optional)`" class="q-mt-sm" data-outcome-create-value />
         <div v-if="createProblem" class="os-body text-negative q-mt-sm">{{ createProblem }}</div>
       </q-card-section>
       <q-card-actions align="right">
@@ -1508,6 +1654,24 @@ const history = computed<HistoryLine[]>(() => {
 
 [data-swatch='achieved'] {
   background: var(--os-stat-running);
+}
+
+.outcome-periods {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.outcome-periods th,
+.outcome-periods td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--os-rule);
+}
+
+.outcome-periods th {
+  font-weight: 600;
+  color: var(--os-text-muted, inherit);
 }
 
 .outcome-money {

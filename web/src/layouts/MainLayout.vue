@@ -56,6 +56,7 @@ import {
   ConnectionsAction,
   DocumentsAction,
   OutcomesAction,
+  SpendAction,
   PluginsAction,
   McpServersAction,
   RepositoriesAction,
@@ -431,6 +432,7 @@ function onRibbonAction(action: string, team: TeamId | null = null) {
   else if (action === McpServersAction) mcpServersOpen.value = true;
   else if (action === ConnectionsAction) openConnections();
   else if (action === RepositoriesAction) repositoriesOpen.value = true;
+  else if (action === SpendAction) void router.push('/spend');
   else if (action === OutcomesAction) {
     outcomesAt.value = null;
     outcomesOpen.value = true;

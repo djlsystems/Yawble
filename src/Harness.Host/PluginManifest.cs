@@ -11,7 +11,7 @@ namespace Harness.Host;
 /// REQUIRED NOW: <c>schemaVersion</c>, <c>id</c>, <c>name</c>, <c>description</c>, <c>version</c>,
 /// <c>protocol</c>, <c>executable</c>. OPTIONAL NOW: <c>timeoutSeconds</c>, <c>config</c>,
 /// <c>secrets</c>, <c>events.publishes</c>, <c>skills</c>, <c>platforms</c>, <c>requires</c>,
-/// <c>connections</c>, <c>reads</c>, <c>namedSecrets</c>, <c>replaces</c>.
+/// <c>connections</c>, <c>reads</c>, <c>namedSecrets</c>, <c>replaces</c>, <c>cost</c>.
 /// RESERVED - kept as raw JSON, validated by nothing, acted on by nothing yet: <c>actions</c>,
 /// <c>consumes</c>, <c>health</c>, <c>signature</c>, <c>publisher</c>, <c>minHostVersion</c>,
 /// <c>permits</c>. A key this version does not know is IGNORED and named in
@@ -63,6 +63,24 @@ public sealed record PluginManifest(
     /// </summary>
     public IReadOnlyList<string> Replaces { get; init; } = [];
 
+    /// <summary>
+    /// HOW THIS PLUGIN'S RUNS ARE PRICED, as its manifest's <c>cost.type</c> declares:
+    /// <see cref="DurationCost"/> is the only type, and a manifest with no <c>cost</c> (or no
+    /// <c>cost.type</c>) is duration too. Duration is the run's time at its member's own hourly rate,
+    /// snapshotted at start (<c>EffectiveCost</c>); with no rate of its own the run is not priced. Any
+    /// other type is refused when the manifest is read, so no plugin is ever priced in a way this Host
+    /// does not do. Nothing is priced from this field: it only says what the pricing already is.
+    /// </summary>
+    public string CostType { get; init; } = DurationCost;
+
+    /// <summary>The one cost type: a plugin's time, priced at its member's own hourly rate.</summary>
+    public const string DurationCost = "duration";
+
+    /// <summary>The sentence refusing a <c>cost.type</c> other than <see cref="DurationCost"/>
+    /// (tests/Fixtures/PluginCost/cases.json).</summary>
+    public const string CostTypeRefusal =
+        "`cost.type` must be \"duration\", the only cost type: a plugin's time, priced at its member's own hourly rate.";
+
     /// <summary>The most ids one manifest's <c>replaces</c> may name.</summary>
     public const int MaxReplaces = 16;
 
@@ -96,7 +114,7 @@ public sealed record PluginManifest(
     {
         "schemaVersion", "id", "name", "description", "version", "protocol", "executable",
         "timeoutSeconds", "config", "secrets", "events", "skills", "platforms", "requires", "connections",
-        "reads", "namedSecrets", "replaces",
+        "reads", "namedSecrets", "replaces", "cost",
     };
 
     /// <summary>This machine's platform key, as the <c>platforms</c> map names it.</summary>
@@ -486,6 +504,10 @@ public sealed record PluginManifest(
             var (replaces, replacesRefusal) = ParseReplaces(root, id);
             if (replacesRefusal is not null) return (null, replacesRefusal);
 
+            var ignoredInCost = new List<string>();
+            var (costType, costRefusal) = ParseCost(root, ignoredInCost);
+            if (costRefusal is not null) return (null, costRefusal);
+
             var reserved = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
             var ignored = new List<string>();
 
@@ -503,11 +525,41 @@ public sealed record PluginManifest(
 
             ignored.AddRange(ignoredInEvents);
             ignored.AddRange(ignoredInBlock);
+            ignored.AddRange(ignoredInCost);
 
             return (new PluginManifest(
                 id, name, description, version, protocol, path, arguments, timeout, config, secrets,
-                publishes, skills, platforms, reserved, ignored) { Requires = requires, Connections = connections, Reads = reads, NamedSecrets = namedSecrets, Replaces = replaces }, null);
+                publishes, skills, platforms, reserved, ignored)
+            {
+                Requires = requires, Connections = connections, Reads = reads, NamedSecrets = namedSecrets, Replaces = replaces,
+                CostType = costType,
+            }, null);
         }
+    }
+
+    /// <summary>The manifest's <c>cost</c>: absent, null or with no <c>type</c> is <see cref="DurationCost"/>;
+    /// an object whose <c>type</c> is anything but <c>"duration"</c> is refused in <see cref="CostTypeRefusal"/>.
+    /// A key inside it this version does not know is ignored and named as <c>cost.&lt;key&gt;</c>, sorted, in the
+    /// sentences the operator CLI uses (tests/Fixtures/PluginCost/cases.json).</summary>
+    private static (string CostType, string? Refusal) ParseCost(JsonElement root, List<string> ignored)
+    {
+        if (!root.TryGetProperty("cost", out var element) || element.ValueKind == JsonValueKind.Null) return (DurationCost, null);
+
+        if (element.ValueKind != JsonValueKind.Object) return (DurationCost, "`cost` must be an object such as { \"type\": \"duration\" }.");
+
+        if (element.TryGetProperty("type", out var type)
+            && (type.ValueKind != JsonValueKind.String || type.GetString() != DurationCost))
+        {
+            return (DurationCost, CostTypeRefusal);
+        }
+
+        ignored.AddRange(element.EnumerateObject()
+            .Select(p => p.Name)
+            .Where(n => n != "type")
+            .Order(StringComparer.Ordinal)
+            .Select(n => $"cost.{n}"));
+
+        return (DurationCost, null);
     }
 
     /// <summary>The manifest's <c>replaces</c>: plugin ids, never its own, at most <see cref="MaxReplaces"/>,

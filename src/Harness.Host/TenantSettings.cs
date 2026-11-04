@@ -94,6 +94,7 @@ public sealed class TenantSettings
         ["usd", "eur", "gbp", "cad", "aud", "nzd", "chf", "jpy", "cny", "inr", "sek", "nok", "dkk", "pln", "brl", "mxn", "zar", "sgd", "hkd"];
     public const string ConciergeMayMergeName = "concierge.mayMerge";
     public const string ConciergeMayArchiveName = "concierge.mayArchive";
+    public const string ReportingAgentsMayReadSpendName = "reporting.agentsMayReadSpend";
 
     /// <summary>
     /// WHERE A PERSON TURNS AN INSTANCE-WIDE SETTING ON, as the console labels it: the ribbon's Admin
@@ -103,6 +104,8 @@ public sealed class TenantSettings
     public const string SystemTab = "Admin > Settings > System";
 
     public const string ConciergeTab = "Admin > Settings > Concierge";
+
+    public const string SpendTab = "Admin > Settings > Spend";
     public const string LeasesHeavyHoldersName = "leases.heavy.holders";
     public const string UpdatesCheckName = "updates.check";
     public const string MarketplaceCheckName = "marketplace.check";
@@ -285,6 +288,11 @@ public sealed class TenantSettings
             new(ConciergeMayArchiveName, TenantSettingKind.Choice, "off", null,
                 "Lets the Concierge archive and unarchive a quiet team when you ask it to in the terminal, "
                 + "as Archive and Unarchive on the Teams screen do, and it is off unless a person turns it on.",
+                Choices: ["off", "on"]),
+            new(ReportingAgentsMayReadSpendName, TenantSettingKind.Choice, "off", null,
+                "Lets agents read Actual Spend for reports - billing accounts, expenses and the Spend page's "
+                + "overview and files, never a write - through the report tool, and it is off unless a person "
+                + "turns it on.",
                 Choices: ["off", "on"]),
             new(AgentsCommitAttributionName, TenantSettingKind.Choice, "off", null,
                 "Lets agent members' CLIs sign the commits and pull requests they write as their own, and "
@@ -617,6 +625,10 @@ public sealed class TenantSettings
     /// <summary><c>concierge.mayArchive</c>: whether the Concierge may archive and unarchive a team.
     /// Read through a delegate by <see cref="ConciergeArchiveGate"/>, never captured.</summary>
     public bool ConciergeMayArchive => Current(ConciergeMayArchiveName) == "on";
+
+    /// <summary><c>reporting.agentsMayReadSpend</c>: whether an agent holds <see cref="Permits.Spend"/>.
+    /// Read on every request by <see cref="Auth.SpendReading"/>, never captured.</summary>
+    public bool ReportingAgentsMayReadSpend => Current(ReportingAgentsMayReadSpendName) == "on";
 
     /// <summary><c>agents.commitAttribution</c>: whether a member's CLI may add its own co-author
     /// trailer or "generated with" line to commits and pull requests. Read through a delegate by

@@ -155,6 +155,9 @@ internal static class MemberReportEndpoints
             // The workflow this instruction will join, known only when it answers something: an
             // instruction with no causation heads a new workflow, where nothing can already be queued.
             long? joins = null;
+            // Whether this instruction answers a decision a member of this team is waiting on in that
+            // workflow: it names the needs-decision row, or joins a workflow one is open in.
+            var answersDecision = false;
 
             // A team container that names no causation dispatches inside the run it is in. See
             // `TellCausation`; the depth and budget checks below then apply to it like any other.
@@ -220,6 +223,8 @@ internal static class MemberReportEndpoints
 
                 causation = seq;
                 joins = found.CorrelationId;
+                answersDecision = found.Type == MessageTypes.NeedsDecision
+                    || DecisionOpenIn(host, stored, found.CorrelationId);
             }
 
             // A DUPLICATE IS NAMED, NOT HELD. A Manager that re-sends an instruction already queued to a
@@ -285,8 +290,15 @@ internal static class MemberReportEndpoints
             // `workflow.outcome-changed` row names the person, or the member for an agent's tell; when it
             // cannot be written, neither the instruction nor the link lands.
             var tellerIsPerson = callerPrincipal?.Kind == PrincipalKind.User;
+            // THE PRINCIPAL REACHES THE LOG AS AN ARGUMENT, from the request's ticket: the row's origin is
+            // derived from it there, and no field of this body can set one (AGENTS.md: origin is derived).
+            // A PERSON'S TELL IS AN INTERVENTION, recorded with its row in the append's transaction
+            // (intervention_ledger): an answer when it answers an open decision, an instruction otherwise.
+            // The outcome link a tell may make is part of this one act, not a second one.
+            var appendContext = AppendContexts.From(context.User)?.Intervening(
+                answersDecision ? InterventionKinds.DecisionAnswered : InterventionKinds.Instruction, container.Id.Team);
             var message = rootOutcome is null
-                ? await log.AppendAsync(instructionRow, ct)
+                ? await log.AppendAsync(instructionRow, appendContext, ct)
                 : (await log.AppendWithinAsync(
                     (_, _, _) => Task.FromResult<NewMessage?>(instructionRow),
                     async (connection, transaction, stored, token) =>
@@ -303,6 +315,7 @@ internal static class MemberReportEndpoints
                                     JsonSerializer.Serialize(detail)),
                             token);
                     },
+                    appendContext,
                     ct))!;
             var paused = teams.IsPaused(stored);
             return Results.Ok(new
@@ -737,6 +750,14 @@ internal static class MemberReportEndpoints
                 "The caller's own pending wake only: the caller must BE the member it names, and a wake that "
                 + "is not its own answers exactly as a missing one, 404. Appends `wake.cancelled`.");
     }
+
+    /// <summary>Whether a member of <paramref name="team"/> is waiting on a person's decision in
+    /// <paramref name="correlation"/> now: its needs-decision mark, which its next run clears.</summary>
+    internal static bool DecisionOpenIn(ContainerHost host, string team, long correlation) =>
+        host.Snapshots().Any(s =>
+            string.Equals(s.Team, team, StringComparison.OrdinalIgnoreCase)
+            && s.NeedsDecision is not null
+            && s.NeedsDecisionCorrelation == correlation);
 
     internal static string PauseNoticeFor(string teamLabel) =>
         $"Team '{teamLabel}' is paused. This instruction was queued and will run when the team resumes.";

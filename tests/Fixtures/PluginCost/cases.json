@@ -1,0 +1,22 @@
+{
+  "_": "`cost` values the Host (PluginCostManifestTests) and the CLI (cli/internal/plugin/manifest_test.go) both read. Each `accepted` value must parse to cost type `duration` and name exactly `ignored` (keys inside `cost` this version does not know); `null` here means the manifest has no `cost` at all. Each `refused` value must refuse the manifest with exactly `says`. Duration is the only cost type: a plugin's time, priced at its member's own hourly rate. Nothing is priced from the field itself.",
+  "accepted": [
+    { "cost": null, "ignored": [] },
+    { "cost": { "type": "duration" }, "ignored": [] },
+    { "cost": {}, "ignored": [] },
+    { "cost": { "type": "duration", "note": "time only" }, "ignored": ["cost.note"] }
+  ],
+  "refused": [
+    { "cost": "duration", "says": "`cost` must be an object such as { \"type\": \"duration\" }." },
+    { "cost": ["duration"], "says": "`cost` must be an object such as { \"type\": \"duration\" }." },
+    { "cost": { "type": 1 }, "says": "`cost.type` must be \"duration\", the only cost type: a plugin's time, priced at its member's own hourly rate." },
+    { "cost": { "type": null }, "says": "`cost.type` must be \"duration\", the only cost type: a plugin's time, priced at its member's own hourly rate." },
+    { "cost": { "type": "Duration" }, "says": "`cost.type` must be \"duration\", the only cost type: a plugin's time, priced at its member's own hourly rate." },
+    { "cost": { "type": "per-invocation" }, "says": "`cost.type` must be \"duration\", the only cost type: a plugin's time, priced at its member's own hourly rate." },
+    { "cost": { "type": "per-transaction" }, "says": "`cost.type` must be \"duration\", the only cost type: a plugin's time, priced at its member's own hourly rate." },
+    { "cost": { "type": "per-unit" }, "says": "`cost.type` must be \"duration\", the only cost type: a plugin's time, priced at its member's own hourly rate." },
+    { "cost": { "type": "fixed" }, "says": "`cost.type` must be \"duration\", the only cost type: a plugin's time, priced at its member's own hourly rate." },
+    { "cost": { "type": "provider-reported" }, "says": "`cost.type` must be \"duration\", the only cost type: a plugin's time, priced at its member's own hourly rate." },
+    { "cost": { "type": "" }, "says": "`cost.type` must be \"duration\", the only cost type: a plugin's time, priced at its member's own hourly rate." }
+  ]
+}

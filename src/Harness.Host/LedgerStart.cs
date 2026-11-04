@@ -10,7 +10,11 @@ namespace Harness.Host;
 /// already begun and nothing was backfilled), the instance's id and when the ledger began - what the
 /// export names itself by.</summary>
 public sealed record LedgerStartResult(
-    int? BackfilledRuns, int? BackfilledWorkflows, string InstanceId, string? LedgerStartedAt);
+    int? BackfilledRuns, int? BackfilledWorkflows, string InstanceId, string? LedgerStartedAt)
+{
+    /// <summary>When <c>intervention_ledger</c> began recording people's acts (<c>interventions.startedAt</c>).</summary>
+    public string? InterventionsStartedAt { get; init; }
+}
 
 /// <summary>
 /// THE LEDGER'S ONE-TIME START, and the instance's id. Run once per boot, after the schema is
@@ -41,9 +45,17 @@ public sealed record LedgerStartResult(
 /// </summary>
 public static class LedgerStart
 {
-    public const string InstanceIdName = "instance.id";
+    public const string InstanceIdName = BillingAccountRules.InstanceIdSetting;
     public const string LedgerStartedAtName = "ledger.startedAt";
     public const string LedgerBackfilledRunsName = "ledger.backfilledRuns";
+
+    /// <summary>
+    /// WHEN PEOPLE'S ACTS BEGAN TO BE RECORDED (<c>intervention_ledger</c>, outcome-010): written once, at
+    /// the first start with that step applied, and never moved - as <see cref="LedgerStartedAtName"/>. Acts
+    /// before it were never recorded, and nothing reconstructs them from the log, so a human figure begins
+    /// here. Not a setting a person can change.
+    /// </summary>
+    public const string InterventionsStartedAtName = "interventions.startedAt";
 
     /// <summary>Who the tenant log says wrote these rows: the platform itself, at start.</summary>
     public const string Actor = "platform";
@@ -100,9 +112,60 @@ public sealed class SqliteLedgerStartRows(string databasePath) : ILedgerStartRow
                 runs.Value.ToString(CultureInfo.InvariantCulture), now, ct);
         }
 
+        var interventionsAt = await SettingAsync(connection, transaction, LedgerStart.InterventionsStartedAtName, ct);
+        if (interventionsAt is null)
+        {
+            interventionsAt = now;
+            await WriteSettingAsync(connection, transaction, LedgerStart.InterventionsStartedAtName, now, now, ct);
+        }
+
         await transaction.CommitAsync(ct);
 
-        return new LedgerStartResult(runs, workflows, instanceId, startedAt);
+        return new LedgerStartResult(runs, workflows, instanceId, startedAt) { InterventionsStartedAt = interventionsAt };
+    }
+
+    public async Task<RateEpoch> RecordRateEpochAsync(RateEpochConfiguration configured, CancellationToken ct = default)
+    {
+        await using var connection = new SqliteConnection(SqliteOpen.ConnectionString(databasePath));
+        await connection.OpenAsync(ct);
+        await SqlitePragmas.ApplyAsync(connection, ct: ct);
+
+        // IMMEDIATE, so two starts on one file cannot both find the table empty.
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
+
+        await using (var read = connection.CreateCommand())
+        {
+            read.Transaction = transaction;
+            read.CommandText = "SELECT recorded_at, rate_amount, rate_currency, rate_source FROM rate_epochs WHERE id = 1";
+            if (await RateEpochFacts.ReadEpochAsync(read, ct) is { } existing)
+            {
+                await transaction.CommitAsync(ct);
+                return existing;
+            }
+        }
+
+        var (amount, currency, source) = RateEpochFacts.Decide(
+            await SettingAsync(connection, transaction, ExecutionSnapshotFacts.AgentHourlyRateSetting, ct),
+            await SettingAsync(connection, transaction, ExecutionSnapshotFacts.CurrencySetting, ct),
+            configured.AgentHourlyRate,
+            configured.Currency);
+
+        var now = Instant.Now();
+        await using (var insert = connection.CreateCommand())
+        {
+            insert.Transaction = transaction;
+            insert.CommandText =
+                "INSERT INTO rate_epochs (id, recorded_at, rate_amount, rate_currency, rate_source) VALUES (1, $at, $amount, $currency, $source)";
+            insert.Parameters.AddWithValue("$at", now);
+            insert.Parameters.AddWithValue("$amount", (object?)amount ?? DBNull.Value);
+            insert.Parameters.AddWithValue("$currency", (object?)currency ?? DBNull.Value);
+            insert.Parameters.AddWithValue("$source", source);
+            await insert.ExecuteNonQueryAsync(ct);
+        }
+
+        await transaction.CommitAsync(ct);
+
+        return new RateEpoch(Instant.Parse(now), amount, currency, source);
     }
 
     private static async Task<(int Runs, int Workflows)> BackfillAsync(

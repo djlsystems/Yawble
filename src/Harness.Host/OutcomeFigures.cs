@@ -3,7 +3,7 @@ using Harness.Contracts;
 namespace Harness.Host;
 
 /// <summary>
-/// WHAT AN OUTCOME'S WORK COST, READ FROM THE LEDGER, NEVER ESTIMATED.
+/// WHAT AN OUTCOME'S WORK TOOK, READ FROM THE LEDGER; ITS MONEY IS <see cref="ExecutionCost"/>'S.
 ///
 /// <para>
 /// A workflow counts toward the outcome its NEWEST link names, followed through <c>merged_into</c>,
@@ -16,8 +16,12 @@ namespace Harness.Host;
 /// </summary>
 public static class OutcomeFigures
 {
-    /// <summary>The name of the entry that carries every unlinked workflow.</summary>
-    public const string NoOutcomeName = "No outcome assigned";
+    /// <summary>
+    /// THE BUCKET FOR WORK THAT SERVES NO OUTCOME, wherever an outcome breakdown is shown: a run with no
+    /// link, an unlink, or an outcome that was deleted. Computed from the runs on every read, never stored:
+    /// there is no Unattributed outcome row.
+    /// </summary>
+    public const string UnattributedName = "Unattributed";
 
     /// <summary>How many weeks the weekly series covers, ending with the current one.</summary>
     public const int Weeks = 8;
@@ -104,18 +108,53 @@ public static class OutcomeFigures
         /// <summary>The last <see cref="Weeks"/> weeks, oldest first, whatever the period.</summary>
         public IReadOnlyList<Week>? Weekly { get; init; }
 
-        /// <summary>Agent hours times the rate; its amount is null when no rate is set.</summary>
+        /// <summary>The estimate of the runs that served it, each priced from its snapshot (<see cref="ExecutionCost"/>);
+        /// its amount is null - never 0 - when none was priced.</summary>
         public Money? Cost { get; init; }
+
+        /// <summary>The same <see cref="Weeks"/> weeks as <see cref="Weekly"/>: how many of its workflows closed in
+        /// each (see <see cref="ThroughputOf"/>).</summary>
+        public IReadOnlyList<WeekThroughput>? Throughput { get; init; }
+
+        /// <summary>Over the same <see cref="Weeks"/> weeks: their estimate over the workflows completed in them, to the
+        /// cent; null - not measurable - when none completed or nothing was priced. Never a division by zero.</summary>
+        public decimal? CostPerCompleted { get; init; }
+
+        /// <summary>The project reading's cumulative series, on one outcome's detail only: everything up to the end of each
+        /// of the same weeks (see <see cref="CumulativeOf"/>).</summary>
+        public IReadOnlyList<CumulativeWeek>? Cumulative { get; init; }
+
+        /// <summary>Human Interventions and Human Attention Time (measured only) of the people's acts that count under it,
+        /// over the read's window (<see cref="HumanFigures"/>). Waiting on a person is <see cref="BlockedSeconds"/>, never
+        /// added to it.</summary>
+        public HumanFigures.Figures? Human { get; init; }
+
+        /// <summary>Intervention frequency over the same <see cref="Weeks"/> weeks as <see cref="Weekly"/>, whatever the period.</summary>
+        public IReadOnlyList<HumanFigures.Week>? HumanWeekly { get; init; }
     }
+
+    /// <summary>One week's throughput: the workflows serving the outcome whose close fell in it - <see cref="Closed"/>
+    /// every one, <see cref="Completed"/> those completed rather than closed - and <see cref="CostPerCompleted"/>, the
+    /// week's estimate over its completed workflows, to the cent; null - not measurable - with none completed or nothing
+    /// priced in the week. Never a division by zero.</summary>
+    public sealed record WeekThroughput(DateTimeOffset WeekStart, int Closed, int Completed, decimal? CostPerCompleted);
+
+    /// <summary>Everything an outcome's runs took from the start of the ledger to the end of the week that starts at
+    /// <see cref="WeekStart"/>: agent time, and money (null - never 0 - when nothing in it was priced).</summary>
+    public sealed record CumulativeWeek(DateTimeOffset WeekStart, double AgentSeconds, decimal? Cost);
 
     public sealed record BacklogCounts(int NotStarted, int InProgress, int Achieved);
 
-    /// <summary>One week, Monday 00:00 UTC on: runs that ended in it.</summary>
+    /// <summary>One week, Monday 00:00 UTC on: the agent time and money of the part of each run inside it,
+    /// and the tokens of the runs that ended in it (<see cref="ExecutionCost.Weekly"/>).</summary>
     public sealed record Week(
         DateTimeOffset WeekStart, double AgentSeconds, long Billable, int MeasuredRuns, int UnmeasuredRuns, decimal? Cost);
 
-    /// <summary>An amount of <see cref="Currency"/>; a null amount is "not priced", never 0.</summary>
-    public sealed record Money(decimal? Amount, string Currency);
+    /// <summary>An amount of <see cref="Currency"/>; a null amount is "not priced", never 0.
+    /// <see cref="LegacyRates"/> is its footnote: <c>reconstructed</c> and <c>fallback-at-upgrade</c>, each when
+    /// a run in it was priced that way. <see cref="AgentRate"/> is the weighted rate of its priced agent time
+    /// (<see cref="ExecutionCost.Costs.AgentRateOf"/>), null when none was priced - never the tenant rate.</summary>
+    public sealed record Money(decimal? Amount, string Currency, IReadOnlyList<string> LegacyRates, decimal? AgentRate = null);
 
     /// <summary>The instance's settings the dashboard is read with.</summary>
     public sealed record Pricing(string Currency, int AgentHourlyRate, string DeclaredCountsAs)
@@ -127,8 +166,6 @@ public static class OutcomeFigures
         public static Pricing Of(TenantSettings settings) =>
             new(settings.OutcomesCurrency, settings.OutcomesAgentHourlyRate, settings.OutcomesDeclaredCountsAs);
 
-        public decimal? CostOf(double agentSeconds) =>
-            AgentHourlyRate <= 0 ? null : decimal.Round((decimal)agentSeconds / 3600m * AgentHourlyRate, 2);
     }
 
     public const string NotStarted = "notStarted";
@@ -165,6 +202,35 @@ public static class OutcomeFigures
         OutcomeLedgerRows rows, DateTimeOffset now, DateTimeOffset? from, DateTimeOffset? to)
     {
         var blocked = new Dictionary<long, double>();
+        foreach (var (run, seconds) in BlockedSpans(rows, now, from, to))
+        {
+            blocked[run.Correlation] = blocked.GetValueOrDefault(run.Correlation) + seconds;
+        }
+
+        return blocked;
+    }
+
+    /// <summary>
+    /// WAITING ON A PERSON, per team: the same spans as <see cref="BlockedByWorkflow"/>, credited to the team of
+    /// the run that ended blocked, counting only a team in <paramref name="floors"/> and a run above its floor.
+    /// </summary>
+    public static IReadOnlyDictionary<string, double> BlockedByTeam(
+        OutcomeLedgerRows rows, DateTimeOffset now, DateTimeOffset? from, DateTimeOffset? to, IReadOnlyDictionary<string, long> floors)
+    {
+        var blocked = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (run, seconds) in BlockedSpans(rows, now, from, to))
+        {
+            if (run.TeamId is not { } team || !floors.TryGetValue(team, out var floor) || run.RunSeq <= floor) continue;
+            blocked[team] = blocked.GetValueOrDefault(team) + seconds;
+        }
+
+        return blocked;
+    }
+
+    /// <summary>Each run that ended blocked, with how long its work then waited on a person, clipped to the window.</summary>
+    private static IEnumerable<(UsageLedgerRow Run, double Seconds)> BlockedSpans(
+        OutcomeLedgerRows rows, DateTimeOffset now, DateTimeOffset? from, DateTimeOffset? to)
+    {
         var closeOf = rows.Closes.GroupBy(c => c.Correlation).ToDictionary(g => g.Key, g => g.Max(c => c.ClosedAt));
 
         foreach (var member in rows.Runs.GroupBy(r => (Team: r.TeamId?.ToLowerInvariant(), Member: r.Member.ToLowerInvariant())))
@@ -191,11 +257,9 @@ public static class OutcomeFigures
                 if (to is { } t && t < end) end = t;
                 if (end <= start) continue;
 
-                blocked[run.Correlation] = blocked.GetValueOrDefault(run.Correlation) + (end - start).TotalSeconds;
+                yield return (run, (end - start).TotalSeconds);
             }
         }
-
-        return blocked;
     }
 
     /// <summary>The Monday 00:00 UTC that starts <paramref name="at"/>'s week.</summary>
@@ -209,13 +273,16 @@ public static class OutcomeFigures
     /// <summary>
     /// The dashboard's figures on top of <paramref name="figures"/>: backlog counts from the items
     /// whose outcome resolves to <paramref name="outcome"/> (null: items with none), blocked time and
-    /// efficiency, the weekly series from <paramref name="all"/> (every workflow, whatever the
-    /// period) and the cost. Nothing is estimated: no rate is no price, no time is no efficiency.
+    /// efficiency from <paramref name="all"/> (every workflow, whatever the period), and the money read
+    /// by <see cref="ExecutionCost"/>: the weekly series from <paramref name="weekRuns"/> - the runs over
+    /// the last weeks, each in the one outcome it serves, split by overlap - and the cost from
+    /// <paramref name="costs"/>. A run with no snapshot rate is not priced, never 0.
     /// </summary>
     public static Figures Dashboard(
         Figures figures, Book all, string? outcome, IReadOnlyList<OutcomeBacklogItem> items,
         IReadOnlyDictionary<string, string> resolution, IReadOnlyDictionary<long, double> blocked,
-        Pricing pricing, DateTimeOffset now)
+        Pricing pricing, DateTimeOffset now, IReadOnlyList<ExecutionCost.Run> weekRuns, ExecutionCost.Costs costs,
+        IReadOnlyList<InterventionEntry>? interventions = null, DateTimeOffset? from = null, DateTimeOffset? to = null)
     {
         var mine = ItemsOf(items, outcome, resolution).Select(i => Bucket(i, pricing.DeclaredCountsAs)).ToList();
         var counts = new BacklogCounts(mine.Count(b => b == NotStarted), mine.Count(b => b == InProgress), mine.Count(b => b == Achieved));
@@ -224,7 +291,8 @@ public static class OutcomeFigures
         var blockedSeconds = workflows.Sum(c => blocked.GetValueOrDefault(c));
         var total = figures.AgentSeconds + blockedSeconds;
 
-        var weekly = Weekly(workflows.SelectMany(c => all.RunsOf[c]).ToList(), pricing, now);
+        var weekly = ExecutionCost.Weekly(weekRuns.Where(r => r.OutcomeId == outcome), WeekStarts(now), pricing.Currency);
+        var throughput = ThroughputOf(all, outcome, now, weekly);
 
         return figures with
         {
@@ -232,8 +300,65 @@ public static class OutcomeFigures
             BlockedSeconds = blockedSeconds,
             Efficiency = total > 0 ? figures.AgentSeconds / total : null,
             Weekly = weekly,
-            Cost = new Money(pricing.CostOf(figures.AgentSeconds), pricing.Currency),
+            Cost = new Money(costs.Of(outcome), pricing.Currency, costs.LegacyRatesOf(outcome), costs.AgentRateOf(outcome)),
+            Throughput = throughput,
+            Human = HumanFigures.Of(HumanFigures.Within(HumanFigures.Serving(interventions ?? [], outcome, resolution), from, to)),
+            HumanWeekly = HumanFigures.Weekly(HumanFigures.Serving(interventions ?? [], outcome, resolution), WeekStarts(now)),
+            CostPerCompleted = PerCompleted(weekly.Where(w => w.Cost is not null).Select(w => w.Cost!.Value).DefaultIfEmpty().Sum(),
+                weekly.Any(w => w.Cost is not null), throughput.Sum(w => w.Completed)),
         };
+    }
+
+    /// <summary>Money over completed workflows, to the cent, or null - not measurable - with none completed or
+    /// nothing priced.</summary>
+    private static decimal? PerCompleted(decimal money, bool priced, int completed) =>
+        priced && completed > 0 ? decimal.Round(money / completed, 2) : null;
+
+    /// <summary>
+    /// THE CUMULATIVE SERIES: for each of the last <see cref="Weeks"/> weeks, the part of every run serving
+    /// <paramref name="outcome"/> (each run once, in the bucket <see cref="ExecutionCost"/> gave it) from its start
+    /// to the end of that week, priced as <see cref="ExecutionCost.Tally"/> prices a span. <paramref name="runs"/> must
+    /// be every run, all time: the last week's money is then the outcome's all-time estimate, to the cent.
+    /// </summary>
+    public static IReadOnlyList<CumulativeWeek> CumulativeOf(
+        IReadOnlyList<ExecutionCost.Run> runs, string? outcome, DateTimeOffset now, string currency)
+    {
+        var mine = runs.Where(r => r.OutcomeId == outcome).ToList();
+        return WeekStarts(now)
+            .Select(start =>
+            {
+                var end = start.AddDays(7);
+                var tally = new ExecutionCost.Tally(currency);
+                foreach (var run in mine) tally.AddSpan(run, run.SecondsIn(null, end));
+                return new CumulativeWeek(start, tally.AgentSeconds, tally.Cost);
+            })
+            .ToList();
+    }
+
+    /// <summary>
+    /// THROUGHPUT OVER THE LAST <see cref="Weeks"/> WEEKS, whatever the period: for each week, the workflows whose
+    /// newest link serves <paramref name="outcome"/> (null: none) - read over every workflow, <paramref name="book"/>
+    /// unwindowed - and whose close (<c>workflow_ledger</c>) fell in it. A workflow is counted once, in the week it
+    /// closed; an open one is in no week.
+    /// </summary>
+    public static IReadOnlyList<WeekThroughput> ThroughputOf(Book book, string? outcome, DateTimeOffset now, IReadOnlyList<Week> weekly)
+    {
+        var costOf = weekly.ToDictionary(w => w.WeekStart, w => w.Cost);
+        var closes = book.WorkflowsOf(outcome)
+            .Select(c => book.CloseOf.GetValueOrDefault(c))
+            .OfType<WorkflowLedgerRow>()
+            .ToList();
+
+        return WeekStarts(now)
+            .Select(start =>
+            {
+                var end = start.AddDays(7);
+                var inWeek = closes.Where(c => c.ClosedAt >= start && c.ClosedAt < end).ToList();
+                var completed = inWeek.Count(c => c.HowClosed == WorkflowLedgerRow.Completed);
+                var cost = costOf.GetValueOrDefault(start);
+                return new WeekThroughput(start, inWeek.Count, completed, PerCompleted(cost ?? 0, cost is not null, completed));
+            })
+            .ToList();
     }
 
     /// <summary>The Monday 00:00 UTC starts of the last <see cref="Weeks"/> weeks, oldest first, the
@@ -243,23 +368,6 @@ public static class OutcomeFigures
         var thisWeek = WeekOf(now);
         return Enumerable.Range(0, Weeks).Select(i => thisWeek.AddDays(-7 * (Weeks - 1 - i))).ToList();
     }
-
-    /// <summary>
-    /// <paramref name="runs"/> by the week they ended in, over <see cref="WeekStarts"/>: agent time,
-    /// billable tokens of the measured runs, the measured and unmeasured runs counted, and the cost at
-    /// the rate (null with none). A run outside the weeks is not counted.
-    /// </summary>
-    public static IReadOnlyList<Week> Weekly(IReadOnlyList<UsageLedgerRow> runs, Pricing pricing, DateTimeOffset now) =>
-        WeekStarts(now)
-            .Select(start =>
-            {
-                var inWeek = runs.Where(r => r.EndedAt >= start && r.EndedAt < start.AddDays(7)).ToList();
-                var seconds = inWeek.Sum(AgentSeconds);
-                return new Week(
-                    start, seconds, inWeek.Where(r => r.Measured).Sum(r => r.Billable ?? 0),
-                    inWeek.Count(r => r.Measured), inWeek.Count(r => !r.Measured), pricing.CostOf(seconds));
-            })
-            .ToList();
 
     /// <summary>The items whose own outcome, followed through merges, is <paramref name="outcome"/>
     /// (null: the items with no outcome).</summary>
@@ -298,7 +406,7 @@ public static class OutcomeFigures
         DateTimeOffset? SetAt);
 
     /// <summary>What the figures are computed over: the workflows in the window, grouped by outcome
-    /// (null is "No outcome").</summary>
+    /// (null is Unattributed).</summary>
     public sealed class Book
     {
         public required OutcomeLedgerRows Rows { get; init; }
@@ -308,12 +416,33 @@ public static class OutcomeFigures
         public required ILookup<long, UsageLedgerRow> RunsOf { get; init; }
         public required IReadOnlyDictionary<long, WorkflowLedgerRow> CloseOf { get; init; }
 
+        /// <summary>Each run as <see cref="ExecutionCost"/> read it, by its <c>run_seq</c>: the outcome it serves
+        /// and its kind. A run not in it is read by its workflow's newest link and its ledger row's kind.</summary>
+        public IReadOnlyDictionary<long, ExecutionCost.Run> Executions { get; init; } = new Dictionary<long, ExecutionCost.Run>();
+
+        /// <summary>The workflows whose newest link serves <paramref name="outcome"/> (null: none): what the
+        /// workflow counts, elapsed times and the detail's workflow list are read over.</summary>
         public IEnumerable<long> WorkflowsOf(string? outcome) =>
             InWindow.Where(c => outcome is null ? !OutcomeOf.ContainsKey(c) : OutcomeOf.GetValueOrDefault(c) == outcome);
+
+        /// <summary>
+        /// THE OUTCOME ONE RUN SERVES: a snapshotted run the one its link named at start, a run from before
+        /// snapshots its workflow's newest link (<see cref="ExecutionCost"/>). Each run is in one place.
+        /// </summary>
+        public string? OutcomeOfRun(UsageLedgerRow run) =>
+            Executions.TryGetValue(run.RunSeq, out var execution) ? execution.OutcomeId : OutcomeOf.GetValueOrDefault(run.Correlation);
+
+        /// <summary>Whether a run's time is agent time: anything but a plugin, by its snapshot's kind, else its ledger row's.</summary>
+        public bool IsAgent(UsageLedgerRow run) =>
+            Executions.TryGetValue(run.RunSeq, out var execution) ? execution.IsAgent : run.MemberKind != MemberRef.PluginKind;
+
+        /// <summary>The runs that serve <paramref name="outcome"/> (null: none), each run once.</summary>
+        public IEnumerable<UsageLedgerRow> RunsServing(string? outcome) => Rows.Runs.Where(r => OutcomeOfRun(r) == outcome);
     }
 
     public static Book Open(
-        OutcomeLedgerRows rows, IReadOnlyList<Outcome> outcomes, DateTimeOffset? from, DateTimeOffset? to)
+        OutcomeLedgerRows rows, IReadOnlyList<Outcome> outcomes, DateTimeOffset? from, DateTimeOffset? to,
+        IReadOnlyList<ExecutionCost.Run>? executions = null)
     {
         var resolution = Resolution(outcomes);
         var outcomeOf = CurrentOutcomes(rows.CurrentLinks, resolution);
@@ -337,13 +466,20 @@ public static class OutcomeFigures
             InWindow = inWindow,
             RunsOf = rows.Runs.ToLookup(r => r.Correlation),
             CloseOf = closeOf,
+            Executions = (executions ?? []).GroupBy(e => e.Ledger.RunSeq).ToDictionary(g => g.Key, g => g.First()),
         };
     }
 
+    /// <summary>
+    /// One outcome's figures (null: the work serving none). WORKFLOW FIGURES - the counts and elapsed
+    /// times - are the workflows whose newest link serves it. RUN FIGURES - agent time, waiting, tokens
+    /// and runs - are the runs that serve it, each run once (<see cref="Book.OutcomeOfRun"/>), so they
+    /// match the money; agent time is agent-kind runs only, never a plugin's.
+    /// </summary>
     public static Figures For(Book book, string? outcome, IReadOnlySet<long> open)
     {
         var workflows = book.WorkflowsOf(outcome).ToList();
-        var runs = workflows.SelectMany(c => book.RunsOf[c]).ToList();
+        var runs = book.RunsServing(outcome).ToList();
 
         var completed = workflows.Count(c => !open.Contains(c)
             && book.CloseOf.TryGetValue(c, out var close) && close.HowClosed == WorkflowLedgerRow.Completed);
@@ -363,7 +499,7 @@ public static class OutcomeFigures
 
         return new Figures(
             new WorkflowCounts(workflows.Count(open.Contains), completed, closed, workflows.Count),
-            runs.Sum(AgentSeconds),
+            runs.Where(book.IsAgent).Sum(AgentSeconds),
             runs.Sum(r => r.StartedAt is { } started && r.QueuedAt is { } queued ? Math.Max(0, (started - queued).TotalSeconds) : 0),
             new Elapsed(Median(elapsed), elapsed.Count == 0 ? null : elapsed[^1], elapsed.Count),
             new Tokens(
@@ -387,7 +523,7 @@ public static class OutcomeFigures
             isOpen ? "open" : close?.HowClosed ?? "open",
             close?.RootAt ?? startedAt,
             isOpen ? null : close?.ElapsedSeconds,
-            runs.Sum(AgentSeconds),
+            runs.Where(book.IsAgent).Sum(AgentSeconds),
             runs.Where(r => r.Measured).Sum(r => r.Billable ?? 0),
             runs.Count(r => r.Measured),
             runs.Count(r => !r.Measured),

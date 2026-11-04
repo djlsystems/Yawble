@@ -159,6 +159,11 @@ public static class TenantActions
     /// and whether they were cleared - never the words, which are somebody's and can be long.</summary>
     public const string MemberInstructionsChanged = "member.instructions-changed";
 
+    /// <summary>A member's own estimated hourly rate or billing account changed, a clear included.
+    /// Detail is <c>{team, rate: {old, new}, billingAccount: {old, new}}</c>, the stored text or null -
+    /// never the effective rate.</summary>
+    public const string MemberBillingChanged = "member.billing-changed";
+
     public const string AgentsSaved = "agents.saved";
 
     /// <summary>A person had the platform update an agent CLI. Subject is the preset; detail names the
@@ -534,6 +539,34 @@ public static class TenantActions
     /// Manager's or the Concierge's <c>outcome</c> set or propose (actor the member). Subject is the
     /// outcome's id; detail names the workflow.</summary>
     public const string WorkflowOutcomeChanged = "workflow.outcome-changed";
+
+    /// <summary>A person created a billing account. Subject is its id, the subject name its name;
+    /// detail is <c>{account, changes: {field: {old, new}}}</c>, every field set from null. A billing
+    /// account holds no credential, so no detail carries one.</summary>
+    public const string BillingAccountCreated = "billing.account-created";
+
+    /// <summary>A person edited a billing account. Detail names the account id and each field that
+    /// moved, as old and new.</summary>
+    public const string BillingAccountChanged = "billing.account-changed";
+
+    /// <summary>A person deactivated a billing account. Members who point at it keep it.</summary>
+    public const string BillingAccountDeactivated = "billing.account-deactivated";
+
+    /// <summary>A person reactivated a deactivated billing account.</summary>
+    public const string BillingAccountReactivated = "billing.account-reactivated";
+
+    /// <summary>A person recorded an expense on a billing account. Subject is the expense id, the subject
+    /// name the account's name; detail is <c>{expense, account, supersedes, status, kind, amount,
+    /// currency, servicePeriodStart, servicePeriodEnd}</c>. An expense holds no secret.</summary>
+    public const string BillingExpenseRecorded = "billing.expense-recorded";
+
+    /// <summary>A person voided an expense: a new void row superseding it. Subject is the void row's id;
+    /// detail's <c>supersedes</c> names the voided row.</summary>
+    public const string BillingExpenseVoided = "billing.expense-voided";
+
+    /// <summary>A person replaced an expense: a new confirmed row on the same account superseding it.
+    /// Subject is the new row's id; detail's <c>supersedes</c> names the replaced row.</summary>
+    public const string BillingExpenseReplaced = "billing.expense-replaced";
 
     public const string SiteCreated = "site.created";
 

@@ -22,7 +22,8 @@ public static class TeamRows
     /// <summary>The columns <see cref="ReadMember"/> reads, in its order.</summary>
     public const string MemberColumns =
         "team, name, label, agent, system_prompt, subscribes, permits, floor_seq, hired_for, "
-        + "system_prompt_set_by, system_prompt_set_by_kind, system_prompt_set_at";
+        + "system_prompt_set_by, system_prompt_set_by_kind, system_prompt_set_at, "
+        + "est_hourly_rate, billing_account_id, billing_set_by, billing_set_at";
 
     /// <summary>The columns <see cref="ReadContributor"/> reads, in its order.</summary>
     public const string ContributorColumns =
@@ -109,7 +110,11 @@ public static class TeamRows
             reader.IsDBNull(8) ? null : reader.GetString(8),
             reader.IsDBNull(9) || reader.IsDBNull(10) || reader.IsDBNull(11)
                 ? null
-                : new SystemPromptSetter(reader.GetString(9), reader.GetString(10), Instant.Parse(reader.GetString(11))));
+                : new SystemPromptSetter(reader.GetString(9), reader.GetString(10), Instant.Parse(reader.GetString(11))),
+            reader.IsDBNull(12) ? null : reader.GetString(12),
+            reader.IsDBNull(13) ? null : reader.GetString(13),
+            reader.IsDBNull(14) ? null : reader.GetString(14),
+            reader.IsDBNull(15) ? null : Instant.Parse(reader.GetString(15)));
 
     /// <summary>A <c>team_repo_default_branches</c> row: team, repo, from_remote, set_by_person.</summary>
     public static RepoDefaultBranch ReadDefaultBranch(DbDataReader reader) =>

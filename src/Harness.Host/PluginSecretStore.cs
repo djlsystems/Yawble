@@ -18,7 +18,18 @@ public sealed record SecretStatus(bool Set, string? SetBy, DateTimeOffset? SetAt
 }
 
 /// <summary>Who set or cleared a stored key: a person, named by email.</summary>
-public sealed record CredentialActor(string? Id, string Email);
+public sealed record CredentialActor(string? Id, string Email)
+{
+    /// <summary>
+    /// The <c>credential_supplied</c> intervention a tenant row with <paramref name="action"/> records: a
+    /// value set or replaced by a person (an <see cref="Id"/>); a clear, or the platform, records none.
+    /// Never the value: only that it happened, the person and the team.
+    /// </summary>
+    public InterventionAct? Supplied(string action, string? team) =>
+        InterventionSites.SuppliesCredential(action)
+            ? InterventionAct.ForPerson(InterventionKinds.CredentialSupplied, Id, Email == "unknown" ? null : Email, team)
+            : null;
+}
 
 /// <summary>
 /// <c>plugin_secrets</c> (schema step auth-025): the plugin keys a person sets from the screen, by
@@ -100,7 +111,10 @@ public sealed class PluginSecretStore(IPluginSecretRows rows, IDataProtectionPro
             logicalKey, _protector.Protect(value), actor.Email, at,
             existed => new TriggerAudit(
                 actor.Id, actor.Email, existed ? TenantActions.SecretReplaced : TenantActions.SecretSet,
-                logicalKey, logicalKey, JsonSerializer.Serialize(new { key = logicalKey })),
+                logicalKey, logicalKey, JsonSerializer.Serialize(new { key = logicalKey }))
+            {
+                Intervention = actor.Supplied(existed ? TenantActions.SecretReplaced : TenantActions.SecretSet, null),
+            },
             ct);
 
         return new SecretStatus(true, actor.Email, at, SecretStatus.Stored);

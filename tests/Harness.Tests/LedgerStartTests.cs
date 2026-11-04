@@ -32,11 +32,11 @@ public sealed class LedgerStartTests : IDisposable
     [Fact]
     public async Task The_backfill_recovers_every_terminal_row_and_close_once_and_records_when_the_ledger_began()
     {
-        // A volume from before the ledger: every step but outcome-001 (and outcome-005, which indexes
-        // its table), and a log holding two workflows' runs - a batched run, an unmeasured run, a
+        // A volume from before the ledger: every step but outcome-001 (and outcome-005, outcome-008,
+        // outcome-014 and outcome-015, which index and extend its table), and a log holding two workflows' runs - a batched run, an unmeasured run, a
         // plugin's run - a completion, a close, and a second completion of the same workflow.
         await new SchemaMigrator(Database).ApplyAsync(
-            [.. SchemaModules.All.Where(s => s.Id is not ("outcome-001" or "outcome-005"))], ct: Ct);
+            [.. SchemaModules.All.Where(s => s.Id is not ("outcome-001" or "outcome-005" or "outcome-008" or "outcome-014" or "outcome-015"))], ct: Ct);
 
         var root = await InsertAsync(MessageTypes.InstructionFor(new ContainerId("Alpha", "Dev")), """{"instruction":"go"}""", "console", null);
         await InsertAsync(MessageTypes.Started, "{}", "Alpha/Dev", root);
@@ -85,6 +85,26 @@ public sealed class LedgerStartTests : IDisposable
 
         // And a direct second pass over the same log adds nothing either: the keys hold.
         Assert.Null((await LedgerStart.RunAsync(Database, Ct)).BackfilledRuns);
+    }
+
+    /// <summary>
+    /// WHEN PEOPLE'S ACTS BEGAN TO BE RECORDED is written once, at the first start with outcome-010 applied,
+    /// with its tenant row, and never moves: <c>interventions.startedAt</c>, as <c>ledger.startedAt</c> is.
+    /// </summary>
+    [Fact]
+    public async Task Interventions_started_at_is_recorded_once_at_the_first_start_and_never_moves()
+    {
+        await StartAsync();
+
+        var startedAt = await SettingAsync(LedgerStart.InterventionsStartedAtName);
+        Assert.NotNull(startedAt);
+        Assert.Equal(startedAt, (await LedgerStart.RunAsync(Database, Ct)).InterventionsStartedAt);
+
+        await StartAsync();
+
+        Assert.Equal(startedAt, await SettingAsync(LedgerStart.InterventionsStartedAtName));
+        Assert.Equal(1, await CountAsync(
+            $"SELECT COUNT(*) FROM tenant_events WHERE action = '{TenantActions.TenantSettingChanged}' AND subject = '{LedgerStart.InterventionsStartedAtName}'"));
     }
 
     [Fact]

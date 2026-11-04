@@ -168,6 +168,7 @@ public sealed class TriggerCost(
                         {
                             member = member.ToString(),
                             reason,
+                            reasonCode = InterruptionReasons.TokenCap,
                         }),
                         source,
                         cause),
