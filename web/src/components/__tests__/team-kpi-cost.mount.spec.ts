@@ -283,6 +283,24 @@ describe('the Estimated Execution Cost dialog over the period', () => {
     expect(legend).toEqual(['Docs refresh', 'Ship billing', 'Unattributed']);
   });
 
+  it('names every column of a short period under the large chart, and about ten of a period by day', async () => {
+    await mountStrip();
+    await openDialog();
+    expect([...dialog()!.querySelectorAll('[data-cost-column-label]')].map((t) => squash(t.textContent)))
+      .toEqual(['Oct 1', 'Oct 2', 'Oct 3']);
+    wrapper!.unmount();
+    resetBody();
+
+    const long = teamCostPeriod();
+    long.buckets = Array.from({ length: 61 }, (_, i) => new Date(Date.UTC(2026, 9, 1 + i)).toISOString().slice(0, 10));
+    long.outcomes = long.outcomes.map((o) => ({ ...o, buckets: long.buckets.map((start) => ({ start, agentSeconds: 60, cost: 1 })) }));
+    await mountStrip(long);
+    await openDialog();
+    const labels = [...dialog()!.querySelectorAll('[data-cost-column-label]')].map((t) => squash(t.textContent));
+    expect(labels).toHaveLength(9);
+    expect(labels.slice(0, 2)).toEqual(['Oct 1', 'Oct 8']);
+  });
+
   it('breaks it down by outcome: each outcome, then Unattributed, then the Team total, budgets as before', async () => {
     await mountStrip();
     await openDialog();

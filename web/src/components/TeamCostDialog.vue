@@ -178,7 +178,7 @@ function changeRate() {
 
 <template>
   <q-dialog v-model="open">
-    <q-card class="token-dialog-card cost-dialog-card os-dialog-lg" data-cost-dialog>
+    <q-card class="token-dialog-card cost-dialog-card os-dialog-xl" data-cost-dialog>
       <q-card-section class="q-pb-none cost-dialog-head">
         <div class="os-dialog-title" data-cost-title>{{ EstimateTitle }} · {{ teamName }}</div>
         <div v-if="cost" class="text-caption os-text-muted cost-rate" data-cost-rate>
@@ -260,7 +260,8 @@ function changeRate() {
               data-cost-breakdowns
             />
 
-            <table v-if="breakdown === 'outcome'" class="token-table cost-table" data-cost-table data-cost-breakdown="outcome">
+            <div v-if="breakdown === 'outcome'" class="cost-table-scroll">
+            <table class="token-table cost-table" data-cost-table data-cost-breakdown="outcome">
               <thead>
                 <tr>
                   <th class="token-name-col">Outcome</th>
@@ -309,6 +310,7 @@ function changeRate() {
                 </tr>
               </tbody>
             </table>
+            </div>
 
             <template v-else-if="breakdown === 'member'">
               <table class="token-table cost-table" data-cost-breakdown="agent-members">
@@ -445,6 +447,16 @@ function changeRate() {
 .token-name {
   overflow-wrap: anywhere;
   min-width: 10ch;
+}
+
+/* THE OUTCOME BREAKDOWN'S SEVEN COLUMNS scroll sideways in a narrow dialog rather than squeeze its names letter by letter. */
+.cost-table-scroll {
+  overflow-x: auto;
+}
+
+.cost-table .token-name {
+  min-width: 14ch;
+  overflow-wrap: normal;
 }
 
 .cost-total-row td {

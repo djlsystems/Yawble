@@ -33,6 +33,16 @@ function titleOf(start: string): string {
   return props.columnTitle ? props.columnTitle(start) : `Week of ${weekLabel(start)}`;
 }
 
+/**
+ * THE COLUMN LABELS UNDER A LARGE CHART: every column's up to twelve (eight weeks, a year of months), otherwise
+ * about ten of them, evenly spaced, so a period by day stays readable. A column is named as its hover text names it.
+ */
+const labelEvery = computed(() => (props.weeks.length <= 12 ? 1 : Math.ceil(props.weeks.length / 10)));
+
+function columnLabel(start: string): string {
+  return props.columnTitle ? props.columnTitle(start) : weekLabel(start);
+}
+
 const Gap = 2;
 
 const box = computed(() => {
@@ -167,14 +177,16 @@ function weekTitle(week: number): string {
               {{ valueText(tick, inMoney, currency) }}
             </text>
           </g>
-          <text
-            v-for="(week, index) in weeks"
-            :key="week"
-            :x="plot.x + (index + 0.5) * slot"
-            :y="box.height - 8"
-            text-anchor="middle"
-            class="cost-axis-text"
-          >{{ weekLabel(week) }}</text>
+          <template v-for="(week, index) in weeks" :key="week">
+            <text
+              v-if="index % labelEvery === 0"
+              :x="plot.x + (index + 0.5) * slot"
+              :y="box.height - 8"
+              text-anchor="middle"
+              class="cost-axis-text"
+              data-cost-column-label
+            >{{ columnLabel(week) }}</text>
+          </template>
         </g>
         <line
           v-else
