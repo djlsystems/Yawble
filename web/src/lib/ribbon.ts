@@ -80,6 +80,12 @@ export const RepositoriesAction = 'admin-repositories';
  */
 export const OutcomesAction = 'admin-outcomes';
 
+/**
+ * Admin > Spend, the tenant's Spend page at `#/spend`: Actual Spend, Projected and Estimated Execution
+ * Cost, the billing accounts and the expenses. Directly after Outcomes.
+ */
+export const SpendAction = 'admin-spend';
+
 /** Admin > Sites, every team's published sites: opened, rolled back, unpublished, deleted. */
 export const SitesAction = 'admin-sites';
 
@@ -185,6 +191,8 @@ export const Ribbon: RibbonSpec = {
         { kind: 'button', action: 'admin-teams', label: 'Teams', icon: 'groups', size: 'large' },
         // What the work is for, beside the teams that do it.
         { kind: 'button', action: OutcomesAction, label: 'Outcomes', icon: 'flag', size: 'large' },
+        // What was paid to vendors, beside what the work was for.
+        { kind: 'button', action: SpendAction, label: 'Spend', icon: 'payments', size: 'large' },
         { kind: 'button', action: 'admin-users', label: 'Users', icon: 'manage_accounts', size: 'large' },
         { kind: 'button', action: 'admin-agents', label: 'Agents', icon: 'smart_toy', size: 'large' },
         { kind: 'button', action: 'admin-skills', label: 'Skills', icon: 'psychology', size: 'large' },

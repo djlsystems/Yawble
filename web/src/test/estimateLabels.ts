@@ -29,3 +29,21 @@ export function readOff(root: Element | null | undefined): string[] {
     .filter((t): t is string => t !== null);
   return [root.textContent ?? '', ...attributes];
 }
+
+/** Value words, which never sit near an estimate or a spend figure: value, ROI, return, savings. */
+export const ValueWords = /\b(value|roi|return|returns|savings)\b/i;
+
+/**
+ * THE SPEND PAGE'S LINT. There, **Actual Spend** is a real figure - confirmed vendor expenses - and the
+ * page itself is titled Spend; every other spend word, an estimate titled Cost alone, `agent h`, and any
+ * value word is misnamed. `titles` are the page's headings and tile titles, checked for Cost alone.
+ */
+export function misnamedOnSpend(texts: readonly (string | null | undefined)[], titles: readonly string[] = []): string[] {
+  const cleaned = texts.map((t) => (t ?? '').replace(/\s+/g, ' ').trim());
+  const words = cleaned.filter((t) => {
+    const rest = t === 'Spend' ? '' : t.replace(/Actual Spend(?![a-z])/g, '');
+    return SpendWord.test(rest) || AgentHShort.test(rest) || ValueWords.test(rest);
+  });
+  const costAlone = titles.map((t) => t.replace(/\s+/g, ' ').trim()).filter((t) => CostAlone.test(t));
+  return [...words, ...costAlone];
+}
