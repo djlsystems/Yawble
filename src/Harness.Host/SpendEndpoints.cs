@@ -138,6 +138,86 @@ public static class SpendEndpoints
                 + "account already active is answered as it is, with nothing written. 404 for an id that "
                 + "names no account.");
         MapExpenses(app);
+        MapOverview(app);
+    }
+
+    private const string OverviewAnswer =
+        "`from` and `to`: the period's instants. `actual`: Actual Spend, `{ currency, amount, count }` per currency "
+        + "by code - the current confirmed expenses (status `confirmed`, superseded by nothing) whose service period "
+        + "STARTS in the period, each counted whole there and never split by days; empty when there are none, and "
+        + "never an estimate in their place. `projected`: the recurring charges projected for the period, per "
+        + "currency, and `projections`, each one - never in `actual`, and dropped once a current confirmed expense "
+        + "covers its account and period. `billingTypes`: `{ billingType, group, currency, actual, projected }`, "
+        + "`group` `fixed` for a subscription and `variable` for metered and service. `estimate`: Estimated "
+        + "Execution Cost and Agent Hours over the period - `{ currency, cost, agentSeconds, agentRate, legacyRates }`, "
+        + "every run's part inside the period priced from its snapshot, the same sum `GET /api/outcomes` gives for "
+        + "the window; `cost` null, never 0, when nothing was priced. `accounts` and `vendors`: the breakdown, "
+        + "`actual` and `projected` apart, null when there is none. `months`: the trend, at least six months to the "
+        + "period's last, each `{ monthStart, actual, estimate }`. Currencies are never converted or added "
+        + "together, and Actual Spend is never inferred from hours.";
+
+    private static void MapOverview(WebApplication app)
+    {
+        app.MapGet("/api/spend/overview", async (
+                string? from, string? to, ISpendStore spend, IOutcomeStore outcomes, TenantSettings settings, CancellationToken ct) =>
+            {
+                if (SpendOverview.PeriodOf(from, to, DateTimeOffset.UtcNow) is not { } period)
+                {
+                    return Refused(400, SpendOverview.PeriodRefused);
+                }
+
+                var months = SpendOverview.TrendOf(period.From, period.To);
+                var readFrom = months[0] < period.From ? months[0] : period.From;
+                var readTo = months[^1].AddMonths(1) > period.To ? months[^1].AddMonths(1) : period.To;
+
+                var all = await outcomes.ListAsync(ct);
+                var currency = settings.OutcomesCurrency;
+                var runs = ExecutionCost.Of(await outcomes.ReadExecutionRunsAsync(readFrom, readTo, pricedOnly: false, ct), all, currency);
+
+                return Results.Ok(SpendOverview.Of(
+                    await spend.ListAccountsAsync(ct), await spend.ListExpensesAsync(ct: ct), runs, currency, period.From, period.To));
+            })
+            .WithTags("Billing")
+            .HumansOnly()
+            .WithSummary("Actual Spend, Projected and Estimated Execution Cost for a period")
+            .WithDescription(
+                "The Spend page's overview over `?from=YYYY-MM-DD&to=YYYY-MM-DD` (midnight UTC, `to` exclusive), the "
+                + "current UTC month when neither is sent; anything else is refused (400) with one sentence. "
+                + OverviewAnswer + " A person's only: no permit lets an agent read it.");
+
+        app.MapGet("/api/spend/linked-members", async (
+                HttpContext context, TeamRegistry teams, TeamAccess access, ITeamStore store, CancellationToken ct) =>
+            {
+                if (PrincipalClaims.From(context.User) is not { } principal) return Results.Unauthorized();
+
+                var effective = await access.EffectiveTeamsAsync(principal, ct);
+                var names = teams.All().Where(t => effective.Contains(t.Id)).ToDictionary(t => t.Id, t => t.Name, StringComparer.OrdinalIgnoreCase);
+
+                var linked = (await store.MembersAsync(ct))
+                    .Where(m => m.BillingAccountId is not null && names.ContainsKey(m.Team))
+                    .OrderBy(m => m.BillingAccountId, StringComparer.Ordinal)
+                    .ThenBy(m => names[m.Team], StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(m => m.Label ?? m.Name, StringComparer.OrdinalIgnoreCase)
+                    .Select(m => new
+                    {
+                        accountId = m.BillingAccountId,
+                        team = m.Team,
+                        teamName = names[m.Team],
+                        member = m.Name,
+                        label = m.Label ?? m.Name,
+                    })
+                    .ToList();
+
+                return Results.Ok(linked);
+            })
+            .WithTags("Billing")
+            .HumansOnly()
+            .WithSummary("The members linked to each billing account")
+            .WithDescription(
+                "Every member, on the teams the caller reaches, whose billing account is set: `{ accountId, team, "
+                + "teamName, member, label }`, by account, then team, then label. Read-only: a member's account is "
+                + "set in its settings. An id with no account behind it is listed as it is stored. A person's only: "
+                + "no permit lets an agent read it.");
     }
 
     public const string ExpenseNotAnObject = "The body must be a JSON object of the expense's fields.";
