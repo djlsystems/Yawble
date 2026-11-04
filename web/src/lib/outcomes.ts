@@ -1,4 +1,12 @@
-import type { Outcome, OutcomeFigures, OutcomeStatus, OutcomeWorkflowLine } from '../api/outcomes'
+import type {
+  Outcome,
+  OutcomeCumulativeWeek,
+  OutcomeFigures,
+  OutcomePresentation,
+  OutcomeStatus,
+  OutcomeThroughputWeek,
+  OutcomeWorkflowLine,
+} from '../api/outcomes'
 import { localTime, wireInstant } from './localTime'
 
 /**
@@ -298,4 +306,66 @@ export function rateText(money: { currency: string; agentHourlyRate: number | nu
   return money.agentHourlyRate === null
     ? `No rate set for agent time (${money.currency})`
     : `Agent time at ${moneyText(money.agentHourlyRate, money.currency)}/h (${money.currency})`
+}
+
+// ---- Two presentations of one outcome. Each formats what the route answered; none computes a figure. ----
+
+/** The two readings a person picks between, in the order the picker shows them. */
+export const PresentationOptions: { label: string; value: OutcomePresentation }[] = [
+  { label: 'Project', value: 'project' },
+  { label: 'Operational', value: 'operational' },
+]
+
+/** How an outcome is read: its stored choice, and project when nobody has picked one (null or absent). */
+export function presentationOf(outcome: Pick<Outcome, 'presentation'>): OutcomePresentation {
+  return outcome.presentation === 'operational' ? 'operational' : 'project'
+}
+
+/**
+ * The Estimated Execution Cost figure's label: `Estimated Execution Cost · 13.8 Agent Hours at $60/h`. The rate is
+ * the route's weighted rate of the priced agent time, never the tenant rate; with none, no rate is named.
+ */
+export function estimateLabel(figures: Pick<OutcomeFigures, 'agentSeconds' | 'cost'>): string {
+  const rate = figures.cost.agentRate ?? null
+  const hours = agentHoursText(figures.agentSeconds)
+  return rate === null
+    ? `Estimated Execution Cost · ${hours}`
+    : `Estimated Execution Cost · ${hours} at ${moneyText(rate, figures.cost.currency)}/h`
+}
+
+/** Each bar's height, 0..100 of the tallest - by cost when any is priced, else by agent time. */
+export function seriesHeights(series: readonly { cost: number | null; agentSeconds: number }[]): number[] {
+  const priced = series.some((w) => w.cost !== null)
+  const values = series.map((w) => (priced ? w.cost ?? 0 : w.agentSeconds))
+  const max = Math.max(0, ...values)
+  return values.map((v) => (max > 0 ? (v / max) * 100 : 0))
+}
+
+/** A week's short label, `Sep 29`, read in UTC as the route's weeks are. */
+export function weekStartText(weekStart: string): string {
+  return new Date(weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' })
+}
+
+/** A cumulative bar's hover text: `To the end of the week of Sep 29: $240 · 2.7 Agent Hours`. */
+export function cumulativeText(week: OutcomeCumulativeWeek, currency: string): string {
+  const parts: string[] = []
+  if (week.cost !== null) parts.push(moneyText(week.cost, currency))
+  parts.push(agentHoursText(week.agentSeconds))
+  return `To the end of the week of ${weekStartText(week.weekStart)}: ${parts.join(' · ')}`
+}
+
+/** Cost per completed workflow as the route answered it, or `not measurable` - never a division by zero. */
+export function perCompletedText(costPerCompleted: number | null | undefined, currency: string): string {
+  return costPerCompleted === null || costPerCompleted === undefined ? 'not measurable' : moneyText(costPerCompleted, currency)
+}
+
+/** Throughput, as the route counted it: `3 closed · 2 completed`. */
+export function throughputText(week: Pick<OutcomeThroughputWeek, 'closed' | 'completed'>): string {
+  return `${week.closed} closed · ${week.completed} completed`
+}
+
+/** Backlog progress in words: `4 of 9 items achieved`, or that it has none. */
+export function backlogProgressText(backlog: OutcomeFigures['backlog']): string {
+  const total = backlog.notStarted + backlog.inProgress + backlog.achieved
+  return total === 0 ? 'No backlog items' : `${backlog.achieved} of ${total} item${total === 1 ? '' : 's'} achieved`
 }

@@ -87,7 +87,7 @@ const series = computed(() => costSeries(props.cost?.outcomes ?? []));
 const colourOf = computed(() => new Map(series.value.map((s) => [s.key, s.colour])));
 const use = computed(() => (props.cost ? budgetUse(props.cost) : null));
 
-/** The table's rows: each outcome in the chart's order, then No outcome. The Team total follows. */
+/** The table's rows: each outcome in the chart's order, then Unattributed. The Team total follows. */
 const rows = computed(() => {
   const outcomes = props.cost?.outcomes ?? [];
   return [...outcomes.filter((o) => o.id !== null), ...outcomes.filter((o) => o.id === null)];

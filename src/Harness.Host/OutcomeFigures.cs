@@ -115,12 +115,25 @@ public static class OutcomeFigures
         /// <summary>The same <see cref="Weeks"/> weeks as <see cref="Weekly"/>: how many of its workflows closed in
         /// each (see <see cref="ThroughputOf"/>).</summary>
         public IReadOnlyList<WeekThroughput>? Throughput { get; init; }
+
+        /// <summary>Over the same <see cref="Weeks"/> weeks: their estimate over the workflows completed in them, to the
+        /// cent; null - not measurable - when none completed or nothing was priced. Never a division by zero.</summary>
+        public decimal? CostPerCompleted { get; init; }
+
+        /// <summary>The project reading's cumulative series, on one outcome's detail only: everything up to the end of each
+        /// of the same weeks (see <see cref="CumulativeOf"/>).</summary>
+        public IReadOnlyList<CumulativeWeek>? Cumulative { get; init; }
     }
 
     /// <summary>One week's throughput: the workflows serving the outcome whose close fell in it - <see cref="Closed"/>
-    /// every one, <see cref="Completed"/> those completed rather than closed. What an operational outcome's cost per
-    /// completed workflow divides by; with none completed it is not measurable, never a division by zero.</summary>
-    public sealed record WeekThroughput(DateTimeOffset WeekStart, int Closed, int Completed);
+    /// every one, <see cref="Completed"/> those completed rather than closed - and <see cref="CostPerCompleted"/>, the
+    /// week's estimate over its completed workflows, to the cent; null - not measurable - with none completed or nothing
+    /// priced in the week. Never a division by zero.</summary>
+    public sealed record WeekThroughput(DateTimeOffset WeekStart, int Closed, int Completed, decimal? CostPerCompleted);
+
+    /// <summary>Everything an outcome's runs took from the start of the ledger to the end of the week that starts at
+    /// <see cref="WeekStart"/>: agent time, and money (null - never 0 - when nothing in it was priced).</summary>
+    public sealed record CumulativeWeek(DateTimeOffset WeekStart, double AgentSeconds, decimal? Cost);
 
     public sealed record BacklogCounts(int NotStarted, int InProgress, int Achieved);
 
@@ -243,6 +256,7 @@ public static class OutcomeFigures
         var total = figures.AgentSeconds + blockedSeconds;
 
         var weekly = ExecutionCost.Weekly(weekRuns.Where(r => r.OutcomeId == outcome), WeekStarts(now), pricing.Currency);
+        var throughput = ThroughputOf(all, outcome, now, weekly);
 
         return figures with
         {
@@ -251,8 +265,36 @@ public static class OutcomeFigures
             Efficiency = total > 0 ? figures.AgentSeconds / total : null,
             Weekly = weekly,
             Cost = new Money(costs.Of(outcome), pricing.Currency, costs.LegacyRatesOf(outcome), costs.AgentRateOf(outcome)),
-            Throughput = ThroughputOf(all, outcome, now),
+            Throughput = throughput,
+            CostPerCompleted = PerCompleted(weekly.Where(w => w.Cost is not null).Select(w => w.Cost!.Value).DefaultIfEmpty().Sum(),
+                weekly.Any(w => w.Cost is not null), throughput.Sum(w => w.Completed)),
         };
+    }
+
+    /// <summary>Money over completed workflows, to the cent, or null - not measurable - with none completed or
+    /// nothing priced.</summary>
+    private static decimal? PerCompleted(decimal money, bool priced, int completed) =>
+        priced && completed > 0 ? decimal.Round(money / completed, 2) : null;
+
+    /// <summary>
+    /// THE CUMULATIVE SERIES: for each of the last <see cref="Weeks"/> weeks, the part of every run serving
+    /// <paramref name="outcome"/> (each run once, in the bucket <see cref="ExecutionCost"/> gave it) from its start
+    /// to the end of that week, priced as <see cref="ExecutionCost.Tally"/> prices a span. <paramref name="runs"/> must
+    /// be every run, all time: the last week's money is then the outcome's all-time estimate, to the cent.
+    /// </summary>
+    public static IReadOnlyList<CumulativeWeek> CumulativeOf(
+        IReadOnlyList<ExecutionCost.Run> runs, string? outcome, DateTimeOffset now, string currency)
+    {
+        var mine = runs.Where(r => r.OutcomeId == outcome).ToList();
+        return WeekStarts(now)
+            .Select(start =>
+            {
+                var end = start.AddDays(7);
+                var tally = new ExecutionCost.Tally(currency);
+                foreach (var run in mine) tally.AddSpan(run, run.SecondsIn(null, end));
+                return new CumulativeWeek(start, tally.AgentSeconds, tally.Cost);
+            })
+            .ToList();
     }
 
     /// <summary>
@@ -261,8 +303,9 @@ public static class OutcomeFigures
     /// unwindowed - and whose close (<c>workflow_ledger</c>) fell in it. A workflow is counted once, in the week it
     /// closed; an open one is in no week.
     /// </summary>
-    public static IReadOnlyList<WeekThroughput> ThroughputOf(Book book, string? outcome, DateTimeOffset now)
+    public static IReadOnlyList<WeekThroughput> ThroughputOf(Book book, string? outcome, DateTimeOffset now, IReadOnlyList<Week> weekly)
     {
+        var costOf = weekly.ToDictionary(w => w.WeekStart, w => w.Cost);
         var closes = book.WorkflowsOf(outcome)
             .Select(c => book.CloseOf.GetValueOrDefault(c))
             .OfType<WorkflowLedgerRow>()
@@ -273,7 +316,9 @@ public static class OutcomeFigures
             {
                 var end = start.AddDays(7);
                 var inWeek = closes.Where(c => c.ClosedAt >= start && c.ClosedAt < end).ToList();
-                return new WeekThroughput(start, inWeek.Count, inWeek.Count(c => c.HowClosed == WorkflowLedgerRow.Completed));
+                var completed = inWeek.Count(c => c.HowClosed == WorkflowLedgerRow.Completed);
+                var cost = costOf.GetValueOrDefault(start);
+                return new WeekThroughput(start, inWeek.Count, completed, PerCompleted(cost ?? 0, cost is not null, completed));
             })
             .ToList();
     }

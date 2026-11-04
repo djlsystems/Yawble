@@ -15,7 +15,7 @@ import { EstimateTitle, agentHours, agentRateLine, legacyRateNote, markedMoney, 
  * priced by the route from its own snapshot, and "at R/h" is the route's weighted agent rate.
  *
  * COLOURS ARE `outcomeColours`'s, by each outcome's global rank, so an outcome is the same colour here
- * as on every list row and the team page. Other / no outcome is the neutral gray.
+ * as on every list row and the team page. Other outcomes and Unattributed are the neutral gray.
  */
 
 /** The Estimated Execution Cost chart's one series: not an outcome, so no outcome's hue. */
@@ -101,7 +101,7 @@ export function summaryOver(outcome: CostSummaryOutcome): boolean {
   return outcome.id !== null && outcome.budget !== null && total !== null && total > outcome.budget;
 }
 
-/** The outcomes carrying a budget. No outcome never does. */
+/** The outcomes carrying a budget. Unattributed never does. */
 export function summaryBudgeted(outcomes: readonly CostSummaryOutcome[]): CostSummaryOutcome[] {
   return outcomes.filter((o) => o.id !== null && o.budget !== null);
 }
@@ -153,9 +153,9 @@ export function budgetsTile(summary: CostSummary, currency: string): BudgetsTile
 // ---- Where it goes -----------------------------------------------------------------------------
 
 export interface WhereBar {
-  /** The outcome's id, or `other` for Other / no outcome. */
+  /** The outcome's id, `other` for the outcomes past the top three, or `unattributed` for work serving none. */
   key: string;
-  /** The outcome to open, or null for Other / no outcome (the Outcomes list). */
+  /** The outcome to open, or null for Other outcomes and Unattributed (the Outcomes list). */
   outcome: string | null;
   name: string;
   colour: string;
@@ -172,9 +172,13 @@ function share(outcome: CostSummaryOutcome, priced: boolean): number {
   return priced ? outcome.cost ?? 0 : outcome.agentSeconds / 3600;
 }
 
+/** The bucket for work that serves no outcome - no link, an unlink, a deleted outcome - as the route names it. */
+export const UnattributedName = 'Unattributed';
+
 /**
- * THE TOP THREE OUTCOMES BY ESTIMATED COST, THEN OTHER / NO OUTCOME (every other outcome plus unlinked work),
- * on ONE scale across the four bars that a budget tick also fits on.
+ * THE TOP THREE OUTCOMES BY ESTIMATED COST, THEN OTHER OUTCOMES (every outcome past the top three), THEN
+ * UNATTRIBUTED (the work serving none, computed by the route, never an outcome), on ONE scale across the bars
+ * that a budget tick also fits on. Every run is in exactly one of them, so they add up to the period's figure.
  */
 export function whereBars(summary: CostSummary, currency: string): WhereBar[] {
   const priced = summaryPriced(summary);
@@ -182,15 +186,21 @@ export function whereBars(summary: CostSummary, currency: string): WhereBar[] {
     .filter((o) => o.id !== null && share(o, priced) > 0)
     .sort((a, b) => share(b, priced) - share(a, priced));
   const top = linked.slice(0, 3);
-  const rest = [...linked.slice(3), ...summary.outcomes.filter((o) => o.id === null)];
-  const restValue = rest.reduce((sum, o) => sum + share(o, priced), 0);
-  const restSeconds = rest.reduce((sum, o) => sum + o.agentSeconds, 0);
+  const rest = linked.slice(3);
+  const none = summary.outcomes.filter((o) => o.id === null);
+  const sumOf = (list: CostSummaryOutcome[]) => ({
+    value: list.reduce((sum, o) => sum + share(o, priced), 0),
+    seconds: list.reduce((sum, o) => sum + o.agentSeconds, 0),
+  });
+  const other = sumOf(rest);
+  const unattributed = sumOf(none);
 
   const text = (value: number, seconds: number) => (priced ? moneyText(value, currency) : agentHours(seconds));
   const budgetOf = (o: CostSummaryOutcome) => (priced && o.budget !== null ? o.budget : null);
   const scale = Math.max(
     ...top.map((o) => Math.max(share(o, priced), budgetOf(o) ?? 0)),
-    restValue,
+    other.value,
+    unattributed.value,
     0,
   );
   const on = (value: number) => (scale > 0 ? Math.min(1, value / scale) : 0);
@@ -206,18 +216,19 @@ export function whereBars(summary: CostSummary, currency: string): WhereBar[] {
     over: priced && summaryOver(o),
   }));
 
-  if (restValue > 0) {
-    bars.push({
-      key: 'other',
-      outcome: null,
-      name: 'Other / no outcome',
-      colour: NoOutcomeColour,
-      amount: text(restValue, restSeconds),
-      fill: on(restValue),
-      tick: null,
-      over: false,
-    });
-  }
+  const grouped = (key: string, name: string, part: { value: number; seconds: number }): WhereBar => ({
+    key,
+    outcome: null,
+    name,
+    colour: NoOutcomeColour,
+    amount: text(part.value, part.seconds),
+    fill: on(part.value),
+    tick: null,
+    over: false,
+  });
+
+  if (other.value > 0) bars.push(grouped('other', 'Other outcomes', other));
+  if (unattributed.value > 0) bars.push(grouped('unattributed', none[0]?.name || UnattributedName, unattributed));
 
   return bars;
 }

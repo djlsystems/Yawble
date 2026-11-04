@@ -141,7 +141,9 @@ public static class OutcomeEndpoints
                 + "window, the part of each run inside it; `agentRate` the weighted rate of its priced agent time - "
                 + "its money over its hours - null when none was priced, never the tenant rate), `throughput` (the "
                 + "same 8 weeks as `weekly`: `{ weekStart, closed, completed }`, its workflows whose close fell in "
-                + "each week, every one and those completed). A run with a snapshot serves the outcome its link named "
+                + "each week, every one and those completed, and `costPerCompleted`, that week's cost over its completed "
+                + "workflows, null - not measurable - with none completed or nothing priced) and `costPerCompleted` "
+                + "(the same over all 8 weeks). A run with a snapshot serves the outcome its link named "
                 + "when it started; `weekly` and `cost` count it there. EACH RUN IS COUNTED ONCE, in one bucket: an "
                 + "outcome or `noOutcome` (Unattributed); nothing is split between outcomes. `money` names the currency, the tenant "
                 + "default rate as set now (no figure multiplies by it) and `declaredCountsAs`. "
@@ -214,8 +216,15 @@ public static class OutcomeEndpoints
 
                 return Results.Ok(new
                 {
+                    // THE PROJECT READING'S CUMULATIVE SERIES, on the detail only: every run of all time, to the
+                    // end of each week, so its last week is the outcome's all-time estimate.
                     outcome = Shape(
-                        outcome, dashboard.Figures(OutcomeFigures.For(book, holder, open), holder), null,
+                        outcome,
+                        dashboard.Figures(OutcomeFigures.For(book, holder, open), holder) with
+                        {
+                            Cumulative = OutcomeFigures.CumulativeOf(executions, holder, DateTimeOffset.UtcNow, settings.OutcomesCurrency),
+                        },
+                        null,
                         OutcomeFigures.LinkedWorkflows(book.Rows.CurrentLinks, all).GetValueOrDefault(outcome.Id),
                         (await EndedAtAsync(outcomes, outcome.IsLive ? [] : [outcome], ct)).GetValueOrDefault(outcome.Id)),
                     money = dashboard.Money,
@@ -249,7 +258,9 @@ public static class OutcomeEndpoints
             .RequirePermit(Permits.Read)
             .WithSummary("One outcome, its workflows and its link history")
             .WithDescription(
-                "The outcome with its `figures` (as the list gives them), each workflow it serves now - "
+                "The outcome with its `figures` (as the list gives them, and `cumulative`: for each of the 8 weeks, "
+                + "`{ weekStart, agentSeconds, cost }` of every run serving it from the start of the ledger to the end of "
+                + "that week, the last being its all-time estimate), each workflow it serves now - "
                 + "team, state, when it started, elapsed, agent time, billable tokens over `measuredRuns`, "
                 + "`unmeasuredRuns`, "
                 + "and how and by whom it was linked - and `history`, every link row that named it or an "

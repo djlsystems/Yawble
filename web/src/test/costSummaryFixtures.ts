@@ -5,7 +5,7 @@ import type { CostSummary, CostSummaryOutcome } from '../api/outcomes';
  *
  * At $60/h over the eight weeks: Ship billing 20 h = $1,200 (all-team $1,200) against $2,000, Docs
  * refresh 10 h = $600 against $500 when over (else $400 and 6.67 h), Research 5 h = $300 with no
- * budget, Ops 2 h = $120 with no budget, No outcome 3 h = $180. The prior eight weeks: 30 h = $1,800.
+ * budget, Ops 2 h = $120 with no budget, Unattributed 3 h = $180. The prior eight weeks: 30 h = $1,800.
  */
 export interface SummaryOptions {
   /** The rate every run was snapshotted at; null is no priced run. */
@@ -33,7 +33,7 @@ export function costSummary(options: SummaryOptions = {}): CostSummary {
   });
 
   const outcomes = [
-    outcome(null, 'No outcome', null, 3, null),
+    outcome(null, 'Unattributed', null, 3, null),
     outcome('o-billing', 'Ship billing', 1, 20, 2000),
     outcome('o-docs', 'Docs refresh', 2, docsHours, 500),
     outcome('o-research', 'Research', 3, 5, null),

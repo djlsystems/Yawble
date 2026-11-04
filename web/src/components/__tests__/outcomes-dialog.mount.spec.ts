@@ -3,12 +3,15 @@
 // OUTCOMES AS A DASHBOARD. The tabs; each outcome as a tile with the route's cost against its value,
 // its eight weeks of spend, its backlog by where it stands and a summary line - never a figure the
 // route did not send, "not set" for a cost with no rate, no efficiency for no time; the "Accounting
-// since" note; the always-shown No outcome assigned tile; the rate editor writing its three settings;
+// since" note; the always-shown Unattributed tile; the rate editor writing its three settings;
 // and an outcome opened: its money row, its backlog columns, its value edited, and the actions -
 // confirm, retire and reactivate send their routes, Merge into… shows the route's preview before it
 // merges, Reject is offered only with no links, and Move sends the link route. Retired & merged is a
 // table - sortable, rows selectable one by one or all shown at once - whose Delete shows the route's
-// preview of what goes before it deletes the ids picked.
+// preview of what goes before it deletes the ids picked. And the two presentations of one outcome:
+// Project (cumulative Agent Hours and Estimated Execution Cost, backlog progress, a cumulative chart) and
+// Operational (cost, throughput and cost per completed workflow by week, "not measurable" where nothing
+// completed), picked by a person through the edit route.
 //
 // THE MOCK IS OF `api/outcomes` and the settings save: what the Host does is pinned server-side
 // (OutcomeTests, OutcomeDashboardTests).
@@ -106,7 +109,7 @@ function listing(over: Partial<OutcomeList> = {}): OutcomeList {
     money: { currency: 'USD', agentHourlyRate: null, declaredCountsAs: 'achieved' },
     outcomes: [pipeline, proposal, retired, merged],
     noOutcome: {
-      name: 'No outcome assigned',
+      name: 'Unattributed',
       figures: figures({
         workflows: { open: 0, completed: 7, closed: 0, total: 7 },
         tokens: { billable: 5000, measuredRuns: 4, unmeasuredRuns: 1 },
@@ -337,12 +340,12 @@ describe('Manage Outcomes: tabs and figures', () => {
     expect(row('o-2')).toContain('<b>Faster</b>');
   });
 
-  it('closes Active with the No outcome assigned tile and its own figures, even with no outcomes', async () => {
+  it('closes Active with the Unattributed tile and its own figures, even with no outcomes', async () => {
     api.listOutcomes.mockResolvedValue(listing({ outcomes: [] }));
     await open();
 
     const none = bodyFind('[data-no-outcome-row]')?.textContent ?? '';
-    expect(none).toContain('No outcome assigned');
+    expect(none).toContain('Unattributed');
     expect(none).toContain('7 workflows completed · 0 active');
     expect(none).toContain('+ 1 unmeasured run');
 
@@ -400,7 +403,7 @@ describe('Manage Outcomes: an outcome opened', () => {
       const detail = detailOf({
         ...found,
         value: '20000',
-        figures: figures({ cost: { amount: 1240, currency: 'USD' }, efficiency: 0.5, blockedSeconds: 3600 }),
+        figures: figures({ cost: { amount: 1240, currency: 'USD', agentRate: 62.5 }, efficiency: 0.5, blockedSeconds: 3600 }),
       });
       detail.money = { currency: 'USD', agentHourlyRate: 90, declaredCountsAs: 'achieved' };
       detail.backlogItems = [
@@ -420,7 +423,9 @@ describe('Manage Outcomes: an outcome opened', () => {
     expect(bodyFind('[data-outcome-value]')?.textContent).toContain('Budget');
     expect(bodyFind('[data-outcome-share]')?.textContent).toContain('Of its budget spent');
     expect(bodyFind('[data-outcome-cost]')?.textContent).toContain('$1,240');
-    expect(bodyFind('[data-outcome-cost]')?.textContent).toContain('at $90/h');
+    // ESTIMATED EXECUTION COST, with the route's weighted rate - never the tenant rate ($90/h) as if it priced it.
+    expect(bodyFind('[data-outcome-cost]')?.textContent).toContain('Estimated Execution Cost · 3.1 Agent Hours at $62.50/h');
+    expect(bodyFind('[data-outcome-cost]')?.textContent).not.toContain('$90');
     expect(bodyFind('[data-outcome-share]')?.textContent).toContain('6%');
     expect(bodyFind('[data-outcome-efficiency]')?.textContent).toContain('50%');
     expect(bodyFind('[data-outcome-efficiency]')?.textContent).toContain('1h waiting on a person');
@@ -808,7 +813,7 @@ describe('Manage Outcomes: Retired & merged as a table', () => {
     const list = bodyFind('[data-outcome-delete-list]')!.textContent!;
     expect(list).toContain('Old goal (retired)');
     expect(list).toContain('Folded goal (merged into Old goal; goes with Old goal)');
-    expect(bodyFind('[data-outcome-delete-workflows]')?.textContent).toContain('4 workflows will count under No outcome');
+    expect(bodyFind('[data-outcome-delete-workflows]')?.textContent).toContain('4 workflows will count under Unattributed');
     expect(bodyFind('[data-outcome-delete-items]')?.textContent).toContain('2 backlog items lose their outcome');
     expect(bodyFind('[data-outcome-delete-triggers]')?.textContent).toContain('1 trigger loses its outcome');
 
@@ -877,5 +882,108 @@ describe('Manage Outcomes: Retired & merged as a table', () => {
 
     expect(api.getOutcome).toHaveBeenCalledWith('o-3');
     expect(bodyFind('[data-outcome-detail]')?.getAttribute('data-outcome-id')).toBe('o-3');
+  });
+});
+
+describe('Manage Outcomes: two presentations of one outcome', () => {
+  const weeks = ['2026-09-14', '2026-09-21', '2026-09-28', '2026-10-05', '2026-10-12', '2026-10-19', '2026-10-26', '2026-11-02']
+    .map((day) => `${day}T00:00:00Z`);
+
+  function readings(over: Partial<OutcomeFigures> = {}): OutcomeFigures {
+    return figures({
+      agentSeconds: 9 * 3600,
+      cost: { amount: 540, currency: 'USD', agentRate: 60 },
+      backlog: { notStarted: 2, inProgress: 3, achieved: 4 },
+      weekly: weeks.map((weekStart, i) => ({
+        weekStart, agentSeconds: i === 7 ? 7200 : 0, billable: 0, measuredRuns: i === 7 ? 2 : 0, unmeasuredRuns: 0, cost: i === 7 ? 120 : null,
+      })),
+      throughput: weeks.map((weekStart, i) => ({
+        weekStart, closed: i === 7 ? 3 : i === 5 ? 1 : 0, completed: i === 7 ? 2 : i === 5 ? 1 : 0, costPerCompleted: i === 7 ? 60 : null,
+      })),
+      costPerCompleted: 40,
+      cumulative: weeks.map((weekStart, i) => ({ weekStart, agentSeconds: (i + 2) * 3600, cost: i < 2 ? null : (i - 1) * 60 })),
+      ...over,
+    });
+  }
+
+  function openWith(over: Partial<Outcome>, figuresOver: Partial<OutcomeFigures> = {}) {
+    api.getOutcome.mockImplementation(async () => detailOf({ ...pipeline, ...over, figures: readings(figuresOver) }));
+    return open({ outcome: 'o-1' });
+  }
+
+  const pressed = () =>
+    [...document.body.querySelectorAll('[data-outcome-presentation] button')]
+      .filter((b) => b.getAttribute('aria-pressed') === 'true')
+      .map((b) => b.textContent?.trim());
+
+  it('reads an outcome nobody has picked for as a project: cumulative figures, backlog progress and a cumulative chart', async () => {
+    await openWith({ presentation: null });
+
+    expect(pressed()).toEqual(['Project']);
+    expect(bodyFind('[data-outcome-project]')).not.toBeNull();
+    expect(bodyFind('[data-outcome-operational]')).toBeNull();
+
+    expect(bodyFind('[data-outcome-cumulative-hours]')?.textContent).toContain('9.0 Agent Hours');
+    expect(bodyFind('[data-outcome-cumulative-hours]')?.textContent).toContain('Agent Hours, all time');
+    expect(bodyFind('[data-outcome-cumulative-cost]')?.textContent).toContain('$540');
+    expect(bodyFind('[data-outcome-cumulative-cost]')?.textContent).toContain('Estimated Execution Cost, all time');
+    expect(bodyFind('[data-outcome-progress]')?.textContent).toContain('4 of 9 items achieved');
+    expect(document.body.querySelectorAll('[data-outcome-progress] .outcome-bar__segment')).toHaveLength(3);
+
+    // EIGHT CUMULATIVE BARS, the last the tallest: the route's figure to the end of each week.
+    const bars = [...document.body.querySelectorAll('[data-outcome-cumulative] .outcome-week__bar')] as HTMLElement[];
+    expect(bars).toHaveLength(8);
+    expect(bars.at(-1)?.style.height).toBe('100%');
+    expect(bars[0]?.style.height).toBe('0%');
+
+    // The budget words stay as they are, and no human figure is shown or stood in for.
+    expect(bodyFind('[data-outcome-value]')?.textContent).toContain('Budget');
+    expect(bodyFind('[data-outcome-share]')?.textContent).toContain('Of its budget spent');
+    expect(bodyText()).not.toMatch(/intervention/i);
+  });
+
+  it('reads an operational outcome week by week: cost, throughput and cost per completed workflow, not measurable without a completion', async () => {
+    await openWith({ presentation: 'operational' });
+
+    expect(pressed()).toEqual(['Operational']);
+    expect(bodyFind('[data-outcome-operational]')).not.toBeNull();
+    expect(bodyFind('[data-outcome-project]')).toBeNull();
+    expect(bodyFind('[data-outcome-per-completed]')?.textContent).toContain('$40');
+    expect(bodyFind('[data-outcome-per-completed]')?.textContent).toContain('Cost per completed workflow, last 8 weeks');
+    expect(bodyText()).toContain('Estimated Execution Cost by week');
+    expect(document.body.querySelectorAll('[data-outcome-weeks] .outcome-week__bar')).toHaveLength(8);
+
+    const row = (weekStart: string) =>
+      [...(bodyFind(`[data-outcome-period-row="${weekStart}"]`)?.querySelectorAll('td') ?? [])].map((td) => td.textContent?.trim());
+    expect(document.body.querySelectorAll('[data-outcome-period-row]')).toHaveLength(8);
+    expect(row(weeks[7]!)).toEqual(['Nov 2', '$120', '2.0 Agent Hours', '3 closed · 2 completed', '$60']);
+    // A completion with nothing priced, and a week with no completion: not measurable, never $0 or a division by zero.
+    expect(row(weeks[5]!)).toEqual(['Oct 19', '—', '0 agent min', '1 closed · 1 completed', 'not measurable']);
+    expect(row(weeks[0]!)).toEqual(['Sep 14', '—', '0 agent min', '0 closed · 0 completed', 'not measurable']);
+    expect(bodyText()).not.toMatch(/intervention/i);
+  });
+
+  it('says not measurable for the eight weeks when nothing completed', async () => {
+    await openWith({ presentation: 'operational' }, { costPerCompleted: null });
+
+    expect(bodyFind('[data-outcome-per-completed]')?.textContent).toContain('not measurable');
+  });
+
+  it("saves a person's pick through the edit route, and offers none on a merged outcome", async () => {
+    await openWith({ presentation: null });
+
+    const operational = [...document.body.querySelectorAll('[data-outcome-presentation] button')]
+      .find((b) => b.textContent?.trim() === 'Operational') as HTMLElement;
+    operational.click();
+    await settle();
+
+    expect(api.editOutcome).toHaveBeenCalledWith('o-1', { presentation: 'operational' });
+
+    resetBody();
+    api.getOutcome.mockImplementation(async () => detailOf({ ...merged, figures: readings() }));
+    await open({ outcome: 'o-4' });
+    const buttons = [...document.body.querySelectorAll('[data-outcome-presentation] button')] as HTMLButtonElement[];
+    expect(buttons.length).toBe(2);
+    expect(buttons.every((b) => b.disabled || b.getAttribute('aria-disabled') === 'true' || b.hasAttribute('disabled'))).toBe(true);
   });
 });

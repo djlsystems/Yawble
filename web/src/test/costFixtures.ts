@@ -2,10 +2,10 @@ import type { TeamCost, TeamCostOutcome, TeamCostWeek } from '../api/outcomes';
 
 /**
  * A TEAM'S COST AS THE PINNED ROUTE ANSWERS IT, for the Cost tile, dialog and list column's
- * mount tests: eight Monday-start UTC weeks, No outcome first, two budgeted outcomes (one shared with
+ * mount tests: eight Monday-start UTC weeks, Unattributed first, two budgeted outcomes (one shared with
  * another team, so its all-team total is more than this team's part), one unbudgeted outcome.
  *
- * At $60/h: No outcome 4 h = $240, Ship billing 8 h = $480 of $700 all-team against $1,000, Docs
+ * At $60/h: Unattributed 4 h = $240, Ship billing 8 h = $480 of $700 all-team against $1,000, Docs
  * refresh 4 h = $240 against $500 ($300 all-team), Research 2 h = $120 with no budget.
  */
 export const Weeks = Array.from({ length: 8 }, (_, i) => new Date(Date.UTC(2026, 8, 7 + 7 * i)).toISOString());
@@ -57,7 +57,7 @@ export function teamCost(options: CostOptions = {}): TeamCost {
   const budgets = options.budgets ?? true;
 
   const outcomes = [
-    outcome(null, 'No outcome', 0.5, 100_000, rate, null, null),
+    outcome(null, 'Unattributed', 0.5, 100_000, rate, null, null),
     outcome('o-billing', 'Ship billing', 1, 250_000, rate, budgets ? 1000 : null, 700, 1),
     outcome('o-docs', 'Docs refresh', 0.5, 50_000, rate, budgets ? 500 : null, options.over ? 650 : 300, 2),
     outcome('o-research', 'Research', 0.25, 25_000, rate, null, 120, 3),

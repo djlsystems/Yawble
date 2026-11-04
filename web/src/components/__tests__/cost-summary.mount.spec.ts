@@ -175,13 +175,15 @@ describe('the Budgets tile', () => {
 });
 
 describe('the Where it goes tile', () => {
-  it('shows the top three outcomes, then Other / no outcome, on one scale with a budget tick', () => {
+  it('shows the top three outcomes, then Other outcomes, then Unattributed, on one scale with a budget tick', () => {
     const where = tile(mountTiles(), 'where');
     const bars = where.findAll('[data-summary-where]');
 
-    expect(bars.map((b) => b.attributes('data-summary-where'))).toEqual(['o-billing', 'o-docs', 'o-research', 'other']);
-    expect(bars.map((b) => b.get('[data-summary-where-amount]').text())).toEqual(['$1,200', '$400', '$300', '$300']);
-    expect(bars[3]!.text()).toContain('Other / no outcome');
+    expect(bars.map((b) => b.attributes('data-summary-where'))).toEqual(['o-billing', 'o-docs', 'o-research', 'other', 'unattributed']);
+    expect(bars.map((b) => b.get('[data-summary-where-amount]').text())).toEqual(['$1,200', '$400', '$300', '$120', '$180']);
+    expect(bars[3]!.text()).toContain('Other outcomes');
+    expect(bars[4]!.text()).toContain('Unattributed');
+    expect(where.text()).not.toMatch(/no outcome/i);
 
     // One scale: Ship billing's $2,000 budget is the top, so its $1,200 is 60% and its tick at 100%.
     expect(bars[0]!.get('[data-summary-where-fill]').attributes('style')).toContain('width: 60%');
@@ -213,16 +215,17 @@ describe('the Where it goes tile', () => {
     const where = tile(mountTiles({ rate: null }), 'where');
 
     expect(where.findAll('[data-summary-where-amount]').map((a) => a.text()))
-      .toEqual(['20.0 Agent Hours', '6.7 Agent Hours', '5.0 Agent Hours', '5.0 Agent Hours']);
+      .toEqual(['20.0 Agent Hours', '6.7 Agent Hours', '5.0 Agent Hours', '2.0 Agent Hours', '3.0 Agent Hours']);
     expect(where.find('[data-summary-where-tick]').exists()).toBe(false);
   });
 
-  it('opens the outcome a bar is, and the Outcomes list from Other', async () => {
+  it('opens the outcome a bar is, and the Outcomes list from Other and Unattributed', async () => {
     const view = mountTiles();
     await view.get('[data-summary-where="o-docs"]').trigger('click');
     await view.get('[data-summary-where="other"]').trigger('click');
+    await view.get('[data-summary-where="unattributed"]').trigger('click');
 
-    expect(view.emitted('open-outcome')).toEqual([['o-docs'], [null]]);
+    expect(view.emitted('open-outcome')).toEqual([['o-docs'], [null], [null]]);
   });
 });
 

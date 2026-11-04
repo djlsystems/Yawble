@@ -24,9 +24,9 @@ export const EstimateTitle = 'Estimated Execution Cost'
 /** The critical colour: an outcome over its budget. */
 export const CriticalColour = 'var(--os-error)'
 
-/** One stacked series: an outcome (or No outcome), its colour and its eight weeks. */
+/** One stacked series: an outcome (or Unattributed), its colour and its eight weeks. */
 export interface CostSeries {
-  /** The outcome's id, or `none` for No outcome. */
+  /** The outcome's id, or `none` for Unattributed. */
   key: string
   name: string
   colour: string
@@ -75,7 +75,7 @@ export function agentRateLine(totals: Pick<TeamCostTotals, 'agentSeconds' | 'age
 }
 
 /**
- * THE FIXED ORDER: No outcome first (the bottom of each stack, neutral gray), then each outcome in the
+ * THE FIXED ORDER: Unattributed first (the bottom of each stack, neutral gray), then each outcome in the
  * route's order. Each colour comes from the shared `outcomeColours` module (the outcome's global rank),
  * never from its position among whatever one team lists: one outcome is one colour on every teams-list
  * row, the tile and the dialog.
@@ -85,7 +85,7 @@ export function costSeries(outcomes: readonly TeamCostOutcome[]): CostSeries[] {
   const linked = outcomes.filter((o) => o.id !== null)
 
   return [
-    ...none.map((o) => ({ key: 'none', name: o.name || 'No outcome', colour: outcomeColour(o), none: true, weekly: o.weekly })),
+    ...none.map((o) => ({ key: 'none', name: o.name || 'Unattributed', colour: outcomeColour(o), none: true, weekly: o.weekly })),
     ...linked.map((o) => ({
       key: o.id!,
       name: o.name,
@@ -138,7 +138,7 @@ export function overBudget(outcome: Pick<TeamCostOutcome, 'id' | 'value' | 'outc
   return outcome.id !== null && outcome.value !== null && outcome.outcomeTotalCost !== null && outcome.outcomeTotalCost > outcome.value
 }
 
-/** The outcomes this team serves that carry a budget. No outcome never does. */
+/** The outcomes this team serves that carry a budget. Unattributed never does. */
 export function budgeted(outcomes: readonly TeamCostOutcome[]): TeamCostOutcome[] {
   return outcomes.filter((o) => o.id !== null && o.value !== null)
 }
@@ -163,7 +163,7 @@ export function budgetUse(cost: TeamCost): { spent: number; budget: number; shar
   return { spent, budget, share: budget > 0 ? spent / budget : spent > 0 ? Infinity : 0, over: overCount(cost.outcomes) }
 }
 
-/** What this team spent on work with no budget: unbudgeted outcomes and No outcome. Null unpriced. */
+/** What this team spent on work with no budget: unbudgeted outcomes and Unattributed. Null unpriced. */
 export function unbudgetedSpend(cost: TeamCost): number | null {
   if (!priced(cost)) return null
   return cost.outcomes

@@ -17,7 +17,7 @@ import { json, send } from './client'
  * | list with figures | `GET /api/outcomes?status=&from=&to=` |
  * | one outcome | `GET /api/outcomes/{id}` |
  * | create | `POST /api/outcomes` |
- * | rename, describe, value | `PATCH /api/outcomes/{id}` |
+ * | rename, describe, value, present | `PATCH /api/outcomes/{id}` |
  * | confirm, retire, reactivate | `POST /api/outcomes/{id}/{verb}` |
  * | merge (and its preview) | `POST /api/outcomes/{id}/merge[?preview=true]` |
  * | reject | `DELETE /api/outcomes/{id}` |
@@ -55,9 +55,36 @@ export interface OutcomeFigures {
   efficiency: number | null
   /** The last eight weeks, oldest first, Monday-start UTC, whatever the period. */
   weekly: OutcomeWeek[]
-  /** Agent hours times the rate; `amount` is null when no rate is set, never 0. */
-  cost: { amount: number | null; currency: string; legacyRates?: string[] }
+  /**
+   * The sum of each run's estimate, priced from its own snapshot; `amount` is null when no run was priced,
+   * never 0. `agentRate` is the weighted rate of its priced agent time (money over hours), null when none
+   * was priced - never the tenant rate.
+   */
+  cost: { amount: number | null; currency: string; legacyRates?: string[]; agentRate?: number | null }
+  /** The same eight weeks as `weekly`: its workflows that closed in each, every one and those completed. */
+  throughput?: OutcomeThroughputWeek[]
+  /** The eight weeks' cost over the workflows completed in them; null is "not measurable", never a division by zero. */
+  costPerCompleted?: number | null
+  /** On one outcome's detail only: everything up to the end of each of the eight weeks, the last its all-time figure. */
+  cumulative?: OutcomeCumulativeWeek[]
 }
+
+export interface OutcomeThroughputWeek {
+  weekStart: string
+  closed: number
+  completed: number
+  /** That week's cost over its completed workflows; null is "not measurable". */
+  costPerCompleted: number | null
+}
+
+export interface OutcomeCumulativeWeek {
+  weekStart: string
+  agentSeconds: number
+  cost: number | null
+}
+
+/** How a person reads an outcome. A stored null - never picked - reads as `project`. */
+export type OutcomePresentation = 'project' | 'operational'
 
 export interface OutcomeWeek {
   weekStart: string
@@ -107,6 +134,8 @@ export interface Outcome {
   targetValue: string | null
   /** What achieving it is worth, in `money.currency`, as text; null when nobody has said. */
   value: string | null
+  /** How a person reads it; null (never picked) reads as project. Absent from an older Host. */
+  presentation?: OutcomePresentation | null
   createdBy: string
   createdByKind: string
   createdAt: string
@@ -200,6 +229,8 @@ export interface OutcomeFields {
   targetValue?: string
   /** An amount of `money.currency`; empty clears it. */
   value?: string
+  /** A person's choice; only `project` or `operational` is accepted. */
+  presentation?: OutcomePresentation
 }
 
 export interface MergePreview {

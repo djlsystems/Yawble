@@ -169,7 +169,7 @@ describe('the Cost tile', () => {
     expect(tile().find('[data-cost-note]').exists()).toBe(false);
   });
 
-  it('draws the small stacked weekly chart, No outcome at the bottom of each stack in neutral gray', async () => {
+  it('draws the small stacked weekly chart, Unattributed at the bottom of each stack in neutral gray', async () => {
     await mountStrip();
 
     const chart = tile().find('[data-cost-chart]');
@@ -280,7 +280,7 @@ describe('the Cost dialog', () => {
     await openDialog();
 
     const legend = [...dialog()!.querySelectorAll('[data-cost-legend-item]')].map((i) => squash(i.textContent));
-    expect(legend).toEqual(['Research', 'Docs refresh', 'Ship billing', 'No outcome']);
+    expect(legend).toEqual(['Research', 'Docs refresh', 'Ship billing', 'Unattributed']);
     expect(dialog()!.querySelectorAll('[data-cost-tick]').length).toBeGreaterThan(1);
 
     dialog()!.querySelector('[data-cost-week="3"]')!.dispatchEvent(new Event('mouseenter'));
@@ -288,11 +288,11 @@ describe('the Cost dialog', () => {
 
     const tip = dialog()!.querySelector('[data-cost-tooltip]')!;
     expect(words(tip.querySelector('[data-cost-tooltip-row="o-billing"]'))).toBe('Ship billing $60 1.0 Agent Hours');
-    expect(words(tip.querySelector('[data-cost-tooltip-row="none"]'))).toBe('No outcome $30 0.5 Agent Hours');
+    expect(words(tip.querySelector('[data-cost-tooltip-row="none"]'))).toBe('Unattributed $30 0.5 Agent Hours');
     expect(words(tip.querySelector('[data-cost-tooltip-total]'))).toBe('Week total $135 · 2.3 Agent Hours');
   });
 
-  it('tables each outcome, then No outcome and a Team total row', async () => {
+  it('tables each outcome, then Unattributed and a Team total row', async () => {
     await mountStrip();
     await openDialog();
 
@@ -305,7 +305,7 @@ describe('the Cost dialog', () => {
       { row: 'o-billing', cells: ['Ship billing', '8.0', '$480', '$700 / $1,000', '2,000,000', '$240'] },
       { row: 'o-docs', cells: ['Docs refresh', '4.0', '$240', '$300 / $500', '400,000', '$600'] },
       { row: 'o-research', cells: ['Research', '2.0', '$120', 'None set', '200,000', '$600'] },
-      { row: 'none', cells: ['No outcome', '4.0', '$240', '—', '800,000', '$300'] },
+      { row: 'none', cells: ['Unattributed', '4.0', '$240', '—', '800,000', '$300'] },
       { row: 'total', cells: ['Team total', '18.0', '$1,080', '', '3,400,000', '$318'] },
     ]);
     expect(squash(dialog()!.querySelector('[data-cost-note]')!.textContent)).toContain('tokens are not billed here');

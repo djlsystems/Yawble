@@ -8,7 +8,7 @@ import { moneyText } from '../lib/outcomes';
  * the Cost tile's (`tile`), a teams-list row's (`row`) and the Cost dialog's (`large`, with its axis,
  * grid, legend and per-week hover box).
  *
- * THE CHART RULES: series in the fixed order `costSeries` gives - No outcome first, at the
+ * THE CHART RULES: series in the fixed order `costSeries` gives - Unattributed first, at the
  * bottom of each stack in neutral gray, then each outcome on the categorical palette slot of its
  * GLOBAL rank (`--os-series-*`, which the theme steps for dark mode), so one outcome is one colour on
  * every team; a 2px surface gap between stacked segments;

@@ -222,7 +222,7 @@ public sealed class OutcomeRollupTests(HostFixture host) : IClassFixture<HostFix
     // ---- throughput, for an operational outcome ----
 
     [Fact]
-    public async Task An_outcomes_throughput_counts_its_workflows_closed_in_each_of_the_eight_weeks()
+    public async Task An_outcomes_throughput_and_cost_per_completed_workflow_are_per_week_and_not_measurable_without_a_completion()
     {
         var person = await host.PersonAsync();
         var team = await NewTeamAsync("Rollup throughput");
@@ -230,12 +230,17 @@ public sealed class OutcomeRollupTests(HostFixture host) : IClassFixture<HostFix
         var now = DateTimeOffset.UtcNow;
         var thisWeek = OutcomeFigures.WeekOf(now);
 
+        // This week: one completed, one closed, 2 h at 60/h. Two weeks back: one completed, no run. Three
+        // weeks back: 1 h at 60/h and nothing completed. One workflow still open.
         var done = await LinkedAsync(outcome.Id, team);
         var closed = await LinkedAsync(outcome.Id, team);
         var earlier = await LinkedAsync(outcome.Id, team);
-        await LinkedAsync(outcome.Id, team);
-        await CloseAsync(done, team, thisWeek.AddMinutes(1), "completed");
-        await CloseAsync(closed, team, thisWeek.AddMinutes(2), "closed");
+        var open = await LinkedAsync(outcome.Id, team);
+        await RunAsync(done, team, thisWeek.AddSeconds(1), thisWeek.AddSeconds(3601), rate: "60");
+        await RunAsync(closed, team, thisWeek.AddSeconds(2), thisWeek.AddSeconds(3602), rate: "60");
+        await RunAsync(open, team, thisWeek.AddDays(-21).AddHours(1), thisWeek.AddDays(-21).AddHours(2), rate: "60");
+        await CloseAsync(done, team, thisWeek.AddHours(1).AddMinutes(1), "completed");
+        await CloseAsync(closed, team, thisWeek.AddHours(1).AddMinutes(2), "closed");
         await CloseAsync(earlier, team, thisWeek.AddDays(-14).AddHours(1), "completed");
 
         var figures = (await JsonAsync(await person.GetAsync($"/api/outcomes/{outcome.Id}", Ct))).GetProperty("outcome").GetProperty("figures");
@@ -244,11 +249,27 @@ public sealed class OutcomeRollupTests(HostFixture host) : IClassFixture<HostFix
         Assert.Equal(
             figures.GetProperty("weekly").EnumerateArray().Select(w => w.GetProperty("weekStart").GetDateTimeOffset()),
             throughput.Select(w => w.GetProperty("weekStart").GetDateTimeOffset()));
-        Assert.Equal(2, throughput[^1].GetProperty("closed").GetInt32());
-        Assert.Equal(1, throughput[^1].GetProperty("completed").GetInt32());
-        Assert.Equal(1, throughput[^3].GetProperty("closed").GetInt32());
-        Assert.Equal(1, throughput[^3].GetProperty("completed").GetInt32());
+        Assert.Equal((2, 1, 120m), (throughput[^1].GetProperty("closed").GetInt32(), throughput[^1].GetProperty("completed").GetInt32(),
+            throughput[^1].GetProperty("costPerCompleted").GetDecimal()));
+        // A completion with nothing priced in its week, and a priced week with no completion: not measurable.
+        Assert.Equal((1, 1), (throughput[^3].GetProperty("closed").GetInt32(), throughput[^3].GetProperty("completed").GetInt32()));
+        Assert.Equal(JsonValueKind.Null, throughput[^3].GetProperty("costPerCompleted").ValueKind);
+        Assert.Equal(0, throughput[^4].GetProperty("completed").GetInt32());
+        Assert.Equal(JsonValueKind.Null, throughput[^4].GetProperty("costPerCompleted").ValueKind);
         Assert.Equal(3, throughput.Sum(w => w.GetProperty("closed").GetInt32()));
+
+        // Over the eight weeks: $180 over two completed.
+        Assert.Equal(90m, figures.GetProperty("costPerCompleted").GetDecimal());
+
+        // THE CUMULATIVE SERIES, on the detail: up to the end of each week, the last its all-time estimate.
+        var cumulative = figures.GetProperty("cumulative").EnumerateArray().ToList();
+        Assert.Equal(8, cumulative.Count);
+        Assert.Equal(JsonValueKind.Null, cumulative[0].GetProperty("cost").ValueKind);
+        Assert.Equal(60m, cumulative[^4].GetProperty("cost").GetDecimal());
+        Assert.Equal(60m, cumulative[^2].GetProperty("cost").GetDecimal());
+        Assert.Equal(180m, cumulative[^1].GetProperty("cost").GetDecimal());
+        Assert.Equal(figures.GetProperty("cost").GetProperty("amount").GetDecimal(), cumulative[^1].GetProperty("cost").GetDecimal());
+        Assert.Equal(3 * 3600, cumulative[^1].GetProperty("agentSeconds").GetDouble(), 3);
     }
 
     // ---- presentation: a person's choice ----
