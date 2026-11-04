@@ -1000,9 +1000,15 @@ internal static class TeamEndpoints
 
             // The flag and its tenant_events row are one transaction: a change with no record of who
             // made it does not land.
+            // A PERSON RELEASING A PAUSED TEAM is an intervention, recorded with the tenant row in its
+            // transaction; resuming a team that was not paused (still 204) releases nothing, and records none.
+            var wasPaused = teams.IsPaused(stored);
             await teams.SetPausedAsync(
                 stored, paused: false, ct,
-                id => TenantLogging.Row(context, TenantActions.TeamResumed, id, teams.LabelFor(id), new { paused = false }));
+                id => TenantLogging.Row(context, TenantActions.TeamResumed, id, teams.LabelFor(id), new { paused = false }) with
+                {
+                    Intervention = wasPaused ? InterventionAct.Of(InterventionKinds.Resume, AppendContexts.From(context.User), id) : null,
+                });
 
             return Results.NoContent();
         })

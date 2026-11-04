@@ -34,9 +34,35 @@ public sealed record Outcome(
     DateTimeOffset UpdatedAt,
     string? ConfirmedBy,
     DateTimeOffset? ConfirmedAt,
-    string? Value = null)
+    string? Value = null,
+    string? Presentation = null)
 {
     public bool IsLive => OutcomeStatus.IsLive(Status);
+}
+
+/// <summary>
+/// HOW A PERSON READS AN OUTCOME (<c>outcomes.presentation</c>, <c>outcome-011</c>): a <c>project</c> is
+/// read as a whole - cumulative Agent Hours and Estimated Execution Cost, backlog progress, a cumulative
+/// chart - and an <c>operational</c> one week by week - cost, throughput (closed workflows) and cost per
+/// completed workflow. Stored NULL until a person picks one, and NULL reads as project. One model, two
+/// readings: nothing about the figures changes, only how the Outcomes dialog lays them out. A person sets
+/// it through the outcome edit route; nothing else writes it.
+/// </summary>
+public static class OutcomePresentation
+{
+    public const string Project = "project";
+    public const string Operational = "operational";
+
+    /// <summary>The closed set, as the column's CHECK constraint holds it on both providers.</summary>
+    public static readonly IReadOnlyList<string> All = [Project, Operational];
+
+    public const string Refusal = "An outcome's presentation is project or operational.";
+
+    /// <summary>Whether <paramref name="value"/> is one of <see cref="All"/>, exactly.</summary>
+    public static bool IsKnown(string? value) => value is Project or Operational;
+
+    /// <summary>How a stored value reads: NULL (never picked) is project.</summary>
+    public static string Read(string? stored) => stored ?? Project;
 }
 
 /// <summary>
@@ -173,7 +199,7 @@ public sealed record OutcomeWrite(
 public sealed record OutcomeEdit(
     string? Name = null, string? Description = null,
     string? TargetMetric = null, string? TargetUnit = null, string? TargetValue = null,
-    string? Value = null);
+    string? Value = null, string? Presentation = null);
 
 /// <summary>An outcome's value as the store keeps it: a non-negative decimal, invariant, no
 /// exponent. The one check, so the route and the store say the same.</summary>
@@ -296,9 +322,60 @@ public interface IOutcomeStore
     /// narrowed to the window.</summary>
     Task<OutcomeLedgerRows> ReadLedgerAsync(DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct = default);
 
+    /// <summary>
+    /// WHAT A RUN'S ESTIMATE IS PRICED FROM: each <c>usage_ledger</c> row LEFT JOIN its
+    /// <c>execution_snapshots</c> row on <c>start_seq</c>, with the outcome the snapshot's
+    /// <c>link_id</c> names, and every workflow's newest link for a run with no snapshot. Windowed in
+    /// the query: only runs whose [started_at, ended_at) overlaps [<paramref name="from"/>,
+    /// <paramref name="to"/>), or - with no start - that ended in it. With <paramref name="pricedOnly"/>,
+    /// only runs whose snapshot carries a rate: the rows a money total can come from.
+    /// </summary>
+    Task<ExecutionRunRows> ReadExecutionRunsAsync(
+        DateTimeOffset? from, DateTimeOffset? to, bool pricedOnly, CancellationToken ct = default);
+
     /// <summary>Every backlog item with its outcome and its newest dispatch: what an outcome's
     /// Not started, In progress and Achieved are counted from.</summary>
     Task<IReadOnlyList<OutcomeBacklogItem>> ReadBacklogAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// WHAT THE HUMAN FIGURES ARE COUNTED FROM: every <c>intervention_ledger</c> row whose
+    /// <c>occurred_at</c> is in [<paramref name="from"/>, <paramref name="to"/>), oldest first - each row once,
+    /// and none of its actor's identity. Read only; nothing writes through this.
+    /// </summary>
+    Task<IReadOnlyList<InterventionEntry>> ReadInterventionsAsync(
+        DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct = default);
+}
+
+/// <summary>
+/// One <c>intervention_ledger</c> row as the human figures read it: when, which kind, the team and workflow
+/// it was on, the workflow's outcome at that moment (<c>outcome_id_at_event</c>, as stored - a reader follows
+/// it through <c>merged_into</c>), and its duration, which counts only when <paramref name="DurationMeasured"/>.
+/// The actor is not read: no figure names a person.
+/// </summary>
+public sealed record InterventionEntry(
+    long Id,
+    DateTimeOffset OccurredAt,
+    string Kind,
+    string? TeamId,
+    long? Correlation,
+    string? OutcomeIdAtEvent,
+    long? DurationSeconds,
+    bool DurationMeasured)
+{
+    /// <summary>The columns <see cref="Read"/> takes, in order.</summary>
+    public const string Columns =
+        "id, occurred_at, kind, team_id, correlation, outcome_id_at_event, duration_seconds, duration_measured";
+
+    /// <summary>One row, read from <see cref="Columns"/>.</summary>
+    public static InterventionEntry Read(System.Data.Common.DbDataReader reader) => new(
+        reader.GetInt64(0),
+        Instant.Parse(reader.GetString(1)),
+        reader.GetString(2),
+        reader.IsDBNull(3) ? null : reader.GetString(3),
+        reader.IsDBNull(4) ? null : reader.GetInt64(4),
+        reader.IsDBNull(5) ? null : reader.GetString(5),
+        reader.IsDBNull(6) ? null : reader.GetInt64(6),
+        !reader.IsDBNull(7) && Convert.ToInt32(reader.GetValue(7), System.Globalization.CultureInfo.InvariantCulture) == 1);
 }
 
 /// <summary>One outcome a delete removes: as it was, the outcome it came with when it was merged into
@@ -345,6 +422,49 @@ public sealed record OutcomeBacklogItem(
     long? Correlation,
     DateTimeOffset? DispatchedAt,
     DateTimeOffset? LandedAt);
+
+/// <summary>
+/// One run's snapshot as the cost read sees it (<c>outcome-008</c>): the member's kind, the rate it was
+/// priced at when it started - canonical decimal text, never "0" - its currency and where it came from,
+/// and the link current at start: its id, whether that row still exists, and the outcome it names (null
+/// for an unlink).
+/// </summary>
+public sealed record ExecutionRunSnapshot(
+    string? MemberKind,
+    string? RateAmount,
+    string? RateCurrency,
+    string RateSource,
+    long? LinkId,
+    bool LinkFound,
+    string? LinkOutcomeId);
+
+/// <summary>One ledger row and its snapshot, or null for a run from before snapshots.</summary>
+public sealed record ExecutionRunRow(UsageLedgerRow Run, long? StartSeq, ExecutionRunSnapshot? Snapshot);
+
+/// <summary>What the cost read answers: the runs, every workflow's newest link, and the tenant rate's
+/// history a run from before snapshots is priced from (<see cref="RateTimeline"/>).</summary>
+public sealed record ExecutionRunRows(
+    IReadOnlyList<OutcomeLink> CurrentLinks, IReadOnlyList<ExecutionRunRow> Runs, RateTimeline? Timeline = null);
+
+/// <summary>
+/// The one <c>rate_epochs</c> row (<c>outcome-012</c>): the tenant agent rate in force when that step was
+/// applied, canonical decimal text or null, its currency upper-case or null, and where it came from
+/// (<c>tenant</c>, <c>configuration</c> or <c>none</c>). Written once and never moved.
+/// </summary>
+public sealed record RateEpoch(DateTimeOffset RecordedAt, string? RateAmount, string? RateCurrency, string RateSource);
+
+/// <summary>One <c>tenant.settingChanged</c> or <c>tenant.setting-reset</c> row for
+/// <c>outcomes.agentHourlyRate</c>: when, its seq, and the value it set - null for a reset.</summary>
+public sealed record RateChange(DateTimeOffset At, long Seq, string? NewValue);
+
+/// <summary>
+/// THE TENANT AGENT RATE'S HISTORY, as a run from before snapshots is priced from it: every recorded
+/// change, oldest first, and the epoch row for a run that started before all of them.
+/// </summary>
+public sealed record RateTimeline(RateEpoch? Epoch, IReadOnlyList<RateChange> Changes)
+{
+    public static readonly RateTimeline Empty = new(null, []);
+}
 
 /// <summary>The ledger rows the figures are computed from.</summary>
 public sealed record OutcomeLedgerRows(

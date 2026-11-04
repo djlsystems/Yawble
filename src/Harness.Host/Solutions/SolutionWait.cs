@@ -78,6 +78,13 @@ public sealed class SolutionWait(
         foreach (var row in await solutions.ListAsync(ct)) await WaitingForAsync(row.Team, ct);
     }
 
+    /// <summary>
+    /// The <see cref="InterruptionReasons"/> code of a fire skipped because the team waits for a missing
+    /// input: <c>auth</c>, as for the <c>needs-person</c> class, since only a person can supply the
+    /// connection or the file it waits for.
+    /// </summary>
+    public const string ReasonCode = InterruptionReasons.Auth;
+
     /// <summary>"waiting for a file in Resume/ and Scout's adzuna connection".</summary>
     public static string ReasonOf(IReadOnlyList<SolutionMissing> missing) =>
         "waiting for " + string.Join(" and ", missing.Select(m => m.Kind == "document"
@@ -98,7 +105,7 @@ public sealed class SolutionWait(
         var skipped = await log.AppendAsync(
             new NewMessage(
                 MessageTypes.ScheduleSkipped,
-                JsonSerializer.Serialize(new { member = member.ToString(), reason }),
+                JsonSerializer.Serialize(new { member = member.ToString(), reason, reasonCode = ReasonCode }),
                 source,
                 cause),
             ct);

@@ -131,6 +131,21 @@ public static class Permits
     /// </summary>
     public const string Preview = "Preview";
 
+    /// <summary>
+    /// READING Actual Spend for a report: billing accounts, expenses, the Spend page's overview and its
+    /// files. Reading only - every billing account, expense, rate, member cost setting and outcome value
+    /// write stays <c>HumansOnly</c>, and no permit reaches one. Estimates need no Spend: they are
+    /// <see cref="Read"/>, bounded by team like every team figure.
+    ///
+    /// NEVER STORED AND NEVER MINTED. <c>SpendReading.Apply</c> takes it from every principal at
+    /// authentication, however its key was made, and gives it to an agent (a team's container or a
+    /// Concierge) only while a person has turned on the tenant setting <c>reporting.agentsMayReadSpend</c>,
+    /// read on every request. A person's API key and the worker key never hold it.
+    ///
+    /// NOT IN <see cref="All"/>, which is what a member key or an API key can be minted with.
+    /// </summary>
+    public const string Spend = "Spend";
+
     public static IReadOnlySet<string> All { get; } = new HashSet<string>(StringComparer.Ordinal)
     {
         Read, Tell, CreateContainer, CreateTeam, Progress,

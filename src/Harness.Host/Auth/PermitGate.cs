@@ -21,7 +21,7 @@ namespace Harness.Host.Auth;
 /// on the very next request.
 ///
 /// That is a property of the AUTH PATH rather than of this gate, so it is pinned rather than
-/// assumed - `A_revoked_permit_is_refused_on_the_next_request` in PermitGateTests is what fails
+/// assumed - `PermitTests.A_revoked_permit_is_refused_on_the_next_request` is what fails
 /// loudly if machine principals ever become cookie-authenticable. If that day comes the fix is a
 /// `PermitsForAsync(id)` on IPrincipalStore mirroring `TeamForAsync`, deliberately not written now:
 /// an unused query on every request is a real cost paid for a hazard that does not exist.
@@ -117,7 +117,7 @@ public static class PermitGate
         {
             // NAMED. The fix is a configuration change somebody has to find, exactly as with the
             // missing-Agent refusal that names both ways out of itself.
-            await Refuse(context, Missing(required.Permit));
+            await Refuse(context, required.Permit == Permits.Spend ? SpendReading.Refused : Missing(required.Permit));
             return;
         }
 

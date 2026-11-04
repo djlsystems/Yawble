@@ -47,6 +47,12 @@ const props = defineProps<{
    * axis is the team's own window.
    */
   range?: ActivityRange | null;
+  /**
+   * THE PERIOD'S EXECUTIONS, AGENT HOURS AND ACTIVE MEMBERS, worded by the team page from the cost read for the period
+   * it shows (`lib/teamPeriod.ts` `activityLine`); absent on the Teams list and before the read lands. The lanes above
+   * keep the team's own window: this line is the period's.
+   */
+  periodLine?: string | null;
 }>();
 
 /** The team's own window, or `null` with no chart, so the Teams list can share one axis across rows. */
@@ -373,6 +379,7 @@ function onTileClick() {
     <div v-else-if="$slots.status" class="stats-status"><slot name="status" /></div>
 
     <div v-if="!compact" class="stats-caption">{{ caption }}</div>
+    <div v-if="!compact && periodLine" class="stats-caption stats-period" data-activity-period>{{ periodLine }}</div>
     <div v-else-if="!hasChart" class="os-text-muted" data-activity-none>—</div>
 
     <TeamStatisticsDialog

@@ -30,7 +30,7 @@ type Manifest struct {
 	ID, Name, Version string
 	// Ignored is what the Host would ignore and name rather than refuse: a key inside an event's
 	// monitor hint that it does not know, as events.publishes.<type>.monitor.<key>, then one inside
-	// the namedSecrets block, as namedSecrets.<key>.
+	// the namedSecrets block, as namedSecrets.<key>, then one inside cost, as cost.<key>.
 	Ignored []string
 	// Executables are executable.path and every platforms entry, relative to the folder. The Host
 	// runs one of them, chosen by the container's processor, so the install marks them all.
@@ -38,7 +38,13 @@ type Manifest struct {
 	// Replaces is the manifest's `replaces`: the plugin ids this one succeeds, duplicates dropped.
 	// Only the manifest says so; an id need not be installed and is never the plugin's own.
 	Replaces []string
+	// CostType is the manifest's `cost.type`: always DurationCost, the only cost type; a manifest
+	// with no `cost` is duration too, and any other type is refused.
+	CostType string
 }
+
+// DurationCost is PluginManifest.DurationCost: a plugin's time, priced at its member's own hourly rate.
+const DurationCost = "duration"
 
 // MaxReplaces is PluginManifest.MaxReplaces: the most ids one manifest's `replaces` may name.
 const MaxReplaces = 16
@@ -332,7 +338,34 @@ func parse(root map[string]any) (Manifest, []string, string) {
 	if reason != "" {
 		return m, nil, reason
 	}
-	return Manifest{ID: id, Name: name, Version: version, Ignored: ignored, Executables: executables, Replaces: replaced}, skills, ""
+	if r := cost(root["cost"], &ignored); r != "" {
+		return m, nil, r
+	}
+	return Manifest{ID: id, Name: name, Version: version, Ignored: ignored, Executables: executables, Replaces: replaced, CostType: DurationCost}, skills, ""
+}
+
+// cost is PluginManifest.ParseCost, in the same sentences (tests/Fixtures/PluginCost/cases.json):
+// absent, null or with no type is duration; a type other than "duration" is refused; a key inside
+// it this version does not know is named as cost.<key>, sorted.
+func cost(v any, ignored *[]string) string {
+	if v == nil {
+		return ""
+	}
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return "`cost` must be an object such as { \"type\": \"duration\" }."
+	}
+	if t, present := obj["type"]; present {
+		if s, ok := t.(string); !ok || s != DurationCost {
+			return "`cost.type` must be \"duration\", the only cost type: a plugin's time, priced at its member's own hourly rate."
+		}
+	}
+	for _, key := range orderedKeys(obj) {
+		if key != "type" {
+			*ignored = append(*ignored, "cost."+key)
+		}
+	}
+	return ""
 }
 
 // replaces is PluginManifest.ParseReplaces, in the same sentences

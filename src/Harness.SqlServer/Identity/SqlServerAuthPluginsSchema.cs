@@ -240,5 +240,17 @@ public static class SqlServerAuthPluginsSchema
                  CONSTRAINT pk_team_mcp_servers PRIMARY KEY (team, server_id)
              );
              """),
+
+        // `AuthSchema`'s auth-034: a member's own estimated hourly rate (canonical decimal text, NULL
+        // no override, "0" not priced), its billing account id, and who last changed either and when.
+        new MigrationStep(
+            "auth-034",
+            """
+            ALTER TABLE team_members ADD
+                est_hourly_rate    NVARCHAR(64)  NULL,
+                billing_account_id NVARCHAR(64)  NULL,
+                billing_set_by     NVARCHAR(MAX) NULL,
+                billing_set_at     NVARCHAR(40)  NULL;
+            """),
     ];
 }

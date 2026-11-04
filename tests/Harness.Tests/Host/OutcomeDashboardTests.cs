@@ -216,7 +216,7 @@ public sealed class OutcomeDashboardTests(HostFixture host) : IClassFixture<Host
     }
 
     [Fact]
-    public async Task The_last_eight_weeks_and_the_cost_are_priced_at_the_rate_and_no_rate_prices_nothing()
+    public async Task The_last_eight_weeks_and_the_cost_are_priced_from_each_runs_snapshot_and_a_run_without_one_prices_nothing()
     {
         var person = await host.PersonAsync();
         var outcome = await CreateAsync(person, Unique("Spend"));
@@ -224,8 +224,9 @@ public sealed class OutcomeDashboardTests(HostFixture host) : IClassFixture<Host
         Assert.True((await PersonLinkAsync(workflow, outcome.Id)).Ok);
 
         var now = DateTimeOffset.UtcNow;
-        await RunAsync(workflow, "Dev", now.AddHours(-2), now.AddHours(-1), "completed", billable: 400);
-        await RunAsync(workflow, "Dev", now.AddDays(-14).AddHours(-2), now.AddDays(-14), "completed", billable: 100);
+        // FROM BEFORE SNAPSHOTS: time, never money - whatever the tenant rate is now.
+        await RunAsync(workflow, "Dev", now.AddHours(-4), now.AddHours(-3), "completed", billable: 40);
+        await RunAsync(workflow, "Dev", now.AddDays(-21).AddHours(-2), now.AddDays(-21), "completed", billable: 60);
 
         var unpriced = await FiguresAsync(person, outcome.Id);
         Assert.Equal(JsonValueKind.Null, unpriced.GetProperty("cost").GetProperty("amount").ValueKind);
@@ -235,6 +236,15 @@ public sealed class OutcomeDashboardTests(HostFixture host) : IClassFixture<Host
         {
             await SetOkAsync(person, TenantSettings.OutcomesAgentHourlyRateName, 90);
             await SetOkAsync(person, TenantSettings.OutcomesCurrencyName, "eur");
+
+            var stillUnpriced = await FiguresAsync(person, outcome.Id);
+            Assert.Equal(JsonValueKind.Null, stillUnpriced.GetProperty("cost").GetProperty("amount").ValueKind);
+            Assert.All(stillUnpriced.GetProperty("weekly").EnumerateArray(),
+                w => Assert.Equal(JsonValueKind.Null, w.GetProperty("cost").ValueKind));
+
+            // SNAPSHOTTED AT 90 EUR: priced at what each started with.
+            await RunAsync(workflow, "Dev", now.AddHours(-2), now.AddHours(-1), "completed", billable: 400, rate: "90", currency: "EUR");
+            await RunAsync(workflow, "Dev", now.AddDays(-14).AddHours(-2), now.AddDays(-14), "completed", billable: 100, rate: "90", currency: "EUR");
 
             var list = await JsonAsync(await person.GetAsync("/api/outcomes", Ct));
             Assert.Equal(90, list.GetProperty("money").GetProperty("agentHourlyRate").GetInt32());
@@ -247,8 +257,8 @@ public sealed class OutcomeDashboardTests(HostFixture host) : IClassFixture<Host
             var weekly = figures.GetProperty("weekly").EnumerateArray().ToList();
             Assert.Equal(OutcomeFigures.Weeks, weekly.Count);
             Assert.Equal(OutcomeFigures.WeekOf(now), weekly[^1].GetProperty("weekStart").GetDateTimeOffset());
-            Assert.Equal(500, weekly.Sum(w => w.GetProperty("billable").GetInt64()));
-            Assert.Equal(270m, weekly.Sum(w => w.GetProperty("cost").GetDecimal()));
+            Assert.Equal(600, weekly.Sum(w => w.GetProperty("billable").GetInt64()));
+            Assert.Equal(270m, weekly.Sum(w => w.GetProperty("cost").ValueKind == JsonValueKind.Number ? w.GetProperty("cost").GetDecimal() : 0m));
         }
         finally
         {
@@ -278,7 +288,7 @@ public sealed class OutcomeDashboardTests(HostFixture host) : IClassFixture<Host
         Assert.Null((await Outcomes.FindAsync(outcome.Id, Ct))!.Value);
 
         var list = await JsonAsync(await person.GetAsync("/api/outcomes", Ct));
-        Assert.Equal("No outcome assigned", list.GetProperty("noOutcome").GetProperty("name").GetString());
+        Assert.Equal("Unattributed", list.GetProperty("noOutcome").GetProperty("name").GetString());
     }
 
     // ---- fixtures ----
@@ -309,18 +319,37 @@ public sealed class OutcomeDashboardTests(HostFixture host) : IClassFixture<Host
             """,
             ("$item", item), ("$team", host.Alpha), ("$c", correlation), ("$at", DateTimeOffset.UtcNow.ToString("O")), ("$by", Email));
 
-    private Task RunAsync(
+    /// <summary>A ledger row; with <paramref name="rate"/>, it names a snapshot priced at it and naming the
+    /// workflow's newest link, as the writer leaves one at start.</summary>
+    private async Task RunAsync(
         long correlation, string member, DateTimeOffset started, DateTimeOffset ended, string outcome,
-        DateTimeOffset? queued = null, long billable = 10) =>
-        ExecuteAsync(
+        DateTimeOffset? queued = null, long billable = 10, string? rate = null, string currency = "USD")
+    {
+        object start = DBNull.Value;
+        if (rate is not null)
+        {
+            start = Interlocked.Increment(ref _run);
+            await ExecuteAsync(
+                """
+                INSERT INTO execution_snapshots (start_seq, correlation, team_id, team_name, member, member_kind,
+                    rate_amount, rate_currency, rate_source, link_id, started_at)
+                VALUES ($start, $c, $team, 'Alpha', $member, 'agent', $rate, $currency, 'tenant',
+                    (SELECT MAX(id) FROM workflow_outcome_links WHERE correlation = $c), $started)
+                """,
+                ("$start", start), ("$c", correlation), ("$team", host.Alpha), ("$member", member),
+                ("$rate", rate), ("$currency", currency), ("$started", started.ToString("O")));
+        }
+
+        await ExecuteAsync(
             """
             INSERT INTO usage_ledger (run_seq, correlation, team_id, team_name, member, run_outcome,
-                queued_at, started_at, ended_at, measured, tokens_in, tokens_out, billable)
-            VALUES ($seq, $c, $team, 'Alpha', $member, $outcome, $queued, $started, $ended, 1, $billable, 0, $billable)
+                queued_at, started_at, ended_at, measured, tokens_in, tokens_out, billable, start_seq)
+            VALUES ($seq, $c, $team, 'Alpha', $member, $outcome, $queued, $started, $ended, 1, $billable, 0, $billable, $start)
             """,
             ("$seq", Interlocked.Increment(ref _run)), ("$c", correlation), ("$team", host.Alpha), ("$member", member),
             ("$outcome", outcome), ("$queued", (object?)queued?.ToString("O") ?? DBNull.Value),
-            ("$started", started.ToString("O")), ("$ended", ended.ToString("O")), ("$billable", billable));
+            ("$started", started.ToString("O")), ("$ended", ended.ToString("O")), ("$billable", billable), ("$start", start));
+    }
 
     private async Task ExecuteAsync(string sql, params (string Name, object Value)[] parameters)
     {

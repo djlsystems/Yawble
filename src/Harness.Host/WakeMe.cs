@@ -294,7 +294,8 @@ public sealed class WakeMe(
     /// row says it. Answers the cancelled wake, or null when there was none to cancel.
     /// </summary>
     public async Task<PendingWake?> CancelAsync(
-        long id, string by, string reason, ContainerId? owner = null, string? team = null, CancellationToken ct = default)
+        long id, string by, string reason, ContainerId? owner = null, string? team = null, CancellationToken ct = default,
+        AppendContext? principal = null)
     {
         // NOT ITS OWN, OR NOT THIS TEAM'S, IS ANSWERED EXACTLY AS A MISSING WAKE. A stored wake never
         // changes hands, so reading it before the transaction that takes it decides nothing late.
@@ -324,6 +325,7 @@ public sealed class WakeMe(
                     taken.AskedSeq);
             },
             (_, _, _, _) => Task.CompletedTask,
+            principal,
             ct);
 
         if (taken is not null) await ChangedAsync(taken.Container, ct);

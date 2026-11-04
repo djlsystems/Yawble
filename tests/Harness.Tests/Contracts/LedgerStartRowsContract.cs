@@ -90,6 +90,67 @@ public abstract class LedgerStartRowsContract : ProviderContract
         Assert.Equal(1, await stores.LongAsync($"SELECT COUNT(*) FROM tenant_events WHERE subject = '{LedgerStart.InstanceIdName}'"));
     }
 
+    [Fact]
+    public async Task The_rate_epoch_is_written_once_with_the_stored_rate_and_a_later_start_or_rate_change_does_not_move_it()
+    {
+        var start = await CreateAsync();
+        var stores = await StoresAsync();
+        await StoreSettingAsync(stores, "outcomes.agentHourlyRate", "60");
+        await StoreSettingAsync(stores, "outcomes.currency", "eur");
+
+        // A configured rate is not read while a rate row is stored.
+        var first = await start.RecordRateEpochAsync(new RateEpochConfiguration("90", "usd"), Ct);
+        Assert.Equal(("60", "EUR", "tenant"), (first.RateAmount, first.RateCurrency, first.RateSource));
+
+        // The rate changes, and the Host starts again: the row is the one written first.
+        await stores.ExecuteAsync("UPDATE tenant_settings SET value = '75' WHERE name = 'outcomes.agentHourlyRate'");
+        var second = await start.RecordRateEpochAsync(new RateEpochConfiguration("90", "usd"), Ct);
+
+        Assert.Equal(first, second);
+        Assert.Equal(1, await stores.LongAsync("SELECT COUNT(*) FROM rate_epochs"));
+        Assert.Equal("60", await stores.TextAsync("SELECT rate_amount FROM rate_epochs"));
+    }
+
+    [Fact]
+    public async Task With_no_stored_rate_the_epoch_takes_a_configured_positive_rate_and_otherwise_records_none()
+    {
+        var stores = await StoresAsync();
+        var configured = await (await CreateAsync()).RecordRateEpochAsync(new RateEpochConfiguration("62.50", null), Ct);
+        Assert.Equal(("62.5", "USD", "configuration"), (configured.RateAmount, configured.RateCurrency, configured.RateSource));
+        Assert.Equal("configuration", await stores.TextAsync("SELECT rate_source FROM rate_epochs"));
+    }
+
+    [Fact]
+    public async Task A_stored_zero_rate_hides_a_configured_one_and_the_epoch_records_none()
+    {
+        var stores = await StoresAsync();
+        await StoreSettingAsync(stores, "outcomes.agentHourlyRate", "0");
+
+        var epoch = await (await CreateAsync()).RecordRateEpochAsync(new RateEpochConfiguration("90", "usd"), Ct);
+
+        Assert.Equal(((string?)null, (string?)null, "none"), (epoch.RateAmount, epoch.RateCurrency, epoch.RateSource));
+        Assert.Equal(1, await stores.LongAsync("SELECT COUNT(*) FROM rate_epochs WHERE rate_amount IS NULL AND rate_currency IS NULL"));
+    }
+
+    [Fact]
+    public async Task The_rate_epoch_is_never_updated_deleted_or_joined_by_a_second_row()
+    {
+        var stores = await StoresAsync();
+        await (await CreateAsync()).RecordRateEpochAsync(new RateEpochConfiguration("60", null), Ct);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => stores.ExecuteAsync("UPDATE rate_epochs SET rate_amount = '90'"));
+        await Assert.ThrowsAnyAsync<Exception>(() => stores.ExecuteAsync("DELETE FROM rate_epochs"));
+        await Assert.ThrowsAnyAsync<Exception>(() => stores.ExecuteAsync(
+            "INSERT INTO rate_epochs (id, recorded_at, rate_amount, rate_currency, rate_source) VALUES (2, 'x', '90', 'USD', 'tenant')"));
+
+        Assert.Equal(1, await stores.LongAsync("SELECT COUNT(*) FROM rate_epochs"));
+        Assert.Equal("60", await stores.TextAsync("SELECT rate_amount FROM rate_epochs"));
+    }
+
+    private static Task StoreSettingAsync(ContractStores stores, string name, string value) =>
+        stores.ExecuteAsync(
+            $"INSERT INTO tenant_settings (name, value, updated_at, updated_by) VALUES ('{name}', '{value}', '2026-01-01T00:00:00.0000000+00:00', 'p')");
+
     private static Task<string?> SettingAsync(ContractStores stores, string name) =>
         stores.TextAsync($"SELECT value FROM tenant_settings WHERE name = '{name}'");
 }

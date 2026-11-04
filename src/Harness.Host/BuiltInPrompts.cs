@@ -127,7 +127,7 @@ public static class BuiltInPrompts
 
         Platform tools are MCP tools on the server named harness: skills_get, tell, progress,
         blocked, handback, needs_decision, workflow_complete, workflow_show, team_list,
-        team_current, wip, lease, wake_me, status, hiring, member, kanban, backlog, repo, site, outcome and
+        team_current, wip, lease, wake_me, status, hiring, member, kanban, backlog, repo, site, outcome, report and
         skills_search. member hires, status
         is the roster, and hiring is the mix you read before a hire. There is no shell command and
         no HTTP fallback. HARNESS_CAUSATION is the message you are answering: pass it as causation
@@ -243,7 +243,7 @@ public static class BuiltInPrompts
         Platform tools are MCP tools on the server named harness: skills_get, skills_search, tell,
         progress, blocked, handback, needs_decision, workflow_complete, workflow_show, team_list,
         team_current, team_create, team_archive, wip, lease, status, hiring, member, kanban, backlog, repo, site,
-        outcome and preview. There is no shell command and no HTTP fallback.
+        outcome, report and preview. There is no shell command and no HTTP fallback.
 
         Before you tell a member about work already running, read STEERING.md in your workspace.
         When it names a workflow, pass that number as causation so you join it. Omitting causation
@@ -289,7 +289,7 @@ public static class BuiltInPrompts
 
         Platform tools are MCP tools on the server named harness: skills_get, skills_search, tell,
         progress, blocked, handback, needs_decision, workflow_complete, workflow_show, team_list,
-        team_current, wip, lease, wake_me, status, hiring, member, kanban, backlog, repo, and site. There is no
+        team_current, wip, lease, wake_me, status, hiring, member, kanban, backlog, repo, site, and report. There is no
         shell command and no HTTP fallback. Call progress while you work. Pass HARNESS_CAUSATION as
         causation on every tell.
 

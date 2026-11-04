@@ -41,6 +41,27 @@ const tokens = (value: unknown) => (typeof value === 'number' ? `${value.toLocal
 const shown = (value: unknown) =>
   value === null || value === undefined || value === '' ? 'nothing' : localInstants(typeof value === 'string' ? value : JSON.stringify(value));
 
+/** One field of a billing account row's `changes`, as from and to, or null when it is not there. */
+function billingChange(detail: Detail | null | undefined, key: string): { from: unknown; to: unknown } | null {
+  const pair = objectOf(objectOf(get(detail, 'changes'))?.[key]);
+  return pair ? { from: get(pair, 'old'), to: get(pair, 'new') } : null;
+}
+
+/** An expense row's kind and amount, as `an invoice of 20 USD`. */
+function expenseWords(detail: Detail | null | undefined): string {
+  const kind = text(detail, 'kind');
+  const article = kind === 'invoice' || kind === 'adjustment' ? 'an' : 'a';
+  const amount = text(detail, 'amount');
+  return `${kind ? `${article} ${kind}` : 'an expense'}${amount ? ` of ${amount}${text(detail, 'currency') ? ` ${text(detail, 'currency')}` : ''}` : ''}`;
+}
+
+/** An expense row's service period, end exclusive, in local time. */
+function expensePeriod(detail: Detail | null | undefined): string | null {
+  const start = text(detail, 'servicePeriodStart');
+  const end = text(detail, 'servicePeriodEnd');
+  return start && end ? `for ${start} up to ${end}` : null;
+}
+
 /** One field of a trigger change, in words. */
 function fieldWords(change: FieldChange): string {
   switch (change.field) {
@@ -540,6 +561,24 @@ const words: Record<string, Words> = {
         text(d, 'agent') && `agent set to ${text(d, 'agent')}`,
         bySolution(d),
       ]) || 'Saved with nothing changed.',
+  },
+  'member.billing-changed': {
+    did: "changed member's rate or billing account",
+    detail: (d) => {
+      const change = (key: string) => {
+        const pair = get(d, key);
+        if (!pair || typeof pair !== 'object') return null;
+        const from = get(pair as Detail, 'old');
+        const to = get(pair as Detail, 'new');
+        return from === to ? null : { from, to };
+      };
+      const rate = change('rate');
+      const account = change('billingAccount');
+      return sentence([
+        rate && `hourly rate ${rate.to == null ? `${shown(rate.from)} cleared` : `set from ${shown(rate.from)} to ${shown(rate.to)}`}`,
+        account && `billing account ${account.to == null ? `${shown(account.from)} cleared` : `set from ${shown(account.from)} to ${shown(account.to)}`}`,
+      ]) || 'Saved with nothing changed.';
+    },
   },
   'member.deleted': {
     did: 'removed member',
@@ -1108,6 +1147,51 @@ const words: Record<string, Words> = {
     detail: (d) => sentence([`merged into ${text(d, 'intoName') ?? text(d, 'into') ?? 'another outcome'}`]),
   },
   'outcome.retired': { did: 'retired an outcome', detail: () => 'Retired.' },
+  'billing.account-created': {
+    did: 'created a billing account',
+    detail: (d, row) => {
+      const to = (key: string) => billingChange(d, key)?.to;
+      const kind = [to('vendor'), to('billingType')].filter((part) => typeof part === 'string' && part !== '').join(' ');
+      return sentence([
+        `created ${row.subjectName || 'the account'}${kind ? ` (${kind})` : ''}`,
+        typeof to('billingPeriod') === 'string' && `billed ${to('billingPeriod')}${typeof to('currency') === 'string' ? ` in ${to('currency')}` : ''}`,
+        typeof to('recurringAmount') === 'string' && `recurring amount ${to('recurringAmount')} recorded, not added to any estimate`,
+      ]);
+    },
+  },
+  'billing.account-changed': {
+    did: 'changed a billing account',
+    detail: (d) => {
+      const changes = objectOf(get(d, 'changes'));
+      const parts = Object.keys(changes ?? {}).map((key) => {
+        const change = billingChange(d, key);
+        if (!change) return null;
+        return change.to === null || change.to === undefined || change.to === ''
+          ? `${keyWords(key)} ${shown(change.from)} cleared`
+          : `${keyWords(key)} set from ${shown(change.from)} to ${shown(change.to)}`;
+      });
+      return sentence(parts) || 'Saved with nothing changed.';
+    },
+  },
+  'billing.account-deactivated': {
+    did: 'deactivated a billing account',
+    detail: () => 'Deactivated; members that name it keep it.',
+  },
+  'billing.account-reactivated': { did: 'reactivated a billing account', detail: () => 'Reactivated.' },
+  'billing.expense-recorded': {
+    did: 'recorded an expense on a billing account',
+    detail: (d, row) => sentence([`recorded ${expenseWords(d)} on ${row.subjectName || 'the account'}`, expensePeriod(d)]),
+  },
+  'billing.expense-voided': {
+    did: 'voided an expense on a billing account',
+    detail: (d, row) =>
+      sentence([`voided ${expenseWords(d)} on ${row.subjectName || 'the account'}`, `the void is a new row; the expense it voids, ${text(d, 'supersedes') ?? 'unknown'}, is kept`]),
+  },
+  'billing.expense-replaced': {
+    did: 'replaced an expense on a billing account',
+    detail: (d, row) =>
+      sentence([`replaced expense ${text(d, 'supersedes') ?? 'unknown'} on ${row.subjectName || 'the account'} with ${expenseWords(d)}`, expensePeriod(d)]),
+  },
   'outcome.deleted': {
     did: 'deleted an outcome',
     detail: (d, row) => {

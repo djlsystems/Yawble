@@ -8,7 +8,7 @@ import { moneyText } from '../lib/outcomes';
  * the Cost tile's (`tile`), a teams-list row's (`row`) and the Cost dialog's (`large`, with its axis,
  * grid, legend and per-week hover box).
  *
- * THE CHART RULES: series in the fixed order `costSeries` gives - No outcome first, at the
+ * THE CHART RULES: series in the fixed order `costSeries` gives - Unattributed first, at the
  * bottom of each stack in neutral gray, then each outcome on the categorical palette slot of its
  * GLOBAL rank (`--os-series-*`, which the theme steps for dark mode), so one outcome is one colour on
  * every team; a 2px surface gap between stacked segments;
@@ -23,15 +23,32 @@ const props = withDefaults(defineProps<{
   inMoney: boolean;
   currency: string;
   size?: 'tile' | 'row' | 'large';
-  /** A shared scale's top (the teams list's Same scale); the chart's own largest week otherwise. */
+  /** A shared scale's top (the teams list's one relative scale across rows); the chart's own largest column otherwise. */
   scaleMax?: number | null;
-}>(), { size: 'large', scaleMax: null });
+  /** How a column is named in its hover text; `Week of Sep 29` unless given (the teams list's period: a day or a month). */
+  columnTitle?: ((start: string) => string) | null;
+}>(), { size: 'large', scaleMax: null, columnTitle: null });
+
+function titleOf(start: string): string {
+  return props.columnTitle ? props.columnTitle(start) : `Week of ${weekLabel(start)}`;
+}
+
+/**
+ * THE COLUMN LABELS UNDER A LARGE CHART: every column's up to twelve (eight weeks, a year of months), otherwise
+ * about ten of them, evenly spaced, so a period by day stays readable. A column is named as its hover text names it.
+ */
+const labelEvery = computed(() => (props.weeks.length <= 12 ? 1 : Math.ceil(props.weeks.length / 10)));
+
+function columnLabel(start: string): string {
+  return props.columnTitle ? props.columnTitle(start) : weekLabel(start);
+}
 
 const Gap = 2;
 
 const box = computed(() => {
   if (props.size === 'tile') return { width: 120, height: 32, left: 0, right: 0, top: 2, bottom: 0, radius: 2, bar: 0.7 };
-  if (props.size === 'row') return { width: 112, height: 28, left: 0, right: 0, top: 2, bottom: 0, radius: 2, bar: 0.7 };
+  // A ROW WITH MANY COLUMNS (a period by day) widens so each keeps a visible bar; eight weeks keep the 112 they had.
+  if (props.size === 'row') return { width: Math.min(244, Math.max(112, props.weeks.length * 4)), height: 28, left: 0, right: 0, top: 2, bottom: 0, radius: 2, bar: 0.7 };
   return { width: 640, height: 240, left: 64, right: 8, top: 10, bottom: 26, radius: 4, bar: 0.62 };
 });
 
@@ -120,7 +137,7 @@ const tooltip = computed(() => {
   const cost = props.inMoney ? props.series.reduce((sum, s) => sum + (s.weekly[week]?.cost ?? 0), 0) : null;
 
   return {
-    title: `Week of ${weekLabel(props.weeks[week]!)}`,
+    title: titleOf(props.weeks[week]!),
     rows,
     total: cost === null ? agentHours(seconds) : `${moneyText(cost, props.currency)} · ${agentHours(seconds)}`,
     left: ((plot.value.x + (week + 0.5) * slot.value) / box.value.width) * 100,
@@ -129,7 +146,7 @@ const tooltip = computed(() => {
 
 /** A compact chart's native hover text per week: its date and total. */
 function weekTitle(week: number): string {
-  return `Week of ${weekLabel(props.weeks[week]!)}: ${valueText(totals.value[week] ?? 0, props.inMoney, props.currency)}`;
+  return `${titleOf(props.weeks[week]!)}: ${valueText(totals.value[week] ?? 0, props.inMoney, props.currency)}`;
 }
 </script>
 
@@ -148,7 +165,9 @@ function weekTitle(week: number): string {
         :height="large ? undefined : box.height"
         class="cost-chart-svg"
         role="img"
-        :aria-label="inMoney ? 'Cost by week and outcome' : 'Agent hours by week and outcome'"
+        :aria-label="columnTitle
+          ? (inMoney ? 'Estimated Execution Cost by period and outcome' : 'Agent Hours by period and outcome')
+          : (inMoney ? 'Cost by week and outcome' : 'Agent hours by week and outcome')"
       >
         <!-- THE GRID AND THE ONE AXIS, recessive: hairlines in the rule colour, labels muted. -->
         <g v-if="large" class="cost-grid">
@@ -158,14 +177,16 @@ function weekTitle(week: number): string {
               {{ valueText(tick, inMoney, currency) }}
             </text>
           </g>
-          <text
-            v-for="(week, index) in weeks"
-            :key="week"
-            :x="plot.x + (index + 0.5) * slot"
-            :y="box.height - 8"
-            text-anchor="middle"
-            class="cost-axis-text"
-          >{{ weekLabel(week) }}</text>
+          <template v-for="(week, index) in weeks" :key="week">
+            <text
+              v-if="index % labelEvery === 0"
+              :x="plot.x + (index + 0.5) * slot"
+              :y="box.height - 8"
+              text-anchor="middle"
+              class="cost-axis-text"
+              data-cost-column-label
+            >{{ columnLabel(week) }}</text>
+          </template>
         </g>
         <line
           v-else

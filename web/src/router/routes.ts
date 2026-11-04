@@ -64,6 +64,15 @@ const routes: RouteRecordRaw[] = [
     ],
   },
 
+  // ADMIN → SPEND, `#/spend`: the tenant's Spend page over the Console. A person's only: every route it
+  // reads refuses a machine principal.
+  {
+    path: '/spend',
+    component: () => import('@/layouts/MainLayout.vue'),
+    meta: { title: 'Spend' },
+    children: [{ path: '', components: { default: Console, overlay: () => import('@/pages/SpendPage.vue') } }],
+  },
+
   {
     path: '/board',
     redirect: '/console',

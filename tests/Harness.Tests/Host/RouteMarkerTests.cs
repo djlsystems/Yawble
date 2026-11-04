@@ -68,6 +68,45 @@ public sealed class RouteMarkerTests(HostFixture host) : IClassFixture<HostFixtu
             doors);
     }
 
+    /// <summary>
+    /// THE SPEND PERMIT OPENS READS ONLY: exactly the Spend page's reads require it - a person passes as
+    /// before - and every billing account and expense write stays HumansOnly.
+    /// </summary>
+    [Fact]
+    public void Exactly_the_Actual_Spend_reads_require_the_Spend_permit_and_every_spend_write_stays_humans_only()
+    {
+        var endpoints = host.Services.GetRequiredService<EndpointDataSource>().Endpoints;
+
+        var spend = endpoints
+            .Where(e => e.Metadata.GetMetadata<PermitRequirement>()?.Permit == Harness.Contracts.Permits.Spend)
+            .Select(Describe)
+            .Order(StringComparer.Ordinal);
+
+        Assert.Equal(
+            [
+                "GET /api/billing-accounts",
+                "GET /api/billing-accounts/{id}",
+                "GET /api/expenses",
+                "GET /api/expenses/{id}",
+                "GET /api/spend/export/billing-accounts",
+                "GET /api/spend/export/estimated-execution-cost",
+                "GET /api/spend/export/expenses",
+                "GET /api/spend/export/period-summary",
+                "GET /api/spend/linked-members",
+                "GET /api/spend/overview",
+            ],
+            spend);
+
+        var writes = endpoints
+            .Where(e => Describe(e) is var name && !name.StartsWith("GET ", StringComparison.Ordinal)
+                && (name.Contains(" /api/billing-accounts", StringComparison.Ordinal) || name.Contains(" /api/expenses", StringComparison.Ordinal)
+                    || name.Contains(" /api/spend", StringComparison.Ordinal) || name == "PUT /api/tenant/settings"))
+            .ToList();
+
+        Assert.Equal(8, writes.Count);
+        Assert.All(writes, e => Assert.NotNull(e.Metadata.GetMetadata<HumansOnlyMarker>()));
+    }
+
     private static string Describe(Endpoint endpoint)
     {
         var methods = endpoint.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods;

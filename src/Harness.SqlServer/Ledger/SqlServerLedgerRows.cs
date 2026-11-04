@@ -6,8 +6,8 @@ using static Harness.Messaging.LedgerFacts;
 namespace Harness.SqlServer.Ledger;
 
 /// <summary>
-/// THE ONE WRITER OF <c>usage_ledger</c>, <c>workflow_ledger</c>, <c>delivery_ledger</c> AND
-/// <c>nudge_ledger</c> ON SQL SERVER: SQLite's <c>LedgerRows</c> statement for statement, whose remarks
+/// THE ONE WRITER OF <c>usage_ledger</c>, <c>workflow_ledger</c>, <c>delivery_ledger</c>,
+/// <c>nudge_ledger</c> AND <c>execution_snapshots</c> ON SQL SERVER: SQLite's <c>LedgerRows</c> statement for statement, whose remarks
 /// are the argument. What a row says is decided by <see cref="LedgerFacts"/> for both; this asks the
 /// questions in T-SQL.
 ///
@@ -30,6 +30,9 @@ public static class SqlServerLedgerRows
         SqlConnection connection, SqlTransaction transaction, Message stored, bool backfilled, CancellationToken ct)
     {
         if (LedgerRows.IsRunTerminal(stored)) return await WriteRunAsync(connection, transaction, stored, backfilled, ct);
+
+        // A run's start writes its snapshot, live only, as SQLite's does.
+        if (stored.Type == MessageTypes.Started) return !backfilled && await WriteSnapshotAsync(connection, transaction, stored, ct);
 
         if (stored.Type is MessageTypes.WorkflowCompleted or MessageTypes.WorkflowClosed)
         {
@@ -95,8 +98,13 @@ public static class SqlServerLedgerRows
 
         var started = await StartedAsync(connection, transaction, terminal, ct);
 
+        (string Type, string Payload)? blocking = null;
         var outcome = await RunOutcomeAsync(
-            terminal, () => BlockedAsync(connection, transaction, terminal, started?.Seq, ct));
+            terminal,
+            async () => (blocking = await BlockingAsync(connection, transaction, terminal, started?.Seq, ct)) is not null);
+
+        // Why it ended interrupted, as SQLite's LedgerRows writes it: a live row only.
+        var reasonCode = backfilled ? null : ReasonCode(terminal, outcome, blocking);
 
         string? agent = null;
         if (teamId is not null)
@@ -120,14 +128,23 @@ public static class SqlServerLedgerRows
             run_seq, correlation, team_id, team_name, member, member_kind, agent_preset,
             run_outcome, queued_at, started_at, ended_at, measured,
             tokens_in, tokens_cached_in, tokens_cache_creation, tokens_out, tokens_combined, billable,
-            trigger_source, trigger_fired_at, backfilled
+            trigger_source, trigger_fired_at, backfilled, start_seq, origin_kind, origin_actor_id,
+            reason_code
             """,
             $"""
              @seq, @correlation, @team, {TeamNameSql}, @member, @kind, @agent,
              @outcome, @queued, @started, @ended, @measured,
              @in, @cachedIn, @cacheCreation, @out, @combined, @billable,
-             @trigger, @firedAt, @backfilled
+             @trigger, @firedAt, @backfilled, @startSeq, @originKind, @originActor,
+             @reasonCode
              """);
+
+        Text(insert, "@reasonCode", reasonCode);
+
+        // The workflow's origin, as SQLite's LedgerRows copies it: a live row only.
+        var origin = backfilled ? null : await OriginOfAsync(connection, transaction, terminal.Seq, ct);
+        Text(insert, "@originKind", origin?.Kind);
+        Text(insert, "@originActor", origin?.ActorId);
 
         insert.Parameters.AddWithValue("@seq", terminal.Seq);
         insert.Parameters.AddWithValue("@correlation", terminal.CorrelationId);
@@ -149,8 +166,118 @@ public static class SqlServerLedgerRows
         insert.Parameters.AddWithValue("@trigger", (object?)attribution?.TriggerSource ?? DBNull.Value);
         insert.Parameters.AddWithValue("@firedAt", (object?)attribution?.TriggerFiredAt ?? DBNull.Value);
         insert.Parameters.AddWithValue("@backfilled", backfilled ? 1L : 0L);
+        Long(insert, "@startSeq", started?.Seq);
 
         return await insert.ExecuteNonQueryAsync(ct) > 0;
+    }
+
+    /// <summary>A run's configuration at start, as SQLite's <c>LedgerRows</c> writes it: the roster row,
+    /// the tenant's rate and currency and the current outcome link, read in this transaction.</summary>
+    private static async Task<bool> WriteSnapshotAsync(
+        SqlConnection connection, SqlTransaction transaction, Message started, CancellationToken ct)
+    {
+        var (teamId, member) = Split(started.Source);
+
+        EffectiveCost.Member? row = null;
+
+        if (teamId is not null)
+        {
+            await using var lookup = connection.CreateCommand();
+            lookup.Transaction = transaction;
+            lookup.CommandText =
+                "SELECT agent, est_hourly_rate, billing_account_id FROM team_members WHERE team = @team AND name = @name";
+            lookup.Parameters.AddWithValue("@team", teamId);
+            lookup.Parameters.AddWithValue("@name", member);
+
+            await using var reader = await lookup.ExecuteReaderAsync(ct);
+            if (await reader.ReadAsync(ct))
+            {
+                row = new EffectiveCost.Member(
+                    reader.GetString(0),
+                    reader.IsDBNull(1) ? null : reader.GetString(1),
+                    reader.IsDBNull(2) ? null : reader.GetString(2));
+            }
+        }
+
+        var cost = EffectiveCost.Of(
+            row,
+            await TextAsync(connection, transaction, "SELECT value FROM tenant_settings WHERE name = @p", ExecutionSnapshotFacts.AgentHourlyRateSetting, null, ct),
+            await TextAsync(connection, transaction, "SELECT value FROM tenant_settings WHERE name = @p", ExecutionSnapshotFacts.CurrencySetting, null, ct));
+
+        var link = await SqlServerOutcomeLinks.CurrentAsync(connection, transaction, started.CorrelationId, ct);
+
+        await using var insert = connection.CreateCommand();
+        insert.Transaction = transaction;
+        insert.CommandText =
+            $"""
+             INSERT INTO execution_snapshots (
+                 start_seq, correlation, team_id, team_name, member, member_kind, agent_preset,
+                 rate_amount, rate_currency, rate_source, billing_account_id, link_id, started_at,
+                 origin_kind, origin_actor_id, origin_actor_email, origin_trigger)
+             VALUES (
+                 @seq, @correlation, @team, {TeamNameSql}, @member, @kind, @agent,
+                 @amount, @currency, @source, @account, @link, @at,
+                 @originKind, @originActor, @originEmail, @originTrigger);
+             """;
+
+        var origin = await OriginOfAsync(connection, transaction, started.Seq, ct);
+        Text(insert, "@originKind", origin?.Kind);
+        Text(insert, "@originActor", origin?.ActorId);
+        Text(insert, "@originEmail", origin?.ActorEmail);
+        Text(insert, "@originTrigger", origin?.Trigger);
+
+        insert.Parameters.AddWithValue("@seq", started.Seq);
+        insert.Parameters.AddWithValue("@correlation", started.CorrelationId);
+        insert.Parameters.AddWithValue("@team", (object?)teamId ?? DBNull.Value);
+        insert.Parameters.AddWithValue("@member", member);
+        insert.Parameters.AddWithValue("@kind", (object?)cost.Kind ?? DBNull.Value);
+        insert.Parameters.AddWithValue("@agent", (object?)cost.Preset ?? DBNull.Value);
+        insert.Parameters.AddWithValue("@amount", (object?)cost.Amount ?? DBNull.Value);
+        insert.Parameters.AddWithValue("@currency", (object?)cost.Currency ?? DBNull.Value);
+        insert.Parameters.AddWithValue("@source", cost.Source);
+        insert.Parameters.AddWithValue("@account", (object?)cost.BillingAccountId ?? DBNull.Value);
+        Long(insert, "@link", link?.Id);
+        insert.Parameters.AddWithValue("@at", Instant.Stamp(started.OccurredAt));
+
+        return await insert.ExecuteNonQueryAsync(ct) > 0;
+    }
+
+    /// <summary>The origin row <paramref name="seq"/> was stored with, as SQLite's LedgerRows reads it.</summary>
+    private static async Task<MessageOrigin?> OriginOfAsync(
+        SqlConnection connection, SqlTransaction transaction, long seq, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText =
+            "SELECT origin_kind, origin_actor_id, origin_actor_email, origin_trigger, publisher_kind FROM messages WHERE seq = @seq";
+        command.Parameters.AddWithValue("@seq", seq);
+
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct) || reader.IsDBNull(0)) return null;
+
+        return new MessageOrigin(
+            reader.GetString(0),
+            reader.IsDBNull(1) ? null : reader.GetString(1),
+            reader.IsDBNull(2) ? null : reader.GetString(2),
+            reader.IsDBNull(3) ? null : reader.GetString(3),
+            reader.IsDBNull(4) ? PublisherKinds.Host : reader.GetString(4));
+    }
+
+    /// <summary>A nullable NVARCHAR(MAX) parameter.</summary>
+    private static void Text(SqlCommand command, string name, string? value) =>
+        command.Parameters.Add(name, System.Data.SqlDbType.NVarChar, -1).Value = (object?)value ?? DBNull.Value;
+
+    /// <summary>One text value with up to two parameters, <c>@p</c> and <c>@q</c>; null for no row.</summary>
+    private static async Task<string?> TextAsync(
+        SqlConnection connection, SqlTransaction transaction, string sql, string p, string? q, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = sql;
+        command.Parameters.AddWithValue("@p", p);
+        if (q is not null) command.Parameters.AddWithValue("@q", q);
+
+        return await command.ExecuteScalarAsync(ct) as string;
     }
 
     private static async Task<bool> WriteWorkflowAsync(
@@ -281,22 +408,22 @@ public static class SqlServerLedgerRows
             reader.IsDBNull(4) ? null : reader.GetInt64(4));
     }
 
-    /// <summary>Whether the run published a run-level `blocked` (naming no item) or asked a person to
-    /// decide, between its start and this row.</summary>
-    private static async Task<bool> BlockedAsync(
+    /// <summary>The newest run-level `blocked` (naming no item) or `needsDecision` row the run published
+    /// between its start and this row, or null when it published none.</summary>
+    private static async Task<(string Type, string Payload)?> BlockingAsync(
         SqlConnection connection, SqlTransaction transaction, Message terminal, long? startedSeq, CancellationToken ct)
     {
-        if (startedSeq is not { } from) return false;
+        if (startedSeq is not { } from) return null;
 
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText =
             $"""
-             SELECT CASE WHEN EXISTS (
-                 SELECT 1 FROM messages
-                 WHERE source = @source COLLATE {SqlServerSql.NoCase} AND type IN (@blocked, @needsDecision)
-                   AND seq > @from AND seq < @terminal
-                   AND {SqlServerSql.Absent("payload", PayloadFields.Item)}) THEN 1 ELSE 0 END
+             SELECT TOP 1 type, payload FROM messages
+             WHERE source = @source COLLATE {SqlServerSql.NoCase} AND type IN (@blocked, @needsDecision)
+               AND seq > @from AND seq < @terminal
+               AND {SqlServerSql.Absent("payload", PayloadFields.Item)}
+             ORDER BY seq DESC
              """;
         command.Parameters.AddWithValue("@source", terminal.Source);
         command.Parameters.AddWithValue("@blocked", MessageTypes.Blocked);
@@ -304,7 +431,8 @@ public static class SqlServerLedgerRows
         command.Parameters.AddWithValue("@from", from);
         command.Parameters.AddWithValue("@terminal", terminal.Seq);
 
-        return Convert.ToInt32(await command.ExecuteScalarAsync(ct)) != 0;
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct) ? (reader.GetString(0), reader.GetString(1)) : null;
     }
 
     private static void Long(SqlCommand command, string name, long? value) =>

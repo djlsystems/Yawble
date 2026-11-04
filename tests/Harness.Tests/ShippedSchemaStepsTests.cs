@@ -22,6 +22,7 @@ public sealed class ShippedSchemaStepsTests
         ["messages-004"] = "0f253b2352fb1d0c6dc63d4e6e9bdae795e7d8cd3d4b8f362c1fa0b5c5ed9617",
         ["messages-005"] = "b5afce13c4f46e19bacfd783158015c0a468015d046428dec4539a883fa37b07",
         ["messages-006"] = "c4e771b1609a9af3f3234aa4d9a05915339de032ae559da3644069c15a22ca7d",
+        ["messages-007"] = "971bd922af71118f266e8295690a1e81e19f0bffb8d0305434e06812fa691135",
         ["auth-001"] = "c2e86a37e99a689f95c32134db882b3add91e4775c1516c759ee1758482d374d",
         ["auth-002"] = "e1b6b1e9b3dab445585d7658667e95067126053948aaf4a0e3ebfd6f500605b4",
         ["auth-003"] = "a632d0adfee1aae846161316f552e5d72a91a586935a7c51dc45c39d624869d5",
@@ -55,6 +56,7 @@ public sealed class ShippedSchemaStepsTests
         ["auth-031"] = "06233dff12f1c0c1f25799bc1ea41c61db0c8df336172a7ff9b987acaf989f39",
         ["auth-032"] = "5f5b5acc590c2c9594e18edfaa7effc98de1f0311616b441b58b599802682cc9",
         ["auth-033"] = "07dd1e3f395c987e0e64de45d45184545016797fa6724dcf4d503597a36d8ac9",
+        ["auth-034"] = "f152ed5eb873cfbbf2b113898ef0a827cbe5af990ced7713a4542999c0b8861c",
         ["skill-001"] = "43d1e6d741db4f371cbc11722e5c782c62892118b1f480206a8961e28b011d0e",
         ["skill-002"] = "c489c729453566533b3d2301a0e04b90025074284dc9b78dce8847991abcc726",
         ["skill-003"] = "c5b39099b5250853f952d26dca3479df8edf54cc9a7e24a71baffb2660c390b6",
@@ -70,6 +72,16 @@ public sealed class ShippedSchemaStepsTests
         ["outcome-005"] = "9ba44e54faa9326eb5932b57d7833eb7652b3f6af0d22eab41849a82b6bf1b98",
         ["outcome-006"] = "8d058495722ab6439f7e588b208292db5647078786551ba343ef2002928d6a45",
         ["outcome-007"] = "e2e0821cc3ea0c631c24778b2987e500ac94c8b59ac57469d5e6183e42ed22db",
+        ["outcome-008"] = "b979068c0229ee6cf9e01b2cde1be83064b028d85365196b81b98bdbc1169c1e",
+        ["outcome-012"] = "d1134e6c77faf2db9a1e9689b3ac54d9e87bd800b027eab88b46d6892b482751",
+        ["outcome-009"] = "ec585b69de13fddefdf00f7f6dcbda96544a32e127d76c8d7381dcbb0abc228c",
+        ["outcome-013"] = "8718754d44d87bbfeb2e72c4a3fcc282aff36d592cb062c6fe8f94410b26c66b",
+        ["outcome-014"] = "9d9d813ed7a3f04bc12c18e5f9275a60472661cf57360d46ac7ce71192855377",
+        ["outcome-015"] = "caaea5f943f09e124f11d63f6b6d3f331ae1f58cba8ab4ff83c5bd47f279530a",
+        // Re-pinned before release: team_id gained COLLATE NOCASE to match its SQL Server twin
+        // (SchemaParityTests.Every_team_id_column_folds_case_on_both_providers).
+        ["outcome-010"] = "60b4bb529db53d4a276ef6d46639afca3dbda35f9760cb66528b4d8effbfd5bf",
+        ["outcome-011"] = "ec1c9a2ef28342df6e80127b05f7d5aa6e0d916671c5ff6235df13fa29ff0717",
         ["link-001"] = "6cf771b5256f635c32313b14e1a610c88c9c4d005929c31402eb16efa578acd1",
     };
 

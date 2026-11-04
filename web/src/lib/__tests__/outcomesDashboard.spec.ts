@@ -1,6 +1,6 @@
 // THE OUTCOMES DASHBOARD'S WORDING. Each helper formats a figure the route answered and computes
-// none: a cost with no rate is "not set", never $0; no time is no efficiency, never 0%; a share of
-// the value needs both figures; a week says its cost, its agent time and its runs.
+// none: a cost with no rate is "not set", never $0; no time is no efficiency, never 0%; a week says its
+// cost, its agent time and its runs.
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -9,8 +9,6 @@ import {
   efficiencyText,
   moneyText,
   rateText,
-  shareOfValueText,
-  valueAmount,
   weekHeights,
   weekText,
 } from '../outcomes';
@@ -23,22 +21,8 @@ describe('the dashboard wording', () => {
     expect(moneyText(20000, 'EUR')).toContain('20,000');
   });
 
-  it('takes a value only when one was given', () => {
-    expect(valueAmount('20000')).toBe(20000);
-    expect(valueAmount(null)).toBeNull();
-    expect(valueAmount('')).toBeNull();
-  });
-
-  it('gives the share of the value only with both figures and a value above 0', () => {
-    expect(shareOfValueText(1240, 20000)).toBe('6%');
-    expect(shareOfValueText(10, 20000)).toBe('<1%');
-    expect(shareOfValueText(null, 20000)).toBe('');
-    expect(shareOfValueText(1240, null)).toBe('');
-    expect(shareOfValueText(1240, 0)).toBe('');
-  });
-
   it('reads agent time in hours, and efficiency as a percentage or a dash, never 0%', () => {
-    expect(agentHoursText(49_680)).toBe('13.8 agent h');
+    expect(agentHoursText(49_680)).toBe('13.8 Agent Hours');
     expect(agentHoursText(2700)).toBe('45 agent min');
     expect(efficiencyText(0.78)).toBe('78%');
     expect(efficiencyText(null)).toBe('—');
@@ -60,7 +44,7 @@ describe('the dashboard wording', () => {
 
   it('says what a week cost, how long agents worked and how many runs it had', () => {
     expect(weekText({ weekStart: '2026-09-28T00:00:00Z', agentSeconds: 9720, billable: 0, measuredRuns: 2, unmeasuredRuns: 1, cost: 243 }, 'USD'))
-      .toBe('Week of Sep 28: $243 · 2.7 agent h · 3 runs · + 1 unmeasured run');
+      .toBe('Week of Sep 28: $243 · 2.7 Agent Hours · 3 runs · + 1 unmeasured run');
   });
 
   it('names the rate, or that none is set', () => {

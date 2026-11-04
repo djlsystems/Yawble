@@ -1,0 +1,106 @@
+/**
+ * WHAT THE COST SURFACES MAY CALL THEIR FIGURE. Agent hours times the instance's current rate is an
+ * estimate of what execution cost - never money paid - so the Teams list, its summary tiles, the team
+ * page's tile and the dialog it opens never title it Spend, Spent or Cost alone, and never say
+ * `agent h` for Agent Hours. The per-workflow token budget is a different figure and keeps its words.
+ */
+
+/** Spend or spent, as a word, in any case. */
+export const SpendWord = /\bspen[dt]\b/i;
+
+/** A title that is the bare word Cost (`Cost`, `Cost · 8 weeks`, `Cost - last 8 weeks`). */
+export const CostAlone = /^\s*Cost\b/;
+
+/** The old short form of Agent Hours. */
+export const AgentHShort = /\bagent h\b/i;
+
+/** Every text that names the estimate wrongly: a spend word, `agent h`, or a title of Cost alone. */
+export function misnamed(texts: readonly (string | null | undefined)[], { titles = false } = {}): string[] {
+  return texts
+    .map((t) => (t ?? '').replace(/\s+/g, ' ').trim())
+    .filter((t) => SpendWord.test(t) || AgentHShort.test(t) || (titles && CostAlone.test(t)));
+}
+
+/** What a person reads off an element: its text, and every `aria-label` and `title` inside it. */
+export function readOff(root: Element | null | undefined): string[] {
+  if (!root) return [];
+  const attributes = [root, ...root.querySelectorAll('[aria-label], [title]')]
+    .flatMap((e) => [e.getAttribute('aria-label'), e.getAttribute('title')])
+    .filter((t): t is string => t !== null);
+  return [root.textContent ?? '', ...attributes];
+}
+
+/** Value words, which never sit near an estimate or a spend figure: value, ROI, return, savings. */
+export const ValueWords = /\b(value|roi|return|returns|savings)\b/i;
+
+/**
+ * THE SPEND PAGE'S LINT. There, **Actual Spend** is a real figure - confirmed vendor expenses - and the
+ * page itself is titled Spend; every other spend word, an estimate titled Cost alone, `agent h`, and any
+ * value word is misnamed. `titles` are the page's headings and tile titles, checked for Cost alone.
+ */
+export function misnamedOnSpend(texts: readonly (string | null | undefined)[], titles: readonly string[] = []): string[] {
+  const cleaned = texts.map((t) => (t ?? '').replace(/\s+/g, ' ').trim());
+  const words = cleaned.filter((t) => {
+    const rest = t === 'Spend' ? '' : t.replace(/Actual Spend(?![a-z])/g, '');
+    return SpendWord.test(rest) || AgentHShort.test(rest) || ValueWords.test(rest);
+  });
+  const costAlone = titles.map((t) => t.replace(/\s+/g, ' ').trim()).filter((t) => CostAlone.test(t));
+  return [...words, ...costAlone];
+}
+
+/** The word cost, in any case. */
+export const CostWord = /\bcost\b/i;
+
+/**
+ * THE MEMBER RATE'S LINT, for a member's estimated hourly rate and billing account in Member settings.
+ * A rate is an Estimated hourly rate, never a cost, a spend or a value: no spend word, no `cost` at all,
+ * no `agent h`, and no value word, in its text, its help or its labels.
+ */
+export function misnamedOnMemberRate(texts: readonly (string | null | undefined)[]): string[] {
+  return texts
+    .map((t) => (t ?? '').replace(/\s+/g, ' ').trim())
+    .filter((t) => SpendWord.test(t) || CostWord.test(t) || AgentHShort.test(t) || ValueWords.test(t));
+}
+
+/**
+ * THE TEAMS LIST'S LINT, for its period control, its Estimated Execution Cost and Agent Hours columns, and the
+ * Estimated Execution Cost and Where it goes tiles: no spend word, no `agent h`, no value word, and no title of
+ * Cost alone.
+ */
+export function misnamedOnTeamsList(texts: readonly (string | null | undefined)[], titles: readonly string[] = []): string[] {
+  const words = texts
+    .map((t) => (t ?? '').replace(/\s+/g, ' ').trim())
+    .filter((t) => SpendWord.test(t) || AgentHShort.test(t) || ValueWords.test(t));
+  const costAlone = titles.map((t) => t.replace(/\s+/g, ' ').trim()).filter((t) => CostAlone.test(t));
+  return [...words, ...costAlone];
+}
+
+/**
+ * What a person reads off an element, block by block: each text node on its own (so a word at an element's seam keeps
+ * its boundary - `textContent` runs `Plugin member` and `Executions` together), and every `aria-label` and `title`.
+ */
+export function readWords(root: Element | null | undefined): string[] {
+  if (!root) return [];
+  const parts: string[] = [];
+  const walker = root.ownerDocument.createTreeWalker(root, 4);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = (node.textContent ?? '').trim();
+    if (text) parts.push(text);
+  }
+  return [...parts, ...readOff(root).slice(1)];
+}
+
+/**
+ * AN OUTCOME BUDGET'S WORDS, which no cost surface shows any more: an outcome's stored value is kept and readable on
+ * the outcome routes, but nothing measures an estimate against it. Budget in any form (budget, budgets, budgeted,
+ * unbudgeted), a spending limit, `None set`, `⚠ … over`, and the old Budgets tile's setup note. (`spent` is
+ * `misnamed`'s.)
+ * The per-workflow TOKEN budget is a different figure and keeps its words: lint only the cost surfaces with this.
+ */
+export const OutcomeBudgetWords =
+  /\b(budget|budgets|budgeted|unbudgeted)\b|\bspending limit\b|\bnone set\b|⚠[^⚠]*\bover\b|give an outcome a value/i;
+
+/** Every text that shows an outcome budget. */
+export function budgetWordsOn(texts: readonly (string | null | undefined)[]): string[] {
+  return texts.map((t) => (t ?? '').replace(/\s+/g, ' ').trim()).filter((t) => OutcomeBudgetWords.test(t));
+}

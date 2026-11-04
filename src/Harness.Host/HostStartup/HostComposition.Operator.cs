@@ -137,6 +137,21 @@ internal sealed partial class HostComposition
             Console.Error.WriteLine($"The usage ledger's start did not finish and is tried again at the next start: {exception.Message}");
         }
 
+        // THE RATE EPOCH, once: the rate in force at the start that applies outcome-012, the only place a
+        // configuration-only rate is read. A later start finds the row and writes nothing. A failure is
+        // printed and the next start tries again.
+        if (ledgerRows is not null)
+        try
+        {
+            await ledgerRows.RecordRateEpochAsync(new RateEpochConfiguration(
+                builder.Configuration[Harness.Messaging.RateEpochFacts.ConfiguredRateKey],
+                builder.Configuration[Harness.Messaging.RateEpochFacts.ConfiguredCurrencyKey]));
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Console.Error.WriteLine($"The rate epoch was not recorded and is tried again at the next start: {exception.Message}");
+        }
+
         // BACKLOG ITEMS TAKE THEIR DISPATCH WORKFLOW'S OUTCOME, once, for the items dispatched before the
         // link writer did it for them. One transaction; a failure leaves it to the next start.
         try

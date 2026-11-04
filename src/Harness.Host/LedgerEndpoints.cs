@@ -1,6 +1,10 @@
 using System.ComponentModel;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Harness.Contracts;
 using Harness.Host.Auth;
+using Microsoft.AspNetCore.Http.Json;
+using Microsoft.Extensions.Options;
 
 namespace Harness.Host;
 
@@ -23,7 +27,8 @@ public static class LedgerEndpoints
                     + "for the newest page.")] long? before,
                 [Description("How many rows (runs and workflows together) to return. Default 50, clamped to "
                     + "1..200.")] int? take,
-                IUsageLedger ledger, IOutcomeStore outcomes, LedgerIdentity identity, CancellationToken ct) =>
+                IUsageLedger ledger, IOutcomeStore outcomes, LedgerIdentity identity, TenantSettings settings,
+                IOptions<JsonOptions> json, CancellationToken ct) =>
             {
                 var page = await ledger.ReadPageAsync(
                     since ?? DateTimeOffset.MinValue, before, Math.Clamp(take ?? 50, 1, ITenantLog.MaxTake), ct);
@@ -38,7 +43,7 @@ public static class LedgerEndpoints
                 {
                     instanceId = identity.InstanceId,
                     ledgerStartedAt = identity.LedgerStartedAt,
-                    runs = page.Runs,
+                    runs = await PricedAsync(page.Runs, outcomes, settings, json.Value.SerializerOptions, ct),
                     workflows = page.Workflows,
                     outcomes = all,
                     links,
@@ -58,6 +63,11 @@ public static class LedgerEndpoints
                 + "`billable`. `endedAt - startedAt` is agent time, `startedAt - queuedAt` time waiting "
                 + "for a slot. A workflow's `closedAt - rootAt` is its elapsed time; it is never summed "
                 + "across workflows.\n\n"
+                + "Each run also carries `rateSource` and `estimate`, priced as every cost figure prices it "
+                + "(`ExecutionCost`): a run with a snapshot is `member`, `tenant` or `none`; a run from before "
+                + "snapshots is `reconstructed` (the tenant rate in effect at its start), `fallback-at-upgrade` (the "
+                + "rate captured when the rate history began) or `none`. `estimate` is `{ amount, currency }`, both "
+                + "null - never 0 - when the run is not priced. It is an estimate, not money paid.\n\n"
                 + "Paged by a seq cursor shared by both lists: pass `nextBefore` as `before` for the "
                 + "next, older page; `nextBefore` is null on the last page.\n\n"
                 + "Nothing ever updates or deletes a ledger row: Reset, team deletion and log retention "
@@ -71,6 +81,39 @@ public static class LedgerEndpoints
                 + "name its newest link was made under, with \" (deleted)\"). Such a workflow counts under No "
                 + "outcome.\n\n"
                 + "**A person's action.**");
+    }
+
+    /// <summary>
+    /// The page's runs, each with its <c>rateSource</c> and <c>estimate</c> from <see cref="ExecutionCost"/>:
+    /// one windowed read of the runs the page spans, matched by <c>run_seq</c>, never a second formula.
+    /// </summary>
+    private static async Task<IReadOnlyList<JsonObject>> PricedAsync(
+        IReadOnlyList<UsageLedgerRow> page, IOutcomeStore outcomes, TenantSettings settings,
+        JsonSerializerOptions options, CancellationToken ct)
+    {
+        if (page.Count == 0) return [];
+
+        var from = page.Min(r => r.StartedAt is { } started && started < r.EndedAt ? started : r.EndedAt);
+        var to = page.Max(r => r.EndedAt).AddTicks(1);
+        var read = await outcomes.ReadExecutionRunsAsync(from, to, pricedOnly: false, ct);
+        var priced = ExecutionCost.Of(read, await outcomes.ListAsync(ct), settings.OutcomesCurrency)
+            .ToDictionary(r => r.Ledger.RunSeq);
+
+        return page.Select(row =>
+            {
+                var view = JsonSerializer.SerializeToNode(row, options)!.AsObject();
+                var run = priced.GetValueOrDefault(row.RunSeq);
+                var estimate = run?.Estimate;
+
+                view["rateSource"] = run?.RateSource ?? Harness.Messaging.ExecutionSnapshotFacts.RateSourceNone;
+                view["estimate"] = new JsonObject
+                {
+                    ["amount"] = estimate,
+                    ["currency"] = estimate is null ? null : run!.Currency,
+                };
+                return view;
+            })
+            .ToList();
     }
 
     /// <summary>Each outcome id the links or these closes name that no outcome has any more, named

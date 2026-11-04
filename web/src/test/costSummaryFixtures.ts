@@ -5,10 +5,13 @@ import type { CostSummary, CostSummaryOutcome } from '../api/outcomes';
  *
  * At $60/h over the eight weeks: Ship billing 20 h = $1,200 (all-team $1,200) against $2,000, Docs
  * refresh 10 h = $600 against $500 when over (else $400 and 6.67 h), Research 5 h = $300 with no
- * budget, Ops 2 h = $120 with no budget, No outcome 3 h = $180. The prior eight weeks: 30 h = $1,800.
+ * budget, Ops 2 h = $120 with no budget, Unattributed 3 h = $180. The prior eight weeks: 30 h = $1,800.
  */
 export interface SummaryOptions {
+  /** The rate every run was snapshotted at; null is no priced run. */
   rate?: number | null;
+  /** The tenant default rate as set now (`rate`); the run rate unless given. No figure uses it. */
+  tenantRate?: number | null;
   budgets?: boolean;
   over?: boolean;
   waiting?: number;
@@ -26,11 +29,11 @@ export function costSummary(options: SummaryOptions = {}): CostSummary {
     agentSeconds: hours * 3600,
     cost: rate === null ? null : hours * rate,
     budget: budgets ? budget : null,
-    spentTotal: rate === null || id === null ? null : hours * rate,
+    outcomeTotalCost: rate === null || id === null ? null : hours * rate,
   });
 
   const outcomes = [
-    outcome(null, 'No outcome', null, 3, null),
+    outcome(null, 'Unattributed', null, 3, null),
     outcome('o-billing', 'Ship billing', 1, 20, 2000),
     outcome('o-docs', 'Docs refresh', 2, docsHours, 500),
     outcome('o-research', 'Research', 3, 5, null),
@@ -47,12 +50,12 @@ export function costSummary(options: SummaryOptions = {}): CostSummary {
   });
 
   return {
-    rate,
+    rate: options.tenantRate === undefined ? rate : options.tenantRate,
     weeks,
     periodStart: '2026-09-07',
     periodEnd: '2026-11-01',
-    total: { agentSeconds: seconds, cost: rate === null ? null : (seconds / 3600) * rate },
-    prior: { agentSeconds: 30 * 3600, cost: rate === null ? null : 30 * rate },
+    total: { agentSeconds: seconds, cost: rate === null ? null : (seconds / 3600) * rate, agentRate: rate },
+    prior: { agentSeconds: 30 * 3600, cost: rate === null ? null : 30 * rate, agentRate: rate },
     outcomes,
     rightNow: { openWorkflows: 4, membersRunning: 2, waitingOnYou: options.waiting ?? 3 },
   };

@@ -36,6 +36,13 @@ vi.mock('../../api/client', async (importOriginal) => ({
   retryRemoval,
 }));
 
+// THE PERIOD'S FIGURES never land here: these tests are about the rows' actions, and a real fetch failing late
+// would re-render a list an earlier test left mounted.
+vi.mock('../../api/outcomes', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  getTeamsCostPeriod: () => new Promise(() => {}),
+}));
+
 import TeamsView from '../TeamsView.vue';
 import { TeamDeletionConfirmationRequired } from '../../api/client';
 import { useConsoleStore } from '../../stores/console';

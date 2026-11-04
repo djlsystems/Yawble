@@ -38,6 +38,7 @@ export const SystemPackages = 'system.packages'
 export const AgentTags = 'agents.tags'
 export const ConciergeMayMerge = 'concierge.mayMerge'
 export const ConciergeMayArchive = 'concierge.mayArchive'
+export const ReportingAgentsMayReadSpend = 'reporting.agentsMayReadSpend'
 export const AgentsCommitAttribution = 'agents.commitAttribution'
 export const UpdatesCheck = 'updates.check'
 export const MarketplaceCheck = 'marketplace.check'
@@ -55,6 +56,10 @@ export const ConciergeMayMergeSentence =
 /** This sentence is put in front of a person, word for word: what the setting allows, and that it is off unless turned on. */
 export const ConciergeMayArchiveSentence =
   'Lets the Concierge archive and unarchive a quiet team when you ask it to in the terminal; it is off unless a person turns it on.'
+
+/** This sentence is put in front of a person, word for word: what the setting allows, that it never reaches a write, and that it is off unless turned on. */
+export const ReportingAgentsMayReadSpendSentence =
+  'Lets agents read Actual Spend for reports through the report tool: billing accounts, expenses and the Spend page’s overview and files. They can never add or change an account, an expense, a rate or a member’s cost settings. It is off unless a person turns it on.'
 
 /** This sentence is put in front of a person, word for word: what the setting does, and what off means. */
 export const AgentsCommitAttributionSentence =
@@ -112,6 +117,13 @@ export const TenantSettingFields: readonly TenantSettingField[] = [
     kind: 'count',
     label: 'Spend limit per workflow (tokens)',
     hint: 'Billable tokens one workflow may spend before the platform pauses it. 0 means no limit.',
+  },
+  {
+    name: ReportingAgentsMayReadSpend,
+    tab: 'spend',
+    kind: 'toggle',
+    label: 'Let agents read Actual Spend for reports',
+    hint: ReportingAgentsMayReadSpendSentence,
   },
   {
     name: 'concierge.idleTimeout',

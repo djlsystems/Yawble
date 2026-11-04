@@ -17,7 +17,7 @@ import { json, send } from './client'
  * | list with figures | `GET /api/outcomes?status=&from=&to=` |
  * | one outcome | `GET /api/outcomes/{id}` |
  * | create | `POST /api/outcomes` |
- * | rename, describe, value | `PATCH /api/outcomes/{id}` |
+ * | rename, describe, value, present | `PATCH /api/outcomes/{id}` |
  * | confirm, retire, reactivate | `POST /api/outcomes/{id}/{verb}` |
  * | merge (and its preview) | `POST /api/outcomes/{id}/merge[?preview=true]` |
  * | reject | `DELETE /api/outcomes/{id}` |
@@ -49,15 +49,68 @@ export interface OutcomeFigures {
   lastWorkedAt: string | null
   /** Its backlog items by where they stand; `declared` is counted as `money.declaredCountsAs` says. */
   backlog: { notStarted: number; inProgress: number; achieved: number }
-  /** Time its workflows were blocked on a person, from the ledger. */
+  /** Waiting on a person: time its workflows were blocked on a person, from the ledger. Never attention. */
   blockedSeconds: number
   /** Agent time over agent time plus blocked time, 0..1; null when both are 0, never 0. */
   efficiency: number | null
   /** The last eight weeks, oldest first, Monday-start UTC, whatever the period. */
   weekly: OutcomeWeek[]
-  /** Agent hours times the rate; `amount` is null when no rate is set, never 0. */
-  cost: { amount: number | null; currency: string }
+  /**
+   * The sum of each run's estimate, priced from its own snapshot; `amount` is null when no run was priced,
+   * never 0. `agentRate` is the weighted rate of its priced agent time (money over hours), null when none
+   * was priced - never the tenant rate.
+   */
+  cost: { amount: number | null; currency: string; legacyRates?: string[]; agentRate?: number | null }
+  /** The same eight weeks as `weekly`: its workflows that closed in each, every one and those completed. */
+  throughput?: OutcomeThroughputWeek[]
+  /** The eight weeks' cost over the workflows completed in them; null is "not measurable", never a division by zero. */
+  costPerCompleted?: number | null
+  /** On one outcome's detail only: everything up to the end of each of the eight weeks, the last its all-time figure. */
+  cumulative?: OutcomeCumulativeWeek[]
+  /** People's acts that count under it, in the read's window. Absent from an older Host. */
+  human?: HumanFigures
+  /** The same eight weeks as `weekly`: the acts in each - intervention frequency. */
+  humanWeekly?: HumanWeek[]
 }
+
+/**
+ * PEOPLE'S ACTS, from `intervention_ledger`, never priced. `interventions` is Human Interventions, each row once;
+ * `attentionSeconds` is Human Attention Time - measured durations only - and null when nothing was measured: no
+ * measured time, never 0. Waiting on a person is a separate figure and is never added to it.
+ */
+export interface HumanFigures {
+  interventions: number
+  measuredInterventions: number
+  attentionSeconds: number | null
+}
+
+export interface HumanWeek extends HumanFigures {
+  weekStart: string
+}
+
+/** A team's (or the reached teams') human figures over the eight weeks, with Waiting on a person beside them. */
+export interface TeamHumanFigures extends HumanFigures {
+  unattributed: HumanFigures
+  /** Waiting on a person: time its work waited on a person. Never added to `attentionSeconds`. */
+  waitingSeconds: number
+}
+
+export interface OutcomeThroughputWeek {
+  weekStart: string
+  closed: number
+  completed: number
+  /** That week's cost over its completed workflows; null is "not measurable". */
+  costPerCompleted: number | null
+}
+
+export interface OutcomeCumulativeWeek {
+  weekStart: string
+  agentSeconds: number
+  cost: number | null
+}
+
+/** How a person reads an outcome. A stored null - never picked - reads as `project`. */
+export type OutcomePresentation = 'project' | 'operational'
 
 export interface OutcomeWeek {
   weekStart: string
@@ -107,6 +160,8 @@ export interface Outcome {
   targetValue: string | null
   /** What achieving it is worth, in `money.currency`, as text; null when nobody has said. */
   value: string | null
+  /** How a person reads it; null (never picked) reads as project. Absent from an older Host. */
+  presentation?: OutcomePresentation | null
   createdBy: string
   createdByKind: string
   createdAt: string
@@ -200,6 +255,8 @@ export interface OutcomeFields {
   targetValue?: string
   /** An amount of `money.currency`; empty clears it. */
   value?: string
+  /** A person's choice; only `project` or `operational` is accepted. */
+  presentation?: OutcomePresentation
 }
 
 export interface MergePreview {
@@ -361,22 +418,31 @@ export interface TeamCostWeek {
 
 /** Totals over the eight weeks, the same shape for an outcome and for the team. */
 export interface TeamCostTotals {
+  /** Agent-kind time only, priced or not: a plugin's time is never Agent Hours. */
   agentSeconds: number
   billable: number
   measuredRuns: number
   unmeasuredRuns: number
+  /** Every priced run's estimate, agent and plugin, each from its own snapshot; null - never 0 - when none was priced. */
   cost: number | null
+  /** The priced agent time's own rate: its estimates over its hours. Null when no agent time was priced. */
+  agentRate?: number | null
+  /**
+   * The figure's footnote: `reconstructed` and `fallback-at-upgrade`, each when a run from before snapshots
+   * was priced into it that way. Empty, or absent from an older Host, when none was.
+   */
+  legacyRates?: string[]
 }
 
 /** One outcome the team's workflows served, or `id: null` for its unlinked workflows ("No outcome"). */
 export interface TeamCostOutcome {
   id: string | null
   name: string
-  /** The outcome's budget (what achieving it is worth), or null when none is set. */
+  /** The outcome's stored value (`outcomes.value_amount`), or null when none is set. No screen reads it: it is no budget. */
   value: number | null
   weekly: TeamCostWeek[]
   totals: TeamCostTotals
-  /** The outcome's total across ALL teams: the figure its budget is measured against. */
+  /** The outcome's Estimated Execution Cost across ALL teams, all time. */
   outcomeTotalCost: number | null
   /**
    * The outcome's 1-based place in the fixed order (created, oldest first, ties by id) among every
@@ -384,6 +450,8 @@ export interface TeamCostOutcome {
    * Null for No outcome.
    */
   rank: number | null
+  /** The team's Human Interventions and Human Attention Time under it over the eight weeks. Absent from an older Host. */
+  human?: HumanFigures
 }
 
 /** How the cost routes price agent time: the currency, and the rate (null when none is set). */
@@ -398,13 +466,15 @@ export interface TeamCost {
   /** No outcome first when present, then each outcome. */
   outcomes: TeamCostOutcome[]
   totals: TeamCostTotals
+  /** Its human figures over the eight weeks, with Waiting on a person beside them. Absent from an older Host. */
+  human?: TeamHumanFigures
 }
 
 /** `GET /api/teams/cost`: every team's figures at once, for the teams list - one call, never one per row. */
 export interface TeamsCost {
   money: TeamCostMoney
   weeks: string[]
-  teams: Array<Pick<TeamCost, 'team' | 'outcomes' | 'totals'>>
+  teams: Array<Pick<TeamCost, 'team' | 'outcomes' | 'totals' | 'human'>>
 }
 
 export const getTeamCost = (team: string) => json<TeamCost>(`/api/teams/${encodeURIComponent(team)}/cost`)
@@ -420,10 +490,17 @@ export interface CostSummaryWeek {
   cost: number | null
 }
 
-/** Agent seconds and cost over a period; `cost` is null when no rate is set, never 0. */
+/** Agent seconds and cost over a period; `cost` is null when no run was priced, never 0. */
 export interface CostSummaryTotals {
   agentSeconds: number
   cost: number | null
+  /** The priced agent time's own rate: its estimates over its hours. Null when no agent time was priced. */
+  agentRate?: number | null
+  /**
+   * The figure's footnote: `reconstructed` and `fallback-at-upgrade`, each when a run from before snapshots
+   * was priced into it that way. Empty, or absent from an older Host, when none was.
+   */
+  legacyRates?: string[]
 }
 
 /** One outcome's eight weeks across every team, or `id: null` for work linked to no outcome. */
@@ -434,15 +511,22 @@ export interface CostSummaryOutcome {
   rank: number | null
   agentSeconds: number
   cost: number | null
-  /** What achieving it is worth, in the instance's currency; null when none is set. */
+  /** The outcome's stored value, in the instance's currency; null when none is set. No screen reads it: it is no budget. */
   budget: number | null
-  /** What it has spent across every team, the figure its budget is measured against. */
-  spentTotal: number | null
+  /** Its Estimated Execution Cost across every team, all time. */
+  outcomeTotalCost: number | null
+  /**
+   * The figure's footnote: `reconstructed` and `fallback-at-upgrade`, each when a run from before snapshots
+   * was priced into it that way. Empty, or absent from an older Host, when none was.
+   */
+  legacyRates?: string[]
+  /** The reached teams' Human Interventions and Human Attention Time under it over the eight weeks. Absent from an older Host. */
+  human?: HumanFigures
 }
 
 /** `GET /api/teams/cost/summary`: the four tiles above the teams list, in one answer. */
 export interface CostSummary {
-  /** The agent hourly rate; null when none is set. */
+  /** The tenant default agent rate as set now; null when none is set. No figure is this rate times hours. */
   rate: number | null
   /** The instance's currency, when the route sends it; the teams cost route's otherwise. */
   currency?: string
@@ -456,6 +540,139 @@ export interface CostSummary {
   prior: CostSummaryTotals
   outcomes: CostSummaryOutcome[]
   rightNow: { openWorkflows: number; membersRunning: number; waitingOnYou: number }
+  /** The reached teams' human figures over the eight weeks, with Waiting on a person beside them. Absent from an older Host. */
+  human?: TeamHumanFigures
 }
 
 export const getCostSummary = () => json<CostSummary>('/api/teams/cost/summary')
+
+// ---- Every team's figures over the period the Teams list picks, by day or month -----------------
+
+/** How the Teams list's period is cut: by UTC day or by calendar month. */
+export type CostBucket = 'day' | 'month'
+
+/** A period the Teams list reads: `from` and `to` as `YYYY-MM-DD`, midnight UTC, `to` exclusive. */
+export interface CostPeriodRange {
+  from: string
+  to: string
+}
+
+/** One bucket of one series; `cost` is null - never 0 - when nothing in it was priced. */
+export interface CostPeriodBucket {
+  /** The bucket's first day, `YYYY-MM-DD`. */
+  start: string
+  agentSeconds: number
+  cost: number | null
+}
+
+/** One outcome a team's runs served in the period, or `id: null` for Unattributed. */
+export interface CostPeriodTeamOutcome {
+  id: string | null
+  name: string
+  rank: number | null
+  totals: CostSummaryTotals
+  buckets: CostPeriodBucket[]
+}
+
+/** One team's figures over the period. A team with no runs has zero seconds, a null cost and no outcomes. */
+export interface CostPeriodTeam {
+  team: string
+  totals: CostSummaryTotals
+  buckets: CostPeriodBucket[]
+  outcomes: CostPeriodTeamOutcome[]
+}
+
+/** `GET /api/teams/cost/period`: every reachable team, the instance's total and its outcomes over one period. */
+export interface TeamsCostPeriod {
+  money: TeamCostMoney
+  period: CostPeriodRange & { bucket: CostBucket }
+  /** Each bucket's first day, oldest first. */
+  buckets: string[]
+  teams: CostPeriodTeam[]
+  total: CostSummaryTotals
+  /** The reached teams' figure per bucket, for the summary tile's chart. */
+  totalBuckets: CostPeriodBucket[]
+  /** The same length of time just before the period, for the change. */
+  prior: CostSummaryTotals
+  /** Unattributed first when there is some, then each outcome served in the period, as the summary gives them. */
+  outcomes: CostSummaryOutcome[]
+}
+
+export const getTeamsCostPeriod = (range: CostPeriodRange, bucket: CostBucket) =>
+  json<TeamsCostPeriod>(
+    `/api/teams/cost/period?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}&bucket=${bucket}`)
+
+// ---- One team's figures over the period, broken down: the team page ----------------------------
+
+/** One group's figures over the period: `cost` null - never 0 - when nothing in it was priced. */
+export interface TeamPeriodFigures {
+  /** Agent-kind time only: a plugin member's is 0. */
+  agentSeconds: number
+  cost: number | null
+  agentRate: number | null
+  legacyRates: string[]
+  /** Its runs that started and whose span meets the period. */
+  executions: number
+  /** Tokens of its runs that ended in the period; a run that reported none is in `unmeasuredRuns`. */
+  billable: number
+  measuredRuns: number
+  unmeasuredRuns: number
+}
+
+/** The team's figures over the period: its Teams list row's, with tokens, executions and active members. */
+export interface TeamPeriodTotals extends CostSummaryTotals {
+  billable: number
+  measuredRuns: number
+  unmeasuredRuns: number
+  executions: number
+  activeMembers: number
+}
+
+/** One outcome the team's runs served (or Unattributed, `id` null): the list row's entry, its stored value and all-time total beside it. */
+export interface TeamPeriodOutcome extends CostPeriodTeamOutcome {
+  value: number | null
+  outcomeTotalCost: number | null
+  figures: TeamPeriodFigures
+}
+
+export interface TeamPeriodMember {
+  member: string
+  kind: 'agent' | 'plugin'
+  figures: TeamPeriodFigures
+  /** A plugin member with no money in the period only: `not-priced` when a run started with no rate of its own,
+   *  `unavailable` when every run is from before snapshots. Absent on every other entry. */
+  unpriced?: 'not-priced' | 'unavailable'
+}
+
+export interface TeamPeriodWorkflow {
+  workflow: number
+  figures: TeamPeriodFigures
+}
+
+/** `GET /api/teams/{team}/cost/period`. */
+export interface TeamCostPeriod {
+  team: string
+  money: TeamCostMoney
+  period: CostPeriodRange & { bucket: CostBucket }
+  buckets: string[]
+  totals: TeamPeriodTotals
+  totalBuckets: CostPeriodBucket[]
+  outcomes: TeamPeriodOutcome[]
+  members: TeamPeriodMember[]
+  workflows: TeamPeriodWorkflow[]
+}
+
+export const getTeamCostPeriod = (team: string, range: CostPeriodRange, bucket: CostBucket) =>
+  json<TeamCostPeriod>(
+    `/api/teams/${encodeURIComponent(team)}/cost/period?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}&bucket=${bucket}`)
+
+/** `GET /api/teams/{team}/cost/workflows`: each workflow's figures over all its runs, newest first. */
+export interface TeamCostWorkflows {
+  team: string
+  money: TeamCostMoney
+  workflows: TeamPeriodWorkflow[]
+}
+
+export const getTeamCostWorkflows = (team: string, workflow?: number) =>
+  json<TeamCostWorkflows>(
+    `/api/teams/${encodeURIComponent(team)}/cost/workflows${workflow === undefined ? '' : `?workflow=${workflow}`}`)

@@ -756,7 +756,7 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
         }
 
         // The Concierge's prompt names the tool with the others.
-        Assert.Contains("outcome and preview.", BuiltInPrompts.Compose(SkillRoles.Concierge, null, null, []), StringComparison.Ordinal);
+        Assert.Contains("outcome, report and preview.", BuiltInPrompts.Compose(SkillRoles.Concierge, null, null, []), StringComparison.Ordinal);
     }
 
     /// <summary>

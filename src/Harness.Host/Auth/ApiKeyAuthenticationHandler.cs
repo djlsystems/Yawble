@@ -48,6 +48,10 @@ public sealed class ApiKeyAuthenticationHandler(
         // MERGE IS THE CONCIERGE'S, taken here from anything else that carries it.
         principal = ConciergeLaunchFactory.Strip(principal);
 
+        // SPEND IS AN AGENT'S ONLY WHILE A PERSON HAS TURNED IT ON, read now rather than stored with the key.
+        principal = SpendReading.Apply(
+            principal, Context.RequestServices.GetService<TenantSettings>()?.ReportingAgentsMayReadSpend == true);
+
         return AuthenticateResult.Success(
             new AuthenticationTicket(PrincipalClaims.ToClaimsPrincipal(principal, Scheme), Scheme));
     }

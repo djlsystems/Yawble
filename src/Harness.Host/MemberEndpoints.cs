@@ -610,11 +610,12 @@ internal static class MemberEndpoints
         app.MapGet("/api/teams/{team}/containers/{name}", async (
             [Description(Describe.Team)] string team,
             [Description("The member's current identifier, as addressed in its route.")] string name,
-            TeamRegistry teams, CancellationToken ct) =>
+            TeamRegistry teams, ITenantSettingsStore settings, CancellationToken ct) =>
         {
             try
             {
                 var member = await teams.MemberAsync(team, name, ct);
+                var billing = await MemberBillingView.OfAsync(member, settings, ct);
 
                 return Results.Ok(new
                 {
@@ -625,6 +626,11 @@ internal static class MemberEndpoints
                     systemPromptSetBy = member.SystemPromptSetBy?.By,
                     systemPromptSetByKind = member.SystemPromptSetBy?.Kind,
                     systemPromptSetAt = SystemPromptSetAt(member.SystemPromptSetBy),
+                    hourlyRate = billing.HourlyRate,
+                    billingAccountId = billing.BillingAccountId,
+                    billingSetBy = billing.BillingSetBy,
+                    billingSetAt = billing.BillingSetAt,
+                    effectiveRate = billing.EffectiveRate,
                 });
             }
             catch (InvalidOperationException exception)
@@ -645,6 +651,7 @@ internal static class MemberEndpoints
                 + "`systemPromptSetAt` is when, ISO-8601 UTC. Set at hire and by every PATCH that changes the "
                 + "text, a clear included. All three are null for a member nobody is known to have set: one "
                 + "from before they were recorded, until it is next edited, or a plugin.\n\n"
+                + MemberBillingView.Described
                 + "404 for an unknown team or member.");
 
         // One member's own recent activity - the message log filtered to one (team, member), newest first.
@@ -710,8 +717,23 @@ internal static class MemberEndpoints
             [Description(Describe.Team)] string team,
             [Description("The member's current identifier, as addressed in its route.")] string name,
             UpdateContainer request, TeamRegistry teams, AgentInstallProbe probe,
-            AgentCatalog catalog, HttpContext context, IUserStore users, CancellationToken ct) =>
+            AgentCatalog catalog, HttpContext context, IUserStore users, ITenantSettingsStore settings,
+            ISpendStore spend, CancellationToken ct) =>
         {
+            // REFUSED BEFORE ANYTHING IS WRITTEN: a rate or account that cannot be stored leaves the
+            // row, its tenant rows and every other field of the request alone.
+            var (billing, refusal) = MemberBilling.Read(request.HourlyRate, request.BillingAccountId);
+            if (refusal is not null) return Results.BadRequest(new { error = refusal });
+
+            // A SENT ACCOUNT MUST NAME A BILLING ACCOUNT, a deactivated one included. Read before the
+            // write and not under its lock: an account is never deleted, so one found here is still
+            // there when the member row lands. A save that does not send the field is not checked, so a
+            // dangling id stored before any account existed stays until a person changes it.
+            if (billing!.Account is { } account && await spend.FindAccountAsync(account, ct) is null)
+            {
+                return Results.BadRequest(new { error = MemberBilling.AccountMissing(account) });
+            }
+
             try
             {
                 // The row and its tenant_events rows are one transaction: an edit with no record of who
@@ -722,7 +744,8 @@ internal static class MemberEndpoints
                 var update = await teams.UpdateMemberAsync(
                     team, name, request.Name, request.SystemPrompt, request.Agent,
                     await SystemPromptSetters.ForAsync(context, users, ct), ct,
-                    change => MemberAuditRows(context, change, request.Agent));
+                    change => MemberAuditRows(context, change, request.Agent),
+                    billing);
                 var updated = update.Snapshot;
 
                 var unresolvedList = new List<object>();
@@ -751,6 +774,14 @@ internal static class MemberEndpoints
                     obj["systemPromptSetBy"] = update.Row.SystemPromptSetBy?.By;
                     obj["systemPromptSetByKind"] = update.Row.SystemPromptSetBy?.Kind;
                     obj["systemPromptSetAt"] = SystemPromptSetAt(update.Row.SystemPromptSetBy);
+
+                    // The rate and account as stored, and what the next run's snapshot will record.
+                    var view = await MemberBillingView.OfAsync(update.Row, settings, ct);
+                    obj["hourlyRate"] = view.HourlyRate;
+                    obj["billingAccountId"] = view.BillingAccountId;
+                    obj["billingSetBy"] = view.BillingSetBy;
+                    obj["billingSetAt"] = view.BillingSetAt;
+                    obj["effectiveRate"] = JsonSerializer.SerializeToNode(view.EffectiveRate, HostJson.WebEnums);
                 }
                 return Results.Json(node, statusCode: 200);
             }
@@ -782,7 +813,7 @@ internal static class MemberEndpoints
         })
             .WithTags("Members")
             .HumansOnly()
-            .WithSummary("Change a member's name, system prompt or Agent")
+            .WithSummary("Change a member's name, system prompt, Agent, hourly rate or billing account")
             .WithDescription(
                 "Changes what a member is CALLED, what it is TOLD, and what it RUNS. `agent` must name a "
                 + "HEADLESS preset - a member is woken by a message and never typed at. The change takes "
@@ -803,7 +834,17 @@ internal static class MemberEndpoints
                 + "the person as who last set it (`systemPromptSetBy`, `systemPromptSetByKind`, "
                 + "`systemPromptSetAt`, answered here and on GET) and appends `member.instructions-changed` "
                 + "to the tenant log. People only: a Manager sets a member's instructions once, at hire.\n\n"
-                + "400 when `agent` names a preset this tenant does not have, or an interactive one.\n\n"
+                + "`hourlyRate` is the member's own estimated hourly rate and `billingAccountId` its billing "
+                + "account: omitted leaves it, null or blank clears it. A rate is a number of zero or more, "
+                + "stored as canonical text (0 is explicitly not priced); an account id is stored lower-case. "
+                + "A change to either, a clear included, records the person (`billingSetBy`, `billingSetAt`) "
+                + "and appends `member.billing-changed` with the old and new stored values. A run's snapshot "
+                + "records the effective rate at its start; a later change does not alter it.\n\n"
+                + MemberBillingView.Described
+                + "400 when `agent` names a preset this tenant does not have, or an interactive one, or when "
+                + "`hourlyRate` is negative or not a number, or `billingAccountId` is not an id or names no "
+                + "billing account (a deactivated one is an account, and may be stored): nothing is written. "
+                + "A save that does not send `billingAccountId` keeps the stored id, checked or not.\n\n"
                 + "404 for an unknown team or member.");
 
         // The ORDER the work happens in is MemberDeletion's, and its doc comment is where the reasoning
@@ -916,12 +957,28 @@ internal static class MemberEndpoints
     static IReadOnlyList<TriggerAudit> MemberAuditRows(HttpContext context, MemberChange change, string? agent)
     {
         var subject = $"{change.Id.Team}/{change.Id.Name}";
-        var rows = new List<TriggerAudit>
+        var rows = new List<TriggerAudit>();
+
+        if (change.Changed)
         {
-            TenantLogging.Row(
+            rows.Add(TenantLogging.Row(
                 context, TenantActions.MemberChanged, subject, change.Name,
-                new { team = change.Id.Team, renamed = change.Renamed, promptChanged = change.PromptChanged, agent }),
-        };
+                new { team = change.Id.Team, renamed = change.Renamed, promptChanged = change.PromptChanged, agent }));
+        }
+
+        // The stored text, old and new - never the effective rate, which is derived and moves with
+        // the tenant default.
+        if (change.BillingChanged)
+        {
+            rows.Add(TenantLogging.Row(
+                context, TenantActions.MemberBillingChanged, subject, change.Name,
+                new
+                {
+                    team = change.Id.Team,
+                    rate = new { old = change.Before?.EstHourlyRate, @new = change.Row.EstHourlyRate },
+                    billingAccount = new { old = change.Before?.BillingAccountId, @new = change.Row.BillingAccountId },
+                }));
+        }
 
         if (change.PromptChanged)
         {

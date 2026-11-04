@@ -235,6 +235,7 @@ public sealed class SqliteOutcomeStore(
         }
 
         if (OutcomeRules.ValueRefusal(edit.Value) is { } badValue) return OutcomeWrite.Refused(400, badValue);
+        if (OutcomeRules.PresentationRefusal(edit.Presentation) is { } badPresentation) return OutcomeWrite.Refused(400, badPresentation);
 
         var next = OutcomeRules.Edited(outcome, edit);
 
@@ -250,7 +251,7 @@ public sealed class SqliteOutcomeStore(
                 """
                 UPDATE outcomes SET name = $name, name_key = $key, description = $description,
                     target_metric = $metric, target_unit = $unit, target_value = $value,
-                    value_amount = $amount, updated_at = $at
+                    value_amount = $amount, presentation = $presentation, updated_at = $at
                 WHERE id = $id
                 """;
             update.Parameters.AddWithValue("$id", id);
@@ -261,12 +262,13 @@ public sealed class SqliteOutcomeStore(
             update.Parameters.AddWithValue("$unit", (object?)next.TargetUnit ?? DBNull.Value);
             update.Parameters.AddWithValue("$value", (object?)next.TargetValue ?? DBNull.Value);
             update.Parameters.AddWithValue("$amount", (object?)next.Value ?? DBNull.Value);
+            update.Parameters.AddWithValue("$presentation", (object?)next.Presentation ?? DBNull.Value);
             update.Parameters.AddWithValue("$at", Now());
             await update.ExecuteNonQueryAsync(ct);
         }
 
         var row = isRename ? renamed : changed;
-        await audit(connection, transaction, row with { Subject = id, SubjectName = next.Name }, ct);
+        await audit(connection, transaction, row with { Subject = id, SubjectName = next.Name, Detail = OutcomeRules.EditDetail(row.Detail, outcome, next) }, ct);
         await transaction.CommitAsync(ct);
 
         return new OutcomeWrite(await FindAsync(id, ct));
@@ -646,6 +648,84 @@ public sealed class SqliteOutcomeStore(
         }
 
         return new OutcomeLedgerRows(current, runRows, closeRows, names);
+    }
+
+    public async Task<IReadOnlyList<InterventionEntry>> ReadInterventionsAsync(
+        DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            $"""
+            SELECT {InterventionEntry.Columns}
+            FROM intervention_ledger
+            WHERE occurred_at >= $from AND occurred_at < $to
+            ORDER BY id
+            """;
+        command.Parameters.AddWithValue("$from", Stamp(from ?? DateTimeOffset.MinValue));
+        command.Parameters.AddWithValue("$to", Stamp(to ?? DateTimeOffset.MaxValue));
+
+        var rows = new List<InterventionEntry>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct)) rows.Add(InterventionEntry.Read(reader));
+        return rows;
+    }
+
+    public async Task<ExecutionRunRows> ReadExecutionRunsAsync(
+        DateTimeOffset? from, DateTimeOffset? to, bool pricedOnly, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+
+        await using var links = connection.CreateCommand();
+        links.CommandText =
+            $"""
+             SELECT {OutcomeLinks.Columns} FROM workflow_outcome_links l
+             WHERE l.id = (SELECT MAX(n.id) FROM workflow_outcome_links n WHERE n.correlation = l.correlation)
+             ORDER BY l.correlation
+             """;
+        var current = await ReadLinksAsync(links, ct);
+
+        // OVERLAP, NOT END: a run is in the window when its [started_at, ended_at) meets it; a run that
+        // never started has no span, so it is in the window it ended in.
+        await using var runs = connection.CreateCommand();
+        runs.CommandText =
+            $"""
+            SELECT {LedgerFacts.ExecutionRunColumns}
+            FROM usage_ledger u
+            LEFT JOIN execution_snapshots s ON s.start_seq = u.start_seq
+            LEFT JOIN workflow_outcome_links l ON l.id = s.link_id
+            WHERE ((u.started_at IS NOT NULL AND u.started_at < $to AND u.ended_at > $from)
+                   OR (u.ended_at >= $from AND u.ended_at < $to))
+              AND ($priced = 0 OR s.rate_amount IS NOT NULL
+                   OR (s.start_seq IS NULL AND u.started_at IS NOT NULL AND COALESCE(u.member_kind, '') <> $plugin))
+            ORDER BY u.run_seq
+            """;
+        runs.Parameters.AddWithValue("$from", Stamp(from ?? DateTimeOffset.MinValue));
+        runs.Parameters.AddWithValue("$to", Stamp(to ?? DateTimeOffset.MaxValue));
+        runs.Parameters.AddWithValue("$priced", pricedOnly ? 1 : 0);
+        runs.Parameters.AddWithValue("$plugin", MemberRef.PluginKind);
+        var rows = await LedgerFacts.ReadExecutionRunsAsync(runs, ct);
+
+        // THE TENANT RATE'S HISTORY, for the runs from before snapshots: the epoch row and every change
+        // of outcomes.agentHourlyRate, oldest first.
+        await using var epoch = connection.CreateCommand();
+        epoch.CommandText = "SELECT recorded_at, rate_amount, rate_currency, rate_source FROM rate_epochs WHERE id = 1";
+
+        await using var changes = connection.CreateCommand();
+        changes.CommandText =
+            """
+            SELECT seq, occurred_at, detail FROM tenant_events
+            WHERE action IN ($changed, $reset) AND subject = $setting
+            ORDER BY seq
+            """;
+        changes.Parameters.AddWithValue("$changed", TenantActions.TenantSettingChanged);
+        changes.Parameters.AddWithValue("$reset", TenantActions.TenantSettingReset);
+        changes.Parameters.AddWithValue("$setting", ExecutionSnapshotFacts.AgentHourlyRateSetting);
+
+        var timeline = new RateTimeline(
+            await RateEpochFacts.ReadEpochAsync(epoch, ct), await RateEpochFacts.ReadChangesAsync(changes, ct));
+
+        return new ExecutionRunRows(current, rows, timeline);
     }
 
     // ---- helpers ----

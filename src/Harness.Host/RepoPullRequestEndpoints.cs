@@ -265,7 +265,7 @@ public static partial class RepoEndpoints
                 }),
                 PrincipalClaims.From(httpContext.User)?.Id ?? "console",
                 null),
-            ct);
+            AppendContexts.From(httpContext.User), ct);
 
         await log.WriteAsync(userId, email, TenantActions.RepoPullRequestOpen, $"{stored}/{name}", null,
             JsonSerializer.Serialize(new { success = true, url = pull.Url, number = pull.Number }), ct);

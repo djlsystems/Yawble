@@ -1446,6 +1446,7 @@ public sealed class ContainerHost : IAsyncDisposable
                 JsonSerializer.Serialize(new
                 {
                     reason,
+                    reasonCode = InterruptionReasons.WorkflowBudget,
                     refused = message.Type,
                     refusedSeq = message.Seq,
                 }),
@@ -1516,6 +1517,7 @@ public sealed class ContainerHost : IAsyncDisposable
                         // depends on.
                         [PayloadFields.Team] = container.Id.Team,
                         [PayloadFields.Reason] = reason,
+                        [PayloadFields.ReasonCode] = InterruptionReasons.WorkflowBudget,
                         [PayloadFields.Limit] = bound,
                         [PayloadFields.Spent] = spend.TokensSpent,
                         [PayloadFields.LimitSource] =

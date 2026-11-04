@@ -20,7 +20,9 @@ internal sealed record CreateOutcome(
 internal sealed record EditOutcome(
     string? Name = null, string? Description = null,
     string? TargetMetric = null, string? TargetUnit = null, string? TargetValue = null,
-    string? Value = null);
+    string? Value = null,
+    [property: Description("How the Outcomes dialog reads it: `project` or `operational`. Absent leaves it alone; anything else is refused.")]
+    string? Presentation = null);
 
 internal sealed record MergeOutcome(
     [property: Description("The id of the active or proposed outcome this one's figures move to.")] string? Into);
@@ -63,13 +65,14 @@ public static class OutcomeEndpoints
                 }
 
                 var all = await outcomes.ListAsync(ct);
-                var book = OutcomeFigures.Open(await outcomes.ReadLedgerAsync(from, to, ct), all, from, to);
+                var executions = ExecutionCost.Of(await outcomes.ReadExecutionRunsAsync(from, to, pricedOnly: false, ct), all, settings.OutcomesCurrency);
+                var book = OutcomeFigures.Open(await outcomes.ReadLedgerAsync(from, to, ct), all, from, to, executions);
                 var open = await log.OpenWorkflowsAmongAsync([.. book.InWindow], ct);
 
                 // THE DASHBOARD READS EVERY WORKFLOW: the weekly series is the last weeks whatever the
                 // period, and a blocked span ends at the member's next run, which may be after it.
                 var whole = from is null && to is null ? book : OutcomeFigures.Open(await outcomes.ReadLedgerAsync(null, null, ct), all, null, null);
-                var dashboard = Dashboard.Of(settings, all, whole, await outcomes.ReadBacklogAsync(ct), from, to);
+                var dashboard = await Dashboard.OfAsync(settings, all, whole, await outcomes.ReadBacklogAsync(ct), from, to, outcomes, executions, ct);
 
                 var shown = all.Where(o => statuses.Length == 0 ? o.Status != OutcomeStatus.Merged : statuses.Contains(o.Status));
 
@@ -111,7 +114,7 @@ public static class OutcomeEndpoints
                     outcomes = list,
                     noOutcome = new
                     {
-                        name = OutcomeFigures.NoOutcomeName,
+                        name = OutcomeFigures.UnattributedName,
                         figures = dashboard.Figures(OutcomeFigures.For(book, null, open), null),
                     },
                 });
@@ -121,7 +124,9 @@ public static class OutcomeEndpoints
             .WithSummary("List outcomes with the figures of the work that served them")
             .WithDescription(
                 "Each outcome with `figures` read from the usage ledger: `workflows` (open, completed, "
-                + "closed, total), `agentSeconds` (the sum over runs; parallel runs add up), "
+                + "closed, total; a workflow counts toward its newest link's outcome), `agentSeconds` (the sum "
+                + "over the agent runs that serve it - a run with a snapshot serves the outcome its link named "
+                + "at start - parallel runs adding up; a plugin's time is not agent time), "
                 + "`waitingSeconds` (the sum of time runs waited for a slot), `elapsed` (per workflow, "
                 + "`medianSeconds` and `longestSeconds` of the closed ones; never summed), `tokens` "
                 + "(`billable` over measured runs, and `unmeasuredRuns`, counted and never zero), "
@@ -129,11 +134,27 @@ public static class OutcomeEndpoints
                 + "and `lastWorkedAt`; and the dashboard's `backlog` (`notStarted`, `inProgress`, `achieved`: "
                 + "its backlog items, `declared` counted as `outcomes.declaredCountsAs` says), `blockedSeconds` "
                 + "(time its workflows were blocked on a person, from the ledger), `efficiency` (agent time over "
-                + "agent time plus blocked time, null when both are 0), `weekly` (the last 8 weeks, Monday-start "
-                + "UTC, whatever the period) and `cost` (agent hours times `outcomes.agentHourlyRate`; `amount` "
-                + "null when no rate is set). `money` names the currency, the rate and `declaredCountsAs`. "
+                + "agent time plus blocked time, null when both are 0; `blockedSeconds` is Waiting on a person, never attention), `weekly` (the last 8 weeks, Monday-start "
+                + "UTC, whatever the period: agent-kind time and money split by overlap, tokens in the week a run ended) "
+                + "and `cost` (the sum of each run's estimate, priced from the snapshot taken when it started; a run "
+                + "with no snapshot rate adds nothing; `amount` null - never 0 - when no run was priced; with a "
+                + "window, the part of each run inside it; `agentRate` the weighted rate of its priced agent time - "
+                + "its money over its hours - null when none was priced, never the tenant rate), `throughput` (the "
+                + "same 8 weeks as `weekly`: `{ weekStart, closed, completed }`, its workflows whose close fell in "
+                + "each week, every one and those completed, and `costPerCompleted`, that week's cost over its completed "
+                + "workflows, null - not measurable - with none completed or nothing priced) and `costPerCompleted` "
+                + "(the same over all 8 weeks), `human` (people's acts from `intervention_ledger` in the window, each row once: "
+                + "`interventions` - Human Interventions, every kind, a Concierge session one - `measuredInterventions`, and "
+                + "`attentionSeconds` - Human Attention Time, the sum of measured durations only, null when none in the window "
+                + "was measured, never 0 for that; never priced and never joined to `blockedSeconds`) and `humanWeekly` (the same "
+                + "8 weeks as `weekly`: `{ weekStart, interventions, measuredInterventions, attentionSeconds }`). An act counts "
+                + "under the outcome its workflow served when it happened, followed through `mergedInto`; one with none, or "
+                + "whose outcome is deleted, counts under `noOutcome`. A run with a snapshot serves the outcome its link named "
+                + "when it started; `weekly` and `cost` count it there. EACH RUN IS COUNTED ONCE, in one bucket: an "
+                + "outcome or `noOutcome` (Unattributed); nothing is split between outcomes. `money` names the currency, the tenant "
+                + "default rate as set now (no figure multiplies by it) and `declaredCountsAs`. "
                 + "A workflow counts toward the outcome its newest link names, "
-                + "followed through `mergedInto`. `noOutcome` carries every workflow with no link. "
+                + "followed through `mergedInto`. `noOutcome` carries the work that serves no outcome - no link, an unlink, a deleted outcome - named `Unattributed`: computed on every read, never an outcome row. "
                 + "`ledgerStartedAt` is when the ledger began: work before it was recovered from the log. "
                 + "Each outcome also carries `linkedWorkflows` (how many workflows reach it now, through "
                 + "`mergedInto`, whatever the window: what a delete would unlink) and `endedAt` (when a retired "
@@ -150,10 +171,11 @@ public static class OutcomeEndpoints
                 var all = await outcomes.ListAsync(ct);
                 var resolution = OutcomeFigures.Resolution(all);
                 var holder = resolution.GetValueOrDefault(outcome.Id, outcome.Id);
-                var book = OutcomeFigures.Open(await outcomes.ReadLedgerAsync(null, null, ct), all, null, null);
+                var executions = ExecutionCost.Of(await outcomes.ReadExecutionRunsAsync(null, null, pricedOnly: false, ct), all, settings.OutcomesCurrency);
+                var book = OutcomeFigures.Open(await outcomes.ReadLedgerAsync(null, null, ct), all, null, null, executions);
                 var open = await log.OpenWorkflowsAmongAsync([.. book.InWindow], ct);
                 var items = await outcomes.ReadBacklogAsync(ct);
-                var dashboard = Dashboard.Of(settings, all, book, items, null, null);
+                var dashboard = await Dashboard.OfAsync(settings, all, book, items, null, null, outcomes, executions, ct);
 
                 var lines = new List<OutcomeFigures.WorkflowLine>();
                 foreach (var correlation in book.WorkflowsOf(holder).Order())
@@ -200,8 +222,15 @@ public static class OutcomeEndpoints
 
                 return Results.Ok(new
                 {
+                    // THE PROJECT READING'S CUMULATIVE SERIES, on the detail only: every run of all time, to the
+                    // end of each week, so its last week is the outcome's all-time estimate.
                     outcome = Shape(
-                        outcome, dashboard.Figures(OutcomeFigures.For(book, holder, open), holder), null,
+                        outcome,
+                        dashboard.Figures(OutcomeFigures.For(book, holder, open), holder) with
+                        {
+                            Cumulative = OutcomeFigures.CumulativeOf(executions, holder, DateTimeOffset.UtcNow, settings.OutcomesCurrency),
+                        },
+                        null,
                         OutcomeFigures.LinkedWorkflows(book.Rows.CurrentLinks, all).GetValueOrDefault(outcome.Id),
                         (await EndedAtAsync(outcomes, outcome.IsLive ? [] : [outcome], ct)).GetValueOrDefault(outcome.Id)),
                     money = dashboard.Money,
@@ -235,7 +264,9 @@ public static class OutcomeEndpoints
             .RequirePermit(Permits.Read)
             .WithSummary("One outcome, its workflows and its link history")
             .WithDescription(
-                "The outcome with its `figures` (as the list gives them), each workflow it serves now - "
+                "The outcome with its `figures` (as the list gives them, and `cumulative`: for each of the 8 weeks, "
+                + "`{ weekStart, agentSeconds, cost }` of every run serving it from the start of the ledger to the end of "
+                + "that week, the last being its all-time estimate), each workflow it serves now - "
                 + "team, state, when it started, elapsed, agent time, billable tokens over `measuredRuns`, "
                 + "`unmeasuredRuns`, "
                 + "and how and by whom it was linked - and `history`, every link row that named it or an "
@@ -275,7 +306,9 @@ public static class OutcomeEndpoints
                 var detail = new { request.Name, request.Description, request.TargetMetric, request.TargetUnit, request.TargetValue, request.Value };
                 var write = await outcomes.EditAsync(
                     id,
-                    new OutcomeEdit(request.Name, request.Description, request.TargetMetric, request.TargetUnit, request.TargetValue, request.Value),
+                    new OutcomeEdit(
+                        request.Name, request.Description, request.TargetMetric, request.TargetUnit, request.TargetValue, request.Value,
+                        request.Presentation),
                     TenantLogging.Row(context, TenantActions.OutcomeRenamed, id, request.Name, detail),
                     TenantLogging.Row(context, TenantActions.OutcomeChanged, id, null, detail),
                     ct);
@@ -284,12 +317,15 @@ public static class OutcomeEndpoints
             })
             .WithTags("Outcomes")
             .HumansOnly()
-            .WithSummary("Rename, describe or value an outcome")
+            .WithSummary("Rename, describe, value or present an outcome")
             .WithDescription(
                 "Absent fields are left alone; an empty target or `value` clears it. `value` is the "
                 + "outcome's budget, what it may spend, an amount of `outcomes.currency`, 0 or more; anything "
-                + "else is refused (400) with a sentence. A rename appends "
-                + "`outcome.renamed`, any other change `outcome.changed`. A RENAME NEVER REWRITES A LINK: "
+                + "else is refused (400) with a sentence. `presentation` is how the Outcomes dialog reads it, "
+                + "`project` or `operational` (a stored null reads as project); anything else is refused (400) "
+                + "and nothing is stored. A rename appends "
+                + "`outcome.renamed`, any other change `outcome.changed`; a presentation change adds "
+                + "`presentation: { old, new }` to that row's detail. A RENAME NEVER REWRITES A LINK: "
                 + "each keeps the name it was made under. 409 for a name another live outcome holds, or "
                 + "for a merged outcome.");
 
@@ -309,7 +345,8 @@ public static class OutcomeEndpoints
         app.MapPost("/api/outcomes/{id}/merge", async (
                 string id,
                 [Description("true answers what would move and changes nothing.")] bool? preview,
-                MergeOutcome request, HttpContext context, IOutcomeStore outcomes, IMessageLog log, CancellationToken ct) =>
+                MergeOutcome request, HttpContext context, IOutcomeStore outcomes, IMessageLog log, TenantSettings settings,
+                CancellationToken ct) =>
             {
                 if (string.IsNullOrWhiteSpace(request.Into)) return Results.BadRequest(new { error = "Say which outcome to merge into (`into`)." });
 
@@ -322,7 +359,8 @@ public static class OutcomeEndpoints
                 if (preview == true)
                 {
                     var all = await outcomes.ListAsync(ct);
-                    var book = OutcomeFigures.Open(await outcomes.ReadLedgerAsync(null, null, ct), all, null, null);
+                    var executions = ExecutionCost.Of(await outcomes.ReadExecutionRunsAsync(null, null, pricedOnly: false, ct), all, settings.OutcomesCurrency);
+                    var book = OutcomeFigures.Open(await outcomes.ReadLedgerAsync(null, null, ct), all, null, null, executions);
                     var open = await log.OpenWorkflowsAmongAsync([.. book.InWindow], ct);
                     var resolution = OutcomeFigures.Resolution(all);
                     var links = (await outcomes.ReadLinksAsync(ct))
@@ -411,7 +449,7 @@ public static class OutcomeEndpoints
                 + "unknown one, refuses the whole request with a sentence naming it, and nothing changes. "
                 + "Every outcome merged into one asked for is deleted with it (`cascadedFrom` names the "
                 + "outcome it went with). Every workflow whose outcome now, followed through `mergedInto`, is "
-                + "one deleted gets an unlink row (`how: person`) and counts under No outcome afterwards; no "
+                + "one deleted gets an unlink row (`how: person`) and counts under Unattributed afterwards; no "
                 + "link is rewritten or removed. Each backlog item and trigger naming one loses its outcome. "
                 + "The answer lists each outcome deleted (`id`, `name`, `status`, `mergedInto`, `cascadedFrom`, "
                 + "`workflowsUnlinked`, `backlogItemsCleared`, `triggersCleared`) and the totals "
@@ -496,7 +534,8 @@ public static class OutcomeEndpoints
                     workflow!.Value, outcome.Id, stored, ActorOf(context, principal),
                     person ? OutcomeLinkHow.Person : OutcomeLinkHow.Manager,
                     agentRule: !person,
-                    AuditOf(context, principal, TenantActions.WorkflowOutcomeChanged, new { team = stored, workflow }),
+                    AuditOf(context, principal, TenantActions.WorkflowOutcomeChanged, new { team = stored, workflow })
+                        with { Intervention = OutcomeChangedBy(context, stored, workflow.Value) },
                     ct);
 
                 return write.Ok ? Results.Ok(write.Link) : Refusal(write);
@@ -529,7 +568,8 @@ public static class OutcomeEndpoints
 
                 var write = await outcomes.UnlinkAsync(
                     workflow!.Value, stored, PersonOf(context),
-                    TenantLogging.Row(context, TenantActions.WorkflowOutcomeChanged, null, null, null),
+                    TenantLogging.Row(context, TenantActions.WorkflowOutcomeChanged, null, null, null)
+                        with { Intervention = OutcomeChangedBy(context, stored, workflow.Value) },
                     ct);
 
                 return write.Ok ? Results.Ok(write.Link) : Refusal(write);
@@ -539,7 +579,7 @@ public static class OutcomeEndpoints
             .WithSummary("Set a workflow to no outcome")
             .WithDescription(
                 "A person's \"None\": appends a link row that names no outcome (`outcomeId` null, "
-                + "`how: person`), so the workflow counts under No outcome. Nothing is deleted: the links "
+                + "`how: person`), so the workflow counts under Unattributed. Nothing is deleted: the links "
                 + "before it stay, and the outcome it served lists the unlink in its history. 409 when the "
                 + "workflow serves no outcome. Appends `workflow.outcome-changed` with `from` (the outcome "
                 + "it served) and `to: null`; nothing is unlinked when that row cannot be written.");
@@ -608,6 +648,14 @@ public static class OutcomeEndpoints
             ? PersonOf(context)
             : new OutcomeActor(principal.Id, OutcomeActorKind.Member, principal.Id);
 
+    /// <summary>
+    /// A PERSON'S CHANGE OF ONE WORKFLOW'S OUTCOME, recorded with its <c>workflow.outcome-changed</c> tenant
+    /// row in the link's own transaction (intervention_ledger): a person, or a person's key as its owner.
+    /// A member or a Concierge records none (<see cref="InterventionAct.Of"/>).
+    /// </summary>
+    private static InterventionAct? OutcomeChangedBy(HttpContext context, string team, long workflow) =>
+        InterventionAct.Of(InterventionKinds.OutcomeChanged, AppendContexts.From(context.User), team, workflow);
+
     /// <summary>A person's row names the person; an agent's names the member.</summary>
     private static TriggerAudit AuditOf(HttpContext context, Principal principal, string action, object detail) =>
         principal.Kind == PrincipalKind.User
@@ -617,7 +665,9 @@ public static class OutcomeEndpoints
     /// <summary>What a read prices and counts the dashboard with, read once per request.</summary>
     private sealed record Dashboard(
         OutcomeFigures.Pricing Pricing, OutcomeFigures.Book Whole, IReadOnlyList<OutcomeBacklogItem> Items,
-        IReadOnlyDictionary<string, string> Resolution, IReadOnlyDictionary<long, double> Blocked, DateTimeOffset Now)
+        IReadOnlyDictionary<string, string> Resolution, IReadOnlyDictionary<long, double> Blocked, DateTimeOffset Now,
+        IReadOnlyList<ExecutionCost.Run> WeekRuns, ExecutionCost.Costs Costs,
+        IReadOnlyList<InterventionEntry> Interventions, DateTimeOffset? From, DateTimeOffset? To)
     {
         public object Money => new
         {
@@ -626,19 +676,35 @@ public static class OutcomeEndpoints
             declaredCountsAs = Pricing.DeclaredCountsAs,
         };
 
-        public static Dashboard Of(
+        /// <summary>
+        /// The dashboard at now: the runs overlapping the last weeks, read windowed
+        /// (<see cref="IOutcomeStore.ReadExecutionRunsAsync"/>), for the weekly series, and each outcome's
+        /// cost from <paramref name="executions"/> - the period's runs, all time with no window.
+        /// </summary>
+        public static async Task<Dashboard> OfAsync(
             TenantSettings settings, IReadOnlyList<Outcome> all, OutcomeFigures.Book whole,
-            IReadOnlyList<OutcomeBacklogItem> items, DateTimeOffset? from, DateTimeOffset? to)
+            IReadOnlyList<OutcomeBacklogItem> items, DateTimeOffset? from, DateTimeOffset? to,
+            IOutcomeStore outcomes, IReadOnlyList<ExecutionCost.Run> executions, CancellationToken ct)
         {
             var now = DateTimeOffset.UtcNow;
             var pricing = OutcomeFigures.Pricing.Of(settings);
+
+            var weeks = OutcomeFigures.WeekStarts(now);
+            var weekRuns = ExecutionCost.Of(await outcomes.ReadExecutionRunsAsync(weeks[0], weeks[^1].AddDays(7), pricedOnly: false, ct), all, settings.OutcomesCurrency);
+
+            // EVERY PERSON'S ACT, ALL TIME: the window's figures and the weekly frequency are both read from it.
+            var interventions = await outcomes.ReadInterventionsAsync(null, null, ct);
+
             return new Dashboard(
                 pricing, whole, items, OutcomeFigures.Resolution(all),
-                OutcomeFigures.BlockedByWorkflow(whole.Rows, now, from, to), now);
+                OutcomeFigures.BlockedByWorkflow(whole.Rows, now, from, to), now,
+                weekRuns, ExecutionCost.CostsOf(executions, from, to, pricing.Currency),
+                interventions, from, to);
         }
 
         public OutcomeFigures.Figures Figures(OutcomeFigures.Figures figures, string? outcome) =>
-            OutcomeFigures.Dashboard(figures, Whole, outcome, Items, Resolution, Blocked, Pricing, Now);
+            OutcomeFigures.Dashboard(
+                figures, Whole, outcome, Items, Resolution, Blocked, Pricing, Now, WeekRuns, Costs, Interventions, From, To);
     }
 
     /// <summary>A delete that failed part way changed nothing - it is one transaction - and says so.</summary>
@@ -691,6 +757,7 @@ public static class OutcomeEndpoints
         outcome.TargetUnit,
         outcome.TargetValue,
         outcome.Value,
+        outcome.Presentation,
         outcome.CreatedBy,
         outcome.CreatedByKind,
         outcome.CreatedAt,

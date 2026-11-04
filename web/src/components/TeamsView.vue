@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import FieldHelp from './FieldHelp.vue';
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useQuasar } from 'quasar';
 import {
   archiveCheck,
@@ -28,6 +28,7 @@ import {
   teamRowFrom,
   teamShown,
   teamStatusText,
+  withPeriodFigures,
   writeTeamSort,
   type TeamRow,
   type TeamSort,
@@ -41,9 +42,17 @@ import UnfinishedRemovals from './UnfinishedRemovals.vue';
 import TeamCostDialog from './TeamCostDialog.vue';
 import CostWeeksChart from './CostWeeksChart.vue';
 import CostSummary from './CostSummary.vue';
-import { getCostSummary, getTeamsCost, type CostSummary as CostSummaryAnswer, type TeamCost, type TeamsCost } from '../api/outcomes';
-import { costSeries, overCount, priced, spendText, weekValue } from '../lib/teamCost';
-import { periodLine } from '../lib/costSummary';
+import {
+  getCostSummary, getTeamsCost, getTeamsCostPeriod,
+  type CostSummary as CostSummaryAnswer, type TeamCost, type TeamsCost, type TeamsCostPeriod,
+} from '../api/outcomes';
+import { EstimateTitle } from '../lib/teamCost';
+import {
+  bucketLabel, estimateFootnote, estimateText, hoursText, periodHeading, periodPriced,
+  periodSeries, periodTop, rangeOfChoice,
+} from '../lib/teamsPeriod';
+import { useCostPeriodChoice } from '../lib/costPeriodChoice';
+import CostPeriodControl from './CostPeriodControl.vue';
 import TeamStatusIcon from './TeamStatusIcon.vue';
 import { vResizableColumns } from '../lib/resizableColumns';
 import { itemLabel } from '../lib/backlog';
@@ -69,8 +78,8 @@ function storedSort(): TeamSort {
 const sort = ref<TeamSort>(storedSort());
 
 /**
- * THE COST COLUMN: every team's eight weeks by outcome, from ONE call for the whole list -
- * never one per row. Read when the list mounts; a team the answer does not carry shows a dash.
+ * EVERY TEAM'S EIGHT WEEKS BY OUTCOME, from ONE call for the whole list - never one per row: what a row's Cost
+ * dialog opens on (its rate line). The column itself follows the period below.
  */
 const teamsCost = ref<TeamsCost | null>(null);
 
@@ -83,8 +92,8 @@ async function readTeamsCost() {
 }
 
 /**
- * THE SUMMARY ABOVE THE LIST: the instance's eight weeks, budgets, where the money goes and what is
- * going on now, from one call. Not read, the tiles and their header line are not shown.
+ * THE SUMMARY ABOVE THE LIST: what is going on now, from one call. Not read, the tiles are not shown.
+ * The first tile and Where it goes follow the period instead.
  */
 const summary = ref<CostSummaryAnswer | null>(null);
 
@@ -97,50 +106,52 @@ async function readSummary() {
 }
 
 /** The summary's currency: the route's when it sends one, the list's cost answer's otherwise. */
-const summaryCurrency = computed(() => summary.value?.currency ?? teamsCost.value?.money.currency ?? 'USD');
+const summaryCurrency = computed(() => summary.value?.currency ?? period.value?.money.currency ?? teamsCost.value?.money.currency ?? 'USD');
 
 /**
- * SAME SCALE, remembered in this browser: off, each row's chart is on its own scale; on, every row is
- * on the largest team's, so bars compare across teams.
+ * THE SHARED PERIOD: Daily or Monthly, over the last two months or a custom range, remembered in this browser under
+ * `harness.teamsCostPeriod` beside the sort and Show active/archived - the one choice a team page shares
+ * (`lib/costPeriodChoice.ts`), picked through the one control (`CostPeriodControl.vue`). The Estimated Execution Cost
+ * and Agent Hours columns and the first and third tiles follow it.
  */
-const SameScaleKey = 'harness.teamsCostSameScale';
+const { choice } = useCostPeriodChoice();
 
-function storedSameScale(): boolean {
+const heading = computed(() => periodHeading(choice.value, new Date(now.value)));
+
+/** Every team's figures over the period, from ONE call. Null until it lands, or when it failed (`periodError`). */
+const period = ref<TeamsCostPeriod | null>(null);
+const periodError = ref<string | null>(null);
+
+async function readPeriod() {
+  const asked = choice.value;
   try {
-    return localStorage.getItem(SameScaleKey) === 'true';
-  } catch {
-    return false;
+    const answer = await getTeamsCostPeriod(rangeOfChoice(asked), asked.bucket);
+    if (choice.value !== asked) return;
+    period.value = answer;
+    periodError.value = null;
+  } catch (cause) {
+    if (choice.value !== asked) return;
+    period.value = null;
+    periodError.value = cause instanceof Error ? cause.message : String(cause);
   }
 }
 
-const sameScale = ref(storedSameScale());
+watch(choice, () => void readPeriod());
 
-function setSameScale(value: boolean) {
-  sameScale.value = value;
-  try {
-    localStorage.setItem(SameScaleKey, String(value));
-  } catch {
-    // Still applies for this session.
-  }
-}
-
-/** The largest week of any team, in the list's unit: the shared top when Same scale is on. */
-const sharedTop = computed<number | null>(() => {
-  const answer = teamsCost.value;
-  if (!sameScale.value || !answer) return null;
-  const money = priced(answer);
-  let top = 0;
-  for (const team of answer.teams) {
-    answer.weeks.forEach((_, week) => {
-      const total = team.outcomes.reduce(
-        (sum, o) => sum + weekValue(o.weekly[week] ?? { cost: null, agentSeconds: 0 }, money), 0);
-      top = Math.max(top, total);
-    });
-  }
-  return top;
+/** The list's one unit - money when any team was priced in the period - and ONE relative scale across every row. */
+const periodMoney = computed(() => (period.value ? periodPriced(period.value) : false));
+const periodScale = computed(() => (period.value ? periodTop(period.value, periodMoney.value) : null));
+const columnTitle = computed(() => {
+  const bucket = period.value?.period.bucket ?? choice.value.bucket;
+  return (start: string) => bucketLabel(start, bucket);
 });
 
-/** One team's figures from the list's answer, in the one-team route's shape the dialog reads. */
+/** A team's period figures, or null when the answer does not carry it. */
+function periodFor(team: string) {
+  return period.value?.teams.find((t) => t.team === team) ?? null;
+}
+
+/** One team's eight weeks from the list's answer, in the one-team route's shape the dialog reads. */
 function costFor(team: string): TeamCost | null {
   const answer = teamsCost.value;
   const entry = answer?.teams.find((t) => t.team === team);
@@ -148,16 +159,18 @@ function costFor(team: string): TeamCost | null {
   return { team, money: answer.money, weeks: answer.weeks, outcomes: entry.outcomes, totals: entry.totals };
 }
 
-/** The row's chart, period total and over-budget marker, or null without figures. */
+/** The row's chart and total over the period, or null without figures. */
 function costCell(team: string) {
-  const cost = costFor(team);
-  if (!cost) return null;
+  const entry = periodFor(team);
+  if (!entry || !period.value) return null;
   return {
-    cost,
-    series: costSeries(cost.outcomes),
-    money: priced(cost),
-    total: spendText(cost.totals, cost.money.currency),
-    over: overCount(cost.outcomes),
+    buckets: period.value.buckets,
+    series: periodSeries(entry),
+    currency: period.value.money.currency,
+    total: estimateText(entry, period.value.money.currency),
+    // The total's footnote, as its title: a reconstructed or fallback rate priced part of it.
+    footnote: estimateFootnote(entry),
+    hours: hoursText(entry),
   };
 }
 
@@ -217,6 +230,7 @@ onMounted(() => {
   wip.watch();
   void readTeamsCost();
   void readSummary();
+  void readPeriod();
 });
 
 onUnmounted(() => {
@@ -239,6 +253,8 @@ const Headings: { key: TeamSort['column']; label: string }[] = [
   { key: 'name', label: 'Team' },
   { key: 'members', label: 'Members' },
   { key: 'status', label: 'Status' },
+  { key: 'estimate', label: EstimateTitle },
+  { key: 'hours', label: 'Agent Hours' },
 ];
 
 /** What the click MEANS is `nextSort`'s; persisting the answer is this component's. */
@@ -255,7 +271,8 @@ function sortBy(column: TeamSort['column']) {
 const rows = computed<TeamRow[]>(() =>
   board.teams
     .filter((team) => teamShown(team, shown.value))
-    .map((team) => teamRowFrom(team, board.workflowFor(team.id), board.workflowsFor(team.id), now.value))
+    .map((team) => withPeriodFigures(
+      teamRowFrom(team, board.workflowFor(team.id), board.workflowsFor(team.id), now.value), periodFor(team.id)))
     .sort((a, b) => compareTeams(a, b, sort.value)),
 );
 
@@ -726,14 +743,16 @@ async function setPaused(team: Team | null, paused: boolean) {
     </div>
 
     <template v-else>
-    <!-- THE TEAMS TITLE, with the summary's period at its right, then the four tiles. -->
-    <div class="row items-baseline justify-between q-mb-sm teams-title-row">
+    <!-- THE TEAMS TITLE, with the shared period control at its right, then the four tiles. -->
+    <div class="row items-center justify-between q-mb-sm teams-title-row">
       <div class="text-h6 teams-title">Teams</div>
-      <div v-if="summary" class="os-text-muted teams-period" data-teams-period>{{ periodLine(summary) }}</div>
+      <CostPeriodControl />
     </div>
+    <div v-if="periodError" class="text-negative text-caption q-mb-sm" data-teams-period-error>{{ periodError }}</div>
     <CostSummary
       v-if="summary"
       :summary="summary"
+      :period="period"
       :currency="summaryCurrency"
       @open-outcome="workflowNav.openOutcome"
       @open-needs-you="workflowNav.openNeedsYou()"
@@ -773,8 +792,8 @@ async function setPaused(team: Team | null, paused: boolean) {
           <th
             v-for="heading in Headings"
             :key="heading.key"
-            :data-col="heading.key"
-            class="text-left"
+            :data-col="heading.key === 'estimate' ? 'cost' : heading.key"
+            :class="heading.key === 'hours' ? 'text-right' : 'text-left'"
             :aria-sort="ariaSort(sort, heading.key)"
           >
             <q-btn
@@ -795,25 +814,6 @@ async function setPaused(team: Team | null, paused: boolean) {
                 class="teams-sort-arrow"
               />
             </q-btn>
-          </th>
-
-          <!-- NOT SORTABLE: eight weeks by outcome have no single value to order by. -->
-          <th data-col="cost" class="text-left">
-            <div class="teams-cost-head">
-              <span>Cost · 8 weeks</span>
-              <!-- SAME SCALE, remembered in this browser: every row on the largest team's scale. -->
-              <q-toggle
-                dense
-                size="xs"
-                :model-value="sameScale"
-                label="Same scale"
-                class="teams-cost-scale"
-                data-teams-cost-scale
-                @update:model-value="setSameScale"
-              >
-                <q-tooltip>Every row on the largest team's scale, so bars compare across teams</q-tooltip>
-              </q-toggle>
-            </div>
           </th>
 
           <!-- No label: the column carries live controls rather than sortable data. -->
@@ -880,10 +880,10 @@ async function setPaused(team: Team | null, paused: boolean) {
             </div>
           </td>
 
-          <!-- COST · 8 WEEKS: the team's stacked weekly chart by outcome at row height, the period's
-               total beside it (agent hours without a rate) and ⚠ when one of its outcomes is over
-               budget. A click on it opens that team's Cost dialog, not the team; the status icon and
-               the room around it open the team as the rest of the row does. -->
+          <!-- ESTIMATED EXECUTION COST over the period: the team's stacked chart by outcome at row height, every row on
+               ONE relative scale, the period's total beside it. A click
+               on it opens that team's Cost dialog, not the team; the status icon and the room around it open the team
+               as the rest of the row does. -->
           <td class="teams-cost">
             <div class="teams-cost-cell">
               <button
@@ -891,29 +891,31 @@ async function setPaused(team: Team | null, paused: boolean) {
                 type="button"
                 class="teams-cost-button"
                 data-teams-cost
-                :aria-label="`Cost of ${row.name}, last 8 weeks: ${costCell(row.id)!.total}`"
+                :aria-label="`${EstimateTitle} of ${row.name}, ${heading}: ${costCell(row.id)!.total}`"
                 @click.stop="costTeam = row.id"
               >
                 <CostWeeksChart
-                  :weeks="costCell(row.id)!.cost.weeks"
+                  :weeks="costCell(row.id)!.buckets"
                   :series="costCell(row.id)!.series"
-                  :in-money="costCell(row.id)!.money"
-                  :currency="costCell(row.id)!.cost.money.currency"
-                  :scale-max="sharedTop"
+                  :in-money="periodMoney"
+                  :currency="costCell(row.id)!.currency"
+                  :scale-max="periodScale"
+                  :column-title="columnTitle"
                   size="row"
                 />
-                <span class="teams-cost-total mono" data-teams-cost-total>{{ costCell(row.id)!.total }}</span>
                 <span
-                  v-if="costCell(row.id)!.over > 0"
-                  class="teams-cost-over"
-                  data-teams-cost-over
-                  :title="`${costCell(row.id)!.over} outcome${costCell(row.id)!.over === 1 ? '' : 's'} over budget`"
-                >⚠</span>
+                  class="teams-cost-total mono"
+                  data-teams-cost-total
+                  :title="costCell(row.id)!.footnote ?? undefined"
+                >{{ costCell(row.id)!.total }}</span>
               </button>
               <span v-else class="os-text-muted" data-teams-cost-none>—</span>
               <TeamStatusIcon :status="row.status" :held="row.held" :workflows="board.workflowsFor(row.id)" />
             </div>
           </td>
+
+          <!-- AGENT HOURS over the period: agent-kind time, priced or not, so a low-activity team stays readable. -->
+          <td class="text-right mono" data-teams-hours>{{ costCell(row.id)?.hours ?? '—' }}</td>
 
           <!-- `.stop` because these controls sit inside the whole-row click handler that switches
                teams - without it, acting on a team would also activate it on the way through. -->
@@ -1296,24 +1298,6 @@ async function setPaused(team: Team | null, paused: boolean) {
   gap: 8px;
 }
 
-.teams-period {
-  font-size: 0.875rem;
-}
-
-/* The Cost heading: its words, then the Same scale switch beside them. */
-.teams-cost-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.teams-cost-scale {
-  font-weight: 400;
-  font-size: 0.75rem;
-  color: var(--os-ink-muted);
-}
-
 /* The Cost cell: the chart with its total and marker as one control, then the team's status icon. */
 .teams-cost-cell {
   display: flex;
@@ -1345,11 +1329,6 @@ async function setPaused(team: Team | null, paused: boolean) {
 
 .teams-cost-total {
   white-space: nowrap;
-}
-
-.teams-cost-over {
-  color: var(--os-error);
-  font-weight: 600;
 }
 
 .teams-table [data-col-actions] {

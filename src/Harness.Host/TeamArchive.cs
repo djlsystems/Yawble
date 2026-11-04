@@ -129,7 +129,7 @@ public sealed class TeamArchive(
         var skipped = await log.AppendAsync(
             new NewMessage(
                 MessageTypes.ScheduleSkipped,
-                JsonSerializer.Serialize(new { member = member.ToString(), reason }),
+                JsonSerializer.Serialize(new { member = member.ToString(), reason, reasonCode = InterruptionReasons.TeamArchived }),
                 source,
                 cause),
             ct);

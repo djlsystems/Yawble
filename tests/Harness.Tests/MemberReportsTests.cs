@@ -109,8 +109,8 @@ public sealed class MemberReportsTests
         Assert.Equal("which one?", snapshot.NeedsDecision);
         Assert.Equal("shipped", snapshot.HandedBack);
 
-        Assert.Equal("""{"reason":"no key"}""", (await OnlyAsync(bed, MessageTypes.Blocked)).Payload);
-        Assert.Equal("""{"question":"which one?"}""", (await OnlyAsync(bed, MessageTypes.NeedsDecision)).Payload);
+        Assert.Equal("""{"reason":"no key","reasonCode":"failure"}""", (await OnlyAsync(bed, MessageTypes.Blocked)).Payload);
+        Assert.Equal("""{"question":"which one?","reasonCode":"decision_required"}""", (await OnlyAsync(bed, MessageTypes.NeedsDecision)).Payload);
         var handback = await OnlyAsync(bed, MessageTypes.Handback);
         Assert.Equal("""{"delivered":"shipped"}""", handback.Payload);
         Assert.Equal(cause, handback.CausationSeq);

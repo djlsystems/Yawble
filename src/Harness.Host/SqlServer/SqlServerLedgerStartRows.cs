@@ -59,9 +59,61 @@ public sealed class SqlServerLedgerStartRows(string connectionString) : ILedgerS
                         runs.Value.ToString(System.Globalization.CultureInfo.InvariantCulture), now, token);
                 }
 
+                var interventionsAt = await SettingAsync(connection, transaction, LedgerStart.InterventionsStartedAtName, token);
+                if (interventionsAt is null)
+                {
+                    interventionsAt = now;
+                    await WriteSettingAsync(connection, transaction, LedgerStart.InterventionsStartedAtName, now, now, token);
+                }
+
                 await SqlServerOpen.CommitAsync(transaction, token);
 
-                return new LedgerStartResult(runs, workflows, instanceId, startedAt);
+                return new LedgerStartResult(runs, workflows, instanceId, startedAt) { InterventionsStartedAt = interventionsAt };
+            },
+            ct);
+
+    public Task<RateEpoch> RecordRateEpochAsync(RateEpochConfiguration configured, CancellationToken ct = default) =>
+        SqlServerOpen.RunAsync(
+            _connectionString,
+            async (connection, token) =>
+            {
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
+
+                // UPDLOCK, HOLDLOCK: two Hosts started on one database must not both find it empty.
+                await using (var read = connection.CreateCommand())
+                {
+                    read.Transaction = transaction;
+                    read.CommandText =
+                        "SELECT recorded_at, rate_amount, rate_currency, rate_source FROM rate_epochs WITH (UPDLOCK, HOLDLOCK) WHERE id = 1";
+                    if (await RateEpochFacts.ReadEpochAsync(read, token) is { } existing)
+                    {
+                        await SqlServerOpen.CommitAsync(transaction, token);
+                        return existing;
+                    }
+                }
+
+                var (amount, currency, source) = RateEpochFacts.Decide(
+                    await SettingAsync(connection, transaction, ExecutionSnapshotFacts.AgentHourlyRateSetting, token),
+                    await SettingAsync(connection, transaction, ExecutionSnapshotFacts.CurrencySetting, token),
+                    configured.AgentHourlyRate,
+                    configured.Currency);
+
+                var now = Instant.Now();
+                await using (var insert = connection.CreateCommand())
+                {
+                    insert.Transaction = transaction;
+                    insert.CommandText =
+                        "INSERT INTO rate_epochs (id, recorded_at, rate_amount, rate_currency, rate_source) VALUES (1, @at, @amount, @currency, @source)";
+                    insert.Parameters.AddWithValue("@at", now);
+                    insert.Parameters.AddWithValue("@amount", (object?)amount ?? DBNull.Value);
+                    insert.Parameters.AddWithValue("@currency", (object?)currency ?? DBNull.Value);
+                    insert.Parameters.AddWithValue("@source", source);
+                    await insert.ExecuteNonQueryAsync(token);
+                }
+
+                await SqlServerOpen.CommitAsync(transaction, token);
+
+                return new RateEpoch(Instant.Parse(now), amount, currency, source);
             },
             ct);
 

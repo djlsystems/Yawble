@@ -2,6 +2,7 @@ import { defineStore, acceptHMRUpdate } from 'pinia'
 import { getNeedsYou } from '../api/client'
 import type { NeedsYouItem, NeedsYouPart } from '../api/types'
 import { wireInstant } from '../lib/localTime'
+import { needsYouOnTeam } from '../lib/needsYou'
 
 /** How often the stored part is read again while the header shows. */
 export const StoredEveryMs = 30_000
@@ -45,6 +46,14 @@ export const useNeedsYouStore = defineStore('needsYou', {
     count(state): number | null {
       if (!state.live.loaded && !state.stored.loaded) return null
       return state.live.items.length + state.stored.items.length
+    },
+
+    /** One team's count of the same rows (`needsYouOnTeam`), or null before either part has been read. */
+    countFor(state): (team: string) => number | null {
+      return (team: string) => {
+        if (!state.live.loaded && !state.stored.loaded) return null
+        return needsYouOnTeam([...state.live.items, ...state.stored.items], team).length
+      }
     },
 
     /** What the last failed read said, if either part's did. */

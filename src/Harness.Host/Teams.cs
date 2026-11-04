@@ -173,8 +173,13 @@ public sealed record MemberUpdate(ContainerSnapshot Snapshot, PersistedMember Ro
 
 /// <summary>A member edit as it is about to be stored: what its tenant rows are made from, so they
 /// are written in the same transaction as the row. <paramref name="Renamed"/> is whether what the
-/// member is called changed, not whether a name was sent.</summary>
-public sealed record MemberChange(ContainerId Id, string Name, PersistedMember Row, bool PromptChanged, bool Renamed);
+/// member is called changed, not whether a name was sent. <paramref name="Changed"/> is whether
+/// anything but the rate and account changed (a rename, the instructions, a repoint);
+/// <paramref name="BillingChanged"/> whether the stored rate text or account id did, and
+/// <paramref name="Before"/> the row as it was, for that change's old values.</summary>
+public sealed record MemberChange(
+    ContainerId Id, string Name, PersistedMember Row, bool PromptChanged, bool Renamed,
+    bool Changed = true, bool BillingChanged = false, PersistedMember? Before = null);
 
 /// <summary>One repository's contributor settings as a screen sees them. See <see cref="RepoContributor"/>.</summary>
 public sealed record TeamRepoContributor(
@@ -3184,7 +3189,8 @@ public sealed class TeamRegistry(
     public async Task<MemberUpdate> UpdateMemberAsync(
         string team, string name, string? label, string? systemPrompt, string? agent,
         SystemPromptSetter? promptSetBy, CancellationToken ct = default,
-        Func<MemberChange, IReadOnlyList<TriggerAudit>>? audit = null)
+        Func<MemberChange, IReadOnlyList<TriggerAudit>>? audit = null,
+        MemberBillingEdit? billing = null)
     {
         var stored = ExistingName(team) ?? throw new InvalidOperationException($"No team '{team}'.");
         var id = new ContainerId(stored, name);
@@ -3312,12 +3318,26 @@ public sealed class TeamRegistry(
         // clear of something that was there is a change like any other.
         var promptChanged = !string.Equals(override_, member.SystemPrompt, StringComparison.Ordinal);
 
+        // THE MEMBER'S OWN RATE AND ACCOUNT: a field not sent keeps what is stored, and a change is
+        // the stored TEXT moving - the same rate sent again is no change and records nobody. Who made
+        // a change is kept when the values are later cleared, since the clear is itself that change.
+        billing ??= MemberBillingEdit.None;
+        var rate = billing.RateSent ? billing.Rate : member.EstHourlyRate;
+        var account = billing.AccountSent ? billing.Account : member.BillingAccountId;
+        var billingChanged =
+            !string.Equals(rate, member.EstHourlyRate, StringComparison.Ordinal)
+            || !string.Equals(account, member.BillingAccountId, StringComparison.Ordinal);
+
         var saved = member with
         {
             Label = trimmedLabel,
             SystemPrompt = override_,
             Agent = newAgent,
             SystemPromptSetBy = promptChanged ? promptSetBy : member.SystemPromptSetBy,
+            EstHourlyRate = rate,
+            BillingAccountId = account,
+            BillingSetBy = billingChanged ? promptSetBy?.By : member.BillingSetBy,
+            BillingSetAt = billingChanged ? promptSetBy?.At ?? DateTimeOffset.UtcNow : member.BillingSetAt,
         };
 
         // A NAME SENT IS NOT A RENAME. The Member settings dialog sends the name on every save, and
@@ -3325,13 +3345,16 @@ public sealed class TeamRegistry(
         // nothing: no row, and no `member.changed` claiming a rename that did not happen.
         var renamed = !string.Equals(trimmedLabel, member.Label, StringComparison.Ordinal);
 
-        var changed = renamed || promptChanged || repointed;
+        var memberChanged = renamed || promptChanged || repointed;
+        var changed = memberChanged || billingChanged;
 
         if (changed && audit is not null)
         {
             await teams.SaveMemberAsync(
                 saved,
-                audit(new MemberChange(container.Id, trimmedLabel ?? container.Id.Name, saved, promptChanged, renamed)),
+                audit(new MemberChange(
+                    container.Id, trimmedLabel ?? container.Id.Name, saved, promptChanged, renamed,
+                    memberChanged, billingChanged, member)),
                 ct);
         }
         else if (changed)

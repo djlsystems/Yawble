@@ -4,7 +4,10 @@ import { memberStateOf } from '../lib/memberState';
 import FieldHelp from './FieldHelp.vue';
 import { computed, ref, watch } from 'vue';
 import { useQuasar, type QForm } from 'quasar';
-import { getMember, getNamedSecrets, getPluginSettings, listCatalog, listPlugins, savePluginSettings, updateMember } from '../api/client';
+import { getMember, getNamedSecrets, getPluginSettings, getTenantSettings, listCatalog, listPlugins, savePluginSettings, updateMember } from '../api/client';
+import { listBillingAccounts, type BillingAccount } from '../api/spend';
+import MemberCostSection from './MemberCostSection.vue';
+import { costPatch, draftOf, tenantDefaultOf, type CostDraft, type TenantDefault } from '../lib/memberCost';
 import type { InstalledPlugin } from '../api/types';
 import { pluginChoiceLabel } from '../lib/plugins';
 import { isBuiltInPlugin } from '../lib/teamConnections';
@@ -71,6 +74,10 @@ import { rowName, tableProblem, tableRows, type TableSecretStates, type TableSec
  * key binding is kept as stored and shown only in "As JSON". Above the settings sits what the plugin
  * is, as Add member shows it: its description's first paragraph and a Documentation link when the
  * catalog lists it (`marketplaceUrl`), else the whole description.
+ *
+ * EVERY MEMBER HAS AN ESTIMATED HOURLY RATE AND A BILLING ACCOUNT (`MemberCostSection`): its own rate or
+ * the default, and the tenant's billing account its runs are recorded against, sent on the same PATCH
+ * only when changed. Its effective configuration is the member read's own answer, never worked out here.
  *
  * The Agent IS editable. The preset is resolved by name on every invocation, so a repoint is a
  * single write and takes effect on the member’s next wake, with no Host restart. The manager can be repointed like any other member.
@@ -173,22 +180,70 @@ const instructionsChanged = computed(
 
 const writtenBy = computed(() => instructionsWrittenBy(stored.value));
 
-async function loadInstructions() {
+/** The member read, for every member: its instructions (an agent's) and its rate and account. */
+const detail = ref<MemberDetail | null>(null);
+const costProblem = ref<string | null>(null);
+
+async function loadMember() {
   stored.value = null;
+  detail.value = null;
   instructions.value = '';
   instructionsProblem.value = null;
-
-  if (!hasInstructions.value) return;
+  costProblem.value = null;
 
   try {
-    const detail = await getMember(props.snapshot.team, props.snapshot.id);
+    const read = await getMember(props.snapshot.team, props.snapshot.id);
 
-    stored.value = detail;
-    instructions.value = detail.systemPrompt ?? '';
+    detail.value = read;
+    cost.value = draftOf({ hourlyRate: read.hourlyRate ?? null, billingAccountId: read.billingAccountId ?? null });
+    if (hasInstructions.value) {
+      stored.value = read;
+      instructions.value = read.systemPrompt ?? '';
+    }
   } catch (cause) {
-    instructionsProblem.value = `Could not read this member's instructions: ${cause instanceof Error ? cause.message : String(cause)}`;
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    if (hasInstructions.value) instructionsProblem.value = `Could not read this member's instructions: ${reason}`;
+    costProblem.value = `Could not read this member's rate and billing account: ${reason}`;
   }
 }
+
+/**
+ * THE RATE AND ACCOUNT as the person is editing them, from the member read. `accounts` is the tenant's
+ * billing accounts (the picker), `tenantDefault` the default as stored, for the Inherit choice's words.
+ */
+const cost = ref<CostDraft>({ mode: 'inherit', rate: '', account: '' });
+const accounts = ref<BillingAccount[] | null>(null);
+const accountsProblem = ref<string | null>(null);
+const tenantDefault = ref<TenantDefault | null>(null);
+
+async function loadAccounts() {
+  accounts.value = null;
+  accountsProblem.value = null;
+  try {
+    accounts.value = await listBillingAccounts();
+  } catch (cause) {
+    accountsProblem.value = `Could not read the billing accounts: ${cause instanceof Error ? cause.message : String(cause)}`;
+  }
+}
+
+async function loadTenantDefault() {
+  tenantDefault.value = null;
+  try {
+    tenantDefault.value = tenantDefaultOf((await getTenantSettings()).settings);
+  } catch {
+    // Left unknown: the Inherit choice then says only "Inherit default".
+  }
+}
+
+/** The rate and account fields this save sends: none until the member read answered. */
+const costFields = computed(() =>
+  detail.value
+    ? costPatch({ hourlyRate: detail.value.hourlyRate ?? null, billingAccountId: detail.value.billingAccountId ?? null }, cost.value)
+    : {});
+
+/** The preset or plugin, as the effective configuration names it. */
+const presetText = computed(() =>
+  isPlugin.value ? (pluginAgentOptions.value.find((o) => o.value === props.snapshot.agent)?.label ?? props.snapshot.agent) : props.snapshot.agent);
 
 /**
  * A PLUGIN MEMBER'S SETTINGS. `pluginShape` is the manifest of the version it runs, as the settings
@@ -400,7 +455,9 @@ watch(open, (showing) => {
 
   void loadAgents();
   void loadInstalledPlugins();
-  void loadInstructions();
+  void loadMember();
+  void loadAccounts();
+  void loadTenantDefault();
   void loadPluginSettings();
 }, { immediate: true });
 
@@ -462,7 +519,7 @@ async function submit() {
 
     // ONLY WHAT CHANGED. `name` goes only on a rename: the Host records every PATCH that names one
     // as `member.changed {"renamed": true}`, so sending it unchanged logged a rename nobody made.
-    const body: { name?: string; agent?: string; systemPrompt?: string } = {};
+    const body: { name?: string; agent?: string; systemPrompt?: string; hourlyRate?: string | null; billingAccountId?: string | null } = {};
 
     if (renamedTo !== null) body.name = renamedTo;
 
@@ -473,6 +530,10 @@ async function submit() {
     // Only when it moved, so a rename is not recorded as an edit of the instructions. Blank is sent
     // as blank, which clears them.
     if (instructionsChanged.value) body.systemPrompt = instructions.value.trim();
+
+    // The rate and the account, each only when the person changed it: a field left out keeps what is
+    // stored, so a name-only or rate-only save never touches the account, a dangling id included.
+    Object.assign(body, costFields.value);
 
     // A save that changes nothing about the member writes nothing: no PATCH, no tenant row.
     if (Object.keys(body).length === 0) {
@@ -656,6 +717,17 @@ async function submit() {
           <div v-else class="text-caption os-text-muted">Reading its settings…</div>
           <div class="text-caption os-text-muted">A change takes effect on the member's next run.</div>
         </div>
+
+        <MemberCostSection
+          v-model="cost"
+          :kind="isPlugin ? 'plugin' : 'agent'"
+          :preset="presetText"
+          :stored="detail"
+          :problem="costProblem"
+          :accounts="accounts"
+          :accounts-problem="accountsProblem"
+          :tenant="tenantDefault"
+        />
 
           <q-banner v-if="error" dense class="os-bg-tint-error text-negative">
             <template #avatar><q-icon name="error" /></template>
