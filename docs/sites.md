@@ -372,6 +372,233 @@ config or secrets are large), with a sentence when some were cut (see
 [plugins.md](plugins.md#reading-site-data-reads)). A page's Delete or Archive is best kept in the
 document itself - a `status` the plugin reads - rather than in a second store of the plugin's own.
 
+A plugin of a team with a Team picture feeds the page its operational figures in the documented
+`tp-ops` shape (see [The Team picture](#the-team-picture)); the platform's own collections refuse it.
+
+## The Team picture
+
+The **Team picture** is a site the platform makes for a team when a person turns it on (the New
+Team option, or the control in Team settings; `team_create` takes `teamPicture: true`). It shows what
+the team builds or runs: one tab per open item with the work in flight first, a short bounded history
+of finished items, or an operational team's single ongoing picture. Its name, `team-picture`, is
+reserved: no team or package makes a site of that name. It opens from the globe link beside the
+team's name on its board and from Sites. Turning it off unpublishes it and keeps its data; turning it
+on again publishes it again.
+
+The page is a **template that ships with the platform**: its layout, styling and motion are the
+template's own files, and a newer release's template reaches every team. No agent writes, publishes
+or rebuilds it. It reads its data again every few seconds; nothing is pushed into it.
+
+### Its collections, and who writes each
+
+| Collection | What it holds | Who writes it |
+|---|---|---|
+| `tp-team`, `tp-items`, `tp-now`, `tp-runs`, `tp-spend`, `tp-waiting`, `tp-history` | The platform's own figures: the team's summary, progress over each item's cards, the work in flight now (member, card, how long, last progress), recent runs and their outcomes, the team's spend in the platform's words, what waits on a person, and the finished items' history (at most 20, each with its last picture). Recomputed from the log, the Kanban and the ledgers, off every run's path; nothing is estimated, and a figure not measured is `null` and reads "not measured", never 0. | The platform only. A page, an agent, a plugin, a person and another team are refused. |
+| `tp-picture` | The picture of each item: architecture, screens and flows, or an operational team's how it works and the rule one run follows. | The team's Manager and the Concierge, through the `site` tool (and a person through `/api`). A member, a plugin and the page are refused. |
+| `tp-settings` | The page's customization: hidden sections, colours, extra sections. | The Concierge, on a person's request (and a person through `/api`). |
+| `tp-ops` | An operational team's own figures, in the shape below. | The team's plugins with `site.put`, or an agent as one data write inside a run it is already making. |
+| `tp-extra-<slug>` | Data for an extra section the settings add. | The team's plugins and agents, and the Concierge. |
+
+Any other collection name on this site is refused for everybody, and the page itself writes nothing.
+Each refusal is a sentence (403).
+
+Every item has a **key**, the document id in `tp-items`, `tp-picture` and `tp-history`: a backlog
+item's id (`B0089`), `w<workflow>` for told work with no backlog item (`w27613`), and `ongoing` for an
+operational team's single picture. Before the Manager has drawn an item, the page shows the live
+parts and says "The picture is drawn when the team plans its work."
+
+The Manager writes `tp-picture` when it plans an item and revises it only when the plan changes,
+never on a routine wake (the `manager` skill). It never writes a figure there: every figure on the
+page comes from the platform's collections or a plugin's `tp-ops`.
+
+### Customization is a layer, never a fork
+
+The Concierge customizes a team's page by writing one `tp-settings` document through the `site` tool
+(the `concierge` skill). The template reads it and applies it; the template itself is never copied or
+changed for one team. So a later template keeps a customized team's settings, and so does turning the
+picture off and on again.
+
+### The operational figures a plugin writes: `tp-ops`
+
+An operational plugin (one that reads a mailbox every 5 minutes, say) feeds the page with ONE
+`site.put` record into `tp-ops`, at the end of a run it already makes, never a run of its own to move
+a counter; an agent may instead write it as one data write inside a run it is already making.
+
+Document id `today`, rewritten whole:
+
+```json
+{ "date": "2026-11-04",
+  "counts": { "support": 3, "inquiry": 5, "alert": 1, "spam": 12 },
+  "lastMessage": { "to": "Administrator", "sentAt": "2026-11-04T09:55:00Z", "text": "2 support, 1 alert" },
+  "runs": [ { "at": "2026-11-04T09:55:00Z", "kind": "support" }, { "at": "2026-11-04T10:00:00Z", "kind": null } ],
+  "items": [ { "at": "2026-11-04T09:55:00Z", "kind": "support", "title": "Printer down" } ] }
+```
+
+| Field | Shape | Bound |
+|---|---|---|
+| `date` | `YYYY-MM-DD`, required. A new day starts the document again. | |
+| `counts` | Kind name to a whole number of at least 0, required. Counts per kind for today. A kind absent reads "not measured", never 0. | |
+| `lastMessage` | `{to, sentAt, text}` strings, or `null`: the last message sent, as the recipient saw it. | |
+| `runs` | `[{at, kind}]`, optional: today's runs for the strip, oldest first. `kind` is the most urgent kind the run found, `null` for nothing new (a grey bar). The run in progress (amber) comes from the platform's own `tp-runs`. | At most 400 |
+| `items` | `[{at, kind, title}]`, optional: the latest items with their kind. | At most 50 |
+
+The Host checks the shape and refuses a wrong type with a sentence naming the field. Kind names are
+the team's own words; the page orders them, most urgent first, from the picture's `kinds`.
+
+As a record, one line:
+
+    {"t":"site.put","site":"team-picture","collection":"tp-ops","id":"today","doc":{"date":"2026-11-04","counts":{"support":2,"spam":11},"runs":[{"at":"2026-11-04T09:15:00Z","kind":"support"}]}}
+
+The page keeps today, never every run forever: a team that runs every 5 minutes makes about 288 runs
+a day, and the whole document stays one site document under 64 KB.
+
+### The picture shapes
+
+What the template draws from `tp-picture` (the Manager's, or the Concierge's). Every string is drawn
+with `textContent` or SVG text nodes, never as markup. Anything unknown is ignored; anything missing
+is skipped. Lengths are cut, not refused: a label at 80 characters, a detail line at 80, a text block
+at 600, at most 40 nodes and 80 edges a diagram, 30 steps and 60 links a flow, 12 screens, 12
+regions a screen, 20 rows a table.
+
+#### Statuses (one vocabulary everywhere)
+
+| status | drawn as |
+|---|---|
+| `done` | green, still |
+| `active` | amber (in progress). It glows only when live: see "What moves" |
+| `todo` | grey (not started) |
+| `unchanged` | outlined, dashed: the rest of the product, or something outside the team (a mailbox, a phone) |
+
+Missing or unknown status reads `todo`.
+
+#### `tp-picture` - one document per item (Manager)
+
+Document id: the item's key as `tp-items` names it (`B0089`, or `w<workflow>` for told work). An
+operational team keeps ONE document, id `ongoing`.
+
+```json
+{
+  "kind": "build",
+  "title": "Cost, spend and human attribution",
+  "summary": "One or two sentences on what the item is for.",
+
+  "architecture": { "...": "a Diagram (build)" },
+  "screens":      [ { "...": "a Screen (build)" } ],
+  "flows":        [ { "...": "a Flow (build)" } ],
+
+  "howItWorks":   { "...": "a Diagram (operational)" },
+  "rule":         { "...": "a Flow (operational)" },
+  "kinds":        [ { "id": "alert", "label": "Alerts and errors", "colour": "#dc2626", "note": "texted at once" } ]
+}
+```
+
+- `kind`: `build` or `operational`. When it is missing (or there is no document) the page takes
+  `operational` when `tp-ops` holds a document and no item is open, else `build`.
+- `kinds` (operational): the categories the team sorts into, MOST URGENT FIRST. Their order is what
+  "the most urgent kind" means on the run strip. `colour` optional (`#rgb` / `#rrggbb`); without it
+  the template gives each kind its own colour. With no `kinds`, the page uses the keys of
+  `tp-ops.counts` in the order they appear.
+
+#### Diagram (`architecture`, `howItWorks`)
+
+```json
+{
+  "caption": "Focused on what B0084 adds or changes; the rest is a faded backdrop",
+  "backdrop": "Yawble Host",
+  "nodes": [
+    { "id": "ledger", "label": "Runs and usage ledger", "status": "unchanged", "column": 0, "row": 0 },
+    { "id": "cost", "label": "Cost service", "detail": ["Estimated Execution Cost", "Actual Spend"],
+      "status": "done", "column": 1, "row": 0, "cards": ["C3", "C4"] },
+    { "id": "report", "label": "Report tool for agents", "status": "active", "column": 2, "row": 5,
+      "cards": ["C21"] },
+    { "id": "triager", "label": "Triager (agent)", "detail": "support, inquiry, alert, spam",
+      "member": "Triager", "status": "done" }
+  ],
+  "edges": [ { "from": "ledger", "to": "cost", "label": "optional words" } ]
+}
+```
+
+- `id`: 1-64 of letters, digits, `.`, `_`, `-`. Edges naming a missing node are skipped.
+- `detail`: a string or up to 3 strings, drawn as small lines under the label.
+- `column` / `row`: optional integers 0-11, left to right / top to bottom. Without them the page
+  lays the node out itself (column = its longest path from a node with no edge into it; row = its
+  order in the column).
+- `cards`: card ids (as `tp-now` / `tp-items` name them) this piece is built by. `member`: a member
+  name, for an operational team's piece that IS a member (the triager) or a plugin.
+- `kind` (operational, optional): a `kinds` id; the node is drawn in that kind's colour.
+
+#### Flow (`flows[]`, `rule`)
+
+```json
+{
+  "title": "How one run is priced",
+  "caption": "Flow chart of the rule the team built",
+  "steps": [
+    { "id": "start", "label": "A run ends", "shape": "start" },
+    { "id": "plugin", "label": "Plugin member?", "shape": "decision", "status": "done" },
+    { "id": "rate", "label": "duration x the plugin's own rate", "status": "done", "cards": ["C7"] },
+    { "id": "quiet", "label": "end quietly", "shape": "end" }
+  ],
+  "links": [ { "from": "start", "to": "plugin" }, { "from": "plugin", "to": "rate", "label": "yes" } ]
+}
+```
+
+- `shape`: `start` (rounded, outlined), `step` (box, the default), `decision` (diamond), `end` (grey
+  box). `status`, `cards`, `member`, `column`, `row` as for a diagram node.
+
+#### Screen (`screens[]`)
+
+```json
+{
+  "title": "Spend page",
+  "change": "new",
+  "status": "done",
+  "cards": ["C9"],
+  "regions": [
+    { "type": "figures", "items": [ { "label": "Actual Spend", "value": "$1,240.00", "note": "3 accounts, USD" } ] },
+    { "type": "fields",  "items": [ { "label": "Estimated hourly rate", "value": "$42.00 / agent hour", "input": true } ] },
+    { "type": "table",   "columns": ["Account", "Expenses", "Total"], "rows": [ ["Anthropic API", "4", "$900.00"] ] },
+    { "type": "buttons", "items": ["Export CSV"] },
+    { "type": "heading", "text": "Before B0084" },
+    { "type": "text",    "text": "A run is priced at the rate it started with.", "muted": true },
+    { "type": "terminal","lines": ["> report action: spend period: 2026-11"] }
+  ]
+}
+```
+
+- `change`: `new` or `changed` (shown beside the title).
+- A screen with `"noScreen": true` is a STAND-IN card for work with no screen (a tool, a service):
+  its title, status and regions (usually one `terminal` or `text`) on a plain card.
+
+### `tp-settings`: the Concierge's layer over the template
+
+
+Document id `settings`.
+
+```json
+{
+  "hide": ["spend", "waiting"],
+  "colours": { "done": "#15803d", "active": "#d97706", "todo": "#cbd5e1", "accent": "#1d4ed8" },
+  "sections": [
+    { "id": "contacts", "title": "Who to call", "after": "progress",
+      "regions": [ { "type": "text", "text": "On-call: ..." } ] }
+  ]
+}
+```
+
+- `hide`: section names: `progress`, `now`, `architecture`, `screens`, `flows`, `figures`,
+  `howItWorks`, `didToday`, `rule`, `runs`, `spend`, `waiting`, `history`, or an extra section's id.
+- `colours`: keys `done`, `active`, `todo`, `unchanged`, `accent`, and `kind.<id>`; values `#rgb` or
+  `#rrggbb` only, anything else ignored.
+- `sections`: at most 8 extra sections, each drawn from Screen `regions` (same types, same text-only
+  rule), placed after the named section (default: before the history).
+
+### Data limits
+
+The Team picture is a site like any other, so the site limits hold for every collection above: 64 KB
+a document, 10 000 documents a collection, 50 MB a site, each refused with a sentence. The
+platform's collections are bounded to fit (today and a short history), and so are the shapes above.
+
 ## A complete example: the triage site
 
 The triage site is a triage queue over the `items` collection with **Done** and **Assign** actions,

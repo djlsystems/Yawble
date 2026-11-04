@@ -251,6 +251,76 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
             skill, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The Manager skill served to a Manager says to draw an item's Team picture into `tp-picture`
+    /// when it plans the item, to revise it only when the plan changes, never on a routine wake, and
+    /// never to write a figure. The platform cannot count a real agent's writes, so this wording is
+    /// what holds the rule.
+    /// </summary>
+    [Fact]
+    public async Task The_manager_skill_draws_the_team_picture_when_it_plans_and_never_on_a_routine_wake()
+    {
+        var key = await host.Services.GetRequiredService<IPrincipalStore>().MintAsync(
+            new ContainerId(host.Alpha, TeamRegistry.DefaultManagerName).ToString(),
+            PrincipalKind.Container, host.Alpha, Permits.All, ct: Ct);
+        using var manager = host.Container(key);
+        var skill = McpContractTests.Flat(await manager.GetStringAsync("/api/me/skills/manager", Ct));
+
+        Assert.Contains("Draw the Team picture when you plan, never on a routine wake", skill, StringComparison.Ordinal);
+        Assert.Contains(
+            "When the team has a Team picture, you draw each item's picture when you plan it: for a build item, its architecture, its screens and its flows; for an operational team, how it works and the rule one run follows.",
+            skill, StringComparison.Ordinal);
+        Assert.Contains("Write them into the `tp-picture` collection with the `site` tool", skill, StringComparison.Ordinal);
+        Assert.Contains("site action: data op: put site: team-picture collection: tp-picture id: <item>", skill, StringComparison.Ordinal);
+        Assert.Contains("Revise them only when the plan changes", skill, StringComparison.Ordinal);
+        Assert.Contains("Never redraw on a routine wake", skill, StringComparison.Ordinal);
+        Assert.Contains("Never write figures into the picture", skill, StringComparison.Ordinal);
+        Assert.Contains("Never publish, copy or rebuild the page either", skill, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The Concierge asks whether to turn the Team picture on when it creates a team (or turns it on
+    /// when told), and customizes a team's page only by writing `tp-settings` through the `site` tool,
+    /// never by forking the template. The new-team skill asks the same question.
+    /// </summary>
+    [Fact]
+    public void The_concierge_skill_offers_the_team_picture_and_customizes_it_as_a_layer_through_the_site_tool()
+    {
+        static string Flat(string name) => System.Text.RegularExpressions.Regex.Replace(BuiltInSkills.Find(name)!.Body, @"\s+", " ");
+
+        var concierge = Flat("concierge");
+        Assert.Contains("when you create a team, ask the person whether to turn the Team picture on", concierge, StringComparison.Ordinal);
+        Assert.Contains("or turn it on when they have already said so: `team_create` with `teamPicture: true`", concierge, StringComparison.Ordinal);
+        Assert.Contains("never turn it on unasked", concierge, StringComparison.Ordinal);
+        Assert.Contains("Customize it through the `site` tool by writing the page's settings, one document in the `tp-settings` collection", concierge, StringComparison.Ordinal);
+        Assert.Contains("The settings are a layer over the template, never a fork of it", concierge, StringComparison.Ordinal);
+        Assert.Contains("never publish, copy or rebuild the `team-picture` site, and never write its files", concierge, StringComparison.Ordinal);
+
+        Assert.Contains("ask whether to turn the Team picture on, unless the person has said: then pass `teamPicture: true`", Flat("new-team"), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The plugin skill documents the `tp-ops` shape an operational plugin writes with `site.put`,
+    /// with its bounds, and that a plugin writes nothing else of the Team picture's.
+    /// </summary>
+    [Fact]
+    public void The_plugin_skill_documents_the_team_picture_ops_shape_and_its_bounds()
+    {
+        var plugins = System.Text.RegularExpressions.Regex.Replace(BuiltInSkills.Find("authoring-plugins")!.Body, @"\s+", " ");
+
+        Assert.Contains("a `site.put` record into the `tp-ops` collection", plugins, StringComparison.Ordinal);
+        Assert.Contains("never a run of its own to move a counter", plugins, StringComparison.Ordinal);
+        Assert.Contains("It is ONE document, id `today`, rewritten whole", plugins, StringComparison.Ordinal);
+        Assert.Contains("{\"t\":\"site.put\",\"site\":\"team-picture\",\"collection\":\"tp-ops\",\"id\":\"today\"", plugins, StringComparison.Ordinal);
+        Assert.Contains("`date` - today, as `YYYY-MM-DD`. Required.", plugins, StringComparison.Ordinal);
+        Assert.Contains("A kind not counted is left out: it reads \"not measured\", never 0.", plugins, StringComparison.Ordinal);
+        Assert.Contains("`lastMessage` - the last message sent, as the recipient saw it: `to`, `sentAt` and `text`, or null.", plugins, StringComparison.Ordinal);
+        Assert.Contains("`runs` - today's runs for the strip, oldest first, at most 400", plugins, StringComparison.Ordinal);
+        Assert.Contains("`items` - the latest items with their kind, at most 50.", plugins, StringComparison.Ordinal);
+        Assert.Contains("it stays under 64 KB: keep today, never every run forever", plugins, StringComparison.Ordinal);
+        Assert.Contains("The plugin writes only `tp-ops` (and an extra section's `tp-extra-<slug>`): the platform's own collections refuse it, and the picture is the Manager's.", plugins, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task A_managers_list_has_no_worktrees_and_it_is_refused_the_member_skill()
     {
