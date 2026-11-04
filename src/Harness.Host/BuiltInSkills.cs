@@ -2279,7 +2279,153 @@ public static class BuiltInSkills
             by itself, and the person decides there. Take the folder from the board notice or the
             Manager's delivery; `workflow_show` reads the thread back.
             """),
+        new(
+            OutcomeReporting,
+            "Use when asked for a report on a team, an outcome or a period: Estimated Execution Cost, "
+            + "Agent Hours, human involvement or Actual Spend, as Markdown, HTML or CSV, from the "
+            + "report tool only.",
+            [SkillRoles.Manager, SkillRoles.Member],
+            """
+            # Outcome reporting
+
+            A report says what the work cost to run, how many Agent Hours it took, how much a
+            person had to step in and, when a person allows it, what was actually paid. Every
+            figure in it is one the `report` tool answered. You copy figures; you never make one.
+
+            ## Where every figure comes from
+
+            Call `report` and nothing else for figures. Each action answers what a screen shows,
+            under one heading line that says what the figures are:
+
+            | Action | What it answers |
+            |---|---|
+            | `teams` | Estimated Execution Cost and Agent Hours for each team you reach, and their `total` |
+            | `team` | One team's period by outcome (Unattributed included), by member (agent and plugin apart) and by workflow |
+            | `workflows` | Each of a team's workflows, all time |
+            | `outcomes` | Each outcome and Unattributed, across every team: Estimated Execution Cost, Agent Hours, Human Interventions and Human Attention Time |
+            | `human` | A team's Human Interventions and Human Attention Time over its last eight weeks; it reads no period |
+            | `spend` | Actual Spend and Projected for the period, per currency |
+            | `accounts` | The billing accounts |
+
+            - **The period** is `from` and `to`, `YYYY-MM-DD`, UTC, `to` the day after the last.
+              Neither is the current UTC month. Prefer a period that has ended: an open one moves
+              while runs finish, so a report on it says "so far" and the time you read it.
+            - **`bucket`** is `day` or `month` for `teams` and `team`.
+            - **A member reaches its own team only.** Another team's figures are refused; say so in
+              the report rather than leaving the team out silently.
+            - Never read the message log, run transcripts, the board or the tokens to rebuild a
+              figure, and never fetch a URL for one. If `report` has no action for what was asked,
+              say what is missing in the report and with `blocked` or `handback`.
+
+            ## Copy, never compute
+
+            - **No arithmetic.** No sum, total, average, rate, share, percentage, difference or
+              trend of your own. A total is the answer's own `total` or `totals`; a weighted rate
+              is its `agentRate`. If the answer has no figure for something, the report says it
+              has none.
+            - **The one conversion.** Agent Hours is `agentSeconds` divided by 3600, written with
+              one decimal under 100 hours and whole hours from 100, as the screens write it. A CSV
+              keeps `agent_seconds` beside it.
+            - **Money** is written as the answer gives it, with its currency code, to the cent.
+            - **Never infer Actual Spend** from hours, rates, tokens or an estimate. Actual Spend
+              is only what `spend` answers.
+            - **Never add currencies.** Actual Spend and Projected are per currency. Each currency
+              is its own line, never converted, never added to another.
+            - **Never mix the two measurements.** Estimated Execution Cost and Actual Spend never
+              share one figure, row, column, chart or total, and neither is subtracted from the
+              other. The `estimate` inside the `spend` answer is every team's: it is not one team's
+              figure.
+
+            ## The words
+
+            Use these terms exactly: Actual Spend, Estimated Agent Cost, Estimated Plugin Cost,
+            Estimated Execution Cost, Agent Hours, Human Interventions, Human Attention Time.
+
+            - An estimate is never called spend, spent, paid or cost alone. Its heading says
+              Estimated Execution Cost.
+            - No value words near an estimate: not value, ROI, return or savings. An estimate is
+              what the work cost to run at the hourly rates a person set, not what it was worth.
+            - **Estimate unavailable.** `cost` null is written "Estimate unavailable" (nothing was
+              priced), never 0 and never blank.
+            - **Rate sources.** A non-empty `legacyRates` (`reconstructed`, `fallback-at-upgrade`)
+              is carried beside the figure with a footnote saying the rate was reconstructed or a
+              fallback at upgrade.
+            - **Plugin members.** A plugin member's `unpriced` is written "Not priced"
+              (`not-priced`) or "Estimate unavailable" (`unavailable`).
+            - **Human Attention Time** of null is "no measured time", never 0. The `human` figures
+              are the last eight weeks; say so beside them.
+            - **No budgets.** An outcome's stored `value`, `budget` or `outcomeTotalCost` is not a
+              budget. Never compare an estimate to it and never report how much of it was used.
+            - **The sentence.** Wherever Actual Spend and Estimated Execution Cost both appear,
+              write this sentence with them, word for word:
+
+              "Actual Spend is what you paid vendors. Estimated Execution Cost is agent and plugin time at your estimated hourly rates. They are different measurements and need not reconcile."
+
+            ## When Actual Spend is not yours to read
+
+            `spend` and `accounts` answer only while a person has turned on **Let agents read Actual
+            Spend for reports** (Admin → Settings → Spend). When they are refused, report the
+            estimates only, and write in the report: "Actual Spend is not in this report: a person
+            must turn on Let agents read Actual Spend for reports in Admin → Settings → Spend." Do
+            not ask for a credential, and never fill the gap from anything else.
+
+            ## Writing the files
+
+            Write each file to the team's shared folder (`HARNESS_SHARED`), the folder a person
+            opens in Documents, named for what and when: `<subject>-<from>-to-<to>.md`.
+
+            - **Markdown** is the default. It opens with the subject, the period (UTC, the last day
+              included), when the figures were read, and which actions answered.
+            - **HTML** is one self-contained file: inline styles, no script, no remote font, image
+              or link. Documents shows it in a sandbox that runs nothing.
+            - **CSV** is one file per measurement, with a header row and one row per figure:
+              - `<name>-estimated-execution-cost.csv`: `period_from`, `period_to`, `team`, `scope`
+                (team, outcome, member or workflow), `id`, `name`, `agent_seconds`, `agent_hours`,
+                `currency`, `estimated_execution_cost` (empty when the estimate is unavailable),
+                `agent_rate`, `rate_source` (the `legacyRates`, `;`-joined), `note`.
+              - `<name>-actual-spend.csv`, only when `spend` answered: `period_from`, `period_to`,
+                `scope` (total, billing type or account), `name`, `billing_type`, `currency`,
+                `actual_spend`, `projected`.
+              - ISO dates, currency codes and the answer's ids; nothing inferred, nothing added
+                across currencies.
+            - **Spreadsheets.** CSV is the spreadsheet: it opens in any spreadsheet program. The
+              platform writes no XLSX.
+            - **PDF.** The platform writes no PDF. Make one only through a plugin member on your
+              team whose own skill says it makes PDFs. Otherwise say there is no PDF writer here,
+              and that the HTML prints to PDF from the browser.
+
+            ## Sending a report
+
+            Mail goes only through a mail plugin member on your team that a person has set up.
+
+            1. Look for it with `status` (your team's roster) and `skills_search` with "mail". A
+               plugin's skill is named `plugin-<id>`; load it with `skills_get`.
+            2. Tell it only what its skill says it takes, through `tell`. It may make a draft for
+               the person to send instead of sending; say which in your hand-back.
+            3. With no mail plugin member, or one whose skill does not send what you have, say:
+               "This report was not sent: no mail plugin is set up on this team." Name where the
+               files are. Never send mail any other way.
+
+            ## Reports that repeat
+
+            A weekly or monthly report runs from a trigger or schedule a person sets on the team,
+            through the existing workflows. Each run writes that period's files. There is no
+            report scheduler; ask the person for a trigger.
+
+            ## If you are the Manager
+
+            Dispatch a report to a member with `tell`, naming this skill, the subject, the period
+            and the formats asked for. Judge the hand-back against this skill:
+            - every figure is one `report` answered;
+            - the words are these;
+            - Actual Spend appears only if `spend` answered, and never mixed with an estimate;
+            - the sentence is there wherever both appear;
+            - the files are in the shared folder.
+            """),
     ];
+
+    /// <summary>The name of the reporting skill, for the tests that hold its text to the report tool.</summary>
+    public const string OutcomeReporting = "outcome-reporting";
 
     /// <summary>Every built-in, as the agent reads it: the transport preamble, then the body.</summary>
     public static IReadOnlyList<BuiltInSkill> All { get; } =

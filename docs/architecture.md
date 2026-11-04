@@ -35,6 +35,11 @@ The product name, Yawble, lives in the web app's presentation layer
   `report` is read-only: each action relays one GET a screen makes, with the caller's own key
   ([cost.md](cost.md#reporting-the-report-tool)). There is no
   agent-facing CLI and no HTTP fallback.
+- **Built-in skills come from the build.** Each is an entry in `src/Harness.Host/BuiltInSkills.cs`
+  naming the roles it is offered to; the skill index is rebuilt from them on every start, and
+  `skills_get` and `skills_search` serve a role only its own. `outcome-reporting` (Manager,
+  Member) is how a member writes a report from `report` alone
+  ([cost.md](cost.md#writing-a-report-the-outcome-reporting-skill)).
 - **Workflows.** An instruction roots a workflow; `HARNESS_CAUSATION` carries it into each run so
   follow-up instructions join it. The member the root instruction addressed owns the workflow and
   declares it complete; the Manager may declare it for an idle member that owns it, and the platform

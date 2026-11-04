@@ -671,10 +671,52 @@ Agents read cost figures for a report through `report`, a read-only MCP tool on 
   refused with the one sentence in [spend.md](spend.md#who-may-read-it-and-who-may-write). Nothing
   in the tool writes.
 - **Not in the tool.** There is no scheduled delivery, no figure from another instance, and no PDF
-  or mail.
+  or mail. Writing a report from the tool is the `outcome-reporting` skill's
+  ([below](#writing-a-report-the-outcome-reporting-skill)).
 - **Tests.** Pinned by `ReportToolTests` and `SpendReadingRuleTests` in
   `tests/Harness.Tests/Host/ReportToolTests.cs`, and
   `RouteMarkerTests.Exactly_the_Actual_Spend_reads_require_the_Spend_permit_and_every_spend_write_stays_humans_only`.
+
+## Writing a report: the `outcome-reporting` skill
+
+The built-in skill `outcome-reporting` (`src/Harness.Host/BuiltInSkills.cs`) teaches an agent to
+write a report on a team, an outcome or a period from the `report` tool and nothing else. It is
+offered to the Manager and to members. A member writes the report; the Manager dispatches it and
+checks the hand-back against the skill. The Concierge is not offered it: it has no shared folder,
+and its own skill already sends a report to a team.
+
+- **Copy, never compute.** Every figure is one the tool answered: a total is the answer's own
+  `total` or `totals`, a rate its `agentRate`. The one conversion is Agent Hours from
+  `agentSeconds` (one decimal under 100 hours, as the screens write it). Actual Spend is never
+  inferred from hours or rates. No currencies are added or converted. Estimated Execution Cost and
+  Actual Spend never share one figure, row, column or total.
+- **The words.** The terms of this page and [spend.md](spend.md), with these rules:
+  - `cost` null is Estimate unavailable;
+  - `legacyRates` is carried as a footnote, and a plugin member's `unpriced` as Not priced or
+    Estimate unavailable;
+  - an outcome's stored value is never treated as a budget;
+  - the Spend page's sentence goes wherever both measurements appear.
+- **Actual Spend only when allowed.** When `spend` is refused, the report carries the estimates
+  only, with a line saying a person must turn on **Let agents read Actual Spend for reports**.
+- **Files.** Markdown, HTML (self-contained, no script) and CSV, written to the team's shared
+  folder. The CSV files are one per measurement: `<name>-estimated-execution-cost.csv` and, only
+  when `spend` answered, `<name>-actual-spend.csv`.
+- **What it cannot make or send.**
+  - The platform writes no PDF and no XLSX. CSV is the spreadsheet, and the HTML prints to PDF
+    from a browser. A PDF is made only by a plugin member whose own skill says it makes one.
+  - Mail goes only through a mail plugin member a person has set up on the team; without one,
+    the report says it was not sent.
+  - A recurring report runs from a trigger a person sets. There is no report scheduler.
+- **Tests.** Pinned by `OutcomeReportingSkillTests` in
+  `tests/Harness.Tests/Host/OutcomeReportingSkillTests.cs`:
+  - the roles;
+  - the actions it names against `PlatformMcpTools.ReportActions`;
+  - the words, and that no estimate is called spend;
+  - copying, never computing;
+  - estimates only when Actual Spend is refused;
+  - the files and limits.
+
+  The general built-in skill rules hold too: `McpContractTests.Built_in_skills_send_agents_to_mcp_tools_not_the_http_api`.
 
 ## Routes
 
