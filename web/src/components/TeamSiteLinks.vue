@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { listTeamSites, type Site } from '../api/sites';
 import type { TeamId } from '../api/types';
+import { openSiteTab } from '../lib/siteOpen';
 
 /**
  * THE TEAM'S SITES, BESIDE ITS NAME: one globe link per published site, opening it in a new tab.
@@ -9,8 +10,10 @@ import type { TeamId } from '../api/types';
  * screen says the team has a site at all.
  *
  * Only a LIVE site (a published version) gets a link: an unpublished one has nothing to open. The
- * link is the site's own `url`, same origin, and the Host issues the capability when the tab asks,
- * as the Sites dialog's Open does. Re-read when the team changes and when the window comes back
+ * link is the site's own `url`, same origin, so a middle-click, a modified click or "copy link" still
+ * names the entry. A plain click opens the site the way the Sites dialog's Open does (`openSiteTab`):
+ * through a capability the app asks for, so the new tab never depends on the browser sending the
+ * session cookie with its first request (W27510). Re-read when the team changes and when the window comes back
  * into focus (a site published while the person was away appears then); no polling. A failed read
  * shows nothing: the links are a convenience, the Sites dialog is the record.
  */
@@ -39,6 +42,14 @@ watch(() => props.team, () => {
   void load();
 }, { immediate: true });
 
+/** A plain click: the app's own open. A modified or middle click is left to the browser's link. */
+function open(event: Event, site: Site) {
+  if (!(event instanceof MouseEvent)) return;
+  if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  void openSiteTab(site);
+}
+
 const onFocus = () => void load();
 onMounted(() => window.addEventListener('focus', onFocus));
 onUnmounted(() => window.removeEventListener('focus', onFocus));
@@ -60,6 +71,7 @@ onUnmounted(() => window.removeEventListener('focus', onFocus));
       rel="noopener"
       :aria-label="`Open the ${site.name} site`"
       :data-team-site="site.name"
+      @click="open($event, site)"
     >
       <q-tooltip>Open the {{ site.name }} site (version {{ site.liveVersion }})</q-tooltip>
     </q-btn>

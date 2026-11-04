@@ -13,6 +13,7 @@ import { json, send } from './client'
  * | one site, its versions and collections | `GET /api/teams/{team}/sites/{site}` |
  * | roll back | `POST /api/teams/{team}/sites/{site}/rollback` |
  * | unpublish | `POST /api/teams/{team}/sites/{site}/unpublish` |
+ * | open (a capability for this person) | `POST /api/teams/{team}/sites/{site}/open` |
  * | delete | `DELETE /api/teams/{team}/sites/{site}` |
  * | a collection's documents | `GET /api/teams/{team}/sites/{site}/data/{collection}` |
  */
@@ -88,6 +89,17 @@ export const rollbackSite = (team: string, name: string, version: number) =>
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ version }),
+  })
+
+/**
+ * A capability for the signed-in person to open the site with: `{ url }` is the path its pages are
+ * served under (`/sites/<team>/<site>/_c/<capability>/`), which needs no cookie. See `lib/siteOpen.ts`.
+ */
+export const openSiteCapability = (team: string, name: string) =>
+  json<{ url: string }>(site(team, name, '/open'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({}),
   })
 
 /** Takes the site down. Its files and data are kept. */

@@ -22,6 +22,11 @@ namespace Harness.Host;
 /// <item><c>GET .../_c/{capability}/_api/files/{path}</c> - one file the team made for the site, from
 /// its files folder in the team's documents (<see cref="SiteFiles"/>), as an attachment. GET only, no
 /// listing, no link followed at any level, no path leaving the folder.</item>
+/// <item><c>POST /api/teams/{team}/sites/{site}/open</c> - the same capability, answered to the app's own
+/// signed-in request as <c>{ url }</c>. The app's globe and Admin → Sites → Open use it and open the
+/// capability path in the new tab, so opening a site never rests on the browser sending the
+/// <c>SameSite=Strict</c> session cookie with a new tab's navigation; the front door uses it for a
+/// site entry in its <c>next</c>.</item>
 /// <item><c>GET /sites/_sdk/site.js</c> - the helper script, the same bytes for everyone.</item>
 /// </list>
 ///
@@ -58,6 +63,9 @@ public static class SiteEndpoints
 
     private const string Area = "Sites";
 
+    /// <summary>The app's own open: the capability path as JSON, not as a redirect.</summary>
+    public const string OpenRoute = "/api/teams/{team}/sites/{site}/open";
+
     public static void Map(WebApplication app)
     {
         app.MapGet(SdkPath, () => Results.Text(Sdk, "text/javascript; charset=utf-8"))
@@ -80,6 +88,16 @@ public static class SiteEndpoints
                 + "this one site and redirects to the site's pages under it, carrying the query unchanged. "
                 + "With no session, a browser navigation is redirected to sign in with `next` naming this "
                 + "entry and its query; any other request answers 401. A site that is not published answers 404.");
+
+        app.MapPost(OpenRoute, OpenForApp)
+            .HumansOnly()
+            .WithTags(Area)
+            .WithSummary("Open a site from the app")
+            .WithDescription(
+                "For a signed-in person only (the session cookie). Issues a short-lived capability for this one "
+                + "site and answers `{ \"url\": \"/sites/<team>/<site>/_c/<capability>/\" }`, the path the entry "
+                + "would redirect to, with `Cache-Control: no-store`. The app opens that path in a new tab, so the "
+                + "tab's navigation needs no cookie. 401 with no person, 404 for no such site or one not published.");
 
         var capability = $"/sites/{{team}}/{{site}}/{CapabilitySegment}/{{capability}}";
         var api = $"{capability}/{SiteRules.ApiSegment}";
@@ -149,16 +167,51 @@ public static class SiteEndpoints
             return Results.Text(SignInFirst, "text/plain; charset=utf-8", statusCode: 401);
         }
 
-        var found = await sites.FindAsync(team, site, null, ct);
-        if (found.Value is not { } row) return Results.Text(found.Refusal, "text/plain; charset=utf-8", statusCode: found.Status);
-        if (row.LiveVersion is null) return Results.Text(SiteService.NotPublished, "text/plain; charset=utf-8", statusCode: 404);
+        var issued = await IssueAsync(team, site, person, email, sites, capabilities, ct);
+        if (issued.Refusal is { } refusal) return Results.Text(refusal, "text/plain; charset=utf-8", statusCode: issued.Status);
 
-        var token = capabilities.Issue(row.Team, row.Name, person.Id, email);
         context.Response.Headers.CacheControl = "no-store";
 
         // THE QUERY IS CARRIED, NOT READ: the page's own script reads it from `location.search`.
-        return Results.Redirect(
-            $"{SiteService.EntryPath(row.Team, row.Name)}{CapabilitySegment}/{token}/{context.Request.QueryString}");
+        return Results.Redirect($"{issued.Path}{context.Request.QueryString}");
+    }
+
+    /// <summary>
+    /// THE APP'S OWN OPEN: the capability the entry would issue, answered as <c>{ url }</c> to the app's
+    /// signed-in request rather than as a redirect of a navigation. A new tab's first request is where
+    /// a browser decides whether to send a <c>SameSite=Strict</c> cookie, and when it does not the entry
+    /// sends the person to the front door instead of the site; a capability path needs no cookie, so
+    /// opening it in the tab cannot be turned back. Only a person, by the cookie: the same rule as the entry.
+    /// </summary>
+    private static async Task<IResult> OpenForApp(
+        string team, string site, HttpContext context, SiteService sites, SiteCapability capabilities,
+        CancellationToken ct)
+    {
+        context.Response.Headers.CacheControl = "no-store";
+
+        if (PrincipalClaims.From(context.User) is not { Kind: PrincipalKind.User } person
+            || context.User.FindFirstValue(ClaimTypes.Email) is not { Length: > 0 } email)
+        {
+            return Results.Json(new { error = SignInFirst }, statusCode: 401);
+        }
+
+        var issued = await IssueAsync(team, site, person, email, sites, capabilities, ct);
+        return issued.Refusal is { } refusal
+            ? Results.Json(new { error = refusal }, statusCode: issued.Status)
+            : Results.Ok(new { url = issued.Path });
+    }
+
+    /// <summary>A capability for a live site, as the path its pages are served under; or the refusal.</summary>
+    private static async Task<(string? Path, string? Refusal, int Status)> IssueAsync(
+        string team, string site, Principal person, string email, SiteService sites, SiteCapability capabilities,
+        CancellationToken ct)
+    {
+        var found = await sites.FindAsync(team, site, null, ct);
+        if (found.Value is not { } row) return (null, found.Refusal, found.Status);
+        if (row.LiveVersion is null) return (null, SiteService.NotPublished, 404);
+
+        var token = capabilities.Issue(row.Team, row.Name, person.Id, email);
+        return ($"{SiteService.EntryPath(row.Team, row.Name)}{CapabilitySegment}/{token}/", null, 200);
     }
 
     private static readonly FileExtensionContentTypeProvider ContentTypes = new();
