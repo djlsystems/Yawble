@@ -1,3 +1,4 @@
+using Harness.Containers;
 using Harness.Contracts;
 using Harness.Host.Auth;
 using Harness.Identity;
@@ -116,6 +117,31 @@ internal sealed partial class HostComposition
             sp.GetRequiredService<IMessageLog>(),
             removal: sp.GetRequiredService<FolderRemoval>()));
         builder.Services.AddSingleton<SiteCapability>();
+
+        // THE TEAM PICTURE: the reserved site's live collections and the shipped template. Late lookups,
+        // as above. The template is `templates/team-picture` beside the Host; `TeamPicture:Template`
+        // names another folder (a test's).
+        builder.Services.AddSingleton(sp => new TeamPictureFigures(
+            sp.GetRequiredService<ISiteStore>(),
+            sp.GetRequiredService<SiteService>(),
+            team => sp.GetRequiredService<TeamRegistry>().HasTeamPicture(team),
+            team => sp.GetRequiredService<TeamRegistry>().LabelFor(team),
+            team => sp.GetRequiredService<TeamRegistry>().FloorFor(team),
+            sp.GetRequiredService<KanbanStore>(),
+            sp.GetRequiredService<IBacklogStore>(),
+            sp.GetRequiredService<IMessageLog>(),
+            sp.GetRequiredService<IUsageLedger>(),
+            () => sp.GetRequiredService<WipLedger>().View(),
+            sp.GetService<TimeProvider>()));
+        builder.Services.AddSingleton(sp => new TeamPicture(
+            sp.GetRequiredService<SiteService>(),
+            sp.GetRequiredService<ISiteStore>(),
+            sp.GetRequiredService<TeamRegistry>(),
+            sp.GetRequiredService<TeamPictureFigures>(),
+            builder.Configuration["TeamPicture:Template"] is { Length: > 0 } template
+                ? template
+                : Path.Combine(AppContext.BaseDirectory, "templates", "team-picture"),
+            sp.GetService<ILogger<TeamPicture>>()));
     }
 
     /// <summary>

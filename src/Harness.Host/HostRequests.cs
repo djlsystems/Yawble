@@ -157,6 +157,11 @@ internal static class Describe
 /// apply to such a team - leaving 0 as the only spelling of an explicit "unlimited". A negative
 /// value is refused with 400 at the route.
 /// </summary>
+/// <summary>The body of <c>PUT /api/teams/{team}/team-picture</c>.</summary>
+internal sealed record TeamPictureSetting(
+    [property: Description("True to turn the team's Team picture on, false to turn it off (its page is unpublished and its data kept).")]
+    bool? TeamPicture);
+
 internal sealed record TeamBudget(
     [property: Description(
         "Tokens this team may spend on ONE workflow, input and output together. **Null means the "
@@ -243,7 +248,14 @@ internal sealed record CreateTeam(
         + "A person only: an agent's create naming any is refused (403). Each must exist (400 otherwise, "
         + "before anything is created); each lands with its `team.connection-assigned` row. Omitted, the "
         + "team starts with none.")]
-    IReadOnlyList<string>? Connections = null);
+    IReadOnlyList<string>? Connections = null,
+
+    [property: Description(
+        "True to give the team its Team picture: the platform's site `team-picture`, published from the "
+        + "shipped template and kept current from the team's own figures. Omitted or false, none; it is "
+        + "turned on or off later with `PUT /api/teams/{team}/team-picture`. When the page cannot be "
+        + "published the team is still made, and the answer carries `teamPictureError`.")]
+    bool? TeamPicture = null);
 
 /// <summary>
 /// What a person typed as the clone's name, and NOTHING ELSE. The identifier is derived from it

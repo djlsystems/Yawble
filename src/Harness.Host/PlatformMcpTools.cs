@@ -195,6 +195,8 @@ public sealed partial class PlatformMcpTools(
         string? additionalInstructions = null,
         [Description("Pass true only when the person asks for the team's local repository now. Omitted, a team with no repos gets none until its work needs one.")]
         bool? localRepository = null,
+        [Description("Pass true when the person wants the team's Team picture: a page, kept by the platform, showing what the team builds or runs. Ask them, or pass it when they have said so; omit otherwise.")]
+        bool? teamPicture = null,
         CancellationToken cancellationToken = default)
     {
         var chosen = string.IsNullOrWhiteSpace(agent)
@@ -216,6 +218,7 @@ public sealed partial class PlatformMcpTools(
                 memberAgents = new[] { chosen },
                 repos = repos is { Length: > 0 } ? repos : null,
                 localRepository,
+                teamPicture,
             },
             cancellationToken);
     }

@@ -227,6 +227,7 @@ internal sealed partial class HostComposition
         builder.Services.AddSingleton<LoginThrottle>();
         builder.Services.AddHostedService<PumpService>();
         builder.Services.AddHostedService<KanbanChangePush>();
+        builder.Services.AddHostedService<TeamPictureKeeper>();
 
         // THE MONITOR'S VIEW OF A RUNNING MEMBER'S FILES: read during every run, recorded for the replay,
         // pushed only to the people watching. See WorkspaceFileWatch.

@@ -13,19 +13,55 @@ namespace Harness.Host;
 /// <param name="Id">A principal id, recorded as the tenant row's actor.</param>
 /// <param name="Email">A person's email, when the actor is a person.</param>
 /// <param name="Label">What the site's rows record as who did it: the email, or the member's id.</param>
-public sealed record SiteActor(string Id, string? Email, string Label, string? BoundTeam)
+public sealed record SiteActor(
+    string Id, string? Email, string Label, string? BoundTeam, SiteActorKind Kind = SiteActorKind.Person)
 {
+    /// <summary>A person, through <c>/api</c> or a screen of the app.</summary>
     public static SiteActor Person(string userId, string email) => new(userId, email, email, null);
 
-    /// <summary>A team's member - an agent or a plugin - bound to its own team.</summary>
-    public static SiteActor Member(ContainerId member) =>
-        new(member.ToString(), null, member.ToString(), member.Team);
+    /// <summary>A person through a site's own page (its capability's <c>_api/</c>).</summary>
+    public static SiteActor Page(string userId, string email) => new(userId, email, email, null, SiteActorKind.Page);
 
-    /// <summary>The Concierge, or a person's key: reaches every team, like a person.</summary>
+    /// <summary>A team's agent member (the Manager among them), through its key, bound to its own team.</summary>
+    public static SiteActor Member(ContainerId member) =>
+        new(member.ToString(), null, member.ToString(), member.Team, SiteActorKind.Member);
+
+    /// <summary>A team's plugin member, through its <c>site.put</c> records, bound to its own team.</summary>
+    public static SiteActor Plugin(ContainerId member) =>
+        new(member.ToString(), null, member.ToString(), member.Team, SiteActorKind.Plugin);
+
+    /// <summary>A person's key, or the installer acting for one: reaches every team, like a person.</summary>
     public static SiteActor Unbound(string id, string? email) => new(id, email, email ?? id, null);
 
+    /// <summary>The Concierge, acting for its person: reaches every team, like a person.</summary>
+    public static SiteActor Concierge(string id, string? email) =>
+        new(id, email, email ?? id, null, SiteActorKind.Concierge);
+
+    /// <summary>The platform itself, keeping the Team picture (<see cref="TeamPicture"/>).</summary>
+    public static SiteActor Platform(string team) =>
+        new(TeamPicture.PlatformLabel, null, TeamPicture.PlatformLabel, team, SiteActorKind.Platform);
+
+    /// <summary>Whether this actor is its team's Manager.</summary>
+    public bool IsManager =>
+        Kind == SiteActorKind.Member
+        && ContainerId.TryParse(Id, out var member)
+        && string.Equals(member.Name, TeamRegistry.DefaultManagerName, StringComparison.OrdinalIgnoreCase);
+
     internal TriggerAudit Audit(string action, string team, string site, object? detail) =>
-        new(Id, Email, action, $"{team}/{site}", site, detail is null ? null : JsonSerializer.Serialize(detail));
+        new(Kind == SiteActorKind.Platform ? null : Id, Email, action, $"{team}/{site}", site,
+            detail is null ? null : JsonSerializer.Serialize(detail));
+}
+
+/// <summary>Which kind of caller a <see cref="SiteActor"/> is. The Team picture's collections are
+/// written by kind (<see cref="TeamPictureRules"/>); every other site treats them alike.</summary>
+public enum SiteActorKind
+{
+    Person,
+    Page,
+    Member,
+    Plugin,
+    Concierge,
+    Platform,
 }
 
 /// <summary>What a site operation came to: its value, or a sentence and the status to answer it with.</summary>
@@ -140,6 +176,11 @@ public sealed class SiteService(
 
         if (!SiteRules.IsSlug(name)) return new(null, SiteRules.NotASlug("site", name), 400);
 
+        if (TeamPicture.IsReserved(name) && actor.Kind != SiteActorKind.Platform)
+        {
+            return new(null, TeamPicture.ReservedName, 409);
+        }
+
         var row = new SiteRow(stored, name, null, 1, DateTimeOffset.UtcNow, actor.Label);
 
         if (!await store.CreateAsync(row, actor.Audit(TenantActions.SiteCreated, stored, name, null), ct))
@@ -164,9 +205,42 @@ public sealed class SiteService(
     {
         var found = await FindAsync(team, name, actor, ct);
         if (found.Value is not { } site) return new(null, found.Refusal, found.Status);
+        if (PlatformsOnly(site, actor) is { } kept) return new(null, kept, 409);
 
         if (SourceRefusal(site.Team, folder) is { } refusal) return new(null, refusal, 400);
 
+        return await PublishCopyAsync(site, folder, PluginCatalog.Resolved(folder), actor, ct);
+    }
+
+    /// <summary>
+    /// The platform's publish of its own shipped template as the Team picture's page: the folder is
+    /// the Host's, not the team's, and <paramref name="source"/> is what the version records
+    /// (<c>platform:team-picture#&lt;digest&gt;</c>). Only the page's files change; its data is never
+    /// touched.
+    /// </summary>
+    internal async Task<SiteResult<SiteVersionRow>> PublishTemplateAsync(
+        string team, string name, string folder, string source, CancellationToken ct = default)
+    {
+        var actor = SiteActor.Platform(team);
+        var found = await FindAsync(team, name, actor, ct);
+        if (found.Value is not { } site) return new(null, found.Refusal, found.Status);
+
+        if (!File.Exists(Path.Combine(folder, "index.html")))
+        {
+            return new(null, $"The shipped template at {folder} has no index.html.", 500);
+        }
+
+        return await PublishCopyAsync(site, folder, source, actor, ct);
+    }
+
+    /// <summary>Why <paramref name="actor"/> may not publish, roll back, unpublish or delete
+    /// <paramref name="site"/>: the Team picture's page is the platform's alone.</summary>
+    private static string? PlatformsOnly(SiteRow site, SiteActor actor) =>
+        TeamPicture.IsReserved(site.Name) && actor.Kind != SiteActorKind.Platform ? TeamPicture.PlatformsPage : null;
+
+    private async Task<SiteResult<SiteVersionRow>> PublishCopyAsync(
+        SiteRow site, string folder, string recorded, SiteActor actor, CancellationToken ct)
+    {
         var source = PluginCatalog.Resolved(folder);
         var gate = Gates.GetOrAdd($"{site.Team.ToLowerInvariant()}/{site.Name}", _ => new SemaphoreSlim(1, 1));
 
@@ -209,13 +283,13 @@ public sealed class SiteService(
                     .Where(v => v != site.LiveVersion)
                     .ToList();
 
-                var row = new SiteVersionRow(version, DateTimeOffset.UtcNow, actor.Label, source, copy.Files, copy.Bytes);
+                var row = new SiteVersionRow(version, DateTimeOffset.UtcNow, actor.Label, recorded, copy.Files, copy.Bytes);
 
                 await store.RecordPublishAsync(
                     site.Team, site.Name, row, pruned,
                     actor.Audit(TenantActions.SitePublished, site.Team, site.Name, new
                     {
-                        version, source, files = copy.Files, bytes = copy.Bytes, previous = site.LiveVersion,
+                        version, source = recorded, files = copy.Files, bytes = copy.Bytes, previous = site.LiveVersion,
                     }),
                     ct);
 
@@ -245,6 +319,7 @@ public sealed class SiteService(
     {
         var found = await FindAsync(team, name, actor, ct);
         if (found.Value is not { } site) return found;
+        if (PlatformsOnly(site, actor) is { } kept) return new(null, kept, 409);
 
         var versions = await store.VersionsAsync(site.Team, site.Name, ct);
 
@@ -277,6 +352,7 @@ public sealed class SiteService(
     {
         var found = await FindAsync(team, name, actor, ct);
         if (found.Value is not { } site) return found;
+        if (PlatformsOnly(site, actor) is { } kept) return new(null, kept, 409);
 
         await store.SetLiveAsync(site.Team, site.Name, null,
             actor.Audit(TenantActions.SiteUnpublished, site.Team, site.Name, new { previous = site.LiveVersion }), ct);
@@ -295,6 +371,7 @@ public sealed class SiteService(
     {
         var found = await FindAsync(team, name, actor, ct);
         if (found.Value is not { } site) return found;
+        if (PlatformsOnly(site, actor) is { } platforms) return new(null, platforms, 409);
 
         var usage = await store.UsageAsync(site.Team, site.Name, ct);
 
@@ -379,6 +456,11 @@ public sealed class SiteService(
 
         if (!IsJson(json)) return new(null, "A document must be JSON.", 400);
 
+        if (TeamPicture.IsReserved(row.Name) && TeamPictureRules.WriteRefusal(collection, actor, json) is { } kept)
+        {
+            return new(null, kept.Sentence, kept.Status);
+        }
+
         var at = DateTimeOffset.UtcNow;
         var written = await store.PutDocumentAsync(row.Team, row.Name, collection, id, json, actor.Label, at, ct);
 
@@ -393,6 +475,11 @@ public sealed class SiteService(
         var found = await FindAsync(team, site, actor, ct);
         if (found.Value is not { } row) return new(false, found.Refusal, found.Status);
         if (Refusal(collection, id) is { } refusal) return new(false, refusal, 400);
+
+        if (TeamPicture.IsReserved(row.Name) && TeamPictureRules.WriteRefusal(collection, actor, null) is { } kept)
+        {
+            return new(false, kept.Sentence, kept.Status);
+        }
 
         return await store.DeleteDocumentAsync(row.Team, row.Name, collection, id, ct);
     }

@@ -86,7 +86,8 @@ internal sealed partial class HostComposition
                 sp.GetRequiredService<IOutcomeStore>(),
                 sp.GetRequiredService<FolderRemoval>(),
                 sp.GetRequiredService<PluginMemberSecretStore>(),
-                sp.GetRequiredService<PluginSecretMoves>());
+                sp.GetRequiredService<PluginSecretMoves>(),
+                sp.GetRequiredService<TeamPicture>());
         });
 
         // WHAT A SOLUTION TEAM WAITS FOR, asked before every trigger's fire. The installer is late-bound:
