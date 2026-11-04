@@ -100,4 +100,22 @@ describe("the team's site links", () => {
     expect(wrapper.findAll('[data-team-site]').map((a) => a.attributes('data-team-site'))).toEqual(['status']);
     wrapper.unmount();
   });
+
+  it('links the Team picture like any live site, named as the Team picture, and nothing once it is off', async () => {
+    sites.Pictured = [site('Pictured', 'team-picture', 3), site('Pictured', 'jobs', 1)];
+    const wrapper = await links('Pictured');
+
+    const picture = wrapper.find('[data-team-site="team-picture"]');
+    expect(picture.attributes('href')).toBe('/sites/Pictured/team-picture/');
+    expect(picture.attributes('target')).toBe('_blank');
+    expect(picture.attributes('aria-label')).toBe('Open the Team picture');
+    expect(wrapper.find('[data-team-site="jobs"]').attributes('aria-label')).toBe('Open the jobs site');
+
+    // Turned off: unpublished, so no link, though the site and its data are kept.
+    sites.Pictured = [site('Pictured', 'team-picture', null), site('Pictured', 'jobs', 1)];
+    window.dispatchEvent(new Event('focus'));
+    await settle();
+    expect(wrapper.find('[data-team-site="team-picture"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
 });

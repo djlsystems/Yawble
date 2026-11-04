@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { listTeamSites, type Site } from '../api/sites';
 import type { TeamId } from '../api/types';
+import { siteLinkWords } from '../lib/teamPicture';
 
 /**
  * THE TEAM'S SITES, BESIDE ITS NAME: one globe link per published site, opening it in a new tab.
@@ -58,10 +59,10 @@ onUnmounted(() => window.removeEventListener('focus', onFocus));
       :href="site.url"
       target="_blank"
       rel="noopener"
-      :aria-label="`Open the ${site.name} site`"
+      :aria-label="`Open ${siteLinkWords(site.name)}`"
       :data-team-site="site.name"
     >
-      <q-tooltip>Open the {{ site.name }} site (version {{ site.liveVersion }})</q-tooltip>
+      <q-tooltip>Open {{ siteLinkWords(site.name) }} (version {{ site.liveVersion }})</q-tooltip>
     </q-btn>
   </span>
 </template>
