@@ -88,9 +88,9 @@ their answers are unchanged.
 - **Off by default.** Only a person can turn the setting on, and turning it off refuses the
   agent's next request.
 - **Who never gets it.** A person's API key and the worker key never get it.
-- **What an agent without it sees.** "Reading Actual Spend is a person's unless a person turns on
-  reporting.agentsMayReadSpend in Admin > Settings > Spend; no credential changes that, so report
-  what you need and ask a person."
+- **What a machine principal without it sees.** "Reading Actual Spend is a person's, and an
+  agent's only while a person has turned on reporting.agentsMayReadSpend in Admin > Settings >
+  Spend; no credential changes that, so report what you need and ask a person."
 
 Agents read these figures through the read-only `report` MCP tool
 ([cost.md](cost.md#reporting-the-report-tool)). The overview's `estimate` is the tenant's

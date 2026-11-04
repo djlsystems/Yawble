@@ -23,8 +23,9 @@ public static class SpendReading
     /// person's setting, so this names it and where it lives.
     /// </summary>
     public const string Refused =
-        "Reading Actual Spend is a person's unless a person turns on " + TenantSettings.ReportingAgentsMayReadSpendName
-        + " in " + TenantSettings.SpendTab + "; no credential changes that, so report what you need and ask a person.";
+        "Reading Actual Spend is a person's, and an agent's only while a person has turned on "
+        + TenantSettings.ReportingAgentsMayReadSpendName + " in " + TenantSettings.SpendTab
+        + "; no credential changes that, so report what you need and ask a person.";
 
     public static bool IsAgent(Principal principal) =>
         principal.Kind is PrincipalKind.Container or PrincipalKind.Concierge or PrincipalKind.TenantConcierge;
