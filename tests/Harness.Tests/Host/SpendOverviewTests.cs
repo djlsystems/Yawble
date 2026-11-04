@@ -229,21 +229,26 @@ public sealed class SpendOverviewTests(HostFixture host) : IClassFixture<HostFix
     public async Task The_overview_keeps_two_currencies_apart_and_its_projection_drops_once_a_charge_is_recorded()
     {
         using var person = await host.PersonAsync();
+
+        // THIS TEST'S OWN CURRENCIES: the class shares one Host, and another test's NOK subscription
+        // (Members_sharing_one_subscription_...) is projected over every later period too.
+        static bool Own(JsonElement a) => a.GetProperty("currency").GetString() is "USD" or "EUR";
+
         var usd = await AccountAsync(person, "Seats", "subscription", "usd", 30);
         var eur = await AccountAsync(person, "Tokens", "metered", "eur", null);
         await ExpenseAsync(person, eur, "41.20", "EUR", "2033-02-03", "2033-03-03", "invoice");
 
         var before = await JsonAsync(await person.GetAsync("/api/spend/overview?from=2033-02-01&to=2033-03-01", Ct));
-        Assert.Equal([("EUR", 41.2m)], before.GetProperty("actual").EnumerateArray().Select(a => (a.GetProperty("currency").GetString(), a.GetProperty("amount").GetDecimal())));
-        Assert.Equal([("USD", 30m)], before.GetProperty("projected").EnumerateArray().Select(a => (a.GetProperty("currency").GetString(), a.GetProperty("amount").GetDecimal())));
+        Assert.Equal([("EUR", 41.2m)], before.GetProperty("actual").EnumerateArray().Where(Own).Select(a => (a.GetProperty("currency").GetString(), a.GetProperty("amount").GetDecimal())));
+        Assert.Equal([("USD", 30m)], before.GetProperty("projected").EnumerateArray().Where(Own).Select(a => (a.GetProperty("currency").GetString(), a.GetProperty("amount").GetDecimal())));
 
         await ExpenseAsync(person, usd, "30", "USD", "2033-02-01", "2033-03-01", "subscription-charge");
 
         var after = await JsonAsync(await person.GetAsync("/api/spend/overview?from=2033-02-01&to=2033-03-01", Ct));
         Assert.Equal(
             [("EUR", 41.2m), ("USD", 30m)],
-            after.GetProperty("actual").EnumerateArray().Select(a => (a.GetProperty("currency").GetString(), a.GetProperty("amount").GetDecimal())));
-        Assert.Equal(0, after.GetProperty("projected").GetArrayLength());
+            after.GetProperty("actual").EnumerateArray().Where(Own).Select(a => (a.GetProperty("currency").GetString(), a.GetProperty("amount").GetDecimal())));
+        Assert.Equal(0, after.GetProperty("projected").EnumerateArray().Count(Own));
 
         // A bad period is one sentence, nothing else.
         var refused = await person.GetAsync("/api/spend/overview?from=2033-03-01&to=2033-02-01", Ct);
