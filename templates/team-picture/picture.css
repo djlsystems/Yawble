@@ -85,7 +85,7 @@ h2 { font-size: 16px; margin: 22px 0 10px; }
 .tp-mockup { background: var(--tp-panel); border: 1px solid var(--tp-line); border-radius: 8px; overflow: hidden; margin-bottom: 14px; }
 .tp-mockup-header { display: flex; justify-content: space-between; gap: 8px; align-items: center; padding: 8px 12px; background: #f3f4f6; border-bottom: 1px solid var(--tp-line); font-size: 12px; font-weight: 600; }
 .tp-mockup-body { padding: 12px; font-size: 12px; }
-.tp-graph-body { padding: 6px; }
+.tp-graph-body { padding: 6px; overflow-x: auto; }
 .tp-split { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
 .tp-split > .tp-mockup { margin-bottom: 0; }
 
@@ -114,7 +114,7 @@ h2 { font-size: 16px; margin: 22px 0 10px; }
 .tp-run-note-html { padding: 0 12px 10px; color: var(--tp-active-ink); font-size: 11px; }
 
 /* Diagrams and flow charts */
-.tp-graph { display: block; width: 100%; height: auto; font-family: system-ui, sans-serif; font-size: 12px; }
+.tp-graph { display: block; width: 100%; min-width: 760px; height: auto; font-family: system-ui, sans-serif; font-size: 12px; }
 .tp-frame { fill: #f8fafc; stroke: #e2e8f0; }
 .tp-frame-label { fill: #94a3b8; }
 .tp-edge { fill: none; stroke: var(--tp-unchanged); stroke-width: 1.4; }

@@ -57,6 +57,24 @@
     return text.length > max ? text.slice(0, max - 1) + '…' : text;
   }
 
+  /** Words broken into at most `maxLines` lines that fit `width`; the last line is cut if it must be. */
+  function wrap(text, width, size, maxLines) {
+    var max = Math.max(4, Math.floor(width / ((size || 12) * 0.56)));
+    var lines = [];
+    var current = '';
+    text.split(/\s+/).forEach(function (word) {
+      if (!word) return;
+      var next = current ? current + ' ' + word : word;
+      if (next.length <= max || !current) current = next;
+      else { lines.push(current); current = word; }
+    });
+    if (current) lines.push(current);
+    if (lines.length > maxLines) {
+      lines = lines.slice(0, maxLines - 1).concat([lines.slice(maxLines - 1).join(' ')]);
+    }
+    return lines.map(function (line) { return fit(line, width, size); });
+  }
+
   function idList(value) {
     return list(value, 40).filter(function (id) { return typeof id === 'string' && id.length > 0 && id.length <= 128; });
   }
@@ -157,10 +175,12 @@
     graph.nodes.forEach(function (node) {
       columns = Math.max(columns, node.col + 1);
       rows = Math.max(rows, node.r + 1);
-      node.h = node.shape === 'decision' ? 72 : 30 + 14 * Math.max(1, node.detail.length + 1);
+      node.labelLines = wrap(node.label, node.shape === 'decision' ? boxWidth * 0.6 : boxWidth - 14, 12, 2);
+      var lineCount = node.labelLines.length + node.detail.length;
+      node.h = node.shape === 'decision' ? Math.max(72, 44 + 14 * lineCount) : 30 + 14 * Math.max(1, lineCount);
       tallest = Math.max(tallest, node.h);
     });
-    var rowPitch = tallest + 34;
+    var rowPitch = tallest + 40;
     var top = options.frame ? 44 : 16;
     var width = Math.max(980, 40 + columns * colWidth);
     var height = top + rows * rowPitch + 10;
@@ -210,6 +230,15 @@
         var mid = (x1 + x2) / 2;
         d = 'M' + x1 + ',' + y1 + ' C' + mid + ',' + y1 + ' ' + mid + ',' + y2 + ' ' + x2 + ',' + y2;
         lx = mid; ly = (y1 + y2) / 2 - 6;
+      } else if (b.col < a.col) {
+        // Right to left (a reply going back out, an SMS to a phone): side to side.
+        var bx1 = a.x;
+        var by1 = a.y + a.h / 2;
+        var bx2 = b.x + b.w + 2;
+        var by2 = b.y + b.h / 2;
+        var bmid = (bx1 + bx2) / 2;
+        d = 'M' + bx1 + ',' + by1 + ' C' + bmid + ',' + by1 + ' ' + bmid + ',' + by2 + ' ' + bx2 + ',' + by2;
+        lx = bmid; ly = (by1 + by2) / 2 - 6;
       } else {
         var down = b.r >= a.r;
         var sx = a.x + a.w / 2;
@@ -255,24 +284,30 @@
       }
       group.appendChild(body);
 
-      var lines = [node.label].concat(node.detail);
-      var textClass = 'tp-node-text tp-t-' + status + (kindClass ? ' tp-t-kind' : '');
+      var labelCount = node.labelLines.length;
+      var lines = node.labelLines.concat(node.detail);
+      // An outlined shape (a decision, a start) is white inside, so its words are dark whatever its status.
+      var outlined = node.shape === 'decision' || node.shape === 'start';
+      var textClass = 'tp-node-text tp-t-' + (outlined ? 'outlined' : status) + (kindClass ? ' tp-t-kind' : '');
       var lineTop = node.y + node.h / 2 - (lines.length - 1) * 7 + 4;
       lines.forEach(function (line, index) {
-        var inner = node.shape === 'decision' ? node.w * 0.62 : node.w - 12;
-        group.appendChild(svgText(node.x + node.w / 2, lineTop + index * 14, fit(line, inner, index ? 10 : 12), textClass + (index ? ' tp-node-detail' : '')));
+        var inner = node.shape === 'decision' ? node.w * 0.6 : node.w - 14;
+        var detail = index >= labelCount;
+        group.appendChild(svgText(node.x + node.w / 2, lineTop + index * 14, fit(line, inner, detail ? 10 : 12), textClass + (detail ? ' tp-node-detail' : '')));
       });
       if (node.run) {
         group.appendChild(svg('circle', { cx: node.x + node.w - 10, cy: node.y + 10, r: 4 }, 'tp-dot tp-dot-svg'));
       }
-      group.appendChild(svg('title')).textContent = lines.join(' - ');
+      group.appendChild(svg('title')).textContent = [node.label].concat(node.detail).join(' - ');
       root.appendChild(group);
     });
 
     // Beneath the live pieces: who is on it, how long, last progress. Drawn last so it sits on top.
     graph.nodes.forEach(function (node) {
       if (!node.run || !options.describeRun) return;
-      root.appendChild(svgText(node.x + node.w / 2, node.y + node.h + 15, fit(options.describeRun(node.run), colWidth + 20, 11), 'tp-run-note'));
+      wrap(options.describeRun(node.run), colWidth, 11, 2).forEach(function (line, index) {
+        root.appendChild(svgText(node.x + node.w / 2, node.y + node.h + 15 + index * 13, line, 'tp-run-note'));
+      });
     });
 
     if (rows > 0) root.setAttribute('height', String(Math.min(height, 120 + rows * 70)));

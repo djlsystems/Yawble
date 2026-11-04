@@ -29,7 +29,7 @@
   var COLOUR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
   var COLOUR_KEYS = ['done', 'active', 'todo', 'unchanged', 'accent'];
 
-  var state = { selected: null, lastKey: null, data: null, readError: null, timer: null, inserted: 0 };
+  var state = { selected: null, lastKey: null, data: null, readError: null, timer: null, sheet: null, colours: null };
 
   // ------------------------------------------------------------------------------------------
   // Reading
@@ -164,12 +164,6 @@
   // The Concierge's layer: colours through the template's own stylesheet, never inline.
   // ------------------------------------------------------------------------------------------
 
-  /** The template's own stylesheet (index.html's <link id="tp-css">), once it has loaded. */
-  function ownSheet() {
-    var node = document.getElementById('tp-css');
-    return node && node.sheet ? node.sheet : null;
-  }
-
   function kindOrder(data, picture) {
     var settings = byId(data['tp-settings'], 'page') || {};
     var ops = byId(data['tp-ops'], 'today');
@@ -183,30 +177,38 @@
     return order;
   }
 
+  /**
+   * The Concierge's colours, as ONE constructed stylesheet adopted by the document: CSSOM, never a
+   * <style> element or a style attribute, and only `#rgb`/`#rrggbb` values reach it. (The page's own
+   * picture.css cannot be edited from script: the page runs in an opaque origin, so its own files are
+   * cross-origin to it.) A browser without constructed stylesheets keeps the template's colours.
+   */
   function applyColours(data, kinds) {
-    var sheet = ownSheet();
-    if (!sheet || typeof sheet.insertRule !== 'function') return;
-    while (state.inserted > 0) {
-      sheet.deleteRule(sheet.cssRules.length - 1);
-      state.inserted--;
-    }
     var settings = byId(data['tp-settings'], 'page') || {};
     var colours = settings.colours && typeof settings.colours === 'object' ? settings.colours : {};
+    var rules = [];
     var declarations = [];
     COLOUR_KEYS.forEach(function (key) {
       if (COLOUR.test(colours[key])) declarations.push('--tp-' + key + ':' + colours[key]);
     });
-    if (declarations.length) {
-      sheet.insertRule(':root{' + declarations.join(';') + '}', sheet.cssRules.length);
-      state.inserted++;
-    }
+    if (declarations.length) rules.push(':root{' + declarations.join(';') + '}');
     kinds.forEach(function (name, index) {
       var colour = colours['kind:' + name];
-      if (COLOUR.test(colour)) {
-        sheet.insertRule('.tp-k-' + index + '{--tp-kind:' + colour + '}', sheet.cssRules.length);
-        state.inserted++;
-      }
+      if (COLOUR.test(colour)) rules.push('.tp-k-' + index + '{--tp-kind:' + colour + '}');
     });
+    var text = rules.join('\n');
+    if (text === state.colours) return;
+    state.colours = text;
+    try {
+      if (!state.sheet) {
+        if (typeof root.CSSStyleSheet !== 'function' || !('adoptedStyleSheets' in document)) return;
+        state.sheet = new root.CSSStyleSheet();
+        document.adoptedStyleSheets = document.adoptedStyleSheets.concat([state.sheet]);
+      }
+      state.sheet.replaceSync(text);
+    } catch (error) {
+      // Colours are a layer: without them the page still draws in the template's own.
+    }
   }
 
   // ------------------------------------------------------------------------------------------
@@ -896,7 +898,8 @@
     state.lastKey = null;
     state.data = null;
     state.readError = null;
-    state.inserted = 0;
+    state.colours = null;
+    if (state.sheet) state.sheet.replaceSync('');
   }
 
   root.TeamPicture = { refresh: refresh, render: render, start: start, stop: stop, reset: reset, INTERVAL_MS: INTERVAL_MS, NOT_MEASURED: NOT_MEASURED, NOT_DRAWN: NOT_DRAWN };
