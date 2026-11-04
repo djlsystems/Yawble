@@ -2323,10 +2323,15 @@ public static class BuiltInSkills
               trend of your own. A total is the answer's own `total` or `totals`; a weighted rate
               is its `agentRate`. If the answer has no figure for something, the report says it
               has none.
-            - **The one conversion.** Agent Hours is `agentSeconds` divided by 3600, written with
-              one decimal under 100 hours and whole hours from 100, as the screens write it. A CSV
-              keeps `agent_seconds` beside it.
-            - **Money** is written as the answer gives it, with its currency code, to the cent.
+            - **The one conversion.** Agent Hours is `agentSeconds` divided by 3600, written as the
+              screens write it: under 100 hours, JavaScript's `toFixed(1)` of the hours (so 9540
+              seconds is 2.6, not 2.7); from 100, the hours rounded to a whole number. A CSV keeps
+              `agent_seconds` beside it. A plugin member has no Agent Hours: leave them out for it.
+            - **Money** is copied exactly as the answer gives it, with its currency code: never
+              rounded, never padded, never shortened. An answer of 151.445 is written 151.445.
+            - **Human Attention Time** is copied as the answer's `attentionSeconds`, written in
+              seconds (for example "2014 seconds"). It is not converted to minutes or hours:
+              that is not the one conversion.
             - **Never infer Actual Spend** from hours, rates, tokens or an estimate. Actual Spend
               is only what `spend` answers.
             - **Never add currencies.** Actual Spend and Projected are per currency. Each currency
@@ -2354,6 +2359,11 @@ public static class BuiltInSkills
               (`not-priced`) or "Estimate unavailable" (`unavailable`).
             - **Human Attention Time** of null is "no measured time", never 0. The `human` figures
               are the last eight weeks; say so beside them.
+            - **Which `outcomes` fields are the period's.** Only each outcome's `figures`, `cost`
+              and `human` are read for the period you sent. `weekly`, `throughput`,
+              `costPerCompleted` and `humanWeekly` are the last eight weeks up to now, and
+              `backlog` and `linkedWorkflows` are as they stand now, whatever the period; leave
+              them out of a period report, or put them under a heading that names their own span.
             - **No budgets.** An outcome's stored `value`, `budget` or `outcomeTotalCost` is not a
               budget. Never compare an estimate to it and never report how much of it was used.
             - **The sentence.** Wherever Actual Spend and Estimated Execution Cost both appear,
@@ -2372,7 +2382,11 @@ public static class BuiltInSkills
             ## Writing the files
 
             Write each file to the team's shared folder (`HARNESS_SHARED`), the folder a person
-            opens in Documents, named for what and when: `<subject>-<from>-to-<to>.md`.
+            opens in Documents, named for what and when: `<subject>-<from>-to-<to>.md`, where `from`
+            and `to` are the days you sent (`to` is the day after the last). Every file of one
+            report shares that stem, the `<name>` below. When `spend` was refused, the stem ends
+            `-estimates-only` (`<subject>-<from>-to-<to>-estimates-only.md`), so a later report on
+            the same period with Actual Spend never overwrites it.
 
             - **Markdown** is the default. It opens with the subject, the period (UTC, the last day
               included), when the figures were read, and which actions answered.
@@ -2388,6 +2402,10 @@ public static class BuiltInSkills
                 `actual_spend`, `projected`.
               - ISO dates, currency codes and the answer's ids; nothing inferred, nothing added
                 across currencies.
+              - **A cell a spreadsheet could run.** A text cell whose first character is `=`, `+`,
+                `-`, `@`, a tab or a carriage return gets a single quote (`'`) before it, as the
+                Spend page's own files do, so a spreadsheet reads it as text. A plain number such
+                as -12.50 is written as it is.
             - **Spreadsheets.** CSV is the spreadsheet: it opens in any spreadsheet program. The
               platform writes no XLSX.
             - **PDF.** The platform writes no PDF. Make one only through a plugin member on your

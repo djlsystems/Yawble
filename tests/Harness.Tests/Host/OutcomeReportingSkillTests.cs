@@ -40,9 +40,17 @@ public sealed class OutcomeReportingSkillTests(HostFixture host) : IClassFixture
         // CSV columns.
         "period_from", "period_to", "scope", "id", "name", "agent_seconds", "agent_hours", "currency",
         "estimated_execution_cost", "agent_rate", "rate_source", "note", "billing_type", "actual_spend", "projected", ";",
+        // The outcomes answer's fields, and how the screens and the Spend page's files write a figure or a cell.
+        "figures", "attentionSeconds", "weekly", "throughput", "costPerCompleted", "humanWeekly", "backlog",
+        "linkedWorkflows", "toFixed(1)", "=", "+", "-", "@", "'",
         // File names.
-        "<subject>-<from>-to-<to>.md", "<name>-estimated-execution-cost.csv", "<name>-actual-spend.csv", "plugin-<id>",
+        "<subject>-<from>-to-<to>.md", "<subject>-<from>-to-<to>-estimates-only.md", "-estimates-only", "<name>",
+        "<name>-estimated-execution-cost.csv", "<name>-actual-spend.csv", "plugin-<id>",
     };
+
+    /// <summary>The skill's text as sentences, so a rule is read as the sentence it is and a line added beside it is
+    /// read on its own.</summary>
+    private static string[] Sentences => Regex.Split(Flat(Body), @"(?<=[.!?])\s+(?=[A-Z*""(`-])|\s+(?=- |\| |#)");
 
     [Fact]
     public async Task The_reporting_skill_is_served_to_members_and_the_manager_and_not_to_the_concierge()
@@ -112,7 +120,7 @@ public sealed class OutcomeReportingSkillTests(HostFixture host) : IClassFixture
         Assert.DoesNotMatch(new Regex(@"\bspent\b|\bROI\b|\bsavings\b", RegexOptions.IgnoreCase), rest);
 
         // Every other "spend" is Actual Spend, the `spend` action, the setting, or its place in Settings.
-        var named = Regex.Replace(rest, @"Actual Spend|`spend`|Settings → Spend|-actual-spend\.csv|`actual_spend`", "");
+        var named = Regex.Replace(rest, @"Actual Spend|`spend`|Settings → Spend|the Spend page|-actual-spend\.csv|`actual_spend`", "");
         Assert.DoesNotMatch(new Regex(@"spend", RegexOptions.IgnoreCase), named);
     }
 
@@ -176,6 +184,112 @@ public sealed class OutcomeReportingSkillTests(HostFixture host) : IClassFixture
         {
             Assert.True(flat.Contains(rule, StringComparison.Ordinal), $"Missing: {rule}");
         }
+    }
+
+    [Fact]
+    public void The_reporting_skill_copies_money_as_given_and_writes_Agent_Hours_and_Human_Attention_Time_one_way()
+    {
+        var flat = Flat(Body);
+
+        foreach (var rule in new[]
+                 {
+                     "**Money** is copied exactly as the answer gives it, with its currency code: never rounded, never padded, never shortened.",
+                     "An answer of 151.445 is written 151.445.",
+                     "under 100 hours, JavaScript's `toFixed(1)` of the hours (so 9540 seconds is 2.6, not 2.7); from 100, the hours rounded to a whole number.",
+                     "A plugin member has no Agent Hours: leave them out for it.",
+                     "**Human Attention Time** is copied as the answer's `attentionSeconds`, written in seconds (for example \"2014 seconds\").",
+                     "It is not converted to minutes or hours: that is not the one conversion.",
+                 })
+        {
+            Assert.True(flat.Contains(rule, StringComparison.Ordinal), $"Missing: {rule}");
+        }
+
+        // "To the cent" is a rounding the skill may not ask for: the screens round, a report copies.
+        Assert.DoesNotContain("to the cent", flat, StringComparison.OrdinalIgnoreCase);
+
+        // The rule the skill names is the one the screens run (hoursFigure in web/src/lib/teamCost.ts).
+        var screens = File.ReadAllText(Path.Combine(RepoRoot(), "web", "src", "lib", "teamCost.ts"));
+        Assert.Contains("return hours < 100 ? hours.toFixed(1) : Math.round(hours).toLocaleString()", screens, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_reporting_skill_neutralises_formula_cells_as_the_Spend_files_do_names_the_period_fields_and_never_overwrites_an_estimates_only_report()
+    {
+        var flat = Flat(Body);
+
+        // Formula cells: the same first characters, and the same quote, as the Spend page's own files.
+        const string Cells = "A text cell whose first character is `=`, `+`, `-`, `@`, a tab or a carriage return gets a single quote (`'`) before it, as the Spend page's own files do";
+        Assert.Contains(Cells, flat, StringComparison.Ordinal);
+        Assert.Contains("A plain number such as -12.50 is written as it is.", flat, StringComparison.Ordinal);
+        foreach (var first in new[] { "=", "+", "-", "@", "\t", "\r" })
+        {
+            Assert.Equal("'" + first + "SUM(A1)", SpendExport.Neutral(first + "SUM(A1)"));
+        }
+
+        Assert.Equal("-12.50", SpendExport.Neutral("-12.50"));
+        Assert.Equal("Seats", SpendExport.Neutral("Seats"));
+
+        // The outcomes answer: which fields are the period's, which are the last eight weeks, which are now.
+        Assert.Contains("Only each outcome's `figures`, `cost` and `human` are read for the period you sent.", flat, StringComparison.Ordinal);
+        Assert.Contains("`weekly`, `throughput`, `costPerCompleted` and `humanWeekly` are the last eight weeks up to now", flat, StringComparison.Ordinal);
+        Assert.Contains("`backlog` and `linkedWorkflows` are as they stand now, whatever the period", flat, StringComparison.Ordinal);
+        var described = File.ReadAllText(Path.Combine(RepoRoot(), "src", "Harness.Host", "OutcomeEndpoints.cs"));
+        // The route's own description says the same of `weekly`.
+        Assert.Contains("`weekly` (the last 8 weeks, Monday-start \"", described, StringComparison.Ordinal);
+        Assert.Contains("\"UTC, whatever the period:", described, StringComparison.Ordinal);
+
+        // File names: one stem per report, and a setting-off report's never equals a setting-on report's of the same period.
+        Assert.Contains("Every file of one report shares that stem, the `<name>` below.", flat, StringComparison.Ordinal);
+        Assert.Contains("When `spend` was refused, the stem ends `-estimates-only` (`<subject>-<from>-to-<to>-estimates-only.md`), so a later report on the same period with Actual Spend never overwrites it.", flat, StringComparison.Ordinal);
+        Assert.Contains("where `from` and `to` are the days you sent (`to` is the day after the last).", flat, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A LINE ADDED BESIDE A RULE THAT UNDOES IT. The rule tests above find each rule's own sentence; these find a
+    /// sentence that says the opposite next to it: adding or converting currencies, the Spend overview's estimate
+    /// read as one team's, or Human Attention Time turned into minutes or hours.
+    /// </summary>
+    [Fact]
+    public void The_reporting_skill_holds_no_sentence_against_its_own_rules()
+    {
+        var sentences = Sentences;
+
+        // Currencies: the only sentences that join a currency to a sum, a total, an addition or a conversion are the rules.
+        string[] currencyRules =
+        [
+            "**Never add currencies.** Actual Spend and Projected are per currency.",
+            "Each currency is its own line, never converted, never added to another.",
+            "ISO dates, currency codes and the answer's ids; nothing inferred, nothing added across currencies.",
+        ];
+        var currency = new Regex(@"currenc", RegexOptions.IgnoreCase);
+        var joining = new Regex(@"\b(sum|summ|add|total|convert|combin|grand|aggregat|exchange)\w*", RegexOptions.IgnoreCase);
+        var flat = Flat(Body);
+        foreach (var rule in currencyRules) Assert.True(flat.Contains(rule, StringComparison.Ordinal), $"Missing: {rule}");
+        // A backticked name is a field or a column, not an instruction: `total` and `currency` in one table row add nothing.
+        static string Prose(string sentence) => Regex.Replace(sentence, "`[^`]*`", "");
+        var against = sentences
+            .Where(s => currency.IsMatch(Prose(s)) && joining.IsMatch(Prose(s)))
+            .Where(s => !currencyRules.Any(rule => rule.Contains(s, StringComparison.Ordinal) || s.Contains(rule, StringComparison.Ordinal)))
+            .ToList();
+        Assert.True(against.Count == 0, "Joins currencies: " + string.Join(" | ", against));
+
+        // The Spend overview's estimate is every team's, and no other sentence makes it a team's own.
+        const string EveryTeams = "The `estimate` inside the `spend` answer is every team's: it is not one team's figure.";
+        Assert.Contains(EveryTeams, flat, StringComparison.Ordinal);
+        var teams = sentences
+            .Select(s => s.Replace(EveryTeams, "", StringComparison.Ordinal))
+            .Where(s => s.Contains("`estimate`", StringComparison.Ordinal))
+            .Where(s => Regex.IsMatch(s, @"team's|team’s|own team|this team", RegexOptions.IgnoreCase))
+            .ToList();
+        Assert.True(teams.Count == 0, "Reads the overview's estimate as one team's: " + string.Join(" | ", teams));
+
+        // Human Attention Time is written in seconds: no sentence about it names minutes or hours, but the one saying not to.
+        const string NotConverted = "It is not converted to minutes or hours: that is not the one conversion.";
+        var attention = sentences
+            .Where(s => s.Contains("Attention Time", StringComparison.Ordinal) || s.Contains("attentionSeconds", StringComparison.Ordinal))
+            .Where(s => Regex.IsMatch(s, @"\b(minutes?|hours?|h|m)\b") && s != NotConverted)
+            .ToList();
+        Assert.True(attention.Count == 0, "Converts Human Attention Time: " + string.Join(" | ", attention));
     }
 
     private static string RepoRoot()
