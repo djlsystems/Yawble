@@ -163,7 +163,12 @@ The product name, Yawble, lives in the web app's presentation layer
   budgets, is its page's Cost tile and the Teams list's Cost column ([cost.md](cost.md)). The Teams
   list reads its columns and its first and third summary tiles over a period a person picks (Daily or
   Monthly, the last two months or a custom range) from `GET /api/teams/cost/period`, a read over the
-  same `ExecutionCost` pricing as every other cost figure; the eight-week reads are unchanged.
+  same `ExecutionCost` pricing as every other cost figure; the eight-week reads are unchanged. A team
+  page shares that period choice: its Cost tile, dialog breakdowns (by outcome, member and workflow) and
+  Activity line read `GET /api/teams/{team}/cost/period` (the team's Teams list row, broken down), and
+  each workflow's line in the Workflows dialog and a Kanban card's detail reads
+  `GET /api/teams/{team}/cost/workflows`, both over the same pricing. The Workflow tile's Needs you
+  count is the app bar's Needs you list filtered to the team.
 - **Spend.** Admin → Spend (`#/spend`) is the tenant's Spend page, a person's only. It shows
   **Actual Spend** (confirmed vendor expenses, per currency, never converted), **Projected**
   recurring charges (never in Actual Spend) and **Estimated Execution Cost · Agent Hours** from the

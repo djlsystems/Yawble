@@ -74,3 +74,18 @@ export function misnamedOnTeamsList(texts: readonly (string | null | undefined)[
   const costAlone = titles.map((t) => t.replace(/\s+/g, ' ').trim()).filter((t) => CostAlone.test(t));
   return [...words, ...costAlone];
 }
+
+/**
+ * What a person reads off an element, block by block: each text node on its own (so a word at an element's seam keeps
+ * its boundary - `textContent` runs `Plugin member` and `Executions` together), and every `aria-label` and `title`.
+ */
+export function readWords(root: Element | null | undefined): string[] {
+  if (!root) return [];
+  const parts: string[] = [];
+  const walker = root.ownerDocument.createTreeWalker(root, 4);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = (node.textContent ?? '').trim();
+    if (text) parts.push(text);
+  }
+  return [...parts, ...readOff(root).slice(1)];
+}

@@ -8,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 
-const { getWip, listRemovals, getTeamsCost, getTeamCost, getTeamTokens, getTeamsCostPeriod } = vi.hoisted(() => ({
+const { getWip, listRemovals, getTeamsCost, getTeamCost, getTeamTokens, getTeamsCostPeriod, getTeamCostPeriod } = vi.hoisted(() => ({
+  getTeamCostPeriod: vi.fn(),
   getWip: vi.fn(),
   listRemovals: vi.fn(),
   getTeamsCost: vi.fn(),
@@ -35,6 +36,7 @@ vi.mock('../../api/outcomes', async (importOriginal) => ({
   getTeamsCost,
   getTeamCost,
   getTeamsCostPeriod,
+  getTeamCostPeriod,
 }));
 
 import TeamsView from '../TeamsView.vue';
@@ -46,6 +48,7 @@ import { resetBody } from '../../test/mountQuasar';
 import { teamCost, Weeks, type CostOptions } from '../../test/costFixtures';
 import { misnamedOnTeamsList, readOff } from '../../test/estimateLabels';
 import { teamsCostPeriod } from '../../test/costPeriodFixtures';
+import { teamCostPeriod } from '../../test/teamPeriodFixtures';
 import { lastTwoMonths } from '../../lib/teamsPeriod';
 import CostWeeksChart from '../CostWeeksChart.vue';
 
@@ -75,6 +78,7 @@ let wrapper: VueWrapper | undefined;
 beforeEach(() => {
   localStorage.clear();
   getTeamsCostPeriod.mockResolvedValue(teamsCostPeriod());
+  getTeamCostPeriod.mockResolvedValue(teamCostPeriod());
   getWip.mockResolvedValue({ running: [], waiting: [], limit: null });
   listRemovals.mockResolvedValue([]);
   getTeamsCost.mockResolvedValue(teamsCost({ betaOver: true }));
@@ -248,8 +252,9 @@ describe('the Estimated Execution Cost column over the period', () => {
     expect(row(view, 'alpha').find('[data-teams-hours]').text()).toBe('—');
   });
 
-  it('opens that team\'s Cost dialog on a click, not the team', async () => {
+  it('opens that team\'s Cost dialog on a click, not the team, over the list\'s own period', async () => {
     getTeamsCost.mockResolvedValue(teamsCost({ betaOver: true }));
+    getTeamCostPeriod.mockResolvedValue(teamCostPeriod({ team: 'beta', over: true }));
     const { view, setActive } = await mountView();
 
     await row(view, 'beta').find('[data-teams-cost]').trigger('click');
@@ -260,7 +265,9 @@ describe('the Estimated Execution Cost column over the period', () => {
     expect(dialog.props('modelValue')).toBe(true);
     expect(dialog.props('teamId')).toBe('beta');
     expect(document.body.querySelector('[data-cost-title]')?.textContent?.trim()).toBe('Estimated Execution Cost · Beta');
-    expect(document.body.querySelector('[data-cost-row="o-docs"] [data-cost-over]')).not.toBeNull();
+    // THE DIALOG READS THE TEAM OVER THE LIST'S PERIOD: the row's figures, in more detail.
+    expect(getTeamCostPeriod).toHaveBeenCalledWith('beta', lastTwoMonths(), 'day');
+    expect(document.body.querySelector('[data-cost-row="o-billing"] [data-cost-over]')).not.toBeNull();
     expect(getTeamsCost).toHaveBeenCalledTimes(1);
     expect(getTeamCost).not.toHaveBeenCalled();
   });

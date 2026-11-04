@@ -547,6 +547,250 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
             withPeriod.GetProperty("teams").EnumerateArray().Single(t => t.GetProperty("team").GetString() == team).GetRawText());
     }
 
+    // ---- one team's period, broken down (the team page) ----
+
+    /// <summary>
+    /// THE TEAM PAGE'S READ IS THE TEAMS LIST'S ROW, AND EXECUTIONCOST BY GROUP: for the same window, by day and by month,
+    /// the team's totals, buckets and outcomes are its entry of <c>GET /api/teams/cost/period</c> byte for byte; each
+    /// member (agent and plugin apart, an unpriced plugin null - never 0), outcome and workflow is ExecutionCost's own
+    /// tally of its runs over the window; executions and active members count the runs that started; and a team with
+    /// no runs answers zeros, nulls and empty breakdowns.
+    /// </summary>
+    [Fact]
+    public async Task The_team_period_read_is_the_teams_list_row_and_ExecutionCost_by_member_outcome_and_workflow()
+    {
+        var person = await host.PersonAsync();
+        var busy = await NewTeamAsync("Team period busy");
+        var idle = await NewTeamAsync("Team period idle");
+        var outcome = await CreateAsync(person, "Team period outcome", value: "1000");
+        var from = new DateTimeOffset(2014, 10, 1, 0, 0, 0, TimeSpan.Zero);
+        var to = new DateTimeOffset(2014, 12, 1, 0, 0, 0, TimeSpan.Zero);
+
+        var linked = await LinkedAsync(outcome.Id, busy);
+        var crossing = NextCorrelation();
+        var edge = NextCorrelation();
+        await RunAsync(linked, busy, from.AddDays(2).AddHours(9), from.AddDays(2).AddHours(11), rate: "60", member: "Dev");
+        await RunAsync(crossing, busy, to.AddMonths(-1).AddHours(-1), to.AddMonths(-1).AddHours(2), rate: "90", member: "Ana");
+        await RunAsync(edge, busy, from.AddHours(-1), from.AddHours(1), rate: "60", member: "Ana");
+        await RunAsync(NextCorrelation(), busy, from.AddDays(4), from.AddDays(4).AddHours(1), rate: "30", kind: MemberRef.PluginKind, member: "Tool");
+        await RunAsync(NextCorrelation(), busy, from.AddDays(5), from.AddDays(5).AddHours(1), snapshot: true, kind: MemberRef.PluginKind, member: "Bare");
+        await RunAsync(NextCorrelation(), busy, from.AddDays(10), from.AddDays(10).AddMinutes(30), member: "Dev");
+
+        var all = await Outcomes.ListAsync(Ct);
+        var runs = ExecutionCost.Of(await Outcomes.ReadExecutionRunsAsync(from, to, pricedOnly: false, Ct), all, "USD")
+            .Where(r => r.Ledger.TeamId == busy).ToList();
+        ExecutionCost.Tally Service(Func<ExecutionCost.Run, bool> which) => TeamCostPeriod.Tally(runs.Where(which), "USD", from, to);
+
+        foreach (var bucket in new[] { "day", "month" })
+        {
+            var query = $"from={Day(from)}&to={Day(to)}&bucket={bucket}";
+            var read = await JsonAsync(await person.GetAsync($"/api/teams/{busy}/cost/period?{query}", Ct));
+            var list = await JsonAsync(await person.GetAsync($"/api/teams/cost/period?{query}", Ct));
+            var row = list.GetProperty("teams").EnumerateArray().Single(t => t.GetProperty("team").GetString() == busy);
+
+            // THE LIST'S ROW, BYTE FOR BYTE: totals, buckets, and each outcome's name, rank, totals and buckets.
+            var totals = read.GetProperty("totals");
+            foreach (var field in new[] { "agentSeconds", "cost", "agentRate", "legacyRates" })
+            {
+                Assert.Equal(row.GetProperty("totals").GetProperty(field).GetRawText(), totals.GetProperty(field).GetRawText());
+            }
+            Assert.Equal(row.GetProperty("buckets").GetRawText(), read.GetProperty("totalBuckets").GetRawText());
+            Assert.Equal(list.GetProperty("buckets").GetRawText(), read.GetProperty("buckets").GetRawText());
+            Assert.Equal(list.GetProperty("period").GetRawText(), read.GetProperty("period").GetRawText());
+            var listed = row.GetProperty("outcomes").EnumerateArray().ToList();
+            var outcomes = read.GetProperty("outcomes").EnumerateArray().ToList();
+            Assert.Equal(listed.Count, outcomes.Count);
+            for (var i = 0; i < listed.Count; i++)
+            {
+                foreach (var field in new[] { "id", "name", "rank", "totals", "buckets" })
+                {
+                    Assert.Equal(listed[i].GetProperty(field).GetRawText(), outcomes[i].GetProperty(field).GetRawText());
+                }
+            }
+
+            // THE TEAM: Dev 120, Ana 270 + the hour of the edge run inside the period, Tool 30; Bare and the run from
+            // before snapshots add no money. Agent Hours leave both plugins out.
+            Assert.Equal(480m, totals.GetProperty("cost").GetDecimal());
+            Assert.Equal(Service(_ => true).Cost, totals.GetProperty("cost").GetDecimal());
+            Assert.Equal(7200 + 10800 + 3600 + 1800, totals.GetProperty("agentSeconds").GetDouble(), 3);
+            Assert.Equal(6, totals.GetProperty("executions").GetInt32());
+            Assert.Equal(4, totals.GetProperty("activeMembers").GetInt32());
+            Assert.Equal(60, totals.GetProperty("billable").GetInt64());
+            Assert.Equal(6, totals.GetProperty("measuredRuns").GetInt32());
+
+            // BY OUTCOME: Unattributed first; the budget and the all-time total beside the outcome.
+            Assert.Equal(JsonValueKind.Null, outcomes[0].GetProperty("id").ValueKind);
+            Assert.Equal(360m, outcomes[0].GetProperty("figures").GetProperty("cost").GetDecimal());
+            Assert.Equal(Service(r => r.OutcomeId is null).Cost, outcomes[0].GetProperty("figures").GetProperty("cost").GetDecimal());
+            Assert.Equal(outcome.Id, outcomes[1].GetProperty("id").GetString());
+            Assert.Equal(120m, outcomes[1].GetProperty("figures").GetProperty("cost").GetDecimal());
+            Assert.Equal(1000m, outcomes[1].GetProperty("value").GetDecimal());
+            Assert.Equal(120m, outcomes[1].GetProperty("outcomeTotalCost").GetDecimal());
+            Assert.Equal(1, outcomes[1].GetProperty("figures").GetProperty("executions").GetInt32());
+
+            // BY MEMBER: agents first, then plugins, each by name, each ExecutionCost's tally of its runs.
+            var members = read.GetProperty("members").EnumerateArray().ToList();
+            Assert.Equal(
+                ["Ana agent", "Dev agent", "Bare plugin", "Tool plugin"],
+                members.Select(m => $"{m.GetProperty("member").GetString()} {m.GetProperty("kind").GetString()}"));
+            foreach (var member in members)
+            {
+                var name = member.GetProperty("member").GetString();
+                var service = Service(r => r.Ledger.Member == name);
+                var figures = member.GetProperty("figures");
+                Assert.Equal(service.AgentSeconds, figures.GetProperty("agentSeconds").GetDouble(), 3);
+                Assert.Equal(service.Cost is null ? "null" : service.Cost.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    figures.GetProperty("cost").GetRawText());
+            }
+            Assert.Equal(330m, members[0].GetProperty("figures").GetProperty("cost").GetDecimal());
+            Assert.Equal(82.5m, members[0].GetProperty("figures").GetProperty("agentRate").GetDecimal());
+            Assert.Equal(2, members[0].GetProperty("figures").GetProperty("executions").GetInt32());
+            Assert.Equal(120m, members[1].GetProperty("figures").GetProperty("cost").GetDecimal());
+            Assert.Equal(9000, members[1].GetProperty("figures").GetProperty("agentSeconds").GetDouble(), 3);
+            Assert.Equal(JsonValueKind.Null, members[2].GetProperty("figures").GetProperty("cost").ValueKind);
+            Assert.Equal(0, members[2].GetProperty("figures").GetProperty("agentSeconds").GetDouble());
+            Assert.Equal(1, members[2].GetProperty("figures").GetProperty("executions").GetInt32());
+            Assert.Equal(30m, members[3].GetProperty("figures").GetProperty("cost").GetDecimal());
+            Assert.Equal(0, members[3].GetProperty("figures").GetProperty("agentSeconds").GetDouble());
+            Assert.Equal(JsonValueKind.Null, members[3].GetProperty("figures").GetProperty("agentRate").ValueKind);
+
+            // BY WORKFLOW: newest first; the edge run's workflow is its hour inside the period, never the whole run.
+            var workflows = read.GetProperty("workflows").EnumerateArray().ToList();
+            Assert.Equal(6, workflows.Count);
+            Assert.Equal(workflows.Select(w => w.GetProperty("workflow").GetInt64()).OrderByDescending(w => w), workflows.Select(w => w.GetProperty("workflow").GetInt64()));
+            JsonElement WorkflowOf(long n) => workflows.Single(w => w.GetProperty("workflow").GetInt64() == n).GetProperty("figures");
+            Assert.Equal(60m, WorkflowOf(edge).GetProperty("cost").GetDecimal());
+            Assert.Equal(Service(r => r.Ledger.Correlation == edge).Cost, WorkflowOf(edge).GetProperty("cost").GetDecimal());
+            Assert.Equal(270m, WorkflowOf(crossing).GetProperty("cost").GetDecimal());
+
+            // EACH BREAKDOWN ADDS UP TO THE TEAM'S TOTAL EXACTLY: each run's part is priced once, in one group of each.
+            static decimal Sum(IEnumerable<JsonElement> rows) =>
+                rows.Select(r => r.GetProperty("figures").GetProperty("cost")).Where(c => c.ValueKind == JsonValueKind.Number).Sum(c => c.GetDecimal());
+            static double Hours(IEnumerable<JsonElement> rows) => rows.Sum(r => r.GetProperty("figures").GetProperty("agentSeconds").GetDouble());
+            Assert.Equal(480m, Sum(members));
+            Assert.Equal(480m, Sum(outcomes));
+            Assert.Equal(480m, Sum(workflows));
+            Assert.Equal(totals.GetProperty("agentSeconds").GetDouble(), Hours(members), 3);
+            Assert.Equal(totals.GetProperty("agentSeconds").GetDouble(), Hours(workflows), 3);
+            Assert.Equal(6, members.Sum(m => m.GetProperty("figures").GetProperty("executions").GetInt32()));
+
+            // A TEAM WITH NO RUNS: zero seconds, no money - never 0 - and nothing to break down.
+            var none = await JsonAsync(await person.GetAsync($"/api/teams/{idle}/cost/period?{query}", Ct));
+            Assert.Equal(0, none.GetProperty("totals").GetProperty("agentSeconds").GetDouble());
+            Assert.Equal(JsonValueKind.Null, none.GetProperty("totals").GetProperty("cost").ValueKind);
+            Assert.Equal(0, none.GetProperty("totals").GetProperty("executions").GetInt32());
+            Assert.Equal(0, none.GetProperty("totals").GetProperty("activeMembers").GetInt32());
+            Assert.Empty(none.GetProperty("outcomes").EnumerateArray());
+            Assert.Empty(none.GetProperty("members").EnumerateArray());
+            Assert.Empty(none.GetProperty("workflows").EnumerateArray());
+        }
+
+        // THE CROSSING RUN by day: Oct 31 and Nov 1, each part priced on its own.
+        var daily = await JsonAsync(await person.GetAsync($"/api/teams/{busy}/cost/period?from={Day(from)}&to={Day(to)}&bucket=day", Ct));
+        var days = daily.GetProperty("totalBuckets").EnumerateArray().ToList();
+        Assert.Equal(90m, days.Single(d => d.GetProperty("start").GetString() == "2014-10-31").GetProperty("cost").GetDecimal());
+        Assert.Equal(180m, days.Single(d => d.GetProperty("start").GetString() == "2014-11-01").GetProperty("cost").GetDecimal());
+
+        // EACH WORKFLOW ALL TIME: the edge run whole, as ExecutionCost prices it; one workflow alone when asked.
+        var everyRun = ExecutionCost.Of(await Outcomes.ReadExecutionRunsAsync(null, null, pricedOnly: false, Ct), all, "USD");
+        var whole = await JsonAsync(await person.GetAsync($"/api/teams/{busy}/cost/workflows", Ct));
+        Assert.Equal(6, whole.GetProperty("workflows").GetArrayLength());
+        var one = await JsonAsync(await person.GetAsync($"/api/teams/{busy}/cost/workflows?workflow={edge}", Ct));
+        var only = Assert.Single(one.GetProperty("workflows").EnumerateArray().ToList());
+        Assert.Equal(edge, only.GetProperty("workflow").GetInt64());
+        Assert.Equal(120m, only.GetProperty("figures").GetProperty("cost").GetDecimal());
+        Assert.Equal(everyRun.Single(r => r.Ledger.Correlation == edge).Estimate, only.GetProperty("figures").GetProperty("cost").GetDecimal());
+        Assert.Equal(7200, only.GetProperty("figures").GetProperty("agentSeconds").GetDouble(), 3);
+        Assert.Empty((await JsonAsync(await person.GetAsync($"/api/teams/{idle}/cost/workflows", Ct))).GetProperty("workflows").EnumerateArray());
+    }
+
+    /// <summary>
+    /// WHAT THE CALLER CANNOT REACH IS REFUSED: an unknown team is 404; another team's member key holding every permit
+    /// is refused both team reads with the team gate's own sentence; and a bad period, bucket or length is refused with
+    /// the Teams list read's sentence.
+    /// </summary>
+    [Fact]
+    public async Task The_team_period_and_workflow_reads_refuse_an_unknown_or_unreached_team_and_a_bad_period()
+    {
+        var person = await host.PersonAsync();
+        var mine = await NewTeamAsync("Reach mine");
+        var theirs = await NewTeamAsync("Reach theirs");
+        await RunAsync(NextCorrelation(), theirs, DateTimeOffset.UtcNow.AddHours(-2), DateTimeOffset.UtcNow.AddHours(-1), rate: "60");
+
+        foreach (var route in new[] { "cost/period", "cost/workflows" })
+        {
+            Assert.Equal(HttpStatusCode.NotFound, (await person.GetAsync($"/api/teams/no-such-team-{Guid.NewGuid():N}/{route}", Ct)).StatusCode);
+        }
+
+        var principals = host.Services.GetRequiredService<IPrincipalStore>();
+        var key = await principals.MintAsync(new ContainerId(mine, "Dev").ToString(), PrincipalKind.Container, mine, Permits.All, ct: Ct);
+        using var machine = host.Container(key);
+        foreach (var route in new[] { "cost/period", "cost/workflows" })
+        {
+            var refused = await machine.GetAsync($"/api/teams/{theirs}/{route}", Ct);
+            Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+            Assert.Equal(Harness.Host.Auth.TeamGate.NoSuchTeamMessage, (await refused.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("error").GetString());
+            Assert.Equal(HttpStatusCode.OK, (await machine.GetAsync($"/api/teams/{mine}/{route}", Ct)).StatusCode);
+        }
+
+        foreach (var (query, sentence) in new[]
+        {
+            ("from=2013-10-01", TeamCostPeriod.PeriodRefused),
+            ("from=2013-10-02&to=2013-10-01", TeamCostPeriod.PeriodRefused),
+            ("from=2013-10-01&to=2013-11-01&bucket=week", TeamCostPeriod.BucketRefused),
+            ("from=2010-01-01&to=2013-01-01&bucket=day", TeamCostPeriod.TooLongRefused),
+        })
+        {
+            var response = await person.GetAsync($"/api/teams/{mine}/cost/period?{query}", Ct);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Equal(sentence, (await response.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("error").GetString());
+        }
+
+        // NEITHER DATE: the Teams list's default period, by day.
+        var read = await JsonAsync(await person.GetAsync($"/api/teams/{mine}/cost/period", Ct));
+        var (from, to) = TeamCostPeriod.DefaultPeriod(DateTimeOffset.UtcNow);
+        Assert.Equal(Day(from), read.GetProperty("period").GetProperty("from").GetString());
+        Assert.Equal(Day(to), read.GetProperty("period").GetProperty("to").GetString());
+        Assert.Equal("day", read.GetProperty("period").GetProperty("bucket").GetString());
+    }
+
+    /// <summary>
+    /// THE TEAM PAGE'S EXISTING READS ANSWER BYTE FOR BYTE ALIKE: the eight-week team read, the Teams list's period read
+    /// and the activity read give the same bytes before and after the new reads are called, and the new reads'
+    /// parameters sent to them change nothing.
+    /// </summary>
+    [Fact]
+    public async Task The_existing_team_reads_answer_byte_for_byte_alike_beside_the_team_period_reads()
+    {
+        var person = await host.PersonAsync();
+        var team = await NewTeamAsync("Byte alike");
+        var now = DateTimeOffset.UtcNow;
+        await RunAsync(NextCorrelation(), team, now.AddHours(-3), now.AddHours(-2), rate: "60");
+
+        async Task<string> RawAsync(string url) => await (await person.GetAsync(url, Ct)).Content.ReadAsStringAsync(Ct);
+        var window = $"from={Day(now.AddDays(-3))}&to={Day(now.AddDays(1))}";
+
+        var cost = await RawAsync($"/api/teams/{team}/cost");
+        var period = await RawAsync($"/api/teams/cost/period?{window}&bucket=day");
+        var activity = await RawAsync($"/api/teams/{team}/activity");
+
+        await RawAsync($"/api/teams/{team}/cost/period?{window}&bucket=month");
+        await RawAsync($"/api/teams/{team}/cost/workflows");
+
+        Assert.Equal(cost, await RawAsync($"/api/teams/{team}/cost"));
+        Assert.Equal(cost, await RawAsync($"/api/teams/{team}/cost?{window}&bucket=month&workflow=1"));
+        Assert.Equal(period, await RawAsync($"/api/teams/cost/period?{window}&bucket=day"));
+        Assert.Equal(period, await RawAsync($"/api/teams/cost/period?{window}&bucket=day&workflow=1"));
+
+        static string WithoutClock(string raw)
+        {
+            var node = System.Text.Json.Nodes.JsonNode.Parse(raw)!.AsObject();
+            node.Remove("serverNow");
+            return node.ToJsonString();
+        }
+        Assert.Equal(WithoutClock(activity), WithoutClock(await RawAsync($"/api/teams/{team}/activity")));
+    }
+
     // ---- the teams list's summary ----
 
     [Fact]
@@ -895,7 +1139,7 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
     /// </summary>
     private async Task RunAsync(
         long correlation, string team, DateTimeOffset started, DateTimeOffset ended, long billable = 10, bool measured = true,
-        string? rate = null, string kind = MemberRef.AgentKind, bool snapshot = false, string currency = "USD")
+        string? rate = null, string kind = MemberRef.AgentKind, bool snapshot = false, string currency = "USD", string member = "Dev")
     {
         object start = DBNull.Value;
         if (rate is not null || snapshot)
@@ -905,10 +1149,10 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
                 """
                 INSERT INTO execution_snapshots (start_seq, correlation, team_id, team_name, member, member_kind,
                     rate_amount, rate_currency, rate_source, link_id, started_at)
-                VALUES ($start, $c, $team, $team, 'Dev', $kind, $rate, $currency, $source,
+                VALUES ($start, $c, $team, $team, $member, $kind, $rate, $currency, $source,
                     (SELECT MAX(id) FROM workflow_outcome_links WHERE correlation = $c), $started)
                 """,
-                ("$start", start), ("$c", correlation), ("$team", team), ("$kind", kind),
+                ("$start", start), ("$c", correlation), ("$team", team), ("$kind", kind), ("$member", member),
                 ("$rate", rate ?? (object)DBNull.Value), ("$currency", rate is null ? DBNull.Value : currency),
                 ("$source", rate is null ? "none" : "member"), ("$started", started.ToString("O")));
         }
@@ -917,9 +1161,9 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
             """
             INSERT INTO usage_ledger (run_seq, correlation, team_id, team_name, member, member_kind, run_outcome,
                 started_at, ended_at, measured, tokens_in, tokens_out, billable, start_seq)
-            VALUES ($seq, $c, $team, $team, 'Dev', $kind, 'completed', $started, $ended, $measured, $in, $out, $billable, $start)
+            VALUES ($seq, $c, $team, $team, $member, $kind, 'completed', $started, $ended, $measured, $in, $out, $billable, $start)
             """,
-            ("$seq", Interlocked.Increment(ref _run)), ("$c", correlation), ("$team", team), ("$kind", kind),
+            ("$seq", Interlocked.Increment(ref _run)), ("$c", correlation), ("$team", team), ("$kind", kind), ("$member", member),
             ("$started", started.ToString("O")), ("$ended", ended.ToString("O")), ("$measured", measured ? 1 : 0),
             ("$in", measured ? billable : (object)DBNull.Value), ("$out", measured ? 0L : (object)DBNull.Value),
             ("$billable", measured ? billable : (object)DBNull.Value), ("$start", start));

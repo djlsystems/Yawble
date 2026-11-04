@@ -36,8 +36,18 @@ import TeamStatusIcon from './TeamStatusIcon.vue';
 import type { TeamStatus } from '../lib/teamKpis';
 import TeamCostDialog from './TeamCostDialog.vue';
 import CostWeeksChart from './CostWeeksChart.vue';
-import { getTeamCost, type TeamCost } from '../api/outcomes';
-import { EstimateTitle, costSeries, costTile, priced } from '../lib/teamCost';
+import {
+  getTeamCost, getTeamCostPeriod, getTeamCostWorkflows,
+  type TeamCost, type TeamCostPeriod, type TeamPeriodWorkflow,
+} from '../api/outcomes';
+import { EstimateTitle, costTile } from '../lib/teamCost';
+import { useCostPeriodChoice } from '../lib/costPeriodChoice';
+import { bucketLabel, rangeOfChoice } from '../lib/teamsPeriod';
+import {
+  NoRunsLine, activityLine, teamPeriodPriced, teamPeriodSeries, teamPeriodTile, tileTitle, workflowLine,
+} from '../lib/teamPeriod';
+import { useNeedsYouStore } from '../stores/needsYou';
+import CostPeriodControl from './CostPeriodControl.vue';
 import WakeLines from './WakeLines.vue';
 import WorkflowName from './WorkflowName.vue';
 
@@ -252,11 +262,99 @@ watch(() => props.teamId, () => {
 function openCost() {
   costOpen.value = true;
   void readCost();
+  void readPeriod();
 }
 
-const costMoney = computed(() => (cost.value ? priced(cost.value) : false));
+/**
+ * THE BUDGET WORDS STILL READ THE EIGHT WEEKS: the bar, the budget line, `⚠ n over`, `+ X on work with no budget` and
+ * the notes come from `costTile` over `GET /api/teams/{team}/cost`, unchanged until outcome budgets are settled.
+ */
 const costTileWords = computed(() => (cost.value ? costTile(cost.value) : null));
-const costChartSeries = computed(() => costSeries(cost.value?.outcomes ?? []));
+
+/**
+ * THE PERIOD THE TEAM PAGE SHOWS: the Teams list's own choice (`harness.teamsCostPeriod`), picked through the same
+ * control, so a team opened from the list shows the row that was clicked. The tile's figure, Agent Hours, rate, chart
+ * and footnote, the dialog's headline and breakdowns and the Activity tile's line all come from ONE read,
+ * `GET /api/teams/{team}/cost/period`, made again when the team or the period changes and when the dialog opens.
+ */
+const { choice } = useCostPeriodChoice();
+const period = ref<TeamCostPeriod | null>(null);
+const periodFailed = ref(false);
+let periodSeq = 0;
+
+async function readPeriod() {
+  const seq = ++periodSeq;
+  const team = props.teamId;
+  const asked = choice.value;
+  periodFailed.value = false;
+
+  try {
+    const answer = await getTeamCostPeriod(team, rangeOfChoice(asked), asked.bucket);
+    if (seq === periodSeq) period.value = answer;
+  } catch {
+    if (seq === periodSeq) {
+      period.value = null;
+      periodFailed.value = true;
+    }
+  }
+}
+
+watch(() => props.teamId, () => {
+  period.value = null;
+});
+watch([() => props.teamId, choice], () => void readPeriod(), { immediate: true });
+
+const tileHeading = computed(() => tileTitle(choice.value));
+const periodWords = computed(() => (period.value ? teamPeriodTile(period.value) : null));
+const periodMoney = computed(() => (period.value ? teamPeriodPriced(period.value) : false));
+const periodChartSeries = computed(() => (period.value ? teamPeriodSeries(period.value) : []));
+const periodColumnTitle = computed(() => {
+  const bucket = period.value?.period.bucket ?? choice.value.bucket;
+  return (start: string) => bucketLabel(start, bucket);
+});
+
+/** The Activity tile's line for the period: executions, Agent Hours and active members, from the same read. */
+const periodActivity = computed(() => (period.value ? activityLine(period.value.totals) : null));
+
+/**
+ * NEEDS YOU, THIS TEAM'S PART: the header's one list (`GET /api/needs-you`, held by the Needs you store) filtered to
+ * this team - never counted a second way. Null before the list has been read.
+ */
+const needsYou = useNeedsYouStore();
+const needsYouCount = computed(() => needsYou.countFor(props.teamId));
+
+/**
+ * EACH WORKFLOW'S ONE LINE in the Workflows dialog: `GET /api/teams/{team}/cost/workflows`, every run of each workflow
+ * whole, read when the dialog opens. A workflow with no runs reads no hours and no estimate.
+ */
+const workflowCosts = ref<Map<number, TeamPeriodWorkflow> | null>(null);
+const workflowCurrency = ref('USD');
+let workflowCostSeq = 0;
+
+async function readWorkflowCosts() {
+  const seq = ++workflowCostSeq;
+  try {
+    const answer = await getTeamCostWorkflows(props.teamId);
+    if (seq !== workflowCostSeq) return;
+    workflowCosts.value = new Map(answer.workflows.map((w) => [w.workflow, w]));
+    workflowCurrency.value = answer.money.currency;
+  } catch {
+    if (seq === workflowCostSeq) workflowCosts.value = null;
+  }
+}
+
+watch(() => props.teamId, () => {
+  workflowCosts.value = null;
+});
+watch(workflowOpen, (showing) => {
+  if (showing) void readWorkflowCosts();
+});
+
+function rowCostLine(row: WorkflowRow): string | null {
+  if (!workflowCosts.value) return null;
+  const entry = workflowCosts.value.get(row.correlation);
+  return entry ? workflowLine(entry.figures, workflowCurrency.value) : NoRunsLine;
+}
 
 /** The team's name, for the Cost dialog's title. */
 const teamName = computed(() => useConsoleStore().teams.find((t) => t.id === props.teamId)?.name ?? props.teamId);
@@ -644,6 +742,8 @@ function showThread(row: WorkflowRow) {
 </script>
 
 <template>
+  <!-- THE PERIOD the Cost tile, its dialog and the Activity tile's line follow: the Teams list's control and choice. -->
+  <div class="team-kpi-period" data-team-period><CostPeriodControl /></div>
   <div class="team-kpi-strip" role="group" aria-label="Team status" aria-live="polite">
     <!-- WORKFLOW. Working, Queued and Stopped are the member line here rather than tiles of their
          own: as tiles they almost always read `2 of 4`, `0`, `0` and none of them answers the
@@ -773,6 +873,8 @@ function showThread(row: WorkflowRow) {
         <!-- THE WORKFLOWS THE DIALOG LISTS, BY STATE, only the states that have one: what is
              running, what finished, what was closed, what waits. -->
         <span v-if="tile.states" class="team-kpi-states" data-test="workflow-states">{{ tile.states }}</span>
+        <!-- NEEDS YOU, this team's part of the header's one list: zero is said, unknown is not. -->
+        <span v-if="needsYouCount !== null" class="team-kpi-states" data-test="workflow-needs-you">Needs you · {{ needsYouCount }}</span>
         <q-tooltip>Where the run time went — click for the breakdown</q-tooltip>
       </button>
     </div>
@@ -782,30 +884,37 @@ function showThread(row: WorkflowRow) {
       :team-id="teamId"
       :containers="containers"
       :workflows="workflows"
+      :period-line="periodActivity"
     >
       <template v-if="status" #status>
         <TeamStatusIcon :status="status" :held="heldMembers(containers)" :workflows="workflows" />
       </template>
     </TeamStatisticsTile>
 
-    <!-- ESTIMATED EXECUTION COST, LAST 8 WEEKS: dollars by outcome against the budgets of what the team serves, or agent
-         hours while no rate is set - never $0 for unpriced time. The whole tile opens the Cost
-         dialog, whose Tokens tab is what this tile used to show. -->
+    <!-- ESTIMATED EXECUTION COST OVER THE PERIOD: the team's figure, Agent Hours at the weighted rate and the trend by
+         outcome on the team's own scale, from the period read; Estimate unavailable when it ran unpriced - never $0.
+         The budget bar and lines under it still read the eight weeks (outcome budgets are not settled yet). The whole
+         tile opens the dialog, whose Tokens tab is what this tile used to show. -->
     <button type="button" class="team-kpi team-kpi--cost" data-cost-tile @click="openCost">
-      <div class="team-kpi-label">{{ EstimateTitle }} · last 8 weeks</div>
-      <template v-if="cost && costTileWords">
+      <div class="team-kpi-label" data-cost-label>{{ tileHeading }}</div>
+      <template v-if="period && periodWords">
         <div class="team-kpi-cost-row">
-          <div class="team-kpi-value mono" data-cost-value>{{ costTileWords.value }}</div>
+          <div class="team-kpi-value mono" data-cost-value>{{ periodWords.value }}</div>
           <CostWeeksChart
-            :weeks="cost.weeks"
-            :series="costChartSeries"
-            :in-money="costMoney"
-            :currency="cost.money.currency"
+            :weeks="period.buckets"
+            :series="periodChartSeries"
+            :in-money="periodMoney"
+            :currency="period.money.currency"
+            :column-title="periodColumnTitle"
             size="tile"
           />
         </div>
-        <div v-if="costTileWords.detail" class="team-kpi-detail mono" data-cost-detail>{{ costTileWords.detail }}</div>
-        <div v-if="costTileWords.footnote" class="team-kpi-detail os-text-muted" data-cost-footnote>{{ costTileWords.footnote }}</div>
+        <div class="team-kpi-detail mono" data-cost-detail>{{ periodWords.detail }}</div>
+        <div v-if="periodWords.footnote" class="team-kpi-detail os-text-muted" data-cost-footnote>{{ periodWords.footnote }}</div>
+      </template>
+      <div v-else-if="periodFailed" class="team-kpi-value team-kpi-unavailable">unavailable</div>
+      <div v-else class="team-kpi-value team-kpi-unavailable">—</div>
+      <template v-if="cost && costTileWords">
         <template v-if="costTileWords.bar !== null">
           <div
             class="team-kpi-cost-bar"
@@ -824,8 +933,6 @@ function showThread(row: WorkflowRow) {
         </template>
         <div v-if="costTileWords.note" class="team-kpi-claim team-kpi-cost-note" data-cost-note>{{ costTileWords.note }}</div>
       </template>
-      <div v-else-if="costFailed" class="team-kpi-value team-kpi-unavailable">unavailable</div>
-      <div v-else class="team-kpi-value team-kpi-unavailable">—</div>
       <q-tooltip>{{ EstimateTitle }} by outcome - each run at the rate it started with, not money paid - and the tokens behind it. Click for the breakdown</q-tooltip>
     </button>
   </div>
@@ -921,6 +1028,9 @@ function showThread(row: WorkflowRow) {
             >
               Outcome: {{ row.outcome }}
             </div>
+
+            <!-- THE WORKFLOW'S ONE LINE: its Agent Hours and Estimated Execution Cost over all its runs. -->
+            <div v-if="rowCostLine(row)" class="text-caption mono workflow-row-cost" data-workflow-cost>{{ rowCostLine(row) }}</div>
 
             <!-- TOKENS AGAINST THE BUDGET IN FORCE for one workflow, as the tile's bar and line say
                  it. Absent with no budget; unmeasured spend names the limit and draws no bar. -->
@@ -1230,6 +1340,8 @@ function showThread(row: WorkflowRow) {
     :containers="containers"
     :cost="cost"
     :cost-failed="costFailed"
+    :period="period"
+    :period-failed="periodFailed"
     :usage="usage"
   />
 </template>
@@ -1264,6 +1376,12 @@ function showThread(row: WorkflowRow) {
 /* THE STRIP SIZES ITSELF. This component has two root nodes (the strip and the
    dialog), so a class from IndexPage would silently never land — same trap as
    ContainerCard. The rule lives here. */
+.team-kpi-period {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 8px;
+}
+
 .team-kpi-strip {
   display: flex;
   flex-wrap: wrap;

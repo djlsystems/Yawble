@@ -152,3 +152,13 @@ export function needsYouOpenWords(open: NeedsYouOpen): string {
       return 'Open Admin → Connections, to edit, reconnect or test this connection'
   }
 }
+
+/**
+ * THE ROWS OF THE ONE LIST THAT ARE A TEAM'S: those whose `team` is it, and a connection's row on each team it holds up
+ * (the route names only the first as `team`). A filter of the route's own rows, never a second count: the team page's
+ * Workflow tile says how many.
+ */
+export function needsYouOnTeam(items: readonly NeedsYouItem[], team: string): NeedsYouItem[] {
+  const same = (id: string) => id.toLowerCase() === team.toLowerCase()
+  return items.filter((item) => same(item.team.id) || (item.connection?.holds.some((hold) => same(hold.team.id)) ?? false))
+}

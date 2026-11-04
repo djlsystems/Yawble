@@ -18,6 +18,8 @@ import DiscussWithConcierge from './DiscussWithConcierge.vue';
 import { askForCard } from '../lib/conciergeDecision';
 import { boardHref, memberHref } from '../lib/consoleLinks';
 import type { TeamId } from '../api/types';
+import { getTeamCostWorkflows } from '../api/outcomes';
+import { NoRunsLine, workflowLine } from '../lib/teamPeriod';
 
 /**
  * A card, opened.
@@ -50,6 +52,7 @@ const ownItem = computed(() =>
   card.value?.item != null && cardWorkflow.value?.item?.id !== card.value.item ? card.value.item : null);
 const $q = useQuasar();
 
+
 const open = computed({
   get: () => kanban.selectedId !== '',
   set: (value: boolean) => {
@@ -60,6 +63,33 @@ const open = computed({
 /** The board's copy renders immediately; the fetched detail fills in the trail and attributes. */
 const card = computed(() => kanban.detail ?? kanban.selectedCard);
 const colour = computed(() => (card.value ? colourFor(card.value) : 'slate'));
+
+/**
+ * THE WORKFLOW'S ONE LINE: its Agent Hours and Estimated Execution Cost over every run of it, from
+ * `GET /api/teams/{team}/cost/workflows?workflow=N` - the line its row in the Workflows dialog carries. Read when a
+ * card opens; nothing while it is read or when it could not be.
+ */
+const costLine = ref<string | null>(null);
+let costFor = '';
+
+watch(
+  () => (card.value ? `${card.value.team}#${card.value.workflowSeq}` : ''),
+  async (key) => {
+    costFor = key;
+    costLine.value = null;
+    if (!key || !card.value) return;
+    const { team, workflowSeq } = card.value;
+    try {
+      const answer = await getTeamCostWorkflows(team, workflowSeq);
+      if (costFor !== key) return;
+      const entry = answer.workflows.find((w) => w.workflow === workflowSeq);
+      costLine.value = entry ? workflowLine(entry.figures, answer.money.currency) : NoRunsLine;
+    } catch {
+      if (costFor === key) costLine.value = null;
+    }
+  },
+  { immediate: true },
+);
 
 /** The open decision this card is waiting on, for "Discuss with Concierge"; null otherwise. */
 const decision = computed(() => (card.value ? askForCard(card.value, undefined) : null));
@@ -294,6 +324,8 @@ function when(value: string | null | undefined): string {
           />
           <DiscussWithConcierge v-if="decision" :decision="decision" />
         </div>
+
+        <div v-if="costLine" class="text-caption mono q-mt-sm k-panel-cost" data-card-cost>{{ costLine }}</div>
 
         <!-- A WAKE IS SET IN THIS CARD'S WORKFLOW: when, on the reader's clock, and why, with a
              person's Cancel. -->

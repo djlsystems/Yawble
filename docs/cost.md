@@ -9,10 +9,12 @@ dialog that tile opens, and the **Estimated Execution Cost** and **Agent Hours**
 its hours times the rate it started with. It is not what was paid or owed to any vendor, and none
 of these screens call it spend.
 
-Every figure comes from the usage ledger. The team page's tile and dialog, and the summary's Budgets
-tile, read the last eight weeks (Monday-start weeks in UTC, oldest first, the same weeks the Outcomes
-dashboard uses); the Teams list's columns and its Estimated Execution Cost and Where it goes tiles
-read the period chosen above the list ([below](#the-teams-lists-period)). The hours are measured;
+Every figure comes from the usage ledger. The Teams list's columns and its Estimated Execution Cost
+and Where it goes tiles, and the team page's tile, its dialog, the Activity tile's period line and
+each workflow's line, read the period chosen above the list or the team page - one shared choice
+([below](#the-teams-lists-period)). The summary's Budgets tile and every budget word on the team page
+still read the last eight weeks (Monday-start weeks in UTC, oldest first, the same weeks the Outcomes
+dashboard uses). The hours are measured;
 only the money is an estimate.
 
 ## How a run is priced
@@ -445,7 +447,10 @@ included, read as UTC days). **Last two months** goes back to the default, which
 clock. The period's name sits beside the control: `Last two months · Oct 1, 2026 – Nov 30, 2026`, a
 whole month by its name, or a range by its first and last day, with `UTC`. The choice - the bucket,
 and a custom range or none - is remembered in this browser under `harness.teamsCostPeriod`, beside
-`harness.teamSort` and `harness.teamsShown`.
+`harness.teamSort` and `harness.teamsShown`. A team page shows the same control and shares that one
+choice (`web/src/lib/costPeriodChoice.ts`, `CostPeriodControl.vue`): a team opened from the list shows
+the row that was clicked, in detail, and a period picked on a team page is the list's when the person
+goes back.
 
 The **Estimated Execution Cost** and **Agent Hours** columns, and the summary's **Estimated Execution
 Cost** and **Where it goes** tiles, follow it; **Budgets** and **Right now** do not. Every figure is
@@ -496,22 +501,25 @@ say the same without colour.
 
 ## The team page's tile
 
-The team page's **Estimated Execution Cost · last 8 weeks** tile, beside Activity and Workflow
-Status, shows:
+The period control sits above the team page's three tiles, at the right. The **Estimated Execution
+Cost · <period>** tile (`last two months`, a whole month by its name, or a first and last day),
+beside Activity and Workflow, shows:
 
-- **The team's estimate in dollars** over the eight weeks, with `<h> Agent Hours at <rate>/h`
-  under it, the rate being the priced agent time's own.
-- **A small stacked weekly chart**, one colour per outcome, Unattributed in neutral gray at the
-  bottom of each week.
-- **With budgets** - when any outcome the team serves has one - a bar and
-  `<estimate> of <budget> budget (<n>%)`. Estimate and budget are summed over the budgeted outcomes
-  only, each outcome's estimate being its total across all teams. When the team also worked on unbudgeted
-  outcomes or on no outcome, a second line says `+ <amount> on work with no budget`.
-- **Over budget.** When any outcome's total estimate passes its budget, the bar turns the critical
-  colour and the line ends `⚠ <n> over`, `<n>` being how many outcomes are over.
-- **No budgets.** No bar, and `No outcome budget set`.
-- **No priced run.** Agent Hours instead of dollars, the chart in hours, and
-  `Set an agent hourly rate in Outcomes to see dollars`.
+- **The team's Estimated Execution Cost over the period**, `GET /api/teams/{team}/cost/period`'s
+  `totals.cost` - the same figure as the team's Teams list row - with the `*` footnote marker and its
+  words under it when a reconstructed or fallback rate priced part of it. `Estimate unavailable` when
+  the team ran in the period and nothing was priced; `—` when it did not run. Never $0 for unpriced
+  time.
+- `<h> Agent Hours at <rate>/h` under it: the period's Agent Hours and the route's weighted rate (the
+  priced agent time's money over its hours), never the tenant setting; `<h> Agent Hours` alone when no
+  agent time was priced.
+- **A small stacked trend chart** over the period's days or months, one colour per outcome,
+  Unattributed in neutral gray at the bottom, on **the team's own scale** (its tallest day or month),
+  not the Teams list's shared one.
+- **The budget words are unchanged and still read the eight weeks** (`GET /api/teams/{team}/cost`):
+  with budgets a bar and `<estimate> of <budget> budget (<n>%)`, `+ <amount> on work with no budget`,
+  `⚠ <n> over` in the critical colour; `No outcome budget set`; and, when the eight weeks had no priced
+  run, `Set an agent hourly rate in Outcomes to see dollars`.
 
 Clicking the tile opens the team's Estimated Execution Cost dialog.
 
@@ -520,25 +528,62 @@ Clicking the tile opens the team's Estimated Execution Cost dialog.
 Titled **Estimated Execution Cost · <team>**, with the instance's default rate as set now on the
 right (`Default agent rate $60/h (USD) · Change in Outcomes`, or `No default agent rate set (USD)`).
 That is the rate a new agent run with no rate of its own inherits, not the rate the figures were
-priced at. It has two tabs.
+priced at. It has two tabs. Opened from the team page it uses the page's period read; opened from the
+Teams list it reads `GET /api/teams/{team}/cost/period` itself, for the list's period.
 
-**Estimated Execution Cost** (the tab it opens on):
+**Estimated Execution Cost** (the tab it opens on), over the period, with the period control at its top:
 
-- Headline figures: **Estimated Execution Cost**, **Agent time** (in Agent Hours), **Budget used**
-  (only when an outcome has a budget), and **Per 1M billable tokens** - the estimate divided by the
-  billable tokens in millions.
-- A legend, and a large stacked weekly chart by outcome on one money axis (hours without a rate).
-  Hovering a week lists each outcome's cost and hours and the week's total.
-- A table: one row per outcome, then **Unattributed**, then **Team total**, with **Outcome**,
-  **Agent Hours**, **Estimated Execution Cost**, **Budget** (a small bar and `<outcome total> / <budget>`, `⚠ over` when the
-  outcome is over, `None set` when it has none), **Billable tokens** and **$ / 1M tokens**.
-- A note under the table: the estimate prices each run at the rate it started with, not money
-  paid, and the per-million figure explains the dollars against the tokens behind them. Tokens are
-  not billed here.
+- Headline figures: **Estimated Execution Cost · <period>** (the tile's figure), **Agent Hours** with
+  `<h> Agent Hours at <rate>/h`, **Budget used** (only when an outcome has a budget; still the
+  eight-week answer's budgeted outcomes against their all-time totals), and **Per 1M billable tokens** -
+  the estimate divided by the billable tokens of the runs that ended in the period, in millions.
+- A legend, and a large stacked chart by outcome over the period's days or months, on the team's own
+  scale (hours without a priced run). Hovering a column lists each outcome's figure and the column's total.
+- **Breakdowns** (By outcome, By member, By workflow), each row the route's own figure:
+  - **By outcome:** one row per outcome, then **Unattributed** (runs with no outcome), then **Team
+    total**, with **Executions**, **Agent Hours**, **Estimated Execution Cost**, **Budget** (a small bar
+    and `<outcome total> / <budget>` - the outcome's all-time total across every team, as before -
+    `⚠ over`, or `None set`), **Billable tokens** and **$ / 1M tokens**.
+  - **By member:** agent members (**Executions**, **Agent Hours**, **Estimated Agent Cost**) and plugin
+    members (**Executions**, **Estimated Plugin Cost**) in two tables. A plugin member's time is never
+    Agent Hours; a plugin member with no rate of its own reads **Not priced**, never the agent default.
+  - **By workflow:** each workflow that ran in the period, newest first, with **Executions**, **Agent
+    Hours** and **Estimated Execution Cost**.
+- **They add up.** Each run's part inside the period is priced once - in the team's total and in its
+  row of each breakdown - and each breakdown splits the team's runs with none left over, so each
+  breakdown's rows add up to the Team total exactly. Only the chart's columns are priced apart (a run
+  crossing a day or month edge is priced per column), so they can add up to a cent away from it, the
+  documented one-cent rule. A run crossing the period's edge counts only its part inside.
+- A note under the breakdown: the estimate prices each run at the rate it started with, not money
+  paid; the per-million figure explains the dollars against the tokens behind them. Tokens are not
+  billed here.
 
 **Tokens** is what the Tokens dialog showed before: the chart of the team's runs from the usage
 ledger with its metric switch, then the team total from the message log with its in, cache read,
 cache write and out breakout, by agent brand and by member.
+
+## The team page's Activity and Workflow tiles
+
+- **Activity.** The spans are unchanged and keep the team's own window. Under them, one line for the
+  period: `<n> executions · <h> Agent Hours · <m> active members`, from the same period read's
+  `totals` as the Cost tile - so its Agent Hours are the tile's, by construction. An **execution** is one
+  run that started and whose span meets the period (a run crossing an edge counts in each period it
+  touches); a member is **active** when it has one. The activity read (`GET /api/teams/{team}/activity`)
+  counts no executions and scopes by the team's creation and activity-from rather than the cost floor,
+  so these come from the cost read.
+- **Workflow.** Name and layout are unchanged; active, completed and blocked counts as before. Beside
+  them, `Needs you · <n>`: the app bar's one Needs you list (`GET /api/needs-you`, held by the web's
+  Needs you store) filtered to the team - the rows whose team is this one, and a connection row on
+  every team it holds up. Zero is shown; nothing is shown before the list has been read.
+
+## A workflow's line
+
+Each row of the team page's Workflows dialog, and an opened Kanban card's detail, carries one line:
+`Agent Hours <h> · Estimated Execution Cost <amount>`, from `GET /api/teams/{team}/cost/workflows`
+(the dialog reads every workflow once when it opens; a card reads its own with `?workflow=`). It is
+the workflow's whole life - every run of it on the team, each priced whole from its own snapshot -
+not the period. `Estimate unavailable` when it ran unpriced; `Agent Hours 0.0 · Estimated Execution
+Cost —` when it has no runs. The cards on the board are unchanged.
 
 ## The Teams list's Estimated Execution Cost and Agent Hours columns
 
@@ -547,8 +592,7 @@ column per day or month, Unattributed first in neutral gray, each outcome in its
 period's **Estimated Execution Cost** beside it, then the team's **Agent Hours** in a column of their
 own, so a team with little work stays readable. `⚠` follows the total when one of the team's
 outcomes is over its budget (that mark still reads the eight-week figures, as the Budgets tile does).
-Clicking the chart opens that team's Estimated Execution Cost dialog, which shows the last eight
-weeks; clicking anywhere else on the row opens the team, as before. The whole list is read in one
+Clicking the chart opens that team's Estimated Execution Cost dialog over the same period; clicking anywhere else on the row opens the team, as before. The whole list is read in one
 call.
 
 - **One relative scale.** Every row's chart is drawn against the same top: the tallest day or month of
@@ -567,7 +611,6 @@ call.
   directions.
 
 This column replaced the Activity column, and its **Same time span** switch and legend went with it.
-The team page's Activity tile is unchanged.
 
 ## Colours
 
@@ -582,7 +625,8 @@ covers only the last eight weeks, an outcome can move up a slot when an older ou
 work for eight weeks. Dark mode uses the same palette's dark steps.
 Colour is never the only cue: the dialog's table carries every figure the chart draws. Over the Teams
 list's period, the list's rows and its Where it goes tile take each outcome's rank among the outcomes
-served in that period instead of the eight weeks, by the same order.
+served in that period instead of the eight weeks, by the same order; so do the team page's tile and
+its dialog, ranked among the outcomes served by the teams the caller reaches, as on the list.
 
 ## Routes
 
@@ -597,11 +641,13 @@ served in that period instead of the eight weeks, by the same order.
 | `GET /api/spend/export/billing-accounts`, `.../expenses`, `.../period-summary`, `.../estimated-execution-cost` | The Spend page's CSV files for a period (`?from=&to=`, the overview's period rule): every billing account; every expense row of the period with its correction chain and whether it counts in Actual Spend; the overview's figures one row each; and Estimated Execution Cost with Agent Hours by team and by outcome (Unattributed included), one row per `rate_source`, agent and plugin apart. Stable snake_case columns, `instance_id` on every row, per currency and never converted, formula cells neutralised. See [spend.md](spend.md#csv-export). People only. |
 | `GET /api/teams/cost` | The same for every team at once (`money`, `weeks`, `teams[]`), for the Teams list. Each entry and each team also carry `human` (above). |
 | `GET /api/teams/cost/period` | The Teams list's period (`?from=&to=` as `YYYY-MM-DD`, midnight UTC, `to` exclusive, the previous and current UTC month when neither is sent; `?bucket=day` (the default) or `month`; at most 366 days by day or 60 months by month; anything else is refused, 400, with one sentence): `money`, `period` (`from`, `to`, `bucket`), `buckets` (each bucket's first day), and per reachable team `totals` (`agentSeconds`, `cost`, `agentRate`, `legacyRates`) over the whole period, `buckets` (`start`, `agentSeconds`, `cost`) and `outcomes` (Unattributed first, each with `rank`, `totals` and `buckets`); the reached teams' `total`, `totalBuckets` and `prior` (the same length just before); and `outcomes` as the summary gives them. Every figure is `ExecutionCost`'s, one tally per span, `cost` null - never 0 - when nothing was priced. The same permit as the other cost reads. |
+| `GET /api/teams/{team}/cost/period` | One team over the same period (`?from=&to=&bucket=`, read and refused exactly as `GET /api/teams/cost/period`; 404 for an unknown team, the team gate for a machine principal): `team`, `money`, `period`, `buckets`; `totals` - the team's entry of `GET /api/teams/cost/period` for that period, byte for byte - with `billable`, `measuredRuns`, `unmeasuredRuns` (tokens of runs that ended in the period), `executions` and `activeMembers`; `totalBuckets` (the entry's `buckets`); `outcomes` (the entry's, each with `value`, `outcomeTotalCost` and `figures`); `members` (agent members first, then plugin members, by name: `member`, `kind`, `figures`) and `workflows` (newest first: `workflow`, `figures`). Each `figures` is `agentSeconds`, `cost`, `agentRate`, `legacyRates`, `executions`, `billable`, `measuredRuns`, `unmeasuredRuns`. Each breakdown adds up to `totals` exactly. The same permit as the other cost reads. |
+| `GET /api/teams/{team}/cost/workflows` | Each workflow of the team, all time (`?workflow=N` for one): `team`, `money`, `workflows` (`workflow`, `figures` as above, every run whole). A workflow with no runs is absent. The same permit as the other cost reads. |
 | `GET /api/teams/cost/summary` | The summary above the Teams list: `rate` (the tenant default as set now, null without one); the eight `weeks` (`weekStart`, `agentSeconds`, `cost`), `periodStart` and `periodEnd`; the eight weeks' `total` and the eight before as `prior`, each with `agentRate`; per outcome (`id` null for Unattributed) its `name`, `rank`, `agentSeconds`, `cost`, `budget` and `outcomeTotalCost` (its cost across every team; this field was `spentTotal` before); and `rightNow` (`openWorkflows`, `membersRunning`, `waitingOnYou`); `human` (the reached teams' human figures, with `unattributed` and `waitingSeconds`) and each outcome's `human`. `cost` is null, never 0, when no run was priced. |
 
 In the web app, one module decides every outcome's colour: `web/src/lib/outcomeColours.ts`. Its
 `outcomeColour({ id, rank })` returns the colour for one outcome entry, `outcomeColours(entries)` builds
 an id-to-colour map (keyed `null` for Unattributed) from one team's entries or every team's, and
 `colourForRank(rank)` returns the colour for a bare rank. The summary's Where it goes tile, the teams
-list's Estimated Execution Cost column, the team page's tile and its dialog all use it, and any new cost view should use it too, so that an outcome is never
+list's Estimated Execution Cost column, the team page's tile and its dialog (`web/src/lib/teamPeriod.ts`) all use it, and any new cost view should use it too, so that an outcome is never
 two colours.

@@ -601,3 +601,75 @@ export interface TeamsCostPeriod {
 export const getTeamsCostPeriod = (range: CostPeriodRange, bucket: CostBucket) =>
   json<TeamsCostPeriod>(
     `/api/teams/cost/period?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}&bucket=${bucket}`)
+
+// ---- One team's figures over the period, broken down: the team page ----------------------------
+
+/** One group's figures over the period: `cost` null - never 0 - when nothing in it was priced. */
+export interface TeamPeriodFigures {
+  /** Agent-kind time only: a plugin member's is 0. */
+  agentSeconds: number
+  cost: number | null
+  agentRate: number | null
+  legacyRates: string[]
+  /** Its runs that started and whose span meets the period. */
+  executions: number
+  /** Tokens of its runs that ended in the period; a run that reported none is in `unmeasuredRuns`. */
+  billable: number
+  measuredRuns: number
+  unmeasuredRuns: number
+}
+
+/** The team's figures over the period: its Teams list row's, with tokens, executions and active members. */
+export interface TeamPeriodTotals extends CostSummaryTotals {
+  billable: number
+  measuredRuns: number
+  unmeasuredRuns: number
+  executions: number
+  activeMembers: number
+}
+
+/** One outcome the team's runs served (or Unattributed, `id` null): the list row's entry, budget and all-time total beside it. */
+export interface TeamPeriodOutcome extends CostPeriodTeamOutcome {
+  value: number | null
+  outcomeTotalCost: number | null
+  figures: TeamPeriodFigures
+}
+
+export interface TeamPeriodMember {
+  member: string
+  kind: 'agent' | 'plugin'
+  figures: TeamPeriodFigures
+}
+
+export interface TeamPeriodWorkflow {
+  workflow: number
+  figures: TeamPeriodFigures
+}
+
+/** `GET /api/teams/{team}/cost/period`. */
+export interface TeamCostPeriod {
+  team: string
+  money: TeamCostMoney
+  period: CostPeriodRange & { bucket: CostBucket }
+  buckets: string[]
+  totals: TeamPeriodTotals
+  totalBuckets: CostPeriodBucket[]
+  outcomes: TeamPeriodOutcome[]
+  members: TeamPeriodMember[]
+  workflows: TeamPeriodWorkflow[]
+}
+
+export const getTeamCostPeriod = (team: string, range: CostPeriodRange, bucket: CostBucket) =>
+  json<TeamCostPeriod>(
+    `/api/teams/${encodeURIComponent(team)}/cost/period?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}&bucket=${bucket}`)
+
+/** `GET /api/teams/{team}/cost/workflows`: each workflow's figures over all its runs, newest first. */
+export interface TeamCostWorkflows {
+  team: string
+  money: TeamCostMoney
+  workflows: TeamPeriodWorkflow[]
+}
+
+export const getTeamCostWorkflows = (team: string, workflow?: number) =>
+  json<TeamCostWorkflows>(
+    `/api/teams/${encodeURIComponent(team)}/cost/workflows${workflow === undefined ? '' : `?workflow=${workflow}`}`)

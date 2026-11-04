@@ -44,14 +44,15 @@ import CostWeeksChart from './CostWeeksChart.vue';
 import CostSummary from './CostSummary.vue';
 import {
   getCostSummary, getTeamsCost, getTeamsCostPeriod,
-  type CostBucket, type CostSummary as CostSummaryAnswer, type TeamCost, type TeamsCost, type TeamsCostPeriod,
+  type CostSummary as CostSummaryAnswer, type TeamCost, type TeamsCost, type TeamsCostPeriod,
 } from '../api/outcomes';
 import { EstimateTitle, overCount } from '../lib/teamCost';
 import {
-  DefaultTeamsPeriod, TeamsPeriodKey, bucketLabel, estimateFootnote, estimateText, hoursText, periodHeading, periodPriced,
-  periodSeries, periodTop, rangeOfChoice, readTeamsPeriod, writeTeamsPeriod, type TeamsPeriodChoice,
+  bucketLabel, estimateFootnote, estimateText, hoursText, periodHeading, periodPriced,
+  periodSeries, periodTop, rangeOfChoice,
 } from '../lib/teamsPeriod';
-import { rangeOf } from '../lib/spend';
+import { useCostPeriodChoice } from '../lib/costPeriodChoice';
+import CostPeriodControl from './CostPeriodControl.vue';
 import TeamStatusIcon from './TeamStatusIcon.vue';
 import { vResizableColumns } from '../lib/resizableColumns';
 import { itemLabel } from '../lib/backlog';
@@ -109,65 +110,13 @@ const summaryCurrency = computed(() => summary.value?.currency ?? period.value?.
 
 /**
  * THE SHARED PERIOD: Daily or Monthly, over the last two months or a custom range, remembered in this browser under
- * `harness.teamsCostPeriod` beside the sort and Show active/archived. The Estimated Execution Cost and Agent Hours
- * columns and the first and third tiles follow it.
+ * `harness.teamsCostPeriod` beside the sort and Show active/archived - the one choice a team page shares
+ * (`lib/costPeriodChoice.ts`), picked through the one control (`CostPeriodControl.vue`). The Estimated Execution Cost
+ * and Agent Hours columns and the first and third tiles follow it.
  */
-function storedPeriod(): TeamsPeriodChoice {
-  try {
-    return readTeamsPeriod(localStorage.getItem(TeamsPeriodKey));
-  } catch {
-    return DefaultTeamsPeriod;
-  }
-}
-
-const choice = ref<TeamsPeriodChoice>(storedPeriod());
-
-function choose(next: TeamsPeriodChoice) {
-  choice.value = next;
-  try {
-    localStorage.setItem(TeamsPeriodKey, writeTeamsPeriod(next));
-  } catch {
-    // Still applies for this session.
-  }
-}
+const { choice } = useCostPeriodChoice();
 
 const heading = computed(() => periodHeading(choice.value, new Date(now.value)));
-
-/** The custom range's fields, open while a person picks one. */
-const customOpen = ref(false);
-const firstDay = ref('');
-const lastDay = ref('');
-const rangeError = ref<string | null>(null);
-
-function openCustom() {
-  const range = rangeOfChoice(choice.value);
-  const last = new Date(`${range.to}T00:00:00Z`);
-  last.setUTCDate(last.getUTCDate() - 1);
-  firstDay.value = range.from;
-  lastDay.value = last.toISOString().slice(0, 10);
-  rangeError.value = null;
-  customOpen.value = true;
-}
-
-function applyRange() {
-  const range = rangeOf(firstDay.value, lastDay.value);
-  if (!range) {
-    rangeError.value = 'Pick a first and a last day, the last on or after the first.';
-    return;
-  }
-  rangeError.value = null;
-  customOpen.value = false;
-  choose({ ...choice.value, range });
-}
-
-function lastTwo() {
-  customOpen.value = false;
-  choose({ ...choice.value, range: null });
-}
-
-function setBucket(bucket: CostBucket) {
-  choose({ ...choice.value, bucket });
-}
 
 /** Every team's figures over the period, from ONE call. Null until it lands, or when it failed (`periodError`). */
 const period = ref<TeamsCostPeriod | null>(null);
@@ -799,36 +748,7 @@ async function setPaused(team: Team | null, paused: boolean) {
     <!-- THE TEAMS TITLE, with the shared period control at its right, then the four tiles. -->
     <div class="row items-center justify-between q-mb-sm teams-title-row">
       <div class="text-h6 teams-title">Teams</div>
-      <div class="row items-center teams-period-control" data-teams-period-control>
-        <span class="os-text-muted teams-period" data-teams-period>{{ heading }} <span class="text-caption">UTC</span></span>
-        <q-btn-toggle
-          dense
-          no-caps
-          unelevated
-          toggle-color="primary"
-          :model-value="choice.bucket"
-          :options="[{ label: 'Daily', value: 'day' }, { label: 'Monthly', value: 'month' }]"
-          data-teams-bucket
-          @update:model-value="setBucket"
-        />
-        <q-btn
-          flat
-          dense
-          no-caps
-          label="Last two months"
-          :disable="choice.range === null"
-          data-teams-period-default
-          @click="lastTwo"
-        />
-        <q-btn flat dense no-caps icon="event" label="Custom range" data-teams-period-custom @click="openCustom" />
-      </div>
-    </div>
-    <div v-if="customOpen" class="row items-center q-gutter-sm q-mb-sm" data-teams-range>
-      <q-input v-model="firstDay" dense outlined type="date" stack-label label="First day" data-field="rangeFrom" />
-      <q-input v-model="lastDay" dense outlined type="date" stack-label label="Last day" data-field="rangeTo" />
-      <q-btn unelevated no-caps color="primary" label="Apply" data-teams-range-apply @click="applyRange" />
-      <q-btn flat no-caps label="Cancel" data-teams-range-cancel @click="customOpen = false" />
-      <span v-if="rangeError" class="text-negative text-caption" data-teams-range-error>{{ rangeError }}</span>
+      <CostPeriodControl />
     </div>
     <div v-if="periodError" class="text-negative text-caption q-mb-sm" data-teams-period-error>{{ periodError }}</div>
     <CostSummary
@@ -1384,16 +1304,6 @@ async function setPaused(team: Team | null, paused: boolean) {
 /* The Teams title, with the summary's period at its right. */
 .teams-title-row {
   gap: 8px;
-}
-
-.teams-period {
-  font-size: 0.875rem;
-}
-
-/* The shared period control: the period's words, Daily/Monthly, then the range buttons. */
-.teams-period-control {
-  gap: 8px;
-  flex-wrap: wrap;
 }
 
 /* The Cost cell: the chart with its total and marker as one control, then the team's status icon. */
