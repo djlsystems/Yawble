@@ -11,8 +11,9 @@ import { rangeOfChoice, type TeamsPeriodChoice } from './teamsPeriod'
  * and `GET /api/teams/{team}/cost/workflows` (`api/outcomes.ts`).
  *
  * EVERY FIGURE IS THE ROUTE'S. Nothing here prices, converts or adds money up: each figure a person reads is one the
- * route answered, worded. NO PRICE IS NO MONEY, NEVER $0: an unpriced figure reads `Estimate unavailable`, and a
- * plugin member with no rate of its own reads `Not priced` (a plugin is never given the agent default).
+ * route answered, worded. NO PRICE IS NO MONEY, NEVER $0: an unpriced figure reads `Estimate unavailable`, a
+ * plugin member with no rate of its own reads `Not priced` (a plugin is never given the agent default), and a plugin
+ * member whose runs are all from before snapshots reads `Estimate unavailable`.
  */
 
 /** A read's currency, as every answer carries it. */
@@ -104,11 +105,16 @@ function row(key: string, name: string, figures: TeamPeriodFigures, currency: st
   }
 }
 
-/** A member's row: an agent's Estimated Agent Cost, or a plugin's Estimated Plugin Cost - `Not priced` with none. */
+/**
+ * A member's row: an agent's Estimated Agent Cost, or a plugin's Estimated Plugin Cost. A plugin with no money reads
+ * `Not priced` - a run started with no rate of its own - or, when the route says every run is from before snapshots,
+ * `Estimate unavailable`: such a run is never priced from the agent rate.
+ */
 export function memberRow(member: TeamPeriodMember, currency: string): BreakdownRow {
   const plugin = member.kind === 'plugin'
   const worded = row(`${member.kind}:${member.member}`, member.member, member.figures, currency, !plugin)
-  return plugin && member.figures.cost === null ? { ...worded, estimate: NotPriced } : worded
+  if (!plugin || member.figures.cost !== null) return worded
+  return { ...worded, estimate: member.unpriced === 'unavailable' ? EstimateUnavailable : NotPriced }
 }
 
 /** The member breakdown, agent members and plugin members apart, in the route's order. */

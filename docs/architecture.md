@@ -170,7 +170,10 @@ The product name, Yawble, lives in the web app's presentation layer
   Activity line read `GET /api/teams/{team}/cost/period` (the team's Teams list row, broken down), and
   each workflow's line in the Workflows dialog and a Kanban card's detail reads
   `GET /api/teams/{team}/cost/workflows`, both over the same pricing. The Workflow tile's Needs you
-  count is the app bar's Needs you list filtered to the team.
+  count is the app bar's Needs you list filtered to the team. A plugin member is priced only from its
+  own estimated hourly rate, by duration, as recorded at its run's start: with none it is not priced on
+  every read and screen, a plugin run from before snapshots is unavailable, and neither ever takes the
+  agent rate. A plugin manifest's `cost.type` may only be `duration` ([plugins.md](plugins.md#cost-type-cost)).
 - **Spend.** Admin → Spend (`#/spend`) is the tenant's Spend page, a person's only. It shows
   **Actual Spend** (confirmed vendor expenses, per currency, never converted), **Projected**
   recurring charges (never in Actual Spend) and **Estimated Execution Cost · Agent Hours** from the

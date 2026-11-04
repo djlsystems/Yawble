@@ -90,8 +90,8 @@ export function teamCostPeriod(options: TeamPeriodOptions = {}): TeamCostPeriod 
     members: [
       { member: 'Ana', kind: 'agent', figures: figures(6, m(360), 3, 3000) },
       { member: 'Dev', kind: 'agent', figures: figures(6, m(360), 3, 1500, legacy) },
-      { member: 'Bare', kind: 'plugin', figures: figures(0, null, 1, 0) },
-      { member: 'Tool', kind: 'plugin', figures: figures(0, m(30), 1, 0) },
+      { member: 'Bare', kind: 'plugin', figures: figures(0, null, 1, 0), unpriced: 'not-priced' },
+      { member: 'Tool', kind: 'plugin', figures: figures(0, m(30), 1, 0), ...(priced ? {} : { unpriced: 'not-priced' as const }) },
     ],
     workflows: [
       { workflow: 42, figures: figures(6, m(360), 3, 3000) },

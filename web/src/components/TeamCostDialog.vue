@@ -303,7 +303,7 @@ function changeRate() {
                 </tbody>
               </table>
               <div class="text-caption os-text-muted q-mt-sm">
-                A plugin member's time is never Agent Hours. A plugin member with no rate of its own is not priced.
+                A plugin member's time is never Agent Hours. A plugin member with no rate of its own is not priced, and its runs from before estimates were recorded read Estimate unavailable.
               </div>
             </template>
 

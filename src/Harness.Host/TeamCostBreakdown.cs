@@ -46,8 +46,30 @@ public static class TeamCostBreakdown
         string? Id, string Name, int? Rank, TeamCostPeriod.Amount Totals, IReadOnlyList<TeamCostPeriod.Bucket> Buckets,
         decimal? Value, decimal? OutcomeTotalCost, Figures Figures);
 
-    /// <summary>One member's runs in the period, by the kind its snapshot names: <c>agent</c> or <c>plugin</c>.</summary>
-    public sealed record MemberEntry(string Member, string Kind, Figures Figures);
+    /// <summary>
+    /// One member's runs in the period, by the kind its snapshot names: <c>agent</c> or <c>plugin</c>.
+    /// <paramref name="Unpriced"/> is written for a PLUGIN member whose period has no money only, and says
+    /// why: <see cref="NotPriced"/> when one of its runs started with no rate of its own (a plugin is never
+    /// given the agent default), <see cref="Unavailable"/> when every run is from before snapshots (never
+    /// reconstructed from the agent rate). Absent - not null - on every other entry, so an agent member's
+    /// entry is as it was.
+    /// </summary>
+    public sealed record MemberEntry(
+        string Member, string Kind, Figures Figures,
+        [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        string? Unpriced = null);
+
+    /// <summary>A plugin member's unpriced period: a run started with no rate of its own.</summary>
+    public const string NotPriced = "not-priced";
+
+    /// <summary>A plugin member's unpriced period: every run is from before snapshots.</summary>
+    public const string Unavailable = "unavailable";
+
+    /// <summary>Why a member's runs in the period have no money, for a plugin member only: see <see cref="MemberEntry"/>.</summary>
+    public static string? UnpricedOf(string kind, IReadOnlyList<ExecutionCost.Run> runs, Figures figures) =>
+        kind != MemberRef.PluginKind || figures.Cost is not null ? null
+        : runs.Any(r => r.Snapshotted) ? NotPriced
+        : Unavailable;
 
     /// <summary>One workflow's runs, by its number (its correlation).</summary>
     public sealed record WorkflowEntry(long Workflow, Figures Figures);
@@ -109,7 +131,12 @@ public static class TeamCostBreakdown
             .GroupBy(r => (r.Ledger.Member, Kind: r.IsAgent ? MemberRef.AgentKind : MemberRef.PluginKind))
             .OrderBy(g => g.Key.Kind == MemberRef.AgentKind ? 0 : 1)
             .ThenBy(g => g.Key.Member, StringComparer.OrdinalIgnoreCase)
-            .Select(g => new MemberEntry(g.Key.Member, g.Key.Kind, FiguresOf(g.ToList(), currency, from, to)))
+            .Select(g =>
+            {
+                var runs = g.ToList();
+                var figures = FiguresOf(runs, currency, from, to);
+                return new MemberEntry(g.Key.Member, g.Key.Kind, figures, UnpricedOf(g.Key.Kind, runs, figures));
+            })
             .ToList();
 
         var active = mine.Where(Executed).Select(r => r.Ledger.Member).Distinct(StringComparer.OrdinalIgnoreCase).Count();
@@ -185,7 +212,9 @@ public static class TeamCostBreakdown
                 + "`outcomes`: that entry's `outcomes` (Unattributed first, `id` null), each with `value` (its budget as a "
                 + "number, null when none), `outcomeTotalCost` (all teams, all time) and `figures`. `members`: agent members "
                 + "first, then plugin members, each by name, `{ member, kind, figures }`; a plugin member's `agentSeconds` "
-                + "is 0 and its `cost` null when it has no rate of its own (not priced). `workflows`: newest first, "
+                + "is 0 and its `cost` null when it has no rate of its own (not priced). A plugin member with no money in the "
+                + "period also has `unpriced`: `not-priced` when a run started with no rate of its own, `unavailable` when "
+                + "every run is from before snapshots; no other entry has the field. `workflows`: newest first, "
                 + "`{ workflow, figures }`. Each `figures` is `{ agentSeconds, cost, agentRate, legacyRates, executions, "
                 + "billable, measuredRuns, unmeasuredRuns }` for that group over the period.\n\n"
                 + "Every figure is one tally over its span, each run's part inside it priced from its own snapshot as "

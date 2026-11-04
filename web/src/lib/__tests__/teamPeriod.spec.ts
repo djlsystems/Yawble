@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  NoRunsLine, NotPriced, activityLine, figureText, memberRows, outcomeRows, periodName, teamPeriodSeries, teamPeriodTile,
+  EstimateUnavailable, NoRunsLine, NotPriced, activityLine, figureText, memberRows, outcomeRows, periodName, teamPeriodSeries, teamPeriodTile,
   tileTitle, workflowLine, workflowRows,
 } from '../teamPeriod';
 import { needsYouOnTeam } from '../needsYou';
@@ -47,6 +47,25 @@ describe('the breakdowns', () => {
     expect(rows.agents.map((r) => [r.name, r.executions, r.hours, r.estimate])).toEqual([['Ana', 3, '6.0', '$360'], ['Dev', 3, '6.0', '$360*']]);
     expect(rows.plugins.map((r) => [r.name, r.executions, r.hours, r.estimate])).toEqual([['Bare', 1, '—', NotPriced], ['Tool', 1, '—', '$30']]);
     expect(rows.agents[1]!.footnote).toBe('* Includes reconstructed rates');
+  });
+
+  it('word a plugin whose runs are all from before snapshots Estimate unavailable, never the agent rate', () => {
+    const period = teamCostPeriod();
+    const bare = period.members.find((m) => m.member === 'Bare')!;
+    period.members.push({ ...bare, member: 'Old', unpriced: 'unavailable' });
+    // A plugin with no `unpriced` (an older Host) and no money still reads Not priced; a priced plugin reads its money.
+    period.members.push({ ...bare, member: 'Older', unpriced: undefined });
+
+    expect(memberRows(period).plugins.map((r) => [r.name, r.estimate])).toEqual([
+      ['Bare', NotPriced], ['Tool', '$30'], ['Old', EstimateUnavailable], ['Older', NotPriced]]);
+  });
+
+  it('never word an agent member Not priced: an unpriced agent reads Estimate unavailable', () => {
+    const period = teamCostPeriod();
+    const ana = period.members.find((m) => m.member === 'Ana')!;
+    period.members.push({ ...ana, member: 'Idle', figures: { ...ana.figures, cost: null, agentRate: null } });
+
+    expect(memberRows(period).agents.find((r) => r.name === 'Idle')!.estimate).toBe(EstimateUnavailable);
   });
 
   it('word each outcome and workflow as the route answers them', () => {

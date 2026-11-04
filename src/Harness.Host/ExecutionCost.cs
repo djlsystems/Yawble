@@ -62,6 +62,10 @@ public static class ExecutionCost
         /// <summary>Whether its seconds are Agent Hours: everything that is not a plugin.</summary>
         public bool IsAgent => Kind != MemberRef.PluginKind;
 
+        /// <summary>Whether it has a snapshot: false for a run from before snapshots, whose rate (if any) is
+        /// read from the rate's history. A flag only: nothing here prices by it.</summary>
+        public bool Snapshotted { get; init; }
+
         /// <summary>Whether it is priced from the rate's history rather than a snapshot: <c>reconstructed</c>
         /// or <c>fallback-at-upgrade</c>.</summary>
         public bool IsRebuilt => Rate is not null
@@ -146,7 +150,10 @@ public static class ExecutionCost
 
         return new Run(
             ledger, seconds, snapshot.MemberKind ?? ledger.MemberKind ?? MemberRef.AgentKind,
-            rate, rate is null ? null : snapshot.RateCurrency?.ToUpperInvariant(), snapshot.RateSource, outcome);
+            rate, rate is null ? null : snapshot.RateCurrency?.ToUpperInvariant(), snapshot.RateSource, outcome)
+        {
+            Snapshotted = true,
+        };
     }
 
     /// <summary>

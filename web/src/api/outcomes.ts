@@ -639,6 +639,9 @@ export interface TeamPeriodMember {
   member: string
   kind: 'agent' | 'plugin'
   figures: TeamPeriodFigures
+  /** A plugin member with no money in the period only: `not-priced` when a run started with no rate of its own,
+   *  `unavailable` when every run is from before snapshots. Absent on every other entry. */
+  unpriced?: 'not-priced' | 'unavailable'
 }
 
 export interface TeamPeriodWorkflow {

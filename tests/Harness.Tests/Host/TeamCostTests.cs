@@ -364,6 +364,69 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
         }
     }
 
+    /// <summary>
+    /// A PLUGIN IS PRICED ONLY FROM ITS OWN RATE, ON EVERY TEAM-PAGE READ: with the tenant agent rate set and in the
+    /// rate's history, a plugin run from before snapshots is never reconstructed from it (unavailable), a plugin run that
+    /// started with no rate of its own is not priced, and one with its own rate is priced by duration at it - while an
+    /// agent run from before snapshots is still reconstructed. Each unpriced plugin says which on its member entry.
+    /// </summary>
+    [Fact]
+    public async Task A_plugin_is_priced_only_from_its_own_rate_and_says_whether_it_is_not_priced_or_unavailable()
+    {
+        var person = await host.PersonAsync();
+        var team = await NewTeamAsync("Cost plugin legacy");
+
+        try
+        {
+            await SetOkAsync(person, TenantSettings.OutcomesAgentHourlyRateName, 60);
+            var start = DateTimeOffset.UtcNow.AddSeconds(1);
+
+            // FROM BEFORE SNAPSHOTS: an agent run (reconstructed at 60) and a plugin run (never priced).
+            await RunAsync(NextCorrelation(), team, start, start.AddHours(1), member: "Dev");
+            await RunAsync(NextCorrelation(), team, start, start.AddHours(1), kind: MemberRef.PluginKind, member: "Old");
+            // ONE PLUGIN WITH BOTH: a run from before snapshots and one that started with no rate of its own.
+            await RunAsync(NextCorrelation(), team, start, start.AddHours(1), kind: MemberRef.PluginKind, member: "Mixed");
+            await RunAsync(NextCorrelation(), team, start, start.AddHours(1), kind: MemberRef.PluginKind, member: "Mixed", snapshot: true);
+            // A PLUGIN WITH ITS OWN RATE: two hours at 15, by duration.
+            await RunAsync(NextCorrelation(), team, start, start.AddHours(2), kind: MemberRef.PluginKind, member: "Paid", rate: "15");
+
+            var query = $"from={Day(start)}&to={Day(start.AddDays(2))}&bucket=day";
+            var read = await JsonAsync(await person.GetAsync($"/api/teams/{team}/cost/period?{query}", Ct));
+            var members = read.GetProperty("members").EnumerateArray()
+                .ToDictionary(m => m.GetProperty("member").GetString()!, m => m);
+
+            Assert.Equal(60m, members["Dev"].GetProperty("figures").GetProperty("cost").GetDecimal());
+            Assert.Equal(["reconstructed"], members["Dev"].GetProperty("figures").GetProperty("legacyRates").EnumerateArray().Select(r => r.GetString()));
+            Assert.False(members["Dev"].TryGetProperty("unpriced", out _));
+
+            Assert.Equal(JsonValueKind.Null, members["Old"].GetProperty("figures").GetProperty("cost").ValueKind);
+            Assert.Equal(TeamCostBreakdown.Unavailable, members["Old"].GetProperty("unpriced").GetString());
+
+            Assert.Equal(JsonValueKind.Null, members["Mixed"].GetProperty("figures").GetProperty("cost").ValueKind);
+            Assert.Equal(TeamCostBreakdown.NotPriced, members["Mixed"].GetProperty("unpriced").GetString());
+
+            Assert.Equal(30m, members["Paid"].GetProperty("figures").GetProperty("cost").GetDecimal());
+            Assert.False(members["Paid"].TryGetProperty("unpriced", out _));
+
+            // NO PLUGIN SECOND IS AGENT HOURS, and the headline is the agent's 60 and Paid's 30 - never a plugin at 60.
+            var totals = read.GetProperty("totals");
+            Assert.Equal(3600, totals.GetProperty("agentSeconds").GetDouble(), 3);
+            Assert.Equal(90m, totals.GetProperty("cost").GetDecimal());
+            Assert.All(members.Where(m => m.Key != "Dev"), m => Assert.Equal(0, m.Value.GetProperty("figures").GetProperty("agentSeconds").GetDouble()));
+
+            // THE LEDGER EXPORT SAYS THE SAME PER RUN: Old's run is `none` with no estimate, never the agent rate.
+            var ledger = await JsonAsync(await person.GetAsync("/api/ledger/export?take=200", Ct));
+            var old = ledger.GetProperty("runs").EnumerateArray()
+                .Single(r => r.GetProperty("teamId").GetString() == team && r.GetProperty("member").GetString() == "Old");
+            Assert.Equal("none", old.GetProperty("rateSource").GetString());
+            Assert.Equal(JsonValueKind.Null, old.GetProperty("estimate").GetProperty("amount").ValueKind);
+        }
+        finally
+        {
+            await SetAsync(person, TenantSettings.OutcomesAgentHourlyRateName, null);
+        }
+    }
+
     [Fact]
     public async Task A_run_crossing_a_week_is_split_between_the_weeks_it_overlaps()
     {
@@ -653,6 +716,11 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
             Assert.Equal(30m, members[3].GetProperty("figures").GetProperty("cost").GetDecimal());
             Assert.Equal(0, members[3].GetProperty("figures").GetProperty("agentSeconds").GetDouble());
             Assert.Equal(JsonValueKind.Null, members[3].GetProperty("figures").GetProperty("agentRate").ValueKind);
+
+            // WHY A PLUGIN HAS NO MONEY, on that plugin's entry alone: Bare started with no rate of its own. No other
+            // entry - an agent's, or a priced plugin's - carries the field at all.
+            Assert.Equal(TeamCostBreakdown.NotPriced, members[2].GetProperty("unpriced").GetString());
+            Assert.All([members[0], members[1], members[3]], m => Assert.False(m.TryGetProperty("unpriced", out _)));
 
             // BY WORKFLOW: newest first; the edge run's workflow is its hour inside the period, never the whole run.
             var workflows = read.GetProperty("workflows").EnumerateArray().ToList();

@@ -379,6 +379,29 @@ describe('the Estimated Execution Cost dialog over the period', () => {
     ]);
   });
 
+  it('reads a plugin member whose runs are all from before snapshots Estimate unavailable, beside Not priced and its own rate', async () => {
+    const period = teamCostPeriod();
+    const bare = period.members.find((m) => m.member === 'Bare')!;
+    period.members.push({ ...bare, member: 'Old', unpriced: 'unavailable' });
+    await mountStrip(period);
+    await openDialog();
+    await showBreakdown('By member');
+
+    expect(table('[data-cost-breakdown="plugin-members"]')).toEqual([
+      ['Bare', '1', 'Not priced'],
+      ['Tool', '1', '$30'],
+      ['Old', '1', 'Estimate unavailable'],
+    ]);
+    // NEVER PRICED FROM THE AGENT RATE, NEVER $0, AND NOT CALLED SPEND: read block by block.
+    const plugins = dialog()!.querySelector('[data-cost-breakdown="plugin-members"]');
+    const old = plugins!.querySelector('[data-cost-member="Old"]');
+    expect(readOff(old)).not.toContain('$0');
+    expect(readOff(old).join(' ')).not.toContain('$');
+    expect(misnamedOnTeamsList(readOff(plugins))).toEqual([]);
+    expect(readOff(dialog())).toContain(
+      'A plugin member\'s time is never Agent Hours. A plugin member with no rate of its own is not priced, and its runs from before estimates were recorded read Estimate unavailable.');
+  });
+
   it('breaks it down by workflow, newest first', async () => {
     await mountStrip();
     await openDialog();
