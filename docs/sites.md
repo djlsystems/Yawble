@@ -413,7 +413,7 @@ page comes from the platform's collections or a plugin's `tp-ops`.
 
 ### Customization is a layer, never a fork
 
-The Concierge customizes a team's page by writing one `tp-settings` document through the `site` tool
+The Concierge customizes a team's page by writing one `tp-settings` document, id `page`, through the `site` tool
 (the `concierge` skill). The template reads it and applies it; the template itself is never copied or
 changed for one team. So a later template keeps a customized team's settings, and so does turning the
 picture off and on again.
@@ -442,8 +442,9 @@ Document id `today`, rewritten whole:
 | `runs` | `[{at, kind}]`, optional: today's runs for the strip, oldest first. `kind` is the most urgent kind the run found, `null` for nothing new (a grey bar). The run in progress (amber) comes from the platform's own `tp-runs`. | At most 400 |
 | `items` | `[{at, kind, title}]`, optional: the latest items with their kind. | At most 50 |
 
-The Host checks the shape and refuses a wrong type with a sentence naming the field. Kind names are
-the team's own words; the page orders them, most urgent first, from the picture's `kinds`.
+The Host checks the fields above and refuses a wrong type with a sentence naming the field. Kind names are
+the team's own words; the page orders them, most urgent first, from `tp-settings.kindOrder`, else the
+picture's `kinds`, else the order of `counts`' keys. Fields the table does not name are kept.
 
 As a record, one line:
 
@@ -455,49 +456,49 @@ a day, and the whole document stays one site document under 64 KB.
 ### The picture shapes
 
 What the template draws from `tp-picture` (the Manager's, or the Concierge's). Every string is drawn
-with `textContent` or SVG text nodes, never as markup. Anything unknown is ignored; anything missing
-is skipped. Lengths are cut, not refused: a label at 80 characters, a detail line at 80, a text block
-at 600, at most 40 nodes and 80 edges a diagram, 30 steps and 60 links a flow, 12 screens, 12
-regions a screen, 20 rows a table.
+as text (`textContent`, SVG text nodes), never as markup. Unknown fields are ignored, and missing ones
+are skipped. Text is cut to fit, never refused: a label at 80 characters, a text block at 600; at most
+40 nodes and 80 edges a diagram, 30 steps and 60 links a flow, 12 screens, 12 regions a screen, 20
+rows a table.
 
-#### Statuses (one vocabulary everywhere)
+#### Status words (one vocabulary everywhere)
 
-| status | drawn as |
+| `status` | drawn as |
 |---|---|
 | `done` | green, still |
-| `active` | amber (in progress). It glows only when live: see "What moves" |
-| `todo` | grey (not started) |
-| `unchanged` | outlined, dashed: the rest of the product, or something outside the team (a mailbox, a phone) |
+| `active` | amber (in progress). It glows only while live, see "What moves" |
+| `todo` | grey (not started). The default for a missing or unknown word |
+| `unchanged` | outlined and dashed: the rest of the product, or something outside the team (a mailbox, a phone) |
 
-Missing or unknown status reads `todo`.
+**From cards.** A piece that names `cards` takes its status from `tp-items` instead of its own
+`status`: any of its cards `running`/lane `doing` → `active`; all `done` → `done`; otherwise
+`todo`. Its own `status` applies when none of its cards is found.
 
-#### `tp-picture` - one document per item (Manager)
+**What moves.** A piece glows, and the edge into it is animated, only when it is live: one of its
+`cards` is a `tp-now.card.id`, or its `member` is a `tp-now.member`. Its member, how long it has run
+(from `tp-team.generatedAt` minus `tp-now.startedAt`), and its last progress are written under it.
+Nothing else moves, and under `prefers-reduced-motion` nothing moves at all.
 
-Document id: the item's key as `tp-items` names it (`B000H`, or `w<workflow>` for told work). An
-operational team keeps ONE document, id `ongoing`.
+##### `tp-picture` (one document per item key, or `ongoing`)
 
 ```json
 {
   "kind": "build",
   "title": "Cost, spend and human attribution",
   "summary": "One or two sentences on what the item is for.",
-
-  "architecture": { "...": "a Diagram (build)" },
-  "screens":      [ { "...": "a Screen (build)" } ],
-  "flows":        [ { "...": "a Flow (build)" } ],
-
-  "howItWorks":   { "...": "a Diagram (operational)" },
-  "rule":         { "...": "a Flow (operational)" },
-  "kinds":        [ { "id": "alert", "label": "Alerts and errors", "colour": "#dc2626", "note": "texted at once" } ]
+  "architecture": { "...": "Diagram" },
+  "screens": [ { "...": "Screen" } ],
+  "work":    [ { "...": "Screen (a stand-in card: work with no screen)" } ],
+  "flows":   [ { "...": "Flow" } ],
+  "howItWorks": { "...": "Diagram (operational)" },
+  "rule":       { "...": "Flow (operational)" },
+  "kinds": [ { "id": "alert", "label": "Alerts and errors", "note": "texted at once" } ]
 }
 ```
 
-- `kind`: `build` or `operational`. When it is missing (or there is no document) the page takes
-  `operational` when `tp-ops` holds a document and no item is open, else `build`.
-- `kinds` (operational): the categories the team sorts into, MOST URGENT FIRST. Their order is what
-  "the most urgent kind" means on the run strip. `colour` optional (`#rgb` / `#rrggbb`); without it
-  the template gives each kind its own colour. With no `kinds`, the page uses the keys of
-  `tp-ops.counts` in the order they appear.
+`kinds` (operational, opt) labels the team's own kind names as they appear in `tp-ops.counts`, most
+urgent first. Urgency order: `tp-settings.kindOrder`, else the order of `kinds`, else the order of
+`tp-ops.counts`' keys.
 
 #### Diagram (`architecture`, `howItWorks`)
 
@@ -508,24 +509,23 @@ operational team keeps ONE document, id `ongoing`.
   "nodes": [
     { "id": "ledger", "label": "Runs and usage ledger", "status": "unchanged", "column": 0, "row": 0 },
     { "id": "cost", "label": "Cost service", "detail": ["Estimated Execution Cost", "Actual Spend"],
-      "status": "done", "column": 1, "row": 0, "cards": ["C3", "C4"] },
-    { "id": "report", "label": "Report tool for agents", "status": "active", "column": 2, "row": 5,
-      "cards": ["C21"] },
+      "column": 1, "row": 0, "cards": ["27617", "27618"] },
     { "id": "triager", "label": "Triager (agent)", "detail": "support, inquiry, alert, spam",
-      "member": "Triager", "status": "done" }
+      "member": "Triager", "status": "done" },
+    { "id": "alerts", "label": "Alerts log", "kind": "alert" }
   ],
-  "edges": [ { "from": "ledger", "to": "cost", "label": "optional words" } ]
+  "edges": [ { "from": "ledger", "to": "cost", "label": "opt words" } ]
 }
 ```
 
-- `id`: 1-64 of letters, digits, `.`, `_`, `-`. Edges naming a missing node are skipped.
-- `detail`: a string or up to 3 strings, drawn as small lines under the label.
-- `column` / `row`: optional integers 0-11, left to right / top to bottom. Without them the page
-  lays the node out itself (column = its longest path from a node with no edge into it; row = its
-  order in the column).
-- `cards`: card ids (as `tp-now` / `tp-items` name them) this piece is built by. `member`: a member
-  name, for an operational team's piece that IS a member (the triager) or a plugin.
-- `kind` (operational, optional): a `kinds` id; the node is drawn in that kind's colour.
+- `id`: 1-64 of letters, digits, `.`, `_`, `-`. An edge that names a missing node is skipped.
+- `detail`: a string, or up to 3 strings drawn small under the label.
+- `column` / `row` (opt): integers 0-11, left to right and top to bottom. Without them the page lays the
+  node out itself: column = its longest path from a node with no edge into it, row = its order in that
+  column.
+- `cards` (opt): card ids as `tp-items.cards[].id` / `tp-now.card.id` give them. `member` (opt): the
+  member that IS this piece (an agent or a plugin), for an operational team.
+- `kind` (opt): one of the team's kind names; the node is drawn in that kind's colour.
 
 #### Flow (`flows[]`, `rule`)
 
@@ -536,62 +536,68 @@ operational team keeps ONE document, id `ongoing`.
   "steps": [
     { "id": "start", "label": "A run ends", "shape": "start" },
     { "id": "plugin", "label": "Plugin member?", "shape": "decision", "status": "done" },
-    { "id": "rate", "label": "duration x the plugin's own rate", "status": "done", "cards": ["C7"] },
+    { "id": "rate", "label": "duration x the plugin's own rate", "cards": ["27620"] },
     { "id": "quiet", "label": "end quietly", "shape": "end" }
   ],
   "links": [ { "from": "start", "to": "plugin" }, { "from": "plugin", "to": "rate", "label": "yes" } ]
 }
 ```
 
-- `shape`: `start` (rounded, outlined), `step` (box, the default), `decision` (diamond), `end` (grey
-  box). `status`, `cards`, `member`, `column`, `row` as for a diagram node.
+`shape`: `start` (rounded, outlined), `step` (a box, the default), `decision` (a diamond), `end` (a grey
+box). A step with no `status` and no `cards` is drawn `unchanged` (outlined). `status`, `cards`,
+`member`, `kind`, `column` and `row` work as they do for a diagram node.
 
-#### Screen (`screens[]`)
+#### Screen (`screens[]`, and `work[]` for stand-in cards)
 
 ```json
 {
   "title": "Spend page",
   "change": "new",
   "status": "done",
-  "cards": ["C9"],
+  "cards": ["27619"],
   "regions": [
-    { "type": "figures", "items": [ { "label": "Actual Spend", "value": "$1,240.00", "note": "3 accounts, USD" } ] },
-    { "type": "fields",  "items": [ { "label": "Estimated hourly rate", "value": "$42.00 / agent hour", "input": true } ] },
-    { "type": "table",   "columns": ["Account", "Expenses", "Total"], "rows": [ ["Anthropic API", "4", "$900.00"] ] },
-    { "type": "buttons", "items": ["Export CSV"] },
-    { "type": "heading", "text": "Before B0084" },
-    { "type": "text",    "text": "A run is priced at the rate it started with.", "muted": true },
-    { "type": "terminal","lines": ["> report action: spend period: 2026-11"] }
+    { "type": "figures",  "items": [ { "label": "Actual Spend", "value": "$1,240.00", "note": "3 accounts, USD" } ] },
+    { "type": "fields",   "items": [ { "label": "Estimated hourly rate", "value": "$42.00 / agent hour", "input": true } ] },
+    { "type": "table",    "columns": ["Account", "Expenses", "Total"], "rows": [ ["Anthropic API", "4", "$900.00"] ] },
+    { "type": "buttons",  "items": ["Export CSV"] },
+    { "type": "heading",  "text": "Before B0084" },
+    { "type": "text",     "text": "A run is priced at the rate it started with.", "muted": true },
+    { "type": "terminal", "lines": ["> report action: spend period: 2026-11"] }
   ]
 }
 ```
 
-- `change`: `new` or `changed` (shown beside the title).
-- A screen with `"noScreen": true` is a STAND-IN card for work with no screen (a tool, a service):
-  its title, status and regions (usually one `terminal` or `text`) on a plain card.
+`change`: `new` or `changed`. An entry of `work` (or a screen with `"noScreen": true`) is a stand-in
+card for work with no screen (a tool, a service): its title, status and regions, usually one
+`terminal` or `text`.
 
-### `tp-settings`: the Concierge's layer over the template
-
-
-Document id `settings`.
+### `tp-settings`, id `page`: the Concierge's layer over the template
 
 ```json
 {
-  "hide": ["spend", "waiting"],
-  "colours": { "done": "#15803d", "active": "#d97706", "todo": "#cbd5e1", "accent": "#1d4ed8" },
-  "sections": [
-    { "id": "contacts", "title": "Who to call", "after": "progress",
-      "regions": [ { "type": "text", "text": "On-call: ..." } ] }
+  "hidden": ["spend", "waiting"],
+  "colours": { "done": "#15803d", "active": "#d97706", "todo": "#cbd5e1", "unchanged": "#6b7280",
+               "accent": "#1d4ed8", "kind:alert": "#b91c1c" },
+  "kindOrder": ["alert", "support", "inquiry", "spam"],
+  "extraSections": [
+    { "id": "contacts", "title": "Who to call", "after": "now",
+      "regions": [ { "type": "text", "text": "On-call: ..." } ] },
+    { "id": "deploys", "title": "Deploys", "collection": "tp-extra-deploys" }
   ]
 }
 ```
 
-- `hide`: section names: `progress`, `now`, `architecture`, `screens`, `flows`, `figures`,
-  `howItWorks`, `didToday`, `rule`, `runs`, `spend`, `waiting`, `history`, or an extra section's id.
-- `colours`: keys `done`, `active`, `todo`, `unchanged`, `accent`, and `kind.<id>`; values `#rgb` or
-  `#rrggbb` only, anything else ignored.
-- `sections`: at most 8 extra sections, each drawn from Screen `regions` (same types, same text-only
-  rule), placed after the named section (default: before the history).
+- `hidden`: section ids `now`, `progress`, `architecture`, `screens`, `flows`, `figures`,
+  `howItWorks`, `didToday`, `rule`, `runs`, `spend`, `waiting`, `history`, or an extra section's `id`.
+- `colours`: keys `done`, `active`, `todo`, `unchanged`, `accent` and `kind:<kind name>`; values `#rgb` or
+  `#rrggbb` only. Anything else is ignored. They are applied as CSS custom properties in one
+  constructed stylesheet the page adopts (CSSOM: no <style> element, no style attribute). The page's own
+  picture.css cannot be edited from script, because the page's origin is opaque. A browser without
+  constructed stylesheets keeps the template's colours.
+- `extraSections`: at most 8. Each section is drawn from its own `regions` (the Screen region types),
+  then, when `collection` names a `tp-extra-<slug>`, one row per document of it (newest
+  `updatedAt` first, at most 50): the document's `regions` if it has them, otherwise its `title` and
+  `text`. `after`: a section id; the default is just before the history.
 
 ### Data limits
 

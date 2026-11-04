@@ -279,10 +279,11 @@ public static class BuiltInSkills
             `w<workflow>` for told work with no backlog item; an operational team keeps one
             document, id `ongoing`. A build item's document is `kind` `build` with `architecture` (a
             diagram focused on what the item adds or changes, the rest of the product `unchanged`),
-            `screens` (each new or changed screen as regions, or a `noScreen` stand-in for work with
+            `screens` (each new or changed screen as regions), `work` (a stand-in card for work with
             no screen) and `flows`; an operational team's is `kind` `operational` with `howItWorks`,
             `rule` and its `kinds`, most urgent first. Name the cards each piece is built by in its
-            `cards`. The shapes are in `docs/sites.md` under "The Team picture"; every string is
+            `cards`: the page colours it done, in progress or not started from the platform's own
+            card states, so a card finishing never needs you to redraw. The shapes are in `docs/sites.md` under "The Team picture"; every string is
             drawn as text, never as markup.
 
             Revise them only when the plan changes: a card added, dropped or cut differently, a
@@ -796,7 +797,8 @@ public static class BuiltInSkills
               picture on - a page the platform keeps of what the team builds or runs, kept current
               from its own figures - or turn it on when they have already said so: `team_create`
               with `teamPicture: true`. Off is the default; never turn it on unasked. For a team
-              that already exists, it is a person's control in Team settings.
+              that already exists, turning it on or off is the person's control in Team settings:
+              send them there.
             - Repositories: with no `repos`, the team gets none, and that is right for a team that
               writes code too: when the work needs a repository and the team has none, its Manager or
               a member calls `repo` with action `create-local` once and works in the clone it names.
@@ -894,14 +896,15 @@ public static class BuiltInSkills
             "add a section for X". Customize it through the `site` tool by writing the page's
             settings, one document in the `tp-settings` collection, naming the team:
 
-                site  action: data  op: get  site: team-picture  collection: tp-settings  id: settings  team: <id>
-                site  action: data  op: put  site: team-picture  collection: tp-settings  id: settings  doc: {...}  team: <id>
+                site  action: data  op: get  site: team-picture  collection: tp-settings  id: page  team: <id>
+                site  action: data  op: put  site: team-picture  collection: tp-settings  id: page  doc: {...}  team: <id>
 
-            Read it first and put back the whole document with your change in it: `hide` (the
+            Read it first and put back the whole document with your change in it: `hidden` (the
             sections to hide, such as `spend` or `waiting`), `colours` (`done`, `active`, `todo`,
-            `unchanged`, `accent` and `kind.<id>`, as `#rgb` or `#rrggbb`) and `sections` (at most
-            8 extra sections, drawn from the same regions as a screen, each placed `after` a named
-            section). The shape is in `docs/sites.md` under "The Team picture". The settings are a layer over the template, never
+            `unchanged`, `accent` and `kind:<kind name>`, as `#rgb` or `#rrggbb`), `kindOrder` (an
+            operational team's kinds, most urgent first) and `extraSections` (at most 8, drawn from
+            the same regions as a screen, each placed `after` a named section, and fed from a
+            `tp-extra-<slug>` collection when it names one). The shape is in `docs/sites.md` under "The Team picture". The settings are a layer over the template, never
             a fork of it: never publish, copy or rebuild the `team-picture` site, and never write
             its files. A later release's template then reaches the team with its customizations
             kept, and turning the picture off and on again keeps them too. Never write the
@@ -1558,8 +1561,10 @@ public static class BuiltInSkills
               comes from the platform's own runs, not from you.
             - `items` - the latest items with their kind, at most 50.
 
-            Kind names are the team's own words. A document of another shape is refused with a
-            sentence naming the field, and the whole document is one site document, so it stays
+            Kind names are the team's own words; the page orders them, most urgent first, from the
+            page settings' `kindOrder`, else the picture's `kinds`, else the order of `counts`. A
+            field named here of the wrong type is refused with a sentence naming it; other fields
+            are kept. The whole document is one site document, so it stays
             under 64 KB: keep today, never every run forever. The plugin writes only `tp-ops` (and
             an extra section's `tp-extra-<slug>`): the platform's own collections refuse it, and the
             picture is the Manager's. See `docs/sites.md`.
