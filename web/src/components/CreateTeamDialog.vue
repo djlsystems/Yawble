@@ -18,6 +18,7 @@ import { budgetFieldIsLegal, budgetFieldRefusal, budgetFieldValue, budgetInWords
 import { applyDefaults, readRemembered, remember, type RecentReposScope } from '../lib/newTeamDefaults';
 import { useConsoleStore } from '../stores/console';
 import { teamFolderLine } from '../lib/teamRoot';
+import { TeamPictureHint, TeamPictureLabel } from '../lib/teamPicture';
 import { installStatus, installationFor } from '../lib/agentInstall';
 import { useAgentInstallations } from '../lib/useAgentInstallations';
 import {
@@ -513,6 +514,12 @@ function moveMemberAgent(index: number, direction: -1 | 1) {
 
 const busy = ref(false);
 
+/**
+ * THE TEAM PICTURE, off unless ticked: a page per team is a person's choice, never every team's.
+ * Sent in the create request itself, so the team is never made without the page it was asked with.
+ */
+const teamPicture = ref(false);
+
 /** The name being created, shown while it is; the field can change under a wait. */
 const creating = ref('');
 
@@ -572,6 +579,9 @@ async function submit() {
 
       // The connections chosen on the Connections tab: the team starts with these, or none.
       chosenConnections.value,
+
+      // The Team picture, when ticked.
+      teamPicture.value,
     );
 
     remember({
@@ -581,6 +591,15 @@ async function submit() {
       // Not a URL that was dropped for a local repository: it does not exist, so it is no suggestion.
       repos: repos.value.filter((url) => repoChoices.value[url.trim()] !== 'use-local'),
     }, instanceId.value);
+
+    // The team is made either way; a page that could not be published is said, in the Host's words.
+    if (created.teamPictureError) {
+      $q.notify({
+        type: 'warning',
+        message: created.teamPictureError,
+        caption: 'Team created, but its Team picture is not published',
+      });
+    }
 
     // Handle unresolvedAgents if present
     if (created.unresolvedAgents?.length) {
@@ -598,6 +617,7 @@ async function submit() {
     root.value = '';
     repos.value = [];
     upstreams.value = [];
+    teamPicture.value = false;
     repoInput.value = '';
     refusal.value = null;
     repoChoices.value = {};
@@ -799,6 +819,12 @@ async function submit() {
                   <template #append><FieldHelp :text="TeamInstructionsHint" /></template>
                 </q-input>
               </section>
+
+              <!-- THE TEAM PICTURE: off unless ticked. The same words as Team settings and the install wizard. -->
+              <div class="row items-center no-wrap" data-team-picture-option>
+                <q-checkbox v-model="teamPicture" dense :label="TeamPictureLabel" data-team-picture />
+                <FieldHelp :text="TeamPictureHint" />
+              </div>
 
             </div>
           </q-tab-panel>

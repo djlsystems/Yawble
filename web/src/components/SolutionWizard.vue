@@ -22,6 +22,7 @@ import {
   updateSolution,
 } from '../api/client';
 import { uploadDocument } from '../api/documents';
+import { TeamPictureHint, TeamPictureLabel } from '../lib/teamPicture';
 import {
   asDocumentsFolderKey,
   asMemberId,
@@ -170,6 +171,7 @@ function reset() {
   mode.value = 'install';
   teamName.value = '';
   updateTeam.value = '';
+  teamPicture.value = false;
   prefilledFor = '';
   teamNow.value = null;
   preview.value = null;
@@ -240,6 +242,12 @@ watch(open, (showing) => {
 const mode = ref<'install' | 'update'>('install');
 const teamName = ref('');
 const updateTeam = ref('');
+
+/**
+ * THE NEW TEAM'S TEAM PICTURE, off unless ticked, as on New Team. Only for a new team: an update
+ * or a reinstall onto a kept team leaves that team's own choice alone (Team settings changes it).
+ */
+const teamPicture = ref(false);
 
 const preview = ref<SolutionPreview | null>(null);
 const previewing = ref(false);
@@ -898,6 +906,7 @@ async function install() {
         : await installSolution({
             folder: props.folder,
             teamName: teamName.value.trim(),
+            ...(teamPicture.value && !reinstall.value ? { teamPicture: true } : {}),
             settings,
             connections,
             ...(secretValues ? { secretValues } : {}),
@@ -1072,6 +1081,10 @@ function next() {
                 :error-message="nameProblem ?? nameRefusal ?? ''"
                 data-team-name
               />
+              <div v-if="!reinstall" class="row items-center no-wrap" data-team-picture-option>
+                <q-checkbox v-model="teamPicture" dense :label="TeamPictureLabel" data-team-picture />
+                <FieldHelp :text="TeamPictureHint" />
+              </div>
               <div v-if="anUpdateIsOffered" class="text-caption os-text-muted" data-new-team-alongside>
                 A second, separate team, alongside the one already running this package. To keep that team's settings, update it
                 instead.
