@@ -1,5 +1,6 @@
 import type { LocationQuery, RouteLocationNormalized, RouteLocationRaw } from 'vue-router';
 import { useSessionStore } from '../stores/session';
+import { capabilityForEntry } from '../lib/siteOpen';
 
 /**
  * THE SIGN-IN GATE, and where a signed-out visitor goes back to afterwards.
@@ -11,15 +12,22 @@ import { useSessionStore } from '../stores/session';
  * query cannot send a person somewhere they did not ask to go.
  *
  * The one address outside the app that `next` may name is a site's entry, `/sites/<team>/<site>/`
- * with its query: the Host sends a signed-out visit there (a bookmarklet's `?url=…`) to the door
- * and back. The Host serves it, not the router, so signing in leaves for it with a full navigation.
+ * with its query: the Host sends a visit it does not see as signed in there (a bookmarklet's
+ * `?url=…`, or a new tab whose first request the browser sent without the `SameSite=Strict` cookie)
+ * to the door and back. Signed in, the door asks the Host for that site's capability over the app's
+ * own request and leaves for the capability path, which needs no cookie - never for the entry again,
+ * which could send the tab straight back here, and never for the Console, which is not what the
+ * person opened (W27510). A refusal (not published, no such site) is shown on the door.
  */
 
 /** A site's entry and its query, exactly: two plain segments, no dot segments, no fragment. */
 const SiteEntry = /^\/sites\/[A-Za-z0-9_-][A-Za-z0-9_.-]*\/[A-Za-z0-9_-][A-Za-z0-9_.-]*\/(\?[^#\\]*)?$/;
 
 /** The page's own navigation, apart so a test can watch it instead of leaving. */
-export const page = { assign: (url: string) => window.location.assign(url) };
+export const page = {
+  assign: (url: string) => window.location.assign(url),
+  replace: (url: string) => window.location.replace(url),
+};
 
 /** The site entry `next` names, or null when it names anything else. */
 export function siteEntry(query: LocationQuery): string | null {
@@ -28,20 +36,39 @@ export function siteEntry(query: LocationQuery): string | null {
 }
 
 /**
- * Goes where signing in continues to: a site entry by full navigation, else the in-app route.
- * The door asks twice (the form's done, and the session it sets), so the page is left only once.
+ * Goes where signing in continues to: a site entry's capability by full navigation, else the in-app
+ * route. A site entry never falls back to the Console: when the Host refuses, `refused` is told its
+ * sentence and the page stays. The door asks twice (the form's done, and the session it sets), so
+ * the page is left only once.
  */
-export function goOnward(query: LocationQuery, replace: (path: string) => unknown, left = { done: false }): void {
+export function goOnward(
+  query: LocationQuery,
+  replace: (path: string) => unknown,
+  left = { done: false },
+  refused: (why: string) => void = () => {},
+): Promise<void> {
   const entry = siteEntry(query);
   if (entry === null) {
     void replace(returnPath(query));
-  } else if (!left.done) {
-    left.done = true;
-    page.assign(entry);
+    return Promise.resolve();
   }
+
+  if (left.done) return Promise.resolve();
+  left.done = true;
+
+  return capabilityForEntry(entry).then(
+    (path) => page.replace(path),
+    (cause: unknown) => {
+      left.done = false;
+      refused(cause instanceof Error ? cause.message : String(cause));
+    },
+  );
 }
 
-/** Where signing in continues to: the remembered in-app route, else the Console. */
+/**
+ * Where signing in continues to: the remembered in-app route, else the Console. A site entry never
+ * comes here (`goOnward` takes it first); any other `/sites/` address is not an in-app route.
+ */
 export function returnPath(query: LocationQuery): string {
   const next = Array.isArray(query.next) ? query.next[0] : query.next;
   if (typeof next !== 'string') return '/console';
@@ -80,11 +107,11 @@ export async function sessionGuard(to: RouteLocationNormalized): Promise<boolean
   // Someone already signed in has no business on the front door: `/` and `/login` go on to where
   // they were headed, decided here - the session is already known - so the sign-in form never
   // draws for a moment before the page's own redirect, which a person saw as a flash.
+  //
+  // A site entry is the exception: the door draws its "opening the site" card (not the form) and
+  // leaves for the site's capability itself, so a refusal has somewhere to be said.
   if ((to.path === '/' || to.path === '/login') && session.user) {
-    const entry = siteEntry(to.query);
-    if (entry === null) return returnPath(to.query);
-    page.assign(entry);
-    return false;
+    return siteEntry(to.query) === null ? returnPath(to.query) : true;
   }
 
   if (isPublic) return true;
