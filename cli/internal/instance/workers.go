@@ -116,11 +116,13 @@ type workerApplied struct {
 	Image   string `json:"image"`
 	EnvHash string `json:"envHash"`
 	KeyHash string `json:"keyHash"`
+	// NoLimits is a worker made without its memory and CPU limits; omitted otherwise.
+	NoLimits bool `json:"noLimits,omitempty"`
 }
 
 // WorkerSettingsLabel is the label value stamped on worker i.
 func WorkerSettingsLabel(s Settings, i int, ref string) string {
-	b, _ := json.Marshal(workerApplied{RoleWorker, i, s.Memory, s.CPUs, ref, s.EnvFileHash, s.KeyHash})
+	b, _ := json.Marshal(workerApplied{RoleWorker, i, s.Memory, s.CPUs, ref, s.EnvFileHash, s.KeyHash, s.NoLimits})
 	return string(b)
 }
 
@@ -162,7 +164,7 @@ func workerSpec(s Settings, i int, ref string) engine.RunSpec {
 			InstanceLabel: PodName, RoleLabel: RoleWorker, WorkerIndexLabel: strconv.Itoa(i),
 			engine.SettingsLabel: WorkerSettingsLabel(s, i, ref),
 		},
-		EnvFiles: s.EnvFiles(), Memory: s.Memory, CPUs: s.CPUs,
+		EnvFiles: s.EnvFiles(), Memory: limit(s, s.Memory), CPUs: limitCPUs(s, s.CPUs),
 	}
 }
 
@@ -203,7 +205,7 @@ type workerStep struct {
 func upWorkers(ctx context.Context, e engine.Engine, s Settings, ref string, step workerStep, out io.Writer) error {
 	pulled := false
 	for i := 1; i <= s.Workers; i++ {
-		if err := upWorker(ctx, e, s, i, ref, step, &pulled, out); err != nil {
+		if err := upWorker(ctx, e, &s, i, ref, step, &pulled, out); err != nil {
 			return err
 		}
 	}
@@ -224,14 +226,18 @@ func upWorkers(ctx context.Context, e engine.Engine, s Settings, ref string, ste
 	return nil
 }
 
-func upWorker(ctx context.Context, e engine.Engine, s Settings, i int, ref string, step workerStep, pulled *bool, out io.Writer) error {
+// upWorker makes worker i run. A worker the engine refuses for want of the cgroup controllers is
+// made without its limits, said, and s records it for the workers after it.
+func upWorker(ctx context.Context, e engine.Engine, sp *Settings, i int, ref string, step workerStep, pulled *bool, out io.Writer) error {
+	s := *sp
+	defer func() { sp.NoLimits = s.NoLimits }()
 	name := WorkerName(i)
 	info, err := e.Inspect(ctx, name)
 	if err != nil {
 		return err
 	}
 	if info.State != engine.StateAbsent {
-		diff := WorkerChanges(info.Label, s, i, ref)
+		diff := append(WorkerChanges(info.Label, s, i, ref), limitsChange(info.Label, s)...)
 		if step.recreate && len(diff) == 0 {
 			diff = []string{"control was made again, and a worker shares control's network"}
 		}
@@ -248,14 +254,25 @@ func upWorker(ctx context.Context, e engine.Engine, s Settings, i int, ref strin
 			info.State = engine.StateStopped
 		}
 	}
+	if info.State == engine.StateStopped {
+		if err := e.Start(ctx, name); err == nil {
+			fmt.Fprintf(out, "started %s\n", name)
+		} else if CgroupError(err) && !s.NoLimits {
+			fmt.Fprintln(out, NoLimitsLine(e.Name(), nil))
+			s.NoLimits = true
+			if err := e.Remove(ctx, name); err != nil {
+				return err
+			}
+			info.State = engine.StateAbsent
+		} else if CgroupError(err) {
+			return limitsError(e.Name(), err)
+		} else {
+			return err
+		}
+	}
 	switch info.State {
 	case engine.StateRunning:
 		fmt.Fprintf(out, "%s is already running\n", name)
-	case engine.StateStopped:
-		if err := e.Start(ctx, name); err != nil {
-			return err
-		}
-		fmt.Fprintf(out, "started %s\n", name)
 	case engine.StateAbsent:
 		if !*pulled {
 			if present, err := e.ImagePresent(ctx, ref); err != nil {
@@ -268,11 +285,25 @@ func upWorker(ctx context.Context, e engine.Engine, s Settings, i int, ref strin
 			}
 			*pulled = true
 		}
-		if err := e.Run(ctx, workerSpec(s, i, ref)); err != nil {
+		err := e.Run(ctx, workerSpec(s, i, ref))
+		if err != nil && CgroupError(err) && !s.NoLimits {
 			_ = e.Remove(ctx, name)
+			fmt.Fprintln(out, NoLimitsLine(e.Name(), nil))
+			s.NoLimits = true
+			err = e.Run(ctx, workerSpec(s, i, ref))
+		}
+		if err != nil {
+			_ = e.Remove(ctx, name)
+			if CgroupError(err) {
+				return limitsError(e.Name(), err)
+			}
 			return err
 		}
-		fmt.Fprintf(out, "started %s from %s (memory %s, cpus %d)\n", name, ref, s.Memory, s.CPUs)
+		if s.NoLimits {
+			fmt.Fprintf(out, "started %s from %s (NO memory or CPU limit: the cgroup controllers are not delegated)\n", name, ref)
+		} else {
+			fmt.Fprintf(out, "started %s from %s (memory %s, cpus %d)\n", name, ref, s.Memory, s.CPUs)
+		}
 	}
 	return nil
 }
@@ -383,9 +414,14 @@ func Scale(ctx context.Context, e engine.Engine, s Settings, runsOf RunsOf, opt 
 			}
 		}
 	}
+	control, err := e.Inspect(ctx, ContainerName)
+	if err != nil {
+		return err
+	}
+	s.NoLimits = limitsFor(ctx, e, control, out)
 	pulled := false
 	for i := 1; i <= s.Workers; i++ {
-		if err := upWorker(ctx, e, s, i, ref, workerStep{}, &pulled, out); err != nil {
+		if err := upWorker(ctx, e, &s, i, ref, workerStep{}, &pulled, out); err != nil {
 			return err
 		}
 	}
