@@ -1,6 +1,6 @@
 package doctor_test
 
-// Independent edge cases for B0085 (tester): the doctor cgroups row.
+// Independent edge cases: the doctor cgroups row.
 
 import (
 	"strings"
@@ -10,7 +10,7 @@ import (
 	"github.com/djlsystems/yawble/cli/internal/engine"
 )
 
-func TestB0085OnlyPidsMissingFailsNamingPids(t *testing.T) {
+func TestCgroupEdgeOnlyPidsMissingFailsNamingPids(t *testing.T) {
 	o := healthyObserved()
 	o.Cgroups = &engine.Cgroups{Measured: true, Controllers: []string{"cpu", "memory"}, Source: "podman info"}
 	row := find(t, doctor.HostChecks(o), "cgroups")
@@ -19,7 +19,7 @@ func TestB0085OnlyPidsMissingFailsNamingPids(t *testing.T) {
 	}
 }
 
-func TestB0085DockerPartialFailsNamingCpuAndDockerFix(t *testing.T) {
+func TestCgroupEdgeDockerPartialFailsNamingCpuAndDockerFix(t *testing.T) {
 	o := healthyObserved()
 	o.EngineName = "docker"
 	o.Cgroups = &engine.Cgroups{Measured: true, Controllers: []string{"memory", "pids"}, Source: "docker info"}
@@ -35,7 +35,7 @@ func TestB0085DockerPartialFailsNamingCpuAndDockerFix(t *testing.T) {
 }
 
 // Missing controllers AND a no-limits control: still FAIL (the fail outranks the warn).
-func TestB0085MissingAndNoLimitsControlIsFail(t *testing.T) {
+func TestCgroupEdgeMissingAndNoLimitsControlIsFail(t *testing.T) {
 	o := healthyObserved()
 	o.ControlNoLimits = true
 	o.Cgroups = &engine.Cgroups{Measured: true, Source: "podman info"}
@@ -46,7 +46,7 @@ func TestB0085MissingAndNoLimitsControlIsFail(t *testing.T) {
 
 // Observation: not measured with a no-limits control is plain skip; the row does not say
 // the instance runs without limits.
-func TestB0085NotMeasuredWithNoLimitsControlIsSkip(t *testing.T) {
+func TestCgroupEdgeNotMeasuredWithNoLimitsControlIsSkip(t *testing.T) {
 	o := healthyObserved()
 	o.ControlNoLimits = true
 	o.Cgroups = &engine.Cgroups{Source: "podman info", Reason: "podman info failed"}
