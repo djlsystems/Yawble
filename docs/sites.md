@@ -61,6 +61,7 @@ the entry, and everything the page does after that is authorized by a **capabili
 | Request | Authorized by | Answer |
 |---|---|---|
 | `GET /sites/<team>/<site>/` (the entry) | The session cookie of a signed-in person. A member's key is refused (`HumansOnly`). | 302 to `/sites/<team>/<site>/_c/<capability>/` with the entry's query carried unchanged, `Cache-Control: no-store`. When nobody is signed in, a browser navigation is a 302 to `/#/?next=<entry path and query, encoded>` (sign in, then back here) and anything else is 401 with a sentence; 404 when there is no such site or it is not published. |
+| `POST /api/teams/<team>/sites/<site>/open` (the app's own open) | The session cookie of a signed-in person, on the app's own request (`HumansOnly`; another origin is refused by the origin gate). | `{ "url": "/sites/<team>/<site>/_c/<capability>/" }`, `Cache-Control: no-store`: the capability the entry would redirect to. The team-screen globe and Admin → Sites → Open open a tab and send it to that path, so the tab's navigation needs no cookie. The front door uses it too, for a site entry in `next`: signed in, it leaves for the capability path, never for the entry again (which could bounce back to the door) and never for the Console; a refusal (no such site, not published) is shown on the door. 401 with nobody signed in, 404 with a sentence. |
 | `GET /sites/<team>/<site>/_c/<capability>/<path>` (the site's files) | The capability in the path, and nothing else. | The file, under the site policy below. |
 | `GET …/_c/<capability>/_api/data/<collection>` | The capability. | The collection's documents. |
 | `GET …/_c/<capability>/_api/data/<collection>/<id>` | The capability. | One document, or 404. |
@@ -343,7 +344,7 @@ The tool relays to these with the caller's own key; Admin → Sites calls them w
 |---|---|
 | `GET /api/teams/{team}/sites`, `GET …/sites/{site}`, `GET …/sites/{site}/data/{collection}[/{id}]`, `GET …/sites/{site}/actions?take=` | `Read` |
 | `POST /api/teams/{team}/sites` `{name}`, `POST …/{site}/publish` `{folder}`, `POST …/{site}/rollback` `{version?}`, `POST …/{site}/unpublish`, `PUT …/{site}/data/{collection}/{id}` (the document's JSON), `DELETE …/{site}/data/{collection}/{id}` | `Sites` |
-| `GET /api/sites` (every team, for Admin → Sites), `DELETE /api/teams/{team}/sites/{site}[?confirm=true]` | `HumansOnly` |
+| `GET /api/sites` (every team, for Admin → Sites), `POST /api/teams/{team}/sites/{site}/open`, `DELETE /api/teams/{team}/sites/{site}[?confirm=true]` | `HumansOnly` |
 
 `Sites` is its own permit. A team's Manager, every agent member and the Concierge hold it by default;
 `TeamGate` bounds a container to its own team, and another team's site answers what a missing team
@@ -352,7 +353,7 @@ does. The delete answers 409 with what would be lost until it is confirmed.
 ## Admin → Sites
 
 The Admin group's **Sites** button lists every site across teams: name, team, live version,
-published at and by, and data size. Each row has **Open** (a new tab, through the entry above),
+published at and by, and data size. Each row has **Open** (a new tab, on a capability the app asks for with `POST …/open` above),
 **Versions** (roll back), **Unpublish** (keeps files and data), **Delete** (asks first, showing what
 would be lost) and a read-only view of each collection. The team bar's **Sites** button (under the team's name on its board) opens
 the same list filtered to that team.

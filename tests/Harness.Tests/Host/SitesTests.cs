@@ -177,6 +177,64 @@ public sealed class SitesTests(HostFixture host) : IClassFixture<HostFixture>
         Assert.Equal(SiteService.NoSuchSite, await unknown.Content.ReadAsStringAsync(Ct));
     }
 
+    /// <summary>
+    /// W27510: the app's globe and Admin → Sites → Open sent the new tab to the entry, which needs the
+    /// browser to send the SameSite=Strict cookie with that tab's first request; when it did not, the
+    /// tab went to the front door and on to the board. The app now asks for the capability over its own
+    /// signed-in request and opens the capability path, which serves the page with no cookie at all.
+    /// </summary>
+    [Fact]
+    public async Task The_app_opens_a_site_with_its_own_signed_in_request_and_the_tab_needs_no_cookie()
+    {
+        var site = await PublishedAsync(host.Alpha, "from-the-app");
+
+        using var person = await host.PersonAsync(allowAutoRedirect: false);
+        var opened = await person.PostAsync($"/api/teams/{host.Alpha}/sites/{site}/open", null, Ct);
+        Assert.Equal(HttpStatusCode.OK, opened.StatusCode);
+        Assert.Equal("no-store", opened.Headers.CacheControl?.ToString());
+
+        var url = JsonDocument.Parse(await opened.Content.ReadAsStringAsync(Ct)).RootElement.GetProperty("url").GetString()!;
+        Assert.Matches($"^/sites/{host.Alpha}/{site}/_c/[^/?#]+/$", url);
+
+        // The tab's navigation carries no cookie, and the page is served: nothing sends it to the door.
+        using var tab = host.Anonymous(allowAutoRedirect: false);
+        using var navigation = new HttpRequestMessage(HttpMethod.Get, url);
+        navigation.Headers.Add("Sec-Fetch-Mode", "navigate");
+        var page = await tab.SendAsync(navigation, Ct);
+        Assert.Equal(HttpStatusCode.OK, page.StatusCode);
+        Assert.Equal("<p>hello</p>", await page.Content.ReadAsStringAsync(Ct));
+    }
+
+    [Fact]
+    public async Task Only_a_signed_in_person_opens_a_site_from_the_app_and_only_from_the_apps_own_origin()
+    {
+        var site = await PublishedAsync(host.Alpha, "app-open-rules");
+        Assert.True((await Sites.CreateAsync(host.Alpha, "app-open-draft", Person, Ct)).Ok);
+        var path = $"/api/teams/{host.Alpha}/sites/{site}/open";
+
+        using var anonymous = host.Anonymous(allowAutoRedirect: false);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsync(path, null, Ct)).StatusCode);
+
+        using var container = host.Container(host.AlphaContainerKey);
+        var member = await container.PostAsync(path, null, Ct);
+        Assert.Equal(HttpStatusCode.Forbidden, member.StatusCode);
+        Assert.Contains("That is a person's action.", await member.Content.ReadAsStringAsync(Ct), StringComparison.Ordinal);
+
+        using var person = await host.PersonAsync(allowAutoRedirect: false);
+        var unknown = await person.PostAsync($"/api/teams/{host.Alpha}/sites/nosuch/open", null, Ct);
+        Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+        Assert.Equal(SiteService.NoSuchSite, await ErrorAsync(unknown));
+
+        var draft = await person.PostAsync($"/api/teams/{host.Alpha}/sites/app-open-draft/open", null, Ct);
+        Assert.Equal(HttpStatusCode.NotFound, draft.StatusCode);
+        Assert.Equal(SiteService.NotPublished, await ErrorAsync(draft));
+
+        // A page on another origin (a preview port) cannot have a capability issued as the person.
+        using var foreign = new HttpRequestMessage(HttpMethod.Post, path);
+        foreign.Headers.Add("Origin", "http://localhost:5999");
+        Assert.Equal(HttpStatusCode.Forbidden, (await person.SendAsync(foreign, Ct)).StatusCode);
+    }
+
     [Fact]
     public async Task The_capability_is_refused_on_another_site_of_its_team_and_on_another_teams_site()
     {

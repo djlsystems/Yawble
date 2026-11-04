@@ -12,6 +12,7 @@ import {
   type SiteDetail,
   type SiteDocument,
 } from '../api/sites';
+import { openSiteTab } from '../lib/siteOpen';
 import { useConsoleStore } from '../stores/console';
 import { documentFields } from '../lib/siteDocumentFields';
 import { localTime, wireInstant } from '../lib/localTime';
@@ -97,8 +98,9 @@ const key = (site: Site) => `${site.team}/${site.name}`;
 // --- Row actions ---------------------------------------------------------------------------------
 
 /** Same origin: the Host issues the site's capability itself when the tab asks for it. */
+/** A new tab on the live site, through a capability the app asks for: see `lib/siteOpen.ts` (W27510). */
 function openSite(site: Site) {
-  window.open(site.url, '_blank', 'noopener');
+  void openSiteTab(site);
 }
 
 async function unpublish(site: Site) {
