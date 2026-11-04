@@ -48,8 +48,8 @@ type WorkerStatus struct {
 	Container    engine.State  `json:"container"`
 	Health       engine.Health `json:"health,omitempty"`
 	EngineHealth engine.Health `json:"engineHealth,omitempty"`
-	Image     string        `json:"image"`
-	Pending   []string      `json:"pending,omitempty"`
+	Image        string        `json:"image"`
+	Pending      []string      `json:"pending,omitempty"`
 }
 
 // ErrNoImage is `up` with nothing to run. A dev build pins none, and guessing one (or reaching

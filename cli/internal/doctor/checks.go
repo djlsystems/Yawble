@@ -47,12 +47,12 @@ type Observed struct {
 	Healthy                   *bool
 	// Workers is each worker as instance.Workers found it, with its check already run where the
 	// engine's record said starting or unhealthy. Set with ContainerKnown.
-	Workers []instance.WorkerStatus
-	Port                      int
-	PortFree                  *bool
-	ExeDir                    string
-	OnPath                    *bool
-	GOOS                      string
+	Workers  []instance.WorkerStatus
+	Port     int
+	PortFree *bool
+	ExeDir   string
+	OnPath   *bool
+	GOOS     string
 	// Machine is the Podman machine on macOS and Windows (Applies false elsewhere); MachineErr is
 	// an inspect that failed for a reason other than "no machine". ContainerMemoryMB is the limit
 	// a run would ask for, to compare with the machine's.
