@@ -540,7 +540,8 @@ Clicking the tile opens the team's Estimated Execution Cost dialog.
 Titled **Estimated Execution Cost · <team>**, with the instance's default rate as set now on the
 right (`Default agent rate $60/h (USD) · Change in Outcomes`, or `No default agent rate set (USD)`).
 That is the rate a new agent run with no rate of its own inherits, not the rate the figures were
-priced at. It has two tabs. Opened from the team page it uses the page's period read; opened from the
+priced at. Like the tile, the dialog has no `Set an agent hourly rate` note when nothing in the period
+was priced: a rate set now cannot price the period's runs, and `Estimate unavailable` says so. It has two tabs. Opened from the team page it uses the page's period read; opened from the
 Teams list it reads `GET /api/teams/{team}/cost/period` itself, for the list's period.
 
 **Estimated Execution Cost** (the tab it opens on), over the period, with the period control at its top:

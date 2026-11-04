@@ -420,7 +420,11 @@ describe('the Estimated Execution Cost dialog over the period', () => {
     await openDialog();
 
     expect(words(dialog()!.querySelector('[data-cost-figure="estimate"]'))).toBe('Estimate unavailable Estimated Execution Cost · last two months');
-    expect(dialog()!.querySelector('[data-cost-no-rate]')).not.toBeNull();
+    // NO "SET A RATE TO SEE DOLLARS" NOTE: a rate set now prices only runs that start afterwards, so it cannot change
+    // this period's figure, the currency need not be dollars, and Estimate unavailable already says nothing was priced.
+    expect(dialog()!.querySelector('[data-cost-no-rate]')).toBeNull();
+    expect(dialog()!.textContent).not.toContain('Set an agent hourly rate');
+    expect(dialog()!.textContent).not.toContain('to see dollars');
     await showBreakdown('By member');
     expect(table('[data-cost-breakdown="agent-members"]').map((r) => r[3])).toEqual(['Estimate unavailable', 'Estimate unavailable']);
     expect(table('[data-cost-breakdown="plugin-members"]').map((r) => r[2])).toEqual(['Not priced', 'Not priced']);
