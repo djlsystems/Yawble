@@ -17,7 +17,7 @@ public static class TeamRows
     /// <summary>The columns <see cref="ReadTeam"/> reads, in its order.</summary>
     public const string TeamColumns =
         "id, name, member_agent, member_agents, additional_instructions, root, repos, env, paused, "
-        + "budget_tokens, archived_at, archived_by";
+        + "budget_tokens, archived_at, archived_by, team_picture";
 
     /// <summary>The columns <see cref="ReadMember"/> reads, in its order.</summary>
     public const string MemberColumns =
@@ -91,7 +91,10 @@ public static class TeamRows
             reader.IsDBNull(10)
                 ? null
                 : Instant.Parse(reader.GetString(10)),
-            reader.IsDBNull(11) ? null : reader.GetString(11));
+            reader.IsDBNull(11) ? null : reader.GetString(11),
+
+            // Written by the narrow Team picture setter only, so read here or lost at a restart.
+            !reader.IsDBNull(12) && reader.GetInt64(12) != 0);
 
     public static PersistedMember ReadMember(DbDataReader reader) =>
         new(

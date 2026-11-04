@@ -791,5 +791,14 @@ public static class AuthSchema
                 PRIMARY KEY (team, server_id)
             );
             """),
+
+        // `team_picture` is whether the team keeps its Team picture: the platform's reserved site
+        // `team-picture`, published from the shipped template, with its live collections kept from
+        // the team's own figures (`TeamPicture`). 0 off, 1 on; off unpublishes and keeps its data.
+        new MigrationStep(
+            "auth-034",
+            """
+            ALTER TABLE teams ADD COLUMN team_picture INTEGER NOT NULL DEFAULT 0;
+            """),
     ];
 }

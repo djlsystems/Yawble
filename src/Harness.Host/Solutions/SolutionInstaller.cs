@@ -46,7 +46,7 @@ public sealed record SolutionAnswers(
 /// <summary>A new team from a package.</summary>
 public sealed record SolutionInstallRequest(
     string? Folder, string? TeamName = null, string? Agent = null, bool? LocalRepository = null,
-    SolutionAnswers? Answers = null);
+    SolutionAnswers? Answers = null, bool? TeamPicture = null);
 
 /// <summary>A team moved to a newer version of the package it came from.</summary>
 public sealed record SolutionUpdateRequest(string? Folder, string? Team, SolutionAnswers? Answers = null);
@@ -247,7 +247,8 @@ public sealed class SolutionInstaller(
     IOutcomeStore? outcomes = null,
     FolderRemoval? removal = null,
     PluginMemberSecretStore? memberSecrets = null,
-    PluginSecretMoves? secretMoves = null)
+    PluginSecretMoves? secretMoves = null,
+    TeamPicture? picture = null)
 {
     private readonly FolderRemoval _removal = removal ?? new FolderRemoval();
 
@@ -938,6 +939,22 @@ public sealed class SolutionInstaller(
                     new { manager = created.Containers.FirstOrDefault()?.Agent, solution = manifest.Id, version = manifest.Version }, ct);
 
                 if (announce is not null) await announce.CreatedAsync(created.Id);
+
+                // THE TEAM PICTURE, when the wizard's team step asked for it. A page that cannot be
+                // published fails the step, and the team goes with the undo.
+                if (request.TeamPicture == true)
+                {
+                    if (picture is null) throw new InvalidOperationException("The Team picture is not available on this instance.");
+
+                    if (await picture.SetAsync(
+                            created.Id, true,
+                            id => new TriggerAudit(actor.UserId, actor.Email, TenantActions.TeamPictureChanged, id,
+                                teams.LabelFor(id), JsonSerializer.Serialize(new { teamPicture = true, solution = manifest.Id })),
+                            ct) is { } refusal)
+                    {
+                        throw new InvalidOperationException(refusal);
+                    }
+                }
             });
 
             var tools = package.ToolsFolder is null ? null : ToolsFolderOf(paths, stored!);

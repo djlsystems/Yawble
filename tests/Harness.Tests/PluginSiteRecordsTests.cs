@@ -37,6 +37,11 @@ public sealed class PluginSiteRecordsTests : IAsyncLifetime
                 new SiteRow(team, "board", null, 1, DateTimeOffset.UtcNow, "person@example.test"),
                 new TriggerAudit(null, null, "site.created", $"{team}/board", "board", null), Ct));
         }
+
+        // The Team picture's reserved site, as the platform makes it for a team that has turned it on.
+        Assert.True(await _store.CreateAsync(
+            new SiteRow("alpha", TeamPicture.SiteName, null, 1, DateTimeOffset.UtcNow, TeamPicture.PlatformLabel),
+            new TriggerAudit(null, null, "site.created", $"alpha/{TeamPicture.SiteName}", TeamPicture.SiteName, null), Ct));
     }
 
     public ValueTask DisposeAsync()
@@ -174,5 +179,44 @@ public sealed class PluginSiteRecordsTests : IAsyncLifetime
         Assert.Empty(await _store.ListDocumentsAsync("alpha", "board", "jobs", Ct));
         var warning = Assert.Single(await bed.OfTypeAsync(MessageTypes.Progress));
         Assert.Contains("over the limit of 65536 bytes (64 KB) for one document", Status(warning), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An operational team's own figures, written by the plugin that already has them in the one
+    /// documented shape (docs/sites.md, <c>tp-ops</c>), are what the page reads, with no agent run.
+    /// The plugin cannot write the platform's collections, nor a shape the page cannot draw.
+    /// </summary>
+    [Fact]
+    public async Task A_plugin_writes_the_team_pictures_operational_figures_in_the_documented_shape_and_the_page_reads_them()
+    {
+        await using var bed = await RunAsync("""
+            cat >/dev/null
+            echo '{"t":"site.put","site":"team-picture","collection":"tp-ops","id":"today","doc":{"date":"2026-11-04","counts":{"support":3,"inquiry":5,"alert":1,"spam":12},"lastMessage":{"to":"+440000","sentAt":"2026-11-04T09:55:00Z","text":"3 support, 1 alert"},"runs":[{"at":"2026-11-04T09:50:00Z","kind":null},{"at":"2026-11-04T09:55:00Z","kind":"alert"}],"items":[{"at":"2026-11-04T09:55:00Z","kind":"alert","title":"Disk full"}],"notes":"kept as written"}}'
+            echo '{"t":"site.put","site":"team-picture","collection":"tp-now","id":"plug","doc":{"member":"plug"}}'
+            echo '{"t":"site.put","site":"team-picture","collection":"tp-ops","id":"bad","doc":{"date":"today","counts":{"spam":-1}}}'
+            echo '{"t":"site.put","site":"team-picture","collection":"tp-picture","id":"ongoing","doc":{"kind":"operational"}}'
+            echo '{"t":"result","ok":true,"output":"triaged"}'
+            """);
+
+        var sites = new SiteService(
+            _store, team => string.Equals(team, "alpha", StringComparison.OrdinalIgnoreCase) ? "alpha" : null,
+            new TeamPaths(_dataRoot), bed.Store);
+
+        // What `_api/data/tp-ops` answers the page.
+        var page = await sites.ListDocumentsAsync("alpha", TeamPicture.SiteName, TeamPictureRules.Ops, null, Ct);
+        var ops = Assert.Single(page.Value!);
+        Assert.Equal("today", ops.Id);
+        Assert.Equal("alpha/plug", ops.UpdatedBy);
+        var doc = JsonNode.Parse(ops.Json)!;
+        Assert.Equal(12, (int)doc["counts"]!["spam"]!);
+        Assert.Equal("3 support, 1 alert", (string?)doc["lastMessage"]!["text"]);
+        Assert.Equal(2, doc["runs"]!.AsArray().Count);
+        Assert.Equal("kept as written", (string?)doc["notes"]);
+
+        // Nor the platform's collections, nor the Manager's picture, nor a wrong shape.
+        Assert.Empty(await _store.ListDocumentsAsync("alpha", TeamPicture.SiteName, TeamPictureRules.Now, Ct));
+        Assert.Empty(await _store.ListDocumentsAsync("alpha", TeamPicture.SiteName, TeamPictureRules.Picture, Ct));
+        var warning = Assert.Single(await bed.OfTypeAsync(MessageTypes.Progress));
+        Assert.Contains("A `site.put` record was dropped: `tp-now` is kept by the platform", Status(warning), StringComparison.Ordinal);
     }
 }

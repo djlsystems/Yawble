@@ -37,7 +37,7 @@ internal static class TeamEndpoints
         app.MapPost("/api/teams", async (
             CreateTeam request, TeamRegistry teams, TenantLogging audit, HttpContext context,
             AgentInstallProbe probe, AgentCatalog catalog, TeamListPush listPush, TeamRepoSetup repoSetup,
-            DetachedWork detached, Connections connections, CancellationToken ct) =>
+            DetachedWork detached, Connections connections, TeamPicture picture, CancellationToken ct) =>
         {
             var name = (request.Name ?? "").Trim();
 
@@ -192,6 +192,19 @@ internal static class TeamEndpoints
                 var localRepository = newRepos.LocalRepository;
                 var createdOnGitHub = newRepos.CreatedOnGitHub;
 
+                // THE TEAM PICTURE, once the team exists: its page and its row. A page that cannot be
+                // published leaves the team made, with the flag off, and says why.
+                string? teamPictureError = null;
+                if (request.TeamPicture == true)
+                {
+                    teamPictureError = await picture.SetAsync(
+                        created.Id, true,
+                        stored => new TriggerAudit(actorId, actorEmail, TenantActions.TeamPictureChanged, stored,
+                            teams.LabelFor(stored), JsonSerializer.Serialize(TeamPicture.Detail(true))),
+                        CancellationToken.None);
+                    created = teams.All().First(t => string.Equals(t.Id, created.Id, StringComparison.Ordinal));
+                }
+
                 var unresolvedList = new List<object>();
 
                 // Probe manager (in Containers)
@@ -264,6 +277,8 @@ internal static class TeamEndpoints
                     }
 
                     if (createdOnGitHub.Count > 0) obj["createdOnGitHub"] = new JsonArray([.. createdOnGitHub.Select(u => JsonValue.Create(u))]);
+
+                    if (teamPictureError is not null) obj["teamPictureError"] = teamPictureError;
                 }
                 return Results.Json(node, statusCode: 200);
             }
@@ -347,7 +362,7 @@ internal static class TeamEndpoints
         // make a team at all.
         app.MapPost("/api/teams/{team}/clone", async (
             [Description(Describe.Team)] string team, CloneTeam request, TeamRegistry teams,
-            TenantLogging audit, TeamListPush listPush, HttpContext context, CancellationToken ct) =>
+            TenantLogging audit, TeamListPush listPush, HttpContext context, TeamPicture picture, CancellationToken ct) =>
         {
             if (teams.ExistingName(team) is not { } stored)
             {
@@ -406,6 +421,7 @@ internal static class TeamEndpoints
                             // A clone of a team that chose nothing goes on tracking the instance figure
                             // rather than being frozen at today's value of it.
                             budgetTokens = done.Team.BudgetTokens,
+                            teamPicture = sourceSummary.TeamPicture,
                             env = done.EnvKeys > 0 ? carriedEnvKeys : Array.Empty<string>(),
                             roster = done.Team.Containers
                                 .Select(container => new
@@ -425,6 +441,18 @@ internal static class TeamEndpoints
                     },
                     ct);
 
+                // THE SOURCE'S TEAM PICTURE CHOICE IS CARRIED, its data is not: the clone's page is its own.
+                string? teamPictureError = null;
+                if (sourceSummary.TeamPicture)
+                {
+                    teamPictureError = await picture.SetAsync(
+                        done.Team.Id, true,
+                        stored => TenantLogging.Row(context, TenantActions.TeamPictureChanged, stored, teams.LabelFor(stored),
+                            new { teamPicture = true, clonedFrom = sourceSummary.Id }),
+                        CancellationToken.None);
+                    done = done with { Team = teams.All().First(t => string.Equals(t.Id, done.Team.Id, StringComparison.Ordinal)) };
+                }
+
                 // EVERY OPEN WINDOW HEARS OF THE CLONE, as of any other new team.
                 await listPush.AnnounceCreatedAsync(done.Team.Id, ct);
 
@@ -435,6 +463,7 @@ internal static class TeamEndpoints
                     envKeys = done.EnvKeys,
                     members = done.Members,
                     failures = done.Failures,
+                    teamPictureError,
                 });
             }
             catch (TeamNameTakenException taken)
@@ -1172,6 +1201,40 @@ internal static class TeamEndpoints
         // reaches the team can raise their own. That is deliberate: a limit nobody can see is one nobody
         // can reason about, and a field that silently refuses what a person typed is a worse lie than a
         // number they can change. `WorkflowSpendLimit` stays the thing an unset team is bounded by.
+        app.MapPut("/api/teams/{team}/team-picture", async (
+            [Description(Describe.Team)] string team,
+            TeamPictureSetting? body, TeamRegistry teams, TeamPicture picture, HttpContext context,
+            CancellationToken ct) =>
+        {
+            if (teams.ExistingName(team) is not { } stored) return Refusals.NoTeam(team);
+
+            if (body?.TeamPicture is not { } on)
+            {
+                return Results.BadRequest(new { error = "Send teamPicture: true to turn the Team picture on, or false to turn it off." });
+            }
+
+            var refusal = await picture.SetAsync(
+                stored, on,
+                id => TenantLogging.Row(context, TenantActions.TeamPictureChanged, id, teams.LabelFor(id), TeamPicture.Detail(on)),
+                ct);
+
+            if (refusal is not null) return Results.Json(new { error = refusal }, statusCode: StatusCodes.Status409Conflict);
+
+            return Results.Ok(teams.All().First(t => string.Equals(t.Id, stored, StringComparison.Ordinal)));
+        })
+            .WithTags("Teams")
+            .HumansOnly()
+            .WithSummary("Turn this team's Team picture on or off")
+            .WithDescription(
+                "The Team picture is the platform's site `team-picture` for this team: a page from the template "
+                + "that ships with the platform, whose live parts (progress, work in flight, recent runs, spend, "
+                + "what waits on a person) are kept from the team's own figures with no agent run.\n\n"
+                + "`teamPicture: true` makes the site when the team has none, publishes the shipped template and "
+                + "keeps its figures current. `false` unpublishes it and KEEPS its data - the Manager's picture "
+                + "and the Concierge's settings - so turning it on again brings the page back as it was. Each "
+                + "change writes `team.picture-changed`. 409 with a sentence when the page cannot be published. "
+                + "Answers the whole team, `teamPicture` in it.");
+
         app.MapPut("/api/teams/{team}/budget", async (
             [Description(Describe.Team)] string team,
             TeamBudget? body, TeamRegistry teams, HttpContext context,

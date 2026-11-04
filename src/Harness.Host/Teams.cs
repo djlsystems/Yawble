@@ -162,7 +162,12 @@ public sealed record TeamSummary(
 
     /// <summary>Who archived it - a person's email, or the Concierge on a person's behalf; null for
     /// an active team.</summary>
-    string? ArchivedBy = null);
+    string? ArchivedBy = null,
+
+    /// <summary>Whether this team keeps its Team picture, the platform's reserved site
+    /// <c>team-picture</c> (<see cref="Harness.Host.TeamPicture"/>). Safe to ride the hub: it is the
+    /// team's own setting.</summary>
+    bool TeamPicture = false);
 
 /// <summary>One repository's default branch as a screen sees it. See <see cref="RepoDefaultBranch"/>.</summary>
 public sealed record TeamRepoDefaultBranch(string Repo, string? Branch, string? FromRemote, string? SetByPerson);
@@ -659,9 +664,34 @@ public sealed class TeamRegistry(
         else
         {
             _archived.Remove(stored);
+        _teamPicture.Remove(stored);
         }
 
         host.RepublishTeam(stored);
+        TeamChanged?.Invoke(SummaryFor(stored, withRoot: false));
+    }
+
+    /// <summary>Whether this team keeps its Team picture.</summary>
+    public bool HasTeamPicture(string team) =>
+        ExistingName(team) is { } stored && _teamPicture.Contains(stored);
+
+    /// <summary>Every team that keeps its Team picture, by stored id.</summary>
+    public IReadOnlyList<string> TeamsWithTeamPicture() => [.. _teamPicture];
+
+    /// <summary>
+    /// Records whether this team keeps its Team picture: the row and its tenant row first, in one
+    /// transaction, then memory. Publishing and unpublishing the site is <see cref="TeamPicture"/>'s.
+    /// </summary>
+    public async Task SetTeamPictureAsync(
+        string team, bool on, Func<string, TriggerAudit>? audit = null, CancellationToken ct = default)
+    {
+        var stored = ExistingName(team) ?? throw new InvalidOperationException($"No team '{team}'.");
+
+        await teams.SetTeamPictureAsync(stored, on, audit?.Invoke(stored), ct);
+
+        if (on) _teamPicture.Add(stored);
+        else _teamPicture.Remove(stored);
+
         TeamChanged?.Invoke(SummaryFor(stored, withRoot: false));
     }
 
@@ -962,6 +992,9 @@ public sealed class TeamRegistry(
     /// </summary>
     private readonly Dictionary<string, (DateTimeOffset At, string? By)> _archived = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Which teams keep their Team picture: a write-through cache of `team_picture`.</summary>
+    private readonly HashSet<string> _teamPicture = new(StringComparer.OrdinalIgnoreCase);
+
     // A WRITE-THROUGH CACHE of the `teams` table's name column, not the record of truth. Filled
     // once by RestoreAsync at startup and kept in step by every writer below.
     //
@@ -1108,6 +1141,7 @@ public sealed class TeamRegistry(
                 // a team that chose unlimited to the instance figure.
                 if (team.BudgetTokens is { } chosenBudget) _budgets[team.Id] = chosenBudget;
                 if (team.ArchivedAt is { } archivedAt) _archived[team.Id] = (archivedAt, team.ArchivedBy);
+                if (team.TeamPicture) _teamPicture.Add(team.Id);
 
                 await host.SetPausedAsync(team.Id, team.Paused);
 
@@ -1600,7 +1634,8 @@ public sealed class TeamRegistry(
             solutions?.For(team),
             _archived.ContainsKey(team),
             _archived.TryGetValue(team, out var archived) ? archived.At : null,
-            _archived.TryGetValue(team, out var by) ? by.By : null);
+            _archived.TryGetValue(team, out var by) ? by.By : null,
+            _teamPicture.Contains(team));
 
     /// <summary>
     /// What this team is CALLED - its label, or its identifier when it has never been relabelled.

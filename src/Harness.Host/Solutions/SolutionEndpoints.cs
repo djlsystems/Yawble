@@ -92,7 +92,8 @@ public static class SolutionEndpoints
                 new SolutionInstallRequest(
                     request.Folder, request.TeamName, request.Agent, request.LocalRepository,
                     new SolutionAnswers(
-                        request.Settings, request.Connections, SecretValues: request.SecretValues, NamedSecretValues: request.NamedSecretValues)),
+                        request.Settings, request.Connections, SecretValues: request.SecretValues, NamedSecretValues: request.NamedSecretValues),
+                    request.TeamPicture),
                 ActorOf(context), ct)))
             .WithTags(Area)
             .HumansOnly()
@@ -245,7 +246,9 @@ public sealed record SolutionInstallBody(
     [property: Description("Package member name to secret field to the value a person typed: that member's own value, kept with its hire.")]
     Dictionary<string, Dictionary<string, string>>? SecretValues = null,
     [property: Description("Package member name to the name a person gave a secret to its value, for a member whose plugin declares a `namedSecrets` block: kept with its hire.")]
-    Dictionary<string, Dictionary<string, string>>? NamedSecretValues = null);
+    Dictionary<string, Dictionary<string, string>>? NamedSecretValues = null,
+    [property: Description("True to give the new team its Team picture (the platform's site `team-picture`), set in the team step. Omitted or false, none.")]
+    bool? TeamPicture = null);
 
 /// <summary>Body of <c>POST /api/solutions/update</c>.</summary>
 public sealed record SolutionUpdateBody(

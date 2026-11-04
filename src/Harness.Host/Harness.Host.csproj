@@ -61,6 +61,13 @@
     <Content Include="..\..\plugins\**\*" Exclude="..\..\plugins\*\node_modules\**;..\..\plugins\*\website\test\**" LinkBase="plugins" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- THE TEAM PICTURE'S PAGE TEMPLATE, from templates/team-picture/ at the repository root, beside the
+       Host as templates/team-picture/: what the platform publishes as each team's reserved site
+       `team-picture` (TeamPicture). Versioned with the platform; its digest says which is live. -->
+  <ItemGroup>
+    <Content Include="..\..\templates\team-picture\**\*" LinkBase="templates/team-picture" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <!-- A BUILT-IN PLUGIN'S npm DEPENDENCIES (Team Connections' playwright-core, for a website connection's
        browser), installed from its package-lock.json when they are missing - never committed - and
        copied beside it. The image installs them in its own stage (Containerfile). No npm here and none

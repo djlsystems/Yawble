@@ -286,6 +286,28 @@ public abstract class TeamStoreContract : IdentityContract
         Assert.Equal(["team.archived", "team.unarchived"], await database.ColumnAsync($"SELECT action FROM tenant_events WHERE subject = '{team}' ORDER BY seq"));
     }
 
+    /// <summary>The Team picture's flag: one narrow column with its tenant row, kept by a re-save of the
+    /// whole team, and off for a team that never chose it.</summary>
+    [Fact]
+    public async Task A_teams_picture_is_turned_on_and_off_each_with_its_tenant_row_and_a_re_save_keeps_it()
+    {
+        var database = await DatabaseAsync();
+        var store = database.Teams();
+        const string team = "picture-team";
+        await store.SaveTeamAsync(new PersistedTeam(team, null), Ct);
+        Assert.False(Assert.Single(await store.TeamsAsync(Ct), t => t.Id == team).TeamPicture);
+
+        await store.SetTeamPictureAsync("PICTURE-TEAM", true, new TriggerAudit(null, "person@example.test", TenantActions.TeamPictureChanged, team, team, "{\"teamPicture\":true}"), Ct);
+        Assert.True(Assert.Single(await store.TeamsAsync(Ct), t => t.Id == team).TeamPicture);
+
+        await store.SaveTeamAsync(new PersistedTeam(team, "Renamed"), Ct);
+        Assert.True(Assert.Single(await store.TeamsAsync(Ct), t => t.Id == team).TeamPicture);
+
+        await store.SetTeamPictureAsync(team, false, new TriggerAudit(null, "person@example.test", TenantActions.TeamPictureChanged, team, team, "{\"teamPicture\":false}"), Ct);
+        Assert.False(Assert.Single(await store.TeamsAsync(Ct), t => t.Id == team).TeamPicture);
+        Assert.Equal(["team.picture-changed", "team.picture-changed"], await database.ColumnAsync($"SELECT action FROM tenant_events WHERE subject = '{team}' ORDER BY seq"));
+    }
+
     /// <summary><c>FreshVolumeTests.ActivityFromRoundTripAsync</c>, same values.</summary>
     [Fact]
     public async Task A_teams_activity_from_round_trips_a_re_save_keeps_it_and_a_clear_clears_both()
@@ -379,9 +401,11 @@ public abstract class TeamStoreContract : IdentityContract
         await Assert.ThrowsAnyAsync<Exception>(() => store.SaveMemberAsync(Member("Alpha", "Dev", "codex", 2), [Audit(TenantActions.MemberChanged, "Alpha/Dev")], Ct));
         await Assert.ThrowsAnyAsync<Exception>(() => store.SetPersonDefaultBranchAsync("Alpha", "app", "release", Audit(TenantActions.RepoDefaultBranchSet, "Alpha"), Ct));
         await Assert.ThrowsAnyAsync<Exception>(() => store.SetConciergeSettingsAsync("codex", Audit(TenantActions.ConciergeChanged, "concierge"), Ct));
+        await Assert.ThrowsAnyAsync<Exception>(() => store.SetTeamPictureAsync("Alpha", true, Audit(TenantActions.TeamPictureChanged, "Alpha"), Ct));
 
         var team = Assert.Single(await store.TeamsAsync(Ct));
         Assert.Equal((false, (long?)null, (DateTimeOffset?)null), (team.Paused, team.BudgetTokens, team.ArchivedAt));
+        Assert.False(team.TeamPicture);
         Assert.Empty(team.Env!);
         Assert.Equal(("claude", 1L), ((await store.MemberAsync("Alpha", "Dev", Ct))!.Agent, (await store.MemberAsync("Alpha", "Dev", Ct))!.FloorSeq));
         Assert.Null(Assert.Single(await store.RepoDefaultBranchesAsync(Ct)).SetByPerson);

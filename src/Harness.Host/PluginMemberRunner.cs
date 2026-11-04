@@ -1613,7 +1613,7 @@ public sealed partial class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             return;
         }
 
-        var actor = SiteActor.Member(member);
+        var actor = SiteActor.Plugin(member);
         var service = sites;
 
         if (kind == "site.delete")

@@ -377,6 +377,12 @@ public sealed partial class SolutionChecker(SolutionPlatform platform)
                 continue;
             }
 
+            if (TeamPicture.IsReserved(name))
+            {
+                refusals.Add(new(SolutionManifest.FileName, at, TeamPicture.ReservedName));
+                continue;
+            }
+
             var folder = Path.Combine(root, SitesFolder, name);
 
             if (!Directory.Exists(folder))

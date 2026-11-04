@@ -253,6 +253,17 @@ public sealed class SqlServerTeamStore(string connectionString) : ITeamStore
             audit,
             ct);
 
+    public Task SetTeamPictureAsync(string team, bool on, TriggerAudit? audit = null, CancellationToken ct = default) =>
+        WriteAsync(
+            "UPDATE teams SET team_picture = @on WHERE id = @id",
+            command =>
+            {
+                command.Parameters.AddWithValue("@on", on ? 1L : 0L);
+                command.Parameters.AddWithValue("@id", team);
+            },
+            audit,
+            ct);
+
     public Task SetArchivedAsync(
         string team, DateTimeOffset? archivedAt, string? archivedBy, TriggerAudit audit, CancellationToken ct = default) =>
         WriteAsync(

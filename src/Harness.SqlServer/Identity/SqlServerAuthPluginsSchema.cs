@@ -240,5 +240,12 @@ public static class SqlServerAuthPluginsSchema
                  CONSTRAINT pk_team_mcp_servers PRIMARY KEY (team, server_id)
              );
              """),
+
+        // `AuthSchema`'s auth-034: whether the team keeps its Team picture, 0 or 1, as `paused` is.
+        new MigrationStep(
+            "auth-034",
+            """
+            ALTER TABLE teams ADD team_picture BIGINT NOT NULL CONSTRAINT df_teams_team_picture DEFAULT 0;
+            """),
     ];
 }
