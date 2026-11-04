@@ -338,18 +338,17 @@ func keptWithoutLimits(ctx context.Context, e engine.Engine, label string, s Set
 // when it says starting or unhealthy the check is run here (RunHealthCheck) and that answer is
 // taken, because rootless Podman updates its record only from a timer that does not fire on
 // every machine. Docker's daemon keeps its record on time, so there the record is the answer.
+// A check that cannot be run here, or whose run errors, leaves the record as the answer.
 // said is the engine's record when the check was run here, and empty when it was not.
 func CurrentHealth(ctx context.Context, e engine.Engine, name string) (h, said engine.Health, err error) {
 	h, err = e.Health(ctx, name)
 	if err != nil || (h != engine.HealthStarting && h != engine.HealthUnhealthy) {
 		return h, "", err
 	}
-	ran, err := e.RunHealthCheck(ctx, name)
-	if err != nil {
-		return h, "", err
-	}
-	if ran == engine.HealthNone {
-		// The check could not be run after all: the engine's record stands.
+	ran, runErr := e.RunHealthCheck(ctx, name)
+	if runErr != nil || ran == engine.HealthNone {
+		// The check could not be run after all (the container stopped meanwhile, or the engine
+		// refused once): the engine's record stands, and the caller's own next look decides.
 		return h, "", nil
 	}
 	return ran, h, nil

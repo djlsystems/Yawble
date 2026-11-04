@@ -114,7 +114,8 @@ type Engine interface {
 	// missing container, is HealthNone: never read as healthy.
 	Health(ctx context.Context, name string) (Health, error)
 	// RunHealthCheck runs the image's health check now, where the engine leaves running it to a
-	// timer (Podman), and answers the verdict. Docker runs checks in its daemon: there it is Health.
+	// timer (Podman), and answers the verdict. Docker runs checks in its daemon and has nothing to
+	// run by hand: there it answers HealthNone, and the caller keeps Health's record.
 	RunHealthCheck(ctx context.Context, name string) (Health, error)
 	// HealthTimes is when the container started, its check's start period and interval, and when
 	// the engine last ran the check.

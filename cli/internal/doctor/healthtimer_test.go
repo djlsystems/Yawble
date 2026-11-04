@@ -104,3 +104,24 @@ func TestLingerFixOnlyWhenLingeringIsMeasuredOff(t *testing.T) {
 		}
 	}
 }
+
+// The engine's timestamps come from its VM's clock, and a VM clock two minutes behind this
+// computer's makes a working timer's last check look 2m10s old and a container in its start
+// period look past it. Neither warns: doctor allows ClockSkewMargin on both signs. A timer that
+// has really stopped, past the margin, still warns.
+func TestHealthTimerAllowsForAnEngineClockBehindThisComputers(t *testing.T) {
+	behind := 2 * time.Minute
+	cases := map[string]doctor.HealthObserved{
+		"healthy, checked 10s ago by the engine's clock": {Name: "yawble", Engine: engine.HealthHealthy, Ran: engine.HealthHealthy, Times: workerTimes(20*time.Minute, 10*time.Second+behind)},
+		"starting, 10m in by the engine's clock":         {Name: "w", Engine: engine.HealthStarting, Ran: engine.HealthHealthy, Times: workerTimes(10*time.Minute+behind, 0)},
+	}
+	for name, o := range cases {
+		if c, ok := doctor.HealthTimerCheck([]doctor.HealthObserved{o}, "", hcNow); !ok || c.Verdict != doctor.OK {
+			t.Errorf("%s: check %+v ok %v", name, c, ok)
+		}
+	}
+	stalled := doctor.HealthObserved{Name: "yawble", Engine: engine.HealthHealthy, Ran: engine.HealthHealthy, Times: workerTimes(20*time.Minute, 3*30*time.Second+doctor.ClockSkewMargin+time.Second)}
+	if c, _ := doctor.HealthTimerCheck([]doctor.HealthObserved{stalled}, "", hcNow); c.Verdict != doctor.Warn {
+		t.Errorf("a timer stopped past the margin: check %+v", c)
+	}
+}

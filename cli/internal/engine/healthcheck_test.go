@@ -39,15 +39,15 @@ func TestPodmanRunHealthCheckRunsItAndReadsTheRecord(t *testing.T) {
 	}
 }
 
-// Docker runs its checks in the daemon: the record is read, nothing is run.
+// Docker runs its checks in the daemon: nothing is run by hand, so the answer is none ("cannot be
+// run here") and the caller keeps the daemon's record.
 func TestDockerRunHealthCheckIsTheDaemonsRecord(t *testing.T) {
 	s := engine.NewScripted()
-	s.On("docker container inspect --format {{if .State.Health}}{{.State.Health.Status}}{{end}} w", engine.Result{Stdout: "starting\n"})
-	if h, err := engine.NewDocker(s).RunHealthCheck(context.Background(), "w"); err != nil || h != engine.HealthStarting {
-		t.Errorf("h %q err %v", h, err)
+	if h, err := engine.NewDocker(s).RunHealthCheck(context.Background(), "w"); err != nil || h != engine.HealthNone {
+		t.Errorf("h %q err %v: want none, nothing run by hand on Docker", h, err)
 	}
-	if len(s.Calls) != 1 || strings.Contains(s.Calls[0], "healthcheck") {
-		t.Errorf("calls %q", s.Calls)
+	if len(s.Calls) != 0 {
+		t.Errorf("calls %q: Docker runs nothing by hand and need not re-read the daemon's record", s.Calls)
 	}
 }
 

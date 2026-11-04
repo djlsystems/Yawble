@@ -56,10 +56,11 @@ func (p podman) RunHealthCheck(ctx context.Context, name string) (Health, error)
 	return HealthNone, fmt.Errorf("podman healthcheck run %s: %s (exit %d)", name, strings.TrimSpace(res.Stderr), res.ExitCode)
 }
 
-// RunHealthCheck on Docker is the daemon's own verdict: Docker runs every check in its daemon,
-// on time, and has no verb to run one by hand.
+// RunHealthCheck on Docker runs nothing and answers none, "cannot be run here": Docker runs every
+// check in its daemon, on time, and has no verb to run one by hand, so the daemon's record is the
+// answer and nobody may say a check was run by hand.
 func (d docker) RunHealthCheck(ctx context.Context, name string) (Health, error) {
-	return d.Health(ctx, name)
+	return HealthNone, nil
 }
 
 func (p podman) HealthTimes(ctx context.Context, name string) (HealthTimes, error) {

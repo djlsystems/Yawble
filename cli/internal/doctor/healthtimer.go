@@ -34,7 +34,7 @@ func ObserveHealth(ctx context.Context, e engine.Engine, controlRunning bool, wo
 		if t, err := e.HealthTimes(ctx, name); err == nil {
 			o.Times = &t
 			if o.Ran == "" && o.Engine == engine.HealthHealthy && checkOverdue(t, now) {
-				if ran, err := e.RunHealthCheck(ctx, name); err == nil {
+				if ran, err := e.RunHealthCheck(ctx, name); err == nil && ran != engine.HealthNone {
 					o.Ran = ran
 				}
 			}
@@ -54,28 +54,34 @@ func ObserveHealth(ctx context.Context, e engine.Engine, controlRunning bool, wo
 	return out
 }
 
+// ClockSkewMargin is added to every wait doctor measures against the engine's timestamps. Those
+// come from the engine's clock (a Podman or Docker Desktop VM), and "now" from this computer's;
+// a VM clock that has fallen a minute or two behind (WSL's drifts after the host sleeps) would
+// otherwise make a working timer look overdue.
+const ClockSkewMargin = 3 * time.Minute
+
 // checkOverdue is the engine not having run a check for three of its intervals, counted from the
-// later of the container's start and the last check.
+// later of the container's start and the last check, plus ClockSkewMargin.
 func checkOverdue(t engine.HealthTimes, now time.Time) bool {
 	from := t.StartedAt
 	if t.LastCheck.After(from) {
 		from = t.LastCheck
 	}
-	return !from.IsZero() && now.Sub(from) > 3*t.Every()
+	return !from.IsZero() && now.Sub(from) > 3*t.Every()+ClockSkewMargin
 }
 
 // timerIdle says why a container shows the engine is not running its health check on its own,
 // or "" when it does not. Both signs need the check, run by hand, to pass: a check that fails is
 // the container's own fault, said elsewhere. One: the record still says starting past the start
 // period and one interval. Two: the record says healthy, and the engine has run no check for
-// three intervals.
+// three intervals. Both waits allow ClockSkewMargin for the engine's clock being behind.
 func timerIdle(o HealthObserved, now time.Time) string {
 	if o.Times == nil || o.Ran != engine.HealthHealthy || o.Times.StartedAt.IsZero() {
 		return ""
 	}
 	up := now.Sub(o.Times.StartedAt)
 	switch {
-	case o.Engine == engine.HealthStarting && up > o.Times.StartPeriod+o.Times.Every():
+	case o.Engine == engine.HealthStarting && up > o.Times.StartPeriod+o.Times.Every()+ClockSkewMargin:
 		return fmt.Sprintf("%s still read starting %s after it started (its start period is %s), and its check, run by hand, passes", o.Name, roundMinute(up), roundMinute(o.Times.StartPeriod))
 	case o.Engine == engine.HealthHealthy && checkOverdue(*o.Times, now):
 		last := "has never been run"
