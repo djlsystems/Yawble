@@ -481,7 +481,7 @@ public static class OutcomeSchema
                 actor_id            TEXT    NOT NULL,
                 actor_email         TEXT    NULL,
                 kind                TEXT    NOT NULL,
-                team_id             TEXT    NULL,
+                team_id             TEXT    NULL COLLATE NOCASE,
                 correlation         INTEGER NULL,
                 outcome_id_at_event TEXT    NULL,
                 related_seq         INTEGER NULL,

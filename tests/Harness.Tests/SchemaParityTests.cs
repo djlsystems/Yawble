@@ -196,6 +196,81 @@ public sealed class SchemaParityTests
         }
     }
 
+    /// <summary>
+    /// A TEAM ID FOLDS CASE ON BOTH PROVIDERS, AND THIS NEEDS NO SQL SERVER. <see cref="Tables_match"/>
+    /// compares the two live schemas, but it skips wherever <c>HARNESS_TEST_SQLSERVER</c> is unset, which
+    /// let SQLite's <c>intervention_ledger.team_id</c> ship BINARY beside SQL Server's NOCASE twin. Here
+    /// SQLite's own declared collation (<c>sqlite3_table_column_metadata</c>) is read for every
+    /// <c>team_id</c> column on a fresh volume, and every SQL Server <c>team_id</c> declaration is read
+    /// from its step text: each must fold case, as <c>ContainerId</c>'s equality and every reader
+    /// (<c>HumanFigures.OfTeam</c>, the OrdinalIgnoreCase floors) do.
+    /// </summary>
+    [Fact]
+    public async Task Every_team_id_column_folds_case_on_both_providers()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var sqlite = new SqliteContractDatabase();
+
+        var binary = new List<string>();
+        var seen = new List<string>();
+        await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = sqlite.Path, Pooling = false }.ToString()))
+        {
+            await connection.OpenAsync(ct);
+            foreach (var table in await ProviderSchemaComparison.SqliteTablesAsync(sqlite.Path, ct))
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = "SELECT 1 FROM pragma_table_xinfo($table) WHERE name = 'team_id'";
+                command.Parameters.AddWithValue("$table", table);
+                if (await command.ExecuteScalarAsync(ct) is null) continue;
+
+                var result = SQLitePCL.raw.sqlite3_table_column_metadata(
+                    connection.Handle, "main", table, "team_id", out _, out var collation, out _, out _, out _);
+                Assert.Equal(SQLitePCL.raw.SQLITE_OK, result);
+                seen.Add(table);
+                if (!string.Equals(collation, "NOCASE", StringComparison.OrdinalIgnoreCase)) binary.Add($"{table}.team_id {collation}");
+            }
+        }
+
+        Assert.Contains("intervention_ledger", seen);
+        Assert.Empty(binary);
+
+        var declarations = SqlServerSchemaModules.All
+            .SelectMany(s => Regex.Matches(s.Sql, @"\bteam_id\s+NVARCHAR\([^)]*\)[^,\n]*").Select(m => (s.Id, m.Value)))
+            .ToList();
+        Assert.Contains(declarations, d => d.Id == "outcome-010");
+        Assert.All(declarations, d => Assert.Contains($"COLLATE {SqlServerSql.NoCase}", d.Value, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// <c>intervention_ledger</c>'s team id is matched as a team is: a row written under one spelling is
+    /// found by another, through the column and its <c>ix_intervention_ledger_team</c> index, on SQLite.
+    /// </summary>
+    [Fact]
+    public async Task An_intervention_row_is_found_by_its_team_in_any_case_on_SQLite()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var sqlite = new SqliteContractDatabase();
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = sqlite.Path, Pooling = false }.ToString());
+        await connection.OpenAsync(ct);
+
+        await using (var insert = connection.CreateCommand())
+        {
+            insert.CommandText = """
+                INSERT INTO intervention_ledger (occurred_at, actor_id, kind, team_id)
+                VALUES ('2026-11-04T00:00:00.0000000+00:00', 'person-1', 'instruction', 'AlphaTeam')
+                """;
+            await insert.ExecuteNonQueryAsync(ct);
+        }
+
+        foreach (var spelling in new[] { "AlphaTeam", "alphateam", "ALPHATEAM" })
+        {
+            await using var count = connection.CreateCommand();
+            count.CommandText = "SELECT COUNT(*) FROM intervention_ledger INDEXED BY ix_intervention_ledger_team WHERE team_id = $team";
+            count.Parameters.AddWithValue("$team", spelling);
+            Assert.Equal(1L, (long)(await count.ExecuteScalarAsync(ct))!);
+        }
+    }
+
     /// <summary><c>outcome-011</c> is one id on both providers and adds <c>outcomes.presentation</c>, nullable,
     /// held to the closed set <see cref="Harness.Contracts.OutcomePresentation.All"/> by a CHECK, and nothing else.
     /// <see cref="Tables_match"/> holds the column itself alike.</summary>
