@@ -81,7 +81,12 @@ func newDoctorCommand(deps Deps) *cobra.Command {
 			}
 			checks = append(checks, doctor.CapacityCheck(capacity, s, report))
 			if observed.EngineErr == nil && observed.ContainerKnown {
-				checks = append(checks, workerChecks(cmd.Context(), e, s, report)...)
+				// The workers as Observe found them: a second reading would lose what the engine's
+				// record said before their checks were run.
+				checks = append(checks, workerChecks(cmd.Context(), e, s, report, observed.Workers)...)
+				if c, ok := healthTimerCheck(cmd.Context(), deps, e, observed, observed.Workers); ok {
+					checks = append(checks, c)
+				}
 			}
 			checks = append(checks, doctor.AgentToolsCheck(report, reportErr))
 			checks = doctor.BackupCheck(checks, deps.ConfigDir, deps.Now())
@@ -186,11 +191,7 @@ func repair(cmd *cobra.Command, e engine.Engine, s instance.Settings, o doctor.O
 
 // workerChecks observes each worker container, with the engine's stats of a running one, and
 // judges them against control's record.
-func workerChecks(ctx context.Context, e engine.Engine, s instance.Settings, report *doctor.HostReport) []doctor.Check {
-	workers, err := instance.Workers(ctx, e, s)
-	if err != nil {
-		return []doctor.Check{{Name: "workers", Verdict: doctor.Skip, Detail: "not measured: " + err.Error()}}
-	}
+func workerChecks(ctx context.Context, e engine.Engine, s instance.Settings, report *doctor.HostReport, workers []instance.WorkerStatus) []doctor.Check {
 	observed := make([]doctor.WorkerObserved, 0, len(workers))
 	for _, w := range workers {
 		o := doctor.WorkerObserved{WorkerStatus: w}
@@ -199,4 +200,26 @@ func workerChecks(ctx context.Context, e engine.Engine, s instance.Settings, rep
 	}
 	ref, _ := s.WorkerRef()
 	return doctor.WorkerChecks(observed, report, s.Workers, ref)
+}
+
+// healthTimerCheck is the row that says whether the engine runs the containers' health checks on
+// its own. Only when it does not, on Podman, is the user's lingering asked, in the machine where
+// there is one, to name the fix.
+func healthTimerCheck(ctx context.Context, deps Deps, e engine.Engine, o doctor.Observed, workers []instance.WorkerStatus) (doctor.Check, bool) {
+	now := deps.Now()
+	observed := doctor.ObserveHealth(ctx, e, o.Container == engine.StateRunning, workers, now)
+	c, ok := doctor.HealthTimerCheck(observed, "", now)
+	if !ok || c.Verdict != doctor.Warn || e.Name() != "podman" {
+		return c, ok
+	}
+	r := runnerOf(deps)
+	if r == nil {
+		return c, ok
+	}
+	machineName := ""
+	if o.Machine.Applies {
+		machineName = o.Machine.Name
+	}
+	user, linger, measured := machine.Linger(ctx, r, machineName)
+	return doctor.HealthTimerCheck(observed, doctor.LingerFix(user, linger, measured, machineName), now)
 }

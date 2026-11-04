@@ -106,6 +106,7 @@ func Observe(ctx context.Context, e engine.Engine, s instance.Settings, p Probes
 	o.Pending = st.Pending
 	o.URL = st.URL
 	o.Healthy = st.Healthy
+	o.Workers = st.Workers
 	o.PreviewMadeWith, o.PreviewPublished = st.PreviewMadeWith, st.PreviewPublished
 	if st.Container != engine.StateAbsent {
 		if info, err := e.Inspect(ctx, instance.ContainerName); err == nil {
