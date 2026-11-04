@@ -61,7 +61,8 @@ covering both months counts it once. The monthly trend follows the same rule.
     (at most 24 months).
 - **Billing accounts:** list, add, edit, deactivate and reactivate accounts over the billing
   account routes, with the members linked to each. The member list is read-only; a member's account
-  is set in its own settings. There is no delete.
+  is set in its own settings (see [In Member settings](cost.md#in-member-settings)). There is no
+  delete.
 - **Expenses:** record an invoice, an adjustment or a confirmed subscription charge, and correct one
   by voiding it or replacing it. Each expense shows its history (the rows it supersedes). There is
   no edit and no delete.

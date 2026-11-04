@@ -216,6 +216,53 @@ public sealed class MemberRateTests(HostFixture host) : IClassFixture<HostFixtur
         Assert.Empty(Billing(await EventsAsync(), $"{host.Alpha}/Guarded"));
     }
 
+    /// <summary>
+    /// THE MEMBER COST SECTION IS A PERSON'S: whatever a machine holds, the PATCH refuses it the rate and the
+    /// account, each sent alone and both together, a clear included, with the humans-only sentence - and
+    /// the member's stored rate, account and tenant log stay as the person left them.
+    /// </summary>
+    [Fact]
+    public async Task A_machine_principal_holding_every_permit_is_refused_the_rate_and_account_fields_alone_or_together()
+    {
+        using var person = await host.PersonAsync();
+        var account = await AccountAsync(person);
+        var route = await HireAsync(person, "Machine-Guarded");
+        Assert.Equal(HttpStatusCode.OK, (await person.PatchAsJsonAsync(route, new { hourlyRate = 45, billingAccountId = account }, Ct)).StatusCode);
+        var before = (await EventsAsync()).Count;
+
+        // The API key is scoped to the member's team, so the team gate lets it through to the route and
+        // it is the humans-only marker that refuses it.
+        var principals = host.Services.GetRequiredService<IPrincipalStore>();
+        var apiKey = await principals.MintAsync($"apikey-{Guid.NewGuid():N}", PrincipalKind.ApiKey, host.Alpha, Permits.All, ct: Ct);
+        var manager = await principals.MintAsync(
+            new ContainerId(host.Alpha, TeamRegistry.DefaultManagerName).ToString(), PrincipalKind.Container, host.Alpha, Permits.All, ct: Ct);
+
+        object[] bodies =
+        [
+            new { hourlyRate = 99 },
+            new { hourlyRate = (string?)null },
+            new { billingAccountId = Guid.NewGuid().ToString() },
+            new { billingAccountId = (string?)null },
+            new { hourlyRate = "0", billingAccountId = (string?)null },
+        ];
+
+        foreach (var key in new[] { apiKey, manager, host.AlphaContainerKey })
+        {
+            using var machine = host.Container(key);
+            foreach (var body in bodies)
+            {
+                var refused = await machine.PatchAsJsonAsync(route, body, Ct);
+                Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+                Assert.Equal(PermitGate.HumansOnlyMessage, (await refused.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("error").GetString());
+            }
+        }
+
+        var read = await ReadAsync(person, route);
+        Assert.Equal("45", read.GetProperty("hourlyRate").GetString());
+        Assert.Equal(account.ToLowerInvariant(), read.GetProperty("billingAccountId").GetString());
+        Assert.Equal(before, (await EventsAsync()).Count);
+    }
+
     // ---- fixtures ----
 
     /// <summary>A new billing account's id, upper-cased, so a test can see the PATCH store it lower-case.</summary>

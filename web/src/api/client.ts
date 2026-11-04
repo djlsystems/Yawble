@@ -1783,7 +1783,8 @@ export const getMember = (team: TeamId, name: MemberId) =>
 
 /**
  * Changes what a member is CALLED, what it RUNS and its OWN INSTRUCTIONS (`systemPrompt`: blank
- * clears them). The built-in role prompt is not the person's to change. A key left undefined is dropped by `JSON.stringify` and leaves the stored
+ * clears them), and its estimated hourly rate (`hourlyRate`) and billing account (`billingAccountId`):
+ * null clears either, and a field left out keeps what is stored. The built-in role prompt is not the person's to change. A key left undefined is dropped by `JSON.stringify` and leaves the stored
  * value alone, so `body` is sent exactly as given.
  *
  * `PATCH` answers 200 with the updated snapshot, unlike `saveAgents` next door, which answers 204 -
@@ -1792,7 +1793,7 @@ export const getMember = (team: TeamId, name: MemberId) =>
 export const updateMember = (
   team: TeamId,
   name: MemberId,
-  body: { name?: string; agent?: string; systemPrompt?: string },
+  body: { name?: string; agent?: string; systemPrompt?: string; hourlyRate?: string | null; billingAccountId?: string | null },
 ) =>
   json<ContainerSnapshot>(
     `/api/teams/${encodeURIComponent(team)}/containers/${encodeURIComponent(name)}`,

@@ -47,3 +47,17 @@ export function misnamedOnSpend(texts: readonly (string | null | undefined)[], t
   const costAlone = titles.map((t) => t.replace(/\s+/g, ' ').trim()).filter((t) => CostAlone.test(t));
   return [...words, ...costAlone];
 }
+
+/** The word cost, in any case. */
+export const CostWord = /\bcost\b/i;
+
+/**
+ * THE MEMBER RATE'S LINT, for a member's estimated hourly rate and billing account in Member settings.
+ * A rate is an Estimated hourly rate, never a cost, a spend or a value: no spend word, no `cost` at all,
+ * no `agent h`, and no value word, in its text, its help or its labels.
+ */
+export function misnamedOnMemberRate(texts: readonly (string | null | undefined)[]): string[] {
+  return texts
+    .map((t) => (t ?? '').replace(/\s+/g, ' ').trim())
+    .filter((t) => SpendWord.test(t) || CostWord.test(t) || AgentHShort.test(t) || ValueWords.test(t));
+}

@@ -67,7 +67,8 @@ is an estimate.
   its run starts, in the instance's currency. A person sets both in **Admin → Outcomes**, with
   **change** beside the rate line (the **Pricing agent time** dialog). The Estimated Execution Cost
   dialog's **Change in Outcomes** link opens the same place. No figure is that rate times hours: a
-  change prices the runs that start afterwards.
+  change prices the runs that start afterwards. A member's own rate, and its billing account, are
+  set on the member: see [In Member settings](#in-member-settings).
 - **No price, no dollars.** When no run in a figure has an estimate, the figure is Agent Hours
   instead. Nothing shows `$0` for time that has no price. This is not the same as the tenant rate
   being unset: a member's own rate still prices its runs.
@@ -103,6 +104,39 @@ account, or the tenant rate, during a run leaves that run's snapshot unchanged; 
 snapshot carries the new effective rate. An agent with its own rate does not pick up a change to the
 tenant rate. Linking the workflow to another outcome during a run does not move that run's link
 either.
+
+### In Member settings
+
+**Team settings → Members → a member's settings** (and the settings button on its card) has a
+section, **Estimated hourly rate and billing account**, for agent and plugin members alike:
+
+- **Estimated hourly rate:** **Inherit default** or **Override**.
+  - The Inherit choice names the default: for an agent, the stored tenant default and currency
+    ("Inherit default (60 USD/h)"), or "not set: not priced". A plugin member has no default, so its
+    Inherit choice reads "not priced: a plugin member has no default"; it never falls back to the
+    agent default.
+  - An override is typed as a plain number. It is sent as `hourlyRate` and checked by the member
+    PATCH's own rules: canonical text, `0` explicitly not priced, and a refusal shown as the Host
+    words it. Choosing Inherit, or leaving the override blank, clears it.
+- **Billing account:** No account, or one of the tenant's **active** billing accounts (each named
+  with its vendor and currency). An inactive account appears only as the current value of a member
+  that already holds one, marked inactive. A stored id that names no account (saved before billing
+  accounts existed) shows as an unknown account and is kept until a person chooses another.
+- **What a save sends.** The rate and the account are sent only when the person changed them. A save
+  that changes only the name, only the rate or only the account leaves the other fields as stored,
+  so it never touches a held account, inactive or unknown. A save that changes nothing sends nothing.
+- **Effective configuration** (read-only): the CLI preset (or the plugin), the model ("not
+  identifiable": a preset's model is a launch argument and is not recorded), the effective estimated
+  hourly rate ("62.5 USD/h", or "Not priced") and its source in words ("source: member override",
+  "tenant default" or "none"), and the billing account's name (with its vendor and currency, marked
+  inactive, or an unknown account). These are the member read's own `effectiveRate` and `billingAccountId`,
+  exactly as the Host answered them - the screen does not work them out - so they show what is
+  stored and what a run starting now records, not what is being typed.
+- **The sentence**, under the section: *"Changes apply to the next run; past runs keep the rate
+  they started with."*
+- **People only.** The member PATCH is `HumansOnly`: an agent, a member key, a Manager or an API key
+  is refused the rate and the account, whatever permits it holds. The member read is unchanged and
+  answers the same fields to whoever may read the member.
 
 Runs that started before snapshots existed have none, and none is made for them afterwards. They
 are priced from the rate's history when a figure is read, as **How a run is priced** says; nothing
