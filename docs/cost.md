@@ -73,7 +73,7 @@ is an estimate.
   being unset: a member's own rate still prices its runs.
 - **Budgets.** An outcome's **Budget** (in Admin → Outcomes, on the outcome, or when creating one)
   is what achieving it is worth: what it may spend. An outcome with no budget, and the team's work
-  linked to no outcome at all ("No outcome"), have none.
+  linked to no outcome at all (**Unattributed**), have none.
 
 ## What a run records when it starts
 
@@ -280,6 +280,64 @@ show the same estimate against the same budget. A team's own part of that cost i
 table, under **Estimated Execution Cost**; the **Budget** column beside it is the outcome's all-team total against its
 budget.
 
+## An outcome total counts each run once
+
+Every outcome figure is a sum of the per-run estimates `ExecutionCost` makes
+(`src/Harness.Host/ExecutionCost.cs`), across every team: `GET /api/outcomes` and
+`GET /api/outcomes/{id}`, the merge preview, the Teams list's **Where it goes**, each team's
+by-outcome entries, and `outcomeTotalCost`. Nothing else prices an outcome.
+
+- **The key is the run** (`run_seq`), never the team. A run is counted once, in exactly one bucket:
+  one outcome or **Unattributed**. A workflow whose runs are on two teams adds each run once, so
+  an outcome two teams share is never counted twice.
+- **Which bucket.** A run with a snapshot goes to the outcome its `link_id` named when it started,
+  followed through `merged_into`. A link written after it started, an unlink included, does not
+  move it, and nothing is ever re-attributed. A run from before snapshots keeps the workflow's
+  newest link; nothing is back-filled.
+- **Unattributed** is the work that serves no outcome: a run with no link, a run that started after
+  an unlink, a run from before snapshots whose newest link is an unlink, and a run whose outcome
+  was deleted. It is computed on every read, never stored: there is no Unattributed outcome row.
+  Nothing is allocated or split between outcomes. (`noOutcome` on `GET /api/outcomes` carries it,
+  named `Unattributed`.)
+- **The identity.** For the same window and the same teams, Unattributed plus every outcome's
+  total equals the period's Estimated Execution Cost, to the cent. Each run's part in each week
+  is priced and rounded once, and the buckets and the total add the same parts.
+- **Weighted rate.** An outcome's rate (`cost.agentRate`) is its priced agent time's money over its
+  hours. Runs with no price and plugin time are left out. It is never the tenant rate, and never
+  hours times an average.
+
+### How a person reads an outcome: Project or Operational
+
+An outcome has one model and two presentations. `outcomes.presentation` (`outcome-011`) is
+`project`, `operational`, or NULL. NULL means nobody has picked one, and it reads as project. The
+column is checked on both providers, and nothing back-fills it.
+
+- **Who sets it.** A person, through the outcome edit route (`PATCH /api/outcomes/{id}` with
+  `presentation`), the same people who may rename an outcome. The route is `HumansOnly`, so a
+  member, a member key, a Manager, a Concierge credential, a trigger or the Host is refused
+  (403), and nothing is stored. Any other value, an empty one or a different case included, is a
+  400 and stores nothing, not even a rename sent with it. A change writes the edit's existing
+  tenant row (`outcome.changed`, or `outcome.renamed` with a rename), and that row's detail names
+  `presentation: { old, new }`. `old` is null when it was never picked.
+- **Project** shows the outcome as a whole: all-time Agent Hours and Estimated Execution Cost,
+  backlog progress (`<achieved> of <total> items achieved` and its bar), and a cumulative chart.
+  The chart is the detail route's `figures.cumulative`: for each of the eight weeks, every run's
+  part from the start of the ledger to the end of that week. Its last bar is the outcome's
+  all-time figure.
+- **Operational** shows the outcome week by week, over the same eight weekly buckets (there is no
+  new period control):
+  - the Estimated Execution Cost by week;
+  - throughput (`figures.throughput`: the workflows serving it that closed in each week, every one
+    and those completed);
+  - cost per completed workflow, each week and over the eight weeks.
+
+  Cost per completed workflow is the cost over the workflows completed. With none completed, or
+  nothing priced, it reads **not measurable**. It is never `$0` and never a division by zero.
+- **Both** keep the budget words, the budget bar and `value_amount` as they were. The opened
+  outcome's cost is labelled `Estimated Execution Cost · <h> Agent Hours`, with `at <rate>/h` when
+  its own weighted rate is known. It no longer names the tenant rate. Human Interventions and
+  intervention frequency are not shown yet.
+
 ## The summary above the Teams list
 
 Before any team is opened, the Teams list answers four questions in four tiles: what is this
@@ -303,12 +361,13 @@ list is unchanged.
   `Give an outcome a value to track it here.` **No rate:** `—` and
   `Set an agent hourly rate in Outcomes to measure Estimated Execution Cost against budgets.` Clicking it opens
   Outcomes.
-- **Where it goes** (`by outcome`): the three outcomes that cost most, then
-  **Other / no outcome** (every other outcome and the work linked to none), each a bar in its
-  outcome's colour with its amount. The four bars share one scale. An outcome with a budget has a
-  tick where its budget falls, and `⚠` after its name when it is over. Without a rate the bars are
-  Agent Hours and carry no ticks. Clicking a bar opens that outcome in Outcomes; Other opens the
-  Outcomes list.
+- **Where it goes** (`by outcome`): the three outcomes that cost most, then **Other outcomes**
+  (every other outcome), then **Unattributed** (the work that serves no outcome), each a bar with
+  its amount: an outcome in its colour, the other two in neutral gray. Every run is in exactly one
+  bar, so the bars add up to the Estimated Execution Cost tile's figure, to the cent. The bars share
+  one scale. An outcome with a budget has a tick where its budget falls, and `⚠` after its name when
+  it is over. Without a rate the bars are Agent Hours and carry no ticks. Clicking a bar opens that
+  outcome in Outcomes; Other outcomes and Unattributed open the Outcomes list.
 - **Right now**: open workflows, members running, and `⚠ waiting on you` - the same count the
   app bar's **Needs you** shows - in the warning colour above 0, and plain at 0. Clicking waiting on
   you opens the Needs-you list.
@@ -323,7 +382,7 @@ Status, shows:
 
 - **The team's estimate in dollars** over the eight weeks, with `<h> Agent Hours at <rate>/h`
   under it, the rate being the priced agent time's own.
-- **A small stacked weekly chart**, one colour per outcome, "No outcome" in neutral gray at the
+- **A small stacked weekly chart**, one colour per outcome, Unattributed in neutral gray at the
   bottom of each week.
 - **With budgets** - when any outcome the team serves has one - a bar and
   `<estimate> of <budget> budget (<n>%)`. Estimate and budget are summed over the budgeted outcomes
@@ -351,7 +410,7 @@ priced at. It has two tabs.
   billable tokens in millions.
 - A legend, and a large stacked weekly chart by outcome on one money axis (hours without a rate).
   Hovering a week lists each outcome's cost and hours and the week's total.
-- A table: one row per outcome, then "No outcome", then **Team total**, with **Outcome**,
+- A table: one row per outcome, then **Unattributed**, then **Team total**, with **Outcome**,
   **Agent Hours**, **Estimated Execution Cost**, **Budget** (a small bar and `<outcome total> / <budget>`, `⚠ over` when the
   outcome is over, `None set` when it has none), **Billable tokens** and **$ / 1M tokens**.
 - A note under the table: the estimate prices each run at the rate it started with, not money
@@ -379,13 +438,13 @@ The team page's Activity tile is unchanged.
 
 ## Colours
 
-Outcomes keep a fixed order and colour. The order is the same on every team: "No outcome" first,
+Outcomes keep a fixed order and colour. The order is the same on every team: Unattributed first,
 then outcomes by when they were created, oldest first. An outcome's colour comes from its place in
 that order among every outcome any team worked on in the eight weeks, not from its place on one
 team. So an outcome has the same colour on the summary's Where it goes tile, on every row of the teams
 list, on the team page's tile and in its dialog, even when a team works on only some outcomes. The first eight outcomes in that
 order take the categorical palette's first eight slots, and any outcome after them shares one
-neutral "Other" colour. "No outcome" is always neutral gray and stacked first. Because the order
+neutral "Other" colour. Unattributed is always neutral gray and stacked first. Because the order
 covers only the last eight weeks, an outcome can move up a slot when an older outcome has had no
 work for eight weeks. Dark mode uses the same palette's dark steps.
 Colour is never the only cue: the dialog's table carries every figure the chart draws.
@@ -394,17 +453,17 @@ Colour is never the only cue: the dialog's table carries every figure the chart 
 
 | Route | Answers |
 |---|---|
-| `GET /api/teams/{team}/cost` | One team: `money` (`currency`, and `agentHourlyRate`, the tenant default as set now), the eight `weeks`, and per outcome (`id` null for No outcome) its `weekly` figures, `totals`, `value` (its budget), `outcomeTotalCost` (its estimate across all teams and all time) and `rank` (its place in the order shared by every team, which picks its colour; null for No outcome); then the team's `totals`. `totals` carry `agentSeconds` (agent time only), `cost` (every priced run) and `agentRate` (the priced agent time's rate). `cost` is null, never 0, when no run was priced. Every `cost` is the estimate, never money paid. |
+| `GET /api/teams/{team}/cost` | One team: `money` (`currency`, and `agentHourlyRate`, the tenant default as set now), the eight `weeks`, and per outcome (`id` null for Unattributed) its `weekly` figures, `totals`, `value` (its budget), `outcomeTotalCost` (its estimate across all teams and all time) and `rank` (its place in the order shared by every team, which picks its colour; null for Unattributed); then the team's `totals`. `totals` carry `agentSeconds` (agent time only), `cost` (every priced run) and `agentRate` (the priced agent time's rate). `cost` is null, never 0, when no run was priced. Every `cost` is the estimate, never money paid. |
 | `GET /api/billing-accounts`, `GET /api/billing-accounts/{id}` | Every billing account, active and deactivated, oldest first (an empty list on a fresh instance), or one; 404 for an id that names none. Each has `id`, `name`, `vendor`, `billingType`, `currency`, `billingPeriod`, `recurringAmount`, `effectiveFrom`, `effectiveTo`, `active`, `description`, `scope` (`tenant`), `instanceId`, `createdBy`, `createdAt` and `updatedAt`. People only. |
 | `POST /api/billing-accounts`, `POST /api/billing-accounts/{id}`, `.../deactivate`, `.../reactivate` | Create an account, edit the fields sent (null clears only `description`, `effectiveTo` and `recurringAmount`), and turn `active` off or on. People only; there is no delete. |
 | `GET /api/expenses`, `GET /api/expenses/{id}` | Every expense row, current and superseded, oldest recorded first (`?accountId=` for one account's; an empty list on a fresh instance), or one; 404 for an id that names none. Each has `id`, `accountId`, `amount`, `currency`, `servicePeriodStart`, `servicePeriodEnd` (exclusive), `kind`, `status` (`confirmed` or `void`), `supersedes`, `reference`, `note`, `recordedBy`, `recordedAt`, `supersededBy` and `current`. People only. |
 | `POST /api/expenses`, `POST /api/expenses/{id}/void`, `POST /api/expenses/{id}/replace` | Record a confirmed expense; void one (an optional `note`); replace one with the fields sent over the old row's, on the same account. Each answers the new row. People only; there is no edit and no delete. |
 | `GET /api/teams/cost` | The same for every team at once (`money`, `weeks`, `teams[]`), for the Teams list. |
-| `GET /api/teams/cost/summary` | The summary above the Teams list: `rate` (the tenant default as set now, null without one); the eight `weeks` (`weekStart`, `agentSeconds`, `cost`), `periodStart` and `periodEnd`; the eight weeks' `total` and the eight before as `prior`, each with `agentRate`; per outcome (`id` null for No outcome) its `name`, `rank`, `agentSeconds`, `cost`, `budget` and `outcomeTotalCost` (its cost across every team; this field was `spentTotal` before); and `rightNow` (`openWorkflows`, `membersRunning`, `waitingOnYou`). `cost` is null, never 0, when no run was priced. |
+| `GET /api/teams/cost/summary` | The summary above the Teams list: `rate` (the tenant default as set now, null without one); the eight `weeks` (`weekStart`, `agentSeconds`, `cost`), `periodStart` and `periodEnd`; the eight weeks' `total` and the eight before as `prior`, each with `agentRate`; per outcome (`id` null for Unattributed) its `name`, `rank`, `agentSeconds`, `cost`, `budget` and `outcomeTotalCost` (its cost across every team; this field was `spentTotal` before); and `rightNow` (`openWorkflows`, `membersRunning`, `waitingOnYou`). `cost` is null, never 0, when no run was priced. |
 
 In the web app, one module decides every outcome's colour: `web/src/lib/outcomeColours.ts`. Its
 `outcomeColour({ id, rank })` returns the colour for one outcome entry, `outcomeColours(entries)` builds
-an id-to-colour map (keyed `null` for No outcome) from one team's entries or every team's, and
+an id-to-colour map (keyed `null` for Unattributed) from one team's entries or every team's, and
 `colourForRank(rank)` returns the colour for a bare rank. The summary's Where it goes tile, the teams
 list's Estimated Execution Cost column, the team page's tile and its dialog all use it, and any new cost view should use it too, so that an outcome is never
 two colours.
