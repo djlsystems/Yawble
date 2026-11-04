@@ -165,8 +165,9 @@ The product name, Yawble, lives in the web app's presentation layer
   **Actual Spend** (confirmed vendor expenses, per currency, never converted), **Projected**
   recurring charges (never in Actual Spend) and **Estimated Execution Cost · Agent Hours** from the
   same pricing path as every cost figure, side by side with the sentence that they need not reconcile.
-  Its tabs manage billing accounts and expenses (void or replace, never edit or delete). Every route
-  it uses is `HumansOnly`. See [spend.md](spend.md).
+  Its tabs manage billing accounts and expenses (void or replace, never edit or delete), and Export
+  CSV downloads the period's accounts, expenses, summary and estimates by team and outcome. Every
+  route it uses is `HumansOnly`. See [spend.md](spend.md).
 - **Archived teams.** Archive (in the Teams view) keeps everything a team has - members, settings,
   documents, repositories, sites and history - and stops its work: it is paused, every trigger
   skips with the reason "team archived", and a tell, a backlog dispatch, a new card or a site action

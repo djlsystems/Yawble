@@ -63,6 +63,28 @@ public static class TeamCost
 
     public sealed record MoneyShape(string Currency, int? AgentHourlyRate);
 
+    /// <summary>
+    /// A TEAM'S WORK in [<paramref name="from"/>, <paramref name="to"/>): of <paramref name="runs"/>, each one
+    /// carrying the id of a team in <paramref name="floors"/>, above that team's floor, that overlaps the window -
+    /// by team, in one pass. Every team figure reads its runs this way.
+    /// </summary>
+    public static IReadOnlyDictionary<string, List<ExecutionCost.Run>> RunsByTeam(
+        IEnumerable<ExecutionCost.Run> runs, IReadOnlyDictionary<string, long> floors, DateTimeOffset from, DateTimeOffset to)
+    {
+        var byTeam = new Dictionary<string, List<ExecutionCost.Run>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var run in runs)
+        {
+            if (run.Ledger.TeamId is not { } team || !floors.TryGetValue(team, out var floor)) continue;
+            if (run.Ledger.RunSeq <= floor || !run.Overlaps(from, to)) continue;
+
+            if (!byTeam.TryGetValue(team, out var list)) byTeam[team] = list = [];
+            list.Add(run);
+        }
+
+        return byTeam;
+    }
+
     /// <summary>A figure's totals. <c>agentSeconds</c> is agent-kind time only; <c>cost</c> is every priced run's
     /// estimate, agent and plugin, null - never 0 - when none was priced; <c>agentRate</c> is the weighted rate
     /// of the priced agent time, null when there was none. <c>legacyRates</c> is the figure's footnote:
@@ -201,21 +223,8 @@ public static class TeamCost
         /// <summary>Every team's runs above its floor that overlap [<paramref name="from"/>,
         /// <paramref name="to"/>), in one pass.</summary>
         public IReadOnlyDictionary<string, List<ExecutionCost.Run>> RunsByTeam(
-            IReadOnlyDictionary<string, long> floors, DateTimeOffset from, DateTimeOffset to)
-        {
-            var byTeam = new Dictionary<string, List<ExecutionCost.Run>>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var run in Runs)
-            {
-                if (run.Ledger.TeamId is not { } team || !floors.TryGetValue(team, out var floor)) continue;
-                if (run.Ledger.RunSeq <= floor || !run.Overlaps(from, to)) continue;
-
-                if (!byTeam.TryGetValue(team, out var list)) byTeam[team] = list = [];
-                list.Add(run);
-            }
-
-            return byTeam;
-        }
+            IReadOnlyDictionary<string, long> floors, DateTimeOffset from, DateTimeOffset to) =>
+            TeamCost.RunsByTeam(Runs, floors, from, to);
 
         /// <summary>
         /// WAITING ON A PERSON over the eight weeks, per team in <paramref name="floors"/>: the blocked spans of its

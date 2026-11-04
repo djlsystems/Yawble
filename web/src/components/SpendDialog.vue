@@ -9,6 +9,7 @@ import DialogTabs from './DialogTabs.vue';
 import SpendOverviewTab from './SpendOverviewTab.vue';
 import BillingAccountsTab from './BillingAccountsTab.vue';
 import ExpensesTab from './ExpensesTab.vue';
+import SpendExportMenu from './SpendExportMenu.vue';
 
 /**
  * ADMIN → SPEND, the tenant's Spend page at `#/spend`: what was paid to vendors (Actual Spend), what
@@ -100,6 +101,7 @@ watch(period, () => { if (open.value) void load(); });
           <q-btn flat dense no-caps icon="event" label="Custom range" data-spend-custom @click="openCustom" />
           <span class="text-caption os-text-muted q-ml-sm">UTC</span>
         </div>
+        <SpendExportMenu :period="period" />
         <q-btn flat dense no-caps icon="refresh" label="Refresh" class="q-ml-md" :loading="loading" @click="load" />
         <q-btn v-close-popup flat dense round icon="close" aria-label="Close" />
       </q-card-section>

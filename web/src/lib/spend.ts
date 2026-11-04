@@ -1,4 +1,4 @@
-import type { CurrencyAmount, Expense, SpendEstimate } from '../api/spend'
+import type { CurrencyAmount, Expense, SpendEstimate, SpendExportFile } from '../api/spend'
 import { EstimateTitle, hoursFigure } from './teamCost'
 
 /**
@@ -28,6 +28,15 @@ export const NoEstimate = 'Estimate unavailable: no priced agent or plugin time 
 /** The period edge rule, as the page states it. */
 export const EdgeRule =
   'An expense counts whole in the period where its service period starts; it is never split by days.'
+
+/** The Export control: one CSV file each, for the page's period. */
+export const ExportTitle = 'Export CSV'
+export const ExportFiles: readonly { file: SpendExportFile; label: string; caption: string }[] = [
+  { file: 'billing-accounts', label: 'Billing accounts', caption: 'Every account, active and inactive' },
+  { file: 'expenses', label: 'Expenses', caption: 'Every row of the period, with its voids and replacements' },
+  { file: 'period-summary', label: 'Period summary', caption: 'Actual Spend, Projected and Estimated Execution Cost, per currency' },
+  { file: 'estimated-execution-cost', label: `${EstimateTitle} by team and outcome`, caption: 'Agent Hours and rate source on every row' },
+]
 
 export const BillingTypeWords: Record<string, string> = {
   subscription: 'Subscription (fixed)',

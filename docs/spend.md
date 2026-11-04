@@ -65,20 +65,133 @@ covering both months counts it once. The monthly trend follows the same rule.
 - **Expenses:** record an invoice, an adjustment or a confirmed subscription charge, and correct one
   by voiding it or replacing it. Each expense shows its history (the rows it supersedes). There is
   no edit and no delete.
+- **Export CSV** (in the header): four CSV files for the period the page shows. See
+  [CSV export](#csv-export).
 
 ## People only
 
 The Spend page is a person's. Every route it reads or writes is `HumansOnly`, including its own two
-reads. A machine principal is refused with the humans-only sentence, even one holding every permit:
+reads and its four CSV files. A machine principal is refused with the humans-only sentence, even one holding every permit:
 an agent, a member key, a Manager, a Concierge acting as an agent, or a person's API key. There is no
 Spend permit and no MCP tool for it yet; an agent may get a read permit for reporting later, but not
 before then.
+
+## CSV export
+
+**Export CSV** downloads one of four files for the page's period. The period rule is the overview's:
+`?from=YYYY-MM-DD&to=YYYY-MM-DD` (midnight UTC, `to` exclusive), or the current UTC month when neither
+date is sent. A bad period is a 400 with one sentence. Each file is built on the server from the same
+rows and figures the page reads. Nothing is priced again, converted or inferred.
+
+### Format
+
+- **CSV (RFC 4180).** UTF-8, comma-separated, CRLF line ends. A field holding a comma, a double quote,
+  a CR or an LF is put in double quotes, with each quote doubled.
+- **Header row.** Always there, even when the file has no data rows.
+- **Column names.** Lower-case snake_case. They do not change: renaming or reordering one is a
+  breaking change, and a golden header test holds them.
+- **Timestamps.** ISO-8601 UTC, `yyyy-MM-ddTHH:mm:ss.fffZ`.
+- **Currencies.** ISO 4217 codes, upper case.
+- **Ids.** As stored: GUIDs for accounts, expenses and outcomes, and team ids as the team has them.
+- **Amounts.** Plain decimal text with no currency symbol and no thousands separator. A stored
+  amount (an expense, a recurring amount) is written as stored. Actual Spend and Projected sums
+  keep the stored digits. Estimates are to the cent. An estimate with nothing priced is an empty
+  cell, never 0.
+- **On every row.** `instance_id` (the instance's `instance.id`; on a billing account, the one it
+  copied at create), `period_start` and `period_end` (the period exported).
+- **Per currency, never converted.** No row adds two currencies together.
+- **Formula injection.** A text cell whose first character is `=`, `+`, `-`, `@`, a tab or a
+  carriage return is written with a single quote (`'`) before it, so a spreadsheet shows it as text
+  and never runs it. A plain number (an optional minus, digits and an optional fraction, such as
+  `-12.50`) is a number and is written as it is.
+- **Words.** No column calls an estimate spend or cost alone (`estimated_execution_cost`, never
+  `cost`). `actual_spend` is only ever confirmed current expenses, and no column names a value,
+  ROI, return or savings.
+
+### `billing-accounts`
+
+Every billing account, active and inactive, by name.
+
+`instance_id`, `period_start`, `period_end`, `billing_account_id`, `name`, `vendor`, `billing_type`,
+`fixed_or_variable` (`fixed` for a subscription, `variable` for metered and service), `currency`,
+`billing_period`, `recurring_amount`, `effective_from`, `effective_to`, `is_active`, `description`,
+`created_by`, `created_at`, `updated_at`.
+
+### `expenses`
+
+Every row of each correction chain that has a row whose service period starts in the period. That
+includes current, voided and superseded rows, in the order they were recorded. A replacement that
+moved the service period into or out of the period still brings the rest of its chain.
+
+`instance_id`, `period_start`, `period_end`, `expense_id`, `billing_account_id`,
+`billing_account_name`, `vendor`, `kind`, `status` (`confirmed` or `void`), `amount`, `currency`,
+`service_period_start`, `service_period_end` (exclusive), `supersedes_expense_id`,
+`superseded_by_expense_id`, `is_current`, `counts_in_actual_spend`, `reference`, `note`,
+`recorded_by`, `recorded_at`.
+
+`supersedes_expense_id` and `superseded_by_expense_id` rebuild the chain. `counts_in_actual_spend`
+is `true` only for a current confirmed row whose service period starts in the period (the
+[period edge rule](#the-period-and-the-period-edge-rule)). A voided or replaced expense is
+therefore counted once, by its current row, and the rows marked `true` add up to Actual Spend.
+
+### `period-summary`
+
+`GET /api/spend/overview`'s figures for the same period, one row each. The route builds the same
+overview object with the same code, so the figures cannot differ.
+
+`instance_id`, `period_start`, `period_end`, `measure`, `billing_type`, `fixed_or_variable`,
+`currency`, `amount`, `item_count`, `agent_seconds`, `agent_hours`, `agent_rate`, `rate_source`.
+
+| `measure` | One row per | Filled |
+|---|---|---|
+| `actual_spend` | currency | `amount`, `item_count` (expenses counted) |
+| `projected` | currency | `amount`, `item_count` (projected charges); never in Actual Spend |
+| `actual_spend_by_billing_type` | billing type and currency | `billing_type`, `fixed_or_variable`, `amount` |
+| `projected_by_billing_type` | billing type and currency | `billing_type`, `fixed_or_variable`, `amount` |
+| `estimated_execution_cost` | the instance's currency (one row) | `amount` (Estimated Execution Cost, empty when nothing was priced), `agent_seconds`, `agent_hours`, `agent_rate`, `rate_source` (the rate sources priced into it, `;`-separated) |
+
+### `estimated-execution-cost`
+
+Estimated Execution Cost and Agent Hours by team and by outcome. Every run that overlaps the period
+counts the part of its span inside it, priced on its own by the one pricing path (`ExecutionCost`).
+
+`instance_id`, `period_start`, `period_end`, `rollup`, `team_id`, `team_name`, `outcome_id`,
+`outcome_name`, `rate_source`, `currency`, `estimated_agent_cost`, `estimated_plugin_cost`,
+`estimated_execution_cost`, `agent_seconds`, `agent_hours`, `agent_rate`.
+
+- **`rollup` `team`.** Each team the caller reaches that has runs in the period. Its runs are read as
+  every team figure reads them: the ledger rows carrying its id, above the team's floor.
+- **`rollup` `outcome`.** Every run in the period, under the outcome it serves, followed through
+  `merged_into`, as the outcome reads attribute it. `Unattributed` (empty `outcome_id`) holds the
+  runs serving none, including those whose outcome was deleted.
+- **One row per team or outcome and `rate_source`** (`member`, `tenant`, `reconstructed`,
+  `fallback-at-upgrade`, `none`). A team's or an outcome's rows add up to its figure.
+  - The outcome rows add up, to the cent, to each outcome's and Unattributed's cost in
+    `GET /api/outcomes?from=&to=` for the same window.
+  - All the outcome rows together add up to the summary's estimate.
+  - The team rows leave out runs with no team, and runs of teams the caller does not reach.
+- **Agent and plugin apart.**
+  - `estimated_agent_cost` and `estimated_plugin_cost` are the agent and plugin runs' parts.
+  - `estimated_execution_cost` is both together.
+  - Each is empty, never 0, when nothing in it was priced.
+  - `agent_seconds` and `agent_hours` are agent time only.
+  - `agent_rate` is the priced agent time's weighted rate.
+- **Hours inside the period.** `agent_seconds` here, like the overview's, is the part of each run
+  inside the period. A windowed `GET /api/outcomes` instead counts the whole of each run that ended
+  in the window, so its `agentSeconds` can differ for a run that crosses the period's edge.
+- **The weekly team reads.** These split a run that crosses a Monday into weekly parts, each
+  rounded on its own. For the same span they can therefore differ from this file by a cent per run
+  that crosses a Monday, as described in [cost.md](cost.md).
 
 ## Routes
 
 | Route | Answers |
 |---|---|
 | `GET /api/spend/overview?from=YYYY-MM-DD&to=YYYY-MM-DD` | The period's `actual` and `projected` (`{ currency, amount, count }` per currency), `projections`, `billingTypes` (`group` `fixed` or `variable`), `estimate` (`{ currency, cost, agentSeconds, agentRate, legacyRates }`; `cost` is null, never 0, when nothing was priced), `accounts` and `vendors` (Actual Spend and Projected apart, null when there is none), and `months` (`{ monthStart, actual, estimate }`). With neither date it uses the current UTC month. `to` is exclusive. A bad period is a 400 with one sentence. People only. |
+| `GET /api/spend/export/billing-accounts?from=&to=` | The [`billing-accounts`](#billing-accounts) CSV file. People only. |
+| `GET /api/spend/export/expenses?from=&to=` | The [`expenses`](#expenses) CSV file. People only. |
+| `GET /api/spend/export/period-summary?from=&to=` | The [`period-summary`](#period-summary) CSV file. People only. |
+| `GET /api/spend/export/estimated-execution-cost?from=&to=` | The [`estimated-execution-cost`](#estimated-execution-cost) CSV file. People only. |
 | `GET /api/spend/linked-members` | `{ accountId, team, teamName, member, label }` for every member on a team the caller reaches whose billing account is set. People only. |
 
 The billing account and expense routes are listed in [cost.md](cost.md#routes).

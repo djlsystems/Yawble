@@ -12,6 +12,7 @@ import { json } from './client'
  * | deactivate, reactivate | `POST /api/billing-accounts/{id}/deactivate`, `/reactivate` |
  * | list, record expenses | `GET/POST /api/expenses` |
  * | void, replace | `POST /api/expenses/{id}/void`, `/replace` |
+ * | CSV files for a period | `GET /api/spend/export/{file}?from=&to=` |
  *
  * EVERY FIGURE IS THE ROUTE'S. Nothing here converts a currency, adds two currencies, or puts an
  * estimate where Actual Spend has none.
@@ -198,3 +199,13 @@ export const voidExpense = (id: string, note: string | null) =>
 
 export const replaceExpense = (id: string, fields: ExpenseFields) =>
   json<Expense>(`${expense(id)}/replace`, { method: 'POST', ...body(fields) })
+
+/** The CSV files the page exports, by the name their route carries. */
+export type SpendExportFile = 'billing-accounts' | 'expenses' | 'period-summary' | 'estimated-execution-cost'
+
+/**
+ * Where one CSV file for `[from, to)` downloads from: a plain same-origin link, so the browser sends the
+ * person's session cookie and saves the file under the name the route gives it.
+ */
+export const spendExportUrl = (file: SpendExportFile, period: { from: string; to: string }) =>
+  `/api/spend/export/${file}?from=${encodeURIComponent(period.from)}&to=${encodeURIComponent(period.to)}`

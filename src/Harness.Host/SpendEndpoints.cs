@@ -139,6 +139,7 @@ public static class SpendEndpoints
                 + "names no account.");
         MapExpenses(app);
         MapOverview(app);
+        MapExport(app);
     }
 
     private const string OverviewAnswer =
@@ -166,16 +167,7 @@ public static class SpendEndpoints
                     return Refused(400, SpendOverview.PeriodRefused);
                 }
 
-                var months = SpendOverview.TrendOf(period.From, period.To);
-                var readFrom = months[0] < period.From ? months[0] : period.From;
-                var readTo = months[^1].AddMonths(1) > period.To ? months[^1].AddMonths(1) : period.To;
-
-                var all = await outcomes.ListAsync(ct);
-                var currency = settings.OutcomesCurrency;
-                var runs = ExecutionCost.Of(await outcomes.ReadExecutionRunsAsync(readFrom, readTo, pricedOnly: false, ct), all, currency);
-
-                return Results.Ok(SpendOverview.Of(
-                    await spend.ListAccountsAsync(ct), await spend.ListExpensesAsync(ct: ct), runs, currency, period.From, period.To));
+                return Results.Ok((await OverviewAsync(period, spend, outcomes, settings, ct)).Overview);
             })
             .WithTags("Billing")
             .HumansOnly()
@@ -218,6 +210,129 @@ public static class SpendEndpoints
                 + "teamName, member, label }`, by account, then team, then label. Read-only: a member's account is "
                 + "set in its settings. An id with no account behind it is listed as it is stored. A person's only: "
                 + "no permit lets an agent read it.");
+    }
+
+    private const string ExportFormat =
+        "A CSV file (RFC 4180, UTF-8, CRLF line ends) with its header row always, even with no data rows; "
+        + "snake_case columns that do not change; timestamps ISO-8601 UTC (`yyyy-MM-ddTHH:mm:ss.fffZ`); ISO 4217 "
+        + "currency codes; ids as stored; amounts as plain decimal text with no symbol and no thousands separator "
+        + "(stored amounts as stored, estimates to the cent); `instance_id`, `period_start` and `period_end` on every "
+        + "row. A text cell starting with `=`, `+`, `-`, `@`, a tab or a carriage return is written with a single "
+        + "quote before it, so a spreadsheet never runs it; a plain number is written as it is. The period is "
+        + "`?from=YYYY-MM-DD&to=YYYY-MM-DD` (midnight UTC, `to` exclusive), the current UTC month when neither is sent, "
+        + "as `GET /api/spend/overview` reads it; anything else is refused (400) with one sentence. Currencies are never "
+        + "converted or added together. A person's only: no permit lets an agent read it.";
+
+    private static IResult Csv(string file, string csv, (DateTimeOffset From, DateTimeOffset To) period) =>
+        Results.File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv; charset=utf-8", SpendExport.FileName(file, period.From, period.To));
+
+    private static void MapExport(WebApplication app)
+    {
+        app.MapGet("/api/spend/export/billing-accounts", async (
+                string? from, string? to, ISpendStore spend, LedgerIdentity identity, CancellationToken ct) =>
+            {
+                if (SpendOverview.PeriodOf(from, to, DateTimeOffset.UtcNow) is not { } period) return Refused(400, SpendOverview.PeriodRefused);
+
+                var csv = SpendExport.AccountsCsv(new(period.From, period.To, identity.InstanceId ?? ""), await spend.ListAccountsAsync(ct));
+                return Csv(SpendExport.Accounts, csv, period);
+            })
+            .WithTags("Billing")
+            .HumansOnly()
+            .WithSummary("Every billing account as CSV")
+            .WithDescription(
+                "Every billing account, active and inactive, one row each: `" + string.Join("`, `", SpendExport.AccountColumns) + "`. "
+                + "`instance_id` is the account's own, copied at create; `fixed_or_variable` is `fixed` for a subscription "
+                + "and `variable` for metered and service. " + ExportFormat);
+
+        app.MapGet("/api/spend/export/expenses", async (
+                string? from, string? to, ISpendStore spend, LedgerIdentity identity, CancellationToken ct) =>
+            {
+                if (SpendOverview.PeriodOf(from, to, DateTimeOffset.UtcNow) is not { } period) return Refused(400, SpendOverview.PeriodRefused);
+
+                var csv = SpendExport.ExpensesCsv(
+                    new(period.From, period.To, identity.InstanceId ?? ""), await spend.ListAccountsAsync(ct), await spend.ListExpensesAsync(ct: ct));
+                return Csv(SpendExport.Expenses, csv, period);
+            })
+            .WithTags("Billing")
+            .HumansOnly()
+            .WithSummary("The period's expenses, with every correction, as CSV")
+            .WithDescription(
+                "Every expense row of each correction chain with a row whose service period starts in the period - "
+                + "current, voided and superseded alike - in the order recorded: `" + string.Join("`, `", SpendExport.ExpenseColumns) + "`. "
+                + "`supersedes_expense_id` and `superseded_by_expense_id` rebuild the chain; `counts_in_actual_spend` is "
+                + "true only for the current confirmed row whose service period starts in the period, so a voided or "
+                + "replaced expense counts once, by its current row. " + ExportFormat);
+
+        app.MapGet("/api/spend/export/period-summary", async (
+                string? from, string? to, ISpendStore spend, IOutcomeStore outcomes, TenantSettings settings, LedgerIdentity identity,
+                CancellationToken ct) =>
+            {
+                if (SpendOverview.PeriodOf(from, to, DateTimeOffset.UtcNow) is not { } period) return Refused(400, SpendOverview.PeriodRefused);
+
+                var (overview, runs) = await OverviewAsync(period, spend, outcomes, settings, ct);
+                var csv = SpendExport.SummaryCsv(
+                    new(period.From, period.To, identity.InstanceId ?? ""), overview, SpendExport.RateSourcesOf(runs, period.From, period.To));
+                return Csv(SpendExport.Summary, csv, period);
+            })
+            .WithTags("Billing")
+            .HumansOnly()
+            .WithSummary("The period's Actual Spend, Projected and Estimated Execution Cost as CSV")
+            .WithDescription(
+                "`GET /api/spend/overview`'s figures for the same period, the same object, one row each: `"
+                + string.Join("`, `", SpendExport.SummaryColumns) + "`. `measure` is `actual_spend` (per currency), "
+                + "`projected` (per currency, never in Actual Spend), `actual_spend_by_billing_type` and "
+                + "`projected_by_billing_type` (per billing type and currency, with `fixed_or_variable`), and "
+                + "`estimated_execution_cost` (Estimated Execution Cost with Agent Hours, `amount` empty when nothing was "
+                + "priced; `rate_source` lists the rate sources priced into it, `;`-separated). " + ExportFormat);
+
+        app.MapGet("/api/spend/export/estimated-execution-cost", async (
+                string? from, string? to, HttpContext context, TeamRegistry teams, TeamAccess access, IOutcomeStore outcomes,
+                TenantSettings settings, LedgerIdentity identity, CancellationToken ct) =>
+            {
+                if (PrincipalClaims.From(context.User) is not { } principal) return Results.Unauthorized();
+                if (SpendOverview.PeriodOf(from, to, DateTimeOffset.UtcNow) is not { } period) return Refused(400, SpendOverview.PeriodRefused);
+
+                var effective = await access.EffectiveTeamsAsync(principal, ct);
+                var reached = teams.All().Where(t => effective.Contains(t.Id)).Select(t => new SpendExport.TeamName(t.Id, t.Name)).ToList();
+                var floors = reached.ToDictionary(t => t.Id, t => teams.FloorFor(t.Id), StringComparer.OrdinalIgnoreCase);
+
+                var all = await outcomes.ListAsync(ct);
+                var currency = settings.OutcomesCurrency;
+                var runs = ExecutionCost.Of(await outcomes.ReadExecutionRunsAsync(period.From, period.To, pricedOnly: false, ct), all, currency);
+
+                var csv = SpendExport.EstimatesCsv(new(period.From, period.To, identity.InstanceId ?? ""), runs, all, reached, floors, currency);
+                return Csv(SpendExport.Estimates, csv, period);
+            })
+            .WithTags("Billing")
+            .HumansOnly()
+            .WithSummary("Estimated Execution Cost by team and by outcome as CSV")
+            .WithDescription(
+                "Estimated Execution Cost and Agent Hours over the period, from the one pricing path every cost figure uses: "
+                + "each run's part inside the period priced from its snapshot (or the rate's history, before snapshots) on "
+                + "its own, to the cent. Columns: `" + string.Join("`, `", SpendExport.EstimateColumns) + "`. `rollup` `team`: "
+                + "each team the caller reaches with runs in the period, its runs above its floor as every team figure "
+                + "reads them. `rollup` `outcome`: every run in the period under the outcome it serves, followed through "
+                + "`merged_into`; `Unattributed` (no `outcome_id`) for the runs serving none. One row per team or outcome and "
+                + "`rate_source` (`member`, `tenant`, `reconstructed`, `fallback-at-upgrade`, `none`); a team's or an outcome's "
+                + "rows add up to its figure. `estimated_agent_cost` and `estimated_plugin_cost` are the agent and plugin runs' "
+                + "parts, `estimated_execution_cost` both; each empty, never 0, when nothing was priced. `agent_seconds` and "
+                + "`agent_hours` are agent time only; `agent_rate` the priced agent time's weighted rate. " + ExportFormat);
+    }
+
+    /// <summary>THE OVERVIEW AS <c>GET /api/spend/overview</c> BUILDS IT, and the priced runs behind it: one code path for
+    /// the page and its summary file.</summary>
+    private static async Task<(SpendOverview.Overview Overview, IReadOnlyList<ExecutionCost.Run> Runs)> OverviewAsync(
+        (DateTimeOffset From, DateTimeOffset To) period, ISpendStore spend, IOutcomeStore outcomes, TenantSettings settings, CancellationToken ct)
+    {
+        var months = SpendOverview.TrendOf(period.From, period.To);
+        var readFrom = months[0] < period.From ? months[0] : period.From;
+        var readTo = months[^1].AddMonths(1) > period.To ? months[^1].AddMonths(1) : period.To;
+
+        var all = await outcomes.ListAsync(ct);
+        var currency = settings.OutcomesCurrency;
+        var runs = ExecutionCost.Of(await outcomes.ReadExecutionRunsAsync(readFrom, readTo, pricedOnly: false, ct), all, currency);
+
+        return (SpendOverview.Of(await spend.ListAccountsAsync(ct), await spend.ListExpensesAsync(ct: ct), runs, currency, period.From, period.To), runs);
     }
 
     public const string ExpenseNotAnObject = "The body must be a JSON object of the expense's fields.";

@@ -29,7 +29,7 @@ import SpendDialog from '../SpendDialog.vue';
 import type { BillingAccount, Expense, SpendOverview } from '../../api/spend';
 import { bodyFind, bodyText, mountDialog, resetBody } from '../../test/mountQuasar';
 import { misnamedOnSpend, readOff } from '../../test/estimateLabels';
-import { EstimateTileTitle, NoActualSpend, SpendSentence } from '../../lib/spend';
+import { EstimateTileTitle, ExportFiles, ExportTitle, NoActualSpend, SpendSentence } from '../../lib/spend';
 
 const months = ['2026-06-01', '2026-07-01', '2026-08-01', '2026-09-01', '2026-10-01', '2026-11-01'];
 const none = { currency: 'USD', cost: null, agentSeconds: 0, agentRate: null, legacyRates: [] };
@@ -218,6 +218,35 @@ describe('the Spend page', () => {
     expect(api.voidExpense).toHaveBeenCalledWith('new', null);
   });
 
+  it('exports each CSV file for the period the page shows', async () => {
+    await openPage();
+    const control = bodyFind('[data-spend-export]')!;
+    expect(control.textContent).toContain(ExportTitle);
+
+    const links = async () => {
+      bodyFind('[data-spend-export]')!.click();
+      await flushPromises();
+      return [...document.body.querySelectorAll<HTMLAnchorElement>('[data-spend-export-file]')];
+    };
+
+    const now = new Date();
+    const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10);
+    const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString().slice(0, 10);
+    const first = await links();
+    expect(first.map((a) => a.dataset.spendExportFile)).toEqual(['billing-accounts', 'expenses', 'period-summary', 'estimated-execution-cost']);
+    for (const a of first) {
+      expect(a.getAttribute('href')).toBe(`/api/spend/export/${a.dataset.spendExportFile}?from=${from}&to=${to}`);
+      expect(a.hasAttribute('download')).toBe(true);
+    }
+    expect(first.map((a) => a.textContent)).toEqual(ExportFiles.map((f) => expect.stringContaining(f.label)));
+
+    // The previous month: every file follows the page's period.
+    bodyFind('[data-spend-prev]')!.click();
+    await flushPromises();
+    const prior = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)).toISOString().slice(0, 10);
+    for (const a of await links()) expect(a.getAttribute('href')).toBe(`/api/spend/export/${a.dataset.spendExportFile}?from=${prior}&to=${from}`);
+  });
+
   it('names nothing wrongly on any tab: the estimate is never Spend, Spent or Cost alone, and no value word appears', async () => {
     await openPage();
     const titles = [...document.body.querySelectorAll('[data-spend-dialog] .text-overline, [data-spend-dialog] .os-dialog-title, [data-spend-chart] figcaption')]
@@ -248,6 +277,13 @@ describe('the Spend page', () => {
     await flushPromises();
     texts.push(...readOff(bodyFind('[data-expense-form]')));
     expect(texts.join(' ')).toMatch(/Billing type.*Service period from/s);
+
+    // The Export control and its menu.
+    bodyFind('[data-spend-export]')!.click();
+    await flushPromises();
+    const menu = bodyFind('[data-spend-export-file]')!.closest('.q-menu') as HTMLElement;
+    texts.push(...readOff(bodyFind('[data-spend-export]')), ...readOff(menu));
+    expect(texts.join(' ')).toContain(`${EstimateTileTitle.split(' · ')[0]} by team and outcome`);
 
     expect(misnamedOnSpend(texts, titles)).toEqual([]);
     // The lint bites: these would be refused.
