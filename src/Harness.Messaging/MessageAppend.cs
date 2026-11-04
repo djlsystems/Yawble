@@ -24,6 +24,14 @@ public static class MessageAppend
     public static string Redacted(NewMessage message) =>
         GitOutputRedaction.RedactUserInfo(message.Payload) ?? message.Payload;
 
+    /// <summary>
+    /// The payload a row is written with: <see cref="Redacted"/>, then an interruption row stamped with
+    /// exactly one code from <see cref="InterruptionReasons"/> (<see cref="InterruptionReasons.Stamped"/>).
+    /// A code outside the set throws here, inside the append, so the row is never written.
+    /// </summary>
+    public static string Stored(NewMessage message) =>
+        InterruptionReasons.Stamped(message.Type, Redacted(message));
+
     /// <summary>The text written to the payload column: an empty payload is stored as <c>{}</c>.</summary>
     public static string RowPayload(string redacted) => string.IsNullOrEmpty(redacted) ? "{}" : redacted;
 

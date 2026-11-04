@@ -136,7 +136,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         SqliteConnection connection, SqliteTransaction transaction, NewMessage message, AppendContext? context,
         CancellationToken ct)
     {
-        var payload = MessageAppend.Redacted(message);
+        var payload = MessageAppend.Stored(message);
 
         long correlation = 0;
         var depth = 0;

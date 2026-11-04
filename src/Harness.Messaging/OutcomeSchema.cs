@@ -456,5 +456,15 @@ public static class OutcomeSchema
             ALTER TABLE usage_ledger ADD COLUMN origin_kind TEXT NULL;
             ALTER TABLE usage_ledger ADD COLUMN origin_actor_id TEXT NULL;
             """),
+
+        // WHY A RUN ENDED INTERRUPTED, on its ledger row: one code from InterruptionReasons, written
+        // when a run ends failed (mapped from its failureClass) or blocked (its blocked or
+        // needsDecision row's code); NULL for a completed or quiet run. An ADD COLUMN rewrites no row
+        // and fires no trigger: a row written before this step reads NULL, and nothing back-fills it.
+        new MigrationStep(
+            "outcome-015",
+            """
+            ALTER TABLE usage_ledger ADD COLUMN reason_code TEXT NULL;
+            """),
     ];
 }

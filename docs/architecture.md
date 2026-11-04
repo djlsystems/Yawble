@@ -48,6 +48,43 @@ The product name, Yawble, lives in the web app's presentation layer
   are a trigger with no person, a member's `team/member` is an agent, anything else is the system.
   Every later row in the workflow carries the first row's origin, whoever publishes it. No request
   body, payload field or header can set any of these; rows from before this have none.
+- **Interruption reasons come from the closed set.** Every `agentContainer.blocked`,
+  `agentContainer.needsDecision`, `agentContainer.rejected`, `workflow.paused` and
+  `agentContainer.scheduleSkipped` row carries a `reasonCode` beside its free-text `reason` (a
+  decision request carries its `question`). The code is exactly one of `InterruptionReasons`:
+  `token_cap`, `workflow_budget`, `auth`, `permission`, `approval_required`, `decision_required`,
+  `paused_by_person`, `team_archived`, `busy`, `admission` or `failure`. The platform picks it from
+  what caused the interruption, never from the words:
+
+  | Row | Cause | Code |
+  |---|---|---|
+  | `scheduleSkipped` | the trigger's daily token cap is reached | `token_cap` |
+  | `rejected` and `workflow.paused` | the workflow spent over its team or instance per-workflow budget | `workflow_budget` |
+  | `rejected` | the member's queue is at its ceiling | `admission` |
+  | `scheduleSkipped` | the team is archived | `team_archived` |
+  | `scheduleSkipped` | a person paused the team | `paused_by_person` |
+  | `scheduleSkipped` | an idle-only trigger's member is busy | `busy` |
+  | `scheduleSkipped` | a solution team waits for a connection or a file a person supplies | `auth` |
+  | `blocked` | the Host marked the member blocked for a connection a person must set (`failureClass: needs-person`) | `auth` |
+  | `needsDecision` | the member called `needs_decision` | `decision_required` |
+  | `blocked` | the member called `blocked` itself, for the whole run or one batch item | `failure` |
+
+  `failure` is the default for a member's own `blocked` call: nothing the platform knows says more
+  about why a member gave up. `permission` and `approval_required` are in the set, but nothing
+  writes them yet. An admission hold, a run waiting for a slot or memory, writes no interruption
+  row; it is recorded in `admission_holds`.
+
+  The log enforces the set when it stores a row, on both databases. A code outside the set, a code
+  that is not text, or a second code is refused, and the row is not written. A row that names no
+  code gets its type's default from its structured fields: `needsDecision` is `decision_required`,
+  `blocked` is mapped from its `failureClass` (`failure` when it has none), a `workflow.paused` with a
+  `limitSource` is `workflow_budget`, and anything else is `failure`.
+
+  `agentContainer.failed` gains no field: its code is mapped from its `failureClass`. `needs-person`
+  is `auth`; every other class, and a row with no class, is `failure`. `workflow.resumed` is not an
+  interruption and has no code. Rows from before codes existed have no `reasonCode` and still read;
+  a reader takes the same default for them. A run that ends interrupted copies its code onto its
+  usage ledger row (see [cost.md](cost.md)).
 - **Steering the Concierge.** The workflow a person highlights on the board is the one their
   Concierge continues: its next launch carries it in `HARNESS_CAUSATION`, and a running Concierge
   reads it from `STEERING.md`. Only an open workflow of a team that exists and is not archived can

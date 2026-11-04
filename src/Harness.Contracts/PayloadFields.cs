@@ -190,6 +190,16 @@ public static class PayloadFields
     public const string FailureClass = "failureClass";
 
     /// <summary>
+    /// WHY A RUN OR A WORKFLOW WAS INTERRUPTED - one of <see cref="InterruptionReasons"/> - beside the
+    /// free-text <see cref="Reason"/> on `blocked`, `needsDecision`, `rejected`, `workflow.paused` and
+    /// `scheduleSkipped`. Chosen by the platform from what caused the interruption and stamped by the
+    /// store (<see cref="InterruptionReasons.Stamped"/>); never read from the free text. Absent on rows
+    /// written before it existed. `failed` carries none: its code is mapped from
+    /// <see cref="FailureClass"/>.
+    /// </summary>
+    public const string ReasonCode = "reasonCode";
+
+    /// <summary>
     /// THE CONNECTION A FAILED RUN WAS HELD UP BY, by its id, on an <c>agentContainer.failed</c> row
     /// only: a plugin's run that reported its connection <c>refused</c> or <c>sign-in</c>, and each
     /// later run that did not start because that connection still needs a person. Absent on every

@@ -295,6 +295,13 @@ public static class SqlServerOutcomeSchema
                 origin_kind     NVARCHAR(MAX) NULL,
                 origin_actor_id NVARCHAR(MAX) NULL;
             """),
+
+        // `OutcomeSchema`'s outcome-015: why a run ended interrupted, on its ledger row, nullable.
+        new MigrationStep(
+            "outcome-015",
+            """
+            ALTER TABLE usage_ledger ADD reason_code NVARCHAR(MAX) NULL;
+            """),
     ];
 
     /// <summary>The two triggers that make <paramref name="table"/> append-only, as SQLite's

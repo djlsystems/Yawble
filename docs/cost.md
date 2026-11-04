@@ -112,11 +112,23 @@ The Teams list, its summary, the team page and the Outcomes dashboard price ever
 snapshot, and a run with none from the rate's history, as **How a run is priced** says.
 
 A snapshot also records who the run's workflow began with: the origin the log derived for the
-workflow's first row (`person`, `agent`, `trigger` or `system`, with the person's or member's id
-and email, or the trigger's source). When the run ends, its usage ledger row records the same
-origin's kind and actor id. Both are copies, so they stay after the log's 90-day purge takes the
-rows they came from. Nothing prices, filters or shows them yet. Runs and ledger rows from before
-origins were recorded have none, and none is written back.
+workflow's first row (`person`, `agent`, `trigger` or `system`). A person's origin carries their id
+and email, a member's carries its id and no email, and a trigger's carries its source. When the
+run ends, its usage ledger row records the same origin's kind and actor id. Both are copies, so
+they stay after the log's 90-day purge takes the rows they came from. Nothing prices, filters or
+shows them yet. Runs and ledger rows from before origins were recorded have none, and none is
+written back.
+
+A run that ends interrupted also records why, as `usage_ledger.reason_code`: one code from the
+closed set `InterruptionReasons` (see **Interruption reasons** in
+[architecture.md](architecture.md)). A failed run's code comes from its failure class:
+`needs-person` is `auth`, and every other class (`quota`, `rate`, `transport`, `agent-fault`,
+`launch-missing`, `out-of-memory`, `crashed`, `timeout`, `interrupted`, `worker-lost`, `unknown`,
+or no class) is `failure`. A blocked run's code is the code on the newest `blocked` or
+`needsDecision` row the run published for the whole run (not for one batch item). A completed or
+quiet run's code is NULL. The two databases write the same values. The code is a copy, so it stays
+after the log's purge. Nothing prices, filters or shows it yet. Ledger rows from before it was
+recorded have none, and none is written back.
 
 `GET /api/ledger/export` gives each run its `rateSource` (`member`, `tenant` or `none` for a run
 with a snapshot; `reconstructed`, `fallback-at-upgrade` or `none` for one without) and its

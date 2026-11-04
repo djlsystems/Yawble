@@ -119,8 +119,14 @@ public static class LedgerRows
         // delivery, so another run's start can never be taken for this one's. None is NULL.
         var started = await StartedAsync(connection, transaction, terminal, ct);
 
+        (string Type, string Payload)? blocking = null;
         var outcome = await LedgerFacts.RunOutcomeAsync(
-            terminal, () => BlockedAsync(connection, transaction, terminal, started?.Seq, ct));
+            terminal,
+            async () => (blocking = await BlockingAsync(connection, transaction, terminal, started?.Seq, ct)) is not null);
+
+        // WHY IT ENDED INTERRUPTED (InterruptionReasons): a live row only, as a backfill reads rows from
+        // before codes existed and nothing back-fills one.
+        var reasonCode = backfilled ? null : LedgerFacts.ReasonCode(terminal, outcome, blocking);
 
         var agent = teamId is null ? null : await ScalarTextAsync(
             connection, transaction,
@@ -140,13 +146,17 @@ public static class LedgerRows
                  run_seq, correlation, team_id, team_name, member, member_kind, agent_preset,
                  run_outcome, queued_at, started_at, ended_at, measured,
                  tokens_in, tokens_cached_in, tokens_cache_creation, tokens_out, tokens_combined, billable,
-                 trigger_source, trigger_fired_at, backfilled, start_seq, origin_kind, origin_actor_id)
+                 trigger_source, trigger_fired_at, backfilled, start_seq, origin_kind, origin_actor_id,
+                 reason_code)
              VALUES (
                  $seq, $correlation, $team, {TeamNameSql}, $member, $kind, $agent,
                  $outcome, $queued, $started, $ended, $measured,
                  $in, $cachedIn, $cacheCreation, $out, $combined, $billable,
-                 $trigger, $firedAt, $backfilled, $startSeq, $originKind, $originActor)
+                 $trigger, $firedAt, $backfilled, $startSeq, $originKind, $originActor,
+                 $reasonCode)
              """;
+
+        insert.Parameters.AddWithValue("$reasonCode", (object?)reasonCode ?? DBNull.Value);
 
         // THE WORKFLOW'S ORIGIN, as the terminal row carries it (its root's, messages-007): a live row
         // only, as a backfill reads rows from before origins were derived.
@@ -396,24 +406,26 @@ public static class LedgerRows
             reader.IsDBNull(4) ? null : reader.GetInt64(4));
     }
 
-    /// <summary>Whether the run published a run-level `blocked` (one naming no <c>item</c>) between its
+    /// <summary>The newest run-level `blocked` (one naming no <c>item</c>) the run published between its
     /// start and this row - the rule <c>ReadRunsAsync</c> reads a run as Blocked by - or asked a
     /// person to decide (`needs-decision`), which leaves the member waiting on a person just as a
-    /// block does: the team activity read shows both as blocked, after a Reset too.</summary>
-    private static async Task<bool> BlockedAsync(
+    /// block does: the team activity read shows both as blocked, after a Reset too. Its type and payload
+    /// carry the run's reason code; null when it published neither.</summary>
+    private static async Task<(string Type, string Payload)?> BlockingAsync(
         SqliteConnection connection, SqliteTransaction transaction, Message terminal, long? startedSeq,
         CancellationToken ct)
     {
-        if (startedSeq is not { } from) return false;
+        if (startedSeq is not { } from) return null;
 
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText =
             $"""
-             SELECT EXISTS (SELECT 1 FROM messages
-                            WHERE source = $source COLLATE NOCASE AND type IN ($blocked, $needsDecision)
-                              AND seq > $from AND seq < $terminal
-                              AND json_extract(payload, '$.{PayloadFields.Item}') IS NULL)
+             SELECT type, payload FROM messages
+             WHERE source = $source COLLATE NOCASE AND type IN ($blocked, $needsDecision)
+               AND seq > $from AND seq < $terminal
+               AND json_extract(payload, '$.{PayloadFields.Item}') IS NULL
+             ORDER BY seq DESC LIMIT 1
              """;
         command.Parameters.AddWithValue("$source", terminal.Source);
         command.Parameters.AddWithValue("$blocked", MessageTypes.Blocked);
@@ -421,7 +433,8 @@ public static class LedgerRows
         command.Parameters.AddWithValue("$from", from);
         command.Parameters.AddWithValue("$terminal", terminal.Seq);
 
-        return (long)(await command.ExecuteScalarAsync(ct))! != 0;
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct) ? (reader.GetString(0), reader.GetString(1)) : null;
     }
 
     /// <summary>The origin row <paramref name="seq"/> was stored with (messages-007), or null for a row

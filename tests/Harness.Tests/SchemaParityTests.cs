@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Harness.Host;
 using Harness.SqlServer;
 using Harness.Tests.Contracts;
@@ -140,6 +141,26 @@ public sealed class SchemaParityTests
                 Assert.DoesNotContain("UPDATE", sql, StringComparison.Ordinal);
                 Assert.DoesNotContain("NOT NULL", sql, StringComparison.Ordinal);
             }
+        }
+    }
+
+    /// <summary><c>outcome-015</c> is one id on both providers and adds <c>usage_ledger.reason_code</c>,
+    /// nullable, and nothing else. <see cref="Tables_match"/> holds the column itself alike.</summary>
+    [Fact]
+    public void The_reason_code_step_adds_only_a_nullable_column_on_both_providers()
+    {
+        var sqlite = Assert.Single(SchemaModules.All, s => s.Id == "outcome-015").Sql;
+        var sqlServer = Assert.Single(SqlServerSchemaModules.All, s => s.Id == "outcome-015").Sql;
+
+        foreach (var sql in new[] { sqlite, sqlServer })
+        {
+            Assert.Single(Regex.Matches(sql, "ALTER TABLE", RegexOptions.None));
+            Assert.Contains("ALTER TABLE usage_ledger ADD", sql, StringComparison.Ordinal);
+            Assert.Matches(@"\breason_code\s+\w+(\(MAX\))?\s+NULL;", sql);
+            Assert.DoesNotContain("CREATE", sql, StringComparison.Ordinal);
+            Assert.DoesNotContain("UPDATE", sql, StringComparison.Ordinal);
+            Assert.DoesNotContain("NOT NULL", sql, StringComparison.Ordinal);
+            Assert.DoesNotContain(",", sql, StringComparison.Ordinal);
         }
     }
 

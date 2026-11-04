@@ -128,7 +128,7 @@ public sealed class SqlServerMessageStore : IMessageLog, ICursors, ISubscription
     {
         await TakeAppendLockAsync(connection, transaction, ct);
 
-        var payload = MessageAppend.Redacted(message);
+        var payload = MessageAppend.Stored(message);
 
         long correlation = 0;
         var depth = 0;

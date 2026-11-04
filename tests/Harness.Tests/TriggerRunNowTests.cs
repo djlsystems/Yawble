@@ -197,6 +197,7 @@ public sealed class TriggerRunNowTests : IAsyncLifetime
             MessageTypes.ScheduleSkippedCapReason,
             JsonDocument.Parse(skip.Payload).RootElement.GetProperty("reason").GetString(),
             StringComparison.Ordinal);
+        Assert.Equal(InterruptionReasons.TokenCap, JsonDocument.Parse(skip.Payload).RootElement.GetProperty(PayloadFields.ReasonCode).GetString());
         Assert.Single(await TenantRowsAsync(TenantActions.ScheduleSkipped, id));
 
         Assert.Single(await InstructionsAsync(id));
@@ -205,6 +206,66 @@ public sealed class TriggerRunNowTests : IAsyncLifetime
         var runs = await TenantRowsAsync(TenantActions.ScheduleRunNow, id);
         Assert.Equal(2, runs.Count);
         Assert.Contains(runs, e => JsonDocument.Parse(e.Detail!).RootElement.GetProperty("outcome").GetString() == "capped");
+    }
+
+    /// <summary>A person's pause and a busy member skip a Run now, each with its own code from the closed set
+    /// beside the sentence: the code is the cause the sweep found, never read off the words.</summary>
+    [Fact]
+    public async Task A_paused_team_and_a_busy_member_skip_with_paused_by_person_and_busy()
+    {
+        var daily = await DailyAsync();
+        var idle = await CreateAsync(new
+        {
+            name = "Idle only",
+            kind = "cron",
+            expression = "0 0 3 * * *",
+            timezone = "UTC",
+            container = "Dev",
+            idleOnly = true,
+            instruction = "look",
+            wakeManager = "never",
+        });
+
+        (await _person.PostAsync($"/api/teams/{_team}/pause", null, Ct)).EnsureSuccessStatusCode();
+        var paused = await RunNowAsync(daily);
+        Assert.Equal(("skipped", MessageTypes.ScheduleSkippedPausedReason),
+            (paused.GetProperty("outcome").GetString(), paused.GetProperty("reason").GetString()));
+        Assert.Equal(InterruptionReasons.PausedByPerson, await SkipCodeAsync(daily));
+        (await _person.PostAsync($"/api/teams/{_team}/resume", null, Ct)).EnsureSuccessStatusCode();
+
+        // Dev is mid-run until the gate opens, so the idle-only trigger finds it busy.
+        var gate = new TaskCompletionSource();
+        var running = new TaskCompletionSource();
+        var behaviour = _agents.Behaviour;
+        _agents.Behaviour = async invocation =>
+        {
+            if (invocation.Container.Name == "Dev")
+            {
+                running.TrySetResult();
+                await gate.Task;
+            }
+
+            return await behaviour(invocation);
+        };
+
+        var after = await Log.HighestSeqAsync(Ct);
+        await Log.AppendAsync(new NewMessage(MessageTypes.InstructionFor(Dev), """{"instruction":"work"}""", "console"), Ct);
+        await running.Task.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+
+        var busy = await RunNowAsync(idle);
+        Assert.Equal(("skipped", MessageTypes.ScheduleSkippedBusyReason),
+            (busy.GetProperty("outcome").GetString(), busy.GetProperty("reason").GetString()));
+        Assert.Equal(InterruptionReasons.Busy, await SkipCodeAsync(idle));
+
+        gate.SetResult();
+        await SettleAsync(after);
+    }
+
+    private async Task<string?> SkipCodeAsync(string id)
+    {
+        var skip = Assert.Single(
+            await Log.ReadAfterAsync(0, [MessageTypes.ScheduleSkipped], int.MaxValue, Ct), m => m.Source == $"schedule:{id}");
+        return JsonDocument.Parse(skip.Payload).RootElement.GetProperty(PayloadFields.ReasonCode).GetString();
     }
 
     /// <summary>A solution's run-at-install is this same call with its own action and the clock

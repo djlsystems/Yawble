@@ -116,6 +116,20 @@ public static class LedgerFacts
                 ? "blocked"
                 : Bool(terminal.Payload, PayloadFields.Quiet) ? "quiet" : "completed";
 
+    /// <summary>
+    /// WHY A RUN ENDED INTERRUPTED, as <c>usage_ledger.reason_code</c>: a failed run's code mapped from its
+    /// <c>failureClass</c>, a blocked run's from the run-level <c>blocked</c> or <c>needsDecision</c> row
+    /// that blocked it (<paramref name="blocking"/>, its newest), and null for a completed or quiet run.
+    /// Both ledger writers call this, so their values cannot differ.
+    /// </summary>
+    public static string? ReasonCode(Message terminal, string outcome, (string Type, string Payload)? blocking) =>
+        outcome switch
+        {
+            "failed" => InterruptionReasons.Of(terminal.Type, terminal.Payload),
+            "blocked" when blocking is { } row => InterruptionReasons.Of(row.Type, row.Payload),
+            _ => null,
+        };
+
     /// <summary>The member's kind from its roster agent; a member no longer on the roster still has a
     /// kind when it ran no model.</summary>
     public static string? MemberKind(string? agent, LedgerRows.Usage usage) =>

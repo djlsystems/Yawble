@@ -98,8 +98,13 @@ public static class SqlServerLedgerRows
 
         var started = await StartedAsync(connection, transaction, terminal, ct);
 
+        (string Type, string Payload)? blocking = null;
         var outcome = await RunOutcomeAsync(
-            terminal, () => BlockedAsync(connection, transaction, terminal, started?.Seq, ct));
+            terminal,
+            async () => (blocking = await BlockingAsync(connection, transaction, terminal, started?.Seq, ct)) is not null);
+
+        // Why it ended interrupted, as SQLite's LedgerRows writes it: a live row only.
+        var reasonCode = backfilled ? null : ReasonCode(terminal, outcome, blocking);
 
         string? agent = null;
         if (teamId is not null)
@@ -123,14 +128,18 @@ public static class SqlServerLedgerRows
             run_seq, correlation, team_id, team_name, member, member_kind, agent_preset,
             run_outcome, queued_at, started_at, ended_at, measured,
             tokens_in, tokens_cached_in, tokens_cache_creation, tokens_out, tokens_combined, billable,
-            trigger_source, trigger_fired_at, backfilled, start_seq, origin_kind, origin_actor_id
+            trigger_source, trigger_fired_at, backfilled, start_seq, origin_kind, origin_actor_id,
+            reason_code
             """,
             $"""
              @seq, @correlation, @team, {TeamNameSql}, @member, @kind, @agent,
              @outcome, @queued, @started, @ended, @measured,
              @in, @cachedIn, @cacheCreation, @out, @combined, @billable,
-             @trigger, @firedAt, @backfilled, @startSeq, @originKind, @originActor
+             @trigger, @firedAt, @backfilled, @startSeq, @originKind, @originActor,
+             @reasonCode
              """);
+
+        Text(insert, "@reasonCode", reasonCode);
 
         // The workflow's origin, as SQLite's LedgerRows copies it: a live row only.
         var origin = backfilled ? null : await OriginOfAsync(connection, transaction, terminal.Seq, ct);
@@ -399,22 +408,22 @@ public static class SqlServerLedgerRows
             reader.IsDBNull(4) ? null : reader.GetInt64(4));
     }
 
-    /// <summary>Whether the run published a run-level `blocked` (naming no item) or asked a person to
-    /// decide, between its start and this row.</summary>
-    private static async Task<bool> BlockedAsync(
+    /// <summary>The newest run-level `blocked` (naming no item) or `needsDecision` row the run published
+    /// between its start and this row, or null when it published none.</summary>
+    private static async Task<(string Type, string Payload)?> BlockingAsync(
         SqlConnection connection, SqlTransaction transaction, Message terminal, long? startedSeq, CancellationToken ct)
     {
-        if (startedSeq is not { } from) return false;
+        if (startedSeq is not { } from) return null;
 
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText =
             $"""
-             SELECT CASE WHEN EXISTS (
-                 SELECT 1 FROM messages
-                 WHERE source = @source COLLATE {SqlServerSql.NoCase} AND type IN (@blocked, @needsDecision)
-                   AND seq > @from AND seq < @terminal
-                   AND {SqlServerSql.Absent("payload", PayloadFields.Item)}) THEN 1 ELSE 0 END
+             SELECT TOP 1 type, payload FROM messages
+             WHERE source = @source COLLATE {SqlServerSql.NoCase} AND type IN (@blocked, @needsDecision)
+               AND seq > @from AND seq < @terminal
+               AND {SqlServerSql.Absent("payload", PayloadFields.Item)}
+             ORDER BY seq DESC
              """;
         command.Parameters.AddWithValue("@source", terminal.Source);
         command.Parameters.AddWithValue("@blocked", MessageTypes.Blocked);
@@ -422,7 +431,8 @@ public static class SqlServerLedgerRows
         command.Parameters.AddWithValue("@from", from);
         command.Parameters.AddWithValue("@terminal", terminal.Seq);
 
-        return Convert.ToInt32(await command.ExecuteScalarAsync(ct)) != 0;
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct) ? (reader.GetString(0), reader.GetString(1)) : null;
     }
 
     private static void Long(SqlCommand command, string name, long? value) =>
