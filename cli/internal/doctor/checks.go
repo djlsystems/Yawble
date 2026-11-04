@@ -74,6 +74,11 @@ type Observed struct {
 	PreviewPorts     string
 	PreviewMadeWith  string
 	PreviewPublished []int
+	// Cgroups is the engine's own report of the cgroup controllers its containers get (`podman
+	// info`, `docker info`); nil when the engine could not be asked. ControlNoLimits is control's
+	// label recording it was made without its memory and CPU limits.
+	Cgroups         *engine.Cgroups
+	ControlNoLimits bool
 }
 
 // memoryWarnPercent is the container's memory use, of its limit, from which the stats row warns:
@@ -100,6 +105,30 @@ func statsRow(o Observed) Check {
 		return Check{"stats", Warn, detail, fmt.Sprintf("the container uses %.0f%% of its memory limit; finish or stop some runs, or yawble config set memory <more>, then yawble up", *p)}
 	}
 	return Check{"stats", OK, detail, ""}
+}
+
+// cgroupsRow is whether the engine can apply the containers' memory and CPU limits, from its own
+// report. Any of memory, cpu or pids missing FAILs, naming what is missing and the fix, and says
+// that `up` starts without the limits meanwhile. Not measured stays not measured.
+func cgroupsRow(o Observed) Check {
+	c := o.Cgroups
+	switch {
+	case c == nil:
+		return Check{"cgroups", Skip, "the engine could not be asked", ""}
+	case !c.Measured:
+		return Check{"cgroups", Skip, "not measured: " + c.Reason, ""}
+	}
+	if missing := c.Missing(); len(missing) > 0 {
+		have := "none"
+		if len(c.Controllers) > 0 {
+			have = strings.Join(c.Controllers, ", ")
+		}
+		return Check{"cgroups", Fail, fmt.Sprintf("%s reports no %s cgroup controller (it has: %s), so the engine cannot apply a container's memory or CPU limit; `yawble up` starts the instance WITHOUT them, and no memory or CPU limit is applied to any container", c.Source, strings.Join(missing, ", "), have), instance.LimitsFix(o.EngineName)}
+	}
+	if o.ControlNoLimits {
+		return Check{"cgroups", Warn, fmt.Sprintf("%s reports memory, cpu and pids, but the instance was started without its memory and CPU limits", c.Source), "yawble up (it makes the containers again with their limits)"}
+	}
+	return Check{"cgroups", OK, fmt.Sprintf("memory, cpu and pids are there (%s): the containers' limits apply", c.Source), ""}
 }
 
 // RemoteObserved is the configured provider, its sidecar's state and the URL it printed.
@@ -272,6 +301,8 @@ func HostChecks(o Observed) []Check {
 	default:
 		checks = append(checks, Check{"engine", Fail, "podman is installed but could not reach its engine: " + o.EngineErr.Error(), "podman machine start (macOS, Windows), or check the podman service on Linux"})
 	}
+
+	checks = append(checks, cgroupsRow(o))
 
 	switch {
 	case o.Image == "":

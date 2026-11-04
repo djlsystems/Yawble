@@ -122,6 +122,7 @@ func TestUpOnAFreshDockerMachineMakesTheNetworkControlAndOneWorkerInControlsName
 		"docker network inspect yawble",
 		"docker network create yawble",
 		engines[1].inspect + "yawble",
+		"docker info --format json",
 		"docker image inspect " + img,
 		"docker pull " + img,
 		"docker run -d --name yawble --network yawble -p 0.0.0.0:8080:8080 <control>",

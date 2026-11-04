@@ -89,12 +89,15 @@ type applied struct {
 	// before them reads as previews off.
 	Preview   string `json:"previewPorts,omitempty"`
 	Published string `json:"previewPublished,omitempty"`
+	// NoLimits is a container made without its memory and CPU limits; omitted otherwise, so a
+	// label from before it reads as made with them.
+	NoLimits bool `json:"noLimits,omitempty"`
 }
 
 // controlApplied is control's label for the settings now: its own fixed allowance, not a worker's.
 func controlApplied(s Settings) applied {
 	return applied{RoleControl, s.Port, ControlMemory, ControlCPUs, s.MaxRunning, s.Image, s.EnvFileHash, s.KeyHash, s.MarketplaceCatalog, s.MicrosoftClientID,
-		config.FormatPorts(s.PreviewPorts), config.FormatPorts(s.PreviewPublished)}
+		config.FormatPorts(s.PreviewPorts), config.FormatPorts(s.PreviewPublished), s.NoLimits}
 }
 
 // PreviewOf is the preview range a container's settings label records and the ports of it that
@@ -257,12 +260,16 @@ func Up(ctx context.Context, e engine.Engine, s Settings, health func(string) bo
 		podCreatedHere = true
 	}
 	wasPublished := keptPreview(ctx, e, &s, info, podPublishes)
+	// Whether the engine can apply the containers' memory and CPU limits, asked of the engine
+	// whenever control is to be started or was made without them; a control running with them
+	// shows they apply.
+	s.NoLimits = limitsFor(ctx, e, info, out)
 	// On Docker a worker lives in control's network namespace: a control made again leaves it in
 	// a dead one, and a control started again has a new one. Podman's pod owns the namespace.
 	var step workerStep
 
 	if info.State != engine.StateAbsent {
-		if diff := Changes(info.Label, s); len(diff) > 0 {
+		if diff := append(Changes(info.Label, s), limitsChange(info.Label, s)...); len(diff) > 0 {
 			if PreSplit(info.Label) {
 				fmt.Fprintln(out, PreSplitLine)
 			} else {
@@ -292,15 +299,26 @@ func Up(ctx context.Context, e engine.Engine, s Settings, health func(string) bo
 		}
 	}
 
+	if info.State == engine.StateStopped {
+		if err := e.Start(ctx, ContainerName); err == nil {
+			step.restart = e.Name() == "docker"
+			fmt.Fprintf(out, "started %s\n", ContainerName)
+		} else if CgroupError(err) && !s.NoLimits {
+			// Made with limits the engine cannot apply now: made again without them, said.
+			fmt.Fprintln(out, NoLimitsLine(e.Name(), nil))
+			s.NoLimits = true
+			if err := e.Remove(ctx, ContainerName); err != nil {
+				return err
+			}
+			step.recreate = e.Name() == "docker"
+			info.State = engine.StateAbsent
+		} else {
+			return portError(e.Name(), err, s.Port)
+		}
+	}
 	switch info.State {
 	case engine.StateRunning:
 		fmt.Fprintf(out, "%s is already running\n", ContainerName)
-	case engine.StateStopped:
-		if err := e.Start(ctx, ContainerName); err != nil {
-			return portError(err, s.Port)
-		}
-		step.restart = e.Name() == "docker"
-		fmt.Fprintf(out, "started %s\n", ContainerName)
 	case engine.StateAbsent:
 		if present, err := e.ImagePresent(ctx, s.Image); err != nil {
 			return err
@@ -319,7 +337,15 @@ func Up(ctx context.Context, e engine.Engine, s Settings, health func(string) bo
 			s.PreviewPublished = publishable(s, out)
 		}
 		err := e.Run(ctx, controlSpec(s))
-		if err != nil && len(s.PreviewPublished) > 0 {
+		if err != nil && CgroupError(err) && !s.NoLimits {
+			// The engine cannot apply the limits (its report did not say so, or could not be
+			// read): once more without them, said. Never the port's or a preview port's fault.
+			_ = e.Remove(ctx, ContainerName)
+			fmt.Fprintln(out, NoLimitsLine(e.Name(), nil))
+			s.NoLimits = true
+			err = e.Run(ctx, controlSpec(s))
+		}
+		if err != nil && !CgroupError(err) && len(s.PreviewPublished) > 0 {
 			// A preview port the probe saw free and the engine could not bind (taken since, or
 			// held where a loopback dial does not reach) never stops the instance: once more with
 			// none, said.
@@ -344,9 +370,13 @@ func Up(ctx context.Context, e engine.Engine, s Settings, health func(string) bo
 			if podCreatedHere {
 				_ = e.RemovePod(ctx, PodName)
 			}
-			return portError(err, s.Port)
+			return portError(e.Name(), err, s.Port)
 		}
-		fmt.Fprintf(out, "started %s (control) from %s (memory %s, cpus %d, running limit %s)\n", ContainerName, s.Image, ControlMemory, ControlCPUs, RunLimitText(s))
+		if s.NoLimits {
+			fmt.Fprintf(out, "started %s (control) from %s (NO memory or CPU limit: the cgroup controllers are not delegated; running limit %s)\n", ContainerName, s.Image, RunLimitText(s))
+		} else {
+			fmt.Fprintf(out, "started %s (control) from %s (memory %s, cpus %d, running limit %s)\n", ContainerName, s.Image, ControlMemory, ControlCPUs, RunLimitText(s))
+		}
 	}
 	if err := WaitHealthy(ctx, e, URL(s.Port), health, out); err != nil {
 		return err
@@ -401,10 +431,26 @@ func controlSpec(s Settings) engine.RunSpec {
 		Labels: map[string]string{
 			InstanceLabel: PodName, RoleLabel: RoleControl, engine.SettingsLabel: SettingsLabel(s),
 		},
-		EnvFiles: s.EnvFiles(), Memory: ControlMemory, CPUs: ControlCPUs,
+		EnvFiles: s.EnvFiles(), Memory: limit(s, ControlMemory), CPUs: limitCPUs(s, ControlCPUs),
 		CapDrop: []string{"ALL"}, CapAdd: ControlCaps,
 		HostPort: s.Port, ContainerPort: ContainerPort, PreviewPorts: s.PreviewPublished,
 	}
+}
+
+// limit and limitCPUs are a container's memory and CPU limit flags: none when the engine cannot
+// apply them.
+func limit(s Settings, memory string) string {
+	if s.NoLimits {
+		return ""
+	}
+	return memory
+}
+
+func limitCPUs(s Settings, cpus int) int {
+	if s.NoLimits {
+		return 0
+	}
+	return cpus
 }
 
 // PublishedPreviewPortsVariable tells control the preview ports actually published: the contract
@@ -422,7 +468,7 @@ func createPod(ctx context.Context, e engine.Engine, s *Settings, publishes bool
 		preview = s.PreviewPublished
 	}
 	if err := e.CreatePod(ctx, PodName, s.Port, ContainerPort, preview...); err != nil {
-		return portError(err, s.Port)
+		return portError(e.Name(), err, s.Port)
 	}
 	if len(preview) > 0 {
 		fmt.Fprintf(out, "%s pod %s publishing port %d and preview ports %s\n", verb, PodName, s.Port, config.FormatPorts(preview))
@@ -482,11 +528,15 @@ func keptPreview(ctx context.Context, e engine.Engine, s *Settings, info engine.
 	return published
 }
 
-// portError names the port as the thing to check when a pod, run or start fails. When podman
-// says "in use" the cause is known and said. Otherwise it is NOT claimed: Podman 6 reports a
-// taken port at run time as "starting some containers: internal libpod error" (measured), so
-// the port is offered as the first thing to look at, beside podman's own sentence.
-func portError(err error, port int) error {
+// portError names the port as the thing to check when a pod, run or start fails. An error about
+// the cgroup controllers is said as that, never as the port. When podman says "in use" the
+// cause is known and said. Otherwise it is NOT claimed: Podman 6 reports a taken port at run
+// time as "starting some containers: internal libpod error" (measured), so the port is offered
+// as the first thing to look at, beside podman's own sentence.
+func portError(engineName string, err error, port int) error {
+	if CgroupError(err) {
+		return limitsError(engineName, err)
+	}
 	if strings.Contains(strings.ToLower(err.Error()), "in use") {
 		return fmt.Errorf("port %d is already in use by something else: stop that, or choose another with `yawble config set port <n>` (%w)", port, err)
 	}

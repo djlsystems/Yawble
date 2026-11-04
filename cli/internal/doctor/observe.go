@@ -83,6 +83,8 @@ func Observe(ctx context.Context, e engine.Engine, s instance.Settings, p Probes
 		return o
 	}
 	o.EngineVersion = version
+	cgroups := e.Cgroups(ctx)
+	o.Cgroups = &cgroups
 
 	if s.Image != "" {
 		if present, err := e.ImagePresent(ctx, s.Image); err == nil {
@@ -105,6 +107,11 @@ func Observe(ctx context.Context, e engine.Engine, s instance.Settings, p Probes
 	o.URL = st.URL
 	o.Healthy = st.Healthy
 	o.PreviewMadeWith, o.PreviewPublished = st.PreviewMadeWith, st.PreviewPublished
+	if st.Container != engine.StateAbsent {
+		if info, err := e.Inspect(ctx, instance.ContainerName); err == nil {
+			o.ControlNoLimits = instance.NoLimitsOf(info.Label)
+		}
+	}
 	if st.Container == engine.StateRunning {
 		if stats, err := e.Stats(ctx, instance.ContainerName); err != nil {
 			o.StatsErr = err

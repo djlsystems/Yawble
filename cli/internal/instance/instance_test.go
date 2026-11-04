@@ -67,6 +67,8 @@ func TestUpOnAFreshPodmanMachineMakesThePodControlAndOneWorker(t *testing.T) {
 		"podman pod exists yawble",
 		"podman pod create --name yawble -p 0.0.0.0:8080:8080",
 		inspect,
+		// Control is to be made: can the engine apply its limits? (podman's own report)
+		"podman info --format json",
 		"podman image exists " + img,
 		"podman pull " + img,
 		"podman run -d --name yawble --pod yawble --restart unless-stopped --memory 1536m --cpus 2 --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add FSETID --cap-add SETUID --cap-add SETGID --cap-add SETPCAP --cap-add KILL -e HARNESS_RELEASE_REPOSITORY=djlsystems/Yawble -e HARNESS_ROLE=control -e Wip__MaxRunning=8 --label yawble.instance=yawble --label yawble.role=control --label yawble.settings=" + label(st) + " --env-file /c/yawble/env --env-file /c/yawble/worker.env -v yawble-data:/data " + img,

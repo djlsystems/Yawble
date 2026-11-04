@@ -1,0 +1,19 @@
+{
+  "host": {
+    "arch": "amd64",
+    "buildahVersion": "1.42.0",
+    "cgroupManager": "cgroupfs",
+    "cgroupVersion": "v2",
+    "cgroupControllers": [],
+    "conmon": {"package": "conmon-2.1.13-1.fc42.x86_64", "path": "/usr/bin/conmon"},
+    "cpus": 8,
+    "distribution": {"distribution": "fedora", "variant": "container", "version": "42"},
+    "kernel": "6.6.87.2-microsoft-standard-WSL2",
+    "memTotal": 16624607232,
+    "ociRuntime": {"name": "crun", "package": "crun-1.24-1.fc42.x86_64", "path": "/usr/bin/crun"},
+    "os": "linux",
+    "security": {"rootless": true, "seccompEnabled": true, "selinuxEnabled": false}
+  },
+  "store": {"graphDriverName": "overlay"},
+  "version": {"APIVersion": "6.1.4", "Version": "6.1.4", "OsArch": "linux/amd64"}
+}

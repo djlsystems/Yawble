@@ -151,6 +151,10 @@ type Engine interface {
 	// volume on both engines (Docker has no `volume export`). A nil Stdout collects the output
 	// in the Result.
 	RunHelper(ctx context.Context, spec HelperSpec) (Result, error)
+	// Cgroups is the engine's own report of the cgroup controllers its containers get (`info`):
+	// without memory, cpu and pids a container's limits cannot be applied. Never an error: an
+	// engine that cannot say is not measured.
+	Cgroups(ctx context.Context) Cgroups
 }
 
 // HelperSpec is one helper container. It runs as root (the volume's files belong to two users),

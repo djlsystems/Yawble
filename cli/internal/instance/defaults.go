@@ -55,6 +55,9 @@ type Settings struct {
 	PreviewPublished []int
 	// PortFree probes a port on this computer before it is published; nil is the real probe.
 	PortFree func(port int) bool
+	// NoLimits makes the containers without their memory and CPU limits: the engine's cgroup
+	// controllers are not delegated, so it cannot apply them. Decided only by Up.
+	NoLimits bool
 }
 
 // EnvFiles are the env files every instance container is given, in order: the env file, then

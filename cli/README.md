@@ -277,6 +277,7 @@ ok    rootless       the machine is rootless
 ok    machine memory 15688 MB, above the container limit of 8192 MB
 ok    wsl            WSL answers
 ok    engine         podman 6.0.2
+ok    cgroups        memory, cpu and pids are there (podman info): the containers' limits apply
 ok    image          localhost/yawble:doctor present
 ok    volume         yawble-data
 ok    container      running
@@ -293,6 +294,8 @@ info  capacity       engine has 15688 MB, 10 CPUs (podman machine); the containe
 ok    running limit  4, from the memory bound (the Host's answer: ...)
 info  run memory     rlimit, 1792 MB per run: runs.memoryLimitMb is set
 ```
+
+`cgroups` is the engine's own report of the cgroup controllers its containers get (`podman info`'s `cgroupControllers`; Docker's `docker info` `MemoryLimit`, `CpuCfsQuota` and `PidsLimit`). It FAILs when memory, cpu or pids is missing, naming what is missing and how to delegate them: without them the engine cannot apply a container's memory or CPU limit (crun says ``open `memory.max` for writing: No such file or directory``, as on a rootless Podman machine whose root `cgroup.subtree_control` is empty). Meanwhile `up` starts the instance WITHOUT the containers' memory and CPU limits and says so in a warning line and in each started line; the Host then reads its container limit as not measured and admits runs by the run limit. `up` also does so when the engine refuses a run or start for that reason without its report saying it; it never blames the port, or the preview ports, for that error. Once the controllers are there, `yawble up` makes the containers again with their limits, and until then this row warns. A report the engine cannot give is `skip`, never ok.
 
 `capacity` puts what the engine has (asked of it, as `up` does) beside what the container got, as the Host inside reads its cgroup; it warns when yawble's config asks for more than the engine has. The running limit and run memory are the Host's own answers; when the Host cannot be asked they read "not known", never an estimate. The first four rows appear only with Podman on macOS and Windows, where it runs in a machine; on Linux, and with Docker, the list starts at `engine`.
 

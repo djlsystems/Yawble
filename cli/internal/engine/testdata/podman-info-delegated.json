@@ -1,0 +1,12 @@
+{
+  "host": {
+    "arch": "amd64",
+    "cgroupManager": "systemd",
+    "cgroupVersion": "v2",
+    "cgroupControllers": ["cpuset", "cpu", "io", "memory", "pids"],
+    "cpus": 8,
+    "os": "linux",
+    "security": {"rootless": true}
+  },
+  "version": {"Version": "6.1.4"}
+}
