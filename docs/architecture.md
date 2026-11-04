@@ -94,6 +94,16 @@ The product name, Yawble, lives in the web app's presentation layer
   request body, message, tell, member tool or key can write one or pick its kind, person or
   duration, and nothing in it is the act's content. The kinds, each writer and the rules are in
   [cost.md](cost.md#peoples-acts-the-intervention-ledger).
+- **Human figures are read, never priced.** The outcome reads (`GET /api/outcomes`,
+  `/api/outcomes/{id}`) and the cost reads (`GET /api/teams/{team}/cost`, `/api/teams/cost`,
+  `/api/teams/cost/summary`) carry three figures beside their money, computed on every read by
+  `HumanFigures`: **Human Interventions** (the `intervention_ledger` rows in the window, each once),
+  **Human Attention Time** (measured durations only, null when none was measured) and **Waiting on a
+  person** (`blockedSeconds`, time work waited on a person, never added to attention). For an outcome,
+  a row counts under its `outcome_id_at_event` followed through `merged_into`, or Unattributed; for a
+  team, by its `team_id`, so a team's counts leave out Concierge sessions, which name no team. No
+  route reads the ledger on its own and nothing writes through these reads. The rules are in
+  [cost.md](cost.md#human-figures-human-interventions-human-attention-time-waiting-on-a-person).
 - **Steering the Concierge.** The workflow a person highlights on the board is the one their
   Concierge continues: its next launch carries it in `HARNESS_CAUSATION`, and a running Concierge
   reads it from `STEERING.md`. Only an open workflow of a team that exists and is not archived can

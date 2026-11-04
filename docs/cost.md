@@ -212,7 +212,8 @@ are never Actual Spend.
 ## People's acts: the intervention ledger
 
 `intervention_ledger` (`outcome-010`, on both providers) records one row per meaningful act by a
-person. Nothing is priced from it and no screen, route or report reads it yet. Each row holds:
+person. Nothing is priced from it. The human figures below are read from it, through the existing
+outcome and cost reads; there is no route of its own. Each row holds:
 
 | Column | What it is |
 |---|---|
@@ -299,9 +300,14 @@ by-outcome entries, and `outcomeTotalCost`. Nothing else prices an outcome.
   was deleted. It is computed on every read, never stored: there is no Unattributed outcome row.
   Nothing is allocated or split between outcomes. (`noOutcome` on `GET /api/outcomes` carries it,
   named `Unattributed`.)
-- **The identity.** For the same window and the same teams, Unattributed plus every outcome's
-  total equals the period's Estimated Execution Cost, to the cent. Each run's part in each week
-  is priced and rounded once, and the buckets and the total add the same parts.
+- **The identity.** On the weekly reads (each team's cost, every team's, and the Teams list
+  summary), Unattributed plus every outcome's total equals the period's Estimated Execution Cost
+  for the same teams, to the cent. Each run's part in each week is priced and rounded once, and
+  the buckets and the total add the same parts. With no window, `GET /api/outcomes` adds up the
+  same way: Unattributed plus every outcome is every run's estimate, once. A windowed
+  `GET /api/outcomes` prices each run's part inside the window as one span, rounded once, not week
+  by week. Compared with the weekly reads over the same dates, its figures can differ by up to a
+  cent for each run that crosses a Monday.
 - **Weighted rate.** An outcome's rate (`cost.agentRate`) is its priced agent time's money over its
   hours. Runs with no price and plugin time are left out. It is never the tenant rate, and never
   hours times an average.
@@ -335,8 +341,62 @@ column is checked on both providers, and nothing back-fills it.
   nothing priced, it reads **not measurable**. It is never `$0` and never a division by zero.
 - **Both** keep the budget words, the budget bar and `value_amount` as they were. The opened
   outcome's cost is labelled `Estimated Execution Cost · <h> Agent Hours`, with `at <rate>/h` when
-  its own weighted rate is known. It no longer names the tenant rate. Human Interventions and
-  intervention frequency are not shown yet.
+  its own weighted rate is known. It no longer names the tenant rate. **Waiting on a person** is
+  its own figure beside **Agents working**.
+- **The human figures** (below) are shown in both. Project shows all-time **Human
+  Interventions** and **Human Attention Time**. Operational shows Human Attention Time, all time,
+  and each week's Human Interventions (intervention frequency) and Human Attention Time as two
+  more columns of the weekly table, beside cost and throughput. The Unattributed tile has a line
+  with its Human Interventions and Human Attention Time, beside its money.
+
+## Human figures: Human Interventions, Human Attention Time, Waiting on a person
+
+Three figures describe what people did. They are read from `intervention_ledger` and the ledger's
+blocked time. Each is computed on the service, on every read, by `HumanFigures`
+(`src/Harness.Host/HumanFigures.cs`). Nothing is priced: there is no rate, no labour cost and no
+value word near them.
+
+- **Human Interventions** is the number of `intervention_ledger` rows whose `occurred_at` is in
+  the read's window. Every kind counts, and each row counts once. A Concierge session is one row,
+  so it is one intervention however many messages it held.
+- **Human Attention Time** is the sum of `duration_seconds` over the rows with
+  `duration_measured = 1`, and no others. Today only a Concierge session is measured. A row with
+  no measured duration adds nothing, and nothing is estimated for it. When no row in the window
+  was measured, the figure is null (`attentionSeconds: null`) and the screen says **no measured
+  time**. It never shows 0 for that.
+- **Waiting on a person** is the existing `blockedSeconds`: time work waited on a person. It is not
+  attention. It is never added to Human Attention Time, and no figure, sum or label joins the two.
+
+**Where an act counts.** For an outcome, a row counts under its `outcome_id_at_event`, followed
+through `merged_into`, the same way a run follows its link. A row with no outcome, or whose outcome
+was deleted, counts under **Unattributed**. Each row lands in exactly one bucket: it is never split,
+and never counted once per team. For a team, rows are counted by `team_id`. **A Concierge session
+carries no team** (its `team_id` is NULL), so a team's counts, and the all-teams summary, which sums
+teams, leave Concierge sessions out. They still count under their outcome (Unattributed, as a
+session names no workflow) on the outcome reads. Only a person's act writes a row: a member, a
+member's key, an agent, a trigger, a wake and the Host write none, so they add nothing here. A
+team's count is not cut at the team's floor the way its runs are: a team recreated under the same
+id counts its predecessor's acts.
+
+**Where they appear.** The same window and teams as the figures beside them:
+
+- `GET /api/outcomes` and `GET /api/outcomes/{id}`: each outcome's `figures.human`
+  (`interventions`, `measuredInterventions`, `attentionSeconds`) over the read's window, and
+  `figures.humanWeekly`, the same over the eight weekly buckets whatever the window. `noOutcome`
+  carries Unattributed's beside its money. `blockedSeconds` is Waiting on a person.
+- `GET /api/teams/{team}/cost` and `GET /api/teams/cost`: each outcome entry's `human` (the team's
+  acts under that outcome over the eight weeks), and the team's `human`: `interventions`,
+  `measuredInterventions`, `attentionSeconds`, `unattributed` (the same three for its acts serving
+  no outcome) and `waitingSeconds`, Waiting on a person over the eight weeks, from its runs above
+  the team's floor.
+- `GET /api/teams/cost/summary`: `human`, the reached teams' figures, each row once, with
+  `unattributed` and `waitingSeconds`; and each listed outcome's `human`. An outcome is listed
+  there by the existing rule, so acts under an outcome that is not listed are in the total only.
+
+The Teams list's tiles and the team page's tiles do not show them.
+
+**Where they begin.** At `interventions.startedAt`. Acts before it were never recorded, so a figure
+over an earlier window counts only what followed it.
 
 ## The summary above the Teams list
 
@@ -453,13 +513,13 @@ Colour is never the only cue: the dialog's table carries every figure the chart 
 
 | Route | Answers |
 |---|---|
-| `GET /api/teams/{team}/cost` | One team: `money` (`currency`, and `agentHourlyRate`, the tenant default as set now), the eight `weeks`, and per outcome (`id` null for Unattributed) its `weekly` figures, `totals`, `value` (its budget), `outcomeTotalCost` (its estimate across all teams and all time) and `rank` (its place in the order shared by every team, which picks its colour; null for Unattributed); then the team's `totals`. `totals` carry `agentSeconds` (agent time only), `cost` (every priced run) and `agentRate` (the priced agent time's rate). `cost` is null, never 0, when no run was priced. Every `cost` is the estimate, never money paid. |
+| `GET /api/teams/{team}/cost` | One team: `money` (`currency`, and `agentHourlyRate`, the tenant default as set now), the eight `weeks`, and per outcome (`id` null for Unattributed) its `weekly` figures, `totals`, `value` (its budget), `outcomeTotalCost` (its estimate across all teams and all time) and `rank` (its place in the order shared by every team, which picks its colour; null for Unattributed), and `human` (its Human Interventions and Human Attention Time); then the team's `totals`, and its `human` with `unattributed` and `waitingSeconds` (Waiting on a person). `totals` carry `agentSeconds` (agent time only), `cost` (every priced run) and `agentRate` (the priced agent time's rate). `cost` is null, never 0, when no run was priced. Every `cost` is the estimate, never money paid. |
 | `GET /api/billing-accounts`, `GET /api/billing-accounts/{id}` | Every billing account, active and deactivated, oldest first (an empty list on a fresh instance), or one; 404 for an id that names none. Each has `id`, `name`, `vendor`, `billingType`, `currency`, `billingPeriod`, `recurringAmount`, `effectiveFrom`, `effectiveTo`, `active`, `description`, `scope` (`tenant`), `instanceId`, `createdBy`, `createdAt` and `updatedAt`. People only. |
 | `POST /api/billing-accounts`, `POST /api/billing-accounts/{id}`, `.../deactivate`, `.../reactivate` | Create an account, edit the fields sent (null clears only `description`, `effectiveTo` and `recurringAmount`), and turn `active` off or on. People only; there is no delete. |
 | `GET /api/expenses`, `GET /api/expenses/{id}` | Every expense row, current and superseded, oldest recorded first (`?accountId=` for one account's; an empty list on a fresh instance), or one; 404 for an id that names none. Each has `id`, `accountId`, `amount`, `currency`, `servicePeriodStart`, `servicePeriodEnd` (exclusive), `kind`, `status` (`confirmed` or `void`), `supersedes`, `reference`, `note`, `recordedBy`, `recordedAt`, `supersededBy` and `current`. People only. |
 | `POST /api/expenses`, `POST /api/expenses/{id}/void`, `POST /api/expenses/{id}/replace` | Record a confirmed expense; void one (an optional `note`); replace one with the fields sent over the old row's, on the same account. Each answers the new row. People only; there is no edit and no delete. |
-| `GET /api/teams/cost` | The same for every team at once (`money`, `weeks`, `teams[]`), for the Teams list. |
-| `GET /api/teams/cost/summary` | The summary above the Teams list: `rate` (the tenant default as set now, null without one); the eight `weeks` (`weekStart`, `agentSeconds`, `cost`), `periodStart` and `periodEnd`; the eight weeks' `total` and the eight before as `prior`, each with `agentRate`; per outcome (`id` null for Unattributed) its `name`, `rank`, `agentSeconds`, `cost`, `budget` and `outcomeTotalCost` (its cost across every team; this field was `spentTotal` before); and `rightNow` (`openWorkflows`, `membersRunning`, `waitingOnYou`). `cost` is null, never 0, when no run was priced. |
+| `GET /api/teams/cost` | The same for every team at once (`money`, `weeks`, `teams[]`), for the Teams list. Each entry and each team also carry `human` (above). |
+| `GET /api/teams/cost/summary` | The summary above the Teams list: `rate` (the tenant default as set now, null without one); the eight `weeks` (`weekStart`, `agentSeconds`, `cost`), `periodStart` and `periodEnd`; the eight weeks' `total` and the eight before as `prior`, each with `agentRate`; per outcome (`id` null for Unattributed) its `name`, `rank`, `agentSeconds`, `cost`, `budget` and `outcomeTotalCost` (its cost across every team; this field was `spentTotal` before); and `rightNow` (`openWorkflows`, `membersRunning`, `waitingOnYou`); `human` (the reached teams' human figures, with `unattributed` and `waitingSeconds`) and each outcome's `human`. `cost` is null, never 0, when no run was priced. |
 
 In the web app, one module decides every outcome's colour: `web/src/lib/outcomeColours.ts`. Its
 `outcomeColour({ id, rank })` returns the colour for one outcome entry, `outcomeColours(entries)` builds
