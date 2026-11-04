@@ -27,8 +27,9 @@ var cgroupMarks = []string{
 // controllerRefused is a runtime naming a controller it cannot use: crun's "controller `pids` is
 // not available under .../cgroup.controllers" (exit 126, measured on a rootless WSL Podman machine
 // given --pids-limit), and runc's "controller \"pids\" not available" / "can't set pids limit"
-// and "cannot set memory limit" under Docker. The name is the first group.
-var controllerRefused = regexp.MustCompile("controller [`'\"]?(memory|cpu|cpuset|pids|io)[`'\"]? (?:is )?not (?:available|enabled|supported)|(?:can't|cannot|unable to) set (memory|cpu|pids) limit")
+// and "cannot set memory limit" under Docker, whose CLI prints a backslash before each double quote.
+// The name is the first group.
+var controllerRefused = regexp.MustCompile("controller \\\\?[`'\"]?(memory|cpu|cpuset|pids|io)\\\\?[`'\"]? (?:is )?not (?:available|enabled|supported)|(?:can't|cannot|unable to) set (memory|cpu|pids) limit")
 
 // cgroupFiles are the cgroup files a runtime names when it cannot open one, by the controller
 // whose limit it is.

@@ -64,13 +64,12 @@ func TestCgroupEdgeControllerNotAvailableInOtherQuotings(t *testing.T) {
 	}
 }
 
-// Docker's CLI prints the OCI runtime's error with its double quotes escaped. Known defect: the
-// controllerRefused pattern allows no backslash before the quote, and no other mark matches, so
-// this is not read as a cgroup error. It skips until fixed; drop the skip then.
+// Docker's CLI prints the OCI runtime's error with its double quotes escaped; it is still a
+// cgroup error.
 func TestCgroupEdgeRuncEscapedQuotesIsACgroupError(t *testing.T) {
 	text := `docker: Error response from daemon: failed to create task for container: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: unable to apply cgroup configuration: controller \"pids\" not available: unknown.`
 	if !instance.CgroupError(errors.New(text)) {
-		t.Skipf("KNOWN DEFECT, not read as a cgroup error: %s", text)
+		t.Fatalf("not read as a cgroup error: %s", text)
 	}
 }
 
