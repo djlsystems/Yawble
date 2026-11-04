@@ -118,3 +118,14 @@ describe("a named secret's row", () => {
     expect(sentence).toContain('azure-plugin');
   });
 });
+
+describe('a Team picture change', () => {
+  const words = (detail: object) => detailWords({ action: 'team.picture-changed', detail: JSON.stringify(detail) });
+
+  it('says on or off, and where the choice came from', () => {
+    expect(didWords({ action: 'team.picture-changed', detail: null })).toBe('changed the Team picture');
+    expect(words({ teamPicture: false })).toBe('Team picture turned off.');
+    expect(words({ teamPicture: true, clonedFrom: 'Alpha' })).toBe('Team picture turned on; carried over when cloned from Alpha.');
+    expect(words({ teamPicture: true, solution: 'support-desk' })).toBe('Team picture turned on; chosen when installing solution support-desk.');
+  });
+});

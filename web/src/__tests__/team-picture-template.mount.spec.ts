@@ -79,8 +79,8 @@ function nowRow(member: string, itemKey: string | null, cardId: string | null, t
 }
 
 const architecture = {
-  caption: 'Focused on what B0084 adds or changes',
-  backdrop: 'Yawble Host',
+  caption: 'Focused on what item-report adds or changes',
+  backdrop: 'The Host',
   nodes: [
     { id: 'ledger', label: 'Runs and usage ledger', status: 'unchanged', column: 0, row: 0 },
     { id: 'cost', label: 'Cost service', detail: ['Estimated Execution Cost'], column: 1, row: 0, cards: ['c1'] },
@@ -135,11 +135,11 @@ function twoItems(): Data {
   return {
     'tp-team': [team()],
     'tp-items': [
-      item('B0090', ago(10), [], { total: 2, done: 0, running: 0, todo: 2, blocked: 0, failed: 0 }),
-      item('B0084', ago(600), cards, { total: 3, done: 1, running: 1, todo: 1, blocked: 0, failed: 0 }),
+      item('item-export', ago(10), [], { total: 2, done: 0, running: 0, todo: 2, blocked: 0, failed: 0 }),
+      item('item-report', ago(600), cards, { total: 3, done: 1, running: 1, todo: 1, blocked: 0, failed: 0 }),
     ],
-    'tp-now': [nowRow('DeveloperQuinn', 'B0084', 'c2', 'Report tool', 34)],
-    'tp-picture': [{ id: 'B0084', doc: buildPicture }],
+    'tp-now': [nowRow('DeveloperQuinn', 'item-report', 'c2', 'Report tool', 34)],
+    'tp-picture': [{ id: 'item-report', doc: buildPicture }],
     'tp-spend': [
       {
         id: 'team',
@@ -193,9 +193,9 @@ describe('the Team picture page before anything is drawn', () => {
     data['tp-picture'] = [];
     await draw(data);
 
-    expect($('[data-panel="B0084"] [data-section="progress"]')).not.toBeNull();
-    expect(text('[data-panel="B0084"]')).toContain(api().NOT_DRAWN);
-    expect($('[data-panel="B0084"] .tp-graph')).toBeNull();
+    expect($('[data-panel="item-report"] [data-section="progress"]')).not.toBeNull();
+    expect(text('[data-panel="item-report"]')).toContain(api().NOT_DRAWN);
+    expect($('[data-panel="item-report"] .tp-graph')).toBeNull();
   });
 });
 
@@ -203,10 +203,10 @@ describe('a build item', () => {
   it('has one tab per open item, the work in flight first', async () => {
     await draw(twoItems());
 
-    expect($$('[data-tab]').map((tab) => tab.getAttribute('data-tab'))).toEqual(['B0084', 'B0090']);
-    expect($('[data-tab="B0084"]')!.getAttribute('aria-selected')).toBe('true');
-    expect($('[data-tab="B0084"] .tp-dot')).not.toBeNull();
-    expect($('[data-panel="B0084"]')!.getAttribute('data-kind')).toBe('build');
+    expect($$('[data-tab]').map((tab) => tab.getAttribute('data-tab'))).toEqual(['item-report', 'item-export']);
+    expect($('[data-tab="item-report"]')!.getAttribute('aria-selected')).toBe('true');
+    expect($('[data-tab="item-report"] .tp-dot')).not.toBeNull();
+    expect($('[data-panel="item-report"]')!.getAttribute('data-kind')).toBe('build');
   });
 
   it('leads with the work in flight: member, card, how long and last progress', async () => {
@@ -222,13 +222,13 @@ describe('a build item', () => {
   it('draws the progress bar with a striped, moving segment for what is in flight', async () => {
     await draw(twoItems());
 
-    expect(text('[data-panel="B0084"] .tp-progress-words')).toContain('1 of 3 cards done.');
-    const done = $('[data-panel="B0084"] .tp-bar-done')!;
+    expect(text('[data-panel="item-report"] .tp-progress-words')).toContain('1 of 3 cards done.');
+    const done = $('[data-panel="item-report"] .tp-bar-done')!;
     expect(done.getAttribute('width')).toBe('333');
-    const segment = $('[data-panel="B0084"] [data-bar-now] .tp-bar-active')!;
+    const segment = $('[data-panel="item-report"] [data-bar-now] .tp-bar-active')!;
     expect(segment.getAttribute('x')).toBe('333');
     expect(segment.getAttribute('width')).toBe('333');
-    expect($('[data-panel="B0084"] .tp-stripes.tp-moving')).not.toBeNull();
+    expect($('[data-panel="item-report"] .tp-stripes.tp-moving')).not.toBeNull();
   });
 
   it('colours the architecture from the cards, dashes what is unchanged, and skips a broken edge', async () => {
@@ -241,7 +241,7 @@ describe('a build item', () => {
     expect(status('csv')).toBe('todo');
     expect($('[data-node="ledger"] .tp-s-unchanged')).not.toBeNull();
     expect($$('[data-section="architecture"] .tp-edge')).toHaveLength(3);
-    expect(text('[data-section="architecture"] .tp-frame-label')).toBe('Yawble Host');
+    expect(text('[data-section="architecture"] .tp-frame-label')).toBe('The Host');
   });
 
   it('makes the in-flight piece glow, animates only the path into it, and names who and how long', async () => {
@@ -259,9 +259,9 @@ describe('a build item', () => {
     const data = twoItems();
     data['tp-now'] = [];
     await draw(data);
-    ($('[data-tab="B0084"]') as HTMLButtonElement).click();
+    ($('[data-tab="item-report"]') as HTMLButtonElement).click();
 
-    expect($('[data-panel="B0084"] [data-bar-now]')).not.toBeNull();
+    expect($('[data-panel="item-report"] [data-bar-now]')).not.toBeNull();
     expect($$('.tp-now, .tp-live, .tp-moving')).toHaveLength(0);
   });
 
@@ -290,10 +290,10 @@ describe('a build item', () => {
 
   it('switches tabs on a click', async () => {
     await draw(twoItems());
-    ($('[data-tab="B0090"]') as HTMLButtonElement).click();
+    ($('[data-tab="item-export"]') as HTMLButtonElement).click();
 
-    expect($('[data-panel="B0090"]')).not.toBeNull();
-    expect($('[data-tab="B0090"]')!.getAttribute('aria-selected')).toBe('true');
+    expect($('[data-panel="item-export"]')).not.toBeNull();
+    expect($('[data-tab="item-export"]')!.getAttribute('aria-selected')).toBe('true');
   });
 });
 
@@ -321,7 +321,7 @@ describe('agent-written words', () => {
     const data = twoItems();
     const hostile = '<img src=x onerror="alert(1)">';
     data['tp-picture'] = [{
-      id: 'B0084',
+      id: 'item-report',
       doc: {
         ...buildPicture,
         summary: hostile,
@@ -508,14 +508,14 @@ describe('the history of finished items', () => {
     const data = twoItems();
     data['tp-now'] = [];
     data['tp-history'] = Array.from({ length: 14 }, (_, index) => ({
-      id: `B00${10 + index}`,
-      doc: { key: `B00${10 + index}`, title: `Finished ${index}`, finishedAt: ago(1000 - index), progress: { total: 2, done: 2 }, picture: buildPicture },
+      id: `done-${10 + index}`,
+      doc: { key: `done-${10 + index}`, title: `Finished ${index}`, finishedAt: ago(1000 - index), progress: { total: 2, done: 2 }, picture: buildPicture },
     }));
     await draw(data);
 
     const items = $$('[data-history]');
     expect(items).toHaveLength(10);
-    expect(items[0]!.getAttribute('data-history')).toBe('B0023');
+    expect(items[0]!.getAttribute('data-history')).toBe('done-23');
     expect($('#tp-main')!.lastElementChild!.getAttribute('data-section')).toBe('history');
 
     const first = items[0] as HTMLDetailsElement;
@@ -552,6 +552,6 @@ describe('reading again', () => {
     expect(($('#tp-status') as HTMLElement).hidden).toBe(false);
     expect(text('#tp-status')).toContain("This page's access has expired");
     expect(text('#tp-status')).toContain('Showing what was read last.');
-    expect($('[data-panel="B0084"]')).not.toBeNull();
+    expect($('[data-panel="item-report"]')).not.toBeNull();
   });
 });
