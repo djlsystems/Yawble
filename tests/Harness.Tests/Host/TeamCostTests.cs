@@ -447,8 +447,14 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
             // ONE PLUGIN WITH BOTH: a run from before snapshots and one that started with no rate of its own.
             await RunAsync(NextCorrelation(), team, start, start.AddHours(1), kind: MemberRef.PluginKind, member: "Mixed");
             await RunAsync(NextCorrelation(), team, start, start.AddHours(1), kind: MemberRef.PluginKind, member: "Mixed", snapshot: true);
-            // A PLUGIN WITH ITS OWN RATE: two hours at 15, by duration.
+            // A PLUGIN WITH ITS OWN RATE: two hours at 15, by duration - and a run of its from before snapshots, which adds nothing.
             await RunAsync(NextCorrelation(), team, start, start.AddHours(2), kind: MemberRef.PluginKind, member: "Paid", rate: "15");
+            await RunAsync(NextCorrelation(), team, start, start.AddHours(1), kind: MemberRef.PluginKind, member: "Paid");
+            // AN AGENT THAT STARTED WITH NO RATE: Agent Hours, no money, and never a plugin's word.
+            await RunAsync(NextCorrelation(), team, start, start.AddHours(1), member: "Bare", snapshot: true);
+            // AN UNPRICED PLUGIN RUN SERVING AN OUTCOME: the outcome gets no money and no Agent Hours from it.
+            var served = await CreateAsync(person, "Plugin unpriced");
+            await RunAsync(await LinkedAsync(served.Id, team), team, start, start.AddHours(1), kind: MemberRef.PluginKind, member: "Mixed", snapshot: true);
 
             var query = $"from={Day(start)}&to={Day(start.AddDays(2))}&bucket=day";
             var read = await JsonAsync(await person.GetAsync($"/api/teams/{team}/cost/period?{query}", Ct));
@@ -468,11 +474,19 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
             Assert.Equal(30m, members["Paid"].GetProperty("figures").GetProperty("cost").GetDecimal());
             Assert.False(members["Paid"].TryGetProperty("unpriced", out _));
 
+            Assert.Equal(JsonValueKind.Null, members["Bare"].GetProperty("figures").GetProperty("cost").ValueKind);
+            Assert.Equal(3600, members["Bare"].GetProperty("figures").GetProperty("agentSeconds").GetDouble(), 3);
+            Assert.False(members["Bare"].TryGetProperty("unpriced", out _));
+
+            var outcome = read.GetProperty("outcomes").EnumerateArray().Single(o => o.GetProperty("id").GetString() == served.Id);
+            Assert.Equal(JsonValueKind.Null, outcome.GetProperty("figures").GetProperty("cost").ValueKind);
+            Assert.Equal(0, outcome.GetProperty("figures").GetProperty("agentSeconds").GetDouble());
+
             // NO PLUGIN SECOND IS AGENT HOURS, and the headline is the agent's 60 and Paid's 30 - never a plugin at 60.
             var totals = read.GetProperty("totals");
-            Assert.Equal(3600, totals.GetProperty("agentSeconds").GetDouble(), 3);
+            Assert.Equal(2 * 3600, totals.GetProperty("agentSeconds").GetDouble(), 3);
             Assert.Equal(90m, totals.GetProperty("cost").GetDecimal());
-            Assert.All(members.Where(m => m.Key != "Dev"), m => Assert.Equal(0, m.Value.GetProperty("figures").GetProperty("agentSeconds").GetDouble()));
+            Assert.All(members.Where(m => m.Key is not ("Dev" or "Bare")), m => Assert.Equal(0, m.Value.GetProperty("figures").GetProperty("agentSeconds").GetDouble()));
 
             // THE LEDGER EXPORT SAYS THE SAME PER RUN: Old's run is `none` with no estimate, never the agent rate.
             var ledger = await JsonAsync(await person.GetAsync("/api/ledger/export?take=200", Ct));
