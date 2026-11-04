@@ -285,6 +285,36 @@ public abstract class ExecutionSnapshotContract : ProviderContract
     }
 
     [Fact]
+    public async Task A_CLI_changed_during_or_between_runs_leaves_each_snapshot_with_the_CLI_it_started_on()
+    {
+        var stores = await StoresAsync();
+        await HireAsync(stores, Dev, "claude");
+        await SettingAsync(stores, ExecutionSnapshotFacts.AgentHourlyRateSetting, "60");
+
+        var delivery = await stores.Log.AppendAsync(Instruction(Dev, "first"), Ct);
+        var first = await StartAsync(stores, Dev, delivery.Seq);
+
+        // Under way: the member is moved to another CLI, and the run ends.
+        await stores.ExecuteAsync($"UPDATE team_members SET agent = 'codex' WHERE team = '{Dev.Team}' AND name = '{Dev.Name}'");
+        await stores.Log.AppendAsync(Completed(Dev, delivery.Seq), Ct);
+
+        var second = await RunAsync(stores, Dev);
+        await stores.ExecuteAsync($"UPDATE team_members SET agent = 'gemini' WHERE team = '{Dev.Team}' AND name = '{Dev.Name}'");
+        var third = await RunAsync(stores, Dev);
+
+        var presets = new List<object?>();
+        foreach (var start in new[] { first.Seq, second, third })
+        {
+            presets.Add(Normalised(Assert.Single(await stores.RowsAsync($"SELECT agent_preset FROM execution_snapshots WHERE start_seq = {start}")))[0]);
+        }
+
+        Assert.Equal(new object?[] { "claude", "codex", "gemini" }, presets);
+
+        // The CLI is never a price: every run is priced at the same rate, whichever CLI it ran on.
+        Assert.Equal(3, await stores.LongAsync("SELECT COUNT(*) FROM execution_snapshots WHERE rate_amount = '60'"));
+    }
+
+    [Fact]
     public async Task An_agent_with_its_own_rate_does_not_pick_up_a_tenant_rate_change()
     {
         var stores = await StoresAsync();

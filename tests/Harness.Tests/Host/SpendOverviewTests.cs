@@ -295,6 +295,50 @@ public sealed class SpendOverviewTests(HostFixture host) : IClassFixture<HostFix
         Assert.Equal((host.Alpha, member), (only.GetProperty("team").GetString(), only.GetProperty("member").GetString()));
     }
 
+    /// <summary>
+    /// MANY MEMBERS ON ONE SUBSCRIPTION: three members of two teams share one account, and its recurring amount is
+    /// projected once for the period and, once charged, counted once in Actual Spend - never once per member.
+    /// </summary>
+    [Fact]
+    public async Task Members_sharing_one_subscription_never_multiply_its_projection_or_its_charge()
+    {
+        using var person = await host.PersonAsync();
+        var account = await AccountAsync(person, "Shared seats", "subscription", "nok", 20);
+        var members = new[] { (host.Alpha, "SeatOne"), (host.Alpha, "SeatTwo"), (host.Beta, "SeatThree") };
+        foreach (var (team, member) in members)
+        {
+            Assert.Equal(HttpStatusCode.OK, (await person.PostAsJsonAsync($"/api/teams/{team}/containers", new { name = member, systemPrompt = "Work." }, Ct)).StatusCode);
+            var patched = await person.PatchAsJsonAsync($"/api/teams/{team}/containers/{member}", new { billingAccountId = account }, Ct);
+            Assert.True(patched.IsSuccessStatusCode, await patched.Content.ReadAsStringAsync(Ct));
+        }
+
+        var linked = (await JsonAsync(await person.GetAsync("/api/spend/linked-members", Ct))).EnumerateArray()
+            .Where(l => l.GetProperty("accountId").GetString() == account)
+            .Select(l => (l.GetProperty("team").GetString()!, l.GetProperty("member").GetString()!))
+            .Order().ToList();
+        Assert.Equal(members.Order(), linked);
+
+        const string Period = "/api/spend/overview?from=2033-05-01&to=2033-06-01";
+        static IEnumerable<(string?, decimal)> Nok(JsonElement amounts) => amounts.EnumerateArray()
+            .Where(a => a.GetProperty("currency").GetString() == "NOK")
+            .Select(a => (a.GetProperty("currency").GetString(), a.GetProperty("amount").GetDecimal()));
+
+        var before = await JsonAsync(await person.GetAsync(Period, Ct));
+        Assert.Equal([("NOK", 20m)], Nok(before.GetProperty("projected")));
+        Assert.Empty(Nok(before.GetProperty("actual")));
+        Assert.Single(before.GetProperty("projections").EnumerateArray(), p => p.GetProperty("accountId").GetString() == account);
+        var line = Assert.Single(before.GetProperty("accounts").EnumerateArray(), a => a.GetProperty("accountId").GetString() == account);
+        Assert.Equal(20m, line.GetProperty("projected").GetDecimal());
+
+        await ExpenseAsync(person, account, "20", "NOK", "2033-05-01", "2033-06-01", "subscription-charge");
+
+        var after = await JsonAsync(await person.GetAsync(Period, Ct));
+        Assert.Equal([("NOK", 20m)], Nok(after.GetProperty("actual")));
+        Assert.Empty(Nok(after.GetProperty("projected")));
+        line = Assert.Single(after.GetProperty("accounts").EnumerateArray(), a => a.GetProperty("accountId").GetString() == account);
+        Assert.Equal((20m, 1), (line.GetProperty("actual").GetDecimal(), line.GetProperty("expenses").GetInt32()));
+    }
+
     private async Task<string> AccountAsync(HttpClient person, string name, string type, string currency, decimal? recurring)
     {
         var created = await person.PostAsJsonAsync(

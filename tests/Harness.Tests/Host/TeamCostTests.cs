@@ -4,6 +4,7 @@ using System.Text.Json;
 using Harness.Containers;
 using Harness.Contracts;
 using Harness.Host;
+using Harness.Host.Auth;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -362,6 +363,65 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
         {
             await SetAsync(person, TenantSettings.OutcomesAgentHourlyRateName, null);
         }
+    }
+
+    /// <summary>
+    /// A PRICED PLUGIN RUN SERVES ITS WORKFLOW'S OUTCOME: its money reaches the outcome's estimate across teams, on the
+    /// outcomes read and on each team's own entry, and its seconds are never Agent Hours.
+    /// </summary>
+    [Fact]
+    public async Task A_priced_plugin_run_adds_its_money_to_the_outcome_its_workflow_serves_and_never_Agent_Hours()
+    {
+        var person = await host.PersonAsync();
+        var alpha = await NewTeamAsync("Plugin outcome a");
+        var beta = await NewTeamAsync("Plugin outcome b");
+        var outcome = await CreateAsync(person, "Plugin served");
+        var now = DateTimeOffset.UtcNow;
+
+        var onAlpha = await LinkedAsync(outcome.Id, alpha);
+        var onBeta = await LinkedAsync(outcome.Id, beta);
+        await RunAsync(onAlpha, alpha, now.AddHours(-3), now.AddHours(-2), rate: "60");
+        await RunAsync(onBeta, beta, now.AddHours(-3), now.AddHours(-1), rate: "15", kind: MemberRef.PluginKind, member: "Mailer");
+
+        var list = await JsonAsync(await person.GetAsync("/api/outcomes", Ct));
+        var figures = list.GetProperty("outcomes").EnumerateArray()
+            .Single(o => o.GetProperty("id").GetString() == outcome.Id).GetProperty("figures");
+        Assert.Equal(90m, figures.GetProperty("cost").GetProperty("amount").GetDecimal());
+        Assert.Equal(3600, figures.GetProperty("agentSeconds").GetDouble(), 3);
+        Assert.Equal(60m, figures.GetProperty("cost").GetProperty("agentRate").GetDecimal());
+
+        var betaOutcome = Single(await CostAsync(person, beta));
+        Assert.Equal(outcome.Id, betaOutcome.GetProperty("id").GetString());
+        Assert.Equal(30m, betaOutcome.GetProperty("totals").GetProperty("cost").GetDecimal());
+        Assert.Equal(0, betaOutcome.GetProperty("totals").GetProperty("agentSeconds").GetDouble());
+        Assert.Equal(90m, betaOutcome.GetProperty("outcomeTotalCost").GetDecimal());
+    }
+
+    /// <summary>
+    /// THE ALL-TEAMS COST READS ARE BOUNDED TO THE CALLER'S TEAMS: a member's key reads its own team on
+    /// <c>/api/teams/cost</c> and <c>/api/teams/cost/summary</c>, never another team's run, and is refused another team's
+    /// eight-week read with the gate's sentence.
+    /// </summary>
+    [Fact]
+    public async Task A_members_key_reads_only_its_own_team_on_the_all_teams_cost_reads()
+    {
+        var person = await host.PersonAsync();
+        var other = await NewTeamAsync("Cost unreached");
+        var now = DateTimeOffset.UtcNow;
+        await RunAsync(NextCorrelation(), other, now.AddHours(-2), now.AddHours(-1), rate: "60");
+
+        using var member = host.Container(host.AlphaContainerKey);
+        var all = await JsonAsync(await member.GetAsync("/api/teams/cost", Ct));
+        Assert.Equal([host.Alpha], all.GetProperty("teams").EnumerateArray().Select(t => t.GetProperty("team").GetString()));
+        Assert.Contains(other, (await JsonAsync(await person.GetAsync("/api/teams/cost", Ct))).GetProperty("teams").EnumerateArray().Select(t => t.GetProperty("team").GetString()));
+
+        var mine = await JsonAsync(await member.GetAsync("/api/teams/cost/summary", Ct));
+        var theirs = await JsonAsync(await person.GetAsync("/api/teams/cost/summary", Ct));
+        Assert.True(Seconds(theirs, "total") - Seconds(mine, "total") >= 3600 - 0.001);
+
+        var refused = await member.GetAsync($"/api/teams/{other}/cost", Ct);
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+        Assert.Equal(TeamGate.NoSuchTeamMessage, JsonSerializer.Deserialize<JsonElement>(await refused.Content.ReadAsStringAsync(Ct)).GetProperty("error").GetString());
     }
 
     /// <summary>
