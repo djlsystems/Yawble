@@ -6,8 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { capabilityFor, capabilityPath, entryParts, NotThisSite, openSiteTab, type TabOpener } from '../siteOpen';
 import { fakeHost, reply, type Call } from '../../test/solutionFixtures';
 
-const Site = { team: 'YawbleCoreEngineeringTeam', name: 'team-dashboard', url: '/sites/YawbleCoreEngineeringTeam/team-dashboard/' };
-const Capability = '/sites/YawbleCoreEngineeringTeam/team-dashboard/_c/CfDJ8Ab-c_d/';
+const Site = { team: 'CoreTeam', name: 'team-dashboard', url: '/sites/CoreTeam/team-dashboard/' };
+const Capability = '/sites/CoreTeam/team-dashboard/_c/CfDJ8Ab-c_d/';
 
 let calls: Call[] = [];
 let answer: Response;
@@ -35,7 +35,7 @@ describe('opening a site from the app', () => {
     expect(tab.opener).toBeNull();
     await opening;
 
-    expect(calls).toEqual([{ method: 'POST', url: '/api/teams/YawbleCoreEngineeringTeam/sites/team-dashboard/open', body: {} }]);
+    expect(calls).toEqual([{ method: 'POST', url: '/api/teams/CoreTeam/sites/team-dashboard/open', body: {} }]);
     expect(tab.location.replace).toHaveBeenCalledWith(`http://127.0.0.1:8080${Capability}`);
   });
 
@@ -48,8 +48,8 @@ describe('opening a site from the app', () => {
   });
 
   it('never follows an answer that is not this site\'s capability path', async () => {
-    for (const url of ['https://evil.example/sites/YawbleCoreEngineeringTeam/team-dashboard/_c/x/', '//evil.example/x/',
-      '/sites/Other/team-dashboard/_c/x/', '/sites/YawbleCoreEngineeringTeam/team-dashboard/_c/a/b/', '/console']) {
+    for (const url of ['https://evil.example/sites/CoreTeam/team-dashboard/_c/x/', '//evil.example/x/',
+      '/sites/Other/team-dashboard/_c/x/', '/sites/CoreTeam/team-dashboard/_c/a/b/', '/console']) {
       answer = reply(200, { url });
       const tab = { opener: null as unknown, location: { replace: vi.fn() } };
       await openSiteTab(Site, browser(tab));
