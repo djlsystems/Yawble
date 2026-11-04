@@ -118,6 +118,45 @@ describe('a billing account row', () => {
   });
 });
 
+describe('an expense row', () => {
+  const account = '3f2b8c1e-9a4d-4e2f-b6a1-0c5d7e8f9a10';
+  const detail = (extra: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      expense: 'b7d4e2a1-0c3f-4e5d-9a8b-1c2d3e4f5a6b',
+      account,
+      supersedes: null,
+      status: 'confirmed',
+      kind: 'invoice',
+      amount: '20.5',
+      currency: 'USD',
+      servicePeriodStart: '2026-11-01T00:00:00.0000000+00:00',
+      servicePeriodEnd: '2026-12-01T00:00:00.0000000+00:00',
+      ...extra,
+    });
+
+  it('names a recorded expense, its amount in its currency and the account', () => {
+    const words = detailWords({ action: 'billing.expense-recorded', subjectName: 'Claude Team', detail: detail() });
+    expect(words).toMatch(/^Recorded an invoice of 20\.5 USD on Claude Team; for .+ up to .+\.$/);
+  });
+
+  it('says a void is a new row and keeps the row it voids', () => {
+    const words = detailWords({ action: 'billing.expense-voided', subjectName: 'Claude Team', detail: detail({ status: 'void', supersedes: 'old-row' }) });
+    expect(words).toBe('Voided an invoice of 20.5 USD on Claude Team; the void is a new row; the expense it voids, old-row, is kept.');
+  });
+
+  it('names the replaced row', () => {
+    const words = detailWords({ action: 'billing.expense-replaced', subjectName: 'Claude Team', detail: detail({ kind: 'subscription-charge', supersedes: 'old-row' }) });
+    expect(words).toMatch(/^Replaced expense old-row on Claude Team with a subscription-charge of 20\.5 USD; for /);
+  });
+
+  it('never calls an expense Spend or Actual Spend', () => {
+    for (const action of ['billing.expense-recorded', 'billing.expense-voided', 'billing.expense-replaced']) {
+      const words = `${didWords({ action, detail: null })} ${detailWords({ action, detail: detail({ supersedes: 'x' }) })}`;
+      expect(words, action).not.toMatch(/spen[dt]/i);
+    }
+  });
+});
+
 describe('a deleted outcome', () => {
   const detail = (cascade: { id: string; name: string } | null) =>
     JSON.stringify({

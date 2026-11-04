@@ -4,7 +4,7 @@ using Microsoft.Data.Sqlite;
 namespace Harness.Messaging;
 
 /// <summary>
-/// <see cref="ISpendStore"/> over <c>billing_accounts</c> in the log's own database file.
+/// <see cref="ISpendStore"/> over <c>billing_accounts</c> and <c>expenses</c> in the log's own database file.
 ///
 /// <para>
 /// EVERY WRITE AND ITS TENANT ROW ARE ONE TRANSACTION, as <see cref="SqliteOutcomeStore"/>'s: the row is
@@ -118,6 +118,123 @@ public sealed class SqliteSpendStore(
         if (current.Active == active) return new SpendWrite(current);
 
         return await WriteAsync(connection, transaction, current, current with { Active = active, UpdatedAt = Instant.Now() }, audit_, ct);
+    }
+
+    public async Task<IReadOnlyList<Expense>> ListExpensesAsync(string? accountId = null, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+        if (accountId is null)
+        {
+            command.CommandText = $"{ExpenseRules.Select} ORDER BY e.recorded_at, e.id";
+        }
+        else
+        {
+            if (BillingAccountRules.KeyOf(accountId) is not { } key) return [];
+            command.CommandText = $"{ExpenseRules.Select} WHERE e.account_id = $account ORDER BY e.recorded_at, e.id";
+            command.Parameters.AddWithValue("$account", key);
+        }
+
+        return await ExpenseRules.ReadRowsAsync(command, ct);
+    }
+
+    public async Task<Expense?> FindExpenseAsync(string id, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        return await FindExpenseAsync(connection, null, id, ct);
+    }
+
+    public async Task<ExpenseWrite> RecordExpenseAsync(
+        ExpenseFields fields, string recordedBy, TriggerAudit audit_, CancellationToken ct = default)
+    {
+        var (draft, refusal) = ExpenseRules.Read(fields, null);
+        if (refusal is not null) return ExpenseWrite.Refused(400, refusal);
+
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        var account = await FindAsync(connection, transaction, draft!.AccountId, ct);
+        if (ExpenseRules.Against(draft, account) is { } wrong) return ExpenseWrite.Refused(400, wrong);
+
+        return await InsertAsync(connection, transaction, ExpenseRules.New(draft, ExpenseRules.StatusConfirmed, null, recordedBy), account!, audit_, ct);
+    }
+
+    public async Task<ExpenseWrite> VoidExpenseAsync(
+        string id, string? note, string recordedBy, TriggerAudit audit_, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        if (await FindExpenseAsync(connection, transaction, id, ct) is not { } target) return ExpenseWrite.Refused(404, ExpenseRules.Missing(id));
+        if (ExpenseRules.Uncorrectable(target) is { } no) return ExpenseWrite.Refused(no.Status, no.Sentence);
+
+        var (text, refusal) = ExpenseRules.VoidNote(note);
+        if (refusal is not null) return ExpenseWrite.Refused(400, refusal);
+
+        var account = (await FindAsync(connection, transaction, target.AccountId, ct))!;
+        return await InsertAsync(connection, transaction, ExpenseRules.Voiding(target, text, recordedBy), account, audit_, ct);
+    }
+
+    public async Task<ExpenseWrite> ReplaceExpenseAsync(
+        string id, ExpenseFields fields, string recordedBy, TriggerAudit audit_, CancellationToken ct = default)
+    {
+        await using var connection = Open();
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+
+        if (await FindExpenseAsync(connection, transaction, id, ct) is not { } target) return ExpenseWrite.Refused(404, ExpenseRules.Missing(id));
+        if (ExpenseRules.Uncorrectable(target) is { } no) return ExpenseWrite.Refused(no.Status, no.Sentence);
+
+        var (draft, refusal) = ExpenseRules.Read(fields, target);
+        if (refusal is not null) return ExpenseWrite.Refused(400, refusal);
+
+        var account = await FindAsync(connection, transaction, draft!.AccountId, ct);
+        if (ExpenseRules.Against(draft, account) is { } wrong) return ExpenseWrite.Refused(400, wrong);
+
+        return await InsertAsync(
+            connection, transaction, ExpenseRules.New(draft, ExpenseRules.StatusConfirmed, target.Id, recordedBy), account!, audit_, ct);
+    }
+
+    /// <summary>
+    /// The row and its tenant row, in the write's transaction. A second correction of one row that got
+    /// past the read (the unique index on <c>supersedes</c> refuses it) is answered as the read would
+    /// have answered it, with nothing written.
+    /// </summary>
+    private async Task<ExpenseWrite> InsertAsync(
+        SqliteConnection connection, SqliteTransaction transaction, Expense row, BillingAccount account,
+        TriggerAudit audit_, CancellationToken ct)
+    {
+        await using (var insert = connection.CreateCommand())
+        {
+            insert.Transaction = transaction;
+            insert.CommandText = ExpenseRules.Insert('$');
+            foreach (var (name, value) in ExpenseRules.Values(row)) insert.Parameters.AddWithValue("$" + name, value);
+
+            try
+            {
+                await insert.ExecuteNonQueryAsync(ct);
+            }
+            catch (SqliteException e) when (e.SqliteErrorCode == 19 && row.Supersedes is not null)
+            {
+                return ExpenseWrite.Refused(409, ExpenseRules.AlreadyCorrected);
+            }
+        }
+
+        await audit(connection, transaction, ExpenseRules.Row(audit_, row, account), ct);
+        await transaction.CommitAsync(ct);
+
+        return new ExpenseWrite(row);
+    }
+
+    private static async Task<Expense?> FindExpenseAsync(
+        SqliteConnection connection, SqliteTransaction? transaction, string id, CancellationToken ct)
+    {
+        if (BillingAccountRules.KeyOf(id) is not { } key) return null;
+
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = $"{ExpenseRules.Select} WHERE e.id = $id";
+        command.Parameters.AddWithValue("$id", key);
+        return (await ExpenseRules.ReadRowsAsync(command, ct)).FirstOrDefault();
     }
 
     private async Task<SpendWrite> WriteAsync(

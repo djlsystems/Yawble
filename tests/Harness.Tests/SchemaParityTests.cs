@@ -99,6 +99,24 @@ public sealed class SchemaParityTests
         Assert.Empty(Unmatched([.. sqlite, "messages-999"], [.. sqlServer, "messages-999"]));
     }
 
+    /// <summary>The expenses step is one id on both providers, and each makes the table append-only and
+    /// a row superseded at most once: the two triggers and the unique index on <c>supersedes</c>.</summary>
+    [Fact]
+    public void The_expenses_step_is_append_only_and_supersedes_once_on_both_providers()
+    {
+        var sqlite = Assert.Single(SchemaModules.All, s => s.Id == "outcome-013").Sql;
+        var sqlServer = Assert.Single(SqlServerSchemaModules.All, s => s.Id == "outcome-013").Sql;
+
+        foreach (var sql in new[] { sqlite, sqlServer })
+        {
+            Assert.Contains("CREATE TABLE expenses", sql, StringComparison.Ordinal);
+            Assert.Contains("CREATE UNIQUE INDEX ux_expenses_supersedes ON expenses(supersedes) WHERE supersedes IS NOT NULL", sql, StringComparison.Ordinal);
+            Assert.Contains("CREATE TRIGGER expenses_no_update", sql, StringComparison.Ordinal);
+            Assert.Contains("CREATE TRIGGER expenses_no_delete", sql, StringComparison.Ordinal);
+            Assert.DoesNotContain("CHECK", sql, StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public async Task Tables_match()
     {

@@ -409,5 +409,41 @@ public static class OutcomeSchema
             CREATE TRIGGER billing_accounts_no_delete BEFORE DELETE ON billing_accounts
             BEGIN SELECT RAISE(ABORT, 'billing_accounts rows are deactivated, never deleted'); END;
             """),
+
+        // THE CHARGES RECORDED ON A BILLING ACCOUNT, append-only: the triggers refuse every UPDATE and
+        // DELETE, so a correction is a new row whose `supersedes` names the row it corrects - a void
+        // (status `void`) or a replace (a new `confirmed` row). `supersedes` is unique, so a row is
+        // corrected at most once even when two corrections race. `account_id` names a
+        // `billing_accounts` row and `currency` is that account's; `amount` is canonical decimal text,
+        // negative only for an adjustment. `kind` and `status` are closed sets the stores hold
+        // (`ExpenseRules`), with no CHECK, so a later kind needs no edit here. No row is seeded.
+        new MigrationStep(
+            "outcome-013",
+            """
+            CREATE TABLE expenses (
+                id                   TEXT PRIMARY KEY,
+                account_id           TEXT NOT NULL,
+                amount               TEXT NOT NULL,
+                currency             TEXT NOT NULL,
+                service_period_start TEXT NOT NULL,
+                service_period_end   TEXT NOT NULL,
+                kind                 TEXT NOT NULL,
+                status               TEXT NOT NULL,
+                supersedes           TEXT NULL,
+                reference            TEXT NULL,
+                note                 TEXT NULL,
+                recorded_by          TEXT NOT NULL,
+                recorded_at          TEXT NOT NULL
+            );
+
+            CREATE UNIQUE INDEX ux_expenses_supersedes ON expenses(supersedes) WHERE supersedes IS NOT NULL;
+            CREATE INDEX ix_expenses_account ON expenses(account_id, recorded_at);
+
+            CREATE TRIGGER expenses_no_update BEFORE UPDATE ON expenses
+            BEGIN SELECT RAISE(ABORT, 'expenses is append-only'); END;
+
+            CREATE TRIGGER expenses_no_delete BEFORE DELETE ON expenses
+            BEGIN SELECT RAISE(ABORT, 'expenses is append-only'); END;
+            """),
     ];
 }

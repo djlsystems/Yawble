@@ -47,6 +47,21 @@ function billingChange(detail: Detail | null | undefined, key: string): { from: 
   return pair ? { from: get(pair, 'old'), to: get(pair, 'new') } : null;
 }
 
+/** An expense row's kind and amount, as `an invoice of 20 USD`. */
+function expenseWords(detail: Detail | null | undefined): string {
+  const kind = text(detail, 'kind');
+  const article = kind === 'invoice' || kind === 'adjustment' ? 'an' : 'a';
+  const amount = text(detail, 'amount');
+  return `${kind ? `${article} ${kind}` : 'an expense'}${amount ? ` of ${amount}${text(detail, 'currency') ? ` ${text(detail, 'currency')}` : ''}` : ''}`;
+}
+
+/** An expense row's service period, end exclusive, in local time. */
+function expensePeriod(detail: Detail | null | undefined): string | null {
+  const start = text(detail, 'servicePeriodStart');
+  const end = text(detail, 'servicePeriodEnd');
+  return start && end ? `for ${start} up to ${end}` : null;
+}
+
 /** One field of a trigger change, in words. */
 function fieldWords(change: FieldChange): string {
   switch (change.field) {
@@ -1163,6 +1178,20 @@ const words: Record<string, Words> = {
     detail: () => 'Deactivated; members that name it keep it.',
   },
   'billing.account-reactivated': { did: 'reactivated a billing account', detail: () => 'Reactivated.' },
+  'billing.expense-recorded': {
+    did: 'recorded an expense on a billing account',
+    detail: (d, row) => sentence([`recorded ${expenseWords(d)} on ${row.subjectName || 'the account'}`, expensePeriod(d)]),
+  },
+  'billing.expense-voided': {
+    did: 'voided an expense on a billing account',
+    detail: (d, row) =>
+      sentence([`voided ${expenseWords(d)} on ${row.subjectName || 'the account'}`, `the void is a new row; the expense it voids, ${text(d, 'supersedes') ?? 'unknown'}, is kept`]),
+  },
+  'billing.expense-replaced': {
+    did: 'replaced an expense on a billing account',
+    detail: (d, row) =>
+      sentence([`replaced expense ${text(d, 'supersedes') ?? 'unknown'} on ${row.subjectName || 'the account'} with ${expenseWords(d)}`, expensePeriod(d)]),
+  },
   'outcome.deleted': {
     did: 'deleted an outcome',
     detail: (d, row) => {

@@ -259,6 +259,33 @@ public static class SqlServerOutcomeSchema
                 IF EXISTS (SELECT 1 FROM deleted) THROW 51001, N''billing_accounts rows are deactivated, never deleted'', 1;
             END');
             """),
+
+        // `OutcomeSchema`'s outcome-013: the expenses, append-only. The unique index on `supersedes` is
+        // filtered, because SQL Server lets a plain unique index hold only one NULL.
+        new MigrationStep(
+            "outcome-013",
+            $"""
+             CREATE TABLE expenses (
+                 id                   NVARCHAR(36)  NOT NULL PRIMARY KEY,
+                 account_id           NVARCHAR(36)  NOT NULL,
+                 amount               NVARCHAR(MAX) NOT NULL,
+                 currency             NVARCHAR(MAX) NOT NULL,
+                 service_period_start NVARCHAR(40)  NOT NULL,
+                 service_period_end   NVARCHAR(40)  NOT NULL,
+                 kind                 NVARCHAR(MAX) NOT NULL,
+                 status               NVARCHAR(MAX) NOT NULL,
+                 supersedes           NVARCHAR(36)  NULL,
+                 reference            NVARCHAR(MAX) NULL,
+                 note                 NVARCHAR(MAX) NULL,
+                 recorded_by          NVARCHAR(MAX) NOT NULL,
+                 recorded_at          NVARCHAR(40)  NOT NULL
+             );
+
+             CREATE UNIQUE INDEX ux_expenses_supersedes ON expenses(supersedes) WHERE supersedes IS NOT NULL;
+             CREATE INDEX ix_expenses_account ON expenses(account_id, recorded_at);
+
+             {AppendOnly("expenses")}
+             """),
     ];
 
     /// <summary>The two triggers that make <paramref name="table"/> append-only, as SQLite's

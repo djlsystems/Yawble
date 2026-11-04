@@ -551,6 +551,19 @@ public static class TenantActions
     /// <summary>A person reactivated a deactivated billing account.</summary>
     public const string BillingAccountReactivated = "billing.account-reactivated";
 
+    /// <summary>A person recorded an expense on a billing account. Subject is the expense id, the subject
+    /// name the account's name; detail is <c>{expense, account, supersedes, status, kind, amount,
+    /// currency, servicePeriodStart, servicePeriodEnd}</c>. An expense holds no secret.</summary>
+    public const string BillingExpenseRecorded = "billing.expense-recorded";
+
+    /// <summary>A person voided an expense: a new void row superseding it. Subject is the void row's id;
+    /// detail's <c>supersedes</c> names the voided row.</summary>
+    public const string BillingExpenseVoided = "billing.expense-voided";
+
+    /// <summary>A person replaced an expense: a new confirmed row on the same account superseding it.
+    /// Subject is the new row's id; detail's <c>supersedes</c> names the replaced row.</summary>
+    public const string BillingExpenseReplaced = "billing.expense-replaced";
+
     public const string SiteCreated = "site.created";
 
     /// <summary>A new version of a site was copied and made live. Detail carries the version, the

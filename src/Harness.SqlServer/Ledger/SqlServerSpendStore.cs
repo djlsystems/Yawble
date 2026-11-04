@@ -5,7 +5,7 @@ using Microsoft.Data.SqlClient;
 namespace Harness.SqlServer.Ledger;
 
 /// <summary>
-/// <see cref="ISpendStore"/> over <c>billing_accounts</c> on SQL Server: SQLite's
+/// <see cref="ISpendStore"/> over <c>billing_accounts</c> and <c>expenses</c> on SQL Server: SQLite's
 /// <c>SqliteSpendStore</c> write for write. Every write and its tenant row are one transaction (written
 /// through <paramref name="audit"/>, which the Host hands <see cref="SqlServerTenantAuditRow.AppendAsync"/>),
 /// and the read a write decides from holds its row (<c>UPDLOCK, HOLDLOCK</c>) until the transaction ends,
@@ -127,6 +127,149 @@ public sealed class SqlServerSpendStore(
                     connection, transaction, current, current with { Active = active, UpdatedAt = Instant.Now() }, audit_, token);
             },
             ct);
+
+    public Task<IReadOnlyList<Expense>> ListExpensesAsync(string? accountId = null, CancellationToken ct = default) =>
+        RunAsync<IReadOnlyList<Expense>>(
+            async (connection, token) =>
+            {
+                await using var command = connection.CreateCommand();
+                if (accountId is null)
+                {
+                    command.CommandText = $"{ExpenseRules.Select} ORDER BY e.recorded_at, e.id";
+                }
+                else
+                {
+                    if (BillingAccountRules.KeyOf(accountId) is not { } key) return [];
+                    command.CommandText = $"{ExpenseRules.Select} WHERE e.account_id = @account ORDER BY e.recorded_at, e.id";
+                    command.Parameters.AddWithValue("@account", key);
+                }
+
+                return await ExpenseRules.ReadRowsAsync(command, token);
+            },
+            ct);
+
+    public Task<Expense?> FindExpenseAsync(string id, CancellationToken ct = default) =>
+        RunAsync((connection, token) => FindExpenseAsync(connection, null, id, token), ct);
+
+    public Task<ExpenseWrite> RecordExpenseAsync(
+        ExpenseFields fields, string recordedBy, TriggerAudit audit_, CancellationToken ct = default)
+    {
+        var (draft, refusal) = ExpenseRules.Read(fields, null);
+        if (refusal is not null) return Task.FromResult(ExpenseWrite.Refused(400, refusal));
+
+        return ExpenseWriteAsync(
+            async (connection, transaction, token) =>
+            {
+                var account = await FindAsync(connection, transaction, draft!.AccountId, token);
+                if (ExpenseRules.Against(draft, account) is { } wrong) return ExpenseWrite.Refused(400, wrong);
+
+                return await InsertAsync(
+                    connection, transaction, ExpenseRules.New(draft, ExpenseRules.StatusConfirmed, null, recordedBy), account!, audit_, token);
+            },
+            ct);
+    }
+
+    public Task<ExpenseWrite> VoidExpenseAsync(
+        string id, string? note, string recordedBy, TriggerAudit audit_, CancellationToken ct = default) =>
+        ExpenseWriteAsync(
+            async (connection, transaction, token) =>
+            {
+                if (await FindExpenseAsync(connection, transaction, id, token) is not { } target)
+                {
+                    return ExpenseWrite.Refused(404, ExpenseRules.Missing(id));
+                }
+
+                if (ExpenseRules.Uncorrectable(target) is { } no) return ExpenseWrite.Refused(no.Status, no.Sentence);
+
+                var (text, refusal) = ExpenseRules.VoidNote(note);
+                if (refusal is not null) return ExpenseWrite.Refused(400, refusal);
+
+                var account = (await FindAsync(connection, transaction, target.AccountId, token))!;
+                return await InsertAsync(connection, transaction, ExpenseRules.Voiding(target, text, recordedBy), account, audit_, token);
+            },
+            ct);
+
+    public Task<ExpenseWrite> ReplaceExpenseAsync(
+        string id, ExpenseFields fields, string recordedBy, TriggerAudit audit_, CancellationToken ct = default) =>
+        ExpenseWriteAsync(
+            async (connection, transaction, token) =>
+            {
+                if (await FindExpenseAsync(connection, transaction, id, token) is not { } target)
+                {
+                    return ExpenseWrite.Refused(404, ExpenseRules.Missing(id));
+                }
+
+                if (ExpenseRules.Uncorrectable(target) is { } no) return ExpenseWrite.Refused(no.Status, no.Sentence);
+
+                var (draft, refusal) = ExpenseRules.Read(fields, target);
+                if (refusal is not null) return ExpenseWrite.Refused(400, refusal);
+
+                var account = await FindAsync(connection, transaction, draft!.AccountId, token);
+                if (ExpenseRules.Against(draft, account) is { } wrong) return ExpenseWrite.Refused(400, wrong);
+
+                return await InsertAsync(
+                    connection, transaction, ExpenseRules.New(draft, ExpenseRules.StatusConfirmed, target.Id, recordedBy), account!, audit_, token);
+            },
+            ct);
+
+    /// <summary>One expense write: its own transaction, committed only when <paramref name="work"/> wrote.</summary>
+    private Task<ExpenseWrite> ExpenseWriteAsync(
+        Func<SqlConnection, SqlTransaction, CancellationToken, Task<ExpenseWrite>> work, CancellationToken ct) =>
+        RunAsync(
+            async (connection, token) =>
+            {
+                await using var transaction = await SqlServerOpen.BeginAsync(connection, token);
+                var write = await work(connection, transaction, token);
+                if (write.Ok) await SqlServerOpen.CommitAsync(transaction, token);
+                return write;
+            },
+            ct);
+
+    /// <summary>
+    /// The row and its tenant row, in the write's transaction. A second correction of one row that got
+    /// past the read (the filtered unique index on <c>supersedes</c> refuses it: 2601) is answered as
+    /// the read would have answered it, with nothing written.
+    /// </summary>
+    private async Task<ExpenseWrite> InsertAsync(
+        SqlConnection connection, SqlTransaction transaction, Expense row, BillingAccount account,
+        TriggerAudit audit_, CancellationToken ct)
+    {
+        await using (var insert = connection.CreateCommand())
+        {
+            insert.Transaction = transaction;
+            insert.CommandText = ExpenseRules.Insert('@');
+            foreach (var (name, value) in ExpenseRules.Values(row)) insert.Parameters.AddWithValue("@" + name, value);
+
+            try
+            {
+                await insert.ExecuteNonQueryAsync(ct);
+            }
+            catch (SqlException e) when (e.Number is 2601 or 2627 && row.Supersedes is not null)
+            {
+                return ExpenseWrite.Refused(409, ExpenseRules.AlreadyCorrected);
+            }
+        }
+
+        await audit(connection, transaction, ExpenseRules.Row(audit_, row, account), ct);
+        return new ExpenseWrite(row);
+    }
+
+    /// <summary>The row with <paramref name="id"/>; inside a write, its row and the range of rows that
+    /// could supersede it are held (<c>UPDLOCK, HOLDLOCK</c>) until the transaction ends, so two
+    /// corrections of one row decide one after the other.</summary>
+    private static async Task<Expense?> FindExpenseAsync(
+        SqlConnection connection, SqlTransaction? transaction, string id, CancellationToken ct)
+    {
+        if (BillingAccountRules.KeyOf(id) is not { } key) return null;
+
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = transaction is null
+            ? $"{ExpenseRules.Select} WHERE e.id = @id"
+            : $"{ExpenseRules.Select.Replace("FROM expenses e LEFT JOIN expenses s", "FROM expenses e WITH (UPDLOCK, HOLDLOCK) LEFT JOIN expenses s WITH (UPDLOCK, HOLDLOCK)", StringComparison.Ordinal)} WHERE e.id = @id";
+        command.Parameters.AddWithValue("@id", key);
+        return (await ExpenseRules.ReadRowsAsync(command, ct)).FirstOrDefault();
+    }
 
     private async Task<SpendWrite> UpdateAsync(
         SqlConnection connection, SqlTransaction transaction, BillingAccount before, BillingAccount after,

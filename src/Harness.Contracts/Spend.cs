@@ -90,4 +90,97 @@ public interface ISpendStore
     /// <summary>Active set to <paramref name="active"/>; <paramref name="audit"/> appended only when it
     /// moved.</summary>
     Task<SpendWrite> SetAccountActiveAsync(string id, bool active, TriggerAudit audit, CancellationToken ct = default);
+
+    /// <summary>Every expense row, current and superseded, oldest recorded first, then by id; only
+    /// <paramref name="accountId"/>'s when one is given.</summary>
+    Task<IReadOnlyList<Expense>> ListExpensesAsync(string? accountId = null, CancellationToken ct = default);
+
+    /// <summary>The expense row with <paramref name="id"/> (compared as a lower-case GUID), or null.</summary>
+    Task<Expense?> FindExpenseAsync(string id, CancellationToken ct = default);
+
+    /// <summary>A new confirmed expense on an existing account (a deactivated one included), in that
+    /// account's currency, recorded by <paramref name="recordedBy"/>; appends <paramref name="audit"/>.</summary>
+    Task<ExpenseWrite> RecordExpenseAsync(
+        ExpenseFields fields, string recordedBy, TriggerAudit audit, CancellationToken ct = default);
+
+    /// <summary>A new void row superseding the current confirmed row <paramref name="id"/>, carrying its
+    /// account, amount, currency, period and kind, with <paramref name="note"/>; appends
+    /// <paramref name="audit"/>.</summary>
+    Task<ExpenseWrite> VoidExpenseAsync(
+        string id, string? note, string recordedBy, TriggerAudit audit, CancellationToken ct = default);
+
+    /// <summary>A new confirmed row superseding the current confirmed row <paramref name="id"/>, on the
+    /// same account: the sent fields over the old row's; appends <paramref name="audit"/>.</summary>
+    Task<ExpenseWrite> ReplaceExpenseAsync(
+        string id, ExpenseFields fields, string recordedBy, TriggerAudit audit, CancellationToken ct = default);
+}
+
+/// <summary>
+/// One recorded charge on a billing account (<c>expenses</c>, <c>outcome-013</c>), in that account's
+/// currency, never converted. The table is APPEND-ONLY: a row is never updated or deleted, and a
+/// correction is a new row that <see cref="Supersedes"/> the one it corrects - a void (status
+/// <c>void</c>) or a replace (a new <c>confirmed</c> row). A row is current while nothing supersedes it.
+/// </summary>
+/// <param name="Amount">Canonical decimal text; zero allowed, negative only for an adjustment.</param>
+/// <param name="ServicePeriodStart">An ISO-8601 UTC instant, as <see cref="Instant"/> stores one.</param>
+/// <param name="ServicePeriodEnd">Exclusive, after the start.</param>
+/// <param name="Kind"><c>invoice</c>, <c>subscription-charge</c> or <c>adjustment</c>.</param>
+/// <param name="Status"><c>confirmed</c> or <c>void</c>.</param>
+/// <param name="Supersedes">The id of the row this one corrects, or null.</param>
+/// <param name="SupersededBy">Read, not stored: the id of the row that corrects this one, or null.</param>
+public sealed record Expense(
+    string Id,
+    string AccountId,
+    string Amount,
+    string Currency,
+    string ServicePeriodStart,
+    string ServicePeriodEnd,
+    string Kind,
+    string Status,
+    string? Supersedes,
+    string? Reference,
+    string? Note,
+    string RecordedBy,
+    string RecordedAt,
+    string? SupersededBy = null)
+{
+    /// <summary>True while no other row supersedes this one.</summary>
+    public bool Current => SupersededBy is null;
+}
+
+/// <summary>The fields a record or a replace sends, as the request gave them. On a record an absent
+/// field is a missing one; on a replace an absent field is the old row's.</summary>
+public sealed record ExpenseFields(
+    Sent? AccountId = null,
+    Sent? Amount = null,
+    Sent? Currency = null,
+    Sent? ServicePeriodStart = null,
+    Sent? ServicePeriodEnd = null,
+    Sent? Kind = null,
+    Sent? Reference = null,
+    Sent? Note = null);
+
+/// <summary>An expense write's answer: the row it wrote, or a refusal with its status and one
+/// sentence. Every successful expense write writes a row.</summary>
+public sealed record ExpenseWrite(Expense? Expense, int Status = 201, string? Refusal = null)
+{
+    public bool Ok => Refusal is null;
+
+    public static ExpenseWrite Refused(int status, string sentence) => new(null, status, sentence);
+}
+
+/// <summary>
+/// A recurring charge an account would bring in one billing period, computed at read time and never
+/// stored. It is labelled projected and kept apart: it is never Actual Spend and never added to an
+/// estimate.
+/// </summary>
+public sealed record ProjectedCharge(
+    string AccountId,
+    string PeriodStart,
+    string PeriodEnd,
+    string Amount,
+    string Currency)
+{
+    /// <summary>Always true: a projection, not a recorded expense.</summary>
+    public bool Projected => true;
 }

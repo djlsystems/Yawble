@@ -125,9 +125,11 @@ recurring amount (zero or more; a zero is a zero) and the dates it is effective 
 
 - **It is not a connection.** It holds no credential, no key and no login, and nothing in its tenant
   log rows is secret.
-- **Actual Spend is not computed from it yet.** A recurring amount is stored as it was given. It is
-  not projected over a period and it is not added to any estimate. Hours are never Actual Spend:
-  every figure on these screens is still an **Estimated Execution Cost**.
+- **Actual Spend is not computed from it yet.** A recurring amount is stored as it was given and is
+  not added to any estimate. It is projected over periods only when read (see
+  [Projected recurring charges](#projected-recurring-charges)), and a projection is never Actual
+  Spend. Hours are never Actual Spend: every figure on these screens is still an **Estimated
+  Execution Cost**.
 - **A person's only.** Listing, reading, creating and changing accounts are people's acts; no agent
   or key may read or write one, whatever it holds.
 - **Never deleted.** An account is deactivated, and may be reactivated. A deactivated account is
@@ -145,6 +147,48 @@ account existed. A new run's snapshot copies the member's stored account, as it 
 run is never refused for it.
 
 There is no screen for billing accounts yet; they are reached through the routes below.
+
+## Expenses
+
+An **expense** is a charge recorded on a billing account: an `invoice`, a `subscription-charge` or
+an `adjustment`, for a service period, in **that account's currency**. The currency must be the
+account's; an expense in another currency is refused, and nothing is converted. The amount may be
+zero; only an adjustment may be negative. A deactivated account may still take an expense (a late
+invoice), but an account id that names no account is refused.
+
+- **Append-only.** An expense row is never changed and never deleted; the table refuses both. A
+  mistake is corrected by a new row that supersedes the old one:
+  - **Void**: a new `void` row carrying the old row's account, amount, currency, period and kind,
+    with an optional note. The old row stays, no longer current.
+  - **Replace**: a new `confirmed` row on the **same account**, with the fields given over the old
+    row's. To move a charge to another account, void it and record a new one.
+- **A row is corrected once.** A row is current while nothing supersedes it. A void row cannot be
+  voided or replaced, and a row already voided or replaced cannot be corrected again: correct the
+  current row instead. Two corrections of one row at the same moment land one and refuse the other.
+- **Every write has its tenant row.** Recording, voiding and replacing each append
+  `billing.expense-recorded`, `-voided` or `-replaced`, naming the expense, its account and, for a
+  void or a replace, the row it supersedes, in the same transaction: when that row cannot be
+  written, the expense is not recorded.
+- **A person's only**, as billing accounts are: no agent or key may read or write one.
+
+### Projected recurring charges
+
+An active account with a recurring amount is expected to bring one charge per billing period. Those
+**projected** charges are computed when they are read and never stored. The periods step from the
+account's effective-from date by one month (`monthly`) or one year (`annual`), each counted from
+effective-from itself, so an account from 31 January projects 28 February, then 31 March. They stop
+at effective-to: a period that starts there or later is not one, and the last period ends there. A
+zero amount projects a zero charge; an inactive account, or one with no recurring amount, projects
+nothing.
+
+A projected charge is **dropped when a confirmed expense covers it**: any current, confirmed
+expense on that account whose service period overlaps the projected period. A voided expense no
+longer covers its period, and a replaced one covers by its replacement's period. A projection is
+labelled projected, kept apart from recorded expenses, and is **never counted as Actual Spend** and
+never added to an estimate. Several members naming one account never multiply its charge.
+
+No screen shows expenses or projections yet; expenses are reached through the routes below. Hours
+are never Actual Spend.
 
 ## A shared budget is measured across every team
 
@@ -271,6 +315,8 @@ Colour is never the only cue: the dialog's table carries every figure the chart 
 | `GET /api/teams/{team}/cost` | One team: `money` (`currency`, and `agentHourlyRate`, the tenant default as set now), the eight `weeks`, and per outcome (`id` null for No outcome) its `weekly` figures, `totals`, `value` (its budget), `outcomeTotalCost` (its estimate across all teams and all time) and `rank` (its place in the order shared by every team, which picks its colour; null for No outcome); then the team's `totals`. `totals` carry `agentSeconds` (agent time only), `cost` (every priced run) and `agentRate` (the priced agent time's rate). `cost` is null, never 0, when no run was priced. Every `cost` is the estimate, never money paid. |
 | `GET /api/billing-accounts`, `GET /api/billing-accounts/{id}` | Every billing account, active and deactivated, oldest first (an empty list on a fresh instance), or one; 404 for an id that names none. Each has `id`, `name`, `vendor`, `billingType`, `currency`, `billingPeriod`, `recurringAmount`, `effectiveFrom`, `effectiveTo`, `active`, `description`, `scope` (`tenant`), `instanceId`, `createdBy`, `createdAt` and `updatedAt`. People only. |
 | `POST /api/billing-accounts`, `POST /api/billing-accounts/{id}`, `.../deactivate`, `.../reactivate` | Create an account, edit the fields sent (null clears only `description`, `effectiveTo` and `recurringAmount`), and turn `active` off or on. People only; there is no delete. |
+| `GET /api/expenses`, `GET /api/expenses/{id}` | Every expense row, current and superseded, oldest recorded first (`?accountId=` for one account's; an empty list on a fresh instance), or one; 404 for an id that names none. Each has `id`, `accountId`, `amount`, `currency`, `servicePeriodStart`, `servicePeriodEnd` (exclusive), `kind`, `status` (`confirmed` or `void`), `supersedes`, `reference`, `note`, `recordedBy`, `recordedAt`, `supersededBy` and `current`. People only. |
+| `POST /api/expenses`, `POST /api/expenses/{id}/void`, `POST /api/expenses/{id}/replace` | Record a confirmed expense; void one (an optional `note`); replace one with the fields sent over the old row's, on the same account. Each answers the new row. People only; there is no edit and no delete. |
 | `GET /api/teams/cost` | The same for every team at once (`money`, `weeks`, `teams[]`), for the Teams list. |
 | `GET /api/teams/cost/summary` | The summary above the Teams list: `rate` (the tenant default as set now, null without one); the eight `weeks` (`weekStart`, `agentSeconds`, `cost`), `periodStart` and `periodEnd`; the eight weeks' `total` and the eight before as `prior`, each with `agentRate`; per outcome (`id` null for No outcome) its `name`, `rank`, `agentSeconds`, `cost`, `budget` and `outcomeTotalCost` (its cost across every team; this field was `spentTotal` before); and `rightNow` (`openWorkflows`, `membersRunning`, `waitingOnYou`). `cost` is null, never 0, when no run was priced. |
 

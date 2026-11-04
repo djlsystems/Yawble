@@ -8,10 +8,11 @@ using Harness.SqlServer.Ledger;
 namespace Harness.Tests.Contracts;
 
 /// <summary>
-/// <see cref="ISpendStore"/>, the billing accounts (<c>outcome-009</c>), as each provider must keep
-/// them: the store reads and refuses every field itself, assigns the id, copies <c>instance.id</c> once,
-/// writes each real change with its tenant row in one transaction, writes nothing for a change that is
-/// none, and the table refuses a delete.
+/// <see cref="ISpendStore"/>, the billing accounts (<c>outcome-009</c>) and their expenses
+/// (<c>outcome-013</c>), as each provider must keep them: the store reads and refuses every field itself,
+/// assigns the id, copies <c>instance.id</c> once, writes each real change with its tenant row in one
+/// transaction, writes nothing for a change that is none, and the tables refuse a delete. Expenses are
+/// append-only: a correction is a new row superseding the old, at most once.
 /// </summary>
 public abstract class SpendStoreContract : ProviderContract
 {
@@ -239,6 +240,271 @@ public abstract class SpendStoreContract : ProviderContract
         Assert.Equal(1, await stores.ExecuteAsync($"UPDATE billing_accounts SET description = 'raw' WHERE id = '{account.Id}'"));
         Assert.Equal("raw", (await spend.FindAccountAsync(account.Id, Ct))!.Description);
     }
+
+    // ---- expenses ----
+
+    private static readonly TriggerAudit Recorded = new(null, Email, TenantActions.BillingExpenseRecorded, null, null, null);
+    private static readonly TriggerAudit Voided = new(null, Email, TenantActions.BillingExpenseVoided, null, null, null);
+    private static readonly TriggerAudit Replaced = new(null, Email, TenantActions.BillingExpenseReplaced, null, null, null);
+
+    private static ExpenseFields Charge(
+        string? account, string? amount = "20", string? currency = "USD", string? start = "2026-11-01",
+        string? end = "2026-12-01", string? kind = "invoice", string? reference = null, string? note = null) =>
+        new(
+            account is null ? null : new Sent(account), amount is null ? null : new Sent(amount),
+            currency is null ? null : new Sent(currency), start is null ? null : new Sent(start), end is null ? null : new Sent(end),
+            kind is null ? null : new Sent(kind), reference is null ? null : new Sent(reference), note is null ? null : new Sent(note));
+
+    private async Task<(ContractStores Stores, ISpendStore Spend, BillingAccount Account)> AccountAsync(string? amount = null)
+    {
+        var (stores, spend, _) = await ReadyAsync();
+        var account = (await spend.CreateAccountAsync(Fields(amount: amount), Email, Created, Ct)).Account!;
+        return (stores, spend, account);
+    }
+
+    [Fact]
+    public async Task A_recorded_expense_reads_every_field_and_writes_its_tenant_row()
+    {
+        var (stores, spend, account) = await AccountAsync();
+
+        var write = await spend.RecordExpenseAsync(
+            Charge(account.Id.ToUpperInvariant(), amount: "20.50", currency: "usd", start: "2026-11-01", end: "2026-12-01T00:00:00Z",
+                kind: " Invoice ", reference: "  INV-1  ", note: " November "),
+            Email, Recorded, Ct);
+
+        Assert.Equal((201, null), (write.Status, write.Refusal));
+        var row = write.Expense!;
+        Assert.True(Guid.TryParseExact(row.Id, "D", out _));
+        Assert.Equal(row.Id.ToLowerInvariant(), row.Id);
+        Assert.Equal(
+            (account.Id, "20.5", "USD", "invoice", ExpenseRules.StatusConfirmed, (string?)null, "INV-1", "November", Email),
+            (row.AccountId, row.Amount, row.Currency, row.Kind, row.Status, row.Supersedes, row.Reference, row.Note, row.RecordedBy));
+        Assert.Equal(new DateTimeOffset(2026, 11, 1, 0, 0, 0, TimeSpan.Zero), Instant.Parse(row.ServicePeriodStart));
+        Assert.Equal(new DateTimeOffset(2026, 12, 1, 0, 0, 0, TimeSpan.Zero), Instant.Parse(row.ServicePeriodEnd));
+        Assert.True(row.Current);
+
+        Assert.Equal(row, await spend.FindExpenseAsync(row.Id.ToUpperInvariant(), Ct));
+        Assert.Null(await spend.FindExpenseAsync(Guid.NewGuid().ToString(), Ct));
+        Assert.Equal([row], await spend.ListExpensesAsync(ct: Ct));
+        Assert.Equal([row], await spend.ListExpensesAsync(account.Id, Ct));
+        Assert.Empty(await spend.ListExpensesAsync(Guid.NewGuid().ToString(), Ct));
+
+        // A zero is a charge; an adjustment may be negative; a deactivated account still takes one.
+        Assert.Equal("0", (await spend.RecordExpenseAsync(Charge(account.Id, amount: "0.00"), Email, Recorded, Ct)).Expense!.Amount);
+        Assert.Equal("-5", (await spend.RecordExpenseAsync(Charge(account.Id, amount: "-5.00", kind: "adjustment"), Email, Recorded, Ct)).Expense!.Amount);
+        await spend.SetAccountActiveAsync(account.Id, false, Deactivated, Ct);
+        Assert.True((await spend.RecordExpenseAsync(Charge(account.Id, kind: "subscription-charge"), Email, Recorded, Ct)).Ok);
+
+        var tenant = Assert.Single(await TenantRowsAsync(stores, row.Id));
+        Assert.Equal((TenantActions.BillingExpenseRecorded, account.Name, Email), (tenant.Action, tenant.SubjectName, tenant.Email));
+        using var detail = JsonDocument.Parse(tenant.Detail!);
+        Assert.Equal((row.Id, account.Id, JsonValueKind.Null), (
+            detail.RootElement.GetProperty("expense").GetString(), detail.RootElement.GetProperty("account").GetString(),
+            detail.RootElement.GetProperty("supersedes").ValueKind));
+    }
+
+    [Fact]
+    public async Task The_store_refuses_an_expense_outside_its_rules_and_writes_nothing()
+    {
+        var (stores, spend, account) = await AccountAsync();
+        var missing = Guid.NewGuid().ToString();
+
+        (ExpenseFields Fields, string Refusal)[] refused =
+        [
+            (Charge(null), ExpenseRules.AccountRequired),
+            (Charge("  "), ExpenseRules.AccountRequired),
+            (Charge(missing), BillingAccountRules.Missing(missing)),
+            (Charge(account.Id, amount: null), ExpenseRules.AmountRefused),
+            (Charge(account.Id, amount: "twenty"), ExpenseRules.AmountRefused),
+            (Charge(account.Id, amount: "-1"), ExpenseRules.NegativeRefused),
+            (Charge(account.Id, amount: "-1", kind: "subscription-charge"), ExpenseRules.NegativeRefused),
+            (Charge(account.Id, currency: null), ExpenseRules.CurrencyRefused),
+            (Charge(account.Id, currency: "US"), ExpenseRules.CurrencyRefused),
+            (Charge(account.Id, currency: "EUR"), ExpenseRules.WrongCurrency("USD")),
+            (Charge(account.Id, kind: null), ExpenseRules.KindRefused),
+            (Charge(account.Id, kind: "provider-reported"), ExpenseRules.KindRefused),
+            (Charge(account.Id, kind: "refund"), ExpenseRules.KindRefused),
+            (Charge(account.Id, start: null), ExpenseRules.StartRefused),
+            (Charge(account.Id, start: "11/01/2026"), ExpenseRules.StartRefused),
+            (Charge(account.Id, end: "soon"), ExpenseRules.EndRefused),
+            (Charge(account.Id, start: "2026-11-01", end: "2026-11-01"), ExpenseRules.EndNotAfterStart),
+            (Charge(account.Id, start: "2026-11-02", end: "2026-11-01"), ExpenseRules.EndNotAfterStart),
+            (Charge(account.Id, reference: new string('x', ExpenseRules.NoteLimit + 1)), ExpenseRules.ReferenceTooLong),
+            (Charge(account.Id, note: new string('x', ExpenseRules.NoteLimit + 1)), ExpenseRules.NoteTooLong),
+        ];
+
+        foreach (var (fields, refusal) in refused)
+        {
+            var write = await spend.RecordExpenseAsync(fields, Email, Recorded, Ct);
+            Assert.Equal((400, refusal), (write.Status, write.Refusal));
+        }
+
+        Assert.Empty(await spend.ListExpensesAsync(ct: Ct));
+        Assert.Equal(0, await stores.LongAsync("SELECT COUNT(*) FROM tenant_events WHERE action LIKE 'billing.expense-%'"));
+    }
+
+    [Fact]
+    public async Task A_void_is_a_new_row_carrying_the_old_and_a_void_or_superseded_row_cannot_be_corrected_again()
+    {
+        var (stores, spend, account) = await AccountAsync();
+        var original = (await spend.RecordExpenseAsync(Charge(account.Id, kind: "adjustment", amount: "-3", reference: "INV-9"), Email, Recorded, Ct)).Expense!;
+
+        var voided = await spend.VoidExpenseAsync(original.Id, "  Entered twice  ", Email, Voided, Ct);
+
+        Assert.Equal(201, voided.Status);
+        var row = voided.Expense!;
+        Assert.NotEqual(original.Id, row.Id);
+        Assert.Equal(
+            (original.AccountId, original.Amount, original.Currency, original.ServicePeriodStart, original.ServicePeriodEnd, original.Kind),
+            (row.AccountId, row.Amount, row.Currency, row.ServicePeriodStart, row.ServicePeriodEnd, row.Kind));
+        Assert.Equal((ExpenseRules.StatusVoid, original.Id, "Entered twice", (string?)null), (row.Status, row.Supersedes, row.Note, row.Reference));
+
+        // The voided row is kept, unchanged but for who supersedes it; the void is current.
+        var listed = await spend.ListExpensesAsync(ct: Ct);
+        Assert.Equal([original with { SupersededBy = row.Id }, row], listed);
+        Assert.False(listed[0].Current);
+        Assert.True(listed[1].Current);
+
+        Assert.Equal((409, ExpenseRules.AlreadyCorrected), Refusal(await spend.VoidExpenseAsync(original.Id, null, Email, Voided, Ct)));
+        Assert.Equal((409, ExpenseRules.AlreadyCorrected), Refusal(await spend.ReplaceExpenseAsync(original.Id, Charge(null), Email, Replaced, Ct)));
+        Assert.Equal((409, ExpenseRules.VoidIsFinal), Refusal(await spend.VoidExpenseAsync(row.Id, null, Email, Voided, Ct)));
+        Assert.Equal((409, ExpenseRules.VoidIsFinal), Refusal(await spend.ReplaceExpenseAsync(row.Id, Charge(null), Email, Replaced, Ct)));
+        Assert.Equal(404, (await spend.VoidExpenseAsync(Guid.NewGuid().ToString(), null, Email, Voided, Ct)).Status);
+        Assert.Equal(404, (await spend.ReplaceExpenseAsync("not-an-id", Charge(null), Email, Replaced, Ct)).Status);
+
+        var other = (await spend.RecordExpenseAsync(Charge(account.Id), Email, Recorded, Ct)).Expense!;
+        Assert.Equal((400, ExpenseRules.NoteTooLong), Refusal(await spend.VoidExpenseAsync(other.Id, new string('x', ExpenseRules.NoteLimit + 1), Email, Voided, Ct)));
+
+        Assert.Equal(3, (await spend.ListExpensesAsync(ct: Ct)).Count);
+        var tenant = Assert.Single(await TenantRowsAsync(stores, row.Id));
+        Assert.Equal(TenantActions.BillingExpenseVoided, tenant.Action);
+        using var detail = JsonDocument.Parse(tenant.Detail!);
+        Assert.Equal((row.Id, account.Id, original.Id), (
+            detail.RootElement.GetProperty("expense").GetString(), detail.RootElement.GetProperty("account").GetString(),
+            detail.RootElement.GetProperty("supersedes").GetString()));
+    }
+
+    [Fact]
+    public async Task A_replace_is_a_new_confirmed_row_on_the_same_account_over_the_old_fields()
+    {
+        var (stores, spend, account) = await AccountAsync();
+        var other = (await spend.CreateAccountAsync(Fields(name: "Other"), Email, Created, Ct)).Account!;
+        var original = (await spend.RecordExpenseAsync(Charge(account.Id, reference: "INV-1", note: "First"), Email, Recorded, Ct)).Expense!;
+
+        Assert.Equal((400, ExpenseRules.OtherAccount), Refusal(await spend.ReplaceExpenseAsync(original.Id, Charge(other.Id, kind: null), Email, Replaced, Ct)));
+        Assert.Equal((400, ExpenseRules.WrongCurrency("USD")), Refusal(await spend.ReplaceExpenseAsync(original.Id, Charge(null, amount: null, currency: "EUR", start: null, end: null, kind: null), Email, Replaced, Ct)));
+        Assert.Equal((400, ExpenseRules.AmountRefused), Refusal(await spend.ReplaceExpenseAsync(original.Id, new ExpenseFields(Amount: new Sent(null)), Email, Replaced, Ct)));
+        Assert.Equal((400, ExpenseRules.EndNotAfterStart), Refusal(await spend.ReplaceExpenseAsync(original.Id, new ExpenseFields(ServicePeriodEnd: new Sent("2026-10-01")), Email, Replaced, Ct)));
+        Assert.Equal((400, ExpenseRules.NegativeRefused), Refusal(await spend.ReplaceExpenseAsync(original.Id, new ExpenseFields(Amount: new Sent("-1")), Email, Replaced, Ct)));
+        Assert.Single(await spend.ListExpensesAsync(ct: Ct));
+
+        var replaced = await spend.ReplaceExpenseAsync(
+            original.Id,
+            new ExpenseFields(AccountId: new Sent(account.Id), Amount: new Sent("25"), ServicePeriodEnd: new Sent("2026-11-16"), Note: new Sent(null)),
+            Email, Replaced, Ct);
+
+        var row = replaced.Expense!;
+        Assert.Equal(
+            (account.Id, "25", "USD", original.ServicePeriodStart, "invoice", ExpenseRules.StatusConfirmed, original.Id, "INV-1", (string?)null),
+            (row.AccountId, row.Amount, row.Currency, row.ServicePeriodStart, row.Kind, row.Status, row.Supersedes, row.Reference, row.Note));
+        Assert.Equal(new DateTimeOffset(2026, 11, 16, 0, 0, 0, TimeSpan.Zero), Instant.Parse(row.ServicePeriodEnd));
+
+        // The replacement is current and may itself be corrected; the original may not.
+        Assert.Equal([original with { SupersededBy = row.Id }, row], await spend.ListExpensesAsync(ct: Ct));
+        Assert.Equal((409, ExpenseRules.AlreadyCorrected), Refusal(await spend.ReplaceExpenseAsync(original.Id, new ExpenseFields(), Email, Replaced, Ct)));
+        Assert.True((await spend.VoidExpenseAsync(row.Id, null, Email, Voided, Ct)).Ok);
+
+        var tenant = Assert.Single(await TenantRowsAsync(stores, row.Id));
+        Assert.Equal(TenantActions.BillingExpenseReplaced, tenant.Action);
+        using var detail = JsonDocument.Parse(tenant.Detail!);
+        Assert.Equal(original.Id, detail.RootElement.GetProperty("supersedes").GetString());
+    }
+
+    [Fact]
+    public async Task Two_corrections_of_one_expense_at_once_land_one_and_refuse_the_other()
+    {
+        var (_, spend, account) = await AccountAsync();
+        var original = (await spend.RecordExpenseAsync(Charge(account.Id), Email, Recorded, Ct)).Expense!;
+
+        var writes = await Task.WhenAll(
+            Enumerable.Range(0, 6).Select(i => i % 2 == 0
+                ? spend.VoidExpenseAsync(original.Id, $"void {i}", Email, Voided, Ct)
+                : spend.ReplaceExpenseAsync(original.Id, new ExpenseFields(Amount: new Sent($"{i}")), Email, Replaced, Ct)));
+
+        Assert.Single(writes, w => w.Ok);
+        Assert.All(writes.Where(w => !w.Ok), w => Assert.Equal((409, ExpenseRules.AlreadyCorrected), Refusal(w)));
+        Assert.Equal(2, (await spend.ListExpensesAsync(ct: Ct)).Count);
+    }
+
+    [Fact]
+    public async Task An_expense_write_whose_tenant_row_cannot_be_written_does_not_happen()
+    {
+        var (stores, spend, account) = await AccountAsync();
+        var original = (await spend.RecordExpenseAsync(Charge(account.Id), Email, Recorded, Ct)).Expense!;
+        var failing = FailingAudit(stores);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => failing.RecordExpenseAsync(Charge(account.Id, amount: "99"), Email, Recorded, Ct));
+        await Assert.ThrowsAnyAsync<Exception>(() => failing.VoidExpenseAsync(original.Id, null, Email, Voided, Ct));
+        await Assert.ThrowsAnyAsync<Exception>(() => failing.ReplaceExpenseAsync(original.Id, new ExpenseFields(Amount: new Sent("1")), Email, Replaced, Ct));
+
+        Assert.Equal([original], await spend.ListExpensesAsync(ct: Ct));
+        Assert.Equal(1, await stores.LongAsync("SELECT COUNT(*) FROM tenant_events WHERE action LIKE 'billing.expense-%'"));
+
+        // The original is still current, so a correction through the real store still lands.
+        Assert.True((await spend.VoidExpenseAsync(original.Id, null, Email, Voided, Ct)).Ok);
+    }
+
+    [Fact]
+    public async Task The_expenses_table_refuses_every_update_and_delete_and_a_second_row_superseding_one()
+    {
+        var (stores, spend, account) = await AccountAsync();
+        var original = (await spend.RecordExpenseAsync(Charge(account.Id), Email, Recorded, Ct)).Expense!;
+        var voided = (await spend.VoidExpenseAsync(original.Id, null, Email, Voided, Ct)).Expense!;
+
+        await Assert.ThrowsAnyAsync<Exception>(() => stores.ExecuteAsync($"UPDATE expenses SET amount = '1' WHERE id = '{original.Id}'"));
+        await Assert.ThrowsAnyAsync<Exception>(() => stores.ExecuteAsync($"UPDATE expenses SET status = 'confirmed' WHERE id = '{voided.Id}'"));
+        await Assert.ThrowsAnyAsync<Exception>(() => stores.ExecuteAsync($"DELETE FROM expenses WHERE id = '{voided.Id}'"));
+        await Assert.ThrowsAnyAsync<Exception>(() => stores.ExecuteAsync(
+            $"""
+             INSERT INTO expenses ({ExpenseRules.Columns})
+             VALUES ('{Guid.NewGuid()}', '{account.Id}', '1', 'USD', '{original.ServicePeriodStart}', '{original.ServicePeriodEnd}',
+                 'invoice', 'confirmed', '{original.Id}', NULL, NULL, 'raw', '{Instant.Now()}')
+             """));
+
+        Assert.Equal([original with { SupersededBy = voided.Id }, voided], await spend.ListExpensesAsync(ct: Ct));
+    }
+
+    [Fact]
+    public async Task A_voided_expense_no_longer_covers_its_period_and_a_replaced_one_covers_by_its_new_period()
+    {
+        var (_, spend, account) = await AccountAsync(amount: "30");
+        var from = new DateTimeOffset(2026, 11, 1, 0, 0, 0, TimeSpan.Zero);
+        var to = new DateTimeOffset(2027, 2, 1, 0, 0, 0, TimeSpan.Zero);
+
+        async Task<string[]> ProjectedStarts() =>
+            [.. (await RecurringCharges.ProjectAsync(spend, from, to, Ct)).Select(c => c.PeriodStart[..10])];
+
+        Assert.Equal(["2026-11-01", "2026-12-01", "2027-01-01"], await ProjectedStarts());
+
+        // November's invoice covers November.
+        var november = (await spend.RecordExpenseAsync(Charge(account.Id, start: "2026-11-01", end: "2026-12-01"), Email, Recorded, Ct)).Expense!;
+        Assert.Equal(["2026-12-01", "2027-01-01"], await ProjectedStarts());
+
+        // Voided, it covers nothing, and November is projected again.
+        await spend.VoidExpenseAsync(november.Id, null, Email, Voided, Ct);
+        Assert.Equal(["2026-11-01", "2026-12-01", "2027-01-01"], await ProjectedStarts());
+
+        // Replaced, the replacement's period is what covers: December, not November.
+        var december = (await spend.RecordExpenseAsync(Charge(account.Id, start: "2026-11-01", end: "2026-12-01"), Email, Recorded, Ct)).Expense!;
+        Assert.Equal(["2026-12-01", "2027-01-01"], await ProjectedStarts());
+        await spend.ReplaceExpenseAsync(december.Id, new ExpenseFields(ServicePeriodStart: new Sent("2026-12-01"), ServicePeriodEnd: new Sent("2027-01-01")), Email, Replaced, Ct);
+        Assert.Equal(["2026-11-01", "2027-01-01"], await ProjectedStarts());
+
+        // Nothing projected was stored.
+        Assert.Equal(4, (await spend.ListExpensesAsync(ct: Ct)).Count);
+    }
+
+    private static (int, string?) Refusal(ExpenseWrite write) => (write.Status, write.Refusal);
 
     private sealed record TenantRow(string Action, string? SubjectName, string? Email, string? Detail);
 

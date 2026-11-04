@@ -6,10 +6,11 @@ using Harness.Messaging;
 namespace Harness.Host;
 
 /// <summary>
-/// The billing accounts, tenant-wide, not under a team: a person's to read and write
+/// The billing accounts and their expenses, tenant-wide, not under a team: a person's to read and write
 /// (<c>HumansOnly</c> on each route; there is no Spend permit, so a machine principal is refused every
 /// one of them, whatever it holds, before a missing id can be told from a real one). There is no
-/// delete: an account is deactivated, and the table refuses a delete.
+/// delete: an account is deactivated, and the table refuses a delete. Expenses have no edit and no
+/// delete either: a correction is a new row (void or replace) that supersedes the old.
 ///
 /// <para>
 /// A billing account is a named vendor account in its own currency. It is not a connection and holds
@@ -136,6 +137,178 @@ public static class SpendEndpoints
                 "Sets `active` true and appends `billing.account-reactivated`, in one transaction. An "
                 + "account already active is answered as it is, with nothing written. 404 for an id that "
                 + "names no account.");
+        MapExpenses(app);
+    }
+
+    public const string ExpenseNotAnObject = "The body must be a JSON object of the expense's fields.";
+
+    public static string ExpenseNotText(string field) => $"An expense's {field} must be text.";
+
+    /// <summary>The body's fields a record or a replace may send, by their JSON name. Any other field -
+    /// <c>id</c>, <c>status</c>, <c>supersedes</c>, <c>recordedBy</c>, <c>recordedAt</c> - is not read:
+    /// the store sets those, as a billing account create sets its own.</summary>
+    private static readonly string[] ExpenseEditable =
+        ["accountId", "amount", "currency", "servicePeriodStart", "servicePeriodEnd", "kind", "reference", "note"];
+
+    private const string ExpenseFieldsText =
+        "`accountId` (the id of a billing account, a deactivated one included), `amount` (a number, stored "
+        + "as canonical text; zero allowed, negative only for an adjustment), `currency` (three letters, and "
+        + "the account's own: no conversion), `servicePeriodStart` and `servicePeriodEnd` (ISO-8601 dates, "
+        + "read as midnight UTC, or instants; the end is exclusive and after the start), `kind` (`invoice`, "
+        + "`subscription-charge` or `adjustment`), `reference` and `note` (short text, or null). The store "
+        + "sets `id`, `status`, `supersedes`, `recordedBy` and `recordedAt`; a body's own are not read.";
+
+    private const string ExpenseAnswer =
+        "An expense answers its fields, `id`, `status` (`confirmed` or `void`), `supersedes` (the row it "
+        + "corrects, or null), `recordedBy`, `recordedAt`, `supersededBy` (the row that corrects it, or null) "
+        + "and `current` (true while nothing supersedes it). Expenses are append-only: a row is never "
+        + "changed or deleted, and nothing here is a projection or an estimate.";
+
+    private static void MapExpenses(WebApplication app)
+    {
+        app.MapGet("/api/expenses", async (string? accountId, ISpendStore spend, CancellationToken ct) =>
+                Results.Ok(await spend.ListExpensesAsync(accountId, ct)))
+            .WithTags("Billing")
+            .HumansOnly()
+            .WithSummary("List the expenses")
+            .WithDescription(
+                "Every expense row, current and superseded, oldest recorded first, then by id; only one "
+                + "account's with `?accountId=`; an empty list when there is none. " + ExpenseAnswer
+                + " A person's only: no permit lets an agent read one.");
+
+        app.MapGet("/api/expenses/{id}", async (string id, ISpendStore spend, CancellationToken ct) =>
+                await spend.FindExpenseAsync(id, ct) is { } expense
+                    ? Results.Ok(expense)
+                    : Results.NotFound(new { error = ExpenseRules.Missing(id) }))
+            .WithTags("Billing")
+            .HumansOnly()
+            .WithSummary("One expense")
+            .WithDescription(ExpenseAnswer + " 404, with one sentence, for an id that names no expense.");
+
+        app.MapPost("/api/expenses", async (JsonElement body, HttpContext context, ISpendStore spend, CancellationToken ct) =>
+            {
+                var (fields, refusal) = ReadExpense(body);
+                if (refusal is not null) return Refused(400, refusal);
+
+                var write = await spend.RecordExpenseAsync(
+                    fields!, Actor(context), TenantLogging.Row(context, TenantActions.BillingExpenseRecorded, null, null, null), ct);
+
+                return write.Ok
+                    ? Results.Created($"/api/expenses/{write.Expense!.Id}", write.Expense)
+                    : Refused(write.Status, write.Refusal!);
+            })
+            .WithTags("Billing")
+            .HumansOnly()
+            .WithSummary("Record an expense")
+            .WithDescription(
+                "A confirmed charge on a billing account: " + ExpenseFieldsText + " Anything else is refused "
+                + "(400) with one sentence: an account id that names no account, another currency than the "
+                + "account's, a kind outside the set. Appends `billing.expense-recorded`; nothing is recorded "
+                + "when that row cannot be written. " + ExpenseAnswer);
+
+        app.MapPost("/api/expenses/{id}/void", async (string id, HttpContext context, ISpendStore spend, CancellationToken ct) =>
+            {
+                string? note = null;
+                if (context.Request.ContentLength is > 0 || context.Request.HasJsonContentType())
+                {
+                    JsonElement body;
+                    try
+                    {
+                        body = await context.Request.ReadFromJsonAsync<JsonElement>(ct);
+                    }
+                    catch (JsonException)
+                    {
+                        return Refused(400, ExpenseNotAnObject);
+                    }
+
+                    if (body.ValueKind is not (JsonValueKind.Object or JsonValueKind.Undefined or JsonValueKind.Null)) return Refused(400, ExpenseNotAnObject);
+                    if (body.ValueKind == JsonValueKind.Object && body.TryGetProperty("note", out var sent))
+                    {
+                        if (sent.ValueKind == JsonValueKind.String) note = sent.GetString();
+                        else if (sent.ValueKind != JsonValueKind.Null) return Refused(400, ExpenseNotText("note"));
+                    }
+                }
+
+                var write = await spend.VoidExpenseAsync(
+                    id, note, Actor(context), TenantLogging.Row(context, TenantActions.BillingExpenseVoided, null, null, null), ct);
+
+                return write.Ok
+                    ? Results.Created($"/api/expenses/{write.Expense!.Id}", write.Expense)
+                    : Refused(write.Status, write.Refusal!);
+            })
+            .WithTags("Billing")
+            .HumansOnly()
+            .WithSummary("Void an expense")
+            .WithDescription(
+                "Records a new `void` row superseding the expense, carrying its account, amount, currency, "
+                + "service period and kind, with an optional `note`; the voided row is kept, no longer current. "
+                + "Appends `billing.expense-voided` in the same transaction and answers the void row (201). A "
+                + "void row, or a row already voided or replaced, is refused (409) with one sentence and nothing "
+                + "written. 404 for an id that names no expense.");
+
+        app.MapPost("/api/expenses/{id}/replace", async (
+                string id, JsonElement body, HttpContext context, ISpendStore spend, CancellationToken ct) =>
+            {
+                var (fields, refusal) = ReadExpense(body);
+                if (refusal is not null) return Refused(400, refusal);
+
+                var write = await spend.ReplaceExpenseAsync(
+                    id, fields!, Actor(context), TenantLogging.Row(context, TenantActions.BillingExpenseReplaced, null, null, null), ct);
+
+                return write.Ok
+                    ? Results.Created($"/api/expenses/{write.Expense!.Id}", write.Expense)
+                    : Refused(write.Status, write.Refusal!);
+            })
+            .WithTags("Billing")
+            .HumansOnly()
+            .WithSummary("Replace an expense")
+            .WithDescription(
+                "Records a new `confirmed` row superseding the expense: the fields sent over the old row's (an "
+                + "absent field is the old row's; null clears only `reference` and `note`). " + ExpenseFieldsText
+                + " It stays on the same account: another `accountId` is refused (400) - void it and record a new "
+                + "one. Appends `billing.expense-replaced` in the same transaction and answers the new row (201). "
+                + "A void row, or a row already voided or replaced, is refused (409) with one sentence and nothing "
+                + "written. 404 for an id that names no expense.");
+    }
+
+    private static string Actor(HttpContext context)
+    {
+        var (id, email) = ActorClaims.Of(context.User);
+        return email ?? id ?? "unknown";
+    }
+
+    /// <summary>The body's expense fields, each absent, null or its text, or the one sentence that
+    /// refuses the body.</summary>
+    internal static (ExpenseFields? Fields, string? Refusal) ReadExpense(JsonElement body)
+    {
+        if (body.ValueKind != JsonValueKind.Object) return (null, ExpenseNotAnObject);
+
+        var sents = new Dictionary<string, Sent?>();
+        foreach (var field in ExpenseEditable)
+        {
+            if (!body.TryGetProperty(field, out var value)) continue;
+
+            switch (value.ValueKind)
+            {
+                case JsonValueKind.Null:
+                    sents[field] = new Sent(null);
+                    break;
+                case JsonValueKind.String:
+                    sents[field] = new Sent(value.GetString());
+                    break;
+                case JsonValueKind.Number when field == "amount":
+                    sents[field] = new Sent(value.GetRawText());
+                    break;
+                default:
+                    return (null, field == "amount" ? ExpenseRules.AmountRefused : ExpenseNotText(field));
+            }
+        }
+
+        Sent? Of(string field) => sents.GetValueOrDefault(field);
+
+        return (new ExpenseFields(
+            Of("accountId"), Of("amount"), Of("currency"), Of("servicePeriodStart"), Of("servicePeriodEnd"), Of("kind"),
+            Of("reference"), Of("note")), null);
     }
 
     private static async Task<IResult> SetActiveAsync(

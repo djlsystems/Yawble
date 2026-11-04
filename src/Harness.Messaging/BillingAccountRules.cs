@@ -247,7 +247,7 @@ public static class BillingAccountRules
     }
 
     /// <summary>An ISO-8601 date (midnight UTC) or date and time (UTC when it names no offset), or null.</summary>
-    private static DateTimeOffset? Moment(string? text)
+    internal static DateTimeOffset? Moment(string? text)
     {
         var value = text?.Trim();
         if (value is null || value.Length < 10 || value[4] != '-' || value[7] != '-') return null;
