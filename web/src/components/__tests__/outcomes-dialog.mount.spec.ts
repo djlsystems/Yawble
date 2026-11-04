@@ -428,7 +428,10 @@ describe('Manage Outcomes: an outcome opened', () => {
     expect(bodyFind('[data-outcome-cost]')?.textContent).not.toContain('$90');
     expect(bodyFind('[data-outcome-share]')?.textContent).toContain('6%');
     expect(bodyFind('[data-outcome-efficiency]')?.textContent).toContain('50%');
-    expect(bodyFind('[data-outcome-efficiency]')?.textContent).toContain('1h waiting on a person');
+    // WAITING ON A PERSON is its own figure, labelled as such, beside - never inside - agents working.
+    expect(bodyFind('[data-outcome-efficiency]')?.textContent).not.toMatch(/waiting/i);
+    expect(bodyFind('[data-outcome-waiting]')?.textContent).toContain('1h');
+    expect(bodyFind('[data-outcome-waiting]')?.textContent).toContain('Waiting on a person');
 
     const column = (key: string) => bodyFind(`[data-outcome-bucket="${key}"]`)?.textContent ?? '';
     expect(column('notStarted')).toContain('Not started (1)');
@@ -961,6 +964,66 @@ describe('Manage Outcomes: two presentations of one outcome', () => {
     expect(row(weeks[5]!)).toEqual(['Oct 19', '—', '0 agent min', '1 closed · 1 completed', 'not measurable']);
     expect(row(weeks[0]!)).toEqual(['Sep 14', '—', '0 agent min', '0 closed · 0 completed', 'not measurable']);
     expect(bodyText()).not.toMatch(/intervention/i);
+  });
+
+  // ---- the human figures, as the route counted them; never priced and never joined to Waiting on a person ----
+
+  const human = {
+    human: { interventions: 14, measuredInterventions: 2, attentionSeconds: 3900 },
+    humanWeekly: weeks.map((weekStart, i) => ({
+      weekStart,
+      interventions: i === 7 ? 5 : i === 6 ? 2 : 0,
+      measuredInterventions: i === 7 ? 1 : 0,
+      attentionSeconds: i === 7 ? 1500 : null,
+    })),
+    blockedSeconds: 7200,
+  };
+
+  it('shows a project its Human Interventions and Human Attention Time, all time, and Waiting on a person apart', async () => {
+    await openWith({ presentation: 'project' }, human);
+
+    expect(bodyFind('[data-outcome-interventions]')?.textContent).toContain('14');
+    expect(bodyFind('[data-outcome-interventions]')?.textContent).toContain('Human Interventions, all time');
+    expect(bodyFind('[data-outcome-attention]')?.textContent).toContain('1h 5m');
+    expect(bodyFind('[data-outcome-attention]')?.textContent).toContain('Human Attention Time, all time');
+    // Waiting on a person is 2h of its own; attention is not 1h 5m + 2h, and no money sits by either.
+    expect(bodyFind('[data-outcome-waiting]')?.textContent).toContain('2h');
+    expect(bodyFind('[data-outcome-attention]')?.textContent).not.toContain('3h');
+    expect(bodyFind('[data-outcome-interventions]')?.textContent).not.toMatch(/\$|value|ROI|cost/i);
+    expect(bodyFind('[data-outcome-attention]')?.textContent).not.toMatch(/\$|value|ROI|cost/i);
+  });
+
+  it('says a project has no measured time when nothing was measured, never 0', async () => {
+    await openWith({ presentation: 'project' }, { ...human, human: { interventions: 3, measuredInterventions: 0, attentionSeconds: null } });
+
+    expect(bodyFind('[data-outcome-interventions]')?.textContent).toContain('3');
+    expect(bodyFind('[data-outcome-attention]')?.textContent).toContain('no measured time');
+    expect(bodyFind('[data-outcome-attention]')?.textContent).not.toMatch(/\b0s\b|\b0m\b/);
+  });
+
+  it('reads an operational outcome\'s intervention frequency per week beside cost and throughput, with measured attention', async () => {
+    await openWith({ presentation: 'operational' }, human);
+
+    const row = (weekStart: string) =>
+      [...(bodyFind(`[data-outcome-period-row="${weekStart}"]`)?.querySelectorAll('td') ?? [])].map((td) => td.textContent?.trim());
+    const heads = [...document.body.querySelectorAll('[data-outcome-periods] th')].map((th) => th.textContent?.trim());
+    expect(heads).toEqual([
+      'Week of', 'Estimated Execution Cost', 'Agent Hours', 'Throughput', 'Cost per completed workflow',
+      'Human Interventions', 'Human Attention Time',
+    ]);
+    expect(row(weeks[7]!)).toEqual(['Nov 2', '$120', '2.0 Agent Hours', '3 closed · 2 completed', '$60', '5', '25m']);
+    expect(row(weeks[6]!)?.slice(5)).toEqual(['2', 'no measured time']);
+    expect(row(weeks[0]!)?.slice(5)).toEqual(['0', 'no measured time']);
+    expect(bodyFind('[data-outcome-operational] [data-outcome-attention]')?.textContent).toContain('1h 5m');
+  });
+
+  it('shows the Unattributed tile its Human Interventions beside its money', async () => {
+    api.listOutcomes.mockImplementation(async () => listing({
+      noOutcome: { name: 'Unattributed', figures: figures({ human: { interventions: 6, measuredInterventions: 1, attentionSeconds: 754 } }) },
+    }));
+    await open();
+
+    expect(bodyFind('[data-no-outcome-row] [data-outcome-human]')?.textContent).toBe('6 Human Interventions · Human Attention Time 12m');
   });
 
   it('says not measurable for the eight weeks when nothing completed', async () => {

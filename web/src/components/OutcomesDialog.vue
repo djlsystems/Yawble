@@ -21,6 +21,7 @@ import {
   type OutcomeDetail,
   type OutcomeEvent,
   type OutcomeFields,
+  type HumanWeek,
   type OutcomeFigures,
   type OutcomeList,
   type OutcomeMoney,
@@ -36,6 +37,13 @@ import {
   PeriodOptions,
   PresentationOptions,
   backlogProgressText,
+  attentionText,
+  humanLineText,
+  interventionsText,
+  waitingText,
+  HumanAttentionLabel,
+  HumanInterventionsLabel,
+  WaitingOnAPersonLabel,
   cumulativeText,
   estimateLabel,
   perCompletedText,
@@ -258,15 +266,21 @@ const cumulative = computed(() => current.value?.figures.cumulative ?? []);
 const cumulativePriced = computed(() => cumulative.value.some((w) => w.cost !== null));
 const weeklyPriced = computed(() => (current.value?.figures.weekly ?? []).some((w) => w.cost !== null));
 
-/** The operational table: each of the eight weeks with its cost and agent time, and its throughput when the route sent one. */
+/** The operational table: each of the eight weeks with its cost and agent time, and its throughput and people's acts
+ *  (intervention frequency) when the route sent them. */
+/** Whether the route sent intervention frequency: an older Host sends none, and then no column stands in for it. */
+const humanWeekly = computed(() => current.value?.figures.humanWeekly !== undefined);
+
 const periodRows = computed(() => {
   const weekly = current.value?.figures.weekly ?? [];
   const throughput = new Map<string, OutcomeThroughputWeek>((current.value?.figures.throughput ?? []).map((t) => [t.weekStart, t]));
+  const human = new Map<string, HumanWeek>((current.value?.figures.humanWeekly ?? []).map((h) => [h.weekStart, h]));
   return weekly.map((w) => ({
     weekStart: w.weekStart,
     cost: w.cost,
     agentSeconds: w.agentSeconds,
     throughput: throughput.get(w.weekStart) ?? null,
+    human: human.get(w.weekStart) ?? null,
   }));
 });
 // Reject is refused while a link names the outcome OR another outcome is merged into it, so
@@ -838,13 +852,17 @@ const history = computed<HistoryLine[]>(() => {
           </div>
           <div class="outcome-stat" data-outcome-efficiency>
             <div class="outcome-stat__figure">{{ efficiencyText(current.figures.efficiency) }}</div>
-            <div class="outcome-stat__label">
-              Agents working<template v-if="current.figures.efficiency !== null">, {{ duration(current.figures.blockedSeconds) }} waiting on a person</template>
-            </div>
+            <div class="outcome-stat__label">Agents working</div>
             <div v-if="current.figures.efficiency !== null" class="outcome-split" aria-hidden="true">
               <div class="outcome-split__working" :style="{ width: `${current.figures.efficiency * 100}%` }" />
               <div class="outcome-split__waiting" :style="{ width: `${(1 - current.figures.efficiency) * 100}%` }" />
             </div>
+          </div>
+          <!-- WAITING ON A PERSON: time the work waited on a person (the route's blockedSeconds). Not attention: it is
+               never added to Human Attention Time, and nothing here joins the two. -->
+          <div class="outcome-stat" data-outcome-waiting>
+            <div class="outcome-stat__figure">{{ waitingText(current.figures.blockedSeconds) }}</div>
+            <div class="outcome-stat__label">{{ WaitingOnAPersonLabel }}</div>
           </div>
         </div>
         <div v-if="current.figures.tokens.unmeasuredRuns > 0" class="text-caption os-text-muted q-mt-xs" data-outcome-unmeasured>
@@ -876,6 +894,16 @@ const history = computed<HistoryLine[]>(() => {
               </div>
               <div class="outcome-stat__label">Backlog progress</div>
             </div>
+            <!-- PEOPLE'S ACTS, all time: each intervention once; attention is measured durations only, and says
+                 so when none was measured - never 0. Nothing is priced. -->
+            <div v-if="current.figures.human" class="outcome-stat" data-outcome-interventions>
+              <div class="outcome-stat__figure">{{ interventionsText(current.figures.human) }}</div>
+              <div class="outcome-stat__label">{{ HumanInterventionsLabel }}, all time</div>
+            </div>
+            <div v-if="current.figures.human" class="outcome-stat" data-outcome-attention>
+              <div class="outcome-stat__figure">{{ attentionText(current.figures.human) }}</div>
+              <div class="outcome-stat__label">{{ HumanAttentionLabel }}, all time</div>
+            </div>
           </div>
 
           <div class="row items-baseline q-mt-md">
@@ -904,6 +932,10 @@ const history = computed<HistoryLine[]>(() => {
               <div class="outcome-stat__figure">{{ perCompletedText(current.figures.costPerCompleted, money.currency) }}</div>
               <div class="outcome-stat__label">Cost per completed workflow, last 8 weeks</div>
             </div>
+            <div v-if="current.figures.human" class="outcome-stat" data-outcome-attention>
+              <div class="outcome-stat__figure">{{ attentionText(current.figures.human) }}</div>
+              <div class="outcome-stat__label">{{ HumanAttentionLabel }}, all time</div>
+            </div>
           </div>
 
           <div class="row items-baseline q-mt-md">
@@ -931,6 +963,10 @@ const history = computed<HistoryLine[]>(() => {
                 <th scope="col">Agent Hours</th>
                 <th scope="col">Throughput</th>
                 <th scope="col">Cost per completed workflow</th>
+                <template v-if="humanWeekly">
+                  <th scope="col">{{ HumanInterventionsLabel }}</th>
+                  <th scope="col">{{ HumanAttentionLabel }}</th>
+                </template>
               </tr>
             </thead>
             <tbody>
@@ -940,6 +976,10 @@ const history = computed<HistoryLine[]>(() => {
                 <td>{{ agentHoursText(row.agentSeconds) }}</td>
                 <td>{{ row.throughput === null ? '—' : throughputText(row.throughput) }}</td>
                 <td>{{ row.throughput === null ? '—' : perCompletedText(row.throughput.costPerCompleted, money.currency) }}</td>
+                <template v-if="humanWeekly">
+                  <td data-outcome-period-interventions>{{ row.human === null ? '—' : interventionsText(row.human) }}</td>
+                  <td data-outcome-period-attention>{{ row.human === null ? '—' : attentionText(row.human) }}</td>
+                </template>
               </tr>
             </tbody>
           </table>
@@ -1190,6 +1230,7 @@ const history = computed<HistoryLine[]>(() => {
                 </div>
               </div>
               <div class="os-tile-line os-text-muted q-mt-xs" data-outcome-summary>{{ tileSummaryText(list.noOutcome.figures) }}</div>
+              <div v-if="list.noOutcome.figures.human" class="os-tile-line os-text-muted" data-outcome-human>{{ humanLineText(list.noOutcome.figures.human) }}</div>
               <div class="os-tile-line os-text-muted" data-outcome-tokens>
                 <template v-if="list.noOutcome.figures.tokens.unmeasuredRuns > 0">{{ unmeasuredText(list.noOutcome.figures.tokens.unmeasuredRuns) }}</template>
               </div>

@@ -1,4 +1,5 @@
 import type {
+  HumanFigures,
   Outcome,
   OutcomeCumulativeWeek,
   OutcomeFigures,
@@ -368,4 +369,39 @@ export function throughputText(week: Pick<OutcomeThroughputWeek, 'closed' | 'com
 export function backlogProgressText(backlog: OutcomeFigures['backlog']): string {
   const total = backlog.notStarted + backlog.inProgress + backlog.achieved
   return total === 0 ? 'No backlog items' : `${backlog.achieved} of ${total} item${total === 1 ? '' : 's'} achieved`
+}
+
+// ---- People's acts: Human Interventions, Human Attention Time, Waiting on a person -------------------------------
+
+/** The three human figures' words, used exactly as written. None is priced; no value word sits near them. */
+export const HumanInterventionsLabel = 'Human Interventions'
+export const HumanAttentionLabel = 'Human Attention Time'
+export const WaitingOnAPersonLabel = 'Waiting on a person'
+
+/** What Human Attention Time says when nothing was measured: never 0, which would read as measured. */
+export const NoMeasuredTime = 'no measured time'
+
+/** Human Interventions as the route counted them: `12`, or `—` from an older Host that sent none. */
+export function interventionsText(human: HumanFigures | undefined): string {
+  return human === undefined ? '—' : human.interventions.toLocaleString()
+}
+
+/**
+ * Human Attention Time: the route's sum of measured durations, `1h 5m`, or "no measured time" when the route
+ * measured none - a null, never shown as 0. Waiting on a person is never part of it.
+ */
+export function attentionText(human: HumanFigures | undefined): string {
+  return human === undefined || human.attentionSeconds === null ? NoMeasuredTime : duration(human.attentionSeconds)
+}
+
+/** Waiting on a person, the route's blocked time: a duration of its own, never added to attention. */
+export function waitingText(seconds: number): string {
+  return duration(seconds)
+}
+
+/** One line for a tile: `3 Human Interventions · Human Attention Time 12m` (or "no measured time"). */
+export function humanLineText(human: HumanFigures | undefined): string {
+  if (human === undefined) return ''
+  const count = `${human.interventions.toLocaleString()} ${HumanInterventionsLabel}`
+  return `${count} · ${HumanAttentionLabel} ${attentionText(human)}`
 }

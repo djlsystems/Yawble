@@ -473,7 +473,10 @@ public static class TeamCost
                 + "`openWorkflows.openCount` and `running` over the active teams reached, and `waitingOnYou`, "
                 + "the number of items `GET /api/needs-you` lists.\n\n"
                 + "Cost is an estimate, never money paid: each run priced from the snapshot taken at its start, as "
-                + "`GET /api/teams/cost` describes, and null - never 0 - when no run was priced.");
+                + "`GET /api/teams/cost` describes, and null - never 0 - when no run was priced.\n\n"
+                + "`human`: the reached teams' Human Interventions, Human Attention Time and Waiting on a person over the 8 weeks, "
+                + "as `GET /api/teams/cost` gives each team's, with `unattributed`; each outcome in `outcomes` carries its own "
+                + "`human`. A Concierge session names no team, so it is in none of these counts.");
     }
 
     private const string Description =
@@ -504,5 +507,16 @@ public static class TeamCost
         + "plugin, and null - never 0 - when none was priced. `agentSeconds` is agent-kind time only, priced or "
         + "not. `agentRate` is the priced agent time's money over its hours, null when none was priced. "
         + "`billable` sums measured runs only, in the week each ended; a run that reported no usage is counted "
-        + "in `unmeasuredRuns`, never as zero tokens.";
+        + "in `unmeasuredRuns`, never as zero tokens.\n\n"
+        + HumanDescription;
+
+    /// <summary>The human figures' part of each cost read's description.</summary>
+    private const string HumanDescription =
+        "PEOPLE'S ACTS, NEVER PRICED. Each outcome entry carries `human` - `{ interventions, measuredInterventions, "
+        + "attentionSeconds }`, the team's Human Interventions under that outcome over the 8 weeks (each "
+        + "`intervention_ledger` row once, by its `team_id`) and Human Attention Time, the sum of measured durations "
+        + "only, null - no measured time - when none was measured. The team carries `human`: `interventions`, "
+        + "`measuredInterventions`, `attentionSeconds`, `unattributed` (the same three for its acts serving no outcome) "
+        + "and `waitingSeconds`, Waiting on a person - time its work waited on a person, kept beside the others and "
+        + "never added to `attentionSeconds`. A Concierge session names no team, so a team's counts leave it out.";
 }

@@ -49,7 +49,7 @@ export interface OutcomeFigures {
   lastWorkedAt: string | null
   /** Its backlog items by where they stand; `declared` is counted as `money.declaredCountsAs` says. */
   backlog: { notStarted: number; inProgress: number; achieved: number }
-  /** Time its workflows were blocked on a person, from the ledger. */
+  /** Waiting on a person: time its workflows were blocked on a person, from the ledger. Never attention. */
   blockedSeconds: number
   /** Agent time over agent time plus blocked time, 0..1; null when both are 0, never 0. */
   efficiency: number | null
@@ -67,6 +67,32 @@ export interface OutcomeFigures {
   costPerCompleted?: number | null
   /** On one outcome's detail only: everything up to the end of each of the eight weeks, the last its all-time figure. */
   cumulative?: OutcomeCumulativeWeek[]
+  /** People's acts that count under it, in the read's window. Absent from an older Host. */
+  human?: HumanFigures
+  /** The same eight weeks as `weekly`: the acts in each - intervention frequency. */
+  humanWeekly?: HumanWeek[]
+}
+
+/**
+ * PEOPLE'S ACTS, from `intervention_ledger`, never priced. `interventions` is Human Interventions, each row once;
+ * `attentionSeconds` is Human Attention Time - measured durations only - and null when nothing was measured: no
+ * measured time, never 0. Waiting on a person is a separate figure and is never added to it.
+ */
+export interface HumanFigures {
+  interventions: number
+  measuredInterventions: number
+  attentionSeconds: number | null
+}
+
+export interface HumanWeek extends HumanFigures {
+  weekStart: string
+}
+
+/** A team's (or the reached teams') human figures over the eight weeks, with Waiting on a person beside them. */
+export interface TeamHumanFigures extends HumanFigures {
+  unattributed: HumanFigures
+  /** Waiting on a person: time its work waited on a person. Never added to `attentionSeconds`. */
+  waitingSeconds: number
 }
 
 export interface OutcomeThroughputWeek {
@@ -424,6 +450,8 @@ export interface TeamCostOutcome {
    * Null for No outcome.
    */
   rank: number | null
+  /** The team's Human Interventions and Human Attention Time under it over the eight weeks. Absent from an older Host. */
+  human?: HumanFigures
 }
 
 /** How the cost routes price agent time: the currency, and the rate (null when none is set). */
@@ -438,13 +466,15 @@ export interface TeamCost {
   /** No outcome first when present, then each outcome. */
   outcomes: TeamCostOutcome[]
   totals: TeamCostTotals
+  /** Its human figures over the eight weeks, with Waiting on a person beside them. Absent from an older Host. */
+  human?: TeamHumanFigures
 }
 
 /** `GET /api/teams/cost`: every team's figures at once, for the teams list - one call, never one per row. */
 export interface TeamsCost {
   money: TeamCostMoney
   weeks: string[]
-  teams: Array<Pick<TeamCost, 'team' | 'outcomes' | 'totals'>>
+  teams: Array<Pick<TeamCost, 'team' | 'outcomes' | 'totals' | 'human'>>
 }
 
 export const getTeamCost = (team: string) => json<TeamCost>(`/api/teams/${encodeURIComponent(team)}/cost`)
@@ -490,6 +520,8 @@ export interface CostSummaryOutcome {
    * was priced into it that way. Empty, or absent from an older Host, when none was.
    */
   legacyRates?: string[]
+  /** The reached teams' Human Interventions and Human Attention Time under it over the eight weeks. Absent from an older Host. */
+  human?: HumanFigures
 }
 
 /** `GET /api/teams/cost/summary`: the four tiles above the teams list, in one answer. */
@@ -508,6 +540,8 @@ export interface CostSummary {
   prior: CostSummaryTotals
   outcomes: CostSummaryOutcome[]
   rightNow: { openWorkflows: number; membersRunning: number; waitingOnYou: number }
+  /** The reached teams' human figures over the eight weeks, with Waiting on a person beside them. Absent from an older Host. */
+  human?: TeamHumanFigures
 }
 
 export const getCostSummary = () => json<CostSummary>('/api/teams/cost/summary')
