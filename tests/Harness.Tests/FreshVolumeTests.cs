@@ -953,6 +953,46 @@ public sealed class FreshVolumeTests : IDisposable
     }
 
     /// <summary>
+    /// The attribution and rate-history steps (`messages-007`, `outcome-012`, `outcome-014`, `outcome-015`) apply to a
+    /// volume that already holds a message and a ledger row: both stay exactly as they were, every new column reads NULL
+    /// with nothing back-filled, no rate epoch is written by the step itself, and the ledger is still append-only.
+    /// </summary>
+    [Fact]
+    public async Task The_origin_reason_and_rate_history_steps_leave_old_rows_as_they_were_with_null_origins()
+    {
+        string[] later = ["messages-007", "outcome-012", "outcome-014", "outcome-015"];
+        var migrator = new SchemaMigrator(Database);
+        await migrator.ApplyAsync([.. SchemaModules.All.Where(s => !later.Contains(s.Id))], ct: Ct);
+
+        await ExecuteAsync(
+            """
+            INSERT INTO messages (type, payload, source, correlation_id, causation_seq, depth, occurred_at)
+            VALUES ('agentContainer.instruction.Alpha/Dev', '{"instruction":"go","originKind":"person"}', 'user-1', 1, NULL, 0, '2026-08-01T00:00:00.0000000+00:00');
+            INSERT INTO usage_ledger (run_seq, correlation, team_id, member, run_outcome, started_at, ended_at, measured, billable)
+            VALUES (5, 1, 'old-team', 'Dev', 'failed', '2026-08-01T00:00:00.0000000+00:00', '2026-08-01T01:00:00.0000000+00:00', 1, 42);
+            """);
+
+        await migrator.ApplyAsync(SchemaModules.All, ct: Ct);
+
+        var applied = await migrator.AppliedAsync(ct: Ct);
+        Assert.All(later, step => Assert.Contains(step, applied));
+        Assert.Equal(
+            ["{\"instruction\":\"go\",\"originKind\":\"person\"}|user-1|null|null|null|null|null"],
+            await ColumnAsync(
+                "SELECT payload || '|' || source || '|' || COALESCE(origin_kind, 'null') || '|' || COALESCE(origin_actor_id, 'null') || '|' "
+                + "|| COALESCE(origin_actor_email, 'null') || '|' || COALESCE(origin_trigger, 'null') || '|' || COALESCE(publisher_kind, 'null') FROM messages"));
+        Assert.Equal(
+            ["5|old-team|failed|42|null|null|null"],
+            await ColumnAsync(
+                "SELECT run_seq || '|' || team_id || '|' || run_outcome || '|' || billable || '|' || COALESCE(origin_kind, 'null') || '|' "
+                + "|| COALESCE(origin_actor_id, 'null') || '|' || COALESCE(reason_code, 'null') FROM usage_ledger"));
+        Assert.Empty(await ColumnAsync("SELECT CAST(id AS TEXT) FROM rate_epochs"));
+
+        await Assert.ThrowsAsync<SqliteException>(() => ExecuteAsync("UPDATE usage_ledger SET origin_kind = 'person'"));
+        await Assert.ThrowsAsync<SqliteException>(() => ExecuteAsync("UPDATE usage_ledger SET reason_code = 'failure'"));
+    }
+
+    /// <summary>
     /// `outcome-006` applies to an empty volume and to one with ledger rows: the rows stay, and the new
     /// table takes a hold, its one close, and nothing else.
     /// </summary>

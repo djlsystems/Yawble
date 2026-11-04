@@ -59,6 +59,30 @@ public sealed class MessageOriginTests(HostFixture host) : IClassFixture<HostFix
             await OriginAsync(seq));
     }
 
+    /// <summary>
+    /// A PERSON'S INSTRUCTION AND WHAT FOLLOWS FROM IT, AT ANY DEPTH, through the real route: a member's tell caused by
+    /// the person's, and one caused by that, carry the person as origin - while each row's publisher is the agent that
+    /// wrote it.
+    /// </summary>
+    [Fact]
+    public async Task Rows_a_member_writes_under_a_persons_instruction_carry_that_person_at_every_depth()
+    {
+        using var person = await host.PersonAsync();
+        using var member = host.Container(host.AlphaContainerKey);
+        var root = await TellAsync(person, new { instruction = "Start the work." });
+        var child = await TellAsync(member, new { instruction = "Next step.", causation = root.ToString(), originKind = "agent" });
+        var grandchild = await TellAsync(member, new { instruction = "And the one after.", causation = child.ToString() });
+
+        var userId = await UserIdAsync();
+        Assert.Equal([OriginKinds.Person, userId, "person@example.test", null, PublisherKinds.Person], await OriginAsync(root));
+        foreach (var seq in new[] { child, grandchild })
+        {
+            Assert.Equal([OriginKinds.Person, userId, "person@example.test", null, PublisherKinds.Agent], await OriginAsync(seq));
+        }
+
+        Assert.Equal("2", await ScalarAsync($"SELECT CAST(depth - (SELECT depth FROM messages WHERE seq = {root}) AS TEXT) FROM messages WHERE seq = {grandchild}"));
+    }
+
     [Fact]
     public async Task A_members_tell_is_an_agents()
     {
@@ -110,5 +134,35 @@ public sealed class MessageOriginTests(HostFixture host) : IClassFixture<HostFix
         }.ToString());
         connection.Open();
         return connection;
+    }
+}
+
+/// <summary>
+/// NO PUBLISHER CAN CLAIM AN ORIGIN, by the shape of the public append: <see cref="NewMessage"/> - all a publisher
+/// hands the log - has no field that could carry one, and the only place an <see cref="AppendContext"/> is made is
+/// <c>AppendContexts.From</c>, out of the request's own authenticated principal.
+/// </summary>
+public sealed class MessageOriginShapeTests
+{
+    [Fact]
+    public void A_new_message_has_no_origin_field_and_an_append_context_is_made_only_from_the_requests_principal()
+    {
+        Assert.Equal(
+            ["CausationSeq", "Payload", "Source", "Type"],
+            typeof(NewMessage).GetProperties().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.Equal(
+            ["CausationSeq", "Payload", "Source", "Type"],
+            typeof(NewMessage).GetConstructors().Single().GetParameters().Select(p => p.Name!).Order(StringComparer.Ordinal));
+
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "Harness.slnx"))) root = root.Parent;
+        Assert.NotNull(root);
+
+        var made = Directory.EnumerateFiles(Path.Combine(root.FullName, "src"), "*.cs", SearchOption.AllDirectories)
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .Where(f => System.Text.RegularExpressions.Regex.IsMatch(File.ReadAllText(f), @"new\s+AppendContext\s*\(|new\s*\(\s*PrincipalKind\."))
+            .Select(f => Path.GetRelativePath(root.FullName, f).Replace(Path.DirectorySeparatorChar, '/'))
+            .ToList();
+        Assert.Equal(["src/Harness.Host/Auth/AppendContexts.cs"], made);
     }
 }

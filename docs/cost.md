@@ -540,7 +540,8 @@ Clicking the tile opens the team's Estimated Execution Cost dialog.
 Titled **Estimated Execution Cost · <team>**, with the instance's default rate as set now on the
 right (`Default agent rate $60/h (USD) · Change in Outcomes`, or `No default agent rate set (USD)`).
 That is the rate a new agent run with no rate of its own inherits, not the rate the figures were
-priced at. It has two tabs. Opened from the team page it uses the page's period read; opened from the
+priced at. Like the tile, the dialog has no `Set an agent hourly rate` note when nothing in the period
+was priced: a rate set now cannot price the period's runs, and `Estimate unavailable` says so. It has two tabs. Opened from the team page it uses the page's period read; opened from the
 Teams list it reads `GET /api/teams/{team}/cost/period` itself, for the list's period.
 
 **Estimated Execution Cost** (the tab it opens on), over the period, with the period control at its top:
@@ -687,9 +688,16 @@ and its own skill already sends a report to a team.
 
 - **Copy, never compute.** Every figure is one the tool answered: a total is the answer's own
   `total` or `totals`, a rate its `agentRate`. The one conversion is Agent Hours from
-  `agentSeconds` (one decimal under 100 hours, as the screens write it). Actual Spend is never
-  inferred from hours or rates. No currencies are added or converted. Estimated Execution Cost and
-  Actual Spend never share one figure, row, column or total.
+  `agentSeconds`, as the screens write it: JavaScript's `toFixed(1)` under 100 hours (9540 seconds
+  is 2.6), whole hours from 100, and none for a plugin member. Money is copied exactly as answered,
+  never rounded (151.445 stays 151.445). Human Attention Time is the answer's `attentionSeconds`,
+  written in seconds, never turned into minutes or hours. Actual Spend is never inferred from hours
+  or rates. No currencies are added or converted. Estimated Execution Cost and Actual Spend never
+  share one figure, row, column or total, and the Spend overview's `estimate` is every team's, never
+  one team's.
+- **The period's fields.** Of the `outcomes` answer, only `figures`, `cost` and `human` are the
+  period's; `weekly`, `throughput`, `costPerCompleted` and `humanWeekly` are the last eight weeks,
+  and `backlog` and `linkedWorkflows` are now, whatever the period.
 - **The words.** The terms of this page and [spend.md](spend.md), with these rules:
   - `cost` null is Estimate unavailable;
   - `legacyRates` is carried as a footnote, and a plugin member's `unpriced` as Not priced or
@@ -699,8 +707,11 @@ and its own skill already sends a report to a team.
 - **Actual Spend only when allowed.** When `spend` is refused, the report carries the estimates
   only, with a line saying a person must turn on **Let agents read Actual Spend for reports**.
 - **Files.** Markdown, HTML (self-contained, no script) and CSV, written to the team's shared
-  folder. The CSV files are one per measurement: `<name>-estimated-execution-cost.csv` and, only
-  when `spend` answered, `<name>-actual-spend.csv`.
+  folder under one stem, `<subject>-<from>-to-<to>` with the days sent; a report written while
+  `spend` was refused ends `-estimates-only`, so a later report on the same period never overwrites
+  it. The CSV files are one per measurement: `<name>-estimated-execution-cost.csv` and, only when
+  `spend` answered, `<name>-actual-spend.csv`. A text cell starting `=`, `+`, `-`, `@`, a tab or a
+  carriage return gets a leading `'`, as the Spend page's files do.
 - **What it cannot make or send.**
   - The platform writes no PDF and no XLSX. CSV is the spreadsheet, and the HTML prints to PDF
     from a browser. A PDF is made only by a plugin member whose own skill says it makes one.
@@ -712,7 +723,10 @@ and its own skill already sends a report to a team.
   - the roles;
   - the actions it names against `PlatformMcpTools.ReportActions`;
   - the words, and that no estimate is called spend;
-  - copying, never computing;
+  - copying, never computing: money as given, the Agent Hours rule, attention time in seconds;
+  - formula cells, the period's `outcomes` fields and the estimates-only file name;
+  - no sentence that undoes a rule beside it: adding currencies, the overview's estimate read as a
+    team's, attention time in hours;
   - estimates only when Actual Spend is refused;
   - the files and limits.
 

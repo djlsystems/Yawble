@@ -147,10 +147,14 @@ public sealed class ReportToolTests(HostFixture host) : IClassFixture<HostFixtur
         try
         {
             await SetAsync(person, "on");
-            using var agent = host.Container(host.AlphaContainerKey);
+            var member = $"/api/teams/{host.Alpha}/containers/{TeamRegistry.DefaultManagerName}";
+
+            // A member, the team's Manager and the Concierge: each holds Spend while the setting is on, and none writes.
+            foreach (var key in new[] { host.AlphaContainerKey, await ManagerKeyAsync(), await ConciergeKeyAsync() })
+            {
+            using var agent = host.Container(key);
             Assert.Equal(HttpStatusCode.OK, (await agent.GetAsync("/api/billing-accounts", Ct)).StatusCode);
 
-            var member = $"/api/teams/{host.Alpha}/containers/{TeamRegistry.DefaultManagerName}";
             var writes = new[]
             {
                 await agent.PostAsJsonAsync("/api/billing-accounts", NewAccount("Agent's"), Ct),
@@ -171,6 +175,7 @@ public sealed class ReportToolTests(HostFixture host) : IClassFixture<HostFixtur
             {
                 Assert.Equal(HttpStatusCode.Forbidden, answer.StatusCode);
                 Assert.Equal(PermitGate.HumansOnlyMessage, (await JsonAsync(answer)).GetProperty("error").GetString());
+            }
             }
 
             // Nothing moved.
@@ -305,8 +310,26 @@ public sealed class ReportToolTests(HostFixture host) : IClassFixture<HostFixtur
         foreach (var action in new[] { "team", "workflows", "human" })
         {
             var refused = await tools.Report(action, team: host.Beta, from: "2035-03-01", to: "2035-04-01", cancellationToken: Ct);
-            Assert.StartsWith($"Refused: the report tool's {action}: ", refused, StringComparison.Ordinal);
-            Assert.DoesNotContain("agentSeconds", refused, StringComparison.Ordinal);
+            Assert.Equal($"Refused: the report tool's {action}: {TeamGate.NoSuchTeamMessage}", refused);
+        }
+    }
+
+    [Fact]
+    public async Task A_Concierge_names_the_team_it_reports_on_and_an_unknown_team_is_the_gates_own_sentence()
+    {
+        await SeedAsync();
+        var person = await host.Services.GetRequiredService<IUserStore>().FindAsync("person@example.test", Ct);
+        var tools = ConciergeTools(await ConciergeKeyAsync(), person!.Id);
+
+        foreach (var action in new[] { "team", "workflows", "human" })
+        {
+            Assert.Equal(
+                $"Refused: the report tool's {action} needs a team. A Concierge has no default team.",
+                await tools.Report(action, from: "2035-03-01", to: "2035-04-01", cancellationToken: Ct));
+            Assert.Equal(
+                $"Refused: the report tool's {action}: {TeamGate.NoSuchTeamMessage}",
+                await tools.Report(action, team: "no-such-team-" + Guid.NewGuid().ToString("N"), from: "2035-03-01", to: "2035-04-01", cancellationToken: Ct));
+            Assert.StartsWith("HTTP 200", await tools.Report(action, team: host.Beta, from: "2035-03-01", to: "2035-04-01", cancellationToken: Ct), StringComparison.Ordinal);
         }
     }
 
@@ -341,6 +364,8 @@ public sealed class ReportToolTests(HostFixture host) : IClassFixture<HostFixtur
 
             // The heading names the estimate in its own words and never calls it Spend, Spent or Cost alone.
             Assert.DoesNotMatch(@"\bSpent\b", answer.Heading);
+            Assert.DoesNotMatch(new System.Text.RegularExpressions.Regex(@"\bspen[dt]\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase),
+                answer.Heading.Replace("Actual Spend", "", StringComparison.Ordinal));
             Assert.DoesNotContain("value", answer.Heading, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("ROI", answer.Heading, StringComparison.Ordinal);
             Assert.DoesNotContain("savings", answer.Heading, StringComparison.OrdinalIgnoreCase);
@@ -370,6 +395,41 @@ public sealed class ReportToolTests(HostFixture host) : IClassFixture<HostFixtur
 
         var context = new DefaultHttpContext();
         context.Request.Headers[ApiKeyAuthenticationHandler.Header] = _agentKey;
+        context.User = PrincipalClaims.ToClaimsPrincipal(principal, "test");
+
+        return new PlatformMcpTools(
+            new HttpContextAccessor { HttpContext = context },
+            host.Services.GetRequiredService<IPrincipalStore>(),
+            host.Services.GetRequiredService<AgentCatalog>(),
+            new ServerClients(host.ServerHandler()));
+    }
+
+    private Task<string> ManagerKeyAsync() =>
+        host.Services.GetRequiredService<IPrincipalStore>().MintAsync(
+            new ContainerId(host.Alpha, TeamRegistry.DefaultManagerName).ToString(), PrincipalKind.Container, host.Alpha,
+            TeamRegistry.ManagerPermits, ct: Ct);
+
+    private string? _conciergeKey;
+
+    private async Task<string> ConciergeKeyAsync()
+    {
+        var person = await host.Services.GetRequiredService<IUserStore>().FindAsync("person@example.test", Ct);
+        _conciergeKey ??= await host.Services.GetRequiredService<IPrincipalStore>().MintAsync(
+            ConciergeLaunchFactory.PrincipalId(person!.Id), PrincipalKind.TenantConcierge, null,
+            ConciergeLaunchFactory.ConciergePermits, ownerUserId: person.Id, ct: Ct);
+        return _conciergeKey;
+    }
+
+    /// <summary>The tools as the person's Concierge calls them, its principal made as authentication makes it. Not async:
+    /// the accessor's context is the caller's own, as <see cref="AgentTools"/>'s is.</summary>
+    private PlatformMcpTools ConciergeTools(string key, string personId)
+    {
+        var principal = SpendReading.Apply(
+            new Principal(ConciergeLaunchFactory.PrincipalId(personId), PrincipalKind.TenantConcierge, ConciergeLaunchFactory.ConciergePermits, personId),
+            host.Services.GetRequiredService<TenantSettings>().ReportingAgentsMayReadSpend);
+
+        var context = new DefaultHttpContext();
+        context.Request.Headers[ApiKeyAuthenticationHandler.Header] = key;
         context.User = PrincipalClaims.ToClaimsPrincipal(principal, "test");
 
         return new PlatformMcpTools(

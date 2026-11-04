@@ -207,9 +207,6 @@ function changeRate() {
               :column-title="columnTitle"
               size="large"
             />
-            <div v-if="!isPriced" class="text-caption os-text-muted q-mt-xs" data-cost-no-rate>
-              Set an agent hourly rate in Outcomes to see dollars
-            </div>
           </q-card-section>
 
           <!-- THE BREAKDOWNS ARE THE ACCESSIBLE VIEW: every figure the chart draws, in words, three ways. -->

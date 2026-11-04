@@ -254,6 +254,39 @@ public sealed class ExecutionCostTests
         Assert.Equal(10, total.Billable);
     }
 
+    /// <summary>
+    /// A ZERO-LENGTH RUN is a run: it falls in the period it is in and its tokens count, but it adds no seconds and no
+    /// money - a figure with nothing else priced has no amount, as with no priced run at all, never a made-up figure - and
+    /// a run whose end is before its start (a clock step) adds no time, never negative time. Neither divides by zero:
+    /// with no priced hour there is no weighted rate, and beside a priced hour the rate is that hour's alone.
+    /// </summary>
+    [Fact]
+    public void A_zero_length_run_adds_no_seconds_and_no_money_one_ending_before_it_starts_adds_no_negative_time_and_neither_divides_by_zero()
+    {
+        var zero = Run(Monday.AddHours(5), Monday.AddHours(5), rate: "60");
+        var backwards = Run(Monday.AddHours(6), Monday.AddHours(5), rate: "60");
+
+        Assert.True(zero.Overlaps(Monday, Monday.AddDays(1)));
+        Assert.Equal(0, zero.SecondsIn(null, null));
+        Assert.Equal(0, backwards.SecondsIn(null, null));
+        Assert.Equal((0d, 0m), (backwards.Seconds, backwards.Estimate));
+
+        var alone = ExecutionCost.Total(ExecutionCost.Weeks([zero, backwards], Weeks, Usd), Usd);
+        Assert.Equal(0, alone.AgentSeconds);
+        Assert.Null(alone.Cost);
+        Assert.Null(alone.AgentRate);
+        Assert.Equal(2, alone.MeasuredRuns);
+
+        var beside = ExecutionCost.Total(ExecutionCost.Weeks([zero, backwards, Run(Monday, Monday.AddHours(1), rate: "90")], Weeks, Usd), Usd);
+        Assert.Equal(3600, beside.AgentSeconds, 3);
+        Assert.Equal(90m, beside.Cost);
+        Assert.Equal(90m, beside.AgentRate);
+
+        var costs = ExecutionCost.CostsOf([zero, backwards], Monday, Monday.AddDays(1), Usd);
+        Assert.Null(costs.Of(null));
+        Assert.Null(costs.AgentRateOf(null));
+    }
+
     [Fact]
     public void A_snapshotted_run_serves_the_outcome_its_link_named_at_start_and_a_run_without_one_keeps_the_newest_link()
     {

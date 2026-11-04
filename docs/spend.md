@@ -95,8 +95,9 @@ their answers are unchanged.
 Agents read these figures through the read-only `report` MCP tool
 ([cost.md](cost.md#reporting-the-report-tool)), and write a report from it with the built-in skill
 `outcome-reporting` ([cost.md](cost.md#writing-a-report-the-outcome-reporting-skill)). While the
-setting is off, that report carries Estimated Execution Cost only and says a person must turn the
-setting on; Actual Spend is never filled in from hours or rates. The overview's `estimate` is the tenant's
+setting is off, that report carries Estimated Execution Cost only, says a person must turn the
+setting on, and its file names end `-estimates-only`, so a report with Actual Spend for the same period
+never overwrites it; Actual Spend is never filled in from hours or rates. The overview's `estimate` is the tenant's
 Estimated Execution Cost across every team, as a person sees it. Agents can already read the same
 figures across every team in `GET /api/outcomes`.
 
