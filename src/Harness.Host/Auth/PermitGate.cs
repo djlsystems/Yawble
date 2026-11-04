@@ -117,7 +117,7 @@ public static class PermitGate
         {
             // NAMED. The fix is a configuration change somebody has to find, exactly as with the
             // missing-Agent refusal that names both ways out of itself.
-            await Refuse(context, Missing(required.Permit));
+            await Refuse(context, required.Permit == Permits.Spend ? SpendReading.Refused : Missing(required.Permit));
             return;
         }
 

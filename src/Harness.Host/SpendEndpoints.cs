@@ -7,8 +7,10 @@ namespace Harness.Host;
 
 /// <summary>
 /// The billing accounts and their expenses, tenant-wide, not under a team: a person's to read and write
-/// (<c>HumansOnly</c> on each route; there is no Spend permit, so a machine principal is refused every
-/// one of them, whatever it holds, before a missing id can be told from a real one). There is no
+/// (<c>HumansOnly</c> on each write, whatever a machine principal holds, before a missing id can be told
+/// from a real one). The reads are <c>RequirePermit(Spend)</c>: a person passes as before, and an agent holds
+/// <see cref="Permits.Spend"/> only while a person has turned on <c>reporting.agentsMayReadSpend</c>
+/// (<see cref="Auth.SpendReading"/>). There is no
 /// delete: an account is deactivated, and the table refuses a delete. Expenses have no edit and no
 /// delete either: a correction is a new row (void or replace) that supersedes the old.
 ///
@@ -50,18 +52,18 @@ public static class SpendEndpoints
         app.MapGet("/api/billing-accounts", async (ISpendStore spend, CancellationToken ct) =>
                 Results.Ok(await spend.ListAccountsAsync(ct)))
             .WithTags("Billing")
-            .HumansOnly()
+            .RequirePermit(Permits.Spend)
             .WithSummary("List the billing accounts")
             .WithDescription(
                 "Every billing account, active and deactivated, oldest created first, then by id; an empty "
-                + "list when there is none. " + Answer + " A person's only: no permit lets an agent read one.");
+                + "list when there is none. " + Answer + " A person's, and an agent's while a person has turned on `reporting.agentsMayReadSpend` (the Spend permit); every write stays a person's.");
 
         app.MapGet("/api/billing-accounts/{id}", async (string id, ISpendStore spend, CancellationToken ct) =>
                 await spend.FindAccountAsync(id, ct) is { } account
                     ? Results.Ok(account)
                     : Results.NotFound(new { error = BillingAccountRules.Missing(id) }))
             .WithTags("Billing")
-            .HumansOnly()
+            .RequirePermit(Permits.Spend)
             .WithSummary("One billing account")
             .WithDescription(Answer + " 404, with one sentence, for an id that names no account.");
 
@@ -170,12 +172,12 @@ public static class SpendEndpoints
                 return Results.Ok((await OverviewAsync(period, spend, outcomes, settings, ct)).Overview);
             })
             .WithTags("Billing")
-            .HumansOnly()
+            .RequirePermit(Permits.Spend)
             .WithSummary("Actual Spend, Projected and Estimated Execution Cost for a period")
             .WithDescription(
                 "The Spend page's overview over `?from=YYYY-MM-DD&to=YYYY-MM-DD` (midnight UTC, `to` exclusive), the "
                 + "current UTC month when neither is sent; anything else is refused (400) with one sentence. "
-                + OverviewAnswer + " A person's only: no permit lets an agent read it.");
+                + OverviewAnswer + " A person's, and an agent's while a person has turned on `reporting.agentsMayReadSpend` (the Spend permit); every write stays a person's.");
 
         app.MapGet("/api/spend/linked-members", async (
                 HttpContext context, TeamRegistry teams, TeamAccess access, ITeamStore store, CancellationToken ct) =>
@@ -203,13 +205,13 @@ public static class SpendEndpoints
                 return Results.Ok(linked);
             })
             .WithTags("Billing")
-            .HumansOnly()
+            .RequirePermit(Permits.Spend)
             .WithSummary("The members linked to each billing account")
             .WithDescription(
                 "Every member, on the teams the caller reaches, whose billing account is set: `{ accountId, team, "
                 + "teamName, member, label }`, by account, then team, then label. Read-only: a member's account is "
-                + "set in its settings. An id with no account behind it is listed as it is stored. A person's only: "
-                + "no permit lets an agent read it.");
+                + "set in its settings. An id with no account behind it is listed as it is stored. "
+                + "A person's, and an agent's while a person has turned on `reporting.agentsMayReadSpend` (the Spend permit); every write stays a person's.");
     }
 
     private const string ExportFormat =
@@ -221,7 +223,7 @@ public static class SpendEndpoints
         + "quote before it, so a spreadsheet never runs it; a plain number is written as it is. The period is "
         + "`?from=YYYY-MM-DD&to=YYYY-MM-DD` (midnight UTC, `to` exclusive), the current UTC month when neither is sent, "
         + "as `GET /api/spend/overview` reads it; anything else is refused (400) with one sentence. Currencies are never "
-        + "converted or added together. A person's only: no permit lets an agent read it.";
+        + "converted or added together. A person's, and an agent's while a person has turned on `reporting.agentsMayReadSpend` (the Spend permit); every write stays a person's.";
 
     private static IResult Csv(string file, string csv, (DateTimeOffset From, DateTimeOffset To) period) =>
         Results.File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv; charset=utf-8", SpendExport.FileName(file, period.From, period.To));
@@ -237,7 +239,7 @@ public static class SpendEndpoints
                 return Csv(SpendExport.Accounts, csv, period);
             })
             .WithTags("Billing")
-            .HumansOnly()
+            .RequirePermit(Permits.Spend)
             .WithSummary("Every billing account as CSV")
             .WithDescription(
                 "Every billing account, active and inactive, one row each: `" + string.Join("`, `", SpendExport.AccountColumns) + "`. "
@@ -254,7 +256,7 @@ public static class SpendEndpoints
                 return Csv(SpendExport.Expenses, csv, period);
             })
             .WithTags("Billing")
-            .HumansOnly()
+            .RequirePermit(Permits.Spend)
             .WithSummary("The period's expenses, with every correction, as CSV")
             .WithDescription(
                 "Every expense row of each correction chain with a row whose service period starts in the period - "
@@ -275,7 +277,7 @@ public static class SpendEndpoints
                 return Csv(SpendExport.Summary, csv, period);
             })
             .WithTags("Billing")
-            .HumansOnly()
+            .RequirePermit(Permits.Spend)
             .WithSummary("The period's Actual Spend, Projected and Estimated Execution Cost as CSV")
             .WithDescription(
                 "`GET /api/spend/overview`'s figures for the same period, the same object, one row each: `"
@@ -304,7 +306,7 @@ public static class SpendEndpoints
                 return Csv(SpendExport.Estimates, csv, period);
             })
             .WithTags("Billing")
-            .HumansOnly()
+            .RequirePermit(Permits.Spend)
             .WithSummary("Estimated Execution Cost by team and by outcome as CSV")
             .WithDescription(
                 "Estimated Execution Cost and Agent Hours over the period, from the one pricing path every cost figure uses: "
@@ -364,19 +366,19 @@ public static class SpendEndpoints
         app.MapGet("/api/expenses", async (string? accountId, ISpendStore spend, CancellationToken ct) =>
                 Results.Ok(await spend.ListExpensesAsync(accountId, ct)))
             .WithTags("Billing")
-            .HumansOnly()
+            .RequirePermit(Permits.Spend)
             .WithSummary("List the expenses")
             .WithDescription(
                 "Every expense row, current and superseded, oldest recorded first, then by id; only one "
                 + "account's with `?accountId=`; an empty list when there is none. " + ExpenseAnswer
-                + " A person's only: no permit lets an agent read one.");
+                + " A person's, and an agent's while a person has turned on `reporting.agentsMayReadSpend` (the Spend permit); every write stays a person's.");
 
         app.MapGet("/api/expenses/{id}", async (string id, ISpendStore spend, CancellationToken ct) =>
                 await spend.FindExpenseAsync(id, ct) is { } expense
                     ? Results.Ok(expense)
                     : Results.NotFound(new { error = ExpenseRules.Missing(id) }))
             .WithTags("Billing")
-            .HumansOnly()
+            .RequirePermit(Permits.Spend)
             .WithSummary("One expense")
             .WithDescription(ExpenseAnswer + " 404, with one sentence, for an id that names no expense.");
 

@@ -638,17 +638,97 @@ list's period, the list's rows and its Where it goes tile take each outcome's ra
 served in that period instead of the eight weeks, by the same order; so do the team page's tile and
 its dialog, ranked among the outcomes served by the teams the caller reaches, as on the list.
 
+## Reporting: the `report` tool
+
+Agents read cost figures for a report through `report`, a read-only MCP tool on the harness server
+(`src/Harness.Host/PlatformMcpReportTools.cs`).
+
+- **One route per action, unchanged.** Each action sends one GET that a screen makes, with the
+  caller's own credential. It answers `HTTP <status>`, then one heading line in the product's
+  words, then the route's own JSON byte for byte. So every figure is the route's, priced by
+  `ExecutionCost` and nothing else.
+- **The same reach as the screens.** The team gate bounds the tool as it bounds the route: a
+  member reaches only its own team, and another team's figures are refused with the route's
+  sentence.
+- **Period.** `from` and `to` are `YYYY-MM-DD`, UTC, with `to` exclusive. With neither, every action
+  reads the current UTC month. `bucket` is `day` or `month` for `teams` and `team`.
+
+| Action | Route | What it gives |
+|---|---|---|
+| `teams` | `GET /api/teams/cost/period` | Estimated Execution Cost and Agent Hours for each team the caller reaches: the Teams list's rows |
+| `team` | `GET /api/teams/{team}/cost/period` | One team's period, by outcome (Unattributed), by member (agent and plugin apart; `unpriced` `not-priced` or `unavailable`) and by workflow: the team page's tile and dialog |
+| `workflows` | `GET /api/teams/{team}/cost/workflows` | Each workflow's Agent Hours and Estimated Execution Cost, all time |
+| `outcomes` | `GET /api/outcomes?from=&to=` | Estimate, Agent Hours, Human Interventions and Human Attention Time by outcome and Unattributed, across every team |
+| `human` | `GET /api/teams/{team}/cost` | A team's Human Interventions and Human Attention Time over its last eight weeks (the period is not read) |
+| `spend` | `GET /api/spend/overview` | Actual Spend and Projected for the period, per currency, with the sentence that the two measurements need not reconcile. Needs `Spend` |
+| `accounts` | `GET /api/billing-accounts` | The billing accounts. Needs `Spend` |
+
+- **Words.** The estimate actions' heading names Estimated Execution Cost and Agent Hours, and says
+  the figure is an estimate and never Actual Spend. It says that `cost` null is Estimate
+  unavailable, never 0, that `legacyRates` names a reconstructed or fallback-at-upgrade rate, and
+  that money is never converted. No estimate field the tool answers is named `spend`.
+- **Actual Spend needs the permit.** Without the `Spend` permit, `spend` and `accounts` are
+  refused with the one sentence in [spend.md](spend.md#who-may-read-it-and-who-may-write). Nothing
+  in the tool writes.
+- **Not in the tool.** There is no scheduled delivery, no figure from another instance, and no PDF
+  or mail. Writing a report from the tool is the `outcome-reporting` skill's
+  ([below](#writing-a-report-the-outcome-reporting-skill)).
+- **Tests.** Pinned by `ReportToolTests` and `SpendReadingRuleTests` in
+  `tests/Harness.Tests/Host/ReportToolTests.cs`, and
+  `RouteMarkerTests.Exactly_the_Actual_Spend_reads_require_the_Spend_permit_and_every_spend_write_stays_humans_only`.
+
+## Writing a report: the `outcome-reporting` skill
+
+The built-in skill `outcome-reporting` (`src/Harness.Host/BuiltInSkills.cs`) teaches an agent to
+write a report on a team, an outcome or a period from the `report` tool and nothing else. It is
+offered to the Manager and to members. A member writes the report; the Manager dispatches it and
+checks the hand-back against the skill. The Concierge is not offered it: it has no shared folder,
+and its own skill already sends a report to a team.
+
+- **Copy, never compute.** Every figure is one the tool answered: a total is the answer's own
+  `total` or `totals`, a rate its `agentRate`. The one conversion is Agent Hours from
+  `agentSeconds` (one decimal under 100 hours, as the screens write it). Actual Spend is never
+  inferred from hours or rates. No currencies are added or converted. Estimated Execution Cost and
+  Actual Spend never share one figure, row, column or total.
+- **The words.** The terms of this page and [spend.md](spend.md), with these rules:
+  - `cost` null is Estimate unavailable;
+  - `legacyRates` is carried as a footnote, and a plugin member's `unpriced` as Not priced or
+    Estimate unavailable;
+  - an outcome's stored value is never treated as a budget;
+  - the Spend page's sentence goes wherever both measurements appear.
+- **Actual Spend only when allowed.** When `spend` is refused, the report carries the estimates
+  only, with a line saying a person must turn on **Let agents read Actual Spend for reports**.
+- **Files.** Markdown, HTML (self-contained, no script) and CSV, written to the team's shared
+  folder. The CSV files are one per measurement: `<name>-estimated-execution-cost.csv` and, only
+  when `spend` answered, `<name>-actual-spend.csv`.
+- **What it cannot make or send.**
+  - The platform writes no PDF and no XLSX. CSV is the spreadsheet, and the HTML prints to PDF
+    from a browser. A PDF is made only by a plugin member whose own skill says it makes one.
+  - Mail goes only through a mail plugin member a person has set up on the team; without one,
+    the report says it was not sent.
+  - A recurring report runs from a trigger a person sets. There is no report scheduler.
+- **Tests.** Pinned by `OutcomeReportingSkillTests` in
+  `tests/Harness.Tests/Host/OutcomeReportingSkillTests.cs`:
+  - the roles;
+  - the actions it names against `PlatformMcpTools.ReportActions`;
+  - the words, and that no estimate is called spend;
+  - copying, never computing;
+  - estimates only when Actual Spend is refused;
+  - the files and limits.
+
+  The general built-in skill rules hold too: `McpContractTests.Built_in_skills_send_agents_to_mcp_tools_not_the_http_api`.
+
 ## Routes
 
 | Route | Answers |
 |---|---|
 | `GET /api/teams/{team}/cost` | One team: `money` (`currency`, and `agentHourlyRate`, the tenant default as set now), the eight `weeks`, and per outcome (`id` null for Unattributed) its `weekly` figures, `totals`, `value` (its stored value, no screen reads it), `outcomeTotalCost` (its estimate across all teams and all time) and `rank` (its place in the order shared by every team, which picks its colour; null for Unattributed), and `human` (its Human Interventions and Human Attention Time); then the team's `totals`, and its `human` with `unattributed` and `waitingSeconds` (Waiting on a person). `totals` carry `agentSeconds` (agent time only), `cost` (every priced run) and `agentRate` (the priced agent time's rate). `cost` is null, never 0, when no run was priced. Every `cost` is the estimate, never money paid. |
-| `GET /api/billing-accounts`, `GET /api/billing-accounts/{id}` | Every billing account, active and deactivated, oldest first (an empty list on a fresh instance), or one; 404 for an id that names none. Each has `id`, `name`, `vendor`, `billingType`, `currency`, `billingPeriod`, `recurringAmount`, `effectiveFrom`, `effectiveTo`, `active`, `description`, `scope` (`tenant`), `instanceId`, `createdBy`, `createdAt` and `updatedAt`. People only. |
+| `GET /api/billing-accounts`, `GET /api/billing-accounts/{id}` | Every billing account, active and deactivated, oldest first (an empty list on a fresh instance), or one; 404 for an id that names none. Each has `id`, `name`, `vendor`, `billingType`, `currency`, `billingPeriod`, `recurringAmount`, `effectiveFrom`, `effectiveTo`, `active`, `description`, `scope` (`tenant`), `instanceId`, `createdBy`, `createdAt` and `updatedAt`. People, and agents holding `Spend`. |
 | `POST /api/billing-accounts`, `POST /api/billing-accounts/{id}`, `.../deactivate`, `.../reactivate` | Create an account, edit the fields sent (null clears only `description`, `effectiveTo` and `recurringAmount`), and turn `active` off or on. People only; there is no delete. |
-| `GET /api/expenses`, `GET /api/expenses/{id}` | Every expense row, current and superseded, oldest recorded first (`?accountId=` for one account's; an empty list on a fresh instance), or one; 404 for an id that names none. Each has `id`, `accountId`, `amount`, `currency`, `servicePeriodStart`, `servicePeriodEnd` (exclusive), `kind`, `status` (`confirmed` or `void`), `supersedes`, `reference`, `note`, `recordedBy`, `recordedAt`, `supersededBy` and `current`. People only. |
+| `GET /api/expenses`, `GET /api/expenses/{id}` | Every expense row, current and superseded, oldest recorded first (`?accountId=` for one account's; an empty list on a fresh instance), or one; 404 for an id that names none. Each has `id`, `accountId`, `amount`, `currency`, `servicePeriodStart`, `servicePeriodEnd` (exclusive), `kind`, `status` (`confirmed` or `void`), `supersedes`, `reference`, `note`, `recordedBy`, `recordedAt`, `supersededBy` and `current`. People, and agents holding `Spend`. |
 | `POST /api/expenses`, `POST /api/expenses/{id}/void`, `POST /api/expenses/{id}/replace` | Record a confirmed expense; void one (an optional `note`); replace one with the fields sent over the old row's, on the same account. Each answers the new row. People only; there is no edit and no delete. |
-| `GET /api/spend/overview`, `GET /api/spend/linked-members` | The Spend page's reads: Actual Spend, Projected, fixed vs variable, Estimated Execution Cost · Agent Hours and the monthly trend for a period, and the members linked to each billing account. See [spend.md](spend.md#routes). People only. |
-| `GET /api/spend/export/billing-accounts`, `.../expenses`, `.../period-summary`, `.../estimated-execution-cost` | The Spend page's CSV files for a period (`?from=&to=`, the overview's period rule): every billing account; every expense row of the period with its correction chain and whether it counts in Actual Spend; the overview's figures one row each; and Estimated Execution Cost with Agent Hours by team and by outcome (Unattributed included), one row per `rate_source`, agent and plugin apart. Stable snake_case columns, `instance_id` on every row, per currency and never converted, formula cells neutralised. See [spend.md](spend.md#csv-export). People only. |
+| `GET /api/spend/overview`, `GET /api/spend/linked-members` | The Spend page's reads: Actual Spend, Projected, fixed vs variable, Estimated Execution Cost · Agent Hours and the monthly trend for a period, and the members linked to each billing account. See [spend.md](spend.md#routes). People, and agents holding `Spend`. |
+| `GET /api/spend/export/billing-accounts`, `.../expenses`, `.../period-summary`, `.../estimated-execution-cost` | The Spend page's CSV files for a period (`?from=&to=`, the overview's period rule): every billing account; every expense row of the period with its correction chain and whether it counts in Actual Spend; the overview's figures one row each; and Estimated Execution Cost with Agent Hours by team and by outcome (Unattributed included), one row per `rate_source`, agent and plugin apart. Stable snake_case columns, `instance_id` on every row, per currency and never converted, formula cells neutralised. See [spend.md](spend.md#csv-export). People, and agents holding `Spend`. |
 | `GET /api/teams/cost` | The same for every team at once (`money`, `weeks`, `teams[]`), for the Teams list. Each entry and each team also carry `human` (above). |
 | `GET /api/teams/cost/period` | The Teams list's period (`?from=&to=` as `YYYY-MM-DD`, midnight UTC, `to` exclusive, the previous and current UTC month when neither is sent; `?bucket=day` (the default) or `month`; at most 366 days by day or 60 months by month; anything else is refused, 400, with one sentence): `money`, `period` (`from`, `to`, `bucket`), `buckets` (each bucket's first day), and per reachable team `totals` (`agentSeconds`, `cost`, `agentRate`, `legacyRates`) over the whole period, `buckets` (`start`, `agentSeconds`, `cost`) and `outcomes` (Unattributed first, each with `rank`, `totals` and `buckets`); the reached teams' `total`, `totalBuckets` and `prior` (the same length just before); and `outcomes` as the summary gives them. Every figure is `ExecutionCost`'s, one tally per span, `cost` null - never 0 - when nothing was priced. The same permit as the other cost reads. |
 | `GET /api/teams/{team}/cost/period` | One team over the same period (`?from=&to=&bucket=`, read and refused exactly as `GET /api/teams/cost/period`; 404 for an unknown team, the team gate for a machine principal): `team`, `money`, `period`, `buckets`; `totals` - the team's entry of `GET /api/teams/cost/period` for that period, byte for byte - with `billable`, `measuredRuns`, `unmeasuredRuns` (tokens of runs that ended in the period), `executions` and `activeMembers`; `totalBuckets` (the entry's `buckets`); `outcomes` (the entry's, each with `value`, `outcomeTotalCost` and `figures`); `members` (agent members first, then plugin members, by name: `member`, `kind`, `figures`; a plugin member with no money in the period also has `unpriced` - `not-priced` when a run started with no rate of its own, `unavailable` when every run is from before snapshots - and no other entry has it) and `workflows` (newest first: `workflow`, `figures`). Each `figures` is `agentSeconds`, `cost`, `agentRate`, `legacyRates`, `executions`, `billable`, `measuredRuns`, `unmeasuredRuns`. Each breakdown adds up to `totals` exactly. The same permit as the other cost reads. |

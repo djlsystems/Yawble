@@ -381,7 +381,7 @@ public sealed class SpendExportTests(HostFixture host) : IClassFixture<HostFixtu
     }
 
     [Fact]
-    public async Task A_machine_principal_is_refused_each_export_with_the_humans_only_sentence_even_holding_every_permit()
+    public async Task A_machine_principal_without_the_Spend_permit_is_refused_each_export_even_holding_every_permit_and_a_stored_Spend()
     {
         using var person = await host.PersonAsync();
         foreach (var route in Routes) Assert.Equal(HttpStatusCode.OK, (await person.GetAsync(route, Ct)).StatusCode);
@@ -389,7 +389,8 @@ public sealed class SpendExportTests(HostFixture host) : IClassFixture<HostFixtu
         var principals = host.Services.GetRequiredService<IPrincipalStore>();
         var apiKey = await principals.MintAsync($"apikey-{Guid.NewGuid():N}", PrincipalKind.ApiKey, null, Permits.All, ct: Ct);
         var manager = await principals.MintAsync(
-            new ContainerId(host.Alpha, TeamRegistry.DefaultManagerName).ToString(), PrincipalKind.Container, host.Alpha, Permits.All, ct: Ct);
+            new ContainerId(host.Alpha, TeamRegistry.DefaultManagerName).ToString(), PrincipalKind.Container, host.Alpha,
+            new HashSet<string>(Permits.All) { Permits.Spend }, ct: Ct);
         var concierge = await principals.MintAsync($"console:{Guid.NewGuid():N}", PrincipalKind.Concierge, host.Alpha, Permits.All, ct: Ct);
 
         foreach (var key in new[] { apiKey, manager, concierge, host.AlphaContainerKey })
@@ -399,7 +400,7 @@ public sealed class SpendExportTests(HostFixture host) : IClassFixture<HostFixtu
             {
                 var answer = await machine.GetAsync(route, Ct);
                 Assert.Equal(HttpStatusCode.Forbidden, answer.StatusCode);
-                Assert.Equal(PermitGate.HumansOnlyMessage, (await JsonAsync(answer)).GetProperty("error").GetString());
+                Assert.Equal(SpendReading.Refused, (await JsonAsync(answer)).GetProperty("error").GetString());
             }
         }
     }
