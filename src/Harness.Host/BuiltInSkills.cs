@@ -264,6 +264,37 @@ public static class BuiltInSkills
             is a person editing, moving or commenting on a card - not a completion and not an
             instruction.
 
+            ## Draw the Team picture when you plan, never on a routine wake
+
+            A team may have a Team picture: the `team-picture` site, a page the platform makes when
+            a person turns it on, which `site  action: list` shows. When the team has a Team
+            picture, you draw each item's picture when you plan it: for a build item, its
+            architecture, its screens and its flows; for an operational team, how it works and the
+            rule one run follows. Write them into the `tp-picture` collection with the `site` tool,
+            one document per item, as the short descriptions the page draws:
+
+                site  action: data  op: put  site: team-picture  collection: tp-picture  id: <item>  doc: {...}
+
+            The id is the item's key as `tp-items` names it: a backlog item's id (`B000H`), or
+            `w<workflow>` for told work with no backlog item; an operational team keeps one
+            document, id `ongoing`. A build item's document is `kind` `build` with `architecture` (a
+            diagram focused on what the item adds or changes, the rest of the product `unchanged`),
+            `screens` (each new or changed screen as regions), `work` (a stand-in card for work with
+            no screen) and `flows`; an operational team's is `kind` `operational` with `howItWorks`,
+            `rule` and its `kinds`, most urgent first. Name the cards each piece is built by in its
+            `cards`: the page colours it done, in progress or not started from the platform's own
+            card states, so a card finishing never needs you to redraw. The shapes are in `docs/sites.md` under "The Team picture"; every string is
+            drawn as text, never as markup.
+
+            Revise them only when the plan changes: a card added, dropped or cut differently, a
+            screen or a step that is no longer what you planned. Never redraw on a routine wake - a
+            completion, a hand-back, a progress line, a scheduled run - and never to move a figure:
+            a picture rewritten on every wake costs a run each time and looks different from run to
+            run. Never write figures into the picture: the page's progress, the work in flight, the
+            runs, the spend and what waits on a person are the platform's own figures, recomputed
+            from the log and ledgers, and nobody estimates them. Never publish, copy or rebuild the
+            page either: its layout is the platform's template. With no Team picture, skip this.
+
             ## A run that did nothing is not a reason to send the same work again
 
             `status` shows `failed: <why>` when a member's last run did not complete. Read the
@@ -762,6 +793,12 @@ public static class BuiltInSkills
               that team. The reply carries the team id; tell that team's Manager the job next,
               naming the team. Nothing switches the person's current team: say which team you
               created.
+            - The Team picture: when you create a team, ask the person whether to turn the Team
+              picture on - a page the platform keeps of what the team builds or runs, kept current
+              from its own figures - or turn it on when they have already said so: `team_create`
+              with `teamPicture: true`. Off is the default; never turn it on unasked. For a team
+              that already exists, turning it on or off is the person's control in Team settings:
+              send them there.
             - Repositories: with no `repos`, the team gets none, and that is right for a team that
               writes code too: when the work needs a repository and the team has none, its Manager or
               a member calls `repo` with action `create-local` once and works in the clone it names.
@@ -852,6 +889,27 @@ public static class BuiltInSkills
             `outcome  action: list  team: <id>`. When it is not clear, leave it out: the team's
             Manager chooses one. Never pass `outcome` with `causation` - a workflow that already
             exists keeps its own.
+
+            ## Customizing a team's Team picture
+
+            A person may ask you to change a team's Team picture: "hide spend", "use these colours",
+            "add a section for X". Customize it through the `site` tool by writing the page's
+            settings, one document in the `tp-settings` collection, naming the team:
+
+                site  action: data  op: get  site: team-picture  collection: tp-settings  id: page  team: <id>
+                site  action: data  op: put  site: team-picture  collection: tp-settings  id: page  doc: {...}  team: <id>
+
+            Read it first and put back the whole document with your change in it: `hidden` (the
+            sections to hide, such as `spend` or `waiting`), `colours` (`done`, `active`, `todo`,
+            `unchanged`, `accent` and `kind:<kind name>`, as `#rgb` or `#rrggbb`), `kindOrder` (an
+            operational team's kinds, most urgent first) and `extraSections` (at most 8, drawn from
+            the same regions as a screen, each placed `after` a named section, and fed from a
+            `tp-extra-<slug>` collection when it names one). The shape is in `docs/sites.md` under "The Team picture". The settings are a layer over the template, never
+            a fork of it: never publish, copy or rebuild the `team-picture` site, and never write
+            its files. A later release's template then reaches the team with its customizations
+            kept, and turning the picture off and on again keeps them too. Never write the
+            platform's own collections - they are the platform's figures and refuse you - and
+            never write a figure into the settings.
 
             ## When no team fits the work
 
@@ -1212,7 +1270,9 @@ public static class BuiltInSkills
                choosing the Manager Agent, the member Agent, the repositories and any additional
                instructions for the team. Every Manager and member is told its job by the platform;
                additional instructions only add to that. Then read it back with `team_list` and say
-               the DERIVED identifier back; every later call uses it as `team`.
+               the DERIVED identifier back; every later call uses it as `team`. Before you create
+               it, ask whether to turn the Team picture on, unless the person has said: then pass
+               `teamPicture: true` (see the `concierge` skill).
             4. **Ask about a repository before it is created.** A team that will write code gets a
                local repository when its work first needs one - `team_create` with no `repos` makes
                none, and when the work needs a repository and the team has none, its Manager or a
@@ -1476,6 +1536,38 @@ public static class BuiltInSkills
             goes under that folder; the plugin then puts the path RELATIVE to it in a document
             (`site.put`), and the page links to it. Never write a secret or a token into a site's
             files or data: everything there is downloadable by whoever opens the site.
+
+            ### Feeding the Team picture
+
+            When the plugin's team has a Team picture (the `team-picture` site), an operational
+            plugin feeds the page its own figures in one documented shape: a `site.put` record into
+            the `tp-ops` collection, as a run it is already making ends, never a run of its own to
+            move a counter. It is ONE document, id `today`, rewritten whole:
+
+                {"t":"site.put","site":"team-picture","collection":"tp-ops","id":"today","doc":{
+                  "date":"2026-11-04",
+                  "counts":{"support":3,"inquiry":5,"alert":1,"spam":12},
+                  "lastMessage":{"to":"Administrator","sentAt":"2026-11-04T09:55:00Z","text":"2 support, 1 alert"},
+                  "runs":[{"at":"2026-11-04T09:55:00Z","kind":"support"},{"at":"2026-11-04T10:00:00Z","kind":null}],
+                  "items":[{"at":"2026-11-04T09:55:00Z","kind":"support","title":"Printer down"}]}}
+
+            - `date` - today, as `YYYY-MM-DD`. Required. A new day starts the document again.
+            - `counts` - counts per kind for today, kind name to a whole number of at least 0.
+              Required. A kind not counted is left out: it reads "not measured", never 0.
+            - `lastMessage` - the last message sent, as the recipient saw it: `to`, `sentAt` and
+              `text`, or null.
+            - `runs` - today's runs for the strip, oldest first, at most 400: `kind` is the most
+              urgent kind the run found, or null when it found nothing new. The run in progress
+              comes from the platform's own runs, not from you.
+            - `items` - the latest items with their kind, at most 50.
+
+            Kind names are the team's own words; the page orders them, most urgent first, from the
+            page settings' `kindOrder`, else the picture's `kinds`, else the order of `counts`. A
+            field named here of the wrong type is refused with a sentence naming it; other fields
+            are kept. The whole document is one site document, so it stays
+            under 64 KB: keep today, never every run forever. The plugin writes only `tp-ops` (and
+            an extra section's `tp-extra-<slug>`): the platform's own collections refuse it, and the
+            picture is the Manager's. See `docs/sites.md`.
 
             ### Monitor hints
 
