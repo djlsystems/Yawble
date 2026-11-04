@@ -24,11 +24,37 @@ import {
 export interface TerminalDisplay {
   fontFamily: string;
   fontSize: number;
+  textColour: TerminalTextColour;
   maximised: boolean;
   width: number;
   height: number;
   left: number;
   top: number;
+}
+
+/**
+ * The terminal's default text and background, as a choice. Only the DEFAULT colours change: a
+ * colour the agent's CLI sets itself (its links, its hints, its diffs) is drawn as the CLI asks.
+ * `bright` is xterm's own default (white on black), kept as the default because the CLIs are drawn
+ * against it; `soft` is Windows Terminal's default scheme (Campbell), so the panel reads like a
+ * terminal on this computer; `dim` is greyer still. The app's themes never change these.
+ */
+export const TerminalTextColours = {
+  bright: { label: 'Bright (white on black)', foreground: '#ffffff', background: '#000000' },
+  soft: { label: 'Soft (like Windows Terminal)', foreground: '#cccccc', background: '#0c0c0c' },
+  dim: { label: 'Dim', foreground: '#a0a0a0', background: '#0c0c0c' },
+} as const;
+
+export type TerminalTextColour = keyof typeof TerminalTextColours;
+
+function isTerminalTextColour(value: unknown): value is TerminalTextColour {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(TerminalTextColours, value);
+}
+
+/** The xterm theme for a choice: its default foreground and background, nothing else. */
+export function terminalTheme(colour: TerminalTextColour): { foreground: string; background: string } {
+  const { foreground, background } = TerminalTextColours[colour];
+  return { foreground, background };
 }
 
 export const FontSizeBounds = { min: 10, max: 22 } as const;
@@ -42,6 +68,7 @@ export const WindowHeightBounds = { min: 280, max: 1080 } as const;
 export const DefaultTerminalDisplay: TerminalDisplay = {
   fontFamily: '"Cascadia Mono", Consolas, monospace',
   fontSize: 13,
+  textColour: 'bright',
   maximised: false,
   width: 960,
   height: 560,
@@ -73,6 +100,7 @@ export function clampTerminalDisplay(partial: Partial<TerminalDisplay>): Termina
   return {
     fontFamily,
     fontSize: clampNumber(partial.fontSize, FontSizeBounds, DefaultTerminalDisplay.fontSize),
+    textColour: isTerminalTextColour(partial.textColour) ? partial.textColour : DefaultTerminalDisplay.textColour,
     maximised: typeof partial.maximised === 'boolean' ? partial.maximised : DefaultTerminalDisplay.maximised,
     ...clampGeometry(partial, TerminalWindowBounds, DefaultTerminalDisplay),
   };

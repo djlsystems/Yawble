@@ -48,6 +48,7 @@ import { useConsoleStore } from '../stores/console';
 import { useConciergeAskStore } from '../stores/conciergeAsk';
 import { useSessionStore } from '../stores/session';
 import { useTerminalDisplayStore } from '../stores/terminalDisplay';
+import { terminalTheme } from '../lib/terminalDisplay';
 import { useWindowFrame } from '../lib/useWindowFrame';
 import { agentsForMode, asTeamId, type ConciergeMcpTools, type ConciergeSettings, type TeamId } from '../api/types';
 
@@ -796,11 +797,13 @@ async function attach() {
   const fontFamily = display.fontFamily;
   const fontSize = display.fontSize;
 
-  // NO THEME, and no repaint when the console's theme changes. The agent's CLI draws for a
-  // terminal's default palette, so xterm's own colours are the ones it was designed against.
+  // NO APP THEME, and no repaint when the console's theme changes. The agent's CLI draws for a
+  // terminal's default palette, so only the default text and background are this browser's choice
+  // (`textColour`, `lib/terminalDisplay`); the 16 ANSI colours stay xterm's own.
   terminal = new Terminal({
     fontFamily,
     fontSize,
+    theme: terminalTheme(display.textColour),
   });
 
   fit = new FitAddon();
@@ -1128,6 +1131,14 @@ watch([() => display.fontFamily, () => display.fontSize], () => {
   scheduleRefit();
 });
 
+// The text colour applies live too; it changes no cell size, so nothing refits.
+watch(
+  () => display.textColour,
+  (colour) => {
+    if (terminal) terminal.options.theme = terminalTheme(colour);
+  },
+);
+
 onBeforeUnmount(() => {
   document.body.style.overflow = '';
   document.removeEventListener('keydown', onKeydown);
@@ -1400,7 +1411,7 @@ onBeforeUnmount(() => {
         <span class="col">{{ asks.notice }}</span>
         <q-btn flat dense round size="sm" icon="close" aria-label="Dismiss" @click="asks.notice = null" />
       </div>
-      <div ref="host" class="col concierge-host" />
+      <div ref="host" class="col concierge-host" :style="{ background: terminalTheme(display.textColour).background }" />
 
       <!-- Resize handles: only when windowed. Edges and corner grips. -->
       <div
@@ -1597,7 +1608,8 @@ onBeforeUnmount(() => {
   min-height: 0; /* load-bearing: a flex child defaults to min-height auto and refuses to shrink */
   padding: 8px;
 
-  /* xterm's own default background, so the 8px of padding around the canvas matches it. */
+  /* xterm's own default background, so the 8px of padding around the canvas matches it. The
+     element's style binding replaces it with the chosen text colour's background. */
   background: #000;
   overflow: hidden;
 

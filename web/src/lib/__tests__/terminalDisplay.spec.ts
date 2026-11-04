@@ -4,6 +4,7 @@ import {
   DefaultTerminalDisplay,
   FontSizeBounds,
   readTerminalDisplay,
+  terminalTheme,
   WindowWidthBounds,
   WindowHeightBounds,
   writeTerminalDisplay,
@@ -69,6 +70,21 @@ describe('clampTerminalDisplay', () => {
       '"IBM Plex Mono", Consolas, monospace'
     );
     expect(clampTerminalDisplay({ fontFamily: 'bad-font' }).fontFamily).toBe(DefaultTerminalDisplay.fontFamily);
+  });
+
+  it('accepts only a known text colour, bright by default', () => {
+    expect(DefaultTerminalDisplay.textColour).toBe('bright');
+    expect(clampTerminalDisplay({ textColour: 'soft' }).textColour).toBe('soft');
+    expect(clampTerminalDisplay({ textColour: 'dim' }).textColour).toBe('dim');
+    expect(clampTerminalDisplay({ textColour: 'neon' as any }).textColour).toBe('bright');
+    expect(clampTerminalDisplay({ textColour: 'toString' as any }).textColour).toBe('bright');
+    expect(clampTerminalDisplay({}).textColour).toBe('bright');
+  });
+
+  it('gives xterm the default text and background only', () => {
+    expect(terminalTheme('bright')).toEqual({ foreground: '#ffffff', background: '#000000' });
+    expect(terminalTheme('soft')).toEqual({ foreground: '#cccccc', background: '#0c0c0c' });
+    expect(terminalTheme('dim')).toEqual({ foreground: '#a0a0a0', background: '#0c0c0c' });
   });
 
   it('treats maximised as a boolean', () => {

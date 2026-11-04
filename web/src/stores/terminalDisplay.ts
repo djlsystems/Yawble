@@ -34,6 +34,7 @@ export const useTerminalDisplayStore = defineStore('terminalDisplay', {
       const next = clampTerminalDisplay({
         fontFamily: this.fontFamily,
         fontSize: this.fontSize,
+        textColour: this.textColour,
         maximised: this.maximised,
         width: this.width,
         height: this.height,
@@ -44,6 +45,7 @@ export const useTerminalDisplayStore = defineStore('terminalDisplay', {
 
       this.fontFamily = next.fontFamily;
       this.fontSize = next.fontSize;
+      this.textColour = next.textColour;
       this.maximised = next.maximised;
       this.width = next.width;
       this.height = next.height;
@@ -61,6 +63,7 @@ export const useTerminalDisplayStore = defineStore('terminalDisplay', {
         {
           fontFamily: this.fontFamily,
           fontSize: this.fontSize,
+        textColour: this.textColour,
           maximised: this.maximised,
           width: this.width,
           height: this.height,
@@ -73,6 +76,7 @@ export const useTerminalDisplayStore = defineStore('terminalDisplay', {
 
       this.fontFamily = next.fontFamily;
       this.fontSize = next.fontSize;
+      this.textColour = next.textColour;
       this.maximised = next.maximised;
       this.width = next.width;
       this.height = next.height;
@@ -100,6 +104,7 @@ export const useTerminalDisplayStore = defineStore('terminalDisplay', {
       const current = {
         fontFamily: this.fontFamily,
         fontSize: this.fontSize,
+        textColour: this.textColour,
         maximised: this.maximised,
         width: this.width,
         height: this.height,

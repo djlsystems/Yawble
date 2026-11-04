@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { TerminalTextColours, type TerminalTextColour } from '../lib/terminalDisplay';
 import { useTerminalDisplayStore } from '../stores/terminalDisplay';
+import FieldHelp from './FieldHelp.vue';
 
 /**
- * THIS BROWSER'S CONCIERGE DISPLAY - font family and size, saved locally and applied live, with no
+ * THIS BROWSER'S CONCIERGE DISPLAY - font family, size and text colour, saved locally and applied live, with no
  * Save. It sits on Admin > Settings > Concierge beside the instance's Agent and Prompt, and says it
  * is this browser's own because everything else on that dialog is shared.
  */
@@ -14,6 +16,11 @@ const fontFamilyOptions = [
   'Consolas, monospace',
   'ui-monospace, monospace',
 ];
+
+const textColourOptions = (Object.keys(TerminalTextColours) as TerminalTextColour[]).map((value) => ({
+  value,
+  label: TerminalTextColours[value].label,
+}));
 </script>
 
 <template>
@@ -35,6 +42,28 @@ const fontFamilyOptions = [
     >
       <template #prepend>
         <q-icon name="format_size" />
+      </template>
+    </q-select>
+
+    <q-select
+      :model-value="display.textColour"
+      :options="textColourOptions"
+      emit-value
+      map-options
+      outlined
+      dense
+      label="Text colour"
+      data-test="terminal-text-colour"
+      popup-content-class="concierge-settings"
+      @update:model-value="(val) => val && display.set({ textColour: val })"
+    >
+      <template #prepend>
+        <q-icon name="contrast" />
+      </template>
+      <template #append>
+        <FieldHelp
+          text="The terminal's default text and background. Colours the agent sets itself (links, hints, diffs) are drawn as it asks."
+        />
       </template>
     </q-select>
 

@@ -68,6 +68,8 @@ import { useConsoleStore } from '../../stores/console';
 import { useSessionStore } from '../../stores/session';
 import type { Team, TeamId } from '../../api/types';
 import { resetBody } from '../../test/mountQuasar';
+import { terminalTheme } from '../../lib/terminalDisplay';
+import { useTerminalDisplayStore } from '../../stores/terminalDisplay';
 
 function giveTheDomALayout(): void {
   for (const property of ['clientWidth', 'offsetWidth'] as const) {
@@ -268,7 +270,8 @@ describe('the theme, from the account menu', () => {
 
   /**
    * THE CONCIERGE TERMINAL KEEPS THE AGENT'S OWN COLOURS. The agent's CLI draws for a terminal's
-   * default palette, so the panel hands xterm no theme and does not repaint it on a toggle.
+   * default palette, so the panel hands xterm only this browser's text colour choice (bright by
+   * default: xterm's own white on black) and does not repaint it on a theme toggle.
    */
   it('leaves the Concierge terminal in the agent\'s own colours, through a toggle', async () => {
     const wrapper = await mountShell();
@@ -279,13 +282,31 @@ describe('the theme, from the account menu', () => {
 
     expect(document.querySelector('.xterm'), 'the terminal never attached').not.toBeNull();
     expect(terminals, 'the panel built no terminal').toHaveLength(1);
-    expect(terminals[0]!.built.theme, 'the panel handed xterm a theme').toBeUndefined();
+    expect(terminals[0]!.built.theme, 'the panel handed xterm more than its text colour').toEqual(terminalTheme('bright'));
 
     const before = JSON.stringify(terminals[0]!.options.theme ?? {});
 
     await choose(wrapper, 'dark');
 
     expect(JSON.stringify(terminals[0]!.options.theme ?? {})).toBe(before);
+
+    wrapper.unmount();
+  });
+
+  it('repaints the open terminal in the text colour this browser picks, at once', async () => {
+    const wrapper = await mountShell();
+
+    await wrapper.find('.concierge-fab').trigger('click');
+    await flushPromises();
+    await flushPromises();
+
+    expect(terminals, 'the panel built no terminal').toHaveLength(1);
+
+    useTerminalDisplayStore().set({ textColour: 'soft' });
+    await flushPromises();
+
+    expect(terminals[0]!.options.theme).toEqual(terminalTheme('soft'));
+    expect((document.querySelector('.concierge-host') as HTMLElement).style.background).toBe(terminalTheme('soft').background);
 
     wrapper.unmount();
   });

@@ -39,9 +39,16 @@ const pending = new Set(['lib/kanban.ts', 'components/ConciergePanel.vue', 'comp
  */
 const presetData = new Set(['lib/appearance.ts']);
 
+/**
+ * THE CONCIERGE TERMINAL'S OWN TEXT COLOURS: the default foreground and background a person picks
+ * for this browser's terminal (bright is xterm's own, soft is Windows Terminal's). Like the panel's
+ * literals they are the terminal's, never the app theme's, and no theme reaches them.
+ */
+const terminalColours = new Set(['lib/terminalDisplay.ts']);
+
 describe('no literal colours outside the theme', () => {
   for (const { name, text } of sources) {
-    if (pending.has(name) || presetData.has(name)) continue;
+    if (pending.has(name) || presetData.has(name) || terminalColours.has(name)) continue;
 
     it(`${name} has no six-digit hex colour`, () => {
       expect(text.match(/#[0-9a-fA-F]{6}\b/g) ?? []).toEqual([]);
