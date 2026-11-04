@@ -129,6 +129,36 @@ public sealed class SpendExportIdentityRuleTests
         Assert.Equal(SpendExport.NoScope, summary.Single(r => r["measure"] == SpendExport.MeasureEstimate)["scope"]);
     }
 
+    /// <summary>
+    /// A SUMMARY ROW'S <c>scope</c> IS ITS CURRENCY'S ACCOUNTS' SCOPES, each once, in ordinal order, <c>;</c>-joined: the
+    /// accounts here are stored out of order, two share a scope, and another currency's account has a scope of its own.
+    /// </summary>
+    [Fact]
+    public void A_summary_rows_scope_names_each_scope_of_its_currencys_accounts_once_in_order()
+    {
+        var first = Account("acc-1", "Tokens", "metered", "USD", "tenant", "home-instance");
+        var second = Account("acc-2", "Seats", "metered", "USD", "shared", "home-instance");
+        var third = Account("acc-3", "More", "metered", "usd", "tenant", "home-instance");
+        var euro = Account("acc-4", "Euro", "metered", "EUR", "zz-euro", "home-instance");
+        var accounts = new[] { first, second, third, euro };
+        var expenses = new[]
+        {
+            new Expense("exp-1", first.Id, "4.20", "USD", Instant.Stamp(March.AddDays(2)), Instant.Stamp(March.AddDays(3)), "invoice", "confirmed", null, null, null, "p@example.test", Instant.Stamp(March)),
+            new Expense("exp-2", euro.Id, "7", "EUR", Instant.Stamp(March.AddDays(2)), Instant.Stamp(March.AddDays(3)), "invoice", "confirmed", null, null, null, "p@example.test", Instant.Stamp(March)),
+        };
+
+        var overview = SpendOverview.Of(accounts, expenses, [], "usd", March, April);
+        var summary = Rows(SpendExport.SummaryCsv(new(March, April, "home-instance"), overview, [], accounts));
+
+        string ScopeOf(string measure, string currency, string? type = null) => summary.Single(r =>
+            r["measure"] == measure && r["currency"] == currency && (type is null || r["billing_type"] == type))["scope"];
+
+        Assert.Equal("shared;tenant", ScopeOf(SpendExport.MeasureActual, "USD"));
+        Assert.Equal("shared;tenant", ScopeOf(SpendExport.MeasureActualByType, "USD", "metered"));
+        Assert.Equal("zz-euro", ScopeOf(SpendExport.MeasureActual, "EUR"));
+        Assert.Equal("zz-euro", ScopeOf(SpendExport.MeasureActualByType, "EUR", "metered"));
+    }
+
     private static BillingAccount Account(string id, string name, string type, string currency, string scope, string instance) =>
         new(id, name, name, type, currency, "monthly", null, Instant.Stamp(March.AddYears(-1)), null, true, null, scope, instance,
             "p@example.test", Instant.Stamp(March), Instant.Stamp(March));
