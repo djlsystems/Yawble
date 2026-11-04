@@ -378,7 +378,9 @@ A plugin of a team with a Team picture feeds the page its operational figures in
 ## The Team picture
 
 The **Team picture** is a site the platform makes for a team when a person turns it on (the New
-Team option, or the control in Team settings; `team_create` takes `teamPicture: true`). It shows what
+Team option, or the control in Team settings; `team_create` takes `teamPicture: true`, so the
+Concierge turns it on only when it creates a team, and for an existing team sends the person to Team
+settings, whose `PUT` is `HumansOnly`). It shows what
 the team builds or runs: one tab per open item with the work in flight first, a short bounded history
 of finished items, or an operational team's single ongoing picture. Its name, `team-picture`, is
 reserved: no team or package makes a site of that name. It opens from the globe link beside the
@@ -395,9 +397,9 @@ or rebuilds it. It reads its data again every few seconds; nothing is pushed int
 |---|---|---|
 | `tp-team`, `tp-items`, `tp-now`, `tp-runs`, `tp-spend`, `tp-waiting`, `tp-history` | The platform's own figures: the team's summary, progress over each item's cards, the work in flight now (member, card, how long, last progress), recent runs and their outcomes, the team's spend in the platform's words, what waits on a person, and the finished items' history (at most 20, each with its last picture). Recomputed from the log, the Kanban and the ledgers, off every run's path; nothing is estimated, and a figure not measured is `null` and reads "not measured", never 0. | The platform only. A page, an agent, a plugin, a person and another team are refused. |
 | `tp-picture` | The picture of each item: architecture, screens and flows, or an operational team's how it works and the rule one run follows. | The team's Manager and the Concierge, through the `site` tool (and a person through `/api`). A member, a plugin and the page are refused. |
-| `tp-settings` | The page's customization: hidden sections, colours, extra sections. | The Concierge, on a person's request (and a person through `/api`). |
+| `tp-settings` | The page's customization, one document `page`: hidden sections, colours, kind order, extra sections. | The Concierge, on a person's request (and a person through `/api`). |
 | `tp-ops` | An operational team's own figures, in the shape below. | The team's plugins with `site.put`, or an agent as one data write inside a run it is already making. |
-| `tp-extra-<slug>` | Data for an extra section the settings add. | The team's plugins and agents, and the Concierge. |
+| `tp-extra-<slug>` | Data for an extra section the settings add. | The team's members and plugins, the Concierge, and a person through `/api`. |
 
 Any other collection name on this site is refused for everybody, and the page itself writes nothing.
 Each refusal is a sentence (403).
