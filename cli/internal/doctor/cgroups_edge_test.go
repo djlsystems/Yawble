@@ -44,15 +44,18 @@ func TestCgroupEdgeMissingAndNoLimitsControlIsFail(t *testing.T) {
 	}
 }
 
-// Observation: not measured with a no-limits control is plain skip; the row does not say
-// the instance runs without limits.
-func TestCgroupEdgeNotMeasuredWithNoLimitsControlIsSkip(t *testing.T) {
+// Not measured with a control made without its limits warns: the instance runs without them and
+// the cause could not be measured. Never ok, and not a plain skip.
+func TestTheCgroupsRowWarnsWhenNotMeasuredAndControlHasNoLimits(t *testing.T) {
 	o := healthyObserved()
 	o.ControlNoLimits = true
 	o.Cgroups = &engine.Cgroups{Source: "podman info", Reason: "podman info failed"}
 	row := find(t, doctor.HostChecks(o), "cgroups")
-	if row.Verdict != doctor.Skip {
+	if row.Verdict != doctor.Warn || !strings.Contains(row.Detail, "the instance runs without container limits") || !strings.Contains(row.Detail, "the cause could not be measured: podman info failed") || !strings.Contains(row.Fix, "podman info") {
 		t.Errorf("%+v", row)
 	}
-	t.Logf("%+v", row)
+	o.ControlNoLimits = false
+	if row := find(t, doctor.HostChecks(o), "cgroups"); row.Verdict != doctor.Skip {
+		t.Errorf("control with its limits, not measured: %+v", row)
+	}
 }

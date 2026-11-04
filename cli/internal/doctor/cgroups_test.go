@@ -33,7 +33,7 @@ func TestTheCgroupsRowFailsWhenPodmanReportsNoControllers(t *testing.T) {
 	if row.Verdict != doctor.Fail {
 		t.Fatalf("%+v", row)
 	}
-	for _, want := range []string{"podman info reports no memory, cpu, pids cgroup controller", "it has: none", "cannot apply a container's memory or CPU limit", "starts the instance WITHOUT them"} {
+	for _, want := range []string{"podman info reports no memory, cpu, pids cgroup controller", "it has: none", "cannot apply a container's memory, CPU and process (pids) limits", "starts the instance WITHOUT the containers' limits"} {
 		if !strings.Contains(row.Detail, want) {
 			t.Errorf("detail lacks %q: %s", want, row.Detail)
 		}

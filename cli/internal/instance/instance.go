@@ -305,7 +305,7 @@ func Up(ctx context.Context, e engine.Engine, s Settings, health func(string) bo
 			fmt.Fprintf(out, "started %s\n", ContainerName)
 		} else if CgroupError(err) && !s.NoLimits {
 			// Made with limits the engine cannot apply now: made again without them, said.
-			fmt.Fprintln(out, NoLimitsLine(e.Name(), nil))
+			fmt.Fprintln(out, refusedLine(e.Name(), err))
 			s.NoLimits = true
 			if err := e.Remove(ctx, ContainerName); err != nil {
 				return err
@@ -341,7 +341,7 @@ func Up(ctx context.Context, e engine.Engine, s Settings, health func(string) bo
 			// The engine cannot apply the limits (its report did not say so, or could not be
 			// read): once more without them, said. Never the port's or a preview port's fault.
 			_ = e.Remove(ctx, ContainerName)
-			fmt.Fprintln(out, NoLimitsLine(e.Name(), nil))
+			fmt.Fprintln(out, refusedLine(e.Name(), err))
 			s.NoLimits = true
 			err = e.Run(ctx, controlSpec(s))
 		}

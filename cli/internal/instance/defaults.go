@@ -58,6 +58,10 @@ type Settings struct {
 	// NoLimits makes the containers without their memory and CPU limits: the engine's cgroup
 	// controllers are not delegated, so it cannot apply them. Decided only by Up.
 	NoLimits bool
+	// CgroupsSeen is the engine's report of its controllers when a worker was refused the limits
+	// beside a control that has them (CgroupsSeen()); recorded on the worker so it is made again
+	// only when that report, or its settings, change. Decided only by Up.
+	CgroupsSeen string
 }
 
 // EnvFiles are the env files every instance container is given, in order: the env file, then

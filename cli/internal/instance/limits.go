@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/djlsystems/yawble/cli/internal/engine"
@@ -22,6 +24,18 @@ var cgroupMarks = []string{
 	"does not support pids limit", "cpu cfs", "nanocpus",
 }
 
+// controllerRefused is a runtime naming a controller it cannot use: crun's "controller `pids` is
+// not available under .../cgroup.controllers" (exit 126, measured on a rootless WSL Podman machine
+// given --pids-limit), and runc's "controller \"pids\" not available" / "can't set pids limit"
+// and "cannot set memory limit" under Docker. The name is the first group.
+var controllerRefused = regexp.MustCompile("controller [`'\"]?(memory|cpu|cpuset|pids|io)[`'\"]? (?:is )?not (?:available|enabled|supported)|(?:can't|cannot|unable to) set (memory|cpu|pids) limit")
+
+// cgroupFiles are the cgroup files a runtime names when it cannot open one, by the controller
+// whose limit it is.
+var cgroupFiles = []struct{ file, controller string }{
+	{"memory.", "memory"}, {"cpu.max", "cpu"}, {"cpu.weight", "cpu"}, {"pids.max", "pids"},
+}
+
 // CgroupError says whether an engine's error is the cgroup controllers not being delegated:
 // a limit the engine cannot apply. Such an error is never a port's.
 func CgroupError(err error) bool {
@@ -29,12 +43,40 @@ func CgroupError(err error) bool {
 		return false
 	}
 	text := strings.ToLower(err.Error())
+	if controllerRefused.MatchString(text) {
+		return true
+	}
 	for _, mark := range cgroupMarks {
 		if strings.Contains(text, mark) {
 			return true
 		}
 	}
 	return false
+}
+
+// refusedControllers is the controllers a cgroup error names, in LimitControllers' order; none
+// when it names none.
+func refusedControllers(err error) []string {
+	if err == nil {
+		return nil
+	}
+	text := strings.ToLower(err.Error())
+	named := map[string]bool{}
+	for _, m := range controllerRefused.FindAllStringSubmatch(text, -1) {
+		named[m[1]+m[2]] = true
+	}
+	for _, f := range cgroupFiles {
+		if strings.Contains(text, "`"+f.file) || strings.Contains(text, "/"+f.file) {
+			named[f.controller] = true
+		}
+	}
+	var out []string
+	for _, c := range engine.LimitControllers {
+		if named[c] {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // LimitsFix is how to give the engine the controllers, for the engine detected; it names no
@@ -46,15 +88,55 @@ func LimitsFix(engineName string) string {
 	return "delegate the memory, cpu and pids cgroup controllers to Podman: enable them in each cgroup.subtree_control from /sys/fs/cgroup down to the cgroup Podman runs in (on a Podman machine, inside it: podman machine ssh), or run Podman in systemd's user session with cgroup_manager = \"systemd\"; `podman info` then lists them under cgroupControllers. Then: yawble up"
 }
 
-// NoLimitsLine is the warning `up` prints when it starts the instance without the containers'
-// memory and CPU limits. missing is what the engine reported missing; none when only the error
-// said so.
-func NoLimitsLine(engineName string, missing []string) string {
-	why := "the engine could not apply the containers' memory and CPU limits because its cgroup controllers are not delegated"
-	if len(missing) > 0 {
-		why = fmt.Sprintf("%s info reports no %s cgroup controller, so it cannot apply the containers' memory and CPU limits", engineName, strings.Join(missing, ", "))
+// limitNames are the limits each controller carries, as a person reads them.
+var limitNames = map[string]string{"memory": "memory", "cpu": "CPU", "pids": "process (pids)"}
+
+// limitsOf is the limits the missing controllers carry: "memory and CPU limits", "process (pids)
+// limit".
+func LimitsOf(missing []string) string {
+	var names []string
+	for _, c := range missing {
+		if n, ok := limitNames[c]; ok {
+			names = append(names, n)
+		}
 	}
-	return "warning: " + why + "; starting WITHOUT them: no memory or CPU limit is applied to any container, and the Host admits runs by its run limit alone. To have the limits, " + LimitsFix(engineName)
+	switch len(names) {
+	case 0:
+		return "limits"
+	case 1:
+		return names[0] + " limit"
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1] + " limits"
+}
+
+// NoLimitsLine is the warning `up` prints when it starts the instance without the containers'
+// limits. missing is the controllers the engine reported missing, or its error named; none when
+// neither said which. Whichever is missing, every limit Yawble sets is dropped.
+func NoLimitsLine(engineName string, missing []string) string {
+	if len(missing) == 0 {
+		return noLimitsWarning(engineName, "the engine could not apply the containers' limits because its cgroup controllers are not delegated")
+	}
+	return noLimitsWarning(engineName, fmt.Sprintf("%s info reports no %s cgroup controller, so it cannot apply the containers' %s", engineName, strings.Join(missing, ", "), LimitsOf(missing)))
+}
+
+// refusedLine is NoLimitsLine for a run or start the engine refused: the controllers its error
+// names, said as the engine's refusal, not as its report.
+func refusedLine(engineName string, err error) string {
+	refused := refusedControllers(err)
+	if len(refused) == 0 {
+		return NoLimitsLine(engineName, nil)
+	}
+	return noLimitsWarning(engineName, fmt.Sprintf("the engine refused the containers' %s: no %s cgroup controller is delegated to it", LimitsOf(refused), strings.Join(refused, ", ")))
+}
+
+func noLimitsWarning(engineName, why string) string {
+	return "warning: " + why + "; starting WITHOUT the containers' limits: no memory or CPU limit is applied to any container, and the Host admits runs by its run limit alone. To have the limits, " + LimitsFix(engineName)
+}
+
+// UnmeasuredLine is the warning `up` prints when the instance runs without the containers'
+// limits and the engine's report of its controllers cannot be read: the cause is not measured.
+func UnmeasuredLine(reason string) string {
+	return "warning: the instance runs without container limits (no memory or CPU limit is applied to any container), and the cause could not be measured: " + reason + ". When the engine answers, yawble doctor's cgroups row says what is missing; yawble up then applies the limits if it can"
 }
 
 // limitsError is a run or start the engine refused for want of the controllers, said as that:
@@ -99,12 +181,16 @@ func limitsFor(ctx context.Context, e engine.Engine, control engine.ContainerInf
 
 // decideLimits is whether `up` makes the containers without memory and CPU limits, from the
 // engine's own report: missing controllers decide it, said once; a report that cannot be read
-// keeps what the existing container was made with (a first run that the engine refuses for
-// want of them degrades then).
+// keeps what the existing container was made with, and says so when that is without limits (a
+// first run that the engine refuses for want of them degrades then).
 func decideLimits(ctx context.Context, e engine.Engine, label string, out io.Writer) bool {
 	c := e.Cgroups(ctx)
 	if !c.Measured {
-		return NoLimitsOf(label)
+		if NoLimitsOf(label) {
+			fmt.Fprintln(out, UnmeasuredLine(c.Reason))
+			return true
+		}
+		return false
 	}
 	missing := c.Missing()
 	if len(missing) == 0 {
@@ -112,4 +198,20 @@ func decideLimits(ctx context.Context, e engine.Engine, label string, out io.Wri
 	}
 	fmt.Fprintln(out, NoLimitsLine(e.Name(), missing))
 	return true
+}
+
+// CgroupsSeen is the engine's report as a worker made without limits beside a control made with
+// them records it: the limit controllers it has, or that it was not measured. The worker is made
+// again only when this changes (or its settings do), never on every up.
+func CgroupsSeen(c engine.Cgroups) string {
+	if !c.Measured {
+		return "not measured"
+	}
+	var have []string
+	for _, want := range engine.LimitControllers {
+		if slices.Contains(c.Controllers, want) {
+			have = append(have, want)
+		}
+	}
+	return "has: " + strings.Join(have, ",")
 }
