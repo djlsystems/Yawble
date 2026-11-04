@@ -169,12 +169,6 @@ beforeEach(() => {
   api().reset();
   const page = source('index.html');
   document.body.innerHTML = /<body>([\s\S]*)<\/body>/.exec(page)![1]!;
-  // The page's own stylesheet (index.html's <link id="tp-css">), as a sheet the test can read.
-  document.head.querySelectorAll('#tp-css').forEach((node) => node.remove());
-  const sheet = document.createElement('style');
-  sheet.id = 'tp-css';
-  sheet.textContent = ':root{--tp-done:#16a34a}';
-  document.head.appendChild(sheet);
 });
 
 afterEach(() => {
@@ -469,7 +463,7 @@ describe("the Concierge's layer (tp-settings)", () => {
     expect($('[data-section="screens"]')).not.toBeNull();
   });
 
-  it('applies its colours as rules in the page\'s own stylesheet, and ignores anything not a colour', async () => {
+  it('applies its colours as a constructed stylesheet, never inline, and ignores anything not a colour', async () => {
     const data = operational();
     data['tp-settings'] = [{
       id: 'page',
@@ -477,8 +471,7 @@ describe("the Concierge's layer (tp-settings)", () => {
     }];
     await draw(data);
 
-    const sheet = (document.getElementById('tp-css') as HTMLStyleElement).sheet!;
-    const rules = [...sheet.cssRules].map((rule) => rule.cssText.replace(/\s+/g, ''));
+    const rules = document.adoptedStyleSheets.flatMap((sheet) => [...sheet.cssRules]).map((rule) => rule.cssText.replace(/\s+/g, ''));
     expect(rules.some((rule) => rule.includes('--tp-done:#15803d'))).toBe(true);
     expect(rules.some((rule) => rule.includes('.tp-k-0') && rule.includes('#b91c1c'))).toBe(true);
     expect(rules.join('')).not.toContain('url(');
