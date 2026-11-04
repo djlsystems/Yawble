@@ -21,6 +21,7 @@ using Harness.Contracts;
 using Harness.Host;
 using Harness.Host.Auth;
 using Harness.Host.Capacity;
+using Harness.Host.Link;
 using Harness.Host.Solutions;
 using Harness.Identity;
 using Harness.Kanban;
@@ -175,6 +176,29 @@ internal sealed partial class HostComposition
             sp.GetRequiredService<Connections>(), dataRoot, sp.GetRequiredService<ILogger<ConnectRequests>>(),
             sp.GetRequiredService<TeamRegistry>(), sp.GetRequiredService<IMemberReports>()));
         builder.Services.AddHostedService(sp => sp.GetRequiredService<ConnectRequests>());
+
+        // THE MANAGEMENT LINK'S ATTACH AND DETACH: the attach command and the detach command through the same
+        // exchange as `connect`, and HARNESS_LINK_URL / HARNESS_LINK_TOKEN once at start while no link is
+        // stored. Nothing is reached and nothing is shown until a link exists.
+        builder.Services.AddHttpClient(nameof(LinkAttach), client => client.Timeout = TimeSpan.FromSeconds(30));
+        builder.Services.AddSingleton(sp => new LinkAttach(
+            sp.GetRequiredService<ILinkStore>(), sp.GetRequiredService<IDataProtectionProvider>(), sp.GetRequiredService<ITenantLog>(),
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(LinkAttach)), sp.GetRequiredService<TimeProvider>()));
+        builder.Services.AddSingleton(sp => new LinkRequests(
+            sp.GetRequiredService<LinkAttach>(), sp.GetRequiredService<ILinkStore>(), dataRoot, sp.GetRequiredService<ILogger<LinkRequests>>(),
+            sp.GetService<ILinkSignal>(), builder.Configuration[LinkRequests.UrlVariable], builder.Configuration[LinkRequests.TokenVariable]));
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<LinkRequests>());
+
+        // THE MANAGEMENT LINK'S CLIENT: one outbound WebSocket to the stored service, and nothing while none
+        // is stored. It is the ILinkSignal attach and detach wake. Its summary is the StatusSource, read
+        // once the workers' list exists (HostComposition.Workers); a down service never stops the Host.
+        builder.Services.AddSingleton(sp => new StatusSource(sp.GetRequiredService<TimeProvider>(), sp.GetRequiredService<ILogger<StatusSource>>()));
+        builder.Services.AddSingleton<ILinkSummarySource>(sp => sp.GetRequiredService<StatusSource>());
+        builder.Services.AddSingleton(sp => new LinkClient(
+            sp.GetRequiredService<ILinkStore>(), sp.GetRequiredService<IDataProtectionProvider>(), sp.GetRequiredService<ITenantLog>(),
+            sp.GetRequiredService<ILinkSummarySource>(), sp.GetRequiredService<TimeProvider>(), sp.GetRequiredService<ILogger<LinkClient>>()));
+        builder.Services.AddSingleton<ILinkSignal>(sp => sp.GetRequiredService<LinkClient>());
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<LinkClient>());
 
         // A PLUGIN UPDATE MOVES A MEMBER'S OWN SECRET INTO A CONNECTION (CON 7): run by an install, a
         // Replace and a solution install or update once a version declaring `movedTo` is active.

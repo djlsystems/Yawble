@@ -5,10 +5,10 @@
  * Two different facts, kept apart on purpose. LIVE is this window's hub connection: whether the
  * board in front of the person is receiving pushes now. The SERVICE is the instance's own state from
  * `GET /api/service-status`: how long it has been up, whether it can serve, which build, which
- * workers. The chip's colour is the first alone - a healthy instance this window has lost reads
+ * workers and, once attached, whether it is linked to a management service. The chip's colour is the first alone - a healthy instance this window has lost reads
  * offline, because that is what the person's screen is - and the dropdown says both.
  */
-import type { ServiceCheck, ServiceWorker } from '../api/types';
+import type { ServiceCheck, ServiceManagement, ServiceWorker } from '../api/types';
 
 /** The chip's icon: a radiating dot while live, the same struck through when not. */
 export const LiveIcons = { live: 'sensors', offline: 'sensors_off' } as const;
@@ -73,6 +73,39 @@ export function workerWords(worker: ServiceWorker, connectedSince: string, dropp
   const build = worker.version ? `, ${worker.version}` : '';
   if (worker.state === 'dropped') return `${worker.id}: dropped${droppedAt ? ` at ${droppedAt}` : ''}${build}`;
   return `${worker.id}: connected since ${connectedSince}${build}`;
+}
+
+/**
+ * The management link as one line, read-only. `since` is the link's state time already in the reader's
+ * words (the dropdown's `localStamp`); `now` is when the line is drawn, for "last report N minutes ago".
+ */
+export function managementWords(management: ServiceManagement, since: string, now: number = Date.now()): string {
+  const service = management.serviceName ?? 'the management service';
+  switch (management.state) {
+    case 'connected':
+      return management.lastReportAt
+        ? `Linked to ${service} as ${management.instanceName ?? ''} · last report ${pastWords(management.lastReportAt, now)}`
+        : `Linked to ${service} as ${management.instanceName ?? ''}.`;
+    case 'refused':
+      return management.reason ? `Refused by ${service}: ${management.reason}` : `Refused by ${service}.`;
+    default:
+      return `Not connected to ${service} since ${since}`;
+  }
+}
+
+/**
+ * How long ago an instant was, in the shape the triggers page says it: "just now" inside 5 seconds,
+ * otherwise "N seconds ago", "N minutes ago", "N hours ago" or "N days ago".
+ */
+export function pastWords(iso: string, now: number = Date.now()): string {
+  const at = Date.parse(iso);
+  if (Number.isNaN(at)) return 'at an unreadable time';
+  const deltaSeconds = Math.floor((now - at) / 1000);
+  if (deltaSeconds < 5) return 'just now';
+  if (deltaSeconds < 60) return `${plural(deltaSeconds, 'second')} ago`;
+  if (deltaSeconds < 3600) return `${plural(Math.floor(deltaSeconds / 60), 'minute')} ago`;
+  if (deltaSeconds < 86_400) return `${plural(Math.floor(deltaSeconds / 3600), 'hour')} ago`;
+  return `${plural(Math.floor(deltaSeconds / 86_400), 'day')} ago`;
 }
 
 /** How often the dropdown re-reads the service while it is open. */

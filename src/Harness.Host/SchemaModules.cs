@@ -1,5 +1,6 @@
 using Harness.Backlog;
 using Harness.Contracts;
+using Harness.Host.Link;
 using Harness.Identity;
 using Harness.Messaging;
 using Harness.Skills;
@@ -8,7 +9,7 @@ namespace Harness.Host;
 
 /// <summary>
 /// Every schema module's steps, concatenated in ONE place and in the order Program.cs applies
-/// them: messages, then auth, then skills, then backlog, then outcome (the usage ledger). Both callers - Program.cs on every boot,
+/// them: messages, then auth, then skills, then backlog, then outcome (the usage ledger), then link (the stored management link). Both callers - Program.cs on every boot,
 /// OperatorCommands.cs for its recovery switches - read this list, because a second copy falls
 /// behind when a module is added: <c>--reset-password</c> would then hand
 /// <see cref="SchemaMigrator.ApplyAsync"/> a list missing that module's steps against a database
@@ -24,5 +25,5 @@ namespace Harness.Host;
 public static class SchemaModules
 {
     public static IReadOnlyList<MigrationStep> All { get; } =
-        [.. MessageSchema.Steps, .. AuthSchema.Steps, .. SkillSchema.Steps, .. BacklogSchema.Steps, .. OutcomeSchema.Steps];
+        [.. MessageSchema.Steps, .. AuthSchema.Steps, .. SkillSchema.Steps, .. BacklogSchema.Steps, .. OutcomeSchema.Steps, .. LinkSchema.Steps];
 }

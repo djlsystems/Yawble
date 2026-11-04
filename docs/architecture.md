@@ -258,6 +258,22 @@ MCP servers, plugins, skills, memory and instruction files).
   configured stdio server to check it, as the Concierge's own launch does. The result is
   `GET /api/agents/tools`, and `<dataRoot>/agent-tools.json` for `--doctor`.
 
+## Management link
+
+An instance can be attached to a management service with `yawble attach`; the protocol is in
+[management-link.md](management-link.md). The instance opens one outbound WebSocket itself and
+nothing listens for the service. The link is off unless attached: an instance that was never
+attached opens no socket, `yawble attach status` says "Not attached." and the live-status
+dropdown has no Management section. The link's credential is stored only as ciphertext and is
+never reported, in a log, a tenant row, a report file, an API answer or the dropdown. The status
+summary the instance sends is an allow-list of what the Teams list already shows; of a team, only
+its id and name cross, never documents, transcripts, prompts, file paths, connection values or
+secrets. Close 4401, or a 401 on the upgrade, marks the link refused, writes one tenant row and
+stops retrying until a new attach, while the instance keeps serving; any other drop retries with
+backoff. A frame type the instance does not know, including any `relay.` type, is ignored and
+logged once per type without closing the socket. The dropdown's Management section is read-only
+and absent until the instance is attached.
+
 ## Operations
 
 - [ops/releases-and-updates.md](ops/releases-and-updates.md): updating an instance and cutting a release.

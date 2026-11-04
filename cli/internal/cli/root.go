@@ -118,7 +118,7 @@ func NewRoot(deps Deps) *cobra.Command {
 		newUpCommand(deps), newDownCommand(deps), newStatusCommand(deps), newLogsCommand(deps), newWorkersCommand(deps),
 		newDoctorCommand(deps), newAgentsCommand(deps), newUpdateCommand(deps), newRemoteCommand(deps),
 		newBackupCommand(deps), newRestoreCommand(deps),
-		newUninstallCommand(deps), newConfigCommand(deps), newSecretCommand(deps), newGitHubCommand(deps), newPluginCommand(deps), newSolutionCommand(deps), newConnectCommand(deps), newRepoCommand(deps), newVersionCommand(deps),
+		newUninstallCommand(deps), newConfigCommand(deps), newSecretCommand(deps), newGitHubCommand(deps), newPluginCommand(deps), newSolutionCommand(deps), newConnectCommand(deps), newAttachCommand(deps), newDetachCommand(deps), newRepoCommand(deps), newVersionCommand(deps),
 	)
 	return root
 }

@@ -1,4 +1,5 @@
 using Harness.Contracts;
+using Harness.Host.Link;
 using Harness.Identity;
 using Harness.Messaging;
 
@@ -52,6 +53,7 @@ public static class StoreContracts
         typeof(ILedgerStartRows),
         typeof(IPluginRemovalRows),
         typeof(IPluginSecretMoveRows),
+        typeof(ILinkStore),
     ];
 }
 
@@ -101,6 +103,7 @@ public static class SqlServerStoreRegistry
         typeof(IConnectionStore),
         typeof(IDatabaseHealth),
         typeof(IDatabaseMaintenance),
+        typeof(ILinkStore),
     ];
 }
 

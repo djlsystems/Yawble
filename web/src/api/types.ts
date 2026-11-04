@@ -4789,4 +4789,20 @@ export interface ServiceStatus {
   pumpLastPass: string | null
   build: { version: string; commit: string; builtAt: string | null }
   workers: ServiceWorker[]
+  /** The management link, read-only; null when this instance was never attached to a management service. */
+  management: ServiceManagement | null
+}
+
+/**
+ * The management link as the live-status dropdown shows it: the link's state and since when, the
+ * service's and this instance's names, the last report and a reason. Never the service's address or
+ * the credential.
+ */
+export interface ServiceManagement {
+  state: 'connected' | 'retrying' | 'connecting' | 'refused'
+  since: string
+  serviceName: string | null
+  instanceName: string | null
+  lastReportAt: string | null
+  reason: string | null
 }

@@ -2,6 +2,7 @@ using Harness.Contracts;
 using Harness.SqlServer.Backlog;
 using Harness.SqlServer.Identity;
 using Harness.SqlServer.Ledger;
+using Harness.SqlServer.Link;
 using Harness.SqlServer.Messaging;
 using Harness.SqlServer.Skills;
 
@@ -9,7 +10,7 @@ namespace Harness.SqlServer;
 
 /// <summary>
 /// Every SQL Server schema module's steps, concatenated in ONE place and in the order the SQLite
-/// list (<c>SchemaModules</c> in the Host) applies its own: messages, auth, skills, backlog, outcome.
+/// list (<c>SchemaModules</c> in the Host) applies its own: messages, auth, skills, backlog, outcome, link.
 ///
 /// One list for the same reason the SQLite one is: the migrator treats a database carrying a step
 /// the list does not name as one written by a newer build, so a second, shorter copy would make an
@@ -18,5 +19,5 @@ namespace Harness.SqlServer;
 /// </summary>
 public static class SqlServerSchemaModules
 {
-    public static IReadOnlyList<MigrationStep> All { get; } = [.. SqlServerMessagingSchema.Steps, .. SqlServerAuthSchema.Steps, .. SqlServerAuthSchedulesSchema.Steps, .. SqlServerAuthPluginsSchema.Steps, .. SqlServerSkillSchema.Steps, .. SqlServerBacklogSchema.Steps, .. SqlServerOutcomeSchema.Steps];
+    public static IReadOnlyList<MigrationStep> All { get; } = [.. SqlServerMessagingSchema.Steps, .. SqlServerAuthSchema.Steps, .. SqlServerAuthSchedulesSchema.Steps, .. SqlServerAuthPluginsSchema.Steps, .. SqlServerSkillSchema.Steps, .. SqlServerBacklogSchema.Steps, .. SqlServerOutcomeSchema.Steps, .. SqlServerLinkSchema.Steps];
 }
