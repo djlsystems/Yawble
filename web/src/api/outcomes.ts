@@ -545,3 +545,59 @@ export interface CostSummary {
 }
 
 export const getCostSummary = () => json<CostSummary>('/api/teams/cost/summary')
+
+// ---- Every team's figures over the period the Teams list picks, by day or month -----------------
+
+/** How the Teams list's period is cut: by UTC day or by calendar month. */
+export type CostBucket = 'day' | 'month'
+
+/** A period the Teams list reads: `from` and `to` as `YYYY-MM-DD`, midnight UTC, `to` exclusive. */
+export interface CostPeriodRange {
+  from: string
+  to: string
+}
+
+/** One bucket of one series; `cost` is null - never 0 - when nothing in it was priced. */
+export interface CostPeriodBucket {
+  /** The bucket's first day, `YYYY-MM-DD`. */
+  start: string
+  agentSeconds: number
+  cost: number | null
+}
+
+/** One outcome a team's runs served in the period, or `id: null` for Unattributed. */
+export interface CostPeriodTeamOutcome {
+  id: string | null
+  name: string
+  rank: number | null
+  totals: CostSummaryTotals
+  buckets: CostPeriodBucket[]
+}
+
+/** One team's figures over the period. A team with no runs has zero seconds, a null cost and no outcomes. */
+export interface CostPeriodTeam {
+  team: string
+  totals: CostSummaryTotals
+  buckets: CostPeriodBucket[]
+  outcomes: CostPeriodTeamOutcome[]
+}
+
+/** `GET /api/teams/cost/period`: every reachable team, the instance's total and its outcomes over one period. */
+export interface TeamsCostPeriod {
+  money: TeamCostMoney
+  period: CostPeriodRange & { bucket: CostBucket }
+  /** Each bucket's first day, oldest first. */
+  buckets: string[]
+  teams: CostPeriodTeam[]
+  total: CostSummaryTotals
+  /** The reached teams' figure per bucket, for the summary tile's chart. */
+  totalBuckets: CostPeriodBucket[]
+  /** The same length of time just before the period, for the change. */
+  prior: CostSummaryTotals
+  /** Unattributed first when there is some, then each outcome served in the period, as the summary gives them. */
+  outcomes: CostSummaryOutcome[]
+}
+
+export const getTeamsCostPeriod = (range: CostPeriodRange, bucket: CostBucket) =>
+  json<TeamsCostPeriod>(
+    `/api/teams/cost/period?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}&bucket=${bucket}`)

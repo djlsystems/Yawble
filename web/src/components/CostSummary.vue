@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { CostSummary } from '../api/outcomes';
-import { budgetsTile, spendTile, summaryPriced, whereBars } from '../lib/costSummary';
+import type { CostSummary, TeamsCostPeriod } from '../api/outcomes';
+import { bucketAside, budgetsTile, periodTile, spendTile, summaryPriced, whereBars } from '../lib/costSummary';
+import { bucketLabel } from '../lib/teamsPeriod';
 import { EstimateTitle } from '../lib/teamCost';
 import CostWeeksChart from './CostWeeksChart.vue';
 
@@ -14,10 +15,15 @@ import CostWeeksChart from './CostWeeksChart.vue';
  * alone: names, amounts and ⚠ carry the meaning, and status colours mark only over budget and
  * waiting on you.
  */
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   summary: CostSummary;
   currency: string;
-}>();
+  /**
+   * THE TEAMS LIST'S PERIOD (`GET /api/teams/cost/period`): with it, Estimated Execution Cost and Where it goes are
+   * the period's; Budgets and Right now stay the summary's. Without it, all four are the summary's eight weeks.
+   */
+  period?: TeamsCostPeriod | null;
+}>(), { period: null });
 
 const emit = defineEmits<{
   /** The Outcomes dialog, at one outcome or (null) on its list. */
@@ -26,18 +32,25 @@ const emit = defineEmits<{
   'open-needs-you': [];
 }>();
 
-const priced = computed(() => summaryPriced(props.summary));
-const spend = computed(() => spendTile(props.summary, props.currency));
+const priced = computed(() => (props.period ? props.period.total.cost !== null : summaryPriced(props.summary)));
+const spend = computed(() => (props.period ? periodTile(props.period, props.currency) : spendTile(props.summary, props.currency)));
+const spendAside = computed(() => (props.period ? bucketAside(props.period.period.bucket) : '8 wk'));
+const columnTitle = computed(() => {
+  const bucket = props.period?.period.bucket;
+  return bucket ? (start: string) => bucketLabel(start, bucket) : null;
+});
 const budgets = computed(() => budgetsTile(props.summary, props.currency));
-const bars = computed(() => whereBars(props.summary, props.currency));
+const bars = computed(() => whereBars(props.period ?? props.summary, props.currency));
+const whereNone = computed(() => (props.period ? 'No work in this period' : 'No work in these weeks'));
 const now = computed(() => props.summary.rightNow);
 </script>
 
 <template>
   <div class="cost-summary" data-cost-summary>
-    <!-- ESTIMATED EXECUTION COST - each run priced at the rate it started with, never money paid: the period's total, its change on the eight weeks before, and the weeks as columns. -->
+    <!-- ESTIMATED EXECUTION COST - each run priced at the rate it started with, never money paid: the period's total and
+         Agent Hours, its change on the same length of time before, and the period's days, months or weeks as columns. -->
     <button type="button" class="cost-summary-tile" data-summary-tile="spend" @click="emit('open-outcome', null)">
-      <span class="cost-summary-head"><span class="cost-summary-title">{{ EstimateTitle }}</span><span class="cost-summary-aside">8 wk</span></span>
+      <span class="cost-summary-head"><span class="cost-summary-title">{{ EstimateTitle }}</span><span class="cost-summary-aside" data-summary-aside>{{ spendAside }}</span></span>
       <span class="cost-summary-value mono" data-summary-value>{{ spend.value }}</span>
       <span v-if="spend.change" class="cost-summary-line" data-summary-change :data-direction="spend.direction">{{ spend.change }}</span>
       <span class="cost-summary-line os-text-muted" data-summary-detail>{{ spend.detail }}</span>
@@ -48,6 +61,7 @@ const now = computed(() => props.summary.rightNow);
         :series="spend.series"
         :in-money="priced"
         :currency="currency"
+        :column-title="columnTitle"
         size="tile"
       />
     </button>
@@ -79,7 +93,7 @@ const now = computed(() => props.summary.rightNow);
          budget, ⚠ after an outcome over it. A bar opens its outcome. -->
     <div class="cost-summary-tile cost-summary-tile--static" data-summary-tile="where">
       <span class="cost-summary-head"><span class="cost-summary-title">Where it goes</span><span class="cost-summary-aside">by outcome</span></span>
-      <div v-if="bars.length === 0" class="cost-summary-line os-text-muted" data-summary-where-none>No work in these weeks</div>
+      <div v-if="bars.length === 0" class="cost-summary-line os-text-muted" data-summary-where-none>{{ whereNone }}</div>
       <button
         v-for="bar in bars"
         :key="bar.key"

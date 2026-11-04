@@ -393,6 +393,160 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
         Assert.Equal(HttpStatusCode.NotFound, (await person.GetAsync("/api/teams/no-such-team/cost", Ct)).StatusCode);
     }
 
+    // ---- the teams list's period ----
+
+    /// <summary>
+    /// THE TEAMS LIST'S PERIOD READ is ExecutionCost over the period: each team's total and Agent Hours are its runs'
+    /// parts inside the period priced as the Spend page prices them; the instance's total is the Spend overview's
+    /// Estimated Execution Cost for the same period; daily buckets split a run crossing midnight; Unattributed is its
+    /// own entry; a team with no runs reads zero seconds and no money, never 0.
+    /// </summary>
+    [Fact]
+    public async Task The_period_read_answers_each_team_as_ExecutionCost_and_the_Spend_overview_do_for_the_same_window()
+    {
+        var person = await host.PersonAsync();
+        var busy = await NewTeamAsync("Period busy");
+        var other = await NewTeamAsync("Period other");
+        var idle = await NewTeamAsync("Period idle");
+        var outcome = await CreateAsync(person, "Period outcome");
+        var from = new DateTimeOffset(2013, 10, 1, 0, 0, 0, TimeSpan.Zero);
+        var to = new DateTimeOffset(2013, 12, 1, 0, 0, 0, TimeSpan.Zero);
+
+        // Linked, two hours at 60 on Oct 3; unlinked, crossing midnight into Nov 1 at 90; an unpriced run from before
+        // snapshots; the other team's linked run at 45; and a run in the month before the period, for `prior`.
+        await RunAsync(await LinkedAsync(outcome.Id, busy), busy, from.AddDays(2).AddHours(9), from.AddDays(2).AddHours(11), rate: "60");
+        await RunAsync(NextCorrelation(), busy, to.AddMonths(-1).AddHours(-1), to.AddMonths(-1).AddHours(2), rate: "90");
+        await RunAsync(NextCorrelation(), busy, from.AddDays(10), from.AddDays(10).AddMinutes(30));
+        await RunAsync(await LinkedAsync(outcome.Id, other), other, from.AddDays(40), from.AddDays(40).AddMinutes(40), rate: "45");
+        await RunAsync(NextCorrelation(), busy, from.AddDays(-5), from.AddDays(-5).AddHours(1), rate: "60");
+
+        var daily = await JsonAsync(await person.GetAsync($"/api/teams/cost/period?from={Day(from)}&to={Day(to)}&bucket=day", Ct));
+        var monthly = await JsonAsync(await person.GetAsync($"/api/teams/cost/period?from={Day(from)}&to={Day(to)}&bucket=month", Ct));
+        var overview = await JsonAsync(await person.GetAsync($"/api/spend/overview?from={Day(from)}&to={Day(to)}", Ct));
+
+        Assert.Equal(61, daily.GetProperty("buckets").GetArrayLength());
+        Assert.Equal(["2013-10-01", "2013-11-01"], monthly.GetProperty("buckets").EnumerateArray().Select(b => b.GetString()!));
+
+        // EXECUTIONCOST ITSELF over the same window, team by team, through the store the routes read.
+        var all = await Outcomes.ListAsync(Ct);
+        var runs = ExecutionCost.Of(await Outcomes.ReadExecutionRunsAsync(from, to, pricedOnly: false, Ct), all, "USD");
+        decimal? ServiceCost(string team) => TeamCostPeriod.Tally(runs.Where(r => r.Ledger.TeamId == team), "USD", from, to).Cost;
+        double ServiceSeconds(string team) => TeamCostPeriod.Tally(runs.Where(r => r.Ledger.TeamId == team), "USD", from, to).AgentSeconds;
+
+        foreach (var read in new[] { daily, monthly })
+        {
+            JsonElement TeamOf(string id) => read.GetProperty("teams").EnumerateArray().Single(t => t.GetProperty("team").GetString() == id);
+
+            var b = TeamOf(busy).GetProperty("totals");
+            Assert.Equal(120m + 270m, b.GetProperty("cost").GetDecimal());
+            Assert.Equal(ServiceCost(busy), b.GetProperty("cost").GetDecimal());
+            Assert.Equal(2 * 3600 + 3 * 3600 + 1800, b.GetProperty("agentSeconds").GetDouble(), 3);
+            Assert.Equal(ServiceSeconds(busy), b.GetProperty("agentSeconds").GetDouble(), 3);
+            Assert.Equal(30m, TeamOf(other).GetProperty("totals").GetProperty("cost").GetDecimal());
+
+            // UNATTRIBUTED FIRST, then the outcome; the unpriced run adds hours and no money.
+            var outcomes = TeamOf(busy).GetProperty("outcomes").EnumerateArray().ToList();
+            Assert.Equal(JsonValueKind.Null, outcomes[0].GetProperty("id").ValueKind);
+            Assert.Equal("Unattributed", outcomes[0].GetProperty("name").GetString());
+            Assert.Equal(270m, outcomes[0].GetProperty("totals").GetProperty("cost").GetDecimal());
+            Assert.Equal(outcome.Id, outcomes[1].GetProperty("id").GetString());
+            Assert.Equal(120m, outcomes[1].GetProperty("totals").GetProperty("cost").GetDecimal());
+
+            // A TEAM WITH NO RUNS: zero seconds, no money - never 0 - and no outcomes.
+            var none = TeamOf(idle);
+            Assert.Equal(0, none.GetProperty("totals").GetProperty("agentSeconds").GetDouble());
+            Assert.Equal(JsonValueKind.Null, none.GetProperty("totals").GetProperty("cost").ValueKind);
+            Assert.Empty(none.GetProperty("outcomes").EnumerateArray());
+
+            // THE INSTANCE'S TOTAL IS THE SPEND OVERVIEW'S ESTIMATE for the same period, and the teams' totals summed.
+            Assert.Equal(overview.GetProperty("estimate").GetProperty("cost").GetDecimal(), read.GetProperty("total").GetProperty("cost").GetDecimal());
+            Assert.Equal(overview.GetProperty("estimate").GetProperty("agentSeconds").GetDouble(),
+                read.GetProperty("total").GetProperty("agentSeconds").GetDouble(), 3);
+            Assert.Equal(420m, read.GetProperty("total").GetProperty("cost").GetDecimal());
+            Assert.Equal(60m, read.GetProperty("prior").GetProperty("cost").GetDecimal());
+
+            // WHERE IT GOES: Unattributed and the outcome, adding up to the total.
+            var served = read.GetProperty("outcomes").EnumerateArray().ToList();
+            Assert.Equal("Unattributed", served[0].GetProperty("name").GetString());
+            Assert.Equal(270m, served[0].GetProperty("cost").GetDecimal());
+            Assert.Equal(150m, served.Single(o => o.GetProperty("id").GetString() == outcome.Id).GetProperty("cost").GetDecimal());
+        }
+
+        // THE RUN CROSSING MIDNIGHT is split between Oct 31 and Nov 1 by overlap, each part priced on its own.
+        var busyDays = daily.GetProperty("teams").EnumerateArray().Single(t => t.GetProperty("team").GetString() == busy).GetProperty("buckets");
+        var oct31 = busyDays.EnumerateArray().Single(d => d.GetProperty("start").GetString() == "2013-10-31");
+        var nov1 = busyDays.EnumerateArray().Single(d => d.GetProperty("start").GetString() == "2013-11-01");
+        Assert.Equal(90m, oct31.GetProperty("cost").GetDecimal());
+        Assert.Equal(180m, nov1.GetProperty("cost").GetDecimal());
+        Assert.Equal(JsonValueKind.Null, busyDays[5].GetProperty("cost").ValueKind);
+        var instanceDays = daily.GetProperty("totalBuckets").EnumerateArray().ToList();
+        Assert.Equal(90m, instanceDays.Single(d => d.GetProperty("start").GetString() == "2013-10-31").GetProperty("cost").GetDecimal());
+        Assert.Equal(30m, instanceDays.Single(d => d.GetProperty("start").GetString() == "2013-11-10").GetProperty("cost").GetDecimal());
+
+        var busyMonths = monthly.GetProperty("teams").EnumerateArray().Single(t => t.GetProperty("team").GetString() == busy).GetProperty("buckets");
+        Assert.Equal(120m + 90m, busyMonths[0].GetProperty("cost").GetDecimal());
+        Assert.Equal(180m, busyMonths[1].GetProperty("cost").GetDecimal());
+    }
+
+    [Fact]
+    public async Task The_period_read_refuses_a_bad_period_bucket_or_length_with_one_sentence()
+    {
+        var person = await host.PersonAsync();
+
+        foreach (var (query, sentence) in new[]
+        {
+            ("from=2013-10-01", TeamCostPeriod.PeriodRefused),
+            ("from=2013-10-02&to=2013-10-01", TeamCostPeriod.PeriodRefused),
+            ("from=2013-10-01&to=2013-11-01&bucket=week", TeamCostPeriod.BucketRefused),
+            ("from=2010-01-01&to=2013-01-01&bucket=day", TeamCostPeriod.TooLongRefused),
+        })
+        {
+            var response = await person.GetAsync($"/api/teams/cost/period?{query}", Ct);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Equal(sentence, (await response.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("error").GetString());
+        }
+
+        // NEITHER DATE: the previous and the current UTC month, by day.
+        var read = await JsonAsync(await person.GetAsync("/api/teams/cost/period", Ct));
+        var (from, to) = TeamCostPeriod.DefaultPeriod(DateTimeOffset.UtcNow);
+        Assert.Equal(Day(from), read.GetProperty("period").GetProperty("from").GetString());
+        Assert.Equal(Day(to), read.GetProperty("period").GetProperty("to").GetString());
+        Assert.Equal("day", read.GetProperty("period").GetProperty("bucket").GetString());
+        Assert.Equal((to - from).Days, read.GetProperty("buckets").GetArrayLength());
+    }
+
+    /// <summary>
+    /// THE EXISTING READS ARE UNCHANGED: called as before, the team, all-teams and summary reads answer the fields
+    /// they always have and nothing of the period read's; and a period's parameters sent to them change nothing.
+    /// </summary>
+    [Fact]
+    public async Task The_existing_cost_reads_answer_as_before_without_any_new_parameter()
+    {
+        var person = await host.PersonAsync();
+        var team = await NewTeamAsync("Unchanged reads");
+        var now = DateTimeOffset.UtcNow;
+        await RunAsync(NextCorrelation(), team, now.AddHours(-3), now.AddHours(-2), rate: "60");
+
+        static string[] Keys(JsonElement e) => e.EnumerateObject().Select(p => p.Name).ToArray();
+
+        var one = await CostAsync(person, team);
+        Assert.Equal(["team", "money", "weeks", "outcomes", "totals", "human"], Keys(one));
+
+        var all = await JsonAsync(await person.GetAsync("/api/teams/cost", Ct));
+        Assert.Equal(["money", "weeks", "teams"], Keys(all));
+        Assert.Equal(8, all.GetProperty("weeks").GetArrayLength());
+
+        var summary = await SummaryAsync(person);
+        Assert.Equal(
+            ["rate", "weeks", "periodStart", "periodEnd", "total", "prior", "outcomes", "rightNow", "human"], Keys(summary));
+
+        var withPeriod = await JsonAsync(await person.GetAsync("/api/teams/cost?from=2013-10-01&to=2013-12-01&bucket=month", Ct));
+        Assert.Equal(all.GetProperty("weeks").GetRawText(), withPeriod.GetProperty("weeks").GetRawText());
+        Assert.Equal(
+            all.GetProperty("teams").EnumerateArray().Single(t => t.GetProperty("team").GetString() == team).GetRawText(),
+            withPeriod.GetProperty("teams").EnumerateArray().Single(t => t.GetProperty("team").GetString() == team).GetRawText());
+    }
+
     // ---- the teams list's summary ----
 
     [Fact]
@@ -607,7 +761,7 @@ public sealed class TeamCostTests(HostFixture host) : IClassFixture<HostFixture>
 
             foreach (var route in new[]
             {
-                $"/api/teams/{team}/cost", "/api/teams/cost", "/api/teams/cost/summary",
+                $"/api/teams/{team}/cost", "/api/teams/cost", "/api/teams/cost/summary", "/api/teams/cost/period",
                 "/api/outcomes", $"/api/outcomes/{outcome.Id}",
             })
             {

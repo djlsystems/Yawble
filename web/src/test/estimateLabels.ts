@@ -61,3 +61,16 @@ export function misnamedOnMemberRate(texts: readonly (string | null | undefined)
     .map((t) => (t ?? '').replace(/\s+/g, ' ').trim())
     .filter((t) => SpendWord.test(t) || CostWord.test(t) || AgentHShort.test(t) || ValueWords.test(t));
 }
+
+/**
+ * THE TEAMS LIST'S LINT, for its period control, its Estimated Execution Cost and Agent Hours columns, and the
+ * Estimated Execution Cost and Where it goes tiles: no spend word, no `agent h`, no value word, and no title of
+ * Cost alone. (The Budgets tile keeps its budget words until outcome budgets are settled; it is not linted here.)
+ */
+export function misnamedOnTeamsList(texts: readonly (string | null | undefined)[], titles: readonly string[] = []): string[] {
+  const words = texts
+    .map((t) => (t ?? '').replace(/\s+/g, ' ').trim())
+    .filter((t) => SpendWord.test(t) || AgentHShort.test(t) || ValueWords.test(t));
+  const costAlone = titles.map((t) => t.replace(/\s+/g, ' ').trim()).filter((t) => CostAlone.test(t));
+  return [...words, ...costAlone];
+}

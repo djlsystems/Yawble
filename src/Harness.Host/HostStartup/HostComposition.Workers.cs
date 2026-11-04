@@ -52,6 +52,7 @@ internal sealed partial class HostComposition
         OutcomeEndpoints.Map(app);
         SpendEndpoints.Map(app);
         TeamCost.Map(app);
+        TeamCostPeriod.Map(app);
         SignInEndpoints.Map(app);
         HealthEndpoints.Map(app, dataRoot);
         VersionEndpoints.Map(app);

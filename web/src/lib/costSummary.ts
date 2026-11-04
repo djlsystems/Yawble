@@ -1,4 +1,4 @@
-import type { CostSummary, CostSummaryOutcome } from '../api/outcomes';
+import type { CostBucket, CostSummary, CostSummaryOutcome, TeamsCostPeriod } from '../api/outcomes';
 import { NoOutcomeColour, outcomeColour } from './outcomeColours';
 import { moneyText } from './outcomes';
 import { EstimateTitle, agentHours, agentRateLine, legacyRateNote, markedMoney, percentText, weekLabel, type CostSeries } from './teamCost';
@@ -86,6 +86,53 @@ export function spendTile(summary: CostSummary, currency: string): SpendTile {
     }],
     weeks: summary.weeks.map((w) => w.weekStart),
   };
+}
+
+/**
+ * THE FIRST TILE OVER THE TEAMS LIST'S PERIOD (`GET /api/teams/cost/period`): the period's Estimated Execution Cost
+ * with its Agent Hours, its change on the same length of time just before, and the period's buckets as columns.
+ * Every figure is the route's `total`, `prior` and `totalBuckets`.
+ */
+export function periodTile(period: Pick<TeamsCostPeriod, 'total' | 'prior' | 'totalBuckets' | 'outcomes'>, currency: string): SpendTile {
+  const priced = period.total.cost !== null;
+  const now = priced ? period.total.cost! : period.total.agentSeconds;
+  const before = priced ? period.prior.cost ?? 0 : period.prior.agentSeconds;
+
+  let change: string | null = null;
+  let direction: SpendTile['direction'] = null;
+  if (before > 0) {
+    const share = (now - before) / before;
+    const percent = Math.round(Math.abs(share) * 100);
+    direction = percent === 0 ? 'flat' : share > 0 ? 'up' : 'down';
+    change = `${direction === 'up' ? '▲ ' : direction === 'down' ? '▼ ' : ''}${percent}% vs prior period`;
+  }
+
+  const ran = period.total.agentSeconds > 0 || period.outcomes.length > 0;
+
+  return {
+    value: priced
+      ? markedMoney(moneyText(period.total.cost, currency), period.total.legacyRates)
+      : ran ? 'Estimate unavailable' : '—',
+    change,
+    direction,
+    detail: priced ? agentRateLine(period.total, currency) : agentHours(period.total.agentSeconds),
+    footnote: priced ? legacyRateNote(period.total.legacyRates) : null,
+    series: [{
+      key: 'spend',
+      name: priced ? EstimateTitle : 'Agent Hours',
+      colour: SpendColour,
+      none: false,
+      weekly: period.totalBuckets.map((b) => ({
+        weekStart: b.start, agentSeconds: b.agentSeconds, cost: b.cost, billable: 0, measuredRuns: 0, unmeasuredRuns: 0,
+      })),
+    }],
+    weeks: period.totalBuckets.map((b) => b.start),
+  };
+}
+
+/** The tile's aside: how the period is cut. */
+export function bucketAside(bucket: CostBucket): string {
+  return bucket === 'day' ? 'by day' : 'by month';
 }
 
 // ---- Budgets -----------------------------------------------------------------------------------
@@ -180,7 +227,7 @@ export const UnattributedName = 'Unattributed';
  * UNATTRIBUTED (the work serving none, computed by the route, never an outcome), on ONE scale across the bars
  * that a budget tick also fits on. Every run is in exactly one of them, so they add up to the period's figure.
  */
-export function whereBars(summary: CostSummary, currency: string): WhereBar[] {
+export function whereBars(summary: Pick<CostSummary, 'total' | 'outcomes'>, currency: string): WhereBar[] {
   const priced = summaryPriced(summary);
   const linked = summary.outcomes
     .filter((o) => o.id !== null && share(o, priced) > 0)
