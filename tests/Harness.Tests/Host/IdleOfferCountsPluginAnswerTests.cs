@@ -12,7 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Harness.Tests.Host;
 
 /// <summary>
-/// Tester Quill's check of B008D's `IdleWorkflowOffer.UndeliveredAsync` arm: a plugin's answer
+/// The check of the `IdleWorkflowOffer.UndeliveredAsync` arm: a plugin's answer
 /// naming the member that asked (`answersTell`) counts as still coming to that member, though it
 /// holds neither `completed` nor `failed`, so the idle offer is not made in the moment between the
 /// Manager's cursor passing the answer and the asker's. Reached through the public
