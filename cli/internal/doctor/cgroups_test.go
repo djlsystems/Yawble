@@ -114,3 +114,18 @@ func TestTheCgroupsFixOnAPodmanMachineNamesYawbleUp(t *testing.T) {
 		t.Errorf("linux fix changed: %s", row.Fix)
 	}
 }
+
+// Under cgroupfs on a Podman machine yawble up cannot help: the fix names the cgroup manager and
+// does not send the person to yawble up. The systemd case keeps yawble up.
+func TestTheCgroupsFixUnderCgroupfsNamesTheCgroupManager(t *testing.T) {
+	c := &engine.Cgroups{Measured: true, Source: "podman info", Manager: "cgroupfs"}
+	o := doctor.Observed{EngineName: "podman", Cgroups: c, Machine: machine.Info{Applies: true, Exists: true, Running: true}}
+	row := find(t, doctor.HostChecks(o), "cgroups")
+	if row.Verdict != doctor.Fail || row.Fix != doctor.CgroupfsFix || strings.HasPrefix(row.Fix, "run yawble up") || !strings.Contains(row.Fix, `cgroup_manager = "cgroupfs"`) {
+		t.Errorf("%+v", row)
+	}
+	c.Manager = "systemd"
+	if row := find(t, doctor.HostChecks(o), "cgroups"); !strings.HasPrefix(row.Fix, "run yawble up") {
+		t.Errorf("systemd fix changed: %s", row.Fix)
+	}
+}

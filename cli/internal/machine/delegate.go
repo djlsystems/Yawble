@@ -127,12 +127,16 @@ func parseDelegation(stdout string) Delegation {
 // write appeared between the read and the write.
 var ErrForeignDelegate = fmt.Errorf("%s inside the machine was not written by yawble; it is left as it is", DelegateFile)
 
+// delegateDir is DelegateFile's directory.
+const delegateDir = "/etc/systemd/system/user@.service.d"
+
 // writeScript runs as root inside the machine (sudo -n: the machine's user has it without a
-// password). It refuses, exit 3, when a delegate.conf without yawble's mark is there, so a file
+// password). It refuses, exit 3, when a delegate.conf whose first line is not exactly
+// DelegateMark is there - the same test the read makes - so a file
 // someone else wrote is never overwritten, even one written after ReadDelegation.
 var writeScript = `sudo -n sh -c 'f=` + DelegateFile + `; ` +
-	`if [ -e $f ] && ! grep -qF "yawble-delegate:" $f; then exit 3; fi; ` +
-	`mkdir -p /etc/systemd/system/user@.service.d && ` +
+	`if [ -e $f ] && ! head -n1 $f | grep -qxF "` + DelegateMark + `"; then exit 3; fi; ` +
+	`mkdir -p ` + delegateDir + ` && ` +
 	`printf "%s\n" "` + DelegateMark + `" "[Service]" "` + DelegateLine + `" > $f && ` +
 	`systemctl daemon-reload'`
 

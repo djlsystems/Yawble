@@ -29,7 +29,8 @@ func consent(deps Deps, yes bool, out io.Writer, question string) bool {
 
 // delegateControllers is `up` on a running rootless Podman machine whose `podman info` lacks a
 // controller the containers' limits need. Only when the machine itself says the delegation is the
-// cause - user@.service's cgroup.controllers lack them and no delegate.conf is there - and the
+// cause - Podman uses the systemd cgroup manager, user@.service's cgroup.controllers lack them
+// and no delegate.conf is there - and the
 // person agrees, it writes yawble's delegate.conf inside the machine as root, reloads systemd,
 // restarts the machine and reads `podman info` again. It never recreates the machine, never
 // touches a volume and never overwrites a delegate.conf it did not write. Whatever it cannot fix
@@ -43,8 +44,15 @@ func delegateControllers(ctx context.Context, deps Deps, yes bool, machineName s
 	if len(missing) == 0 {
 		return nil // there, or not measured: nothing to delegate on what is not known to be missing
 	}
-	d := machine.ReadDelegation(ctx, r, machineName)
 	lacking := strings.Join(missing, ", ")
+	if before.UnderCgroupfs() {
+		// Under cgroupfs rootless Podman's containers get no controllers whatever systemd
+		// delegates: a write and a restart cannot help. The image chose cgroupfs (WSL 2.9), so
+		// changing it is a person's decision, not up's.
+		fmt.Fprintln(errOut, CgroupfsNote(missing))
+		return nil
+	}
+	d := machine.ReadDelegation(ctx, r, machineName)
 	switch {
 	case !d.Measured:
 		fmt.Fprintf(errOut, "note: podman info reports no %s cgroup controller, and whether the machine's systemd delegation is the cause could not be read (%s); the machine is left as it is\n", lacking, d.Reason)
@@ -57,6 +65,9 @@ func delegateControllers(ctx context.Context, deps Deps, yes bool, machineName s
 		return nil
 	case d.File == machine.DelegateOurs:
 		fmt.Fprintf(errOut, "warning: yawble's %s is in place inside the machine, but podman info still reports no %s cgroup controller: the delegation did not take\n", machine.DelegateFile, lacking)
+		return nil
+	}
+	if !d.IsTheCause() {
 		return nil
 	}
 
@@ -91,6 +102,12 @@ func delegateControllers(ctx context.Context, deps Deps, yes bool, machineName s
 	}
 	fmt.Fprintf(out, "podman info now reports the cgroup controllers: %s\n", strings.Join(after.Controllers, " "))
 	return nil
+}
+
+// CgroupfsNote is what up says when podman info lacks controllers and Podman in the machine uses
+// cgroup_manager = "cgroupfs": the cause, and that the machine is left as it is.
+func CgroupfsNote(missing []string) string {
+	return fmt.Sprintf("note: podman info reports no %s cgroup controller, and Podman in the machine uses cgroup_manager = \"cgroupfs\" (set by the machine image); rootless containers get no cgroup controllers under cgroupfs, and delegation cannot change that; the machine is left as it is", strings.Join(missing, ", "))
 }
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }

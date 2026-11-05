@@ -11,7 +11,8 @@ import (
 // The answers a Podman machine gives, as `podman info` and the read inside it over
 // `podman machine ssh` would.
 const (
-	infoNoControllers = `{"host":{"cgroupVersion":"v2","cgroupManager":"cgroupfs","cgroupControllers":[]}}`
+	infoNoControllers = `{"host":{"cgroupVersion":"v2","cgroupManager":"systemd","cgroupControllers":[]}}`
+	infoCgroupfs      = `{"host":{"cgroupVersion":"v2","cgroupManager":"cgroupfs","cgroupControllers":[]}}`
 	infoControllers   = `{"host":{"cgroupVersion":"v2","cgroupManager":"systemd","cgroupControllers":["cpuset","cpu","io","memory","pids"]}}`
 	sshPrefix         = "podman machine ssh podman-machine-default "
 	readPrefix        = sshPrefix + "u=$(id -u)"
@@ -273,5 +274,30 @@ func TestOnLinuxWithoutAMachineUpWritesNoSystemFileAndPrintsTheFix(t *testing.T)
 	}
 	if !strings.Contains(out+errOut, "enable them in each cgroup.subtree_control") {
 		t.Errorf("out %s\nerr %s", out, errOut)
+	}
+}
+
+// Podman in the machine under cgroup_manager = "cgroupfs": no delegation can give the containers
+// controllers, so up names the cgroup manager as the cause, asks nothing, writes nothing and does
+// not restart - even with user@.service lacking the controllers and no delegate.conf - and starts
+// without the limits as B0085 does.
+func TestOnCgroupfsUpNamesTheCgroupManagerAndWritesNothing(t *testing.T) {
+	s := delegationScript(notDelegated, infoCgroupfs)
+	code, out, errOut := runUp(t, s, true, "y\n")
+	if code != 0 {
+		t.Fatalf("exit %d: %s %s", code, out, errOut)
+	}
+	if has(s, writePrefix) || has(s, "podman machine stop") || has(s, "podman machine start") || has(s, "sudo") {
+		t.Errorf("changed the machine:\n%s", calls(s))
+	}
+	if strings.Contains(out, "Delegate them now?") {
+		t.Errorf("asked: %s", out)
+	}
+	want := `note: podman info reports no memory, cpu, pids cgroup controller, and Podman in the machine uses cgroup_manager = "cgroupfs" (set by the machine image); rootless containers get no cgroup controllers under cgroupfs, and delegation cannot change that; the machine is left as it is`
+	if !strings.Contains(errOut, want+"\n") || !strings.Contains(out+errOut, "WITHOUT the containers' limits") {
+		t.Errorf("out %s\nerr %s", out, errOut)
+	}
+	if strings.Contains(errOut, "the delegation is not the cause") || strings.Contains(errOut, "did not take") {
+		t.Errorf("named the delegation: %s", errOut)
 	}
 }
