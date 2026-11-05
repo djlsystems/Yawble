@@ -165,6 +165,21 @@ internal sealed class ProcessBed : IAsyncDisposable
     public async Task<IReadOnlyList<Row>> RowsOfAsync(string team, string member, params string[] types) =>
         [.. (await RowsAsync()).Where(r => r.Source.Equals($"{team}/{member}", StringComparison.OrdinalIgnoreCase) && (types.Length == 0 || types.Contains(r.Type)))];
 
+    /// <summary>
+    /// Waits for the end of <paramref name="member"/>'s first run - its completed or failed row, whichever
+    /// the log has first - and asserts that it completed. A run that failed fails the test as soon as its
+    /// row lands, with its class, its words and the hosts' last lines, rather than after the bound.
+    /// </summary>
+    public async Task CompletedAsync(string team, string member)
+    {
+        Row? end = null;
+        await UntilAsync($"{member}'s run ended", async () =>
+            (end = (await RowsOfAsync(team, member, MessageTypes.Completed, MessageTypes.Failed)).FirstOrDefault()) is not null);
+        Assert.True(
+            end!.Type == MessageTypes.Completed,
+            $"{member}'s run failed ({end.FailureClass}) instead of completing: {end.Payload}\n{Logs()}");
+    }
+
     /// <summary>The worker ids a capacity sample or /api/workers names, with their state.</summary>
     public async Task<IReadOnlyList<JsonElement>> WorkersAsync() => [.. (await GetAsync("/api/workers")).EnumerateArray()];
 
