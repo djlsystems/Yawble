@@ -108,8 +108,7 @@ public sealed class WorktreePerCardAcceptanceTests : IAsyncDisposable
 
         // Workflow B: the second card, on the same member, while the first is interrupted.
         await TellAsync(person, "Manager", "#plan c2");
-        await EventuallyAsync(() => _declarations.Any(d => d.Tag == "c2" && d.Status == HttpStatusCode.NoContent)
-            ? "yes" : null);
+        await DeclaredAsync(d => d.Tag == "c2" && d.Status == HttpStatusCode.NoContent);
 
         var c2 = _cards["c2"];
         var c2Tree = _paths.WorktreeFor(new ContainerId(_team, "Dev"), Repo, c2);
@@ -188,8 +187,7 @@ public sealed class WorktreePerCardAcceptanceTests : IAsyncDisposable
             (await person.PostAsync($"/api/teams/{_team}/containers/Dev/stop", null, Ct)).StatusCode);
 
         await TellAsync(person, "Manager", "#resume c1");
-        await EventuallyAsync(() => _declarations.Any(d => d.Tag == "c1" && d.Status == HttpStatusCode.NoContent)
-            ? "yes" : null);
+        await DeclaredAsync(d => d.Tag == "c1" && d.Status == HttpStatusCode.NoContent);
 
         var c1Tree = _paths.WorktreeFor(new ContainerId(_team, "Dev"), Repo, _cards["c1"]);
         var leftRows = (await RowsAsync(MessageTypes.RepoWorktreeLeft)).Select(r => Field(r, PayloadFields.Worktree));
@@ -275,7 +273,7 @@ public sealed class WorktreePerCardAcceptanceTests : IAsyncDisposable
         };
 
         await TellAsync(person, "Manager", "#plan c3 c4:Dev2");
-        await EventuallyAsync(() => _declarations.Any(d => d.Status == HttpStatusCode.NoContent) ? "yes" : null);
+        await DeclaredAsync(d => d.Status == HttpStatusCode.NoContent);
 
         var c3Tree = _paths.WorktreeFor(new ContainerId(_team, "Dev"), Repo, _cards["c3"]);
         var c4Tree = _paths.WorktreeFor(new ContainerId(_team, "Dev2"), Repo, _cards["c4"]);
@@ -569,36 +567,14 @@ public sealed class WorktreePerCardAcceptanceTests : IAsyncDisposable
             }
             else if (Directive(prompt, "#done") is { } done)
             {
-                // Two cards handed back are two wakes of this Manager in one workflow. The first can
-                // be accepted in the moment after the second member went idle and before its
-                // handback reached this Manager's queue, and the route accepts a second declaration
-                // of a declared workflow - a repeat removal pass that names the dirty tree again. A
-                // Manager reads its own history: a workflow already declared is not declared twice.
-                var waking = await _factory.Services.GetRequiredService<IMessageLog>()
-                    .FindAsync(long.Parse(causation), ct);
-                if (waking is not null && (await RowsAsync(MessageTypes.WorkflowCompleted))
-                        .Any(row => row.CorrelationId == waking.CorrelationId))
-                {
-                    return new AgentResult(0, "ok");
-                }
-
-                // Declared as a Manager would: refused while the member is still finishing its run
-                // or a sibling card is open, so it asks again for a while.
-                var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(20);
-                while (true)
-                {
-                    var declared = await client.PostAsJsonAsync(
-                        $"/api/teams/{_team}/containers/Manager/workflow-complete",
-                        new { delivered = $"delivered {done}" }, ct);
-                    var text = await declared.Content.ReadAsStringAsync(ct);
-                    _declarations.Enqueue((done, declared.StatusCode, text));
-
-                    if (declared.StatusCode != HttpStatusCode.Conflict || DateTime.UtcNow > deadline
-                        || text.Contains("not currently running", StringComparison.Ordinal))
-                        break;
-
-                    await Task.Delay(200, ct);
-                }
+                await DeclareDoneAsync(client, long.Parse(causation), done, ct);
+            }
+            else if (await OfferAfterDoneAsync(long.Parse(causation), ct) is { } offered)
+            {
+                // The idle offer, on a workflow a member already handed back "#done" in: the run that
+                // was handed it ended without declaring, so this one does - what a Manager offered
+                // another turn on finished work does.
+                await DeclareDoneAsync(client, long.Parse(causation), offered, ct);
             }
 
             return new AgentResult(0, "ok");
@@ -712,6 +688,144 @@ public sealed class WorktreePerCardAcceptanceTests : IAsyncDisposable
         var told = await person.PostAsJsonAsync(
             $"/api/teams/{_team}/containers/{member}/tell", new { instruction }, Ct);
         told.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>
+    /// The Manager declaring a workflow a member handed back as done, the way a Manager does.
+    /// </summary>
+    /// <remarks>
+    /// A WORKFLOW ALREADY DECLARED IS NOT DECLARED TWICE. Two cards handed back are two wakes of
+    /// this Manager in one workflow, and the route accepts a second declaration of a declared
+    /// workflow - a repeat removal pass that names the dirty tree again. A Manager reads its own history.
+    ///
+    /// NOT WHILE ANOTHER DELIVERY OF THE WORKFLOW IS QUEUED FOR THE MANAGER. The second card's hand-back
+    /// can be queued behind the run the first one woke, and `workflow-complete` refuses that run
+    /// ("Manager has 1 pending delivery in this workflow") for as long as it lasts: asking again from
+    /// inside it can never succeed, and it once spent the whole wait doing so. That run ends and the
+    /// queued one declares; a refusal that names the Manager's own pending delivery (queued between the
+    /// look and the ask) ends the run the same way.
+    ///
+    /// ASKED AGAIN ONLY WHILE SOMEBODY ELSE IS STILL FINISHING - a member whose run is ending, a
+    /// sibling card still open - which goes on its own; every answer is recorded.
+    /// </remarks>
+    private async Task DeclareDoneAsync(HttpClient client, long causation, string done, CancellationToken ct)
+    {
+        var log = _factory.Services.GetRequiredService<IMessageLog>();
+        if (await log.FindAsync(causation, ct) is not { } waking) return;
+        var workflow = waking.CorrelationId;
+
+        if ((await RowsAsync(MessageTypes.WorkflowCompleted)).Any(row => row.CorrelationId == workflow)) return;
+
+        var deadline = DateTime.UtcNow + Patience;
+        while (true)
+        {
+            if (await QueuedForManagerAsync(workflow, ct) is { } queued)
+            {
+                _declarations.Enqueue((done, 0, $"left to the Manager's queued delivery {queued}"));
+                return;
+            }
+
+            var declared = await client.PostAsJsonAsync(
+                $"/api/teams/{_team}/containers/Manager/workflow-complete",
+                new { delivered = $"delivered {done}" }, ct);
+            var text = await declared.Content.ReadAsStringAsync(ct);
+            _declarations.Enqueue((done, declared.StatusCode, text));
+
+            if (declared.StatusCode != HttpStatusCode.Conflict || DateTime.UtcNow > deadline
+                || text.Contains("not currently running", StringComparison.Ordinal)
+                || text.Contains("Manager has", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            await Task.Delay(200, ct);
+        }
+    }
+
+    /// <summary>The seq of an unstarted delivery of <paramref name="workflow"/> queued for the
+    /// Manager, or null. Its own started row - the run asking - is not waiting.</summary>
+    private async Task<long?> QueuedForManagerAsync(long workflow, CancellationToken ct)
+    {
+        var log = _factory.Services.GetRequiredService<IMessageLog>();
+        foreach (var row in await _factory.Services.GetRequiredService<IPendingDeliveries>().ForTeamAsync(_team, ct))
+        {
+            if (row.Started || !string.Equals(row.Subscriber, $"{_team}/Manager", StringComparison.OrdinalIgnoreCase)) continue;
+            if ((await log.FindAsync(row.Seq, ct))?.CorrelationId == workflow) return row.Seq;
+        }
+
+        return null;
+    }
+
+    /// <summary>When the row that woke the Manager is the idle offer on a workflow a member handed
+    /// back "#done" in, that hand-back's tag; otherwise null.</summary>
+    private async Task<string?> OfferAfterDoneAsync(long causation, CancellationToken ct)
+    {
+        var log = _factory.Services.GetRequiredService<IMessageLog>();
+        if (await log.FindAsync(causation, ct) is not { } waking || !IdleWorkflowOffer.IsOffer(waking)) return null;
+
+        return (await log.ReadCorrelationAsync(waking.CorrelationId, ct))
+            .Where(m => m.Type == MessageTypes.Handback)
+            .Select(m => Directive(MessageText.Of(m), "#done"))
+            .LastOrDefault(tag => tag is not null);
+    }
+
+    /// <summary>
+    /// Until a declaration <paramref name="match"/>es, or until nothing more can happen on the team
+    /// to make one: every container idle with nothing queued, no delivery pending, and no row a
+    /// container subscribes to still beyond its cursor, for a second. Then it fails at once with every
+    /// answer the Manager had; <see cref="Patience"/> only catches a hang.
+    /// </summary>
+    private async Task DeclaredAsync(Func<(string Tag, HttpStatusCode Status, string Body), bool> match)
+    {
+        var host = _factory.Services.GetRequiredService<ContainerHost>();
+        var deadline = DateTime.UtcNow + Patience;
+        DateTime? quietSince = null;
+
+        while (!_declarations.Any(match))
+        {
+            string Said() => string.Join(" | ", _declarations.Select(d => $"{d.Tag}:{(int)d.Status}:{d.Body}"));
+
+            if (await NothingComingAsync(host))
+            {
+                quietSince ??= DateTime.UtcNow;
+                if (DateTime.UtcNow - quietSince > TimeSpan.FromSeconds(1))
+                {
+                    throw new InvalidOperationException($"Not declared, and nothing more is coming to declare it. Declarations: {Said()}");
+                }
+            }
+            else
+            {
+                quietSince = null;
+            }
+
+            if (DateTime.UtcNow > deadline) throw new TimeoutException($"Timed out. Declarations: {Said()}");
+            await Task.Delay(100, Ct);
+        }
+    }
+
+    private async Task<bool> NothingComingAsync(ContainerHost host)
+    {
+        var snapshots = host.Snapshots().Where(s => string.Equals(s.Team, _team, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (snapshots.Any(s => s.State == ContainerState.Running || s.QueueDepth > 0)) return false;
+        if ((await _factory.Services.GetRequiredService<IPendingDeliveries>().ForTeamAsync(_team, Ct)).Count > 0) return false;
+
+        var log = _factory.Services.GetRequiredService<IMessageLog>();
+        foreach (var snapshot in snapshots)
+        {
+            var member = new ContainerId(snapshot.Team, snapshot.Id);
+            var types = await _factory.Services.GetRequiredService<ISubscriptions>().ForAsync(member, Ct);
+            if (types.Count == 0) continue;
+
+            var position = await _factory.Services.GetRequiredService<ICursors>().PositionAsync(member, Ct);
+            if ((await log.ReadAfterAsync(position, types, 100, Ct)).Any(m =>
+                    !string.Equals(m.Source, member.ToString(), StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(MessageTeam.Of(m), _team, StringComparison.OrdinalIgnoreCase)))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private async Task<string> EventuallyAsync(Func<string?> probe)

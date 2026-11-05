@@ -121,19 +121,35 @@ public sealed class MemberRemovalWorkflowTests : IAsyncLifetime
     /// while the Manager's re-wake run was still in flight let that run's end offer the workflow
     /// another turn (<c>IdleWorkflowOffer</c>), an instruction after the declaration that reopens it.
     ///
-    /// AND ONLY FROM A RUN WITH NOTHING STILL COMING TO THE MANAGER. Reading Dev's completion on the
-    /// log is not the same as the Manager having been handed it: a Manager run woken by something
-    /// else (an idle offer, say) can see the row while its delivery is still queued, and
+    /// BY A RUN THAT WAS HANDED DEV'S COMPLETION, WITH NOTHING STILL COMING TO THE MANAGER. Reading
+    /// Dev's completion on the log is not the same as the Manager having been handed it: a run woken
+    /// by something earlier can see the row while its delivery is still queued, and
     /// `workflow-complete` refuses that ("Manager has 1 pending delivery in this workflow"). So a run
-    /// declares only once Dev's completion has been offered to the Manager and no delivery of this
-    /// workflow is waiting for it (<see cref="NothingComingToAsync"/>); otherwise it ends, and the
-    /// run that queued delivery starts reads the same and declares - what a real Manager does when it
-    /// is refused for in-flight work.
+    /// declares only when the row that woke it (<c>HARNESS_CAUSATION</c>) is Dev's completion or
+    /// later - the pump hands a member its rows in order - and no unstarted delivery of the workflow
+    /// is queued for the Manager; otherwise it ends, and the queued run declares.
+    ///
+    /// AND ONCE DEV'S RUN HAS FINISHED ENDING. Dev appends its completion before it drops its own
+    /// pending row and leaves Running, so a quick Manager run can be handed that row while
+    /// `workflow-complete` still refuses it ("Dev is Running; Dev has 1 pending delivery"), and the
+    /// same busy state refuses the idle offer at that run's end - nothing would wake the Manager again.
+    /// The run waits for that tail, a condition (<see cref="DevSettledAsync"/>), before declaring.
+    ///
+    /// NOT BY THE MANAGER'S CURSOR. The pump moves a cursor only after its whole batch, so the run
+    /// handed Dev's completion can start and end with the cursor still below it. Asking the cursor
+    /// made that run decline, left the declaration to a re-wake only <c>IdleWorkflowOffer</c> might
+    /// give, and timed out when it gave none.
+    ///
+    /// THE WAIT FOLLOWS THE CONDITION, NOT A CLOCK: it ends when a run declares, and fails at once,
+    /// naming every Manager run and what it did, when no declaration has come and nothing more is
+    /// coming to the Manager (<see cref="NothingComingToAsync"/>) - no run, nothing queued, nothing
+    /// on the thread its cursor has still to pass. The outer bound only catches a hang.
     /// </remarks>
     private async Task<long> CompletedWorkflowAsync()
     {
         var root = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
         var declared = new TaskCompletionSource<(HttpStatusCode, string)>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var runs = new System.Collections.Concurrent.ConcurrentQueue<string>();
         var manager = new ContainerId(_team, TeamRegistry.DefaultManagerName);
         var dev = new ContainerId(_team, Dev);
 
@@ -142,13 +158,28 @@ public sealed class MemberRemovalWorkflowTests : IAsyncLifetime
             if (invocation.Container == manager)
             {
                 var correlation = await root.Task;
+                var cause = long.Parse(invocation.Environment["HARNESS_CAUSATION"]);
                 var thread = await Log.ReadCorrelationAsync(correlation, Ct);
 
                 if (thread.FirstOrDefault(m => m.Type == MessageTypes.Completed && m.Source == dev.ToString()) is { } done)
                 {
-                    if (await NothingComingToAsync(manager, correlation, done.Seq))
+                    if (cause < done.Seq)
                     {
-                        declared.TrySetResult(await DeclareAsync(invocation, "Widget built."));
+                        runs.Enqueue($"run woken by {cause}: saw Dev's completion {done.Seq} before being handed it; left it to that run");
+                    }
+                    else if (await QueuedForAsync(manager, correlation) is { } queued)
+                    {
+                        runs.Enqueue($"run woken by {cause}: delivery {queued} still queued for the Manager; left it to that run");
+                    }
+                    else if (!await DevSettledAsync(dev, correlation))
+                    {
+                        runs.Enqueue($"run woken by {cause}: Dev's run never finished ending");
+                    }
+                    else
+                    {
+                        var (status, body) = await DeclareAsync(invocation, "Widget built.");
+                        runs.Enqueue($"run woken by {cause}: declared, {(int)status} {body}");
+                        declared.TrySetResult((status, body));
                     }
                 }
                 else if (!thread.Any(m => m.Type == MessageTypes.InstructionFor(dev)))
@@ -157,7 +188,12 @@ public sealed class MemberRemovalWorkflowTests : IAsyncLifetime
                         MessageTypes.InstructionFor(dev),
                         """{"instruction":"Build the widget","subject":"Build the widget"}""",
                         manager.ToString(),
-                        long.Parse(invocation.Environment["HARNESS_CAUSATION"])), Ct);
+                        cause), Ct);
+                    runs.Enqueue($"run woken by {cause}: told Dev");
+                }
+                else
+                {
+                    runs.Enqueue($"run woken by {cause}: Dev has not completed yet");
                 }
             }
 
@@ -171,8 +207,32 @@ public sealed class MemberRemovalWorkflowTests : IAsyncLifetime
         var workflow = JsonDocument.Parse(await told.Content.ReadAsStringAsync(Ct)).RootElement.GetProperty("correlationId").GetInt64();
         root.SetResult(workflow);
 
-        var (status, body) = await declared.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct);
-        Assert.True(status == HttpStatusCode.NoContent, $"{status}: {body}");
+        // Until a run declares, or until nothing more can come to the Manager to declare with: then
+        // say why, at once. Quiet is asked to hold for a second, so a row in flight between two
+        // stores (appended, not yet offered) is not read as an end.
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var quietSince = (TimeSpan?)null;
+        while (!declared.Task.IsCompleted)
+        {
+            if (await NothingComingToAsync(manager, workflow))
+            {
+                quietSince ??= watch.Elapsed;
+                if (watch.Elapsed - quietSince > TimeSpan.FromSeconds(1))
+                {
+                    Assert.Fail($"No Manager run declared and nothing more is coming to the Manager - {await StoryAsync(workflow, runs)}");
+                }
+            }
+            else
+            {
+                quietSince = null;
+            }
+
+            if (watch.Elapsed > TimeSpan.FromSeconds(90)) Assert.Fail($"Still not declared after 90 s - {await StoryAsync(workflow, runs)}");
+            await Task.WhenAny(declared.Task, Task.Delay(50, Ct));
+        }
+
+        var (status, body) = await declared.Task;
+        Assert.True(status == HttpStatusCode.NoContent, $"{status}: {body} - {string.Join("; ", runs)}");
 
         // THE DECLARING RUN HAS ENDED: its own `agentContainer.completed` follows the declaration.
         for (var tries = 0; ; tries++)
@@ -188,22 +248,82 @@ public sealed class MemberRemovalWorkflowTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// Whether <paramref name="member"/> has been handed everything of <paramref name="workflow"/> up
-    /// to <paramref name="seq"/> and has nothing of it still queued: its cursor is past that row (the
-    /// pump records a delivery before it moves the cursor), and no unstarted pending delivery of the
-    /// workflow is its. Its own started row - the run asking - is not waiting.
+    /// Whether <paramref name="dev"/>'s run has finished ending under <paramref name="workflow"/>:
+    /// not Running in it and no pending delivery of it left. Waited for from inside the Manager's
+    /// run; false only if that never happens, which the wait outside then reports.
     /// </summary>
-    private async Task<bool> NothingComingToAsync(ContainerId member, long workflow, long seq)
+    private async Task<bool> DevSettledAsync(ContainerId dev, long workflow)
     {
-        if (await _factory.Services.GetRequiredService<ICursors>().PositionAsync(member, Ct) < seq) return false;
+        var host = _factory.Services.GetRequiredService<Harness.Containers.ContainerHost>();
+        var pending = _factory.Services.GetRequiredService<IPendingDeliveries>();
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        while (watch.Elapsed < TimeSpan.FromSeconds(60))
+        {
+            var running = host.Snapshots().Any(s => string.Equals(s.Team, dev.Team, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(s.Id, dev.Name, StringComparison.OrdinalIgnoreCase)
+                && s.State == ContainerState.Running && s.CurrentCorrelation == workflow);
+            var queued = false;
+            foreach (var row in await pending.ForTeamAsync(_team, Ct))
+            {
+                if (string.Equals(row.Subscriber, dev.ToString(), StringComparison.OrdinalIgnoreCase)
+                    && (await Log.FindAsync(row.Seq, Ct))?.CorrelationId == workflow)
+                {
+                    queued = true;
+                }
+            }
 
+            if (!running && !queued) return true;
+            await Task.Delay(20, Ct);
+        }
+
+        return false;
+    }
+
+    private async Task<string> StoryAsync(long workflow, IEnumerable<string> runs) =>
+        $"workflow {workflow}: {string.Join("; ", runs)}. Thread: "
+        + string.Join(", ", (await Log.ReadCorrelationAsync(workflow, Ct)).Select(m => $"{m.Seq} {m.Type} from {m.Source}"));
+
+    /// <summary>
+    /// The seq of an unstarted delivery of <paramref name="workflow"/> queued for
+    /// <paramref name="member"/>, or null when there is none. Its own started row - the run asking -
+    /// is not waiting.
+    /// </summary>
+    private async Task<long?> QueuedForAsync(ContainerId member, long workflow)
+    {
         foreach (var row in await _factory.Services.GetRequiredService<IPendingDeliveries>().ForTeamAsync(_team, Ct))
         {
             if (row.Started || !string.Equals(row.Subscriber, member.ToString(), StringComparison.OrdinalIgnoreCase)) continue;
-            if ((await Log.FindAsync(row.Seq, Ct))?.CorrelationId == workflow) return false;
+            if ((await Log.FindAsync(row.Seq, Ct))?.CorrelationId == workflow) return row.Seq;
         }
 
-        return true;
+        return null;
+    }
+
+    /// <summary>
+    /// Whether nothing more of <paramref name="workflow"/> can reach <paramref name="member"/>: it is
+    /// not running, no delivery of any kind is pending for it, and no row of the thread it subscribes
+    /// to, from someone else, lies beyond its cursor (the pump's own delivery test).
+    /// </summary>
+    private async Task<bool> NothingComingToAsync(ContainerId member, long workflow)
+    {
+        var host = _factory.Services.GetRequiredService<Harness.Containers.ContainerHost>();
+        if (host.Snapshots().Any(s => string.Equals(s.Team, member.Team, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(s.Id, member.Name, StringComparison.OrdinalIgnoreCase)
+                && (s.State == ContainerState.Running || s.QueueDepth > 0)))
+        {
+            return false;
+        }
+
+        if ((await _factory.Services.GetRequiredService<IPendingDeliveries>().ForTeamAsync(_team, Ct))
+            .Any(row => string.Equals(row.Subscriber, member.ToString(), StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        var types = new HashSet<string>(await _factory.Services.GetRequiredService<ISubscriptions>().ForAsync(member, Ct), StringComparer.Ordinal);
+        var position = await _factory.Services.GetRequiredService<ICursors>().PositionAsync(member, Ct);
+        return !(await Log.ReadCorrelationAsync(workflow, Ct)).Any(m =>
+            m.Seq > position && types.Contains(m.Type) && !string.Equals(m.Source, member.ToString(), StringComparison.OrdinalIgnoreCase));
     }
 
     private async Task<(HttpStatusCode, string)> DeclareAsync(AgentInvocation invocation, string delivered)
