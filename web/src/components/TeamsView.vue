@@ -1298,11 +1298,18 @@ async function setPaused(team: Team | null, paused: boolean) {
   gap: 8px;
 }
 
-/* The Cost cell: the chart with its total and marker as one control, then the team's status icon. */
+/* The Cost cell: the chart with its total and marker as one control, then the team's status icon. A grid, so
+   the icon sits at the column's right edge on every row, whether a row has a chart and total or only a dash; every
+   cell in the column is as wide as the column, so the charts, the totals and the icons each line up. */
 .teams-cost-cell {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto;
   align-items: center;
-  gap: 6px;
+  column-gap: 6px;
+}
+
+.teams-cost-cell > :first-child {
+  justify-self: start;
 }
 
 .teams-cost-button {
