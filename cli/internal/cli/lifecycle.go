@@ -274,8 +274,15 @@ func newStatusCommand(deps Deps) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			stats, statsErr := containerStats(cmd.Context(), e, instance.ContainerName, st.Container)
-			workers, installs := workersOf(cmd.Context(), e, st)
+			// The engine's report of its controllers, asked only when something runs to have stats:
+			// a zero a missing controller leaves unreadable is said not measured.
+			var cgroups *engine.Cgroups
+			if st.Container == engine.StateRunning {
+				c := e.Cgroups(cmd.Context())
+				cgroups = &c
+			}
+			stats, statsErr := containerStats(cmd.Context(), e, instance.ContainerName, st.Container, cgroups)
+			workers, installs := workersOf(cmd.Context(), e, st, cgroups)
 			if asJSON {
 				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
@@ -355,7 +362,7 @@ type workerJSON struct {
 
 // workersOf adds to each worker the engine's stats and control's record of it. Control's record
 // is asked only when control runs.
-func workersOf(ctx context.Context, e engine.Engine, st instance.Status) ([]workerJSON, *doctor.AgentInstalls) {
+func workersOf(ctx context.Context, e engine.Engine, st instance.Status, cgroups *engine.Cgroups) ([]workerJSON, *doctor.AgentInstalls) {
 	var record *doctor.WorkersRecord
 	var installs *doctor.AgentInstalls
 	if st.Container == engine.StateRunning {
@@ -366,7 +373,7 @@ func workersOf(ctx context.Context, e engine.Engine, st instance.Status) ([]work
 	}
 	out := make([]workerJSON, 0, len(st.Workers))
 	for _, w := range st.Workers {
-		stats, err := containerStats(ctx, e, w.Name, w.Container)
+		stats, err := containerStats(ctx, e, w.Name, w.Container, cgroups)
 		out = append(out, workerJSON{WorkerStatus: w, Stats: stats, StatsError: text.ErrorText(err), Control: record.Worker(w.ID), record: record})
 	}
 	return out, installs
@@ -380,14 +387,18 @@ func errorOf(text string) error {
 }
 
 // containerStats asks the engine for a container's stats only when it runs: a stopped
-// container has none, and that is said, not asked.
-func containerStats(ctx context.Context, e engine.Engine, name string, state engine.State) (*engine.Stats, error) {
+// container has none, and that is said, not asked. With the engine's report of its controllers
+// (nil: not asked), a zero a missing controller leaves unreadable is cleared (Stats.Without).
+func containerStats(ctx context.Context, e engine.Engine, name string, state engine.State, cgroups *engine.Cgroups) (*engine.Stats, error) {
 	if state != engine.StateRunning {
 		return nil, nil
 	}
 	st, err := e.Stats(ctx, name)
 	if err != nil {
 		return nil, err
+	}
+	if cgroups != nil {
+		st = st.Without(*cgroups)
 	}
 	return &st, nil
 }

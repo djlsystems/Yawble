@@ -430,7 +430,7 @@ func controlSpec(s Settings) engine.RunSpec {
 	return engine.RunSpec{
 		Name: ContainerName, Pod: PodName, Image: s.Image,
 		Volumes: []string{VolumeName + ":/data"},
-		Env:     env,
+		Env:     engineEnv(env, s),
 		Labels: map[string]string{
 			InstanceLabel: PodName, RoleLabel: RoleControl, engine.SettingsLabel: SettingsLabel(s),
 		},

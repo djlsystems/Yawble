@@ -27,7 +27,12 @@ func newDoctorCommand(deps Deps) *cobra.Command {
 		Use:   "doctor",
 		Short: "Check the engine, the instance and what runs inside it; say how to fix what is wrong",
 		Long: "Every check is ok, warn, FAIL or skip. skip means it could not be measured (a stopped " +
-			"instance has no health to check), and skip is not failure. Exit 1 when anything FAILs.\n" +
+			"instance has no health to check), and skip is not failure. Exit 1 when anything FAILs; exit 0 otherwise, " +
+			"warnings included.\n" +
+			"An instance that runs and answers without its containers' limits (the engine has no memory, cpu or pids " +
+			"cgroup controller) is a cgroups warning with the fix, not a FAIL: doctor exits 0 for it, so a script tells " +
+			"it from a broken instance. Before the containers are made, or while control will not start or answer, " +
+			"cgroups FAILs and doctor exits 1. Engine stats the missing controllers leave unreadable read \"not measured\".\n" +
 			"--fix repairs only what is safe and idempotent: it creates a missing data volume and starts " +
 			"a stopped container, then waits for it to answer, then starts stopped workers. It never removes anything.\n" +
 			"Each worker has a row: control's record of it (connected, version, runs) and the Host's " +
@@ -83,7 +88,7 @@ func newDoctorCommand(deps Deps) *cobra.Command {
 			if observed.EngineErr == nil && observed.ContainerKnown {
 				// The workers as Observe found them: a second reading would lose what the engine's
 				// record said before their checks were run.
-				checks = append(checks, workerChecks(cmd.Context(), e, s, report, observed.Workers)...)
+				checks = append(checks, workerChecks(cmd.Context(), e, s, report, observed.Workers, observed.Cgroups)...)
 				if c, ok := healthTimerCheck(cmd.Context(), deps, e, observed, observed.Workers); ok {
 					checks = append(checks, c)
 				}
@@ -191,11 +196,11 @@ func repair(cmd *cobra.Command, e engine.Engine, s instance.Settings, o doctor.O
 
 // workerChecks observes each worker container, with the engine's stats of a running one, and
 // judges them against control's record.
-func workerChecks(ctx context.Context, e engine.Engine, s instance.Settings, report *doctor.HostReport, workers []instance.WorkerStatus) []doctor.Check {
+func workerChecks(ctx context.Context, e engine.Engine, s instance.Settings, report *doctor.HostReport, workers []instance.WorkerStatus, cgroups *engine.Cgroups) []doctor.Check {
 	observed := make([]doctor.WorkerObserved, 0, len(workers))
 	for _, w := range workers {
 		o := doctor.WorkerObserved{WorkerStatus: w}
-		o.Stats, o.StatsErr = containerStats(ctx, e, w.Name, w.Container)
+		o.Stats, o.StatsErr = containerStats(ctx, e, w.Name, w.Container, cgroups)
 		observed = append(observed, o)
 	}
 	ref, _ := s.WorkerRef()

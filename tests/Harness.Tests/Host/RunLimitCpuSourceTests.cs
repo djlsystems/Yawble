@@ -81,6 +81,7 @@ public sealed class RunLimitCpuSourceTests
         var limit = settings.RunLimit();
         Assert.Equal(13, limit.Limit);
         Assert.Equal(CpuCount.Engine, limit.CpusSource);
+        // Word for word what cli/internal/doctor/testdata/host-doctor-no-cpu-controller.json carries.
         Assert.Equal(
             "sum of 1 worker's bound: worker-1 13 (CPU bound 13 = 14 CPUs reported by the engine - 1, as the container's cgroup does not say its CPUs; the container has no memory limit)",
             limit.Reason);
@@ -91,7 +92,10 @@ public sealed class RunLimitCpuSourceTests
         // A worker that measured nothing is the one case left for 3.
         settings.Workers = () => [new WorkerBoundSource(new WorkerId("worker-1"), null, null)];
         Assert.Equal(3, settings.RunLimit().Limit);
-        Assert.Contains("no CPU count could be measured", settings.RunLimit().Reason);
+        // Word for word what cli/internal/doctor/testdata/host-doctor-no-cpu-count.json carries.
+        Assert.Equal(
+            "sum of 1 worker's bound: worker-1 3 (CPU bound 3, as no CPU count could be measured: not the container's cgroup, the engine's figure or the processors the worker sees; the container has no memory limit)",
+            settings.RunLimit().Reason);
     }
 
     [Fact]

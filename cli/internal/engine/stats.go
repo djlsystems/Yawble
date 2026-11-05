@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -31,6 +32,38 @@ type Stats struct {
 	PIDs             *int     `json:"pids"`
 	NetIO            string   `json:"netIO,omitempty"`
 	BlockIO          string   `json:"blockIO,omitempty"`
+	// Unreadable names the figures the engine printed as zero that a missing cgroup controller
+	// leaves it unable to read ("memory", "pids"): they are cleared above and said "not measured",
+	// never 0. Empty on an engine that reports its controllers, where a zero is a zero.
+	Unreadable []string `json:"unreadable,omitempty"`
+}
+
+// Without is the stats as they can be read without the controllers the engine reports missing.
+// Measured live on rootless WSL Podman 6.1.4 with cgroupControllers=[]: podman stats printed
+// "0B / 58.97GB" and pids 0 for a worker running agent runs, because with no memory controller
+// there is no memory.current, and with no pids controller no pids.current. Such a zero is not a
+// reading: memory usage (and its percent) and pids are cleared and named in Unreadable. A figure
+// that is not zero, an engine whose report was not measured, and a controller that is there leave
+// the figures as the engine printed them.
+func (s Stats) Without(c Cgroups) Stats {
+	if s.NotRunning || !c.Measured {
+		return s
+	}
+	missing := c.Missing()
+	if slices.Contains(missing, "memory") && s.MemoryUsageBytes != nil && *s.MemoryUsageBytes == 0 {
+		s.MemoryUsage, s.MemoryUsageBytes, s.MemoryPercent = "", nil, nil
+		s.Unreadable = append(s.Unreadable, "memory")
+	}
+	if slices.Contains(missing, "pids") && s.PIDs != nil && *s.PIDs == 0 {
+		s.PIDs = nil
+		s.Unreadable = append(s.Unreadable, "pids")
+	}
+	return s
+}
+
+// unreadable is what Summary says for a figure a missing controller leaves unreadable.
+func unreadable(controller string) string {
+	return "not measured (no " + controller + " cgroup controller)"
 }
 
 // Summary is the figures on one line, each one that was not reported said so:
@@ -47,6 +80,11 @@ func (s Stats) Summary() string {
 	}
 	memory := "memory "
 	switch {
+	case slices.Contains(s.Unreadable, "memory"):
+		memory += unreadable("memory")
+		if s.MemoryLimit != "" {
+			memory += " / " + s.MemoryLimit
+		}
 	case s.MemoryUsage != "" && s.MemoryLimit != "":
 		memory += s.MemoryUsage + " / " + s.MemoryLimit
 	case s.MemoryUsage != "":
@@ -63,6 +101,8 @@ func (s Stats) Summary() string {
 	parts = append(parts, memory)
 	if s.PIDs != nil {
 		parts = append(parts, fmt.Sprintf("pids %d", *s.PIDs))
+	} else if slices.Contains(s.Unreadable, "pids") {
+		parts = append(parts, "pids "+unreadable("pids"))
 	} else {
 		parts = append(parts, "pids not measured")
 	}

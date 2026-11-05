@@ -162,11 +162,11 @@ func workerSpec(s Settings, i int, ref string) engine.RunSpec {
 	return engine.RunSpec{
 		Name: WorkerName(i), Pod: PodName, Network: "container:" + ContainerName, Image: ref,
 		Volumes: []string{VolumeName + ":/data"},
-		Env: map[string]string{
+		Env: engineEnv(map[string]string{
 			"HARNESS_ROLE":        RoleWorker,
 			"HARNESS_CONTROL_URL": ControlURLForWorkers,
 			"HARNESS_WORKER_ID":   WorkerID(i),
-		},
+		}, s),
 		Labels: map[string]string{
 			InstanceLabel: PodName, RoleLabel: RoleWorker, WorkerIndexLabel: strconv.Itoa(i),
 			engine.SettingsLabel: WorkerSettingsLabel(s, i, ref),

@@ -62,6 +62,25 @@ type Settings struct {
 	// beside a control that has them (CgroupsSeen()); recorded on the worker so it is made again
 	// only when that report, or its settings, change. Decided only by Up.
 	CgroupsSeen string
+	// EngineCPUs is how many CPUs the engine reports (the measured Machine's CPUs), handed to
+	// control and every worker as EngineCPUsVariable so the Host can bound its runs by a measured
+	// CPU count when the container's cgroup does not say (no cpu controller). 0 is not measured:
+	// nothing is passed, and nothing is estimated in its place.
+	EngineCPUs int
+}
+
+// EngineCPUsVariable is the engine's CPU count as control and the workers read it: the contract
+// with the Host (CpuCount.EngineVariable in src/Harness.Contracts/CpuCount.cs).
+const EngineCPUsVariable = "HARNESS_ENGINE_CPUS"
+
+// engineEnv adds the engine's measured CPUs to a container's environment, when measured. It is not
+// in the settings label: a different count makes no container again, and a container made before
+// it was passed falls back to the processors the Host sees.
+func engineEnv(env map[string]string, s Settings) map[string]string {
+	if s.EngineCPUs > 0 {
+		env[EngineCPUsVariable] = strconv.Itoa(s.EngineCPUs)
+	}
+	return env
 }
 
 // EnvFiles are the env files every instance container is given, in order: the env file, then
@@ -111,6 +130,9 @@ func Defaults(c config.Config, m Machine, pinned string) (Settings, []string) {
 	}
 	if s.Image == "" {
 		s.Image = pinned
+	}
+	if m.Measured && m.CPUs > 0 {
+		s.EngineCPUs = m.CPUs
 	}
 	memoryMB, cpus := Proposed(m)
 	if s.Memory == "" {

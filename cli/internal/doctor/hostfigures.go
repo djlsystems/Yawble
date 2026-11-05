@@ -27,6 +27,10 @@ type WipLimit struct {
 	MemoryLimitMb  *int64 `json:"memoryLimitMb"`
 	MemoryPerRunMb int    `json:"memoryPerRunMb"`
 	Reason         string `json:"reason"`
+	// CpusSource is where the Host's CPU count came from: "cgroup", "engine" (the figure up hands
+	// in as HARNESS_ENGINE_CPUS) or "processors"; empty from an older Host, with none, or over
+	// workers that measured theirs in different ways. The Reason names it in words.
+	CpusSource string `json:"cpusSource,omitempty"`
 }
 
 // RunMemory is how the Host limits one run's memory. Mechanism is "cgroup", "rlimit" or "none";
