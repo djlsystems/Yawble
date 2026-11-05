@@ -7,7 +7,7 @@ namespace Harness.Tests;
 /// blocking read of the PTY returns only when the child's side closes, so a child that ignores SIGHUP
 /// kept a stop waiting forever: its session sweep, which runs after the stop, was never reached. A
 /// child ignores SIGHUP when it says so itself, or when it inherits SIG_IGN, as everything does under
-/// a worker (or a test run) started with <c>nohup</c>. Red before card 28788: the dispose never returned.
+/// a worker (or a test run) started with <c>nohup</c>. Red before the SIGKILL fallback: the dispose never returned.
 /// </summary>
 public sealed class PtyStopTests
 {
