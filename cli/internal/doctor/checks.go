@@ -104,16 +104,32 @@ func statsRow(o Observed) Check {
 		return Check{"stats", Skip, fmt.Sprintf("%s says the container is not running", o.Stats.Command), ""}
 	}
 	detail := fmt.Sprintf("%s  (%s)", o.Stats.Summary(), o.Stats.Command)
+	if len(o.Stats.Unreadable) > 0 {
+		return Check{"stats", Warn, detail, UnreadableStatsFix}
+	}
 	if p := o.Stats.MemoryPercent; p != nil && *p >= memoryWarnPercent {
 		return Check{"stats", Warn, detail, fmt.Sprintf("the container uses %.0f%% of its memory limit; finish or stop some runs, or yawble config set memory <more>, then yawble up", *p)}
 	}
 	return Check{"stats", OK, detail, ""}
 }
 
+// UnreadableStatsFix is the fix on a stats row (control's, or a worker's) with figures the missing
+// cgroup controllers leave unreadable: the cgroups row's cause, and its fix.
+const UnreadableStatsFix = "the engine cannot read these figures without the cgroup controllers the cgroups row names; its fix gives them back"
+
+// RunningWithoutLimits is whether the instance runs and answers while made without its limits:
+// control running, its health answering, and its settings label saying it was made without them.
+func RunningWithoutLimits(o Observed) bool {
+	return o.ControlNoLimits && o.ContainerKnown && o.Container == engine.StateRunning && o.Healthy != nil && *o.Healthy
+}
+
 // cgroupsRow is whether the engine can apply the containers' memory and CPU limits, from its own
 // report. Any of memory, cpu or pids missing FAILs, naming what is missing and the fix, and says
-// that `up` starts without the limits meanwhile. Not measured stays not measured, and is never
-// ok: with control made without its limits it warns that the cause could not be measured.
+// that `up` starts without the limits meanwhile - until the instance runs and answers without
+// them (RunningWithoutLimits): then it is a warning with the same fix, and doctor exits 0 for it,
+// so a scripted check tells "running without limits" from "broken". Not measured stays not
+// measured, and is never ok: with control made without its limits it warns that the cause could
+// not be measured.
 func cgroupsRow(o Observed) Check {
 	c := o.Cgroups
 	switch {
@@ -128,6 +144,9 @@ func cgroupsRow(o Observed) Check {
 		have := "none"
 		if len(c.Controllers) > 0 {
 			have = strings.Join(c.Controllers, ", ")
+		}
+		if RunningWithoutLimits(o) {
+			return Check{"cgroups", Warn, fmt.Sprintf("%s reports no %s cgroup controller (it has: %s), so the engine cannot apply a container's %s; the instance runs and answers WITHOUT the containers' limits, and no memory or CPU limit is applied to any container (a warning: doctor exits 0 for it)", c.Source, strings.Join(missing, ", "), have, instance.LimitsOf(missing)), cgroupsFix(o)}
 		}
 		return Check{"cgroups", Fail, fmt.Sprintf("%s reports no %s cgroup controller (it has: %s), so the engine cannot apply a container's %s; `yawble up` starts the instance WITHOUT the containers' limits, and no memory or CPU limit is applied to any container", c.Source, strings.Join(missing, ", "), have, instance.LimitsOf(missing)), cgroupsFix(o)}
 	}

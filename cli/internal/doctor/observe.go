@@ -117,6 +117,8 @@ func Observe(ctx context.Context, e engine.Engine, s instance.Settings, p Probes
 		if stats, err := e.Stats(ctx, instance.ContainerName); err != nil {
 			o.StatsErr = err
 		} else {
+			// A zero the missing controllers leave unreadable is not measured, never 0.
+			stats = stats.Without(cgroups)
 			o.Stats = &stats
 		}
 	}

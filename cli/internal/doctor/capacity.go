@@ -50,9 +50,31 @@ func containerGot(r *HostReport) string {
 	if l.MemoryLimitMb != nil {
 		memory = fmt.Sprintf("%d MB", *l.MemoryLimitMb)
 	}
+	// A count from the engine or the processors seen is not a limit the container got: its cgroup
+	// does not say its CPUs, so say so and name where the running limit's count came from.
+	if l.Cpus != nil {
+		if from := countFrom(l, *l.Cpus); from != "" {
+			return fmt.Sprintf("the container got %s and no CPU limit its cgroup says (the running limit counts %s)", memory, from)
+		}
+	}
 	cpus := "CPUs not known"
 	if l.Cpus != nil {
 		cpus = fmt.Sprintf("%d CPUs", *l.Cpus)
 	}
 	return fmt.Sprintf("the container got %s, %s (the Host's cgroup reading)", memory, cpus)
+}
+
+// countFrom names a CPU count that did not come from the container's cgroup, in the Host's words;
+// empty for the cgroup's own count and for an older Host that does not say its source.
+func countFrom(l *WipLimit, cpus int) string {
+	switch l.CpusSource {
+	case "engine":
+		return fmt.Sprintf("%d CPUs reported by the engine", cpus)
+	case "processors":
+		if l.Bound == "workers" {
+			return fmt.Sprintf("%d processors the worker sees", cpus)
+		}
+		return fmt.Sprintf("%d processors the Host sees", cpus)
+	}
+	return ""
 }

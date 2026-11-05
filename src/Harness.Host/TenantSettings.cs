@@ -129,19 +129,31 @@ public sealed class TenantSettings
     private readonly Dictionary<string, string> _fallbacks = new(StringComparer.Ordinal);
     private readonly HashSet<string> _configured = new(StringComparer.Ordinal);
     private readonly int? _cpus;
+    private readonly string? _cpusSource;
     private readonly long? _memoryLimitMb;
     private volatile IReadOnlyDictionary<string, TenantSettingRow> _rows =
         new Dictionary<string, TenantSettingRow>(StringComparer.Ordinal);
 
-    /// <param name="cpuCount">CPUs the container may use; null reads the cgroup, 0 is not known.</param>
+    /// <param name="cpuCount">CPUs the container's cgroup allows; null reads the cgroup, 0 is the
+    /// cgroup not saying. When the cgroup does not say, the CPU count is the engine's figure the CLI
+    /// handed in (<see cref="CpuCount.EngineVariable"/>), else the processors the Host sees.</param>
     /// <param name="memoryLimitMb">The container's memory limit in MB; null reads the cgroup, 0 is
     /// no limit.</param>
+    /// <param name="processors">The processors the Host sees; null is <see cref="Environment.ProcessorCount"/>
+    /// when the cgroup is read (cpuCount null), and not measured when a cpuCount is handed in, so a
+    /// test's figure is the only one.</param>
     public TenantSettings(
-        ITenantSettingsStore store, IConfiguration configuration, int? cpuCount = null, long? memoryLimitMb = null)
+        ITenantSettingsStore store, IConfiguration configuration, int? cpuCount = null, long? memoryLimitMb = null,
+        int? processors = null)
     {
         _store = store;
         _configuration = configuration;
-        _cpus = (cpuCount ?? CgroupCpus()) is > 0 and var cpus ? cpus : null;
+        var (cpus, source) = CpuCount.Measure(
+            cpuCount ?? CgroupCpus(),
+            configuration[CpuCount.EngineVariable],
+            processors ?? (cpuCount is null ? Environment.ProcessorCount : null));
+        _cpus = cpus is { } measured ? (int)Math.Ceiling(measured) : null;
+        _cpusSource = _cpus is null ? null : source;
         _memoryLimitMb = (memoryLimitMb ?? CgroupMemoryMb()) is > 0 and var mb ? mb : null;
 
         // The running limit's built-in default depends on wip.memoryPerRunMb, which can change at
@@ -156,8 +168,10 @@ public sealed class TenantSettings
                 + "waits its turn; nothing is refused. A Manager may use one slot above it, so a pool "
                 + "full of members never starves the Manager that would free them. 0 means no limit. "
                 + "Takes effect immediately: raising it starts waiting work, lowering it stops nothing "
-                + "that is running. Default: the smaller of a CPU bound, max(1, CPUs in the container's "
-                + "cgroup - 1) or 3 when the CPUs are not known, and, when the container has a memory "
+                + "that is running. Default: the smaller of a CPU bound, max(1, CPUs - 1) - the CPUs in the "
+                + "container's cgroup, or, when the cgroup does not say (no cpu controller), the CPUs the "
+                + "engine reports or else the processors the Host sees; 3 only when no CPU count can be "
+                + "measured - and, when the container has a memory "
                 + "limit, a memory bound, floor(limit / wip.memoryPerRunMb), at least 1.",
                 Min: 0, Max: 1000),
             new(WipMemoryPerRunMbName, TenantSettingKind.Integer,
@@ -358,7 +372,7 @@ public sealed class TenantSettings
     /// <summary>The floor of the computed per-run limit: below it an agent CLI cannot start.</summary>
     public const int MinRunMemoryLimitMb = 512;
 
-    /// <summary>The CPU bound when the cgroup does not say how many CPUs there are.</summary>
+    /// <summary>The CPU bound when no CPU count can be measured: not the cgroup's, the engine's or the processors seen.</summary>
     public const int UnknownCpuBound = 3;
 
     public IReadOnlyList<TenantSettingDefinition> Definitions { get; }
@@ -453,7 +467,7 @@ public sealed class TenantSettings
                 "no worker is connected, so no run can start; the default is the sum of each connected worker's own bound");
         }
 
-        var each = connected.Select(w => (Worker: w, Limit: Bounds(w.Cpus, w.MemoryLimitMb, memoryPerRunMb))).ToList();
+        var each = connected.Select(w => (Worker: w, Limit: Bounds(w, memoryPerRunMb))).ToList();
         var limit = each.Sum(e => e.Limit.Limit);
         var memory = each.All(e => e.Limit.MemoryLimitMb is not null) ? each.Sum(e => e.Limit.MemoryLimitMb) : null;
         return new WipRunLimit(
@@ -462,7 +476,8 @@ public sealed class TenantSettings
             each.All(e => e.Limit.MemoryBound is not null) ? each.Sum(e => e.Limit.MemoryBound) : null,
             memory, memoryPerRunMb,
             (each.Count == 1 ? "sum of 1 worker's bound: " : $"sum of {each.Count} workers' bounds: ")
-            + string.Join(", ", each.Select(e => $"{e.Worker.Id} {e.Limit.Limit} ({e.Limit.Reason})")));
+            + string.Join(", ", each.Select(e => $"{e.Worker.Id} {e.Limit.Limit} ({e.Limit.Reason})")),
+            each.Select(e => e.Limit.CpusSource).Distinct().ToList() is [var one] ? one : null);
     }
 
     /// <summary>
@@ -473,25 +488,31 @@ public sealed class TenantSettings
     public int? WorkerBound(WorkerBoundSource worker) =>
         _rows.ContainsKey(WipMaxRunningName) || _configured.Contains(WipMaxRunningName)
             ? null
-            : Bounds(worker.Cpus, worker.MemoryLimitMb, WipMemoryPerRunMb).Limit;
+            : Bounds(worker, WipMemoryPerRunMb).Limit;
 
-    private WipRunLimit Bounds(int memoryPerRunMb) => Bounds(_cpus, _memoryLimitMb, memoryPerRunMb);
+    private WipRunLimit Bounds(int memoryPerRunMb) => Bounds(_cpus, _memoryLimitMb, memoryPerRunMb, _cpusSource, "the Host");
+
+    /// <summary>A worker's bound, from what it said of itself.</summary>
+    private static WipRunLimit Bounds(WorkerBoundSource worker, int memoryPerRunMb) =>
+        Bounds(worker.Cpus, worker.MemoryLimitMb, memoryPerRunMb, worker.CpusSource, "the worker");
 
     /// <summary>
     /// One container's bound: the smaller of max(1, CPUs - 1) (or <see cref="UnknownCpuBound"/> when
-    /// the CPUs are not known) and, when it has a memory limit, floor(limit / per-run MB), at least 1.
+    /// no CPU count was measured) and, when it has a memory limit, floor(limit / per-run MB), at least 1.
+    /// <paramref name="cpusSource"/> is where the CPUs were measured (<see cref="CpuCount"/>), and the
+    /// reason names it; <paramref name="whose"/> is whose processors "processors" means.
     /// </summary>
-    public static WipRunLimit Bounds(int? cpus, long? memoryLimitMb, int memoryPerRunMb)
+    public static WipRunLimit Bounds(
+        int? cpus, long? memoryLimitMb, int memoryPerRunMb, string? cpusSource = null, string whose = "the Host")
     {
         var cpuBound = cpus is { } known ? Math.Max(1, known - 1) : UnknownCpuBound;
-        var cpuText = cpus is { } c
-            ? $"CPU bound {cpuBound} = {c} CPUs - 1"
-            : $"CPU bound {cpuBound}, as the container's CPUs are not known";
+        var cpuText = CpuText(cpuBound, cpus, cpusSource, whose);
+        var source = cpus is null ? null : cpusSource ?? CpuCount.Cgroup;
 
         if (memoryLimitMb is not { } limitMb)
         {
             return new WipRunLimit(cpuBound, "cpu", cpuBound, cpus, null, null, memoryPerRunMb,
-                $"{cpuText}; the container has no memory limit");
+                $"{cpuText}; the container has no memory limit", source);
         }
 
         var memoryBound = (int)Math.Max(1, Math.Min(int.MaxValue, limitMb / Math.Max(1, memoryPerRunMb)));
@@ -499,10 +520,25 @@ public sealed class TenantSettings
 
         return memoryBound < cpuBound
             ? new WipRunLimit(memoryBound, "memory", cpuBound, cpus, memoryBound, limitMb, memoryPerRunMb,
-                $"{memoryText}, below the {cpuText}: the memory bound applies")
+                $"{memoryText}, below the {cpuText}: the memory bound applies", source)
             : new WipRunLimit(cpuBound, "cpu", cpuBound, cpus, memoryBound, limitMb, memoryPerRunMb,
-                $"{cpuText}, not above the {memoryText}: the CPU bound applies");
+                $"{cpuText}, not above the {memoryText}: the CPU bound applies", source);
     }
+
+    /// <summary>
+    /// The CPU bound in words, naming where the CPU count came from. The cgroup's count reads as it
+    /// always has; a count measured another way says which way, and that the cgroup did not say.
+    /// </summary>
+    public static string CpuText(int cpuBound, int? cpus, string? cpusSource, string whose = "the Host") => (cpus, cpusSource) switch
+    {
+        ({ } c, CpuCount.Engine) =>
+            $"CPU bound {cpuBound} = {c} CPUs reported by the engine - 1, as the container's cgroup does not say its CPUs",
+        ({ } c, CpuCount.Processors) =>
+            $"CPU bound {cpuBound} = {c} processors {whose} sees - 1, as the container's cgroup does not say its CPUs",
+        ({ } c, _) => $"CPU bound {cpuBound} = {c} CPUs - 1",
+        _ => $"CPU bound {cpuBound}, as no CPU count could be measured: not the container's cgroup, "
+            + $"the engine's figure or the processors {whose} sees",
+    };
 
     /// <summary>
     /// The memory one run may use, and where the figure came from: <c>runs.memoryLimitMb</c> when it
@@ -525,8 +561,8 @@ public sealed class TenantSettings
         if (connected.Count <= 1 || runs <= 0) return RunMemoryLimit(worker.MemoryLimitMb, runs, null);
 
         var perRun = WipMemoryPerRunMb;
-        var total = connected.Sum(w => Bounds(w.Cpus, w.MemoryLimitMb, perRun).Limit);
-        var own = Bounds(worker.Cpus, worker.MemoryLimitMb, perRun).Limit;
+        var total = connected.Sum(w => Bounds(w, perRun).Limit);
+        var own = Bounds(worker, perRun).Limit;
         var share = (int)Math.Max(1, Math.Ceiling(runs * (double)own / Math.Max(1, total)));
         return RunMemoryLimit(worker.MemoryLimitMb, share, $"{share} (worker {worker.Id}'s share of wip.maxRunning {runs})");
     }
@@ -1073,11 +1109,14 @@ public sealed class TenantSettings
 /// The running limit in force and why: <c>Bound</c> is <c>setting</c> (a tenant row),
 /// <c>configuration</c> (appsettings), <c>cpu</c> or <c>memory</c>. <c>CpuBound</c> and
 /// <c>MemoryBound</c> are what the built-in default would allow; <c>MemoryBound</c> is null when the
-/// container has no memory limit, and <c>Cpus</c> when its CPU count is not known.
+/// container has no memory limit, and <c>Cpus</c> when no CPU count was measured. <c>CpusSource</c>
+/// is where the CPU count came from (<see cref="CpuCount"/>: cgroup, engine or processors), null with
+/// none, or over workers that measured theirs in different ways.
 /// </summary>
 public sealed record WipRunLimit(
     int Limit, string Bound, int CpuBound, int? Cpus, int? MemoryBound, long? MemoryLimitMb,
-    int MemoryPerRunMb, string Reason);
+    int MemoryPerRunMb, string Reason, string? CpusSource = null);
 
-/// <summary>A worker's own CPUs and container memory limit (null: not measured), as its bound is computed from.</summary>
-public sealed record WorkerBoundSource(WorkerId Id, int? Cpus, long? MemoryLimitMb);
+/// <summary>A worker's own CPUs and container memory limit (null: not measured), as its bound is computed
+/// from, and where its CPU count came from (null: a worker that does not say, whose count is its cgroup's).</summary>
+public sealed record WorkerBoundSource(WorkerId Id, int? Cpus, long? MemoryLimitMb, string? CpusSource = null);

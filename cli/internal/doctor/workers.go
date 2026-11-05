@@ -177,6 +177,9 @@ func WorkerChecks(workers []WorkerObserved, r *HostReport, configured int, worke
 			checks = append(checks, Check{w.ID, Warn, fmt.Sprintf("%s runs %s, not %s, control's worker image; %s", w.Name, w.Image, workerRef, detail), "yawble up replaces it"})
 		case rec == nil || rec.State != "connected":
 			checks = append(checks, Check{w.ID, Warn, w.Name + " runs but is not connected to control; " + detail, "yawble logs " + w.ID + " says why"})
+		case w.Stats != nil && len(w.Stats.Unreadable) > 0:
+			// Not measured is never ok: the engine's figures the missing controllers leave unreadable.
+			checks = append(checks, Check{w.ID, Warn, detail, UnreadableStatsFix})
 		default:
 			checks = append(checks, Check{w.ID, OK, detail, ""})
 		}

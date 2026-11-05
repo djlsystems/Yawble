@@ -174,7 +174,7 @@ func TestAForeignDelegateConfFoundAtTheWriteIsLeftAndNoRestart(t *testing.T) {
 	}
 }
 
-// Delegated, restarted, and podman info still lacks them: B0085's start without limits, with its
+// Delegated, restarted, and podman info still lacks them: the start without limits, with its
 // warning, and the reason: the delegation did not take.
 func TestDelegationThatDoesNotTakeFallsBackToTheStartWithoutLimitsSayingWhy(t *testing.T) {
 	s := delegationScript(notDelegated, infoNoControllers)
@@ -280,7 +280,7 @@ func TestOnLinuxWithoutAMachineUpWritesNoSystemFileAndPrintsTheFix(t *testing.T)
 // Podman in the machine under cgroup_manager = "cgroupfs": no delegation can give the containers
 // controllers, so up names the cgroup manager as the cause, asks nothing, writes nothing and does
 // not restart - even with user@.service lacking the controllers and no delegate.conf - and starts
-// without the limits as B0085 does.
+// without the limits as it does when the controllers are missing.
 func TestOnCgroupfsUpNamesTheCgroupManagerAndWritesNothing(t *testing.T) {
 	s := delegationScript(notDelegated, infoCgroupfs)
 	code, out, errOut := runUp(t, s, true, "y\n")

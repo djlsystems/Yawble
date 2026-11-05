@@ -543,7 +543,7 @@ public sealed class TenantSettingsTests(HostFixture host) : IClassFixture<HostFi
         Assert.Equal(3, unknown.Limit);
         Assert.Equal("cpu", unknown.Bound);
         Assert.Null(unknown.Cpus);
-        Assert.Contains("not known", unknown.Reason);
+        Assert.Contains("no CPU count could be measured", unknown.Reason);
     }
 
     [Fact]

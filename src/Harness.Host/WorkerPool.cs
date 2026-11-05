@@ -296,4 +296,4 @@ public sealed class WorkerPool : IRunPlacement
 /// What a worker said of itself when it connected: its build version, its CPUs and memory limit as it
 /// measured them (null: not measured), and when it connected.
 /// </summary>
-public sealed record WorkerInfo(WorkerId Id, string? Version, double? Cpus, long? MemoryLimitBytes, DateTimeOffset ConnectedSince);
+public sealed record WorkerInfo(WorkerId Id, string? Version, double? Cpus, long? MemoryLimitBytes, DateTimeOffset ConnectedSince, string? CpusSource = null);

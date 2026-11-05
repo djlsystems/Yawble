@@ -23,7 +23,7 @@ public sealed class WorkerFrameTests
 
     private static IReadOnlyList<WorkerFrame> EveryFrame() =>
     [
-        new WorkerHello(new WorkerId("w1"), "1.2.3", "session", "nonce", new WorkerHelloCapacity(4, 8_000_000_000), [Run], 41, Draining: true),
+        new WorkerHello(new WorkerId("w1"), "1.2.3", "session", "nonce", new WorkerHelloCapacity(4, 8_000_000_000, CpuCount.Engine), [Run], 41, Draining: true),
         new WorkerWelcome("nonce", 40, new RunWorkerSettings(new MemoryFigure(2048, "computed", false), 1024)),
         new WorkerRefused("This worker is version 0.0.0 and control is version 1.2.3; a worker must run control's version."),
         new CommandFrame(7, new CancelRun(Run)),
