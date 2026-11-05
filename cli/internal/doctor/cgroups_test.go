@@ -9,6 +9,7 @@ import (
 	"github.com/djlsystems/yawble/cli/internal/doctor"
 	"github.com/djlsystems/yawble/cli/internal/engine"
 	"github.com/djlsystems/yawble/cli/internal/instance"
+	"github.com/djlsystems/yawble/cli/internal/machine"
 )
 
 // cgroupsObserved is the doctor's cgroups row for an engine whose `info --format json` answers
@@ -97,4 +98,19 @@ func TestTheCgroupsRowIsAlwaysOnTheShortList(t *testing.T) {
 		}
 	}
 	t.Errorf("not shown: %+v", shown)
+}
+
+// On a Podman machine the fix names the command that delegates the controllers: yawble up, and
+// what it changes; without a machine (Linux) it stays the engine's own steps.
+func TestTheCgroupsFixOnAPodmanMachineNamesYawbleUp(t *testing.T) {
+	missing := &engine.Cgroups{Measured: true, Source: "podman info"}
+	o := doctor.Observed{EngineName: "podman", Cgroups: missing, Machine: machine.Info{Applies: true, Exists: true, Running: true}}
+	row := find(t, doctor.HostChecks(o), "cgroups")
+	if row.Verdict != doctor.Fail || !strings.HasPrefix(row.Fix, "run yawble up") || !strings.Contains(row.Fix, machine.DelegateFile) || !strings.Contains(row.Fix, "restarts the machine") {
+		t.Errorf("%+v", row)
+	}
+	o.Machine = machine.Info{}
+	if row := find(t, doctor.HostChecks(o), "cgroups"); row.Fix != instance.LimitsFix("podman") {
+		t.Errorf("linux fix changed: %s", row.Fix)
+	}
 }
