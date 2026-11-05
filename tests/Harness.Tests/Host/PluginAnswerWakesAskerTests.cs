@@ -68,6 +68,12 @@ public sealed class PluginAnswerWakesAskerTests : IAsyncLifetime
 
         _agents.Behaviour = async invocation =>
         {
+            // The platform's idle offer to a workflow's owner is not a step: Dev answers it and tells nothing.
+            if (invocation.Prompt.Contains("This workflow is open and nobody is working it", StringComparison.Ordinal))
+            {
+                return new AgentResult(0, $"noted by {invocation.Container.Name}");
+            }
+
             if (invocation.Container == Dev)
             {
                 _devPrompts.Enqueue(invocation.Prompt);
@@ -186,7 +192,11 @@ public sealed class PluginAnswerWakesAskerTests : IAsyncLifetime
         Assert.True(told.IsSuccessStatusCode, await told.Content.ReadAsStringAsync(Ct));
 
         // Dev's first run asks, and each answer wakes it for the next: four runs in all.
-        await AwaitAsync(async () => (await TerminalRowsOfAsync(Dev)).Count >= 4, "Dev's fourth run");
+        await AwaitAsync(async () =>
+        {
+            var answers = await TerminalRowsOfAsync(Echo);
+            return answers.Count == 3 && (await TerminalRowsOfAsync(Dev)).Any(row => row.CausationSeq == answers[2].Seq);
+        }, "Dev's run woken by the third answer");
         await SettleAsync();
 
         var echo = await TerminalRowsOfAsync(Echo);
@@ -240,15 +250,19 @@ public sealed class PluginAnswerWakesAskerTests : IAsyncLifetime
         var told = await _person.PostAsJsonAsync($"/api/teams/{_team}/containers/Dev/tell", new { instruction = "drive Echo" }, Ct);
         Assert.True(told.IsSuccessStatusCode, await told.Content.ReadAsStringAsync(Ct));
 
-        await AwaitAsync(async () => (await TerminalRowsOfAsync(Dev)).Count >= 2, "Dev's second run");
+        // Woken by the failed answer - whatever else (the platform's idle offer) wakes it besides.
+        await AwaitAsync(async () =>
+        {
+            var answer = (await TerminalRowsOfAsync(Echo)).FirstOrDefault();
+            return answer is not null && (await TerminalRowsOfAsync(Dev)).Any(row => row.CausationSeq == answer.Seq);
+        }, "Dev's run woken by Echo's failure");
         await SettleAsync();
 
         var failed = Assert.Single(await TerminalRowsOfAsync(Echo));
         Assert.Equal(MessageTypes.Failed, failed.Type);
         Assert.Equal(Dev.ToString(), AnswersTell(failed));
 
-        var dev = await TerminalRowsOfAsync(Dev);
-        Assert.Equal(failed.Seq, dev[1].CausationSeq);
+        Assert.Single(await TerminalRowsOfAsync(Dev), row => row.CausationSeq == failed.Seq);
         Assert.DoesNotContain(await TerminalRowsOfAsync(Manager), row => row.CausationSeq == failed.Seq);
     }
 
@@ -261,7 +275,11 @@ public sealed class PluginAnswerWakesAskerTests : IAsyncLifetime
             $"/api/teams/{_team}/containers/{TeamRegistry.DefaultManagerName}/tell", new { instruction = "ask Echo" }, Ct);
         Assert.True(told.IsSuccessStatusCode, await told.Content.ReadAsStringAsync(Ct));
 
-        await AwaitAsync(async () => (await TerminalRowsOfAsync(Manager)).Count >= 2, "the Manager's second run");
+        await AwaitAsync(async () =>
+        {
+            var answer = (await TerminalRowsOfAsync(Echo)).FirstOrDefault();
+            return answer is not null && (await TerminalRowsOfAsync(Manager)).Any(row => row.CausationSeq == answer.Seq);
+        }, "the Manager's run woken by Echo's answer");
         await SettleAsync();
 
         var answer = Assert.Single(await TerminalRowsOfAsync(Echo));
