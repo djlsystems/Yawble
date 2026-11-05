@@ -122,6 +122,14 @@ func preflight(ctx context.Context, deps Deps, yes bool, engineName string, memo
 		}
 	}
 
+	// The controllers a container's limits need, on a running rootless machine: also right after
+	// the flip to rootless above, so a fresh install never reaches the start without limits.
+	if info.Exists && info.Running && !info.Rootful {
+		if err := delegateControllers(ctx, deps, yes, info.Name, out, errOut); err != nil {
+			return info, err
+		}
+	}
+
 	// 3. Re-read the facts now that the machine runs: memory is measured only then.
 	if fresh, err := machine.Inspect(ctx, r, goos); err == nil {
 		info = fresh

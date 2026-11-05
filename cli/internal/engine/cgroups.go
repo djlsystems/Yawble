@@ -19,7 +19,17 @@ type Cgroups struct {
 	Controllers []string
 	Source      string
 	Reason      string
+	// Manager is podman info's host.cgroupManager ("systemd" or "cgroupfs"); empty when the
+	// engine does not say (Docker, an older Podman).
+	Manager string
 }
+
+// CgroupfsManager is the cgroup manager under which rootless Podman's containers get no cgroup
+// controllers at all: no systemd delegation reaches them.
+const CgroupfsManager = "cgroupfs"
+
+// UnderCgroupfs is whether the engine says it manages cgroups with cgroupfs.
+func (c Cgroups) UnderCgroupfs() bool { return c.Manager == CgroupfsManager }
 
 // Missing is the limit controllers the report lacks, in LimitControllers' order; none when not
 // measured, because nothing is known to be missing.
@@ -36,7 +46,7 @@ func (c Cgroups) Missing() []string {
 	return missing
 }
 
-// podmanCgroups reads `podman info --format json`'s host.cgroupControllers. An answer with no
+// podmanCgroups reads `podman info --format json`'s host.cgroupControllers and host.cgroupManager. An answer with no
 // such field (an older Podman, or something unreadable) is not measured; an empty list is
 // measured, and is every controller missing.
 func podmanCgroups(stdout string) Cgroups {
@@ -44,15 +54,16 @@ func podmanCgroups(stdout string) Cgroups {
 	var info struct {
 		Host struct {
 			CgroupControllers *[]string `json:"cgroupControllers"`
+			CgroupManager     string    `json:"cgroupManager"`
 		} `json:"host"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &info); err != nil {
 		return Cgroups{Source: source, Reason: "podman info did not answer in JSON"}
 	}
 	if info.Host.CgroupControllers == nil {
-		return Cgroups{Source: source, Reason: "podman info does not report its cgroup controllers"}
+		return Cgroups{Source: source, Reason: "podman info does not report its cgroup controllers", Manager: info.Host.CgroupManager}
 	}
-	return Cgroups{Measured: true, Controllers: *info.Host.CgroupControllers, Source: source}
+	return Cgroups{Measured: true, Controllers: *info.Host.CgroupControllers, Source: source, Manager: info.Host.CgroupManager}
 }
 
 // dockerCgroups reads `docker info --format json`: Docker has no list of controllers, but says

@@ -181,8 +181,9 @@ func newUpCommand(deps Deps) *cobra.Command {
 		Long: "up runs the instance on the container engine that is installed: Podman or Docker, asking " +
 			"which when both are (Podman is recommended) and remembering the answer. It installs no " +
 			"engine: with neither, it says where to get one. With Podman on macOS and Windows it creates the Podman machine " +
-			"rootless if there is none, starts it if it is stopped, and offers to make a rootful one " +
-			"rootless. Then it creates the data volume and the pod, pulls the image, starts the container " +
+			"rootless if there is none, starts it if it is stopped, offers to make a rootful one " +
+			"rootless, and, when the machine's systemd does not delegate the cgroup controllers the containers' limits need, " +
+			"offers to delegate them (it writes delegate.conf inside the machine and restarts it). Then it creates the data volume and the pod, pulls the image, starts the container " +
 			"and waits for it to answer. Every step is idempotent: on a healthy instance it changes nothing.",
 		Example: "  yawble up\n  yawble up --yes    # answer every question yes (Podman when both are installed, machine changes)",
 		Args:    cobra.NoArgs,
@@ -219,7 +220,7 @@ func newUpCommand(deps Deps) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "answer yes to every question: Podman when both engines are installed, create or re-root the machine")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "answer yes to every question: Podman when both engines are installed, create or re-root the machine, delegate its cgroup controllers")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "do not open the board in a browser when it is up")
 	return cmd
 }
