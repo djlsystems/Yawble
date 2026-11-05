@@ -65,6 +65,11 @@ public sealed class SolutionUpdateTriggerSpendTests(HostFixture host) : IClassFi
             fire.Seq), Ct);
     }
 
+    private static string? ReasonCodeOf(Message skipped) =>
+        JsonDocument.Parse(skipped.Payload).RootElement.TryGetProperty(PayloadFields.ReasonCode, out var code)
+            ? code.GetString()
+            : null;
+
     private Task<WorkflowSpend> SpentTodayAsync(TriggerRow trigger) =>
         Get<TriggerCost>().SpentTodayAsync(trigger, DateTimeOffset.UtcNow, Ct);
 
@@ -109,13 +114,15 @@ public sealed class SolutionUpdateTriggerSpendTests(HostFixture host) : IClassFi
 
         // The fire the pump would make next is skipped as capped. The day's one logged skip may be
         // this one or an earlier fire's - Scout's run at install publishes postings too - so the
-        // row is looked for over the whole log.
+        // row is looked for over the whole log. The pump may also log a skip for this trigger with
+        // another reason (a SolutionWait "waiting for a file in Resume/"), so the cap skip is picked
+        // out by its reasonCode, not by being the trigger's only skip row.
         Assert.True(await Get<TriggerCost>().SkipIfCappedAsync(
             after, new ContainerId(team, after.Container), DateTimeOffset.UtcNow, nextDueAt: null, cause.Seq, Ct));
 
         var skipped = Assert.Single(
             await Get<IMessageLog>().ReadAfterAsync(0, [MessageTypes.ScheduleSkipped], int.MaxValue, Ct),
-            m => m.Source == $"trigger:{after.Id}");
+            m => m.Source == $"trigger:{after.Id}" && ReasonCodeOf(m) == InterruptionReasons.TokenCap);
         Assert.Equal(MessageTypes.ScheduleSkippedCapReason,
             JsonDocument.Parse(skipped.Payload).RootElement.GetProperty("reason").GetString());
 
