@@ -246,6 +246,14 @@ internal sealed class PortaPtySession : IPtySession, IPtyProcess
     /// </summary>
     private static readonly TimeSpan ExitSignalGrace = TimeSpan.FromMilliseconds(500);
 
+    /// <summary>How long a stopped child has to end on Porta.Pty's SIGHUP before it gets SIGKILL.</summary>
+    private static readonly TimeSpan KillGrace = TimeSpan.FromSeconds(1);
+
+    private const int SigKill = 9;
+
+    [System.Runtime.InteropServices.DllImport("libc", SetLastError = true)]
+    private static extern int kill(int pid, int sig);
+
     private int TryReadExitCode()
     {
         try
@@ -420,6 +428,18 @@ internal sealed class PortaPtySession : IPtySession, IPtyProcess
         // (see OnProcessExited) or errors out, so awaiting the pump task first would
         // deadlock whenever the process was still running at dispose time.
         CloseConnection();
+
+        // A CHILD THAT IGNORES SIGHUP. Porta.Pty's Kill sends SIGHUP and nothing more, and the pump's
+        // read returns only once the child's side of the terminal closes, so a child that ignores
+        // SIGHUP (by its own trap, or by inheriting SIG_IGN from a worker started under nohup) left
+        // this await waiting forever, and the session sweep after it never ran. After a short grace
+        // the child's process group (it leads its own session, so its group is its pid) gets SIGKILL.
+        if (!OperatingSystem.IsWindows()
+            && await Task.WhenAny(_pumpTask, Task.Delay(KillGrace)).ConfigureAwait(false) != _pumpTask
+            && ProcessId is { } pid and > 1)
+        {
+            if (kill(-pid, SigKill) != 0) kill(pid, SigKill);
+        }
 
         try
         {
