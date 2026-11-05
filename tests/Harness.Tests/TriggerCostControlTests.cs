@@ -26,6 +26,10 @@ public sealed class TriggerCostControlTests : IAsyncLifetime
     private readonly string _dataRoot = Path.Combine(Path.GetTempPath(), $"harness-trigger-cost-{Guid.NewGuid():N}");
     private readonly FakeAgent _agents = new();
     private WebApplicationFactory<Program> _factory = null!;
+
+    /// <summary>The Host's clock, twelve hours from midnight (see <see cref="NoonClock"/>): every time
+    /// this class fires or arms at is read from it, so no run here sees the day change.</summary>
+    private readonly NoonClock _clock = new();
     private HttpClient _person = null!;
     private string _team = "";
 
@@ -61,7 +65,7 @@ public sealed class TriggerCostControlTests : IAsyncLifetime
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host => host
             .UseSetting("DataRoot", _dataRoot)
             .UseSetting("Logging:LogLevel:Default", "Warning")
-            .ConfigureTestServices(services => services.AddSingleton<IAgentRunner>(_agents)));
+            .ConfigureTestServices(services => services.AddSingleton<IAgentRunner>(_agents).AddSingleton<TimeProvider>(_clock)));
 
         _team = (await Services.GetRequiredService<TeamRegistry>()
             .CreateAsync("Cost", "claude-headless", memberAgent: "claude-headless", ct: Ct)).Id;
@@ -183,13 +187,13 @@ public sealed class TriggerCostControlTests : IAsyncLifetime
         return rows.EnumerateArray().Single(r => r.GetProperty("id").GetString() == id);
     }
 
-    private static DateTimeOffset Due => DateTimeOffset.UtcNow.AddSeconds(301);
+    private DateTimeOffset Due => _clock.GetUtcNow().AddSeconds(301);
 
     /// <summary>Fires trigger <paramref name="id"/> again, now: armed for a moment ahead and swept
     /// at exactly that moment, so nothing is counted missed.</summary>
     private async Task<Message> FireAgainAsync(string id, ContainerId member)
     {
-        var at = DateTimeOffset.UtcNow.AddSeconds(3600);
+        var at = _clock.GetUtcNow().AddSeconds(3600);
         var armed = await _person.PatchAsJsonAsync($"/api/teams/{_team}/triggers/{id}", new { nextDueAt = at }, Ct);
         Assert.Equal(HttpStatusCode.OK, armed.StatusCode);
         return await FireAsync(member, at);
@@ -485,7 +489,7 @@ public sealed class TriggerCostControlTests : IAsyncLifetime
 
         // The next fire, the same day, is skipped.
         var before = await Log.HighestSeqAsync(Ct);
-        await Services.GetRequiredService<TriggerSweep>().FireDueAsync(DateTimeOffset.UtcNow.AddSeconds(602), Ct);
+        await Services.GetRequiredService<TriggerSweep>().FireDueAsync(_clock.GetUtcNow().AddSeconds(602), Ct);
 
         var skipped = await AwaitRowAsync(
             [MessageTypes.ScheduleSkipped], m => m.Seq > before, "the skip");
@@ -504,7 +508,7 @@ public sealed class TriggerCostControlTests : IAsyncLifetime
         Assert.Equal(1, _agents.RunsFor(Dev));
 
         // The next day (UTC: this trigger has no timezone) it fires again.
-        var tomorrow = TriggerCost.StartOfDay(null, DateTimeOffset.UtcNow).AddDays(1).AddHours(1);
+        var tomorrow = TriggerCost.StartOfDay(null, _clock.GetUtcNow()).AddDays(1).AddHours(1);
         await _person.PatchAsJsonAsync($"/api/teams/{_team}/triggers/{id}", new { nextDueAt = tomorrow }, Ct);
 
         var fired = await FireAsync(Dev, tomorrow);
@@ -578,7 +582,7 @@ public sealed class TriggerCostControlTests : IAsyncLifetime
 
         // The second is skipped.
         var before = await Log.HighestSeqAsync(Ct);
-        await FireAsync(Echo, DateTimeOffset.UtcNow.AddSeconds(602));
+        await FireAsync(Echo, _clock.GetUtcNow().AddSeconds(602));
 
         var skipped = await AwaitRowAsync(
             [MessageTypes.ScheduleSkipped], m => m.Seq > before, "the skip");

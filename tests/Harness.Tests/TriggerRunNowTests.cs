@@ -28,6 +28,10 @@ public sealed class TriggerRunNowTests : IAsyncLifetime
     private readonly string _dataRoot = Path.Combine(Path.GetTempPath(), $"harness-run-now-{Guid.NewGuid():N}");
     private readonly FakeAgent _agents = new();
     private WebApplicationFactory<Program> _factory = null!;
+
+    /// <summary>The Host's clock, twelve hours from midnight (see <see cref="NoonClock"/>): every time
+    /// this class fires or arms at is read from it, so no run here sees the day change.</summary>
+    private readonly NoonClock _clock = new();
     private HttpClient _person = null!;
     private string _team = "";
 
@@ -53,7 +57,7 @@ public sealed class TriggerRunNowTests : IAsyncLifetime
             .UseSetting("DataRoot", _dataRoot)
             .UseSetting("Logging:LogLevel:Default", "Warning")
             .UseSetting("ScheduleRunnerEnabled", "false")
-            .ConfigureTestServices(services => services.AddSingleton<IAgentRunner>(_agents)));
+            .ConfigureTestServices(services => services.AddSingleton<IAgentRunner>(_agents).AddSingleton<TimeProvider>(_clock)));
 
         _team = (await Services.GetRequiredService<TeamRegistry>()
             .CreateAsync("RunNow", "claude-headless", memberAgent: "claude-headless", ct: Ct)).Id;
@@ -331,7 +335,7 @@ public sealed class TriggerRunNowTests : IAsyncLifetime
         await SettleAsync(after);
 
         var run = await Services.GetRequiredService<TriggerSweep>().RunNowAsync(
-            id, DateTimeOffset.UtcNow, "installer-id", "installer@example.test", TenantActions.ScheduleRunAtInstall,
+            id, _clock.GetUtcNow(), "installer-id", "installer@example.test", TenantActions.ScheduleRunAtInstall,
             countOnFromNow: true, Ct);
 
         Assert.NotNull(run);

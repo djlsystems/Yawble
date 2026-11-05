@@ -27,6 +27,10 @@ public sealed class LedgerSurvivesTests : IAsyncLifetime
     private readonly string _dataRoot = Path.Combine(Path.GetTempPath(), $"harness-ledger-survives-{Guid.NewGuid():N}");
     private readonly FakeAgent _agents = new();
     private WebApplicationFactory<Program> _factory = null!;
+
+    /// <summary>The Host's clock, twelve hours from midnight (see <see cref="NoonClock"/>): every time
+    /// this class fires or arms at is read from it, so no run here sees the day change.</summary>
+    private readonly NoonClock _clock = new();
     private HttpClient _person = null!;
     private string _team = "";
 
@@ -71,7 +75,7 @@ public sealed class LedgerSurvivesTests : IAsyncLifetime
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host => host
             .UseSetting("DataRoot", _dataRoot)
             .UseSetting("Logging:LogLevel:Default", "Warning")
-            .ConfigureTestServices(services => services.AddSingleton<IAgentRunner>(_agents)));
+            .ConfigureTestServices(services => services.AddSingleton<IAgentRunner>(_agents).AddSingleton<TimeProvider>(_clock)));
 
         _team = (await Services.GetRequiredService<TeamRegistry>()
             .CreateAsync(TeamLabel, "claude-headless", memberAgent: "claude-headless", ct: Ct)).Id;
@@ -202,7 +206,7 @@ public sealed class LedgerSurvivesTests : IAsyncLifetime
 
         var trigger = await CreateScheduleAsync();
         var after = await Log.HighestSeqAsync(Ct);
-        await Services.GetRequiredService<TriggerSweep>().FireDueAsync(DateTimeOffset.UtcNow.AddSeconds(301), Ct);
+        await Services.GetRequiredService<TriggerSweep>().FireDueAsync(_clock.GetUtcNow().AddSeconds(301), Ct);
 
         var dev = await AwaitRowAsync(m => m.Seq > after && m.Source == Dev.ToString(), "Dev's terminal row");
         var handback = (await Log.ReadAfterAsync(after, [MessageTypes.Handback], int.MaxValue, Ct))
@@ -326,7 +330,7 @@ public sealed class LedgerSurvivesTests : IAsyncLifetime
         Assert.Equal(everything, paged);
 
         // `since` leaves out what ended before it.
-        var future = Uri.EscapeDataString(DateTimeOffset.UtcNow.AddMinutes(1).ToString("O"));
+        var future = Uri.EscapeDataString(_clock.GetUtcNow().AddMinutes(1).ToString("O"));
         Assert.Empty(Seqs(await ExportAsync($"since={future}")));
 
         // A run's row carries its figures under the names the ledger keeps them.
@@ -352,7 +356,7 @@ public sealed class LedgerSurvivesTests : IAsyncLifetime
         var trigger = await CreateScheduleAsync();
 
         var after = await Log.HighestSeqAsync(Ct);
-        await Services.GetRequiredService<TriggerSweep>().FireDueAsync(DateTimeOffset.UtcNow.AddSeconds(301), Ct);
+        await Services.GetRequiredService<TriggerSweep>().FireDueAsync(_clock.GetUtcNow().AddSeconds(301), Ct);
 
         var dev = await AwaitRowAsync(m => m.Seq > after && m.Source == Dev.ToString(), "Dev's terminal row");
         var manager = await AwaitRowAsync(

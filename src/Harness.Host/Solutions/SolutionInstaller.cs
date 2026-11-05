@@ -248,8 +248,13 @@ public sealed class SolutionInstaller(
     FolderRemoval? removal = null,
     PluginMemberSecretStore? memberSecrets = null,
     PluginSecretMoves? secretMoves = null,
-    TeamPicture? picture = null)
+    TeamPicture? picture = null,
+    TimeProvider? clock = null)
 {
+    /// <summary>The Host's clock, read for a run at install: its cap is checked against the spend
+    /// today by the same clock the trigger's rows are stamped with.</summary>
+    private readonly TimeProvider _clock = clock ?? TimeProvider.System;
+
     private readonly FolderRemoval _removal = removal ?? new FolderRemoval();
 
     public const string StepPlugins = "plugins";
@@ -2002,7 +2007,7 @@ public sealed class SolutionInstaller(
                 continue;
             }
 
-            var now = DateTimeOffset.UtcNow;
+            var now = _clock.GetUtcNow();
             TriggerRunNow? fired;
 
             try

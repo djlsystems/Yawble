@@ -27,6 +27,10 @@ public sealed class LogRetentionLedgerTests : IAsyncLifetime
     private readonly string _dataRoot = Path.Combine(Path.GetTempPath(), $"harness-log-retention-ledger-{Guid.NewGuid():N}");
     private readonly FakeAgent _agents = new();
     private WebApplicationFactory<Program> _factory = null!;
+
+    /// <summary>The Host's clock, twelve hours from midnight (see <see cref="NoonClock"/>): every time
+    /// this class fires or arms at is read from it, so no run here sees the day change.</summary>
+    private readonly NoonClock _clock = new();
     private HttpClient _person = null!;
     private string _team = "";
 
@@ -60,7 +64,7 @@ public sealed class LogRetentionLedgerTests : IAsyncLifetime
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host => host
             .UseSetting("DataRoot", _dataRoot)
             .UseSetting("Logging:LogLevel:Default", "Warning")
-            .ConfigureTestServices(services => services.AddSingleton<IAgentRunner>(_agents)));
+            .ConfigureTestServices(services => services.AddSingleton<IAgentRunner>(_agents).AddSingleton<TimeProvider>(_clock)));
 
         _team = (await Services.GetRequiredService<TeamRegistry>()
             .CreateAsync(TeamLabel, "claude-headless", memberAgent: "claude-headless", ct: Ct)).Id;
@@ -89,7 +93,7 @@ public sealed class LogRetentionLedgerTests : IAsyncLifetime
     {
         var trigger = await CreateScheduleAsync();
         var after = await Log.HighestSeqAsync(Ct);
-        await Services.GetRequiredService<TriggerSweep>().FireDueAsync(DateTimeOffset.UtcNow.AddSeconds(301), Ct);
+        await Services.GetRequiredService<TriggerSweep>().FireDueAsync(_clock.GetUtcNow().AddSeconds(301), Ct);
 
         var dev = await AwaitRowAsync(m => m.Seq > after && m.Source == Dev.ToString(), "Dev's terminal row");
         var manager = await AwaitRowAsync(
@@ -109,7 +113,7 @@ public sealed class LogRetentionLedgerTests : IAsyncLifetime
         // The whole workflow is 100 days old.
         var rowsBefore = await CountAsync($"SELECT COUNT(*) FROM messages WHERE correlation_id = {workflow}");
         await ExecuteAsync(
-            $"UPDATE messages SET occurred_at = '{DateTimeOffset.UtcNow.AddDays(-100).ToString("O", CultureInfo.InvariantCulture)}' WHERE correlation_id = {workflow}");
+            $"UPDATE messages SET occurred_at = '{_clock.GetUtcNow().AddDays(-100).ToString("O", CultureInfo.InvariantCulture)}' WHERE correlation_id = {workflow}");
 
         var spendBefore = await Log.GetWorkflowSpendAsync(workflow, Ct);
         var sinceNudgeBefore = await Log.GetSpendSinceNudgeAsync(workflow, Ct);
@@ -122,7 +126,7 @@ public sealed class LogRetentionLedgerTests : IAsyncLifetime
         Assert.True(todayBefore.GetProperty("billableTokens").GetInt64() > 0);
         Assert.True(spendBefore.TokensSpent > 0);
 
-        var pass = await Services.GetRequiredService<LogRetention>().RunAsync(DateTimeOffset.UtcNow, Ct);
+        var pass = await Services.GetRequiredService<LogRetention>().RunAsync(_clock.GetUtcNow(), Ct);
 
         // The pass removed rows of that workflow; its root and declaration stay for the outcome link.
         Assert.True(pass.Purged > 0, $"purged {pass.Purged}, retained {pass.Retained}");
