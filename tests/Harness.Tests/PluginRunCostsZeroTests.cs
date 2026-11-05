@@ -25,6 +25,10 @@ public sealed class PluginRunCostsZeroTests : IAsyncLifetime
     private readonly string _dataRoot = Path.Combine(Path.GetTempPath(), $"harness-plugin-zero-{Guid.NewGuid():N}");
     private readonly FakeAgent _agents = new();
     private WebApplicationFactory<Program> _factory = null!;
+
+    /// <summary>The Host's clock, twelve hours from midnight (see <see cref="NoonClock"/>): every time
+    /// this class fires or arms at is read from it, so no run here sees the day change.</summary>
+    private readonly NoonClock _clock = new();
     private HttpClient _person = null!;
     private string _team = "";
 
@@ -49,7 +53,7 @@ public sealed class PluginRunCostsZeroTests : IAsyncLifetime
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host => host
             .UseSetting("DataRoot", _dataRoot)
             .UseSetting("Logging:LogLevel:Default", "Warning")
-            .ConfigureTestServices(services => services.AddSingleton<IAgentRunner>(_agents)));
+            .ConfigureTestServices(services => services.AddSingleton<IAgentRunner>(_agents).AddSingleton<TimeProvider>(_clock)));
 
         _team = (await Services.GetRequiredService<TeamRegistry>()
             .CreateAsync("Zero", "claude-headless", memberAgent: "claude-headless", ct: Ct)).Id;
@@ -97,7 +101,7 @@ public sealed class PluginRunCostsZeroTests : IAsyncLifetime
         var id = (await created.Content.ReadFromJsonAsync<JsonElement>(Ct)).GetProperty("id").GetString()!;
 
         var after = await Log.HighestSeqAsync(Ct);
-        await Services.GetRequiredService<TriggerSweep>().FireDueAsync(DateTimeOffset.UtcNow.AddSeconds(301), Ct);
+        await Services.GetRequiredService<TriggerSweep>().FireDueAsync(_clock.GetUtcNow().AddSeconds(301), Ct);
 
         var source = new ContainerId(_team, member).ToString();
         var deadline = DateTime.UtcNow.AddSeconds(30);

@@ -33,9 +33,12 @@ public sealed class TriggerRunner(
     ITriggerStore schedules,
     TriggerWakeSignal wake,
     TimeSpan maximumWait,
-    ILogger<TriggerRunner> logger)
+    ILogger<TriggerRunner> logger,
+    TimeProvider? clock = null)
     : BackgroundService
 {
+    private readonly TimeProvider _clock = clock ?? TimeProvider.System;
+
     /// <summary>The longest this ever sleeps without re-reading, however far away the next due
     /// instant is. A heartbeat against state that changed without a signal reaching us.</summary>
     public static readonly TimeSpan MaximumWait = TimeSpan.FromMinutes(1);
@@ -49,7 +52,7 @@ public sealed class TriggerRunner(
         {
             try
             {
-                await sweep.FireDueAsync(DateTimeOffset.UtcNow, stoppingToken);
+                await sweep.FireDueAsync(_clock.GetUtcNow(), stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -104,7 +107,7 @@ public sealed class TriggerRunner(
         // created any other way is picked up within the heartbeat rather than never.
         if (earliest is null) return maximumWait;
 
-        var until = earliest.Value - DateTimeOffset.UtcNow;
+        var until = earliest.Value - _clock.GetUtcNow();
 
         if (until > maximumWait) return maximumWait;
 

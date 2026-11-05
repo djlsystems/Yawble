@@ -417,7 +417,9 @@ public sealed class TeamActivityFromTests(TeamActivityFromTests.Bed bed) : IClas
 
         public async Task<JsonElement> TokenRunsAsync(string team) => await GetAsync($"/api/teams/{team}/tokens/runs");
 
-        /// <summary>A daily trigger on Dev, capped at 100 tokens, waking no Manager.</summary>
+        /// <summary>A daily trigger on Dev, capped at 100 tokens, waking no Manager. Its timezone puts
+        /// its day's end eleven hours or more away (<see cref="NoonZone"/>), so its spend today and its
+        /// cap read one day through the whole test even when the run crosses 00:00 UTC.</summary>
         public async Task<string> TriggerAsync(string team)
         {
             var created = await Person.PostAsJsonAsync($"/api/teams/{team}/triggers", new
@@ -425,7 +427,7 @@ public sealed class TeamActivityFromTests(TeamActivityFromTests.Bed bed) : IClas
                 name = "Nightly",
                 kind = "cron",
                 expression = "0 0 3 * * *",
-                timezone = "UTC",
+                timezone = NoonZone.Now(),
                 container = "Dev",
                 idleOnly = false,
                 instruction = "look",

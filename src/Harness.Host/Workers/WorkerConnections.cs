@@ -61,7 +61,8 @@ public sealed class WorkerConnections
         _streams = streams;
     }
 
-    /// <summary>Raised when a worker joins or goes, after the pool and the ledger have heard.</summary>
+    /// <summary>Raised when a worker joins or goes, after the pool and the ledger have heard; for a worker
+    /// that joins or comes back, once its connection can be sent to.</summary>
     public event Action? Changed;
 
     /// <summary>
@@ -73,7 +74,7 @@ public sealed class WorkerConnections
     /// <summary>
     /// Raised on every welcome once the worker's connection can be sent to: a new session, as
     /// <see cref="Joined"/> is, and a worker back on its own session too, which raises
-    /// <see cref="Changed"/> before its socket is attached and no <see cref="Joined"/>.
+    /// <see cref="Changed"/> (also once its socket is attached) and no <see cref="Joined"/>.
     /// </summary>
     public event Action<WorkerId>? Attached;
 
@@ -185,29 +186,35 @@ public sealed class WorkerConnections
             return;
         }
 
-        if (back)
-        {
-            _pool.Back(remote.Id);
-        }
-        else
-        {
-            _pool.Join(remote, remote.Info);
-        }
-
-        // A drain the worker was asked for survives its reconnect: its hello says so.
-        remote.Draining = hello.Draining;
-        _pool.Drain(remote.Id, hello.Draining);
-
-        _log?.LogInformation("Worker {Worker} {How} (version {Version}, session {Session}).", remote.Id, back ? "is back" : "connected", hello.Version, hello.Session);
-        _wip.WorkersChanged();
-        Changed?.Invoke();
-
+        // Its stale runs are stopped first: a cancel said before the socket is the worker's is kept and
+        // said again the moment it is.
         await StopStaleAsync(remote, hello.OpenRuns);
 
-        // Joined only once the socket is the worker's: a handler that asks the worker something at once
-        // (the start's CLI update, the removal retry) would otherwise be refused as not connected.
+        // PLACEABLE ONLY ONCE THE SOCKET IS THE WORKER'S. Until RunAsync attaches it, a start sent to this
+        // worker is refused as not connected, and the run it was for is lost ("stopped answering") though
+        // the worker is right there. So the pool takes it, and the waiters are woken, only from inside the
+        // attach - never between the welcome and it, where a waiter woken on another thread got there first
+        // whenever this thread was slow to be scheduled. Joined then, too: a handler that asks the worker
+        // something at once (the start's CLI update, the removal retry) is sent to it, not refused.
         await RunToEndAsync(remote, socket, ct, () =>
         {
+            if (back)
+            {
+                _pool.Back(remote.Id);
+            }
+            else
+            {
+                _pool.Join(remote, remote.Info);
+            }
+
+            // A drain the worker was asked for survives its reconnect: its hello says so.
+            remote.Draining = hello.Draining;
+            _pool.Drain(remote.Id, hello.Draining);
+
+            _log?.LogInformation("Worker {Worker} {How} (version {Version}, session {Session}).", remote.Id, back ? "is back" : "connected", hello.Version, hello.Session);
+            _wip.WorkersChanged();
+            Changed?.Invoke();
+
             if (!back) Joined?.Invoke(remote.Id);
             Attached?.Invoke(remote.Id);
         });

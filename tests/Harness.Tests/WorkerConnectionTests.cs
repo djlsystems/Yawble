@@ -278,7 +278,42 @@ public sealed class WorkerConnectionTests
         Assert.Equal([new WorkerId("w1")], bed.Pool.Workers);
     }
 
-    private static WorkerHello Hello(string id, string? version = null, string session = "s1", IReadOnlyList<RunId>? open = null) =>
+    /// <summary>
+    /// A run waiting for a worker starts when the ledger is woken, on another thread, at once. Woken
+    /// between the worker's welcome and its socket being attached, that start was refused as not
+    /// connected and the run was lost ("stopped answering") though the worker was right there - which a
+    /// busy machine made likely enough to fail WorkerProcessTests inside the full suite. So the pool
+    /// offers a worker, and the ledger and <see cref="WorkerConnections.Changed"/> are told, only once it
+    /// can be sent to: a start made at that very moment reaches it.
+    /// </summary>
+    [Fact]
+    public async Task A_run_started_the_moment_a_worker_joins_reaches_that_worker()
+    {
+        var bed = new Bed();
+        var woken = bed.Wip.Changed;
+        var start = new StartRun(
+            RunId.For(new ContainerId("alpha", "Dev")), "probe", "", "", "", "/", new Dictionary<string, string>(), null, null, null, null, null);
+        var told = new ConcurrentQueue<(bool Woken, bool Dropped)>();
+        Task<AgentResult>? running = null;
+
+        // What a waiter woken by the join does, here without the thread hop that made it a race.
+        bed.Connections.Changed += () =>
+        {
+            var remote = Assert.Single(bed.Connections.Workers());
+            told.Enqueue((woken.IsCompleted, remote.Dropped));
+            running ??= bed.Directory.RunAsync(bed.Pool.Worker(remote.Id), start, Ct);
+        };
+
+        var raw = await bed.RawWorkerAsync(Hello("w1"));
+        await Until(() => running is not null);
+
+        Assert.Equal([(true, false)], told);
+        if (running!.IsCompleted) Assert.Fail($"The run ended at once: {(await running).LaunchError}");
+        await raw.AnswerStartAsync().WaitAsync(Bound, Ct);
+        Assert.False(running.IsCompleted);
+    }
+
+    private static WorkerHello Hello(string id,string? version = null, string session = "s1", IReadOnlyList<RunId>? open = null) =>
         new(new WorkerId(id), version ?? Version, session, WorkerFrameCodec.NewNonce(), new WorkerHelloCapacity(4, 8_000_000_000), open ?? [], 0);
 
     private static WorkerEnvelope Envelope(string worker, long seq) =>

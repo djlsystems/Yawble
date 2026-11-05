@@ -38,6 +38,7 @@ internal static class TriggerEndpoints
             TeamRegistry teams,
             ITriggerStore schedules,
             TriggerCost cost,
+            TimeProvider clock,
             CancellationToken ct) =>
         {
             if (teams.ExistingName(team) is not { } stored)
@@ -45,7 +46,7 @@ internal static class TriggerEndpoints
                 return Refusals.NoTeam(team);
             }
 
-            return Results.Ok(await cost.ViewsAsync(await schedules.ListForTeamAsync(stored, ct), DateTimeOffset.UtcNow, ct));
+            return Results.Ok(await cost.ViewsAsync(await schedules.ListForTeamAsync(stored, ct), clock.GetUtcNow(), ct));
         })
             .WithTags("Teams")
             .HumansOnly()
@@ -66,6 +67,7 @@ internal static class TriggerEndpoints
             TeamRegistry teams,
             ITriggerStore schedules,
             TriggerCost cost,
+            TimeProvider clock,
             CancellationToken ct) =>
         {
             try
@@ -73,7 +75,7 @@ internal static class TriggerEndpoints
                 var member = await teams.MemberAsync(team, name, ct);
 
                 return Results.Ok(await cost.ViewsAsync(
-                    await schedules.ListForContainerAsync(member.Team, member.Name, ct), DateTimeOffset.UtcNow, ct));
+                    await schedules.ListForContainerAsync(member.Team, member.Name, ct), clock.GetUtcNow(), ct));
             }
             catch (InvalidOperationException exception)
             {
@@ -96,6 +98,7 @@ internal static class TriggerEndpoints
             TriggerCreation triggers,
             TriggerCost cost,
             HttpContext context,
+            TimeProvider clock,
             CancellationToken ct) =>
         {
             if (teams.ExistingName(team) is not { } stored)
@@ -121,7 +124,7 @@ internal static class TriggerEndpoints
 
             if (created.Row is not { } row) return Results.BadRequest(new { error = created.Refusal });
 
-            return Results.Created($"/api/teams/{row.Team}/triggers/{row.Id}", await cost.ViewAsync(row, DateTimeOffset.UtcNow, ct));
+            return Results.Created($"/api/teams/{row.Team}/triggers/{row.Id}", await cost.ViewAsync(row, clock.GetUtcNow(), ct));
         })
             .WithTags("Teams")
             .HumansOnly()
@@ -153,6 +156,7 @@ internal static class TriggerEndpoints
             TriggerWakeSignal wake,
             IOutcomeStore outcomes,
             HttpContext context,
+            TimeProvider clock,
             CancellationToken ct) =>
         {
             if (teams.ExistingName(team) is not { } stored)
@@ -171,7 +175,7 @@ internal static class TriggerEndpoints
                 return Results.BadRequest(new { error = patchError });
             }
 
-            if (ApplySchedulePatch(existing, patch, out var candidate, out var applyError) is false)
+            if (ApplySchedulePatch(existing, patch, clock.GetUtcNow(), out var candidate, out var applyError) is false)
             {
                 return Results.BadRequest(new { error = applyError });
             }
@@ -225,7 +229,7 @@ internal static class TriggerEndpoints
 
                 if (moved || (candidate.Enabled && !existing.Enabled) || candidate.NextDueAt is null)
                 {
-                    candidate = candidate with { NextDueAt = DateTimeOffset.UtcNow };
+                    candidate = candidate with { NextDueAt = clock.GetUtcNow() };
                 }
             }
             else if (FolderWatch.IsFolderKind(existing.Kind))
@@ -296,7 +300,7 @@ internal static class TriggerEndpoints
             // the cap no longer stops it, so it fires at its next occurrence from now rather than tomorrow.
             // Lowering it wakes nothing. An edit to the schedule itself has already re-armed it from now
             // (see ApplySchedulePatch), and an explicit `nextDueAt` still wins.
-            var now = DateTimeOffset.UtcNow;
+            var now = clock.GetUtcNow();
             if (patch.HasDailyTokenCap
                 && !patch.HasNextDueAt
                 && existing.LastOutcome == "capped"
@@ -349,7 +353,7 @@ internal static class TriggerEndpoints
             // slow. Signalled AFTER the write, so waking early cannot read a row that is not there.
             wake.Signal();
 
-            return Results.Ok(await cost.ViewAsync(candidate, DateTimeOffset.UtcNow, ct));
+            return Results.Ok(await cost.ViewAsync(candidate, clock.GetUtcNow(), ct));
         })
             .Accepts<UpdateSchedule>("application/json")
             .WithTags("Teams")
@@ -424,6 +428,7 @@ internal static class TriggerEndpoints
             TriggerSweep sweep,
             TriggerCost cost,
             HttpContext context,
+            TimeProvider clock,
             CancellationToken ct) =>
         {
             if (teams.ExistingName(team) is not { } stored)
@@ -437,7 +442,7 @@ internal static class TriggerEndpoints
                 return Results.NotFound(new { error = $"No schedule '{id}' on team '{stored}'." });
             }
 
-            var now = DateTimeOffset.UtcNow;
+            var now = clock.GetUtcNow();
             var run = await sweep.RunNowAsync(
                 row.Id,
                 now,
@@ -611,6 +616,7 @@ internal static class TriggerEndpoints
     static bool ApplySchedulePatch(
         TriggerRow existing,
         SchedulePatch patch,
+        DateTimeOffset now,
         out TriggerRow updated,
         out string error)
     {
@@ -755,7 +761,7 @@ internal static class TriggerEndpoints
             if (shapeMoved || (enabled && nextDueAt is null))
             {
                 nextDueAt = FirstOccurrence(
-                    kind, expression, timezone, intervalSeconds, fireAt, DateTimeOffset.UtcNow);
+                    kind, expression, timezone, intervalSeconds, fireAt, now);
             }
         }
 

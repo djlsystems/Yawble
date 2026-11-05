@@ -36,8 +36,11 @@ public sealed class SolutionPanels(
     IMessageLog log,
     SiteService sites,
     TeamDocuments documents,
-    PluginCatalog plugins)
+    PluginCatalog plugins,
+    TimeProvider? clock = null)
 {
+    private readonly TimeProvider _clock = clock ?? TimeProvider.System;
+
     public const string StateRunning = "running";
     public const string StateIdle = "idle";
     public const string StateBlocked = "blocked";
@@ -138,7 +141,7 @@ public sealed class SolutionPanels(
     private async Task<Live> LiveAsync(string team, TeamSolutionRow row, CancellationToken ct)
     {
         var manifest = ManifestOf(row);
-        var now = DateTimeOffset.UtcNow;
+        var now = _clock.GetUtcNow();
         var paused = teams.IsPaused(team);
 
         // Members, each with its state and last run; every run read once for the recent-runs list too.

@@ -27,6 +27,14 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
     private readonly string _connectionString;
     private readonly MessageWaitRegistry? _waits;
 
+    /// <summary>
+    /// THE CLOCK A ROW'S <c>occurred_at</c> AND A TIMING READ'S <c>serverNow</c> ARE READ FROM. The
+    /// Host sets it to its own <see cref="TimeProvider"/> once the app is built, so every reader that
+    /// compares a stamp with "now" - a trigger's spend today above all - reads the same clock the
+    /// stamp was written by, and a test can put that clock far from midnight.
+    /// </summary>
+    public TimeProvider Clock { get; set; } = TimeProvider.System;
+
     public SqliteMessageStore(string databasePath, MessageWaitRegistry? waits = null)
     {
         _waits = waits;
@@ -132,7 +140,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
     }
 
     /// <summary>The row itself, inside the caller's transaction. Nothing is published here.</summary>
-    private static async Task<Message> InsertAsync(
+    private async Task<Message> InsertAsync(
         SqliteConnection connection, SqliteTransaction transaction, NewMessage message, AppendContext? context,
         CancellationToken ct)
     {
@@ -194,7 +202,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
             origin = origin with { ActorEmail = await lookup.ExecuteScalarAsync(ct) as string ?? origin.ActorEmail };
         }
 
-        var occurredAt = DateTimeOffset.UtcNow;
+        var occurredAt = Clock.GetUtcNow();
 
         await using var insert = connection.CreateCommand();
         insert.Transaction = transaction;
@@ -700,7 +708,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
         // READ ONCE, AT THE TOP, and carried on the payload. The client takes the offset between
         // this and its own clock and applies it to every tick, so a browser whose clock is ten
         // minutes fast does not render a workflow that started in the future.
-        var serverNow = DateTimeOffset.UtcNow;
+        var serverNow = Clock.GetUtcNow();
 
         if (string.IsNullOrWhiteSpace(team))
         {
@@ -769,7 +777,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
     public async Task<TeamWorkflowTiming> WorkflowForTeamAsync(
         string team, long correlation, long sinceSeq, CancellationToken ct = default)
     {
-        var serverNow = DateTimeOffset.UtcNow;
+        var serverNow = Clock.GetUtcNow();
 
         if (string.IsNullOrWhiteSpace(team))
         {
@@ -1349,7 +1357,7 @@ public sealed class SqliteMessageStore : IMessageLog, ICursors, ISubscriptions
     public async Task<TeamWorkflows> WorkflowsForTeamAsync(
         string team, long sinceSeq, CancellationToken ct = default)
     {
-        var serverNow = DateTimeOffset.UtcNow;
+        var serverNow = Clock.GetUtcNow();
 
         if (string.IsNullOrWhiteSpace(team))
         {

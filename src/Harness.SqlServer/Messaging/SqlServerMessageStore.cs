@@ -40,6 +40,10 @@ public sealed class SqlServerMessageStore : IMessageLog, ICursors, ISubscription
     private readonly MessageWaitRegistry? _waits;
     private readonly ISqlServerAppendRows _appendRows;
 
+    /// <summary>The clock a row's <c>occurred_at</c> and a timing read's <c>serverNow</c> are read
+    /// from, as on SQLite (<c>SqliteMessageStore.Clock</c>): the Host's own once the app is built.</summary>
+    public TimeProvider Clock { get; set; } = TimeProvider.System;
+
     /// <param name="appendRows">The ledger and outcome rows written in each append's transaction.
     /// Required: an append without them would leave a run unbilled and a root unlinked.</param>
     public SqlServerMessageStore(string connectionString, ISqlServerAppendRows appendRows, MessageWaitRegistry? waits = null)
@@ -179,7 +183,7 @@ public sealed class SqlServerMessageStore : IMessageLog, ICursors, ISubscription
             origin = origin with { ActorEmail = await lookup.ExecuteScalarAsync(ct) as string ?? origin.ActorEmail };
         }
 
-        var occurredAt = DateTimeOffset.UtcNow;
+        var occurredAt = Clock.GetUtcNow();
 
         await using var insert = connection.CreateCommand();
         insert.Transaction = transaction;
@@ -591,7 +595,7 @@ public sealed class SqlServerMessageStore : IMessageLog, ICursors, ISubscription
     public async Task<TeamWorkflowTiming> ElapsedForTeamAsync(
         string team, long sinceSeq, CancellationToken ct = default)
     {
-        var serverNow = DateTimeOffset.UtcNow;
+        var serverNow = Clock.GetUtcNow();
 
         if (string.IsNullOrWhiteSpace(team)) return WorkflowTimingFacts.Unavailable(serverNow, "No team was named.");
 
@@ -638,7 +642,7 @@ public sealed class SqlServerMessageStore : IMessageLog, ICursors, ISubscription
     public async Task<TeamWorkflowTiming> WorkflowForTeamAsync(
         string team, long correlation, long sinceSeq, CancellationToken ct = default)
     {
-        var serverNow = DateTimeOffset.UtcNow;
+        var serverNow = Clock.GetUtcNow();
 
         if (string.IsNullOrWhiteSpace(team)) return WorkflowTimingFacts.Unavailable(serverNow, "No team was named.");
 
@@ -1001,7 +1005,7 @@ public sealed class SqlServerMessageStore : IMessageLog, ICursors, ISubscription
     public async Task<TeamWorkflows> WorkflowsForTeamAsync(
         string team, long sinceSeq, CancellationToken ct = default)
     {
-        var serverNow = DateTimeOffset.UtcNow;
+        var serverNow = Clock.GetUtcNow();
 
         if (string.IsNullOrWhiteSpace(team))
         {

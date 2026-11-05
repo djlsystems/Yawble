@@ -28,6 +28,10 @@ public sealed class CappedTriggerSleepTests : IAsyncLifetime
     private readonly string _dataRoot = Path.Combine(Path.GetTempPath(), $"harness-capped-sleep-{Guid.NewGuid():N}");
     private readonly FakeAgent _agents = new();
     private WebApplicationFactory<Program> _factory = null!;
+
+    /// <summary>The Host's clock, twelve hours from midnight (see <see cref="NoonClock"/>): every time
+    /// this class fires or arms at is read from it, so no run here sees the day change.</summary>
+    private readonly NoonClock _clock = new();
     private HttpClient _person = null!;
     private string _team = "";
 
@@ -88,7 +92,7 @@ public sealed class CappedTriggerSleepTests : IAsyncLifetime
             .UseSetting("DataRoot", _dataRoot)
             .UseSetting("Logging:LogLevel:Default", "Warning")
             .UseSetting("ScheduleRunnerEnabled", "false")
-            .ConfigureTestServices(services => services.AddSingleton<IAgentRunner>(_agents)));
+            .ConfigureTestServices(services => services.AddSingleton<IAgentRunner>(_agents).AddSingleton<TimeProvider>(_clock)));
 
         _ = _factory.Services;
         return Task.CompletedTask;
@@ -375,7 +379,7 @@ public sealed class CappedTriggerSleepTests : IAsyncLifetime
         var (id, _) = await CapOnTheThirdRunAsync();
         var changes = (await TenantRowsAsync(TenantActions.ScheduleChanged, id)).Count;
 
-        var before = DateTimeOffset.UtcNow;
+        var before = _clock.GetUtcNow();
         var patched = change == "raise"
             ? await PatchAsync(id, new { dailyTokenCap = 100_000 })
             : await PatchAsync(id, new { dailyTokenCap = (long?)null });
@@ -383,7 +387,7 @@ public sealed class CappedTriggerSleepTests : IAsyncLifetime
 
         // Its next occurrence from now: a minute from the change, not tomorrow.
         var due = await DueAsync(id);
-        Assert.InRange(due, before.AddSeconds(59), DateTimeOffset.UtcNow.AddSeconds(61));
+        Assert.InRange(due, before.AddSeconds(59), _clock.GetUtcNow().AddSeconds(61));
         Assert.Equal(changes + 1, (await TenantRowsAsync(TenantActions.ScheduleChanged, id)).Count);
         Assert.Equal(JsonValueKind.Null, (await ViewAsync("Dev", id)).GetProperty("cappedUntil").ValueKind);
 
@@ -397,11 +401,11 @@ public sealed class CappedTriggerSleepTests : IAsyncLifetime
     {
         var (id, _) = await CapOnTheThirdRunAsync();
 
-        var before = DateTimeOffset.UtcNow;
+        var before = _clock.GetUtcNow();
         Assert.Equal(HttpStatusCode.OK, (await PatchAsync(id, new { intervalSeconds = 120 })).StatusCode);
 
         var due = await DueAsync(id);
-        Assert.InRange(due, before.AddSeconds(119), DateTimeOffset.UtcNow.AddSeconds(121));
+        Assert.InRange(due, before.AddSeconds(119), _clock.GetUtcNow().AddSeconds(121));
 
         // Raised in the same breath, it runs then.
         Assert.Equal(HttpStatusCode.OK, (await PatchAsync(id, new { dailyTokenCap = 100_000 })).StatusCode);

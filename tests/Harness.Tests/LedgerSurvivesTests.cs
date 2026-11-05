@@ -27,6 +27,10 @@ public sealed class LedgerSurvivesTests : IAsyncLifetime
     private readonly string _dataRoot = Path.Combine(Path.GetTempPath(), $"harness-ledger-survives-{Guid.NewGuid():N}");
     private readonly FakeAgent _agents = new();
     private WebApplicationFactory<Program> _factory = null!;
+
+    /// <summary>The Host's clock, twelve hours from midnight (see <see cref="NoonClock"/>): every time
+    /// this class fires or arms at is read from it, so no run here sees the day change.</summary>
+    private readonly NoonClock _clock = new();
     private HttpClient _person = null!;
     private string _team = "";
 
@@ -71,7 +75,7 @@ public sealed class LedgerSurvivesTests : IAsyncLifetime
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host => host
             .UseSetting("DataRoot", _dataRoot)
             .UseSetting("Logging:LogLevel:Default", "Warning")
-            .ConfigureTestServices(services => services.AddSingleton<IAgentRunner>(_agents)));
+            .ConfigureTestServices(services => services.AddSingleton<IAgentRunner>(_agents).AddSingleton<TimeProvider>(_clock)));
 
         _team = (await Services.GetRequiredService<TeamRegistry>()
             .CreateAsync(TeamLabel, "claude-headless", memberAgent: "claude-headless", ct: Ct)).Id;
@@ -202,7 +206,7 @@ public sealed class LedgerSurvivesTests : IAsyncLifetime
 
         var trigger = await CreateScheduleAsync();
         var after = await Log.HighestSeqAsync(Ct);
-        await Services.GetRequiredService<TriggerSweep>().FireDueAsync(DateTimeOffset.UtcNow.AddSeconds(301), Ct);
+        await Services.GetRequiredService<TriggerSweep>().FireDueAsync(_clock.GetUtcNow().AddSeconds(301), Ct);
 
         var dev = await AwaitRowAsync(m => m.Seq > after && m.Source == Dev.ToString(), "Dev's terminal row");
         var handback = (await Log.ReadAfterAsync(after, [MessageTypes.Handback], int.MaxValue, Ct))
@@ -225,10 +229,12 @@ public sealed class LedgerSurvivesTests : IAsyncLifetime
 
         _holdManager.SetResult();
         await AwaitRowAsync(m => m.Source == Manager.ToString() && m.CausationSeq == busy.Seq, "the Manager's own run");
-        await SettleAsync();
 
-        var managerRun = (await Ledger.ReadRecentRunsAsync(Manager, 10, Ct))
-            .Single(r => r.Correlation == dev.CorrelationId);
+        // The Manager's run of the hand-back is the one queued behind its own: waited for by its
+        // ledger row, not by the team looking idle - between its own run and the queued one the
+        // Manager reads idle with the hand-back still in its queue.
+        var managerRun = await AwaitManagerRunAsync(dev.CorrelationId, "the Manager's run of the hand-back");
+        await SettleAsync();
         Assert.Equal(handback.OccurredAt, managerRun.QueuedAt);
         Assert.Equal($"schedule:{trigger}", managerRun.TriggerSource);
         Assert.NotNull(managerRun.TriggerFiredAt);
@@ -326,7 +332,7 @@ public sealed class LedgerSurvivesTests : IAsyncLifetime
         Assert.Equal(everything, paged);
 
         // `since` leaves out what ended before it.
-        var future = Uri.EscapeDataString(DateTimeOffset.UtcNow.AddMinutes(1).ToString("O"));
+        var future = Uri.EscapeDataString(_clock.GetUtcNow().AddMinutes(1).ToString("O"));
         Assert.Empty(Seqs(await ExportAsync($"since={future}")));
 
         // A run's row carries its figures under the names the ledger keeps them.
@@ -352,7 +358,7 @@ public sealed class LedgerSurvivesTests : IAsyncLifetime
         var trigger = await CreateScheduleAsync();
 
         var after = await Log.HighestSeqAsync(Ct);
-        await Services.GetRequiredService<TriggerSweep>().FireDueAsync(DateTimeOffset.UtcNow.AddSeconds(301), Ct);
+        await Services.GetRequiredService<TriggerSweep>().FireDueAsync(_clock.GetUtcNow().AddSeconds(301), Ct);
 
         var dev = await AwaitRowAsync(m => m.Seq > after && m.Source == Dev.ToString(), "Dev's terminal row");
         var manager = await AwaitRowAsync(
@@ -402,6 +408,42 @@ public sealed class LedgerSurvivesTests : IAsyncLifetime
             var idle = new[] { Dev, Echo, Manager }.All(id => host.Find(id)?.State is null or ContainerState.Idle);
             quietPasses = idle ? quietPasses + 1 : 0;
             await Task.Delay(100, Ct);
+        }
+    }
+
+    /// <summary>
+    /// The Manager's ledger row for its run in <paramref name="correlation"/>, written with the run's
+    /// terminal row. Fails at once, with what the Manager is doing and the rows it wrote, when it is
+    /// idle with nothing queued and the row is still not there: no run is left to write it.
+    /// </summary>
+    private async Task<UsageLedgerRow> AwaitManagerRunAsync(long correlation, string what)
+    {
+        var host = Services.GetRequiredService<Harness.Containers.ContainerHost>();
+        var deadline = DateTime.UtcNow.AddSeconds(60);
+
+        while (true)
+        {
+            // Read BEFORE the ledger: a member is Running before its queue depth drops, so idle with
+            // an empty queue here, and no row after, means no run of it is coming.
+            var manager = host.Find(Manager);
+            var nothingComing = manager?.State is ContainerState.Idle && manager.QueueDepth == 0;
+
+            var runs = await Ledger.ReadRecentRunsAsync(Manager, 10, Ct);
+            if (runs.SingleOrDefault(r => r.Correlation == correlation) is { } run) return run;
+
+            if (nothingComing || DateTime.UtcNow > deadline)
+            {
+                var rows = (await Log.ReadAfterAsync(0, [MessageTypes.Completed, MessageTypes.Failed], int.MaxValue, Ct))
+                    .Where(m => m.Source == Manager.ToString())
+                    .Select(m => $"{m.Type} {m.Seq} caused by {m.CausationSeq} in workflow {m.CorrelationId}");
+                throw new Xunit.Sdk.XunitException(
+                    $"No ledger row: {what} (workflow {correlation}). " +
+                    (nothingComing ? "The Manager is idle with nothing queued" : "Still not there after 60 s") +
+                    $"; Manager {manager?.State}, queue {manager?.QueueDepth}. " +
+                    $"Its ledger runs: [{string.Join(", ", runs.Select(r => r.Correlation))}]. Its terminal rows: [{string.Join("; ", rows)}].");
+            }
+
+            await Task.Delay(50, Ct);
         }
     }
 
