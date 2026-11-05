@@ -205,6 +205,42 @@ public sealed class TriggerCostControlTests : IAsyncLifetime
         (await Log.ReadAfterAsync(row.Seq, [MessageTypes.Completed, MessageTypes.Failed], int.MaxValue, Ct))
             .Any(m => m.Source == Manager.ToString() && m.CausationSeq == row.Seq);
 
+    /// <summary>
+    /// Pauses the team and answers once every pump pass that could still deliver to it has ended:
+    /// the pump beats before each pass, so a beat after the pause means the pass running across it
+    /// has finished and every later one sees the pause. Fails, naming the last beat, if the pump
+    /// makes no pass at all.
+    /// </summary>
+    private async Task PausedAsync()
+    {
+        await Services.GetRequiredService<Harness.Containers.ContainerHost>().SetPausedAsync(_team, true);
+
+        var pump = Services.GetRequiredService<PumpHeartbeat>();
+        var before = pump.LastBeat;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        while (pump.LastBeat == before)
+        {
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(30),
+                $"The pump began no pass after the pause (last beat {before:O}, alive {pump.IsAlive}).");
+            await Task.Delay(10, Ct);
+        }
+    }
+
+    /// <summary>What was holding <paramref name="wake"/>'s workflow open: the team's pending
+    /// deliveries, its members' states and Dev's cursor.</summary>
+    private async Task<string> HoldingAsync(Message wake)
+    {
+        var pending = await Services.GetRequiredService<IPendingDeliveries>().ForTeamAsync(_team, Ct);
+        var members = Services.GetRequiredService<Harness.Containers.ContainerHost>().Snapshots()
+            .Where(s => s.Team == _team)
+            .Select(s => $"{s.Id} {s.State} under {s.CurrentCorrelation?.ToString() ?? "-"} queue {s.QueueDepth}");
+        var cursor = await Services.GetRequiredService<ICursors>().PositionAsync(Dev, Ct);
+        return $"Not declared: wake {wake.Seq} in workflow {wake.CorrelationId}; pending ["
+            + string.Join(", ", pending.Select(p => $"{p.Subscriber} {p.Seq}{(p.Started ? " started" : "")}"))
+            + $"]; members [{string.Join(", ", members)}]; Dev's cursor {cursor}; thread: "
+            + string.Join(", ", (await Log.ReadCorrelationAsync(wake.CorrelationId, Ct)).Select(m => $"{m.Seq} {m.Type} from {m.Source}"));
+    }
+
     // ---- A: whom a triggered run wakes ------------------------------------------------------
 
     [Fact]
@@ -241,11 +277,18 @@ public sealed class TriggerCostControlTests : IAsyncLifetime
     /// <summary>The pump moves a member's cursor only after its batch, so a quick run can end
     /// while its own wake still reads as undelivered. The team is paused here to hold the cursor
     /// there for certain, where a loaded host only sometimes does.</summary>
+    /// <remarks>
+    /// THE PAUSE HOLDS ONLY PASSES THAT BEGIN AFTER IT. The pump asks whether a team is paused once
+    /// per container at the top of its turn in a pass, then reads and offers; a pass already past
+    /// that question when the pause lands still hands Dev the wake appended next. Dev then holds a
+    /// pending delivery, the busy check counts it, and nothing is declared. So the wake is appended
+    /// only once the pump has begun a pass after the pause (<see cref="PausedAsync"/>), and a refusal
+    /// says what was still holding the workflow.
+    /// </remarks>
     [Fact]
     public async Task A_quiet_run_ending_before_the_pump_moves_its_cursor_is_still_declared()
     {
-        var host = Services.GetRequiredService<Harness.Containers.ContainerHost>();
-        await host.SetPausedAsync(_team, true);
+        await PausedAsync();
 
         var wake = await Log.AppendAsync(new NewMessage(
             MessageTypes.InstructionFor(Dev),
@@ -256,7 +299,7 @@ public sealed class TriggerCostControlTests : IAsyncLifetime
         var declared = await Services.GetRequiredService<UndeclarableWorkflows>()
             .OnRunEndingAsync(Dev, wake.Seq, succeeded: true, Ct);
 
-        Assert.True(declared);
+        Assert.True(declared, declared ? "" : await HoldingAsync(wake));
         Assert.Contains(
             await Log.ReadCorrelationAsync(wake.CorrelationId, Ct),
             m => m.Type == MessageTypes.WorkflowCompleted);

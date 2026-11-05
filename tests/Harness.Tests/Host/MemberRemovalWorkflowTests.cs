@@ -125,9 +125,17 @@ public sealed class MemberRemovalWorkflowTests : IAsyncLifetime
     /// Dev's completion on the log is not the same as the Manager having been handed it: a run woken
     /// by something earlier can see the row while its delivery is still queued, and
     /// `workflow-complete` refuses that ("Manager has 1 pending delivery in this workflow"). So a run
-    /// declares only when the row that woke it (<c>HARNESS_CAUSATION</c>) is Dev's completion or
-    /// later - the pump hands a member its rows in order - and no unstarted delivery of the workflow
+    /// declares only when it was handed Dev's completion and no unstarted delivery of the workflow
     /// is queued for the Manager; otherwise it ends, and the queued run declares.
+    ///
+    /// HANDED MEANS IN THIS RUN'S BATCH, NOT ONLY ITS WAKING ROW. The pump runs every queued row of
+    /// one workflow as one batch: one <c>agentContainer.started</c>, caused by the FIRST row, which is
+    /// all <c>HARNESS_CAUSATION</c> names, and one terminal row per row handed. An idle offer queued
+    /// just before Dev's completion makes the batch [offer, completion]: woken by the offer, handed
+    /// both. Asking the causation alone made that run decline and wait for a run that never came
+    /// (the thread then ends started, completed, completed). Every row of the batch is marked Started
+    /// before the agent runs and removed only after its terminal row, so the run asks its own
+    /// started deliveries (<see cref="HandedAsync"/>).
     ///
     /// AND ONCE DEV'S RUN HAS FINISHED ENDING. Dev appends its completion before it drops its own
     /// pending row and leaves Running, so a quick Manager run can be handed that row while
@@ -163,7 +171,7 @@ public sealed class MemberRemovalWorkflowTests : IAsyncLifetime
 
                 if (thread.FirstOrDefault(m => m.Type == MessageTypes.Completed && m.Source == dev.ToString()) is { } done)
                 {
-                    if (cause < done.Seq)
+                    if (cause < done.Seq && !await HandedAsync(manager, done.Seq))
                     {
                         runs.Enqueue($"run woken by {cause}: saw Dev's completion {done.Seq} before being handed it; left it to that run");
                     }
@@ -279,9 +287,20 @@ public sealed class MemberRemovalWorkflowTests : IAsyncLifetime
         return false;
     }
 
+    /// <summary>
+    /// Whether <paramref name="seq"/> is one of the deliveries handed to the run of
+    /// <paramref name="member"/> that is asking: its pending row is Started. The pump marks every row
+    /// of a batch Started before the agent runs and removes each only after that row's terminal
+    /// row, so inside the run this is exactly its batch.
+    /// </summary>
+    private async Task<bool> HandedAsync(ContainerId member, long seq) =>
+        (await _factory.Services.GetRequiredService<IPendingDeliveries>().ForTeamAsync(_team, Ct)).Any(row =>
+            row.Started && row.Seq == seq && string.Equals(row.Subscriber, member.ToString(), StringComparison.OrdinalIgnoreCase));
+
     private async Task<string> StoryAsync(long workflow, IEnumerable<string> runs) =>
         $"workflow {workflow}: {string.Join("; ", runs)}. Thread: "
-        + string.Join(", ", (await Log.ReadCorrelationAsync(workflow, Ct)).Select(m => $"{m.Seq} {m.Type} from {m.Source}"));
+        + string.Join(", ", (await Log.ReadCorrelationAsync(workflow, Ct))
+            .Select(m => $"{m.Seq} {m.Type} from {m.Source}{(m.CausationSeq is { } c ? $" caused by {c}" : "")}"));
 
     /// <summary>
     /// The seq of an unstarted delivery of <paramref name="workflow"/> queued for
