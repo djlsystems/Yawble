@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -12,6 +13,12 @@ import (
 // under a temporary root and stub sudo (runs its command) and systemctl (logs its arguments).
 func runWriteScript(t *testing.T, root string) (int, string) {
 	t.Helper()
+	// The script runs inside the Podman machine, a Linux shell. On Windows the sh on PATH is
+	// Git's, which cannot run the stubs (no extension) or the script's paths (C:\...), so the
+	// script is checked where it runs: on Linux and macOS.
+	if runtime.GOOS == "windows" {
+		t.Skip("the write script is a Linux shell script; it is run for real on Linux and macOS")
+	}
 	sh, err := exec.LookPath("sh")
 	if err != nil {
 		t.Skip("no sh here")
