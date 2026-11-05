@@ -36,7 +36,7 @@ func TestCgroupEdgeDockerPartialFailsNamingCpuAndDockerFix(t *testing.T) {
 	}
 }
 
-// Missing controllers AND a no-limits control (B0088): while that control runs and answers, the
+// Missing controllers AND a no-limits control: while that control runs and answers, the
 // row is a warning with the same fix - the instance works without its limits, and doctor exits 0.
 // Before it answers - stopped, absent, or not healthy - it is still a FAIL.
 func TestCgroupEdgeMissingAndNoLimitsControlRunningHealthyWarnsElseFails(t *testing.T) {

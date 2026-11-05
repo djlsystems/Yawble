@@ -9,7 +9,7 @@ import (
 	"github.com/djlsystems/yawble/cli/internal/engine"
 )
 
-// B0088. Measured live on rootless WSL Podman 6.1.4 with cgroupControllers=[]: podman stats printed
+// Measured live on rootless WSL Podman 6.1.4 with cgroupControllers=[]: podman stats printed
 // "0B / 58.97GB" and pids 0 for a worker that was running agent runs. With no memory controller
 // there is no memory.current to read, and with no pids controller no pids.current: those zeros are
 // not readings. Stats.Without says them "not measured", on Podman and Docker alike; on an engine

@@ -338,7 +338,7 @@ public sealed class HostDoctorTests : IDisposable
         using var document = JsonDocument.Parse(HostDoctor.ToJson(report));
         var wip = document.RootElement.GetProperty("wip");
         Assert.Equal(
-            ["limit", "bound", "cpuBound", "cpus", "memoryBound", "memoryLimitMb", "memoryPerRunMb", "reason"],
+            ["limit", "bound", "cpuBound", "cpus", "memoryBound", "memoryLimitMb", "memoryPerRunMb", "reason", "cpusSource"],
             wip.GetProperty("limit").EnumerateObject().Select(p => p.Name));
         Assert.Equal(["mechanism", "perRunMb", "detail"], wip.GetProperty("runMemory").EnumerateObject().Select(p => p.Name));
         Assert.Equal("cgroup", wip.GetProperty("runMemory").GetProperty("mechanism").GetString());

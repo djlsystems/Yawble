@@ -11,7 +11,7 @@ import (
 	"github.com/djlsystems/yawble/cli/internal/instance"
 )
 
-// B0088. A person ran a CLI from main 47edb1a5 on rootless WSL Podman 6.1.4 with
+// A person ran a CLI from main 47edb1a5 on rootless WSL Podman 6.1.4 with
 // cgroupControllers=[]: up made control and worker-1 without their limits and both ran healthy.
 // Three side effects are pinned here, each over fixtures of the engines' own answers:
 //   - doctor's running limit is the Host's, from a measured CPU count (13 on 14 CPUs), and names

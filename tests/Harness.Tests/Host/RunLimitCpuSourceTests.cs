@@ -6,7 +6,7 @@ using Microsoft.Extensions.Configuration;
 namespace Harness.Tests.Host;
 
 /// <summary>
-/// B0088: a container without the cpu controller has no cpu.max, so its CPUs cannot be read from its
+/// A container without the cpu controller has no cpu.max, so its CPUs cannot be read from its
 /// cgroup. The CPU bound then comes from a CPU count measured another way - the engine's figure the
 /// CLI hands in, else the processors the Host (or worker) sees - and its reason names which. 3 is the
 /// bound only when no CPU count was measured at all. Measured live: rootless WSL Podman 6.1.4,
