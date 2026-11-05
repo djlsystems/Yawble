@@ -122,7 +122,7 @@ public sealed class WorkerProcessTests
         Assert.Empty(await bed.RowsOfAsync(team, "Dev", MessageTypes.Failed, MessageTypes.Started));
 
         bed.StartWorker("w1");
-        await bed.UntilAsync("Dev completed", async () => (await bed.RowsOfAsync(team, "Dev", MessageTypes.Completed)).Count >= 1);
+        await bed.CompletedAsync(team, "Dev");
 
         var connected = (await bed.WorkersAsync()).Single().GetProperty("connectedSince").GetDateTimeOffset();
         var started = (await bed.RowsOfAsync(team, "Dev", MessageTypes.Started))[0];
@@ -314,7 +314,7 @@ public sealed class WorkerProcessTests
 
         bed.StartWorker("other-user", prefix: nobody.Prefix, more: new Dictionary<string, string> { ["TMPDIR"] = otherTemp });
         (await bed.TellAsync(team, "Dev", "Run as the other user.")).EnsureSuccessStatusCode();
-        await bed.UntilAsync("Dev completed", async () => (await bed.RowsOfAsync(team, "Dev", MessageTypes.Completed)).Count >= 1);
+        await bed.CompletedAsync(team, "Dev");
         Assert.Matches("^2[0-9][0-9]$", bed.FakeRuns().First(r => r.Member == "Dev").Progress ?? "");
     }
 
@@ -335,7 +335,7 @@ public sealed class WorkerProcessTests
         var w1 = bed.StartWorker("w1", cwd: view);
         var team = await bed.TeamAsync("Clean", "Dev");
         (await bed.TellAsync(team, "Dev", "Run.")).EnsureSuccessStatusCode();
-        await bed.UntilAsync("Dev completed", async () => (await bed.RowsOfAsync(team, "Dev", MessageTypes.Completed)).Count >= 1);
+        await bed.CompletedAsync(team, "Dev");
 
         // The worker is alive, has run a member end to end, and has never mapped a store's code.
         Assert.False(w1.Exited);
