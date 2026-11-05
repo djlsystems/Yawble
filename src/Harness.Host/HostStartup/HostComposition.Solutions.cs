@@ -87,7 +87,8 @@ internal sealed partial class HostComposition
                 sp.GetRequiredService<FolderRemoval>(),
                 sp.GetRequiredService<PluginMemberSecretStore>(),
                 sp.GetRequiredService<PluginSecretMoves>(),
-                sp.GetRequiredService<TeamPicture>());
+                sp.GetRequiredService<TeamPicture>(),
+                sp.GetRequiredService<TimeProvider>());
         });
 
         // WHAT A SOLUTION TEAM WAITS FOR, asked before every trigger's fire. The installer is late-bound:
@@ -111,7 +112,8 @@ internal sealed partial class HostComposition
             sp.GetRequiredService<IMessageLog>(),
             sp.GetRequiredService<SiteService>(),
             sp.GetRequiredService<TeamDocuments>(),
-            pluginCatalog));
+            pluginCatalog,
+            sp.GetRequiredService<TimeProvider>()));
 
         // The board's notice for a package a workflow wrote, checked through that one door when the
         // workflow is declared complete.

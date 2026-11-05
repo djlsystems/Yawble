@@ -35,6 +35,16 @@ internal sealed partial class HostComposition
     {
         app = builder.Build();
 
+        // THE LOG STAMPS ITS ROWS BY THE HOST'S CLOCK. The store is made before the container exists,
+        // so its clock is bound here, once, before anything runs: a trigger's spend today compares
+        // those stamps with the same clock's "now" (TriggerCost), and both must be one clock.
+        var clock = app.Services.GetRequiredService<TimeProvider>();
+        switch (app.Services.GetRequiredService<IMessageLog>())
+        {
+            case SqliteMessageStore sqlite: sqlite.Clock = clock; break;
+            case Harness.SqlServer.Messaging.SqlServerMessageStore sqlServer: sqlServer.Clock = clock; break;
+        }
+
         // A CONTROL LOCK LOST BEFORE THE APP EXISTED stops it as soon as it starts: the lock's callback
         // had no app to stop, and a Host that another took the database from must not go on serving.
         app.Lifetime.ApplicationStarted.Register(() =>

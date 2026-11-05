@@ -120,6 +120,15 @@ public sealed class MemberRemovalWorkflowTests : IAsyncLifetime
     /// DECLARED FROM INSIDE THE MANAGER'S RUN, AS PRODUCTION DOES. A declaration appended from outside
     /// while the Manager's re-wake run was still in flight let that run's end offer the workflow
     /// another turn (<c>IdleWorkflowOffer</c>), an instruction after the declaration that reopens it.
+    ///
+    /// AND ONLY FROM A RUN WITH NOTHING STILL COMING TO THE MANAGER. Reading Dev's completion on the
+    /// log is not the same as the Manager having been handed it: a Manager run woken by something
+    /// else (an idle offer, say) can see the row while its delivery is still queued, and
+    /// `workflow-complete` refuses that ("Manager has 1 pending delivery in this workflow"). So a run
+    /// declares only once Dev's completion has been offered to the Manager and no delivery of this
+    /// workflow is waiting for it (<see cref="NothingComingToAsync"/>); otherwise it ends, and the
+    /// run that queued delivery starts reads the same and declares - what a real Manager does when it
+    /// is refused for in-flight work.
     /// </remarks>
     private async Task<long> CompletedWorkflowAsync()
     {
@@ -135,9 +144,12 @@ public sealed class MemberRemovalWorkflowTests : IAsyncLifetime
                 var correlation = await root.Task;
                 var thread = await Log.ReadCorrelationAsync(correlation, Ct);
 
-                if (thread.Any(m => m.Type == MessageTypes.Completed && m.Source == dev.ToString()))
+                if (thread.FirstOrDefault(m => m.Type == MessageTypes.Completed && m.Source == dev.ToString()) is { } done)
                 {
-                    declared.TrySetResult(await DeclareAsync(invocation, "Widget built."));
+                    if (await NothingComingToAsync(manager, correlation, done.Seq))
+                    {
+                        declared.TrySetResult(await DeclareAsync(invocation, "Widget built."));
+                    }
                 }
                 else if (!thread.Any(m => m.Type == MessageTypes.InstructionFor(dev)))
                 {
@@ -173,6 +185,25 @@ public sealed class MemberRemovalWorkflowTests : IAsyncLifetime
         }
 
         return workflow;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="member"/> has been handed everything of <paramref name="workflow"/> up
+    /// to <paramref name="seq"/> and has nothing of it still queued: its cursor is past that row (the
+    /// pump records a delivery before it moves the cursor), and no unstarted pending delivery of the
+    /// workflow is its. Its own started row - the run asking - is not waiting.
+    /// </summary>
+    private async Task<bool> NothingComingToAsync(ContainerId member, long workflow, long seq)
+    {
+        if (await _factory.Services.GetRequiredService<ICursors>().PositionAsync(member, Ct) < seq) return false;
+
+        foreach (var row in await _factory.Services.GetRequiredService<IPendingDeliveries>().ForTeamAsync(_team, Ct))
+        {
+            if (row.Started || !string.Equals(row.Subscriber, member.ToString(), StringComparison.OrdinalIgnoreCase)) continue;
+            if ((await Log.FindAsync(row.Seq, Ct))?.CorrelationId == workflow) return false;
+        }
+
+        return true;
     }
 
     private async Task<(HttpStatusCode, string)> DeclareAsync(AgentInvocation invocation, string delivered)

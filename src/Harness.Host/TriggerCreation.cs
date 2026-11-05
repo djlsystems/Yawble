@@ -44,8 +44,13 @@ public sealed class TriggerCreation(
     AgentCatalog catalog,
     EffectiveSubscriptions effective,
     TriggerWakeSignal wake,
-    IOutcomeStore? outcomes = null)
+    IOutcomeStore? outcomes = null,
+    TimeProvider? clock = null)
 {
+    /// <summary>The Host's clock: a trigger's first due time and creation are read from the same
+    /// clock its fires and its spend today are (see <c>SqliteMessageStore.Clock</c>).</summary>
+    private readonly TimeProvider _clock = clock ?? TimeProvider.System;
+
     /// <summary>The refusal for an outcome that is not a live one.</summary>
     public static string OutcomeRefusal(string asked) =>
         $"No active or proposed outcome '{asked}'. Name one by its id or its exact name.";
@@ -119,7 +124,7 @@ public sealed class TriggerCreation(
 
         if (Triggers.Validate(
             kind, request.Expression, request.Timezone, request.IntervalSeconds, request.FireAt,
-            onceMustFollow: DateTimeOffset.UtcNow)
+            onceMustFollow: _clock.GetUtcNow())
             is { } invalid)
         {
             return Refused(invalid);
@@ -227,12 +232,12 @@ public sealed class TriggerCreation(
             //
             // A SUPPLIED VALUE STILL WINS: it means "fire first at this time, then follow the shape".
             // Absent means "start from now", which is what a person ticking Enabled means.
-            request.NextDueAt ?? FirstOccurrence(kind, expression, timezone, request.IntervalSeconds, request.FireAt, DateTimeOffset.UtcNow),
+            request.NextDueAt ?? FirstOccurrence(kind, expression, timezone, request.IntervalSeconds, request.FireAt, _clock.GetUtcNow()),
             keeping?.LastFiredAt,
             keeping?.LastOutcome,
             keeping?.LastSeq,
             keeping?.MissedCount ?? 0,
-            keeping?.CreatedAt ?? DateTimeOffset.UtcNow,
+            keeping?.CreatedAt ?? _clock.GetUtcNow(),
             createdBy,
             EventType: eventType,
             Filter: request.Filter)

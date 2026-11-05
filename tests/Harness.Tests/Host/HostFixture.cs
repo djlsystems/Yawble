@@ -4,6 +4,7 @@ using Harness.Host;
 using Harness.Host.Auth;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -15,8 +16,12 @@ namespace Harness.Tests.Host;
 /// the platform mints for it. Minted through <see cref="IPrincipalStore"/> exactly as
 /// <c>AgentEnvironment</c> does, so the key is resolved on every request by the real auth path.
 /// </summary>
-public sealed class HostFixture : IAsyncLifetime
+public class HostFixture : IAsyncLifetime
 {
+    /// <summary>The Host's <see cref="TimeProvider"/> when a fixture sets one (<see cref="NoonHostFixture"/>);
+    /// null keeps the platform's own.</summary>
+    protected virtual TimeProvider? Clock => null;
+
     public const string Password = "correct horse battery";
 
     private readonly string _dataRoot =
@@ -50,6 +55,10 @@ public sealed class HostFixture : IAsyncLifetime
             .WithWebHostBuilder(host => host
                 .UseSetting("DataRoot", _dataRoot)
                 .UseSetting("Logging:LogLevel:Default", "Warning")
+                .ConfigureTestServices(services =>
+                {
+                    if (Clock is { } clock) services.AddSingleton(clock);
+                })
                 .ConfigureLogging(logging => logging
                     .AddProvider(_steering)
                     .AddFilter<SteeringLines>(typeof(SteeringWorkflows).FullName, LogLevel.Information)));
@@ -129,4 +138,16 @@ public sealed class HostFixture : IAsyncLifetime
                 owner._lines.Enqueue(formatter(state, exception));
         }
     }
+}
+
+/// <summary>
+/// <see cref="HostFixture"/> on a clock twelve hours from midnight (<see cref="NoonClock"/>), for a
+/// class whose triggers' spend today must read one day however long it runs. A test reads "now" from
+/// <see cref="Time"/>, never from the wall clock.
+/// </summary>
+public sealed class NoonHostFixture : HostFixture
+{
+    public TimeProvider Time { get; } = new NoonClock();
+
+    protected override TimeProvider? Clock => Time;
 }

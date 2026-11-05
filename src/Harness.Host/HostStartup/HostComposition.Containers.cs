@@ -81,11 +81,12 @@ internal sealed partial class HostComposition
             // (TeamArchive), its solution team waits for a missing required input (SolutionWait), or its
             // daily token cap is reached. Late-bound for the reason above: TriggerCost's tenant log is
             // registered below this line.
+            // "Now" is the Host's clock, the one the log stamps the trigger's runs by (see Build).
             triggerHeld: async (trigger, member, cause, ct) =>
-                await sp.GetRequiredService<TeamArchive>().SkipIfArchivedAsync(trigger, member, DateTimeOffset.UtcNow, cause.Seq, ct)
-                || await sp.GetRequiredService<SolutionWait>().SkipIfWaitingAsync(trigger, member, DateTimeOffset.UtcNow, cause.Seq, ct)
+                await sp.GetRequiredService<TeamArchive>().SkipIfArchivedAsync(trigger, member, sp.GetRequiredService<TimeProvider>().GetUtcNow(), cause.Seq, ct)
+                || await sp.GetRequiredService<SolutionWait>().SkipIfWaitingAsync(trigger, member, sp.GetRequiredService<TimeProvider>().GetUtcNow(), cause.Seq, ct)
                 || await sp.GetRequiredService<TriggerCost>()
-                    .SkipIfCappedAsync(trigger, member, DateTimeOffset.UtcNow, nextDueAt: null, cause.Seq, ct),
+                    .SkipIfCappedAsync(trigger, member, sp.GetRequiredService<TimeProvider>().GetUtcNow(), nextDueAt: null, cause.Seq, ct),
 
             // Whether a member's card shows the eye: its preset has a live view this Host can read.
             // Asked per snapshot, so a catalog edit or a repoint shows on the next one.

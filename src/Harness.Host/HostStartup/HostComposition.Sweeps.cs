@@ -219,7 +219,8 @@ internal sealed partial class HostComposition
                 // due; this only bounds how long it will go without re-reading, for state that changed
                 // without a signal reaching it. `ScheduleSweepInterval` does not decide accuracy.
                 scheduleSweepInterval,
-                sp.GetRequiredService<ILogger<TriggerRunner>>()));
+                sp.GetRequiredService<ILogger<TriggerRunner>>(),
+                sp.GetRequiredService<TimeProvider>()));
         }
 
         builder.Services.AddSingleton(TimeProvider.System);

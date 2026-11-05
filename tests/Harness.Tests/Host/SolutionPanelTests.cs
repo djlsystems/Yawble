@@ -20,7 +20,7 @@ namespace Harness.Tests.Host;
 /// package made while keeping the team's documents and its sites offline with their data, and a
 /// reinstall onto that team bringing them back.
 /// </summary>
-public sealed class SolutionPanelTests(HostFixture host) : IClassFixture<HostFixture>
+public sealed class SolutionPanelTests(NoonHostFixture host) : IClassFixture<NoonHostFixture>
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
@@ -478,7 +478,7 @@ public sealed class SolutionPanelTests(HostFixture host) : IClassFixture<HostFix
         using var person = await host.PersonAsync();
         var panel = await JsonAsync(await person.GetAsync($"/api/teams/{team}/solution/panel", Ct));
         var triggers = panel.GetProperty("triggers").EnumerateArray().Select(t => t.GetProperty("id").GetString()!).ToList();
-        var since = DateTimeOffset.UtcNow;
+        var since = DateTimeOffset.UtcNow; // the tenant log stamps its rows by the wall clock, not the Host's
 
         // EACH CONTROL DRIVEN THROUGH ITS ROUTE, answering the subject its row is written under. A
         // control added to the list and not driven here fails below.
@@ -625,7 +625,7 @@ public sealed class SolutionPanelTests(HostFixture host) : IClassFixture<HostFix
     {
         var deadline = DateTime.UtcNow.AddSeconds(30);
 
-        while (await Get<IMessageLog>().GetTriggerSpendAsync(TriggerCost.SourcesOf(id), DateTimeOffset.UtcNow.AddDays(-1), Ct)
+        while (await Get<IMessageLog>().GetTriggerSpendAsync(TriggerCost.SourcesOf(id), host.Time.GetUtcNow().AddDays(-1), Ct)
             is { RunsWithMeasuredUsage: 0, RunsWithoutUsage: 0 })
         {
             if (DateTime.UtcNow > deadline) throw new TimeoutException($"Trigger {id}'s run at install never finished.");
