@@ -25,11 +25,12 @@ func TestCgroupsReadsTheEnginesOwnReport(t *testing.T) {
 		name, fixture string
 		make          func(engine.Runner) engine.Engine
 		missing       []string
+		manager       string
 	}{
-		{"podman on a WSL machine with nothing delegated", "podman-info-wsl-no-controllers.json", engine.NewPodman, []string{"memory", "cpu", "pids"}},
-		{"podman with the controllers delegated", "podman-info-delegated.json", engine.NewPodman, nil},
-		{"docker that can apply every limit", "docker-info-limits.json", engine.NewDocker, nil},
-		{"docker that can apply none", "docker-info-no-limits.json", engine.NewDocker, []string{"memory", "cpu", "pids"}},
+		{"podman on a WSL machine with nothing delegated", "podman-info-wsl-no-controllers.json", engine.NewPodman, []string{"memory", "cpu", "pids"}, "cgroupfs"},
+		{"podman with the controllers delegated", "podman-info-delegated.json", engine.NewPodman, nil, "systemd"},
+		{"docker that can apply every limit", "docker-info-limits.json", engine.NewDocker, nil, ""},
+		{"docker that can apply none", "docker-info-no-limits.json", engine.NewDocker, []string{"memory", "cpu", "pids"}, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -42,6 +43,9 @@ func TestCgroupsReadsTheEnginesOwnReport(t *testing.T) {
 			}
 			if !slices.Equal(got.Missing(), c.missing) {
 				t.Errorf("missing %q, want %q", got.Missing(), c.missing)
+			}
+			if got.Manager != c.manager || got.UnderCgroupfs() != (c.manager == "cgroupfs") {
+				t.Errorf("manager %q, want %q", got.Manager, c.manager)
 			}
 			if len(s.Calls) != 1 || s.Calls[0] != e.Name()+" info --format json" {
 				t.Errorf("calls %q", s.Calls)

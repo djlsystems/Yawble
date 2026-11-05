@@ -129,12 +129,29 @@ func cgroupsRow(o Observed) Check {
 		if len(c.Controllers) > 0 {
 			have = strings.Join(c.Controllers, ", ")
 		}
-		return Check{"cgroups", Fail, fmt.Sprintf("%s reports no %s cgroup controller (it has: %s), so the engine cannot apply a container's %s; `yawble up` starts the instance WITHOUT the containers' limits, and no memory or CPU limit is applied to any container", c.Source, strings.Join(missing, ", "), have, instance.LimitsOf(missing)), instance.LimitsFix(o.EngineName)}
+		return Check{"cgroups", Fail, fmt.Sprintf("%s reports no %s cgroup controller (it has: %s), so the engine cannot apply a container's %s; `yawble up` starts the instance WITHOUT the containers' limits, and no memory or CPU limit is applied to any container", c.Source, strings.Join(missing, ", "), have, instance.LimitsOf(missing)), cgroupsFix(o)}
 	}
 	if o.ControlNoLimits {
 		return Check{"cgroups", Warn, fmt.Sprintf("%s reports memory, cpu and pids, but the instance was started without its memory and CPU limits", c.Source), "yawble up (it makes the containers again with their limits)"}
 	}
 	return Check{"cgroups", OK, fmt.Sprintf("memory, cpu and pids are there (%s): the containers' limits apply", c.Source), ""}
+}
+
+// CgroupfsFix is the cgroups row's fix on a Podman machine whose Podman uses cgroupfs: the
+// cause, and that neither yawble up nor a delegation changes it.
+const CgroupfsFix = `Podman in the machine uses cgroup_manager = "cgroupfs" (set by the machine image), and rootless containers get no cgroup controllers under cgroupfs; delegating controllers cannot change that, so yawble up leaves the machine as it is and starts the instance without the containers' limits. Changing the machine's cgroup manager undoes a setting the Podman machine image made on purpose, and is not done by yawble`
+
+// cgroupsFix is the cgroups row's fix. Under cgroupfs on a Podman machine it names that cause. On a Podman machine `yawble up` delegates the controllers
+// itself (it asks first, writes delegate.conf inside the machine and restarts it), so it is named
+// first; elsewhere the fix is the engine's own steps, which end in yawble up.
+func cgroupsFix(o Observed) string {
+	if o.EngineName != "docker" && o.Machine.Applies && o.Cgroups != nil && o.Cgroups.UnderCgroupfs() {
+		return CgroupfsFix
+	}
+	if o.EngineName != "docker" && o.Machine.Applies {
+		return "run yawble up: on a Podman machine it delegates the controllers itself, after asking (it writes " + machine.DelegateFile + " inside the machine, reloads systemd and restarts the machine; never over a delegate.conf it did not write). By hand: " + instance.LimitsFix(o.EngineName)
+	}
+	return instance.LimitsFix(o.EngineName)
 }
 
 // RemoteObserved is the configured provider, its sidecar's state and the URL it printed.
