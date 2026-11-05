@@ -492,7 +492,10 @@ public sealed class IdleWorkflowOffer(
             foreach (var row in thread)
             {
                 if (row.Seq <= position) continue;
-                if (!subscribed.Contains(row.Type)) continue;
+
+                // AN ANSWER IS HANDED TO THE MEMBER THAT ASKED whether or not it holds the type
+                // (PayloadFields.AnswersTell), so it is still coming to that member too.
+                if (!subscribed.Contains(row.Type) && !TerminalRowFacts.Of(row).Answers(subscriber)) continue;
 
                 // The pump's own two guards: a container never reacts to its own publications, and
                 // a container is woken only by its OWN TEAM. `MessageTeam.Of`, never
