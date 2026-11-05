@@ -114,7 +114,9 @@ public static class BuiltInSkills
     /// how an agent waits for something outside the platform. A run held open with a sleep is a
     /// paid run doing nothing, and a background process started to "check later" ends with the run,
     /// so the only true way to wait is a wake. The four rules are pinned word for word by
-    /// `McpContractTests.WakeRules`.
+    /// `McpContractTests.WakeRules`. A plugin's answer is never waited for through a wake: it wakes
+    /// the member that asked (`PayloadFields.AnswersTell`), pinned by
+    /// `BuiltInsFromTheBuildTests.PluginAnswerRules`.
     /// </summary>
     private const string WaitingSection =
         """
@@ -125,10 +127,16 @@ public static class BuiltInSkills
         A process you start ends with your run. Never say you are watching or waiting for something
         unless a wake is set.
 
+        A `tell` to a plugin member is answered back to you: its answer, completed or failed, wakes
+        you in the same workflow. So tell it, end your run, and read the answer when it wakes you; to
+        step through a plugin one command at a time, tell the next command after reading the last
+        answer. Never set `wake_me` for a plugin's answer.
+
         To wait for something outside the platform - a deployment to settle, a name to resolve, a
         certificate to be issued, a limit to pass - write down what you are waiting for, set
         `wake_me` with a note, and end your run. Prefer one wake at a sensible interval over many
-        short ones.
+        short ones. A wake is for waiting on something outside the platform - a deploy that takes
+        minutes, a person - never for a plugin's answer.
 
         `wake_me` with `in` (a duration such as `90s`, `10m` or `2h`) and `note` (one line: what to
         look at when woken) wakes you once, in the workflow you are working, with that note; it

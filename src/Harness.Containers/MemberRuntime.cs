@@ -1073,6 +1073,20 @@ public sealed class MemberRuntime : IAsyncDisposable
     /// </summary>
     public bool HasBaseSubscription(string type) => _baseSubscribes.Contains(type);
 
+    /// <summary>
+    /// The member whose `tell` <paramref name="delivery"/> is, when the run's runner answers its
+    /// asker (<see cref="MemberResult.AnswersAsker"/>) and the sender is another member of its own
+    /// team; null otherwise (a runner that does not, a person, a trigger, a wake). What
+    /// <see cref="PayloadFields.AnswersTell"/> carries.
+    /// </summary>
+    private string? AskerOf(MemberResult result, Message delivery) =>
+        result.AnswersAsker
+        && ContainerId.TryParse(delivery.Source, out var asker)
+        && string.Equals(asker.Team, Id.Team, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(asker.Name, Id.Name, StringComparison.OrdinalIgnoreCase)
+            ? asker.ToString()
+            : null;
+
     public void Refloor(long sinceSeq)
     {
         if (sinceSeq <= _sinceSeq) return;
@@ -1941,6 +1955,21 @@ public sealed class MemberRuntime : IAsyncDisposable
                 {
                     payload = payload[..^1]
                         + $",\"{PayloadFields.WakeManager}\":{JsonSerializer.Serialize(wakeManager)}}}";
+                }
+
+                // AN ANSWER NAMES THE MEMBER THAT ASKED, the same way: one key, only on a row whose
+                // runner answers its asker, closing a `tell` from a member of its own team. The pump wakes that
+                // member on it and passes over the Manager, which did not ask; see
+                // PayloadFields.AnswersTell. A later row of a batch naming a member an earlier row
+                // of this run already named carries no key, so one run wakes its asker once.
+                if (AskerOf(result, message) is { } asker
+                    && !batch.Take(index).Any(earlier => !deferredItems.ContainsKey(earlier.Seq)
+                        && !blockedItems.Contains(earlier.Seq)
+                        && string.Equals(AskerOf(result, earlier), asker, StringComparison.OrdinalIgnoreCase)))
+                {
+                    payload = payload[..^1]
+                        + $",\"{PayloadFields.AnswersTell}\":{JsonSerializer.Serialize(asker)}"
+                        + (result.AskersTold ? $",\"{PayloadFields.AskerTold}\":true}}" : "}");
                 }
 
                 // Set BESIDE the publication rather than instead of it, and only on the arm that

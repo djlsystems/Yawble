@@ -268,6 +268,10 @@ public sealed class ContainerHost : IAsyncDisposable
         _passDue = true;
     }
 
+    /// <summary>The types an answer to a member's `tell` is written as: read for every container,
+    /// delivered to one that does not hold them only when the row answers it.</summary>
+    private static readonly string[] AnswerTypes = [MessageTypes.Completed, MessageTypes.Failed];
+
     private async Task<IReadOnlyCollection<string>> SubscriptionsOfAsync(ContainerId container, CancellationToken ct)
     {
         if (_subscriptionCache.TryGetValue(container, out var cached)) return cached;
@@ -780,8 +784,15 @@ public sealed class ContainerHost : IAsyncDisposable
             var types = await SubscriptionsOfAsync(container.Id, ct);
             if (types.Count == 0) continue;
 
+            // AN ANSWER WAKES THE MEMBER THAT ASKED, which holds neither `completed` nor
+            // `failed`: both are read for every container, and a row of a type it does not hold is
+            // delivered only when it answers this container's own `tell` (PayloadFields.AnswersTell).
+            var read = types.Contains(MessageTypes.Completed) && types.Contains(MessageTypes.Failed)
+                ? types
+                : (IReadOnlyCollection<string>)[.. types.Union(AnswerTypes, StringComparer.Ordinal)];
+
             var position = await _cursors.PositionAsync(container.Id, ct);
-            var messages = await _log.ReadAfterAsync(position, types, BatchSize, ct);
+            var messages = await _log.ReadAfterAsync(position, read, BatchSize, ct);
             if (messages.Count == BatchSize) more = true;
 
             // ONE CURSOR MOVE PER CONTAINER PER PASS, in a finally: a message offered has left the
@@ -869,7 +880,20 @@ public sealed class ContainerHost : IAsyncDisposable
                 // its own row. The rule is the row's key, never the member's kind.
                 var isCompleted = string.Equals(message.Type, MessageTypes.Completed, StringComparison.Ordinal);
                 if (!facts.TryGetValue(message.Seq, out var fact)) facts[message.Seq] = fact = TerminalRowFacts.Of(message);
-                var alreadyWoken = (container.HasBaseSubscription(message.Type) && fact.LaterRowOfOneRun)
+                //
+                // AN ANSWER WAKES THE MEMBER THAT ASKED, AND NOT THE MANAGER. A row closing a member's
+                // own `tell`, from a member whose runner answers its asker (MemberResult.AnswersAsker),
+                // names that member (PayloadFields.AnswersTell): it is woken by the row in its
+                // workflow, as a Manager is by a member it told, though it holds neither type. A
+                // subscriber holding the type in its BASE set that did not ask (the Manager) is passed
+                // over on it - the asker is woken - except on a `needs-person` failure, which only a
+                // person can fix. A row answering the Manager's own `tell` names the Manager and wakes
+                // it as before; an event the run published, and an event trigger naming the type,
+                // wake on their own terms. The rule is the row's key, never the member's kind.
+                var answersMe = fact.Answers(container.Id);
+                var alreadyWoken = (!types.Contains(message.Type) && !answersMe)
+                    || (container.HasBaseSubscription(message.Type) && fact.AnswersSomeoneElse(container.Id))
+                    || (container.HasBaseSubscription(message.Type) && fact.LaterRowOfOneRun)
                     || (isCompleted
                     && ((types.Contains(MessageTypes.Handback) && fact.HandedBack)
                         || fact.Quiet))
@@ -907,7 +931,14 @@ public sealed class ContainerHost : IAsyncDisposable
                     // drift bugs in this codebase, each changing nothing until restart. The base-set
                     // check needs no store read at all, so it is asked FIRST - faster for the common
                     // case as well as correct.
-                    var resolution = await ResolveDeliveryAsync(container, message, ct);
+                    //
+                    // The answer to this container's own `tell` is delivered as it is when no
+                    // subscription of its own would hand it over: it did not hold the type, or an
+                    // event trigger naming the type refused the row.
+                    var resolution = types.Contains(message.Type)
+                        ? await ResolveDeliveryAsync(container, message, ct)
+                        : new DeliveryResolution(message, null);
+                    if (resolution.Message is null && answersMe) resolution = new DeliveryResolution(message, null);
                     var toDeliver = resolution.Message;
 
                     // THE BUDGET, ASKED WHERE THE COST IS INCURRED.

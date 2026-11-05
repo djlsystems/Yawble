@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Harness.Containers;
 using Harness.Contracts;
@@ -272,6 +273,17 @@ public sealed class TeamConnectionsTests : IAsyncLifetime
 
         // NO SECRET in any answer, any row, or any file under the data root.
         await AssertNowhereAsync(StripeKey, "sk_test_wrong_00000000");
+
+        // ITS ANSWER WAKES DEV ONCE: as the instruction above. Its run's row names Dev as the asker,
+        // and says Dev was told, so the row wakes neither Dev a second time nor the Manager.
+        var answered = JsonDocument.Parse(list.Payload).RootElement;
+        Assert.Equal(new ContainerId(_alpha, "Dev").ToString(), answered.GetProperty(PayloadFields.AnswersTell).GetString());
+        Assert.True(answered.GetProperty(PayloadFields.AskerTold).GetBoolean());
+        var woken = (await Services.GetRequiredService<IMessageLog>().ReadAfterAsync(
+                0, [MessageTypes.Completed, MessageTypes.Failed], int.MaxValue, Ct))
+            .Where(row => row.CausationSeq == list.Seq || row.CausationSeq == test.Seq)
+            .ToList();
+        Assert.Empty(woken);
     }
 
     // ---- Done when 4: never another team's ---------------------------------------------------------------
