@@ -9,7 +9,8 @@ public static class WorkerBounds
     public static WorkerBoundSource Of(WorkerInfo info) => new(
         info.Id,
         info.Cpus is > 0 and var cpus ? (int)Math.Ceiling(cpus) : null,
-        info.MemoryLimitBytes is > 0 and var bytes ? bytes / (1024 * 1024) : null);
+        info.MemoryLimitBytes is > 0 and var bytes ? bytes / (1024 * 1024) : null,
+        info.CpusSource);
 
     /// <summary><c>Workers:GraceSeconds</c> (30), <c>Workers:KeepAliveSeconds</c> (10) and <c>Workers:HelloSeconds</c> (10).</summary>
     public static WorkerTimings Timings(IConfiguration configuration)

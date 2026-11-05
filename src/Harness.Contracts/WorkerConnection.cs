@@ -45,8 +45,12 @@ public sealed record WorkerHello(
     WorkerId Worker, string Version, string Session, string Nonce, WorkerHelloCapacity Capacity,
     IReadOnlyList<RunId> OpenRuns, long LastSeq, bool Draining = false) : WorkerFrame;
 
-/// <summary>A worker's CPUs and container memory limit as it measured them; null is not measured.</summary>
-public sealed record WorkerHelloCapacity(double? Cpus, long? MemoryLimitBytes);
+/// <summary>
+/// A worker's CPUs and container memory limit as it measured them; null is not measured.
+/// <c>CpusSource</c> is where the CPU count came from (<see cref="CpuCount"/>: cgroup, engine or
+/// processors); null from a worker that does not say, whose count is its cgroup's.
+/// </summary>
+public sealed record WorkerHelloCapacity(double? Cpus, long? MemoryLimitBytes, string? CpusSource = null);
 
 /// <summary>
 /// Control took the worker: control's nonce, the last event of this worker's session control has

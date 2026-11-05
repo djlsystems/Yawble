@@ -155,7 +155,7 @@ public sealed class WorkerConnections
             {
                 replaced = existing is { Gone: false } ? existing : null;
                 remote = new RemoteWorker(
-                    new WorkerInfo(hello.Worker, hello.Version, hello.Capacity.Cpus, hello.Capacity.MemoryLimitBytes, _clock.GetUtcNow()),
+                    new WorkerInfo(hello.Worker, hello.Version, hello.Capacity.Cpus, hello.Capacity.MemoryLimitBytes, _clock.GetUtcNow(), hello.Capacity.CpusSource),
                     hello.Session, _control, _timings, Dropped, Gone, _clock, _log, _streams);
                 remote.DrainingChanged += DrainingChanged;
                 _workers[hello.Worker] = remote;

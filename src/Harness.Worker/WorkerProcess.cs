@@ -128,8 +128,14 @@ public static class WorkerProcess
             id, version, key.Trim(), ControlConnection.Connector(Http(control), key.Trim()),
             capacity: () =>
             {
+                // The cgroup's CPUs, else the engine's figure the CLI handed in, else the processors
+                // this worker sees: a cgroup without the cpu controller has no cpu.max to read.
                 var figures = cgroup.Read();
-                return new WorkerHelloCapacity(figures.CpuUnlimited ? null : figures.CpuLimit, figures.MemoryLimitBytes);
+                var (cpus, source) = CpuCount.Measure(
+                    figures.CpuUnlimited ? null : figures.CpuLimit,
+                    Environment.GetEnvironmentVariable(CpuCount.EngineVariable),
+                    Environment.ProcessorCount);
+                return new WorkerHelloCapacity(cpus, figures.MemoryLimitBytes, source);
             },
             log: log,
             giveUp: giveUp,
