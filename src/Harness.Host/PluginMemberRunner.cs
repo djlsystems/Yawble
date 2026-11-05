@@ -169,7 +169,7 @@ public sealed partial class PluginMemberRunner : IMemberRunner, IRunWorkerClient
     /// figures follow, and the spend queries count it as a measured run of 0.
     /// </summary>
     public async Task<MemberResult> RunAsync(MemberInvocation invocation, CancellationToken ct = default) =>
-        await RunPluginAsync(invocation, ct) with { Usage = InvocationUsage.NoModel };
+        await RunPluginAsync(invocation, ct) with { Usage = InvocationUsage.NoModel, AnswersAsker = true };
 
     private async Task<MemberResult> RunPluginAsync(MemberInvocation invocation, CancellationToken ct)
     {
@@ -485,7 +485,9 @@ public sealed partial class PluginMemberRunner : IMemberRunner, IRunWorkerClient
             // A FAILURE IS NEVER QUIET, whatever the record said: ok:false, a non-zero exit, a
             // timeout and a Stop all wake as they always did.
             Quiet: reason is null && gathered.Result is { Quiet: true },
-            HeldByConnection: reason is null ? null : heldByConnection ?? (websiteHeld ? gathered.WebsiteFailure!.ConnectionId : null));
+            HeldByConnection: reason is null ? null : heldByConnection ?? (websiteHeld ? gathered.WebsiteFailure!.ConnectionId : null),
+            // Each member that asked was told above, as an instruction: the row must not wake it again.
+            AskersTold: gathered.TeamConnections && Answers is not null);
     }
 
     /// <summary>The request's <c>connections</c>: each slot's grant by slot name, or for a multiple slot

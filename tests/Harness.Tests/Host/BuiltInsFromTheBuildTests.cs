@@ -191,6 +191,39 @@ public sealed class BuiltInsFromTheBuildTests(HostFixture host) : IClassFixture<
         }
     }
 
+    /// <summary>How an agent is answered by a plugin, word for word, in the Manager and Member skills.</summary>
+    public static readonly string[] PluginAnswerRules =
+    [
+        "A `tell` to a plugin member is answered back to you: its answer, completed or failed, wakes you in the same workflow. "
+        + "So tell it, end your run, and read the answer when it wakes you;",
+        "Never set `wake_me` for a plugin's answer.",
+        "A wake is for waiting on something outside the platform - a deploy that takes minutes, a person - never for a plugin's answer.",
+    ];
+
+    /// <summary>
+    /// The Member and Manager skills an agent loads say, word for word, that a tell to a plugin is
+    /// answered back to it, so it ends its run and is woken by the answer, and that a wake is for
+    /// something outside the platform, never a plugin's answer.
+    /// </summary>
+    [Fact]
+    public async Task The_member_and_manager_skills_served_to_agents_are_woken_by_a_plugins_answer_and_never_set_a_wake_for_it()
+    {
+        using var member = host.Container(host.AlphaContainerKey);
+        var memberSkill = McpContractTests.Flat(await member.GetStringAsync("/api/me/skills/member", Ct));
+
+        var key = await host.Services.GetRequiredService<IPrincipalStore>().MintAsync(
+            new ContainerId(host.Alpha, TeamRegistry.DefaultManagerName).ToString(),
+            PrincipalKind.Container, host.Alpha, Permits.All, ct: Ct);
+        using var manager = host.Container(key);
+        var managerSkill = McpContractTests.Flat(await manager.GetStringAsync("/api/me/skills/manager", Ct));
+
+        foreach (var rule in PluginAnswerRules)
+        {
+            Assert.Contains(rule, memberSkill, StringComparison.Ordinal);
+            Assert.Contains(rule, managerSkill, StringComparison.Ordinal);
+        }
+    }
+
     /// <summary>
     /// What a Manager and a member are actually given - their prompts and the manager and worktrees
     /// skills served to them - says to call `repo` `create-local` once when the work needs a

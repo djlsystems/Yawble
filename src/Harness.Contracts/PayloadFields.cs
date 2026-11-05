@@ -62,6 +62,24 @@ public static class PayloadFields
     public const string WorkflowDeclared = "workflowDeclared";
 
     /// <summary>
+    /// On a PLUGIN member's `completed` or `failed` row: the qualified id of the member of the same
+    /// team whose `tell` this row answers (the delivery's source). The pump wakes that member on the
+    /// row, in the same workflow, as a Manager is woken by a member it told - it does not subscribe to
+    /// the type - and passes over every OTHER subscriber holding the type in its BASE set (the
+    /// Manager, which did not ask), except on a `failed` row of class `needs-person`. Absent on an
+    /// agent member's row, on a row answering a person, a trigger or a wake, and on a later row of a
+    /// batched run whose earlier row already named the same member.
+    /// </summary>
+    public const string AnswersTell = "answersTell";
+
+    /// <summary>
+    /// Beside <see cref="AnswersTell"/>, true when the plugin's run already told the asker its answer
+    /// as an instruction to it (Team Connections): the row does not wake the asker a second time,
+    /// and still passes over a Manager that did not ask. Absent on every other row.
+    /// </summary>
+    public const string AskerTold = "askerTold";
+
+    /// <summary>
     /// On a `completed` or `failed` row that closes a delivery its run shared with others: the
     /// causation seq of the row in the same batch that carries the run's token figures. This row
     /// carries none, and the spend queries skip it, so a run is billed once however many deliveries

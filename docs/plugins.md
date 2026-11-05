@@ -322,9 +322,11 @@ Content-Type: application/json
   packages use it. A member's own value wins over its binding.
 - **What you get.** The member appears on the team's board with `kind: "plugin"`. Work it is told
   through `tell`, the board, a trigger or a schedule reaches it through the same queue any member
-  has. Its result is its `agentContainer.completed` row's `output`, and that row wakes the Manager
-  like any member's. Any member of its team may `tell` it, without the Tell permit a member needs
-  to tell an agent member, so a command that answers the member that asked reaches that member.
+  has. Its result is its `agentContainer.completed` (or `failed`) row's `output`. Any member of its
+  team may `tell` it, without the Tell permit a member needs to tell an agent member, and the row
+  answering that tell wakes the member that asked, in the same workflow, not the Manager (only a
+  `needs-person` failure still reaches the Manager too). A run told by the Manager, a person, a
+  trigger or a schedule wakes the Manager like any member's, as its wake choice says.
 - **What is refused.**
   - `config`, `secrets` and `secretValues` on an Agent member.
   - A plugin that is not installed.

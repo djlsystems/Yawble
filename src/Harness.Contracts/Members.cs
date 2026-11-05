@@ -85,6 +85,12 @@ public sealed record MemberRunContext(
 /// <param name="HeldByConnection">On a failure, the id of the connection that held the run up and
 /// now waits for a person; written as <see cref="PayloadFields.HeldByConnection"/>. Only a plugin's
 /// run sets it.</param>
+/// <param name="AskersTold">The run already told each member that asked it its answer, as an
+/// instruction (Team Connections), so the terminal row does not wake them a second time; written as
+/// <see cref="PayloadFields.AskerTold"/>. Only a plugin's run sets it.</param>
+/// <param name="AnswersAsker">The run's answer goes back to the member that told it: its terminal
+/// row names that member (<see cref="PayloadFields.AnswersTell"/>), which the row wakes, and the
+/// Manager, which did not ask, is passed over. Every plugin run sets it; an agent member's never does.</param>
 public sealed record MemberResult(
     bool Succeeded,
     int ExitCode,
@@ -97,7 +103,9 @@ public sealed record MemberResult(
     InvocationUsage? Usage = null,
     RunTranscript? Transcript = null,
     bool Quiet = false,
-    string? HeldByConnection = null)
+    string? HeldByConnection = null,
+    bool AskersTold = false,
+    bool AnswersAsker = false)
 {
     /// <summary>A run that did not begin or was cut off: the sentence is both the launch error
     /// and the reason.</summary>
