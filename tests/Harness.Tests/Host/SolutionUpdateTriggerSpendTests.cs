@@ -126,9 +126,21 @@ public sealed class SolutionUpdateTriggerSpendTests(HostFixture host) : IClassFi
         Assert.Equal(MessageTypes.ScheduleSkippedCapReason,
             JsonDocument.Parse(skipped.Payload).RootElement.GetProperty("reason").GetString());
 
+        // The trigger's last outcome is its LAST fire's, whichever wrote last. The pump handles the
+        // same posting the cap was asked about, and asks SolutionWait before the cap: this team waits
+        // for a file in Resume/, so the pump's fire is skipped for that, and when it lands after the
+        // cap's it rightly leaves "skipped". The cap held either way; "skipped" is only allowed when the
+        // row it last recorded is that wait's skip.
         var stored = (await Get<ITriggerStore>().FindAsync(after.Id, Ct))!;
-        Assert.Equal("capped", stored.LastOutcome);
         Assert.True(stored.CappedSkips >= 1);
+        if (stored.LastOutcome != "capped")
+        {
+            Assert.Equal("skipped", stored.LastOutcome);
+            var last = Assert.Single(
+                await Get<IMessageLog>().ReadAfterAsync(stored.LastSeq!.Value - 1, [MessageTypes.ScheduleSkipped], 1, Ct),
+                m => m.Seq == stored.LastSeq);
+            Assert.Equal(($"trigger:{after.Id}", SolutionWait.ReasonCode), (last.Source, ReasonCodeOf(last)));
+        }
     }
 
     [Fact]

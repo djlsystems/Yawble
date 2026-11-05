@@ -229,10 +229,12 @@ public sealed class LedgerSurvivesTests : IAsyncLifetime
 
         _holdManager.SetResult();
         await AwaitRowAsync(m => m.Source == Manager.ToString() && m.CausationSeq == busy.Seq, "the Manager's own run");
-        await SettleAsync();
 
-        var managerRun = (await Ledger.ReadRecentRunsAsync(Manager, 10, Ct))
-            .Single(r => r.Correlation == dev.CorrelationId);
+        // The Manager's run of the hand-back is the one queued behind its own: waited for by its
+        // ledger row, not by the team looking idle - between its own run and the queued one the
+        // Manager reads idle with the hand-back still in its queue.
+        var managerRun = await AwaitManagerRunAsync(dev.CorrelationId, "the Manager's run of the hand-back");
+        await SettleAsync();
         Assert.Equal(handback.OccurredAt, managerRun.QueuedAt);
         Assert.Equal($"schedule:{trigger}", managerRun.TriggerSource);
         Assert.NotNull(managerRun.TriggerFiredAt);
@@ -406,6 +408,42 @@ public sealed class LedgerSurvivesTests : IAsyncLifetime
             var idle = new[] { Dev, Echo, Manager }.All(id => host.Find(id)?.State is null or ContainerState.Idle);
             quietPasses = idle ? quietPasses + 1 : 0;
             await Task.Delay(100, Ct);
+        }
+    }
+
+    /// <summary>
+    /// The Manager's ledger row for its run in <paramref name="correlation"/>, written with the run's
+    /// terminal row. Fails at once, with what the Manager is doing and the rows it wrote, when it is
+    /// idle with nothing queued and the row is still not there: no run is left to write it.
+    /// </summary>
+    private async Task<UsageLedgerRow> AwaitManagerRunAsync(long correlation, string what)
+    {
+        var host = Services.GetRequiredService<Harness.Containers.ContainerHost>();
+        var deadline = DateTime.UtcNow.AddSeconds(60);
+
+        while (true)
+        {
+            // Read BEFORE the ledger: a member is Running before its queue depth drops, so idle with
+            // an empty queue here, and no row after, means no run of it is coming.
+            var manager = host.Find(Manager);
+            var nothingComing = manager?.State is ContainerState.Idle && manager.QueueDepth == 0;
+
+            var runs = await Ledger.ReadRecentRunsAsync(Manager, 10, Ct);
+            if (runs.SingleOrDefault(r => r.Correlation == correlation) is { } run) return run;
+
+            if (nothingComing || DateTime.UtcNow > deadline)
+            {
+                var rows = (await Log.ReadAfterAsync(0, [MessageTypes.Completed, MessageTypes.Failed], int.MaxValue, Ct))
+                    .Where(m => m.Source == Manager.ToString())
+                    .Select(m => $"{m.Type} {m.Seq} caused by {m.CausationSeq} in workflow {m.CorrelationId}");
+                throw new Xunit.Sdk.XunitException(
+                    $"No ledger row: {what} (workflow {correlation}). " +
+                    (nothingComing ? "The Manager is idle with nothing queued" : "Still not there after 60 s") +
+                    $"; Manager {manager?.State}, queue {manager?.QueueDepth}. " +
+                    $"Its ledger runs: [{string.Join(", ", runs.Select(r => r.Correlation))}]. Its terminal rows: [{string.Join("; ", rows)}].");
+            }
+
+            await Task.Delay(50, Ct);
         }
     }
 
