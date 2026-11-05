@@ -116,6 +116,26 @@ func TestDoctorRunningLimitWithoutTheCpuControllerIsFromTheMeasuredCpus(t *testi
 	}
 }
 
+// doctor's capacity row says where the running limit's CPU count came from when the container's
+// cgroup does not say its CPUs: the 14 is the engine's figure, not a limit the container got.
+func TestDoctorCapacitySaysTheContainerGotNoCpuLimitWhenTheCountIsNotFromItsCgroup(t *testing.T) {
+	for _, program := range []string{"podman", "docker"} {
+		for _, c := range []struct{ fixture, want string }{
+			{"host-doctor-no-cpu-controller.json", "the container got no memory limit and no CPU limit its cgroup says (the running limit counts 14 CPUs reported by the engine)"},
+			{"host-doctor-no-cpu-count.json", "the container got no memory limit, CPUs not known (the Host's cgroup reading)"},
+		} {
+			_, deps := withoutLimitsOn(t, program, c.fixture)
+			_, out, _ := run(t, deps, "doctor", "--details")
+			if !strings.Contains(out, c.want) {
+				t.Errorf("%s %s: lacks %q:\n%s", program, c.fixture, c.want, out)
+			}
+			if strings.Contains(out, "14 CPUs (the Host's cgroup reading)") {
+				t.Errorf("%s %s: says the container got the engine's CPUs:\n%s", program, c.fixture, out)
+			}
+		}
+	}
+}
+
 // up hands control and every worker the engine's measured CPUs, the Host's second source; an engine
 // that could not be measured hands nothing, so nothing estimated reaches the Host.
 func TestUpHandsTheEnginesMeasuredCpusToControlAndEachWorker(t *testing.T) {
