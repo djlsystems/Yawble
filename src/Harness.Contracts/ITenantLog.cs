@@ -461,6 +461,11 @@ public static class TenantActions
     public const string RepoRebase = "repo.rebase";
     public const string RepoPush = "repo.push";
 
+    /// <summary>The platform gave a repository whose origin had no ref at all its first commit, on
+    /// <c>main</c>. Actor is the platform (null). Subject <c>{team}/{repo}</c>.
+    /// Detail JSON: { "team": "...", "repository": "...", "branch": "main", "sha": "..." }</summary>
+    public const string RepoInitialized = "repo.initialized";
+
     /// <summary>A person set or cleared a repository's default branch in Team settings.</summary>
     public const string RepoDefaultBranchSet = "repo.default-branch-set";
 

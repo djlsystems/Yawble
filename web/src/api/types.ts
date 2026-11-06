@@ -2379,6 +2379,9 @@ export interface RepoStatus {
    * interrupted clone's `.git` and nothing else). The card reads it "Not ready" and offers Fetch,
    * which makes the clone. Absent from an older Host, which means ready. */
   cloneReady?: boolean
+  /** Why `cloneReady` is false, when the platform knows: an empty origin whose first push to main
+   * was refused, naming the repository and git's reason. Null or absent otherwise. */
+  notReadyReason?: string | null
 }
 
 /**

@@ -100,7 +100,10 @@ public sealed record RepoStatus(
     string? DefaultBranchMoved = null,
 
     [property: Description("False when there is no working clone: none was made, or what is there is an empty clone - a .git with no ref, no HEAD and nothing beside it, what an interrupted clone leaves. The card reads it 'Not ready' and offers Fetch, which makes the clone. True otherwise.")]
-    bool CloneReady = true);
+    bool CloneReady = true,
+
+    [property: Description("Why CloneReady is false, when the platform knows a sentence for it: origin had no commits and the platform's push of its first commit to main was refused - naming the repository and git's reason. Null when not known, which reads 'Not ready' with Fetch, as an interrupted clone does.")]
+    string? NotReadyReason = null);
 
 /// <summary>
 /// The recorded pull request, as the Git dialog shows it: GitHub's last answer and when it

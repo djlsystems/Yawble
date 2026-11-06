@@ -693,6 +693,7 @@ export const NOT_READY = 'Not ready: this repository has not been cloned. Fetch 
 export function repoHeadline(status: RepoStatus): RepoHeadline {
   // NO CLONE OUTRANKS EVEN NOT MEASURED: there is nothing here to measure, and Fetch makes it.
   if (status.cloneReady === false) {
+    if (status.notReadyReason) return { text: `Not ready: ${status.notReadyReason}`, tone: 'attention' }
     return { text: NOT_READY, tone: 'attention' }
   }
 

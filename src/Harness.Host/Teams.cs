@@ -422,7 +422,10 @@ public sealed class TeamRegistry(
     ITeamSolutions? solutions = null,
 
     // Which connections each team may use; a clone copies them. None without one.
-    IConnectionStore? connections = null)
+    IConnectionStore? connections = null,
+
+    // Where an empty origin given its first main is recorded (`repo.initialized`). None without one.
+    ITenantLog? tenantLog = null)
 {
     /// <summary>What each role is offered, for the "Available skills" list every prompt carries.
     /// A registry built without one lists the built-ins.</summary>
@@ -2656,6 +2659,8 @@ public sealed class TeamRegistry(
         foreach (var cloned in outcomes.Where(o => o.Result is RepoCloneResult.Cloned))
         {
             await RecordRemoteDefaultBranchAsync(team, RepoUrls.DeriveName(cloned.Url), cloned.DefaultBranch, ct);
+
+            if (tenantLog is not null) await RepoInitializedRow.WriteAsync(tenantLog, team, cloned, ct);
 
             // A repository whose contributor settings outlived its clone gets its upstream
             // remote and sign-off hook back before any member works in it.

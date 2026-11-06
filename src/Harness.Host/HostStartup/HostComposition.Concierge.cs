@@ -68,7 +68,8 @@ internal sealed partial class HostComposition
 
         builder.Services.AddSingleton<IRepoClone>(sp => new RepoClone(
             sp.GetRequiredService<GitRunner>(), localRepos: sp.GetRequiredService<LocalRepos>(),
-            removal: sp.GetRequiredService<FolderRemoval>()));
+            removal: sp.GetRequiredService<FolderRemoval>(),
+            identity: () => sp.GetRequiredService<InstanceGitIdentity>().Current));
 
         // THE PLATFORM PUBLISHES A TEAM'S WORK TO ORIGIN, on the acceptance of a card, BEFORE the row that
         // accepts it. Wired here for the reason `IRepoClone` above it is - a seam that can be omitted is one

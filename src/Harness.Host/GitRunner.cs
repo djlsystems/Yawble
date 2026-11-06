@@ -542,6 +542,48 @@ public sealed class GitRunner
         return update.ExitCode != 0 ? FirstLineOf(update) : null;
     }
 
+    /// <summary>
+    /// Whether origin holds ANY ref at all: <c>git ls-remote origin</c>, which lists every branch, tag
+    /// and HEAD the remote advertises. True when it lists one, false when it lists none, null when
+    /// git could not ask (unreachable, refused) - which is never read as empty.
+    /// </summary>
+    public async Task<bool?> OriginHasAnyRefAsync(string clonePath, CancellationToken ct = default)
+    {
+        using var semaphore = await AcquireSemaphoreAsync(clonePath);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(_timeoutSeconds));
+
+        var run = await ExecuteGitAsync(clonePath, ["ls-remote", "origin"], cts.Token);
+        if (run.ExitCode != 0) return null;
+        return run.Stdout.Trim().Length > 0;
+    }
+
+    /// <summary>
+    /// One empty commit, "Initial commit", in the clone's object store and on NO ref: what an empty
+    /// origin's first <c>main</c> is pushed from. Authored and committed as
+    /// <paramref name="identity"/>, else the platform's own identity. The sha, or git's invocation
+    /// when it refused.
+    /// </summary>
+    public async Task<(string? Sha, GitInvocation Run)> CreateInitialCommitAsync(
+        string clonePath, GitIdentity? identity, CancellationToken ct = default)
+    {
+        using var semaphore = await AcquireSemaphoreAsync(clonePath);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(_timeoutSeconds));
+
+        var name = identity?.Name ?? PlatformIdentity;
+        var email = identity?.Email ?? PlatformEmail;
+        var run = await ExecuteGitAsync(
+            clonePath, ["commit-tree", "-m", "Initial commit", EmptyTree], cts.Token,
+            environment: new Dictionary<string, string>
+            {
+                ["GIT_AUTHOR_NAME"] = name, ["GIT_AUTHOR_EMAIL"] = email,
+                ["GIT_COMMITTER_NAME"] = name, ["GIT_COMMITTER_EMAIL"] = email,
+            });
+        var sha = run.Stdout.Trim();
+        return (run.ExitCode == 0 && sha.Length >= 40 ? sha : null, run);
+    }
+
     /// <summary>The branch a local repository's HEAD names, as the Host reads it; null when it names
     /// none git would take.</summary>
     public async Task<string?> ReadLocalRepositoryHeadAsync(string path, CancellationToken ct = default)

@@ -20,15 +20,26 @@ public enum RepoCloneResult
 }
 
 /// <summary>One repository, its target path, and what happened to it. <paramref name="DefaultBranch"/>
-/// is what origin's HEAD named right after a clone, null when not known or not cloned.</summary>
+/// is what origin's HEAD named right after a clone, null when not known or not cloned.
+/// <paramref name="Initialized"/> is set when origin had no ref at all and the platform gave it its
+/// first commit on <c>main</c> (<see cref="RepoClone"/>): the caller records it as
+/// <c>repo.initialized</c>.</summary>
 public sealed record RepoCloneOutcome(
-    string Url, string Path, RepoCloneResult Result, string? Error = null, string? DefaultBranch = null);
+    string Url, string Path, RepoCloneResult Result, string? Error = null, string? DefaultBranch = null,
+    RepoInitialized? Initialized = null);
+
+/// <summary>The first commit the platform pushed to an origin that had no ref at all.</summary>
+public sealed record RepoInitialized(string Branch, string Sha);
 
 /// <summary>Completes repository setup before its outcomes can be handed to a Manager.</summary>
 public interface IRepoClone
 {
     Task<IReadOnlyList<RepoCloneOutcome>> EnsureAllAsync(
         IReadOnlyList<(string Url, string Path)> repos, CancellationToken ct);
+
+    /// <summary>Why the clone at <paramref name="path"/> is not ready, when the platform knows a
+    /// sentence for it - an empty origin whose first push was refused. Null otherwise.</summary>
+    string? NotReadyReason(string path) => null;
 }
 
 /// <summary>
@@ -63,9 +74,25 @@ public interface IRepoClone
 /// repository cannot be cloned and says so.</param>
 /// <param name="removal">How an empty clone moved aside is removed: agents can write in a team's
 /// repos folder, so never a recursive delete. Absent, the Host's own pass only.</param>
+/// <param name="identity">Who authors an empty origin's first commit: the instance's
+/// <c>GIT_AUTHOR_NAME</c>/<c>GIT_AUTHOR_EMAIL</c> where set. Absent or null, the platform's own.</param>
 public sealed class RepoClone(
-    GitRunner git, bool enabled = true, LocalRepos? localRepos = null, FolderRemoval? removal = null) : IRepoClone
+    GitRunner git, bool enabled = true, LocalRepos? localRepos = null, FolderRemoval? removal = null,
+    Func<GitIdentity?>? identity = null) : IRepoClone
 {
+    /// <summary>The branch an empty origin is given. The one case the platform creates a default branch.</summary>
+    public const string InitialBranch = "main";
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _notReady =
+        new(StringComparer.Ordinal);
+
+    /// <summary>Awaited after origin was found empty and the first commit made, before origin is
+    /// asked again and pushed to. Null in the Host; a test pushes a ref to origin in it.</summary>
+    public Func<Task>? BeforeInitialPush { get; set; }
+
+    /// <inheritdoc />
+    public string? NotReadyReason(string path) => _notReady.GetValueOrDefault(Path.GetFullPath(path));
+
     /// <summary>Every repository in the list, in order. Never throws: a clone that fails is an
     /// OUTCOME, because a team whose creation 500s over an unreachable remote is worse than a team
     /// that exists and says its repository is not there.</summary>
@@ -136,16 +163,118 @@ public sealed class RepoClone(
             source = bare;
         }
 
-        var run = await git.CloneAsync(parent, source, leaf, ct, noLocal: !ReferenceEquals(source, url));
+        var noLocal = !ReferenceEquals(source, url);
+        var run = await git.CloneAsync(parent, source, leaf, ct, noLocal);
 
         if (run.ExitCode != 0)
         {
             return new RepoCloneOutcome(url, path, RepoCloneResult.Failed, FirstLine(run.Stderr, run.Stdout));
         }
 
+        _notReady.TryRemove(Path.GetFullPath(path), out _);
+
+        // AN ORIGIN WITH NO REF AT ALL GETS ITS MAIN. Its clone is complete and holds nothing, the
+        // same shape a killed clone leaves, and nothing could work in it.
+        var initialized = await InitializeEmptyOriginAsync(url, path, ct);
+        switch (initialized)
+        {
+            case { Refused: { } reason }:
+                _notReady[Path.GetFullPath(path)] = reason;
+                return new RepoCloneOutcome(url, path, RepoCloneResult.Failed, reason);
+
+            case { Raced: true }:
+                // Something reached origin between the check and the push: nothing was pushed, and
+                // the repository is cloned again as an ordinary one.
+                if (!await SetEmptyCloneAsideAsync(path, ct)) break;
+                var again = await git.CloneAsync(parent, source, leaf, ct, noLocal);
+                if (again.ExitCode != 0)
+                {
+                    return new RepoCloneOutcome(url, path, RepoCloneResult.Failed, FirstLine(again.Stderr, again.Stdout));
+                }
+
+                break;
+        }
+
         // On clone, read the branch origin's HEAD names. Null is not known.
         return new RepoCloneOutcome(
-            url, path, RepoCloneResult.Cloned, DefaultBranch: await git.ReadOriginHeadBranchAsync(path, ct));
+            url, path, RepoCloneResult.Cloned, DefaultBranch: await git.ReadOriginHeadBranchAsync(path, ct),
+            Initialized: initialized.Sha is { } sha ? new RepoInitialized(InitialBranch, sha) : null);
+    }
+
+    private sealed record Initialization(string? Sha = null, string? Refused = null, bool Raced = false);
+
+    /// <summary>
+    /// <para>
+    /// THE ONE CASE THE PLATFORM CREATES A DEFAULT BRANCH: a fresh clone that holds nothing, of an
+    /// origin that <c>git ls-remote</c> answers NOTHING for - no branch, no tag, no HEAD. It makes
+    /// one empty commit, "Initial commit", on no ref; asks origin again; and only if origin is still
+    /// empty pushes it as <c>main</c>, never forced. Then the clone's <c>main</c> is that commit,
+    /// tracking <c>origin/main</c>, as a clone of any other repository has it.
+    /// </para>
+    /// <para>
+    /// An origin with ANY ref - another branch, a tag only - is never written to, whatever its default
+    /// branch. An origin git cannot ask is not read as empty. A refused push leaves origin and the
+    /// clone as they were (the commit was on no ref), and answers a sentence naming the repository
+    /// and git's reason.
+    /// </para>
+    /// </summary>
+    private async Task<Initialization> InitializeEmptyOriginAsync(string url, string path, CancellationToken ct)
+    {
+        if (!await IsEmptyCloneAsync(git, path, ct)) return new Initialization();
+        if (await git.OriginHasAnyRefAsync(path, ct) is not false) return new Initialization();
+
+        var (sha, made) = await git.CreateInitialCommitAsync(path, identity?.Invoke(), ct);
+        var name = GitOutputRedaction.Redact(RepoUrls.DeriveName(url));
+        if (sha is null)
+        {
+            return new Initialization(Refused:
+                $"{name} has no commits, and the platform could not make its first commit: "
+                + GitOutputRedaction.Redact(FirstLine(made.Stderr, made.Stdout)));
+        }
+
+        if (BeforeInitialPush is { } hold) await hold();
+
+        // CHECKED AGAIN IMMEDIATELY BEFORE THE PUSH: a ref pushed meanwhile makes it an ordinary one.
+        switch (await git.OriginHasAnyRefAsync(path, ct))
+        {
+            case true:
+                return new Initialization(Raced: true);
+            case null:
+                return new Initialization(Refused:
+                    $"{name} has no commits, and the platform could not reach origin again to push its first commit to {InitialBranch}.");
+        }
+
+        var push = await git.PushRefspecAsync(path, sha, $"refs/heads/{InitialBranch}", ct);
+        if (push.ExitCode != 0)
+        {
+            return new Initialization(Refused:
+                $"{name} has no commits, and origin refused the platform's push of its first commit to {InitialBranch}: "
+                + GitOutputRedaction.Redact(PushReason(push)));
+        }
+
+        // The clone's main is that commit, checked out and tracking origin's, as a clone makes it.
+        await git.RunGitAsync(path, ["symbolic-ref", "HEAD", $"refs/heads/{InitialBranch}"], ct);
+        await git.RunGitAsync(path, ["update-ref", $"refs/heads/{InitialBranch}", sha], ct);
+        await git.FetchAsync(path, ct);
+        await git.RunGitAsync(path, ["branch", $"--set-upstream-to=origin/{InitialBranch}", InitialBranch], ct);
+        await git.RunGitAsync(path, ["read-tree", "HEAD"], ct);
+
+        return new Initialization(Sha: sha);
+    }
+
+    /// <summary>git's reason for a refused push: the first line that says error, fatal, remote or
+    /// rejected, else the first line.</summary>
+    private static string PushReason(GitRunner.GitInvocation push)
+    {
+        var lines = (push.Stderr + "\n" + push.Stdout)
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return lines.FirstOrDefault(l =>
+                l.StartsWith("remote: error", StringComparison.OrdinalIgnoreCase)
+                || l.StartsWith("error:", StringComparison.OrdinalIgnoreCase)
+                || l.StartsWith("fatal:", StringComparison.OrdinalIgnoreCase)
+                || l.Contains("[rejected]", StringComparison.Ordinal)
+                || l.Contains("[remote rejected]", StringComparison.Ordinal))
+            ?? FirstLine(push.Stderr, push.Stdout);
     }
 
     /// <summary>
@@ -229,6 +358,20 @@ public sealed class RepoClone(
         }
 
         return "git failed and said nothing.";
+    }
+}
+
+/// <summary>The one tenant row for an empty origin given its first <c>main</c>.</summary>
+public static class RepoInitializedRow
+{
+    public static async Task WriteAsync(ITenantLog log, string team, RepoCloneOutcome outcome, CancellationToken ct)
+    {
+        if (outcome.Initialized is not { } made) return;
+
+        var repository = RepoUrls.DeriveName(outcome.Url);
+        await log.WriteAsync(
+            null, null, TenantActions.RepoInitialized, $"{team}/{repository}", repository,
+            JsonSerializer.Serialize(new { team, repository, branch = made.Branch, sha = made.Sha }), ct);
     }
 }
 

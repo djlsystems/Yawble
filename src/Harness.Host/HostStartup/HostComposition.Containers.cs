@@ -246,6 +246,7 @@ internal sealed partial class HostComposition
             removal: sp.GetRequiredService<FolderRemoval>(),
             localRepos: sp.GetRequiredService<LocalRepos>(),
             solutions: sp.GetRequiredService<ITeamSolutions>(),
-            connections: sp.GetRequiredService<IConnectionStore>()));
+            connections: sp.GetRequiredService<IConnectionStore>(),
+            tenantLog: sp.GetRequiredService<ITenantLog>()));
     }
 }

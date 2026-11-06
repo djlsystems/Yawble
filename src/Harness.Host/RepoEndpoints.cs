@@ -179,6 +179,7 @@ public static partial class RepoEndpoints
         TeamPaths paths,
         ContainerHost host,
         TenantSettings settings,
+        IRepoClone cloner,
         CancellationToken ct)
     {
         if (teams.ExistingName(team) is not { } stored)
@@ -253,7 +254,8 @@ public static partial class RepoEndpoints
                     DefaultBranchSource: DefaultBranchSource(teams.DefaultBranchFor(stored, repoName)),
                     OriginUrl: GitOutputRedaction.RedactUserInfo(url),
                     UpstreamUrl: GitOutputRedaction.RedactUserInfo(teams.ContributorFor(stored, repoName).UpstreamUrl),
-                    CloneReady: false));
+                    CloneReady: false,
+                    NotReadyReason: Directory.Exists(clonePath) ? GitOutputRedaction.Redact(cloner.NotReadyReason(clonePath)) : null));
                 repoStatuses[^1] = await WithContributorAsync(httpContext, repoStatuses[^1], stored, ct);
                 continue;
             }
@@ -332,6 +334,7 @@ public static partial class RepoEndpoints
             }
 
             await teams.RecordRemoteDefaultBranchAsync(stored, RepoUrls.DeriveName(repoUrl), made.DefaultBranch, ct);
+            await RepoInitializedRow.WriteAsync(log, stored, made, ct);
             await contributorClone.ApplyAsync(clonePath, teams.ContributorFor(stored, RepoUrls.DeriveName(repoUrl)), ct);
 
             await RepoReadyNotice.SendAsync(messages, stored, repo, clonePath, ct);
@@ -543,6 +546,7 @@ public static partial class RepoEndpoints
             if (made.Result is RepoCloneResult.Cloned)
             {
                 await teams.RecordRemoteDefaultBranchAsync(stored, RepoUrls.DeriveName(repoUrl), made.DefaultBranch, ct);
+                await RepoInitializedRow.WriteAsync(log, stored, made, ct);
                 await contributorClone.ApplyAsync(clonePath, teams.ContributorFor(stored, RepoUrls.DeriveName(repoUrl)), ct);
                 await RepoReadyNotice.SendAsync(messages, stored, repo, clonePath, ct);
             }
