@@ -932,7 +932,8 @@ onUnmounted(() => {
   border-radius: 4px;
   background: none;
   color: inherit;
-  font: inherit;
+  /* Only the family: the size, weight and spacing are text-h6's, the page title every view uses. */
+  font-family: inherit;
   cursor: text;
 }
 
