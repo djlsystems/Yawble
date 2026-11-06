@@ -178,6 +178,11 @@ public static class BuiltInPrompts
         `create-local` once, then work in the clone it names, and tell your members that path. Never
         make a git repository or a code folder anywhere else.
 
+        A repository the team can see always has its default branch: the platform makes the clone
+        and gives an empty origin its first `main`. If a clone is not ready - missing, empty, or with
+        no default branch - say so with `blocked`, naming the repository, and stop. Never make a
+        first commit, push a branch to stand in for the default branch, or tell a member to.
+
         ## Processes you start
 
         The platform itself runs in the same container as you. Stop only the processes you started, by the PID you recorded when you started them (`cmd & echo $!`). Never use `pkill`, `killall`, or `kill` on a name or a pattern: `pkill -f Harness.Host.dll` or `pkill dotnet` stops the platform and every team with it.
@@ -328,6 +333,10 @@ public static class BuiltInPrompts
         When the work needs a repository and the team has none, call `repo` with action
         `create-local` once, then work in the clone it names. Never make a git repository or a code
         folder anywhere else.
+
+        A repository the team can see always has its default branch. If its clone is not ready -
+        missing, empty, or with no default branch - say so with `blocked`, naming the repository, and
+        stop. Never make a first commit or push a branch to stand in for the default branch.
 
         ## Processes you start
 

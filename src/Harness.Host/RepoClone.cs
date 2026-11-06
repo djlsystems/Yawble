@@ -450,7 +450,9 @@ public static class RepoSetupMessage
             + string.Join("\n", clones.Select(c => $"  {GitOutputRedaction.Redact(c.Url)} -> {c.Path}"))
             + "\n\nHire a member when there is work. A member cuts its own worktree from that clone; "
             + "see the `worktrees` skill. What a manager does to the clone itself is bring it "
-            + "current, and nothing else.";
+            + "current, and nothing else. A clone always has its default branch; if one is not "
+            + "ready, say so with `blocked`, naming the repository - never make a first commit "
+            + "or push a branch to stand in for the default branch.";
     }
 
     /// <summary>

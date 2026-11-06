@@ -633,9 +633,12 @@ public static class BuiltInSkills
             """
             # Worktrees
 
-            The main clone at `<teamRoot>/repos/<Repo>/main` is made by the platform. If the team has a
-            repository and its clone is not there, that is a platform failure: say so with `blocked`
-            and stop. Do not clone it by hand.
+            The main clone at `<teamRoot>/repos/<Repo>/main` is made by the platform, and it always
+            has the repository's default branch: the platform gives an empty origin its first `main`.
+            If the team has a repository and its clone is not ready - not there, empty, or with no
+            default branch - that is for a person: say so with `blocked`, naming the repository, and
+            stop. Do not clone it by hand, make a first commit, or push a branch to stand in for the
+            default branch.
 
             When the work needs a repository and the team has none, call `repo` with action
             `create-local` once, then work in the clone it names, cutting your tree from it as below.
