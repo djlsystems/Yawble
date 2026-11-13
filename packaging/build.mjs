@@ -1,7 +1,11 @@
 #!/usr/bin/env node
-// Unsigned dev installers. One command per OS, run on that OS:
+// Installers. One command per OS, run on that OS:
 //
-//   node packaging/build.mjs [--rid linux-x64|osx-arm64|win-x64] [--skip-stage]
+//   node packaging/build.mjs [--rid linux-x64|osx-arm64|win-x64] [--skip-stage] [--sign]
+//
+// --sign (Windows): every .exe and .dll that ships, and the installer, signed with the DJL Systems certificate through
+// Azure Artifact Signing (windows-signing.cjs, signing.json); files already signed by their maker keep that signature.
+// The build fails if any file ends unsigned. Output: Yawble-Setup-<version>-<arch>.exe and SHA256SUMS.
 //
 // 1. Stage the .NET payload for the RID into packaging/stage/<rid>/:
 //      core/  yawble-core, self-contained (no .NET install needed), with the sandbox's native lib (and wxc-exec.exe on Windows)
@@ -11,7 +15,7 @@
 //      Windows  NSIS setup .exe, per-user, no admin, with an uninstaller in Settings > Apps
 //      macOS    .app in a .dmg and a .zip, arm64 only, ad-hoc signed (mac-adhoc-sign.cjs)
 //      Linux    .tar.gz with install.sh / uninstall.sh and install-apparmor.sh (root, once)
-// Output: artifacts/installers/<rid>/. Nothing is signed or notarized. No agent CLI is bundled, pinned or fetched:
+// Output: artifacts/installers/<rid>/. Without --sign nothing is signed; macOS is not notarized. No agent CLI is bundled, pinned or fetched:
 // the app detects the person's own installed Claude Code and Grok and runs them from where they are installed.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -27,9 +31,11 @@ const hostRid = `${{ win32: 'win', darwin: 'osx', linux: 'linux' }[process.platf
 const argv = process.argv.slice(2);
 let rid = hostRid;
 let skipStage = false;
+let sign = false;
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === '--rid') rid = argv[++i];
   else if (argv[i] === '--skip-stage') skipStage = true;
+  else if (argv[i] === '--sign') sign = true;
   else throw new Error(`unknown argument ${argv[i]}`);
 }
 const supported = ['linux-x64', 'linux-arm64', 'win-x64', 'win-arm64', 'osx-arm64'];
@@ -38,6 +44,8 @@ if (!supported.includes(rid)) {
 }
 if (rid.split('-')[0] !== hostRid.split('-')[0]) throw new Error(`build ${rid} on its own OS (this is ${hostRid})`);
 const os = rid.split('-')[0];
+if (sign && os !== 'win') throw new Error('--sign signs Windows builds; macOS and Linux are not signed here');
+const signing = sign ? require('./windows-signing.cjs') : null;
 const exe = os === 'win' ? '.exe' : '';
 const stage = path.join(here, 'stage', rid);
 const out = path.join(repo, 'artifacts', 'installers', rid);
@@ -115,17 +123,21 @@ writeFileSync(path.join(stage, 'roles', 'README.txt'), 'Role text for agents. Th
 rmSync(path.join(stage, 'toolchain'), { recursive: true, force: true }); // a stage left by an older build
 // The staged core runs on its own (self-contained), before anything is packaged.
 run(path.join(stage, 'core', `yawble-core${exe}`), ['--version']);
+// Signed in place, so electron-builder copies signed files; those its maker signed (the .NET runtime, the sandbox) stay so.
+if (signing) signing.signFiles(signing.signableFiles(stage));
 
 // --- 2. Electron packaging -------------------------------------------------------------------------------
 const shell = path.join(repo, 'shell');
 mustExist(path.join(shell, 'out', 'main', 'main', 'index.js'), 'build the shell first: (cd shell && npm ci && npm run build)');
 const electronVersion = JSON.parse(readFileSync(path.join(shell, 'node_modules', 'electron', 'package.json'), 'utf8')).version;
 const version = JSON.parse(readFileSync(path.join(shell, 'package.json'), 'utf8')).version;
+const { readBuildVersion } = await import('../scripts/build-version.mjs');
+const buildVersion = readBuildVersion(repo).version;
 
 const builder = require('electron-builder');
 const archName = rid.endsWith('arm64') ? 'arm64' : 'x64';
 const arch = builder.Arch[archName];
-const name = `yawble-${version}-${rid}-unsigned`;
+const name = sign ? `Yawble-Setup-${buildVersion}-${archName}` : `yawble-${version}-${rid}-unsigned`;
 const config = {
   appId: 'com.djlsystems.yawble',
   productName: 'Yawble',
@@ -148,12 +160,23 @@ const config = {
   publish: null,
   win: {
     target: [{ target: 'nsis', arch: [archName] }],
-    // Unsigned: no certificate is configured, and signing must not be attempted with whatever the machine has.
+    // yawble.exe, the installer and the uninstaller carry the Yawble icon (the taskbar and Start show it), not Electron's.
+    icon: path.join(shell, 'resources', 'icon.ico'),
     signAndEditExecutable: true,
-    forceCodeSigning: false,
+    ...(sign
+      ? {
+          // The app's executable, its DLLs and the installer and uninstaller, through the same signing (sign-hook.cjs).
+          signtoolOptions: { sign: path.join(here, 'sign-hook.cjs'), signingHashAlgorithms: ['sha256'], publisherName: signing.settings.publisher },
+          signExts: ['.dll', '.node'],
+          forceCodeSigning: true,
+        }
+      : {
+          // Unsigned: no certificate is configured, and signing must not be attempted with whatever the machine has.
+          forceCodeSigning: false,
+        }),
   },
   nsis: {
-    artifactName: `${name}-setup.\${ext}`,
+    artifactName: sign ? `${name}.\${ext}` : `${name}-setup.\${ext}`,
     oneClick: false,
     perMachine: false, // %LOCALAPPDATA%\Programs\Yawble: no admin, no UAC prompt
     allowToChangeInstallationDirectory: true,
@@ -184,7 +207,16 @@ const config = {
 const platform = { win: builder.Platform.WINDOWS, osx: builder.Platform.MAC, linux: builder.Platform.LINUX }[os];
 rmSync(out, { recursive: true, force: true });
 const files = await builder.build({ targets: platform.createTarget(null, arch), config, publish: 'never', projectDir: here });
+const installers = files.filter((f) => !f.endsWith('.blockmap') && !f.endsWith('.yml'));
+if (signing) {
+  // electron-builder logs a file it could not sign and carries on; every file that ships is checked here instead.
+  const checked = signing.verifyAll([path.join(out, archName === 'x64' ? 'win-unpacked' : `win-${archName}-unpacked`), ...installers]);
+  console.log(`\nsigned: all ${checked} .exe and .dll files and the installer carry a valid signature`);
+  const { createHash } = await import('node:crypto');
+  const sums = installers.map((f) => `${createHash('sha256').update(readFileSync(f)).digest('hex')}  ${path.basename(f)}`).join('\n') + '\n';
+  writeFileSync(path.join(out, 'SHA256SUMS'), sums);
+}
 console.log('\ninstallers:');
-for (const f of files.filter((f) => !f.endsWith('.blockmap') && !f.endsWith('.yml'))) {
+for (const f of installers) {
   console.log(`  ${path.relative(repo, f)}  ${(statSync(f).size / 1048576).toFixed(1)} MiB`);
 }

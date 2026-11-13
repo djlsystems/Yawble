@@ -1,0 +1,7 @@
+{
+  "endpoint": "https://wus2.codesigning.azure.net/",
+  "account": "yawblesigning",
+  "profile": "yawblepublic",
+  "publisher": "DJL Systems, Inc.",
+  "timestamp": "http://timestamp.acs.microsoft.com"
+}

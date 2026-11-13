@@ -184,6 +184,11 @@ function newWindow(opts: { width: number; height: number; x?: number; y?: number
       webSecurity: true,
     },
   });
+  // Windows takes the taskbar button's icon from the program file. Installed, that is yawble.exe, which carries the
+  // Yawble icon; in development it is Electron's electron.exe, so the window names its own icon (an .ico) instead.
+  if (process.platform === 'win32' && !app.isPackaged) {
+    win.setAppDetails({ appId: `${APP_ID}.dev`, appIconPath: appResource('icon.ico'), appIconIndex: 0, relaunchDisplayName: APP_DISPLAY_NAME });
+  }
   // No navigation, no new windows: the renderer only ever shows our own page.
   win.webContents.on('will-navigate', (e) => e.preventDefault());
   // A link in the Concierge's answers (target=_blank) opens in the person's browser: only web and mail addresses.

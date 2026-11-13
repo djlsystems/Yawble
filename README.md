@@ -101,6 +101,13 @@ self-contained `yawble-core`; `bin/`: the helper programs and the `yawble` compa
 installer to `artifacts/installers/<rid>/`: an NSIS setup on Windows, a `.dmg` and `.zip` on macOS, a `.tar.gz` with
 `install.sh` on Linux.
 
+On Windows, `--sign` signs every `.exe` and `.dll` that ships, and the installer, through Azure Artifact Signing
+(`packaging/signing.json` names the account and certificate profile), and writes `Yawble-Setup-<version>-<arch>.exe`
+and `SHA256SUMS`. Files their maker signed (the .NET runtime, the sandbox) keep that signature, and the build fails if
+any file ends unsigned. It needs the Windows SDK's `signtool`, the Artifact Signing client tools
+(`Azure.CodeSigning.Dlib.dll`; `YAWBLE_SIGNING_DLIB` names it when it is not where they install it), an `az login`, and
+the Certificate Profile Signer role on the account.
+
 ### Run in development
 
 The shell finds the core in this order: `YAWBLE_CORE_PATH` (a `.dll` runs under `dotnet`), `resources/core` in a
