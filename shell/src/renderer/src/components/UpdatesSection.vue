@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { onBeforeUnmount, onMounted, ref } from 'vue';
 import type { UpdateStatus, YawbleApi } from '../../../shared/api';
 import { errorText } from '../api';
 import BusyLabel from './BusyLabel.vue';
 
 /** Settings > General, Updates: this version, the newest release, automatic checks, Check now. */
-const props = defineProps<{ api: YawbleApi }>();
+const props = defineProps<{ api: YawbleApi; pollMs?: number }>();
 
 const status = ref<UpdateStatus | null>(null);
 const checking = ref(false);
@@ -42,7 +42,13 @@ function line(s: UpdateStatus): string {
   }
 }
 
-onMounted(load);
+// The automatic check and its download change the state while this section is open: read it again every few seconds.
+let timer: ReturnType<typeof setInterval> | undefined;
+onMounted(() => {
+  void load();
+  timer = setInterval(() => { if (!checking.value) void load(); }, props.pollMs ?? 5000);
+});
+onBeforeUnmount(() => clearInterval(timer));
 </script>
 
 <template>
@@ -69,4 +75,10 @@ onMounted(load);
 <style scoped>
 .updates { margin-top: 18px; }
 .updates p { margin: 6px 0; }
+/* The same row as the other settings checkboxes (SettingsView's styles are scoped to it). */
+.check { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; cursor: pointer; }
+.check input { margin-top: 3px; }
+.check > span { display: flex; flex-direction: column; gap: 3px; font-size: 13.5px; }
+.muted { color: var(--muted); font-weight: 400; }
+.error { color: var(--bad); }
 </style>

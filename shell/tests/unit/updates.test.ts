@@ -125,4 +125,16 @@ describe('Settings > General, Updates', () => {
     await flushPromises();
     expect(w.find('[data-test=updates-line]').text()).toContain('Yawble 2026.11.20.1 is available.');
   });
+
+  it('FollowsTheAutomaticCheckWhileOpen', async () => {
+    let s = status('upToDate', { latest: '2026.11.12.1', checkedAt: null });
+    const w = mount(UpdatesSection, { props: { api: fakeApi({ 'updates.status': () => s }).api, pollMs: 10 } });
+    await flushPromises();
+    expect(w.find('[data-test=updates-line]').text()).toContain('Yawble 2026.11.12.1.');
+    s = status('downloading'); // the automatic check found a newer version meanwhile
+    await new Promise((r) => setTimeout(r, 40));
+    await flushPromises();
+    expect(w.find('[data-test=updates-line]').text()).toContain('Downloading Yawble 2026.11.20.1');
+    w.unmount();
+  });
 });
