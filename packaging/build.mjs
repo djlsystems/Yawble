@@ -138,9 +138,21 @@ const builder = require('electron-builder');
 const archName = rid.endsWith('arm64') ? 'arm64' : 'x64';
 const arch = builder.Arch[archName];
 const name = sign ? `Yawble-Setup-${buildVersion}-${archName}` : `yawble-${version}-${rid}-unsigned`;
+// The installed app's version where Windows shows it (Settings > Apps, inventory tools): electron-builder writes the
+// uninstall entry from package.json's version, which is not the build's (yyyy.mm.dd.N is not semver); this NSIS hook
+// runs after that entry is written and puts the build's version in it.
+const nsisInclude = path.join(stage, 'installer-version.nsh');
+writeFileSync(nsisInclude, [
+  '!macro customInstall',
+  `  WriteRegStr SHELL_CONTEXT "\${UNINSTALL_REGISTRY_KEY}" "DisplayVersion" "${buildVersion.replace(/[^0-9A-Za-z.+-]/g, '')}"`,
+  '!macroend',
+  '',
+].join('\r\n'));
 const config = {
   appId: 'com.djlsystems.yawble',
   productName: 'Yawble',
+  // yawble.exe's file version (Windows) and the bundle version (macOS): the build's numbers, without +dev.<commit>.
+  buildVersion: buildVersion.split('+')[0],
   // Windows and Linux: yawble(.exe), which the AppArmor profile and launcher name. Not on macOS, where
   // electron-builder would also rename the bundle; the Mac app stays "Yawble.app".
   ...(os === 'osx' ? {} : { executableName: 'yawble' }),
@@ -188,6 +200,9 @@ const config = {
     // The Start Menu and desktop shortcuts. Windows titles the app's notifications with this name (the shortcut
     // carries appId, which the shell sets as its AppUserModelID). productName stays: it decides the data folder.
     shortcutName: 'Yawble Desktop',
+    // Settings > Apps lists the name and the version (DisplayVersion, from nsisInclude) apart.
+    uninstallDisplayName: 'Yawble',
+    include: nsisInclude,
     deleteAppDataOnUninstall: false,
   },
   mac: {
