@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import mark from '../assets/yawble-mark.png';
 import { computed } from 'vue';
 import type { ConciergeToolUse } from '../../../shared/api';
 import { copyCodeFrom, renderMarkdown } from '../markdown';
@@ -48,7 +49,7 @@ const time = computed(() => {
       </div>
     </div>
     <template v-else>
-      <div class="who"><span class="avatar"><Icon name="spark" :size="14" /></span>Concierge<span v-if="cli" class="muted small"> · {{ cli }}</span></div>
+      <div class="who"><img class="avatar" :src="mark" alt="" />Concierge<span v-if="cli" class="muted small"> · {{ cli }}</span></div>
       <div v-if="tools?.length" class="tools">
         <span v-for="(t, i) in tools" :key="i" class="tool" :title="t.detail ?? ''"><Icon name="tool" :size="12" />{{ label(t.name) }}<template v-if="t.detail"> <span class="muted">{{ t.detail.length > 48 ? t.detail.slice(0, 48) + '…' : t.detail }}</span></template></span>
       </div>
@@ -66,7 +67,7 @@ const time = computed(() => {
 .msg.user { display: flex; justify-content: flex-end; }
 .bubble { background: var(--bubble); padding: 10px 16px; border-radius: 18px; max-width: 78%; white-space: pre-wrap; line-height: 1.5; font-size: 15px; }
 .who { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; margin-bottom: 6px; }
-.avatar { width: 22px; height: 22px; border-radius: 50%; background: var(--brand); color: #fff; display: grid; place-items: center; }
+.avatar { width: 22px; height: 22px; object-fit: contain; }
 .tools { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
 .tool { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; background: var(--chip); color: var(--ink-soft); border-radius: 12px; padding: 2px 9px; }
 .md { font-size: 15px; line-height: 1.6; overflow-wrap: anywhere; }

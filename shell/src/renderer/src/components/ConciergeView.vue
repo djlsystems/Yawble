@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import mark from '../assets/yawble-mark.png';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { ConciergeMessage, ConciergeTurnEvent, ConciergeUpdateEvent, ConciergeWatch, Conversation, YawbleApi, TeamSummary } from '../../../shared/api';
 import { errorText, resolveApi } from '../api';
@@ -198,7 +199,7 @@ watch(() => props.defaultCli, (c) => { if (!props.conversationId) cli.value = c;
   <section class="concierge">
     <!-- A new chat -->
     <div v-if="!conversationId && !pending" class="hero" data-test="concierge-hero">
-      <h1><span class="mark"><Icon name="spark" :size="22" /></span>{{ greeting }}</h1>
+      <h1><img class="mark" :src="mark" alt="" data-test="concierge-mark" />{{ greeting }}</h1>
       <p class="sub">What should your teams work on?</p>
       <Composer ref="composer" v-model:cli="cli" :team-id="teamId" :teams="teams" :agents="agents" :running="false" autofocus
         @update:team-id="changeTeam" @send="send" />
@@ -243,7 +244,7 @@ watch(() => props.defaultCli, (c) => { if (!props.conversationId) cli.value = c;
 .concierge { height: 100%; display: flex; flex-direction: column; min-height: 0; }
 .hero { margin: auto; width: min(760px, 100% - 48px); padding: 0 0 12vh; }
 .hero h1 { display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 30px; font-weight: 600; margin: 0 0 6px; letter-spacing: -.01em; }
-.mark { width: 36px; height: 36px; border-radius: 50%; background: var(--brand); color: #fff; display: grid; place-items: center; }
+.mark { width: 40px; height: 40px; object-fit: contain; }
 .sub { text-align: center; color: var(--muted); font-size: 16px; margin: 0 0 22px; }
 .suggest { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
 .chip-btn { border: 1px solid var(--line); background: var(--surface); border-radius: 18px; padding: 6px 14px; font-size: 13px; color: var(--ink-soft); }
