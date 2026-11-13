@@ -32,6 +32,10 @@ finished. This holds for any repository and toolchain (`dotnet test`, `npm test`
   sees, so report the FULL path of anything they should open or run, e.g.
   `C:\Users\...\teams\demo\members\DeveloperPriya\repo\Hello\bin\Release\net10.0\Hello.exe`.
   Get it with `(Resolve-Path <relative path>).Path`.
+- Windows with Smart App Control on blocks a program you just built (`HelloApp.exe`: "An Application Control policy
+  has blocked this file"), because it is new and unsigned. That is the computer's setting, not a fault in your build:
+  run .NET programs through the SDK instead (`dotnet run --project <project>`, `dotnet <path>\HelloApp.dll`), make
+  tests run the program the same way, and tell the person the exe itself is blocked on this computer.
 
 ## Network
 

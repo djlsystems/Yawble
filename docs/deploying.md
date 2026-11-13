@@ -93,3 +93,7 @@ On the computer itself, Yawble reaches:
 
 Every file Yawble installs is signed, which Smart App Control requires. SmartScreen may still warn on a downloaded
 installer while the publisher builds reputation; an installer deployed by IT does not pass through SmartScreen.
+
+Smart App Control also applies to what agents build: a new, unsigned program (a `.exe` an agent just compiled) is
+blocked from running. Agents know this and run .NET programs through the SDK (`dotnet run`, `dotnet <program>.dll`);
+the built `.exe` itself runs only where Smart App Control is off or a policy allows it.
