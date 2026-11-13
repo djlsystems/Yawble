@@ -72,7 +72,7 @@ public class DoctorTests : IDisposable
 
     private DoctorService Doctor(FakeSystem? s = null, IBackupLister? b = null, ICliDetector? a = null, IConnectionSource? c = null,
         ICredentialIndex? k = null, IDoctorTeams? t = null) =>
-        new(s ?? new FakeSystem(), b, a, c, k, t, _clock);
+        new(s ?? new FakeSystem(), b, a, c, k, t, _clock, git: new Yawble.Core.Teams.GitService(new Yawble.Core.Tests.Teams.FakeGitHost()));
 
     private static async Task<DoctorCheck> Check(DoctorService d, string id) =>
         (await d.RunAsync(Ct)).Single(c => c.Id == id);
@@ -82,7 +82,7 @@ public class DoctorTests : IDisposable
     {
         var ready = new FakeAgents(Cli("claude", true, SignInStatus.SignedIn));
         var checks = await Doctor(b: new FakeBackups(new BackupInfo("x", 1, "daily", Start - TimeSpan.FromHours(3))), a: ready, t: new FakeTeams(Team("Yawble"))).RunAsync(Ct);
-        Assert.Equal(["database", "disk", "sandbox", "agents", "cloudLink", "connections", "teams", "logs"], checks.Select(c => c.Id));
+        Assert.Equal(["database", "disk", "sandbox", "git", "agents", "cloudLink", "connections", "teams", "logs"], checks.Select(c => c.Id));
         Assert.All(checks, c => Assert.Equal("ok", c.Status));
     }
 

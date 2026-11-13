@@ -346,7 +346,7 @@ public sealed partial class TeamRepos
         var lines = r.Stdout.Split('\n');
         if (r.ExitCode == 0) return (lines[0].Trim(), []);
         if (r.ExitCode == 1) return (null, lines.Skip(1).Select(l => l.Trim()).Where(l => l.Length > 0).Distinct().ToArray());
-        throw new GitException($"git merge-tree failed ({r.ExitCode}): {r.Stderr}");
+        throw new GitException(GitProgram.LooksTooOld(r.Stderr) ? GitProgram.TooOldMessage("git merge-tree") : $"git merge-tree failed ({r.ExitCode}): {r.Stderr}");
     }
 
     private async Task<(string Name, string Email)> PersonIdentityAsync(string path, CancellationToken ct)

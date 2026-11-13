@@ -22,7 +22,12 @@ ship, pin or update them; it finds the ones you installed and runs them from whe
 - **Windows 11** 24H2 or later, with the August 2026 update or later. Apple silicon **macOS 15** and **Linux** with
   bubblewrap 0.5+ and slirp4netns build and run from source.
 - At least one agent CLI, installed and signed in the vendor's way.
-- `git` 2.29 or later.
+- `git` 2.38 or later. Yawble runs your own git and does not ship one. When git is missing or too old the window
+  says so; on Windows its **Install Git** button installs Git for Windows for you only, through winget, with no
+  administrator prompt.
+- A repository host is optional. A team works on a folder on your computer (git needs no account), or on a clone of
+  any git repository: GitHub, GitLab, Bitbucket, Azure DevOps or your own server. Branches are pushed with your own
+  git sign-in. Pull requests are opened and merged from the app only for repositories on GitHub, with your `gh`.
 
 ## Install
 

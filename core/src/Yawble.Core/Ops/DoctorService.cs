@@ -47,13 +47,14 @@ public sealed class DoctorOptions
 public sealed class DoctorService(
     IDoctorSystem system, IBackupLister? backups, ICliDetector? agents, IConnectionSource? connections,
     ICredentialIndex? credentials, IDoctorTeams? teams, TimeProvider? clock = null, DoctorOptions? options = null,
-    IIssuedKeyLedger? ledger = null)
+    IIssuedKeyLedger? ledger = null, Teams.GitService? git = null)
 {
     public const string ConnectionPrefix = "connection/";
     public const string RemoveOrphansFix = "remove-orphan-credentials";
     public const string ArchiveFixPrefix = "archive-team:";
     public const string SyncFixPrefix = "sync-team:";
     public const string OpenConnectionFixPrefix = "open-connection:";
+    public const string InstallGitFix = "install-git";
 
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
     private readonly DoctorOptions _o = options ?? new DoctorOptions();
@@ -65,6 +66,7 @@ public sealed class DoctorService(
             Guard("database", "Database", Database),
             Guard("disk", "Disk space", Disk),
             Guard("sandbox", "Sandbox", Sandbox),
+            await GuardAsync("git", "Git", Git, ct),
             await GuardAsync("agents", "Agent CLIs", Agents, ct),
             Guard("cloudLink", "Cloud Link", Link),
             Guard("connections", "Connections", Connections),
@@ -158,6 +160,26 @@ public sealed class DoctorService(
         if (s.GatewayProblem is null) parts.Add("gateway answered a test request");
         else { status = DoctorStatus.Fail; parts.Add($"the gateway did not answer: {s.GatewayProblem}"); }
         return new DoctorCheck("sandbox", "Sandbox", status, string.Join("; ", parts));
+    }
+
+    // ------------------------------------------------------------------ git
+
+    private async Task<DoctorCheck> Git(CancellationToken ct)
+    {
+        if (git is null) return new DoctorCheck("git", "Git", DoctorStatus.Warn, "the git check is not wired in this core");
+        var s = await git.CheckAsync(ct).ConfigureAwait(false);
+        IReadOnlyList<DoctorFix>? fix = s.CanInstall && !s.Ok
+            ? [new DoctorFix(InstallGitFix, s.State == "missing" ? "Install Git" : "Update Git", "run", Confirm: true)]
+            : null;
+        return s.State switch
+        {
+            "ok" => new DoctorCheck("git", "Git", DoctorStatus.Ok, $"git {s.Version} ({s.Path})"),
+            "old" => new DoctorCheck("git", "Git", DoctorStatus.Fail,
+                $"git {s.Version} is older than {s.Minimum}: teams cannot merge or sync their branches with it ({s.Path})", fix),
+            "broken" => new DoctorCheck("git", "Git", DoctorStatus.Fail, $"git at {s.Path} does not work: {s.Detail}", fix),
+            _ => new DoctorCheck("git", "Git", DoctorStatus.Fail,
+                $"git is not installed (or not on PATH): teams cannot run without it. Get git {s.Minimum} or later from {Yawble.Core.Teams.GitProgram.DownloadUrl}", fix),
+        };
     }
 
     // ------------------------------------------------------------------ agents
@@ -297,6 +319,19 @@ public sealed class DoctorService(
     /// </summary>
     public async Task<DoctorFixResult> RunFixAsync(string fix, bool confirmed, CancellationToken ct, IReadOnlyList<string>? expected = null)
     {
+        if (fix == InstallGitFix && git is not null)
+        {
+            var s = await git.CheckAsync(ct).ConfigureAwait(false);
+            if (s.Ok) return new DoctorFixResult(true, false, $"git {s.Version} is installed; nothing to do", []);
+            var what = s.State == "missing" ? "Install" : "Update";
+            if (!confirmed)
+                return new DoctorFixResult(false, true, $"{what} Git for Windows with winget? It downloads it from the winget catalog and installs it" +
+                    (s.State == "missing" ? " for you only, with no administrator prompt." : "; Windows may ask for permission."), [s.State]);
+            if (Provenance.Actor.Current is { Via: not Provenance.Actor.App })
+                return new DoctorFixResult(false, false, Yawble.Core.Teams.GitRpc.InstallRefusal, []);
+            var r = await git.InstallAsync(ct).ConfigureAwait(false);
+            return new DoctorFixResult(r.Done, false, r.Message, []);
+        }
         if (fix == RemoveOrphansFix)
         {
             var orphans = OrphanCredentialKeys();

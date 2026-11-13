@@ -105,7 +105,7 @@ public sealed class PersonGitPush(TimeSpan? timeout = null, string? globalConfig
         // --no-verify: a pre-push hook would run on the host, outside every sandbox, often over the members' code
         // (tests, build scripts); the app never runs agent-written code unsandboxed.
         foreach (var a in new[] { "-c", "core.askPass=" }.Concat(args)) psi.ArgumentList.Add(a);
-        using var process = Process.Start(psi) ?? throw new GitException("git could not be started: is git installed?");
+        using var process = GitProgram.Start(psi);
         process.StandardInput.Close();
         var stdout = process.StandardOutput.ReadToEndAsync(ct);
         var stderr = process.StandardError.ReadToEndAsync(ct);

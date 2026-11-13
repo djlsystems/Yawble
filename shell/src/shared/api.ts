@@ -198,6 +198,21 @@ export type WindowCommand = (typeof WindowCommands)[number];
 
 /** One line of ops.doctor (core Ops/DoctorRpc.cs). kind "open" is a screen of the app; "run" is ops.doctorFix. */
 export interface DoctorFix { id: string; label: string; kind: 'open' | 'run'; confirm: boolean }
+/** git.check: the git found on this computer (any repository host works; git itself is required). */
+export interface GitStatus {
+  state: 'ok' | 'missing' | 'old' | 'broken';
+  version: string | null;
+  path: string | null;
+  minimum: string;
+  /** This computer can install or update it from the app (Windows with winget). */
+  canInstall: boolean;
+  detail: string | null;
+  downloadUrl: string;
+}
+
+/** git.install: what it did, and the git found afterwards. */
+export interface GitInstallResult { done: boolean; message: string; status: GitStatus }
+
 export interface DoctorCheck { id: string; title: string; status: 'ok' | 'warn' | 'fail'; detail: string; fix: DoctorFix | null; fixes: DoctorFix[] }
 /** One backup (ops.backups). */
 export interface BackupItem { name: string; size: number; reason: string; time: string }

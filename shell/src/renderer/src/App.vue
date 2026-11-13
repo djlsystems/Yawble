@@ -23,6 +23,7 @@ import Sidebar, { type View } from './components/Sidebar.vue';
 import SettingsView, { type SettingsTab } from './components/SettingsView.vue';
 import Icon from './components/Icon.vue';
 import LoadingNote from './components/LoadingNote.vue';
+import GitBanner from './components/GitBanner.vue';
 import type { AgentOption } from './components/Composer.vue';
 
 // The main window: the sidebar (New chat, the places, the teams, the Concierge chats) and one place at a time. The
@@ -321,6 +322,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
       <p v-if="terminalPane.stopError" class="error banner" data-test="terminal-stop-error">{{ terminalPane.stopError }} <button class="mini" @click="terminalPane.stopError = null">Dismiss</button></p>
       <p v-if="error" class="error banner" data-test="error">Core unavailable: {{ error }}</p>
       <HostChecksBanner :api="api" />
+      <GitBanner :api="api" />
       <CompanionAsks v-if="!api.remote" :api="api" :poll-ms="pollMs" />
 
       <div class="content">

@@ -234,8 +234,8 @@ public sealed partial class TeamRepos
     {
         var u = (url ?? "").Trim();
         var ok = Uri.TryCreate(u, UriKind.Absolute, out var parsed) && (parsed.Scheme is "https" or "http" or "ssh" || parsed.Scheme == "file" && u.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
-            || System.Text.RegularExpressions.Regex.IsMatch(u, @"^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[^\s]+$"); // git@github.com:owner/repo.git
-        if (!ok || u.StartsWith('-')) throw new ArgumentException("give the repository's address, e.g. https://github.com/owner/repo.git");
+            || System.Text.RegularExpressions.Regex.IsMatch(u, @"^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[^\s]+$"); // git@git.example.com:owner/repo.git
+        if (!ok || u.StartsWith('-')) throw new ArgumentException("give the repository's address, e.g. https://git.example.com/owner/repo.git or git@git.example.com:owner/repo.git");
         if (Directory.Exists(target) && Directory.EnumerateFileSystemEntries(target).Any())
             throw new ArgumentException($"{target} is already there; pick it as the team's folder instead, or remove it first");
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);

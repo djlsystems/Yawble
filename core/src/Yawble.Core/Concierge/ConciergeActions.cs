@@ -256,6 +256,7 @@ public sealed class ConciergeActions(
             case "git_pr_open":
             {
                 var (_, repo) = await RepoAsync(args, ct);
+                await RequireGitHubAsync(repo, ct);
                 var branch = Required(args, "branch");
                 var r = await Gh(repo.Path, ["pr", "create", "--head", branch, "--base", repo.BaseBranch, "--title", Required(args, "title"), "--body", Optional(args, "body") ?? ""], ct);
                 return $"ok: opened a pull request for {branch} into {repo.BaseBranch}: {r}";
@@ -263,6 +264,7 @@ public sealed class ConciergeActions(
             case "git_pr_merge":
             {
                 var (team, repo) = await RepoAsync(args, ct);
+                await RequireGitHubAsync(repo, ct);
                 var pr = (Long(args, "pr") ?? throw new ArgumentException("'pr' is required")).ToString();
                 var view = await Gh(repo.Path, ["pr", "view", pr, "--json", "number,title,headRefName,baseRefName,state,isDraft"], ct);
                 if (JsonNode.Parse(view) is not JsonObject v || v["state"]?.GetValue<string>() != "OPEN") throw new ArgumentException($"pull request {pr} is not open; nothing to merge");
@@ -458,6 +460,12 @@ public sealed class ConciergeActions(
 
     // ------------------------------------------------------------------ helpers
 
+    /// <summary>Pull requests are GitHub's (through gh): a repository with no origin, or hosted elsewhere, is refused with what to do instead.</summary>
+    private async Task RequireGitHubAsync(ActionRepo repo, CancellationToken ct)
+    {
+        if (RepoHost.PullRequestsUnavailable(repo.Name, await git.OriginUrlAsync(repo.Path, ct)) is { } why) throw new ArgumentException(why);
+    }
+
     private async Task<string> Gh(string path, IReadOnlyList<string> args, CancellationToken ct)
     {
         if (gh is null) throw new ArgumentException("gh is not available on this computer, so pull requests cannot be opened or merged from here; the closest thing: push the branch (git_push_branch) and the person opens it on GitHub");
@@ -537,9 +545,9 @@ public sealed class ConciergeActions(
             ("team", "string", "The team.", true), ("branch", "string", "The branch.", true), ("repo", "string", "Repository name (default main).", false)),
         Tool("git_sync_branch", "Bring a member's or team branch current with the base branch (a merge commit; a conflict changes nothing; a checked-out branch is refused).",
             ("team", "string", "The team.", true), ("branch", "string", "The branch.", true), ("repo", "string", "Repository name (default main).", false)),
-        Tool("git_pr_open", "Open a GitHub pull request for a branch into the base branch (needs gh signed in on this computer).",
+        Tool("git_pr_open", "Open a GitHub pull request for a branch into the base branch (only for a repository whose origin is on GitHub; needs gh signed in on this computer).",
             ("team", "string", "The team.", true), ("branch", "string", "The branch.", true), ("title", "string", "Title.", true), ("body", "string", "Description.", false), ("repo", "string", "Repository name (default main).", false)),
-        Tool("git_pr_merge", "Merge an open pull request (into the base branch only). Needs the person's yes: the first call shows the pull request and returns a token.",
+        Tool("git_pr_merge", "Merge an open GitHub pull request (into the base branch only; origin on GitHub). Needs the person's yes: the first call shows the pull request and returns a token.",
             ("team", "string", "The team.", true), ("pr", "integer", "The pull request's number.", true), ("repo", "string", "Repository name (default main).", false), ("confirm", "string", "The token, after the person's yes.", false)),
         Tool("team_archive", "Archive a team. Needs the person's yes (first call shows it, returns a token).", ("team", "string", "The team.", true), ("confirm", "string", "The token, after the person's yes.", false)),
         Tool("team_unarchive", "Bring an archived team back.", ("team", "string", "The team.", true)),

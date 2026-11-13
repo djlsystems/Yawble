@@ -102,7 +102,8 @@ public sealed class LaunchWiring : IAsyncDisposable
             ? new WxcExecBackend(Path.Combine(AppContext.BaseDirectory, "wxc-exec.exe"), Path.Combine(data, "requests"))
             : new NativeSandboxBackend();
         var host = new LaunchHost(TargetOsExtensions.Host, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            appRoot, Path.GetFullPath(install), clis, HostPathCanonicalizer.Canonicalize, ToolFolders: HostTools.Detect(appRoot));
+            appRoot, Path.GetFullPath(install), clis, HostPathCanonicalizer.Canonicalize,
+            ToolFoldersNow: () => HostTools.Detect(appRoot)); // read at every run: a git installed while the app runs is on the next run's PATH
         // Paths are canonicalised (symlinks resolved) before they are compared or handed to the sandbox.
         var agentDefaults = new Agents.AgentDefaultsStore(connectionString);
         var launcher = new SandboxLauncher(host, new SqliteMemberDirectory(connectionString),

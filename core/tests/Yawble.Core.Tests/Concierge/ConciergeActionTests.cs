@@ -380,6 +380,7 @@ public class ConciergeActionTests : IDisposable
     public async Task PullRequests_OpenDirectly_MergeAfterYes_NeverWithoutGh()
     {
         var rig = await MakeRigAsync();
+        Run(Work, "remote", "set-url", "origin", "https://github.com/acme/app.git"); // pull requests are GitHub's; gh is a fake
         var a = rig.Actions();
         var opened = Call("git_pr_open", a, new() { ["team"] = "alpha", ["branch"] = "members/ines", ["title"] = "Add x" });
         Assert.StartsWith("ok:", opened);
@@ -399,6 +400,25 @@ public class ConciergeActionTests : IDisposable
         var none = Call("git_pr_open", rig.Actions(), new() { ["team"] = "alpha", ["branch"] = "b", ["title"] = "t" });
         Assert.Contains("gh is not available", none);
         Assert.Contains("git_push_branch", none); // the closest thing it can do
+    }
+
+    [Fact]
+    public async Task PullRequests_ForARepositoryNotOnGitHub_AreRefusedWithWhatToDoInstead_AndGhNeverRuns()
+    {
+        var rig = await MakeRigAsync();
+        var local = Call("git_pr_open", rig.Actions(), new() { ["team"] = "alpha", ["branch"] = "members/ines", ["title"] = "Add x" });
+        Assert.Contains("only for repositories hosted on GitHub", local);
+        Assert.Contains("a local folder", local);
+
+        Run(Work, "remote", "set-url", "origin", "https://gitlab.com/acme/app.git");
+        var gitlab = Call("git_pr_open", rig.Actions(), new() { ["team"] = "alpha", ["branch"] = "members/ines", ["title"] = "Add x" });
+        Assert.Contains("on gitlab.com", gitlab);
+        Assert.Contains("Push the branch", gitlab);
+        Assert.Contains("on gitlab.com", Call("git_pr_merge", rig.Actions(), new() { ["team"] = "alpha", ["pr"] = 7 }));
+
+        Run(Work, "remote", "remove", "origin");
+        Assert.Contains("has no remote", Call("git_pr_open", rig.Actions(), new() { ["team"] = "alpha", ["branch"] = "members/ines", ["title"] = "Add x" }));
+        Assert.Empty(rig.GhCalls);
     }
 
     // ---------------------------------------------------------------- doctor fixes

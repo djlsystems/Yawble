@@ -86,6 +86,9 @@ var terminals = new Yawble.Core.Ui.TerminalHub(events);
 // backs runs.list / runs.stop. The launcher runs on the gateway, credentials and transcripts (LaunchWiring).
 new Yawble.Core.Launch.RunRecordStore($"Data Source={dbPath}").MarkOpenInterrupted();
 var runs = new Yawble.Core.Launch.RunRegistry();
+// git, found where it is installed even when this process's PATH predates the install (its folder goes first on PATH).
+var gitService = new Yawble.Core.Teams.GitService(new Yawble.Core.Teams.SystemGitHost());
+Yawble.Core.Teams.GitProgram.EnsureOnPath();
 await using var launch = Yawble.Core.Launch.LaunchWiring.Create(
     options.DataDir!, $"Data Source={dbPath}", clis, options.InstallDir, runs, Environment.GetEnvironmentVariable,
     line => Console.Error.WriteLine($"launch: {line}"));
@@ -256,7 +259,7 @@ var doctorService = new Yawble.Core.Ops.DoctorService(
     backups: new BackupListerAdapter(backupService), clis, new Yawble.Core.Ops.ConnectionSourceAdapter(connections),
     credentialService.Store as Yawble.Core.Ops.ICredentialIndex,
     new Yawble.Core.Ops.DoctorHostTeams(bus, $"Data Source={dbPath}"),
-    ledger: issuedKeys);
+    ledger: issuedKeys, git: gitService);
 var doctor = new Yawble.Core.Ops.DoctorRpc(doctorService);
 var backupRpc = new BackupRpc(backupService);
 doctorForConcierge = doctor;
@@ -299,7 +302,7 @@ var dispatcher = new RpcDispatcher(new SandboxPlatformInfo(), () => applied, run
     scheduler: bus.SchedulerSnapshotAsync, stopQueued: bus.StopMemberAsync, agents: clis, agentTests: agentTests, link: link, concierge: concierge, board: board,
     audit: new Yawble.Core.Provenance.AuditLog($"Data Source={dbPath}"), integrations: integrations,
     doctor: doctor, backups: backupRpc, agentProfiles: agentProfileRpc, agentInfo: agentInfoRpc, companion: companionRpc,
-    code: new Yawble.Core.Code.CodeBrowserRpc(codeBrowser));
+    code: new Yawble.Core.Code.CodeBrowserRpc(codeBrowser), git: new Yawble.Core.Teams.GitRpc(gitService));
 dispatcherForLink = dispatcher;
 link.Start();
 

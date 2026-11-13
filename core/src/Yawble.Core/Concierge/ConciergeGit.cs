@@ -170,7 +170,7 @@ public sealed class ConciergeGit(HostGit git, PersonGitPush pusher, Func<DateTim
         var merge = await git.TryRunAsync(path, ["merge-tree", "--write-tree", "--name-only", "--no-messages", sha, baseSha], ct);
         if (merge.ExitCode == 1)
             throw new ArgumentException($"{branch} does not merge cleanly with {repo.BaseBranch}; nothing changed. Conflicts: {string.Join(", ", merge.Stdout.Split('\n').Skip(1).Where(l => l.Length > 0).Distinct())}");
-        if (merge.ExitCode != 0) throw new ArgumentException("git merge-tree failed: " + merge.Stderr);
+        if (merge.ExitCode != 0) throw new ArgumentException(GitProgram.LooksTooOld(merge.Stderr) ? GitProgram.TooOldMessage("git merge-tree") : "git merge-tree failed: " + merge.Stderr);
         var tree = merge.Stdout.Split('\n')[0].Trim();
         var merged = await git.RunAsync(path, ct, "-c", "user.name=Yawble", "-c", "user.email=yawble@localhost",
             "commit-tree", tree, "-p", sha, "-p", baseSha, "-m", $"Merge {repo.BaseBranch} into {branch}");
@@ -215,6 +215,13 @@ public sealed class ConciergeGit(HostGit git, PersonGitPush pusher, Func<DateTim
     {
         var gitDir = await git.TryRunAsync(path, ["rev-parse", "--absolute-git-dir"], ct);
         if (gitDir.ExitCode == 0) await File.AppendAllTextAsync(System.IO.Path.Combine(gitDir.Stdout, DeletedLog), text, ct);
+    }
+
+    /// <summary>The repository's origin address as configured (may carry a credential: redact before showing), or null.</summary>
+    public async Task<string?> OriginUrlAsync(string path, CancellationToken ct)
+    {
+        var r = await git.TryRunAsync(path, ["config", "--get", "remote.origin.url"], ct);
+        return r.ExitCode == 0 && r.Stdout.Trim().Length > 0 ? r.Stdout.Trim() : null;
     }
 
     private async Task<string?> RevAsync(string path, string reference, CancellationToken ct)

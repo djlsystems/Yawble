@@ -155,6 +155,13 @@ files, spawn (headless, or on a PTY for a terminal), supervisor, post-run checks
   has used a clone, the host never runs git inside it again: its hooks and config are untrusted.
 - **Host git** for clones reads no system or global config, drops inherited `GIT_*` and allows only the `file`
   transport. Pushing to the person's remote uses the person's own git, only through actions the person approves.
+- **Which git.** The core runs the git on PATH, 2.38 or later (merges use `git merge-tree --write-tree`). At start,
+  and at each check, a git found only in the person's or the machine's current PATH or in Git for Windows' own
+  folders has its folder put first on the core's PATH, so a git installed while the app runs is used at once, by the
+  host and on the next run's PATH. `git.check` reports it; `git.install` (the window only, never the Cloud Link)
+  runs `winget install --id Git.Git --scope user`, or `winget upgrade` for an old one.
+- **Hosts.** Nothing in git handling depends on where origin is hosted. Pull requests are the one host-specific
+  feature: read, opened and merged for an origin on github.com only, through the person's `gh`.
 
 ## Guardrail check
 

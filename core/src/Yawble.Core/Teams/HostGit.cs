@@ -4,7 +4,7 @@ using System.Text;
 namespace Yawble.Core.Teams;
 
 /// <summary>A git command the host ran that failed.</summary>
-public sealed class GitException(string message) : Exception(message);
+public class GitException(string message) : Exception(message);
 
 public sealed record GitResult(int ExitCode, string Stdout, string Stderr);
 
@@ -77,7 +77,7 @@ public sealed class HostGit
         foreach (var option in SafetyOptions) psi.ArgumentList.Add(option);
         foreach (var arg in args) psi.ArgumentList.Add(arg);
 
-        using var process = Process.Start(psi) ?? throw new GitException("git could not be started: is git installed?");
+        using var process = GitProgram.Start(psi);
         process.StandardInput.Close();
         var stdout = process.StandardOutput.ReadToEndAsync(ct);
         var stderr = process.StandardError.ReadToEndAsync(ct);

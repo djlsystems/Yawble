@@ -56,7 +56,7 @@ async function create() {
         <button v-if="!api.remote" type="button" data-test="team-repo-pick" @click="pick">Choose…</button></span>
     </label>
     <template v-else>
-      <label>Repository address <input v-model="form.repoUrl" data-test="team-repo-url" placeholder="https://github.com/owner/repo.git" /></label>
+      <label>Repository address <input v-model="form.repoUrl" data-test="team-repo-url" placeholder="https://git.example.com/owner/repo.git" /></label>
       <p class="muted small">Cloned with your own git sign-in (clone it once in your terminal first if it is private). The team's branches are
         pushed back there after each run; merging to main stays yours.</p>
     </template>

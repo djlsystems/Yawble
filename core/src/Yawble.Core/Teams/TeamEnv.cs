@@ -16,7 +16,7 @@ public static partial class TeamEnv
     [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]*$")]
     private static partial Regex NamePattern();
 
-    private static readonly string[] ReservedPrefixes = ["YAWBLE_", "YAWBLE_", "ANTHROPIC_", "CLAUDE_", "CODEX_", "OPENAI_", "GROK_", "XAI_", "COPILOT_", "GITHUB_", "GH_", "GIT_", "DOTNET_", "NUGET_", "XDG_", "MSBUILD"];
+    private static readonly string[] ReservedPrefixes = ["YAWBLE_", "ANTHROPIC_", "CLAUDE_", "CODEX_", "OPENAI_", "GROK_", "XAI_", "COPILOT_", "GITHUB_", "GH_", "GIT_", "DOTNET_", "NUGET_", "XDG_", "MSBUILD"];
 
     private static readonly HashSet<string> ReservedNames = new(StringComparer.OrdinalIgnoreCase)
     {

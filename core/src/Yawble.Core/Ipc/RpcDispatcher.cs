@@ -29,7 +29,8 @@ public sealed class RpcDispatcher(
     Agents.Profiles.AgentProfileRpc? agentProfiles = null,
     Agents.AgentInfoRpc? agentInfo = null,
     Companion.CompanionRpc? companion = null,
-    Code.CodeBrowserRpc? code = null)
+    Code.CodeBrowserRpc? code = null,
+    Teams.GitRpc? git = null)
 {
     /// <summary>
     /// A call as the person (or a cloud viewer) made it: run as <paramref name="actor"/>, so whatever it records carries
@@ -91,6 +92,8 @@ public sealed class RpcDispatcher(
             // Settings > Cloud Link, "Show members' code to cloud viewers" (the window only: link. is refused remotely).
             "link.setShowCode" => Task.FromResult<JsonNode?>(Then(() => Link().SetShowCode(parameters?["show"]?.GetValue<bool>() ?? true))),
             "runs.stop" => StopRunAsync(parameters, ct),
+            // The git on this computer: the check, and installing or updating it (Teams/GitRpc.cs).
+            _ when git is not null && Teams.GitRpc.Handles(method) => git.DispatchAsync(method, parameters, ct),
             // The read-only code browser of members' clones (Code/CodeBrowserRpc.cs).
             _ when code is not null && Yawble.CodeBrowser.CodeBrowserService.Handles(method) => code.DispatchAsync(method, parameters, ct),
             // The screens' methods (teams, members, policy, credentials, terminals).

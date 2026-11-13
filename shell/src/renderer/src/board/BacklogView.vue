@@ -320,7 +320,7 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
             </label>
             <template v-if="target === 'new'">
               <label>New team's name<input v-model="newTeam.name" data-test="backlog-new-team" placeholder="e.g. Billing" /></label>
-              <label>Its repository (address or folder, optional)<input v-model="newTeam.repo" class="mono" placeholder="https://github.com/owner/repo.git" /></label>
+              <label>Its repository (address or folder, optional)<input v-model="newTeam.repo" class="mono" placeholder="https://git.example.com/owner/repo.git" /></label>
               <label>Manager's agent
                 <select v-model="newTeam.cli"><option value="claude">Claude</option><option value="codex">Codex</option><option value="grok">Grok</option><option value="copilot">Copilot</option><option value="antigravity">Antigravity</option></select>
               </label>

@@ -16,6 +16,8 @@ public static class RemoteAccess
         "core.getInfo", "sandbox.getAvailableBackends", "sandbox.getPlatformSupport", "scheduler.getState",
         "guardrail.", "agents.", "runs.", "concierge.", "board.", "backlog.", "integrations.", "tasks.",
         "ops.backups",
+        // Whether git is installed (the banner's text); installing it is git.install, refused below.
+        "git.check",
         // The read-only code browser (members' clones), unless the person turned it off (Settings > Cloud Link).
         "code.",
     ];
@@ -45,6 +47,8 @@ public static class RemoteAccess
             return "an agent's terminal is used in the app on the computer itself";
         if (method == "runs.stop" && (parameters?["team"] as JsonValue)?.TryGetValue<string>(out var stopTeam) == true && stopTeam == Agents.AgentTestSessions.Team)
             return "an agent's terminal is stopped in the app on the computer itself";
+        if (method == "git.install")
+            return Teams.GitRpc.InstallRefusal;
         if (method is "ops.backupNow" or "ops.restore")
             return "backups can only be made or restored on the computer itself";
         if (!Allowed.Any(p => p.EndsWith('.') ? method.StartsWith(p, StringComparison.Ordinal) : method == p))

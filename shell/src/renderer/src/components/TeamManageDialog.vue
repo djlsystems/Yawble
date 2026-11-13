@@ -254,7 +254,7 @@ onMounted(() => { void checkQuiet(); void loadEnv(); void loadMembers(); void lo
       <div class="block">
         <h4>Add a repository</h4>
         <label>Its address (cloned with your own git) or its folder on this computer
-          <input v-model="newRepo.where" class="mono wide" placeholder="https://github.com/owner/repo.git" data-test="repo-where" />
+          <input v-model="newRepo.where" class="mono wide" placeholder="https://git.example.com/owner/repo.git" data-test="repo-where" />
         </label>
         <label>Name members see it by (optional)<input v-model="newRepo.name" placeholder="from the repository's name" data-test="repo-name" /></label>
         <label class="check"><input v-model="newRepo.readOnly" type="checkbox" data-test="repo-readonly" /> Read-only reference (the team reads it, never changes it)</label>

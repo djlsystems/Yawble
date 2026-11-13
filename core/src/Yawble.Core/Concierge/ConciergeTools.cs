@@ -470,7 +470,7 @@ public sealed class ConciergeTools(
                             "with team_repo_add (read_only for reference-only ones) before telling its Manager the work. Then give its Manager work with tell.",
             ("name", "string", "A short name for the team.", true),
             ("repo_path", "string", "The repository folder on this computer the team works on (optional).", false),
-            ("repo_url", "string", "Or a repository's address to clone (https://github.com/owner/repo.git); the team's branches are pushed back there.", false),
+            ("repo_url", "string", "Or a repository's address to clone, on any git host (https://git.example.com/owner/repo.git); the team's branches are pushed back there.", false),
             ("manager_cli", "string", "The Manager's agent CLI: claude, grok, codex, copilot or antigravity (default claude).", false)),
         Tool("team_repos", "A team's repositories: its main one and any others, writable or read-only references.",
             ("team", "string", "The team's name.", true)),
@@ -478,7 +478,7 @@ public sealed class ConciergeTools(
                               "Writable: every member gets its own clone and its branches are pushed back like the main one's. Read-only: a reference members can read, kept current. " +
                               "Give repo_url (cloned with the person's own git) or repo_path (a folder on this computer).",
             ("team", "string", "The team's name.", true),
-            ("repo_url", "string", "The repository's address, e.g. https://github.com/owner/repo.git.", false),
+            ("repo_url", "string", "The repository's address on any git host, e.g. https://git.example.com/owner/repo.git.", false),
             ("repo_path", "string", "Or the repository's folder on this computer.", false),
             ("name", "string", "A short name members see it by (default: the repository's own name).", false),
             ("read_only", "boolean", "true for a read-only reference; default false (writable).", false)),

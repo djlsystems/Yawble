@@ -447,7 +447,7 @@ public class ConciergeReadToolsTests : IDisposable
         Assert.Matches(@"already-merged: \w+ [\d-]+ ""first""; same as origin/main, merged", text);
         Assert.Matches(@"team/alpha: .*1 ahead / 0 behind origin/main; NOT merged; local only \(not on origin\)", text);
         Assert.Contains("origin/main:", text);
-        Assert.Contains("Open pull requests: check not run", text);
+        Assert.Contains("Pull requests: none (origin is a folder on this computer).", text);
         // Ada: one unpushed commit on a branch the team repository does not have. Her uncommitted edit is NOT read: that
         // would mean running git inside her clone, whose config she controls; the answer says so plainly.
         Assert.Contains("Ada: on members/ada; uncommitted changes: not checked", text);
@@ -682,7 +682,7 @@ public class ConciergeReadToolsTests : IDisposable
         Assert.Contains("origin: https://example.test/x.git", text);
         Assert.Contains("check not run: this folder is not a readable git repository.", text);
         Assert.Contains("1 check(s) could not run", text);
-        Assert.Contains("Open pull requests: check not run (GitHub is not read from here)", text);
+        Assert.Contains("Pull requests: not read for example.test (only GitHub's are read from here, through gh).", text);
     }
 
     [Fact]
@@ -690,6 +690,7 @@ public class ConciergeReadToolsTests : IDisposable
     {
         await _bus.CreateTeamAsync("alpha", ct: Ct);
         var target = await RepoAsync();
+        await G(target.Path, "remote", "set-url", "origin", "https://github.com/acme/app.git"); // pull requests are read for GitHub only
         var answering = new ConciergeReadTools(_bus, (_, _, _) => Task.FromResult<JsonNode?>(null), _db.ConnectionString,
             (_, _) => Task.FromResult<IReadOnlyList<GitRepoTarget>>([target]), _git,
             (_, _) => Task.FromResult<IReadOnlyDictionary<string, string>?>(new Dictionary<string, string> { ["team/alpha"] = "#12 Team work" }), remote: false);

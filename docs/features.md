@@ -78,7 +78,8 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board** 
   usage and the doctor.
 - It can tell a Manager, answer a team's question, create a team, pause or resume a team, nudge or close a
   workflow, and add, dispatch, move or comment on backlog items and cards.
-- Git and team actions: delete, prune, push or sync branches, open or merge a pull request (with your `gh`),
+- Git and team actions: delete, prune, push or sync branches, open or merge a pull request (GitHub repositories, with
+  your `gh`),
   archive or delete a team, set environment variables, change an agent.
 - Anything destructive first shows the exact list. It runs only after you say yes in a later message in the same
   conversation.
@@ -115,7 +116,14 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board** 
 - Clones have no remote and no credential helper. After each run the app cleans the clone's git config and fetches
   the member's branch into the team repository. It never runs git inside a clone an agent used.
 - When the team repository has an origin, branches are pushed with your own git setup at each run's end. Pushes are
-  never forced.
+  never forced. The origin can be on any git host, or there can be none: a team repository with no origin keeps
+  every branch on this computer.
+- Pull requests are a hosting service's feature, not git's. The app reads, opens and merges them only for a
+  repository whose origin is on GitHub, through your `gh`. For any other host it says so and leaves the pull request
+  (or merge request) to that host's own site.
+- git 2.38 or later is required. When it is missing, too old or not working, a banner at the top of the window says
+  so, with **Download Git** and **Check again**; on Windows with winget, **Install Git** (or **Update Git**) installs
+  Git for Windows for you only. The app finds a git installed while it runs without a restart.
 - **Git** on the team page: **Fetch**, **Sync now**, **Merge** (the team branch into the base branch, then pushed
   to origin), and per-member branch state. The app never forces, rebases or stashes.
 - A banner shows when branches could not be brought up to date on their own.
@@ -163,10 +171,10 @@ work with your teams, as an MCP server (`yawble mcp`) or a CLI.
   values.
 - **Restore…** returns teams, cards and messages to that moment. It is applied at the next start.
 - Log files older than 14 days are deleted.
-- **Settings > Health** runs the doctor. Its checks are Database, Disk space, Sandbox, Agent CLIs, Cloud Link,
+- **Settings > Health** runs the doctor. Its checks are Database, Disk space, Sandbox, Git, Agent CLIs, Cloud Link,
   Connections, Teams and Logs.
 - Fixes it offers: open a Connection to reconnect it, remove unused credentials, sync a team that is behind, archive
-  a team that is quiet. Fixes that change something ask first.
+  a team that is quiet, install or update Git (Windows). Fixes that change something ask first.
 - A banner at start-up says when this computer is not ready to run agents, and how to fix it.
 
 ## Guardrail check
