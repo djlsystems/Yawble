@@ -14,9 +14,27 @@ public sealed class WxcExecBackend(string executable, string requestDir) : ISand
 {
     public string Name => "wxc-exec";
 
+    /// <summary>
+    /// The request without the denied paths that do not exist on the host. The sandbox (wxc-exec 1.0.1) cannot start a
+    /// run that denies a path whose parent folder is missing too (CreateProcessSecurityEnvironment, 0x80070003: a new
+    /// Windows profile has no ~/.config, so ~/.config/gh stopped every run); a path that does not exist holds nothing to
+    /// deny, and every run checks again. The request is unchanged when every denied path exists.
+    /// </summary>
+    public static string WithoutMissingDenied(string requestJson, Func<string, bool>? exists = null)
+    {
+        exists ??= Path.Exists;
+        if (System.Text.Json.Nodes.JsonNode.Parse(requestJson) is not System.Text.Json.Nodes.JsonObject request
+            || request["filesystem"]?["deniedPaths"] is not System.Text.Json.Nodes.JsonArray denied) return requestJson;
+        var missing = denied.Where(n => n?.GetValue<string>() is not { } p || !exists(p)).ToList();
+        if (missing.Count == 0) return requestJson;
+        foreach (var n in missing) denied.Remove(n);
+        return request.ToJsonString();
+    }
+
     public ISandboxProcess Spawn(string requestJson)
     {
         if (!File.Exists(executable)) throw new SandboxStartException(4, $"wxc-exec.exe is missing at {executable}");
+        requestJson = WithoutMissingDenied(requestJson);
         Directory.CreateDirectory(requestDir);
         var file = Path.Combine(requestDir, $"request-{Guid.NewGuid():N}.json");
         // The request carries the run token: the file lives in the core's data folder, which no sandbox is granted.
@@ -43,6 +61,7 @@ public sealed class WxcExecBackend(string executable, string requestDir) : ISand
     {
         if (!OperatingSystem.IsWindows()) throw new SandboxStartException(2, "the wxc-exec backend runs only on Windows");
         if (!File.Exists(executable)) throw new SandboxStartException(4, $"wxc-exec.exe is missing at {executable}");
+        requestJson = WithoutMissingDenied(requestJson);
         Directory.CreateDirectory(requestDir);
         var file = Path.Combine(requestDir, $"request-{Guid.NewGuid():N}.json");
         File.WriteAllText(file, requestJson);

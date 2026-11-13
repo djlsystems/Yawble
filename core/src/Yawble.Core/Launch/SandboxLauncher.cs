@@ -359,7 +359,6 @@ public sealed class SandboxLauncher(
             layout = RunLayout.Standard(host.Os, Root(host.Home), Root(host.AppDataRoot), Root(host.InstallDir),
                 new PolicyMember(member.Team, member.Name), member.Cli, cliInstall,
                 probe is null ? members.All() : [.. members.All(), .. probe.ExtraMembers]) with { HostToolFolders = host.ToolFoldersNow?.Invoke() ?? host.ToolFolders ?? [] };
-            EnsureDeniedAppFolders(layout, Root(host.AppDataRoot));
             // The team's shared view, once the host has made it (a member's first run makes it).
             if (synthetic is null && (host.Folders ?? DiskFolders.Instance).Exists(layout.SharedRepoCandidate))
                 layout = layout with { SharedRepo = layout.SharedRepoCandidate };
@@ -559,36 +558,6 @@ public sealed class SandboxLauncher(
     {
         records.Ended(runKey, end, exit, reason, guardrails);
         return new LaunchOutcome(runKey, end, reason, exit, guardrails);
-    }
-
-    /// <summary>
-    /// The sandbox refuses a rule on a path that does not exist (Windows: CreateProcessSecurityEnvironment, HRESULT
-    /// 0x80070003), and every run is denied the app's own folders: its data, the credential file's folder (made only
-    /// when the file fallback is used), grok-home, and the other teams' and members' folders (made on their first run).
-    /// Those that are missing are made here, empty and private, so a fresh install's first runs start. Only folders
-    /// inside the app's own folder, and only when that folder exists on this computer (a layout for another computer,
-    /// as tests compile, is left alone).
-    /// </summary>
-    public static void EnsureDeniedAppFolders(RunLayout layout, string appDataRoot)
-    {
-        if (!Directory.Exists(appDataRoot)) return;
-        var sep = Path.DirectorySeparatorChar;
-        var root = Path.GetFullPath(appDataRoot).TrimEnd(sep) + sep;
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        foreach (var path in new[] { layout.DataDir, layout.CredentialDir, layout.HostGrokHome }.Concat(layout.OtherTeamRoots).Concat(layout.OtherMemberRoots))
-        {
-            if (string.IsNullOrEmpty(path)) continue;
-            string full;
-            try { full = Path.GetFullPath(path); }
-            catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) { continue; }
-            if (!full.StartsWith(root, comparison) || Directory.Exists(full) || File.Exists(full)) continue;
-            try
-            {
-                if (OperatingSystem.IsWindows()) Directory.CreateDirectory(full);
-                else Directory.CreateDirectory(full, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
-        }
     }
 
     private static string? ReasonFor(RunEnd end, SupervisedExit exit, ComputeLimits limits, string? credentialReason = null)
