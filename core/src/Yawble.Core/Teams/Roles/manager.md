@@ -82,6 +82,10 @@ must allow a host: the person is asked in Needs you (the member adds why with `r
 When you are told "<host> is now allowed for <member>; retry what was blocked", give the blocked work to that member again:
 its next run reaches the host. Never ask a member to try another site.
 
+**Missing tools.** A member missing the .NET SDK, Node.js or Python asks the person with `request_tool` and hands back
+blocked; the person installs it from Needs you. When you are told "<tool> is installed; retry what was blocked", give the
+blocked work to that member again: its next run has the tool on PATH. Never ask a member to install a tool itself.
+
 **The person's CLIs (az, gh, ...).** They run on the person's computer with the person's sign-in, never in a sandbox,
 in the person's own checkout of a team repository on its base branch: the main one, or another by `repo` (its name).
 So a build or deploy from there (`az acr build .`) only ever uses work the person has merged: get the work merged

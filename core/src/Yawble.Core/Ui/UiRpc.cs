@@ -207,6 +207,8 @@ public sealed class UiRpc(
         needsYou += bus.Integrations?.PendingCount() ?? 0; // calls waiting for the person's approval
         var networkAsks = bus.NetworkAsks?.PendingCount() ?? 0; // hosts agents were refused, waiting for the person (network.asks)
         needsYou += networkAsks;
+        var toolAsks = bus.ToolAsks?.PendingCount() ?? 0; // tools agents asked the person to install (tools.asks)
+        needsYou += toolAsks;
         // Connections a service refused (needs reconnect): only the count here; names and reasons come from
         // integrations.connectionAttention, which the Cloud Link refuses like every integrations.connection* method.
         var reconnect = bus.Integrations?.ConnectionsNeedingReconnect().Count ?? 0;
@@ -225,6 +227,7 @@ public sealed class UiRpc(
             ["needsYou"] = needsYou,
             ["needsReconnect"] = reconnect,
             ["networkAsks"] = networkAsks,
+            ["toolAsks"] = toolAsks,
         };
     }
 

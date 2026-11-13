@@ -227,6 +227,14 @@ var networkAsks = new Yawble.Core.Integrations.NetworkAskService($"Data Source={
 networkAsks.Changed = () => events.Publish(Yawble.Core.Integrations.NetworkAskService.ChangedEvent, null);
 bus.NetworkAsks = networkAsks;
 launch.HostRefusals = networkAsks;
+// Host tool asks: a tool from the app's catalog an agent asked for (request_tool) waits for the person in Needs you; Install
+// runs the catalog's winget command in this process, as git.install does, and the launcher's detection checks it afterwards.
+var toolAsks = new Yawble.Core.Integrations.ToolAskService($"Data Source={dbPath}",
+    new Yawble.Core.Integrations.SystemToolHost(new Yawble.Core.Teams.SystemGitHost(), layouts.AppDataRoot),
+    (team, member, text, causation, ct) => bus.PersonTellAsync(team, member, text, causation, ct));
+toolAsks.Changed = () => events.Publish(Yawble.Core.Integrations.ToolAskService.ChangedEvent, null);
+toolAsks.Progress = e => events.Publish(Yawble.Core.Integrations.ToolAskService.ProgressEvent, e);
+bus.ToolAsks = toolAsks;
 link.IsIntegration = integrations.HasIntegration; // a remote viewer may detect or discover a CLI that is already added, not a new unknown one
 link.IsRemoteMcp = integrations.IsRemoteMcp;
 // Host tasks: the person's named programs, run on this computer on the base branch of their own checkout, under a hash-pinned approval.
@@ -328,7 +336,7 @@ var dispatcher = new RpcDispatcher(new SandboxPlatformInfo(), () => applied, run
     audit: new Yawble.Core.Provenance.AuditLog($"Data Source={dbPath}"), integrations: integrations,
     doctor: doctor, backups: backupRpc, agentProfiles: agentProfileRpc, agentInfo: agentInfoRpc, companion: companionRpc,
     code: new Yawble.Core.Code.CodeBrowserRpc(codeBrowser), git: new Yawble.Core.Teams.GitRpc(gitService), logs: new Yawble.Core.Logs.LogRpc(logService),
-    updates: new Yawble.Core.Updates.UpdateRpc(updateService), networkAsks: networkAsks);
+    updates: new Yawble.Core.Updates.UpdateRpc(updateService), networkAsks: networkAsks, toolAsks: toolAsks);
 dispatcherForLink = dispatcher;
 link.Start();
 
