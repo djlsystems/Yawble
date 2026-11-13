@@ -122,7 +122,7 @@ public class GitProgramTests
     // ---------------------------------------------------------------- install
 
     [Fact]
-    public async Task Install_RunsWingetPerUser_ThenChecksAgain()
+    public async Task Install_RunsWinget_ThenChecksAgain()
     {
         var host = new FakeGitHost { Git = null };
         host.OnWinget = () => host.Git = @"C:\Users\ada\AppData\Local\Programs\Git\cmd\git.exe";
@@ -130,13 +130,13 @@ public class GitProgramTests
         Assert.True(r.Done, r.Message);
         Assert.Equal("ok", r.Status.State);
         var winget = host.Calls.Single(c => c.Exe == host.Winget);
-        Assert.Equal(["install", "--id", "Git.Git", "--exact", "--source", "winget", "--scope", "user", "--silent",
+        Assert.Equal(["install", "--id", "Git.Git", "--exact", "--source", "winget", "--silent",
             "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity"], winget.Args);
         Assert.Equal(GitService.InstallLimit, winget.Limit);
     }
 
     [Fact]
-    public async Task AnOldGitIsUpdated_InItsOwnScope()
+    public async Task AnOldGitIsUpdated()
     {
         var host = new FakeGitHost { VersionOutput = "git version 2.30.1" };
         host.OnWinget = () => host.VersionOutput = "git version 2.56.0";
@@ -144,7 +144,6 @@ public class GitProgramTests
         Assert.True(r.Done);
         var args = host.Calls.Single(c => c.Exe == host.Winget).Args;
         Assert.Equal("upgrade", args[0]);
-        Assert.DoesNotContain("--scope", args);
     }
 
     [Fact]
@@ -242,7 +241,7 @@ public class GitProgramTests
 
         var ask = await doctor.RunFixAsync(DoctorService.InstallGitFix, confirmed: false, Ct);
         Assert.True(ask.NeedsConfirm);
-        Assert.Contains("no administrator prompt", ask.Message);
+        Assert.Contains("Windows asks for permission", ask.Message);
         Assert.DoesNotContain(host.Calls, c => c.Exe == host.Winget);
 
         using (Actor.Use(new Actor(Actor.Concierge, null)))

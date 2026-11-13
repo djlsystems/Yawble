@@ -12,6 +12,8 @@ export interface AgentOption { id: string; label: string; ready: boolean }
 const props = defineProps<{
   teams: TeamSummary[];
   agents: AgentOption[];
+  /** The agent CLIs have been looked for (an empty list then means none is installed). */
+  agentsLoaded?: boolean;
   cli: string;
   teamId: number | null;
   running: boolean;
@@ -82,7 +84,7 @@ onMounted(() => { if (props.autofocus) focus(); });
       <span class="grow" />
       <label class="pick" title="The agent that answers">
         <select :value="cli" data-test="composer-agent" @change="emit('update:cli', ($event.target as HTMLSelectElement).value)">
-          <option v-if="!agents.length" :value="cli">Finding agents…</option>
+          <option v-if="!agents.length" :value="cli" data-test="composer-no-agents">{{ agentsLoaded ? 'No agent CLI found (Settings > Agents)' : 'Finding agents…' }}</option>
           <option v-for="a in agents" :key="a.id" :value="a.id" :disabled="!a.ready">{{ a.label }}{{ a.ready ? '' : ' (not signed in)' }}</option>
         </select>
         <Icon name="chevron" :size="14" />

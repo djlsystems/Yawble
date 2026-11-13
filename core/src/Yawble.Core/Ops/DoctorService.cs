@@ -325,8 +325,7 @@ public sealed class DoctorService(
             if (s.Ok) return new DoctorFixResult(true, false, $"git {s.Version} is installed; nothing to do", []);
             var what = s.State == "missing" ? "Install" : "Update";
             if (!confirmed)
-                return new DoctorFixResult(false, true, $"{what} Git for Windows with winget? It downloads it from the winget catalog and installs it" +
-                    (s.State == "missing" ? " for you only, with no administrator prompt." : "; Windows may ask for permission."), [s.State]);
+                return new DoctorFixResult(false, true, $"{what} Git for Windows with winget? It downloads it from the winget catalog and installs it for everyone on this computer, so Windows asks for permission.", [s.State]);
             if (Provenance.Actor.Current is { Via: not Provenance.Actor.App })
                 return new DoctorFixResult(false, false, Yawble.Core.Teams.GitRpc.InstallRefusal, []);
             var r = await git.InstallAsync(ct).ConfigureAwait(false);

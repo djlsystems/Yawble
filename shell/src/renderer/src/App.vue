@@ -56,6 +56,8 @@ const conversations = ref<ConversationSummary[]>([]);
 // The Concierge chats have had their first answer (the sidebar shows the loading state until then).
 const chatsLoaded = ref(false);
 const agents = ref<AgentOption[]>([]);
+/** Whether the agent CLIs have been looked for yet. */
+const agentsLoaded = ref(false);
 /** Logs (sidebar): every log the app keeps, in one dialog. */
 const logsOpen = ref(false);
 const error = ref<string | null>(null);
@@ -120,7 +122,7 @@ async function loadAgents() {
   try {
     const found = await api.call<DetectedCli[]>('agents.detect');
     agents.value = found.filter((c) => c.found).map((c) => ({ id: c.cliId, label: cliLabel(c.cliId), ready: c.signIn?.status === 'signed-in' }));
-  } catch { agents.value = []; }
+  } catch { agents.value = []; } finally { agentsLoaded.value = true; }
 }
 
 function newChat() {
@@ -332,7 +334,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
 
       <div class="content">
       <div class="place">
-        <ConciergeView v-if="view === 'concierge'" :conversation-id="conversationId" :teams="teams" :agents="agents"
+        <ConciergeView v-if="view === 'concierge'" :conversation-id="conversationId" :teams="teams" :agents="agents" :agents-loaded="agentsLoaded"
           :default-cli="defaultCli" :focus-team-id="focusTeamId" :api="api" :draft="conciergeDraft" @drafted="conciergeDraft = null"
           @opened="conversationId = $event; loadConversations()" @changed="loadConversations" />
 

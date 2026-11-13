@@ -49,7 +49,7 @@ public sealed class SystemGitHost : IGitHost
 
 /// <summary>
 /// git.check and git.install: is git here and new enough, and (Windows) installing or updating Git for Windows for the
-/// person with winget, per user, with no administrator prompt. git itself is the only requirement; where a repository
+/// person with winget (Git for Windows installs for the whole computer, so Windows asks for permission). git itself is the only requirement; where a repository
 /// is hosted (GitHub, another service, or nowhere) is each team's own business.
 /// </summary>
 public sealed class GitService(IGitHost host)
@@ -80,13 +80,13 @@ public sealed class GitService(IGitHost host)
     }
 
     /// <summary>
-    /// The winget command line an install (git missing) or update (git old or broken) runs. An install is per user (no
-    /// administrator prompt); an update keeps the installed git's own scope, so a git installed for the whole computer
-    /// asks Windows for permission.
+    /// The winget command line an install (git missing) or update (git old or broken) runs. Git for Windows' installer
+    /// installs for the whole computer whatever scope it is asked for (it ignores /CURRENTUSER), so Windows asks the
+    /// person for permission; the person can decline, and Download Git remains.
     /// </summary>
     public static IReadOnlyList<string> WingetArgs(bool update) =>
     [
-        update ? "upgrade" : "install", "--id", WingetId, "--exact", "--source", "winget", .. update ? Array.Empty<string>() : ["--scope", "user"],
+        update ? "upgrade" : "install", "--id", WingetId, "--exact", "--source", "winget",
         "--silent", "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity",
     ];
 

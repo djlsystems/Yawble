@@ -175,6 +175,8 @@ describe('the renderer may reach only the screens\' methods', () => {
   it('allows the UI prefixes and refuses everything else', () => {
     expect(isUiMethod('teams.create')).toBe(true);
     expect(isUiMethod('terminal.attach')).toBe(true);
+    // Every call the Logs dialog makes.
+    for (const m of ['logs.sources', 'logs.who', 'logs.query', 'logs.values', 'logs.prunePreview', 'logs.prune', 'logs.setRetention']) expect(isUiMethod(m)).toBe(true);
     expect(isUiMethod('skills.list')).toBe(true);
     expect(isUiMethod('triggers.save')).toBe(true);
     expect(isUiMethod('git.merge')).toBe(true);

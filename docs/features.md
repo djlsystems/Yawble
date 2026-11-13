@@ -152,7 +152,8 @@ a member's card opens it at that member's activity.
   (or merge request) to that host's own site.
 - git 2.38 or later is required. When it is missing, too old or not working, a banner at the top of the window says
   so, with **Download Git** and **Check again**; on Windows with winget, **Install Git** (or **Update Git**) installs
-  Git for Windows for you only. The app finds a git installed while it runs without a restart.
+  Git for Windows for everyone on the computer, so Windows asks for permission. The app finds a git installed while it
+  runs without a restart.
 - **Git** on the team page: **Fetch**, **Sync now**, **Merge** (the team branch into the base branch, then pushed
   to origin), and per-member branch state. The app never forces, rebases or stashes.
 - A banner shows when branches could not be brought up to date on their own.

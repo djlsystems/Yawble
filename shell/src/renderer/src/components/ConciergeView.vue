@@ -16,6 +16,7 @@ const props = defineProps<{
   conversationId: string | null;
   teams: TeamSummary[];
   agents: AgentOption[];
+  agentsLoaded?: boolean;
   defaultCli: string;
   focusTeamId: number | null;
   api?: YawbleApi;
@@ -201,7 +202,7 @@ watch(() => props.defaultCli, (c) => { if (!props.conversationId) cli.value = c;
     <div v-if="!conversationId && !pending" class="hero" data-test="concierge-hero">
       <h1><img class="mark" :src="mark" alt="" data-test="concierge-mark" />{{ greeting }}</h1>
       <p class="sub">What should your teams work on?</p>
-      <Composer ref="composer" v-model:cli="cli" :team-id="teamId" :teams="teams" :agents="agents" :running="false" autofocus
+      <Composer ref="composer" v-model:cli="cli" :team-id="teamId" :teams="teams" :agents="agents" :agents-loaded="agentsLoaded" :running="false" autofocus
         @update:team-id="changeTeam" @send="send" />
       <div class="suggest">
         <button v-for="s in suggestions" :key="s" class="chip-btn" data-test="concierge-suggestion" @click="composer?.set(s)">{{ s }}</button>
@@ -232,7 +233,7 @@ watch(() => props.defaultCli, (c) => { if (!props.conversationId) cli.value = c;
               @click="unwatch(w)"><BusyLabel :busy="work.is(`watch-${w.id}`, 'stop')">×</BusyLabel></button>
           </span>
         </div>
-        <Composer v-model:cli="cli" :team-id="teamId" :teams="teams" :agents="agents" :running="running" :stopping="work.is('stop')" placeholder="Reply to the Concierge…" autofocus
+        <Composer v-model:cli="cli" :team-id="teamId" :teams="teams" :agents="agents" :agents-loaded="agentsLoaded" :running="running" :stopping="work.is('stop')" placeholder="Reply to the Concierge…" autofocus
           @update:team-id="changeTeam" @send="send" @stop="stop" />
         <p class="hint">The Concierge sees every team and acts through the Managers. It can make mistakes; check what it did on the team.</p>
       </div>
