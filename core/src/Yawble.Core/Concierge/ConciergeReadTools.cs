@@ -245,7 +245,13 @@ public sealed class ConciergeReadTools(
         sb.AppendLine(hostLines.Count == 0 ? "Network requests (hosts agents were refused): none."
             : $"Network requests waiting for the person ({hostLines.Count}; they are answered in Needs you, in the window or over the Cloud Link, not from here):");
         foreach (var l in hostLines) sb.AppendLine(l);
-        sb.AppendLine($"Needs the person: {needsYou + asks + hostLines.Count} item(s) ({needsYou} decision(s), {asks} approval(s), {hostLines.Count} network request(s)).");
+        // Tools agents asked the person to install (the app's catalog): Install is in Needs you, in the window on this computer only.
+        var toolLines = bus.ToolAsks?.PendingLines() ?? [];
+        sb.AppendLine(toolLines.Count == 0 ? "Tool requests (tools agents asked the person to install): none."
+            : $"Tool requests waiting for the person ({toolLines.Count}; Install is in Needs you in the app's window on this computer, not from here or the Cloud Link):");
+        foreach (var l in toolLines) sb.AppendLine(l);
+        sb.AppendLine($"Needs the person: {needsYou + asks + hostLines.Count + toolLines.Count} item(s) ({needsYou} decision(s), {asks} approval(s), " +
+                      $"{hostLines.Count} network request(s), {toolLines.Count} tool request(s)).");
         if (remote)
         {
             sb.AppendLine("Cloud Link: only on the computer itself (its state is not shown over the Cloud Link).");

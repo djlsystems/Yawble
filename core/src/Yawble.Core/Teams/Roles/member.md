@@ -39,7 +39,8 @@ team (developer, tester, ...) is in your prompt when the Manager or the person g
   merge `origin/<base>` so you number after what is already there, and say the number in your hand-back: another
   member may be adding one at the same time.
 - The `dev-tools` skill lists the tools you have (git, .NET, Node.js, Python when installed) and how to use them
-  here.
+  here. A missing one from the app's catalog (.NET SDK, Node.js, Python): call `request_tool` (tool, reason), then hand
+  back as blocked on it; never install one yourself.
 
 ## Report
 

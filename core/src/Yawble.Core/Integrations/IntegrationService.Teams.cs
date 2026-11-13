@@ -33,6 +33,9 @@ public sealed partial class IntegrationService
             "DELETE FROM host_tasks WHERE team_id = $t;",
             // Network asks (0039): waiting or answered, they were about this team's members.
             "DELETE FROM network_asks WHERE team_id = $t;",
+            // Tool asks (0040) and what happened to them.
+            "DELETE FROM tool_ask_events WHERE ask_id IN (SELECT id FROM tool_asks WHERE team_id = $t);",
+            "DELETE FROM tool_asks WHERE team_id = $t;",
         })
             Exec(c, tx, sql, ("$t", teamId));
         tx.Commit();

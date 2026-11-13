@@ -80,6 +80,22 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
   blocked". If the policy store refuses the change, the item stays and shows why. IP addresses, local and
   private-network names, the app's own hosts and floor-rule hosts are never asked about. Each request and its answer
   is in the **Approvals** log; the Concierge's status lists the open ones.
+- **Tool requests**: an agent missing a developer tool asks with its `request_tool` tool, naming one from the app's
+  fixed catalog: **.NET SDK 10**, **.NET SDK (current LTS)**, **Node.js LTS** or **Python 3**. Agents never give a
+  package id or command. An unknown name gets the catalog's names back; a tool already installed is said to be there
+  (the next run has it on PATH). Otherwise you get one **Needs you** item per team and tool (repeats only count up),
+  with the member, the reason, the publisher, whether it installs for you or for the whole computer, and the exact
+  command. The choices:
+  - **Install** runs exactly `winget install --id <id> --exact --source winget --silent --accept-package-agreements
+    --accept-source-agreements --disable-interactivity` (plus `--scope user` for Python), in the app on this computer,
+    the same way as installing Git. Only from the window: never over the Cloud Link or from the `yawble` companion.
+    Afterwards the app looks for the program again. When it is found, every open request for that tool closes and each
+    team's Manager is told "<tool> is installed; retry what was blocked". When it is not, the item stays open with
+    winget's message and **Try again**.
+  - **Not now** closes it; the agent is told, and the team is not asked about that tool again for 24 hours.
+  On Linux and macOS the item shows the command to run yourself; the app installs nothing. Each request, answer and
+  result is in the **Approvals** log; the Concierge's status lists the open ones.
+>>>>>>> e0bcbb53905ed486f757e14fd9f0ea395a3314df
 - Files: each member reads and writes only its own clone, home and temp folders. The app's data, the credential
   store, and other members and teams are denied.
 - **Settings > Guardrails** is the global policy: Sandbox, Limits (idle and wall-clock timeouts), Files and folders,
