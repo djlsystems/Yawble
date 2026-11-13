@@ -21,5 +21,6 @@ const api: YawbleApi = {
   openDocuments: (teamId) => ipcRenderer.invoke('window:openDocuments', teamId),
   windowCommand: (command) => ipcRenderer.send('window:command', command),
   installUpdate: () => ipcRenderer.invoke('app:installUpdate'),
+  updateInfo: () => ipcRenderer.invoke('app:updateInfo'),
 };
 contextBridge.exposeInMainWorld('yawble', api);

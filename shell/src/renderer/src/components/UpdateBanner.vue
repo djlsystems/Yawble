@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import type { Overview, UpdateStatus, YawbleApi } from '../../../shared/api';
+import type { Overview, UpdateInfo, UpdateStatus, YawbleApi } from '../../../shared/api';
 import { errorText } from '../api';
 import BusyLabel from './BusyLabel.vue';
 
 /**
  * The line at the top of the window about an update to the app itself (updates.status): downloading it, ready to
- * install (Restart to update), or available to download. Restart to update asks first while agents are working, since
- * the app quits to install. "Later" hides it until a newer version. A cloud viewer is told; installing is on the
- * computer. A development run of the source shows nothing.
+ * install (Restart to update), or available to download. Restart to update asks first while agents are working, or
+ * while other people signed in to this computer have the app open (an all-users install is replaced for everyone),
+ * since the app quits to install. An all-users install needs an administrator: Windows asks for permission, and a
+ * person who is not one is told their administrator installs updates. "Later" hides it until a newer version. Nothing
+ * shows when the organization manages updates, or in a development run of the source. A cloud viewer is told; installing
+ * is on the computer.
  */
 const props = defineProps<{ api: YawbleApi; pollMs?: number }>();
 
@@ -16,7 +19,9 @@ const status = ref<UpdateStatus | null>(null);
 const packaged = ref<boolean | null>(null);
 const later = ref<string | null>(readLater());
 const busy = ref<'download' | 'install' | null>(null);
-const working = ref<number | null>(null);
+const info = ref<UpdateInfo | null>(null);
+/** Why Restart to update waits for a second yes: agents working here, other people with the app open. */
+const confirm = ref<{ agents: number; others: number } | null>(null);
 const error = ref<string | null>(null);
 /** "You have the latest version" after a check the person asked for (Help > Check for updates). */
 const told = ref<string | null>(null);
@@ -31,10 +36,12 @@ function hide() {
 
 const show = computed(() => {
   const s = status.value;
-  if (!s || !s.available || !s.latest || later.value === s.latest) return false;
+  if (!s || s.managed || !s.available || !s.latest || later.value === s.latest) return false;
   if (props.api.remote) return true;
   return packaged.value !== false && ['available', 'downloading', 'ready', 'error'].includes(s.state);
 });
+/** An all-users install and this person cannot update it: their administrator does. */
+const adminOnly = computed(() => !!info.value?.allUsers && !info.value.admin);
 const percent = computed(() => (status.value && status.value.size > 0 ? Math.min(100, Math.round((status.value.downloaded / status.value.size) * 100)) : null));
 
 async function refresh() {
@@ -50,16 +57,17 @@ async function download() {
   finally { busy.value = null; }
 }
 
-/** Restart to update: while agents run, say so and wait for a second yes. */
+/** Restart to update: while agents run, or others have the app open, say so and wait for a second yes. */
 async function install(confirmed = false) {
   error.value = null;
   if (!confirmed) {
-    try {
-      const running = (await props.api.call<Overview>('app.overview')).slots.running;
-      if (running > 0) { working.value = running; return; }
-    } catch { /* the overview could not be read: install anyway, as quitting does */ }
+    let agents = 0;
+    try { agents = (await props.api.call<Overview>('app.overview')).slots.running; } catch { /* install anyway, as quitting does */ }
+    let others = 0;
+    try { others = (await props.api.updateInfo?.())?.otherUsers ?? 0; } catch { /* none known */ }
+    if (agents > 0 || others > 0) { confirm.value = { agents, others }; return; }
   }
-  working.value = null;
+  confirm.value = null;
   busy.value = 'install';
   try { await props.api.installUpdate?.(); }
   catch (e) { error.value = errorText(e); busy.value = null; }
@@ -79,6 +87,7 @@ async function checkNow() {
 let timer: ReturnType<typeof setInterval> | undefined;
 onMounted(async () => {
   try { packaged.value = (await props.api.shellSettings?.())?.packaged ?? (props.api.remote ? null : false); } catch { packaged.value = false; }
+  try { info.value = (await props.api.updateInfo?.()) ?? null; } catch { info.value = null; }
   await refresh();
   timer = setInterval(() => void refresh(), props.pollMs ?? 30_000);
 });
@@ -91,8 +100,11 @@ defineExpose({ checkNow, refresh });
     <template v-if="api.remote">
       <span class="text">Yawble {{ status!.latest }} is available. It is installed on the computer itself.</span>
     </template>
+    <template v-else-if="adminOnly">
+      <span class="text" data-test="update-admin-only">Yawble {{ status!.latest }} is available. It is installed for everyone on this computer, so your administrator installs updates.</span>
+    </template>
     <template v-else-if="status!.state === 'ready'">
-      <span class="text">Yawble {{ status!.latest }} is ready to install. The app restarts to update.</span>
+      <span class="text">Yawble {{ status!.latest }} is ready to install. The app restarts to update<template v-if="info?.allUsers">; it is installed for everyone on this computer, so Windows asks for administrator permission</template>.</span>
       <button type="button" class="primary" :disabled="busy === 'install'" data-test="update-install" @click="install()">
         <BusyLabel :busy="busy === 'install'" text="Restarting…">Restart to update</BusyLabel>
       </button>
@@ -108,10 +120,11 @@ defineExpose({ checkNow, refresh });
     </template>
     <a :href="status!.notesUrl" target="_blank" rel="noopener" data-test="update-notes">What's new</a>
     <button v-if="!api.remote" type="button" class="mini" data-test="update-later" @click="hide">Later</button>
-    <span v-if="working" class="confirm" data-test="update-confirm">
-      {{ working }} agent{{ working === 1 ? ' is' : 's are' }} working; updating stops {{ working === 1 ? 'it' : 'them' }} now.
+    <span v-if="confirm" class="confirm" data-test="update-confirm">
+      <template v-if="confirm.agents">{{ confirm.agents }} agent{{ confirm.agents === 1 ? ' is' : 's are' }} working; updating stops {{ confirm.agents === 1 ? 'it' : 'them' }} now. </template>
+      <template v-if="confirm.others">Yawble is open for {{ confirm.others }} other {{ confirm.others === 1 ? 'person' : 'people' }} signed in to this computer; updating closes it for them. </template>
       <button type="button" class="danger mini" data-test="update-anyway" @click="install(true)">Update now</button>
-      <button type="button" class="mini" data-test="update-wait" @click="working = null">Wait</button>
+      <button type="button" class="mini" data-test="update-wait" @click="confirm = null">Wait</button>
     </span>
     <span v-if="error || (status!.state === 'error' && status!.error)" class="error" data-test="update-error">{{ error ?? status!.error }}</span>
   </div>

@@ -4,6 +4,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { diagnosticLog } from './diagnostic-log';
+import { installScope, isAdministrator, otherSessionsRunning, updaterArgs } from './install-scope';
 import { appFolder } from './app-folder';
 import { Channels, isUiMethod, type Overview } from '../shared/api';
 import { AppTray, applyStartAtLogin, ShellSettingsFile, startAtLoginRegistered, startedInBackground, type ShellSettings } from './background';
@@ -315,13 +316,24 @@ app.whenReady().then(async () => {
     return result.canceled ? null : (result.filePaths[0] ?? null);
   });
   ipcMain.handle(Channels.shellSettings, () => ({ ...settings, startAtLoginRegistered: startAtLoginRegistered(), packaged: app.isPackaged }));
+  // How this copy is installed: for everyone (an administrator updates it) or for this person; who else has it open.
+  ipcMain.handle(Channels.updateInfo, () => {
+    const allUsers = process.platform === 'win32' && installScope(app.getPath('exe'), process.env) === 'machine';
+    return {
+      allUsers,
+      admin: process.platform === 'win32' ? isAdministrator() : false,
+      otherUsers: allUsers ? otherSessionsRunning(path.basename(app.getPath('exe')), process.pid) : 0,
+    };
+  });
   // Restart to update: the core hands over the downloaded installer it has just verified again (hash and publisher's
-  // signature); it runs silently over this install (per user, as installed) and starts the app again (--force-run).
+  // signature); it runs silently over this install, in the scope it was installed in (an all-users install asks Windows
+  // for administrator permission itself), and starts the app again (--force-run).
   ipcMain.handle(Channels.installUpdate, async () => {
     if (!app.isPackaged) throw new Error('a development run updates from its source, not from a release');
     const { path: installer } = (await (await requireClient()).call('updates.installer')) as { path: string };
-    report(`updating: running ${installer}`);
-    spawn(installer, ['--updated', '/S', '--force-run'], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+    const args = updaterArgs(installScope(app.getPath('exe'), process.env));
+    report(`updating: running ${installer} ${args.join(' ')}`);
+    spawn(installer, args, { detached: true, stdio: 'ignore', windowsHide: true }).unref();
     quitting = true;
     app.quit();
   });

@@ -61,8 +61,8 @@ public sealed class UpdateServiceTests : IDisposable
         return (feed, new Check());
     }
 
-    private UpdateService Service(Feed feed, Check check, string current = "2026.11.12.1", bool canInstall = true) =>
-        new(_db.Dir, _db.ConnectionString, current, feed, check, canInstall, "x64");
+    private UpdateService Service(Feed feed, Check check, string current = "2026.11.12.1", bool canInstall = true, bool managed = false) =>
+        new(_db.Dir, _db.ConnectionString, current, feed, check, canInstall, "x64", managed: () => managed);
 
     [Theory]
     [InlineData("2026.11.20.1", "2026.11.12.1", true)]
@@ -166,6 +166,20 @@ public sealed class UpdateServiceTests : IDisposable
         Assert.False(s["canInstall"]!.GetValue<bool>());
         Assert.Empty(feed.Downloads);
         Assert.Throws<InvalidOperationException>(() => updates.InstallerToRun());
+    }
+
+    [Fact]
+    public async Task WhenTheOrganizationManagesUpdates_NothingIsCheckedDownloadedOrInstalled()
+    {
+        var (feed, check) = Release();
+        var updates = Service(feed, check, managed: true);
+        var s = await updates.CheckAsync(download: true, Ct);
+        Assert.Equal("managed", s["state"]!.GetValue<string>());
+        Assert.True(s["managed"]!.GetValue<bool>());
+        Assert.Null(s["latest"]);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => updates.DownloadAsync(Ct));
+        Assert.Throws<InvalidOperationException>(() => updates.InstallerToRun());
+        Assert.Empty(feed.Downloads);
     }
 
     [Fact]

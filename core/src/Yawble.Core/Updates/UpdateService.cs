@@ -64,8 +64,13 @@ public static class ReleaseVersion
 /// </summary>
 public sealed class UpdateService(
     string dataDir, string connectionString, string currentVersion, IReleaseFeed feed, IInstallerCheck check,
-    bool canInstall, string arch, TimeProvider? clock = null, Action<string>? log = null)
+    bool canInstall, string arch, TimeProvider? clock = null, Action<string>? log = null, Func<bool>? managed = null)
 {
+    public const string ManagedMessage = "updates to this app are managed by your organization";
+
+    /// <summary>Whether the organization manages updates (<see cref="UpdatePolicy"/>): then the app checks nothing.</summary>
+    public bool Managed => managed?.Invoke() ?? false;
+
     public const string AutoSetting = "updates.auto";
     public const string ReleasesUrl = "https://github.com/djlsystems/Yawble/releases";
     public static readonly TimeSpan Every = TimeSpan.FromHours(6);
@@ -99,6 +104,7 @@ public sealed class UpdateService(
                 ["notesUrl"] = _latest?.PageUrl ?? ReleasesUrl,
                 ["canInstall"] = canInstall,
                 ["auto"] = Auto(),
+                ["managed"] = Managed,
                 ["checkedAt"] = _checkedAt,
                 ["error"] = _error,
                 ["downloaded"] = _downloaded,
@@ -140,6 +146,7 @@ public sealed class UpdateService(
     /// <summary>Asks for the newest release; with <paramref name="download"/>, a newer one is downloaded and verified too.</summary>
     public async Task<JsonObject> CheckAsync(bool download, CancellationToken ct)
     {
+        if (Managed) { Set("managed"); return Status(); }
         if (!await _work.WaitAsync(0, ct).ConfigureAwait(false)) return Status(); // a check or download is under way
         try
         {
@@ -171,6 +178,7 @@ public sealed class UpdateService(
     /// <summary>Downloads and verifies the newest release's installer (after a check found it).</summary>
     public async Task<JsonObject> DownloadAsync(CancellationToken ct)
     {
+        if (Managed) throw new InvalidOperationException(ManagedMessage);
         if (!canInstall) throw new InvalidOperationException($"updates are installed from the release page on this computer: {ReleasesUrl}");
         ReleaseInfo? latest;
         lock (_lock) latest = _latest;
@@ -258,6 +266,7 @@ public sealed class UpdateService(
     {
         ReleaseInfo? latest;
         lock (_lock) latest = _latest;
+        if (Managed) throw new InvalidOperationException(ManagedMessage);
         if (!canInstall) throw new InvalidOperationException($"updates are installed from the release page on this computer: {ReleasesUrl}");
         if (latest is null || !ReleaseVersion.IsNewer(latest.Version, currentVersion) || !Ready(latest.Version))
             throw new InvalidOperationException("no update is downloaded and verified yet");
@@ -271,7 +280,7 @@ public sealed class UpdateService(
         catch (OperationCanceledException) { return; }
         while (!ct.IsCancellationRequested)
         {
-            if (Auto())
+            if (Auto() && !Managed)
             {
                 try { await CheckAsync(download: true, ct).ConfigureAwait(false); }
                 catch (OperationCanceledException) { return; }
@@ -307,6 +316,24 @@ public sealed class UpdateService(
     private static void TryDelete(string file)
     {
         try { File.Delete(file); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+    }
+}
+
+/// <summary>
+/// The organization's update policy (Group Policy, Intune or any tool that writes the registry): the DWORD
+/// HKLM\SOFTWARE\Policies\DJL Systems\Yawble\UpdateChecks = 0 turns the app's own update checks off, because IT
+/// deploys new versions itself. Any other value, or none, leaves them to the person (Settings > General > Updates).
+/// </summary>
+public static class UpdatePolicy
+{
+    public const string Key = @"SOFTWARE\Policies\DJL Systems\Yawble";
+    public const string Value = "UpdateChecks";
+
+    public static bool Managed()
+    {
+        if (!OperatingSystem.IsWindows()) return false;
+        using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(Key);
+        return key?.GetValue(Value) is int v && v == 0;
     }
 }
 

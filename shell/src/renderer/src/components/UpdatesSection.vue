@@ -48,11 +48,12 @@ onMounted(load);
 <template>
   <section class="updates" data-test="updates-section">
     <h3>Updates</h3>
-    <p v-if="status" data-test="updates-line">
+    <p v-if="status?.managed" data-test="updates-managed">Yawble {{ status.current }}. Updates to this app are managed by your organization.</p>
+    <p v-else-if="status" data-test="updates-line">
       Yawble {{ status.current }}. <span :class="{ error: status.state === 'error' }">{{ line(status) }}</span>
       <a v-if="status.available" :href="status.notesUrl" target="_blank" rel="noopener">What's new</a>
     </p>
-    <label v-if="status" class="check">
+    <label v-if="status && !status.managed" class="check">
       <input type="checkbox" :checked="status.auto" data-test="updates-auto" @change="setAuto(($event.target as HTMLInputElement).checked)" />
       <span>
         <b>Check for updates automatically</b>
@@ -60,7 +61,7 @@ onMounted(load);
           (its SHA-256 and the publisher's signature); it is installed only when you choose Restart to update.</span>
       </span>
     </label>
-    <button type="button" :disabled="checking" data-test="updates-check" @click="check"><BusyLabel :busy="checking" text="Checking…">Check now</BusyLabel></button>
+    <button v-if="!status?.managed" type="button" :disabled="checking" data-test="updates-check" @click="check"><BusyLabel :busy="checking" text="Checking…">Check now</BusyLabel></button>
     <p v-if="error" class="error" data-test="updates-error">{{ error }}</p>
   </section>
 </template>

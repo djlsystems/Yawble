@@ -178,7 +178,12 @@ const config = {
   nsis: {
     artifactName: sign ? `${name}.\${ext}` : `${name}-setup.\${ext}`,
     oneClick: false,
-    perMachine: false, // %LOCALAPPDATA%\Programs\Yawble: no admin, no UAC prompt
+    // The person chooses: "Only for me" (the default: %LOCALAPPDATA%\Programs\Yawble, no administrator prompt) or "Anyone
+    // who uses this computer" (%ProgramFiles%\Yawble, with Windows' permission prompt). IT deploys silently with
+    // /S /allusers (docs/deploying.md); the app's updater installs in the scope it finds (shell install-scope.ts).
+    perMachine: false,
+    allowElevation: true,
+    selectPerMachineByDefault: false,
     allowToChangeInstallationDirectory: true,
     // The Start Menu and desktop shortcuts. Windows titles the app's notifications with this name (the shortcut
     // carries appId, which the shell sets as its AppUserModelID). productName stays: it decides the data folder.
@@ -209,6 +214,7 @@ rmSync(out, { recursive: true, force: true });
 const files = await builder.build({ targets: platform.createTarget(null, arch), config, publish: 'never', projectDir: here });
 const installers = files.filter((f) => !f.endsWith('.blockmap') && !f.endsWith('.yml'));
 if (signing) {
+  if (signing.failures.length > 0) throw new Error(`signing failed for ${signing.failures.length} file(s) packed into the installer: ${signing.failures.join(', ')}`);
   // electron-builder logs a file it could not sign and carries on; every file that ships is checked here instead.
   const checked = signing.verifyAll([path.join(out, archName === 'x64' ? 'win-unpacked' : `win-${archName}-unpacked`), ...installers]);
   console.log(`\nsigned: all ${checked} .exe and .dll files and the installer carry a valid signature`);

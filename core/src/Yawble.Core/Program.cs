@@ -261,7 +261,7 @@ updateHttp.DefaultRequestHeaders.UserAgent.ParseAdd("Yawble-Updater/1");
 var updateService = new Yawble.Core.Updates.UpdateService(options.DataDir!, $"Data Source={dbPath}", Yawble.Core.CoreInfo.Version,
     new Yawble.Core.Updates.GitHubReleaseFeed(updateHttp), new Yawble.Core.Updates.AuthenticodeCheck(), canInstall: OperatingSystem.IsWindows(),
     arch: System.Runtime.InteropServices.RuntimeInformation.OSArchitecture == System.Runtime.InteropServices.Architecture.Arm64 ? "arm64" : "x64",
-    log: line => Console.Error.WriteLine(line));
+    log: line => Console.Error.WriteLine(line), managed: Yawble.Core.Updates.UpdatePolicy.Managed);
 // Every log, for the Logs dialog, its pruning and the daily retention sweep.
 var logService = new Yawble.Core.Logs.LogService(options.DataDir!, $"Data Source={dbPath}", log: line => Console.Error.WriteLine(line));
 var logFolders = new[] { Path.Combine(options.DataDir!, "logs"), Path.Combine(options.DataDir!, "transcripts") };

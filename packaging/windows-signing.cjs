@@ -102,9 +102,21 @@ function verifyAll(dirsOrFiles) {
   return files.length;
 }
 
+/**
+ * Files the hook could not sign. electron-builder logs a failed signature and carries on, and some of the files it signs
+ * (the installer's own elevate.exe, which asks Windows for administrator rights) are packed inside the installer, out of
+ * reach of verifyAll: build.mjs fails the build when this list is not empty.
+ */
+const failures = [];
+
 /** electron-builder's signtoolOptions.sign hook: one file at a time, as electron-builder hands them over. */
 async function electronBuilderSign(configuration) {
-  signFiles([configuration.path], () => {});
+  try {
+    signFiles([configuration.path], () => {});
+  } catch (e) {
+    failures.push(configuration.path);
+    throw e;
+  }
 }
 
-module.exports = { signFiles, signableFiles, verifyAll, isSigned, electronBuilderSign, settings };
+module.exports = { signFiles, signableFiles, verifyAll, isSigned, electronBuilderSign, failures, settings };

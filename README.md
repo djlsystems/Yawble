@@ -52,9 +52,10 @@ not ship, pin or update them; it finds the ones you installed and runs them from
 ## Install
 
 Signed installers are published on this repository's
-[Releases](https://github.com/djlsystems/Yawble/releases) page: `Yawble-Setup-<version>-x64.exe` and
-`Yawble-Setup-<version>-arm64.exe`, a per-user install that needs no administrator rights. `SHA256SUMS` lists the
-checksum of every file.
+[Releases](https://github.com/djlsystems/Yawble/releases) page: `Yawble-Setup-<version>-x64.exe`, with `SHA256SUMS`
+listing its checksum. It installs for you only (no administrator rights needed) or, if you choose, for everyone who
+uses the computer. Organizations deploying it silently, with their own update policy: see
+[Deploying Yawble in an organization](docs/deploying.md).
 
 The app checks GitHub Releases for newer versions (Settings > General > Updates) and offers **Restart to update** once
 a newer installer is downloaded and its hash and signature check out.
@@ -69,6 +70,7 @@ The app keeps its data in `%LOCALAPPDATA%\Yawble` on Windows, `~/Library/Applica
 - [Connections and integrations](docs/connections-and-integrations.md): tools for agents and how their secrets are
   kept.
 - [Cloud Link](docs/cloud-link.md): viewing the app from a browser.
+- [Deploying Yawble in an organization](docs/deploying.md): silent install for all users, the update policy, removal.
 
 ## Build from source
 

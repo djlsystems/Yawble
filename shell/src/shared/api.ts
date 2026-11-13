@@ -136,6 +136,8 @@ export interface YawbleApi {
   openTerminal(memberId: number): Promise<void>;
   /** Quits and runs the downloaded, verified update's installer, which starts the app again (desktop window only). */
   installUpdate?(): Promise<void>;
+  /** How this copy is installed, for its updates (desktop window only). */
+  updateInfo?(): Promise<UpdateInfo>;
   /** The desktop window's menu commands (Edit, zoom, reload, quit); absent in a remote view. */
   windowCommand?(command: WindowCommand): void;
   /** The OS folder picker, for a team's repository (null when the window has none: a remote view). */
@@ -193,6 +195,7 @@ export const Channels = {
   openDocuments: 'window:openDocuments',
   windowCommand: 'window:command',
   installUpdate: 'app:installUpdate',
+  updateInfo: 'app:updateInfo',
 } as const;
 
 /** What the window's menu bar asks of the desktop app (Electron main does it for the window that asked). */
@@ -263,10 +266,19 @@ export interface ShellSettings { runInBackground: boolean; startAtLogin: boolean
 
 /** updates.status: the app's own updates (core Updates/UpdateService.cs). */
 export interface UpdateStatus {
-  current: string; state: 'idle' | 'checking' | 'upToDate' | 'available' | 'downloading' | 'ready' | 'error';
+  current: string; state: 'idle' | 'checking' | 'upToDate' | 'available' | 'downloading' | 'ready' | 'error' | 'managed';
   latest: string | null; available: boolean; notesUrl: string; canInstall: boolean; auto: boolean;
   checkedAt: string | null; error: string | null; downloaded: number; size: number;
+  /** The organization manages updates (a Windows policy): the app checks nothing. */
+  managed?: boolean;
 }
+
+/**
+ * How this copy is installed, for its updates (desktop window only). allUsers: installed for everyone on the computer,
+ * so updating needs an administrator; admin: this person is one; otherUsers: people in other Windows sessions who have
+ * the app open (an all-users update closes it for them).
+ */
+export interface UpdateInfo { allUsers: boolean; admin: boolean; otherUsers: number }
 
 /** The only core methods the renderer may reach through Channels.call (checked again in Electron main). */
 export const UI_METHOD_PREFIXES = ['app.', 'monitor.', 'board.', 'backlog.', 'teams.', 'members.', 'bus.', 'policy.', 'credentials.', 'hostTerminal.', 'terminal.', 'guardrail.', 'agents.', 'agentProfiles.', 'skills.', 'triggers.', 'git.', 'link.', 'concierge.', 'docs.', 'integrations.', 'tasks.', 'ops.', 'companion.', 'code.', 'logs.', 'updates.'] as const;
