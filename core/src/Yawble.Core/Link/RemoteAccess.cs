@@ -20,6 +20,8 @@ public static class RemoteAccess
         "git.check",
         // The Logs dialog, read only (pruning and retention are refused below).
         "logs.",
+        // Whether an update is available (installing it is the window's alone, below).
+        "updates.status",
         // The read-only code browser (members' clones), unless the person turned it off (Settings > Cloud Link).
         "code.",
     ];
@@ -49,6 +51,8 @@ public static class RemoteAccess
             return "an agent's terminal is used in the app on the computer itself";
         if (method == "runs.stop" && (parameters?["team"] as JsonValue)?.TryGetValue<string>(out var stopTeam) == true && stopTeam == Agents.AgentTestSessions.Team)
             return "an agent's terminal is stopped in the app on the computer itself";
+        if (method.StartsWith("updates.", StringComparison.Ordinal) && method != "updates.status")
+            return Updates.UpdateRpc.LocalOnly;
         if (Logs.LogRpc.ChangesLogs(method))
             return Logs.LogRpc.LocalOnly;
         if (method == "git.install")

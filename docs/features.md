@@ -194,6 +194,20 @@ work with your teams, as an MCP server (`yawble mcp`) or a CLI.
 - Paired programs are listed and revoked in Settings > Companion.
 - Setup is in the [README](../README.md).
 
+## Updates
+
+- Yawble checks GitHub Releases a minute after it starts and every 6 hours (**Settings > General > Updates**:
+  **Check for updates automatically**, on by default), or when asked (**Check now**, or **Help > Check for updates**).
+- A newer release's installer for this computer is downloaded to `<data>/updates/` and checked before it can run: its
+  SHA-256 must match the release's `SHA256SUMS`, and it must carry a valid signature by DJL Systems, Inc. A file that
+  fails either check is deleted.
+- A line at the top of the window then offers **Restart to update**: the app quits, the installer runs silently over
+  the installed app (your data stays), and the app starts again. While agents are working it asks first. **Later**
+  hides the line until a newer version.
+- With automatic checks off, a newer release is offered with **Download** instead.
+- A Cloud Link viewer is told an update is available; it is installed on the computer itself. macOS and Linux get a
+  link to the release page.
+
 ## Backups and doctor
 
 - **Backups** (Settings > General) copy the app's database:

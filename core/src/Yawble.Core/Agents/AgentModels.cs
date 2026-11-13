@@ -153,20 +153,30 @@ public static class UpdateCommands
 /// <summary>
 /// The install command each CLI's maker documents for Windows, run in a visible terminal when the person asks (Settings >
 /// Agents, Install): the person sees it, answers anything it asks, and signs in afterwards. Null when the maker offers no
-/// command (Antigravity installs from its site).
+/// command (Antigravity installs from its site). The app finds an installed CLI without PATH (each detector also looks
+/// in its maker's install folder); PATH matters to the person, who runs the CLI once to sign in. Claude Code's installer
+/// leaves %USERPROFILE%\.local\bin off PATH, so its command adds it to the person's PATH when missing. The PowerShell
+/// window stays open, with PATH as it is now, for that sign-in.
 /// </summary>
 public static class InstallCommands
 {
+    /// <summary>Puts %USERPROFILE%\.local\bin on the person's PATH (and this window's) when it is not there yet.</summary>
+    public const string ClaudeOnPath =
+        "$b = Join-Path $HOME '.local\\bin'; $p = [string][Environment]::GetEnvironmentVariable('Path', 'User'); " +
+        "if (($p -split ';') -notcontains $b) { [Environment]::SetEnvironmentVariable('Path', (($p.TrimEnd(';') + ';' + $b).TrimStart(';')), 'User'); " +
+        "Write-Host ('Added ' + $b + ' to your PATH.') }; if (($env:Path -split ';') -notcontains $b) { $env:Path = $env:Path + ';' + $b }; " +
+        "Write-Host 'Next: run claude here to sign in.'";
+
     public static IReadOnlyList<string>? For(AgentCli cli) => cli switch
     {
-        AgentCli.Claude => PowerShell("irm https://claude.ai/install.ps1 | iex"),
-        AgentCli.Grok => PowerShell("irm https://x.ai/cli/install.ps1 | iex"),
+        AgentCli.Claude => PowerShell("irm https://claude.ai/install.ps1 | iex; " + ClaudeOnPath),
+        AgentCli.Grok => PowerShell("irm https://x.ai/cli/install.ps1 | iex; Write-Host 'Next: run grok login here to sign in.'"),
         AgentCli.Codex => ["npm", "install", "-g", "@openai/codex"],
         AgentCli.Copilot => ["winget", "install", "--id", "GitHub.Copilot", "--exact", "--source", "winget"],
         _ => null,
     };
 
-    private static IReadOnlyList<string> PowerShell(string script) => ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script];
+    private static IReadOnlyList<string> PowerShell(string script) => ["powershell", "-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script];
 }
 
 /// <summary>Opens a visible terminal that runs a command and stays open. A fake in tests.</summary>

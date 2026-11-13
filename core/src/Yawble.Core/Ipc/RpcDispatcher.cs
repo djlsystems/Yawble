@@ -31,7 +31,8 @@ public sealed class RpcDispatcher(
     Companion.CompanionRpc? companion = null,
     Code.CodeBrowserRpc? code = null,
     Teams.GitRpc? git = null,
-    Logs.LogRpc? logs = null)
+    Logs.LogRpc? logs = null,
+    Updates.UpdateRpc? updates = null)
 {
     /// <summary>
     /// A call as the person (or a cloud viewer) made it: run as <paramref name="actor"/>, so whatever it records carries
@@ -97,6 +98,8 @@ public sealed class RpcDispatcher(
             _ when git is not null && Teams.GitRpc.Handles(method) => git.DispatchAsync(method, parameters, ct),
             // The Logs dialog: every log, its entries, pruning and retention (Logs/LogRpc.cs).
             _ when logs is not null && Logs.LogRpc.Handles(method) => logs.DispatchAsync(method, parameters, ct),
+            // Updates to the app itself (Updates/UpdateRpc.cs).
+            _ when updates is not null && Updates.UpdateRpc.Handles(method) => updates.DispatchAsync(method, parameters, ct),
             // The read-only code browser of members' clones (Code/CodeBrowserRpc.cs).
             _ when code is not null && Yawble.CodeBrowser.CodeBrowserService.Handles(method) => code.DispatchAsync(method, parameters, ct),
             // The screens' methods (teams, members, policy, credentials, terminals).

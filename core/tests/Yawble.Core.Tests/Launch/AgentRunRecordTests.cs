@@ -216,12 +216,19 @@ public class AgentRunRecordTests
         {
             var opened = await rpc.DispatchAsync("agents.install", new JsonObject { ["cli"] = "grok" }, Ct);
             Assert.True(opened!["opened"]!.GetValue<bool>());
-            Assert.Equal(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "irm https://x.ai/cli/install.ps1 | iex"], Assert.Single(terminal.Opened));
+            var grok = Assert.Single(terminal.Opened);
+            Assert.Equal(["powershell", "-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"], grok.Take(6));
+            Assert.StartsWith("irm https://x.ai/cli/install.ps1 | iex;", grok[^1]);
             Assert.Contains("already installed", (await Assert.ThrowsAsync<RpcException>(() => rpc.DispatchAsync("agents.install", new JsonObject { ["cli"] = "claude" }, Ct))).Message);
             Assert.Contains("maker's site", (await Assert.ThrowsAsync<RpcException>(() => rpc.DispatchAsync("agents.install", new JsonObject { ["cli"] = "antigravity" }, Ct))).Message);
         }
         Assert.Single(terminal.Opened);
         Assert.Equal(["npm", "install", "-g", "@openai/codex"], InstallCommands.For(AgentCli.Codex));
+        // Claude Code's installer leaves its folder off PATH; the command adds it, without a double quote (the terminal
+        // drops them) or anything cmd would read outside the quoted argument.
+        var claude = InstallCommands.For(AgentCli.Claude)![^1];
+        Assert.Contains(InstallCommands.ClaudeOnPath, claude);
+        Assert.DoesNotContain('"', claude);
         Assert.Equal("winget", InstallCommands.For(AgentCli.Copilot)![0]);
     }
 

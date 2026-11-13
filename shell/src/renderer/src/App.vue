@@ -25,6 +25,7 @@ import Icon from './components/Icon.vue';
 import LoadingNote from './components/LoadingNote.vue';
 import GitBanner from './components/GitBanner.vue';
 import LogsDialog from './components/LogsDialog.vue';
+import UpdateBanner from './components/UpdateBanner.vue';
 import type { AgentOption } from './components/Composer.vue';
 
 // The main window: the sidebar (New chat, the places, the teams, the Concierge chats) and one place at a time. The
@@ -60,6 +61,8 @@ const agents = ref<AgentOption[]>([]);
 const agentsLoaded = ref(false);
 /** Logs (sidebar): every log the app keeps, in one dialog. */
 const logsOpen = ref(false);
+/** The update line (Help > Check for updates asks it to check now). */
+const updateBanner = ref<InstanceType<typeof UpdateBanner> | null>(null);
 const error = ref<string | null>(null);
 const dialog = ref<null | 'newTeam' | 'link'>(null);
 const link = ref<LinkStatus | null>(null);
@@ -266,6 +269,7 @@ const menus = computed<Menu[]>(() => [
     ] : []),
   ] },
   { label: 'Help', items: [
+    { id: 'checkUpdates', label: 'Check for updates' },
     { id: 'about', label: 'About Yawble' },
     { id: 'go:settings-agents', label: 'Agents and sign-ins' },
   ] },
@@ -286,6 +290,7 @@ function command(id: string) {
     case 'terminal': toggleTerminalPane(); break;
     case 'sidebar': collapsed.value = !collapsed.value; break;
     case 'about': menu('system'); break;
+    case 'checkUpdates': void updateBanner.value?.checkNow(); break;
     default: if (api.windowCommand) api.windowCommand(id as Parameters<NonNullable<typeof api.windowCommand>>[0]);
   }
 }
@@ -330,6 +335,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
       <HostChecksBanner :api="api" />
       <LogsDialog v-if="logsOpen" :api="api" @close="logsOpen = false" />
       <GitBanner :api="api" />
+      <UpdateBanner ref="updateBanner" :api="api" />
       <CompanionAsks v-if="!api.remote" :api="api" :poll-ms="pollMs" />
 
       <div class="content">

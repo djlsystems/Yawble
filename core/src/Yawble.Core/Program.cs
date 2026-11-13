@@ -255,6 +255,13 @@ if (bus.Repos is { } actionRepos)
 // The doctor and log retention. Backups come from the BackupService lister.
 // Connections: read through ConnectionService.Index (no secret). Orphan secrets are offered only for keys this data folder's
 // issued-keys ledger recorded (the OS store is shared by every data folder), and only from a store that is a credential index.
+// Updates to the app itself, from GitHub Releases; installed only on Windows, from the window.
+var updateHttp = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
+updateHttp.DefaultRequestHeaders.UserAgent.ParseAdd("Yawble-Updater/1");
+var updateService = new Yawble.Core.Updates.UpdateService(options.DataDir!, $"Data Source={dbPath}", Yawble.Core.CoreInfo.Version,
+    new Yawble.Core.Updates.GitHubReleaseFeed(updateHttp), new Yawble.Core.Updates.AuthenticodeCheck(), canInstall: OperatingSystem.IsWindows(),
+    arch: System.Runtime.InteropServices.RuntimeInformation.OSArchitecture == System.Runtime.InteropServices.Architecture.Arm64 ? "arm64" : "x64",
+    log: line => Console.Error.WriteLine(line));
 // Every log, for the Logs dialog, its pruning and the daily retention sweep.
 var logService = new Yawble.Core.Logs.LogService(options.DataDir!, $"Data Source={dbPath}", log: line => Console.Error.WriteLine(line));
 var logFolders = new[] { Path.Combine(options.DataDir!, "logs"), Path.Combine(options.DataDir!, "transcripts") };
@@ -306,7 +313,8 @@ var dispatcher = new RpcDispatcher(new SandboxPlatformInfo(), () => applied, run
     scheduler: bus.SchedulerSnapshotAsync, stopQueued: bus.StopMemberAsync, agents: clis, agentTests: agentTests, link: link, concierge: concierge, board: board,
     audit: new Yawble.Core.Provenance.AuditLog($"Data Source={dbPath}"), integrations: integrations,
     doctor: doctor, backups: backupRpc, agentProfiles: agentProfileRpc, agentInfo: agentInfoRpc, companion: companionRpc,
-    code: new Yawble.Core.Code.CodeBrowserRpc(codeBrowser), git: new Yawble.Core.Teams.GitRpc(gitService), logs: new Yawble.Core.Logs.LogRpc(logService));
+    code: new Yawble.Core.Code.CodeBrowserRpc(codeBrowser), git: new Yawble.Core.Teams.GitRpc(gitService), logs: new Yawble.Core.Logs.LogRpc(logService),
+    updates: new Yawble.Core.Updates.UpdateRpc(updateService));
 dispatcherForLink = dispatcher;
 link.Start();
 
@@ -345,6 +353,7 @@ Console.WriteLine($"YAWBLE-READY {server.Address}");
 _ = concierge.WatchAsync(stop.Token);
 _ = board.RunAsync(stop.Token);
 _ = logService.RunDailyAsync(stop.Token); // each log kept to its retention: on start, then daily
+_ = updateService.RunAsync(stop.Token); // updates to the app: a minute after start, then every 6 hours (when on)
 _ = integrations.RunWatchesAsync(stop.Token); // integrations' watches: their new items become events
 try
 {

@@ -1,12 +1,18 @@
-# Cut a release from this checkout: check, test, tag v<version>, push the tag. Nothing else is published here.
+# Cut a release from this checkout: check, test, tag v<version>, push the tag, then build the signed Windows installer
+# for that version and publish it as the GitHub release v<version> (the app's updater reads it).
 #
-#   scripts\release.ps1 -DryRun          # checks, the suites, and the version it would use; tags and pushes nothing
-#   scripts\release.ps1                  # the same, then git tag -a v<version> and push that one tag to origin
+#   scripts\release.ps1 -DryRun          # checks, the suites, and the version it would use; tags and publishes nothing
+#   scripts\release.ps1                  # the same, then tag, push the tag, build signed, publish the release
+#   scripts\release.ps1 -TagOnly         # tag and push the tag; no installer, no GitHub release
+#
+# Publishing needs what packaging/build.mjs --sign needs (signtool, the Artifact Signing client tools, az login) and gh
+# signed in with access to this repository. The release holds Yawble-Setup-<version>-x64.exe and SHA256SUMS.
 #
 # The version is yyyy.mm.dd.N (UTC date), the tag v<version>. N is 1 + the highest N among that day's release tags on
 # origin. Never force-pushes; never moves an existing tag.
 param(
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$TagOnly
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'release-functions.ps1')
@@ -77,6 +83,7 @@ if ($DryRun) {
     Write-Host "Dry run. The suites passed. Next version: $version"
     Write-Host "Would tag      $tag (annotated, 'Release $version') on $head"
     Write-Host "Would push     refs/tags/$tag to origin (only that tag)"
+    if (-not $TagOnly) { Write-Host "Would publish  the GitHub release $tag with Yawble-Setup-$version-x64.exe and SHA256SUMS, signed" }
     Write-Host "The app built from that commit shows $version (scripts/build-version.mjs)."
     return
 }
@@ -91,5 +98,23 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host ''
-Write-Host "Released $version."
+Write-Host "Tagged $version."
 Write-Host "  Tag: $tag on $head"
+if ($TagOnly) { return }
+
+# 5. The signed installer for exactly this commit and version, published as the GitHub release (never a draft: the
+# updater reads the newest published release).
+Write-Host '== Signed installer =='
+$env:YAWBLE_BUILD_VERSION = $version
+Invoke-Checked 'The shell build' { npm --prefix (Join-Path $root 'shell') run build }
+Invoke-Checked 'The signed build' { node (Join-Path $root 'packaging\build.mjs') --sign }
+$out = Join-Path $root 'artifacts\installers\win-x64'
+$installer = Join-Path $out "Yawble-Setup-$version-x64.exe"
+$sums = Join-Path $out 'SHA256SUMS'
+foreach ($f in @($installer, $sums)) { if (-not (Test-Path -LiteralPath $f)) { throw "The signed build did not write $f" } }
+$signature = Get-AuthenticodeSignature -LiteralPath $installer
+if ($signature.Status -ne 'Valid') { throw "The installer's signature is $($signature.Status), not Valid; nothing was published." }
+Write-Host '== GitHub release =='
+Invoke-Checked 'gh release create' { gh release create $tag $installer $sums --verify-tag --title "Yawble $version" --generate-notes }
+Write-Host ''
+Write-Host "Released ${version}: https://github.com/djlsystems/Yawble/releases/tag/$tag"

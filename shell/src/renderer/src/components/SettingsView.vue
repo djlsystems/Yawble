@@ -9,6 +9,7 @@ import LinkDialog from './LinkDialog.vue';
 import SystemPanel from './SystemPanel.vue';
 import IntegrationsPanel from './IntegrationsPanel.vue';
 import HealthPanel from './HealthPanel.vue';
+import UpdatesSection from './UpdatesSection.vue';
 import BackupsSection from './BackupsSection.vue';
 import CompanionPanel from './CompanionPanel.vue';
 import type { MenuItem } from './Sidebar.vue';
@@ -88,6 +89,7 @@ async function set(patch: Partial<ShellSettings>) {
           </label>
         </template>
         <p v-else class="muted">These are set on the computer itself.</p>
+        <UpdatesSection v-if="!api.remote" :api="api" />
         <BackupsSection v-if="!api.remote" :api="api" />
       </section>
       <HealthPanel v-else-if="tab === 'health' && !api.remote" :api="api" @open="emit('connections')" @changed="emit('changed')" />

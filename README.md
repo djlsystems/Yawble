@@ -56,6 +56,9 @@ Signed installers are published on this repository's
 `Yawble-Setup-<version>-arm64.exe`, a per-user install that needs no administrator rights. `SHA256SUMS` lists the
 checksum of every file.
 
+The app checks GitHub Releases for newer versions (Settings > General > Updates) and offers **Restart to update** once
+a newer installer is downloaded and its hash and signature check out.
+
 The app keeps its data in `%LOCALAPPDATA%\Yawble` on Windows, `~/Library/Application Support/Yawble` on macOS and
 `~/.local/share/yawble` on Linux.
 

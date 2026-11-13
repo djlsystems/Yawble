@@ -20,5 +20,6 @@ const api: YawbleApi = {
   setShellSettings: (patch) => ipcRenderer.invoke('shell:setSettings', patch ? JSON.parse(JSON.stringify(patch)) : {}),
   openDocuments: (teamId) => ipcRenderer.invoke('window:openDocuments', teamId),
   windowCommand: (command) => ipcRenderer.send('window:command', command),
+  installUpdate: () => ipcRenderer.invoke('app:installUpdate'),
 };
 contextBridge.exposeInMainWorld('yawble', api);

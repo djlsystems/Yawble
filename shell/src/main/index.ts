@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, screen, session, shell } from 'electron';
 import { placeWindow, WindowStateFile, type Display, type Rect } from './window-state';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { diagnosticLog } from './diagnostic-log';
@@ -314,7 +314,17 @@ app.whenReady().then(async () => {
       : await dialog.showOpenDialog({ properties: ['openDirectory'] });
     return result.canceled ? null : (result.filePaths[0] ?? null);
   });
-  ipcMain.handle(Channels.shellSettings, () => ({ ...settings, startAtLoginRegistered: startAtLoginRegistered() }));
+  ipcMain.handle(Channels.shellSettings, () => ({ ...settings, startAtLoginRegistered: startAtLoginRegistered(), packaged: app.isPackaged }));
+  // Restart to update: the core hands over the downloaded installer it has just verified again (hash and publisher's
+  // signature); it runs silently over this install (per user, as installed) and starts the app again (--force-run).
+  ipcMain.handle(Channels.installUpdate, async () => {
+    if (!app.isPackaged) throw new Error('a development run updates from its source, not from a release');
+    const { path: installer } = (await (await requireClient()).call('updates.installer')) as { path: string };
+    report(`updating: running ${installer}`);
+    spawn(installer, ['--updated', '/S', '--force-run'], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+    quitting = true;
+    app.quit();
+  });
   ipcMain.handle(Channels.setShellSettings, (_e, patch: unknown) => {
     changeSettings(patch);
     return { ...settings, startAtLoginRegistered: startAtLoginRegistered() };
