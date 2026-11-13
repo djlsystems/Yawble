@@ -60,6 +60,12 @@ sandbox.lock.json           the pinned sandbox release, request contract and tel
   `core/src/Yawble.Core/Storage/Migrations/NNNN_name.sql` files, applied in order once each and recorded in
   `schema_migrations`. A shipped migration is never edited; changes are new migrations.
 - Transcripts: one owner-only file per run under `<data>/transcripts/`, indexed in SQLite.
+- Logs: the database logs (`audit_log`, `gateway_events`, `run_records`, `integration_calls`, `integration_asks`,
+  `usage_events`, `agent_changes`, `host_task_runs`, `transcripts`, `messages`, `board_trail`) and two log files: the
+  diagnostic log (`<data>/logs/core-<day>.log` and `shell-<day>.log`: everything the core and the window process report
+  on standard error, with its time) and `<data>/cloud-link-audit.log`. `LogService` (`core/src/Yawble.Core/Logs/`) pages,
+  filters, sorts and prunes them all; a member's activity is one query across them. Retention is per log, in
+  `app_meta` (`logs.retention.<log>`), applied by a daily sweep, which also forgets transcripts whose file is gone.
 - Secrets never go into the database or a log (see [Connections and integrations](connections-and-integrations.md)).
 - Backups: a daily automatic copy and on-demand backups in `<data>/backups/`; restore is staged and applied at the
   next start.

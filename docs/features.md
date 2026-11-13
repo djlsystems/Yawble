@@ -107,6 +107,32 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board** 
 - Counts across the top, an **Activity** panel of messages, and a **Workflows** panel per team.
 - A timeline replays any moment. **● Back to live** returns.
 
+## Logs
+
+**Logs** (in the sidebar under Monitor) shows every log the app keeps, one at a time, as a table. The **log** icon on
+a member's card opens it at that member's activity.
+
+- **Logs:**
+  - **All activity**: everything a member did or was asked to do, gathered from every log below. Every member's
+    activity is auditable here.
+  - **Accountability**: **Audit** (every change made from the window, a Cloud Link viewer, the Concierge or a paired
+    program; reads are not recorded), **Cloud Link**, **Tool calls**, **Approvals**, **Agent changes**, **Host tasks**.
+  - **Security**: **Network** (each run's gateway: model requests, connections allowed and refused) and **Runs** (how
+    each sandboxed run ended).
+  - **Usage**: **Model usage**, tokens per model request.
+  - **Agent output**: **Transcripts**.
+  - **Work history**: **Team messages** and **Board history**.
+  - **Diagnostics**: what the app itself reported (`<data>/logs/`).
+- Filters: team, member, each log's own columns, a date range, and free text across every column. Every column sorts
+  either way. Pages load as the table scrolls; a row opens to show every field.
+- **Prune…** deletes a log's entries older than a chosen age, or all of them. It first says how many entries and files
+  go, their date range, and what is lost, and deletes only after **Delete**. Approvals still waiting for an answer are
+  never pruned. Team messages and Board history are never pruned: the team pages, workflows and the Monitor's replay
+  are built from them.
+- **Retention…** sets how long each log is kept (or forever). Once a day the app deletes what is older. Defaults: a
+  year for accountability, security and usage, 30 days for transcripts, 14 days for diagnostics.
+- Over the Cloud Link the logs can be read, never pruned, and retention cannot be changed.
+
 ## Repositories and git
 
 - Each team has a team repository on this computer: a folder you pick, a clone of an address, or one the app makes.
@@ -170,7 +196,7 @@ work with your teams, as an MCP server (`yawble mcp`) or a CLI.
 - Passwords and sign-ins are not copied. A backup records which Connections and secret fields existed, never their
   values.
 - **Restore…** returns teams, cards and messages to that moment. It is applied at the next start.
-- Log files older than 14 days are deleted.
+- Old log entries are deleted daily, by each log's retention (see [Logs](#logs)).
 - **Settings > Health** runs the doctor. Its checks are Database, Disk space, Sandbox, Git, Agent CLIs, Cloud Link,
   Connections, Teams and Logs.
 - Fixes it offers: open a Connection to reconnect it, remove unused credentials, sync a team that is behind, archive

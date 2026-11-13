@@ -7,6 +7,7 @@ import { errorText, resolveApi } from '../api';
 import { type AgentCliId } from '../agentClis';
 import { useAgentOptions } from '../agentOptions';
 import AgentCard from './AgentCard.vue';
+import LogsDialog from './LogsDialog.vue';
 import TileGrip from './TileGrip.vue';
 import { memberCardsStore } from '../gripStore';
 import Icon from './Icon.vue';
@@ -30,6 +31,8 @@ import { showMemberTerminal } from '../terminalPane';
 const props = defineProps<{ team: TeamSummary; api?: YawbleApi; pollMs?: number }>();
 const emit = defineEmits<{ settings: [memberId: number]; guardrail: [memberId: number]; changed: []; deleted: []; discuss: [decision: Decision] }>();
 const api = resolveApi(props.api);
+/** The member whose activity the Logs dialog shows ("Team/Name"), opened from its card. */
+const logsFor = ref<string | null>(null);
 const agentOptions = useAgentOptions(api);
 
 const cards = ref<Card[]>([]);
@@ -269,7 +272,7 @@ defineExpose({ refresh, openWorkflows });
       <AgentCard :card="c"
         :pending="busy.is(`member-${c.member.id}`, 'stop') ? 'stop' : busy.is(`member-${c.member.id}`, 'remove') ? 'remove' : null"
         @terminal="openTerminal(c)" @code="openCode(c.member.team, c.member.name)" @settings="emit('settings', c.member.id)"
-        @guardrail="emit('guardrail', c.member.id)" @stop="stop(c)" @remove="remove(c)" />
+        @guardrail="emit('guardrail', c.member.id)" @logs="logsFor = `${c.member.team}/${c.member.name}`" @stop="stop(c)" @remove="remove(c)" />
       <TileGrip axis="h" :store="memberCardsStore" />
     </div>
 
@@ -278,6 +281,7 @@ defineExpose({ refresh, openWorkflows });
       <select v-model="newAgent.cli" data-test="add-agent-cli"><option v-for="c in agentOptions" :key="c.id" :value="c.id">{{ c.label }}</option></select>
       <button data-test="add-agent" :disabled="!newAgent.name.trim() || busy.is('add-agent')" :aria-busy="busy.is('add-agent')" @click="addAgent"><BusyLabel :busy="busy.is('add-agent')" text="Adding…">+ Add agent</BusyLabel></button>
     </div>
+    <LogsDialog v-if="logsFor" :api="api" source="activity" :member="logsFor" @close="logsFor = null" />
   </section>
 </template>
 

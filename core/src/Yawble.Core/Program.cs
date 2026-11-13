@@ -36,8 +36,10 @@ if (options.Error is not null)
     return 2;
 }
 
-Console.Error.WriteLine(CoreInfo.StartupLine());
 Directory.CreateDirectory(options.DataDir!);
+// Everything the core reports on standard error is also kept in <data>/logs/core-<day>.log (the Diagnostics log).
+Console.SetError(new Yawble.Core.Logs.DiagnosticLog(options.DataDir!, "core").Tee(Console.Error));
+Console.Error.WriteLine(CoreInfo.StartupLine());
 var dbPath = Path.Combine(options.DataDir!, "yawble.db");
 // Backups: one before the first pending migration (the update is refused if it fails), a daily one while running.
 Yawble.Core.Connections.ConnectionService? connectionsForBackup = null; // set once the Connection service exists
@@ -253,6 +255,8 @@ if (bus.Repos is { } actionRepos)
 // The doctor and log retention. Backups come from the BackupService lister.
 // Connections: read through ConnectionService.Index (no secret). Orphan secrets are offered only for keys this data folder's
 // issued-keys ledger recorded (the OS store is shared by every data folder), and only from a store that is a credential index.
+// Every log, for the Logs dialog, its pruning and the daily retention sweep.
+var logService = new Yawble.Core.Logs.LogService(options.DataDir!, $"Data Source={dbPath}", log: line => Console.Error.WriteLine(line));
 var logFolders = new[] { Path.Combine(options.DataDir!, "logs"), Path.Combine(options.DataDir!, "transcripts") };
 var doctorService = new Yawble.Core.Ops.DoctorService(
     new Yawble.Core.Ops.DoctorHostSystem(options.DataDir!, () => applied, launch.Problem, guardrail, link.Status, logFolders, launch.GatewayProbe),
@@ -302,7 +306,7 @@ var dispatcher = new RpcDispatcher(new SandboxPlatformInfo(), () => applied, run
     scheduler: bus.SchedulerSnapshotAsync, stopQueued: bus.StopMemberAsync, agents: clis, agentTests: agentTests, link: link, concierge: concierge, board: board,
     audit: new Yawble.Core.Provenance.AuditLog($"Data Source={dbPath}"), integrations: integrations,
     doctor: doctor, backups: backupRpc, agentProfiles: agentProfileRpc, agentInfo: agentInfoRpc, companion: companionRpc,
-    code: new Yawble.Core.Code.CodeBrowserRpc(codeBrowser), git: new Yawble.Core.Teams.GitRpc(gitService));
+    code: new Yawble.Core.Code.CodeBrowserRpc(codeBrowser), git: new Yawble.Core.Teams.GitRpc(gitService), logs: new Yawble.Core.Logs.LogRpc(logService));
 dispatcherForLink = dispatcher;
 link.Start();
 
@@ -340,7 +344,7 @@ Console.WriteLine($"YAWBLE-READY {server.Address}");
 // The Concierge keeps tabs on what it promised to follow up (its watches), with no agent running.
 _ = concierge.WatchAsync(stop.Token);
 _ = board.RunAsync(stop.Token);
-_ = new Yawble.Core.Ops.LogRetention(logFolders, log: line => Console.Error.WriteLine(line)).RunAsync(stop.Token); // logs older than 14 days: on start, then daily
+_ = logService.RunDailyAsync(stop.Token); // each log kept to its retention: on start, then daily
 _ = integrations.RunWatchesAsync(stop.Token); // integrations' watches: their new items become events
 try
 {

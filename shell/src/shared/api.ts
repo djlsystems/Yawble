@@ -198,6 +198,22 @@ export type WindowCommand = (typeof WindowCommands)[number];
 
 /** One line of ops.doctor (core Ops/DoctorRpc.cs). kind "open" is a screen of the app; "run" is ops.doctorFix. */
 export interface DoctorFix { id: string; label: string; kind: 'open' | 'run'; confirm: boolean }
+/** One column of a log (logs.sources): kind time, text or number; filter: the dialog offers its values. */
+export interface LogColumn { key: string; label: string; kind: 'time' | 'text' | 'number'; filter: boolean }
+/** One log the app keeps (logs.sources). retentionDays: 0 keeps it forever; null when it is never pruned. */
+export interface LogSourceInfo {
+  id: string; title: string; group: string; about: string; columns: LogColumn[];
+  prunable: boolean; loss: string | null; keptBecause: string | null; defaultDays: number | null; retentionDays: number | null;
+  /** Whether the team and member filters apply to it. */
+  team: boolean; member: boolean;
+}
+/** A page of a log (logs.query). total: on the first page only. next: the offset of the next page, null at the end. */
+export interface LogPage { rows: Record<string, string | number | null>[]; total: number | null; asOf: string; next: number | null }
+/** The teams and members for the filters (logs.who). key: "Team/Name". */
+export interface LogWho { teams: string[]; members: { team: string; name: string; key: string }[] }
+/** What pruning would delete (logs.prunePreview). */
+export interface LogPrunePreview { source: string; title: string; cutoff: string; count: number; oldest: string | null; newest: string | null; loss: string; files: number }
+
 /** git.check: the git found on this computer (any repository host works; git itself is required). */
 export interface GitStatus {
   state: 'ok' | 'missing' | 'old' | 'broken';

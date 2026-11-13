@@ -24,6 +24,7 @@ import SettingsView, { type SettingsTab } from './components/SettingsView.vue';
 import Icon from './components/Icon.vue';
 import LoadingNote from './components/LoadingNote.vue';
 import GitBanner from './components/GitBanner.vue';
+import LogsDialog from './components/LogsDialog.vue';
 import type { AgentOption } from './components/Composer.vue';
 
 // The main window: the sidebar (New chat, the places, the teams, the Concierge chats) and one place at a time. The
@@ -55,6 +56,8 @@ const conversations = ref<ConversationSummary[]>([]);
 // The Concierge chats have had their first answer (the sidebar shows the loading state until then).
 const chatsLoaded = ref(false);
 const agents = ref<AgentOption[]>([]);
+/** Logs (sidebar): every log the app keeps, in one dialog. */
+const logsOpen = ref(false);
 const error = ref<string | null>(null);
 const dialog = ref<null | 'newTeam' | 'link'>(null);
 const link = ref<LinkStatus | null>(null);
@@ -252,7 +255,7 @@ const menus = computed<Menu[]>(() => [
     { id: 'sidebar', label: 'Sidebar', keys: `${mod}B`, checked: !collapsed.value },
     { separator: true },
     { id: 'go:concierge', label: 'Concierge' }, { id: 'go:documents', label: 'Documents' }, { id: 'go:backlog', label: 'Backlog' },
-    { id: 'go:teams', label: 'Teams' }, { id: 'go:board', label: 'Board' }, { id: 'go:monitor', label: 'Monitor' },
+    { id: 'go:teams', label: 'Teams' }, { id: 'go:board', label: 'Board' }, { id: 'go:monitor', label: 'Monitor' }, { id: 'go:logs', label: 'Logs' },
     ...(desktop ? [
       { separator: true } as const,
       { id: 'zoomIn', label: 'Zoom in', keys: `${mod}=` }, { id: 'zoomOut', label: 'Zoom out', keys: `${mod}-` }, { id: 'zoomReset', label: 'Actual size', keys: `${mod}0` },
@@ -270,6 +273,7 @@ function command(id: string) {
   if (id.startsWith('go:')) {
     const place = id.slice(3);
     if (place === 'settings-agents') { menu('agents'); return; }
+    if (place === 'logs') { logsOpen.value = true; return; }
     go(place as View);
     return;
   }
@@ -305,7 +309,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
     <Sidebar :rail="collapsed" :view="view" :conversations="conversations" :teams="teams" :conversation-id="conversationId"
       :team-id="selected" :slots="overview?.slots ?? null" :remote="!!api.remote" :loading="{ teams: !overview && !error, chats: !chatsLoaded }" :removing="removingChat"
       @new-chat="newChat" @open-conversation="openConversation" @open-team="openTeam" @go="go"
-      @rename="rename" @remove="remove" @new-team="dialog = 'newTeam'" @collapse="collapsed = true" @expand="collapsed = false" />
+      @rename="rename" @remove="remove" @new-team="dialog = 'newTeam'" @collapse="collapsed = true" @expand="collapsed = false" @logs="logsOpen = true" />
 
     <main class="main">
       <header class="bar">
@@ -322,6 +326,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
       <p v-if="terminalPane.stopError" class="error banner" data-test="terminal-stop-error">{{ terminalPane.stopError }} <button class="mini" @click="terminalPane.stopError = null">Dismiss</button></p>
       <p v-if="error" class="error banner" data-test="error">Core unavailable: {{ error }}</p>
       <HostChecksBanner :api="api" />
+      <LogsDialog v-if="logsOpen" :api="api" @close="logsOpen = false" />
       <GitBanner :api="api" />
       <CompanionAsks v-if="!api.remote" :api="api" :poll-ms="pollMs" />
 

@@ -317,47 +317,4 @@ public class DoctorTests : IDisposable
         public Task<IReadOnlyList<DoctorTeam>> ListAsync(CancellationToken ct) => throw new InvalidOperationException("db locked");
         public Task ArchiveAsync(string team, CancellationToken ct) => Task.CompletedTask;
     }
-
-    // ------------------------------------------------------------------ log retention
-
-    private string Log(string rel, int ageDays)
-    {
-        var path = Path.Combine(_dir, rel);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, "x");
-        File.SetLastWriteTimeUtc(path, (Start - TimeSpan.FromDays(ageDays)).UtcDateTime);
-        return path;
-    }
-
-    [Fact]
-    public void Retention_deletes_logs_over_14_days_and_keeps_the_rest()
-    {
-        var old = Log("logs/core.log", 15);
-        var oldRun = Log("transcripts/T/M/run-1.log", 30);
-        var edge = Log("logs/edge.log", 13);
-        var other = Log("logs/notes.txt", 100);
-        var db = Path.Combine(_dir, "yawble.db");
-        File.WriteAllText(db, "db");
-        File.SetLastWriteTimeUtc(db, (Start - TimeSpan.FromDays(400)).UtcDateTime);
-
-        var deleted = new LogRetention([Path.Combine(_dir, "logs"), Path.Combine(_dir, "transcripts"), Path.Combine(_dir, "missing")], _clock).Sweep();
-
-        Assert.Equal(2, deleted);
-        Assert.False(File.Exists(old));
-        Assert.False(File.Exists(oldRun));
-        Assert.True(File.Exists(edge));
-        Assert.True(File.Exists(other));
-        Assert.True(File.Exists(db));
-    }
-
-    [Fact]
-    public void Retention_leaves_a_log_that_is_open_for_writing()
-    {
-        if (!OperatingSystem.IsWindows()) return; // elsewhere an open file can be unlinked
-        var path = Log("logs/live.log", 20);
-        using var open = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.Read);
-        var deleted = new LogRetention([Path.Combine(_dir, "logs")], _clock).Sweep();
-        Assert.Equal(0, deleted);
-        Assert.True(File.Exists(path));
-    }
 }

@@ -22,9 +22,21 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         "list", "get", "status", "card", "messages", "decisions", "overview", "agents", "detect", "read", "preview", "attach",
         "banner", "input", "resize", "previewLoosen", "getInfo", "getAvailableBackends", "getPlatformSupport", "getState",
         "getGlobal", "getMember", "version",
+        // The screens' polls and lookups: what is waiting, the Monitor's steps, workflows, settings shown, catalogs.
+        "asks", "steps", "workflows", "item", "connectionAttention", "connections", "versionStatus", "models", "repos",
+        "mcpList", "apiList", "checklist", "discoverStatus", "watches", "approvals", "env", "quiet", "runs", "runRecords",
+        "history", "check", "commandLine", "testSessions", "actionStatus", "backups", "doctor", "keepDaily", "restoreStatus",
+        "defaultModels", "sources", "query", "values", "retention", "prunePreview", "who",
     };
 
-    /// <summary>A call that only reads: not audited.</summary>
+    /// <summary>Calls that read a setting, or set it when they carry <c>on</c>.</summary>
+    private static readonly HashSet<string> GetOrSet = new(StringComparer.Ordinal) { "teams.push", "teams.syncToBase" };
+
+    /// <summary>A call that only reads: not audited. A get-or-set call reads when it carries no <c>on</c>.</summary>
+    public static bool IsReadOnly(string method, JsonObject? parameters) =>
+        GetOrSet.Contains(method) ? parameters?["on"] is null : IsReadOnly(method);
+
+    /// <summary>A call that only reads, by its name alone.</summary>
     public static bool IsReadOnly(string method)
     {
         var dot = method.LastIndexOf('.');
@@ -49,7 +61,7 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
 
     public void Record(Actor actor, string method, JsonObject? parameters, string outcome)
     {
-        if (IsReadOnly(method)) return;
+        if (IsReadOnly(method, parameters)) return;
         try
         {
             using var c = new SqliteConnection(connectionString);

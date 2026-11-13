@@ -29,7 +29,7 @@ defineProps<{
   removing?: string | null;
 }>();
 const emit = defineEmits<{
-  newChat: []; openConversation: [id: string]; openTeam: [id: number]; go: [view: View];
+  newChat: []; openConversation: [id: string]; openTeam: [id: number]; go: [view: View]; logs: [];
   rename: [id: string, title: string]; remove: [id: string]; newTeam: []; collapse: []; expand: [];
 }>();
 
@@ -66,6 +66,7 @@ function finishRename(id: string) {
         <Icon :name="p.icon" />
         <span v-if="p.view === 'teams' && slots?.running" class="rail-badge" title="agents running">{{ slots.running }}</span>
       </button>
+      <button class="rail-btn" title="Logs" data-test="rail-logs" @click="emit('logs')"><Icon name="logs" /></button>
     </nav>
     <span class="grow" />
     <button class="rail-btn" :class="{ on: view === 'settings' }" title="Settings" data-test="rail-settings" @click="emit('go', 'settings')"><Icon name="settings" /></button>
@@ -86,6 +87,7 @@ function finishRename(id: string) {
       <button class="item" :class="{ on: view === 'teams' }" data-test="nav-teams" @click="emit('go', 'teams')"><Icon name="teams" />Teams<span v-if="slots?.running" class="badge" title="agents running">{{ slots.running }}</span></button>
       <button class="item" :class="{ on: view === 'board' }" data-test="nav-board" @click="emit('go', 'board')"><Icon name="board" />Board</button>
       <button class="item" :class="{ on: view === 'monitor' }" data-test="nav-monitor" @click="emit('go', 'monitor')"><Icon name="monitor" />Monitor</button>
+      <button class="item" data-test="nav-logs" @click="emit('logs')"><Icon name="logs" />Logs</button>
     </nav>
 
     <div class="lists">

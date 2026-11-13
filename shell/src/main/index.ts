@@ -3,6 +3,7 @@ import { placeWindow, WindowStateFile, type Display, type Rect } from './window-
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
+import { diagnosticLog } from './diagnostic-log';
 import { appFolder } from './app-folder';
 import { Channels, isUiMethod, type Overview } from '../shared/api';
 import { AppTray, applyStartAtLogin, ShellSettingsFile, startAtLoginRegistered, startedInBackground, type ShellSettings } from './background';
@@ -22,6 +23,7 @@ app.setPath('userData', appFolder(process.platform, process.env, os.homedir()));
 const dataDir = process.env.YAWBLE_DATA_DIR ?? path.join(app.getPath('userData'), 'data');
 const settingsFile = new ShellSettingsFile(path.join(dataDir, 'shell-settings.json'));
 const windowStateFile = new WindowStateFile(path.join(dataDir, 'window-state.json'));
+const report = diagnosticLog(dataDir);
 let settings: ShellSettings = settingsFile.read();
 let tray: AppTray | null = null;
 let quitting = false;
@@ -36,7 +38,7 @@ async function connectCore(): Promise<CoreClient> {
   const installDir = process.env.YAWBLE_INSTALL_DIR ?? (app.isPackaged ? process.resourcesPath : undefined);
   core = await startCore(launch, { dataDir, installDir });
   core.child.once('exit', (code) => {
-    console.error(`[shell] the core exited (${code})`);
+    report(`the core exited (${code})`);
     client = null;
     if (!quitting) void restartCore();
   });
@@ -133,17 +135,17 @@ async function restartCore(): Promise<void> {
   const now = Date.now();
   while (coreStarts.length > 0 && now - coreStarts[0]! > 60_000) coreStarts.shift();
   if (coreStarts.length >= 3) {
-    console.error('[shell] the core keeps exiting; not starting it again');
+    report('the core keeps exiting; not starting it again');
     return;
   }
   coreStarts.push(now);
-  console.error('[shell] starting the core again');
+  report('starting the core again');
   ready = startAndAttach();
   try {
     await ready;
     for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed() && !websiteWindows.has(win)) win.webContents.reload();
   } catch (e) {
-    console.error(`[shell] the core did not start again: ${e instanceof Error ? e.message : String(e)}`);
+    report(`the core did not start again: ${e instanceof Error ? e.message : String(e)}`);
     // Reload anyway: each page's first call then fails with the core's reason (its "fatal:" lines), which it shows.
     for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed() && !websiteWindows.has(win)) win.webContents.reload();
   }
@@ -337,7 +339,7 @@ app.whenReady().then(async () => {
     }, () => tray?.update(null));
   }, 5000);
   if (!startedInBackground(process.argv)) showMain();
-  first.catch((e) => console.error(`[shell] ${e.message}`));
+  first.catch((e) => report(`${e.message}`));
 });
 
 /** Opens the main window, or brings it forward. The core (and the teams' work) is already running either way. */

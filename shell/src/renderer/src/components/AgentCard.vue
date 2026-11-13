@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import type { AgentCard } from '../../../shared/api';
 import MemberAvatar from '../faces/MemberAvatar.vue';
 import BusyLabel from './BusyLabel.vue';
+import Icon from './Icon.vue';
 import { displayName, memberStateOf, MemberStateLabel } from '../faces/faces';
 import { renderMarkdown } from '../markdown';
 import { splitReport } from '../reportFormat';
@@ -15,7 +16,7 @@ import { outputHeight } from '../agentOutputHeight';
 // of every member's box together (the gap handles under each card, see TeamView).
 /** pending: Stop or Remove was clicked and the core has not answered yet (that icon shows the spinner, both are held). */
 const props = defineProps<{ card: AgentCard; pending?: 'stop' | 'remove' | null }>();
-const emit = defineEmits<{ terminal: []; code: []; settings: []; guardrail: []; stop: []; remove: [] }>();
+const emit = defineEmits<{ terminal: []; code: []; settings: []; guardrail: []; logs: []; stop: []; remove: [] }>();
 
 const m = computed(() => props.card.member);
 const face = computed(() => memberStateOf(props.card));
@@ -63,6 +64,7 @@ const height = outputHeight;
         <button v-if="card.hasClone" class="icon code" title="Code" data-test="open-code" @click="emit('code')">&lt;/&gt;</button>
         <button class="icon" title="Settings" data-test="open-settings" @click="emit('settings')">⚙</button>
         <button class="icon" title="Guardrail check" data-test="open-guardrail" @click="emit('guardrail')">🛡</button>
+        <button class="icon" title="Logs: all of this agent's activity" data-test="open-logs" @click="emit('logs')"><Icon name="logs" :size="14" /></button>
         <button class="icon" :title="pending === 'stop' ? 'Stopping…' : 'Stop'" data-test="stop" :disabled="card.state !== 'running' || !!pending" :aria-busy="pending === 'stop'" @click="emit('stop')"><BusyLabel :busy="pending === 'stop'">■</BusyLabel></button>
         <button v-if="m.role === 'member'" class="icon danger" :title="pending === 'remove' ? 'Removing…' : 'Remove agent'" data-test="remove-agent" :disabled="card.state === 'running' || !!pending" :aria-busy="pending === 'remove'" @click="emit('remove')"><BusyLabel :busy="pending === 'remove'">🗑</BusyLabel></button>
       </div>
