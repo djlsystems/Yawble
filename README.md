@@ -7,7 +7,7 @@
   </a>
 </p>
 
-<p align="center"><b>Focus on the work, not the agent.</b></p>
+<p align="center"><b>AI teamwork. Built-in guardrails. Your control.</b></p>
 
 <p align="center">
   <a href="https://yawble.ai">yawble.ai</a> ·
@@ -24,8 +24,9 @@ agent splits it between member agents, each member works on its own branch of yo
 merge the result. Every agent run happens inside its own sandbox, with no access to your model credentials, your other
 files or the open network.
 
-Yawble uses the agent CLIs you already have: Claude Code, Codex, Grok, GitHub Copilot and Antigravity. It does not
-ship, pin or update them; it finds the ones you installed and runs them from where they are.
+Yawble is agent-agnostic. Each member of a team picks its own agent CLI and model, so different agents work side by
+side in one team: Claude Code, Codex, Grok, GitHub Copilot and Antigravity, as you already installed them. Yawble does
+not ship, pin or update them; it finds the ones you installed and runs them from where they are.
 
 - **Teams.** A Manager and members, each with its own CLI, model and instructions. Teams share one global run limit.
 - **Your repository.** Each team works in a team repository; every member has its own clone and branch. Branches

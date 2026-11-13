@@ -1,9 +1,10 @@
 # Features
 
 A short reference to what Yawble does. Yawble is a desktop app that runs teams of AI coding agents, using the agent
-CLIs you already installed. Each agent run is isolated in its own sandbox (Microsoft's MXC sandbox).
+CLIs you already installed. It is agent-agnostic: each member picks its own CLI and model, and different agents work
+side by side in one team. Each agent run is isolated in its own sandbox (Microsoft's MXC sandbox).
 
-The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board** and **Monitor**, plus Settings.
+The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**, **Monitor** and **Logs**, plus Settings.
 
 ## Teams and members
 
@@ -34,7 +35,9 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board** 
 
 ## Agent CLIs
 
-- Supported: **Claude Code**, **Grok (xAI)**, **Codex (OpenAI)**, **GitHub Copilot**, **Antigravity (Google)**.
+- Yawble is agent-agnostic. Supported: **Claude Code**, **Grok (xAI)**, **Codex (OpenAI)**, **GitHub Copilot**,
+  **Antigravity (Google)**. Each member's CLI and model are its own, so one team can mix them, and an agent can be
+  changed later (Member settings, or the Concierge when asked).
 - Yawble does not ship or update them. It detects your own install (PATH, then the vendor's install locations) at
   every launch and runs it by absolute path.
 - Each run gets the install folders read-only. The CLI's config and credential folders are blocked. Self-update is
