@@ -130,6 +130,40 @@ describe('the Board: Needs You', () => {
     expect(w.find('[data-test=network-ask]').exists()).toBe(false);
   });
 
+  it('lists a tool ask with Install and Not now, counts it, and follows the team filter', async () => {
+    const { api, calls } = fakeApi();
+    const call = api.call.bind(api);
+    let pending = [{ id: 3, at: '2026-11-13T21:00:00Z', teamId: 1, team: 'payments', member: 'payments/DeveloperPriya', memberName: 'DeveloperPriya',
+      tool: 'nodejs-lts', displayName: 'Node.js LTS', publisher: 'OpenJS Foundation', wingetId: 'OpenJS.NodeJS.LTS', scope: 'machine',
+      reason: 'build the site', count: 1, lastSeen: '2026-11-13T21:00:00Z', workflow: 11, state: 'pending', attempts: 0, error: null,
+      decidedBy: null, decidedVia: null, decidedAt: null, canInstall: true, command: 'winget install --id OpenJS.NodeJS.LTS --exact', choices: ['install', 'notNow'] }];
+    (api as any).call = async (method: string, params?: any) => {
+      if (method === 'tools.asks') { calls.push({ method, params }); return pending; }
+      if (method === 'tools.notNow') { calls.push({ method, params }); pending = []; return { ok: true, id: 3, tool: 'nodejs-lts', told: null }; }
+      return call(method, params);
+    };
+    const w = mount(BoardView, { props: { api, pollMs: 60_000 } });
+    await flushPromises();
+    const lane = w.get('[data-test=lane-blocked]');
+    const item = lane.get('[data-test=tool-ask]');
+    expect(item.text()).toContain('Developer Priya');
+    expect(item.text()).toContain('Node.js LTS');
+    expect(item.text()).toContain('build the site');
+    expect(item.findAll('button').map((b) => b.text())).toEqual(['Install', 'Not now']);
+    expect(lane.get('.count').text()).toBe('2'); // the question card and the tool ask
+    expect(w.find('[data-test=tool-asks].banner').exists()).toBe(false);
+
+    await w.get('[data-test=board-team]').setValue('i18n');
+    expect(w.find('[data-test=tool-ask]').exists()).toBe(false);
+    expect(w.get('[data-test=lane-blocked] .count').text()).toBe('0');
+    await w.get('[data-test=board-team]').setValue('payments');
+
+    await w.get('[data-test=tool-ask-notNow]').trigger('click');
+    await flushPromises();
+    expect(calls.find((c) => c.method === 'tools.notNow')!.params).toEqual({ id: 3 });
+    expect(w.find('[data-test=tool-ask]').exists()).toBe(false);
+  });
+
   it('a remote view never asks for connections', async () => {
     const { api, calls } = fakeApi();
     (api as any).remote = true;

@@ -95,7 +95,11 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
   - **Not now** closes it; the agent is told, and the team is not asked about that tool again for 24 hours.
   On Linux and macOS the item shows the command to run yourself; the app installs nothing. Each request, answer and
   result is in the **Approvals** log; the Concierge's status lists the open ones.
->>>>>>> e0bcbb53905ed486f757e14fd9f0ea395a3314df
+  The items show in the same **Needs you** strip above every view, and in the Board's **Needs You** lane when the Board
+  is open (its team and member filters apply). A machine-wide tool says "Windows may ask for permission". While
+  winget runs the item says what it is doing (installing, then looking for the program) and its buttons wait; when the
+  program is found the item goes and a line says the tool is installed. **Not now** takes an optional note for the
+  agent. A remote view shows the item with **Not now** only and says to install it in the Yawble window.
 - Files: each member reads and writes only its own clone, home and temp folders. The app's data, the credential
   store, and other members and teams are denied.
 - **Settings > Guardrails** is the global policy: Sandbox, Limits (idle and wall-clock timeouts), Files and folders,
@@ -129,7 +133,8 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
 
 - **Board**: four lanes, **To Do**, **In Progress**, **Needs You** and **Done**. Cards come from the teams' work and
   move with its status. You can move a card, comment, or ask the Manager about it. **Needs You** also lists the
-  Connections to reconnect and the network requests waiting for you (see Sandbox and policy), with their buttons.
+  Connections to reconnect, the network requests and the tool requests waiting for you (see Sandbox and policy), with
+  their buttons.
 - **Backlog**: work you want done, most important first.
   - Add an item, read it and mark it ready, then dispatch it to a team's Manager or to **A new team…**.
   - When the team declares the work complete, only you mark it implemented.
@@ -287,7 +292,7 @@ work with your teams, as an MCP server (`yawble mcp`) or a CLI.
 | Companion | The `yawble` companion: the line to add it to Claude Code, paired programs |
 | System | Version, build, platform, sandbox backend and capabilities, About |
 
-- A notification says when Yawble needs you: questions, approvals, network requests and Connections to reconnect.
+- A notification says when Yawble needs you: questions, approvals, network requests, tool requests and Connections to reconnect.
 - Every call that changes something is recorded in an audit log, with who made it and how. Keys, tokens and
   messages are never recorded.
 - Each run's output is kept in an owner-only transcript file. The terminal shows it as **Formatted** or **Raw**.
