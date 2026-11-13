@@ -106,6 +106,7 @@ if ($TagOnly) { return }
 # updater reads the newest published release).
 Write-Host '== Signed installer =='
 $env:YAWBLE_BUILD_VERSION = $version
+$env:YAWBLE_BUILD_COMMIT = $head
 Invoke-Checked 'The shell build' { npm --prefix (Join-Path $root 'shell') run build }
 Invoke-Checked 'The signed build' { node (Join-Path $root 'packaging\build.mjs') --sign }
 $out = Join-Path $root 'artifacts\installers\win-x64'
