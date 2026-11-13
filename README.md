@@ -1,3 +1,22 @@
+<p align="center">
+  <a href="https://yawble.ai">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.png">
+      <img src="docs/images/logo.png" alt="Yawble" width="420">
+    </picture>
+  </a>
+</p>
+
+<p align="center"><b>Focus on the work, not the agent.</b></p>
+
+<p align="center">
+  <a href="https://yawble.ai">yawble.ai</a> ·
+  <a href="https://yawble.ai/download">Download</a> ·
+  <a href="https://yawble.ai/get-started">Get started</a> ·
+  <a href="https://www.youtube.com/@Yawble">YouTube</a> ·
+  <a href="https://x.com/_Yawble">X</a>
+</p>
+
 # Yawble
 
 Yawble is a desktop app that runs teams of AI coding agents on your own computer. You describe the work; a Manager
