@@ -80,6 +80,26 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
   blocked". If the policy store refuses the change, the item stays and shows why. IP addresses, local and
   private-network names, the app's own hosts and floor-rule hosts are never asked about. Each request and its answer
   is in the **Approvals** log; the Concierge's status lists the open ones.
+- **Tool requests**: an agent missing a developer tool asks with its `request_tool` tool, naming one from the app's
+  fixed catalog: **.NET SDK 10**, **.NET SDK (current LTS)**, **Node.js LTS** or **Python 3**. Agents never give a
+  package id or command. An unknown name gets the catalog's names back; a tool already installed is said to be there
+  (the next run has it on PATH). Otherwise you get one **Needs you** item per team and tool (repeats only count up),
+  with the member, the reason, the publisher, whether it installs for you or for the whole computer, and the exact
+  command. The choices:
+  - **Install** runs exactly `winget install --id <id> --exact --source winget --silent --accept-package-agreements
+    --accept-source-agreements --disable-interactivity` (plus `--scope user` for Python), in the app on this computer,
+    the same way as installing Git. Only from the window: never over the Cloud Link or from the `yawble` companion.
+    Afterwards the app looks for the program again. When it is found, every open request for that tool closes and each
+    team's Manager is told "<tool> is installed; retry what was blocked". When it is not, the item stays open with
+    winget's message and **Try again**.
+  - **Not now** closes it; the agent is told, and the team is not asked about that tool again for 24 hours.
+  On Linux and macOS the item shows the command to run yourself; the app installs nothing. Each request, answer and
+  result is in the **Approvals** log; the Concierge's status lists the open ones.
+  The items show in the same **Needs you** strip above every view, and in the Board's **Needs You** lane when the Board
+  is open (its team and member filters apply). A machine-wide tool says "Windows may ask for permission". While
+  winget runs the item says what it is doing (installing, then looking for the program) and its buttons wait; when the
+  program is found the item goes and a line says the tool is installed. **Not now** takes an optional note for the
+  agent. A remote view shows the item with **Not now** only and says to install it in the Yawble window.
 - Files: each member reads and writes only its own clone, home and temp folders. The app's data, the credential
   store, and other members and teams are denied.
 - **Settings > Guardrails** is the global policy: Sandbox, Limits (idle and wall-clock timeouts), Files and folders,
@@ -113,7 +133,8 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
 
 - **Board**: four lanes, **To Do**, **In Progress**, **Needs You** and **Done**. Cards come from the teams' work and
   move with its status. You can move a card, comment, or ask the Manager about it. **Needs You** also lists the
-  Connections to reconnect and the network requests waiting for you (see Sandbox and policy), with their buttons.
+  Connections to reconnect, the network requests and the tool requests waiting for you (see Sandbox and policy), with
+  their buttons.
 - **Backlog**: work you want done, most important first.
   - Add an item, read it and mark it ready, then dispatch it to a team's Manager or to **A new team…**.
   - When the team declares the work complete, only you mark it implemented.
@@ -271,7 +292,7 @@ work with your teams, as an MCP server (`yawble mcp`) or a CLI.
 | Companion | The `yawble` companion: the line to add it to Claude Code, paired programs |
 | System | Version, build, platform, sandbox backend and capabilities, About |
 
-- A notification says when Yawble needs you: questions, approvals, network requests and Connections to reconnect.
+- A notification says when Yawble needs you: questions, approvals, network requests, tool requests and Connections to reconnect.
 - Every call that changes something is recorded in an audit log, with who made it and how. Keys, tokens and
   messages are never recorded.
 - Each run's output is kept in an owner-only transcript file. The terminal shows it as **Formatted** or **Raw**.

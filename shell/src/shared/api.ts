@@ -477,7 +477,7 @@ export interface TaskPreview {
   problem: string | null; programResolved: string | null; commit: string | null; pinned: string[]; warnings: string[]; commandLineOnly: boolean;
 }
 export interface RunSlots { running: number; limit: number; queued: number }
-export interface Overview { slots: RunSlots; teams: TeamSummary[]; needsYou?: number; needsReconnect?: number; networkAsks?: number; heavy?: LeaseSnapshot }
+export interface Overview { slots: RunSlots; teams: TeamSummary[]; needsYou?: number; needsReconnect?: number; networkAsks?: number; toolAsks?: number; heavy?: LeaseSnapshot }
 /** How the person answers a network ask: allow the host for the agent, its team or everyone, or deny it. */
 export type NetworkAskChoice = 'agent' | 'team' | 'everywhere' | 'deny';
 /**
@@ -493,6 +493,31 @@ export interface NetworkAsk {
 }
 /** network.answer's reply: closed lists every ask the answer closed (the team's or everyone's for that host). */
 export interface NetworkAnswer { ok: boolean; id: number; host: string; choice: NetworkAskChoice; closed: number[]; told: string[] }
+/** One developer tool of the app's fixed catalog (tools.catalog; core: Integrations/ToolAsks.cs). command: the winget line, or the person's own command off Windows. */
+export interface ToolCatalogEntry {
+  name: string; displayName: string; publisher: string; wingetId: string; scope: 'user' | 'machine'; program: string; command: string;
+}
+/** How the person answers a tool ask: install it with winget (the window on this computer only), or not now. */
+export type ToolAskChoice = 'install' | 'notNow';
+/**
+ * A developer tool an agent asked for with request_tool, waiting for the person in Needs you (tools.asks). One per team
+ * and tool (count: repeats). error: winget's message after a failed install (state is back to pending: Try again).
+ * canInstall: the app can run command (the exact winget line); otherwise command is for the person to run (Linux/macOS).
+ */
+export interface ToolAsk {
+  id: number; at: string; teamId: number; team: string; member: string; memberName: string; tool: string;
+  displayName: string | null; publisher: string | null; wingetId: string | null; scope: 'user' | 'machine' | null;
+  reason: string | null; count: number; lastSeen: string; workflow: number | null;
+  state: 'pending' | 'installing' | 'installed' | 'dismissed'; attempts: number; error: string | null;
+  decidedBy: string | null; decidedVia: string | null; decidedAt: string | null;
+  canInstall: boolean; command: string | null; choices: ToolAskChoice[];
+}
+/** tools.install's reply, when winget has finished: done when the program is found; manual off Windows (run command yourself). */
+export interface ToolInstallResult { done: boolean; id: number; tool: string; message: string; manual: boolean; closed?: number[]; told?: string[] }
+/** tools.notNow's reply: told is the member told, or null. */
+export interface ToolNotNowResult { ok: boolean; id: number; tool: string; told: string | null }
+/** The tools.installProgress event while winget runs. */
+export interface ToolInstallProgress { id: number; tool: string; phase: 'installing' | 'checking' | 'installed' | 'failed'; message: string; command: string }
 /** One holder of the heavy-work lease, or one run waiting for it (core: Bus/BusEngine.Lease.cs). since: ISO time. */
 export interface LeaseEntry { team: string; member: string; what: string; since: string; position?: number | null }
 /** The heavy-work lease: how many may hold it at once (app.heavyWorkAtOnce), who holds it, who waits in order. */

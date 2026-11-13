@@ -240,6 +240,12 @@ public static class LogSources
                  CASE WHEN n.state = 'allowed' THEN 'allowed for ' || COALESCE(n.scope, '?') ELSE n.state END,
                  NULLIF(trim(COALESCE(n.decided_by, '') || COALESCE(' via ' || n.decided_via, '')), ''), n.decided_at
             FROM network_asks n
+          UNION ALL
+          SELECT 'e' || e.id, e.at, ta.team_id, ta.member, 'host tool',
+                 ta.tool || COALESCE(': ' || e.detail, ''), e.kind,
+                 NULLIF(trim(COALESCE(e.by_user, '') || COALESCE(' via ' || e.via, '')), ''),
+                 CASE WHEN e.kind IN ('asked', 'asked again') THEN NULL ELSE e.at END
+            FROM tool_ask_events e JOIN tool_asks ta ON ta.id = e.ask_id
         ) t LEFT JOIN teams tm ON tm.id = t.team_id
         """;
 
@@ -266,6 +272,10 @@ public static class LogSources
           SELECT na.at, 'Approvals', na.member, 'network ' || na.state || COALESCE(' for ' || na.scope, ''),
                  trim(na.host || COALESCE(': ' || na.reason, '') || ' (' || na.count || 'x)' || COALESCE(' by ' || na.decided_by, '')), 'q' || na.id
             FROM network_asks na
+          UNION ALL
+          SELECT te.at, 'Approvals', tq.member, 'host tool ' || tq.tool || ' ' || te.kind,
+                 trim(COALESCE(te.detail, '') || COALESCE(' by ' || te.by_user, '')), 'w' || te.id
+            FROM tool_ask_events te JOIN tool_asks tq ON tq.id = te.ask_id
           UNION ALL
           SELECT u.at, 'Model usage', u.member, COALESCE(u.model, 'model request'),
                  'input ' || COALESCE(u.input_tokens, 0) || ', output ' || COALESCE(u.output_tokens, 0) || ', cache ' || (COALESCE(u.cache_read_tokens, 0) + COALESCE(u.cache_write_tokens, 0)), 'u' || u.id

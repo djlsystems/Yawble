@@ -26,7 +26,7 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         "asks", "steps", "workflows", "item", "connectionAttention", "connections", "versionStatus", "models", "repos",
         "mcpList", "apiList", "checklist", "discoverStatus", "watches", "approvals", "env", "quiet", "runs", "runRecords",
         "history", "check", "commandLine", "testSessions", "actionStatus", "backups", "doctor", "keepDaily", "restoreStatus",
-        "defaultModels", "sources", "query", "values", "retention", "prunePreview", "who",
+        "defaultModels", "sources", "query", "values", "retention", "prunePreview", "who", "catalog",
     };
 
     /// <summary>Calls that read a setting, or set it when they carry <c>on</c>.</summary>

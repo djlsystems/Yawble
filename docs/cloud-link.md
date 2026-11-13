@@ -44,7 +44,8 @@ A remote viewer can do what you can do in the window, with the exceptions below.
 teams, answering their questions, the board and backlog, approving integration requests, answering network
 requests (allowing a host an agent was refused, like any other policy change), running the guardrail check, and
 changing agents and teams. A network request shows in the remote view's **Needs you** with the same four buttons; if
-the computer refuses the answer, the item says why and to answer it in the window.
+the computer refuses the answer, the item says why and to answer it in the window. A tool request shows there too,
+with **Not now** only: it says to install it in the Yawble window on the computer.
 
 Calls from a viewer run as that viewer. Every remote call that changes something, and every refused call, is
 written to `cloud-link-audit.log` in the app's data folder, with the time, the viewer and the method.
@@ -63,6 +64,7 @@ These are refused over Cloud Link. The viewer sees the reason.
 | MCP servers | Importing servers from config files on the computer; adding or changing a remote server, its address, transport, sign-in or secrets; reading a remote server's tools. |
 | Agent terminals | An agent's **Terminal** / **Test** session. It is started, typed into and stopped in the window only, and its output is not sent up. |
 | Backups | **Back up now** and **Restore**. The list of backups can be read. |
+| Host tools | **Install** (and **Try again**) for a tool an agent asked for: winget runs on the computer, so it is clicked there. The requests can be listed and answered **Not now**. |
 | Companion | Pairing, approving, listing or revoking `yawble` companion clients. Nothing of the companion is sent up. |
 
 ### Host terminals
