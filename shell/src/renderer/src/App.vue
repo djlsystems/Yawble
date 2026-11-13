@@ -231,8 +231,11 @@ onMounted(() => {
   void loadConversations();
   void loadAgents();
   timer = setInterval(refresh, props.pollMs ?? 1000);
+  // Back in the window (an agent CLI may have been installed or signed in to meanwhile): the agents again.
+  window.addEventListener('focus', loadAgentsOnFocus);
 });
-onBeforeUnmount(() => { if (timer) clearInterval(timer); for (const off of offs) off(); window.removeEventListener('keydown', shortcut); });
+function loadAgentsOnFocus() { void loadAgents(); }
+onBeforeUnmount(() => { if (timer) clearInterval(timer); for (const off of offs) off(); window.removeEventListener('keydown', shortcut); window.removeEventListener('focus', loadAgentsOnFocus); });
 
 // The window's own title (taskbar, Alt+Tab) follows the place; the page shows its own heading.
 watch(title, (t) => { document.title = t ? `${t} · Yawble` : 'Yawble'; }, { immediate: true });

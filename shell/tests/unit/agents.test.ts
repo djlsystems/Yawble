@@ -249,3 +249,42 @@ describe('agents screen: detection', () => {
     expect(isUiMethod('agents.test')).toBe(true);
   });
 });
+
+describe('agents screen: after Install', () => {
+  it('updates by itself until the CLI is found signed in, and again when the window comes back', async () => {
+    const { vi } = await import('vitest');
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let stage: 'missing' | 'found' | 'signed' = 'missing';
+      const grok = () => (stage === 'missing' ? grokMissing
+        : { ...grokMissing, found: true, executablePath: '/home/u/.grok/bin/grok', version: '1.0.0', signIn: { status: stage === 'signed' ? 'signed-in' : 'not-signed-in' } }) as DetectedCli;
+      const { api, calls } = fakeApi({ ...quiet, 'agents.detect': () => [claude, grok()], 'agents.install': () => ({ opened: true }) });
+      const w = mount(AgentsDialog, { props: { api } });
+      await flushPromises();
+      await w.get('[data-test=agent-cli-grok] [data-test=tile-install-btn]').trigger('click');
+      await flushPromises();
+      expect(w.text()).toContain('this list updates by itself');
+
+      stage = 'found';
+      await vi.advanceTimersByTimeAsync(4100);
+      await flushPromises();
+      expect(w.get('[data-test=agent-cli-grok] [data-test=cli-found]').text()).toBe('Found');
+      expect(w.text()).toContain('Sign in to it in the terminal');
+
+      stage = 'signed';
+      await vi.advanceTimersByTimeAsync(4100);
+      await flushPromises();
+      expect(w.text()).toContain('is installed and signed in');
+      const detects = calls.filter((c) => c.method === 'agents.detect').length;
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(calls.filter((c) => c.method === 'agents.detect').length).toBe(detects); // stopped once signed in
+
+      window.dispatchEvent(new Event('focus'));
+      await flushPromises();
+      expect(calls.filter((c) => c.method === 'agents.detect').length).toBe(detects + 1);
+      w.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

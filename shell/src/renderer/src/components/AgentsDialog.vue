@@ -65,17 +65,40 @@ const tiles = computed<Tile[]>(() => {
   return list;
 });
 
-async function detect() {
-  detecting.value = true;
-  error.value = null;
+/** Detects the CLIs again. quiet: in the background (after Install, or back in the window), without the busy label. */
+async function detect(quiet = false) {
+  if (!quiet) detecting.value = true;
+  if (!quiet) error.value = null;
   try {
     clis.value = await api.call<DetectedCli[]>('agents.detect');
   } catch (e) {
-    error.value = errorText(e);
+    if (!quiet) error.value = errorText(e);
   } finally {
-    detecting.value = false;
+    if (!quiet) detecting.value = false;
   }
 }
+
+// After Install: detect again every few seconds until that CLI is found signed in (or 20 minutes pass), so its card
+// changes by itself when the install and the sign-in in the terminal are done.
+let watching: ReturnType<typeof setInterval> | undefined;
+function watchFor(cliId: string) {
+  clearInterval(watching);
+  const until = Date.now() + 20 * 60_000;
+  watching = setInterval(async () => {
+    if (Date.now() > until) { clearInterval(watching); return; }
+    await detect(true);
+    const c = clis.value?.find((d) => d.cliId === cliId);
+    if (c?.found && c.signIn?.status === 'signed-in') {
+      clearInterval(watching);
+      notice.value = `${titleOf(cliId)} is installed and signed in.`;
+    } else if (c?.found && notice.value?.startsWith('A terminal opened')) {
+      notice.value = `${titleOf(cliId)} is installed. Sign in to it in the terminal, as its card says.`;
+    }
+  }, 4000);
+}
+
+// Back in the window (from a terminal where a CLI was installed or signed in to): detect again.
+function onFocus() { void detect(true); }
 
 async function loadAgents() {
   if (api.remote) return;
@@ -197,7 +220,8 @@ async function install(cliId: string) {
   updating.value = cliId;
   try {
     await api.call('agents.install', { cli: cliId });
-    notice.value = `A terminal opened with ${titleOf(cliId)}'s install command. When it finishes, sign in as its card says, then press Detect again.`;
+    notice.value = `A terminal opened with ${titleOf(cliId)}'s install command. When it finishes, sign in as its card says; this list updates by itself.`;
+    watchFor(cliId);
   } catch (e) {
     error.value = errorText(e);
   } finally {
@@ -269,12 +293,13 @@ async function remove(moveToBase: boolean) {
 onMounted(() => {
   void detect();
   void loadAgents();
+  window.addEventListener('focus', onFocus);
   if (!api.remote) {
     offChanged = api.onEvent?.((e) => { if (e.event === AGENT_TEST_CHANGED) onChanged(e.data); }) ?? null;
     void loadSessions();
   }
 });
-onBeforeUnmount(() => { offChanged?.(); offChanged = null; });
+onBeforeUnmount(() => { offChanged?.(); offChanged = null; clearInterval(watching); window.removeEventListener('focus', onFocus); });
 </script>
 
 <template>
@@ -284,7 +309,7 @@ onBeforeUnmount(() => { offChanged?.(); offChanged = null; });
       Update open a terminal that runs the CLI's own install or update command; you sign in to each CLI there, your own way.
     </p>
     <div class="row bar">
-      <button data-test="agents-redetect" :disabled="detecting" :aria-busy="detecting" @click="detect"><BusyLabel :busy="detecting" text="Detecting…">Detect again</BusyLabel></button>
+      <button data-test="agents-redetect" :disabled="detecting" :aria-busy="detecting" @click="detect()"><BusyLabel :busy="detecting" text="Detecting…">Detect again</BusyLabel></button>
     </div>
     <p v-if="error" class="error" data-test="agents-error">{{ error }}</p>
     <p v-if="notice" class="ok small" data-test="agents-notice">{{ notice }}</p>
