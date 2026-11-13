@@ -64,17 +64,22 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
 - Network: model and team traffic go through the gateway. Other hosts are reachable only if allowed; every refusal
   is logged.
 - **Network requests**: when a run is refused a host name that is not on its allowlist, you get one **Needs you** item
-  per team, member and host (repeats only count up). The agent can add why with its `request_host` tool. The item
-  shows the member, team, host, the reason (or what was refused), how often, and what a package registry is for
-  (api.nuget.org: NuGet; registry.npmjs.org: npm; pypi.org and files.pythonhosted.org: pip). The choices:
+  per team, member and host (repeats only count up). The agent can add why with its `request_host` tool. The items
+  show in a **Needs you** strip above every view, and in the Board's **Needs You** lane instead when the Board is open
+  (its team and member filters apply). Each item shows the member, team, host, the agent's reason (or what was
+  refused: the method and a short path, without its query), how many times it was refused since when, and what a
+  package registry is for (api.nuget.org: NuGet; registry.npmjs.org: npm; pypi.org and files.pythonhosted.org: pip).
+  It has four buttons:
   - **Allow for this agent** adds the host to the member's loosen block;
-  - **Allow for this team** adds it to every member of the team;
-  - **Allow everywhere** adds it to the global allowed hosts;
-  - **Deny** closes it; the agent is told, and that host is not asked again for that member for 24 hours.
+  - **Allow for this team** adds it to every member of the team, and closes the team's other requests for that host;
+  - **Allow everywhere** adds it to the global allowed hosts, and closes every team's requests for that host;
+  - **Deny** closes it; the agent is told (with the note you type above the buttons, if any), and that host is not
+    asked again for that member for 24 hours.
   Only the exact host is allowed, only after your click, through the same checks as a policy change; it applies from
   the member's next run. After an allow the team's Manager is told "<host> is now allowed for <member>; retry what was
-  blocked". IP addresses, local and private-network names, the app's own hosts and floor-rule hosts are never asked
-  about. Each request and its answer is in the **Approvals** log; the Concierge's status lists the open ones.
+  blocked". If the policy store refuses the change, the item stays and shows why. IP addresses, local and
+  private-network names, the app's own hosts and floor-rule hosts are never asked about. Each request and its answer
+  is in the **Approvals** log; the Concierge's status lists the open ones.
 - **Tool requests**: an agent missing a developer tool asks with its `request_tool` tool, naming one from the app's
   fixed catalog: **.NET SDK 10**, **.NET SDK (current LTS)**, **Node.js LTS** or **Python 3**. Agents never give a
   package id or command. An unknown name gets the catalog's names back; a tool already installed is said to be there
@@ -122,7 +127,8 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
 ## Board, Backlog and Documents
 
 - **Board**: four lanes, **To Do**, **In Progress**, **Needs You** and **Done**. Cards come from the teams' work and
-  move with its status. You can move a card, comment, or ask the Manager about it.
+  move with its status. You can move a card, comment, or ask the Manager about it. **Needs You** also lists the
+  Connections to reconnect and the network requests waiting for you (see Sandbox and policy), with their buttons.
 - **Backlog**: work you want done, most important first.
   - Add an item, read it and mark it ready, then dispatch it to a team's Manager or to **A new team…**.
   - When the team declares the work complete, only you mark it implemented.
@@ -280,7 +286,7 @@ work with your teams, as an MCP server (`yawble mcp`) or a CLI.
 | Companion | The `yawble` companion: the line to add it to Claude Code, paired programs |
 | System | Version, build, platform, sandbox backend and capabilities, About |
 
-- A notification says when Yawble needs you: questions, approvals and Connections to reconnect.
+- A notification says when Yawble needs you: questions, approvals, network requests and Connections to reconnect.
 - Every call that changes something is recorded in an audit log, with who made it and how. Keys, tokens and
   messages are never recorded.
 - Each run's output is kept in an owner-only transcript file. The terminal shows it as **Formatted** or **Raw**.

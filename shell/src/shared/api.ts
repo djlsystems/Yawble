@@ -477,7 +477,22 @@ export interface TaskPreview {
   problem: string | null; programResolved: string | null; commit: string | null; pinned: string[]; warnings: string[]; commandLineOnly: boolean;
 }
 export interface RunSlots { running: number; limit: number; queued: number }
-export interface Overview { slots: RunSlots; teams: TeamSummary[]; needsYou?: number; needsReconnect?: number; heavy?: LeaseSnapshot }
+export interface Overview { slots: RunSlots; teams: TeamSummary[]; needsYou?: number; needsReconnect?: number; networkAsks?: number; heavy?: LeaseSnapshot }
+/** How the person answers a network ask: allow the host for the agent, its team or everyone, or deny it. */
+export type NetworkAskChoice = 'agent' | 'team' | 'everywhere' | 'deny';
+/**
+ * A host a run was refused (the gateway, or the agent's request_host tool), waiting for the person in Needs you
+ * (network.asks; core: Integrations/NetworkAsks.cs). member is "Team/Name"; reason is the agent's words, else method and
+ * pathSample say what was refused; hint says what a well-known package registry is for.
+ */
+export interface NetworkAsk {
+  id: number; at: string; teamId: number; team: string; member: string; memberName: string; host: string;
+  reason: string | null; method: string | null; pathSample: string | null; count: number; lastSeen: string; hint: string | null;
+  workflow: number | null; state: 'pending' | 'allowed' | 'denied'; scope: Exclude<NetworkAskChoice, 'deny'> | null;
+  decidedBy: string | null; decidedAt: string | null; choices: NetworkAskChoice[];
+}
+/** network.answer's reply: closed lists every ask the answer closed (the team's or everyone's for that host). */
+export interface NetworkAnswer { ok: boolean; id: number; host: string; choice: NetworkAskChoice; closed: number[]; told: string[] }
 /** One holder of the heavy-work lease, or one run waiting for it (core: Bus/BusEngine.Lease.cs). since: ISO time. */
 export interface LeaseEntry { team: string; member: string; what: string; since: string; position?: number | null }
 /** The heavy-work lease: how many may hold it at once (app.heavyWorkAtOnce), who holds it, who waits in order. */

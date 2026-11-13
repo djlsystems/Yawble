@@ -358,7 +358,7 @@ app.whenReady().then(async () => {
       tray?.update({ running: o.slots.running, queued: o.slots.queued, needsYou: needs });
       // A new question for the person: a system notification when the window is not in front (clicking opens it).
       if (needsYou !== null && needs > needsYou && !(mainWindow?.isFocused() ?? false) && Notification.isSupported()) {
-        const n = new Notification({ title: 'Yawble needs you', body: `${needs} thing${needs === 1 ? '' : 's'} waiting for you (questions, approvals, connections to reconnect).` });
+        const n = new Notification({ title: 'Yawble needs you', body: `${needs} thing${needs === 1 ? '' : 's'} waiting for you (questions, approvals, hosts agents ask to reach, connections to reconnect).` });
         n.on('click', showMain);
         n.show();
       }
