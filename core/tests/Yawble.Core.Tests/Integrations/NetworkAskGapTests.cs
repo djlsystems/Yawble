@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Nodes;
+using System.Text.Json.Nodes;
 using Microsoft.Data.Sqlite;
 using Yawble.Core.Gateway;
 using Yawble.Core.Integrations;
@@ -162,14 +162,14 @@ public sealed class NetworkAskGapTests : IDisposable
     // ------------------------------------------------------------------ "Allow everywhere" and a narrowing override
 
     /// <summary>
-    /// FAULT (card 62): a member whose override narrows network.allowHosts (Settings: a member's own list, a subset of the
+    /// Was a fault (card 62, fixed on card 60): a member whose override narrows network.allowHosts (Settings: a member's own list, a subset of the
     /// global one) is still refused the host after "Allow everywhere", because the override filters the global list
     /// (PolicyMerger.Merge, StoreNetworkPolicy.EffectiveHosts); yet the ask closes and the Manager is told "<host> is now
     /// allowed for Priya; retry what was blocked". The retry is refused again and a new ask is raised.
     /// Expected: either the member is allowed (the host also goes in that member's loosen block, or the override), or
     /// the answer says so and the Manager is not told it is allowed for that member.
     /// </summary>
-    [Fact(Skip = "fault reported on card 62: Allow everywhere does not reach a member whose override narrows network.allowHosts")]
+    [Fact]
     public async Task AllowEverywhere_ForAMemberWhoseOverrideNarrowsTheHosts_ActuallyAllowsIt()
     {
         _policies.SaveGlobal(_policies.GetGlobal() with { Network = new NetworkPolicy(["github.com"]) }, _layout);
@@ -182,6 +182,75 @@ public sealed class NetworkAskGapTests : IDisposable
         var allowed = StoreNetworkPolicy.EffectiveHosts(_policies.GetGlobal(), _policies.GetMember(_priya)).Contains("pypi.org");
         var toldAllowed = _told.Any(t => t.Text.StartsWith("pypi.org is now allowed for Priya", StringComparison.Ordinal));
         Assert.True(allowed || !toldAllowed, "the Manager was told pypi.org is allowed for Priya, but Priya's override still filters it out");
+        Assert.True(allowed);
+        Assert.True(toldAllowed);
+        Assert.Contains("pypi.org", _policies.GetGlobal().Network.AllowHosts);
+        Assert.Contains("pypi.org", _policies.GetMember(_priya).Loosen.Network?.AllowHosts ?? []);
+        Assert.Equal(HostAskOutcome.AllowedNextRun, asks.Refused("Alpha/Priya", "pypi.org", "CONNECT", null));
+    }
+
+    [Fact]
+    public async Task AllowEverywhere_AlsoReachesAnotherTeamsWaitingMember_WhoseOverrideNarrowsTheHosts()
+    {
+        var beta = Insert("INSERT INTO teams (name, created_at) VALUES ('Beta', '2026-11-13T00:00:00Z') RETURNING id;");
+        Insert($"INSERT INTO members (team_id, name, role, created_at) VALUES ({beta}, 'Manager', 'manager', '2026-11-13T00:00:00Z') RETURNING id;");
+        var omar = Insert($"INSERT INTO members (team_id, name, role, created_at) VALUES ({beta}, 'Omar', 'member', '2026-11-13T00:00:00Z') RETURNING id;");
+        _policies.SaveGlobal(_policies.GetGlobal() with { Network = new NetworkPolicy(["github.com"]) }, _layout);
+        _policies.SaveOverride(omar, new PolicyPatch(Network: new NetworkPatch(["github.com"])), _layout);
+        var asks = Service();
+        asks.Refused("Alpha/Priya", "pypi.org", "CONNECT", null);
+        asks.Refused("Beta/Omar", "pypi.org", "CONNECT", null);
+
+        var result = await asks.AnswerAsync(asks.Asks().First(a => a.Member == "Alpha/Priya").Id, NetworkAskChoices.Everywhere, null, Ct);
+
+        Assert.Equal(2, result["closed"]!.AsArray().Count);
+        Assert.Contains("pypi.org", StoreNetworkPolicy.EffectiveHosts(_policies.GetGlobal(), _policies.GetMember(_priya)));
+        Assert.Contains("pypi.org", StoreNetworkPolicy.EffectiveHosts(_policies.GetGlobal(), _policies.GetMember(omar)));
+        Assert.Contains(_told, t => t.Team == "Beta" && t.Text.StartsWith("pypi.org is now allowed for Omar", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AllowForTheTeam_ReachesAMemberWhoseOwnOverrideNarrowsTheHosts()
+    {
+        var omar = Insert($"INSERT INTO members (team_id, name, role, created_at) VALUES ({_alpha}, 'Omar', 'member', '2026-11-13T00:00:00Z') RETURNING id;");
+        _policies.SaveGlobal(_policies.GetGlobal() with { Network = new NetworkPolicy(["github.com"]) }, _layout);
+        _policies.SaveOverride(_priya, new PolicyPatch(Network: new NetworkPatch(["github.com"])), _layout);
+        var asks = Service();
+        asks.Refused("Alpha/Priya", "pypi.org", "CONNECT", null);
+
+        await asks.AnswerAsync(Assert.Single(asks.Asks()).Id, NetworkAskChoices.Team, null, Ct);
+
+        Assert.Contains("pypi.org", StoreNetworkPolicy.EffectiveHosts(_policies.GetGlobal(), _policies.GetMember(_priya)));
+        Assert.Contains("pypi.org", StoreNetworkPolicy.EffectiveHosts(_policies.GetGlobal(), _policies.GetMember(omar)));
+        Assert.DoesNotContain("pypi.org", _policies.GetGlobal().Network.AllowHosts);
+        Assert.Contains(_told, t => t.Text.StartsWith("pypi.org is now allowed for Priya", StringComparison.Ordinal));
+        Assert.Equal(HostAskOutcome.AllowedNextRun, asks.Refused("Alpha/Priya", "pypi.org", "CONNECT", null));
+    }
+
+    /// <summary>A policy that saves without error but whose effective hosts still lack the host.</summary>
+    private sealed class SilentlyIneffectivePolicy : INetworkPolicy
+    {
+        public bool AllowedFor(long memberId, string host) => false;
+        public Task AllowForMemberAsync(long memberId, string host, CancellationToken ct) => Task.CompletedTask;
+        public Task AllowEverywhereAsync(string host, CancellationToken ct) => Task.CompletedTask;
+    }
+
+    [Theory]
+    [InlineData("agent")]
+    [InlineData("team")]
+    [InlineData("everywhere")]
+    public async Task AnAllowThatDoesNotReachTheMember_LeavesTheAskWaiting_AndTellsNoOne(string choice)
+    {
+        var asks = Service(new SilentlyIneffectivePolicy());
+        asks.Refused("Alpha/Priya", "pypi.org", "CONNECT", null);
+        var id = Assert.Single(asks.Asks()).Id;
+
+        var e = await Assert.ThrowsAsync<RpcException>(() => asks.DispatchAsync("network.answer", new JsonObject { ["id"] = id, ["choice"] = choice }, Ct));
+
+        Assert.Equal("policy_refused", e.Code);
+        Assert.Contains("still not allowed for Alpha/Priya", e.Message);
+        Assert.Equal("pending", Assert.Single(asks.Asks()).State);
+        Assert.Empty(_told);
     }
 
     private static long InsertIn(TempDb db, string sql)

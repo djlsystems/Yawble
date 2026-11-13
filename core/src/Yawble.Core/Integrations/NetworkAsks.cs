@@ -281,6 +281,19 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
                     await policy.AllowEverywhereAsync(ask.Host, ct);
                     break;
             }
+
+            // The members this answer tells the Manager about: the asker, and for team or everywhere each member whose
+            // waiting ask for the host closes with it. A member's own override can narrow the global list (it is an
+            // intersection), so the global list alone does not reach it: that member also gets the host in its loosen block.
+            var reached = new List<Who> { asker };
+            if (choice != NetworkAskChoices.Agent)
+                foreach (var a in Asks().Where(a => a.Id != id && a.Host == ask.Host && (choice == NetworkAskChoices.Everywhere || a.TeamId == ask.TeamId)))
+                    if (Find(a.Team, a.MemberName) is { } m && reached.All(r => r.MemberId != m.MemberId)) reached.Add(m);
+            foreach (var m in reached)
+                if (!policy.AllowedFor(m.MemberId, ask.Host)) await policy.AllowForMemberAsync(m.MemberId, ask.Host, ct);
+            // Never tell the Manager a host is allowed unless the member's effective hosts now include it.
+            if (reached.Where(m => !policy.AllowedFor(m.MemberId, ask.Host)).Select(m => m.Qualified).ToList() is { Count: > 0 } missed)
+                throw new PolicyException([$"{ask.Host} is still not allowed for {string.Join(", ", missed)} after the change; the request stays waiting"]);
         }
 
         var cleanNote = string.IsNullOrWhiteSpace(note) ? null : Clip(note.Trim(), 500);

@@ -77,7 +77,9 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
     asked again for that member for 24 hours.
   Only the exact host is allowed, only after your click, through the same checks as a policy change; it applies from
   the member's next run. After an allow the team's Manager is told "<host> is now allowed for <member>; retry what was
-  blocked". If the policy store refuses the change, the item stays and shows why. IP addresses, local and
+  blocked". A member whose own override narrows the host list also gets the host in its loosen block, so the team and
+  everywhere answers reach it too; the Manager is told only once the member's effective hosts include it. If the policy
+  store refuses the change, the item stays and shows why. IP addresses, local and
   private-network names, the app's own hosts and floor-rule hosts are never asked about. Each request and its answer
   is in the **Approvals** log; the Concierge's status lists the open ones.
 - **Tool requests**: an agent missing a developer tool asks with its `request_tool` tool, naming one from the app's
