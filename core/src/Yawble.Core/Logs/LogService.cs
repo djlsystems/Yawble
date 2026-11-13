@@ -268,13 +268,21 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
         var s = LogSources.Find(source) ?? throw new ArgumentException($"no log named '{source}'");
         var p = s.Prune ?? throw new ArgumentException($"{s.Title} is kept: {s.KeptBecause}");
         using var c = Open();
-        using var cmd = c.CreateCommand();
-        cmd.CommandText = $"SELECT COUNT(*), MIN({p.TimeColumn}), MAX({p.TimeColumn}) {(p.FileColumn is null ? "" : $", COUNT({p.FileColumn})")} FROM {p.Table} WHERE {PruneWhere(p)};";
-        cmd.Parameters.AddWithValue("@cutoff", cutoff);
-        using var r = cmd.ExecuteReader();
-        r.Read();
-        return new(s.Id, s.Title, cutoff, r.GetInt64(0), r.IsDBNull(1) ? null : r.GetString(1), r.IsDBNull(2) ? null : r.GetString(2), p.Loss,
-            p.FileColumn is null ? 0 : r.GetInt64(3));
+        long count = 0, files = 0;
+        string? oldest = null, newest = null;
+        foreach (var t in p.Tables)
+        {
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = $"SELECT COUNT(*), MIN({t.TimeColumn}), MAX({t.TimeColumn}) {(t.FileColumn is null ? "" : $", COUNT({t.FileColumn})")} FROM {t.Table} WHERE {PruneWhere(t)};";
+            cmd.Parameters.AddWithValue("@cutoff", cutoff);
+            using var r = cmd.ExecuteReader();
+            r.Read();
+            count += r.GetInt64(0);
+            if (!r.IsDBNull(1) && (oldest is null || string.CompareOrdinal(r.GetString(1), oldest) < 0)) oldest = r.GetString(1);
+            if (!r.IsDBNull(2) && (newest is null || string.CompareOrdinal(r.GetString(2), newest) > 0)) newest = r.GetString(2);
+            if (t.FileColumn is not null) files += r.GetInt64(3);
+        }
+        return new(s.Id, s.Title, cutoff, count, oldest, newest, p.Loss, files);
     }
 
     private static string PruneWhere(LogPrune p) => $"{p.TimeColumn} < @cutoff" + (p.Where is null ? "" : $" AND ({p.Where})");
@@ -286,18 +294,23 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
         var s = LogSources.Find(source) ?? throw new ArgumentException($"no log named '{source}'");
         var p = s.Prune ?? throw new ArgumentException($"{s.Title} is kept: {s.KeptBecause}");
         using var c = Open();
-        if (p.FileColumn is not null)
+        long deleted = 0;
+        foreach (var t in p.Tables)
         {
-            using var files = c.CreateCommand();
-            files.CommandText = $"SELECT {p.FileColumn} FROM {p.Table} WHERE {PruneWhere(p)} AND {p.FileColumn} IS NOT NULL;";
-            files.Parameters.AddWithValue("@cutoff", cutoff);
-            using var r = files.ExecuteReader();
-            while (r.Read()) DeleteFile(r.GetString(0));
+            if (t.FileColumn is not null)
+            {
+                using var files = c.CreateCommand();
+                files.CommandText = $"SELECT {t.FileColumn} FROM {t.Table} WHERE {PruneWhere(t)} AND {t.FileColumn} IS NOT NULL;";
+                files.Parameters.AddWithValue("@cutoff", cutoff);
+                using var r = files.ExecuteReader();
+                while (r.Read()) DeleteFile(r.GetString(0));
+            }
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = $"DELETE FROM {t.Table} WHERE {PruneWhere(t)};";
+            cmd.Parameters.AddWithValue("@cutoff", cutoff);
+            deleted += cmd.ExecuteNonQuery();
         }
-        using var cmd = c.CreateCommand();
-        cmd.CommandText = $"DELETE FROM {p.Table} WHERE {PruneWhere(p)};";
-        cmd.Parameters.AddWithValue("@cutoff", cutoff);
-        return cmd.ExecuteNonQuery();
+        return deleted;
     }
 
     /// <summary>Deletes a file the app wrote under its data folder; nothing outside it.</summary>

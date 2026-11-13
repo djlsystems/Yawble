@@ -189,6 +189,44 @@ public sealed class LogServiceTests : IDisposable
     }
 
     [Fact]
+    public void PruningApprovals_AlsoPrunesAnsweredNetworkAsks_NeverAWaitingOne()
+    {
+        Exec("""
+            INSERT INTO network_asks (at, team_id, member, host, method, last_seen, state, scope, decided_by, decided_at) VALUES
+              (@old, 1, 'web/DeveloperAda', 'pypi.org', 'CONNECT', @old, 'allowed', 'everywhere', 'pat', @old),
+              (@old, 1, 'web/DeveloperAda', 'evil.example', 'CONNECT', @old, 'denied', NULL, 'pat', @old),
+              (@older, 1, 'web/DeveloperAda', 'npmjs.org', 'CONNECT', @older, 'pending', NULL, NULL, NULL),
+              (@new, 1, 'web/DeveloperAda', 'nuget.org', 'CONNECT', @new, 'allowed', 'agent', 'pat', @new);
+            """, ("@old", Ago(400)), ("@older", Ago(700)), ("@new", Ago(1)));
+        int NetworkRows(string? state = null)
+        {
+            using var c = new SqliteConnection(_db.ConnectionString);
+            c.Open();
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT count(*) FROM network_asks" + (state is null ? ";" : " WHERE state = @s;");
+            if (state is not null) cmd.Parameters.AddWithValue("@s", state);
+            return Convert.ToInt32(cmd.ExecuteScalar());
+        }
+
+        // The preview counts the two answered network asks older than a year (the seeded tool-call asks are recent or waiting).
+        var preview = _logs.PrunePreview("approvals", _logs.CutoffFor(365));
+        Assert.Equal(2, preview.Count);
+        Assert.Equal(Ago(400), preview.Oldest);
+
+        // The sweep keeps the Approvals log to 365 days: both go, the 700-day-old waiting ask and the recent one stay.
+        Assert.Equal(2, _logs.Sweep()["approvals"]);
+        Assert.Equal(2, NetworkRows());
+        Assert.Equal(1, NetworkRows("pending"));
+
+        // A year later the recent answers (network and tool call) go too; the waiting asks never do.
+        _clock.Advance(TimeSpan.FromDays(365));
+        Assert.Equal(2, _logs.Sweep()["approvals"]);
+        Assert.Equal(1, NetworkRows());
+        Assert.Equal(1, NetworkRows("pending"));
+        Assert.All(Rows(Q(new LogQuery("approvals"))), r => Assert.Equal("pending", r["state"]!.GetValue<string>()));
+    }
+
+    [Fact]
     public void PruningTranscripts_DeletesTheirFiles()
     {
         var old = Path.Combine(_db.Dir, "transcripts", "web", "DeveloperAda", "run-2.log");
