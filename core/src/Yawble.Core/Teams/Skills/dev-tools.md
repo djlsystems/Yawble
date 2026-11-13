@@ -50,6 +50,18 @@ the remote server"), even for an allowed host. So never check the network with t
 A host that is not allowed answers through the proxy with 403 "host not on this agent's allowlist": that, and only
 that, means the person must allow it.
 
+When your work needs a host that is refused (NuGet's `api.nuget.org` for `dotnet restore`, `registry.npmjs.org` for
+`npm ci`, `pypi.org` and `files.pythonhosted.org` for `pip install`):
+
+1. Call `request_host` with the exact host name and one line on what it is for ("restore NuGet packages for the xUnit
+   test project"). The refusal itself already put the host in the person's Needs you; your reason tells them why.
+2. Then hand back as `blocked` on that host, saying what is waiting for it. A host the person allows is reachable
+   from your next run, not the one that was refused; the Manager is told when it is allowed and has the work retried.
+3. Never retry in a loop, and never try another site, a mirror or another way around the refusal. If the person
+   denies it, carry on without it or report that you are blocked.
+
+IP addresses, local and private-network names, and the model vendors' hosts are never asked about: they stay refused.
+
 ## What you cannot reach
 
 The person's own folders (Documents, Desktop, ...), other members' folders, the team's repository, the app's

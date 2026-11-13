@@ -16,6 +16,8 @@ public static class RemoteAccess
         "core.getInfo", "sandbox.getAvailableBackends", "sandbox.getPlatformSupport", "scheduler.getState",
         "guardrail.", "agents.", "runs.", "concierge.", "board.", "backlog.", "integrations.", "tasks.",
         "ops.backups",
+        // Network asks: listed and answered like the other policy changes (policy. is a screen prefix above).
+        "network.",
         // Whether git is installed (the banner's text); installing it is git.install, refused below.
         "git.check",
         // The Logs dialog, read only (pruning and retention are refused below).

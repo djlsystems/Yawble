@@ -63,6 +63,18 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
 - The run gets a random run token. It works only for that run and stops when the run ends.
 - Network: model and team traffic go through the gateway. Other hosts are reachable only if allowed; every refusal
   is logged.
+- **Network requests**: when a run is refused a host name that is not on its allowlist, you get one **Needs you** item
+  per team, member and host (repeats only count up). The agent can add why with its `request_host` tool. The item
+  shows the member, team, host, the reason (or what was refused), how often, and what a package registry is for
+  (api.nuget.org: NuGet; registry.npmjs.org: npm; pypi.org and files.pythonhosted.org: pip). The choices:
+  - **Allow for this agent** adds the host to the member's loosen block;
+  - **Allow for this team** adds it to every member of the team;
+  - **Allow everywhere** adds it to the global allowed hosts;
+  - **Deny** closes it; the agent is told, and that host is not asked again for that member for 24 hours.
+  Only the exact host is allowed, only after your click, through the same checks as a policy change; it applies from
+  the member's next run. After an allow the team's Manager is told "<host> is now allowed for <member>; retry what was
+  blocked". IP addresses, local and private-network names, the app's own hosts and floor-rule hosts are never asked
+  about. Each request and its answer is in the **Approvals** log; the Concierge's status lists the open ones.
 - Files: each member reads and writes only its own clone, home and temp folders. The app's data, the credential
   store, and other members and teams are denied.
 - **Settings > Guardrails** is the global policy: Sandbox, Limits (idle and wall-clock timeouts), Files and folders,

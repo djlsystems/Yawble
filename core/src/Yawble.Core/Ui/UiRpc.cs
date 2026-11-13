@@ -205,6 +205,8 @@ public sealed class UiRpc(
         var needsYou = 0;
         foreach (var t in teams) needsYou += (await bus.OpenDecisionsAsync(t.Name, ct)).Count;
         needsYou += bus.Integrations?.PendingCount() ?? 0; // calls waiting for the person's approval
+        var networkAsks = bus.NetworkAsks?.PendingCount() ?? 0; // hosts agents were refused, waiting for the person (network.asks)
+        needsYou += networkAsks;
         // Connections a service refused (needs reconnect): only the count here; names and reasons come from
         // integrations.connectionAttention, which the Cloud Link refuses like every integrations.connection* method.
         var reconnect = bus.Integrations?.ConnectionsNeedingReconnect().Count ?? 0;
@@ -222,6 +224,7 @@ public sealed class UiRpc(
             // Open questions waiting on the person, across every team (the tray and the window's badge).
             ["needsYou"] = needsYou,
             ["needsReconnect"] = reconnect,
+            ["networkAsks"] = networkAsks,
         };
     }
 

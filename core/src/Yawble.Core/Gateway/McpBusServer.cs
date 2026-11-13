@@ -16,7 +16,7 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
     public static readonly string[] SupportedProtocolVersions = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
     public static readonly IReadOnlyList<string> ToolNames =
-        ["tell", "progress", "handback", "blocked", "needs_decision", "workflow_complete", "status", "hiring", "hire", "board", "backlog", "skills_get", "skills_list", "wake_me", "workflow_show", "lease", "repo"];
+        ["tell", "progress", "handback", "blocked", "needs_decision", "workflow_complete", "status", "hiring", "hire", "board", "backlog", "skills_get", "skills_list", "wake_me", "workflow_show", "lease", "repo", "request_host"];
 
     public async Task<BusReply> HandleAsync(byte[] body, CancellationToken ct)
     {
@@ -106,6 +106,8 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
                 "skills_list" => string.Join(Environment.NewLine, run.Skills().Select(x => $"{x.Name} - {x.Description}")),
                 "lease" => await run.LeaseAsync(Optional(args, "action") ?? "status", Optional(args, "what"), ct),
                 "repo" => await RepoText(run, ct),
+                "request_host" => (run.Engine.NetworkAsks ?? throw new BusRefusal("unavailable", "network requests are not available here: hand back blocked on the host instead"))
+                    .RequestFromAgent(run.Member, Required(args, "host"), Required(args, "reason"), run.Correlation, run.Causation),
                 "workflow_show" => WorkflowText(await run.WorkflowShowAsync(OptionalLong(args, "workflow") ?? run.Correlation, ct)),
                 _ when run.Engine.Integrations?.IsTool(name) == true => await CallIntegrationAsync(name, args, img => png = img, ct),
                 _ => throw new RpcError(-32602, $"unknown tool: {name}"),
@@ -270,6 +272,11 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
         Tool("wake_me", "Be woken once, later, in the work you are doing now: after this many minutes you get a run with your note. Use it to check again later instead of waiting or sleeping; then end your turn.",
             ("minutes", "integer", "How long from now (1 to 10080, a week).", true),
             ("note", "string", "What to look at when you are woken.", true)),
+        Tool("request_host", "Ask the person to allow a host your work needs (a 403 \"host not on this agent's allowlist\", e.g. api.nuget.org for dotnet restore). " +
+                             "The person answers in Needs you; an allowed host is reachable from your next run. Then hand back blocked on that host: " +
+                             "never retry in a loop, never try another site.",
+            ("host", "string", "The exact host name, e.g. api.nuget.org (no scheme, port, path or wildcard).", true),
+            ("reason", "string", "One line on what you need it for, e.g. 'restore NuGet packages for the xUnit test project'.", true)),
     ];
 
     /// <summary>A long report is shown formatted on the card and in the workflow: a summary line first, then Markdown.</summary>

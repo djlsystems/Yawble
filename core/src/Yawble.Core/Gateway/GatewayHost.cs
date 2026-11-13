@@ -105,6 +105,35 @@ public sealed class GatewayHostOptions
     public IConnectDialer? ConnectDialer { get; init; }
 }
 
+/// <summary>What became of a host refusal: the person was asked (or already is), or it stays a plain refusal.</summary>
+public enum HostAskOutcome
+{
+    /// <summary>Not a host the person is asked about (an IP, loopback, a private or app host, a floor-rule host), or no ask store.</summary>
+    None,
+
+    /// <summary>A new ask for the person.</summary>
+    Asked,
+
+    /// <summary>The same host already waits for the person: only its count went up.</summary>
+    Pending,
+
+    /// <summary>The person denied this host for this member within the last 24 hours.</summary>
+    Denied,
+
+    /// <summary>The host is already allowed for the member's next run (the person allowed it after this run started).</summary>
+    AllowedNextRun,
+}
+
+/// <summary>Where a run's gateway reports a host it refused because it is not on the agent's allowlist (the network asks).</summary>
+public interface IHostRefusals
+{
+    /// <param name="member">The run's member, "Team/Name".</param>
+    /// <param name="host">The host refused (lower case, no port).</param>
+    /// <param name="method">CONNECT, or the plain-http request's method.</param>
+    /// <param name="path">A plain-http request's path without its query; null for CONNECT.</param>
+    HostAskOutcome Refused(string member, string host, string method, string? path);
+}
+
 /// <summary>What one run's gateway serves. Only the vhosts the run's CLI and mode need are on (least exposure).</summary>
 public sealed record RunGatewaySpec(
     long RunId,
@@ -182,6 +211,9 @@ public sealed class GatewayHost : IDisposable
     public RunTokenRegistry Tokens { get; }
     public GatewayHostOptions Options { get; }
     internal HttpClient Upstream { get; }
+
+    /// <summary>The network asks: a host refused for not being on the allowlist is reported here (null: plain refusals only). Set by the host at start.</summary>
+    public IHostRefusals? Refusals { get; set; }
 
     /// <summary>
     /// Issues the run's token and binds 127.0.0.1:&lt;ephemeral&gt; (IPv4 only; never 0.0.0.0) for it.

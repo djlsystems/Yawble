@@ -213,6 +213,20 @@ await using var integrations = new Yawble.Core.Integrations.IntegrationService($
     connections: connections, browser: new Yawble.Core.Integrations.ShellBrowser(), redirect: () => new Yawble.Core.Integrations.LoopbackRedirectReceiver(),
     websites: websiteHost);
 bus.Integrations = integrations;
+// Network asks: a host a run's gateway refused (or an agent's request_host) waits for the person in Needs you; their answer
+// changes the policy through the policy store, with each member's layout for its checks.
+var networkAsks = new Yawble.Core.Integrations.NetworkAskService($"Data Source={dbPath}",
+    new Yawble.Core.Integrations.StoreNetworkPolicy(policies,
+        async (memberId, ct) =>
+        {
+            var everyone = await bus.AllMemberRowsAsync(ct);
+            return layouts.For(everyone.FirstOrDefault(m => m.Id == memberId) ?? throw new ArgumentException($"no member {memberId}"), everyone);
+        },
+        async ct => layouts.Sample(await bus.AllMemberRowsAsync(ct))),
+    (team, member, text, causation, ct) => bus.PersonTellAsync(team, member, text, causation, ct));
+networkAsks.Changed = () => events.Publish(Yawble.Core.Integrations.NetworkAskService.ChangedEvent, null);
+bus.NetworkAsks = networkAsks;
+launch.HostRefusals = networkAsks;
 link.IsIntegration = integrations.HasIntegration; // a remote viewer may detect or discover a CLI that is already added, not a new unknown one
 link.IsRemoteMcp = integrations.IsRemoteMcp;
 // Host tasks: the person's named programs, run on this computer on the base branch of their own checkout, under a hash-pinned approval.
@@ -314,7 +328,7 @@ var dispatcher = new RpcDispatcher(new SandboxPlatformInfo(), () => applied, run
     audit: new Yawble.Core.Provenance.AuditLog($"Data Source={dbPath}"), integrations: integrations,
     doctor: doctor, backups: backupRpc, agentProfiles: agentProfileRpc, agentInfo: agentInfoRpc, companion: companionRpc,
     code: new Yawble.Core.Code.CodeBrowserRpc(codeBrowser), git: new Yawble.Core.Teams.GitRpc(gitService), logs: new Yawble.Core.Logs.LogRpc(logService),
-    updates: new Yawble.Core.Updates.UpdateRpc(updateService));
+    updates: new Yawble.Core.Updates.UpdateRpc(updateService), networkAsks: networkAsks);
 dispatcherForLink = dispatcher;
 link.Start();
 

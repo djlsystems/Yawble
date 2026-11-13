@@ -78,7 +78,9 @@ reproduce it, then have the tester check again after the fix.
 and `curl.exe` use it; PowerShell's `Invoke-WebRequest` does not and always reports "Unable to connect", even for an
 allowed host. Never ask a member to "check the host is reachable" with it, and do not take that error as a blocked
 network: have the member run the real command. Only a 403 "host not on this agent's allowlist" means the person
-must allow a host.
+must allow a host: the person is asked in Needs you (the member adds why with `request_host` and hands back blocked).
+When you are told "<host> is now allowed for <member>; retry what was blocked", give the blocked work to that member again:
+its next run reaches the host. Never ask a member to try another site.
 
 **The person's CLIs (az, gh, ...).** They run on the person's computer with the person's sign-in, never in a sandbox,
 in the person's own checkout of a team repository on its base branch: the main one, or another by `repo` (its name).

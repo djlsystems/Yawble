@@ -113,8 +113,8 @@ public static class LogSources
             new("integration_calls", "at", 365, "the record of which tool calls agents made and which rule allowed or refused each.")),
 
         new("approvals", "Approvals", "Accountability",
-            "Tool calls that asked first: what was asked, why, and who approved or declined it.",
-            "integration_asks t LEFT JOIN teams tm ON tm.id = t.team_id", "t.id", "t.at",
+            "Tool calls that asked first, and hosts agents were refused (network): what was asked, why, and who approved or declined it, and for whom a host was allowed.",
+            ApprovalsFrom, "t.rid", "t.at",
             [
                 new("at", "Asked", "t.at", "time"),
                 new("team", "Team", "tm.name", Filter: true),
@@ -227,6 +227,23 @@ public static class LogSources
     public static LogSource? Find(string id) => All.FirstOrDefault(s => s.Id == id);
 
     /// <summary>
+    /// The Approvals log: the asked tool calls (integration_asks) and the network asks (network_asks, 0039: the host, the
+    /// agent's reason or what was refused, how often; allowed for whom - agent, team or everywhere - or denied, by whom and how).
+    /// </summary>
+    private const string ApprovalsFrom = """
+        (
+          SELECT 'a' || a.id AS rid, a.at, a.team_id, a.member, a.integration, a.args, a.state, a.decided_by, a.decided_at
+            FROM integration_asks a
+          UNION ALL
+          SELECT 'n' || n.id, n.at, n.team_id, n.member, 'network',
+                 n.host || COALESCE(': ' || n.reason, ' (refused ' || n.method || COALESCE(' ' || n.path_sample, '') || ')', '') || ' (' || n.count || 'x)',
+                 CASE WHEN n.state = 'allowed' THEN 'allowed for ' || COALESCE(n.scope, '?') ELSE n.state END,
+                 NULLIF(trim(COALESCE(n.decided_by, '') || COALESCE(' via ' || n.decided_via, '')), ''), n.decided_at
+            FROM network_asks n
+        ) t LEFT JOIN teams tm ON tm.id = t.team_id
+        """;
+
+    /// <summary>
     /// The combined view: one row per thing that happened to or by a member, with its member as "Team/Name". Audit
     /// entries are about a member when their target names it (memberId=…, or team=… member=…).
     /// </summary>
@@ -245,6 +262,10 @@ public static class LogSources
           UNION ALL
           SELECT a.at, 'Approvals', a.member, a.integration || ' ' || a.state, trim(COALESCE(a.args, '') || COALESCE(' by ' || a.decided_by, '')), 'a' || a.id
             FROM integration_asks a
+          UNION ALL
+          SELECT na.at, 'Approvals', na.member, 'network ' || na.state || COALESCE(' for ' || na.scope, ''),
+                 trim(na.host || COALESCE(': ' || na.reason, '') || ' (' || na.count || 'x)' || COALESCE(' by ' || na.decided_by, '')), 'q' || na.id
+            FROM network_asks na
           UNION ALL
           SELECT u.at, 'Model usage', u.member, COALESCE(u.model, 'model request'),
                  'input ' || COALESCE(u.input_tokens, 0) || ', output ' || COALESCE(u.output_tokens, 0) || ', cache ' || (COALESCE(u.cache_read_tokens, 0) + COALESCE(u.cache_write_tokens, 0)), 'u' || u.id

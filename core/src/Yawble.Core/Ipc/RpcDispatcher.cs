@@ -32,7 +32,8 @@ public sealed class RpcDispatcher(
     Code.CodeBrowserRpc? code = null,
     Teams.GitRpc? git = null,
     Logs.LogRpc? logs = null,
-    Updates.UpdateRpc? updates = null)
+    Updates.UpdateRpc? updates = null,
+    Integrations.NetworkAskService? networkAsks = null)
 {
     /// <summary>
     /// A call as the person (or a cloud viewer) made it: run as <paramref name="actor"/>, so whatever it records carries
@@ -116,6 +117,8 @@ public sealed class RpcDispatcher(
         _ when agentProfiles is not null && Agents.Profiles.AgentProfileRpc.Handles(method) => agentProfiles.DispatchAsync(method, parameters, ct),
             // Host tasks: the person's definitions, approvals and runs; refused for any actor but the window or a cloud viewer.
             _ when integrations?.HostTasks is not null && Tasks.HostTaskRpc.Handles(method) => integrations.HostTasks.DispatchAsync(method, parameters, ct),
+            // Network asks: hosts agents were refused, and the person's four answers (Integrations/NetworkAsks.cs).
+            _ when networkAsks is not null && Integrations.NetworkAskService.Handles(method) => networkAsks.DispatchAsync(method, parameters, ct),
             // Integrations: the person's CLIs, their rules, and the calls waiting for approval.
             _ when integrations is not null && Integrations.IntegrationService.Handles(method) => integrations.DispatchAsync(method, parameters, ct),
             // The doctor: health checks and their fixes (Ops/DoctorRpc.cs). Not offered over the Cloud Link.

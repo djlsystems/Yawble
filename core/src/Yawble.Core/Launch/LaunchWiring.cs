@@ -28,6 +28,16 @@ public sealed class LaunchWiring : IAsyncDisposable
         _gatewayHost is { } host ? ct => Gateway.GatewaySelfTest.CheckAsync(host, TimeSpan.FromSeconds(5), ct) : null;
     private readonly GrokKeeper? _keeper;
 
+    /// <summary>Where every run's gateway reports a host refused for not being on the allowlist (the network asks); set once the ask store is up.</summary>
+    public Gateway.IHostRefusals? HostRefusals
+    {
+        get => _gatewayHost?.Refusals;
+        set
+        {
+            if (_gatewayHost is { } host) host.Refusals = value;
+        }
+    }
+
     private LaunchWiring(IAgentRunner runner, SandboxLauncher? launcher, GatewayHost? gatewayHost, GrokKeeper? keeper, string? problem)
     {
         Runner = runner;

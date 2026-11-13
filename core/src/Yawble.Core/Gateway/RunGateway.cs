@@ -168,7 +168,11 @@ public sealed class RunGateway : IAsyncDisposable
         if (!_spec.ModelVhosts.Contains(vhost) || !_host.Options.Upstreams.TryGetValue(vhost, out var upstream))
         {
             Write(GatewayEventKinds.HostDenied, true, vhost, head.Method, Redact(head.Target), 403, "host not served by this run's gateway");
-            await HttpWire.RespondJsonAsync(s, 403, "Forbidden", Error($"{vhost} is not reachable from this agent"), keepAlive, ct);
+            // Plain http is never forwarded; a host name off the allowlist is still reported (allowed, it is reachable over https).
+            var told = vhost.Length > 0 && !Vhosts.HostAllowed(vhost, _spec.AllowHosts) && !vhost.EndsWith("." + Policy.FloorRules.ReservedSuffix, StringComparison.OrdinalIgnoreCase)
+                ? $"{vhost} is not reachable from this agent: {AllowlistRefusal(vhost, head.Method, path)}"
+                : $"{vhost} is not reachable from this agent";
+            await HttpWire.RespondJsonAsync(s, 403, "Forbidden", Error(told), keepAlive, ct);
             return keepAlive;
         }
 
@@ -492,15 +496,19 @@ public sealed class RunGateway : IAsyncDisposable
     private async Task ConnectAsync(Stream s, WireRequest head, CancellationToken ct)
     {
         var (host, port) = SplitAuthority(head.Target);
-        async Task Refuse(string why)
+        async Task Refuse(string why, string? told = null)
         {
             Write(GatewayEventKinds.ConnectDenied, true, null, "CONNECT", head.Target, 403, why);
-            await HttpWire.RespondJsonAsync(s, 403, "Forbidden", Error($"CONNECT {head.Target} refused: {why}"), false, ct);
+            await HttpWire.RespondJsonAsync(s, 403, "Forbidden", Error($"CONNECT {head.Target} refused: {told ?? why}"), false, ct);
         }
         if (host is null || port is null) { await Refuse("malformed authority"); return; }
         if (!_host.Options.ConnectPorts.Contains(port.Value)) { await Refuse($"port {port} is not allowed"); return; }
         if (Vhosts.IsNeverConnect(host)) { await Refuse("model vendor and sign-in hosts are never reachable directly"); return; }
-        if (!Vhosts.HostAllowed(host, _spec.AllowHosts)) { await Refuse("host not on this agent's allowlist"); return; }
+        if (!Vhosts.HostAllowed(host, _spec.AllowHosts))
+        {
+            await Refuse(NotOnAllowlist, AllowlistRefusal(host, "CONNECT", null));
+            return;
+        }
 
         IPAddress[] addresses;
         try
@@ -593,6 +601,41 @@ public sealed class RunGateway : IAsyncDisposable
         token is not null && token.StartsWith("gho_" + RunTokenRegistry.Prefix, StringComparison.Ordinal) ? token[4..] : token;
 
     private static string Redact(string target) => target.Length > 512 ? target[..512] : target;
+
+    /// <summary>The gateway log's detail for an allowlist miss (GatewayVerdicts and the Logs dialog read it).</summary>
+    public const string NotOnAllowlist = "host not on this agent's allowlist";
+
+    /// <summary>Reports an allowlist miss to the network asks (never for the doctor's quiet self-test) and returns what the agent is told.</summary>
+    private string AllowlistRefusal(string host, string method, string? path)
+    {
+        var outcome = HostAskOutcome.None;
+        if (!_spec.Quiet && _host.Refusals is { } refusals)
+        {
+            try
+            {
+                outcome = refusals.Refused(_spec.Member, host.TrimEnd('.').ToLowerInvariant(), method, path);
+            }
+            catch (Exception e) when (e is not OutOfMemoryException)
+            {
+                // The ask store failing must never turn a refusal into anything else: it stays a plain refusal.
+                outcome = HostAskOutcome.None;
+            }
+        }
+        return AllowlistText(host, outcome);
+    }
+
+    /// <summary>What the agent reads in the 403 for an allowlist miss, by what became of the ask.</summary>
+    public static string AllowlistText(string host, HostAskOutcome outcome) => outcome switch
+    {
+        HostAskOutcome.Asked or HostAskOutcome.Pending =>
+            $"{NotOnAllowlist}. The person is asked to allow {host} (Needs you). Call the request_host tool (host, reason) to say what you need it for, " +
+            $"then hand back blocked on {host}: a host the person allows is reachable from your next run. Do not retry in a loop or try another site.",
+        HostAskOutcome.Denied =>
+            $"{NotOnAllowlist}. The person denied {host} for you in the last 24 hours. Do not try another site: carry on without it, or hand back blocked on {host}.",
+        HostAskOutcome.AllowedNextRun =>
+            $"{NotOnAllowlist} for this run; the person has allowed {host} from your next run. Hand back blocked on {host} so the work is retried in a new run; do not retry in this one.",
+        _ => NotOnAllowlist,
+    };
 
     private static string Error(string message) =>
         JsonSerializer.Serialize(new Dictionary<string, object>

@@ -41,8 +41,9 @@ and who is viewing.
 ## What a remote viewer can do
 
 A remote viewer can do what you can do in the window, with the exceptions below. That includes reading and telling
-teams, answering their questions, the board and backlog, approving integration requests, running the guardrail
-check, and changing agents and teams.
+teams, answering their questions, the board and backlog, approving integration requests, answering network
+requests (allowing a host an agent was refused, like any other policy change), running the guardrail check, and
+changing agents and teams.
 
 Calls from a viewer run as that viewer. Every remote call that changes something, and every refused call, is
 written to `cloud-link-audit.log` in the app's data folder, with the time, the viewer and the method.
