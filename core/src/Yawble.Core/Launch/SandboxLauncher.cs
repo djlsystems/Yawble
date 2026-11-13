@@ -46,10 +46,10 @@ public static class HostTools
         var root = Path.GetFullPath(appDataRoot).TrimEnd('\\') + "\\";
         var profile = (home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)).TrimEnd('\\');
         var dirs = new List<string>();
-        foreach (var dir in (pathVariable ?? Environment.GetEnvironmentVariable("PATH") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))
+        foreach (var dir in (pathVariable ?? CurrentPath()).Split(';', StringSplitOptions.RemoveEmptyEntries))
         {
             string full;
-            try { full = Path.GetFullPath(dir.Trim().Trim('"')).TrimEnd('\\'); }
+            try { full = Path.GetFullPath(Environment.ExpandEnvironmentVariables(dir.Trim().Trim('"'))).TrimEnd('\\'); }
             catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) { continue; }
             if ((full + "\\").StartsWith(root, StringComparison.OrdinalIgnoreCase)) continue;
             if (full.Length <= 3 || string.Equals(full, profile, StringComparison.OrdinalIgnoreCase)) continue;
@@ -64,6 +64,15 @@ public static class HostTools
         }
         return found;
     }
+
+    /// <summary>
+    /// The core's PATH, then the machine's and the user's PATH as they are now: the core's own is the one it started
+    /// with, and a tool installed while the app runs (the .NET SDK, Node.js) is only in the saved ones.
+    /// </summary>
+    private static string CurrentPath() => string.Join(';',
+        Environment.GetEnvironmentVariable("PATH") ?? "",
+        Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Machine) ?? "",
+        Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.User) ?? "");
 }
 
 /// <summary>The command line shown for an agent: one per run kind (see <see cref="SandboxLauncher.DescribeAsync"/>).</summary>

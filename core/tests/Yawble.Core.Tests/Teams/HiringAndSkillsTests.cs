@@ -313,4 +313,22 @@ public class HiringAndSkillsTests
         var path = string.Join(';', inApp, store, git, dotnet, node, git);
         Assert.Equal([git, dotnet, node], HostTools.Detect(app, path, home: Path.Combine(db.Dir, "home")));
     }
+
+    [Fact]
+    public void AToolFolderSavedWithAVariable_IsFound()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Skip("host tools are detected on Windows only");
+        using var db = new TempDb();
+        var tools = Path.Combine(db.Dir, "tools");
+        Directory.CreateDirectory(Path.Combine(tools, "dotnet"));
+        File.WriteAllText(Path.Combine(tools, "dotnet", "dotnet.exe"), "");
+        // The saved PATH keeps entries such as %ProgramFiles%\dotnet unexpanded.
+        Environment.SetEnvironmentVariable("YAWBLE_TEST_TOOLS", tools);
+        try
+        {
+            Assert.Equal([Path.Combine(tools, "dotnet")],
+                HostTools.Detect(Path.Combine(db.Dir, "app"), @"%YAWBLE_TEST_TOOLS%\dotnet", home: Path.Combine(db.Dir, "home")));
+        }
+        finally { Environment.SetEnvironmentVariable("YAWBLE_TEST_TOOLS", null); }
+    }
 }
