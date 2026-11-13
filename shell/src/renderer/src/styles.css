@@ -1,0 +1,43 @@
+:root {
+  /* where dialogs start: below the window's title bar, whose buttons the system draws over the page */
+  --dialog-top: max(40px, calc(env(titlebar-area-y, 0px) + env(titlebar-area-height, 0px) + 12px));
+  --ink: #1d2330; --ink-soft: #3d4555; --muted: #6b7384; --line: #e2e5eb; --line-soft: #ebedf1; --bg: #f6f7f9;
+  --accent: #2457c5; --warn: #9a5b00; --bad: #a01818; --ok: #1d6b2f;
+  /* the chat-first frame (sidebar, Concierge) */
+  --surface: #ffffff; --side: #f7f7f8; --hover: #eeeff2; --hover-strong: #e3e5ea; --selected: #e8eaee;
+  --chip: #f0f1f4; --bubble: #f1f2f5; --brand: #3b5bdb;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif; background: var(--surface); color: var(--ink); font-size: 14px; -webkit-font-smoothing: antialiased; }
+button { font: inherit; border: 1px solid var(--line); background: #fff; border-radius: 5px; padding: 4px 10px; cursor: pointer; color: var(--ink); }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+button.danger { color: var(--bad); }
+button.icon { padding: 2px 8px; font-family: ui-monospace, monospace; }
+input, select, textarea { font: inherit; border: 1px solid var(--line); border-radius: 5px; padding: 4px 6px; background: #fff; color: var(--ink); }
+input:disabled, textarea:disabled, select:disabled { background: #f1f3f6; color: var(--muted); }
+code, .mono { font-family: ui-monospace, monospace; font-size: 12px; }
+.muted { color: var(--muted); }
+.error { color: var(--bad); white-space: pre-wrap; }
+.warn { color: var(--warn); }
+.ok { color: var(--ok); }
+.chip { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 9px; background: #eef1f6; color: var(--muted); margin-left: 6px; }
+.chip.cli-claude { background: #f6e9df; color: #8a4b1c; }
+.chip.cli-grok { background: #e4e9f7; color: #2a3f7a; }
+.chip.loosened { background: #fff1d6; color: var(--warn); }
+.chip.fake { background: #ffe3e3; color: var(--bad); }
+.row { display: flex; gap: 8px; align-items: center; }
+.grow { flex: 1; }
+/* Member states, as the faces' rings and the Monitor show them. */
+:root {
+  --state-running: #2e7d4f; --state-waiting: #5f7385; --state-decision: #7a4fc4; --state-blocked: #b26a00;
+  --state-failed: #c62828; --state-idle: #8a847c;
+}
+/* The one "action in progress" spinner, inside a button whose click awaits the core (BusyLabel.vue puts it there).
+   It takes the button's text colour; it does not spin when the person asks for reduced motion. */
+.btn-spinner { display: inline-block; flex: none; width: 10px; height: 10px; box-sizing: border-box; border-radius: 50%; margin-right: 6px; vertical-align: -1px;
+  border: 2px solid currentColor; border-top-color: transparent; animation: btn-spin 0.8s linear infinite; }
+.btn-spinner.solo { margin-right: 0; }
+@keyframes btn-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .btn-spinner { animation: none; border-top-color: currentColor; opacity: .6; } }

@@ -1,0 +1,31 @@
+S3()                                                                      S3()
+
+NAME
+       s3 -
+
+DESCRIPTION
+       This section explains prominent concepts and notations in the set of
+       high-level S3 commands provided.
+
+SYNOPSIS
+          aws s3 <Command> [<Arg> ...]
+
+AVAILABLE COMMANDS
+       o cp
+
+       o ls
+
+       o mb
+
+       o mv
+
+       o presign
+
+       o rb
+
+       o rm
+
+       o sync
+
+SEE ALSO
+       o aws help topics

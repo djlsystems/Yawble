@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The read-only code browser (file reading, safety checks, change tracking, line diffs). No reference to the core:
+       the core wires it to members' clones and exposes its RPCs (core/src/Yawble.Core/Code/). -->
+  <PropertyGroup>
+    <RootNamespace>Yawble.CodeBrowser</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Yawble.CodeBrowser.Tests" />
+  </ItemGroup>
+</Project>

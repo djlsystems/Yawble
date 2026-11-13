@@ -1,0 +1,54 @@
+{
+  "compute": {
+    "idleTimeoutSec": 1800,
+    "wallTimeoutSec": 900,
+    "memoryMb": null,
+    "cpuPercent": null,
+    "maxProcesses": null
+  },
+  "gateway": {
+    "port": 47001,
+    "allowHosts": [
+      "registry.npmjs.org"
+    ],
+    "vhosts": [
+      {
+        "host": "bus.yawble.internal",
+        "kind": "bus",
+        "upstream": null,
+        "credential": null,
+        "allowedPaths": [
+          "/mcp"
+        ]
+      },
+      {
+        "host": "model.yawble.internal",
+        "kind": "model",
+        "upstream": "https://api.anthropic.com",
+        "credential": "claude-setup-token",
+        "allowedPaths": [
+          "POST /v1/messages",
+          "POST /v1/messages/count_tokens",
+          "GET /v1/models",
+          "HEAD /api/hello"
+        ]
+      }
+    ]
+  },
+  "seeds": [
+    {
+      "path": "/home/alice/.local/share/yawble/teams/alpha/members/dev1/home/.yawble/mcp.json",
+      "content": "{\n  \"mcpServers\": {\n    \"bus\": {\n      \"type\": \"stdio\",\n      \"command\": \"/opt/yawble/resources/bin/yawble-bridge\",\n      \"args\": []\n    }\n  }\n}"
+    },
+    {
+      "path": "/home/alice/.local/share/yawble/teams/alpha/members/dev1/home/.claude/settings.json",
+      "content": "{\n  \"permissions\": {\n    \"defaultMode\": \"bypassPermissions\"\n  },\n  \"skipDangerousModePermissionPrompt\": true\n}"
+    },
+    {
+      "path": "/home/alice/.local/share/yawble/teams/alpha/members/dev1/home/.claude/.claude.json",
+      "content": "{\n  \"hasCompletedOnboarding\": true,\n  \"hasSeenAutoDefaultNudge\": true,\n  \"projects\": {\n    \"/home/alice/.local/share/yawble/teams/alpha/members/dev1/repo\": {\n      \"hasTrustDialogAccepted\": true\n    }\n  }\n}"
+    }
+  ],
+  "loosened": [],
+  "maxConcurrentAgents": 4
+}

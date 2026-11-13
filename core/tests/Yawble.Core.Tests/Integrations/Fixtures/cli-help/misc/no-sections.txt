@@ -1,0 +1,3 @@
+A tool that does one thing.
+
+It takes no sub-commands; give it a file.

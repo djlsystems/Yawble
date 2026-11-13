@@ -1,0 +1,94 @@
+{
+  "version": "1.0.0",
+  "containment": "bubblewrap",
+  "process": {
+    "commandLine": "/home/alice/.nvm/versions/node/v22.12.0/bin/node /home/alice/.nvm/versions/node/v22.12.0/lib/node_modules/@anthropic-ai/claude-code/cli.js -p 'You have 1 instruction from Manager. Read it with the bus tools; don'\\''t push. $(id) `id`' --output-format stream-json --verbose --strict-mcp-config --mcp-config /home/alice/.local/share/yawble/teams/alpha/members/dev1/home/.yawble/mcp.json --dangerously-skip-permissions --session-id 11111111-2222-3333-4444-555555555555",
+    "cwd": "/home/alice/.local/share/yawble/teams/alpha/members/dev1/repo",
+    "env": [
+      "ANTHROPIC_BASE_URL=http://model.yawble.internal",
+      "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1",
+      "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
+      "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1",
+      "CLAUDE_CODE_OAUTH_TOKEN=golden-run-token-0123456789abcdefghijklmnopqrstuv",
+      "CLAUDE_CONFIG_DIR=/home/alice/.local/share/yawble/teams/alpha/members/dev1/home/.claude",
+      "DISABLE_AUTOUPDATER=1",
+      "DISABLE_INSTALLATION_CHECKS=1",
+      "DISABLE_UPDATES=1",
+      "DOTNET_CLI_HOME=/home/alice/.local/share/yawble/teams/alpha/members/dev1/home",
+      "DOTNET_CLI_TELEMETRY_OPTOUT=1",
+      "DOTNET_GENERATE_ASPNET_CERTIFICATE=false",
+      "DOTNET_NOLOGO=1",
+      "DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1",
+      "ENABLE_CLAUDEAI_MCP_SERVERS=false",
+      "HOME=/home/alice/.local/share/yawble/teams/alpha/members/dev1/home",
+      "IS_SANDBOX=1",
+      "LANG=C.UTF-8",
+      "NODE_USE_ENV_PROXY=1",
+      "NUGET_PACKAGES=/home/alice/.local/share/yawble/teams/alpha/members/dev1/home/.nuget/packages",
+      "PATH=/home/alice/.nvm/versions/node/v22.12.0/bin:/home/alice/.nvm/versions/node/v22.12.0/lib/node_modules/@anthropic-ai/claude-code:/opt/yawble/resources/bin:/usr/local/bin:/usr/bin:/bin",
+      "TERM=xterm-256color",
+      "TMPDIR=/home/alice/.local/share/yawble/teams/alpha/members/dev1/tmp",
+      "XDG_CACHE_HOME=/home/alice/.local/share/yawble/teams/alpha/members/dev1/home/.cache",
+      "XDG_CONFIG_HOME=/home/alice/.local/share/yawble/teams/alpha/members/dev1/home/.config",
+      "XDG_DATA_HOME=/home/alice/.local/share/yawble/teams/alpha/members/dev1/home/.local/share",
+      "XDG_STATE_HOME=/home/alice/.local/share/yawble/teams/alpha/members/dev1/home/.local/state",
+      "YAWBLE_RUN_TOKEN=golden-run-token-0123456789abcdefghijklmnopqrstuv"
+    ],
+    "timeout": 900000
+  },
+  "filesystem": {
+    "readonlyPaths": [
+      "/home/alice/.nvm/versions/node/v22.12.0/lib/node_modules/@anthropic-ai/claude-code",
+      "/home/alice/.nvm/versions/node/v22.12.0/bin",
+      "/opt/yawble/resources/bin",
+      "/opt/yawble/resources/roles",
+      "/home/alice/src/reference"
+    ],
+    "readwritePaths": [
+      "/home/alice/.local/share/yawble/teams/alpha/members/dev1/repo",
+      "/home/alice/.local/share/yawble/teams/alpha/members/dev1/home",
+      "/home/alice/.local/share/yawble/teams/alpha/members/dev1/tmp"
+    ],
+    "deniedPaths": [
+      "/home/alice/.local/share/yawble/data",
+      "/home/alice/.local/share/yawble/data/yawble.db",
+      "/home/alice/.local/share/yawble/data/credentials",
+      "/home/alice/.local/share/yawble/grok-home",
+      "/home/alice/.claude",
+      "/home/alice/.claude.json",
+      "/home/alice/.local/share/yawble/teams/beta",
+      "/home/alice/.local/share/yawble/teams/alpha/members/manager",
+      "/home/alice/.local/share/yawble/teams/alpha/members/dev2",
+      "/home/alice/.ssh",
+      "/home/alice/.aws",
+      "/home/alice/.config/gh",
+      "/home/alice/Desktop",
+      "/home/alice/Documents",
+      "/home/alice/Downloads",
+      "/home/alice/Music",
+      "/home/alice/OneDrive",
+      "/home/alice/Pictures",
+      "/home/alice/Videos"
+    ]
+  },
+  "network": {
+    "egress": {
+      "default": "deny"
+    },
+    "ingress": {
+      "default": "deny",
+      "hostLoopback": "deny"
+    }
+  },
+  "runtimeConfig": {
+    "networkProxy": "http://127.0.0.1:47001"
+  },
+  "ui": {
+    "disable": true,
+    "clipboard": "none",
+    "injection": false
+  },
+  "telemetry": {
+    "enabled": false
+  }
+}

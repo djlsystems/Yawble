@@ -1,0 +1,12 @@
+[
+  { "name": "the release's own commit, clean", "describe": "v2026.11.12.1-0-gee55691", "sha": "ee5569190000000000000000000000000000abcd", "dirty": false, "version": "2026.11.12.1", "released": true },
+  { "name": "a bare tag (exact match) is the release too", "describe": "v2026.11.12.1", "sha": "ee5569190000000000000000000000000000abcd", "dirty": false, "version": "2026.11.12.1", "released": true },
+  { "name": "a later commit: the last release + dev + short sha", "describe": "v2026.11.12.1-3-gee55691", "sha": "ee5569190000000000000000000000000000abcd", "dirty": false, "version": "2026.11.12.1+dev.ee55691", "released": false },
+  { "name": "the release commit with uncommitted changes", "describe": "v2026.11.12.1-0-gee55691", "sha": "ee5569190000000000000000000000000000abcd", "dirty": true, "version": "2026.11.12.1+dev.ee55691.dirty", "released": false },
+  { "name": "a later commit, dirty", "describe": "v2026.11.12.10-12-gee55691", "sha": "ee5569190000000000000000000000000000abcd", "dirty": true, "version": "2026.11.12.10+dev.ee55691.dirty", "released": false },
+  { "name": "before the first release", "describe": "", "sha": "ee5569190000000000000000000000000000abcd", "dirty": false, "version": "0.0.0+dev.ee55691", "released": false },
+  { "name": "before the first release, dirty", "describe": "", "sha": "ee5569190000000000000000000000000000abcd", "dirty": true, "version": "0.0.0+dev.ee55691.dirty", "released": false },
+  { "name": "a v2 tag that is not a release counts as none", "describe": "v2.0.0-4-gee55691", "sha": "ee5569190000000000000000000000000000abcd", "dirty": false, "version": "0.0.0+dev.ee55691", "released": false },
+  { "name": "no commit (no git)", "describe": "", "sha": "", "dirty": false, "version": "0.0.0+dev.unknown", "released": false },
+  { "name": "a short sha is used as given (7)", "describe": "v2026.01.05.2-1-gabc1234", "sha": "abc1234", "dirty": false, "version": "2026.01.05.2+dev.abc1234", "released": false }
+]

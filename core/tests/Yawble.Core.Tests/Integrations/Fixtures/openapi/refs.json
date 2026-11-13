@@ -1,0 +1,23 @@
+{
+  "openapi": "3.0.0",
+  "info": { "title": "Refs", "version": "1" },
+  "paths": {
+    "/nodes": {
+      "post": {
+        "operationId": "addNode",
+        "parameters": [ { "$ref": "#/components/parameters/Page" } ],
+        "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Node" } } } }
+      },
+      "get": {
+        "operationId": "remoteRef",
+        "requestBody": { "content": { "application/json": { "schema": { "$ref": "https://example.com/x.json" } } } }
+      }
+    }
+  },
+  "components": {
+    "parameters": { "Page": { "name": "page", "in": "query", "schema": { "type": "integer" } } },
+    "schemas": {
+      "Node": { "type": "object", "properties": { "name": { "type": "string" }, "next": { "$ref": "#/components/schemas/Node" } } }
+    }
+  }
+}

@@ -1,0 +1,22 @@
+bin/
+obj/
+*.user
+.vs/
+TestResults/
+node_modules/
+shell/out/
+shell/dist/
+shell/test-results/
+shell/playwright-report/
+# Fetched binaries (toolchain/*.mjs). Never committed; the manifests pin them.
+.toolchain/
+artifacts/
+AGENTS.md
+
+# Unsigned dev installers: the staged .NET payload (packaging/build.mjs).
+packaging/stage/
+.superpowers/
+
+# Dev install of the helper programs (scripts/run-dev.cmd).
+.devinstall/
+__pycache__/

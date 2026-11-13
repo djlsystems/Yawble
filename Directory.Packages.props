@@ -1,0 +1,34 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <!-- One sandbox release (Microsoft MXC) for the SDK and the bundled wxc-exec.exe; must equal sandbox.lock.json release.version. -->
+    <SandboxVersion>1.0.1</SandboxVersion>
+  </PropertyGroup>
+
+  <ItemGroup Label="Sandbox">
+    <!-- The sandbox SDK: the latest STABLE release, never alpha or pre-release.
+         sandbox.lock.json names the same version; Yawble.SandboxCheck fails the build when they disagree,
+         when the release is a pre-release, or when it no longer accepts a 1.0.0 request with telemetry off. -->
+    <PackageVersion Include="Microsoft.Mxc.Sdk" Version="$(SandboxVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Label="Runtime">
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.10" />
+    <!-- Microsoft.Data.Sqlite 10.0.10 resolves SQLitePCLRaw.lib.e_sqlite3 2.1.11, which carries a known
+         high-severity advisory (GHSA-2m69-gcr7-jv3q). Pinned forward. -->
+    <PackageVersion Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.12" />
+    <!-- Cron schedules for triggers. -->
+    <PackageVersion Include="Cronos" Version="0.13.0" />
+    <!-- YAML OpenAPI specs are read into a JSON tree (Integrations/OpenApiReader.cs). -->
+    <PackageVersion Include="YamlDotNet" Version="16.3.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Test">
+    <!-- The hang dump option of dotnet test (hangdump, hangdump-timeout) names a test that hangs and dumps the test host instead of stalling the run. -->
+    <!-- An in-memory ASP.NET Core server for the gateway tests' fake model upstream: no port is bound (GatewayTestKit.cs). -->
+    <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Testing.Extensions.HangDump" Version="2.4.1" />
+    <PackageVersion Include="Microsoft.Testing.Extensions.TrxReport" Version="2.4.1" />
+    <PackageVersion Include="xunit.v3.mtp-v2" Version="4.0.1" />
+  </ItemGroup>
+</Project>

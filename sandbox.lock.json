@@ -1,0 +1,23 @@
+{
+  "$comment": "The one sandbox release (microsoft/mxc) this build uses. Bump all fields together, then run the sandbox check (README). Never an alpha, rc or other pre-release.",
+  "release": {
+    "version": "1.0.1",
+    "githubRepo": "microsoft/mxc",
+    "tag": "v1.0.1",
+    "nugetPackage": "Microsoft.Mxc.Sdk",
+    "npmPackage": "@microsoft/mxc-sdk"
+  },
+  "request": {
+    "contract": "1.0.0",
+    "telemetryEnabled": false
+  },
+  "wxcExec": {
+    "$comment": "wxc-exec.exe is not in the NuGet package. It is taken from the same release's mxc-release-binaries.zip; toolchain/fetch-wxc-exec.mjs extracts only this member and checks its sha256.",
+    "asset": "mxc-release-binaries.zip",
+    "assetSha256": "0e832239454ba7fcd338ff56218a287eef4c0a01c1484084b869f55feff8abe9",
+    "files": {
+      "win-x64": { "member": "x64/wxc-exec.exe", "sha256": "090f5d1f7bb93104ab08dcd4e8034ef954aeefcdaf6658dde5f7dff4cfc12f3a" },
+      "win-arm64": { "member": "arm64/wxc-exec.exe", "sha256": "91aa4171e8809f33f19622c381116188eab7d8c8cffad231230a31b58146ee77" }
+    }
+  }
+}

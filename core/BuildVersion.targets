@@ -1,0 +1,19 @@
+<Project>
+  <!-- The build's version (yyyy.mm.dd.N, or <last release>+dev.<sha>[.dirty]): scripts/build-version.mjs is the one
+       source of truth for the core, the yawble client and the shell. It writes assembly metadata CoreInfo reads into obj/ (git-ignored),
+       only when it changed. No node or no git: no file, and CoreInfo says 0.0.0+dev.unknown; the build never fails. -->
+  <Target Name="YawbleBuildVersion" BeforeTargets="CoreCompile" DependsOnTargets="PrepareForBuild" Condition="'$(DesignTimeBuild)' != 'true'">
+    <PropertyGroup>
+      <YawbleBuildVersionFile>$(IntermediateOutputPath)BuildVersion.g.cs</YawbleBuildVersionFile>
+    </PropertyGroup>
+    <Exec Command="node &quot;$(MSBuildThisFileDirectory)../scripts/build-version.mjs&quot; --cs &quot;$(YawbleBuildVersionFile)&quot;"
+          IgnoreExitCode="true" IgnoreStandardErrorWarningFormat="true" StandardOutputImportance="low" StandardErrorImportance="low">
+      <Output TaskParameter="ExitCode" PropertyName="YawbleBuildVersionExit" />
+    </Exec>
+    <Delete Files="$(YawbleBuildVersionFile)" Condition="'$(YawbleBuildVersionExit)' != '0'" />
+    <ItemGroup Condition="Exists('$(YawbleBuildVersionFile)')">
+      <Compile Include="$(YawbleBuildVersionFile)" />
+      <FileWrites Include="$(YawbleBuildVersionFile)" />
+    </ItemGroup>
+  </Target>
+</Project>

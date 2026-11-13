@@ -1,0 +1,10 @@
+
+Command
+    az vm list : List details of Virtual Machines.
+        For accurate output, use "az vm list -d".
+
+Arguments
+    --resource-group -g        : Name of resource group.
+
+Global Arguments
+    --help -h                  : Show this help message and exit.

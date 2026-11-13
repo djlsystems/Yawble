@@ -1,0 +1,18 @@
+<Solution>
+  <Folder Name="/core/">
+    <Project Path="core/src/Yawble.CodeBrowser/Yawble.CodeBrowser.csproj" />
+    <Project Path="core/src/Yawble.Core/Yawble.Core.csproj" />
+    <Project Path="core/tests/Yawble.CodeBrowser.Tests/Yawble.CodeBrowser.Tests.csproj" />
+    <Project Path="core/tests/Yawble.Core.Tests/Yawble.Core.Tests.csproj" />
+    <Project Path="core/tools/Yawble.Companion/Yawble.Companion.csproj" />
+    <Project Path="core/tools/Yawble.SandboxCheck/Yawble.SandboxCheck.csproj" />
+  </Folder>
+  <Folder Name="/bridge/">
+    <Project Path="bridge/src/Yawble.Bridge/Yawble.Bridge.csproj" />
+    <Project Path="bridge/src/Yawble.DotnetShim/Yawble.DotnetShim.csproj" />
+    <Project Path="bridge/src/Yawble.GrokAuth/Yawble.GrokAuth.csproj" />
+    <Project Path="bridge/src/Yawble.GuardCheck/Yawble.GuardCheck.csproj" />
+    <Project Path="bridge/src/Yawble.Run/Yawble.Run.csproj" />
+    <Project Path="bridge/tests/Yawble.Bridge.Tests/Yawble.Bridge.Tests.csproj" />
+  </Folder>
+</Solution>

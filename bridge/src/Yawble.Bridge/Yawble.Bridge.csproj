@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>yawble-bridge</AssemblyName>
+    <RootNamespace>Yawble.Bridge</RootNamespace>
+    <!-- Runs INSIDE every sandbox, so it is a small self-contained native binary with no
+         .NET runtime to grant. `dotnet publish -r <rid>` produces it; plain build/test stay JIT. -->
+    <PublishAot>true</PublishAot>
+    <IsAotCompatible>true</IsAotCompatible>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Yawble.Bridge.Tests" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,14 @@
+{
+  "openapi": "3.0.0",
+  "info": { "title": "Bearer API", "version": "1" },
+  "servers": [ { "url": "/api" } ],
+  "security": [ { "tok": [] } ],
+  "paths": {
+    "/me": { "get": { "operationId": "me" } },
+    "/user/tokens": { "post": { "operationId": "makeToken" } }
+  },
+  "components": { "securitySchemes": {
+    "other": { "type": "apiKey", "in": "query", "name": "key" },
+    "tok": { "type": "http", "scheme": "bearer", "description": "Paste a token" }
+  } }
+}

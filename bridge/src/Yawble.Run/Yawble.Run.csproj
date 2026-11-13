@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>yawble-run</AssemblyName>
+    <RootNamespace>Yawble.Run</RootNamespace>
+    <!-- Runs INSIDE a sandbox, in front of an agent CLI that needs the run's temp folder to exist (Windows), so, like
+         yawble-bridge, a small native binary with no .NET runtime to grant. `dotnet publish -r <rid>` produces it. -->
+    <PublishAot>true</PublishAot>
+    <IsAotCompatible>true</IsAotCompatible>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+  </PropertyGroup>
+</Project>

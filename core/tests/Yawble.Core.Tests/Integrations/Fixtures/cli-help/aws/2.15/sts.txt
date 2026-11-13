@@ -1,0 +1,11 @@
+STS()                                                                    STS()
+
+NAME
+       sts -
+
+AVAILABLE COMMANDS
+       o assume-role
+
+       o get-caller-identity
+
+       o get-session-token

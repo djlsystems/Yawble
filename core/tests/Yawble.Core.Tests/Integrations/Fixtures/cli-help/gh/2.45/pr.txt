@@ -1,0 +1,24 @@
+Work with GitHub pull requests.
+
+USAGE
+  gh pr <command> [flags]
+
+GENERAL COMMANDS
+  create:     Create a pull request
+  list:       List pull requests in a repository
+  status:     Show status of relevant pull requests
+
+TARGETED COMMANDS
+  checkout:   Check out a pull request in git
+  checks:     Show CI status for a single pull request
+  close:      Close a pull request
+  comment:    Add a comment to a pull request
+  diff:       View changes in a pull request
+  merge:      Merge a pull request
+  view:       View a pull request
+
+FLAGS
+  -R, --repo [HOST/]OWNER/REPO   Select another repository using the [HOST/]OWNER/REPO format
+
+INHERITED FLAGS
+  --help   Show help for command

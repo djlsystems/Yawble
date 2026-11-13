@@ -1,0 +1,15 @@
+NAME
+    gcloud auth - manage oauth2 credentials for the Google Cloud CLI
+
+COMMANDS
+    COMMAND is one of the following:
+
+     list
+        List credentialed accounts.
+
+     login
+        Authorize gcloud to access the Cloud Platform with Google user
+        credentials.
+
+     print-access-token
+        Print an access token for the specified account.

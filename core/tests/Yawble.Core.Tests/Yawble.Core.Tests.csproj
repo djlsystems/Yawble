@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="xunit.v3.mtp-v2" />
+    <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" />
+    <PackageReference Include="Microsoft.Testing.Extensions.HangDump" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Golden files: the exact sandbox requests the compiler must produce (Policy/GoldenRequestTests.cs). -->
+    <None Include="Golden/*.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Discover: captured/recorded CLI help (cli/version/path_words.txt) the parser and the walker are tested on. -->
+    <None Include="Integrations/Fixtures/**/*.txt" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Hand-written OpenAPI/Swagger specs for OpenApiReaderTests. -->
+    <None Include="Integrations/Fixtures/openapi/*" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The stand-in agent CLI that RealSandboxLauncherTests runs inside a real sandbox. -->
+    <None Include="Launch/RealSandbox/standin-cli.py" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- yawble-bridge's relay, compiled in: the bridge tests run it in this process against the in-memory gateway (no port);
+         the opt-in real-loopback tests run the built yawble-bridge process instead. -->
+    <Compile Include="../../../bridge/src/Yawble.Bridge/BusRelay.cs" Link="Gateway/Bridge/BusRelay.cs" />
+    <Compile Include="../../../bridge/src/Yawble.Bridge/GatewayAddress.cs" Link="Gateway/Bridge/GatewayAddress.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Yawble.Core/Yawble.Core.csproj" />
+    <ProjectReference Include="../../tools/Yawble.SandboxCheck/Yawble.SandboxCheck.csproj" />
+    <!-- The yawble client, run in process by Companion/CompanionCliTests and McpStdioTests. Aliased: it link-compiles the
+         core's companion protocol files, so its copies of those public types must not clash with the core's. -->
+    <ProjectReference Include="../../tools/Yawble.Companion/Yawble.Companion.csproj" Aliases="yawble" />
+    <!-- Built first, run as real processes by the gateway tests (not referenced as assemblies). -->
+    <ProjectReference Include="../../../bridge/src/Yawble.Bridge/Yawble.Bridge.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../../bridge/src/Yawble.GrokAuth/Yawble.GrokAuth.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../../bridge/src/Yawble.GuardCheck/Yawble.GuardCheck.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../../bridge/src/Yawble.Run/Yawble.Run.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The fake model upstreams in the gateway tests: TestServer in memory by default, Kestrel in the opt-in real-loopback tests. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+</Project>

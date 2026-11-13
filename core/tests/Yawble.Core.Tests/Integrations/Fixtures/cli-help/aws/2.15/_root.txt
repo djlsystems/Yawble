@@ -1,0 +1,32 @@
+AWS()                                                                    AWS()
+
+NAME
+       aws -
+
+DESCRIPTION
+       The AWS Command Line Interface is a unified tool to manage your AWS
+       services.
+
+SYNOPSIS
+            aws [options] <command> <subcommand> [parameters]
+
+OPTIONS
+       --debug (boolean)
+
+          Turn on debug logging.
+
+AVAILABLE SERVICES
+       o configure
+
+       o ec2
+
+       o s3
+
+       o s3api
+
+       o secretsmanager
+
+       o sts
+
+SEE ALSO
+       o aws help topics

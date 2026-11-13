@@ -1,0 +1,26 @@
+NAME
+    gcloud - manage Google Cloud Platform resources and developer workflow
+
+SYNOPSIS
+    gcloud GROUP | COMMAND [--account=ACCOUNT] [--help] [--version]
+
+GROUPS
+    GROUP is one of the following:
+
+     auth
+        Manage oauth2 credentials for the Google Cloud CLI.
+
+     compute
+        Create and manipulate Google Compute Engine resources.
+
+     secrets
+        Manage secrets on Google Cloud.
+
+COMMANDS
+    COMMAND is one of the following:
+
+     info
+        Display information about the current gcloud environment.
+
+     version
+        Print version information for Google Cloud CLI components.

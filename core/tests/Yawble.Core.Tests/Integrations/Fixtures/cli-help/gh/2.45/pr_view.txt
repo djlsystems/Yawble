@@ -1,0 +1,8 @@
+﻿View a pull request.
+
+USAGE
+  gh pr view [flags]
+
+FLAGS
+  -c, --comments   View pull request comments
+  -w, --web        Open a pull request in the web browser

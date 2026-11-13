@@ -1,0 +1,14 @@
+Display one or many resources.
+
+Examples:
+  # List all pods in ps output format
+  kubectl get pods
+
+Options:
+    -A, --all-namespaces=false:
+	If present, list the requested object(s) across all namespaces.
+
+Usage:
+  kubectl get
+[(-o|--output=)json|yaml|name|go-template|go-template-file|template|templatefile|jsonpath|jsonpath-as-json|jsonpath-file|custom-columns|custom-columns-file|wide]
+(TYPE[.VERSION][.GROUP] [NAME | -l label] | TYPE[.VERSION][.GROUP]/NAME ...) [flags] [options]

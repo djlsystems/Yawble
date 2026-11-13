@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>yawble</AssemblyName>
+    <RootNamespace>Yawble.Companion</RootNamespace>
+    <!-- The yawble client: what Claude Code (yawble mcp) and the person (yawble <command>) run to reach the running app's
+         companion endpoint. A small native binary with no .NET runtime to install, like yawble-run: `dotnet publish -r <rid>`. -->
+    <PublishAot>true</PublishAot>
+    <IsAotCompatible>true</IsAotCompatible>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- The core's own protocol, discovery and user-only file code, compiled in (BCL only): one definition, both ends. -->
+    <Compile Include="../../src/Yawble.Core/Ipc/Frame.cs" Link="Linked/Frame.cs" />
+    <Compile Include="../../src/Yawble.Core/Companion/CompanionProtocol.cs" Link="Linked/CompanionProtocol.cs" />
+    <Compile Include="../../src/Yawble.Core/Companion/ControlDiscovery.cs" Link="Linked/ControlDiscovery.cs" />
+    <Compile Include="../../src/Yawble.Core/Companion/UserOnlyFile.cs" Link="Linked/UserOnlyFile.cs" />
+  </ItemGroup>
+  <!-- The same build version as the core (yawble version): core/BuildVersion.targets. -->
+  <Import Project="../../BuildVersion.targets" />
+  <ItemGroup>
+    <InternalsVisibleTo Include="Yawble.Core.Tests" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,2 @@
+# Help fixtures are compared line by line
+core/tests/Yawble.Core.Tests/Integrations/Fixtures/** text eol=lf

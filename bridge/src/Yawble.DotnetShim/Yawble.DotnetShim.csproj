@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- Named dotnet: first on PATH inside Windows sandboxes (bin\dotnet-shim\dotnet.exe), it runs the real dotnet with
+         builds in one MSBuild process. Like yawble-bridge, a small native binary (`dotnet publish -r <rid>`). -->
+    <AssemblyName>dotnet</AssemblyName>
+    <RootNamespace>Yawble.DotnetShim</RootNamespace>
+    <PublishAot>true</PublishAot>
+    <IsAotCompatible>true</IsAotCompatible>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Yawble.Bridge.Tests" />
+  </ItemGroup>
+</Project>

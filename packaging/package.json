@@ -1,0 +1,13 @@
+{
+  "name": "yawble-packaging",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Unsigned dev installers for Yawble. Kept apart from shell/ so the shell's dependencies stay as they are. Run: node build.mjs",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "electron-builder": "26.18.0"
+  }
+}

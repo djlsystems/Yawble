@@ -1,0 +1,124 @@
+{
+  "version": "1.0.0",
+  "containment": "processcontainer",
+  "containerId": "yawble-run-0001",
+  "process": {
+    "commandLine": "C:\\Users\\alice\\.local\\bin\\claude.exe -p \"You have 1 instruction from Manager. Read it with the bus tools; don't push. $(id) `id`\" --output-format stream-json --verbose --strict-mcp-config --mcp-config C:\\Users\\alice\\AppData\\Local\\Yawble\\teams\\alpha\\members\\dev1\\home\\.yawble\\mcp.json --dangerously-skip-permissions --session-id 11111111-2222-3333-4444-555555555555",
+    "cwd": "C:\\Users\\alice\\AppData\\Local\\Yawble\\teams\\alpha\\members\\dev1\\repo",
+    "env": [
+      "ALLUSERSPROFILE=C:\\ProgramData",
+      "ANTHROPIC_BASE_URL=http://model.yawble.internal",
+      "APPDATA=C:\\Users\\alice\\AppData\\Local\\Yawble\\teams\\alpha\\members\\dev1\\home\\AppData\\Roaming",
+      "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1",
+      "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
+      "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1",
+      "CLAUDE_CODE_OAUTH_TOKEN=golden-run-token-0123456789abcdefghijklmnopqrstuv",
+      "CLAUDE_CODE_USE_POWERSHELL_TOOL=1",
+      "CLAUDE_CONFIG_DIR=C:\\Users\\alice\\AppData\\Local\\Yawble\\teams\\alpha\\members\\dev1\\home\\.claude",
+      "CommonProgramFiles=C:\\Program Files\\Common Files",
+      "DISABLE_AUTOUPDATER=1",
+      "DISABLE_INSTALLATION_CHECKS=1",
+      "DISABLE_UPDATES=1",
+      "DOTNET_CLI_HOME=C:\\Users\\alice\\AppData\\Local\\Yawble\\teams\\alpha\\members\\dev1\\home",
+      "DOTNET_CLI_TELEMETRY_OPTOUT=1",
+      "DOTNET_CLI_USE_MSBUILD_SERVER=0",
+      "DOTNET_GENERATE_ASPNET_CERTIFICATE=false",
+      "DOTNET_NOLOGO=1",
+      "DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1",
+      "ENABLE_CLAUDEAI_MCP_SERVERS=false",
+      "HOME=C:\\Users\\alice\\AppData\\Local\\Yawble\\teams\\alpha\\members\\dev1\\home",
+      "IS_SANDBOX=1",
+      "LOCALAPPDATA=C:\\Users\\alice\\AppData\\Local\\Yawble\\teams\\alpha\\members\\dev1\\home\\AppData\\Local",
+      "MSBUILDDISABLENODEREUSE=1",
+      "MSBUILDUSESERVER=0",
+      "NODE_USE_ENV_PROXY=1",
+      "NUGET_PACKAGES=C:\\Users\\alice\\AppData\\Local\\Yawble\\teams\\alpha\\members\\dev1\\home\\.nuget\\packages",
+      "PATH=C:\\Program Files\\Yawble\\resources\\bin\\dotnet-shim;C:\\Users\\alice\\.local\\bin;C:\\Program Files\\Yawble\\resources\\bin;C:\\Windows\\System32;C:\\Windows;C:\\Windows\\System32\\WindowsPowerShell\\v1.0",
+      "PATHEXT=.COM;.EXE;.BAT;.CMD",
+      "ProgramData=C:\\ProgramData",
+      "ProgramFiles=C:\\Program Files",
+      "ProgramFiles(x86)=C:\\Program Files (x86)",
+      "SYSTEMROOT=C:\\Windows",
+      "SystemDrive=C:",
+      "TEMP=C:\\Users\\alice\\AppData\\Local\\Yawble\\teams\\alpha\\members\\dev1\\tmp",
+      "TERM=xterm-256color",
+      "TMP=C:\\Users\\alice\\AppData\\Local\\Yawble\\teams\\alpha\\members\\dev1\\tmp",
+      "USERPROFILE=C:\\Users\\alice\\AppData\\Local\\Yawble\\teams\\alpha\\members\\dev1\\home",
+      "UseSharedCompilation=false",
+      "WINDIR=C:\\Windows",
+      "YAWBLE_RUN_TOKEN=golden-run-token-0123456789abcdefghijklmnopqrstuv"
+    ],
+    "timeout": 900000
+  },
+  "filesystem": {
+    "readonlyPaths": [
+      "C:\\Users\\alice\\.local\\bin",
+      "C:\\Users\\alice\\.local\\share\\claude\\versions",
+      "C:\\Program Files\\Yawble\\resources\\bin",
+      "C:\\Program Files\\Yawble\\resources\\roles",
+      "C:\\Users\\alice\\src\\reference"
+    ],
+    "readwritePaths": [
+      "C:\\Users\\alice\\AppData\\Local\\Yawble\\teams\\alpha\\members\\dev1\\repo",
+      "C:\\Users\\alice\\AppData\\Local\\Yawble\\teams\\alpha\\members\\dev1\\home",
+      "C:\\Users\\alice\\AppData\\Local\\Yawble\\teams\\alpha\\members\\dev1\\tmp"
+    ],
+    "deniedPaths": [
+      "C:\\Users\\alice\\AppData\\Local\\Yawble\\data",
+      "C:\\Users\\alice\\AppData\\Local\\Yawble\\data\\yawble.db",
+      "C:\\Users\\alice\\AppData\\Local\\Yawble\\data\\credentials",
+      "C:\\Users\\alice\\AppData\\Local\\Yawble\\grok-home",
+      "C:\\Users\\alice\\.claude",
+      "C:\\Users\\alice\\.claude.json",
+      "C:\\Users\\alice\\AppData\\Local\\Yawble\\teams\\beta",
+      "C:\\Users\\alice\\AppData\\Local\\Yawble\\teams\\alpha\\members\\manager",
+      "C:\\Users\\alice\\AppData\\Local\\Yawble\\teams\\alpha\\members\\dev2",
+      "C:\\Users\\alice\\.ssh",
+      "C:\\Users\\alice\\.aws",
+      "C:\\Users\\alice\\.config\\gh",
+      "C:\\Users\\alice\\Desktop",
+      "C:\\Users\\alice\\Documents",
+      "C:\\Users\\alice\\Downloads",
+      "C:\\Users\\alice\\Music",
+      "C:\\Users\\alice\\OneDrive",
+      "C:\\Users\\alice\\Pictures",
+      "C:\\Users\\alice\\Videos"
+    ]
+  },
+  "network": {
+    "egress": {
+      "default": "deny"
+    },
+    "ingress": {
+      "default": "allow",
+      "hostLoopback": "allow"
+    }
+  },
+  "runtimeConfig": {
+    "networkProxy": "http://127.0.0.1:47001"
+  },
+  "ui": {
+    "disable": false,
+    "clipboard": "none",
+    "injection": false
+  },
+  "processContainer": {
+    "ui": {
+      "isolation": "container",
+      "desktopSystemControl": false,
+      "systemSettings": "none",
+      "ime": false
+    },
+    "filesystem": {
+      "enumeratePaths": [
+        "C:\\"
+      ]
+    }
+  },
+  "fallback": {
+    "allowDaclMutation": false
+  },
+  "telemetry": {
+    "enabled": false
+  }
+}

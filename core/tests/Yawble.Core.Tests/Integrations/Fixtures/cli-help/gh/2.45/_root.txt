@@ -1,0 +1,35 @@
+Work seamlessly with GitHub from the command line.
+
+USAGE
+  gh <command> <subcommand> [flags]
+
+CORE COMMANDS
+  auth:          Authenticate gh and git with GitHub
+  browse:        Open the repository in the browser
+  issue:         Manage issues
+  pr:            Manage pull requests
+  release:       Manage releases
+  repo:          Manage repositories
+  secret:        Manage GitHub secrets
+
+GITHUB ACTIONS COMMANDS
+  run:           View details about workflow runs
+  workflow:      View details about GitHub Actions workflows
+
+ALIAS COMMANDS
+  co:            Alias for "pr checkout"
+
+ADDITIONAL COMMANDS
+  api:           Make an authenticated GitHub API request
+  status:        Print information about relevant issues, pull requests, and notifications across repositories
+
+FLAGS
+  --help      Show help for command
+  --version   Show gh version
+
+EXAMPLES
+  $ gh issue create
+  $ gh repo clone cli/cli
+
+LEARN MORE
+  Use 'gh <command> <subcommand> --help' for more information about a command.

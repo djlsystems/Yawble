@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="xunit.v3.mtp-v2" />
+    <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" />
+    <PackageReference Include="Microsoft.Testing.Extensions.HangDump" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Yawble.Bridge/Yawble.Bridge.csproj" />
+    <ProjectReference Include="../../src/Yawble.DotnetShim/Yawble.DotnetShim.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,17 @@
+
+Group
+    az
+
+Subgroups:
+    account                    : Manage Azure subscription information.
+    group                      : Manage resource groups and template deployments.
+    keyvault                   : Manage KeyVault keys, secrets, and certificates.
+    storage                    : Manage Azure Cloud Storage resources.
+    vm                         : Manage Linux or Windows virtual machines.
+
+Commands:
+    login                      : Log in to Azure.
+    logout                     : Log out to remove access to Azure subscriptions.
+    version                    : Show the versions of Azure CLI modules and extensions in JSON format by default or format configured by --output.
+
+To search AI knowledge base for examples, use: az find "az "

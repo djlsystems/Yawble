@@ -1,0 +1,27 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Petstore", "version": "1.0.0" },
+  "servers": [ { "url": "https://{region}.petstore.example/v1", "variables": { "region": { "default": "eu" } } } ],
+  "paths": {
+    "/pets": {
+      "get": {
+        "operationId": "listPets", "tags": ["pets"], "summary": "List all pets",
+        "parameters": [
+          { "name": "limit", "in": "query", "description": "How many to return", "schema": { "type": "integer" } },
+          { "name": "X-Trace", "in": "header", "schema": { "type": "string" } },
+          { "name": "Authorization", "in": "header", "schema": { "type": "string" } }
+        ]
+      },
+      "post": {
+        "operationId": "createPets", "tags": ["pets"], "summary": "Create a pet",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "name": { "type": "string" } } } } } }
+      },
+      "options": { "operationId": "optionsPets", "summary": "skipped" }
+    },
+    "/pets/{petId}": {
+      "parameters": [ { "name": "petId", "in": "path", "required": true, "schema": { "type": "string" } } ],
+      "delete": { "operationId": "deletePet", "tags": ["pets"], "summary": "Delete a pet" }
+    }
+  },
+  "components": { "securitySchemes": { "key": { "type": "apiKey", "in": "header", "name": "X-Api-Key" } } }
+}

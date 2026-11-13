@@ -1,0 +1,46 @@
+{
+  "compute": {
+    "idleTimeoutSec": 1800,
+    "wallTimeoutSec": 900,
+    "memoryMb": null,
+    "cpuPercent": null,
+    "maxProcesses": null
+  },
+  "gateway": {
+    "port": 47001,
+    "allowHosts": [
+      "registry.npmjs.org"
+    ],
+    "vhosts": [
+      {
+        "host": "bus.yawble.internal",
+        "kind": "bus",
+        "upstream": null,
+        "credential": null,
+        "allowedPaths": [
+          "/mcp"
+        ]
+      },
+      {
+        "host": "xai.yawble.internal",
+        "kind": "model",
+        "upstream": "https://api.x.ai",
+        "credential": "xai-api-key",
+        "allowedPaths": [
+          "GET /v1/models",
+          "GET /v1/api-key",
+          "POST /v1/responses",
+          "POST /v1/chat/completions"
+        ]
+      }
+    ]
+  },
+  "seeds": [
+    {
+      "path": "/home/alice/.local/share/yawble/teams/alpha/members/dev1/home/.grok/config.toml",
+      "content": "[mcp_servers.bus]\ncommand = '/opt/yawble/resources/bin/yawble-bridge'\nargs = []\n"
+    }
+  ],
+  "loosened": [],
+  "maxConcurrentAgents": 4
+}

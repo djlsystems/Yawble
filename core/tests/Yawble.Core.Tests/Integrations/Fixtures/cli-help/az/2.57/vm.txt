@@ -1,0 +1,15 @@
+
+Group
+    az vm : Manage Linux or Windows virtual machines.
+
+Subgroups:
+    disk                       : Manage the managed data disks attached to a VM.
+    extension                  : Manage extensions on VMs.
+
+Commands:
+    create                     : Create an Azure Virtual Machine.
+    delete                     : Delete a VM.
+    list                       : List details of Virtual Machines.
+    restart                    : Restart VMs.
+    show                       : Get the details of a VM.
+    stop                       : Power off (stop) a running Virtual Machine.

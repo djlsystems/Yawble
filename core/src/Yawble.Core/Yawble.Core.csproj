@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>yawble-core</AssemblyName>
+    <RootNamespace>Yawble.Core</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Sandbox/NativeSandbox.cs: LibraryImport of mxc_run_json, which the 1.0.1 managed SDK does not expose. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Mxc.Sdk" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" />
+    <PackageReference Include="Cronos" />
+    <PackageReference Include="YamlDotNet" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Storage/Migrations/*.sql" LogicalName="Yawble.Core.Migrations.%(Filename)%(Extension)" />
+    <!-- The manager and member role texts served by skills_get (Teams/RoleTexts.cs). -->
+    <EmbeddedResource Include="Teams/Roles/*.md" LogicalName="Yawble.Core.Roles.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Teams/Skills/*.md" LogicalName="Yawble.Core.Skills.%(Filename)%(Extension)" />
+    <Content Include="../../../sandbox.lock.json" Link="sandbox.lock.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Yawble.Core.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The read-only code browser (core/src/Yawble.CodeBrowser/), wired in Code/CodeBrowserRpc.cs. -->
+    <ProjectReference Include="../Yawble.CodeBrowser/Yawble.CodeBrowser.csproj" />
+  </ItemGroup>
+
+  <!-- The build's version (yyyy.mm.dd.N, or <last release>+dev.<sha>[.dirty]): core/BuildVersion.targets. -->
+  <Import Project="../../BuildVersion.targets" />
+
+  <!-- wxc-exec.exe from the same sandbox release, next to the core on Windows. The NuGet
+       package does not carry it; toolchain/fetch-wxc-exec.mjs puts it in .toolchain/<rid>/sandbox/<version>/.
+       A Windows publish (-r win-*) fails without it; a plain build on Windows copies it when present. -->
+  <PropertyGroup>
+    <WxcExecRid Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</WxcExecRid>
+    <WxcExecRid Condition="'$(RuntimeIdentifier)' == '' and $([MSBuild]::IsOSPlatform('Windows'))">win-$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant())</WxcExecRid>
+    <WxcExecPath>$(MSBuildThisFileDirectory)../../../.toolchain/$(WxcExecRid)/sandbox/$(SandboxVersion)/wxc-exec.exe</WxcExecPath>
+  </PropertyGroup>
+  <ItemGroup Condition="$(WxcExecRid.StartsWith('win-')) and Exists('$(WxcExecPath)')">
+    <None Include="$(WxcExecPath)" Link="wxc-exec.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="RequireWxcExecForWindowsPublish" BeforeTargets="PrepareForPublish"
+          Condition="'$(RuntimeIdentifier)' != '' and $(RuntimeIdentifier.StartsWith('win-')) and !Exists('$(WxcExecPath)')">
+    <Error Code="YAWBLE001" Text="wxc-exec.exe for $(RuntimeIdentifier) (sandbox $(SandboxVersion)) is missing at $(WxcExecPath). Run: node toolchain/fetch-wxc-exec.mjs --platform $(RuntimeIdentifier)" />
+  </Target>
+</Project>

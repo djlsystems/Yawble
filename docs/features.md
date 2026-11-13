@@ -1,0 +1,205 @@
+# Features
+
+A short reference to what Yawble does. Yawble is a desktop app that runs teams of AI coding agents, using the agent
+CLIs you already installed. Each agent run is isolated in its own sandbox (Microsoft's MXC sandbox).
+
+The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board** and **Monitor**, plus Settings.
+
+## Teams and members
+
+- A team has one **Manager** and any number of **members**. You tell the Manager what you want. It splits the work,
+  tells members, and declares the workflow complete.
+- **New team** asks for a team name, a repository (a folder on this computer, a new one the app makes, or
+  **Clone from an address**) and its agents, each with a role and a CLI.
+- A member's name is a job and a first name, for example "Developer Priya". Its id names its folder and branch.
+- **Member settings** has General (CLI, model, credential, instructions) and Policy (see
+  [Sandbox and policy](#sandbox-and-policy)).
+- Team **Settings** has the tabs General, Members, Repositories, Environment and Integrations:
+  - **Pause** starts no new runs; a running one finishes; queued work and triggers wait. **Resume** queues it again,
+    oldest first.
+  - **Archive** keeps a quiet team whole and paused. **Unarchive** brings it back paused.
+  - **Delete** removes a quiet team's members, queue, triggers, skills and Board cards. A repository folder you
+    picked is never touched.
+  - **Reset** clears, per member, waiting instructions, the home folder (the CLI's own history), the clone, and the
+    team's documents, as you choose.
+  - **Environment** holds team environment variables; the next runs get them.
+- **Workflows** lists each piece of work with **Nudge** (tell the Manager to pick it up) and **Stop runs**.
+- Members ask you through the team page. **Approve** answers once; **Always approve for this team…** remembers it.
+- One global run limit (default 4) covers every team. Runs and interactive sessions wait in one first-come,
+  first-served queue.
+- After a model usage limit, the Manager is told to pick the work up again once the limit resets, up to 3 times per
+  workflow.
+- When a run ends with its workflow still open and nothing else working on it, the Manager gets one reminder.
+- **Skills** (Settings > Skills) are instructions agents load through the app, offered to chosen roles and teams.
+
+## Agent CLIs
+
+- Supported: **Claude Code**, **Grok (xAI)**, **Codex (OpenAI)**, **GitHub Copilot**, **Antigravity (Google)**.
+- Yawble does not ship or update them. It detects your own install (PATH, then the vendor's install locations) at
+  every launch and runs it by absolute path.
+- Each run gets the install folders read-only. The CLI's config and credential folders are blocked. Self-update is
+  off in the sandbox.
+- You install, update and sign in to each CLI in your own terminal. The app only finds them.
+- A member's **Credential** setting picks the sign-in its runs use:
+  - Claude Code: the app's switch, a Claude subscription, or an Anthropic API key.
+  - Grok: the app's switch, your Grok login, or an xAI API key.
+  - The other CLIs: their own sign-in on this computer.
+- Credentials are kept in the OS credential store and used by the run's gateway, never inside the sandbox.
+- **Settings > Agents** lists detected CLIs (**Detect again**) and custom agents. A custom agent copies a built-in
+  with its own name, default model and command-line arguments.
+- **Terminal** opens an agent's own interface in the window. **Test** runs it with a diagnostic prompt that checks
+  its version, folders and access.
+
+## Sandbox and policy
+
+- Every agent run, Concierge turn and guardrail check runs in its own sandbox.
+- No model credential enters a sandbox. Each run has its own gateway on this computer. It is the run's only network
+  path, and it adds the real credential to model requests outside the sandbox.
+- The run gets a random run token. It works only for that run and stops when the run ends.
+- Network: model and team traffic go through the gateway. Other hosts are reachable only if allowed; every refusal
+  is logged.
+- Files: each member reads and writes only its own clone, home and temp folders. The app's data, the credential
+  store, and other members and teams are denied.
+- **Settings > Guardrails** is the global policy: Sandbox, Limits (idle and wall-clock timeouts), Files and folders,
+  Network (allowed hosts, package restore for .NET, npm and Python) and Desktop.
+- A member's **Override** can only tighten the global policy. Widening one agent goes through **Loosen…**: you
+  preview the exact list and confirm it.
+- Floor rules nobody can loosen:
+  - model vendors' API and sign-in hosts are never allowed hosts;
+  - no IP addresses or wildcards;
+  - no grant may reach the app's data folder;
+  - timeouts at most 24 hours.
+
+## Concierge
+
+- The Concierge is a chat with an agent that knows every team on this computer and acts for you.
+- Conversations are kept. Each reply is one sandboxed run of the conversation's agent CLI.
+- It can read teams, status, activity, workflows, documents, the backlog, the board, git state, integrations,
+  usage and the doctor.
+- It can tell a Manager, answer a team's question, create a team, pause or resume a team, nudge or close a
+  workflow, and add, dispatch, move or comment on backlog items and cards.
+- Git and team actions: delete, prune, push or sync branches, open or merge a pull request (with your `gh`),
+  archive or delete a team, set environment variables, change an agent.
+- Anything destructive first shows the exact list. It runs only after you say yes in a later message in the same
+  conversation.
+- It keeps notes across conversations, and can watch teams and review their updates. A review it starts on its own
+  can read and recommend, never act.
+- You can attach images to a message.
+
+## Board, Backlog and Documents
+
+- **Board**: four lanes, **To Do**, **In Progress**, **Needs You** and **Done**. Cards come from the teams' work and
+  move with its status. You can move a card, comment, or ask the Manager about it.
+- **Backlog**: work you want done, most important first.
+  - Add an item, read it and mark it ready, then dispatch it to a team's Manager or to **A new team…**.
+  - When the team declares the work complete, only you mark it implemented.
+  - Items can be archived and restored. **Dispatches** shows each dispatch with its token counts.
+- **Documents**: each team has a shared documents folder for reports, specs and plans.
+  - Every member reads and writes it as plain files.
+  - You can browse, read, edit, upload (up to 25 MB), rename and delete there.
+
+## Monitor
+
+- A live wall of every team. Members orbit their team as discs with a state ring: running, waiting, needs you,
+  idle.
+- Each member shows its recent tool steps, changed files and what it is doing now.
+- Counts across the top, an **Activity** panel of messages, and a **Workflows** panel per team.
+- A timeline replays any moment. **● Back to live** returns.
+
+## Repositories and git
+
+- Each team has a team repository on this computer: a folder you pick, a clone of an address, or one the app makes.
+- A team can have several repositories, each with a base branch and an optional name members see.
+- Each member works in its own local clone on its own branch, `members/<name>`. The Manager's branch is
+  `team/<team>`.
+- Clones have no remote and no credential helper. After each run the app cleans the clone's git config and fetches
+  the member's branch into the team repository. It never runs git inside a clone an agent used.
+- When the team repository has an origin, branches are pushed with your own git setup at each run's end. Pushes are
+  never forced.
+- **Git** on the team page: **Fetch**, **Sync now**, **Merge** (the team branch into the base branch, then pushed
+  to origin), and per-member branch state. The app never forces, rebases or stashes.
+- A banner shows when branches could not be brought up to date on their own.
+- Each member's working copy has a read-only code browser.
+
+## Integrations
+
+Your CLIs (such as `gh`, `git` and `az`), local and remote MCP servers, web APIs described by OpenAPI, and websites
+can be offered to teams' agents as tools. Every call runs on this computer, under rules: allowed, ask first, or off.
+Calls that ask first wait for your approval. Sign-ins are Connections kept in the OS credential store, which agents
+never see. Host tasks run named programs for a team, under a standing approval. See
+[Connections and integrations](connections-and-integrations.md).
+
+## Triggers
+
+- **⏰ Triggers** on a team's page sends an instruction to a chosen agent as a new piece of work when the trigger
+  fires.
+- Kinds:
+  - **Every**: an interval of at least 10 seconds.
+  - **Cron**: 5 or 6 fields, with a timezone.
+  - **Once**: at a set time.
+  - **Folder**: when files in the team's documents or a folder on this computer change and settle. It can filter by
+    file pattern.
+  - **Event**: when an integration watch reports a new item.
+- Options: **Only when the agent is idle**, **Enabled**, **Run now**.
+- **Wake the Manager when a run ends**: only on a hand-back or failure (the default), every time, or never.
+
+## Companion
+
+`yawble` is a small program installed with the app. It lets a program on this computer, such as Claude Code, see and
+work with your teams, as an MCP server (`yawble mcp`) or a CLI.
+
+- It pairs once per program, with a code you approve in the window.
+- Access levels: `read`, `act` and `destructive`. Destructive calls wait for your approval in the window.
+- It talks only to the running app on this computer. Nothing of it is reachable over Cloud Link.
+- Paired programs are listed and revoked in Settings > Companion.
+- Setup is in the [README](../README.md).
+
+## Backups and doctor
+
+- **Backups** (Settings > General) copy the app's database:
+  - daily, before an update, and on **Back up now**;
+  - 7 daily backups are kept by default, plus 5 before-update and 5 manual ones.
+- Passwords and sign-ins are not copied. A backup records which Connections and secret fields existed, never their
+  values.
+- **Restore…** returns teams, cards and messages to that moment. It is applied at the next start.
+- Log files older than 14 days are deleted.
+- **Settings > Health** runs the doctor. Its checks are Database, Disk space, Sandbox, Agent CLIs, Cloud Link,
+  Connections, Teams and Logs.
+- Fixes it offers: open a Connection to reconnect it, remove unused credentials, sync a team that is behind, archive
+  a team that is quiet. Fixes that change something ask first.
+- A banner at start-up says when this computer is not ready to run agents, and how to fix it.
+
+## Guardrail check
+
+- The check proves the fence from inside it. It runs a probe in a sandbox under a member's effective policy, or the
+  global policy alone, with no model credential.
+- The probe tries to:
+  - write outside its folders;
+  - read the app's data, the credential store and your home's secrets;
+  - reach the network directly or through hosts the gateway does not allow;
+  - reach host processes.
+- The report shows PASSED or what failed. For each probe it gives the verdict, the evidence, and whether the gateway
+  logged the refusal.
+- Run it from a member's settings or **Settings > Guardrails** (**Run check**).
+- It also runs as a command:
+  `yawble-core guardrail-check --data-dir <app root>/data [--team T --member M | --cli claude|grok] [--json]`. The
+  exit code is 0 for passed, 1 for failed and 2 for a usage error.
+
+## Settings
+
+| Tab | What it has |
+|---|---|
+| General | **Keep running when the window is closed** (Yawble stays in the tray), **Start Yawble when I sign in to this computer**, Backups |
+| Agents | Detected CLIs and custom agents |
+| Skills | Skills and which roles and teams they are offered to |
+| Guardrails | The global policy and the global run limit |
+| Integrations | CLIs, APIs, MCP servers, Connections, host tasks |
+| Cloud Link | Pairing and remote access; see [Cloud Link](cloud-link.md) |
+| Health | The doctor |
+| Companion | The `yawble` companion: the line to add it to Claude Code, paired programs |
+| System | Version, build, platform, sandbox backend and capabilities, About |
+
+- A notification says when Yawble needs you: questions, approvals and Connections to reconnect.
+- Every call that changes something is recorded in an audit log, with who made it and how. Keys, tokens and
+  messages are never recorded.
+- Each run's output is kept in an owner-only transcript file. The terminal shows it as **Formatted** or **Raw**.

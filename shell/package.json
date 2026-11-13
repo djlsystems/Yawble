@@ -1,0 +1,40 @@
+{
+  "name": "yawble",
+  "version": "0.1.0",
+  "description": "Yawble: the Electron shell (thin). The .NET core sidecar owns all state; this talks to it over a local socket or named pipe.",
+  "author": "DJL Systems, Inc.",
+  "private": true,
+  "main": "out/main/main/index.js",
+  "scripts": {
+    "postinstall": "install-electron",
+    "build": "npm run build:main && npm run build:renderer",
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:renderer": "vite build",
+    "typecheck": "tsc -p tsconfig.main.json --noEmit && vue-tsc -p tsconfig.renderer.json --noEmit",
+    "start": "electron .",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@types/d3-force": "^3.0.10",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "d3-force": "^3.0.0",
+    "highlight.js": "11.12.0",
+    "markdown-it": "14.3.3",
+    "vue": "^3.5.45"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.0",
+    "@types/markdown-it": "14.1.2",
+    "@types/node": "^22.19.11",
+    "@vitejs/plugin-vue": "^6.0.10",
+    "@vue/test-utils": "^2.5.1",
+    "electron": "^45.2.3",
+    "happy-dom": "^21.0.4",
+    "typescript": "^6.0.0",
+    "vite": "^8.3.6",
+    "vitest": "^5.1.0",
+    "vue-tsc": "^3.3.14"
+  }
+}

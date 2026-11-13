@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>yawble-guardcheck</AssemblyName>
+    <RootNamespace>Yawble.GuardCheck</RootNamespace>
+    <!-- The guardrail check's probe: runs INSIDE a member's sandbox under that member's exact compiled
+         request, like yawble-bridge, so a small native binary with no .NET runtime to grant. `dotnet publish -r <rid>`. -->
+    <PublishAot>true</PublishAot>
+    <IsAotCompatible>true</IsAotCompatible>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+</Project>

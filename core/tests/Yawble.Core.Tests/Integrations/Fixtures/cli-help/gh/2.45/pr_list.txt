@@ -1,0 +1,10 @@
+List pull requests in a repository.
+
+USAGE
+  gh pr list [flags]
+
+FLAGS
+  -a, --assignee string   Filter by assignee
+  -S, --search query      Search pull requests with query
+  -s, --state string      Filter by state: {open|closed|merged|all} (default "open")
+  -w, --web               List pull requests in the web browser
