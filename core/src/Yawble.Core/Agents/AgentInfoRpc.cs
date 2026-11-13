@@ -37,7 +37,7 @@ public sealed class AgentInfoRpc(
     Profiles.AgentChangeLog? changes = null)
 {
     public static bool Handles(string method) => method is "agents.commandLine" or "agents.models" or "agents.defaultModels"
-        or "agents.setDefaultModel" or "agents.resolveModel" or "agents.versionStatus" or "agents.checkForUpdates" or "agents.runRecords";
+        or "agents.setDefaultModel" or "agents.resolveModel" or "agents.versionStatus" or "agents.checkForUpdates" or "agents.install" or "agents.runRecords";
 
     public async Task<JsonNode?> DispatchAsync(string method, JsonObject? p, CancellationToken ct)
     {
@@ -130,6 +130,23 @@ public sealed class AgentInfoRpc(
                     throw new RpcException("unavailable", $"{cli.Id()} is not installed on this computer");
                 var command = UpdateCommands.For(cli, exe) ?? throw new RpcException("unavailable", $"the app does not know an update command for {cli.Id()}");
                 try { terminal.Open($"Update {cli.Id()}", command); }
+                catch (Exception e) when (e is PlatformNotSupportedException or System.ComponentModel.Win32Exception)
+                {
+                    throw new RpcException("unavailable", e.Message);
+                }
+                return new JsonObject { ["opened"] = true, ["command"] = new JsonArray(command.Select(c => (JsonNode?)c).ToArray()) };
+            }
+            case "agents.install":
+            {
+                if (Actor.Current is not { Via: Actor.App })
+                    throw new RpcException("forbidden", "an agent CLI is installed by the person, in the app's window on this computer");
+                var cli = Cli(p);
+                var found = (await clis.DetectAllAsync(ct)).FirstOrDefault(d => d.CliId == cli.Id());
+                if (found is { Found: true })
+                    throw new RpcException("unavailable", $"{cli.Id()} is already installed ({found.ExecutablePath}); use Update");
+                var command = InstallCommands.For(cli)
+                    ?? throw new RpcException("unavailable", $"{cli.Id()} has no install command; install it from its maker's site");
+                try { terminal.Open($"Install {cli.Id()}", command); }
                 catch (Exception e) when (e is PlatformNotSupportedException or System.ComponentModel.Win32Exception)
                 {
                     throw new RpcException("unavailable", e.Message);

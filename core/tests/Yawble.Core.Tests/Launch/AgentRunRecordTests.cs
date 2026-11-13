@@ -200,6 +200,32 @@ public class AgentRunRecordTests
     }
 
     [Fact]
+    public async Task Install_RunsTheMakersCommandInATerminal_OnlyForTheWindow_AndOnlyWhenTheCliIsMissing()
+    {
+        await using var kit = await LaunchKit.StartAsync();
+        var terminal = new FakeTerminal();
+        var clis = new FakeCliDetector(TestClis.Found("claude", "claude.exe", [], []), TestClis.Missing("grok"), TestClis.Missing("antigravity"));
+        var rpc = new AgentInfoRpc(kit.Launcher, kit.Defaults, new ModelCatalog(), clis, kit.Records, new SqliteMemberDirectory(kit.Db.ConnectionString), terminal);
+
+        foreach (var actor in new[] { new Actor(Actor.Cloud, "viewer"), new Actor(Actor.Concierge, null), new Actor(Actor.Agent, null) })
+            using (Actor.Use(actor))
+                Assert.Equal("forbidden", (await Assert.ThrowsAsync<RpcException>(() => rpc.DispatchAsync("agents.install", new JsonObject { ["cli"] = "grok" }, Ct))).Code);
+        Assert.Empty(terminal.Opened);
+
+        using (Actor.Use(Actor.Window))
+        {
+            var opened = await rpc.DispatchAsync("agents.install", new JsonObject { ["cli"] = "grok" }, Ct);
+            Assert.True(opened!["opened"]!.GetValue<bool>());
+            Assert.Equal(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "irm https://x.ai/cli/install.ps1 | iex"], Assert.Single(terminal.Opened));
+            Assert.Contains("already installed", (await Assert.ThrowsAsync<RpcException>(() => rpc.DispatchAsync("agents.install", new JsonObject { ["cli"] = "claude" }, Ct))).Message);
+            Assert.Contains("maker's site", (await Assert.ThrowsAsync<RpcException>(() => rpc.DispatchAsync("agents.install", new JsonObject { ["cli"] = "antigravity" }, Ct))).Message);
+        }
+        Assert.Single(terminal.Opened);
+        Assert.Equal(["npm", "install", "-g", "@openai/codex"], InstallCommands.For(AgentCli.Codex));
+        Assert.Equal("winget", InstallCommands.For(AgentCli.Copilot)![0]);
+    }
+
+    [Fact]
     public async Task Version_changed_since_the_last_run_is_reported_from_the_run_rows()
     {
         await using var kit = await LaunchKit.StartAsync();

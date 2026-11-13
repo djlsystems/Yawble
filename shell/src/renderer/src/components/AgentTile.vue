@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { linkParts } from '../links';
+import { installable } from '../agentClis';
 import { computed } from 'vue';
 import BusyLabel from './BusyLabel.vue';
 import type { AgentTestSession, AgentVersionStatus, DetectedCli } from '../../../shared/api';
@@ -24,7 +26,7 @@ const props = defineProps<{
   /** Update was clicked and the core is opening the CLI's update terminal: that button shows a spinner. */
   updating?: boolean;
 }>();
-const emit = defineEmits<{ terminal: []; test: []; commandLine: []; model: []; update: []; duplicate: []; edit: []; remove: []; open: []; stop: [] }>();
+const emit = defineEmits<{ terminal: []; test: []; commandLine: []; model: []; update: []; install: []; duplicate: []; edit: []; remove: []; open: []; stop: [] }>();
 
 const kinds: Record<string, string> = { native: 'official installer', npm: 'npm', homebrew: 'Homebrew', winget: 'WinGet', other: 'other' };
 const found = computed(() => !!props.detected?.found);
@@ -57,7 +59,9 @@ const found = computed(() => !!props.detected?.found);
         </template>
         <button class="small-btn" data-test="tile-cmd" @click="emit('commandLine')">Command line</button>
         <button class="small-btn" data-test="tile-model" @click="emit('model')">Model</button>
-        <button v-if="!custom" class="small-btn" data-test="tile-update" :disabled="updating" :aria-busy="updating" @click="emit('update')"><BusyLabel :busy="!!updating" text="Opening…">Update</BusyLabel></button>
+        <button v-if="!custom && found" class="small-btn" data-test="tile-update" :disabled="updating" :aria-busy="updating" @click="emit('update')"><BusyLabel :busy="!!updating" text="Opening…">Update</BusyLabel></button>
+        <button v-if="!custom && !found && !loading && installable.includes(cliId)" class="primary small-btn" data-test="tile-install-btn" :disabled="updating" :aria-busy="updating"
+          title="Opens a terminal that runs the maker's own install command" @click="emit('install')"><BusyLabel :busy="!!updating" text="Opening…">Install</BusyLabel></button>
         <button class="small-btn" data-test="tile-duplicate" @click="emit('duplicate')">Duplicate</button>
         <button v-if="custom" class="small-btn" data-test="tile-edit" @click="emit('edit')">Edit</button>
         <button v-if="custom" class="small-btn danger" data-test="tile-delete" @click="emit('remove')">Delete</button>
@@ -70,7 +74,7 @@ const found = computed(() => !!props.detected?.found);
         · installed with <span data-test="cli-kind">{{ kinds[detected.installKind] ?? detected.installKind }}</span>
         <template v-if="detected.launcherPath && detected.launcherPath !== detected.executablePath"> · started as <span class="mono">{{ detected.launcherPath }}</span></template>
       </div>
-      <div v-else-if="detected" data-test="cli-install-help">{{ custom ? `${baseTitle} is not installed: ` : '' }}{{ detected.installHelp }}</div>
+      <div v-else-if="detected" data-test="cli-install-help">{{ custom ? `${baseTitle} is not installed: ` : '' }}<template v-for="(part, i) in linkParts(detected.installHelp)" :key="i"><a v-if="part.href" :href="part.href" target="_blank" rel="noopener">{{ part.text }}</a><template v-else>{{ part.text }}</template></template></div>
       <div v-if="!remote && loading" class="muted faint" data-test="tile-default-model-loading" aria-label="Loading the default model">Default model: …</div>
       <div v-else-if="!remote" class="muted" data-test="tile-default-model">Default model: {{ defaultModel || "the CLI's default" }}</div>
       <ul v-if="detected?.problems.length" class="problems" data-test="cli-problems">

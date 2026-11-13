@@ -42,7 +42,9 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
   every launch and runs it by absolute path.
 - Each run gets the install folders read-only. The CLI's config and credential folders are blocked. Self-update is
   off in the sandbox.
-- You install, update and sign in to each CLI in your own terminal. The app only finds them.
+- **Install** (on a CLI that is not found) and **Update** open a terminal that runs the maker's own install or update
+  command: PowerShell install scripts for Claude Code and Grok, npm for Codex, winget for GitHub Copilot. Antigravity
+  installs from its site. You sign in to each CLI in that terminal, your own way, then press **Detect again**.
 - A member's **Credential** setting picks the sign-in its runs use:
   - Claude Code: the app's switch, a Claude subscription, or an Anthropic API key.
   - Grok: the app's switch, your Grok login, or an xAI API key.

@@ -150,6 +150,25 @@ public static class UpdateCommands
     };
 }
 
+/// <summary>
+/// The install command each CLI's maker documents for Windows, run in a visible terminal when the person asks (Settings >
+/// Agents, Install): the person sees it, answers anything it asks, and signs in afterwards. Null when the maker offers no
+/// command (Antigravity installs from its site).
+/// </summary>
+public static class InstallCommands
+{
+    public static IReadOnlyList<string>? For(AgentCli cli) => cli switch
+    {
+        AgentCli.Claude => PowerShell("irm https://claude.ai/install.ps1 | iex"),
+        AgentCli.Grok => PowerShell("irm https://x.ai/cli/install.ps1 | iex"),
+        AgentCli.Codex => ["npm", "install", "-g", "@openai/codex"],
+        AgentCli.Copilot => ["winget", "install", "--id", "GitHub.Copilot", "--exact", "--source", "winget"],
+        _ => null,
+    };
+
+    private static IReadOnlyList<string> PowerShell(string script) => ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script];
+}
+
 /// <summary>Opens a visible terminal that runs a command and stays open. A fake in tests.</summary>
 public interface IUpdateTerminal
 {

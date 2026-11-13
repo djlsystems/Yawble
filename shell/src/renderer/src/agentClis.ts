@@ -9,4 +9,7 @@ export const agentClis = [
 
 export type AgentCliId = (typeof agentClis)[number]['id'];
 
+/** The CLIs whose maker documents an install command the app can run for the person (core: Agents/AgentModels.cs InstallCommands). */
+export const installable: readonly string[] = ['claude', 'grok', 'codex', 'copilot'];
+
 export const cliLabel = (id: string): string => agentClis.find((c) => c.id === id)?.label ?? id;

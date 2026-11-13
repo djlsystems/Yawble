@@ -189,6 +189,22 @@ async function checkUpdates(cliId: string) {
   }
 }
 
+/** Install: a terminal runs the maker's own install command; the person signs in, then presses Detect again. */
+async function install(cliId: string) {
+  if (updating.value) return;
+  notice.value = null;
+  error.value = null;
+  updating.value = cliId;
+  try {
+    await api.call('agents.install', { cli: cliId });
+    notice.value = `A terminal opened with ${titleOf(cliId)}'s install command. When it finishes, sign in as its card says, then press Detect again.`;
+  } catch (e) {
+    error.value = errorText(e);
+  } finally {
+    updating.value = null;
+  }
+}
+
 // ------------------------------------------------------------------ dialogs
 type Dialog =
   | { kind: 'cmd'; tile: Tile }
@@ -264,8 +280,8 @@ onBeforeUnmount(() => { offChanged?.(); offChanged = null; });
 <template>
   <Modal :inline="inline" title="Agents" wide @close="emit('close')">
     <p class="muted small">
-      The app runs the agent CLIs you installed yourself, from where they are installed, inside the sandbox. You install, update
-      and sign in to each CLI in your own terminal; the app only finds them.
+      The app runs the agent CLIs installed on this computer, from where they are installed, inside the sandbox. Install and
+      Update open a terminal that runs the CLI's own install or update command; you sign in to each CLI there, your own way.
     </p>
     <div class="row bar">
       <button data-test="agents-redetect" :disabled="detecting" :aria-busy="detecting" @click="detect"><BusyLabel :busy="detecting" text="Detecting…">Detect again</BusyLabel></button>
@@ -285,7 +301,7 @@ onBeforeUnmount(() => { offChanged?.(); offChanged = null; });
         :remote="!!api.remote" :loading="agentsLoading" :running="runningFor(t)" :starting="starting?.key === t.key ? starting.kind : null" :updating="updating === t.cliId"
         @open="openSession(runningFor(t)!)" @stop="stopSession(runningFor(t)!)"
         @terminal="session(t, false)" @test="session(t, true)" @command-line="dialog = { kind: 'cmd', tile: t }" @model="dialog = { kind: 'model', tile: t }"
-        @update="checkUpdates(t.cliId)" @duplicate="duplicate(t)" @edit="edit(t)"
+        @update="checkUpdates(t.cliId)" @install="install(t.cliId)" @duplicate="duplicate(t)" @edit="edit(t)"
         @remove="dialog = { kind: 'delete', profile: t.profile, error: null, inUse: false, busy: false }" />
     </div>
     <p v-if="api.remote" class="muted small" data-test="agents-remote-note">The command lines, models and your own agents are set on the computer itself.</p>
