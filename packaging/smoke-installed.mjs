@@ -49,13 +49,13 @@ try {
   await window.locator('[data-test=host-checks-probe][data-state=read]').waitFor({ state: 'attached', timeout: 60_000 });
   const hostChecks = (await window.locator('[data-test=host-checks] li').allTextContents()).map((t) => t.trim());
   // The Guardrails panel is off with "Not available: ..." when the core cannot find <install>/bin/yawble-guardcheck
-  // or its launcher is off. The global policy dialog holds the panel for the global policy; read whether it is available.
+  // or its launcher is off. The global policy's Guardrails tab on the Settings page holds the panel; read whether it is available.
+  await window.locator('[data-test=open-app-settings]').click();
   await window.locator('[data-test=open-global-policy]').click();
   const guardrailAvailable = window.locator('[data-test=guardrail-none]');
   const guardrailOff = window.locator('[data-test=guardrail-unavailable]');
   await guardrailAvailable.or(guardrailOff).waitFor({ state: 'attached', timeout: 60_000 });
   const guardrail = (await guardrailOff.count()) > 0 ? (await guardrailOff.textContent())?.trim() : 'available';
-  await window.locator('[data-test=modal-close]').click();
   await window.locator('[data-test=open-system]').click();
   const version = window.locator('[data-test=core-version]');
   await version.waitFor({ timeout: 60_000 });
@@ -71,7 +71,8 @@ try {
     packaged: await app.evaluate(({ app }) => app.isPackaged),
   };
   console.log(JSON.stringify(info, null, 2));
-  if (info.title !== 'Yawble') throw new Error(`window title is ${info.title}`);
+  // The title names the open page: "Yawble", or "<page> · Yawble".
+  if (!/(^| · )Yawble$/.test(info.title)) throw new Error(`window title is ${info.title}`);
   if (!/^\d+\.\d+\.\d+/.test(info.coreVersion ?? '')) throw new Error(`no core version in the window: ${info.coreVersion}`);
   if (!info.contract?.includes('1.0.0 · telemetry off')) throw new Error(`unexpected sandbox contract line: ${info.contract}`);
   if (hostReady && info.hostChecks.length > 0) throw new Error(`the startup probe says this host is not ready: ${info.hostChecks.join(' | ')}`);

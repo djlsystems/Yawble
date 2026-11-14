@@ -281,7 +281,7 @@ export interface UpdateStatus {
 export interface UpdateInfo { allUsers: boolean; admin: boolean; otherUsers: number }
 
 /** The only core methods the renderer may reach through Channels.call (checked again in Electron main). */
-export const UI_METHOD_PREFIXES = ['app.', 'monitor.', 'board.', 'backlog.', 'teams.', 'members.', 'bus.', 'policy.', 'credentials.', 'hostTerminal.', 'terminal.', 'guardrail.', 'agents.', 'agentProfiles.', 'skills.', 'triggers.', 'git.', 'link.', 'concierge.', 'docs.', 'integrations.', 'tasks.', 'ops.', 'companion.', 'code.', 'logs.', 'updates.'] as const;
+export const UI_METHOD_PREFIXES = ['app.', 'monitor.', 'board.', 'backlog.', 'teams.', 'members.', 'bus.', 'policy.', 'credentials.', 'hostTerminal.', 'terminal.', 'guardrail.', 'agents.', 'agentProfiles.', 'skills.', 'triggers.', 'git.', 'link.', 'concierge.', 'docs.', 'integrations.', 'tasks.', 'ops.', 'companion.', 'code.', 'logs.', 'updates.', 'network.', 'tools.'] as const;
 
 export function isUiMethod(method: unknown): method is string {
   return typeof method === 'string' && UI_METHOD_PREFIXES.some((p) => method.startsWith(p)) && /^[a-zA-Z.]+$/.test(method);
