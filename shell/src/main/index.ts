@@ -190,7 +190,7 @@ function newWindow(opts: { width: number; height: number; x?: number; y?: number
   // Windows takes the taskbar button's icon from the program file. Installed, that is yawble.exe, which carries the
   // Yawble icon; in development it is Electron's electron.exe, so the window names its own icon (an .ico) instead.
   if (process.platform === 'win32' && !app.isPackaged) {
-    win.setAppDetails({ appId: `${APP_ID}.dev`, appIconPath: appResource('icon.ico'), appIconIndex: 0, relaunchDisplayName: APP_DISPLAY_NAME });
+    win.setAppDetails({ appId: DEV_APP_ID, appIconPath: appResource('icon.ico'), appIconIndex: 0, relaunchDisplayName: APP_DISPLAY_NAME });
   }
   // No navigation, no new windows: the renderer only ever shows our own page.
   win.webContents.on('will-navigate', (e) => e.preventDefault());
@@ -244,8 +244,11 @@ function openTerminal(memberId: number): void {
 // shortcut): a separate id whose display name and icon are registered for the current user, or the toast says "Electron".
 const APP_ID = 'com.djlsystems.yawble';
 const APP_DISPLAY_NAME = 'Yawble Desktop';
+// The development build's id. It changed from com.djlsystems.yawble.dev because Windows had cached Electron's icon for that
+// id (from the Electron.lnk Electron made) and kept showing it on the taskbar button; a new id starts with the Yawble icon.
+const DEV_APP_ID = `${APP_ID}.devapp`;
 if (process.platform === 'win32') {
-  const id = app.isPackaged ? APP_ID : `${APP_ID}.dev`;
+  const id = app.isPackaged ? APP_ID : DEV_APP_ID;
   if (!app.isPackaged) {
     const key = `HKCU\\Software\\Classes\\AppUserModelId\\${id}`;
     const reg = (name: string, value: string) =>
@@ -269,7 +272,7 @@ function keepDevStartMenuShortcut(): void {
     const ours = path.join(programs, `${APP_DISPLAY_NAME} (dev).lnk`);
     const want = {
       target: process.execPath, args: `"${app.getAppPath()}"`, cwd: path.dirname(app.getAppPath()),
-      icon: appResource('icon.ico'), iconIndex: 0, appUserModelId: `${APP_ID}.dev`, description: `${APP_DISPLAY_NAME} (development build)`,
+      icon: appResource('icon.ico'), iconIndex: 0, appUserModelId: DEV_APP_ID, description: `${APP_DISPLAY_NAME} (development build)`,
     };
     let current: Electron.ShortcutDetails | null = null;
     try { current = shell.readShortcutLink(ours); } catch { current = null; }
