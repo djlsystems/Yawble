@@ -95,7 +95,7 @@ onBeforeUnmount(() => off?.());
 <template>
   <section class="companion" data-test="settings-companion">
     <h3>Yawble companion</h3>
-    <p class="muted">The <code>yawble</code> program lets tools on this computer, such as Claude Code, see and work with your teams.
+    <p class="muted">The <code>yawble-companion</code> program lets tools on this computer, such as Claude Code, see and work with your teams.
       Each program pairs once, with a code you check here; anything that can't be undone waits for your approval in this window.</p>
     <p v-if="error" class="error" data-test="companion-panel-error">{{ error }}</p>
     <LoadingNote v-if="!loaded" text="Loading the companion…" />
@@ -113,7 +113,7 @@ onBeforeUnmount(() => off?.());
     <div class="connect">
       <h4>Connect Claude Code</h4>
       <p v-if="!status && !error" class="muted small">The steps appear once the companion has answered.</p>
-      <p v-else-if="status && (!status.binaryPath || !status.claudeCommand)" class="muted" data-test="companion-no-binary">This build of Yawble does not include the yawble program (an installed copy does).</p>
+      <p v-else-if="status && (!status.binaryPath || !status.claudeCommand)" class="muted" data-test="companion-no-binary">This build of Yawble does not include yawble-companion (an installed copy does).</p>
       <template v-else-if="status && pairCommand">
         <p v-if="claudePaired" class="muted" data-test="companion-steps-done">
           Claude Code is paired.

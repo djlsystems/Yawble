@@ -38,9 +38,9 @@ public static class RemoteAccess
     {
         if (method.StartsWith("code.", StringComparison.Ordinal) && !showCode)
             return "members' code is not shown to cloud viewers; the person can turn it on in the app on the computer (Settings > Cloud Link)";
-        // The yawble companion is local only: never paired, approved, listed or revoked from the Cloud Link.
+        // yawble-companion is local only: never paired, approved, listed or revoked from the Cloud Link.
         if (method.StartsWith("companion.", StringComparison.Ordinal))
-            return "the yawble companion is paired, approved and revoked on the computer itself";
+            return "yawble-companion is paired, approved and revoked on the computer itself";
         if (method.StartsWith("link.", StringComparison.Ordinal))
             return "the Cloud Link's settings can only be changed on the computer itself";
         if (method.StartsWith("credentials.", StringComparison.Ordinal) && method != "credentials.status" && method != "credentials.setMode")

@@ -17,7 +17,7 @@ import LoadingNote from './LoadingNote.vue';
 
 /**
  * Settings, one page with tabs: General (how the app runs on this computer), Agents, Skills, Guardrails (the global
- * policy), Cloud Link, Health, Companion (the yawble companion; this computer only), System. Each tab shows its screen in place.
+ * policy), Cloud Link, Health, Companion (yawble-companion; this computer only), System. Each tab shows its screen in place.
  */
 export type SettingsTab = 'general' | 'health' | 'companion' | MenuItem;
 

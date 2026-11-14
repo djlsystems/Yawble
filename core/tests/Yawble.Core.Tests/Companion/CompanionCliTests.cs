@@ -237,7 +237,7 @@ public class CompanionCliTests : IDisposable
         var fake = new FakeConnector();
         var run = await RunAsync(fake, "teams");
         Assert.Equal(Y.ExitCodes.NotPaired, run.Exit);
-        Assert.Contains("yawble pair --name", run.Err);
+        Assert.Contains("yawble-companion pair --name", run.Err);
         Assert.Equal(0, fake.Connects); // nothing to present: no connection
 
         // a key the app no longer accepts (revoked)
@@ -248,7 +248,7 @@ public class CompanionCliTests : IDisposable
         };
         var again = await RunAsync(revoked, "teams");
         Assert.Equal(Y.ExitCodes.NotPaired, again.Exit);
-        Assert.Contains("yawble pair --name cc", again.Err);
+        Assert.Contains("yawble-companion pair --name cc", again.Err);
 
         // two names paired here and none chosen: a usage error that names them
         Keys.Save("other", Pad("x"));
@@ -426,7 +426,7 @@ public class CompanionCliTests : IDisposable
         var pending = await RunAsync(new FakeConnector { Handle = Handle }, "team", "delete", "alpha", "--wait", "100");
         Assert.Equal(Y.ExitCodes.Pending, pending.Exit);
         Assert.Contains(plan, pending.Out);
-        Assert.Contains("yawble request r1", pending.Out + pending.Err);
+        Assert.Contains("yawble-companion request r1", pending.Out + pending.Err);
         Assert.Equal([60, 40], waits);
 
         // --wait 0: no waiting at all
@@ -450,7 +450,7 @@ public class CompanionCliTests : IDisposable
         Assert.Equal(Y.ExitCodes.Refused, denied.Exit);
         Assert.Contains("denied", denied.Out + denied.Err);
 
-        // and yawble request <id> checks one later
+        // and yawble-companion request <id> checks one later
         answers = new Queue<string>(["done"]);
         waits.Clear();
         var later = await RunAsync(new FakeConnector { Handle = Handle }, "request", "r1");
@@ -654,7 +654,7 @@ public class CompanionCliTests : IDisposable
 
         var version = await RunAsync(fake, "--version");
         Assert.Equal(Y.ExitCodes.Ok, version.Exit);
-        Assert.Equal($"yawble {CoreInfo.Version}", version.Out.Trim());
+        Assert.Equal($"yawble-companion {CoreInfo.Version}", version.Out.Trim());
 
         Assert.Equal(Y.ExitCodes.Usage, (await RunAsync(fake)).Exit);
         Assert.Equal(Y.ExitCodes.Ok, (await RunAsync(fake, "help")).Exit);

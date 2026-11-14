@@ -15,7 +15,7 @@ export function removeCompanionHomes(): void {
 process.once('exit', removeCompanionHomes);
 
 /**
- * Every e2e run starts a real core, which opens the yawble companion's control endpoint and writes control.json into its
+ * Every e2e run starts a real core, which opens yawble-companion's control endpoint and writes control.json into its
  * home. A fresh, empty temp folder as YAWBLE_HOME keeps it away from the person's real %APPDATA%\yawble-companion (and
  * never near %APPDATA%\yawble). Call removeCompanionHomes() after the app has closed.
  */

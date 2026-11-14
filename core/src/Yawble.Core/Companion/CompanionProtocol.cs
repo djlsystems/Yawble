@@ -1,10 +1,10 @@
 namespace Yawble.Core.Companion;
 
 /// <summary>
-/// The yawble companion's control protocol: frames as <see cref="Ipc.FrameCodec"/>, JSON requests {id, method, params} and
+/// yawble-companion's control protocol: frames as <see cref="Ipc.FrameCodec"/>, JSON requests {id, method, params} and
 /// replies {id, result | error{code, message}}, events {event, data}. Before auth only <see cref="Hello"/>,
 /// <see cref="PairRequest"/> and <see cref="Auth"/> are answered, each frame at most <see cref="MaxUnauthenticatedFrame"/>
-/// bytes; after auth only the four companion.* tool-level methods. Link-compiled into the yawble client: no dependencies.
+/// bytes; after auth only the four companion.* tool-level methods. Link-compiled into yawble-companion: no dependencies.
 /// </summary>
 public static class CompanionProtocol
 {

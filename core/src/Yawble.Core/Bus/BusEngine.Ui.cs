@@ -51,7 +51,7 @@ public sealed partial class BusEngine
     private static string HowNow() => Provenance.Actor.Current?.Via switch
     {
         Provenance.Actor.Concierge => Agents.Profiles.AgentChangeLog.HowConciergeTool,
-        Provenance.Actor.External => Agents.Profiles.AgentChangeLog.HowCompanion, // the yawble companion's team_agent_change
+        Provenance.Actor.External => Agents.Profiles.AgentChangeLog.HowCompanion, // yawble-companion's team_agent_change
         _ => Agents.Profiles.AgentChangeLog.HowSettings,
     };
 

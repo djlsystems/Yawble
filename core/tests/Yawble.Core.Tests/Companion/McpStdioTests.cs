@@ -9,7 +9,7 @@ using Y = yawble::Yawble.Companion;
 namespace Yawble.Core.Tests.Companion;
 
 /// <summary>
-/// Companion task 6: `yawble mcp`, newline-delimited JSON-RPC 2.0 over stdin/stdout, in process: StringReader in,
+/// Companion task 6: `yawble-companion mcp`, newline-delimited JSON-RPC 2.0 over stdin/stdout, in process: StringReader in,
 /// StringWriter out, a <see cref="FakeConnector"/> for the app and a temp YAWBLE_HOME for the key. No process, no pipe.
 /// </summary>
 public class McpStdioTests : IDisposable
@@ -134,7 +134,7 @@ public class McpStdioTests : IDisposable
     {
         // not paired yet: says how
         var unpaired = await RunAsync(new FakeConnector(), null, Line(1, "tools/call", new JsonObject { ["name"] = "team_list" }));
-        Assert.Contains("yawble pair --name", ToolText(ById(unpaired, 1)));
+        Assert.Contains("yawble-companion pair --name", ToolText(ById(unpaired, 1)));
         Assert.True(ById(unpaired, 1)["result"]!["isError"]!.GetValue<bool>());
 
         Keys.Save("cc", new string('k', 43));
@@ -419,7 +419,7 @@ public class McpStdioTests : IDisposable
         await live.EndAsync();
     }
 
-    /// <summary>A running `yawble mcp` the test feeds line by line.</summary>
+    /// <summary>A running `yawble-companion mcp` the test feeds line by line.</summary>
     private sealed class Live : IAsyncDisposable
     {
         private readonly BlockingLines _in = new();

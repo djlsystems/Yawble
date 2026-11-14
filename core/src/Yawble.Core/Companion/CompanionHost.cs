@@ -4,7 +4,7 @@ using Yawble.Core.Ipc;
 namespace Yawble.Core.Companion;
 
 /// <summary>
-/// The yawble companion in the running core: its control endpoint, the user-only control.json that tells the client where it
+/// yawble-companion in the running core: its control endpoint, the user-only control.json that tells the client where it
 /// listens (removed on exit, only while it still names this core's address), and what <c>companion.status</c> shows the
 /// window. Never fatal: a companion home that cannot be secured (a populated YAWBLE_HOME, a folder the user may not change)
 /// or an endpoint that cannot be opened leaves the core running without the endpoint; the reason is logged and shown.
@@ -55,7 +55,7 @@ public sealed class CompanionHost : IAsyncDisposable
         }
         catch (Exception e) when (e is ArgumentException or NotSupportedException or IOException or System.Security.SecurityException)
         {
-            problem = $"the yawble companion is off: {ControlDiscovery.HomeVariable} does not name a usable folder ({e.GetType().Name}); fix or unset it and restart the app";
+            problem = $"yawble-companion is off: {ControlDiscovery.HomeVariable} does not name a usable folder ({e.GetType().Name}); fix or unset it and restart the app";
             return null;
         }
     }
@@ -83,7 +83,7 @@ public sealed class CompanionHost : IAsyncDisposable
         {
             if (server is not null) server.DisposeAsync().AsTask().GetAwaiter().GetResult();
             DeleteDir(created);
-            var problem = $"the yawble companion is off: {e.Message}";
+            var problem = $"yawble-companion is off: {e.Message}";
             log?.Invoke($"companion: {problem}");
             return new CompanionHost(home, binaryPath, null, problem, null);
         }
@@ -102,9 +102,9 @@ public sealed class CompanionHost : IAsyncDisposable
         ["problem"] = Problem,
     };
 
-    /// <summary>The yawble client the installer ships: &lt;install&gt;/bin/yawble(.exe); null without an install folder.</summary>
+    /// <summary>yawble-companion the installer ships: &lt;install&gt;/bin/yawble-companion(.exe); null without an install folder.</summary>
     public static string? BinaryPathFor(string? installDir) =>
-        string.IsNullOrEmpty(installDir) ? null : Path.Combine(installDir, "bin", OperatingSystem.IsWindows() ? "yawble.exe" : "yawble");
+        string.IsNullOrEmpty(installDir) ? null : Path.Combine(installDir, "bin", OperatingSystem.IsWindows() ? "yawble-companion.exe" : "yawble-companion");
 
     /// <summary>
     /// What the companion's calls reach: the Concierge's own route (which refuses companion.*), plus the backups' list and a

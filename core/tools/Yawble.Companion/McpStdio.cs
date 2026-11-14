@@ -6,7 +6,7 @@ using Yawble.Core.Companion;
 namespace Yawble.Companion;
 
 /// <summary>
-/// `yawble mcp`: an MCP server over stdio for Claude Code. Newline-delimited JSON-RPC 2.0: stdout carries protocol messages
+/// `yawble-companion mcp`: an MCP server over stdio for Claude Code. Newline-delimited JSON-RPC 2.0: stdout carries protocol messages
 /// only (every diagnostic goes to <c>log</c>, stderr); notifications are never answered. Requests are served concurrently.
 /// The app is reached lazily (on the first tools/list or tools/call, never on initialize) over one shared connection, made
 /// again when the app has closed it (a restart). While the app cannot be reached, tools/list offers one tool,
@@ -162,8 +162,8 @@ internal sealed class McpStdio(IControlConnector connector, KeyFiles keys, strin
         }
         catch (Exception e)
         {
-            log.WriteLine($"yawble mcp: {method} failed ({e.GetType().Name})");
-            Send(Error(id, -32603, "yawble could not complete this request"));
+            log.WriteLine($"yawble-companion mcp: {method} failed ({e.GetType().Name})");
+            Send(Error(id, -32603, "yawble-companion could not complete this request"));
         }
         finally
         {
@@ -361,7 +361,7 @@ internal sealed class McpStdio(IControlConnector connector, KeyFiles keys, strin
                 await DropAsync(channel).ConfigureAwait(false);
                 if (attempt == 0 && (!e.Sent || retrySent))
                 {
-                    log.WriteLine("yawble mcp: the connection to Yawble ended; connecting again");
+                    log.WriteLine("yawble-companion mcp: the connection to Yawble ended; connecting again");
                     continue;
                 }
                 throw;
@@ -480,7 +480,7 @@ internal sealed class McpStdio(IControlConnector connector, KeyFiles keys, strin
         }
         catch (Exception e)
         {
-            log.WriteLine($"yawble mcp: looking for the app failed ({e.GetType().Name})");
+            log.WriteLine($"yawble-companion mcp: looking for the app failed ({e.GetType().Name})");
         }
     }
 

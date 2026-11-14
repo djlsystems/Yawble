@@ -17,7 +17,7 @@ public enum ActionState { Pending, Done, Failed, Denied, Expired, Changed, Runni
 public sealed record ActionStatus(string Id, ActionState State, string Plan, string? Result, string? NextId);
 
 /// <summary>
-/// What a paired external client (the yawble companion) may do, and how. Every call goes through the Concierge's own tools
+/// What a paired external client (yawble-companion) may do, and how. Every call goes through the Concierge's own tools
 /// (<see cref="ConciergeTools"/> → ConciergeReadTools / ConciergeActions) as <see cref="Actor.ExternalClient"/>: the same
 /// refusals, scrubbing and confirmation binding apply. Reads and acts run in a turn that is the person's (they paired the
 /// client and granted its level) but remote (Cloud Link parity). A destructive call never runs on the client's call: it
@@ -174,7 +174,7 @@ public sealed partial class CompanionService(
 
         var needs = CompanionTools.LevelOf(tool, args);
         // A malformed name is never echoed into the audit (it comes from the client).
-        if (needs is null) return Refused(method == "companion.(unknown)" ? "refused: that is not a tool the yawble companion offers" : $"refused: {tool} is not offered to the yawble companion");
+        if (needs is null) return Refused(method == "companion.(unknown)" ? "refused: that is not a tool yawble-companion offers" : $"refused: {tool} is not offered to yawble-companion");
         if (needs > client.Level)
             return Refused($"refused: {tool} needs the {CompanionLevels.Name(needs.Value)} level; this client was paired for {CompanionLevels.Name(client.Level)}");
 

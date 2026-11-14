@@ -180,7 +180,7 @@ allowed only if the file reached the host. Run it from Settings or with
 
 ## Companion and Cloud Link
 
-- **Companion** (`yawble`): a local-only control endpoint, a per-launch pipe or socket announced in a user-only
+- **Companion** (`yawble-companion`): a local-only control endpoint, a per-launch pipe or socket announced in a user-only
   `control.json`. Programs pair once per name with a level; destructive calls wait for approval in the window. See the
   [README](../README.md#the-yawble-companion).
 - **Cloud Link**: the core connects out to the cloud service; no inbound port is opened. Remote viewers get a

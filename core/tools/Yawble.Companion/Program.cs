@@ -2,7 +2,7 @@ using System.Text;
 using Yawble.Companion;
 using Yawble.Core.Companion;
 
-// yawble: the companion client of the running Yawble app (CLI, or `yawble mcp` for Claude Code). UTF-8 without a BOM on
+// yawble-companion: the companion client of the running Yawble app (CLI, or `yawble-companion mcp` for Claude Code). UTF-8 without a BOM on
 // every stream, "\n" line ends: with `mcp`, stdout is the protocol and nothing else.
 var utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 var stdout = new StreamWriter(Console.OpenStandardOutput(), utf8) { AutoFlush = true, NewLine = "\n" };

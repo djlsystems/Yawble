@@ -102,7 +102,7 @@ node packaging/build.mjs [--rid win-x64|win-arm64|osx-arm64|linux-x64|linux-arm6
 ```
 
 Each OS builds on its own machine. The script stages the payload in `packaging/stage/<rid>/` (`core/`: the
-self-contained `yawble-core`; `bin/`: the helper programs and the `yawble` companion; `roles/`), builds the shell
+self-contained `yawble-core`; `bin/`: the helper programs and `yawble-companion`; `roles/`), builds the shell
 (`npm run build` in `shell/`, so it needs `npm ci` there first) and writes the
 installer to `artifacts/installers/<rid>/`: an NSIS setup on Windows, a `.dmg` and `.zip` on macOS, a `.tar.gz` with
 `install.sh` on Linux.
@@ -156,10 +156,10 @@ Tests that start real sandboxes skip themselves on a host whose sandbox backend 
 stand-in CLIs and fake model servers. The tests that check the CLIs installed on the machine (trait
 `Category=HostCli`) assert only the CLIs that `YAWBLE_HOSTCLI_EXPECT` lists, e.g. `claude:npm grok:native`.
 
-## The yawble companion
+## yawble-companion
 
-`yawble` (installed with the app in `resources/bin/`) lets another program on the same computer, such as Claude Code,
-see and work with your teams through the running app: as an MCP server (`yawble mcp`) or as a CLI (`yawble status`,
+`yawble-companion` (installed with the app in `resources/bin/`) lets another program on the same computer, such as Claude Code,
+see and work with your teams through the running app: as an MCP server (`yawble-companion mcp`) or as a CLI (`yawble-companion status`,
 `yawble tell <team> <instruction>`, `yawble help`). It talks only to the app on this computer, over a per-launch named
 pipe (Windows) or unix socket, and nothing of it is reachable over the Cloud Link.
 

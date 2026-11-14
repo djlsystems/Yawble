@@ -546,7 +546,7 @@ public sealed class CloudLink : IAsyncDisposable
     }
 
     /// <summary>
-    /// Whether a push from the core goes up to the site: all but the yawble companion's (local only) and the agents'
+    /// Whether a push from the core goes up to the site: all but yawble-companion's (local only) and the agents'
     /// Terminal / Test sessions starting and ending (<see cref="Agents.AgentTestSessions.ChangedEvent"/>: window only).
     /// </summary>
     internal static bool Forwards(string? eventName) =>

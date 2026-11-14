@@ -12,7 +12,7 @@ namespace Yawble.Core.Companion;
 /// </summary>
 public sealed class CompanionRpc(CompanionService service, Func<JsonObject> status)
 {
-    public const string WindowOnly = "the yawble companion is managed in the app's window on this computer";
+    public const string WindowOnly = "yawble-companion is managed in the app's window on this computer";
 
     public static bool Handles(string m) => m.StartsWith("companion.", StringComparison.Ordinal);
 

@@ -109,7 +109,7 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
   command. The choices:
   - **Install** runs exactly `winget install --id <id> --exact --source winget --silent --accept-package-agreements
     --accept-source-agreements --disable-interactivity` (plus `--scope user` for Python), in the app on this computer,
-    the same way as installing Git. Only from the window: never over the Cloud Link or from the `yawble` companion.
+    the same way as installing Git. Only from the window: never over the Cloud Link or from `yawble-companion`.
     Afterwards the app looks for the program again. When it is found, every open request for that tool closes and each
     team's Manager is told "<tool> is installed; retry what was blocked". When it is not, the item stays open with
     winget's message and **Try again**.
@@ -257,8 +257,8 @@ never see. Host tasks run named programs for a team, under a standing approval. 
 
 ## Companion
 
-`yawble` is a small program installed with the app. It lets a program on this computer, such as Claude Code, see and
-work with your teams, as an MCP server (`yawble mcp`) or a CLI.
+`yawble-companion` is a small program installed with the app. It lets a program on this computer, such as Claude Code, see and
+work with your teams, as an MCP server (`yawble-companion mcp`) or a CLI.
 
 - It pairs once per program, with a code you approve in the window.
 - Access levels: `read`, `act` and `destructive`. Destructive calls wait for your approval in the window.
@@ -322,7 +322,7 @@ work with your teams, as an MCP server (`yawble mcp`) or a CLI.
 | Integrations | CLIs, APIs, MCP servers, Connections, host tasks |
 | Cloud Link | Pairing and remote access; see [Cloud Link](cloud-link.md) |
 | Health | The doctor |
-| Companion | The `yawble` companion: the line to add it to Claude Code, paired programs |
+| Companion | `yawble-companion`: the line to add it to Claude Code, paired programs |
 | System | Version, build, platform, sandbox backend and capabilities, About |
 
 - A notification says when Yawble needs you: questions, approvals, network requests, tool requests and Connections to reconnect.

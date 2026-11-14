@@ -4,14 +4,14 @@ using System.Text.Json.Nodes;
 
 namespace Yawble.Core.Companion;
 
-/// <summary>What a running core tells the yawble client: where its control endpoint listens. Never a key or a token.</summary>
+/// <summary>What a running core tells yawble-companion: where its control endpoint listens. Never a key or a token.</summary>
 public sealed record ControlFile(int Version, string Address, int Pid, string CoreVersion, DateTimeOffset StartedAt);
 
 /// <summary>
 /// The per-user companion home (YAWBLE_HOME, else %APPDATA%\yawble-companion on Windows, ~/Library/Application
 /// Support/yawble-companion on macOS, $XDG_CONFIG_HOME/yawble-companion or ~/.config/yawble-companion on Linux) and its
 /// user-only control.json. A folder of its own, apart from the app's data. Independent of the app's product
-/// name and YAWBLE_DATA_DIR. Link-compiled into the yawble client: BCL only, JSON through Utf8JsonWriter / JsonNode (AOT-clean).
+/// name and YAWBLE_DATA_DIR. Link-compiled into yawble-companion: BCL only, JSON through Utf8JsonWriter / JsonNode (AOT-clean).
 /// </summary>
 public static class ControlDiscovery
 {

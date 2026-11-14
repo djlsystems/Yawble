@@ -343,7 +343,7 @@ internal static class Commands
 
         public void Need(int min, int max, string usage)
         {
-            if (Pos.Count < min || Pos.Count > max) throw new UsageException("usage: yawble " + usage);
+            if (Pos.Count < min || Pos.Count > max) throw new UsageException("usage: yawble-companion " + usage);
         }
 
         public string Join(int from) => string.Join(' ', Pos.Skip(from));

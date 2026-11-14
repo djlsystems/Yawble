@@ -10,7 +10,7 @@ using Yawble.Core.Ipc;
 namespace Yawble.Core.Companion;
 
 /// <summary>
-/// The yawble companion's control endpoint: its own pipe or socket (never the window's, never handed to the Cloud Link), the
+/// yawble-companion's control endpoint: its own pipe or socket (never the window's, never handed to the Cloud Link), the
 /// same <see cref="FrameCodec"/> frames. Before auth a connection may send only <see cref="CompanionProtocol.Hello"/>,
 /// <see cref="CompanionProtocol.PairRequest"/> or <see cref="CompanionProtocol.Auth"/>{client, key}, each frame at most
 /// <see cref="CompanionProtocol.MaxUnauthenticatedFrame"/> bytes and within a short idle limit; anything else is answered
@@ -220,7 +220,7 @@ public sealed partial class CompanionServer : IAsyncDisposable
                     var client = name is null || key is null ? null : _service.Authenticate(name, key);
                     if (client is null)
                     {
-                        await SendAsync(s, Error(id, "unauthorized", "unknown client or wrong key (pair again with: yawble pair --name <name>)")).ConfigureAwait(false);
+                        await SendAsync(s, Error(id, "unauthorized", "unknown client or wrong key (pair again with: yawble-companion pair --name <name>)")).ConfigureAwait(false);
                         return null;
                     }
                     await SendAsync(s, Ok(id, new JsonObject

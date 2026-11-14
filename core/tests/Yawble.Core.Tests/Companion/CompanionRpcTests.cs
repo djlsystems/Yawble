@@ -118,7 +118,7 @@ public class CompanionRpcTests : IDisposable
                 var p = new JsonObject { ["id"] = ticket.Id, ["approve"] = true, ["name"] = "cc" };
                 var e = await Assert.ThrowsAsync<RpcException>(() => rig.As(actor, method, p));
                 Assert.Equal("forbidden", e.Code);
-                Assert.Equal("the yawble companion is managed in the app's window on this computer", e.Message);
+                Assert.Equal("yawble-companion is managed in the app's window on this computer", e.Message);
             }
         // No actor at all (a call that entered nowhere) is refused too.
         var none = await Assert.ThrowsAsync<RpcException>(() => rig.Dispatcher.DispatchAsync("companion.list", null, Ct));
@@ -240,7 +240,7 @@ public class CompanionRpcTests : IDisposable
     {
         foreach (var method in Methods.Concat(["companion.", "companion.anything", "companion.pair"]))
             foreach (var terminals in new[] { false, true })
-                Assert.Equal("the yawble companion is paired, approved and revoked on the computer itself",
+                Assert.Equal("yawble-companion is paired, approved and revoked on the computer itself",
                     RemoteAccess.Refusal(method, new JsonObject { ["id"] = "p1", ["approve"] = true }, terminals, _ => true, _ => false));
     }
 
@@ -331,7 +331,7 @@ public class CompanionRpcTests : IDisposable
     {
         await using var rig = await MakeRigAsync();
         var lines = new List<string>();
-        var bin = Path.Combine(_db.Dir, "install", "bin", OperatingSystem.IsWindows() ? "yawble.exe" : "yawble");
+        var bin = Path.Combine(_db.Dir, "install", "bin", OperatingSystem.IsWindows() ? "yawble-companion.exe" : "yawble-companion");
         string address;
         await using (var host = CompanionHost.Start(_home, _db.Dir, ServiceFor(rig.Bus), bin, lines.Add))
         {
@@ -464,7 +464,7 @@ public class CompanionRpcTests : IDisposable
     public void TheClientBinaryLivesInTheInstallsBinFolder()
     {
         var install = Path.Combine(_db.Dir, "install");
-        Assert.Equal(Path.Combine(install, "bin", OperatingSystem.IsWindows() ? "yawble.exe" : "yawble"), CompanionHost.BinaryPathFor(install));
+        Assert.Equal(Path.Combine(install, "bin", OperatingSystem.IsWindows() ? "yawble-companion.exe" : "yawble-companion"), CompanionHost.BinaryPathFor(install));
         Assert.Null(CompanionHost.BinaryPathFor(null));
     }
 

@@ -25,9 +25,9 @@ internal static class Cli
             ? v : "0.0.0+dev.unknown";
 
     private const string Help = """
-        yawble: talk to the Yawble app running on this computer.
+        yawble-companion: talk to the Yawble app running on this computer.
 
-        usage: yawble [--client <name>] [--json] [--wait <seconds>] <command> ...
+        usage: yawble-companion [--client <name>] [--json] [--wait <seconds>] <command> ...
 
           pair --name <name> [--level read|act|destructive]   pair this computer (approve the code in the Yawble window)
           whoami                                   which client this is, and its level
@@ -36,7 +36,7 @@ internal static class Cli
           mcp                                      serve MCP over stdin/stdout (for Claude Code)
         """;
 
-    /// <summary>How long `yawble mcp` waits for an approval (YAWBLE_MCP_WAIT seconds, default 60).</summary>
+    /// <summary>How long `yawble-companion mcp` waits for an approval (YAWBLE_MCP_WAIT seconds, default 60).</summary>
     public static TimeSpan McpWait(Func<string, string?> env)
     {
         var text = env(McpWaitVariable);
@@ -98,7 +98,7 @@ internal static class Cli
         if (version)
         {
             if (g.Json) output.Set("version", Version);
-            output.Line($"yawble {Version}");
+            output.Line($"yawble-companion {Version}");
             return output.Finish(ExitCodes.Ok);
         }
         if (g.Error is null && g.Client is not null && !KeyFiles.ValidName(g.Client))
@@ -136,7 +136,7 @@ internal static class Cli
             switch (command)
             {
                 case "mcp":
-                    if (commandArgs.Count > 1) throw new UsageException("usage: yawble mcp");
+                    if (commandArgs.Count > 1) throw new UsageException("usage: yawble-companion mcp");
                     return await new McpStdio(connector, keys, client, stdin, stdout, stderr, McpWait(env)).RunAsync(ct).ConfigureAwait(false);
                 case "pair": return await PairAsync(commandArgs, connector, keys, output, ct).ConfigureAwait(false);
                 case "whoami": return await WhoAmIAsync(commandArgs, connector, keys, client, output, ct).ConfigureAwait(false);
@@ -159,7 +159,7 @@ internal static class Cli
         catch (Exception e)
         {
             // Nothing else is expected; still one clear line (or one JSON document), never a stack trace.
-            return output.Fail(ExitCodes.Failed, "failed", $"yawble failed unexpectedly ({e.GetType().Name}): {e.Message}");
+            return output.Fail(ExitCodes.Failed, "failed", $"yawble-companion failed unexpectedly ({e.GetType().Name}): {e.Message}");
         }
     }
 
@@ -247,20 +247,20 @@ internal static class Cli
                 return output.Fail(ExitCodes.Failed, "expired", $"Request {id} expired before the person decided; nothing was done.");
             case "changed":
                 output.Line($"What request {id} would do changed before it was approved, so it did not run. The Yawble window shows a new request {nextId} " +
-                            $"with the current list; check it with: yawble request {nextId} --wait {DefaultWaitSeconds}");
+                            $"with the current list; check it with: yawble-companion request {nextId} --wait {DefaultWaitSeconds}");
                 return output.Finish(ExitCodes.Pending);
             case "running":
-                output.Line($"Approved; still running. Check again with: yawble request {id} --wait {DefaultWaitSeconds}");
+                output.Line($"Approved; still running. Check again with: yawble-companion request {id} --wait {DefaultWaitSeconds}");
                 return output.Finish(ExitCodes.Pending);
             default:
-                output.Line($"Still waiting for the person's approval in the Yawble window. Check again with: yawble request {id} --wait {DefaultWaitSeconds}");
+                output.Line($"Still waiting for the person's approval in the Yawble window. Check again with: yawble-companion request {id} --wait {DefaultWaitSeconds}");
                 return output.Finish(ExitCodes.Pending);
         }
     }
 
     private static async Task<int> RequestAsync(List<string> rest, IControlConnector connector, KeyFiles keys, string? client, int wait, Output output, CancellationToken ct)
     {
-        if (rest.Count != 2) throw new UsageException("usage: yawble request <id> [--wait S]");
+        if (rest.Count != 2) throw new UsageException("usage: yawble-companion request <id> [--wait S]");
         await using var channel = await ControlSession.OpenAsync(connector, keys, client, ct).ConfigureAwait(false);
         var id = rest[1];
         output.Set("requestId", id);
@@ -282,10 +282,10 @@ internal static class Cli
             {
                 case "--name" when i + 1 < rest.Count: name = rest[++i]; break;
                 case "--level" when i + 1 < rest.Count: level = rest[++i]; break;
-                default: throw new UsageException("usage: yawble pair --name <name> [--level read|act|destructive]");
+                default: throw new UsageException("usage: yawble-companion pair --name <name> [--level read|act|destructive]");
             }
         }
-        if (name is null) throw new UsageException("usage: yawble pair --name <name> [--level read|act|destructive]");
+        if (name is null) throw new UsageException("usage: yawble-companion pair --name <name> [--level read|act|destructive]");
         if (!KeyFiles.ValidName(name)) throw new UsageException($"'{name}' is not a client name (lowercase letters, digits and '-', 1 to 32 characters)");
         if (level is not ("read" or "act" or "destructive")) throw new UsageException("--level is read, act or destructive");
 
@@ -322,7 +322,7 @@ internal static class Cli
             output.Set("level", granted);
             output.Set("keyFile", keys.PathOf(name));
             output.Line($"Paired as '{name}' with the {granted} level. Its key is saved in {keys.PathOf(name)} (only you can open it).");
-            output.Line($"For Claude Code: claude mcp add --scope user yawble -- \"{Environment.ProcessPath ?? "yawble"}\" mcp");
+            output.Line($"For Claude Code: claude mcp add --scope user yawble -- \"{Environment.ProcessPath ?? "yawble-companion"}\" mcp");
             return output.Finish(ExitCodes.Ok);
         }
         var reason = StreamChannel.Text(reply["reason"]) ?? "not approved";
@@ -331,7 +331,7 @@ internal static class Cli
 
     private static async Task<int> WhoAmIAsync(List<string> rest, IControlConnector connector, KeyFiles keys, string? client, Output output, CancellationToken ct)
     {
-        if (rest.Count != 1) throw new UsageException("usage: yawble whoami");
+        if (rest.Count != 1) throw new UsageException("usage: yawble-companion whoami");
         await using var channel = await ControlSession.OpenAsync(connector, keys, client, ct).ConfigureAwait(false);
         JsonObject r;
         using (var bounded = Bounded(ct, CallLimit))
@@ -346,7 +346,7 @@ internal static class Cli
 
     private static int Forget(List<string> rest, KeyFiles keys, string? client, Output output)
     {
-        if (rest.Count != 1) throw new UsageException("usage: yawble [--client <name>] forget");
+        if (rest.Count != 1) throw new UsageException("usage: yawble-companion [--client <name>] forget");
         var name = ControlSession.ResolveClient(keys, client);
         if (!keys.Delete(name)) throw new NotPairedException($"There is no key for '{name}' on this computer.");
         output.Set("client", name);

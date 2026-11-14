@@ -13,7 +13,7 @@ public sealed record CoreOptions
     public string? Token { get; init; }
     public bool PrintVersion { get; init; }
     public bool ExitOnStdinClose { get; init; } = true;
-    /// <summary>Whether the yawble companion's control endpoint (and its control.json) is opened; --no-control turns it off.</summary>
+    /// <summary>Whether yawble-companion's control endpoint (and its control.json) is opened; --no-control turns it off.</summary>
     public bool Control { get; init; } = true;
     public string? Error { get; init; }
 

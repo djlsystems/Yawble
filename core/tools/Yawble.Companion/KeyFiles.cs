@@ -28,7 +28,7 @@ internal sealed class KeyFiles(string home)
     /// <summary>Makes the home and its clients folder (user-only) before anything is asked of the app.</summary>
     public void Prepare()
     {
-        if (string.IsNullOrEmpty(home)) throw new HomeException("yawble has no folder for its files: set YAWBLE_HOME to a new or empty folder");
+        if (string.IsNullOrEmpty(home)) throw new HomeException("yawble-companion has no folder for its files: set YAWBLE_HOME to a new or empty folder");
         try
         {
             UserOnlyFile.EnsureDirectory(home);
@@ -40,7 +40,7 @@ internal sealed class KeyFiles(string home)
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
-            throw new HomeException($"yawble cannot use the folder '{home}' for its files ({e.Message}); point YAWBLE_HOME at a folder you own");
+            throw new HomeException($"yawble-companion cannot use the folder '{home}' for its files ({e.Message}); point YAWBLE_HOME at a folder you own");
         }
     }
 
@@ -54,7 +54,7 @@ internal sealed class KeyFiles(string home)
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            throw new HomeException($"yawble could not write its key file in '{Dir}' ({e.Message})");
+            throw new HomeException($"yawble-companion could not write its key file in '{Dir}' ({e.Message})");
         }
     }
 
@@ -73,7 +73,7 @@ internal sealed class KeyFiles(string home)
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            throw new HomeException($"yawble could not read its key file for '{name}' in '{Dir}' ({e.Message})");
+            throw new HomeException($"yawble-companion could not read its key file for '{name}' in '{Dir}' ({e.Message})");
         }
     }
 
@@ -87,7 +87,7 @@ internal sealed class KeyFiles(string home)
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            throw new HomeException($"yawble could not list its key files in '{Dir}' ({e.Message})");
+            throw new HomeException($"yawble-companion could not list its key files in '{Dir}' ({e.Message})");
         }
     }
 
@@ -106,7 +106,7 @@ internal sealed class KeyFiles(string home)
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            throw new HomeException($"yawble could not delete its key file '{path}' ({e.Message})");
+            throw new HomeException($"yawble-companion could not delete its key file '{path}' ({e.Message})");
         }
     }
 }

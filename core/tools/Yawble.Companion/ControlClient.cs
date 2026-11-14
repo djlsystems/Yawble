@@ -303,13 +303,13 @@ internal static class ControlSession
     }
 
     public const string NotPairedText =
-        "This computer is not paired with Yawble yet. Run: yawble pair --name <name> (for example claude-code), then approve the code in the Yawble window.";
+        "This computer is not paired with Yawble yet. Run: yawble-companion pair --name <name> (for example claude-code), then approve the code in the Yawble window.";
 
     public static async Task<IControlChannel> OpenAsync(IControlConnector connector, KeyFiles keys, string? client, CancellationToken ct)
     {
         var name = ResolveClient(keys, client);
         var key = keys.Load(name) ?? throw new NotPairedException(
-            $"There is no key for '{name}' on this computer. Pair it: yawble pair --name {name}, then approve the code in the Yawble window.");
+            $"There is no key for '{name}' on this computer. Pair it: yawble-companion pair --name {name}, then approve the code in the Yawble window.");
         var channel = await connector.ConnectAsync(ct).ConfigureAwait(false);
         try
         {
@@ -330,7 +330,7 @@ internal static class ControlSession
             await channel.DisposeAsync().ConfigureAwait(false);
             throw new NotPairedException(
                 $"The Yawble app does not accept this computer's key for '{name}' (it was revoked, or the key is out of date). " +
-                $"Pair again: yawble forget --client {name}, then yawble pair --name {name}.");
+                $"Pair again: yawble-companion forget --client {name}, then yawble-companion pair --name {name}.");
         }
         catch
         {

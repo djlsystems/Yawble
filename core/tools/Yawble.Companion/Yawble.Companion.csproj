@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <AssemblyName>yawble</AssemblyName>
+    <AssemblyName>yawble-companion</AssemblyName>
     <RootNamespace>Yawble.Companion</RootNamespace>
     <!-- The yawble client: what Claude Code (yawble mcp) and the person (yawble <command>) run to reach the running app's
          companion endpoint. A small native binary with no .NET runtime to install, like yawble-run: `dotnet publish -r <rid>`. -->

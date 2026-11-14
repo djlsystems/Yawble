@@ -65,7 +65,7 @@ These are refused over Cloud Link. The viewer sees the reason.
 | Agent terminals | An agent's **Terminal** / **Test** session. It is started, typed into and stopped in the window only, and its output is not sent up. |
 | Backups | **Back up now** and **Restore**. The list of backups can be read. |
 | Host tools | **Install** (and **Try again**) for a tool an agent asked for: winget runs on the computer, so it is clicked there. The requests can be listed and answered **Not now**. |
-| Companion | Pairing, approving, listing or revoking `yawble` companion clients. Nothing of the companion is sent up. |
+| Companion | Pairing, approving, listing or revoking `yawble-companion` clients. Nothing of the companion is sent up. |
 
 ### Host terminals
 

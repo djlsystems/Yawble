@@ -9,7 +9,7 @@ namespace Yawble.Core.Companion;
 /// Windows: a protected DACL (nothing inherited) holding exactly one rule, FullControl for the current user's SID, set when
 /// the folder or file is created (a file never exists with the folder's inherited rules). POSIX: 0700 folders, 0600 files.
 /// A file is written to a temp file beside it and then moved over the old one, so a reader never sees half a file.
-/// Link-compiled into the yawble client: BCL only, AOT-clean.
+/// Link-compiled into yawble-companion: BCL only, AOT-clean.
 /// </summary>
 public static class UserOnlyFile
 {

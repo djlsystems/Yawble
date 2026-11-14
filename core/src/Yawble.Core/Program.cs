@@ -298,7 +298,7 @@ var doctor = new Yawble.Core.Ops.DoctorRpc(doctorService);
 var backupRpc = new BackupRpc(backupService);
 doctorForConcierge = doctor;
 backupsForConcierge = backupRpc;
-// The yawble companion (Companion/): a paired external client (Claude Code) calls the Concierge's own tools through this
+// yawble-companion (Companion/): a paired external client (Claude Code) calls the Concierge's own tools through this
 // route, which is the Concierge's plus the backups' list and a restore the person approved in the window (BackupRpc refuses
 // any other). Its actions are the Concierge's own (so its tools audit themselves), with the companion's own confirmation book.
 var companionRoute = Yawble.Core.Companion.CompanionHost.Route(conciergeRoute, backupRpc.DispatchAsync);
@@ -311,7 +311,7 @@ var companionBinary = Yawble.Core.Companion.CompanionHost.BinaryPathFor(
     Yawble.Core.Launch.LaunchWiring.ResolveInstallDir(options.InstallDir, Environment.GetEnvironmentVariable));
 Yawble.Core.Companion.CompanionHost? companionHost = null; // opened after the window's endpoint, below
 // The home (YAWBLE_HOME or the default) is resolved inside CompanionHost: a malformed one is said in companion.status, never thrown.
-var companionStarting = Yawble.Core.Companion.CompanionHost.Off(Environment.GetEnvironmentVariable, companionBinary, "the yawble companion is still starting");
+var companionStarting = Yawble.Core.Companion.CompanionHost.Off(Environment.GetEnvironmentVariable, companionBinary, "yawble-companion is still starting");
 var companionRpc = new Yawble.Core.Companion.CompanionRpc(companion, () => (companionHost ?? companionStarting).Status());
 // "Needs You" counts the failing checks (the list is run once at start and then every 15 minutes, and on each Run again),
 // and the pairings and companion requests waiting for the person.
@@ -362,14 +362,14 @@ if (options.ExitOnStdinClose)
 
 await using var server = IpcServer.Start(IpcEndpoint.Create(options.IpcAddress!), options.Token!, dispatcher, events, hostEvents, websiteHost,
     websiteSignedIn: id => _ = integrations.WebsiteSignedIn(id)); // starts the check and returns: it never throws
-// The yawble companion's control endpoint (its own pipe or socket, never the window's, never handed to the Cloud Link) and
+// yawble-companion's control endpoint (its own pipe or socket, never the window's, never handed to the Cloud Link) and
 // the user-only control.json naming it. Never fatal: a home that cannot be secured leaves the core running without it, and
 // companion.status says why. On POSIX the socket sits beside the window's, in a folder only this user can open.
 await using var companionHostScope = companionHost = options.Control
     ? Yawble.Core.Companion.CompanionHost.Start(Environment.GetEnvironmentVariable,
         OperatingSystem.IsWindows() ? options.DataDir! : Path.GetDirectoryName(Path.GetFullPath(options.IpcAddress!))!,
         companion, companionBinary, line => Console.Error.WriteLine(line))
-    : Yawble.Core.Companion.CompanionHost.Off(Environment.GetEnvironmentVariable, companionBinary, "the yawble companion is off for this launch (--no-control)");
+    : Yawble.Core.Companion.CompanionHost.Off(Environment.GetEnvironmentVariable, companionBinary, "yawble-companion is off for this launch (--no-control)");
 // The shell waits for this exact line before it connects.
 Console.WriteLine($"YAWBLE-READY {server.Address}");
 // The Concierge keeps tabs on what it promised to follow up (its watches), with no agent running.

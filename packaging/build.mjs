@@ -92,7 +92,7 @@ if (!skipStage) {
   publish('bridge/src/Yawble.GrokAuth', 'bin');
   publish('bridge/src/Yawble.GuardCheck', 'bin');
   publish('bridge/src/Yawble.Run', 'bin');
-  // The yawble companion client (AssemblyName yawble, Native AOT): the core names <install>/bin/yawble in companion.status.
+  // yawble-companion (AssemblyName yawble-companion, Native AOT): the core names <install>/bin/yawble-companion in companion.status.
   publish('core/tools/Yawble.Companion', 'bin');
   // Windows: the dotnet wrapper, first on the sandbox's PATH (builds in one MSBuild process; SandboxRequestCompiler.DotnetShimFolder).
   if (os === 'win') publish('bridge/src/Yawble.DotnetShim', path.join('bin', 'dotnet-shim'));
@@ -110,7 +110,7 @@ if (os === 'win') mustExist(path.join(stage, 'core', 'wxc-exec.exe'), 'run node 
 mustExist(path.join(stage, 'bin', `yawble-bridge${exe}`), 'the bridge did not publish');
 mustExist(path.join(stage, 'bin', `yawble-grok-auth${exe}`), 'yawble-grok-auth did not publish');
 mustExist(path.join(stage, 'bin', `yawble-run${exe}`), 'yawble-run did not publish');
-mustExist(path.join(stage, 'bin', `yawble${exe}`), 'yawble did not publish');
+mustExist(path.join(stage, 'bin', `yawble-companion${exe}`), 'yawble-companion did not publish');
 if (os === 'win') mustExist(path.join(stage, 'bin', 'dotnet-shim', 'dotnet.exe'), 'the dotnet wrapper did not publish');
 // GuardrailService: the Guardrails tab is off ("the probe is not installed") without <install>/bin/yawble-guardcheck.
 mustExist(path.join(stage, 'bin', `yawble-guardcheck${exe}`), 'yawble-guardcheck did not publish');
