@@ -351,6 +351,46 @@ public sealed class NetworkAskGapTests : IDisposable
         Assert.Empty(asks.Asks());
     }
 
+    /// <summary>
+    /// Card 62 re-check of a91df85: a covered ask the answer listed before its writes, but which the person denies
+    /// (a cloud viewer, say) while those writes run, is not claimed by the allow: it stays denied with its own note,
+    /// the allow closes only its own ask, and the other team's Manager is not told the host is allowed.
+    /// </summary>
+    [Fact]
+    public async Task AllowEverywhere_ACoveredAskDeniedDuringTheWrite_StaysDenied_AndItsManagerIsNotToldAllowed()
+    {
+        var beta = Insert("INSERT INTO teams (name, created_at) VALUES ('Beta', '2026-11-13T00:00:00Z') RETURNING id;");
+        Insert($"INSERT INTO members (team_id, name, role, created_at) VALUES ({beta}, 'Manager', 'manager', '2026-11-13T00:00:00Z') RETURNING id;");
+        Insert($"INSERT INTO members (team_id, name, role, created_at) VALUES ({beta}, 'Omar', 'member', '2026-11-13T00:00:00Z') RETURNING id;");
+        _policies.SaveGlobal(_policies.GetGlobal() with { Network = new NetworkPolicy(["github.com"]) }, _layout);
+        _policies.SaveOverride(_priya, new PolicyPatch(Network: new NetworkPatch(["github.com"])), _layout);
+        NetworkAskService? asks = null;
+        var denied = false;
+        asks = Service(new HookedPolicy(Store(), async m =>
+        {
+            if (m != _priya || denied) return;
+            denied = true;
+            var omarAsk = asks!.Asks().Single(a => a.Member == "Beta/Omar").Id;
+            await asks.AnswerAsync(omarAsk, NetworkAskChoices.Deny, "not for Beta", Ct);
+        }));
+        asks.Refused("Alpha/Priya", "pypi.org", "CONNECT", null);
+        asks.Refused("Beta/Omar", "pypi.org", "CONNECT", null);
+        var id = asks.Asks().Single(a => a.Member == "Alpha/Priya").Id;
+
+        var result = await asks.AnswerAsync(id, NetworkAskChoices.Everywhere, null, Ct);
+
+        Assert.True(denied);
+        Assert.Single(result["closed"]!.AsArray());
+        var all = asks.Asks(pendingOnly: false);
+        var omar = all.Single(a => a.Member == "Beta/Omar");
+        Assert.Equal("denied", omar.State);
+        Assert.Equal("not for Beta", omar.Note);
+        Assert.Equal("allowed", all.Single(a => a.Id == id).State);
+        Assert.DoesNotContain(_told, t => t.Team == "Beta" && t.Text.Contains("is now allowed", StringComparison.Ordinal));
+        Assert.Single(_told, t => t.Team == "Alpha" && t.Text.StartsWith("pypi.org is now allowed for Priya;", StringComparison.Ordinal));
+        Assert.Single(_told, t => t.Team == "Beta" && t.Member == "Omar" && t.Text.StartsWith("The person denied", StringComparison.Ordinal));
+    }
+
     private static long InsertIn(TempDb db, string sql)
     {
         using var c = new SqliteConnection(db.ConnectionString);

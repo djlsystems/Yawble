@@ -246,6 +246,68 @@ public sealed class ToolAskGapTests : IDisposable
         Assert.Equal(2, ask.Count);
     }
 
+    // ---- card 65 re-check of the B013 fix (ToolCatalog.SamePackage)
+
+    [Fact]
+    public async Task AskingDotnetSdkLts_ThenDotnetSdk10_IsOnePendingAsk_WithCountTwo()
+    {
+        var id = await Asked("dotnet-sdk-lts");
+        var again = await Request("dotnet-sdk-10");
+        Assert.StartsWith("asked:", again);
+        Assert.Contains($"tool request {id}", again);
+        Assert.Contains("already waiting", again);
+        var ask = Assert.Single(_asks.Asks());
+        Assert.Equal((id, "dotnet-sdk-lts", 2, "pending"), (ask.Id, ask.Tool, ask.Count, ask.State));
+        Assert.Equal(1, _asks.PendingCount());
+    }
+
+    [Fact]
+    public async Task AFinishedInstall_ClosesTheAskFiledUnderTheOtherName_InEveryTeam_AndTellsEachManager()
+    {
+        // Beta asked under the other name; and Alpha has an older open row under the other name (filed before the fix).
+        var beta = Insert("INSERT INTO teams (name, created_at) VALUES ('Beta', '2026-11-13T00:00:00Z') RETURNING id;");
+        Insert("INSERT INTO members (team_id, name, role, created_at) VALUES ($t, 'Manager', 'manager', '2026-11-13T00:00:00Z') RETURNING id;", ("$t", beta));
+        var ines = Insert("INSERT INTO members (team_id, name, role, created_at) VALUES ($t, 'Ines', 'member', '2026-11-13T00:00:00Z') RETURNING id;", ("$t", beta));
+        var id = await Asked("dotnet-sdk-lts");
+        Insert(
+            "INSERT INTO tool_asks (at, team_id, tool, member, reason, count, last_seen, workflow, causation_seq) " +
+            "VALUES ('2026-11-13T11:00:00Z', $t, 'dotnet-sdk-10', 'Alpha/Priya', 'old ask', 1, '2026-11-13T11:00:00Z', 1, 2) RETURNING id;", ("$t", _alpha));
+        Assert.StartsWith("asked:", await _asks.RequestFromAgentAsync(new MemberRef(ines, beta, "Beta", "Ines", MemberRole.Member), "dotnet-sdk-10", "build", 1, 2, Ct));
+        Assert.Equal(3, _asks.Asks().Count);
+
+        _host.InstallsOnRun = "dotnet-sdk-lts";
+        var r = await Install(id);
+        Assert.True(r["done"]!.GetValue<bool>());
+        Assert.Single(_host.Runs); // one install, not one per name
+        Assert.Empty(_asks.Asks());
+        Assert.Equal(0, _asks.PendingCount());
+        Assert.Equal(3, r["closed"]!.AsArray().Count);
+        Assert.Equal(["Alpha", "Beta"], _told.Select(t => t.Team).Order());
+        Assert.All(_told, t => Assert.Equal("Manager", t.Member));
+    }
+
+    [Fact]
+    public async Task NodeAndPython_StaySeparateTools_ForTheAsk_NotNow_AndTheInstall()
+    {
+        var node = await Asked("nodejs-lts");
+        var python = await Asked("python-3");
+        Assert.NotEqual(node, python);
+        Assert.All(_asks.Asks(), a => Assert.Equal(1, a.Count));
+        Assert.Equal(["nodejs-lts"], ToolCatalog.SamePackage(ToolCatalog.Find("node")!));
+        Assert.Equal(["python-3"], ToolCatalog.SamePackage(ToolCatalog.Find("python")!));
+
+        using (Actor.Use(Actor.Window)) await _asks.NotNowAsync(node, null, Ct);
+        Assert.StartsWith("refused:", await Request("npm"));
+        var again = await Request("pip"); // Not now on Node.js holds nothing for Python
+        Assert.StartsWith("asked:", again);
+        Assert.Equal(2, Assert.Single(_asks.Asks()).Count);
+
+        _host.InstallsOnRun = "python-3";
+        var r = await Install(python);
+        Assert.True(r["done"]!.GetValue<bool>());
+        Assert.Equal([python], r["closed"]!.AsArray().Select(n => n!.GetValue<long>()));
+    }
+
     /// <summary>Records what would run; <see cref="Pending"/> holds a run until the test lets it finish. Never starts a process.</summary>
     private sealed class FakeToolHost : IToolHost
     {

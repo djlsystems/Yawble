@@ -181,4 +181,23 @@ public sealed class LogPruneGapTests : IDisposable
         Assert.Equal(1, Count("SELECT count(*) FROM network_asks WHERE host = 'fresh.example'"));
         Assert.Equal(0, Count("SELECT count(*) FROM network_asks WHERE host = 'late.example'"));
     }
+
+    [Fact] // card 62 re-check of 524cb07: an answered row with no answer time kept goes by when it was raised
+    public void AnAnsweredAskWithNoDecidedAt_GoesByWhenItWasRaised()
+    {
+        Exec("INSERT INTO network_asks (at, team_id, member, host, method, last_seen, state) VALUES (@at, 1, 'web/DeveloperAda', 'old.example', 'CONNECT', @at, 'denied');", ("@at", Ago(400)));
+        Exec("INSERT INTO network_asks (at, team_id, member, host, method, last_seen, state) VALUES (@at, 1, 'web/DeveloperAda', 'new.example', 'CONNECT', @at, 'allowed');", ("@at", Ago(3)));
+        Exec("INSERT INTO integration_asks (at, integration, team_id, member, args, reason, workflow, causation_seq, state) VALUES (@at, 'az', 1, 'web/DeveloperAda', '[\"x\"]', 'r', 1, 1, 'approved');", ("@at", Ago(390)));
+        Exec("INSERT INTO integration_asks (at, integration, team_id, member, args, reason, workflow, causation_seq, state) VALUES (@at, 'az', 1, 'web/DeveloperAda', '[\"y\"]', 'r', 1, 1, 'pending');", ("@at", Ago(900)));
+
+        var preview = _logs.PrunePreview("approvals", _logs.CutoffFor(365));
+        Assert.Equal(2, preview.Count);
+        Assert.Equal(Ago(400), preview.Oldest);
+        Assert.Equal(Ago(390), preview.Newest);
+        Assert.Equal(2, _logs.Sweep()["approvals"]);
+        Assert.Equal(1, Count("SELECT count(*) FROM network_asks WHERE host = 'new.example'"));
+        Assert.Equal(1, Count("SELECT count(*) FROM network_asks"));
+        Assert.Equal(1, Count("SELECT count(*) FROM integration_asks WHERE state = 'pending'"));
+        Assert.Equal(1, Count("SELECT count(*) FROM integration_asks"));
+    }
 }
