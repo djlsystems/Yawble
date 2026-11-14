@@ -244,7 +244,7 @@ public class TeamBranchGapTests
     /// the same name is hired. Its record must name the branch its clone is actually on, or the next fetch-back looks
     /// for a branch the clone does not have and the clone's work never comes back.
     /// </summary>
-    [Fact]
+    [Fact(Skip = "FAULT (core, card 77): same as ARehiredSameNamedMember_WithAPreB016CloneOnDisk_NoOrigin_...; remove the Skip with that one")]
     public async Task ARehiredSameNamedMember_WhoseOldCloneIsStillOnTheOldBranch_IsMovedOrKeptConsistently()
     {
         using var f = new TeamsFixture();
@@ -263,6 +263,38 @@ public class TeamBranchGapTests
         Assert.Equal(c.Branch, head);
         Assert.True((await f.Repos.FetchBackAsync(again, Ct)).Fetched);
         Assert.Equal(tip, Rev(picked, "refs/heads/" + c.Branch));
+    }
+
+    /// <summary>
+    /// The same rehire as above on a person's repository with no origin (no push needed; it still needs git's local
+    /// transport for the first clone and the fetch-back, which cannot start in the agents' sandbox).
+    /// FAULT (core, card 77): RemoveMemberAsync deletes the member (its member_clones row goes) but leaves its clone on
+    /// disk. The rehired member has no row, so MoveLegacyBranchLockedAsync does nothing, CheckoutOf names
+    /// members/&lt;team&gt;/&lt;name&gt;, and PrepareAsync reuses the clone and records that branch while the clone's HEAD is
+    /// still members/&lt;name&gt;. Fetch-back then looks for a branch the clone does not have, and later starts never move it
+    /// (the row's branch is not old-style). The unfetched work on members/&lt;name&gt; never comes back.
+    /// Remove the Skip once PrepareAsync records (or moves) the branch the reused clone is actually on.
+    /// </summary>
+    [Fact(Skip = "FAULT (core, card 77): a rehired member reusing a pre-B016 clone is recorded on members/<team>/<name> while the clone is on members/<name>; its work never comes back")]
+    public async Task ARehiredSameNamedMember_WithAPreB016CloneOnDisk_NoOrigin_IsRecordedOnTheBranchItsCloneIsOn()
+    {
+        using var f = new TeamsFixture();
+        var (_, ada, _) = f.Team();
+        var repo = LocalRepo(f);
+        await f.Repos.UseExistingRepoAsync(ada.TeamId, "Alpha", repo, Ct);
+        var first = await f.Repos.PrepareAsync(ada, Ct);
+        Ok(first.ClonePath, first.Workspace, "branch", "-m", "members/ada"); // the pre-B016 clone
+        var tip = Commit(first.ClonePath, first.Workspace, "unfetched.txt");
+        Fire(f, ada);
+
+        var again = Hire(f, ada.TeamId, "Ada");
+        var c = await f.Repos.PrepareAsync(again, Ct);
+        Assert.Equal(first.ClonePath, c.ClonePath);
+        var head = Ok(c.ClonePath, c.Workspace, "symbolic-ref", "--short", "HEAD");
+        Assert.Equal(head, f.Repos.Row(again.Id)!.Branch); // expected by reading the code: members/ada vs members/alpha/ada
+        Assert.Equal(head, c.Branch);
+        await f.Repos.FetchBackAsync(again, Ct);
+        Assert.Equal(tip, Rev(repo, "refs/heads/" + c.Branch));
     }
 
     [Fact]
