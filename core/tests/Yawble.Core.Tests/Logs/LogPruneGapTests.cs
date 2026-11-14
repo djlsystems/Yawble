@@ -55,9 +55,9 @@ public sealed class LogPruneGapTests : IDisposable
             ("@at", at), ("@h", host), ("@s", state), ("@scope", state == "allowed" ? "agent" : null),
             ("@by", state == "pending" ? null : "pat"), ("@d", state == "pending" ? null : decidedAt ?? at));
 
-    private void Tool(string at, string args, string state) =>
+    private void Tool(string at, string args, string state, string? decidedAt = null) =>
         Exec("INSERT INTO integration_asks (at, integration, team_id, member, args, reason, workflow, causation_seq, state, decided_by, decided_at) VALUES (@at, 'az', 1, 'web/DeveloperAda', @a, 'r', 1, 1, @s, @by, @d);",
-            ("@at", at), ("@a", args), ("@s", state), ("@by", state == "pending" ? null : "pat"), ("@d", state == "pending" ? null : at));
+            ("@at", at), ("@a", args), ("@s", state), ("@by", state == "pending" ? null : "pat"), ("@d", state == "pending" ? null : decidedAt ?? at));
 
     /// <summary>Old answered asks of both kinds, old waiting ones of both kinds, and recent answered ones.</summary>
     private void SeedMixed()
@@ -152,7 +152,7 @@ public sealed class LogPruneGapTests : IDisposable
         Assert.Equal(1, Count("SELECT count(*) FROM network_asks WHERE host = 'waiting.example'"));
     }
 
-    [Fact(Skip = "Fault (card 62, 0326f54): the Approvals prune cuts by when an ask was raised (at), not when it was answered, so an ask that waited past the retention is deleted by the next sweep right after the person answers it; for a denied network ask that also drops the 24-hour DenyQuiet (NetworkAsks.Raise reads the denied row), so the agent can ask again at once. Same cut on integration_asks.")]
+    [Fact] // card 60: was skipped as the fault from 0326f54 (cut by at, not decided_at)
     public void AnOldAskAnsweredJustNow_SurvivesTheNextSweep()
     {
         // Raised 400 days ago, waited all that time, denied an hour ago. The cutoff is by when it was raised (at),
@@ -160,5 +160,25 @@ public sealed class LogPruneGapTests : IDisposable
         Network(Ago(400), "slow.example", "denied", decidedAt: Ago(1.0 / 24));
         _logs.Sweep();
         Assert.Equal(1, Count("SELECT count(*) FROM network_asks WHERE host = 'slow.example'"));
+    }
+
+    [Fact]
+    public void AnOldToolCallAskAnsweredJustNow_SurvivesTheSweep_AndThePreviewGoesByTheAnswerTime()
+    {
+        Tool(Ago(400), "[\"slow\"]", "declined", decidedAt: Ago(1.0 / 24));   // raised long ago, answered an hour ago
+        Tool(Ago(500), "[\"old\"]", "approved", decidedAt: Ago(380));         // answered past the retention
+        Network(Ago(600), "late.example", "allowed", decidedAt: Ago(370));    // raised and answered past it
+        Network(Ago(700), "fresh.example", "denied", decidedAt: Ago(2));
+
+        var preview = _logs.PrunePreview("approvals", _logs.CutoffFor(365));
+        Assert.Equal(2, preview.Count);
+        Assert.Equal(Ago(380), preview.Oldest);
+        Assert.Equal(Ago(370), preview.Newest);
+
+        Assert.Equal(2, _logs.Sweep()["approvals"]);
+        Assert.Equal(1, Count("SELECT count(*) FROM integration_asks WHERE args = '[\"slow\"]'"));
+        Assert.Equal(0, Count("SELECT count(*) FROM integration_asks WHERE args = '[\"old\"]'"));
+        Assert.Equal(1, Count("SELECT count(*) FROM network_asks WHERE host = 'fresh.example'"));
+        Assert.Equal(0, Count("SELECT count(*) FROM network_asks WHERE host = 'late.example'"));
     }
 }
