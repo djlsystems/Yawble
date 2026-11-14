@@ -7,7 +7,8 @@ import { onBeforeUnmount, onMounted, ref } from 'vue';
  * Edit → Paste, Copy, Cut and Select all act on the field the person was typing in. Each item names a command the main window carries out; shortcuts are
  * handled by the window too (MenuBar only shows them).
  */
-export interface MenuItem { id: string; label: string; keys?: string; checked?: boolean; disabled?: boolean; separator?: false }
+/** radio: one of a group (View > Theme), shown and announced as a radio item; checked marks the chosen one. */
+export interface MenuItem { id: string; label: string; keys?: string; checked?: boolean; radio?: boolean; disabled?: boolean; separator?: false }
 export interface MenuSeparator { separator: true }
 export interface Menu { label: string; items: (MenuItem | MenuSeparator)[] }
 
@@ -39,7 +40,7 @@ void props;
       <div v-if="openIndex === i" class="drop" role="menu">
         <template v-for="(it, j) in m.items" :key="j">
           <div v-if="isSep(it)" class="sep" />
-          <button v-else class="item" role="menuitem" :disabled="it.disabled" :data-test="`menuitem-${it.id}`" @mousedown.prevent @click="run(it)">
+          <button v-else class="item" :role="it.radio ? 'menuitemradio' : 'menuitem'" :aria-checked="it.radio ? !!it.checked : undefined" :disabled="it.disabled" :data-test="`menuitem-${it.id}`" @mousedown.prevent @click="run(it)">
             <span class="check">{{ it.checked ? '✓' : '' }}</span>
             <span class="label">{{ it.label }}</span>
             <span class="keys">{{ it.keys }}</span>
