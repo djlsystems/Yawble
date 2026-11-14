@@ -399,10 +399,10 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
 .cloud-ind { position: relative; display: inline-flex; align-items: center; gap: 4px; padding: 6px 8px; border-radius: 8px; color: var(--muted); }
 .cloud-ind:hover { background: var(--hover); color: var(--ink); }
 .cloud-ind.off { opacity: .7; }
-.cloud-ind.connected { color: #2e9d4f; } /* connected: the cloud itself is filled green, no dot */
+.cloud-ind.connected { color: var(--dot-ok); } /* connected: the cloud itself is filled green, no dot */
 .cdot { position: absolute; left: 21px; top: 17px; width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--surface); display: none; }
-.cloud-ind.connecting .cdot, .cloud-ind.pairing .cdot { display: block; background: #e0a400; }
-.cloud-ind.offline .cdot { display: block; background: #c9473d; }
+.cloud-ind.connecting .cdot, .cloud-ind.pairing .cdot { display: block; background: var(--dot-wait); }
+.cloud-ind.offline .cdot { display: block; background: var(--dot-bad); }
 .cnum { font-size: 12px; font-weight: 600; }
 /* Own title bar: drag by the top bar and the sidebar's top row; keep clear of the window controls. */
 .own-bar .bar { -webkit-app-region: drag; height: 52px; box-sizing: border-box;

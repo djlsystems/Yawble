@@ -76,11 +76,11 @@ async function answer(choice: NetworkAskChoice) {
 </template>
 
 <style scoped>
-.network-ask { display: flex; flex-direction: column; gap: 4px; border: 1px solid #f3c38b; border-left: 3px solid #b45309; border-radius: 10px; padding: 8px 10px; background: #fff; font-size: 13px; }
+.network-ask { display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--warn-edge-soft); border-left: 3px solid var(--warn-edge); border-radius: 10px; padding: 8px 10px; background: var(--surface); font-size: 13px; }
 .network-ask p { margin: 0; overflow-wrap: anywhere; }
 .head code { font-weight: 600; }
 .hint { color: var(--ink-soft); }
-.http { color: #92400e; }
+.http { color: var(--warn-ink); }
 .note { font: inherit; font-size: 12.5px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; margin-top: 2px; }
 .buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .buttons button { font-size: 12.5px; }

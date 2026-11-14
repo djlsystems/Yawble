@@ -1,39 +1,124 @@
+/* The window's colours. Every colour in the renderer comes from these custom properties: :root holds the light
+   theme, [data-theme="dark"] on <html> the dark one (the theme module sets the attribute before first paint).
+   Components use only var(--...); a test fails on a hard-coded colour in a .vue <style> (theme-colours.test.ts).
+   The Monitor (monitor/*) keeps its own dark look in both themes: the block that sets the light values also applies
+   to .monitor in the dark theme, so everything inside it reads exactly what it reads in the light theme. */
 :root {
   /* where dialogs start: below the window's title bar, whose buttons the system draws over the page */
   --dialog-top: max(40px, calc(env(titlebar-area-y, 0px) + env(titlebar-area-height, 0px) + 12px));
-  --ink: #1d2330; --ink-soft: #3d4555; --muted: #6b7384; --line: #e2e5eb; --line-soft: #ebedf1; --bg: #f6f7f9;
-  --accent: #2457c5; --warn: #9a5b00; --bad: #a01818; --ok: #1d6b2f;
+  color-scheme: light dark;
+}
+:root[data-theme="light"], :root[data-theme="dark"] .monitor { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+:root, :root[data-theme="dark"] .monitor {
+  --ink: #1d2330; --ink-soft: #3d4555; --muted: #6b7384; --line: #e2e5eb; --line-soft: #ebedf1; --line-strong: #b9c2d3; --bg: #f6f7f9;
+  --accent: #2457c5; --warn: #9a5b00; --bad: #a01818; --ok: #1d6b2f; --info: #0891b2;
   /* the chat-first frame (sidebar, Concierge) */
   --surface: #ffffff; --side: #f7f7f8; --hover: #eeeff2; --hover-strong: #e3e5ea; --selected: #e8eaee;
   --chip: #f0f1f4; --bubble: #f1f2f5; --brand: #3b5bdb;
+  /* surfaces: a quiet inset panel, a sunken field (disabled inputs, <pre>, small code), inline code */
+  --surface-2: #fafbfc; --surface-sunken: #f1f3f6; --code-bg: #f3f4f7;
+  /* text on a filled accent / brand / bad / ink button or badge */
+  --on-accent: #ffffff;
+  --selection: rgba(36, 87, 197, .22); --focus: #2457c5;
+  --backdrop: rgba(20, 26, 36, .35); --shadow: rgba(0, 0, 0, .2); --shadow-soft: rgba(20, 28, 45, .07); --shadow-chip: rgba(0, 0, 0, .08);
+  --scrim: rgba(0, 0, 0, .6); --on-scrim: #ffffff;
+  --checker: #f3f4f6;
+  /* notices: warning (amber), bad (red), ok (green), info (blue) */
+  --warn-bg: #fffaf0; --warn-bg-soft: #faf7ee; --warn-soft: #fff6e0; --warn-chip: #f6d58a;
+  --warn-line: #e9d29a; --warn-line-soft: #f0e2bb; --warn-line-strong: #e9b84a; --warn-rule: #c9a227;
+  --warn-edge: #b45309; --warn-edge-soft: #f3c38b; --warn-ink: #8a5a00;
+  --bad-bg: #fdecea; --bad-bg-soft: #fef2f2; --bad-line: #c0392b; --bad-line-soft: #fecaca; --bad-ink: #b91c1c;
+  --ok-bg: #e7f5ec; --ok-rule: #2e8b57; --info-bg: #eef4ff;
+  /* connection dots */
+  --dot-ok: #2e9d4f; --dot-wait: #e0a400; --dot-bad: #c9473d; --dot-off: #c3c8d2;
+  /* pills (backlog states, chips): a tinted background and its text */
+  --pill-neutral-bg: #f1f5f9; --pill-neutral-ink: #475569; --pill-info-bg: #e0f2fe; --pill-info-ink: #0369a1;
+  --pill-violet-bg: #ede9fe; --pill-violet-ink: #5b21b6; --pill-blue-bg: #dbeafe; --pill-blue-ink: #1d4ed8; --pill-blue-line: #93c5fd;
+  --pill-yellow-bg: #fef9c3; --pill-yellow-ink: #854d0e; --pill-green-bg: #dcfce7; --pill-green-ink: #166534;
+  --pill-red-bg: #fee2e2; --pill-red-ink: #991b1b;
+  --chip-claude-bg: #f6e9df; --chip-claude-ink: #8a4b1c; --chip-grok-bg: #e4e9f7; --chip-grok-ink: #2a3f7a;
+  /* Kanban card statuses (board/cards.ts StatusColor) */
+  --status-queued: #64748b; --status-running: #2563eb; --status-blocked: #b45309; --status-decision: #c2410c;
+  --status-failed: #b91c1c; --status-completed: #0f766e; --status-done: #15803d;
+  /* fenced code blocks in markdown: dark in both themes */
+  --code-block-bg: #1f2430; --code-block-ink: #e7e9ee; --code-block-muted: #9aa3b5; --code-block-control: #c3c9d6;
+  --code-block-hover: #323949; --code-block-ok: #7ad19b;
+  /* the agent transcript: a console, dark in both themes */
+  --console-bg: #101418; --console-ink: #d8dee9; --console-ink-strong: #eef2f7; --console-text: #c9d4e3; --console-soft: #9aa6b8;
+  --console-dim: #8a95a7; --console-faint: #7d8898; --console-code: #222b36; --console-pre: #1b222c; --console-line: #36404e;
+  --console-rule: #2c3542; --console-link: #8ab4ff; --console-tool: #f2b84b; --console-bad: #c9473d; --console-bad-ink: #ffb4b4;
+  --console-bad-strong: #ff8a8a;
+  /* Member states, as the faces' rings and the Monitor show them. */
+  --state-running: #2e7d4f; --state-waiting: #5f7385; --state-decision: #7a4fc4; --state-blocked: #b26a00;
+  --state-failed: #c62828; --state-idle: #8a847c;
 }
+
+:root[data-theme="dark"] {
+  --ink: #e4e7ec; --ink-soft: #c2c8d2; --muted: #9aa2b1; --line: #353b46; --line-soft: #2b3039; --line-strong: #4d5564; --bg: #15171c;
+  --accent: #7ca3f5; --warn: #e3a64f; --bad: #f08a80; --ok: #6fcf8a; --info: #3cc4e0;
+  --surface: #1b1e24; --side: #17191e; --hover: #262a32; --hover-strong: #30353f; --selected: #2c313b;
+  --chip: #2a2e37; --bubble: #272b33; --brand: #7b93f2;
+  --surface-2: #20242b; --surface-sunken: #252a32; --code-bg: #2a2f38;
+  --on-accent: #10141c;
+  --selection: rgba(124, 163, 245, .35); --focus: #7ca3f5;
+  --backdrop: rgba(0, 0, 0, .55); --shadow: rgba(0, 0, 0, .55); --shadow-soft: rgba(0, 0, 0, .3); --shadow-chip: rgba(0, 0, 0, .4);
+  --scrim: rgba(0, 0, 0, .7); --on-scrim: #ffffff;
+  --checker: #2a2e36;
+  --warn-bg: #2a2416; --warn-bg-soft: #26221a; --warn-soft: #332a15; --warn-chip: #5a4718;
+  --warn-line: #6b5a2c; --warn-line-soft: #4a4128; --warn-line-strong: #b38a2e; --warn-rule: #d4b04a;
+  --warn-edge: #e59a4a; --warn-edge-soft: #6e4c26; --warn-ink: #e3b15e;
+  --bad-bg: #3a1d1c; --bad-bg-soft: #33191a; --bad-line: #c4544a; --bad-line-soft: #6b2e2e; --bad-ink: #f4a3a3;
+  --ok-bg: #173323; --ok-rule: #4cb57a; --info-bg: #1a2540;
+  --dot-ok: #4cc47f; --dot-wait: #e8b62e; --dot-bad: #ef6a5f; --dot-off: #59606d;
+  --pill-neutral-bg: #2a2f38; --pill-neutral-ink: #b8c0cc; --pill-info-bg: #0f2f40; --pill-info-ink: #7cc8ee;
+  --pill-violet-bg: #2b2245; --pill-violet-ink: #c4b1f5; --pill-blue-bg: #18284a; --pill-blue-ink: #93b4fb; --pill-blue-line: #2f4a85;
+  --pill-yellow-bg: #3a3014; --pill-yellow-ink: #e8c76a; --pill-green-bg: #143222; --pill-green-ink: #79d69a;
+  --pill-red-bg: #3d1c1c; --pill-red-ink: #f4a3a3;
+  --chip-claude-bg: #3a2a1e; --chip-claude-ink: #e8a878; --chip-grok-bg: #222b45; --chip-grok-ink: #a8b8ec;
+  --status-queued: #94a3b8; --status-running: #6b9cf8; --status-blocked: #e5a04f; --status-decision: #f0884f;
+  --status-failed: #f2736d; --status-completed: #2dbfa8; --status-done: #4fca7a;
+  --code-block-bg: #111419; --code-block-ink: #e7e9ee; --code-block-muted: #9aa3b5; --code-block-control: #c3c9d6;
+  --code-block-hover: #262b36; --code-block-ok: #7ad19b;
+  --console-bg: #0c0f13; --console-ink: #d8dee9; --console-ink-strong: #eef2f7; --console-text: #c9d4e3; --console-soft: #9aa6b8;
+  --console-dim: #8a95a7; --console-faint: #7d8898; --console-code: #222b36; --console-pre: #1b222c; --console-line: #36404e;
+  --console-rule: #2c3542; --console-link: #8ab4ff; --console-tool: #f2b84b; --console-bad: #c9473d; --console-bad-ink: #ffb4b4;
+  --console-bad-strong: #ff8a8a;
+}
+/* The member states' dark values sit on <body>, not <html>: the Monitor's canvas (monitor/scene.ts) reads --state-*
+   from <html>, so it keeps the light values in both themes; the .monitor block above resets them for its DOM. */
+:root[data-theme="dark"] body {
+  --state-running: #4cc47f; --state-waiting: #93a6b8; --state-decision: #b493f0; --state-blocked: #e09a3e;
+  --state-failed: #f2736d; --state-idle: #a8a299;
+}
+
 * { box-sizing: border-box; }
+/* selection and focus ring follow the theme; the Monitor keeps the browser's own */
+/* (zero specificity, so a component's own outline rule still wins) */
+:where(:not(.monitor, .monitor *))::selection { background: var(--selection); }
+:where(:focus-visible:not(.monitor, .monitor *)) { outline: 2px solid var(--focus); outline-offset: 1px; }
 body { margin: 0; font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif; background: var(--surface); color: var(--ink); font-size: 14px; -webkit-font-smoothing: antialiased; }
-button { font: inherit; border: 1px solid var(--line); background: #fff; border-radius: 5px; padding: 4px 10px; cursor: pointer; color: var(--ink); }
+button { font: inherit; border: 1px solid var(--line); background: var(--surface); border-radius: 5px; padding: 4px 10px; cursor: pointer; color: var(--ink); }
 button:hover:not(:disabled) { border-color: var(--accent); }
 button:disabled { opacity: .45; cursor: default; }
-button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 button.danger { color: var(--bad); }
 button.icon { padding: 2px 8px; font-family: ui-monospace, monospace; }
-input, select, textarea { font: inherit; border: 1px solid var(--line); border-radius: 5px; padding: 4px 6px; background: #fff; color: var(--ink); }
-input:disabled, textarea:disabled, select:disabled { background: #f1f3f6; color: var(--muted); }
+input, select, textarea { font: inherit; border: 1px solid var(--line); border-radius: 5px; padding: 4px 6px; background: var(--surface); color: var(--ink); }
+input:disabled, textarea:disabled, select:disabled { background: var(--surface-sunken); color: var(--muted); }
 code, .mono { font-family: ui-monospace, monospace; font-size: 12px; }
 .muted { color: var(--muted); }
 .error { color: var(--bad); white-space: pre-wrap; }
 .warn { color: var(--warn); }
 .ok { color: var(--ok); }
-.chip { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 9px; background: #eef1f6; color: var(--muted); margin-left: 6px; }
-.chip.cli-claude { background: #f6e9df; color: #8a4b1c; }
-.chip.cli-grok { background: #e4e9f7; color: #2a3f7a; }
-.chip.loosened { background: #fff1d6; color: var(--warn); }
-.chip.fake { background: #ffe3e3; color: var(--bad); }
+.chip { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 9px; background: var(--chip); color: var(--muted); margin-left: 6px; }
+.chip.cli-claude { background: var(--chip-claude-bg); color: var(--chip-claude-ink); }
+.chip.cli-grok { background: var(--chip-grok-bg); color: var(--chip-grok-ink); }
+.chip.loosened { background: var(--warn-soft); color: var(--warn); }
+.chip.fake { background: var(--pill-red-bg); color: var(--bad); }
 .row { display: flex; gap: 8px; align-items: center; }
 .grow { flex: 1; }
-/* Member states, as the faces' rings and the Monitor show them. */
-:root {
-  --state-running: #2e7d4f; --state-waiting: #5f7385; --state-decision: #7a4fc4; --state-blocked: #b26a00;
-  --state-failed: #c62828; --state-idle: #8a847c;
-}
 /* The one "action in progress" spinner, inside a button whose click awaits the core (BusyLabel.vue puts it there).
    It takes the button's text colour; it does not spin when the person asks for reduced motion. */
 .btn-spinner { display: inline-block; flex: none; width: 10px; height: 10px; box-sizing: border-box; border-radius: 50%; margin-right: 6px; vertical-align: -1px;

@@ -29,16 +29,16 @@ const width = computed(() => `${String(props.lines.length).length + 1}ch`);
 </template>
 
 <style scoped>
-.cb-lines { overflow: auto; font: 12.5px/20px ui-monospace, 'Cascadia Code', Consolas, monospace; background: #fff; min-height: 0; flex: 1 1 0; }
+.cb-lines { overflow: auto; font: 12.5px/20px ui-monospace, 'Cascadia Code', Consolas, monospace; background: var(--surface); min-height: 0; flex: 1 1 0; }
 .cb-line { position: relative; height: 20px; white-space: pre; display: flex; min-width: max-content; }
-.cb-num { flex: none; width: var(--num-w); padding: 0 10px 0 6px; text-align: right; color: var(--muted, #6b7384); user-select: none; border-right: 2px solid transparent;
-  position: sticky; left: 0; background: #fff; z-index: 1; }
+.cb-num { flex: none; width: var(--num-w); padding: 0 10px 0 6px; text-align: right; color: var(--muted); user-select: none; border-right: 2px solid transparent;
+  position: sticky; left: 0; background: var(--surface); z-index: 1; }
 .cb-text { padding-left: 10px; position: relative; z-index: 1; }
-.cb-line.recent::before { content: ''; position: absolute; inset: 0; background: var(--state-running, #2e7d4f); opacity: calc(var(--hl) * .22); pointer-events: none; }
-.cb-line.recent .cb-num { background: color-mix(in srgb, var(--state-running, #2e7d4f) 14%, #fff); }
-.cb-line.branch .cb-num { border-right-color: color-mix(in srgb, var(--state-done, var(--ok, #1d6b2f)) 45%, transparent); }
-.cb-line.target .cb-num { color: var(--ink, #1d2330); font-weight: 600; }
-.cb-removed { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--bad, #a01818); z-index: 2; cursor: help; }
+.cb-line.recent::before { content: ''; position: absolute; inset: 0; background: var(--state-running); opacity: calc(var(--hl) * .22); pointer-events: none; }
+.cb-line.recent .cb-num { background: color-mix(in srgb, var(--state-running) 14%, var(--surface)); }
+.cb-line.branch .cb-num { border-right-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.cb-line.target .cb-num { color: var(--ink); font-weight: 600; }
+.cb-removed { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--bad); z-index: 2; cursor: help; }
 .cb-removed.top { top: -1px; bottom: auto; }
 .cb-removed::after { content: ''; position: absolute; left: 0; right: 0; top: -3px; bottom: -3px; } /* an easier hover target */
 </style>

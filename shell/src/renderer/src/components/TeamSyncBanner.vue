@@ -66,7 +66,7 @@ defineExpose({ load });
 
 <style scoped>
 .sync { margin: 6px 0; }
-.note { border: 1px solid var(--warn, #c80); border-radius: 6px; padding: 8px 10px; background: var(--warn-bg, rgba(204, 136, 0, 0.08)); }
+.note { border: 1px solid var(--warn); border-radius: 6px; padding: 8px 10px; background: var(--warn-bg); }
 .note .line { margin-top: 4px; }
 .files { margin: 2px 0 0 18px; padding: 0; }
 .behind { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
