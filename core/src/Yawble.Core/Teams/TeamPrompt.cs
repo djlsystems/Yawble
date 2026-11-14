@@ -27,11 +27,11 @@ public static class TeamPrompt
         if (run.Checkout is { } c)
         {
             lines.Add(run.Member.Role == MemberRole.Manager
-                ? $"Your members commit on their own branches ({TeamRepos.BranchPrefix}<name>); the app brings each into the team's repository when their run ends. Your own branch, {c.Branch}, is the team's delivery branch: merge accepted work into it (see your role's Repositories section). The app pushes branches to the team repository's origin after each run; you never push."
+                ? $"Your members commit on their own branches ({TeamRepos.MemberBranchPrefix(run.Member.Team)}<name>, e.g. {TeamRepos.BranchFor(run.Member.Team, "DeveloperPriya")}); the app brings each into the team's repository when their run ends. Your own branch, {c.Branch}, is the team's delivery branch: merge accepted work into it (see your role's Repositories section). The app pushes branches to the team repository's origin after each run; you never push."
                 : $"Your working directory is your own clone of the team's repository, on branch {c.Branch}. Commit your work there. There is no remote: never push.");
             // Every branch of the team (teammates', the team branch) is in the team's bundle: say where, every run, so a
             // tester checking a developer's work never concludes it is unreachable.
-            lines.Add($"Teammates' branches and the team branch {TeamRepos.TeamBranchFor(run.Member.Team)} are in the team's bundle: " +
+            lines.Add($"Teammates' branches ({TeamRepos.MemberBranchPrefix(run.Member.Team)}<name>) and the team branch {TeamRepos.TeamBranchFor(run.Member.Team)} are in the team's bundle: " +
                       "git fetch \"$env:YAWBLE_TEAM_BUNDLE\" <branch> (on Linux and macOS \"$YAWBLE_TEAM_BUNDLE\"), then use FETCH_HEAD.");
             lines.Add("The team's documents folder is the path in the environment variable YAWBLE_TEAM_DOCS (outside your clone): " +
                       "a document \"in YAWBLE_TEAM_DOCS\" goes to \"$env:YAWBLE_TEAM_DOCS\\<name>\", never to a folder of that name in your clone.");

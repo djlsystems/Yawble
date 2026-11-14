@@ -275,7 +275,7 @@ public static partial class SandboxRequestCompiler
         }
         else
         {
-            var system = l.Os == TargetOs.MacOS ? "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" : "/usr/local/bin:/usr/bin:/bin";
+            var system = l.Os == TargetOs.MacOS ? "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" : string.Join(':', Launch.HostTools.LinuxRunPath);
             env["PATH"] = string.Join(':', [.. l.CliInstall.PathFolders, l.AppBinDir, system]);
             env["TMPDIR"] = l.Tmp;
             env["LANG"] = "C.UTF-8";
@@ -308,7 +308,7 @@ public static partial class SandboxRequestCompiler
             env["UseSharedCompilation"] = "false"; // MSBuild reads environment variables as properties
         }
         // The team's shared view (read-only). Members fetch a teammate's branch from its bundle:
-        // `git fetch "$YAWBLE_TEAM_BUNDLE" members/<name>` (a path fetch needs sh.exe on Windows, microsoft/mxc#1061).
+        // `git fetch "$YAWBLE_TEAM_BUNDLE" members/<team>/<name>` (a path fetch needs sh.exe on Windows, microsoft/mxc#1061).
         if (l.TeamDocuments is not null) env["YAWBLE_TEAM_DOCS"] = l.TeamDocuments;
         if (l.SharedRepo is not null)
         {

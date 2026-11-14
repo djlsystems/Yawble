@@ -110,8 +110,8 @@ public sealed partial class TeamRepos
         var teamBranch = TeamBranchFor(team);
         var branches = new List<string>();
         if (await RevAsync(path, "refs/heads/" + teamBranch, ct) is not null) branches.Add(teamBranch);
-        branches.AddRange((await Git.RunAsync(path, ct, "for-each-ref", "--format=%(refname:short)", "refs/heads/" + BranchPrefix))
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries));
+        // This team's member branches only (members/<team>/*, and an old-style one a member is still on).
+        branches.AddRange((await TeamMemberBranchesAsync(repo.TeamId, team, path, legacyInUseOnly: true, ct)).Select(b => b.Branch));
 
         var checkedOut = await CurrentBranchAsync(path, ct);
         var moved = new List<string>();

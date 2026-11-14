@@ -154,7 +154,7 @@ public sealed class McpBusServer(RunContext run) : IBusEndpoint
         args[name] is JsonValue v && v.TryGetValue<string>(out var s) && !string.IsNullOrWhiteSpace(s) ? s : null;
 
     private static string Hired(MemberRow m) =>
-        $"ok: hired {m.Name} ({m.Cli}) into team {m.Team}. Address it as '{m.Name}' every time (tell, its branch members/{m.Name.ToLowerInvariant()}). Its clone and branch are made at its first run. Give it work with tell.";
+        $"ok: hired {m.Name} ({m.Cli}) into team {m.Team}. Address it as '{m.Name}' every time (tell, its branch {Teams.TeamRepos.BranchFor(m.Team, m.Name)}). Its clone and branch are made at its first run. Give it work with tell.";
 
     private static async Task<string> RepoText(RunContext run, CancellationToken ct)
     {

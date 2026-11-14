@@ -43,12 +43,12 @@ public class LauncherTeamRepoTests
         Assert.NotNull(commandLine);
         Assert.True(cloneHadGit, "the sandbox started before the member's clone was made");
         Assert.Contains("You are dev1, a member of team alpha", commandLine);
-        Assert.Contains("on branch members/dev1", commandLine);
+        Assert.Contains("on branch members/alpha/dev1", commandLine);
         Assert.Contains("write hello.txt", commandLine);
         using var store = kit.Db.OpenStore();
         var dev1 = store.AllMembers().Single(m => m.Team == "alpha" && m.Name == "dev1");
         var row = repos!.Row(dev1.Id)!;
-        Assert.Equal("members/dev1", row.Branch);
+        Assert.Equal("members/alpha/dev1", row.Branch);
         Assert.Equal(Path.GetFullPath(layout.ClonePath), Path.GetFullPath(row.Path));
         Assert.Equal("[]", row.LastCheck);
     }

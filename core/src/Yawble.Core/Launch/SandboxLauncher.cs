@@ -33,6 +33,9 @@ public static class HostTools
     /// <summary>The developer tools a member may run, by program name, in PATH order on the sandbox.</summary>
     public static IReadOnlyList<string> WindowsTools { get; } = ["git", "dotnet", "node", "python"];
 
+    /// <summary>Linux: the system folders at the end of every run's PATH (SandboxRequestCompiler), which each sandbox reads: where a tool a run can use is.</summary>
+    public static IReadOnlyList<string> LinuxRunPath { get; } = ["/usr/local/bin", "/usr/bin", "/bin"];
+
     /// <summary>
     /// Windows: for each of <see cref="WindowsTools"/>, the folder of the first such program on the core's PATH: git
     /// (Git for Windows: ...\Git\cmd, which runs without MSYS2; its sh-based parts cannot start in a ProcessContainer,

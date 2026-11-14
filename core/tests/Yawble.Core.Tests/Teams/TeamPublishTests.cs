@@ -37,7 +37,7 @@ public class TeamPublishTests
         using (f)
         {
             Assert.Equal("team/alpha", (await f.Repos.PrepareAsync(manager, Ct)).Branch);
-            Assert.Equal("members/ada", (await f.Repos.PrepareAsync(ada, Ct)).Branch);
+            Assert.Equal("members/alpha/ada", (await f.Repos.PrepareAsync(ada, Ct)).Branch);
         }
     }
 
@@ -57,20 +57,20 @@ public class TeamPublishTests
 
             var report = await f.Repos.PublishAsync(ada, Ct);
             Assert.Equal(TeamPublishResult.Published, report.Result);
-            Assert.Equal(["members/ada"], report.Branches);
-            Assert.Equal(AgentGit.Host(picked, "rev-parse", "refs/heads/members/ada"), AgentGit.Host(bare, "rev-parse", "refs/heads/members/ada"));
+            Assert.Equal(["members/alpha/ada"], report.Branches);
+            Assert.Equal(AgentGit.Host(picked, "rev-parse", "refs/heads/members/alpha/ada"), AgentGit.Host(bare, "rev-parse", "refs/heads/members/alpha/ada"));
             Assert.Equal(trunkBefore, AgentGit.Host(bare, "rev-parse", "refs/heads/trunk"));
 
             Assert.Equal(TeamPublishResult.NothingToPublish, (await f.Repos.PublishAsync(ada, Ct)).Result);
 
             // The Manager fast-forwards the team branch to Ada's tip: no new commit, but origin's team branch moves.
-            AgentGit.Ok(mcheck, "fetch", "-q", Path.Combine(f.Repos.SharedRepoPath("Alpha"), TeamRepos.SharedBundleFile), "members/ada");
+            AgentGit.Ok(mcheck, "fetch", "-q", Path.Combine(f.Repos.SharedRepoPath("Alpha"), TeamRepos.SharedBundleFile), "members/alpha/ada");
             AgentGit.Ok(mcheck, "merge", "-q", "--ff-only", "FETCH_HEAD");
             Assert.True((await f.Repos.FetchBackAsync(manager, Ct)).Fetched);
             var team = await f.Repos.PublishAsync(manager, Ct);
             Assert.Equal(TeamPublishResult.Published, team.Result);
             Assert.Equal(["team/alpha"], team.Branches);
-            Assert.Equal(AgentGit.Host(bare, "rev-parse", "refs/heads/members/ada"), AgentGit.Host(bare, "rev-parse", "refs/heads/team/alpha"));
+            Assert.Equal(AgentGit.Host(bare, "rev-parse", "refs/heads/members/alpha/ada"), AgentGit.Host(bare, "rev-parse", "refs/heads/team/alpha"));
         }
     }
 
@@ -106,23 +106,23 @@ public class TeamPublishTests
         {
             await Commit(f, ada, "a.txt");
             Assert.Equal(TeamPublishResult.Published, (await f.Repos.PublishAsync(ada, Ct)).Result);
-            var pushed = AgentGit.Host(bare, "rev-parse", "refs/heads/members/ada");
+            var pushed = AgentGit.Host(bare, "rev-parse", "refs/heads/members/alpha/ada");
             // Ada rewrites her pushed commit: the team repository keeps the pushed one (the rewrite is merged with it,
             // the branch is never moved backwards), so nothing on origin would need a force.
             var checkout = await f.Repos.PrepareAsync(ada, Ct);
             AgentGit.Ok(checkout, "commit", "-q", "--amend", "-m", "rewritten");
             Assert.True((await f.Repos.FetchBackAsync(ada, Ct)).Fetched);
-            Assert.Equal(0, AgentGit.Run(picked, Path.GetTempPath(), "merge-base", "--is-ancestor", pushed, "refs/heads/members/ada").ExitCode);
-            // Someone else moves origin's members/ada meanwhile: Ada's push is refused (never forced); the Manager's goes.
+            Assert.Equal(0, AgentGit.Run(picked, Path.GetTempPath(), "merge-base", "--is-ancestor", pushed, "refs/heads/members/alpha/ada").ExitCode);
+            // Someone else moves origin's members/alpha/ada meanwhile: Ada's push is refused (never forced); the Manager's goes.
             var elsewhere = Path.Combine(f.Db.Dir, "elsewhere");
-            AgentGit.Host(f.Db.Dir, "clone", "-q", "-b", "members/ada", bare, elsewhere);
+            AgentGit.Host(f.Db.Dir, "clone", "-q", "-b", "members/alpha/ada", bare, elsewhere);
             TeamSyncTests.Commit(elsewhere, "other.txt", "o\n", "someone else's commit");
-            AgentGit.Host(elsewhere, "push", "-q", "origin", "members/ada");
+            AgentGit.Host(elsewhere, "push", "-q", "origin", "members/alpha/ada");
             await Commit(f, manager, "m.txt");
 
             var report = await f.Repos.PublishAsync(ada, Ct);
             Assert.Equal(TeamPublishResult.Rejected, report.Result);
-            Assert.Equal(["members/ada"], report.Branches);
+            Assert.Equal(["members/alpha/ada"], report.Branches);
             Assert.Equal(["team/alpha"], report.Published);
             Assert.NotEqual("", AgentGit.Host(bare, "rev-parse", "refs/heads/team/alpha"));
         }
@@ -138,7 +138,7 @@ public class TeamPublishTests
             await Commit(f, ada, "a.txt");
             var report = await f.Repos.PublishAsync(ada, Ct);
             Assert.Equal(TeamPublishResult.PushFailed, report.Result);
-            Assert.Equal(["members/ada"], report.Branches);
+            Assert.Equal(["members/alpha/ada"], report.Branches);
             Assert.DoesNotContain("s3cret", report.Reason);
         }
     }

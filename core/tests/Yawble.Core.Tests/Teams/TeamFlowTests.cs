@@ -71,7 +71,7 @@ public class TeamFlowTests
                 if (run.Items.Any(i => i.Source == MessageTypes.PersonSource))
                 {
                     var (role, _) = await bridge.CallAsync("skills_get", new JsonObject { ["name"] = "manager" });
-                    Assert.Contains("members/<name>", role);
+                    Assert.Contains("members/<team>/<name>", role);
                     Assert.Contains("never ask a member to push", role);
                     var (status, _) = await bridge.CallAsync("status");
                     Assert.Contains("\"name\":\"Ada\"", status);
@@ -96,7 +96,7 @@ public class TeamFlowTests
                 }
                 var (text, refused) = await bridge.CallAsync("workflow_complete", new JsonObject
                 {
-                    ["delivered"] = "GET /health on members/ada and its test on members/ben",
+                    ["delivered"] = "GET /health on members/alpha/ada and its test on members/alpha/ben",
                 });
                 declarations.Enqueue(refused ? "refused: " + text : "ok");
                 return; // refused while a member's run is still open: end the turn and be woken by its ending
@@ -111,7 +111,7 @@ public class TeamFlowTests
             Assert.False((await bridge.CallAsync("progress", new JsonObject { ["status"] = "writing the code" })).IsError);
 
             var c = run.Checkout!;
-            Assert.Equal(TeamRepos.BranchFor(run.Member.Name), AgentGit.Ok(c, "symbolic-ref", "--short", "HEAD"));
+            Assert.Equal(TeamRepos.BranchFor(run.Member.Team, run.Member.Name), AgentGit.Ok(c, "symbolic-ref", "--short", "HEAD"));
             string file;
             if (run.Member.Name == "Ada")
             {
@@ -202,7 +202,7 @@ public class TeamFlowTests
         Assert.Equal([Vhosts.Model], adaRun.Vhosts);
         Assert.Equal([Vhosts.Grok], benRun.Vhosts);
         Assert.Equal(repos.MemberRoot("Alpha", "Ada") + Path.DirectorySeparatorChar + "repo", adaRun.Cwd);
-        Assert.Contains("on branch members/ada", adaRun.Prompt);
+        Assert.Contains("on branch members/alpha/ada", adaRun.Prompt);
         Assert.Contains("skills_get tool with name \"member\"", adaRun.Prompt);
         // The Manager was told in sentences: who handed back, and that the runs ended.
         var managerNotices = string.Join("\n", launcher.Runs.Where(r => r.Member == "Manager").Select(r => r.Prompt));
@@ -211,19 +211,19 @@ public class TeamFlowTests
 
         // ---- the team's repository: both branches, with the work; trunk untouched (merging is the person's)
         var branches = AgentGit.Host(picked, "for-each-ref", "--format=%(refname:short)", "refs/heads/");
-        Assert.Equal(["members/ada", "members/ben", "trunk"], branches.Split('\n').Order());
-        Assert.Contains("return {\"ok\": True}", AgentGit.Host(picked, "show", "members/ada:app/health.py"));
-        Assert.Contains("def test_health", AgentGit.Host(picked, "show", "members/ben:tests/test_health.py"));
+        Assert.Equal(["members/alpha/ada", "members/alpha/ben", "trunk"], branches.Split('\n').Order());
+        Assert.Contains("return {\"ok\": True}", AgentGit.Host(picked, "show", "members/alpha/ada:app/health.py"));
+        Assert.Contains("def test_health", AgentGit.Host(picked, "show", "members/alpha/ben:tests/test_health.py"));
         Assert.Equal("1", AgentGit.Host(picked, "rev-list", "--count", "trunk"));
-        Assert.Equal("Ada (Alpha)", AgentGit.Host(picked, "log", "-1", "--format=%an", "members/ada"));
+        Assert.Equal("Ada (Alpha)", AgentGit.Host(picked, "log", "-1", "--format=%an", "members/alpha/ada"));
 
         // ---- pushed by the host: the members' branches reach origin, trunk does not move
-        Assert.Equal(AgentGit.Host(picked, "rev-parse", "members/ada"), AgentGit.Host(bare, "rev-parse", "refs/heads/members/ada"));
-        Assert.Equal(AgentGit.Host(picked, "rev-parse", "members/ben"), AgentGit.Host(bare, "rev-parse", "refs/heads/members/ben"));
+        Assert.Equal(AgentGit.Host(picked, "rev-parse", "members/alpha/ada"), AgentGit.Host(bare, "rev-parse", "refs/heads/members/alpha/ada"));
+        Assert.Equal(AgentGit.Host(picked, "rev-parse", "members/alpha/ben"), AgentGit.Host(bare, "rev-parse", "refs/heads/members/alpha/ben"));
         Assert.Contains(originBefore.Split('\n').Single(l => l.EndsWith("refs/heads/trunk")), AgentGit.Host(bare, "for-each-ref"));
         // Whichever run ends after a branch is fetched back pushes it (runs overlap, so one push may carry both).
-        Assert.Matches(@"The app pushed [^.]*members/ada[^.]* to origin\.", managerNotices);
-        Assert.Matches(@"The app pushed [^.]*members/ben[^.]* to origin\.", managerNotices);
+        Assert.Matches(@"The app pushed [^.]*members/alpha/ada[^.]* to origin\.", managerNotices);
+        Assert.Matches(@"The app pushed [^.]*members/alpha/ben[^.]* to origin\.", managerNotices);
 
         // ---- no remote and no git credential in any clone or workspace
         foreach (var member in new[] { "Manager", "Ada", "Ben" })

@@ -42,7 +42,13 @@ public static class LinuxPackagers
     /// From /etc/os-release: its ID, then each ID_LIKE in order, the first one known decides; anything else is apt.
     /// Pure, so tests pass the file's text.
     /// </summary>
-    public static LinuxPackager FromOsRelease(string? text)
+    public static LinuxPackager FromOsRelease(string? text) => Recognise(text) ?? LinuxPackager.Apt;
+
+    /// <summary>
+    /// The package manager of a distribution /etc/os-release names (its ID, then each ID_LIKE), or null when none is known:
+    /// Install through pkexec is offered only for a recognised one.
+    /// </summary>
+    public static LinuxPackager? Recognise(string? text)
     {
         string? id = null, like = null;
         foreach (var raw in (text ?? "").Split('\n'))
@@ -67,9 +73,26 @@ public static class LinuxPackagers
                 case "arch": return LinuxPackager.Pacman;
             }
         }
-        return LinuxPackager.Apt;
+        return null;
     }
+
+    /// <summary>
+    /// The package manager's program, from this fixed list only (never PATH): an Install through pkexec runs exactly this
+    /// file, so a program of the same name earlier on PATH is never what runs as root.
+    /// </summary>
+    public static string ProgramPath(LinuxPackager packager) => packager switch
+    {
+        LinuxPackager.Dnf => "/usr/bin/dnf",
+        LinuxPackager.Pacman => "/usr/bin/pacman",
+        _ => "/usr/bin/apt-get",
+    };
 }
+
+/// <summary>
+/// What an Install through pkexec runs on Linux: pkexec's path (found on PATH), the distribution's package manager and its
+/// program at the fixed path (<see cref="LinuxPackagers.ProgramPath"/>).
+/// </summary>
+public sealed record LinuxInstaller(string Pkexec, LinuxPackager Packager, string PackageManager);
 
 /// <summary>The fixed catalog of host tools an agent may ask for, and the exact winget command each installs with.</summary>
 public static class ToolCatalog
@@ -126,6 +149,25 @@ public static class ToolCatalog
 
     /// <summary>The command as the person reads it (in the ask and the logs).</summary>
     public static string CommandLine(ToolEntry t) => "winget " + string.Join(' ', WingetArgs(t));
+
+    /// <summary>Linux: the catalog's packages for that package manager, one per item.</summary>
+    public static IReadOnlyList<string> LinuxPackages(ToolEntry t, LinuxPackager packager) =>
+        (packager switch { LinuxPackager.Dnf => t.DnfPackages, LinuxPackager.Pacman => t.PacmanPackages, _ => t.AptPackages })
+        .Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+    /// <summary>
+    /// The arguments pkexec is given on Linux, exactly: the package manager at its fixed path, then
+    /// "install -y &lt;packages&gt;" (dnf, apt-get) or "-S --needed --noconfirm &lt;packages&gt;" (pacman). The packages come from the catalog only.
+    /// </summary>
+    public static IReadOnlyList<string> PkexecArgs(ToolEntry t, LinuxInstaller li) =>
+    [
+        LinuxPackagers.ProgramPath(li.Packager),
+        .. li.Packager == LinuxPackager.Pacman ? (string[])["-S", "--needed", "--noconfirm"] : ["install", "-y"],
+        .. LinuxPackages(t, li.Packager),
+    ];
+
+    /// <summary>The pkexec command as the person reads it: "pkexec /usr/bin/dnf install -y dotnet-sdk-10.0".</summary>
+    public static string PkexecCommandLine(ToolEntry t, LinuxInstaller li) => "pkexec " + string.Join(' ', PkexecArgs(t, li));
 }
 
 /// <summary>Finding and installing host tools on this computer. Tests pass a fake: no test runs winget or an installer.</summary>
@@ -145,6 +187,19 @@ public interface IToolHost
     Task<bool> IsInstalledAsync(ToolEntry tool, CancellationToken ct);
 
     Task<GitResult> RunAsync(string exe, IReadOnlyList<string> args, TimeSpan limit, CancellationToken ct);
+
+    /// <summary>
+    /// Linux: what an Install through pkexec runs, or null when it is not offered here: pkexec is not on PATH, there is no
+    /// graphical session (neither WAYLAND_DISPLAY nor DISPLAY), the distribution is not recognised, or its package manager
+    /// is not at its fixed path. Null on Windows and macOS.
+    /// </summary>
+    LinuxInstaller? LinuxInstall => null;
+
+    /// <summary>
+    /// Where the tool's program is when it is only under the person's home folder (~/.dotnet/dotnet, ~/.local/bin/node),
+    /// which a run's sandbox does not see; null when it is not there (or not only there).
+    /// </summary>
+    string? FoundOnlyInHome(ToolEntry tool) => null;
 }
 
 /// <summary>The production <see cref="IToolHost"/>: winget and the runner of git.install (<see cref="IGitHost"/>), and the launcher's own tool detection.</summary>
@@ -186,20 +241,49 @@ public sealed class SystemToolHost(IGitHost git, string appDataRoot) : IToolHost
     {
         if (OperatingSystem.IsWindows())
             return HostTools.Detect(appDataRoot).Select(d => Path.Combine(d, program + ".exe")).FirstOrDefault(File.Exists);
-        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(':', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var p = Path.Combine(dir, program);
-            if (File.Exists(p)) return p;
-        }
-        return null;
+        // Linux: only the system folders a run's PATH has (HostTools.LinuxRunPath), which every sandbox reads: a program
+        // the core's own PATH finds under the home folder is one a run cannot use (FoundOnlyInHome).
+        var dirs = OperatingSystem.IsLinux() ? HostTools.LinuxRunPath : CorePath();
+        return dirs.Select(d => Path.Combine(d, program)).FirstOrDefault(File.Exists);
     }
 
+    private static string[] CorePath() => (Environment.GetEnvironmentVariable("PATH") ?? "").Split(':', StringSplitOptions.RemoveEmptyEntries);
+
     public Task<GitResult> RunAsync(string exe, IReadOnlyList<string> args, TimeSpan limit, CancellationToken ct) => git.RunAsync(exe, args, limit, ct);
+
+    public LinuxInstaller? LinuxInstall
+    {
+        get
+        {
+            if (!OperatingSystem.IsLinux()) return null;
+            if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WAYLAND_DISPLAY")) && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DISPLAY")))
+                return null;
+            var pkexec = CorePath().Select(d => Path.Combine(d, "pkexec")).FirstOrDefault(p => Path.IsPathRooted(p) && File.Exists(p));
+            if (pkexec is null) return null;
+            string? osRelease;
+            try { osRelease = File.ReadAllText("/etc/os-release"); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
+            if (LinuxPackagers.Recognise(osRelease) is not { } packager) return null;
+            var pm = LinuxPackagers.ProgramPath(packager);
+            return File.Exists(pm) ? new LinuxInstaller(pkexec, packager, pm) : null;
+        }
+    }
+
+    public string? FoundOnlyInHome(ToolEntry tool)
+    {
+        if (!OperatingSystem.IsLinux() || Find(tool.Program) is not null) return null;
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrEmpty(home)) return null;
+        var prefix = home.TrimEnd('/') + "/";
+        IEnumerable<string> dirs = [Path.Combine(home, ".dotnet"), Path.Combine(home, ".local", "bin"), .. CorePath().Where(d => d.StartsWith(prefix, StringComparison.Ordinal))];
+        return dirs.Select(d => Path.Combine(d, tool.Program)).FirstOrDefault(File.Exists);
+    }
 }
 
 /// <summary>A tool ask (tool_asks, 0040). <paramref name="Member"/>: "Team/Name" of the latest member who asked.</summary>
 public sealed record ToolAskRow(long Id, string At, long TeamId, string Team, string Tool, string Member, string? Reason, int Count, string LastSeen,
-    long? Workflow, long? CausationSeq, string State, int Attempts, string? Error, string? DecidedBy, string? DecidedVia, string? DecidedAt, string? Note)
+    long? Workflow, long? CausationSeq, string State, int Attempts, string? Error, string? DecidedBy, string? DecidedVia, string? DecidedAt, string? Note,
+    string? LastResult = null)
 {
     public string MemberName => Member[(Member.IndexOf('/') + 1)..];
 }
@@ -210,7 +294,9 @@ public sealed record ToolAskRow(long Id, string At, long TeamId, string Team, st
 /// the window on this computer, only: never over the Cloud Link, from the companion, by an agent or the Concierge); the
 /// program is looked for again afterwards, and when it is found every open ask for the tool closes and each team's
 /// Manager is told to retry. A failed install leaves the ask open with winget's message (Try again). Not now: the team is
-/// not asked about that tool again for 24 hours. Each ask, answer and result is in the Approvals log (tool_ask_events).
+/// not asked about that tool again for 24 hours. On Linux, with pkexec, a graphical session and a recognised distribution,
+/// Install runs "pkexec &lt;package manager&gt; ..." instead (B017); Check again (tools.checkAgain) looks for the program again
+/// after the person installed it themselves. Each ask, answer and result is in the Approvals log (tool_ask_events).
 /// The network asks' plumbing is shared: the same tell (as the person, in the ask's workflow), the same Needs you count
 /// and Concierge status, the same Approvals log.
 /// </summary>
@@ -256,7 +342,7 @@ public sealed class ToolAskService
         }
         foreach (var id in interrupted)
         {
-            Exec(c, tx, "UPDATE tool_asks SET state = 'pending', error = 'the app closed while it was installing; try again' WHERE id = $id AND state = 'installing';", ("$id", id));
+            Exec(c, tx, "UPDATE tool_asks SET state = 'pending', error = 'the app closed while it was installing; try again', last_result = 'failed' WHERE id = $id AND state = 'installing';", ("$id", id));
             Event(c, tx, id, "failed", null, null, InterruptedDetail);
         }
         tx.Commit();
@@ -341,7 +427,7 @@ public sealed class ToolAskService
             tx.Commit();
         }
         Changed?.Invoke();
-        var how = _host.IsWindows
+        var how = _host.IsWindows || _host.LinuxInstall is not null
             ? "The person can install it from Needs you"
             : $"The person installs it themselves on this computer ({entry.ManualCommand(_host.IsMac, _host.Packager)})";
         return $"asked: the person is asked to install {entry.DisplayName} (tool request {id}){(first ? "" : "; it was already waiting, and your reason is added")}. " +
@@ -358,7 +444,7 @@ public sealed class ToolAskService
         using var c = Open();
         using var cmd = Command(c,
             "SELECT a.id, a.at, a.team_id, COALESCE(t.name, ''), a.tool, a.member, a.reason, a.count, a.last_seen, a.workflow, a.causation_seq, a.state, " +
-            "a.attempts, a.error, a.decided_by, a.decided_via, a.decided_at, a.note FROM tool_asks a LEFT JOIN teams t ON t.id = a.team_id WHERE 1 = 1" +
+            "a.attempts, a.error, a.decided_by, a.decided_via, a.decided_at, a.note, a.last_result FROM tool_asks a LEFT JOIN teams t ON t.id = a.team_id WHERE 1 = 1" +
             (openOnly ? " AND a.state IN ('pending', 'installing')" : "") + (teamId is null ? "" : " AND a.team_id = $t") + " ORDER BY a.id;",
             ("$t", teamId));
         using var r = cmd.ExecuteReader();
@@ -366,7 +452,7 @@ public sealed class ToolAskService
         while (r.Read())
             list.Add(new ToolAskRow(r.GetInt64(0), r.GetString(1), r.GetInt64(2), r.GetString(3), r.GetString(4), r.GetString(5), S(r, 6), (int)r.GetInt64(7),
                 r.GetString(8), r.IsDBNull(9) ? null : r.GetInt64(9), r.IsDBNull(10) ? null : r.GetInt64(10), r.GetString(11), (int)r.GetInt64(12), S(r, 13),
-                S(r, 14), S(r, 15), S(r, 16), S(r, 17)));
+                S(r, 14), S(r, 15), S(r, 16), S(r, 17), S(r, 18)));
         return list;
     }
 
@@ -375,14 +461,16 @@ public sealed class ToolAskService
     {
         ["name"] = t.Name, ["displayName"] = t.DisplayName, ["publisher"] = t.Publisher, ["wingetId"] = t.WingetId,
         ["scope"] = t.UserScope ? "user" : "machine", ["program"] = t.Program,
-        ["command"] = _host.IsWindows ? ToolCatalog.CommandLine(t) : t.ManualCommand(_host.IsMac, _host.Packager),
+        ["command"] = CommandFor(t, _host.IsWindows, _host.IsWindows ? null : _host.LinuxInstall),
     };
 
     /// <summary>One ask as the Needs you item reads it (tools.asks).</summary>
     public JsonObject ToJson(ToolAskRow a)
     {
         var t = ToolCatalog.Find(a.Tool);
-        var canInstall = _host.IsWindows && t is not null;
+        var linux = _host.IsWindows || t is null ? null : _host.LinuxInstall;
+        var canInstall = t is not null && (_host.IsWindows || linux is not null);
+        var homeOnly = t is null || _host.IsWindows ? null : _host.FoundOnlyInHome(t);
         return new JsonObject
         {
             ["id"] = a.Id, ["at"] = a.At, ["teamId"] = a.TeamId, ["team"] = a.Team, ["member"] = a.Member, ["memberName"] = a.MemberName,
@@ -390,13 +478,51 @@ public sealed class ToolAskService
             ["scope"] = t is null ? null : t.UserScope ? "user" : "machine",
             ["reason"] = a.Reason, ["count"] = a.Count, ["lastSeen"] = a.LastSeen, ["workflow"] = a.Workflow,
             ["state"] = a.State, ["attempts"] = a.Attempts, ["error"] = a.Error,
+            // The result code of the last Install or Check again (0042), beside error: failed, cancelled, notAuthorized,
+            // homeOnly or notFound; null before the first attempt. A fresh card reads cancelled/notAuthorized from it.
+            ["lastResult"] = a.LastResult,
             ["decidedBy"] = a.DecidedBy, ["decidedVia"] = a.DecidedVia, ["decidedAt"] = a.DecidedAt,
-            // Windows: Install (or Try again after an error) runs this command; Linux and macOS: the person runs it themselves.
+            // Windows: Install (or Try again after an error) runs this command with winget. Linux with pkexec, a graphical
+            // session and a recognised distribution: Install runs it through pkexec, and the system asks for the person's
+            // password (passwordPrompt). Otherwise (macOS, Linux without them): the person runs manualCommand themselves.
             ["canInstall"] = canInstall,
-            ["command"] = t is null ? null : canInstall ? ToolCatalog.CommandLine(t) : t.ManualCommand(_host.IsMac, _host.Packager),
-            ["choices"] = new JsonArray(canInstall ? ["install", "notNow"] : (JsonNode?[])["notNow"]),
+            ["installer"] = !canInstall ? null : linux is null ? "winget" : "pkexec",
+            ["passwordPrompt"] = linux is null ? null : PasswordPrompt,
+            ["command"] = t is null ? null : CommandFor(t, canInstall, linux),
+            ["manualCommand"] = t is null || _host.IsWindows ? null : t.ManualCommand(_host.IsMac, _host.Packager),
+            // Linux: the program is under the home folder only, where the team's sandbox does not see it.
+            ["homeOnly"] = homeOnly is null ? null : HomeOnlyMessage(t!, homeOnly),
+            // Check again (tools.checkAgain) looks for the program again after the person installed it themselves.
+            ["choices"] = new JsonArray(_host.IsWindows
+                ? canInstall ? ["install", "notNow"] : (JsonNode?[])["notNow"]
+                : canInstall ? ["install", "checkAgain", "notNow"] : (JsonNode?[])["checkAgain", "notNow"]),
         };
     }
+
+    /// <summary>What the ask says before a Linux Install: pkexec shows the system's own password window.</summary>
+    public const string PasswordPrompt = "Your system asks for your password";
+
+    /// <summary>pkexec's exit code when the person closed the password window (the authorization was dismissed).</summary>
+    public const int PkexecCancelled = 126;
+
+    /// <summary>pkexec's exit code when the person was not authorized (wrong password, or this account may not install software).</summary>
+    public const int PkexecNotAuthorized = 127;
+
+    public const string CancelledMessage = "You closed the password window, so nothing was installed. Choose Install to try again.";
+
+    public const string NotAuthorizedMessage =
+        "Your system did not allow the install: the password was not accepted, or this account may not install software. Nothing was installed; " +
+        "choose Install to try again, or run the command yourself and choose Check again.";
+
+    /// <summary>The ask's text when the program is only under the home folder.</summary>
+    public static string HomeOnlyMessage(ToolEntry t, string path) =>
+        $"{t.DisplayName} was found at {path}, inside your home folder, where the team's sandbox cannot see it. " +
+        "Install it for the whole system (Install, or the command shown), then choose Check again.";
+
+    private string CommandFor(ToolEntry t, bool canInstall, LinuxInstaller? linux) =>
+        linux is not null ? ToolCatalog.PkexecCommandLine(t, linux)
+        : canInstall ? ToolCatalog.CommandLine(t)
+        : t.ManualCommand(_host.IsMac, _host.Packager);
 
     /// <summary>The open asks as plain lines (the Concierge's and the companion's status reads).</summary>
     public IReadOnlyList<string> PendingLines() => Asks().Select(a =>
@@ -414,10 +540,11 @@ public sealed class ToolAskService
                 // [{ name, displayName, publisher, wingetId, scope, program, command }]
                 "tools.catalog" => new JsonArray(ToolCatalog.All.Select(t => (JsonNode?)ToJson(t)).ToArray()),
                 // [{ id, at, teamId, team, member, memberName, tool, displayName, publisher, wingetId, scope, reason, count, lastSeen,
-                //    workflow, state, attempts, error, decidedBy, decidedVia, decidedAt, canInstall, command, choices }]
+                //    workflow, state, attempts, error, lastResult, decidedBy, decidedVia, decidedAt, canInstall, command, choices }]
                 "tools.asks" => new JsonArray(Asks(p?["all"]?.GetValue<bool>() != true, OptLong(p, "teamId")).Select(a => (JsonNode?)ToJson(a)).ToArray()),
                 "tools.notNow" => await NotNowAsync(OptLong(p, "id") ?? throw new ArgumentException("id is required"), OptStr(p, "note"), ct),
                 "tools.install" => await InstallAsync(OptLong(p, "id") ?? throw new ArgumentException("id is required"), ct),
+                "tools.checkAgain" => await CheckAgainAsync(OptLong(p, "id") ?? throw new ArgumentException("id is required"), ct),
                 _ => throw new RpcException("unknown_method", $"no method named '{method}'"),
             };
         }
@@ -455,8 +582,12 @@ public sealed class ToolAskService
     }
 
     /// <summary>
-    /// Install (or Try again): the person at the window only. Runs the catalog's winget command for the ask's tool, then
-    /// looks for the program again. Returns when winget has finished; <see cref="Progress"/> reports each phase meanwhile.
+    /// Install (or Try again): the person at the window only. Windows: runs the catalog's winget command for the ask's
+    /// tool. Linux (pkexec on PATH, a graphical session, a recognised distribution): runs exactly
+    /// "pkexec &lt;package manager&gt; ..." (<see cref="ToolCatalog.PkexecArgs"/>) and the system asks for the person's
+    /// password. Then looks for the program again. One install at a time; returns when it has finished, and
+    /// <see cref="Progress"/> reports each phase meanwhile. The result's "result" is installed, failed, cancelled,
+    /// notAuthorized, homeOnly, busy or manual.
     /// </summary>
     public async Task<JsonObject> InstallAsync(long id, CancellationToken ct)
     {
@@ -464,38 +595,52 @@ public sealed class ToolAskService
         if (who is not { Via: Provenance.Actor.App }) throw new RpcException("forbidden", InstallRefusal);
         var ask = Asks().FirstOrDefault(a => a.Id == id) ?? throw new ArgumentException($"tool request {id} is not waiting");
         var tool = ToolCatalog.Find(ask.Tool) ?? throw new ArgumentException($"'{ask.Tool}' is not in the app's catalog");
-        if (!_host.IsWindows)
-            return Result(false, id, tool, $"The app installs tools on Windows only: run {tool.ManualCommand(_host.IsMac, _host.Packager)} on this computer, then ask the team to retry.",
-                manual: true);
-        if (ask.State == "installing") return Result(false, id, tool, $"{tool.DisplayName} is being installed already; wait for it to finish.");
+        var linux = _host.IsWindows ? null : _host.LinuxInstall;
+        if (!_host.IsWindows && linux is null)
+            return Result(false, id, tool,
+                $"The app cannot install {tool.DisplayName} here: run {tool.ManualCommand(_host.IsMac, _host.Packager)} on this computer, then choose Check again.",
+                "manual");
+        if (ask.State == "installing") return Result(false, id, tool, $"{tool.DisplayName} is being installed already; wait for it to finish.", "busy");
         if (await _host.IsInstalledAsync(tool, ct).ConfigureAwait(false))
             return await InstalledAsync(ask, tool, who, "it was already installed", ct);
-        var winget = _host.FindWinget();
-        if (winget is null)
+        string exe;
+        IReadOnlyList<string> args;
+        string with;
+        if (linux is not null)
         {
-            var message = $"winget is not available on this computer: install {tool.DisplayName} from its publisher ({tool.Publisher}), then ask the team to retry.";
-            Fail(ask.Id, tool, who, message, ran: false);
-            return Result(false, id, tool, message);
+            (exe, args, with) = (linux.Pkexec, ToolCatalog.PkexecArgs(tool, linux), $"with {Path.GetFileName(linux.PackageManager)}. {PasswordPrompt}");
         }
+        else
+        {
+            var winget = _host.FindWinget();
+            if (winget is null)
+            {
+                var message = $"winget is not available on this computer: install {tool.DisplayName} from its publisher ({tool.Publisher}), then ask the team to retry.";
+                Fail(ask.Id, tool, who, message, ran: false);
+                return Result(false, id, tool, message, "failed");
+            }
+            (exe, args, with) = (winget, ToolCatalog.WingetArgs(tool), $"with winget{(tool.UserScope ? "" : " (Windows may ask for permission)")}");
+        }
+        var command = CommandFor(tool, true, linux);
         if (!await _installing.WaitAsync(0, ct).ConfigureAwait(false))
-            return Result(false, id, tool, "Another tool is being installed; wait for it to finish, then try again.");
+            return Result(false, id, tool, "Another tool is being installed; wait for it to finish, then try again.", "busy");
         try
         {
             lock (_lock)
             {
                 using var c = Open();
                 using var tx = c.BeginTransaction();
-                if (Exec(c, tx, "UPDATE tool_asks SET state = 'installing', attempts = attempts + 1, error = NULL WHERE id = $id AND state = 'pending';", ("$id", id)) == 0)
+                if (Exec(c, tx, "UPDATE tool_asks SET state = 'installing', attempts = attempts + 1, error = NULL, last_result = NULL WHERE id = $id AND state = 'pending';", ("$id", id)) == 0)
                     throw new ArgumentException($"tool request {id} is not waiting");
-                Event(c, tx, id, "install", who.User, who.Via, ToolCatalog.CommandLine(tool));
+                Event(c, tx, id, "install", who.User, who.Via, command);
                 tx.Commit();
             }
             Changed?.Invoke();
-            Report(id, tool, "installing", $"Installing {tool.DisplayName} with winget{(tool.UserScope ? "" : " (Windows may ask for permission)")}...");
+            Report(id, tool, "installing", $"Installing {tool.DisplayName} {with}...", command);
             GitResult r;
             try
             {
-                r = await _host.RunAsync(winget, ToolCatalog.WingetArgs(tool), InstallLimit, ct).ConfigureAwait(false);
+                r = await _host.RunAsync(exe, args, InstallLimit, ct).ConfigureAwait(false);
             }
             catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -503,21 +648,68 @@ public sealed class ToolAskService
             }
             catch (OperationCanceledException)
             {
-                Fail(id, tool, who, "the install was stopped before it finished", ran: true);
+                Fail(id, tool, who, "the install was stopped before it finished", ran: true, command: command);
                 throw;
             }
-            Report(id, tool, "checking", $"Looking for {tool.Program} again...");
+            // pkexec: the password window was closed, or the person was not authorized. Nothing ran as root, so this is
+            // not a package failure: the ask waits again with plain words.
+            if (linux is not null && r.ExitCode is PkexecCancelled or PkexecNotAuthorized)
+            {
+                var (code, words) = r.ExitCode == PkexecCancelled ? ("cancelled", CancelledMessage) : ("notAuthorized", NotAuthorizedMessage);
+                Fail(id, tool, who, words, ran: true, phase: code, command: command,
+                    detail: $"{(code == "cancelled" ? "cancelled" : "not authorized")} (pkexec exit code {r.ExitCode}): nothing was installed");
+                return Result(false, id, tool, words, code);
+            }
+            Report(id, tool, "checking", $"Looking for {tool.Program} again...", command);
+            var exit = linux is null ? WingetExitCode(r.ExitCode) : $"exit code {r.ExitCode}";
             if (await _host.IsInstalledAsync(tool, ct).ConfigureAwait(false))
-                return await InstalledAsync(ask, tool, who, WingetExitCode(r.ExitCode), ct);
+                return await InstalledAsync(ask, tool, who, exit, ct);
             var output = Last(string.Join('\n', r.Stdout, r.Stderr));
-            var failed = $"Installing {tool.DisplayName} did not finish ({WingetExitCode(r.ExitCode)}{(output.Length > 0 ? $": {output}" : "")}).";
-            Fail(id, tool, who, failed, ran: true);
-            return Result(false, id, tool, failed);
+            var failed = $"Installing {tool.DisplayName} did not finish ({exit}{(output.Length > 0 ? $": {output}" : "")}).";
+            if (linux is not null && _host.FoundOnlyInHome(tool) is { } home)
+            {
+                var words = r.ExitCode == 0 ? HomeOnlyMessage(tool, home) : $"{failed} {HomeOnlyMessage(tool, home)}";
+                Fail(id, tool, who, words, ran: true, command: command, result: "homeOnly");
+                return Result(false, id, tool, words, "homeOnly");
+            }
+            Fail(id, tool, who, failed, ran: true, command: command);
+            return Result(false, id, tool, failed, "failed");
         }
         finally
         {
             _installing.Release();
         }
+    }
+
+    /// <summary>
+    /// Check again (tools.checkAgain): after the person installed the tool themselves, look for its program again (as an
+    /// Install does afterwards). Found: every open ask for the tool closes and each Manager is told to retry, as after an
+    /// Install. Not found: the ask stays open, saying so (or that the program is only under the home folder). It only
+    /// looks, it runs no installer: the window and the Cloud Link may call it; an agent, the Concierge, a trigger and the
+    /// companion may not. The result's "result" is installed, notFound, homeOnly or busy.
+    /// </summary>
+    public async Task<JsonObject> CheckAgainAsync(long id, CancellationToken ct)
+    {
+        var who = Provenance.Actor.Current;
+        if (who is not { Via: Provenance.Actor.App or Provenance.Actor.Cloud })
+            throw new RpcException("forbidden", "a tool request is answered by the person, in Needs you");
+        var ask = Asks().FirstOrDefault(a => a.Id == id) ?? throw new ArgumentException($"tool request {id} is not waiting");
+        var tool = ToolCatalog.Find(ask.Tool) ?? throw new ArgumentException($"'{ask.Tool}' is not in the app's catalog");
+        if (ask.State == "installing") return Result(false, id, tool, $"{tool.DisplayName} is being installed; wait for it to finish.", "busy");
+        if (await _host.IsInstalledAsync(tool, ct).ConfigureAwait(false))
+            return await InstalledAsync(ask, tool, who, "found by Check again", ct);
+        var (message, code) = _host.IsWindows || _host.FoundOnlyInHome(tool) is not { } home
+            ? ($"{tool.DisplayName} is not found yet where the team's runs look for it. Install it, then choose Check again.", "notFound")
+            : (HomeOnlyMessage(tool, home), "homeOnly");
+        lock (_lock)
+        {
+            using var c = Open();
+            using var tx = c.BeginTransaction();
+            Exec(c, tx, "UPDATE tool_asks SET error = $e, last_result = $r WHERE id = $id AND state = 'pending';", ("$e", message), ("$r", code), ("$id", id));
+            tx.Commit();
+        }
+        Changed?.Invoke();
+        return Result(false, id, tool, message, code);
     }
 
     /// <summary>The program is here: every open ask for the tool closes, and each team's Manager is told to retry.</summary>
@@ -533,7 +725,7 @@ public sealed class ToolAskService
             var now = Stamp(_clock.GetUtcNow());
             foreach (var a in closed)
             {
-                Exec(c, tx, "UPDATE tool_asks SET state = 'installed', error = NULL, decided_by = $by, decided_via = $via, decided_at = $now, note = $note WHERE id = $id;",
+                Exec(c, tx, "UPDATE tool_asks SET state = 'installed', error = NULL, last_result = NULL, decided_by = $by, decided_via = $via, decided_at = $now, note = $note WHERE id = $id;",
                     ("$by", who.User), ("$via", who.Via), ("$now", now), ("$note", a.Id == ask.Id ? null : $"installed by tool request {ask.Id}"), ("$id", a.Id));
                 Event(c, tx, a.Id, "installed", who.User, who.Via, a.Id == ask.Id ? detail : $"installed by tool request {ask.Id}");
             }
@@ -551,33 +743,44 @@ public sealed class ToolAskService
             var text = $"{tool.DisplayName} is installed; retry what was blocked (asked for by {names}). It is on PATH for runs that start from now on.";
             if (await TellAsync(first.Team, manager, text, team.Select(a => a.CausationSeq).FirstOrDefault(s => s is not null), ct)) told.Add($"{first.Team}/{manager}");
         }
-        var result = Result(true, ask.Id, tool, message);
+        var result = Result(true, ask.Id, tool, message, "installed");
         result["closed"] = new JsonArray(closed.Select(a => (JsonNode?)a.Id).ToArray());
         result["told"] = told;
         return result;
     }
 
-    /// <summary>The ask waits again with winget's message (Try again).</summary>
-    private void Fail(long id, ToolEntry tool, Provenance.Actor who, string message, bool ran)
+    /// <summary>
+    /// The ask waits again with the message (Try again). The Approvals log gets a failed row with <paramref name="detail"/>
+    /// (the message when null); the window's progress gets <paramref name="phase"/>; the ask keeps <paramref name="result"/>
+    /// (the phase when null) as last_result, which tools.asks sends as lastResult.
+    /// </summary>
+    private void Fail(long id, ToolEntry tool, Provenance.Actor who, string message, bool ran, string phase = "failed", string? command = null, string? detail = null,
+        string? result = null)
     {
         lock (_lock)
         {
             using var c = Open();
             using var tx = c.BeginTransaction();
-            Exec(c, tx, "UPDATE tool_asks SET state = 'pending', error = $e WHERE id = $id AND state IN ('pending', 'installing');", ("$e", Clip(message, 1000)), ("$id", id));
-            Event(c, tx, id, "failed", who.User, who.Via, message);
+            Exec(c, tx, "UPDATE tool_asks SET state = 'pending', error = $e, last_result = $r WHERE id = $id AND state IN ('pending', 'installing');",
+                ("$e", Clip(message, 1000)), ("$r", result ?? phase), ("$id", id));
+            Event(c, tx, id, "failed", who.User, who.Via, detail ?? message);
             tx.Commit();
         }
         Changed?.Invoke();
-        if (ran) Report(id, tool, "failed", message);
+        if (ran) Report(id, tool, phase, message, command);
     }
 
-    private void Report(long id, ToolEntry tool, string phase, string message) =>
-        Progress?.Invoke(new JsonObject { ["id"] = id, ["tool"] = tool.Name, ["phase"] = phase, ["message"] = message, ["command"] = ToolCatalog.CommandLine(tool) });
+    /// <summary>Progress: phase installing | checking | installed | failed | cancelled | notAuthorized.</summary>
+    private void Report(long id, ToolEntry tool, string phase, string message, string? command = null) =>
+        Progress?.Invoke(new JsonObject
+        {
+            ["id"] = id, ["tool"] = tool.Name, ["phase"] = phase, ["message"] = message,
+            ["command"] = command ?? CommandFor(tool, _host.IsWindows, _host.IsWindows ? null : _host.LinuxInstall),
+        });
 
-    private static JsonObject Result(bool done, long id, ToolEntry tool, string message, bool manual = false) => new()
+    private static JsonObject Result(bool done, long id, ToolEntry tool, string message, string result) => new()
     {
-        ["done"] = done, ["id"] = id, ["tool"] = tool.Name, ["message"] = message, ["manual"] = manual,
+        ["done"] = done, ["id"] = id, ["tool"] = tool.Name, ["message"] = message, ["manual"] = result == "manual", ["result"] = result,
     };
 
     private async Task<bool> TellAsync(string team, string member, string text, long? causation, CancellationToken ct)

@@ -503,12 +503,20 @@ export interface NetworkAnswer { ok: boolean; id: number; host: string; choice: 
 export interface ToolCatalogEntry {
   name: string; displayName: string; publisher: string; wingetId: string; scope: 'user' | 'machine'; program: string; command: string;
 }
-/** How the person answers a tool ask: install it with winget (the window on this computer only), or not now. */
-export type ToolAskChoice = 'install' | 'notNow';
+/**
+ * How the person answers a tool ask: install it (winget on Windows, pkexec on Linux; the window on this computer only),
+ * check again after installing it themselves (Linux and macOS; a remote view may too), or not now.
+ */
+export type ToolAskChoice = 'install' | 'checkAgain' | 'notNow';
 /**
  * A developer tool an agent asked for with request_tool, waiting for the person in Needs you (tools.asks). One per team
- * and tool (count: repeats). error: winget's message after a failed install (state is back to pending: Try again).
- * canInstall: the app can run command (the exact winget line); otherwise command is for the person to run (Linux/macOS).
+ * and tool (count: repeats). error: the last install's or Check again's message (state is back to pending: Try again).
+ * canInstall: the app can run command (the exact winget line, or the exact pkexec line on Linux: installer says which);
+ * otherwise command is for the person to run (Linux/macOS). passwordPrompt: Linux Install's "Your system asks for your
+ * password". manualCommand: the command to run yourself off Windows (sudo apt-get ..., brew ...). homeOnly: Linux, the
+ * program is only under the home folder, where the sandbox cannot see it (the core's words). lastResult: the result code of
+ * the last Install or Check again, beside error (cancelled or notAuthorized: nothing was installed, so a fresh card shows
+ * error as a hint with Install, not Try again); null before the first attempt. Older cores omit the new fields.
  */
 export interface ToolAsk {
   id: number; at: string; teamId: number; team: string; member: string; memberName: string; tool: string;
@@ -517,13 +525,30 @@ export interface ToolAsk {
   state: 'pending' | 'installing' | 'installed' | 'dismissed'; attempts: number; error: string | null;
   decidedBy: string | null; decidedVia: string | null; decidedAt: string | null;
   canInstall: boolean; command: string | null; choices: ToolAskChoice[];
+  installer?: 'winget' | 'pkexec' | null; passwordPrompt?: string | null; manualCommand?: string | null; homeOnly?: string | null;
+  lastResult?: ToolInstallCode | null;
 }
-/** tools.install's reply, when winget has finished: done when the program is found; manual off Windows (run command yourself). */
-export interface ToolInstallResult { done: boolean; id: number; tool: string; message: string; manual: boolean; closed?: number[]; told?: string[] }
+/**
+ * What an install or Check again came to: installed (the program is found, the asks closed), failed (the installer ran,
+ * the program is still not found: Try again), cancelled (pkexec 126: the password window was closed), notAuthorized
+ * (pkexec 127), homeOnly (only under the home folder), notFound (Check again: not there yet), busy (another install
+ * runs), manual (the app cannot install here: run the command yourself, then Check again).
+ */
+export type ToolInstallCode = 'installed' | 'failed' | 'cancelled' | 'notAuthorized' | 'homeOnly' | 'notFound' | 'busy' | 'manual';
+/** tools.install's and tools.checkAgain's reply, when it has finished: done when the program is found. result: older cores omit it. */
+export interface ToolInstallResult {
+  done: boolean; id: number; tool: string; message: string; manual: boolean; result?: ToolInstallCode; closed?: number[]; told?: string[];
+}
 /** tools.notNow's reply: told is the member told, or null. */
 export interface ToolNotNowResult { ok: boolean; id: number; tool: string; told: string | null }
-/** The tools.installProgress event while winget runs. */
-export interface ToolInstallProgress { id: number; tool: string; phase: 'installing' | 'checking' | 'installed' | 'failed'; message: string; command: string }
+/** The tools.installProgress event while an install runs (cancelled and notAuthorized: pkexec 126 and 127). */
+export interface ToolInstallProgress {
+  id: number; tool: string; phase: 'installing' | 'checking' | 'installed' | 'failed' | 'cancelled' | 'notAuthorized'; message: string; command: string;
+}
+/** tools.checkAgain { id }: looks for the ask's program again after the person installed it; installs nothing. */
+export function checkToolAgain(api: Pick<YawbleApi, 'call'>, id: number): Promise<ToolInstallResult> {
+  return api.call<ToolInstallResult>('tools.checkAgain', { id });
+}
 /** One holder of the heavy-work lease, or one run waiting for it (core: Bus/BusEngine.Lease.cs). since: ISO time. */
 export interface LeaseEntry { team: string; member: string; what: string; since: string; position?: number | null }
 /** The heavy-work lease: how many may hold it at once (app.heavyWorkAtOnce), who holds it, who waits in order. */
@@ -555,14 +580,24 @@ export interface Trigger {
 }
 export interface TriggerFire { outcome: string; seq: number | null; reason: string | null }
 
-/** The Git dialog (git.status / git.fetch / git.bringCurrent / git.merge / git.askTeam; core Teams/TeamRepos.Git.cs). */
+/** The Git dialog (git.status / git.fetch / git.bringCurrent / git.merge / git.askTeam / git.deleteBranches; core Teams/TeamRepos.Git.cs). */
 export interface TeamGitBranch { branch: string; sha: string; aheadOfBase: number; inTeamBranch: boolean }
+/** An old-style members/<member> branch left from before member branches were named members/<team>/<member>:
+ * here (local) and/or on origin (remote), and whether its commits are merged. */
+export interface TeamGitOldBranch { name: string; local: boolean; remote: boolean; merged: boolean }
 export interface TeamGitStatus {
   repoPath: string; managed: boolean; baseBranch: string; checkedOut: string | null; dirty: boolean; origin: string | null;
   baseSha: string | null; originBaseSha: string | null; baseAheadOfOrigin: number | null; baseBehindOrigin: number | null;
   teamBranch: string; teamSha: string | null; teamAheadOfBase: number; teamBehindBase: number;
   merge: 'none' | 'up-to-date' | 'fast-forward' | 'merge' | 'conflict'; conflictFiles: string[]; members: TeamGitBranch[];
+  /** Old-style members/<member> branches (absent from a core that does not list them). */
+  oldBranches?: TeamGitOldBranch[];
 }
+/** git.deleteBranches without confirm: what would be deleted, as text for the person, and the token that confirms exactly
+ * that plan (empty: nothing to delete). With confirm: token it deletes and answers GitDeleteResult; error code stale
+ * means the branches changed since the plan. */
+export interface GitDeletePlan { plan: string; token: string; empty: boolean }
+export interface GitDeleteResult { result: string }
 /** teams.syncToBase: the team's "Bring branches up to <base> before new work" setting, the note of a sync or fetch-back
  * that could not be done (one line per problem, files after "conflicts in:"), and how far the team branch is behind. */
 export interface TeamSyncState {
