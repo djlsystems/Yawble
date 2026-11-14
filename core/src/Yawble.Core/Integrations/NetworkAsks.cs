@@ -567,12 +567,36 @@ public sealed class StoreNetworkPolicy(PolicyStore store, Func<long, Cancellatio
         return hosts.Where(h => FloorRules.HostProblem(h) is null).Distinct(StringComparer.Ordinal).ToList();
     }
 
+    /// <summary>How many times <see cref="AllowForTeamAsync"/> builds the member list again after the team's members changed under it before it refuses.</summary>
+    public const int TeamMembersAttempts = 3;
+
+    /// <summary>
+    /// Adds the host to the team's list, checked against every current member's run. The list of members (with each one's
+    /// run layout) is built here; when a member is hired or removed before the write, the store writes nothing and says
+    /// so, and the list is built again - so a member hired mid-add is checked too. Refused after
+    /// <see cref="TeamMembersAttempts"/> lists.
+    /// </summary>
     public async Task AllowForTeamAsync(long teamId, string host, CancellationToken ct)
     {
-        var members = new List<(long, RunLayout)>();
-        foreach (var id in store.TeamMemberIds(teamId)) members.Add((id, await layoutFor(id, ct)));
         var who = Provenance.Actor.Current ?? Provenance.Actor.Window;
-        store.AddTeamHost(teamId, host, members, who.User ?? Provenance.Actor.LocalUser, who.Via);
+        for (var attempt = 1; ; attempt++)
+        {
+            var members = new List<(long, RunLayout)>();
+            foreach (var id in store.TeamMemberIds(teamId)) members.Add((id, await layoutFor(id, ct)));
+            try
+            {
+                store.AddTeamHost(teamId, host, members, who.User ?? Provenance.Actor.LocalUser, who.Via);
+                return;
+            }
+            catch (TeamMembersChangedException) when (attempt < TeamMembersAttempts)
+            {
+                // a hire or removal landed after the list was built: build it again and check every member
+            }
+            catch (TeamMembersChangedException e)
+            {
+                throw new PolicyException([$"the team's members kept changing while {host} was checked; nothing was written, try again", .. e.Errors]);
+            }
+        }
     }
 
     public async Task AllowForMemberAsync(long memberId, string host, CancellationToken ct)

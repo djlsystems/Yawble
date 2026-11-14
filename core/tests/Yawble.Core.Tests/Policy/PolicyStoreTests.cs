@@ -218,6 +218,67 @@ public sealed class PolicyStoreTests : IDisposable
         Assert.Equal(["pypi.org"], always.TeamHosts(team).Select(h => h.Host));
     }
 
+    // ------------------------------------------------------------------ B022 (card 127): the team's members are what was checked
+
+    [Fact]
+    public void AddTeamHost_AMemberHiredAfterTheSnapshot_WritesNothingAgainstTheOldList_AndTheirRefusalStopsTheAdd()
+    {
+        var (team, ada, ben) = SeedTeam();
+        const long cleo = 53;
+        // The hire, forced through the fake dry run: after the snapshot read and the checks of Ada and Ben, before the
+        // write, Cleo joins the team with a policy whose check refuses the host.
+        var calls = 0;
+        var store = new PolicyStore(cs, (g, o, l, layout) =>
+        {
+            var answer = RefuseNarrowed(g, o, l, layout);
+            if (++calls == 2)
+                Exec(cs, $"INSERT INTO members (id, team_id, name, role, created_at) VALUES ({cleo}, 5, 'Cleo', 'member', 't');" + SetOverrideSql(cleo));
+            return answer;
+        });
+
+        var changed = Assert.Throws<TeamMembersChangedException>(() => store.AddTeamHost(team, "pypi.org", [(ada, Linux), (ben, Linux)], "pat", "app"));
+
+        Assert.Equal(2, calls); // the transaction saw Cleo and stopped: no write, no check against the old list again
+        Assert.Equal([ada, ben], changed.Given);
+        Assert.Equal([ada, ben, cleo], changed.Current);
+        Assert.Contains("members changed", Assert.Single(changed.Errors));
+        Assert.Equal(0, TeamRows(team));
+        // The refusal left no lock behind, and the list with Cleo in it is refused by Cleo's check.
+        var e = Assert.Throws<PolicyException>(() => store.AddTeamHost(team, "pypi.org", [(ada, Linux), (ben, Linux), (cleo, Linux)], "pat", "app"));
+        Assert.IsNotType<TeamMembersChangedException>(e);
+        Assert.Equal(["the sandbox refused the compiled request: no hosts for this member"], e.Errors);
+        Assert.Equal(0, TeamRows(team));
+    }
+
+    [Fact]
+    public void AddTeamHost_AMemberRemovedBeforeTheWrite_IsAChangeToo_NothingWritten()
+    {
+        var (team, ada, ben) = SeedTeam();
+        var calls = 0;
+        var store = new PolicyStore(cs, (_, _, _, _) => { if (++calls == 2) Exec(cs, $"DELETE FROM members WHERE id = {ben};"); return []; });
+
+        var changed = Assert.Throws<TeamMembersChangedException>(() => store.AddTeamHost(team, "pypi.org", [(ada, Linux), (ben, Linux)], "pat", "app"));
+
+        Assert.Equal([ada], changed.Current);
+        Assert.Equal(0, TeamRows(team));
+        Assert.True(store.AddTeamHost(team, "pypi.org", [(ada, Linux)], "pat", "app"));
+    }
+
+    [Fact]
+    public void AddTeamHost_AListThatIsNotTheTeamsMembers_IsRefusedBeforeAnyCheck_InEitherDirection()
+    {
+        var (team, ada, ben) = SeedTeam();
+        var calls = 0;
+        var store = new PolicyStore(cs, (_, _, _, _) => { calls++; return []; });
+
+        Assert.Throws<TeamMembersChangedException>(() => store.AddTeamHost(team, "pypi.org", [], "pat", "app"));            // missing both
+        Assert.Throws<TeamMembersChangedException>(() => store.AddTeamHost(team, "pypi.org", [(ada, Linux)], "pat", "app")); // missing one
+        Assert.Throws<TeamMembersChangedException>(() => store.AddTeamHost(team, "pypi.org", [(ada, Linux), (ben, Linux), (99, Linux)], "pat", "app")); // one not there
+
+        Assert.Equal(0, calls);
+        Assert.Equal(0, TeamRows(team));
+    }
+
     [Fact]
     public void TheStandardDryRunAsksTheRealSandbox()
     {
