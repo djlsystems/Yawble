@@ -316,6 +316,112 @@ public sealed class LinuxToolInstallTests : IDisposable
         Assert.Equal("bad_params", (await Assert.ThrowsAsync<RpcException>(() => CheckAgain(id + 100))).Code);
     }
 
+    // ------------------------------------------------------------------ B017 gap tests (card 84, TesterWren)
+
+    [Fact]
+    public async Task Gap_AnApprovedCompanionCall_IsStillRefusedInstallAndCheckAgain()
+    {
+        Offer(LinuxPackager.Dnf);
+        var id = await Asked("python-3");
+        var approved = Actor.ExternalClient("claude-code") with { ApprovedBy = "person" };
+        Assert.Equal("forbidden", (await Assert.ThrowsAsync<RpcException>(() => CheckAgain(id, approved))).Code);
+        Assert.Equal("forbidden", (await Assert.ThrowsAsync<RpcException>(() =>
+            As(approved, async () => await _asks.DispatchAsync("tools.install", new JsonObject { ["id"] = id }, Ct)))).Code);
+        Assert.Empty(_host.Runs);
+        Assert.Equal("pending", Assert.Single(_asks.Asks()).State);
+    }
+
+    [Fact]
+    public async Task Gap_TheCloudLinkMayNotInstallOnLinux_EvenWithPkexec()
+    {
+        Offer(LinuxPackager.Dnf);
+        var id = await Asked("nodejs-lts");
+        Assert.NotNull(Yawble.Core.Link.RemoteAccess.Refusal("tools.install", new JsonObject { ["id"] = id }, allowHostTerminals: false));
+        Assert.Equal("forbidden", (await Assert.ThrowsAsync<RpcException>(() =>
+            As(Actor.CloudViewer("person@example.com"), () => _asks.InstallAsync(id, Ct)))).Code);
+        Assert.Empty(_host.Runs);
+    }
+
+    [Fact]
+    public async Task Gap_WhilePkexecWaitsForThePassword_CheckAgainIsBusy_AndASecondInstallIsBusy()
+    {
+        Offer(LinuxPackager.Dnf);
+        var id = await Asked("dotnet-sdk-10");
+        var other = await Asked("nodejs-lts");
+        _host.Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _host.InstallsOnRun = "dotnet-sdk-10";
+
+        var running = Install(id);
+        await _host.Started.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct);
+
+        Assert.Equal("installing", _asks.Asks().Single(a => a.Id == id).State);
+        Assert.Equal("busy", (await CheckAgain(id))["result"]!.GetValue<string>());
+        Assert.Equal("busy", (await Install(id))["result"]!.GetValue<string>());
+        Assert.Equal("busy", (await Install(other))["result"]!.GetValue<string>());
+        Assert.Single(_host.Runs); // one install at a time
+
+        _host.Gate.SetResult();
+        Assert.Equal("installed", (await running)["result"]!.GetValue<string>());
+        Assert.Equal("nodejs-lts", Assert.Single(_asks.Asks()).Tool);
+    }
+
+    [Fact]
+    public async Task Gap_CancelledThenNotAuthorized_KeepTheAttemptsCount_AndNoManagerIsTold()
+    {
+        Offer(LinuxPackager.Pacman);
+        var id = await Asked("python-3");
+        _host.Result = new GitResult(126, "", "");
+        Assert.Equal("cancelled", (await Install(id))["result"]!.GetValue<string>());
+        _host.Result = new GitResult(127, "", "");
+        Assert.Equal("notAuthorized", (await Install(id))["result"]!.GetValue<string>());
+        var ask = Assert.Single(_asks.Asks());
+        Assert.Equal(("pending", 2), (ask.State, ask.Attempts));
+        Assert.Equal(ToolAskService.NotAuthorizedMessage, ask.Error);
+        Assert.Equal(["install", "checkAgain", "notNow"], (await Item())["choices"]!.AsArray().Select(n => n!.GetValue<string>()));
+        Assert.Empty(_told);
+        Assert.All(_host.Runs, r => Assert.Equal(["/usr/bin/pacman", "-S", "--needed", "--noconfirm", "python", "python-pip"], r.Args));
+    }
+
+    [Fact]
+    public async Task Gap_ExitCode126WithoutPkexec_IsNotPossible_TheManualPathRunsNothing()
+    {
+        _host.Installer = null;
+        var id = await Asked("dotnet-sdk-10");
+        _host.Result = new GitResult(126, "", "");
+        Assert.Equal("manual", (await Install(id))["result"]!.GetValue<string>());
+        Assert.Empty(_host.Runs);
+    }
+
+    [Fact]
+    public async Task Gap_HomeOnly_AfterAFailedInstall_TheErrorCarriesTheOutputAndTheHomeNote()
+    {
+        Offer(LinuxPackager.Dnf);
+        var id = await Asked("dotnet-sdk-10");
+        _host.HomeOnly = "/home/alice/.dotnet/dotnet";
+        _host.Result = new GitResult(1, "", "No match for argument: dotnet-sdk-10.0");
+
+        var r = await Install(id);
+
+        Assert.Equal("homeOnly", r["result"]!.GetValue<string>());
+        var message = r["message"]!.GetValue<string>();
+        Assert.Contains("did not finish (exit code 1: No match for argument", message);
+        var note = (await Item())["homeOnly"]!.GetValue<string>();
+        Assert.EndsWith(note, message); // the item's note is a suffix of the error, not equal to it (see the shell gap test)
+        Assert.NotEqual(note, Assert.Single(_asks.Asks()).Error);
+    }
+
+    [Fact]
+    public async Task Gap_HomeOnly_IsNotOfferedOnceTheProgramIsWhereARunLooks()
+    {
+        _host.Installer = null;
+        var id = await Asked("dotnet-sdk-10");
+        _host.HomeOnly = "/home/alice/.dotnet/dotnet";
+        Assert.NotNull((await Item())["homeOnly"]);
+        _host.Installed.Add("dotnet-sdk-10");
+        Assert.Equal("installed", (await CheckAgain(id))["result"]!.GetValue<string>());
+        Assert.Empty(_asks.Asks());
+    }
+
     [Fact]
     public void CheckAgain_IsAnsweredOffTheReadLoop() =>
         Assert.Contains("tools.checkAgain", IpcServer.LongRunning);
@@ -349,6 +455,11 @@ public sealed class LinuxToolInstallTests : IDisposable
 
         public int Checks { get; private set; }
 
+        /// <summary>When set, RunAsync waits for it (the password window still open); Started is set when it begins.</summary>
+        public TaskCompletionSource? Gate { get; set; }
+
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public string? FindWinget() => throw new InvalidOperationException("winget is never looked for on Linux");
 
         public Task<bool> IsInstalledAsync(ToolEntry tool, CancellationToken ct)
@@ -357,16 +468,18 @@ public sealed class LinuxToolInstallTests : IDisposable
             return Task.FromResult(Installed.Contains(tool.Name));
         }
 
-        public Task<GitResult> RunAsync(string exe, IReadOnlyList<string> args, TimeSpan limit, CancellationToken ct)
+        public async Task<GitResult> RunAsync(string exe, IReadOnlyList<string> args, TimeSpan limit, CancellationToken ct)
         {
             Runs.Add((exe, args.ToList()));
             Checks = 0;
+            Started.TrySetResult();
+            if (Gate is { } g) await g.Task.WaitAsync(ct);
             if (Result.ExitCode == 0 && InstallsOnRun is { } t)
             {
                 Installed.Add(t);
                 foreach (var also in InstalledAlso) Installed.Add(also);
             }
-            return Task.FromResult(Result);
+            return Result;
         }
     }
 }

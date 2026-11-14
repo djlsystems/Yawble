@@ -328,6 +328,97 @@ describe('ToolAskCard on Linux', () => {
     const w = mount(ToolAskCard, { props: { ask: manualAsk(), api } });
     expect(w.findAll('button').map((b) => b.text())).toEqual(['Check again', 'Not now']);
   });
+
+  // ---------------------------------------------------------------- B017 gap tests (card 84, TesterWren)
+
+  it('Gap_APackageFailure_IsInErrorRed_AndTheButtonBecomesTryAgain', async () => {
+    const failedMsg = 'Installing .NET SDK 10 did not finish (exit code 1: No match for argument: dotnet-sdk-10.0).';
+    const { api } = fakeApi({ 'tools.install': () => result('failed', failedMsg) });
+    const w = mount(ToolAskCard, { props: { ask: linuxAsk(), api } });
+    await w.get('[data-test=tool-ask-install]').trigger('click');
+    await flushPromises();
+    await w.setProps({ ask: linuxAsk({ error: failedMsg, attempts: 1 }) });
+    expect(w.get('[data-test=tool-ask-failed]').classes()).toContain('error');
+    expect(w.get('[data-test=tool-ask-failed]').classes()).not.toContain('hint');
+    expect(w.findAll('button').map((b) => b.text())).toEqual(['Try again', 'Check again', 'Not now']);
+  });
+
+  it.each([
+    ['cancelled', CANCELLED],
+    ['notAuthorized', NOT_AUTHORIZED],
+  ])('Gap_%s_ThenAnotherInstallFailsForReal_TurnsRedWithTryAgain', async (code, words) => {
+    const failedMsg = 'Installing .NET SDK 10 did not finish (exit code 1: boom).';
+    let answer = result(code, words);
+    const { api } = fakeApi({ 'tools.install': () => answer });
+    const w = mount(ToolAskCard, { props: { ask: linuxAsk(), api } });
+    await w.get('[data-test=tool-ask-install]').trigger('click');
+    await flushPromises();
+    await w.setProps({ ask: linuxAsk({ error: words, attempts: 1 }) });
+    expect(w.get('[data-test=tool-ask-failed]').classes()).toContain('hint');
+    answer = result('failed', failedMsg);
+    await w.get('[data-test=tool-ask-install]').trigger('click');
+    await flushPromises();
+    await w.setProps({ ask: linuxAsk({ error: failedMsg, attempts: 2 }) });
+    expect(w.get('[data-test=tool-ask-failed]').classes()).toContain('error');
+    expect(w.get('[data-test=tool-ask-install]').text()).toBe('Try again');
+  });
+
+  it('Gap_InstallingWithoutAProgressEventYet_HasDataPhaseInstalling_AndThePasswordLine', async () => {
+    const { api } = fakeApi({ 'tools.install': () => new Promise(() => {}) });
+    const w = mount(ToolAskCard, { props: { ask: linuxAsk(), api } });
+    await w.get('[data-test=tool-ask-install]').trigger('click');
+    await flushPromises();
+    const p = w.get('[data-test=tool-ask-progress]');
+    expect(p.attributes('data-phase')).toBe('installing');
+    expect(p.text()).toBe(`Installing .NET SDK 10… ${PASSWORD}`);
+    expect(p.text()).not.toContain('winget');
+  });
+
+  it('Gap_TheManualCommandIsNotShownBesideTheExactPkexecCommand', () => {
+    const { api } = fakeApi({});
+    const w = mount(ToolAskCard, { props: { ask: linuxAsk(), api } });
+    expect(w.text()).toContain(PKEXEC);
+    expect(w.text()).not.toContain(MANUAL);
+  });
+
+  it('Gap_ARemoteView_HasNoPasswordInstallButton_AndTheNoteIsShownOnce', () => {
+    const { api } = fakeApi({}, { remote: true } as Partial<YawbleApi>);
+    const w = mount(ToolAskCard, { props: { ask: linuxAsk(), api } });
+    expect(w.find('[data-test=tool-ask-install]').exists()).toBe(false);
+    expect(w.findAll('[data-test=tool-ask-remote]')).toHaveLength(1);
+  });
+
+  it('Gap_CheckAgain_HomeOnlyResult_ShowsTheHomeTextOnce', async () => {
+    const { api } = fakeApi({ 'tools.checkAgain': () => result('homeOnly', HOME_ONLY) });
+    const w = mount(ToolAskCard, { props: { ask: manualAsk({ homeOnly: HOME_ONLY }), api } });
+    await w.get('[data-test=tool-ask-checkAgain]').trigger('click');
+    await flushPromises();
+    await w.setProps({ ask: manualAsk({ homeOnly: HOME_ONLY, error: HOME_ONLY }) });
+    expect(w.text().split('sandbox cannot see it')).toHaveLength(2);
+  });
+
+  // FAULT (B017, card 84): a failed install whose program is only under the home folder returns the output AND the home
+  // note as one message (ToolAsks.cs InstallAsync, result homeOnly with exit code != 0); the card hides its homeOnly note
+  // only when the note equals the message, so the home text is shown twice. Remove .fails once fixed.
+  it.fails('Gap_FAULT_HomeOnlyAfterAFailedInstall_ShowsTheHomeTextOnce', () => {
+    const failedMsg = 'Installing .NET SDK 10 did not finish (exit code 1: No match for argument: dotnet-sdk-10.0).';
+    const { api } = fakeApi({});
+    const w = mount(ToolAskCard, { props: { ask: linuxAsk({ homeOnly: HOME_ONLY, error: `${failedMsg} ${HOME_ONLY}`, attempts: 1 }), api } });
+    expect(w.text().split('sandbox cannot see it')).toHaveLength(2);
+  });
+
+  // FAULT (B017, card 84): "cancelled"/"notAuthorized" is known only from the click's reply in this card. The core keeps
+  // the plain words as the ask's error but sends no result code with tools.asks, so a fresh card (window reloaded, the
+  // other view, a remote view) shows the cancelled words in error red with Try again. Remove .fails once fixed.
+  it.fails.each([
+    ['cancelled', CANCELLED],
+    ['notAuthorized', NOT_AUTHORIZED],
+  ])('Gap_FAULT_%s_AfterAReload_IsStillAHintWithInstall', (_code, words) => {
+    const { api } = fakeApi({});
+    const w = mount(ToolAskCard, { props: { ask: linuxAsk({ error: words, attempts: 1 }), api } });
+    expect(w.get('[data-test=tool-ask-failed]').classes()).not.toContain('error');
+    expect(w.get('[data-test=tool-ask-install]').text()).toBe('Install');
+  });
 });
 
 describe('ToolAsks', () => {
