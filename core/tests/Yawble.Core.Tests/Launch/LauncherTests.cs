@@ -189,6 +189,7 @@ public class LauncherTests
         Assert.True(state["projects"]![AgentPresets.ClaudeProjectKey(layout)]!["hasTrustDialogAccepted"]!.GetValue<bool>());
         var settings = JsonNode.Parse(settingsJson!)!;
         Assert.True(settings["skipDangerousModePermissionPrompt"]!.GetValue<bool>());
+        Assert.Equal("bypassPermissions", settings["permissions"]!["defaultMode"]!.GetValue<string>());
         // No AI attribution in the agent's commits or pull requests.
         Assert.Equal("", settings["attribution"]!["commit"]!.GetValue<string>());
         Assert.Equal("", settings["attribution"]!["pr"]!.GetValue<string>());
