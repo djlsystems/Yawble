@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it } from 'vitest';
 import TeamView from '../../src/renderer/src/components/TeamView.vue';
 import { MonitorModel } from '../../src/renderer/src/monitor/model';
+import { ACTIVITY_DEFAULT, ACTIVITY_MIN, activityWidth, setActivityWidth } from '../../src/renderer/src/memberActivityWidth';
 import type { AgentCard, YawbleApi, TeamSummary } from '../../src/shared/api';
 
 // The team board: beside each member's card, that member's activity, the same lines the Monitor's activity list shows
@@ -70,8 +71,36 @@ describe('team board: each member\'s activity beside its card', () => {
     for (const r of rows) {
       const kids = [...r.element.children];
       expect(kids[0]!.getAttribute('data-test')).toMatch(/^agent-/);
-      expect(kids[1]!.getAttribute('data-test')).toBe('member-activity');
+      expect(kids[1]!.classList.contains('member-side')).toBe(true);
+      expect(kids[1]!.querySelector('[data-test=member-activity]')).not.toBeNull();
+      expect(kids[1]!.querySelector('[data-test=member-activity-handle-w]')).not.toBeNull();
     }
+    w.unmount();
+  });
+
+  it('a bar between card and activity resizes every member\'s activity together: right is narrower, kept on release, double-click resets', async () => {
+    setActivityWidth(ACTIVITY_DEFAULT);
+    localStorage.clear();
+    const w = await board(fakeApi().api);
+    const widths = () => w.findAll('.member-side').map((x) => (x.element as HTMLElement).style.flexBasis);
+    expect(widths()).toEqual(['360px', '360px']);
+    const bar = w.findAll('[data-test=member-activity-handle-w]')[1]!;
+    await bar.trigger('pointerdown', { clientX: 500, clientY: 0, pointerId: 1, button: 0 });
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 440, clientY: 0, pointerId: 1 }));
+    await w.vm.$nextTick();
+    expect(widths()).toEqual(['420px', '420px']); // dragged left: wider, every member at once
+    expect(localStorage.getItem('yawble.memberActivityWidth')).toBeNull();
+    window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }));
+    expect(activityWidth.value).toBe(420);
+    expect(localStorage.getItem('yawble.memberActivityWidth')).toBe('420');
+    await bar.trigger('keydown', { key: 'ArrowRight' });
+    expect(activityWidth.value).toBe(404); // the bar moves right: narrower
+    await bar.trigger('pointerdown', { clientX: 0, clientY: 0, pointerId: 2, button: 0 });
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 5000, clientY: 0, pointerId: 2 }));
+    window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 2 }));
+    expect(activityWidth.value).toBe(ACTIVITY_MIN); // clamped
+    await bar.trigger('dblclick');
+    expect(activityWidth.value).toBe(ACTIVITY_DEFAULT);
     w.unmount();
   });
 
