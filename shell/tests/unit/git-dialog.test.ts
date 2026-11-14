@@ -83,20 +83,114 @@ describe('git dialog', () => {
     expect(w.find('[data-test=git-behind]').exists()).toBe(true);
   });
 
-  it('lists a nested members/<team>/<member> branch whole, beside a leftover old members/<member> one', async () => {
-    const { api } = fakeApi({
-      'git.status': () => ({ ...base, members: [
-        { branch: 'members/ops/ada', sha: 'dddddddddddd', aheadOfBase: 2, inTeamBranch: false },
-        { branch: 'members/ada', sha: 'cccccccccccc', aheadOfBase: 1, inTeamBranch: true },
-      ] }),
+  it('lists a nested members/<team>/<member> branch whole beside an old members/<member> one, and plans then confirms a delete of each', async () => {
+    let branches = ['members/ops/ada', 'members/ada'];
+    const { api, calls } = fakeApi({
+      'git.status': () => ({ ...base,
+        members: branches.includes('members/ops/ada') ? [{ branch: 'members/ops/ada', sha: 'dddddddddddd', aheadOfBase: 0, inTeamBranch: true }] : [],
+        oldBranches: branches.includes('members/ada') ? [{ name: 'members/ada', local: false, remote: true, merged: true }] : [] }),
+      'git.deleteBranches': (p) => {
+        if (!p.confirm) return { plan: `Delete ${p.branches[0]}${p.remote ? ' here and on origin' : ''}.`, token: `tok-${p.branches[0]}`, empty: false };
+        expect(p.confirm).toBe(`tok-${p.branches[0]}`);
+        branches = branches.filter((b) => b !== p.branches[0]);
+        return { result: `Deleted ${p.branches[0]}.` };
+      },
     });
     const w = mount(GitDialog, { props: { api, team } });
     await flushPromises();
-    const rows = w.findAll('[data-test=git-members] tr').slice(1).map((r) => r.findAll('td').map((c) => c.text()));
-    expect(rows).toEqual([
-      ['members/ops/ada', 'dddddddddd', '2', 'not yet'],
-      ['members/ada', 'cccccccccc', '1', 'yes'],
+    const rows = () => w.findAll('[data-test=git-members] tr').slice(1).map((r) => r.findAll('td').map((c) => c.text()));
+    expect(rows()).toEqual([
+      ['members/ops/ada', 'dddddddddd', '0', 'yes', 'Deleteâ€¦'],
+      ['members/adaold', 'on origin', 'â€”', 'merged', 'Deleteâ€¦'],
     ]);
+    expect(w.find('[data-test=git-old-branch] .chip').text()).toBe('old');
+
+    // The new-style member branch: a plan first (nothing deleted yet), then Delete with its token.
+    await w.find('[data-test="git-delete-members/ops/ada"]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test=git-delete-plan]').text()).toBe('Delete members/ops/ada here and on origin.');
+    expect(calls.filter((c) => c.method === 'git.deleteBranches').map((c) => c.params)).toEqual([
+      { teamId: 3, branches: ['members/ops/ada'], remote: true },
+    ]);
+    await w.find('[data-test=git-delete-yes]').trigger('click');
+    await flushPromises();
+    expect(calls.filter((c) => c.method === 'git.deleteBranches').at(-1)!.params).toEqual(
+      { teamId: 3, branches: ['members/ops/ada'], remote: true, confirm: 'tok-members/ops/ada' });
+    expect(w.find('[data-test=git-result]').text()).toBe('Deleted members/ops/ada.');
+    expect(w.find('[data-test=git-delete]').exists()).toBe(false);
+    expect(rows().map((r) => r[0])).toEqual(['members/adaold']); // reloaded
+
+    // The old one, only on origin: remote follows its remote flag.
+    await w.find('[data-test="git-delete-old-members/ada"]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test=git-delete-unmerged]').exists()).toBe(false); // merged: no choice to make
+    await w.find('[data-test=git-delete-yes]').trigger('click');
+    await flushPromises();
+    expect(calls.filter((c) => c.method === 'git.deleteBranches').slice(-2).map((c) => c.params)).toEqual([
+      { teamId: 3, branches: ['members/ada'], remote: true },
+      { teamId: 3, branches: ['members/ada'], remote: true, confirm: 'tok-members/ada' },
+    ]);
+    expect(w.find('[data-test=git-result]').text()).toBe('Deleted members/ada.');
+    expect(w.find('[data-test=git-old-branch]').exists()).toBe(false);
+  });
+
+  it('an unmerged old branch is deleted only after the explicit choice, which plans again with it in unmergedOk', async () => {
+    const { api, calls } = fakeApi({
+      'git.status': () => ({ ...base, oldBranches: [{ name: 'members/ada', local: true, remote: false, merged: false }] }),
+      'git.deleteBranches': (p) => (p.confirm ? { result: 'Deleted members/ada.' }
+        : p.unmergedOk ? { plan: 'Delete members/ada (2 commits not merged, lost).', token: 'tok-2', empty: false }
+          : { plan: 'Keep members/ada: it has 2 commits not merged.', token: 'tok-1', empty: true }),
+    });
+    const w = mount(GitDialog, { props: { api, team } });
+    await flushPromises();
+    expect(w.find('[data-test=git-old-branch]').text()).toContain('here');
+    expect(w.find('[data-test=git-old-branch]').text()).toContain('not merged');
+    await w.find('[data-test="git-delete-old-members/ada"]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test=git-delete-plan]').text()).toContain('Keep members/ada');
+    expect(w.find('[data-test=git-delete-empty]').exists()).toBe(true);
+    expect(w.find('[data-test=git-delete-yes]').exists()).toBe(false); // nothing to delete without the choice
+    await w.find('[data-test=git-delete-unmerged] input').setValue(true);
+    await flushPromises();
+    expect(w.find('[data-test=git-delete-plan]').text()).toContain('lost');
+    await w.find('[data-test=git-delete-yes]').trigger('click');
+    await flushPromises();
+    expect(calls.filter((c) => c.method === 'git.deleteBranches').map((c) => c.params)).toEqual([
+      { teamId: 3, branches: ['members/ada'], remote: false },
+      { teamId: 3, branches: ['members/ada'], remote: false, unmergedOk: ['members/ada'] },
+      { teamId: 3, branches: ['members/ada'], remote: false, unmergedOk: ['members/ada'], confirm: 'tok-2' },
+    ]);
+  });
+
+  it('a stale delete is shown and planned again; another error shows its own text', async () => {
+    let n = 0;
+    let fail: 'stale' | 'other' = 'stale';
+    const { api, calls } = fakeApi({
+      'git.status': () => ({ ...base, oldBranches: [{ name: 'members/ada', local: true, remote: true, merged: true }] }),
+      'git.deleteBranches': (p) => {
+        if (!p.confirm) return { plan: `Plan ${++n}.`, token: `tok-${n}`, empty: false };
+        // The desktop's shape: Electron passes only the text, the code rides in the error's name.
+        if (fail === 'stale') throw new Error("Error invoking remote method 'core:call': CoreRpcError[stale]: members/ada moved since the plan.");
+        throw Object.assign(new Error('origin refused the push: permission denied'), { code: 'git_failed' });
+      },
+    });
+    const w = mount(GitDialog, { props: { api, team } });
+    await flushPromises();
+    await w.find('[data-test="git-delete-old-members/ada"]').trigger('click');
+    await flushPromises();
+    await w.find('[data-test=git-delete-yes]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test=git-delete-stale]').text()).toContain('members/ada moved since the plan.');
+    expect(w.find('[data-test=git-delete-stale]').text()).not.toContain('CoreRpcError');
+    expect(w.find('[data-test=git-delete-plan]').text()).toBe('Plan 2.'); // planned again
+    fail = 'other';
+    await w.find('[data-test=git-delete-yes]').trigger('click');
+    await flushPromises();
+    expect(calls.filter((c) => c.method === 'git.deleteBranches').at(-1)!.params.confirm).toBe('tok-2');
+    expect(w.find('[data-test=git-delete-error]').text()).toBe('origin refused the push: permission denied');
+    expect(w.find('[data-test=git-delete-plan]').text()).toBe('Plan 2.'); // not re-planned
+    await w.find('[data-test=git-delete-cancel]').trigger('click');
+    expect(w.find('[data-test=git-delete]').exists()).toBe(false);
   });
 
   it('shows no behind line, and no Sync now, for a branch that is in step', async () => {
