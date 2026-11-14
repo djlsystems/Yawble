@@ -48,8 +48,8 @@ const filePath = ref<string | null>(null);
 const file = shallowRef<CodeFile | null>(null);
 const fileLoading = ref(false);
 const fileError = ref<string | null>(null);
-const onlyChangedFiles = ref(false);
-const follow = ref(false);
+const onlyChangedFiles = ref(true);
+const follow = ref(true);
 const showSource = ref(false);
 /** The "Updated: jump to change" chip: the line of a change that landed out of view. */
 const chip = ref<number | null>(null);

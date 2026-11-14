@@ -44,6 +44,13 @@ function open(core: ReturnType<typeof fakeCore>, props: Record<string, unknown> 
   return w;
 }
 
+/** Both checkboxes start on; these tests look at the whole listing and the open file staying put, so they turn them off. */
+async function manual(w: ReturnType<typeof open>) {
+  await w.get('[data-test=code-only-changed]').setValue(false);
+  await w.get('[data-test=code-follow]').setValue(false);
+  await flushPromises();
+}
+
 /** Gives the line view a height (happy-dom does no layout), so "in view" can be told. */
 function sized(height: number) {
   const proto = HTMLElement.prototype as any;
@@ -53,6 +60,13 @@ function sized(height: number) {
 }
 
 describe('the Code browser', () => {
+  it('starts with Only changed files and Follow edits on', async () => {
+    const w = open(clone());
+    await flushPromises();
+    expect((w.get('[data-test=code-only-changed]').element as HTMLInputElement).checked).toBe(true);
+    expect((w.get('[data-test=code-follow]').element as HTMLInputElement).checked).toBe(true);
+  });
+
   it('opens on the latest change: its folder listed, the file previewed, scrolled to the changed line', async () => {
     const restore = sized(300);
     try {
@@ -90,6 +104,7 @@ describe('the Code browser', () => {
     const core = clone({ 'code.open': () => ({ session: 's1', root: 'r', latest: null, clonePresent: true }) });
     const w = open(core);
     await flushPromises();
+    await manual(w);
     const names = w.findAll('.cb-entry .cb-name').map((n) => n.text());
     expect(names).toEqual(['docs', 'src', '.env', 'logo.svg', 'out', 'README.md', 'tool.exe']);
     expect(w.get('[data-test="code-entry-src"] .cb-dot').attributes('data-marker')).toBe('live');
@@ -249,6 +264,7 @@ describe('the Code browser', () => {
     const core = clone();
     const w = open(core);
     await flushPromises();
+    await manual(w);
     core.push('code.changed', { session: 's1', path: 'src/util.ts', ranges: [{ from: 1, to: 1, kind: 'changed' }], at: ago(0) });
     await flushPromises();
     expect(core.called('code.list')).toHaveLength(2);
@@ -420,6 +436,7 @@ describe('the Code browser', () => {
     const core = clone();
     const w = open(core);
     await flushPromises();
+    await manual(w);
     expect(w.get('[data-test=code-back]').attributes('disabled')).toBeDefined();
     await w.get('[data-test=code-crumb-root]').trigger('click'); await flushPromises();
     expect(w.get('[data-test=code-breadcrumb]').text()).toBe('DeveloperAda');
@@ -483,8 +500,9 @@ describe('the Code browser under a flood of changes, and agent markdown', () => 
 
   it('a batched code.changed lists the folder once and reads the open file once', async () => {
     const core = clone();
-    open(core);
+    const w = open(core);
     await flushPromises();
+    await manual(w);
     const lists = core.called('code.list').length;
     core.push('code.changed', {
       session: 's1', path: 'src/util.ts', ranges: [], at: ago(0), cloud: false,
