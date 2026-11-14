@@ -27,8 +27,9 @@ public static partial class CommitAttribution
     [GeneratedRegex(@"^\s*Claude-Session\s*:", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex Session();
 
-    // "🤖 Generated with [Claude Code](https://...)": any symbols before it, then an AI name somewhere on the line.
-    [GeneratedRegex(@"^[\W_]*Generated\s+with\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    // "🤖 Generated with [Claude Code](https://...)": only an optional 🤖 before it (a "- Generated with" bullet in prose
+    // is not a trailer), then an AI name after it.
+    [GeneratedRegex(@"^(?:🤖\s*)?Generated\s+with\b(?<what>.*)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex GeneratedWith();
 
     /// <summary>The lines of <paramref name="message"/> that are AI attribution (trimmed), in order; empty when none.</summary>
@@ -40,9 +41,10 @@ public static partial class CommitAttribution
             var line = raw.Trim();
             if (line.Length == 0) continue;
             var co = CoAuthor().Match(line);
+            var gen = GeneratedWith().Match(line);
             if ((co.Success && AiName().IsMatch(co.Groups["who"].Value))
                 || Session().IsMatch(line)
-                || (GeneratedWith().IsMatch(line) && AiName().IsMatch(line)))
+                || (gen.Success && AiName().IsMatch(gen.Groups["what"].Value)))
                 found.Add(line);
         }
         return found;
