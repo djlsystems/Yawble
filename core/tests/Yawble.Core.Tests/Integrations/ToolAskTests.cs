@@ -366,9 +366,11 @@ public sealed class ToolAskTests : IDisposable
         var item = (await _asks.DispatchAsync("tools.asks", null, Ct))!.AsArray().Single()!.AsObject();
         Assert.False(item["canInstall"]!.GetValue<bool>());
         Assert.Equal("sudo apt-get install -y python3 python3-pip", item["command"]!.GetValue<string>());
-        Assert.Equal(["notNow"], item["choices"]!.AsArray().Select(n => n!.GetValue<string>()));
+        // No pkexec here (the fake has none): no Install, only Check again after the person ran the command, and Not now.
+        Assert.Equal(["checkAgain", "notNow"], item["choices"]!.AsArray().Select(n => n!.GetValue<string>()));
         var r = await AsWindow(() => _asks.InstallAsync(id, Ct));
         Assert.True(r["manual"]!.GetValue<bool>());
+        Assert.Equal("manual", r["result"]!.GetValue<string>());
         Assert.Empty(_host.Runs);
         Assert.Equal("pending", Assert.Single(_asks.Asks()).State);
     }

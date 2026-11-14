@@ -114,8 +114,28 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
     team's Manager is told "<tool> is installed; retry what was blocked". When it is not, the item stays open with
     winget's message and **Try again**.
   - **Not now** closes it; the agent is told, and the team is not asked about that tool again for 24 hours.
-  On Linux and macOS the item shows the command to run yourself (on Linux for the distribution's package manager, from
-  `/etc/os-release`: dnf on Fedora and RHEL, pacman on Arch, otherwise apt-get); the app installs nothing. Each request, answer and
+  On Linux the distribution's package manager comes from `/etc/os-release`: dnf on Fedora and RHEL, pacman on Arch,
+  apt-get on Debian and Ubuntu.
+  - When `pkexec` is on PATH, a graphical session is running (`WAYLAND_DISPLAY` or `DISPLAY`) and the distribution is
+    one of those, the item offers **Install**, says "Your system asks for your password" and shows the exact command:
+    `pkexec /usr/bin/dnf install -y <packages>`, `pkexec /usr/bin/apt-get install -y <packages>` or
+    `pkexec /usr/bin/pacman -S --needed --noconfirm <packages>`. The package manager is always run from that fixed path,
+    never found on PATH, and the packages are always the catalog's. Only from the window, one install at a time, with
+    its progress and result in the item and the **Approvals** log, like winget on Windows.
+  - Closing the password window (pkexec exit code 126) or not being authorized (127) installs nothing: the item stays
+    open and says so in plain words, with **Install** again; it is not reported as a package failure.
+  - Afterwards the app looks for the program again where a run's PATH looks (`/usr/local/bin`, `/usr/bin`, `/bin`,
+    which every sandbox reads). Found: every open request for that tool closes and each Manager is told
+    "<tool> is installed; retry what was blocked". Not found: the item stays open with the package manager's output
+    and **Try again**. A program found only under your home folder (such as `~/.dotnet/dotnet`) is not one a run can
+    use: the item says the sandbox cannot see it.
+  - Without pkexec, a graphical session or a known distribution, the item shows the command to run yourself
+    (`sudo apt-get install -y ...` for an unknown distribution) and **Not now**; the app installs nothing.
+  - **Check again**, on Linux and macOS, looks for the program again after you installed it yourself: found, the
+    requests close and the Managers are told, as after an Install; not found, the item stays open and says so. It
+    installs nothing, so a Cloud Link view may use it too.
+
+  On macOS the item shows the command to run yourself (`brew ...`); the app installs nothing. Each request, answer and
   result is in the **Approvals** log; the Concierge's status lists the open ones.
   The items show in the same **Needs you** strip above every view, and in the Board's **Needs You** lane when the Board
   is open (its team and member filters apply). A machine-wide tool says "Windows may ask for permission". While

@@ -21,8 +21,11 @@ public sealed class IpcServer : IAsyncDisposable
     private readonly Integrations.ShellWebsiteHost? _websites;
     private readonly Action<long>? _signedIn;
 
-    /// <summary>Window calls that run for minutes (installers): each is answered when it finishes, off the connection's read loop.</summary>
-    internal static readonly HashSet<string> LongRunning = ["tools.install", "git.install"];
+    /// <summary>
+    /// Window calls that run for minutes (installers, pkexec waiting for the person's password) or seconds (Check again runs
+    /// `dotnet --list-sdks`): each is answered when it finishes, off the connection's read loop.
+    /// </summary>
+    internal static readonly HashSet<string> LongRunning = ["tools.install", "tools.checkAgain", "git.install"];
 
     private IpcServer(IpcEndpoint endpoint, string token, RpcDispatcher dispatcher, Ui.AppEvents? events = null,
         Integrations.HostEvents? host = null, Integrations.ShellWebsiteHost? websites = null, Action<long>? signedIn = null)

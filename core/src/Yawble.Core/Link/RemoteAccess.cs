@@ -19,7 +19,8 @@ public static class RemoteAccess
         // Network asks: listed and answered like the other policy changes (policy. is a screen prefix above).
         "network.",
         // Host tool asks: listed and answered Not now like the network asks; Install is the window's alone (below).
-        "tools.catalog", "tools.asks", "tools.notNow",
+        // Check again only looks for the program again (it runs no installer): a remote viewer may use it after installing by hand.
+        "tools.catalog", "tools.asks", "tools.notNow", "tools.checkAgain",
         // Whether git is installed (the banner's text); installing it is git.install, refused below.
         "git.check",
         // The Logs dialog, read only (pruning and retention are refused below).
