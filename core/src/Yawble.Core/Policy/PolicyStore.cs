@@ -56,7 +56,13 @@ public sealed class PolicyStore(string connectionString, PolicyDryRun? dryRun = 
     public GlobalPolicy GetGlobal()
     {
         using var c = Open();
+        return ReadGlobal(c, null);
+    }
+
+    private static GlobalPolicy ReadGlobal(SqliteConnection c, SqliteTransaction? tx)
+    {
         using var cmd = c.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = "SELECT policy_json FROM policy_global WHERE id = 1;";
         return cmd.ExecuteScalar() is string json ? GlobalPolicy.Parse(json) : GlobalPolicy.Default;
     }
@@ -86,7 +92,13 @@ public sealed class PolicyStore(string connectionString, PolicyDryRun? dryRun = 
     public MemberPolicy GetMember(long memberId)
     {
         using var c = Open();
+        return ReadMember(c, null, memberId);
+    }
+
+    private static MemberPolicy ReadMember(SqliteConnection c, SqliteTransaction? tx, long memberId)
+    {
         using var cmd = c.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = "SELECT override_json, loosen_json, loosen_summary, loosen_approved_at FROM member_policy WHERE member_id = $m;";
         cmd.Parameters.AddWithValue("$m", memberId);
         using var r = cmd.ExecuteReader();
@@ -152,7 +164,13 @@ public sealed class PolicyStore(string connectionString, PolicyDryRun? dryRun = 
     public IReadOnlyList<TeamHost> TeamHosts(long teamId)
     {
         using var c = Open();
+        return ReadTeamHosts(c, null, teamId);
+    }
+
+    private static List<TeamHost> ReadTeamHosts(SqliteConnection c, SqliteTransaction? tx, long teamId)
+    {
         using var cmd = c.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = "SELECT host, added_by, added_via, added_at FROM team_network_allows WHERE team_id = $t ORDER BY added_at, host;";
         cmd.Parameters.AddWithValue("$t", teamId);
         using var r = cmd.ExecuteReader();
@@ -192,33 +210,98 @@ public sealed class PolicyStore(string connectionString, PolicyDryRun? dryRun = 
     /// wildcard, no address, a lower-case DNS name), then each member's merged policy with the host and the sandbox dry run
     /// (<paramref name="members"/>: each current member's run layout). Any refusal throws and nothing is written.
     /// False when the host was on the list already.
+    /// The write is one database transaction (BEGIN IMMEDIATE) that reads the team's list, the global policy and each
+    /// member's policy again and writes the row only when they are exactly what was checked; so no policy change can land
+    /// between the checks and the write, and the row written is one every member's check accepted against the state it is
+    /// written in. When something changed the checks run again on the new state (up to <see cref="AddTeamHostAttempts"/>
+    /// times, then refused). The sandbox dry run (a no-op launch on some hosts) runs before the transaction, never while
+    /// it holds the database's write lock; it depends only on what was read, so equal state means an equal answer.
     /// </summary>
     public bool AddTeamHost(long teamId, string host, IReadOnlyList<(long MemberId, RunLayout Layout)> members, string addedBy, string? addedVia)
     {
         // The ask filter's rules too (ASCII names only, no trailing dot, not the app's own hosts), whoever calls this.
         if ((Integrations.NetworkAskFilter.Problem(host) ?? FloorRules.HostProblem(host)) is { } problem) throw new PolicyException([$"network.allowHosts: {problem}"]);
-        var current = TeamHosts(teamId).Select(t => t.Host).ToList();
-        if (current.Contains(host, StringComparer.Ordinal)) return false;
-        var global = GetGlobal();
-        var errors = new List<string>();
-        foreach (var (memberId, layout) in members)
+        var memberIds = members.Select(m => m.MemberId).ToList();
+        for (var attempt = 1; ; attempt++)
         {
-            var m = GetMember(memberId);
-            var merged = PolicyMerger.Merge(global, m.Override, m.Loosen, layout, canonicalize, null, [.. current, host]);
+            TeamHostState checkedState;
+            using (var r = Open()) checkedState = ReadTeamHostState(r, null, teamId, memberIds);
+            if (checkedState.Hosts.Contains(host, StringComparer.Ordinal)) return false;
+            CheckTeamHost(checkedState, host, members);
+
+            using var c = Open();
+            using var tx = c.BeginTransaction(deferred: false);
+            var now = ReadTeamHostState(c, tx, teamId, memberIds);
+            if (now.Hosts.Contains(host, StringComparer.Ordinal)) return false; // disposing tx rolls back: nothing written
+            if (now.Stored != checkedState.Stored)
+            {
+                if (attempt >= AddTeamHostAttempts)
+                    throw new PolicyException(["the team's policy kept changing while the host was checked; nothing was written, try again"]);
+                continue; // checked against an older state: check again on the new one
+            }
+            using var cmd = c.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = "INSERT INTO team_network_allows (team_id, host, added_by, added_via, added_at) VALUES ($t, $h, $by, $via, $at) ON CONFLICT (team_id, host) DO NOTHING;";
+            cmd.Parameters.AddWithValue("$t", teamId);
+            cmd.Parameters.AddWithValue("$h", host);
+            cmd.Parameters.AddWithValue("$by", addedBy);
+            cmd.Parameters.AddWithValue("$via", (object?)addedVia ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$at", Now());
+            var added = cmd.ExecuteNonQuery() > 0;
+            tx.Commit();
+            return added;
+        }
+    }
+
+    /// <summary>How many times <see cref="AddTeamHost"/> checks again after the policy changed under it before it refuses.</summary>
+    public const int AddTeamHostAttempts = 3;
+
+    /// <summary>What AddTeamHost checks: the team's hosts, the global policy and each member's; <c>Stored</c> is the stored text of all of it.</summary>
+    private sealed record TeamHostState(List<string> Hosts, GlobalPolicy Global, List<MemberPolicy> Members, string Stored);
+
+    private static TeamHostState ReadTeamHostState(SqliteConnection c, SqliteTransaction? tx, long teamId, IReadOnlyList<long> memberIds)
+    {
+        var stored = new System.Text.StringBuilder();
+        var hosts = ReadTeamHosts(c, tx, teamId).Select(t => t.Host).ToList();
+        stored.Append(string.Join('\n', hosts)).Append('\0');
+        using (var cmd = c.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = "SELECT policy_json FROM policy_global WHERE id = 1;";
+            stored.Append(cmd.ExecuteScalar() as string).Append('\0');
+        }
+        var global = ReadGlobal(c, tx);
+        var list = new List<MemberPolicy>();
+        foreach (var id in memberIds)
+        {
+            using (var cmd = c.CreateCommand())
+            {
+                cmd.Transaction = tx;
+                cmd.CommandText = "SELECT override_json, loosen_json FROM member_policy WHERE member_id = $m;";
+                cmd.Parameters.AddWithValue("$m", id);
+                using var r = cmd.ExecuteReader();
+                stored.Append(id).Append(':');
+                if (r.Read()) stored.Append(r.IsDBNull(0) ? "" : r.GetString(0)).Append('\u0001').Append(r.IsDBNull(1) ? "" : r.GetString(1));
+                stored.Append('\0');
+            }
+            list.Add(ReadMember(c, tx, id));
+        }
+        return new TeamHostState(hosts, global, list, stored.ToString());
+    }
+
+    /// <summary>Each member's merged policy with the host, then the sandbox dry run; throws with every refusal.</summary>
+    private void CheckTeamHost(TeamHostState state, string host, IReadOnlyList<(long MemberId, RunLayout Layout)> members)
+    {
+        var errors = new List<string>();
+        for (var i = 0; i < members.Count; i++)
+        {
+            var (m, layout) = (state.Members[i], members[i].Layout);
+            var merged = PolicyMerger.Merge(state.Global, m.Override, m.Loosen, layout, canonicalize, null, [.. state.Hosts, host]);
             errors.AddRange(merged.Violations);
             if (merged.Violations.Count == 0 && dryRun is not null)
-                errors.AddRange(dryRun(global, m.Override, m.Loosen with { Network = new NetworkPatch([.. m.Loosen.Network?.AllowHosts ?? [], .. current, host]) }, layout));
+                errors.AddRange(dryRun(state.Global, m.Override, m.Loosen with { Network = new NetworkPatch([.. m.Loosen.Network?.AllowHosts ?? [], .. state.Hosts, host]) }, layout));
         }
         if (errors.Count > 0) throw new PolicyException(errors.Distinct().ToList());
-        using var c = Open();
-        using var cmd = c.CreateCommand();
-        cmd.CommandText = "INSERT INTO team_network_allows (team_id, host, added_by, added_via, added_at) VALUES ($t, $h, $by, $via, $at) ON CONFLICT (team_id, host) DO NOTHING;";
-        cmd.Parameters.AddWithValue("$t", teamId);
-        cmd.Parameters.AddWithValue("$h", host);
-        cmd.Parameters.AddWithValue("$by", addedBy);
-        cmd.Parameters.AddWithValue("$via", (object?)addedVia ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$at", Now());
-        return cmd.ExecuteNonQuery() > 0;
     }
 
     /// <summary>Takes a host off the team's list: the team's next runs no longer have it (a member's own loosen block may still). False when it was not there.</summary>
