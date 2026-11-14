@@ -399,7 +399,8 @@ describe('ToolAskCard on Linux', () => {
 
   // FAULT (B017, card 84): a failed install whose program is only under the home folder returns the output AND the home
   // note as one message (ToolAsks.cs InstallAsync, result homeOnly with exit code != 0); the card hides its homeOnly note
-  // only when the note equals the message, so the home text is shown twice. Remove .fails once fixed.
+  // only when the note equals the message, so the home text is shown twice.
+  // Fixed (card 85): the card hides its note when the message already contains it. Passes as plain it (card 84 re-check).
   it('Gap_FAULT_HomeOnlyAfterAFailedInstall_ShowsTheHomeTextOnce', () => {
     const failedMsg = 'Installing .NET SDK 10 did not finish (exit code 1: No match for argument: dotnet-sdk-10.0).';
     const { api } = fakeApi({});
@@ -409,7 +410,7 @@ describe('ToolAskCard on Linux', () => {
 
   // FAULT (B017, card 84): "cancelled"/"notAuthorized" is known only from the click's reply in this card. The core keeps
   // the plain words as the ask's error but sends no result code with tools.asks, so a fresh card (window reloaded, the
-  // other view, a remote view) shows the cancelled words in error red with Try again. Remove .fails once fixed.
+  // other view, a remote view) shows the cancelled words in error red with Try again.
   // Fixed (card 85): tools.asks sends the ask's lastResult, and the card reads it when it has no reply of its own.
   it.each([
     ['cancelled', CANCELLED],
@@ -420,6 +421,96 @@ describe('ToolAskCard on Linux', () => {
     expect(w.get('[data-test=tool-ask-failed]').attributes('data-result')).toBe(code);
     expect(w.get('[data-test=tool-ask-failed]').classes()).not.toContain('error');
     expect(w.get('[data-test=tool-ask-install]').text()).toBe('Install');
+  });
+
+  // ---------------------------------------------------------------- card 85 re-check (card 84, TesterWren)
+
+  it('Gap_HomeOnly_WithNoMessage_StillShowsTheNoteOnce', () => {
+    const { api } = fakeApi({});
+    const w = mount(ToolAskCard, { props: { ask: linuxAsk({ homeOnly: HOME_ONLY, lastResult: null }), api } });
+    expect(w.get('[data-test=tool-ask-homeOnly]').text()).toBe(HOME_ONLY);
+    expect(w.find('[data-test=tool-ask-failed]').exists()).toBe(false);
+    expect(w.text().split('sandbox cannot see it')).toHaveLength(2);
+  });
+
+  it('Gap_HomeOnly_WithAnUnrelatedError_ShowsBoth', () => {
+    const failedMsg = 'Installing .NET SDK 10 did not finish (exit code 1: boom).';
+    const { api } = fakeApi({});
+    const w = mount(ToolAskCard, { props: { ask: linuxAsk({ homeOnly: HOME_ONLY, error: failedMsg, attempts: 1, lastResult: 'failed' }), api } });
+    expect(w.get('[data-test=tool-ask-failed]').text()).toBe(failedMsg);
+    expect(w.get('[data-test=tool-ask-homeOnly]').text()).toBe(HOME_ONLY);
+  });
+
+  it('Gap_HomeOnlyAfterAFailedInstall_ClickedHere_ShowsTheHomeTextOnce', async () => {
+    const failedMsg = 'Installing .NET SDK 10 did not finish (exit code 1: No match for argument: dotnet-sdk-10.0).';
+    const words = `${failedMsg} ${HOME_ONLY}`;
+    const { api } = fakeApi({ 'tools.install': () => result('homeOnly', words) });
+    const w = mount(ToolAskCard, { props: { ask: linuxAsk({ homeOnly: HOME_ONLY }), api } });
+    await w.get('[data-test=tool-ask-install]').trigger('click');
+    await flushPromises();
+    expect(w.text().split('sandbox cannot see it')).toHaveLength(2);
+    await w.setProps({ ask: linuxAsk({ homeOnly: HOME_ONLY, error: words, attempts: 1, lastResult: 'homeOnly' }) });
+    expect(w.text().split('sandbox cannot see it')).toHaveLength(2);
+    expect(w.find('[data-test=tool-ask-homeOnly]').exists()).toBe(false);
+  });
+
+  it.each([
+    ['cancelled', CANCELLED],
+    ['notAuthorized', NOT_AUTHORIZED],
+  ] as const)('Gap_%s_InARemoteView_IsAHint_NotRed_AndHasNoTryAgain', (code, words) => {
+    const { api } = fakeApi({}, { remote: true } as Partial<YawbleApi>);
+    const w = mount(ToolAskCard, { props: { ask: linuxAsk({ error: words, attempts: 1, lastResult: code }), api } });
+    const shown = w.get('[data-test=tool-ask-failed]');
+    expect(shown.classes()).toContain('hint');
+    expect(shown.classes()).not.toContain('error');
+    expect(shown.attributes('data-result')).toBe(code);
+    expect(w.findAll('button').map((b) => b.text())).toEqual(['Check again', 'Not now']);
+  });
+
+  it.each([
+    ['cancelled', CANCELLED],
+    ['notAuthorized', NOT_AUTHORIZED],
+  ] as const)('Gap_%s_AfterAReload_ShowsAllThreeButtonsEnabled_WithInstall', (code, words) => {
+    const { api } = fakeApi({});
+    const w = mount(ToolAskCard, { props: { ask: linuxAsk({ error: words, attempts: 1, lastResult: code }), api } });
+    expect(w.get('[data-test=tool-ask-failed]').classes()).toContain('hint');
+    expect(w.findAll('button').map((b) => b.text())).toEqual(['Install', 'Check again', 'Not now']);
+    expect(w.findAll('button').every((b) => b.attributes('disabled') === undefined)).toBe(true);
+  });
+
+  it.each(['failed', 'notFound', 'homeOnly'] as const)('Gap_AfterAReload_%s_IsRedWithTryAgain', (code) => {
+    const { api } = fakeApi({});
+    const w = mount(ToolAskCard, { props: { ask: linuxAsk({ error: 'Installing .NET SDK 10 did not finish (exit code 1: boom).', attempts: 1, lastResult: code }), api } });
+    expect(w.get('[data-test=tool-ask-failed]').classes()).toContain('error');
+    expect(w.get('[data-test=tool-ask-failed]').attributes('data-result')).toBe(code);
+    expect(w.get('[data-test=tool-ask-install]').text()).toBe('Try again');
+  });
+
+  it('Gap_AnOlderCoreWithoutLastResult_ShowsTheErrorAsBefore', () => {
+    const { api } = fakeApi({});
+    const w = mount(ToolAskCard, { props: { ask: linuxAsk({ error: CANCELLED, attempts: 1 }), api } });
+    expect(w.get('[data-test=tool-ask-failed]').attributes('data-result')).toBeUndefined();
+    expect(w.get('[data-test=tool-ask-install]').text()).toBe('Try again');
+  });
+
+  it('Gap_ALastResultWithoutAnError_ShowsNoMessage_AndInstall', () => {
+    const { api } = fakeApi({});
+    const w = mount(ToolAskCard, { props: { ask: linuxAsk({ error: null, lastResult: 'cancelled' }), api } });
+    expect(w.find('[data-test=tool-ask-failed]').exists()).toBe(false);
+    expect(w.get('[data-test=tool-ask-install]').text()).toBe('Install');
+  });
+
+  it('Gap_ThisCardsOwnReply_ComesBeforeTheAsksLastResult', async () => {
+    const failedMsg = 'Installing .NET SDK 10 did not finish (exit code 1: boom).';
+    const { api } = fakeApi({ 'tools.install': () => result('failed', failedMsg) });
+    // the list still holds the old cancel when the reply comes back
+    const w = mount(ToolAskCard, { props: { ask: linuxAsk({ error: CANCELLED, attempts: 1, lastResult: 'cancelled' }), api } });
+    expect(w.get('[data-test=tool-ask-install]').text()).toBe('Install');
+    await w.get('[data-test=tool-ask-install]').trigger('click');
+    await flushPromises();
+    expect(w.get('[data-test=tool-ask-failed]').attributes('data-result')).toBe('failed');
+    expect(w.get('[data-test=tool-ask-failed]').classes()).toContain('error');
+    expect(w.get('[data-test=tool-ask-install]').text()).toBe('Try again');
   });
 });
 

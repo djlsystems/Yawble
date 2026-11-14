@@ -4,6 +4,7 @@ using Yawble.Core.Bus;
 using Yawble.Core.Integrations;
 using Yawble.Core.Ipc;
 using Yawble.Core.Provenance;
+using Yawble.Core.Storage;
 using Yawble.Core.Teams;
 using Yawble.Core.Tests.Bus;
 using Yawble.Core.Tests.Gateway;
@@ -465,6 +466,106 @@ public sealed class LinuxToolInstallTests : IDisposable
         _host.Gate.SetResult();
         Assert.Equal("installed", (await running)["result"]!.GetValue<string>());
         Assert.Null(_asks.Asks(openOnly: false).Single(a => a.Id == id).LastResult);
+    }
+
+    // ------------------------------------------------------------------ lastResult gap tests (card 84 re-check, TesterWren)
+
+    private long Scalar(string sql)
+    {
+        using var c = new SqliteConnection(_db.ConnectionString);
+        c.Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = sql;
+        return (long)cmd.ExecuteScalar()!;
+    }
+
+    [Fact]
+    public void Gap_0042_OnAFreshDatabase_AddsANullableLastResultColumn()
+    {
+        Assert.Contains("0042_tool_ask_last_result", SchemaMigrator.Migrate(_db.ConnectionString));
+        Assert.Equal(1, Scalar("SELECT count(*) FROM pragma_table_info('tool_asks') WHERE name = 'last_result' AND \"notnull\" = 0 AND type = 'TEXT';"));
+    }
+
+    [Fact]
+    public async Task Gap_0042_OnAnUpgradedDatabase_KeepsTheAsks_WithNoLastResult_AndRunsOnce()
+    {
+        Offer(LinuxPackager.Dnf);
+        var id = await Asked("dotnet-sdk-10");
+        _host.Result = new GitResult(126, "", "");
+        await Install(id); // an ask with an error from before 0042
+        // Wind the database back to before 0042, as an existing install is.
+        Insert("ALTER TABLE tool_asks DROP COLUMN last_result; DELETE FROM schema_migrations WHERE name = '0042_tool_ask_last_result'; SELECT 1;");
+        Assert.Equal(0, Scalar("SELECT count(*) FROM pragma_table_info('tool_asks') WHERE name = 'last_result';"));
+
+        var applied = SchemaMigrator.Migrate(_db.ConnectionString);
+        Assert.Contains("0042_tool_ask_last_result", applied);
+        Assert.Equal(applied, SchemaMigrator.Migrate(_db.ConnectionString)); // twice: nothing happens
+        Assert.Equal(1, Scalar("SELECT count(*) FROM schema_migrations WHERE name = '0042_tool_ask_last_result';"));
+
+        var ask = Assert.Single(_asks.Asks());
+        Assert.Equal((id, "pending", 1, ToolAskService.CancelledMessage), (ask.Id, ask.State, ask.Attempts, ask.Error));
+        Assert.Null(ask.LastResult); // an ask from before 0042 has no code: the card shows its error as before
+        var item = await Item();
+        Assert.True(item.ContainsKey("lastResult"));
+        Assert.Null(item["lastResult"]);
+
+        // and the next attempt writes it again
+        _host.Result = new GitResult(127, "", "");
+        await Install(id);
+        Assert.Equal("notAuthorized", Assert.Single(_asks.Asks()).LastResult);
+    }
+
+    [Fact]
+    public async Task Gap_LastResult_ClearsOnInstallStart_EvenAfterACancel_AndOnCheckAgainFound()
+    {
+        Offer(LinuxPackager.Apt);
+        var id = await Asked("python-3");
+        await Asked("python-3", new MemberRef(_wren, _beta, "Beta", "Wren", MemberRole.Member));
+        _host.Result = new GitResult(126, "", "");
+        await Install(id);
+        Assert.Equal("cancelled", _asks.Asks().Single(a => a.Id == id).LastResult);
+
+        _host.Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _host.Result = new GitResult(100, "", "E: Unable to locate package python3");
+        var running = Install(id);
+        await _host.Started.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct);
+        var during = await As(Actor.Window, async () => (await _asks.DispatchAsync("tools.asks", null, Ct))!.AsArray());
+        var mine = during.Single(n => n!["id"]!.GetValue<long>() == id)!;
+        Assert.Equal("installing", mine["state"]!.GetValue<string>());
+        Assert.Null(mine["lastResult"]);
+        Assert.Null(mine["error"]);
+        _host.Gate.SetResult();
+        await running;
+        Assert.Equal("failed", _asks.Asks().Single(a => a.Id == id).LastResult);
+
+        _host.Installed.Add("python-3"); // the person installed it themselves
+        Assert.Equal("installed", (await CheckAgain(id))["result"]!.GetValue<string>());
+        Assert.All(_asks.Asks(openOnly: false), a => Assert.Equal(("installed", null, null), (a.State, a.Error, a.LastResult)));
+    }
+
+    [Fact]
+    public void Gap_AnInstallTheAppClosedDuring_IsFailed_NotACancel()
+    {
+        Insert($"INSERT INTO tool_asks (at, team_id, tool, member, count, last_seen, state, attempts, last_result) " +
+               $"VALUES ('x', {_alpha}, 'nodejs-lts', 'Alpha/Priya', 1, 'x', 'installing', 1, 'cancelled') RETURNING id;");
+
+        var fresh = new ToolAskService(_db.ConnectionString, _host, (_, _, _, _, _) => Task.CompletedTask, _clock);
+
+        var ask = Assert.Single(fresh.Asks());
+        Assert.Equal(("pending", "failed"), (ask.State, ask.LastResult));
+        Assert.Contains("app closed while it was installing", ask.Error);
+    }
+
+    [Fact]
+    public async Task Gap_TheRemoteView_ReadsTheSameLastResult()
+    {
+        Offer(LinuxPackager.Dnf);
+        var id = await Asked("dotnet-sdk-10");
+        _host.Result = new GitResult(126, "", "");
+        await Install(id);
+        var remote = await As(Actor.CloudViewer("alice@example.com"), async () => (await _asks.DispatchAsync("tools.asks", null, Ct))!.AsArray().Single()!.AsObject());
+        Assert.Equal("cancelled", remote["lastResult"]!.GetValue<string>());
+        Assert.Equal(ToolAskService.CancelledMessage, remote["error"]!.GetValue<string>());
     }
 
     [Fact]
