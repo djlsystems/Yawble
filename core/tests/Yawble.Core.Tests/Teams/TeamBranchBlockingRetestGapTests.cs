@@ -63,7 +63,7 @@ public class TeamBranchBlockingRetestGapTests
     /// too. So git.deleteBranches with "Members/Ada" (and unmergedOk "Members/Ada") deletes team Alpha's in-use, unmerged
     /// members/ada from team Ada's dialog. On a case-sensitive file system git finds no such branch and this passes.
     /// </summary>
-    [Fact(Skip = "B020 fault F4 (card 105): another team's in-use branch is deletable when named in another case (Windows). Remove Skip when fixed.")]
+    [Fact]
     public async Task AnotherTeamsInUseOldBranch_IsNotDeletable_WhenNamedInAnotherCase()
     {
         using var f = new TeamsFixture();
@@ -80,6 +80,54 @@ public class TeamBranchBlockingRetestGapTests
             await f.Repos.GitDeleteBranchesAsync(adaBen.TeamId, "Ada", teamAda, null, ["Members/Ada"], false, ["Members/Ada"], plan.Token, Ct);
 
         Assert.Contains($"refs/heads/members/ada {work}", Refs(picked));
+        Assert.Contains("members/ada: REFUSED, team Alpha's member Ada is still on it", plan.Plan);
+    }
+
+    /// <summary>Card 106: two branches whose names differ only in case (one packed, one loose): a name matching both is
+    /// refused as unclear and neither is deleted.</summary>
+    [Fact]
+    public async Task ANameMatchingTwoBranchesInAnotherCase_IsRefused()
+    {
+        using var f = new TeamsFixture();
+        var (_, _, ben) = f.Team("Ada");
+        var repo = await f.Repos.EnsureTeamRepoAsync(ben.TeamId, "Ada", Ct);
+        var main = AgentGit.Host(repo.Path, "rev-parse", "main");
+        AgentGit.Host(repo.Path, "update-ref", "refs/heads/old/x", main);
+        AgentGit.Host(repo.Path, "pack-refs", "--all");
+        AgentGit.Host(repo.Path, "update-ref", "refs/heads/Old/X", main);
+        var before = Refs(repo.Path);
+        Assert.Contains("refs/heads/old/x ", before);
+        Assert.Contains("refs/heads/Old/X ", before);
+
+        var plan = await f.Repos.GitDeleteBranchesAsync(ben.TeamId, "Ada", [ben.Name], null, ["OLD/x"], false, [], null, Ct);
+
+        Assert.Contains("OLD/x: REFUSED, more than one branch has this name in another case", plan.Plan);
+        Assert.True(plan.Empty);
+        Assert.Equal(before, Refs(repo.Path));
+    }
+
+    /// <summary>Card 106 (Wren's note on card 105): a same-team member still on its old members/ada, which only origin has
+    /// (as of the last fetch): Delete with origin refuses it as checked out, and nothing is pushed.</summary>
+    [Fact]
+    public async Task ASameTeamMembersInUseOldBranch_OnOriginOnly_IsRefused()
+    {
+        using var f = new TeamsFixture();
+        var (manager, ada, ben) = f.Team("Ada");
+        var repo = await f.Repos.EnsureTeamRepoAsync(ben.TeamId, "Ada", Ct);
+        AgentGit.Host(repo.Path, "remote", "add", "origin", Path.Combine(f.Db.Dir, "nowhere.git"));
+        var main = AgentGit.Host(repo.Path, "rev-parse", "main");
+        AgentGit.Host(repo.Path, "update-ref", "refs/remotes/origin/main", main);
+        AgentGit.Host(repo.Path, "update-ref", "refs/remotes/origin/members/ada", main);
+        FakeClone(f, ada, "Ada", "members/ada");
+
+        var names = new[] { manager.Name, ada.Name, ben.Name };
+        var plan = await f.Repos.GitDeleteBranchesAsync(ben.TeamId, "Ada", names, null, ["Members/Ada"], true, [], null, Ct);
+
+        Assert.Contains("members/ada", plan.Plan);
+        Assert.Contains("REFUSED, checked out in", plan.Plan);
+        Assert.DoesNotContain("delete origin/members/ada", plan.Plan);
+        Assert.True(plan.Empty);
+        Assert.Contains($"refs/remotes/origin/members/ada {main}", Refs(repo.Path));
     }
 
     /// <summary>F1 on origin's side: another team's member's branch known only as origin's (as of the last fetch) is refused

@@ -286,11 +286,13 @@ public sealed partial class TeamRepos
             .Concat(users.Select(u => u.ClonePath)).Distinct(StringComparer.FromComparison(PathComparison)).ToList();
         var action = new Concierge.ActionRepo(name, repo.Path, repo.BaseBranch, clones);
         var git = new Concierge.ConciergeGit(Git, Pusher);
-        var refusals = new List<string>();
+        // Card 106 (F4): git on Windows and macOS finds a loose ref whatever its case, so the refusal below, the plan, its
+        // token and the delete all work on the exact ref name each requested one resolves to (an ambiguous one is refused).
+        var (exact, refusals) = await git.ResolveBranchNamesAsync(repo.Path, branches.Distinct(), remote, ct);
         var allowed = new List<string>();
-        foreach (var b in branches.Distinct())
+        foreach (var b in exact)
         {
-            if (users.FirstOrDefault(u => u.TeamId != teamId && u.Branch == b) is { } held)
+            if (users.FirstOrDefault(u => u.TeamId != teamId && string.Equals(u.Branch, b, StringComparison.OrdinalIgnoreCase)) is { } held)
                 refusals.Add($"- {b}: REFUSED, {Holder(held, teamId)} is still on it"
                     + (IsLegacyMemberBranch(b) ? $" (its old branch: it moves to {BranchFor(held.Team, held.Member)} at that member's next start)" : ""));
             else allowed.Add(b);
