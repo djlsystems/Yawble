@@ -109,8 +109,10 @@ it from a Connection that holds a GitHub token.
 - **When it cannot be read.** If the Connection is gone, its field is empty, or it needs reconnecting, the task does
   not start. The agent is told which binding is missing, by variable and Connection name, and the run record notes
   it. Fix the Connection and ask again.
-- **Over Cloud Link** the bindings show by name only and cannot be changed, like the rest of a host task's
-  definition.
+- **Over Cloud Link** the bindings show by name only and cannot be added, removed or re-pointed, even when host
+  terminals are allowed for the Cloud Link.
+- **A bound value must be at least 8 characters**, so the log can mask it; a shorter one stops the run as above. A
+  value over several lines (a key file) is masked line by line.
 
 #### Example: a release job that uploads to GitHub
 

@@ -273,10 +273,19 @@ public class TeamBranchBlockingTests
         Assert.Equal(tip, AgentGit.Host(picked, "rev-parse", "refs/heads/members/docs/docs"));
         Assert.DoesNotContain("refs/heads/members/docs ", Refs(picked));
 
+        // Origin's members/docs is never deleted by the app (a name alone does not prove whose it is): the push waits and
+        // says to delete it in the Git dialog. Once the person has deleted it there, the next publish goes through.
         var report = await f.Repos.PublishAsync(docs, Ct);
-        Assert.Contains("members/docs/docs", report.Published!);
+        Assert.Contains($"refs/heads/members/docs {tip}", Refs(bare));
+        Assert.DoesNotContain("refs/heads/members/docs/docs ", Refs(bare));
+        Assert.Contains("Delete members/docs on origin in the Git dialog", report.Reason ?? "");
+
+        AgentGit.Host(bare, "branch", "-D", "members/docs");
+        AgentGit.Host(picked, "fetch", "--prune", "origin");
+        var again = await f.Repos.PublishAsync(docs, Ct);
+        Assert.Equal(TeamPublishResult.Published, again.Result);
+        Assert.Contains("members/docs/docs", again.Branches);
         Assert.Contains($"refs/heads/members/docs/docs {tip}", Refs(bare));
-        Assert.DoesNotContain("refs/heads/members/docs ", Refs(bare));
 
         Assert.Equal("members/docs/ben", (await f.Repos.PrepareAsync(ben, Ct)).Branch);
     }

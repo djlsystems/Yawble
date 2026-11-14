@@ -170,11 +170,11 @@ public class TeamBranchBlockingRetestGapTests
         return (f, docs, repo.Path, work);
     }
 
-    /// <summary>F2's push: origin's old members/docs, which the new branch holds, is deleted with a lease before the new
-    /// branch is pushed. Here origin does not exist, so the delete is tried and fails: the report says so plainly, names
-    /// what to do, and the new branch is not pushed.</summary>
+    /// <summary>F2's push, after review: origin's old members/docs, even one the new branch holds, is never deleted by the
+    /// app (a name alone does not prove whose it is). No delete is tried; the report says plainly to delete it in the Git
+    /// dialog, and the new branch is not pushed.</summary>
     [Fact]
-    public async Task TheOwnOldBranchOnOrigin_IsDeletedFirst_AndARefusedDeleteIsReportedPlainly()
+    public async Task TheOwnOldBranchOnOrigin_IsNeverDeletedByTheApp_AndThePushWaitsForThePerson()
     {
         var (f, docs, repo, work) = await MovedDocsAsync();
         using var _ = f;
@@ -184,7 +184,7 @@ public class TeamBranchBlockingRetestGapTests
 
         Assert.Equal(TeamPublishResult.Rejected, report.Result);
         Assert.Contains("members/docs/docs", report.Branches);
-        Assert.Contains("origin refused deleting it", report.Reason);
+        Assert.DoesNotContain("refused deleting", report.Reason); // no delete was tried
         Assert.Contains("Delete members/docs on origin in the Git dialog", report.Reason);
         Assert.DoesNotContain("cannot lock ref", report.Reason);
         Assert.Contains($"refs/remotes/origin/members/docs {work}", Refs(repo)); // nothing changed on our side

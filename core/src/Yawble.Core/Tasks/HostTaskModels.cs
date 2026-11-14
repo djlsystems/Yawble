@@ -131,7 +131,8 @@ public static partial class HostTaskRules
             if (!secrets.ContainsKey(b.Field))
                 throw new ArgumentException($"{b.Name}: Connection '{brief.Name}' has no secret field '{b.Field}' with a value"
                     + (secrets.Count == 0 ? "" : $" (its secret fields: {string.Join(", ", secrets.Keys.Order(StringComparer.Ordinal))})"));
-            named.Add(b with { ConnectionName = brief.Name });
+            // The id as one canonical string ("03" and "+3" are 3), so the hash, the in-use list and the refusals agree.
+            named.Add(b with { ConnectionId = id.ToString(System.Globalization.CultureInfo.InvariantCulture), ConnectionName = brief.Name });
         }
         return d with { EnvFromConnections = named };
     }

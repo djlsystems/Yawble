@@ -134,7 +134,7 @@ rmSync(path.join(stage, 'toolchain'), { recursive: true, force: true }); // a st
 {
   const core = path.join(stage, 'core', `yawble-core${exe}`);
   console.log(`> ${core} --version`);
-  const r = spawnSync(core, ['--version'], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
+  const r = spawnSync(core, ['--version'], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], timeout: 30_000 });
   if (r.error) throw r.error;
   if (r.status !== 0) throw new Error(`yawble-core --version exited with ${r.status}`);
   const said = r.stdout.trim();

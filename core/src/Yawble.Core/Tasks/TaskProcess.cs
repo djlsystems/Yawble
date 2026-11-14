@@ -36,10 +36,26 @@ public sealed class TaskProcessOptions
 /// </summary>
 public static class TaskProcess
 {
+    /// <summary>Values shorter than this are not masked in a task's log (they would mask ordinary words).</summary>
+    public const int MinMaskedLength = 8;
+
+    /// <summary>
+    /// What to mask for one secret value: the value, and, since the log is masked a line at a time, each of its lines
+    /// long enough to mask (a key file over several lines would otherwise never match as a whole).
+    /// </summary>
+    public static IEnumerable<string> MaskedParts(string value)
+    {
+        yield return value;
+        foreach (var line in value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            if (line.Length >= MinMaskedLength && line != value) yield return line;
+    }
+
     public static string Redact(string line, IReadOnlyList<string> secrets)
     {
         var text = CliRunner.Redact(line);
-        foreach (var s in secrets) if (s.Length >= 8) text = text.Replace(s, "[redacted]", StringComparison.Ordinal);
+        // Longest first: a shorter secret inside a longer one must not leave the rest of the longer one showing.
+        foreach (var s in secrets.Where(s => s.Length >= MinMaskedLength).OrderByDescending(s => s.Length))
+            text = text.Replace(s, "[redacted]", StringComparison.Ordinal);
         return text;
     }
 
@@ -91,8 +107,9 @@ public static class TaskProcess
             {
                 try
                 {
-                    if (connections.Secrets(id).TryGetValue(b.Field, out var v) && v.Length > 0) values[b.Name] = v;
-                    else why = $"its field '{b.Field}' is empty";
+                    if (!connections.Secrets(id).TryGetValue(b.Field, out var v) || v.Length == 0) why = $"its field '{b.Field}' is empty";
+                    else if (v.Trim().Length < MinMaskedLength) why = $"its field '{b.Field}' is shorter than {MinMaskedLength} characters, too short to be masked in the task's log";
+                    else values[b.Name] = v;
                 }
                 catch (Credentials.CredentialStoreException) { why = "the Connection could not be read on this computer"; }
             }

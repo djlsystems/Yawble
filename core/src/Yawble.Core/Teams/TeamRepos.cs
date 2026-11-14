@@ -866,28 +866,9 @@ public sealed partial class TeamRepos
                 // B020: origin has a branch at one of this one's parent paths (members/<team> for members/<team>/<name>):
                 // not pushed, said plainly, never git's "cannot lock ref".
                 var blockers = (await BlockersOnOriginAsync(repo.Path, unpublished[i], ct)).ToList();
-                // Card 104: a member's own old branch that its new one is under (members/docs for members/docs/docs) is
-                // replaced: deleted on origin at the commit last fetched, when nobody is on it and the new branch holds
-                // every commit of it, then the new one is pushed below.
-                if (blockers.Count == 1 && OwnOldBranchOf(member.Team, unpublished[i]) is { } old && blockers[0] == old
-                    && OldBranchUser(RepoUsers(repo.Path), old) is null && await OwnOldOnOriginIsHeldAsync(repo.Path, old, unpublished[i], ct))
-                {
-                    var sha = await RevAsync(repo.Path, "refs/remotes/origin/" + old, ct);
-                    var gone = await Pusher.RunAsync(repo.Path, ["push", "--no-verify", $"--force-with-lease=refs/heads/{old}:{sha}", "origin", "--delete", old], ct);
-                    if (gone.ExitCode == 0)
-                    {
-                        _log?.Invoke($"team {member.Team}: deleted origin's old {old} (was {sha}; {unpublished[i]} holds it) so {unpublished[i]} can be pushed");
-                        blockers.Clear();
-                    }
-                    else
-                    {
-                        rejected.Add(unpublished[i]);
-                        rejection ??= $"{unpublished[i]} was not pushed: origin has its old branch {old} (git cannot keep a branch and branches under its name at once), "
-                            + $"and origin refused deleting it: {PersonGitPush.Redact(string.Join('\n', gone.Stderr, gone.Stdout).Trim())}. "
-                            + $"Delete {old} on origin in the Git dialog (Fetch first so it is listed); {unpublished[i]} is pushed at the next run's end.";
-                        continue;
-                    }
-                }
+                // A branch on origin is never deleted here, not even a member's own old branch that its new one is under
+                // (members/docs for members/docs/docs): a name alone does not prove whose it is. The push waits, and the
+                // person deletes it in the Git dialog (plan, then confirm).
                 if (blockers.FirstOrDefault() is { } blocker)
                 {
                     rejected.Add(unpublished[i]);

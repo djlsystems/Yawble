@@ -232,20 +232,20 @@ public class TeamBranchMoveTests
     }
 
     [Fact]
-    public async Task AMoveThatWouldClashWithAnExistingRef_LeavesTheMemberOnItsOldBranch()
+    public async Task AMemberNamedLikeItsTeam_MovesThroughItsOwnOldBranch()
     {
-        // Team "Ada" with a member "Ada": members/ada/ada cannot exist beside members/ada.
+        // Team "Ada" with a member "Ada": members/ada/ada cannot exist beside members/ada, so (B020) the member's own old
+        // branch is moved through: members/ada becomes members/ada/ada, its work and HEAD with it.
         using var f = new TeamsFixture();
         var (_, ada, _) = f.Team("Ada");
         var checkout = await f.Repos.PrepareAsync(ada, Ct);
-        var old = MakeOldStyle(f, ada, checkout);
+        MakeOldStyle(f, ada, checkout);
         var tip = Commit(checkout.ClonePath, checkout.Workspace, "w.txt");
         Assert.True((await f.Repos.FetchBackAsync(ada, Ct)).Fetched);
 
         var again = await f.Repos.PrepareAsync(ada, Ct);
-        Assert.Equal(old, again.Branch);
-        Assert.Equal(old, Ok(again.ClonePath, again.Workspace, "symbolic-ref", "--short", "HEAD"));
+        Assert.Equal("members/ada/ada", again.Branch);
+        Assert.Equal("members/ada/ada", Ok(again.ClonePath, again.Workspace, "symbolic-ref", "--short", "HEAD"));
         Assert.Equal(tip, Ok(again.ClonePath, again.Workspace, "rev-parse", "HEAD"));
-        Assert.Contains(f.Log, l => l.Contains("stays on members/ada", StringComparison.Ordinal));
     }
 }

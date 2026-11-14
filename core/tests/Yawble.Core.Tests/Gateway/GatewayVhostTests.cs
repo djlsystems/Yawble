@@ -329,6 +329,21 @@ public class GatewayVhostTests
         Assert.Equal(HttpStatusCode.OK, await Ask());
     }
 
+    [Theory]
+    [InlineData("example.com", true)]
+    [InlineData("registry.npmjs.org.", true)] // a trailing dot names the same host
+    [InlineData("169.254.169.254", false)] // an address: never reachable, over https either
+    [InlineData("127.0.0.1", false)]
+    [InlineData("localhost", false)]
+    [InlineData("printer.local", false)]
+    [InlineData("api.anthropic.com", false)] // a model vendor's host
+    [InlineData("bus.yawble.internal", false)] // a gateway virtual host
+    [InlineData("bus.yawble.internal.", false)]
+    [InlineData("cloud.yawble.ai", false)] // the app's own
+    [InlineData("", false)]
+    public void OnlyAHostThePersonCouldAllow_IsToldToUseHttps(string host, bool outside) =>
+        Assert.Equal(outside, RunGateway.IsOutsideHost(host));
+
     [Fact]
     public async Task RefusedPlainHttpToAnOutsideHost_CarriesThePlainHttpNote()
     {

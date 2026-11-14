@@ -171,7 +171,9 @@ public sealed class RunGateway : IAsyncDisposable
             // Plain http is never forwarded; a host name off the allowlist is still reported (allowed, it is reachable over https).
             // Only a real outside host is told to use https: a gateway virtual host (*.yawble.internal) has no https address.
             var outside = IsOutsideHost(vhost);
-            var told = vhost.Length > 0 && !Vhosts.HostAllowed(vhost, _spec.AllowHosts) && !vhost.EndsWith("." + Policy.FloorRules.ReservedSuffix, StringComparison.OrdinalIgnoreCase)
+            var bare = vhost.TrimEnd('.'); // a trailing dot names the same host: it must not slip past the virtual-host test
+            var told = bare.Length > 0 && !Vhosts.HostAllowed(vhost, _spec.AllowHosts) && !bare.EndsWith("." + Policy.FloorRules.ReservedSuffix, StringComparison.OrdinalIgnoreCase)
+                       && !bare.Equals(Policy.FloorRules.ReservedSuffix, StringComparison.OrdinalIgnoreCase)
                 ? $"{vhost} is not reachable from this agent: {await AllowlistRefusalAsync(vhost, head.Method, path, ct)}"
                 : $"{vhost} is not reachable from this agent";
             if (outside) told += $". {PlainHttpNote}";
@@ -609,16 +611,15 @@ public sealed class RunGateway : IAsyncDisposable
     public const string PlainHttpNote = "Only https is forwarded: plain http is refused even for an allowed host; use the https:// address.";
 
     /// <summary>
-    /// A real outside host a plain-http refusal may point at its https address: a name, not a gateway virtual host
-    /// (*.yawble.internal) and not a model vendor or sign-in host (never reachable, over https either).
+    /// A real outside host a plain-http refusal may point at its https address: a host the person could be asked to
+    /// allow (<see cref="Integrations.NetworkAskFilter"/>). Not a gateway virtual host (*.yawble.internal), an IP address,
+    /// a loopback or private-network name, the app's own hosts, or a model vendor or sign-in host: none of those is
+    /// reachable over https either, so pointing at https would mislead.
     /// </summary>
-    private static bool IsOutsideHost(string vhost)
+    internal static bool IsOutsideHost(string vhost)
     {
         var h = vhost.TrimEnd('.');
-        if (h.Length == 0) return false;
-        var reserved = Policy.FloorRules.ReservedSuffix;
-        if (h.Equals(reserved, StringComparison.OrdinalIgnoreCase) || h.EndsWith("." + reserved, StringComparison.OrdinalIgnoreCase)) return false;
-        return !Vhosts.IsNeverConnect(h);
+        return h.Length > 0 && Integrations.NetworkAskFilter.Problem(h) is null;
     }
 
     /// <summary>The gateway log's detail for an allowlist miss (GatewayVerdicts and the Logs dialog read it).</summary>

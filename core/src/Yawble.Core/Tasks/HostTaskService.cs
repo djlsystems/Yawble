@@ -156,10 +156,11 @@ public sealed class HostTaskService
             return Refused(task, 8, busy);
         }
 
-        if (BindingRefusal(eval, null, member, workflow, Actor.Current) is { } unbound) return Refused(task, 9, unbound);
-
+        // A request that already waits is answered first: repeating it must not add a refused run each time.
         if (_store.PendingAsk(task.Id) is { } waiting)
             return new TaskRequestResult(RequestKind.AlreadyWaiting, $"asked: task {task.Def.Name} already waits for the person (request {waiting.Id}). Do not ask again.", waiting.Id);
+
+        if (BindingRefusal(eval, null, member, workflow, Actor.Current) is { } unbound) return Refused(task, 9, unbound);
 
         var approval = _store.Approval(task.Id);
         if (eval.Covers(approval))
@@ -481,7 +482,7 @@ public sealed class HostTaskService
             foreach (var (name, value) in bound)
             {
                 env[name] = value;
-                secrets.Add(value);
+                secrets.AddRange(TaskProcess.MaskedParts(value));
             }
             runId = _store.InsertRun(task, eval.Repo.Path, askId, member, eval.Commit, eval.DefinitionHash, eval.FilesHash, eval.ProgramResolved,
                 missing.Count == 0 ? null : string.Join(",", missing), who);

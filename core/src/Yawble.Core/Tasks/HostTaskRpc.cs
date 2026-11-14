@@ -93,6 +93,8 @@ public sealed class HostTaskRpc(HostTaskService tasks, Func<long, IReadOnlyList<
 
     private async Task<JsonNode> PreviewAsync(long teamId, HostTaskDef def, CancellationToken ct)
     {
+        // A Cloud Link preview with new bindings is refused like a save: its errors would name the computer's Connections.
+        if (BindingRefusal(Actor.Current, def, tasks.Store.Task(teamId, def.Name)?.Def) is { } refused) throw new RpcException("forbidden", refused);
         var rules = Validation(def);
         var pv = rules is null ? await tasks.PreviewAsync(teamId, def, ct) : null;
         return new JsonObject
