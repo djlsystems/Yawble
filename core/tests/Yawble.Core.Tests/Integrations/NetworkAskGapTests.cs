@@ -335,6 +335,22 @@ public sealed class NetworkAskGapTests : IDisposable
         Assert.True(omarHas || !omarTold, "Beta's Manager was told pypi.org is allowed for Omar, but Omar's override still filters it out");
     }
 
+    [Fact] // card 67: the Approvals prune goes by when an ask was answered, so a deny's 24-hour quiet outlives the sweep
+    public async Task ADenyOfAnAskRaisedLongAgo_SurvivesTheSweep_AndTheHostStaysQuiet()
+    {
+        var asks = Service();
+        asks.Refused("Alpha/Priya", "slow.example", "CONNECT", null);
+        _clock.Advance(TimeSpan.FromDays(400)); // it waited past the Approvals retention (365 days)
+        await asks.AnswerAsync(Assert.Single(asks.Asks()).Id, NetworkAskChoices.Deny, "not needed", Ct);
+        _clock.Advance(TimeSpan.FromHours(1));
+
+        new Yawble.Core.Logs.LogService(_db.Dir, _db.ConnectionString, _clock).Sweep();
+
+        Assert.Equal("denied", Assert.Single(asks.Asks(pendingOnly: false)).State);
+        Assert.Equal(HostAskOutcome.Denied, asks.Refused("Alpha/Priya", "slow.example", "CONNECT", null));
+        Assert.Empty(asks.Asks());
+    }
+
     private static long InsertIn(TempDb db, string sql)
     {
         using var c = new SqliteConnection(db.ConnectionString);

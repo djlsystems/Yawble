@@ -174,7 +174,7 @@ a member's card opens it at that member's activity.
   either way. Pages load as the table scrolls; a row opens to show every field.
 - **Prune…** deletes a log's entries older than a chosen age, or all of them. It first says how many entries and files
   go, their date range, and what is lost, and deletes only after **Delete**. Approvals still waiting for an answer are
-  never pruned. Team messages and Board history are never pruned: the team pages, workflows and the Monitor's replay
+  never pruned, and an answered one is kept by when it was answered. Host tool rows in Approvals are not pruned. Team messages and Board history are never pruned: the team pages, workflows and the Monitor's replay
   are built from them.
 - **Retention…** sets how long each log is kept (or forever). Once a day the app deletes what is older. Defaults: a
   year for accountability, security and usage, 30 days for transcripts, 14 days for diagnostics.

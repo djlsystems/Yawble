@@ -135,7 +135,7 @@ public static class LogSources
             "tm.name = @team", "t.member = @member",
             // An answered ask goes by when it was answered, not raised: one that waited past the retention must not be
             // pruned the moment the person answers it (for a denied network ask that would lift the 24-hour DenyQuiet).
-            new("integration_asks", AnsweredAt, 365, "who approved or declined those requests, and who allowed or denied which host. Requests still waiting for an answer are never pruned.", Where: "state <> 'pending'",
+            new("integration_asks", AnsweredAt, 365, "who approved or declined those requests, and who allowed or denied which host. Requests still waiting for an answer are never pruned. Host tool requests (developer tools agents asked for) are not pruned.", Where: "state <> 'pending'",
                 Also: [new("network_asks", AnsweredAt, null, "", Where: "state <> 'pending'")])),
 
         new("usage", "Model usage", "Usage",
