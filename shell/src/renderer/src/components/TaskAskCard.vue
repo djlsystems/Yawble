@@ -28,6 +28,10 @@ const short = (s: string | null | undefined) => (s ?? '').slice(0, 8);
         in {{ ask.detail.workdir }} · limit {{ ask.detail.timeout_s }} s · pin mode {{ ask.detail.pin_mode }}
         <template v-if="ask.detail.env_names.length"> · passes environment names: {{ ask.detail.env_names.join(', ') }}</template>
       </p>
+      <template v-if="ask.detail.env_from_connections?.length">
+        <p class="small muted">Environment from a Connection (read at start, the value is never shown):</p>
+        <p v-for="b in ask.detail.env_from_connections" :key="b" class="small mono" data-test="task-ask-binding">{{ b }}</p>
+      </template>
       <p class="small"><span class="muted">Pinned files:</span> <span class="mono">{{ ask.detail.pinned.join(', ') || 'none (only the command line)' }}</span></p>
       <p v-for="w in ask.detail.warnings" :key="w" class="small warn">{{ w }}</p>
       <p v-if="!ask.detail.standingApproval" class="small" data-test="task-ask-first">No standing approval yet.</p>

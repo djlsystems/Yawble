@@ -138,7 +138,7 @@ onMounted(load);
 
     <ApisPanel v-show="tab === 'api'" :api="api" :teams="teams" @count="apiCount = $event" />
     <McpServersPanel v-show="tab === 'mcp'" :api="api" :teams="teams" @count="mcpCount = $event" />
-    <ConnectionsPanel v-show="tab === 'connections'" :api="api" @count="connectionCount = $event" />
+    <ConnectionsPanel v-show="tab === 'connections'" :api="api" :teams="teams" @count="connectionCount = $event" />
     <IntegrationDialog v-if="editing" :api="api" kind="cli" :name="editing" :teams="teams" :initial-scope="null" @close="closed" @saved="load" />
     <TasksPanel :api="api" :teams="teams" />
   </section>

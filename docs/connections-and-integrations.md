@@ -6,8 +6,10 @@ no sign-ins, and their only network path is the run's gateway, which reaches onl
 the app, under rules you set. The app runs each call on your computer, with your sign-in, and the agent gets only
 the result.
 
-A **Connection** is a sign-in (an API key, a token, an OAuth sign-in or a website login) that integrations share.
-Connections are kept on this computer; agents never see them.
+A **Connection** is a sign-in (an API key, a token, an OAuth sign-in or a website login) that integrations and
+host tasks share. A host task can take an environment variable from a Connection (see
+[Environment from a Connection](#environment-from-a-connection)). Connections are kept on this computer; agents
+never see them.
 
 Everything here is in **Settings > Integrations**, which has four tabs: **CLIs**, **APIs**, **MCP servers** and
 **Connections**. Host tasks are listed below the tabs.
@@ -84,6 +86,56 @@ task and give a reason. Each request asks you first: **Run once**, or **Always f
 standing approval pinned to the files shown. When those files change, the task asks again and shows what changed.
 The result reaches the agent when the run ends.
 
+#### Environment from a Connection
+
+A task's environment holds only a few basic variables and the variable names you list to pass on from the app's
+own environment. A **binding** adds one more variable whose value comes from a Connection: a variable name, a
+Connection, and one of that Connection's secret fields. A release script that needs `GH_TOKEN`, for example, takes
+it from a Connection that holds a GitHub token.
+
+- **How to add one.** In the task's form, under **Environment from a Connection**, press
+  **+ Variable from a Connection**, type the variable name, pick the Connection, then pick the field. A Connection
+  with one secret field fills the field in. **Remove** takes a row out. The name cannot be one the task already
+  passes on from your environment, nor one the app sets itself (`PATH`, `HOME`, `TERM`, `CI`, `NO_COLOR` and the
+  other basic variables).
+- **What is shown.** The task and its approval request show a binding as
+  `GH_TOKEN ← Connection 'GitHub release' (token)`: the variable, the Connection's name and the field, never the value.
+- **What is pinned.** The binding is part of the task's definition. Adding, removing or re-pointing a binding asks
+  you again, like any other change to the task. The secret value is not pinned: replacing an expired token in the
+  Connection asks nothing.
+- **At run time.** The value is read from the Connection when the task starts and set in the task's environment
+  only. It is masked in the task's log, and it never reaches an agent: not in the request, the result, the log, the
+  call record or the board. The agent still only names the task and gives a reason.
+- **When it cannot be read.** If the Connection is gone, its field is empty, or it needs reconnecting, the task does
+  not start. The agent is told which binding is missing, by variable and Connection name, and the run record notes
+  it. Fix the Connection and ask again.
+- **Over Cloud Link** the bindings show by name only and cannot be changed, like the rest of a host task's
+  definition.
+
+#### Example: a release job that uploads to GitHub
+
+A team publishes a build to each new GitHub release of a repository.
+
+1. On GitHub, make a fine-grained personal access token with **Contents: write** on that one repository only, and
+   nothing else.
+2. In **Settings > Integrations > Connections**, add an **API key or token** Connection named, for example,
+   `GitHub release (Yawble)`, and paste the token into its `token` field.
+3. Below the tabs, add a host task for the team, for example `release`, that runs the release script in the
+   repository (for example `bash` with the argument `packaging/release.sh`). Under **Environment from a Connection**,
+   add `GH_TOKEN` ← `GitHub release (Yawble)` (`token`). Save it.
+4. Offer `gh` to the team and give the team a watch on `gh release list --json tagName`. Add an **Event** trigger on
+   that watch that tells the team's Manager when a new release appears.
+5. When a new release appears, the Manager asks for the task `release` by name, with a reason. The request shows on
+   the team's page with the command, the pinned files and the binding. Approve it once with **Always for this team**;
+   later releases run without asking, until something pinned changes.
+
+Why this shape is safe:
+
+- The token can reach only that one repository, and only its contents.
+- Agents never see the token. They name the task; the app reads the token and starts the script on this computer.
+- A change to the script, its command line or the binding asks you again before the next run.
+- Removing the Connection stops the job: the task refuses to start without it.
+
 ## Who gets an integration
 
 Each integration has **Offer to**: **Every team** or the teams you pick. Only offered teams' agents see its tools.
@@ -159,6 +211,9 @@ hosts in **Settings > Guardrails**) and applies from the member's next run. See 
 The **Connections** tab lists every Connection, its status (**untested**, **works** or **needs reconnect**) and what
 uses it. **Test** checks a Connection.
 
+A Connection that a host task takes a variable from also says which tasks use it. You can still remove it: the
+removal warns you, and those tasks then refuse to start until they are bound to another Connection.
+
 ### How secrets are kept
 
 - Secret values are kept only in the operating system's credential store: Windows Credential Manager, the macOS
@@ -206,7 +261,7 @@ requests, and run
 Discover and save rules for CLIs the app knows or that are already set up on this computer. These are refused
 remotely and happen only on the computer itself:
 
-- seeing or changing Connections;
+- seeing or changing Connections, and defining or changing a host task's environment from a Connection;
 - every sign-in: OAuth, website logins, MCP server sign-ins, and opening a terminal to sign a CLI in;
 - adding, removing or discovering an API;
 - importing MCP servers, and adding, changing or reading a remote MCP server;
