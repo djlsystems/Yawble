@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { discussWithConcierge, gitPrompt } from '../conciergeDiscuss';
 import { computed, onMounted, ref } from 'vue';
 import type { GitInstallResult, GitStatus, YawbleApi } from '../../../shared/api';
 import { errorText } from '../api';
@@ -66,6 +67,7 @@ defineExpose({ check });
       </button>
       <a :href="status!.downloadUrl" target="_blank" rel="noopener" data-test="git-download">Download Git</a>
       <button type="button" class="mini" :disabled="checking || installing" data-test="git-recheck" @click="check">Check again</button>
+      <button type="button" class="mini" data-test="git-discuss" title="Talk it through with the Concierge" @click="discussWithConcierge(null, gitPrompt(text))">Discuss with the Concierge</button>
     </span>
     <span v-if="api.remote" class="muted small" data-test="git-remote-note">Install it on the computer itself.</span>
     <span v-if="error" class="error" data-test="git-error">{{ error }}</span>
