@@ -16,6 +16,9 @@
 //   node scripts/build-version.mjs              prints the version
 //   node scripts/build-version.mjs --json       prints {version, commit, dirty, released}
 //   node scripts/build-version.mjs --cs <file>  writes the core's assembly attributes (only when they changed)
+//
+// packaging/build.mjs stamps the same version into the installed files: numericVersion (2026.11.14.3) for the file
+// and assembly versions and the Electron app's version (dotnetVersionProperties, electronBuilderVersion).
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -81,6 +84,45 @@ export function csharpSource(v) {
     `[assembly: System.Reflection.AssemblyMetadata("YawbleReleased", ${s(v.released ? 'true' : 'false')})]`,
     '',
   ].join('\n');
+}
+
+/** The highest part a .NET assembly or Windows file version may have (AssemblyVersion: 65534; a Win32 VERSIONINFO part is 16 bits). */
+export const MAX_VERSION_PART = 65534;
+
+/**
+ * The build's version in four-part numeric form, for Windows file Properties, the assemblies and the Electron app:
+ * 2026.11.14.3 for that release; a dev build gets its last release's numbers (2026.11.14.3+dev.ee55691 -> 2026.11.14.3)
+ * and a build before the first release 0.0.0.0. Leading zeros go (2026.01.05.2 -> 2026.1.5.2). Throws on a version
+ * this file would not make, or a part over 65534, so a package is never stamped with a wrong number.
+ */
+export function numericVersion(version) {
+  if (!isBuildVersion(version)) throw new Error(`not a build version: ${JSON.stringify(String(version).slice(0, 60))}`);
+  const parts = version.split('+')[0].split('.').map(Number);
+  while (parts.length < 4) parts.push(0);
+  const big = parts.find((p) => !Number.isSafeInteger(p) || p > MAX_VERSION_PART);
+  if (big !== undefined) throw new Error(`${version}: version part ${big} is over ${MAX_VERSION_PART}, the most a file version can hold`);
+  return parts.join('.');
+}
+
+/**
+ * The `dotnet publish` properties that stamp the build's version into every published assembly and executable:
+ * Version and FileVersion the numeric form, InformationalVersion (Properties' "Product version") the build's own
+ * version, as yawble-core --version prints it. The SDK would add "+<commit>" to InformationalVersion; it is off.
+ */
+export function dotnetVersionProperties(version) {
+  const n = numericVersion(version);
+  return [`-p:Version=${n}`, `-p:FileVersion=${n}`, `-p:InformationalVersion=${version}`, '-p:IncludeSourceRevisionInInformationalVersion=false'];
+}
+
+/**
+ * electron-builder settings for the app's version: package.json's version in the package (Electron's app.getVersion()
+ * and the macOS bundle's short version), the file version of yawble.exe and the bundle version (buildVersion), and
+ * buildNumber, the fourth part of the exe's and installer's product version (electron-builder reads only three parts
+ * of the version there and puts buildNumber fourth).
+ */
+export function electronBuilderVersion(version) {
+  const n = numericVersion(version);
+  return { extraMetadata: { version: n }, buildVersion: n, buildNumber: n.split('.')[3] };
 }
 
 function repoRoot() {
