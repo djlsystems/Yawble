@@ -226,6 +226,96 @@ public sealed class LogServiceTests : IDisposable
         Assert.All(Rows(Q(new LogQuery("approvals"))), r => Assert.Equal("pending", r["state"]!.GetValue<string>()));
     }
 
+    private long Count(string sql)
+    {
+        using var c = new SqliteConnection(_db.ConnectionString);
+        c.Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = sql;
+        return Convert.ToInt64(cmd.ExecuteScalar());
+    }
+
+    private long ToolAsk(string tool, string state, string at, string? decidedAt, params (string Kind, string At)[] events)
+    {
+        using var c = new SqliteConnection(_db.ConnectionString);
+        c.Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO tool_asks (at, team_id, tool, member, last_seen, state, decided_by, decided_at)
+            VALUES (@at, 1, @tool, 'web/DeveloperAda', @at, @state, @by, @decided) RETURNING id;
+            """;
+        cmd.Parameters.AddWithValue("@at", at);
+        cmd.Parameters.AddWithValue("@tool", tool);
+        cmd.Parameters.AddWithValue("@state", state);
+        cmd.Parameters.AddWithValue("@by", decidedAt is null ? DBNull.Value : "pat");
+        cmd.Parameters.AddWithValue("@decided", (object?)decidedAt ?? DBNull.Value);
+        var id = (long)cmd.ExecuteScalar()!;
+        foreach (var (kind, when) in events)
+            Exec("INSERT INTO tool_ask_events (ask_id, at, kind) VALUES (@a, @at, @k);", ("@a", id), ("@at", when), ("@k", kind));
+        return id;
+    }
+
+    [Fact]
+    public void PruningApprovals_AlsoPrunesAnsweredToolAsks_KeepsWaitingOnesAndThe24HourQuiets()
+    {
+        static string HoursAgo(double h) => (Now - TimeSpan.FromHours(h)).ToString("O");
+        var installed = ToolAsk("git", "installed", Ago(401), Ago(400), ("asked", Ago(401)), ("install", Ago(400)), ("installed", Ago(400)));
+        ToolAsk("node-lts", "pending", Ago(700), null, ("asked", Ago(700)));
+        ToolAsk("python-3", "installing", Ago(500), null, ("asked", Ago(500)), ("install", Ago(500)));
+        // Not now for the same package under each of its two names, both within the 24 hours.
+        ToolAsk("dotnet-sdk-10", "dismissed", HoursAgo(20), HoursAgo(12), ("asked", HoursAgo(20)), ("not now", HoursAgo(12)));
+        ToolAsk("dotnet-sdk-lts", "dismissed", HoursAgo(10), HoursAgo(6), ("asked", HoursAgo(10)), ("not now", HoursAgo(6)));
+        // A Not now whose 24 hours are over.
+        ToolAsk("gh", "dismissed", Ago(3), Ago(2), ("asked", Ago(3)), ("not now", Ago(2)));
+        Exec("""
+            INSERT INTO network_asks (at, team_id, member, host, method, last_seen, state, decided_by, decided_at) VALUES
+              (@recent, 1, 'web/DeveloperAda', 'quiet.example', 'CONNECT', @recent, 'denied', 'pat', @recent),
+              (@older, 1, 'web/DeveloperAda', 'over.example', 'CONNECT', @older, 'denied', 'pat', @older);
+            """, ("@recent", HoursAgo(12)), ("@older", Ago(2)));
+        var seededAnswered = Count("SELECT count(*) FROM integration_asks WHERE state <> 'pending'");
+
+        // Keeping a year: only the ask installed 400 days ago goes, with its three events; the preview says so.
+        var preview = _logs.PrunePreview("approvals", _logs.CutoffFor(365));
+        Assert.Equal(4, preview.Count);
+        Assert.Equal(4, _logs.Prune("approvals", _logs.CutoffFor(365)));
+        Assert.Equal(0, Count($"SELECT count(*) FROM tool_asks WHERE id = {installed}"));
+        Assert.Equal(0, Count($"SELECT count(*) FROM tool_ask_events WHERE ask_id = {installed}"));
+
+        // Pruning all of it: the answered tool-call asks, the denial older than 24 hours and the old Not now (with its two
+        // events) go. The preview's count is what is deleted.
+        preview = _logs.PrunePreview("approvals", "9999-12-31");
+        Assert.Equal(seededAnswered + 1 + 1 + 2, preview.Count);
+        Assert.Equal(preview.Count, _logs.Prune("approvals", "9999-12-31"));
+        Assert.Equal(["dotnet-sdk-10", "dotnet-sdk-lts", "node-lts", "python-3"],
+            Rows(Q(new LogQuery("approvals"))).Where(r => r["integration"]!.GetValue<string>() == "host tool")
+                .Select(r => r["args"]!.GetValue<string>().Split(':')[0]).Distinct().Order());
+        Assert.Equal(4, Count("SELECT count(*) FROM tool_asks"));
+        Assert.Equal(7, Count("SELECT count(*) FROM tool_ask_events"));
+        Assert.Equal(0, Count("SELECT count(*) FROM tool_ask_events WHERE ask_id NOT IN (SELECT id FROM tool_asks)"));
+        // The Not now hold reads the latest dismissal of the package's names; it is still there, as is the host's denial.
+        Assert.Equal(2, Count("SELECT count(*) FROM tool_asks WHERE state = 'dismissed'"));
+        Assert.Equal(HoursAgo(6), Scalar("SELECT decided_at FROM tool_asks WHERE team_id = 1 AND tool IN ('dotnet-sdk-10', 'dotnet-sdk-lts') AND state = 'dismissed' ORDER BY decided_at DESC LIMIT 1;"));
+        Assert.Equal("quiet.example", Scalar("SELECT host FROM network_asks WHERE state = 'denied';"));
+
+        // A day later the quiets are over: the Not nows and the denial go; the waiting and installing asks never do.
+        _clock.Advance(TimeSpan.FromDays(1));
+        preview = _logs.PrunePreview("approvals", "9999-12-31");
+        Assert.Equal(2 + 4 + 1, preview.Count); // the two Not nows, their four events, the denial
+        Assert.Equal(preview.Count, _logs.Prune("approvals", "9999-12-31"));
+        Assert.Equal("installing,pending", Scalar("SELECT group_concat(state, ',') FROM (SELECT state FROM tool_asks ORDER BY state);"));
+        Assert.Equal(3, Count("SELECT count(*) FROM tool_ask_events"));
+        Assert.Equal(0, Count("SELECT count(*) FROM network_asks WHERE state = 'denied'"));
+    }
+
+    private string? Scalar(string sql)
+    {
+        using var c = new SqliteConnection(_db.ConnectionString);
+        c.Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = sql;
+        return cmd.ExecuteScalar() as string;
+    }
+
     [Fact]
     public void PruningTranscripts_DeletesTheirFiles()
     {
