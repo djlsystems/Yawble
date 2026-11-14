@@ -314,10 +314,6 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
         {
             throw new RpcException("policy_refused", string.Join("; ", e.Errors));
         }
-        catch (StaleMemberListException e)
-        {
-            throw new RpcException("members_changed", e.Message);
-        }
     }
 
     /// <summary>
@@ -571,36 +567,12 @@ public sealed class StoreNetworkPolicy(PolicyStore store, Func<long, Cancellatio
         return hosts.Where(h => FloorRules.HostProblem(h) is null).Distinct(StringComparer.Ordinal).ToList();
     }
 
-    /// <summary>How many times a team add is tried when the team's members keep changing under it.</summary>
-    public const int TeamAddAttempts = 3;
-
-    /// <summary>
-    /// Checks the host against every current member's run and writes it in one transaction. A member hired (or removed)
-    /// while the layouts were built makes the write refuse the list as stale: the list is rebuilt with fresh layouts and
-    /// tried again, up to <see cref="TeamAddAttempts"/> times; a host refusal is never retried.
-    /// </summary>
     public async Task AllowForTeamAsync(long teamId, string host, CancellationToken ct)
     {
+        var members = new List<(long, RunLayout)>();
+        foreach (var id in store.TeamMemberIds(teamId)) members.Add((id, await layoutFor(id, ct)));
         var who = Provenance.Actor.Current ?? Provenance.Actor.Window;
-        for (var attempt = 1; ; attempt++)
-        {
-            var members = new List<(long, RunLayout)>();
-            foreach (var id in store.TeamMemberIds(teamId)) members.Add((id, await layoutFor(id, ct)));
-            try
-            {
-                store.AddTeamHost(teamId, host, members, who.User ?? Provenance.Actor.LocalUser, who.Via);
-                return;
-            }
-            catch (StaleMemberListException e) when (attempt >= TeamAddAttempts)
-            {
-                throw new StaleMemberListException(teamId, e.CheckedIds, e.CurrentIds,
-                    $"{host} was not added for the team: its members kept changing while each one's run was checked ({TeamAddAttempts} tries); nothing was written, try again");
-            }
-            catch (StaleMemberListException)
-            {
-                // the team changed under the check: rebuild the list
-            }
-        }
+        store.AddTeamHost(teamId, host, members, who.User ?? Provenance.Actor.LocalUser, who.Via);
     }
 
     public async Task AllowForMemberAsync(long memberId, string host, CancellationToken ct)

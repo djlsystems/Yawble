@@ -3,20 +3,6 @@ using Yawble.Core.Sandboxing;
 
 namespace Yawble.Core.Policy;
 
-/// <summary>
-/// A team host was not written because the team's members changed after the list it was checked against was built (or the
-/// list missed a member): not a refusal of the host. Rebuild the list with fresh layouts and try again.
-/// </summary>
-public sealed class StaleMemberListException(long teamId, IReadOnlyList<long> checkedIds, IReadOnlyList<long> currentIds, string? message = null)
-    : Exception(message ?? $"the team's members changed while the host was being checked (checked {Ids(checkedIds)}, now {Ids(currentIds)}); nothing was written")
-{
-    public long TeamId { get; } = teamId;
-    public IReadOnlyList<long> CheckedIds { get; } = checkedIds;
-    public IReadOnlyList<long> CurrentIds { get; } = currentIds;
-
-    private static string Ids(IReadOnlyList<long> ids) => ids.Count == 0 ? "none" : string.Join(", ", ids);
-}
-
 /// <summary>One host on a team's network allow list (team_network_allows, 0041).</summary>
 public sealed record TeamHost(string Host, string AddedBy, string? AddedVia, string AddedAt);
 
@@ -205,9 +191,6 @@ public sealed class PolicyStore(string connectionString, PolicyDryRun? dryRun = 
     /// Adds a host to the team's network allow list, in one write. Checked first: the floor rules (no vendor host, no
     /// wildcard, no address, a lower-case DNS name), then each member's merged policy with the host and the sandbox dry run
     /// (<paramref name="members"/>: each current member's run layout). Any refusal throws and nothing is written.
-    /// The write is one transaction that re-reads the team's member ids: when they are not exactly the ids checked (a
-    /// member hired or removed meanwhile, or a list missing one), nothing is written and it throws
-    /// <see cref="StaleMemberListException"/>; the caller rebuilds the list and tries again.
     /// False when the host was on the list already.
     /// </summary>
     public bool AddTeamHost(long teamId, string host, IReadOnlyList<(long MemberId, RunLayout Layout)> members, string addedBy, string? addedVia)
@@ -227,32 +210,15 @@ public sealed class PolicyStore(string connectionString, PolicyDryRun? dryRun = 
                 errors.AddRange(dryRun(global, m.Override, m.Loosen with { Network = new NetworkPatch([.. m.Loosen.Network?.AllowHosts ?? [], .. current, host]) }, layout));
         }
         if (errors.Count > 0) throw new PolicyException(errors.Distinct().ToList());
-        var checkedIds = members.Select(m => m.MemberId).Distinct().Order().ToList();
         using var c = Open();
-        // BEGIN IMMEDIATE (Microsoft.Data.Sqlite's default): the write lock is held from the member read to the insert,
-        // so no hire can land between them.
-        using var tx = c.BeginTransaction();
-        var currentIds = new List<long>();
-        using (var read = c.CreateCommand())
-        {
-            read.Transaction = tx;
-            read.CommandText = "SELECT id FROM members WHERE team_id = $t ORDER BY id;";
-            read.Parameters.AddWithValue("$t", teamId);
-            using var r = read.ExecuteReader();
-            while (r.Read()) currentIds.Add(r.GetInt64(0));
-        }
-        if (!currentIds.SequenceEqual(checkedIds)) throw new StaleMemberListException(teamId, checkedIds, currentIds);
         using var cmd = c.CreateCommand();
-        cmd.Transaction = tx;
         cmd.CommandText = "INSERT INTO team_network_allows (team_id, host, added_by, added_via, added_at) VALUES ($t, $h, $by, $via, $at) ON CONFLICT (team_id, host) DO NOTHING;";
         cmd.Parameters.AddWithValue("$t", teamId);
         cmd.Parameters.AddWithValue("$h", host);
         cmd.Parameters.AddWithValue("$by", addedBy);
         cmd.Parameters.AddWithValue("$via", (object?)addedVia ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$at", Now());
-        var added = cmd.ExecuteNonQuery() > 0;
-        tx.Commit();
-        return added;
+        return cmd.ExecuteNonQuery() > 0;
     }
 
     /// <summary>Takes a host off the team's list: the team's next runs no longer have it (a member's own loosen block may still). False when it was not there.</summary>
