@@ -189,13 +189,12 @@ public sealed partial class TeamRepos
             }
         }
         var members = new List<TeamGitBranch>();
-        var listed = await Git.RunAsync(path, ct, "for-each-ref", "--format=%(refname:short) %(objectname)", "refs/heads/" + BranchPrefix);
-        foreach (var line in listed.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        // This team's: members/<team>/*, and old-style members/<name> ones (B016 left them for the person to delete).
+        foreach (var (branch, sha) in await TeamMemberBranchesAsync(repo.TeamId, team, path, legacyInUseOnly: false, ct))
         {
-            var parts = line.Split(' ', 2);
-            var aheadOfBase = start is null ? 0 : await CountAsync(path, parts[1], start, ct);
-            var inTeam = teamSha is not null && await IsAncestorAsync(path, parts[1], teamSha, ct);
-            members.Add(new TeamGitBranch(parts[0], parts[1], aheadOfBase, inTeam));
+            var aheadOfBase = start is null ? 0 : await CountAsync(path, sha, start, ct);
+            var inTeam = teamSha is not null && await IsAncestorAsync(path, sha, teamSha, ct);
+            members.Add(new TeamGitBranch(branch, sha, aheadOfBase, inTeam));
         }
         var checkedOut = await CurrentBranchAsync(path, ct);
         // The working tree is the person's: their git (and its core.autocrlf) decides what changed. The app's config-free

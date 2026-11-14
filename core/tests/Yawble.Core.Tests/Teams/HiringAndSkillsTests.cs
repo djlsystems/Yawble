@@ -178,16 +178,16 @@ public class HiringAndSkillsTests
         AgentGit.Ok(adaCheckout, "add", "hello.txt");
         AgentGit.Ok(adaCheckout, "commit", "-q", "-m", "hello");
         Assert.True((await f.Repos.FetchBackAsync(ada, Ct)).Fetched);
-        Assert.Contains("refs/heads/members/ada", AgentGit.Host(shared, "for-each-ref", "--format=%(refname)"));
+        Assert.Contains("refs/heads/members/alpha/ada", AgentGit.Host(shared, "for-each-ref", "--format=%(refname)"));
 
         // Members fetch from the bundle, not the repository: a path fetch starts git-upload-pack through sh.exe on
         // Windows, which cannot start in a ProcessContainer (microsoft/mxc#1061); reading a bundle is in-process.
         var bundle = Path.Combine(shared, TeamRepos.SharedBundleFile);
         Assert.True(File.Exists(bundle), "the shared view's bundle is written with every update");
-        Assert.Contains("refs/heads/members/ada", AgentGit.Host(shared, "bundle", "list-heads", bundle));
+        Assert.Contains("refs/heads/members/alpha/ada", AgentGit.Host(shared, "bundle", "list-heads", bundle));
 
         var benCheckout = await f.Repos.PrepareAsync(ben, Ct);
-        AgentGit.Ok(benCheckout, "fetch", "-q", bundle, "members/ada");
+        AgentGit.Ok(benCheckout, "fetch", "-q", bundle, "members/alpha/ada");
         AgentGit.Ok(benCheckout, "merge", "-q", "--no-edit", "FETCH_HEAD");
         Assert.Equal("hi", File.ReadAllText(Path.Combine(benCheckout.ClonePath, "hello.txt")));
     }

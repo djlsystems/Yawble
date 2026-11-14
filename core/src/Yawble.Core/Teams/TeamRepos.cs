@@ -43,7 +43,7 @@ public sealed record GitFinding(string Where, string What);
 /// or a folder the person picked. Before a member's first run the host makes the member's own
 /// <c>git clone --local --no-hardlinks</c> at <c>&lt;appdata&gt;/teams/&lt;team&gt;/members/&lt;member&gt;/repo</c> (the same path
 /// <see cref="Policy.RunLayout"/> grants read/write and uses as cwd), checks out the member's branch
-/// <c>members/&lt;name&gt;</c> and REMOVES the remote: a sandbox never holds a remote or a git credential.
+/// <c>members/&lt;team&gt;/&lt;name&gt;</c> and REMOVES the remote: a sandbox never holds a remote or a git credential.
 /// <c>--no-hardlinks</c> because a hard-linked object file is the same inode as the team repository's, and the
 /// sandbox may write its clone. Shared-.git worktrees are not used: they need write access to the main .git.</para>
 ///
@@ -97,22 +97,38 @@ public sealed partial class TeamRepos
     public const string SharedRepoFolder = "shared.git";
     public string MemberRoot(string team, string member) => Path.Combine(TeamRoot(team), "members", Segment(member));
 
-    /// <summary>The member's one branch: members/&lt;name&gt;, lower-case, with anything git dislikes replaced.</summary>
-    public static string BranchFor(string memberName)
+    /// <summary>
+    /// The member's one branch: members/&lt;team&gt;/&lt;name&gt; (B016), both parts as <see cref="SlugOf"/> makes them, the
+    /// team's the same as in <see cref="TeamBranchFor"/>. Two teams sharing a repository or an origin never share a member branch.
+    /// </summary>
+    public static string BranchFor(string team, string memberName) => MemberBranchPrefix(team) + SlugOf(memberName);
+
+    /// <summary>members/&lt;team&gt;/: where every branch of the team's members is.</summary>
+    public static string MemberBranchPrefix(string team) => BranchPrefix + SlugOf(team) + "/";
+
+    /// <summary>The branch a member had before B016: members/&lt;name&gt;, without the team. Moved at the member's next start.</summary>
+    public static string LegacyBranchFor(string memberName) => BranchPrefix + SlugOf(memberName);
+
+    /// <summary>Whether a branch is an old-style member branch (members/&lt;name&gt;, one level, no team).</summary>
+    public static bool IsLegacyMemberBranch(string branch) =>
+        branch.StartsWith(BranchPrefix, StringComparison.Ordinal) && branch.Length > BranchPrefix.Length && branch.IndexOf('/', BranchPrefix.Length) < 0;
+
+    /// <summary>A name as one branch-name part: lower-case, with anything git dislikes replaced ("member" when nothing is left).</summary>
+    public static string SlugOf(string name)
     {
         var sb = new StringBuilder();
-        foreach (var c in memberName.Trim().ToLowerInvariant())
+        foreach (var c in name.Trim().ToLowerInvariant())
             sb.Append(char.IsAsciiLetterOrDigit(c) || c is '-' or '_' ? c : '-');
         var slug = sb.ToString().Trim('-');
         while (slug.Contains("--", StringComparison.Ordinal)) slug = slug.Replace("--", "-", StringComparison.Ordinal);
-        return BranchPrefix + (slug.Length == 0 ? "member" : slug);
+        return slug.Length == 0 ? "member" : slug;
     }
 
     /// <summary>
     /// The team's delivery branch, team/&lt;team&gt;: the Manager's own branch, into which it
     /// merges accepted work. Landing it on the base branch is the person's.
     /// </summary>
-    public static string TeamBranchFor(string team) => TeamBranchPrefix + BranchFor(team)[BranchPrefix.Length..];
+    public static string TeamBranchFor(string team) => TeamBranchPrefix + SlugOf(team);
 
     public const string TeamBranchPrefix = "team/";
 
@@ -144,7 +160,7 @@ public sealed partial class TeamRepos
     public MemberCheckout CheckoutOf(MemberRef member, TeamRepo repo)
     {
         var root = MemberRoot(member.Team, member.Name);
-        var branch = Row(member.Id)?.Branch ?? (member.Role == MemberRole.Manager ? TeamBranchFor(member.Team) : BranchFor(member.Name));
+        var branch = Row(member.Id)?.Branch ?? (member.Role == MemberRole.Manager ? TeamBranchFor(member.Team) : BranchFor(member.Team, member.Name));
         return new MemberCheckout(Path.Combine(root, "repo"), Path.Combine(root, "home"), Path.Combine(root, "tmp"), branch, repo.BaseBranch, repo.Path);
     }
 
@@ -325,6 +341,9 @@ public sealed partial class TeamRepos
         try
         {
             if (AppCloned(repo.Path)) await RefreshFromOriginAsync(repo.Path, repo.BaseBranch, ct);
+            // B016: a member still on members/<name> moves to members/<team>/<name> (the old branch is kept).
+            // Before the shared view is updated, so its bundle already has the new branch.
+            await MoveLegacyBranchLockedAsync(member, repo, ct);
             await UpdateSharedLockedAsync(member.Team, repo, ct);
             var checkout = CheckoutOf(member, repo);
             checkout = checkout with
@@ -376,7 +395,7 @@ public sealed partial class TeamRepos
         }
         var config = Path.Combine(clone, ".git", "config");
         await SetAsync(config, "user.name", $"{member.Name} ({member.Team})", ct);
-        await SetAsync(config, "user.email", $"{BranchFor(member.Name)[BranchPrefix.Length..]}@{Slug(member.Team)}.yawble.local", ct);
+        await SetAsync(config, "user.email", $"{SlugOf(member.Name)}@{SlugOf(member.Team)}.yawble.local", ct);
         // An empty helper resets the list, so no system or global helper (Git Credential Manager on Windows) applies.
         await SetAsync(config, "credential.helper", "", ct);
         await SetAsync(config, "commit.gpgSign", "false", ct);
@@ -385,8 +404,6 @@ public sealed partial class TeamRepos
 
     private Task SetAsync(string configFile, string key, string value, CancellationToken ct) =>
         Git.RunAsync(null, ct, "config", "--file", configFile, key, value);
-
-    private static string Slug(string s) => BranchFor(s)[BranchPrefix.Length..];
 
     // ------------------------------------------------------------------ after a run
 
@@ -818,13 +835,15 @@ public sealed partial class TeamRepos
                 var ahead = await Git.TryRunAsync(repo.Path, ["rev-list", "--count", "refs/heads/" + branch, "--not", "--remotes=origin"], ct);
                 var isAhead = ahead.ExitCode != 0 || ahead.Stdout != "0";
                 // The team branch is also compared with origin's copy: a fast-forward to a member's tip adds no commit,
-                // yet origin's team branch has not moved.
-                if (!isAhead && branch.StartsWith(TeamBranchPrefix, StringComparison.Ordinal))
+                // yet origin's team branch has not moved. So is a member branch: one moved to members/<team>/<name>
+                // (B016) holds only commits origin has on the old name, yet origin does not have the new one.
+                if (!isAhead && (branch.StartsWith(TeamBranchPrefix, StringComparison.Ordinal) || branch.StartsWith(BranchPrefix, StringComparison.Ordinal)))
                 {
                     var local = await Git.TryRunAsync(repo.Path, ["rev-parse", "refs/heads/" + branch], ct);
                     var remote = await Git.TryRunAsync(repo.Path, ["rev-parse", "--verify", "-q", "refs/remotes/origin/" + branch], ct);
-                    isAhead = remote.ExitCode != 0 || remote.Stdout != local.Stdout;
-                    // ...unless the team branch is only a point of origin's base branch (no work of the team on it):
+                    // A member branch only when origin lacks it: one origin has at another commit is not ours to move.
+                    isAhead = remote.ExitCode != 0 || (branch.StartsWith(TeamBranchPrefix, StringComparison.Ordinal) && remote.Stdout != local.Stdout);
+                    // ...unless the branch is only a point of origin's base branch (no work of the team on it):
                     // a branch on origin that says nothing.
                     if (isAhead && remote.ExitCode != 0
                         && (await Git.TryRunAsync(repo.Path, ["merge-base", "--is-ancestor", "refs/heads/" + branch, "refs/remotes/origin/" + repo.BaseBranch], ct)).ExitCode == 0)

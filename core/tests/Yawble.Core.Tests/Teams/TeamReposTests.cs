@@ -33,10 +33,10 @@ public class TeamReposTests
         Assert.Equal(f.Repos.DefaultRepoPath("Alpha"), repo.Path);
         Assert.DoesNotContain(layout.ImplicitReadwrite, p => repo.Path.StartsWith(p, StringComparison.Ordinal));
 
-        Assert.Equal("members/ada", checkout.Branch);
-        Assert.Equal("members/ada", AgentGit.Ok(checkout, "symbolic-ref", "--short", "HEAD"));
+        Assert.Equal("members/alpha/ada", checkout.Branch);
+        Assert.Equal("members/alpha/ada", AgentGit.Ok(checkout, "symbolic-ref", "--short", "HEAD"));
         Assert.Equal("", AgentGit.Ok(checkout, "remote"));
-        Assert.Equal("members/ada", AgentGit.Ok(checkout, "for-each-ref", "--format=%(refname:short)"));
+        Assert.Equal("members/alpha/ada", AgentGit.Ok(checkout, "for-each-ref", "--format=%(refname:short)"));
         var config = File.ReadAllText(Path.Combine(checkout.ClonePath, ".git", "config"));
         Assert.DoesNotContain("[remote", config);
         Assert.DoesNotContain("url =", config);
@@ -63,7 +63,7 @@ public class TeamReposTests
         }
 
         var benCheckout = await f.Repos.PrepareAsync(ben, Ct);
-        Assert.Equal("members/ben", benCheckout.Branch);
+        Assert.Equal("members/alpha/ben", benCheckout.Branch);
         Assert.NotEqual(checkout.ClonePath, benCheckout.ClonePath);
     }
 
@@ -86,8 +86,8 @@ public class TeamReposTests
         var fetched = await f.Repos.FetchBackAsync(ada, Ct);
         Assert.True(fetched.Fetched, fetched.Error);
         Assert.Equal(sha, fetched.Sha);
-        Assert.Equal(sha, AgentGit.Host(team, "rev-parse", "refs/heads/members/ada"));
-        Assert.Equal("hello", AgentGit.Host(team, "show", "members/ada:hello.txt"));
+        Assert.Equal(sha, AgentGit.Host(team, "rev-parse", "refs/heads/members/alpha/ada"));
+        Assert.Equal("hello", AgentGit.Host(team, "show", "members/alpha/ada:hello.txt"));
         Assert.Equal(sha, f.Repos.Row(ada.Id)!.FetchedSha);
         // main is untouched: merging is the person's.
         Assert.Equal("1", AgentGit.Host(team, "rev-list", "--count", "main"));
@@ -118,7 +118,7 @@ public class TeamReposTests
         AgentGit.Ok(checkout, "commit", "-q", "-m", "x");
         Assert.True((await f.Repos.FetchBackAsync(ada, Ct)).Fetched);
 
-        Assert.Contains("members/ada", AgentGit.Host(picked, "branch", "--list"));
+        Assert.Contains("members/alpha/ada", AgentGit.Host(picked, "branch", "--list"));
         Assert.Equal(before, AgentGit.Host(bare, "for-each-ref"));
         // A folder inside the app's own tree is refused.
         await Assert.ThrowsAsync<ArgumentException>(() => f.Repos.UseExistingRepoAsync(ada.TeamId, "Alpha", Path.Combine(f.AppRoot, "teams", "Alpha", "members"), Ct));
@@ -283,7 +283,7 @@ public class TeamReposTests
         var benCheckout = await f.Repos.PrepareAsync(ben, Ct);
         var team = f.Repos.RepoOf(ada.TeamId)!.Path;
         // Ben's clone stands in for any other repository on this computer: it has a branch Ada must not get read.
-        AgentGit.Ok(benCheckout, "checkout", "-q", "-b", "members/ada");
+        AgentGit.Ok(benCheckout, "checkout", "-q", "-b", "members/alpha/ada");
         File.WriteAllText(Path.Combine(benCheckout.ClonePath, "ben.txt"), "ben\n");
         AgentGit.Ok(benCheckout, "add", "ben.txt");
         AgentGit.Ok(benCheckout, "commit", "-q", "-m", "not ada's");
@@ -295,7 +295,7 @@ public class TeamReposTests
         var result = await f.Repos.FetchBackAsync(ada, Ct);
         Assert.False(result.Fetched);
         Assert.Contains(".git/.git", result.Error);
-        Assert.NotEqual(foreign, AgentGit.Host(team, "for-each-ref", "--format=%(objectname)", "refs/heads/members/ada"));
+        Assert.NotEqual(foreign, AgentGit.Host(team, "for-each-ref", "--format=%(objectname)", "refs/heads/members/alpha/ada"));
 
         File.Delete(redirect);
         File.WriteAllText(Path.Combine(adaCheckout.ClonePath, ".git", "objects", "info", "alternates"), Path.Combine(benCheckout.ClonePath, ".git", "objects"));
@@ -329,13 +329,13 @@ public class TeamReposTests
         AgentGit.Ok(checkout, "add", "half.txt");
         AgentGit.Ok(checkout, "commit", "-q", "-m", "half"); // then the core was killed: no fetch-back happened
         var team = f.Repos.RepoOf(ada.TeamId)!.Path;
-        Assert.DoesNotContain("members/ada", AgentGit.Host(team, "branch", "--list"));
+        Assert.DoesNotContain("members/alpha/ada", AgentGit.Host(team, "branch", "--list"));
 
         var env = new Dictionary<string, string?> { [global::Yawble.Core.Bus.BusHost.RunnerVariable] = "fake-complete" };
         await using (var engine = await global::Yawble.Core.Bus.BusHost.StartAsync(f.Db.ConnectionString, k => env.GetValueOrDefault(k), log: null, launcher: null, runner: null, maxConcurrentAgents: null, appDataRoot: f.AppRoot))
         {
-            Assert.Contains("members/ada", AgentGit.Host(team, "branch", "--list"));
-            Assert.Equal("half done", AgentGit.Host(team, "show", "members/ada:half.txt"));
+            Assert.Contains("members/alpha/ada", AgentGit.Host(team, "branch", "--list"));
+            Assert.Equal("half done", AgentGit.Host(team, "show", "members/alpha/ada:half.txt"));
 
             // And a run of the fake runner now works in Ben's clone, made on demand.
             await engine.PersonTellAsync("Alpha", "Ben", "anything", ct: Ct);
@@ -410,11 +410,24 @@ public class TeamReposTests
     }
 
     [Theory]
-    [InlineData("Ada", "members/ada")]
-    [InlineData("Ben Smith", "members/ben-smith")]
-    [InlineData("  ./..  ", "members/member")]
-    [InlineData("Zoë", "members/zo")]
-    public void BranchNames(string member, string branch) => Assert.Equal(branch, TeamRepos.BranchFor(member));
+    [InlineData("Alpha", "Ada", "members/alpha/ada")]
+    [InlineData("Yawble Engineering Team", "Ben Smith", "members/yawble-engineering-team/ben-smith")]
+    [InlineData("Alpha", "  ./..  ", "members/alpha/member")]
+    [InlineData("Zoë's", "Zoë", "members/zo-s/zo")]
+    public void BranchNames(string team, string member, string branch)
+    {
+        // B016: the team part is the same slug as the team branch's.
+        Assert.Equal(branch, TeamRepos.BranchFor(team, member));
+        Assert.Equal("team/" + branch.Split('/')[1], TeamRepos.TeamBranchFor(team));
+    }
+
+    [Theory]
+    [InlineData("members/ada", true)]
+    [InlineData("members/alpha/ada", false)]
+    [InlineData("members/", false)]
+    [InlineData("team/alpha", false)]
+    [InlineData("feature/x", false)]
+    public void LegacyMemberBranches(string branch, bool legacy) => Assert.Equal(legacy, TeamRepos.IsLegacyMemberBranch(branch));
 
     [Fact]
     public void AppRoot_IsTheParentOfADataFolder_AndNothingElse()

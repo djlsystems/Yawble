@@ -59,7 +59,7 @@ public class TeamGitDialogTests
             Assert.Equal("team/alpha", s.TeamBranch);
             Assert.Equal(1, s.TeamAheadOfBase);
             Assert.Equal("fast-forward", s.Merge);
-            var a = Assert.Single(s.Members, b => b.Branch == "members/ada");
+            var a = Assert.Single(s.Members, b => b.Branch == "members/alpha/ada");
             Assert.Equal(1, a.AheadOfBase);
             Assert.False(a.InTeamBranch);
         }

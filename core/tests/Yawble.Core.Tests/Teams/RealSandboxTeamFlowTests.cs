@@ -42,7 +42,7 @@ public class RealSandboxTeamFlowTests
             new
             {
                 say = "declare",
-                bus = new object[] { new { tool = "workflow_complete", args = new { delivered = "health() on members/ada and its test on members/ben" } } },
+                bus = new object[] { new { tool = "workflow_complete", args = new { delivered = "health() on members/acme/ada and its test on members/acme/ben" } } },
             },
         },
     };
@@ -144,7 +144,7 @@ public class RealSandboxTeamFlowTests
                 // The launcher started the CLI with the team prompt: who it is, its role text, its branch.
                 var argv = string.Join(' ', o.GetProperty("argv").EnumerateArray().Select(a => a.GetString()));
                 Assert.Contains($"You are {name}, a member of team acme", argv);
-                Assert.Contains($"on branch members/{name}", argv);
+                Assert.Contains($"on branch members/acme/{name}", argv);
 
                 var git = o.GetProperty("steps").GetProperty("git").EnumerateArray().ToList();
                 JsonElement G(params string[] args) => git.Single(g => g.GetProperty("args").EnumerateArray().Select(a => a.GetString()).SequenceEqual(args));
@@ -163,9 +163,9 @@ public class RealSandboxTeamFlowTests
                 Assert.Equal(sha, AgentGit.Host(picked, "rev-parse", "members/" + name));
                 Assert.Equal($"{name} (acme)", AgentGit.Host(picked, "log", "-1", "--format=%an", "members/" + name));
             }
-            Assert.Contains("return {\"ok\": True}", AgentGit.Host(picked, "show", "members/ada:app/health.py"));
-            Assert.Contains("def test_health", AgentGit.Host(picked, "show", "members/ben:tests/test_health.py"));
-            Assert.Equal(["members/ada", "members/ben", "trunk"], // the Manager committed nothing
+            Assert.Contains("return {\"ok\": True}", AgentGit.Host(picked, "show", "members/acme/ada:app/health.py"));
+            Assert.Contains("def test_health", AgentGit.Host(picked, "show", "members/acme/ben:tests/test_health.py"));
+            Assert.Equal(["members/acme/ada", "members/acme/ben", "trunk"], // the Manager committed nothing
                 AgentGit.Host(picked, "for-each-ref", "--format=%(refname:short)", "refs/heads/").Split('\n').Order());
             Assert.Equal("1", AgentGit.Host(picked, "rev-list", "--count", "trunk")); // merging is the person's
             Assert.Equal(picked, Path.GetFullPath(repos!.RepoOf(teamId)!.Path));

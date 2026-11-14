@@ -68,7 +68,7 @@ public class TeamSyncTests
         var (f, _, ada, repo) = Ready();
         using var _f = f;
         AgentGit.Host(repo, "branch", "team/alpha");
-        AgentGit.Host(repo, "branch", "members/ada");
+        AgentGit.Host(repo, "branch", "members/alpha/ada");
         var main = Commit(repo, "new.txt", "new\n", "base moves on");
 
         var r = await f.Repos.SyncBranchesAsync(ada.TeamId, "Alpha", "7", Ct);
@@ -76,7 +76,7 @@ public class TeamSyncTests
         Assert.Equal("synced", r.Outcome);
         Assert.Equal(main, r.BaseSha);
         Assert.Equal(main, AgentGit.Host(repo, "rev-parse", "refs/heads/team/alpha"));
-        Assert.Equal(main, AgentGit.Host(repo, "rev-parse", "refs/heads/members/ada"));
+        Assert.Equal(main, AgentGit.Host(repo, "rev-parse", "refs/heads/members/alpha/ada"));
         Assert.Contains("team/alpha", r.Moved);
         Assert.Null(f.Repos.SyncNote(ada.TeamId));
         // The shared view and its bundle were refreshed, so members fetch the synced branches.
@@ -136,20 +136,20 @@ public class TeamSyncTests
         var (f, _, ada, repo) = Ready();
         using var _f = f;
         Commit(repo, "shared.txt", "one\n", "base has shared.txt");
-        AgentGit.Host(repo, "branch", "members/idle");
-        var clean = BranchWithWork(repo, "members/clean", "clean.txt", "c\n");
-        var clash = BranchWithWork(repo, "members/clash", "shared.txt", "clash\n");
+        AgentGit.Host(repo, "branch", "members/alpha/idle");
+        var clean = BranchWithWork(repo, "members/alpha/clean", "clean.txt", "c\n");
+        var clash = BranchWithWork(repo, "members/alpha/clash", "shared.txt", "clash\n");
         var main = Commit(repo, "shared.txt", "main\n", "base changes shared.txt");
 
         var r = await f.Repos.SyncBranchesAsync(ada.TeamId, "Alpha", "5", Ct);
 
         Assert.Equal("synced", r.Outcome); // no team branch yet, and a member's conflict is not the team's
-        Assert.Equal(main, AgentGit.Host(repo, "rev-parse", "members/idle"));
-        var merged = AgentGit.Host(repo, "rev-parse", "members/clean");
+        Assert.Equal(main, AgentGit.Host(repo, "rev-parse", "members/alpha/idle"));
+        var merged = AgentGit.Host(repo, "rev-parse", "members/alpha/clean");
         Assert.Equal(0, AgentGit.Host(repo, "rev-list", "--count", main, "^" + merged) == "0" ? 0 : 1);
-        Assert.Equal("c", AgentGit.Host(repo, "show", "members/clean:clean.txt"));
-        Assert.Equal(clash, AgentGit.Host(repo, "rev-parse", "members/clash"));
-        Assert.DoesNotContain("members/clash", r.Moved);
+        Assert.Equal("c", AgentGit.Host(repo, "show", "members/alpha/clean:clean.txt"));
+        Assert.Equal(clash, AgentGit.Host(repo, "rev-parse", "members/alpha/clash"));
+        Assert.DoesNotContain("members/alpha/clash", r.Moved);
         Assert.Null(r.Note);
         Assert.NotEqual(clean, merged);
     }
@@ -249,20 +249,20 @@ public class TeamSyncTests
         records.BaseCommit("r-1", checkout.CloneBaseCommit);
         Assert.Equal(main, records.Get("r-1")!.BaseCommit);
 
-        // The base moves on and a sync brings members/ada up in the team repository, but Ada's clone has not merged it
+        // The base moves on and a sync brings members/alpha/ada up in the team repository, but Ada's clone has not merged it
         // yet: the next run's record names the base commit the CLONE is on, not the synced branch's.
         var repo = f.Repos.RepoOf(ada.TeamId)!.Path;
         AgentGit.Ok(checkout, "commit", "-q", "--allow-empty", "-m", "ada's work");
         await f.Repos.FetchBackAsync(ada, Ct);
         var newer = Commit(repo, "new.txt", "n\n", "base moves on");
         Assert.Equal("synced", (await f.Repos.SyncBranchesAsync(ada.TeamId, "Alpha", "2", Ct)).Outcome);
-        Assert.Equal(newer, AgentGit.Host(repo, "merge-base", "members/ada", "main"));
+        Assert.Equal(newer, AgentGit.Host(repo, "merge-base", "members/alpha/ada", "main"));
         var again = await f.Repos.PrepareAsync(ada, Ct);
         Assert.Equal(main, again.CloneBaseCommit);
     }
 
     /// <summary>A member clone made, given one commit of the agent's own and fetched back; then the base moves on and a
-    /// sync merges it into members/ada in the team repository. The clone itself is not updated.</summary>
+    /// sync merges it into members/alpha/ada in the team repository. The clone itself is not updated.</summary>
     private static async Task<(TeamsFixture F, MemberRef Ada, MemberCheckout Clone, string Repo, string Synced)> SyncedWhileTheCloneWasNot(
         string? baseChange = null)
     {
@@ -277,8 +277,8 @@ public class TeamSyncTests
         Assert.True((await f.Repos.FetchBackAsync(ada, Ct)).Fetched);
         Commit(repo, baseChange ?? "new.txt", "main\n", "base moves on");
         var r = await f.Repos.SyncBranchesAsync(ada.TeamId, "Alpha", "6", Ct);
-        Assert.Contains("members/ada", r.Moved);
-        return (f, ada, clone, repo, AgentGit.Host(repo, "rev-parse", "refs/heads/members/ada"));
+        Assert.Contains("members/alpha/ada", r.Moved);
+        return (f, ada, clone, repo, AgentGit.Host(repo, "rev-parse", "refs/heads/members/alpha/ada"));
     }
 
     [Fact]
@@ -290,11 +290,11 @@ public class TeamSyncTests
         var fetched = await f.Repos.FetchBackAsync(ada, Ct); // the run made no new commit
 
         Assert.Null(fetched.Error);
-        Assert.Equal(synced, AgentGit.Host(repo, "rev-parse", "refs/heads/members/ada")); // never moved backwards
-        Assert.Equal("main", AgentGit.Host(repo, "show", "members/ada:new.txt"));
+        Assert.Equal(synced, AgentGit.Host(repo, "rev-parse", "refs/heads/members/alpha/ada")); // never moved backwards
+        Assert.Equal("main", AgentGit.Host(repo, "show", "members/alpha/ada:new.txt"));
         var bundle = Path.Combine(f.Repos.SharedRepoPath("Alpha"), TeamRepos.SharedBundleFile);
         var heads = AgentGit.Host(repo, "bundle", "list-heads", bundle);
-        Assert.Contains(synced + " refs/heads/members/ada", heads);
+        Assert.Contains(synced + " refs/heads/members/alpha/ada", heads);
         Assert.DoesNotContain("refs/sandbox/", heads); // the staging ref stays the host's
         Assert.Empty(f.Repos.SyncNotes());
     }
@@ -312,14 +312,14 @@ public class TeamSyncTests
         var fetched = await f.Repos.FetchBackAsync(ada, Ct);
 
         Assert.Null(fetched.Error);
-        var tip = AgentGit.Host(repo, "rev-parse", "refs/heads/members/ada");
+        var tip = AgentGit.Host(repo, "rev-parse", "refs/heads/members/alpha/ada");
         Assert.Equal(synced + " " + work, AgentGit.Host(repo, "rev-list", "--parents", "-n1", tip)[(tip.Length + 1)..]);
-        Assert.Equal("main", AgentGit.Host(repo, "show", "members/ada:new.txt"));
-        Assert.Equal("more", AgentGit.Host(repo, "show", "members/ada:more.txt"));
+        Assert.Equal("main", AgentGit.Host(repo, "show", "members/alpha/ada:new.txt"));
+        Assert.Equal("more", AgentGit.Host(repo, "show", "members/alpha/ada:more.txt"));
         Assert.Equal("", AgentGit.Host(repo, "status", "--porcelain", "--untracked-files=no"));
         // A later fetch-back of the same clone (still behind the merge) changes nothing.
         await f.Repos.FetchBackAsync(ada, Ct);
-        Assert.Equal(tip, AgentGit.Host(repo, "rev-parse", "refs/heads/members/ada"));
+        Assert.Equal(tip, AgentGit.Host(repo, "rev-parse", "refs/heads/members/alpha/ada"));
     }
 
     [Fact]
@@ -333,16 +333,16 @@ public class TeamSyncTests
 
         var fetched = await f.Repos.FetchBackAsync(ada, Ct);
 
-        Assert.Equal(synced, AgentGit.Host(repo, "rev-parse", "refs/heads/members/ada")); // unchanged
-        Assert.Equal(work, AgentGit.Host(repo, "rev-parse", "refs/sandbox/fetch/members/ada")); // the work is kept, not lost
+        Assert.Equal(synced, AgentGit.Host(repo, "rev-parse", "refs/heads/members/alpha/ada")); // unchanged
+        Assert.Equal(work, AgentGit.Host(repo, "rev-parse", "refs/sandbox/fetch/members/alpha/ada")); // the work is kept, not lost
         Assert.False(File.Exists(Path.Combine(repo, ".git", "MERGE_HEAD")));
         Assert.Contains("shared.txt", fetched.Error);
         var note = Assert.Single(f.Repos.SyncNotes()).Note;
-        Assert.Contains("members/ada", note);
+        Assert.Contains("members/alpha/ada", note);
         Assert.Contains("conflicts in: shared.txt", note);
         // The next workflow's sync keeps saying so while the work is still parked.
         var r = await f.Repos.SyncBranchesAsync(ada.TeamId, "Alpha", "7", Ct);
-        Assert.Contains("members/ada", r.Note);
+        Assert.Contains("members/alpha/ada", r.Note);
         Assert.Single(f.Repos.SyncNotes());
     }
 
