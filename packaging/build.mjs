@@ -49,6 +49,14 @@ const signing = sign ? require('./windows-signing.cjs') : null;
 const exe = os === 'win' ? '.exe' : '';
 const stage = path.join(here, 'stage', rid);
 const out = path.join(repo, 'artifacts', 'installers', rid);
+// The build's version (scripts/build-version.mjs): it names the installers and is stamped into what they install, the
+// .NET files (Properties' file and product version) and the Electron app (app.getVersion(), yawble.exe's Properties),
+// as 2026.11.14.3. Worked out once, before anything is built, and checked against the staged core below.
+const { readBuildVersion, dotnetVersionProperties, electronBuilderVersion } = await import('../scripts/build-version.mjs');
+const buildVersion = readBuildVersion(repo).version;
+const dotnetVersion = dotnetVersionProperties(buildVersion);
+const appVersion = electronBuilderVersion(buildVersion);
+console.log(`> build version ${buildVersion} (files and app: ${appVersion.buildVersion})`);
 
 function run(cmd, args, opts = {}) {
   console.log(`> ${cmd} ${args.join(' ')}`);
@@ -84,7 +92,7 @@ if (!skipStage) {
     }
   }
   const publish = (project, dir, ...extra) =>
-    run('dotnet', ['publish', project, '-c', 'Release', '-r', rid, '-o', path.join(stage, dir), '-p:DebugType=none', '-p:DebugSymbols=false', ...extra]);
+    run('dotnet', ['publish', project, '-c', 'Release', '-r', rid, '-o', path.join(stage, dir), '-p:DebugType=none', '-p:DebugSymbols=false', ...dotnetVersion, ...extra]);
   // Self-contained: the person installing needs no .NET runtime. Not single-file: the sandbox's native lib is
   // loaded from beside the core and wxc-exec.exe is run from there (RpcDispatcher.WxcExec).
   publish('core/src/Yawble.Core', 'core', '--self-contained', 'true');
@@ -121,8 +129,20 @@ mustExist(path.join(stage, 'bin', `yawble-guardcheck${exe}`), 'yawble-guardcheck
 mkdirSync(path.join(stage, 'roles'), { recursive: true });
 writeFileSync(path.join(stage, 'roles', 'README.txt'), 'Role text for agents. This folder is granted to every agent run, so it must exist.\n');
 rmSync(path.join(stage, 'toolchain'), { recursive: true, force: true }); // a stage left by an older build
-// The staged core runs on its own (self-contained), before anything is packaged.
-run(path.join(stage, 'core', `yawble-core${exe}`), ['--version']);
+// The staged core runs on its own (self-contained), before anything is packaged, and says this build's version
+// (CoreInfo.Version, the assembly metadata build-version.mjs wrote): a stage from another checkout (--skip-stage) fails here.
+{
+  const core = path.join(stage, 'core', `yawble-core${exe}`);
+  console.log(`> ${core} --version`);
+  const r = spawnSync(core, ['--version'], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
+  if (r.error) throw r.error;
+  if (r.status !== 0) throw new Error(`yawble-core --version exited with ${r.status}`);
+  const said = r.stdout.trim();
+  console.log(said);
+  if (said !== buildVersion) {
+    throw new Error(`the staged core says ${said}, this build is ${buildVersion}${skipStage ? ': stage again (without --skip-stage)' : ''}`);
+  }
+}
 // Signed in place, so electron-builder copies signed files; those its maker signed (the .NET runtime, the sandbox) stay so.
 if (signing) signing.signFiles(signing.signableFiles(stage));
 
@@ -136,8 +156,6 @@ if (process.platform === 'win32') run('npm run build', [], { cwd: shell, shell: 
 else run('npm', ['run', 'build'], { cwd: shell });
 mustExist(path.join(shell, 'out', 'main', 'main', 'index.js'), 'the shell build wrote no out/main/main/index.js');
 const electronVersion = JSON.parse(readFileSync(path.join(shell, 'node_modules', 'electron', 'package.json'), 'utf8')).version;
-const { readBuildVersion } = await import('../scripts/build-version.mjs');
-const buildVersion = readBuildVersion(repo).version;
 
 const builder = require('electron-builder');
 const archName = rid.endsWith('arm64') ? 'arm64' : 'x64';
@@ -158,8 +176,9 @@ writeFileSync(nsisInclude, [
 const config = {
   appId: 'com.djlsystems.yawble',
   productName: 'Yawble',
-  // yawble.exe's file version (Windows) and the bundle version (macOS): the build's numbers, without +dev.<commit>.
-  buildVersion: buildVersion.split('+')[0],
+  // The app's version, 2026.11.14.3 (scripts/build-version.mjs electronBuilderVersion): package.json's version in the
+  // package (shell/package.json says 0.1.0), yawble.exe's file and product version, the bundle versions (macOS).
+  ...appVersion,
   // Windows and Linux: yawble(.exe), which the AppArmor profile and launcher name. Not on macOS, where
   // electron-builder would also rename the bundle; the Mac app stays "Yawble.app".
   ...(os === 'osx' ? {} : { executableName: 'yawble' }),

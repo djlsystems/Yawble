@@ -329,6 +329,86 @@ public class GatewayVhostTests
         Assert.Equal(HttpStatusCode.OK, await Ask());
     }
 
+    [Fact]
+    public async Task RefusedPlainHttpToAnOutsideHost_CarriesThePlainHttpNote()
+    {
+        await using var f = await GatewayFixture.StartAsync();
+        await using var gateway = f.StartRun(11, allowHosts: ["registry.npmjs.org"]);
+
+        // Off the allowlist, and on it: plain http is refused either way, and the agent is told to use https.
+        foreach (var host in new[] { "example.com", "registry.npmjs.org" })
+        {
+            var (status, body) = await RawBodyAsync(gateway, $"GET http://{host}/ HTTP/1.1\r\nHost: {host}\r\n\r\n");
+            Assert.StartsWith("HTTP/1.1 403", status);
+            Assert.Contains($"{host} is not reachable from this agent", body);
+            Assert.Contains(RunGateway.PlainHttpNote, body);
+        }
+        Assert.Empty(f.Upstream.Requests);
+    }
+
+    [Fact]
+    public async Task RefusedGatewayVhost_HasNoPlainHttpNote()
+    {
+        await using var f = await GatewayFixture.StartAsync();
+        // A Claude run: xai.yawble.internal is not served, and an unknown *.yawble.internal never is.
+        await using var gateway = f.StartRun(12, vhosts: RunGatewaySpec.VhostsFor("claude", GrokMode.Session));
+
+        foreach (var host in new[] { Vhosts.Xai, "nothing.yawble.internal" })
+        {
+            var (status, body) = await RawBodyAsync(gateway, $"GET http://{host}/v1/models HTTP/1.1\r\nHost: {host}\r\n\r\n");
+            Assert.StartsWith("HTTP/1.1 403", status);
+            Assert.Contains($"{host} is not reachable from this agent", body);
+            Assert.DoesNotContain("Only https is forwarded", body);
+            Assert.DoesNotContain("https://", body);
+        }
+        Assert.Empty(f.Upstream.Requests);
+        Assert.Contains(f.Log.Read(12), e => e.Kind == GatewayEventKinds.HostDenied && e.Vhost == Vhosts.Xai);
+    }
+
+    [Fact]
+    public async Task HttpsRefusals_HaveNoPlainHttpNote()
+    {
+        await using var f = await GatewayFixture.StartAsync();
+        await using var gateway = f.StartRun(13, allowHosts: ["registry.npmjs.org"]);
+
+        // CONNECT off the allowlist, CONNECT to a refused port, and https absolute-form: none is a plain-http refusal.
+        foreach (var (request, expected) in new[]
+                 {
+                     ("CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n", "HTTP/1.1 403"),
+                     ("CONNECT registry.npmjs.org:22 HTTP/1.1\r\nHost: registry.npmjs.org:22\r\n\r\n", "HTTP/1.1 403"),
+                     ("GET https://example.com/ HTTP/1.1\r\nHost: example.com\r\n\r\n", "HTTP/1.1 400"),
+                 })
+        {
+            var (status, body) = await RawBodyAsync(gateway, request);
+            Assert.StartsWith(expected, status);
+            Assert.DoesNotContain("Only https is forwarded", body);
+        }
+    }
+
+    /// <summary>A raw request's status line and what follows it (headers and the JSON error body).</summary>
+    private static async Task<(string Status, string Body)> RawBodyAsync(RunGateway gateway, string request)
+    {
+        var (status, stream, client) = await ProxyClient.RawAsync(gateway, request);
+        using (client)
+        {
+            // Read the headers, then exactly Content-Length bytes: the connection may stay open, so never to the end.
+            var bytes = new List<byte>();
+            var one = new byte[1];
+            int end;
+            while ((end = Encoding.ASCII.GetString(bytes.ToArray()).IndexOf("\r\n\r\n", StringComparison.Ordinal)) < 0)
+            {
+                if (await stream.ReadAsync(one, Ct) != 1) return (status, Encoding.UTF8.GetString(bytes.ToArray()));
+                bytes.Add(one[0]);
+            }
+            var headers = Encoding.ASCII.GetString(bytes.ToArray(), 0, end);
+            var lengthLine = headers.Split("\r\n").FirstOrDefault(l => l.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase));
+            var length = lengthLine is null ? 0 : int.Parse(lengthLine["Content-Length:".Length..].Trim());
+            var body = new byte[length];
+            await stream.ReadExactlyAsync(body, Ct);
+            return (status, Encoding.UTF8.GetString(body));
+        }
+    }
+
     private static async Task<string> ReadLineAsync(Stream s)
     {
         var sb = new StringBuilder();
