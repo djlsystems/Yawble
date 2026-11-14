@@ -594,7 +594,14 @@ export interface TeamGitStatus {
   merge: 'none' | 'up-to-date' | 'fast-forward' | 'merge' | 'conflict'; conflictFiles: string[]; members: TeamGitBranch[];
   /** Old-style members/<member> branches (absent from a core that does not list them). */
   oldBranches?: TeamGitOldBranch[];
+  /** members/<slug> branches named like this team's slug, which git cannot hold beside members/<slug>/<member> ones, so
+   * they block this team's member branches: one entry per ref, here (local) or on origin (remote). Absent from a core
+   * that does not list them. */
+  blockingBranches?: TeamGitBlockingBranch[];
 }
+/** inUseBy (core card 104): a member is still on it, its old members/<name> ("team Alpha's member Ada", or "member Docs of
+ * this team"); it is not deleted from the dialog but moves to movesTo at that member's next start. Absent otherwise. */
+export interface TeamGitBlockingBranch { name: string; repo: string; location: 'local' | 'remote'; inUseBy?: string; movesTo?: string }
 /** git.deleteBranches without confirm: what would be deleted, as text for the person, and the token that confirms exactly
  * that plan (empty: nothing to delete). With confirm: token it deletes and answers GitDeleteResult; error code stale
  * means the branches changed since the plan. */

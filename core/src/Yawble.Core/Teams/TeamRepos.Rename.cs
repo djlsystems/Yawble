@@ -15,9 +15,12 @@ namespace Yawble.Core.Teams;
 ///   the same commit, so this is what <c>git switch -c</c> would do.</item>
 /// <item>The old branch is left everywhere it is (host repository, clone, origin): never deleted, never forced. The person
 ///   deletes it in the Git dialog. The new one is pushed after the run like any branch origin does not have.</item>
+/// <item>Except when the old branch is a parent path of the new one (team "Docs", member "Docs": members/docs to
+///   members/docs/docs, card 104): git cannot keep both, so the old branch is renamed (repository, clone) and, on origin,
+///   replaced by the new one at the push after the run when the new one holds all its commits.</item>
 /// </list>
 /// Anything that would make the move unsafe (a clone .git the host may not read, a link on the ref path, a name clash with
-/// an existing ref) leaves the member on its old branch, with the reason logged.
+/// an existing ref here, in the clone or on origin's side: B020) leaves the member on its old branch, with the reason logged.
 /// </summary>
 public sealed partial class TeamRepos
 {
@@ -90,17 +93,45 @@ public sealed partial class TeamRepos
         var cloneHasNew = newTip.Length > 0;
         // The clone already has the new name at another commit (an agent made it, or an earlier move stopped half-way and
         // work went on the old one): switching to it could hide work. Stay, and say why.
+        // Card 104: the old branch is a parent path of the new one (team "Docs", member "Docs": members/docs to
+        // members/docs/docs). Git cannot keep both, so here, and only here, the old branch is renamed, not kept: in the
+        // repository by git branch -m, in the clone by file (MoveCloneRefThrough), and on origin by the push after the run.
+        var through = to.StartsWith(from + "/", StringComparison.Ordinal);
+        if (through && RepoUsers(repoPath).FirstOrDefault(u => u.Branch == from && !string.Equals(NormalPath(u.ClonePath), NormalPath(clonePath), PathComparison)) is { } other)
+            return $"{from} is also the branch of team {other.Team}'s member {other.Member}";
         if (cloneHasNew && newTip != cloneTip) return $"the clone already has {to} at another commit than {from}";
-        if (!cloneHasNew && await RefClashAsync(repoPath, gitDir, to, ct) is { } cloneClash) return $"the clone already has {cloneClash}";
+        if (!cloneHasNew && await RefClashAsync(repoPath, gitDir, to, through ? from : null, ct) is { } cloneClash) return $"the clone already has {cloneClash}";
+        // B020: the same check for the new name on origin's side, before anything moves (the push would fail later). The
+        // member's own old branch there is replaced by the push after the run (PublishRepoAsync), when nobody else is on it.
+        if ((await BlockersOnOriginAsync(repoPath, to, ct)).FirstOrDefault(b => !(through && b == from)) is { } onOrigin)
+            return $"origin already has {onOrigin} (as of the last fetch)";
 
         // The host repository: the new branch at the old one's commit there (it holds every fetched-back run and any sync
         // since). Clone work it does not have yet, or that was parked, lands on the new name at the next fetch-back, by the
         // usual rules. No old branch here means no work fetched back yet: the next fetch-back makes the new one.
+        var renamedHere = false;
         if (await RevAsync(repoPath, "refs/heads/" + from, ct) is { } oldHere && await RevAsync(repoPath, "refs/heads/" + to, ct) is null)
         {
-            if (await RefClashInRepoAsync(repoPath, to, ct) is { } clash) return $"the repository already has {clash}";
-            var made = await Git.TryRunAsync(repoPath, ["update-ref", "-m", $"move {from} to {to}", "refs/heads/" + to, oldHere, ""], ct);
+            if (await RefClashInRepoAsync(repoPath, to, through ? from : null, ct) is { } clash) return $"the repository already has {clash}";
+            var made = through
+                ? await Git.TryRunAsync(repoPath, ["branch", "-m", from, to], ct)
+                : await Git.TryRunAsync(repoPath, ["update-ref", "-m", $"move {from} to {to}", "refs/heads/" + to, oldHere, ""], ct);
             if (made.ExitCode != 0) return "could not make the new branch in the repository: " + made.Stderr;
+            renamedHere = through;
+        }
+
+        if (through)
+        {
+            // The clone, by file, all or nothing (HEAD included); on failure the repository's rename is undone too.
+            var refused = cloneTip.Length == 0 ? null : MoveCloneRefThrough(gitDir, from, to, cloneTip);
+            if (refused is null && cloneTip.Length == 0 && CloneHead.Read(gitDir)?.Branch == from) refused = WriteHead(gitDir, to);
+            if (refused is null) return null;
+            if (renamedHere)
+            {
+                var back = await Git.TryRunAsync(repoPath, ["branch", "-m", to, from], ct);
+                if (back.ExitCode != 0) refused += $"; and the repository's {to} could not be named back to {from}: {back.Stderr}";
+            }
+            return refused;
         }
 
         // The clone, by file: the new loose ref (unless the clone already has the branch) and HEAD.
@@ -115,22 +146,24 @@ public sealed partial class TeamRepos
 
     /// <summary>An existing ref of the clone that would stop refs/heads/<paramref name="branch"/> being made (a ref at one
     /// of its parent paths, or refs under it), read with upload-pack from the host repository.</summary>
-    private async Task<string?> RefClashAsync(string repoPath, string gitDir, string branch, CancellationToken ct)
+    private async Task<string?> RefClashAsync(string repoPath, string gitDir, string branch, string? except, CancellationToken ct)
     {
         var all = await Git.TryRunAsync(repoPath, ["ls-remote", "--heads", StrictUploadPack, "--", gitDir], ct);
         return all.ExitCode != 0 ? "branches the host could not read: " + all.Stderr : Clash(all.Stdout.Split('\n')
-            .Select(l => l.Split('\t', 2)).Where(p => p.Length == 2).Select(p => p[1].Trim()), branch);
+            .Select(l => l.Split('\t', 2)).Where(p => p.Length == 2).Select(p => p[1].Trim()), branch, except);
     }
 
-    private async Task<string?> RefClashInRepoAsync(string repoPath, string branch, CancellationToken ct) =>
-        Clash((await Git.RunAsync(repoPath, ct, "for-each-ref", "--format=%(refname)", "refs/heads/")).Split('\n', StringSplitOptions.RemoveEmptyEntries), branch);
+    private async Task<string?> RefClashInRepoAsync(string repoPath, string branch, string? except, CancellationToken ct) =>
+        Clash((await Git.RunAsync(repoPath, ct, "for-each-ref", "--format=%(refname)", "refs/heads/")).Split('\n', StringSplitOptions.RemoveEmptyEntries), branch, except);
 
-    private static string? Clash(IEnumerable<string> refs, string branch)
+    /// <summary>The first ref that clashes with refs/heads/<paramref name="branch"/>, other than refs/heads/<paramref name="except"/>
+    /// (the old branch a move goes through, card 104).</summary>
+    private static string? Clash(IEnumerable<string> refs, string branch, string? except = null)
     {
         var wanted = "refs/heads/" + branch;
         foreach (var r in refs)
         {
-            if (r == wanted) continue;
+            if (r == wanted || except is not null && r == "refs/heads/" + except) continue;
             if (wanted.StartsWith(r + "/", StringComparison.Ordinal) || r.StartsWith(wanted + "/", StringComparison.Ordinal)) return r;
         }
         return null;
@@ -186,6 +219,125 @@ public sealed partial class TeamRepos
             return "could not point the clone's HEAD at the new branch: " + e.Message;
         }
         return null;
+    }
+
+    /// <summary>
+    /// Card 104: renames the clone's branch <paramref name="from"/> to <paramref name="to"/> under it (members/docs to
+    /// members/docs/docs), by file, as <c>git branch -m</c> would, without running git in the clone. The old ref (a loose file
+    /// and/or a packed-refs line, at <paramref name="tip"/>) goes, the new loose ref is written at the same commit, the reflog
+    /// moves with it, and HEAD follows when it was on the old branch. Every path on the way must be a plain folder or file
+    /// (never a link). All or nothing: on any failure what was changed is put back. Returns null, or why not.
+    /// </summary>
+    internal static string? MoveCloneRefThrough(string gitDir, string from, string to, string tip)
+    {
+        if (!CloneHead.IsBranchName(from) || !CloneHead.IsBranchName(to) || !to.StartsWith(from + "/", StringComparison.Ordinal))
+            return $"{to} is not a branch under {from}";
+        var refs = Path.Combine(gitDir, "refs");
+        var heads = Path.Combine(refs, "heads");
+        if (IsLink(new DirectoryInfo(refs)) || IsLink(new DirectoryInfo(heads)) || !Directory.Exists(heads))
+            return "the clone's .git/refs/heads is missing or a link";
+        var fromParts = from.Split('/');
+        var rest = to[(from.Length + 1)..].Split('/');
+        string? PlainPath(string root, IEnumerable<string> parts)
+        {
+            var dir = root;
+            foreach (var part in parts)
+            {
+                dir = Path.Combine(dir, part);
+                if (IsLink(new DirectoryInfo(dir)) || IsLink(new FileInfo(dir))) return null;
+            }
+            return dir;
+        }
+        if (PlainPath(heads, fromParts) is not { } loose) return "a folder on the clone's ref path is a link";
+        if (Directory.Exists(loose)) return $"the clone already has branches under {from}";
+        var hasLoose = File.Exists(loose);
+        if (hasLoose && File.ReadAllText(loose).Trim() != tip) return $"the clone's {from} moved while it was read";
+
+        var packed = Path.Combine(gitDir, "packed-refs");
+        if (IsLink(new FileInfo(packed))) return "the clone's packed-refs is a link";
+        var packedText = File.Exists(packed) ? File.ReadAllText(packed) : null;
+        string? newPacked = null;
+        if (packedText is not null)
+        {
+            var lines = packedText.Split('\n').ToList();
+            var at = lines.FindIndex(l => l.TrimEnd('\r').EndsWith(" refs/heads/" + from, StringComparison.Ordinal) && l.Length > 0 && l[0] != '#' && l[0] != '^');
+            if (at >= 0)
+            {
+                if (!hasLoose && lines[at].Split(' ', 2)[0] != tip) return $"the clone's {from} moved while it was read";
+                lines.RemoveAt(at);
+                if (at < lines.Count && lines[at].StartsWith('^')) lines.RemoveAt(at);
+                newPacked = string.Join('\n', lines);
+            }
+        }
+        if (!hasLoose && newPacked is null) return $"the clone's {from} was not found";
+
+        if (PlainPath(gitDir, ["logs", "refs", "heads", .. fromParts]) is not { } log) return "a folder on the clone's reflog path is a link";
+        var head = new FileInfo(Path.Combine(gitDir, "HEAD"));
+        var moveHead = CloneHead.Read(gitDir)?.Branch == from;
+        if (moveHead && (IsLink(head) || File.Exists(Path.Combine(gitDir, "HEAD.lock")))) return "the clone's HEAD is a link or locked";
+
+        // git ignores ref files ending in .lock, so the old one set aside is no branch while the new one is written.
+        var aside = loose + ".yawble-move.lock";
+        var logAside = log + ".yawble-move.lock";
+        var newLog = Path.Combine([log, .. rest]);
+        bool asideMade = false, packedWritten = false, logMoved = false;
+        try
+        {
+            if (Path.Exists(aside) || Path.Exists(logAside)) return "a leftover of an earlier move is in the clone's refs";
+            if (hasLoose) { File.Move(loose, aside); asideMade = true; }
+            if (newPacked is not null) { WriteReplacing(packed, newPacked); packedWritten = true; }
+            if (WriteLooseRef(gitDir, to, tip) is { } refused) throw new IOException(refused);
+            if (File.Exists(log))
+            {
+                File.Move(log, logAside);
+                logMoved = true;
+                Directory.CreateDirectory(Path.GetDirectoryName(newLog)!);
+                File.Move(logAside, newLog);
+            }
+            if (moveHead && WriteHead(gitDir, to) is { } headRefused) throw new IOException(headRefused);
+            if (asideMade) File.Delete(aside);
+            return null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Put back what changed, newest first. HEAD was not changed (it is written last, by an atomic move).
+            try
+            {
+                if (logMoved)
+                {
+                    if (File.Exists(newLog)) File.Move(newLog, logAside);
+                    DeleteEmptyUpTo(Path.GetDirectoryName(newLog)!, Path.GetDirectoryName(log)!);
+                    if (File.Exists(logAside)) File.Move(logAside, log);
+                }
+                var newRef = Path.Combine([loose, .. rest]);
+                if (File.Exists(newRef)) File.Delete(newRef);
+                DeleteEmptyUpTo(Path.GetDirectoryName(newRef)!, Path.GetDirectoryName(loose)!);
+                if (packedWritten) WriteReplacing(packed, packedText!);
+                if (asideMade) File.Move(aside, loose);
+            }
+            catch (Exception undo) when (undo is IOException or UnauthorizedAccessException)
+            {
+                return $"could not move the clone's branch ({e.Message}), and putting it back failed: {undo.Message}";
+            }
+            return "could not move the clone's branch: " + e.Message;
+        }
+
+        static void WriteReplacing(string file, string text)
+        {
+            var temp = file + ".yawble-move";
+            File.WriteAllText(temp, text, new UTF8Encoding(false));
+            File.Move(temp, file, overwrite: true);
+        }
+
+        // Removes empty folders from dir up to (not including) stop.
+        static void DeleteEmptyUpTo(string dir, string stop)
+        {
+            while (dir.Length > stop.Length && Directory.Exists(dir) && !Directory.EnumerateFileSystemEntries(dir).Any())
+            {
+                Directory.Delete(dir);
+                dir = Path.GetDirectoryName(dir)!;
+            }
+        }
     }
 
     /// <summary>

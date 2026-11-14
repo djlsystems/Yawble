@@ -344,6 +344,11 @@ public sealed partial class TeamRepos
             // B016: a member still on members/<name> moves to members/<team>/<name> (the old branch is kept).
             // Before the shared view is updated, so its bundle already has the new branch.
             await MoveLegacyBranchLockedAsync(member, repo, ct);
+            // B020: a members/<team> ref (here, on origin, in the shared view or the clone) blocks the member's branch: a
+            // plain refusal before anything is made, never git's "cannot lock ref" later.
+            var planned = CheckoutOf(member, repo);
+            await CheckMemberBranchFreeAsync(member, planned.Branch, "the team's repository", repo.Path, SharedRepoPath(member.Team), planned.ClonePath, ct);
+            await CheckExtrasFreeLockedAsync(member, planned.Branch, ct);
             await UpdateSharedLockedAsync(member.Team, repo, ct);
             var checkout = CheckoutOf(member, repo);
             checkout = checkout with
@@ -858,6 +863,42 @@ public sealed partial class TeamRepos
             string? rejection = null;
             for (var i = 0; i < unpublished.Count; i++)
             {
+                // B020: origin has a branch at one of this one's parent paths (members/<team> for members/<team>/<name>):
+                // not pushed, said plainly, never git's "cannot lock ref".
+                var blockers = (await BlockersOnOriginAsync(repo.Path, unpublished[i], ct)).ToList();
+                // Card 104: a member's own old branch that its new one is under (members/docs for members/docs/docs) is
+                // replaced: deleted on origin at the commit last fetched, when nobody is on it and the new branch holds
+                // every commit of it, then the new one is pushed below.
+                if (blockers.Count == 1 && OwnOldBranchOf(member.Team, unpublished[i]) is { } old && blockers[0] == old
+                    && OldBranchUser(RepoUsers(repo.Path), old) is null && await OwnOldOnOriginIsHeldAsync(repo.Path, old, unpublished[i], ct))
+                {
+                    var sha = await RevAsync(repo.Path, "refs/remotes/origin/" + old, ct);
+                    var gone = await Pusher.RunAsync(repo.Path, ["push", "--no-verify", $"--force-with-lease=refs/heads/{old}:{sha}", "origin", "--delete", old], ct);
+                    if (gone.ExitCode == 0)
+                    {
+                        _log?.Invoke($"team {member.Team}: deleted origin's old {old} (was {sha}; {unpublished[i]} holds it) so {unpublished[i]} can be pushed");
+                        blockers.Clear();
+                    }
+                    else
+                    {
+                        rejected.Add(unpublished[i]);
+                        rejection ??= $"{unpublished[i]} was not pushed: origin has its old branch {old} (git cannot keep a branch and branches under its name at once), "
+                            + $"and origin refused deleting it: {PersonGitPush.Redact(string.Join('\n', gone.Stderr, gone.Stdout).Trim())}. "
+                            + $"Delete {old} on origin in the Git dialog (Fetch first so it is listed); {unpublished[i]} is pushed at the next run's end.";
+                        continue;
+                    }
+                }
+                if (blockers.FirstOrDefault() is { } blocker)
+                {
+                    rejected.Add(unpublished[i]);
+                    var held = OldBranchUser(RepoUsers(repo.Path), blocker);
+                    rejection ??= $"{unpublished[i]} was not pushed: origin has a branch {blocker}, and git cannot keep a branch and branches under its name at once. "
+                        + (held is null
+                            ? $"Delete {blocker} on origin in the Git dialog (Fetch first so it is listed); {unpublished[i]} is pushed at the next run's end."
+                            : $"It is the old branch of {Holder(held, member.TeamId)}, who is still on it: it moves to {BranchFor(held.Team, held.Member)} "
+                              + "at that member's next start, and can be deleted on origin in the Git dialog after that.");
+                    continue;
+                }
                 var run = await Pusher.PushAsync(repo.Path, unpublished[i], ct);
                 var output = PersonGitPush.Redact(string.Join('\n', run.Stderr, run.Stdout).Trim());
                 if (run.ExitCode == 0)
