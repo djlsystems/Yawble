@@ -253,6 +253,88 @@ public sealed class NetworkAskGapTests : IDisposable
         Assert.Empty(_told);
     }
 
+    // ------------------------------------------------------------------ re-check of the fix (card 62): partial failure and a late ask
+
+    /// <summary>The real store policy, with a hook before each member write (it may refuse or do something meanwhile).</summary>
+    private sealed class HookedPolicy(INetworkPolicy inner, Func<long, Task> beforeMember) : INetworkPolicy
+    {
+        public bool AllowedFor(long memberId, string host) => inner.AllowedFor(memberId, host);
+        public async Task AllowForMemberAsync(long memberId, string host, CancellationToken ct)
+        {
+            await beforeMember(memberId);
+            await inner.AllowForMemberAsync(memberId, host, ct);
+        }
+        public Task AllowEverywhereAsync(string host, CancellationToken ct) => inner.AllowEverywhereAsync(host, ct);
+    }
+
+    private StoreNetworkPolicy Store() => new(_policies, (_, _) => Task.FromResult(_layout), _ => Task.FromResult<RunLayout?>(_layout));
+
+    [Fact]
+    public async Task AllowEverywhere_GlobalSavedButAnotherMembersLoosenRefused_StaysWaitingTellsNoOne_AndARetryCompletes()
+    {
+        var beta = Insert("INSERT INTO teams (name, created_at) VALUES ('Beta', '2026-11-13T00:00:00Z') RETURNING id;");
+        Insert($"INSERT INTO members (team_id, name, role, created_at) VALUES ({beta}, 'Manager', 'manager', '2026-11-13T00:00:00Z') RETURNING id;");
+        var omar = Insert($"INSERT INTO members (team_id, name, role, created_at) VALUES ({beta}, 'Omar', 'member', '2026-11-13T00:00:00Z') RETURNING id;");
+        _policies.SaveGlobal(_policies.GetGlobal() with { Network = new NetworkPolicy(["github.com"]) }, _layout);
+        _policies.SaveOverride(omar, new PolicyPatch(Network: new NetworkPatch(["github.com"])), _layout);
+        var refuse = true;
+        var asks = Service(new HookedPolicy(Store(), m => refuse && m == omar ? throw new PolicyException(["the sandbox dry run refused it"]) : Task.CompletedTask));
+        asks.Refused("Alpha/Priya", "pypi.org", "CONNECT", null);
+        asks.Refused("Beta/Omar", "pypi.org", "CONNECT", null);
+        var id = asks.Asks().First(a => a.Member == "Alpha/Priya").Id;
+
+        var e = await Assert.ThrowsAsync<RpcException>(() => asks.DispatchAsync("network.answer", new JsonObject { ["id"] = id, ["choice"] = "everywhere" }, Ct));
+
+        Assert.Equal("policy_refused", e.Code);
+        Assert.All(asks.Asks(pendingOnly: false), a => Assert.Equal("pending", a.State));
+        Assert.Equal(2, asks.Asks().Count);
+        Assert.Empty(_told);
+        // the global write stays (not rolled back); Omar still lacks it, so he is not told anything
+        Assert.Contains("pypi.org", _policies.GetGlobal().Network.AllowHosts);
+        Assert.DoesNotContain("pypi.org", StoreNetworkPolicy.EffectiveHosts(_policies.GetGlobal(), _policies.GetMember(omar)));
+
+        // the retry is safe: no duplicate host anywhere, both close, both Managers told once
+        refuse = false;
+        var result = await asks.AnswerAsync(id, NetworkAskChoices.Everywhere, null, Ct);
+        Assert.Equal(2, result["closed"]!.AsArray().Count);
+        Assert.Single(_policies.GetGlobal().Network.AllowHosts, h => h == "pypi.org");
+        Assert.Single(_policies.GetMember(omar).Loosen.Network?.AllowHosts ?? [], h => h == "pypi.org");
+        Assert.Contains("pypi.org", StoreNetworkPolicy.EffectiveHosts(_policies.GetGlobal(), _policies.GetMember(omar)));
+        Assert.Single(_told, t => t.Team == "Alpha" && t.Text.StartsWith("pypi.org is now allowed for Priya", StringComparison.Ordinal));
+        Assert.Single(_told, t => t.Team == "Beta" && t.Text.StartsWith("pypi.org is now allowed for Omar", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// An ask for the same host that arrives while the answer is writing the policy (after the answer listed the members it
+    /// reaches) is closed by the answer's "every pending ask for the host" update and its Manager told it is allowed,
+    /// though that member's override still filters the host out. Expected: the close covers only the asks whose members
+    /// the answer checked (or re-checks every closed ask's member), so a late ask stays waiting or is reached too.
+    /// </summary>
+    [Fact(Skip = "Fault (card 62 re-check): AnswerAsync re-lists the covered asks after the policy writes, so an ask raised meanwhile closes and its Manager is told allowed without the member being reached")]
+    public async Task AllowEverywhere_AnAskArrivingDuringTheWrite_IsNotToldAllowed_UnlessItsMemberHasTheHost()
+    {
+        var beta = Insert("INSERT INTO teams (name, created_at) VALUES ('Beta', '2026-11-13T00:00:00Z') RETURNING id;");
+        Insert($"INSERT INTO members (team_id, name, role, created_at) VALUES ({beta}, 'Manager', 'manager', '2026-11-13T00:00:00Z') RETURNING id;");
+        var omar = Insert($"INSERT INTO members (team_id, name, role, created_at) VALUES ({beta}, 'Omar', 'member', '2026-11-13T00:00:00Z') RETURNING id;");
+        _policies.SaveGlobal(_policies.GetGlobal() with { Network = new NetworkPolicy(["github.com"]) }, _layout);
+        _policies.SaveOverride(_priya, new PolicyPatch(Network: new NetworkPatch(["github.com"])), _layout);
+        _policies.SaveOverride(omar, new PolicyPatch(Network: new NetworkPatch(["github.com"])), _layout);
+        NetworkAskService? asks = null;
+        asks = Service(new HookedPolicy(Store(), m =>
+        {
+            // Omar's run is refused pypi.org while Priya's loosen block is being saved
+            if (m == _priya) asks!.Refused("Beta/Omar", "pypi.org", "CONNECT", null);
+            return Task.CompletedTask;
+        }));
+        asks.Refused("Alpha/Priya", "pypi.org", "CONNECT", null);
+
+        await asks.AnswerAsync(Assert.Single(asks.Asks()).Id, NetworkAskChoices.Everywhere, null, Ct);
+
+        var omarHas = StoreNetworkPolicy.EffectiveHosts(_policies.GetGlobal(), _policies.GetMember(omar)).Contains("pypi.org");
+        var omarTold = _told.Any(t => t.Team == "Beta" && t.Text.StartsWith("pypi.org is now allowed for Omar", StringComparison.Ordinal));
+        Assert.True(omarHas || !omarTold, "Beta's Manager was told pypi.org is allowed for Omar, but Omar's override still filters it out");
+    }
+
     private static long InsertIn(TempDb db, string sql)
     {
         using var c = new SqliteConnection(db.ConnectionString);
