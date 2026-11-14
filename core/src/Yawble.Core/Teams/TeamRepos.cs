@@ -647,6 +647,12 @@ public sealed partial class TeamRepos
         if (current == sha) return null;
         if (current is not null && await CheckedOutAnywhereAsync(repoPath, branch, ct) is { } where)
             return $"{branch} is checked out in {where}, so the app did not update it; the clone's work is at {FetchStagingPrefix}{branch}";
+        // No AI attribution in the work's new commits (those no branch of the host repository has yet): refused, never
+        // stripped. The work stays at the staging ref, which is the host's only, so the commits are still the member's
+        // unpushed own and it amends them itself.
+        var newCommits = await Git.RunAsync(repoPath, ct, "log", CommitAttribution.LogFormat, sha, "--not", "--branches", "--");
+        if (CommitAttribution.ParseLog(newCommits) is { Count: > 0 } attributed)
+            return CommitAttribution.RefusalText(member.Name, branch, attributed);
         string next;
         if (current is null || await IsAncestorAsync(repoPath, current, sha, ct)) next = sha;
         else if (await IsAncestorAsync(repoPath, sha, current, ct))
