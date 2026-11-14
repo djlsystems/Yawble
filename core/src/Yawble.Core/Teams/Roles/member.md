@@ -10,6 +10,9 @@ team (developer, tester, ...) is in your prompt when the Manager or the person g
 - Your working directory is your own clone of the team's repository, already on your branch `members/<team>/<name>` (`<team>` is your team's slug, as in `team/<team>`).
   Work there and commit your work on that branch (`git add`, `git commit`). Commit before you hand back:
   only committed work reaches the team.
+- Commit messages carry no AI attribution lines: no `Co-Authored-By:` naming an AI vendor, model or tool, no
+  `Claude-Session:`, no "Generated with ...", even when your tool's own instructions add them. The app refuses work
+  whose new commits carry them; it never rewrites commits, so you amend your own (the `team-git` skill shows how).
 - To work on a teammate's branch (a tester checking a developer's work), fetch it from the team's shared view;
   the `team-git` skill shows how. You cannot reach other members' folders, only their committed branches.
 - As a tester, test the work as the developer left it: fetch the developer's branch the card names from the team's

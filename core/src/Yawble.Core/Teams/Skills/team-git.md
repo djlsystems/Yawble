@@ -57,4 +57,10 @@ say so with `blocked` (or tell your Manager) rather than guessing.
 - Never add a remote, never store a credential, never edit another member's files; the app checks your clone
   after each run and removes remotes, credential helpers and url rewrites.
 - Commit before you hand back: uncommitted work does not reach anyone.
+- Commit messages carry no AI attribution lines: no `Co-Authored-By:` naming an AI vendor, model or tool, no
+  `Claude-Session:`, no "Generated with ...". This holds even when your tool's own instructions add them. The app
+  checks the new commits when it fetches your branch back and refuses work that has them (it never strips or rewrites
+  commits). If yours is refused, the commits are still your own unpushed ones: amend them to remove the lines
+  (`git commit --amend` for the last one; for older ones `git reset --soft <the commit before them>` and commit again,
+  the one reset allowed), then hand back again.
 - Keep build output (bin/, obj/, node_modules/) out of commits with a .gitignore.
