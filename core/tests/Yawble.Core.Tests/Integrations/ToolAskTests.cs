@@ -408,6 +408,29 @@ public sealed class ToolAskTests : IDisposable
         Assert.Contains(activity, r => r["source"]!.GetValue<string>() == "Approvals" && r["event"]!.GetValue<string>() == "host tool nodejs-lts install");
     }
 
+    [Fact]
+    public async Task WhileAnInstallRuns_TheWindowsOtherCallsAreAnswered()
+    {
+        await Request(Priya, "nodejs-lts");
+        var id = _asks.Asks().Single().Id;
+        _host.InstallsOnRun = "nodejs-lts";
+        _host.Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        const string token = "0123456789abcdef0123456789abcdef-test";
+        await using var server = IpcServer.Start(IpcEndpoint.Create(IpcEndpoint.NewAddress(Path.GetTempPath())), token,
+            new RpcDispatcher(new Yawble.Core.Sandboxing.SandboxPlatformInfo(), () => ["0001_baseline"], toolAsks: _asks));
+        await using var client = await TestIpcClient.ConnectAsync(server.Address, Ct);
+        await client.AuthAsync(token, Ct);
+
+        var install = await client.SendAsync("tools.install", new JsonObject { ["id"] = id }, Ct);
+        var info = await client.ReadReplyAsync(await client.SendAsync("core.getInfo", null, Ct), Ct);
+        Assert.NotNull(info!["result"]); // answered while winget (the fake) is still running
+        Assert.False(_host.Gate.Task.IsCompleted);
+
+        _host.Gate.SetResult();
+        var done = await client.ReadReplyAsync(install, Ct);
+        Assert.True(done!["result"]!["done"]!.GetValue<bool>());
+    }
+
     /// <summary>Records what would run; a run "installs" <see cref="InstallsOnRun"/> when set. Never starts a process.</summary>
     private sealed class FakeToolHost : IToolHost
     {
@@ -431,11 +454,15 @@ public sealed class ToolAskTests : IDisposable
 
         public Task<bool> IsInstalledAsync(ToolEntry tool, CancellationToken ct) => Task.FromResult(Installed.Contains(tool.Name));
 
-        public Task<GitResult> RunAsync(string exe, IReadOnlyList<string> args, TimeSpan limit, CancellationToken ct)
+        /// <summary>When set, a run waits for it (an install that takes a while).</summary>
+        public TaskCompletionSource? Gate { get; set; }
+
+        public async Task<GitResult> RunAsync(string exe, IReadOnlyList<string> args, TimeSpan limit, CancellationToken ct)
         {
             Runs.Add((exe, args.ToList()));
+            if (Gate is { } gate) await gate.Task.WaitAsync(ct);
             if (InstallsOnRun is { } t) Installed.Add(t);
-            return Task.FromResult(Result);
+            return Result;
         }
     }
 }

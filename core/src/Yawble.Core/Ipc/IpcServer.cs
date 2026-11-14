@@ -21,6 +21,9 @@ public sealed class IpcServer : IAsyncDisposable
     private readonly Integrations.ShellWebsiteHost? _websites;
     private readonly Action<long>? _signedIn;
 
+    /// <summary>Window calls that run for minutes (installers): each is answered when it finishes, off the connection's read loop.</summary>
+    internal static readonly HashSet<string> LongRunning = ["tools.install", "git.install"];
+
     private IpcServer(IpcEndpoint endpoint, string token, RpcDispatcher dispatcher, Ui.AppEvents? events = null,
         Integrations.HostEvents? host = null, Integrations.ShellWebsiteHost? websites = null, Action<long>? signedIn = null)
     {
@@ -152,6 +155,23 @@ public sealed class IpcServer : IAsyncDisposable
                     else
                         response = Error(id, "invalid", "hostBridge.signedIn needs a connectionId");
                     await SendAsync(stream, writeLock, response).ConfigureAwait(false);
+                    continue;
+                }
+
+                if (LongRunning.Contains(method))
+                {
+                    // Minutes-long (an installer): answered on its own when it finishes, so the window's other calls on
+                    // this connection are not held behind it. Replies carry their id; the write lock keeps frames whole.
+                    var (m, p, i) = (method, parameters, id);
+                    var answering = Task.Run(async () =>
+                    {
+                        JsonObject reply;
+                        try { reply = Ok(i, await _dispatcher.DispatchAsAsync(Provenance.Actor.Window, m, p, _stop.Token).ConfigureAwait(false)); }
+                        catch (RpcException e) { reply = Error(i, e.Code, e.Message); }
+                        catch (Exception e) { reply = Error(i, "internal", $"{e.GetType().Name}: {e.Message}"); }
+                        try { await SendAsync(stream, writeLock, reply).ConfigureAwait(false); }
+                        catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException) { /* the window went away */ }
+                    });
                     continue;
                 }
 

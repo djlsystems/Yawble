@@ -97,6 +97,11 @@ public sealed class NetworkAskTests : IDisposable
     [InlineData("*.nuget.org")]
     [InlineData("api.nuget.org:443")]
     [InlineData("")]
+    [InlineData("pypí.org")] // looks like pypi.org, resolves elsewhere
+    [InlineData("аpi.nuget.org")] // a Cyrillic a
+    [InlineData("xn--pypi-xxa.org")]
+    [InlineData("api.nuget.org.")] // the gateway compares the name as sent
+    [InlineData("api_nuget.org")]
     public void HostsThatAreNeverAskedAbout_StayPlainRefusals(string host)
     {
         Assert.NotNull(NetworkAskFilter.Problem(host));
@@ -143,6 +148,18 @@ public sealed class NetworkAskTests : IDisposable
         Assert.Equal(3, _changed); // the repeats pushed nothing
         Assert.Equal(3, _asks.PendingCount());
         Assert.Empty(_told); // no message for an ask
+    }
+
+    [Fact]
+    public void AtMostFiveHostsWaitPerMember_ARepeatStillCountsUp()
+    {
+        for (var n = 1; n <= NetworkAskService.MaxWaitingPerMember; n++)
+            Assert.Equal(HostAskOutcome.Asked, _asks.Refused("Alpha/Priya", $"h{n}.example.com", "CONNECT", null));
+        Assert.Equal(HostAskOutcome.None, _asks.Refused("Alpha/Priya", "h6.example.com", "CONNECT", null));
+        Assert.Contains("already wait", _asks.RequestFromAgent(Ref(_priya, _alpha, "Alpha", "Priya"), "h7.example.com", "need it", 1, 2));
+        Assert.Equal(HostAskOutcome.Pending, _asks.Refused("Alpha/Priya", "h1.example.com", "CONNECT", null));
+        Assert.Equal(HostAskOutcome.Asked, _asks.Refused("Alpha/Bo", "h6.example.com", "CONNECT", null)); // another member has their own
+        Assert.Equal(NetworkAskService.MaxWaitingPerMember + 1, _asks.Asks().Count);
     }
 
     [Fact]
@@ -270,6 +287,23 @@ public sealed class NetworkAskTests : IDisposable
         await _asks.AnswerAsync(id, NetworkAskChoices.Agent, null, Ct);
         await Assert.ThrowsAsync<ArgumentException>(() => _asks.AnswerAsync(id, NetworkAskChoices.Deny, null, Ct));
         Assert.Single(_told);
+    }
+
+    [Fact]
+    public async Task TwoAnswersAtOnce_OnlyOneChangesThePolicy()
+    {
+        for (var round = 0; round < 20; round++)
+        {
+            var host = $"r{round}.example.com";
+            _asks.Refused("Alpha/Priya", host, "CONNECT", null);
+            var id = _asks.Asks().Single(a => a.Host == host).Id;
+            var allow = Task.Run(() => _asks.AnswerAsync(id, NetworkAskChoices.Everywhere, null, Ct));
+            var deny = Task.Run(() => _asks.AnswerAsync(id, NetworkAskChoices.Deny, null, Ct));
+            var results = await Task.WhenAll(allow.ContinueWith(t => t.IsCompletedSuccessfully), deny.ContinueWith(t => t.IsCompletedSuccessfully));
+            Assert.Equal(1, results.Count(ok => ok));
+            // The policy says what the answer that won says.
+            Assert.Equal(results[0], _policies.GetGlobal().Network.AllowHosts.Contains(host));
+        }
     }
 
     [Fact]

@@ -43,8 +43,16 @@ public static class NetworkAskFilter
     {
         var h = Normalize(host);
         if (h.Length == 0) return "no host was given";
+        // The gateway compares the name as sent, so a trailing dot would be allowed under one name and refused under another.
+        if (host.Trim().EndsWith('.')) return $"'{host.Trim()}' ends in a dot: give the name without it ({h})";
         if (IPAddress.TryParse(h.Trim('[', ']'), out _)) return $"'{h}' is an IP address: the policy is host-name based, and addresses are never asked about";
         if (h.Contains(':') || h.Contains('/') || h.Contains('@')) return $"'{h}' is not a host name: give the name alone (api.nuget.org), without a scheme, port or path";
+        // Only plain ASCII names (letters, digits, hyphens, dots) are asked about: a name in another script, or its xn--
+        // form, can look like a well-known host (pypí.org) while it resolves somewhere else.
+        if (h.Any(ch => !(ch is >= 'a' and <= 'z' or >= '0' and <= '9' or '-' or '.')))
+            return $"'{h}' has characters other than letters, digits, hyphens and dots; such names are never asked about";
+        if (h.Split('.').Any(label => label.StartsWith("xn--", StringComparison.Ordinal)))
+            return $"'{h}' is an internationalized (xn--) name; such names are never asked about";
         if (h == "localhost" || h.EndsWith(".localhost", StringComparison.Ordinal)) return $"'{h}' is this computer (loopback) and is never reachable";
         if (!h.Contains('.') || PrivateSuffixes.Any(s => h.EndsWith("." + s, StringComparison.Ordinal)))
             return $"'{h}' is a private-network name and is never reachable";
@@ -96,7 +104,13 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
     public const string ChangedEvent = "network.asksChanged";
 
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
+    /// <summary>How many different hosts may wait for the person per member at once.</summary>
+    public const int MaxWaitingPerMember = 5;
+
     private readonly Lock _lock = new();
+    // The asks an answer is being applied to: claimed before any policy write, so two answers at once (the window and a
+    // cloud viewer) cannot both change the policy; the second is told the request is being answered.
+    private readonly HashSet<long> _answering = [];
 
     public Action? Changed { get; set; }
 
@@ -147,13 +161,21 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
     private Raised Raise(Who who, string host, string? reason, string? method, string? sample, long? workflow, long? causation)
     {
         var h = NetworkAskFilter.Normalize(host);
-        if (NetworkAskFilter.Problem(h) is { } problem) return new Raised(HostAskOutcome.None, null, h, problem);
+        if (NetworkAskFilter.Problem(host) is { } problem) return new Raised(HostAskOutcome.None, null, h, problem);
         long id, count;
         lock (_lock)
         {
             if (policy.AllowedFor(who.MemberId, h)) return new Raised(HostAskOutcome.AllowedNextRun, null, h);
             var now = _clock.GetUtcNow();
             using var c = Open();
+            // At most MaxWaitingPerMember different hosts wait for the person per member: past that a new host stays a plain
+            // refusal (a repeat of one already waiting still counts up), so one agent cannot fill Needs you.
+            if (Scalar(c, "SELECT count(*) FROM network_asks WHERE team_id = $t AND member = $m AND state = 'pending' AND host <> $h;",
+                    ("$t", who.TeamId), ("$m", who.Qualified), ("$h", h)) is long waiting && waiting >= MaxWaitingPerMember
+                && Scalar(c, "SELECT count(*) FROM network_asks WHERE team_id = $t AND member = $m AND state = 'pending' AND host = $h;",
+                    ("$t", who.TeamId), ("$m", who.Qualified), ("$h", h)) is 0L)
+                return new Raised(HostAskOutcome.None, null, h,
+                    $"{MaxWaitingPerMember} of your requests already wait for the person; wait for their answers before asking for another host");
             if (Scalar(c, "SELECT decided_at FROM network_asks WHERE team_id = $t AND member = $m AND host = $h AND state = 'denied' ORDER BY decided_at DESC LIMIT 1;",
                     ("$t", who.TeamId), ("$m", who.Qualified), ("$h", h)) is string denied
                 && DateTimeOffset.TryParse(denied, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var deniedAt)
@@ -263,6 +285,20 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
         if (who.Via is not (Provenance.Actor.App or Provenance.Actor.Cloud))
             throw new ArgumentException("a network request is answered by the person, in Needs you");
         if (!NetworkAskChoices.All.Contains(choice)) throw new ArgumentException($"'{choice}' is not a choice (agent, team, everywhere or deny)");
+        lock (_lock)
+            if (!_answering.Add(id)) throw new ArgumentException($"network request {id} is being answered already");
+        try
+        {
+            return await AnswerClaimedAsync(id, choice, note, who, ct);
+        }
+        finally
+        {
+            lock (_lock) _answering.Remove(id);
+        }
+    }
+
+    private async Task<JsonObject> AnswerClaimedAsync(long id, string choice, string? note, Provenance.Actor who, CancellationToken ct)
+    {
         var ask = Asks().FirstOrDefault(a => a.Id == id) ?? throw new ArgumentException($"network request {id} is not waiting");
         if (NetworkAskFilter.Problem(ask.Host) is { } problem) throw new ArgumentException(problem);
         var allow = choice != NetworkAskChoices.Deny;

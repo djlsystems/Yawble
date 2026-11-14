@@ -79,8 +79,12 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
   the member's next run. After an allow the team's Manager is told "<host> is now allowed for <member>; retry what was
   blocked". A member whose own override narrows the host list also gets the host in its loosen block, so the team and
   everywhere answers reach it too; the Manager is told only once the member's effective hosts include it. If the policy
-  store refuses the change, the item stays and shows why. IP addresses, local and
-  private-network names, the app's own hosts and floor-rule hosts are never asked about. Each request and its answer
+  store refuses the change, the item stays and shows why.
+  - **Never asked about:** IP addresses, local and private-network names, the app's own hosts, floor-rule hosts, and names that are not plain ASCII. A plain ASCII name has only letters, digits, hyphens and dots. Internationalized names, including their `xn--` form, a name ending in a dot, and an underscore all fail this test.
+  - **Limit:** at most five different hosts wait per member at once. A repeat of a host already waiting only counts up.
+  - **Answering:** one request takes one answer at a time; a second answer given meanwhile is refused.
+
+  Each request and its answer
   is in the **Approvals** log; the Concierge's status lists the open ones.
 - **Tool requests**: an agent missing a developer tool asks with its `request_tool` tool, naming one from the app's
   fixed catalog: **.NET SDK 10**, **.NET SDK (current LTS)**, **Node.js LTS** or **Python 3**. Agents never give a
