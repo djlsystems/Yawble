@@ -31,6 +31,12 @@ case "$prefix" in
   *[\"\'\`\$\*\?\[\]\{\}\^\\]*) echo "install.sh: the install path cannot contain quotes, \$, \`, * ? [ ] { } ^ or \\: $prefix" >&2; exit 2 ;;
 esac
 [ -x "$src/yawble" ] || { echo "install.sh: run me from the unpacked tarball (no yawble beside me)" >&2; exit 1; }
+# The launcher is written as $bindir/yawble; a program of that name that is not a Yawble launcher is left alone.
+launcher="$bindir/yawble"
+if [ -e "$launcher" ] && ! grep -q 'yawble-launch.sh' "$launcher" 2>/dev/null; then
+  echo "install.sh: $launcher exists and is not a Yawble launcher; not replacing it. Move it away and run this again." >&2
+  exit 1
+fi
 
 if [ "$src" != "$prefix" ]; then
   if [ -e "$prefix" ]; then
@@ -45,7 +51,6 @@ chmod -R u+rwX,go+rX,go-w "$prefix"
 
 mkdir -p "$bindir" "$appsdir"
 # The launcher checks the AppArmor profile before starting Electron, whose own sandbox needs it too.
-launcher="$bindir/yawble"
 cat > "$launcher" <<EOF
 #!/bin/sh
 exec '$prefix/yawble-launch.sh' "\$@"

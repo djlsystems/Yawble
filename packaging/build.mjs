@@ -130,18 +130,19 @@ if (signing) signing.signFiles(signing.signableFiles(stage));
 const shell = path.join(repo, 'shell');
 mustExist(path.join(shell, 'node_modules', 'electron', 'package.json'), 'install the shell first: (cd shell && npm ci)');
 // Always rebuilt: a shell/out left from an earlier checkout would ship an old window with this checkout's core.
-// npm is npm.cmd on Windows, which Node starts only through a shell; the arguments are fixed.
-run(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'build'], { cwd: shell, shell: process.platform === 'win32' });
+// npm is npm.cmd on Windows, which Node starts only through a shell: there the whole fixed command is one string, since
+// arguments beside shell: true are concatenated unescaped (Node's DEP0190).
+if (process.platform === 'win32') run('npm run build', [], { cwd: shell, shell: true });
+else run('npm', ['run', 'build'], { cwd: shell });
 mustExist(path.join(shell, 'out', 'main', 'main', 'index.js'), 'the shell build wrote no out/main/main/index.js');
 const electronVersion = JSON.parse(readFileSync(path.join(shell, 'node_modules', 'electron', 'package.json'), 'utf8')).version;
-const version = JSON.parse(readFileSync(path.join(shell, 'package.json'), 'utf8')).version;
 const { readBuildVersion } = await import('../scripts/build-version.mjs');
 const buildVersion = readBuildVersion(repo).version;
 
 const builder = require('electron-builder');
 const archName = rid.endsWith('arm64') ? 'arm64' : 'x64';
 const arch = builder.Arch[archName];
-const name = sign ? `Yawble-Setup-${buildVersion}-${archName}` : `yawble-${version}-${rid}-unsigned`;
+const name = sign ? `Yawble-Setup-${buildVersion}-${archName}` : `yawble-${buildVersion}-${rid}-unsigned`;
 // The installed app's version where Windows shows it (Settings > Apps, inventory tools): electron-builder writes the
 // uninstall entry from package.json's version, which is not the build's (yyyy.mm.dd.N is not semver); this NSIS hook
 // runs after that entry is written and puts the build's version in it.
