@@ -344,6 +344,11 @@ public sealed partial class TeamRepos
             // B016: a member still on members/<name> moves to members/<team>/<name> (the old branch is kept).
             // Before the shared view is updated, so its bundle already has the new branch.
             await MoveLegacyBranchLockedAsync(member, repo, ct);
+            // B020: a members/<team> ref (here, on origin, in the shared view or the clone) blocks the member's branch: a
+            // plain refusal before anything is made, never git's "cannot lock ref" later.
+            var planned = CheckoutOf(member, repo);
+            await CheckMemberBranchFreeAsync(member, planned.Branch, "the team's repository", repo.Path, SharedRepoPath(member.Team), planned.ClonePath, ct);
+            await CheckExtrasFreeLockedAsync(member, planned.Branch, ct);
             await UpdateSharedLockedAsync(member.Team, repo, ct);
             var checkout = CheckoutOf(member, repo);
             checkout = checkout with
@@ -858,6 +863,15 @@ public sealed partial class TeamRepos
             string? rejection = null;
             for (var i = 0; i < unpublished.Count; i++)
             {
+                // B020: origin has a branch at one of this one's parent paths (members/<team> for members/<team>/<name>):
+                // not pushed, said plainly, never git's "cannot lock ref".
+                if (await BlockedOnOriginAsync(repo.Path, unpublished[i], ct) is { } blocker)
+                {
+                    rejected.Add(unpublished[i]);
+                    rejection ??= $"{unpublished[i]} was not pushed: origin has a branch {blocker}, and git cannot keep a branch and branches under its name at once. "
+                        + $"Rename or delete {blocker} in the Git dialog (Fetch first so it is listed), or rename the team.";
+                    continue;
+                }
                 var run = await Pusher.PushAsync(repo.Path, unpublished[i], ct);
                 var output = PersonGitPush.Redact(string.Join('\n', run.Stderr, run.Stdout).Trim());
                 if (run.ExitCode == 0)

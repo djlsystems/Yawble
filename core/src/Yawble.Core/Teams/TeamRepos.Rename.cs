@@ -17,7 +17,7 @@ namespace Yawble.Core.Teams;
 ///   deletes it in the Git dialog. The new one is pushed after the run like any branch origin does not have.</item>
 /// </list>
 /// Anything that would make the move unsafe (a clone .git the host may not read, a link on the ref path, a name clash with
-/// an existing ref) leaves the member on its old branch, with the reason logged.
+/// an existing ref here, in the clone or on origin's side: B020) leaves the member on its old branch, with the reason logged.
 /// </summary>
 public sealed partial class TeamRepos
 {
@@ -92,6 +92,8 @@ public sealed partial class TeamRepos
         // work went on the old one): switching to it could hide work. Stay, and say why.
         if (cloneHasNew && newTip != cloneTip) return $"the clone already has {to} at another commit than {from}";
         if (!cloneHasNew && await RefClashAsync(repoPath, gitDir, to, ct) is { } cloneClash) return $"the clone already has {cloneClash}";
+        // B020: the same check for the new name on origin's side, before anything moves (the push would fail later).
+        if (await BlockedOnOriginAsync(repoPath, to, ct) is { } onOrigin) return $"origin already has {onOrigin} (as of the last fetch)";
 
         // The host repository: the new branch at the old one's commit there (it holds every fetched-back run and any sync
         // since). Clone work it does not have yet, or that was parked, lands on the new name at the next fetch-back, by the

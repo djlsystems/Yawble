@@ -241,6 +241,14 @@ a member's card opens it at that member's activity.
 - A member whose clone is still on an older `members/<name>` branch moves to `members/<team>/<name>` at its next
   start, with its commits: the app creates the new branch at the old one's commit and pushes it. The old branch on
   origin is left for you to delete in the Git dialog, where it is listed as old.
+- git cannot keep a branch `members/<x>` beside branches under `members/<x>/`. So an old branch named like a team's
+  slug (for example `members/docs` and a team "Docs") blocks that team's member branches. Before a member branch is
+  made or pushed, the app looks for such a branch in the team's repositories, on origin (as of the last fetch), in the
+  shared view and in the member's clone. When one is there, the member does not start: the message names the branch,
+  where it is, and what to do (rename or delete it in the Git dialog, or rename the team). Nothing is deleted or
+  renamed for you, and another team's branches are never touched. The Git dialog lists the blocking branch with
+  **Delete**, under the same rules as any other branch delete. An old-style member that cannot move because of such a
+  branch stays on its old branch and keeps working there.
 - Clones have no remote and no credential helper. After each run the app cleans the clone's git config and fetches
   the member's branch into the team repository. It never runs git inside a clone an agent used.
 - When the team repository has an origin, branches are pushed with your own git setup at each run's end. Pushes are

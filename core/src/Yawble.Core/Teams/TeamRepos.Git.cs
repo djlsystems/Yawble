@@ -18,6 +18,11 @@ public sealed record TeamGitStatus(
     /// <summary>Old-style <c>members/&lt;member&gt;</c> branches (no team segment, B016) here and/or on origin (as of the last
     /// fetch), for the person to delete; empty when none.</summary>
     public IReadOnlyList<TeamGitOldBranch> OldBranches { get; init; } = [];
+
+    /// <summary>B020: branches here or on origin (as of the last fetch) that block this team's members/&lt;team&gt;/&lt;name&gt;
+    /// branches (members/&lt;team&gt;, or members), for the dialog's Delete or Rename; empty when none. An old-style one is
+    /// also in <see cref="OldBranches"/>.</summary>
+    public IReadOnlyList<TeamGitBlockingBranch> BlockingBranches { get; init; } = [];
 }
 
 /// <summary>An old-style member branch: where it is, and whether every copy of it is in the base (local or origin's).</summary>
@@ -220,6 +225,7 @@ public sealed partial class TeamRepos
             baseSha, originBase, ahead, behind, teamBranch, teamSha, teamAhead, teamBehind, merge, conflicts, members)
         {
             OldBranches = await OldBranchesAsync(path, baseSha, originBase, legacyInUse, ct),
+            BlockingBranches = await BlockingLockedAsync(repo, team, ct),
         };
     }
 
