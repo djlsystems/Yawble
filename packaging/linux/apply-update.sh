@@ -18,6 +18,8 @@ say "applying $tarball over $prefix"
 
 [ -f "$tarball" ] || { say "no tarball at $tarball; nothing changed"; exit 1; }
 [ -x "$prefix/yawble" ] && [ -f "$prefix/install.sh" ] || { say "$prefix is not a Yawble install; nothing changed"; exit 1; }
+# The running programs' paths in /proc are resolved, so the install's must be too (a symlink in it, a trailing slash).
+prefix=$(cd "$prefix" && pwd -P)
 
 # Wait for the window and the core (every process whose program is inside the install) to end.
 tries=0
