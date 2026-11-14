@@ -190,7 +190,7 @@ public class LauncherTests
         var settings = JsonNode.Parse(settingsJson!)!;
         Assert.True(settings["skipDangerousModePermissionPrompt"]!.GetValue<bool>());
         Assert.Equal("bypassPermissions", settings["permissions"]!["defaultMode"]!.GetValue<string>());
-        // B028: no AI attribution in the agent's commits or pull requests.
+        // No AI attribution in the agent's commits or pull requests.
         Assert.Equal("", settings["attribution"]!["commit"]!.GetValue<string>());
         Assert.Equal("", settings["attribution"]!["pr"]!.GetValue<string>());
         Assert.False(settings["includeCoAuthoredBy"]!.GetValue<bool>());
