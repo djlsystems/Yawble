@@ -5,6 +5,7 @@ import { errorText, isRemoteRefusal } from '../api';
 import { displayName } from '../faces/faces';
 import BusyLabel from './BusyLabel.vue';
 import { useBusy } from '../busy';
+import { discussWithConcierge, networkAskPrompt } from '../conciergeDiscuss';
 
 /**
  * One network ask in Needs you: a host a member's run was refused (or asked for with request_host), with who asked, the
@@ -70,20 +71,23 @@ async function answer(choice: NetworkAskChoice) {
         :disabled="busy.is('answer')" :aria-busy="busy.is('answer', c.choice)" @click="answer(c.choice)">
         <BusyLabel :busy="busy.is('answer', c.choice)" :text="c.busy">{{ c.label }}</BusyLabel>
       </button>
+      <button class="discuss" data-test="network-ask-discuss" title="Talk it through with the Concierge first; you still answer it here"
+        @click="discussWithConcierge(ask.teamId, networkAskPrompt(ask))">Discuss with the Concierge</button>
     </div>
     <p v-if="error" class="error small" data-test="network-ask-error">{{ error }}</p>
   </article>
 </template>
 
 <style scoped>
-.network-ask { display: flex; flex-direction: column; gap: 4px; border: 1px solid #f3c38b; border-left: 3px solid #b45309; border-radius: 10px; padding: 8px 10px; background: #fff; font-size: 13px; }
+.network-ask { display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--warn-edge-soft); border-left: 3px solid var(--warn-edge); border-radius: 10px; padding: 8px 10px; background: var(--surface); font-size: 13px; }
 .network-ask p { margin: 0; overflow-wrap: anywhere; }
 .head code { font-weight: 600; }
 .hint { color: var(--ink-soft); }
-.http { color: #92400e; }
+.http { color: var(--warn-ink); }
 .note { font: inherit; font-size: 12.5px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; margin-top: 2px; }
 .buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .buttons button { font-size: 12.5px; }
+.buttons .discuss { margin-left: auto; }
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
 .error { color: var(--bad); }

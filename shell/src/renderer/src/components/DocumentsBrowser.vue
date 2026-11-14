@@ -200,7 +200,7 @@ onMounted(() => void load(''));
 .split { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 12px; min-height: 380px; }
 .files { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line-soft); border-radius: 8px; overflow: auto; max-height: 60vh; }
 .files li { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-bottom: 1px solid var(--line-soft); }
-.files li.on { background: var(--hover, #eef2fb); }
+.files li.on { background: var(--hover); }
 .files .name { flex: 1; text-align: left; border: 0; background: transparent; padding: 3px 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ico { margin-right: 6px; }
 .acts { display: flex; gap: 2px; }
@@ -226,7 +226,7 @@ onMounted(() => void load(''));
 .browser.fill .viewer > .vbody { flex: 1 1 0; min-height: 0; overflow: auto; }
 .browser.fill .viewer > .editor { min-height: 0; resize: none; }
 .browser.fill .viewer > .img { object-fit: contain; align-self: flex-start; }
-.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
 .error { color: var(--bad); }

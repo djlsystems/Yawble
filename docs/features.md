@@ -6,6 +6,8 @@ side by side in one team. Each agent run is isolated in its own sandbox (Microso
 
 The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Kanban board**, **Monitor** and **Logs**, plus Settings.
 
+The window has light and dark themes: the sun or moon button right of the Cloud Link icon in the title bar switches them (also **View > Theme** and **Toggle theme**); until you choose, the theme follows the OS, and **Theme: Use system setting** follows it again. The Monitor is always dark.
+
 ## Teams and members
 
 - A team has one **Manager** and any number of **members**. You tell the Manager what you want. It splits the work,
@@ -188,7 +190,12 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Kanban b
 - **Kanban board**: four lanes, **To Do**, **In Progress**, **Needs You** and **Done**. Cards come from the teams' work and
   move with its status. You can move a card, comment, or ask the Manager about it. **Needs You** also lists the
   Connections to reconnect, the network requests and the tool requests waiting for you (see Sandbox and policy), with
-  their buttons.
+  their buttons. The card a member is working on says **Heavy work** while that member holds the heavy-work lease, and
+  **Waiting for heavy work** (with its place in the queue) while it waits; the tooltip says what for.
+- **Discuss with the Concierge** sits on a member's question, a network request, a tool request, an open Kanban card,
+  the team page's branch sync notice, the Git notice and the not-ready-to-run-agents notice:
+  it starts a Concierge chat about that team with the request written out (the agent's own words quoted), so you can
+  talk it through first. The Concierge advises; you still answer the request yourself.
   - On a team with a tester, verify and test cards go to the tester. The tester tests the developer's branch as the
     developer left it, and reports what ran and the result on the card and in its hand-back.
   - A developer's report never closes a verify card. When the Manager moves a tester's card to Done and the tester

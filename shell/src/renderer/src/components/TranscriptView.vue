@@ -33,26 +33,26 @@ watch(entries, () => { if (atBottom) void nextTick(() => { if (box.value) box.va
 </template>
 
 <style scoped>
-.transcript { height: 100%; overflow: auto; padding: 10px 12px; background: #101418; color: #d8dee9; font-size: 13px; line-height: 1.45; box-sizing: border-box; }
-.empty { color: #7d8898; }
-.said { color: #eef2f7; margin: 8px 0; }
+.transcript { height: 100%; overflow: auto; padding: 10px 12px; background: var(--console-bg); color: var(--console-ink); font-size: 13px; line-height: 1.45; box-sizing: border-box; }
+.empty { color: var(--console-faint); }
+.said { color: var(--console-ink-strong); margin: 8px 0; }
 .said :deep(p) { margin: 4px 0; }
-.said :deep(code) { background: #222b36; padding: 0 4px; border-radius: 3px; }
-.said :deep(pre) { background: #1b222c; padding: 6px 8px; border-radius: 4px; overflow: auto; }
-.said :deep(a) { color: #8ab4ff; }
+.said :deep(code) { background: var(--console-code); padding: 0 4px; border-radius: 3px; }
+.said :deep(pre) { background: var(--console-pre); padding: 6px 8px; border-radius: 4px; overflow: auto; }
+.said :deep(a) { color: var(--console-link); }
 .said :deep(table) { border-collapse: collapse; }
-.said :deep(td), .said :deep(th) { border: 1px solid #36404e; padding: 2px 6px; }
-.thinking { margin: 4px 0; color: #8a95a7; }
+.said :deep(td), .said :deep(th) { border: 1px solid var(--console-line); padding: 2px 6px; }
+.thinking { margin: 4px 0; color: var(--console-dim); }
 .thinking summary { cursor: pointer; font-size: 12px; }
 .thinking pre { white-space: pre-wrap; font-size: 12px; margin: 4px 0 4px 12px; }
 .tool { display: flex; gap: 8px; align-items: baseline; margin: 6px 0 2px; font-size: 12.5px; }
-.tname { color: #f2b84b; font-weight: 600; white-space: nowrap; }
-.tool code { color: #c9d4e3; white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, Consolas, monospace; }
-.result { margin: 0 0 6px 14px; padding: 4px 8px; border-left: 2px solid #2c3542; color: #9aa6b8; white-space: pre-wrap; word-break: break-word; font-size: 12px; max-height: 260px; overflow: auto; }
-.result.error { border-left-color: #c9473d; color: #ffb4b4; }
-.mark { margin: 8px 0; padding: 4px 8px; background: #1b222c; border-radius: 4px; font-size: 12px; color: #9aa6b8; }
-.mark b { color: #d8dee9; }
-.mark.error b { color: #ff8a8a; }
-.note { margin: 4px 0; font-size: 12.5px; color: #c9d4e3; }
-.plain { white-space: pre-wrap; word-break: break-word; color: #c9d4e3; margin: 4px 0; font-size: 12.5px; }
+.tname { color: var(--console-tool); font-weight: 600; white-space: nowrap; }
+.tool code { color: var(--console-text); white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, Consolas, monospace; }
+.result { margin: 0 0 6px 14px; padding: 4px 8px; border-left: 2px solid var(--console-rule); color: var(--console-soft); white-space: pre-wrap; word-break: break-word; font-size: 12px; max-height: 260px; overflow: auto; }
+.result.error { border-left-color: var(--console-bad); color: var(--console-bad-ink); }
+.mark { margin: 8px 0; padding: 4px 8px; background: var(--console-pre); border-radius: 4px; font-size: 12px; color: var(--console-soft); }
+.mark b { color: var(--console-ink); }
+.mark.error b { color: var(--console-bad-strong); }
+.note { margin: 4px 0; font-size: 12.5px; color: var(--console-text); }
+.plain { white-space: pre-wrap; word-break: break-word; color: var(--console-text); margin: 4px 0; font-size: 12.5px; }
 </style>

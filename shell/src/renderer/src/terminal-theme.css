@@ -1,0 +1,14 @@
+/* The terminals' own colours (TerminalApp, TerminalScreen, TerminalPane; the xterm palette itself is in terminalPane.ts),
+   light and dark, keyed on <html data-theme> like the rest of the window (theme.ts sets it). */
+:root {
+  --term-bg: #fbfbfc; --term-fg: #1d2330; --term-title: #11151c; --term-muted: #5b6475;
+  --term-head: #eef0f3; --term-bar: #f3f4f6; --term-line: #d9dce3;
+  --term-btn: #ffffff; --term-btn-on: #e3e6ec; --term-btn-line: #c3c8d2; --term-btn-ink: #1d2330; --term-on-ink: #11151c;
+  --term-warn: #8a5200; --term-bad: #b42318; --term-grip: rgba(36, 87, 197, .22);
+}
+:root[data-theme="dark"] {
+  --term-bg: #101418; --term-fg: #d8dee9; --term-title: #ffffff; --term-muted: #9aa6b8;
+  --term-head: #1b222c; --term-bar: #151b23; --term-line: #2c3542;
+  --term-btn: #222b36; --term-btn-on: #222b36; --term-btn-line: #36404e; --term-btn-ink: #d8dee9; --term-on-ink: #e6ebf2;
+  --term-warn: #f2b84b; --term-bad: #ff8a8a; --term-grip: rgba(80, 120, 200, .25);
+}

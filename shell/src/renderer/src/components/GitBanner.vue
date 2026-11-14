@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { discussWithConcierge, gitPrompt } from '../conciergeDiscuss';
 import { computed, onMounted, ref } from 'vue';
 import type { GitInstallResult, GitStatus, YawbleApi } from '../../../shared/api';
 import { errorText } from '../api';
@@ -66,6 +67,7 @@ defineExpose({ check });
       </button>
       <a :href="status!.downloadUrl" target="_blank" rel="noopener" data-test="git-download">Download Git</a>
       <button type="button" class="mini" :disabled="checking || installing" data-test="git-recheck" @click="check">Check again</button>
+      <button type="button" class="mini" data-test="git-discuss" title="Talk it through with the Concierge" @click="discussWithConcierge(null, gitPrompt(text))">Discuss with the Concierge</button>
     </span>
     <span v-if="api.remote" class="muted small" data-test="git-remote-note">Install it on the computer itself.</span>
     <span v-if="error" class="error" data-test="git-error">{{ error }}</span>
@@ -74,9 +76,9 @@ defineExpose({ check });
 </template>
 
 <style scoped>
-.git-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 6px 18px; margin: 0; border: 1px solid #c0392b; background: #fdecea; color: #1d2330; }
+.git-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 6px 18px; margin: 0; border: 1px solid var(--bad-line); background: var(--bad-bg); color: var(--ink); }
 .git-banner .text { flex: 1 1 320px; }
 .git-banner .actions { display: inline-flex; gap: 8px; align-items: center; }
-.git-banner .error { flex-basis: 100%; color: #a01818; }
+.git-banner .error { flex-basis: 100%; color: var(--bad); }
 .ok-line { padding: 6px 18px; margin: 0; color: var(--ok); }
 </style>
