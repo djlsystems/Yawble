@@ -4,7 +4,7 @@ A short reference to what Yawble does. Yawble is a desktop app that runs teams o
 CLIs you already installed. It is agent-agnostic: each member picks its own CLI and model, and different agents work
 side by side in one team. Each agent run is isolated in its own sandbox (Microsoft's MXC sandbox).
 
-The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**, **Monitor** and **Logs**, plus Settings.
+The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Kanban board**, **Monitor** and **Logs**, plus Settings.
 
 ## Teams and members
 
@@ -183,7 +183,7 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
 
 ## Board, Backlog and Documents
 
-- **Board**: four lanes, **To Do**, **In Progress**, **Needs You** and **Done**. Cards come from the teams' work and
+- **Kanban board**: four lanes, **To Do**, **In Progress**, **Needs You** and **Done**. Cards come from the teams' work and
   move with its status. You can move a card, comment, or ask the Manager about it. **Needs You** also lists the
   Connections to reconnect, the network requests and the tool requests waiting for you (see Sandbox and policy), with
   their buttons.
