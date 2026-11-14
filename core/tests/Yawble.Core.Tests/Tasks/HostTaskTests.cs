@@ -25,8 +25,17 @@ internal sealed class TaskFixture : IDisposable
     public bool Win => IsWin;
     public string ScriptPath => Win ? "scripts/run.ps1" : "scripts/run.sh";
 
-    public TaskFixture()
+    /// <summary>Set with <c>withConnections</c>: Connections over an in-memory credential store, given to the service.</summary>
+    public Connections.MemoryCredentialStore? Creds { get; }
+    public Yawble.Core.Connections.ConnectionService? Conns { get; }
+
+    public TaskFixture(bool withConnections = false)
     {
+        if (withConnections)
+        {
+            Creds = new Connections.MemoryCredentialStore();
+            Conns = new Yawble.Core.Connections.ConnectionService(Creds, Db.ConnectionString, log: _ => { });
+        }
         Repo = Path.Combine(Db.Dir, "checkout");
         Docs = Path.Combine(Db.Dir, "docs");
         Directory.CreateDirectory(Repo);
@@ -39,7 +48,7 @@ internal sealed class TaskFixture : IDisposable
         Write("other.txt", "unpinned");
         Commit("first");
         Svc = new HostTaskService(Db.ConnectionString, Git, (_, name) => name == "main" ? new TaskRepoInfo(Repo, BaseBranch) : null, _ => Docs,
-            w => { lock (Wakes) Wakes.Add(w); return System.Threading.Tasks.Task.CompletedTask; });
+            w => { lock (Wakes) Wakes.Add(w); return System.Threading.Tasks.Task.CompletedTask; }, connections: Conns);
     }
 
     public string G(params string[] args) => Git.RunAsync(Repo, args).GetAwaiter().GetResult();

@@ -23,6 +23,9 @@ public sealed record ConnectionSecretKeys(long Id, string Name, string Kind, IRe
 
 public sealed record ConnectionBrief(long Id, string Name, string Status, string? StatusReason);
 
+/// <summary>A host task that takes an environment variable from a Connection (the Connections list's usedByTasks: teamId, taskName).</summary>
+public sealed record ConnectionTaskUse(long TeamId, string TaskName);
+
 /// <summary>
 /// Shared sign-ins (API keys and tokens). Rows are in SQLite; secret values live only in the credential store under
 /// "connection/{storeKey}/{fieldKey}", where storeKey is the row's random GUID: ids restart at 1 in every data dir, and the OS
@@ -349,6 +352,25 @@ public sealed class ConnectionService
         using var r = cmd.ExecuteReader();
         var list = new List<string>();
         while (r.Read()) list.Add(r.GetString(0));
+        return list;
+    }
+
+    /// <summary>
+    /// The host tasks that take an environment variable from this Connection (host_tasks.env_from_connections), by team and task
+    /// name, sorted. Removing the Connection stays allowed: those tasks then refuse to start until it is back or the task changes.
+    /// </summary>
+    public IReadOnlyList<ConnectionTaskUse> UsedByTasks(long id)
+    {
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = """
+            SELECT DISTINCT t.team_id, t.name FROM host_tasks t, json_each(t.env_from_connections) b
+            WHERE CAST(json_extract(b.value, '$.connectionId') AS TEXT) = $i ORDER BY t.team_id, t.name;
+            """;
+        cmd.Parameters.AddWithValue("$i", id.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        using var r = cmd.ExecuteReader();
+        var list = new List<ConnectionTaskUse>();
+        while (r.Read()) list.Add(new ConnectionTaskUse(r.GetInt64(0), r.GetString(1)));
         return list;
     }
 
