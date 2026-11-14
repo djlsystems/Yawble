@@ -180,7 +180,7 @@ public sealed class HostTaskStore(string connectionString, TimeProvider clock)
     // ------------------------------------------------------------------ plumbing
 
     private static string? S(SqliteDataReader r, int i) => r.IsDBNull(i) ? null : r.GetString(i);
-    public static string Clip(string s, int max) => s.Length <= max ? s : s[..(max - 1)] + "â€¦";
+    public static string Clip(string s, int max) => s.Length <= max ? s : s[..(max - 1)] + "…";
 
     private SqliteConnection Open()
     {
