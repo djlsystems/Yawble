@@ -183,11 +183,30 @@ public sealed class ToolAskService
         _host = host;
         _tell = tell;
         _clock = clock ?? TimeProvider.System;
-        // An install the app was closed during never finished here: the ask waits again, with Try again.
+        // An install the app was closed during never finished here: the ask waits again, with Try again, and the
+        // Approvals log gets its result (a failed event), so no install there is left without one.
         using var c = Open();
-        using var cmd = Command(c, "UPDATE tool_asks SET state = 'pending', error = 'the app closed while it was installing; try again' WHERE state = 'installing';");
-        cmd.ExecuteNonQuery();
+        using var tx = c.BeginTransaction();
+        var interrupted = new List<long>();
+        using (var cmd = Command(c, "SELECT id FROM tool_asks WHERE state = 'installing' ORDER BY id;"))
+        {
+            cmd.Transaction = tx;
+            using var r = cmd.ExecuteReader();
+            while (r.Read()) interrupted.Add(r.GetInt64(0));
+        }
+        foreach (var id in interrupted)
+        {
+            Exec(c, tx, "UPDATE tool_asks SET state = 'pending', error = 'the app closed while it was installing; try again' WHERE id = $id AND state = 'installing';", ("$id", id));
+            Event(c, tx, id, "failed", null, null, InterruptedDetail);
+        }
+        tx.Commit();
     }
+
+    /// <summary>The Approvals log's result for an install the app was closed during.</summary>
+    public const string InterruptedDetail = "install interrupted: the app closed";
+
+    /// <summary>winget's exit code in decimal and hex, as winget documents them: "winget exit code -1978335212 (0x8A150014)".</summary>
+    public static string WingetExitCode(int code) => $"winget exit code {code} (0x{code:X8})";
 
     public Action? Changed { get; set; }
 
@@ -429,9 +448,9 @@ public sealed class ToolAskService
             }
             Report(id, tool, "checking", $"Looking for {tool.Program} again...");
             if (await _host.IsInstalledAsync(tool, ct).ConfigureAwait(false))
-                return await InstalledAsync(ask, tool, who, $"winget exit code {r.ExitCode}", ct);
+                return await InstalledAsync(ask, tool, who, WingetExitCode(r.ExitCode), ct);
             var output = Last(string.Join('\n', r.Stdout, r.Stderr));
-            var failed = $"Installing {tool.DisplayName} did not finish (winget exit code {r.ExitCode}{(output.Length > 0 ? $": {output}" : "")}).";
+            var failed = $"Installing {tool.DisplayName} did not finish ({WingetExitCode(r.ExitCode)}{(output.Length > 0 ? $": {output}" : "")}).";
             Fail(id, tool, who, failed, ran: true);
             return Result(false, id, tool, failed);
         }

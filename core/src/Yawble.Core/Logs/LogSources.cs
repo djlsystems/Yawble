@@ -135,8 +135,16 @@ public static class LogSources
             "tm.name = @team", "t.member = @member",
             // An answered ask goes by when it was answered, not raised: one that waited past the retention must not be
             // pruned the moment the person answers it (for a denied network ask that would lift the 24-hour DenyQuiet).
-            new("integration_asks", AnsweredAt, 365, "who approved or declined those requests, and who allowed or denied which host. Requests still waiting for an answer are never pruned. Host tool requests (developer tools agents asked for) are not pruned.", Where: "state <> 'pending'",
-                Also: [new("network_asks", AnsweredAt, null, "", Where: "state <> 'pending'")])),
+            // A network denial and a host tool Not now are also kept while their 24-hour quiet lasts (@quietSince), whatever
+            // the cutoff: pruning them all would let the agent ask again at once. A tool ask's events go with it, first.
+            new("integration_asks", AnsweredAt, 365, "who approved or declined those requests, who allowed or denied which host, and which developer tools agents asked for and what the person did. Requests still waiting for an answer, a tool still installing, and a host denial or a tool's Not now from the last 24 hours are never pruned.", Where: "state <> 'pending'",
+                Also:
+                [
+                    new("network_asks", AnsweredAt, null, "", Where: "state <> 'pending' AND NOT (state = 'denied' AND " + AnsweredAt + " >= @quietSince)"),
+                    new("tool_ask_events", "(SELECT COALESCE(q.decided_at, q.at) FROM tool_asks q WHERE q.id = tool_ask_events.ask_id)", null, "",
+                        Where: $"ask_id IN (SELECT id FROM tool_asks WHERE {ToolAskGoes})"),
+                    new("tool_asks", AnsweredAt, null, "", Where: ToolAskGoes),
+                ])),
 
         new("usage", "Model usage", "Usage",
             "Tokens for each model request: input, output and cache, by run, member and model.",
@@ -236,6 +244,18 @@ public static class LogSources
 
     /// <summary>The prune time of an ask: when it was answered, or when it was raised if no answer time was kept.</summary>
     private const string AnsweredAt = "COALESCE(decided_at, at)";
+
+    /// <summary>
+    /// A host tool ask (tool_asks, 0040) that pruning may delete: installed, or Not now (dismissed) longer than 24 hours
+    /// ago. Never one pending or installing. A Not now inside its 24 hours is kept, whichever catalog name it is under:
+    /// the hold is read per team over every name of the package (ToolAsks.SamePackage), so keeping each such row keeps it.
+    /// </summary>
+    private const string ToolAskGoes = "state IN ('installed', 'dismissed') AND NOT (state = 'dismissed' AND " + AnsweredAt + " >= @quietSince)";
+
+    /// <summary>How long a network denial and a tool's Not now keep the agent from asking again: pruning keeps those
+    /// answers this long, whatever the cutoff (@quietSince is now less this).</summary>
+    public static TimeSpan AnswerQuiet =>
+        Integrations.NetworkAskService.DenyQuiet > Integrations.ToolAskService.NotNowQuiet ? Integrations.NetworkAskService.DenyQuiet : Integrations.ToolAskService.NotNowQuiet;
 
     public static LogSource? Find(string id) => All.FirstOrDefault(s => s.Id == id);
 

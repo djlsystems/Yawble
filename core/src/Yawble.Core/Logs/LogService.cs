@@ -267,6 +267,7 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
         }
         var s = LogSources.Find(source) ?? throw new ArgumentException($"no log named '{source}'");
         var p = s.Prune ?? throw new ArgumentException($"{s.Title} is kept: {s.KeptBecause}");
+        var quietSince = QuietSince();
         using var c = Open();
         long count = 0, files = 0;
         string? oldest = null, newest = null;
@@ -275,6 +276,7 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
             using var cmd = c.CreateCommand();
             cmd.CommandText = $"SELECT COUNT(*), MIN({t.TimeColumn}), MAX({t.TimeColumn}) {(t.FileColumn is null ? "" : $", COUNT({t.FileColumn})")} FROM {t.Table} WHERE {PruneWhere(t)};";
             cmd.Parameters.AddWithValue("@cutoff", cutoff);
+            cmd.Parameters.AddWithValue("@quietSince", quietSince);
             using var r = cmd.ExecuteReader();
             r.Read();
             count += r.GetInt64(0);
@@ -285,6 +287,10 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
         return new(s.Id, s.Title, cutoff, count, oldest, newest, p.Loss, files);
     }
 
+    /// <summary>Answers newer than this are kept whatever the cutoff: a network denial and a tool's Not now hold the agent off
+    /// for <see cref="LogSources.AnswerQuiet"/>, and pruning them would lift it.</summary>
+    private string QuietSince() => (_clock.GetUtcNow() - LogSources.AnswerQuiet).ToString("O", CultureInfo.InvariantCulture);
+
     private static string PruneWhere(LogPrune p) => $"{p.TimeColumn} < @cutoff" + (p.Where is null ? "" : $" AND ({p.Where})");
 
     /// <summary>Deletes the entries of <paramref name="source"/> before <paramref name="cutoff"/>; how many went.</summary>
@@ -293,6 +299,7 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
         if (FileLogs.Find(source) is { } f) return f.Prune(dataDir, cutoff);
         var s = LogSources.Find(source) ?? throw new ArgumentException($"no log named '{source}'");
         var p = s.Prune ?? throw new ArgumentException($"{s.Title} is kept: {s.KeptBecause}");
+        var quietSince = QuietSince();
         using var c = Open();
         long deleted = 0;
         foreach (var t in p.Tables)
@@ -302,12 +309,14 @@ public sealed class LogService(string dataDir, string connectionString, TimeProv
                 using var files = c.CreateCommand();
                 files.CommandText = $"SELECT {t.FileColumn} FROM {t.Table} WHERE {PruneWhere(t)} AND {t.FileColumn} IS NOT NULL;";
                 files.Parameters.AddWithValue("@cutoff", cutoff);
+                files.Parameters.AddWithValue("@quietSince", quietSince);
                 using var r = files.ExecuteReader();
                 while (r.Read()) DeleteFile(r.GetString(0));
             }
             using var cmd = c.CreateCommand();
             cmd.CommandText = $"DELETE FROM {t.Table} WHERE {PruneWhere(t)};";
             cmd.Parameters.AddWithValue("@cutoff", cutoff);
+            cmd.Parameters.AddWithValue("@quietSince", quietSince);
             deleted += cmd.ExecuteNonQuery();
         }
         return deleted;

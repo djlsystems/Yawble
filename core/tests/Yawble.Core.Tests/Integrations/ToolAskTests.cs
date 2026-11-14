@@ -348,6 +348,45 @@ public sealed class ToolAskTests : IDisposable
         Assert.Contains("try again", ask.Error);
     }
 
+    [Fact]
+    public async Task AnInstallTheAppClosedDuring_WritesOneInterruptedRow_InTheApprovalsLog()
+    {
+        await Request(Priya, "python-3");
+        var id = _asks.Asks().Single().Id;
+        await AsWindow(() => _asks.NotNowAsync(id, null, Ct));
+        await Request(Priya, "nodejs-lts");
+        var other = _asks.Asks().Single(a => a.Tool == "nodejs-lts").Id;
+        Insert("UPDATE tool_asks SET state = 'installing' WHERE id = $id RETURNING id;", ("$id", other));
+        Insert("INSERT INTO tool_ask_events (ask_id, at, kind, detail) VALUES ($id, '2026-01-01T00:00:00Z', 'install', 'winget install') RETURNING id;", ("$id", other));
+
+        NewService();
+        NewService(); // a second start finds nothing installing and writes nothing more
+
+        var events = _asks.Events(other);
+        Assert.Equal(["asked", "install", "failed"], events.Select(e => e.Kind));
+        Assert.Single(events, e => e.Detail == ToolAskService.InterruptedDetail);
+        Assert.DoesNotContain(_asks.Events(id), e => e.Detail == ToolAskService.InterruptedDetail);
+
+        var logs = new LogService(_db.Dir, _db.ConnectionString, _clock);
+        var rows = logs.Query(new LogQuery("approvals"))["rows"]!.AsArray().Select(r => r!.AsObject())
+            .Where(r => r["integration"]!.GetValue<string>() == "host tool" && r["args"]!.GetValue<string>().StartsWith("nodejs-lts")).ToList();
+        var row = Assert.Single(rows, r => r["args"]!.GetValue<string>().Contains("install interrupted: the app closed"));
+        Assert.Equal("failed", row["state"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task AFailedInstall_ShowsWingetsExitCodeInHex()
+    {
+        Assert.Equal("winget exit code -1978335212 (0x8A150014)", ToolAskService.WingetExitCode(-1978335212));
+        Assert.Equal("winget exit code 0 (0x00000000)", ToolAskService.WingetExitCode(0));
+        await Request(Priya, "nodejs-lts");
+        var id = _asks.Asks().Single().Id;
+        _host.Result = new GitResult(-1978335212, "No package found matching input criteria.", "");
+        var r = await AsWindow(() => _asks.InstallAsync(id, Ct));
+        Assert.Contains("winget exit code -1978335212 (0x8A150014)", r["message"]!.GetValue<string>());
+        Assert.Contains("0x8A150014", _asks.Events(id).Last().Detail);
+    }
+
     // ------------------------------------------------------------------ the RPCs, the bus tool, the logs
 
     [Fact]
@@ -464,5 +503,82 @@ public sealed class ToolAskTests : IDisposable
             if (InstallsOnRun is { } t) Installed.Add(t);
             return Result;
         }
+    }
+
+    // ------------------------------------------------------------------ B015 tester probes (card 70)
+
+    private long ProbeNotNowAt(string tool)
+    {
+        var id = _asks.Asks().Single(a => a.Tool == tool).Id;
+        AsWindow(() => _asks.NotNowAsync(id, null, Ct)).GetAwaiter().GetResult();
+        return id;
+    }
+
+    private long ProbePruneAll() => new LogService(_db.Dir, _db.ConnectionString, _clock).Prune("approvals", "9999-12-31");
+
+    private long ProbeCount(string sql) => Insert(sql);
+
+    [Fact]
+    public async Task Probe_B015_ANotNowForDotnetSdkLts_HoldsDotnetSdk10_ThroughPruningAll_UntilIts24HoursEnd()
+    {
+        // A Not now on dotnet-sdk-10 25 hours ago (its hold is over), then a Not now on dotnet-sdk-lts (the same package).
+        await Request(Priya, "dotnet-sdk-10");
+        ProbeNotNowAt("dotnet-sdk-10");
+        _clock.Advance(TimeSpan.FromHours(25));
+        Assert.DoesNotContain("refused", await Request(Priya, "dotnet-sdk-lts"));
+        ProbeNotNowAt("dotnet-sdk-lts");
+
+        // Pruning all an hour later: the old dotnet-sdk-10 Not now goes, the dotnet-sdk-lts one stays; dotnet-sdk-10 is still refused.
+        _clock.Advance(TimeSpan.FromHours(1));
+        Assert.True(ProbePruneAll() > 0);
+        Assert.Equal(0, ProbeCount("SELECT count(*) FROM tool_asks WHERE tool = 'dotnet-sdk-10';"));
+        Assert.Equal(1, ProbeCount("SELECT count(*) FROM tool_asks WHERE tool = 'dotnet-sdk-lts' AND state = 'dismissed';"));
+        Assert.StartsWith("refused: the person chose Not now", await Request(Priya, "dotnet-sdk-10"));
+        Assert.StartsWith("refused: the person chose Not now", await Request(Bo, "dotnet"));
+
+        // 23h59 after the Not now: pruning all keeps it, still refused.
+        _clock.Advance(TimeSpan.FromHours(22) + TimeSpan.FromMinutes(59));
+        ProbePruneAll();
+        Assert.Equal(1, ProbeCount("SELECT count(*) FROM tool_asks WHERE tool = 'dotnet-sdk-lts' AND state = 'dismissed';"));
+        Assert.StartsWith("refused", await Request(Priya, "dotnet-sdk-10"));
+
+        // 24h01 after: the hold is over and pruning all removes the Not now with its events; a new ask is raised.
+        _clock.Advance(TimeSpan.FromMinutes(2));
+        ProbePruneAll();
+        Assert.Equal(0, ProbeCount("SELECT count(*) FROM tool_asks;"));
+        Assert.Equal(0, ProbeCount("SELECT count(*) FROM tool_ask_events;"));
+        Assert.DoesNotContain("refused", await Request(Priya, "dotnet-sdk-10"));
+        Assert.Equal("pending", Assert.Single(_asks.Asks()).State);
+        // Another team was never held.
+        Assert.DoesNotContain("refused", await Request(Wren, "dotnet-sdk-lts"));
+    }
+
+    [Fact]
+    public async Task Probe_B015_TheInterruptedRow_ReadsInTheApprovalsLog_AndSurvivesPruningAll()
+    {
+        await Request(Priya, "nodejs-lts");
+        var id = _asks.Asks().Single().Id;
+        _host.Gate = new TaskCompletionSource();
+        var install = AsWindow(() => _asks.InstallAsync(id, Ct)); // the real path to 'installing', with its install event
+        for (var i = 0; i < 200 && _asks.Asks().Single().State != "installing"; i++) await Task.Delay(10, Ct);
+        Assert.Equal("installing", _asks.Asks().Single().State);
+
+        NewService(); // the app starts again; the earlier install never finished
+
+        var logs = new LogService(_db.Dir, _db.ConnectionString, _clock);
+        var rows = logs.Query(new LogQuery("approvals"))["rows"]!.AsArray().Select(r => r!.AsObject())
+            .Where(r => r["integration"]!.GetValue<string>() == "host tool").ToList();
+        File.WriteAllText(Path.Combine(Path.GetTempPath(), "b015-approvals-rows.json"),
+            new JsonArray(rows.Select(r => (JsonNode)r.DeepClone()).ToArray()).ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        var interrupted = Assert.Single(rows, r => r["args"]!.GetValue<string>().Contains(ToolAskService.InterruptedDetail));
+        Assert.Equal("failed", interrupted["state"]!.GetValue<string>());
+        Assert.Single(rows, r => r["state"]!.GetValue<string>() == "install");
+        Assert.Equal("pending", _asks.Asks().Single().State);
+
+        // The ask waits again, so pruning all keeps it and its interrupted row.
+        ProbePruneAll();
+        Assert.Contains(_asks.Events(id), e => e.Detail == ToolAskService.InterruptedDetail);
+        _host.Gate.TrySetResult();
+        await install;
     }
 }
