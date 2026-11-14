@@ -141,7 +141,8 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
   is open (its team and member filters apply). A machine-wide tool says "Windows may ask for permission". While
   winget runs the item says what it is doing (installing, then looking for the program) and its buttons wait; when the
   program is found the item goes and a line says the tool is installed. **Not now** takes an optional note for the
-  agent. A remote view shows the item with **Not now** only and says to install it in the Yawble window.
+  agent. A remote view has no **Install** and says to install it in the Yawble window; it shows **Not now**, and on
+  Linux and macOS **Check again** too.
 - Files: each member reads and writes only its own clone, home and temp folders. The app's data, the credential
   store, and other members and teams are denied.
 - **Settings > Guardrails** is the global policy: Sandbox, Limits (idle and wall-clock timeouts), Files and folders,

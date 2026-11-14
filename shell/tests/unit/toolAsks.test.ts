@@ -164,7 +164,189 @@ describe('ToolAskCard', () => {
   });
 });
 
+const PKEXEC = 'pkexec /usr/bin/dnf install -y dotnet-sdk-10.0';
+const MANUAL = 'sudo dnf install -y dotnet-sdk-10.0';
+const PASSWORD = 'Your system asks for your password';
+const CANCELLED = 'You closed the password window, so nothing was installed. Choose Install to try again.';
+const NOT_AUTHORIZED = 'Your system did not allow the install: the password was not accepted, or this account may not install software. Nothing was installed; choose Install to try again, or run the command yourself and choose Check again.';
+const HOME_ONLY = '.NET SDK 10 was found at /home/ines/.dotnet/dotnet, inside your home folder, where the team\'s sandbox cannot see it. Install it for the whole system (Install, or the command shown), then choose Check again.';
+const NOT_FOUND = '.NET SDK 10 is not found yet where the team\'s runs look for it. Install it, then choose Check again.';
+/** A Linux ask as the core sends it: Install through pkexec, or (canInstall false) the command to run yourself. */
+const linuxAsk = (over: Partial<ToolAsk> = {}): ToolAsk => ask({
+  wingetId: null, canInstall: true, installer: 'pkexec', passwordPrompt: PASSWORD, command: PKEXEC, manualCommand: MANUAL,
+  homeOnly: null, choices: ['install', 'checkAgain', 'notNow'], ...over,
+});
+const manualAsk = (over: Partial<ToolAsk> = {}): ToolAsk => linuxAsk({
+  canInstall: false, installer: null, passwordPrompt: null, command: MANUAL, choices: ['checkAgain', 'notNow'], ...over,
+});
+const result = (code: string, message: string, done = false) => ({ done, id: 4, tool: 'dotnet-sdk-10', message, manual: code === 'manual', result: code });
+
+describe('ToolAskCard on Linux', () => {
+  it('WithInstall_ShowsInstallCheckAgainNotNow_ThePasswordPromptAndTheExactCommand', () => {
+    const { api } = fakeApi({});
+    const w = mount(ToolAskCard, { props: { ask: linuxAsk(), api } });
+    expect(w.findAll('button').map((b) => b.text())).toEqual(['Install', 'Check again', 'Not now']);
+    expect(w.get('[data-test=tool-ask-password]').text()).toBe(PASSWORD);
+    const cmd = w.findAll('[data-test=tool-ask-command]');
+    expect(cmd).toHaveLength(1);
+    expect(cmd[0].text()).toContain('Install runs:');
+    expect(cmd[0].get('code').text()).toBe(PKEXEC);
+    expect(w.find('[data-test=tool-ask-homeOnly]').exists()).toBe(false);
+  });
+
+  it('Installing_ShowsThePasswordPromptThenEachProgressPhase_ThenInstalledEmits', async () => {
+    let finish: (v: unknown) => void = () => {};
+    const { api, calls, emit } = fakeApi({ 'tools.install': () => new Promise((r) => { finish = r; }) });
+    const w = mount(ToolAskCard, { props: { ask: linuxAsk(), api } });
+    await w.get('[data-test=tool-ask-install]').trigger('click');
+    await flushPromises();
+    expect(calls).toEqual([{ method: 'tools.install', params: { id: 4 } }]);
+    expect(w.get('[data-test=tool-ask-progress]').text()).toContain(PASSWORD);
+    expect(w.findAll('button').every((b) => b.attributes('disabled') !== undefined)).toBe(true);
+
+    emit('tools.installProgress', { id: 4, tool: 'dotnet-sdk-10', phase: 'installing', message: `Installing .NET SDK 10 with dnf. ${PASSWORD}...`, command: PKEXEC });
+    await flushPromises();
+    expect(w.get('[data-test=tool-ask-progress]').attributes('data-phase')).toBe('installing');
+    expect(w.get('[data-test=tool-ask-progress]').text()).toBe(`Installing .NET SDK 10 with dnf. ${PASSWORD}...`);
+    emit('tools.installProgress', { id: 4, tool: 'dotnet-sdk-10', phase: 'checking', message: 'Looking for dotnet again...', command: PKEXEC });
+    await flushPromises();
+    expect(w.get('[data-test=tool-ask-progress]').attributes('data-phase')).toBe('checking');
+    expect(w.get('[data-test=tool-ask-progress]').text()).toBe('Looking for dotnet again...');
+
+    const done = { ...result('installed', '.NET SDK 10 is installed; runs that start from now on have it on PATH.', true), closed: [4], told: ['Alpha/Manager'] };
+    finish(done);
+    await flushPromises();
+    expect(w.emitted('installed')?.[0]).toEqual([done]);
+    expect(w.find('[data-test=tool-ask-progress]').exists()).toBe(false);
+  });
+
+  it('StillNotFound_ShowsTheOutputAndTryAgain', async () => {
+    const failedMsg = 'Installing .NET SDK 10 did not finish (exit code 1: No match for argument: dotnet-sdk-10.0).';
+    const { api, calls } = fakeApi({ 'tools.install': () => result('failed', failedMsg) });
+    const w = mount(ToolAskCard, { props: { ask: linuxAsk(), api } });
+    await w.get('[data-test=tool-ask-install]').trigger('click');
+    await flushPromises();
+    expect(w.get('[data-test=tool-ask-failed]').text()).toBe(failedMsg);
+    expect(w.get('[data-test=tool-ask-failed]').attributes('data-result')).toBe('failed');
+    // The list reloads the ask with the core's error: Try again.
+    await w.setProps({ ask: linuxAsk({ error: failedMsg, attempts: 1 }) });
+    expect(w.get('[data-test=tool-ask-install]').text()).toBe('Try again');
+    await w.get('[data-test=tool-ask-install]').trigger('click');
+    await flushPromises();
+    expect(calls.map((c) => c.method)).toEqual(['tools.install', 'tools.install']);
+  });
+
+  it.each([
+    ['cancelled', CANCELLED],
+    ['notAuthorized', NOT_AUTHORIZED],
+  ])('%s_ShowsTheCoresPlainWords_TheItemStaysOpenWithInstall', async (code, words) => {
+    const { api } = fakeApi({ 'tools.install': () => result(code, words) });
+    const w = mount(ToolAskCard, { props: { ask: linuxAsk(), api } });
+    await w.get('[data-test=tool-ask-install]').trigger('click');
+    await flushPromises();
+    await w.setProps({ ask: linuxAsk({ error: words, attempts: 1 }) });
+    const shown = w.get('[data-test=tool-ask-failed]');
+    expect(shown.text()).toBe(words);
+    expect(shown.attributes('data-result')).toBe(code);
+    expect(shown.classes()).not.toContain('error');
+    expect(w.emitted('installed')).toBeUndefined();
+    expect(w.findAll('button').map((b) => b.text())).toEqual(['Install', 'Check again', 'Not now']);
+    expect(w.findAll('button').every((b) => b.attributes('disabled') === undefined)).toBe(true);
+  });
+
+  it('WithoutInstall_ShowsTheManualCommandCheckAgainAndNotNow', () => {
+    const { api } = fakeApi({});
+    const w = mount(ToolAskCard, { props: { ask: manualAsk(), api } });
+    expect(w.findAll('button').map((b) => b.text())).toEqual(['Check again', 'Not now']);
+    const cmd = w.get('[data-test=tool-ask-command]');
+    expect(cmd.text()).toContain('then choose Check again');
+    expect(cmd.get('code').text()).toBe(MANUAL);
+    expect(w.find('[data-test=tool-ask-password]').exists()).toBe(false);
+  });
+
+  it('OnMacOS_ShowsTheBrewCommandAndCheckAgain', () => {
+    const { api } = fakeApi({});
+    const w = mount(ToolAskCard, { props: { ask: manualAsk({ command: 'brew install --cask dotnet-sdk', manualCommand: 'brew install --cask dotnet-sdk' }), api } });
+    expect(w.get('[data-test=tool-ask-command] code').text()).toBe('brew install --cask dotnet-sdk');
+    expect(w.findAll('button').map((b) => b.text())).toEqual(['Check again', 'Not now']);
+  });
+
+  it('CheckAgain_Found_EmitsInstalled_SoTheItemCloses', async () => {
+    const found = { ...result('installed', '.NET SDK 10 is installed; runs that start from now on have it on PATH.', true), closed: [4], told: ['Alpha/Manager'] };
+    const { api, calls } = fakeApi({ 'tools.checkAgain': () => found });
+    const w = mount(ToolAskCard, { props: { ask: manualAsk(), api } });
+    await w.get('[data-test=tool-ask-checkAgain]').trigger('click');
+    await flushPromises();
+    expect(calls).toEqual([{ method: 'tools.checkAgain', params: { id: 4 } }]);
+    expect(w.emitted('installed')?.[0]).toEqual([found]);
+    expect(w.emitted('answered')?.[0]).toEqual([found]);
+  });
+
+  it('CheckAgain_NotFound_ShowsTheResultsMessage_AndStaysOpen', async () => {
+    const { api } = fakeApi({ 'tools.checkAgain': () => result('notFound', NOT_FOUND) });
+    const w = mount(ToolAskCard, { props: { ask: manualAsk(), api } });
+    await w.get('[data-test=tool-ask-checkAgain]').trigger('click');
+    await flushPromises();
+    expect(w.get('[data-test=tool-ask-failed]').text()).toBe(NOT_FOUND);
+    expect(w.get('[data-test=tool-ask-failed]').attributes('data-result')).toBe('notFound');
+    expect(w.emitted('installed')).toBeUndefined();
+    expect(w.get('[data-test=tool-ask-checkAgain]').attributes('disabled')).toBeUndefined();
+  });
+
+  it('CheckAgain_Refused_ShowsTheError', async () => {
+    const { api } = fakeApi({ 'tools.checkAgain': () => { throw new Error('bad_params: tool request 4 is not waiting'); } });
+    const w = mount(ToolAskCard, { props: { ask: manualAsk(), api } });
+    await w.get('[data-test=tool-ask-checkAgain]').trigger('click');
+    await flushPromises();
+    expect(w.get('[data-test=tool-ask-error]').text()).toContain('not waiting');
+    expect(w.emitted('answered')).toBeUndefined();
+  });
+
+  it('HomeOnly_ShowsTheCoresNote_OnceEvenWhenItIsAlsoTheError', () => {
+    const { api } = fakeApi({});
+    const w = mount(ToolAskCard, { props: { ask: linuxAsk({ homeOnly: HOME_ONLY }), api } });
+    expect(w.get('[data-test=tool-ask-homeOnly]').text()).toBe(HOME_ONLY);
+    const again = mount(ToolAskCard, { props: { ask: linuxAsk({ homeOnly: HOME_ONLY, error: HOME_ONLY }), api } });
+    expect(again.find('[data-test=tool-ask-homeOnly]').exists()).toBe(false);
+    expect(again.get('[data-test=tool-ask-failed]').text()).toBe(HOME_ONLY);
+  });
+
+  it('ARemoteView_ShowsCheckAgainAndNotNow_ButNoInstall', async () => {
+    const { api, calls } = fakeApi({ 'tools.checkAgain': () => result('notFound', NOT_FOUND) }, { remote: true } as Partial<YawbleApi>);
+    const w = mount(ToolAskCard, { props: { ask: linuxAsk(), api } });
+    expect(w.find('[data-test=tool-ask-install]').exists()).toBe(false);
+    expect(w.findAll('button').map((b) => b.text())).toEqual(['Check again', 'Not now']);
+    expect(w.get('[data-test=tool-ask-remote]').text()).toContain('Check again or Not now');
+    await w.get('[data-test=tool-ask-checkAgain]').trigger('click');
+    await flushPromises();
+    expect(calls).toEqual([{ method: 'tools.checkAgain', params: { id: 4 } }]);
+    expect(w.get('[data-test=tool-ask-failed]').text()).toBe(NOT_FOUND);
+  });
+
+  it('ARemoteView_ManualAsk_ShowsCheckAgain', () => {
+    const { api } = fakeApi({}, { remote: true } as Partial<YawbleApi>);
+    const w = mount(ToolAskCard, { props: { ask: manualAsk(), api } });
+    expect(w.findAll('button').map((b) => b.text())).toEqual(['Check again', 'Not now']);
+  });
+});
+
 describe('ToolAsks', () => {
+  it('CheckAgain_Found_TheItemCloses_AndSaysItIsInstalled', async () => {
+    let pending = [manualAsk()];
+    const found = { ...result('installed', '.NET SDK 10 is installed; runs that start from now on have it on PATH.', true), closed: [4], told: ['Alpha/Manager'] };
+    const { api } = fakeApi({
+      'tools.asks': () => pending,
+      'tools.checkAgain': () => { pending = []; return found; },
+    });
+    const w = mount(ToolAsks, { props: { api, pollMs: 60_000, banner: true } });
+    await flushPromises();
+    await w.get('[data-test=tool-ask-checkAgain]').trigger('click');
+    await flushPromises();
+    expect(w.find('[data-test=tool-ask]').exists()).toBe(false);
+    expect(w.get('[data-test=tool-ask-done]').text()).toContain('.NET SDK 10 is installed');
+    w.unmount();
+  });
+
   it('ListsTheAsks_AnInstallRemovesItAndSaysItIsInstalled_AndAsksChangedRefreshes', async () => {
     let pending = [ask(), ask({ id: 5, tool: 'nodejs-lts', displayName: 'Node.js LTS', memberName: 'TesterJo', member: 'Alpha/TesterJo' })];
     const { api, calls, emit } = fakeApi({
