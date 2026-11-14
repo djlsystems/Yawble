@@ -6,6 +6,7 @@ import { CLIPBOARD, effectiveOf, fromText, getPath, POLICY_FIELDS, setPath, show
 import { agentClis } from '../agentClis';
 import { agentDefaultLabel } from '../agentArgs';
 import GuardrailPanel from './GuardrailPanel.vue';
+import TeamNetworkAllows from './TeamNetworkAllows.vue';
 import Modal from './Modal.vue';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
@@ -115,6 +116,11 @@ function applyView(v: MemberPolicyView) {
 }
 
 onMounted(load);
+
+// A team host removed beside the policy: read the effective policy again, keeping the override edits in progress.
+async function teamHostsChanged() {
+  try { view.value = await api.call<MemberPolicyView>('policy.getMember', { memberId: props.memberId }); } catch (e) { error.value = errorText(e); }
+}
 
 const saveGeneral = () => work.run('general', doSaveGeneral);
 async function doSaveGeneral() {
@@ -261,6 +267,9 @@ const loosenChanged = () => { preview.value = null; };
           </tr>
         </tbody>
       </table>
+      <section v-if="member" class="team-allows" data-test="policy-team-hosts">
+        <TeamNetworkAllows :team-id="member.teamId" :api="api" @changed="teamHostsChanged" />
+      </section>
       <ul v-if="view.widening.length" class="warn small" data-test="policy-widening">
         <li v-for="w in view.widening" :key="w">Dropped at launch: {{ w }}</li>
       </ul>
@@ -315,6 +324,7 @@ const loosenChanged = () => { preview.value = null; };
 </template>
 
 <style scoped>
+.team-allows { border: 1px solid var(--line-soft); border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
 .tabs { display: flex; gap: 4px; margin-bottom: 10px; }
 .tabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
 .general { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }

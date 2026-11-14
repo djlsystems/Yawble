@@ -31,7 +31,7 @@ const ask = (over: Partial<NetworkAsk> = {}): NetworkAsk => ({
   id: 7, at: '2026-11-13T21:00:00Z', teamId: 1, team: 'Alpha', member: 'Alpha/DeveloperInes', memberName: 'DeveloperInes',
   host: 'api.nuget.org', reason: null, method: 'CONNECT', pathSample: null, count: 3, lastSeen: '2026-11-13T21:05:00Z',
   hint: 'NuGet: .NET packages (dotnet restore, dotnet test)', workflow: 12, state: 'pending', scope: null,
-  decidedBy: null, decidedAt: null, choices: ['agent', 'team', 'everywhere', 'deny'], ...over,
+  decidedBy: null, decidedAt: null, plainHttp: false, choices: ['agent', 'team', 'everywhere', 'deny'], ...over,
 });
 const answered = (choice: string) => ({ ok: true, id: 7, host: 'api.nuget.org', choice, closed: [7], told: ['Alpha/Manager'] });
 
@@ -145,7 +145,7 @@ describe('NetworkAskCard', () => {
 
   it.each([['GET', '/index.html'], ['post', '/upload']])('APlainHttpRefusal_%s_SaysOnlyHttpsIsForwarded', (method, pathSample) => {
     const { api } = fakeApi({});
-    const w = mount(NetworkAskCard, { props: { ask: ask({ method, pathSample, host: 'example.com', hint: null }), api } });
+    const w = mount(NetworkAskCard, { props: { ask: ask({ method, pathSample, host: 'example.com', hint: null, plainHttp: true }), api } });
     expect(w.get('[data-test=network-ask-http]').text()).toContain('only https is forwarded, even once the host is allowed');
   });
 
@@ -155,11 +155,11 @@ describe('NetworkAskCard', () => {
     expect(w.find('[data-test=network-ask-http]').exists()).toBe(false);
   });
 
-  it('TheCoresPlainHttpFlag_WinsOverTheMethod', () => {
+  it('TheTypedPlainHttpFlag_AloneDrivesTheHint_NotTheMethod', () => {
     const { api } = fakeApi({});
-    const flagged = mount(NetworkAskCard, { props: { ask: { ...ask({ method: 'CONNECT' }), plainHttp: true } as NetworkAsk, api } });
+    const flagged = mount(NetworkAskCard, { props: { ask: ask({ method: 'CONNECT', plainHttp: true }), api } });
     expect(flagged.find('[data-test=network-ask-http]').exists()).toBe(true);
-    const unflagged = mount(NetworkAskCard, { props: { ask: { ...ask({ method: 'GET' }), plainHttp: false } as NetworkAsk, api } });
+    const unflagged = mount(NetworkAskCard, { props: { ask: ask({ method: 'GET', plainHttp: false }), api } });
     expect(unflagged.find('[data-test=network-ask-http]').exists()).toBe(false);
   });
 });

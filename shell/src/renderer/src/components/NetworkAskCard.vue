@@ -26,16 +26,8 @@ const choices = computed(() => CHOICES.filter((c) => !props.ask.choices?.length 
 
 /** What was refused when the agent gave no reason: "CONNECT", "GET /v3/index.json". */
 const refused = computed(() => [props.ask.method, props.ask.pathSample].filter(Boolean).join(' '));
-/**
- * A plain-http refusal: the gateway forwards only https (CONNECT), so allowing the host does not make it work.
- * Read from the ask's own flag when the core sends one (plainHttp); until then, a refused method other than CONNECT
- * is a plain-http request (the gateway records CONNECT for https; request_host asks have no method).
- */
-const plainHttp = computed(() => {
-  const flag = (props.ask as NetworkAsk & { plainHttp?: boolean | null }).plainHttp;
-  if (typeof flag === 'boolean') return flag;
-  return !!props.ask.method && props.ask.method.toUpperCase() !== 'CONNECT';
-});
+/** A plain-http refusal (the core's plainHttp flag): the gateway forwards only https, so allowing the host does not make it work. */
+const plainHttp = computed(() => props.ask.plainHttp === true);
 const times = computed(() => (props.ask.count === 1 ? 'once' : `${props.ask.count} times`));
 const since = computed(() => {
   const d = new Date(props.ask.at);

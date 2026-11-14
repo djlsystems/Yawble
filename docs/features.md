@@ -127,7 +127,8 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
   preview the exact list and confirm it.
 - A team's **network allow list** holds the hosts allowed for the whole team, each with who added it and when. Each
   member's run gets them as if they were in its loosen block, under the same floor rules; a host the floor refuses is
-  never written to the list. The team's settings show the list next to the member policy, each host with **Remove**;
+  never written to the list. The team's settings show the list on their **Network** tab, and each member's settings
+  show it on the **Policy** tab next to the member's own policy, each host with who added it, how and when, and **Remove**;
   a removed host is gone from the team's next runs (a member's own loosen block keeps what it has). Adding and removing
   are in the audit log. Hosts that **Allow for this team** wrote into members' loosen blocks before the team list
   existed stay in those blocks.

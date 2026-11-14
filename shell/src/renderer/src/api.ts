@@ -1,8 +1,21 @@
-import type { YawbleApi } from '../../shared/api';
+import type { TeamHosts, YawbleApi } from '../../shared/api';
 
 /** window.yawble, or the one a test passes in. */
 export function resolveApi(api?: YawbleApi): YawbleApi {
   return api ?? window.yawble;
+}
+
+/**
+ * The team's network allow list, oldest first (policy.teamHosts). Both windows send it through call: the desktop's
+ * preload bridge and a remote view's socket (the Cloud Link allows policy.*).
+ */
+export function teamHosts(api: YawbleApi, teamId: number): Promise<TeamHosts> {
+  return api.call<TeamHosts>('policy.teamHosts', { teamId });
+}
+
+/** Takes a host off the team's list (policy.removeTeamHost; the core audits it) and answers the list as it is now. A host not on it: not_found. */
+export function removeTeamHost(api: YawbleApi, teamId: number, host: string): Promise<TeamHosts> {
+  return api.call<TeamHosts>('policy.removeTeamHost', { teamId, host });
 }
 
 /** An IPC error as the person should read it (Electron prefixes "Error invoking remote method ..."). */
