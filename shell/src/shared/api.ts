@@ -514,7 +514,9 @@ export type ToolAskChoice = 'install' | 'checkAgain' | 'notNow';
  * canInstall: the app can run command (the exact winget line, or the exact pkexec line on Linux: installer says which);
  * otherwise command is for the person to run (Linux/macOS). passwordPrompt: Linux Install's "Your system asks for your
  * password". manualCommand: the command to run yourself off Windows (sudo apt-get ..., brew ...). homeOnly: Linux, the
- * program is only under the home folder, where the sandbox cannot see it (the core's words). Older cores omit the new fields.
+ * program is only under the home folder, where the sandbox cannot see it (the core's words). lastResult: the result code of
+ * the last Install or Check again, beside error (cancelled or notAuthorized: nothing was installed, so a fresh card shows
+ * error as a hint with Install, not Try again); null before the first attempt. Older cores omit the new fields.
  */
 export interface ToolAsk {
   id: number; at: string; teamId: number; team: string; member: string; memberName: string; tool: string;
@@ -524,6 +526,7 @@ export interface ToolAsk {
   decidedBy: string | null; decidedVia: string | null; decidedAt: string | null;
   canInstall: boolean; command: string | null; choices: ToolAskChoice[];
   installer?: 'winget' | 'pkexec' | null; passwordPrompt?: string | null; manualCommand?: string | null; homeOnly?: string | null;
+  lastResult?: ToolInstallCode | null;
 }
 /**
  * What an install or Check again came to: installed (the program is found, the asks closed), failed (the installer ran,

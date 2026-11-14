@@ -422,6 +422,51 @@ public sealed class LinuxToolInstallTests : IDisposable
         Assert.Empty(_asks.Asks());
     }
 
+    // ------------------------------------------------------------------ lastResult (card 85)
+
+    [Fact]
+    public async Task TheAsk_KeepsTheLastResultCode_SoAFreshCardKnowsACancelFromAFailure()
+    {
+        Offer(LinuxPackager.Dnf);
+        var id = await Asked("dotnet-sdk-10");
+        string? Last(JsonObject item) => item["lastResult"]?.GetValue<string>();
+        var first = await Item();
+        Assert.True(first.ContainsKey("lastResult"));
+        Assert.Null(Last(first)); // nothing tried yet
+
+        _host.Result = new GitResult(126, "", "");
+        await Install(id);
+        Assert.Equal("cancelled", Last(await Item()));
+        Assert.Equal(ToolAskService.CancelledMessage, (await Item())["error"]!.GetValue<string>());
+
+        _host.Result = new GitResult(127, "", "");
+        await Install(id);
+        Assert.Equal("notAuthorized", Last(await Item()));
+
+        _host.Result = new GitResult(1, "", "No match for argument: dotnet-sdk-10.0");
+        await Install(id);
+        Assert.Equal("failed", Last(await Item()));
+
+        Assert.Equal("notFound", (await CheckAgain(id))["result"]!.GetValue<string>());
+        Assert.Equal("notFound", Last(await Item()));
+
+        _host.HomeOnly = "/home/alice/.dotnet/dotnet";
+        await Install(id);
+        Assert.Equal("homeOnly", Last(await Item()));
+
+        // An install that is running has no result yet.
+        _host.Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _host.HomeOnly = null;
+        _host.Result = new GitResult(0, "", "");
+        _host.InstallsOnRun = "dotnet-sdk-10";
+        var running = Install(id);
+        await _host.Started.Task.WaitAsync(TimeSpan.FromSeconds(10), Ct);
+        Assert.Null(_asks.Asks().Single(a => a.Id == id).LastResult);
+        _host.Gate.SetResult();
+        Assert.Equal("installed", (await running)["result"]!.GetValue<string>());
+        Assert.Null(_asks.Asks(openOnly: false).Single(a => a.Id == id).LastResult);
+    }
+
     [Fact]
     public void CheckAgain_IsAnsweredOffTheReadLoop() =>
         Assert.Contains("tools.checkAgain", IpcServer.LongRunning);

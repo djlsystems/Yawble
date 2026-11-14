@@ -400,7 +400,7 @@ describe('ToolAskCard on Linux', () => {
   // FAULT (B017, card 84): a failed install whose program is only under the home folder returns the output AND the home
   // note as one message (ToolAsks.cs InstallAsync, result homeOnly with exit code != 0); the card hides its homeOnly note
   // only when the note equals the message, so the home text is shown twice. Remove .fails once fixed.
-  it.fails('Gap_FAULT_HomeOnlyAfterAFailedInstall_ShowsTheHomeTextOnce', () => {
+  it('Gap_FAULT_HomeOnlyAfterAFailedInstall_ShowsTheHomeTextOnce', () => {
     const failedMsg = 'Installing .NET SDK 10 did not finish (exit code 1: No match for argument: dotnet-sdk-10.0).';
     const { api } = fakeApi({});
     const w = mount(ToolAskCard, { props: { ask: linuxAsk({ homeOnly: HOME_ONLY, error: `${failedMsg} ${HOME_ONLY}`, attempts: 1 }), api } });
@@ -410,12 +410,14 @@ describe('ToolAskCard on Linux', () => {
   // FAULT (B017, card 84): "cancelled"/"notAuthorized" is known only from the click's reply in this card. The core keeps
   // the plain words as the ask's error but sends no result code with tools.asks, so a fresh card (window reloaded, the
   // other view, a remote view) shows the cancelled words in error red with Try again. Remove .fails once fixed.
-  it.fails.each([
+  // Fixed (card 85): tools.asks sends the ask's lastResult, and the card reads it when it has no reply of its own.
+  it.each([
     ['cancelled', CANCELLED],
     ['notAuthorized', NOT_AUTHORIZED],
-  ])('Gap_FAULT_%s_AfterAReload_IsStillAHintWithInstall', (_code, words) => {
+  ] as const)('Gap_FAULT_%s_AfterAReload_IsStillAHintWithInstall', (code, words) => {
     const { api } = fakeApi({});
-    const w = mount(ToolAskCard, { props: { ask: linuxAsk({ error: words, attempts: 1 }), api } });
+    const w = mount(ToolAskCard, { props: { ask: linuxAsk({ error: words, attempts: 1, lastResult: code }), api } });
+    expect(w.get('[data-test=tool-ask-failed]').attributes('data-result')).toBe(code);
     expect(w.get('[data-test=tool-ask-failed]').classes()).not.toContain('error');
     expect(w.get('[data-test=tool-ask-install]').text()).toBe('Install');
   });

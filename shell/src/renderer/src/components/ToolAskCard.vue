@@ -47,14 +47,16 @@ const progress = ref<ToolInstallProgress | null>(null);
 const code = ref<ToolInstallCode | null>(null);
 const note = ref('');
 const installing = computed(() => busy.is('answer', 'install') || props.ask.state === 'installing');
+/** This card's last result, else the one the core keeps on the ask (lastResult: a reloaded window, the other view, a remote view). */
+const lastCode = computed<ToolInstallCode | null>(() => code.value ?? (failed.value ? props.ask.lastResult ?? null : null));
 /** The password window was closed or the person was not authorized: nothing ran, so the button says Install again. */
-const declined = computed(() => code.value === 'cancelled' || code.value === 'notAuthorized');
+const declined = computed(() => lastCode.value === 'cancelled' || lastCode.value === 'notAuthorized');
 const shownMessage = computed(() => message.value || (failed.value ? props.ask.error : null));
 const installLabel = computed(() => (failed.value && !declined.value ? 'Try again' : 'Install'));
 const progressText = computed(() => progress.value?.message
   || (pkexec.value ? `Installing ${name.value}… ${props.ask.passwordPrompt || 'Your system asks for your password'}` : `Installing ${name.value} with winget…`));
-/** The home-folder note, unless the message above already says it. */
-const homeOnly = computed(() => (props.ask.homeOnly && props.ask.homeOnly !== shownMessage.value ? props.ask.homeOnly : null));
+/** The home-folder note, unless the message above already says it (alone, or after a failed install's output). */
+const homeOnly = computed(() => (props.ask.homeOnly && !shownMessage.value?.includes(props.ask.homeOnly) ? props.ask.homeOnly : null));
 
 let off: (() => void) | null = null;
 onMounted(() => {
@@ -134,7 +136,7 @@ async function notNow() {
     <p v-if="installing" class="small progress" data-test="tool-ask-progress" :data-phase="progress?.phase || 'installing'" role="status">
       {{ progressText }}
     </p>
-    <p v-else-if="shownMessage" class="small" :class="declined ? 'hint' : 'error'" data-test="tool-ask-failed" :data-result="code || undefined">{{ shownMessage }}</p>
+    <p v-else-if="shownMessage" class="small" :class="declined ? 'hint' : 'error'" data-test="tool-ask-failed" :data-result="lastCode || undefined">{{ shownMessage }}</p>
 
     <input v-if="!installing" v-model="note" class="note" placeholder="A note for the agent if you say Not now (optional)" maxlength="500" data-test="tool-ask-note" />
     <div class="buttons">
