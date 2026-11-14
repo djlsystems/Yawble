@@ -78,6 +78,18 @@ public sealed class TeamNetworkAllowGapTests : IAsyncLifetime
     private async Task<long> Hire(long teamId, string name) =>
         (await Call("members.add", new { teamId, name, cli = "claude" }))!["id"]!.GetValue<long>();
 
+    /// <summary>The team's real member list, each with the test layout (what AllowForTeamAsync builds).</summary>
+    private List<(long, RunLayout)> Members(long teamId) => _policies.TeamMemberIds(teamId).Select(id => (id, _layout)).ToList();
+
+    private long Scalar(string sql)
+    {
+        using var c = new SqliteConnection(_db.ConnectionString);
+        c.Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = sql;
+        return (long)cmd.ExecuteScalar()!;
+    }
+
     private void Exec(string sql)
     {
         using var c = new SqliteConnection(_db.ConnectionString);
@@ -130,16 +142,196 @@ public sealed class TeamNetworkAllowGapTests : IAsyncLifetime
     public async Task TeamHosts_ListsOldestFirst_AndANoSuchTeamIsRefused()
     {
         var team = await CreateTeam("payments", "Ada");
-        _policies.AddTeamHost(team, "pypi.org", [], "pat", Actor.App);
+        _policies.AddTeamHost(team, "pypi.org", Members(team), "pat", Actor.App);
         await Task.Delay(15, Ct);
-        _policies.AddTeamHost(team, "registry.npmjs.org", [], "pat", Actor.App);
-        Assert.False(_policies.AddTeamHost(team, "pypi.org", [], "pat", Actor.App)); // a repeat adds nothing
+        _policies.AddTeamHost(team, "registry.npmjs.org", Members(team), "pat", Actor.App);
+        Assert.False(_policies.AddTeamHost(team, "pypi.org", Members(team), "pat", Actor.App)); // a repeat adds nothing
 
         var hosts = (await Call("policy.teamHosts", new { teamId = team }))!["hosts"]!.AsArray();
 
         Assert.Equal(["pypi.org", "registry.npmjs.org"], hosts.Select(h => h!["host"]!.GetValue<string>()));
         await Assert.ThrowsAsync<RpcException>(() => Call("policy.teamHosts", new { teamId = 99_999 }));
         await Assert.ThrowsAsync<RpcException>(() => Call("policy.removeTeamHost", new { teamId = 99_999, host = "pypi.org" }));
+    }
+
+    // ------------------------------------------------------------------ B022 (card 127): a member hired mid-add is checked
+
+    /// <summary>
+    /// A store whose fake dry run hires Cleo (as members.add writes her row) on its first check - after AllowForTeamAsync
+    /// built its list, before the write - and refuses any member whose override narrows the network to nothing.
+    /// </summary>
+    private (PolicyStore Store, Func<long?> Cleo) HiringStore(long team, bool cleoRefuses)
+    {
+        long? cleo = null;
+        var store = new PolicyStore(_db.ConnectionString, (_, o, _, _) =>
+        {
+            if (cleo is null)
+            {
+                cleo = Scalar($"INSERT INTO members (team_id, name, role, created_at) VALUES ({team}, 'Cleo', 'member', '2026-11-14T00:00:00Z') RETURNING id;");
+                if (cleoRefuses) _policies.SaveOverride(cleo.Value, PolicyPatch.Empty with { Network = new NetworkPatch([]) }, _layout);
+            }
+            return o?.Network?.AllowHosts is { Count: 0 } ? ["the sandbox refused the compiled request: no hosts for this member"] : [];
+        });
+        return (store, () => cleo);
+    }
+
+    [Fact]
+    public async Task AllowForTeam_AMemberHiredMidAdd_IsCheckedToo_AndTheirRefusalStopsTheAdd()
+    {
+        var team = await CreateTeam("payments", "Ada");
+        var (store, cleo) = HiringStore(team, cleoRefuses: true);
+        var layoutsFor = new List<long>();
+        var policy = new StoreNetworkPolicy(store, (id, _) => { lock (layoutsFor) layoutsFor.Add(id); return Task.FromResult(_layout); }, _ => Task.FromResult<RunLayout?>(_layout));
+
+        var e = await Assert.ThrowsAsync<PolicyException>(() => policy.AllowForTeamAsync(team, "pypi.org", Ct));
+
+        Assert.IsNotType<TeamMembersChangedException>(e);
+        Assert.Equal(["the sandbox refused the compiled request: no hosts for this member"], e.Errors);
+        Assert.Contains(cleo()!.Value, layoutsFor); // the list was built again, with Cleo's run layout
+        Assert.Empty(_policies.TeamHosts(team));
+    }
+
+    [Fact]
+    public async Task AllowForTeam_AMemberHiredMidAdd_WhoAccepts_TheHostIsWrittenAfterTheirCheck()
+    {
+        var team = await CreateTeam("payments", "Ada");
+        var (store, cleo) = HiringStore(team, cleoRefuses: false);
+        var layoutsFor = new List<long>();
+        var policy = new StoreNetworkPolicy(store, (id, _) => { lock (layoutsFor) layoutsFor.Add(id); return Task.FromResult(_layout); }, _ => Task.FromResult<RunLayout?>(_layout));
+
+        await policy.AllowForTeamAsync(team, "pypi.org", Ct);
+
+        Assert.Contains(cleo()!.Value, layoutsFor);
+        Assert.Equal(["pypi.org"], _policies.TeamHosts(team).Select(h => h.Host));
+        Assert.Contains("pypi.org", _policies.Effective(cleo()!.Value, _layout).Policy.AllowHosts);
+    }
+
+    [Fact]
+    public async Task AllowForTeam_MembersThatKeepChanging_AreRefusedClearly_NothingWritten()
+    {
+        var team = await CreateTeam("payments", "Ada");
+        // One hire per list: the first check after each list is built hires someone new.
+        var hires = 0;
+        var armed = false;
+        var store = new PolicyStore(_db.ConnectionString, (_, _, _, _) =>
+        {
+            if (armed)
+            {
+                armed = false;
+                Scalar($"INSERT INTO members (team_id, name, role, created_at) VALUES ({team}, 'Hire{++hires}', 'member', '2026-11-14T00:00:00Z') RETURNING id;");
+            }
+            return [];
+        });
+        var policy = new StoreNetworkPolicy(store, (_, _) => { armed = true; return Task.FromResult(_layout); }, _ => Task.FromResult<RunLayout?>(_layout));
+
+        var e = await Assert.ThrowsAsync<PolicyException>(() => policy.AllowForTeamAsync(team, "pypi.org", Ct));
+
+        Assert.Contains("kept changing", e.Errors[0]);
+        Assert.Equal(StoreNetworkPolicy.TeamMembersAttempts, hires); // one list per attempt, then refused
+        Assert.Empty(_policies.TeamHosts(team));
+    }
+
+    // ------------------------------------------------------------------ B022 verify (card 128): removals, the snapshot check, the limit's edge
+
+    [Fact]
+    public async Task AllowForTeam_AMemberRemovedAfterTheChecks_BeforeTheWrite_TheListIsBuiltAgainWithoutThem()
+    {
+        var team = await CreateTeam("payments", "Ada", "Ben");
+        var ben = await IdOf(team, "Ben");
+        var removed = false;
+        var checkedIds = new List<long>();
+        // The dry run runs after the snapshot and before BEGIN IMMEDIATE: removing Ben there is caught inside the transaction.
+        var store = new PolicyStore(_db.ConnectionString, (_, _, _, _) =>
+        {
+            if (!removed) { removed = true; Call("members.remove", new { memberId = ben }).GetAwaiter().GetResult(); }
+            return [];
+        });
+        var layoutsFor = new List<long>();
+        var policy = new StoreNetworkPolicy(store, (id, _) => { layoutsFor.Add(id); return Task.FromResult(_layout); }, _ => Task.FromResult<RunLayout?>(_layout));
+
+        await policy.AllowForTeamAsync(team, "pypi.org", Ct);
+
+        Assert.True(removed);
+        Assert.DoesNotContain(ben, _policies.TeamMemberIds(team));
+        Assert.Equal(1, layoutsFor.Count(id => id == ben)); // only the first list had Ben; the second was built without him
+        var ada = await IdOf(team, "Ada");
+        Assert.Equal(2, layoutsFor.Count(id => id == ada)); // the first list was not written: the transaction refused it and a second was built
+        Assert.Equal(["pypi.org"], _policies.TeamHosts(team).Select(h => h.Host));
+    }
+
+    [Fact]
+    public async Task AllowForTeam_AHireWhileTheListIsBuilt_IsCaughtByTheSnapshot_NoMemberCheckedAgainstTheOldList()
+    {
+        var team = await CreateTeam("payments", "Ada");
+        long? cleo = null;
+        var checks = 0;
+        var store = new PolicyStore(_db.ConnectionString, (_, _, _, _) => { checks++; return []; });
+        // The hire lands inside the list build (after TeamMemberIds was read): AddTeamHost's snapshot must refuse before any check.
+        var policy = new StoreNetworkPolicy(store, async (id, _) =>
+        {
+            if (cleo is null) cleo = await Hire(team, "Cleo");
+            return _layout;
+        }, _ => Task.FromResult<RunLayout?>(_layout));
+
+        await policy.AllowForTeamAsync(team, "pypi.org", Ct);
+
+        var now = _policies.TeamMemberIds(team);
+        Assert.Contains(cleo!.Value, now);
+        Assert.Equal(now.Count, checks); // one check per member of the second list: none ran against the list without Cleo
+        Assert.Equal(["pypi.org"], _policies.TeamHosts(team).Select(h => h.Host));
+    }
+
+    [Fact]
+    public async Task AllowForTeam_ChangesOnEveryAttemptButTheLast_IsStillWritten()
+    {
+        var team = await CreateTeam("payments", "Ada");
+        // One hire per list on every list but the last one allowed: the last list matches and is written.
+        var hires = 0;
+        var armed = false;
+        var store = new PolicyStore(_db.ConnectionString, (_, _, _, _) =>
+        {
+            if (armed && hires < StoreNetworkPolicy.TeamMembersAttempts - 1)
+            {
+                armed = false;
+                Scalar($"INSERT INTO members (team_id, name, role, created_at) VALUES ({team}, 'Hire{++hires}', 'member', '2026-11-14T00:00:00Z') RETURNING id;");
+            }
+            return [];
+        });
+        var policy = new StoreNetworkPolicy(store, (_, _) => { armed = true; return Task.FromResult(_layout); }, _ => Task.FromResult<RunLayout?>(_layout));
+
+        await policy.AllowForTeamAsync(team, "pypi.org", Ct);
+
+        Assert.Equal(StoreNetworkPolicy.TeamMembersAttempts - 1, hires);
+        Assert.Equal(["pypi.org"], _policies.TeamHosts(team).Select(h => h.Host));
+    }
+
+    [Fact]
+    public async Task AllowForTeam_RemovalsThatKeepHappening_AreRefusedAtTheLimit_WithTheStoreReason_NothingWritten()
+    {
+        var team = await CreateTeam("payments", "Ada", "Ben", "Cleo", "Dee");
+        var toRemove = new Queue<long>([await IdOf(team, "Ben"), await IdOf(team, "Cleo"), await IdOf(team, "Dee")]);
+        var removals = 0;
+        var armed = false;
+        var store = new PolicyStore(_db.ConnectionString, (_, _, _, _) =>
+        {
+            if (armed && toRemove.Count > 0)
+            {
+                armed = false;
+                removals++;
+                Call("members.remove", new { memberId = toRemove.Dequeue() }).GetAwaiter().GetResult();
+            }
+            return [];
+        });
+        var policy = new StoreNetworkPolicy(store, (_, _) => { armed = true; return Task.FromResult(_layout); }, _ => Task.FromResult<RunLayout?>(_layout));
+
+        var e = await Assert.ThrowsAsync<PolicyException>(() => policy.AllowForTeamAsync(team, "pypi.org", Ct));
+
+        Assert.IsNotType<TeamMembersChangedException>(e);
+        Assert.Equal(StoreNetworkPolicy.TeamMembersAttempts, removals);
+        Assert.Equal(2, e.Errors.Count);
+        Assert.Contains("kept changing", e.Errors[0]);
+        Assert.Contains("members changed", e.Errors[1]);
+        Assert.Empty(_policies.TeamHosts(team));
     }
 
     // ------------------------------------------------------------------ a removed member's asks
