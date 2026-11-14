@@ -185,6 +185,12 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
   move with its status. You can move a card, comment, or ask the Manager about it. **Needs You** also lists the
   Connections to reconnect, the network requests and the tool requests waiting for you (see Sandbox and policy), with
   their buttons.
+  - On a team with a tester, verify and test cards go to the tester. The tester tests the developer's branch as the
+    developer left it, and reports what ran and the result on the card and in its hand-back.
+  - A developer's report never closes a verify card. When the Manager moves a tester's card to Done and the tester
+    has not run on it, the move needs a reason (for example "no tester on this team" or "the person asked to skip
+    testing"). Without one the app refuses the move; with one, the reason shows on the card as a comment.
+  - Teams with no tester are not asked for a reason.
 - **Backlog**: work you want done, most important first.
   - Add an item, read it and mark it ready, then dispatch it to a team's Manager or to **A new team…**.
   - When the team declares the work complete, only you mark it implemented.

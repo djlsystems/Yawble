@@ -33,6 +33,27 @@ public class PromptsAndNoticesTests
             Assert.Contains(needle, member);
         }
         Assert.Throws<ArgumentException>(() => global::Yawble.Core.Gateway.RoleText.For("admin"));
+
+        // Verify cards (B019): the Manager gives them to the tester, never closes one from a developer's report, and
+        // gives the reason in note on board move when it closes one the tester did not run; the tester tests the
+        // developer's branch unchanged and reports on the card and in the hand-back.
+        foreach (var needle in new[] { "goes to the team's tester", "never a developer's report", "`note` on `board` `action: move`",
+                     "refuses that move without a `note`", "as a comment on the card", "no tester on this team" })
+        {
+            Assert.Contains(needle, manager);
+        }
+        foreach (var needle in new[] { "test the work as the developer left it", "test it unchanged", "`board` `action: comment`", "what you ran", "closes a verify card" })
+        {
+            Assert.Contains(needle, member);
+        }
+        foreach (var skill in new[] { "board", "wrap-up" })
+        {
+            var body = global::Yawble.Core.Skills.SkillCatalog.BuiltIns.Single(s => s.Name == skill).Body;
+            Assert.Contains("`note` on `board`", body);
+            Assert.Contains("refuses the", body);
+            Assert.Contains("comment on the card", body);
+            Assert.Contains("a developer's report does not close", body, StringComparison.OrdinalIgnoreCase);
+        }
         Assert.DoesNotContain("\r", manager + member);
     }
 
