@@ -42,7 +42,7 @@ function pick(name: string) {
   void load();
 }
 
-const short = (sha: string | null | undefined) => (sha ? sha.slice(0, 10) : 'â€”');
+const short = (sha: string | null | undefined) => (sha ? sha.slice(0, 10) : '—');
 const mergeText = computed(() => {
   const s = status.value;
   if (!s) return '';
@@ -85,7 +85,7 @@ async function act(method: 'git.fetch' | 'git.bringCurrent' | 'git.merge', label
     error.value = errorText(e);
   } finally {
     busy.value = null;
-    // The merge confirmation stays up (its Merge button shows Mergingâ€¦) until the core answers.
+    // The merge confirmation stays up (its Merge button shows Merging…) until the core answers.
     confirming.value = false;
   }
 }
@@ -209,19 +209,19 @@ onMounted(() => { void loadChoices(); void load(); });
 </script>
 
 <template>
-  <Modal :title="`Git Â· ${team.name}`" wide @close="emit('close')">
+  <Modal :title="`Git · ${team.name}`" wide @close="emit('close')">
     <nav v-if="choices.length > 1" class="repos" data-test="git-repos">
       <button v-for="c in choices" :key="c.name" :class="{ on: repo === c.name }" :data-test="`git-repo-${c.name || 'main'}`" @click="pick(c.name)">{{ c.label }}</button>
     </nav>
     <p v-if="error" class="error" data-test="git-error">{{ error }}</p>
-    <LoadingNote v-if="!status && !error" text="Reading the repositoryâ€¦" />
+    <LoadingNote v-if="!status && !error" text="Reading the repository…" />
 
     <template v-if="status">
       <section class="repo">
         <div><strong>{{ status.repoPath }}</strong><span v-if="status.managed" class="chip">made by the app</span></div>
         <div class="muted small">
           Base branch <code>{{ status.baseBranch }}</code> at {{ short(status.baseSha) }}
-          <template v-if="status.checkedOut"> Â· checked out: <code>{{ status.checkedOut }}</code></template>
+          <template v-if="status.checkedOut"> · checked out: <code>{{ status.checkedOut }}</code></template>
           <span v-if="status.dirty" class="chip warn">uncommitted changes</span>
         </div>
         <div class="muted small" data-test="git-origin">
@@ -242,23 +242,23 @@ onMounted(() => { void loadChoices(); void load(); });
         <div v-if="status.conflictFiles.length" class="small">Conflicting files: <code>{{ status.conflictFiles.join(', ') }}</code></div>
         <div v-if="behindText" class="small behind" data-test="git-behind">{{ behindText }}
           <button v-if="canSync" data-test="git-sync-now" :disabled="!!busy" title="Merge the base into the team and member branches (never a rebase; a conflict changes nothing)"
-            @click="syncNow"><BusyLabel :busy="busy === 'sync'" text="Syncingâ€¦">Sync now</BusyLabel></button>
+            @click="syncNow"><BusyLabel :busy="busy === 'sync'" text="Syncing…">Sync now</BusyLabel></button>
         </div>
       </section>
 
       <div class="row actions">
-        <button v-if="status.origin" data-test="git-fetch" :disabled="!!busy" @click="act('git.fetch', 'fetch')"><BusyLabel :busy="busy === 'fetch'" text="Fetchingâ€¦">Fetch</BusyLabel></button>
+        <button v-if="status.origin" data-test="git-fetch" :disabled="!!busy" @click="act('git.fetch', 'fetch')"><BusyLabel :busy="busy === 'fetch'" text="Fetching…">Fetch</BusyLabel></button>
         <button v-if="status.origin" data-test="git-bring-current" :disabled="!!busy" title="Fast-forward your base branch to origin's"
-          @click="act('git.bringCurrent', 'bring')"><BusyLabel :busy="busy === 'bring'" text="Bringing currentâ€¦">Bring {{ status.baseBranch }} current</BusyLabel></button>
-        <button v-if="canMerge && !confirming" class="primary" data-test="git-merge" :disabled="!!busy" @click="confirming = true">Merge to {{ status.baseBranch }}â€¦</button>
+          @click="act('git.bringCurrent', 'bring')"><BusyLabel :busy="busy === 'bring'" text="Bringing current…">Bring {{ status.baseBranch }} current</BusyLabel></button>
+        <button v-if="canMerge && !confirming" class="primary" data-test="git-merge" :disabled="!!busy" @click="confirming = true">Merge to {{ status.baseBranch }}…</button>
         <span v-if="confirming" class="confirm" data-test="git-merge-confirm">
           Merge {{ status.teamBranch }} into {{ status.baseBranch }}<template v-if="status.origin"> and push {{ status.baseBranch }} to origin</template>?
-          <button class="primary" data-test="git-merge-yes" :disabled="!!busy" @click="act('git.merge', 'merge')"><BusyLabel :busy="busy === 'merge'" text="Mergingâ€¦">Merge</BusyLabel></button>
+          <button class="primary" data-test="git-merge-yes" :disabled="!!busy" @click="act('git.merge', 'merge')"><BusyLabel :busy="busy === 'merge'" text="Merging…">Merge</BusyLabel></button>
           <button data-test="git-merge-cancel" @click="confirming = false">Cancel</button>
         </span>
         <button v-if="status.merge === 'conflict' || (status.teamBehindBase > 0 && status.merge !== 'none')" data-test="git-ask-team" :disabled="!!busy"
-          title="Tell the Manager to merge the base into its branch and resolve the conflicts" @click="askTeam"><BusyLabel :busy="busy === 'ask'" text="Askingâ€¦">Ask the team to bring it current</BusyLabel></button>
-        <button data-test="git-refresh" :disabled="!!busy" @click="refresh"><BusyLabel :busy="busy === 'refresh'" text="Refreshingâ€¦">Refresh</BusyLabel></button>
+          title="Tell the Manager to merge the base into its branch and resolve the conflicts" @click="askTeam"><BusyLabel :busy="busy === 'ask'" text="Asking…">Ask the team to bring it current</BusyLabel></button>
+        <button data-test="git-refresh" :disabled="!!busy" @click="refresh"><BusyLabel :busy="busy === 'refresh'" text="Refreshing…">Refresh</BusyLabel></button>
       </div>
 
       <p v-if="result" class="result" :class="{ ok: result.changed }" data-test="git-result">{{ result.message }}
@@ -271,13 +271,13 @@ onMounted(() => { void loadChoices(); void load(); });
           <input type="checkbox" :checked="deleting.unmergedOk" :disabled="!!busy" @change="chooseUnmerged(($event.target as HTMLInputElement).checked)" />
           Delete it although its commits are not merged (they are lost)
         </label>
-        <LoadingNote v-if="!deleting.plan && !deleting.error" text="Planning the deleteâ€¦" />
+        <LoadingNote v-if="!deleting.plan && !deleting.error" text="Planning the delete…" />
         <pre v-if="deleting.plan" class="plan" data-test="git-delete-plan">{{ deleting.plan.plan }}</pre>
         <p v-if="deleting.plan?.empty" class="muted small" data-test="git-delete-empty">Nothing to delete.</p>
         <p v-if="deleting.error" class="error" data-test="git-delete-error">{{ deleting.error }}</p>
         <div class="row actions">
           <button v-if="deleting.plan && !deleting.plan.empty" class="danger" data-test="git-delete-yes" :disabled="!!busy" @click="confirmDelete">
-            <BusyLabel :busy="busy === 'delete'" text="Deletingâ€¦">Delete</BusyLabel></button>
+            <BusyLabel :busy="busy === 'delete'" text="Deleting…">Delete</BusyLabel></button>
           <button data-test="git-delete-cancel" :disabled="busy === 'delete'" @click="deleting = null">{{ deleting.plan?.empty ? 'Close' : 'Cancel' }}</button>
         </div>
       </section>
@@ -286,13 +286,13 @@ onMounted(() => { void loadChoices(); void load(); });
         <tr><th>Member branch</th><th>Commit</th><th>Ahead of {{ status.baseBranch }}</th><th>In {{ status.teamBranch }}</th><th></th></tr>
         <tr v-for="b in status.members" :key="b.branch">
           <td><code>{{ b.branch }}</code></td><td>{{ short(b.sha) }}</td><td>{{ b.aheadOfBase }}</td><td>{{ b.inTeamBranch ? 'yes' : 'not yet' }}</td>
-          <td><button class="small-btn" :data-test="`git-delete-${b.branch}`" :disabled="!!busy" @click="startDelete(memberTarget(b))">Deleteâ€¦</button></td>
+          <td><button class="small-btn" :data-test="`git-delete-${b.branch}`" :disabled="!!busy" @click="startDelete(memberTarget(b))">Delete…</button></td>
         </tr>
         <tr v-if="status.members.length === 0 && oldBranches.length === 0"><td colspan="5" class="muted">No member has committed yet.</td></tr>
         <tr v-for="o in oldBranches" :key="`old:${o.name}`" class="old" data-test="git-old-branch">
           <td><code>{{ o.name }}</code><span class="chip" title="Named before member branches were members/<team>/<member>; nothing uses it now">old</span></td>
-          <td>{{ oldWhere(o) }}</td><td>â€”</td><td>{{ o.merged ? 'merged' : 'not merged' }}</td>
-          <td><button class="small-btn" :data-test="`git-delete-old-${o.name}`" :disabled="!!busy" @click="startDelete(oldTarget(o))">Deleteâ€¦</button></td>
+          <td>{{ oldWhere(o) }}</td><td>—</td><td>{{ o.merged ? 'merged' : 'not merged' }}</td>
+          <td><button class="small-btn" :data-test="`git-delete-old-${o.name}`" :disabled="!!busy" @click="startDelete(oldTarget(o))">Delete…</button></td>
         </tr>
       </table>
       <p class="muted small">The app never forces, rebases or stashes, and never pushes your own commits on {{ status.baseBranch }}. A merge that

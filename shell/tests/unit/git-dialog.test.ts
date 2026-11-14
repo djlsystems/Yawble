@@ -100,8 +100,8 @@ describe('git dialog', () => {
     await flushPromises();
     const rows = () => w.findAll('[data-test=git-members] tr').slice(1).map((r) => r.findAll('td').map((c) => c.text()));
     expect(rows()).toEqual([
-      ['members/ops/ada', 'dddddddddd', '0', 'yes', 'Deleteâ€¦'],
-      ['members/adaold', 'on origin', 'â€”', 'merged', 'Deleteâ€¦'],
+      ['members/ops/ada', 'dddddddddd', '0', 'yes', 'Delete…'],
+      ['members/adaold', 'on origin', '—', 'merged', 'Delete…'],
     ]);
     expect(w.find('[data-test=git-old-branch] .chip').text()).toBe('old');
 
