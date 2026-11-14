@@ -36,7 +36,8 @@ public class TeamBranchBlockingTests
         Assert.Contains(branch, message);
         Assert.Contains(where, message);
         Assert.Contains("Nothing was changed", message);
-        Assert.Contains("rename the team", message);
+        // Card 104: there is no team rename, and the Git dialog only deletes: only actions that exist are named.
+        Assert.DoesNotContain("rename", message, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("cannot lock ref", message);
     }
 
@@ -227,22 +228,81 @@ public class TeamBranchBlockingTests
         Assert.Contains(f.Log, l => l.Contains("origin already has members/docs", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// Card 104 (F2): team "Docs" with a member "Docs" still on its old members/docs. Ben's start is refused and names
+    /// Docs's next start; that start moves Docs through its own old branch (renamed here and in the clone, HEAD follows),
+    /// the push after its run replaces origin's members/docs with members/docs/docs, and then Ben starts.
+    /// </summary>
     [Fact]
-    public async Task ANewTeamNameWhoseSlugIsBlocked_IsRefused_AndAFreeOneIsNot()
+    public async Task ASameTeamMemberNamedLikeTheSlug_MovesThroughItsOldBranch()
+    {
+        using var f = new TeamsFixture();
+        var (_, _, ben) = f.Team("Docs");
+        MemberRef docs;
+        using (var store = f.Db.OpenStore())
+        {
+            docs = store.AddMember(ben.TeamId, "Docs", MemberRole.Member, "claude");
+            store.Subscribe(docs.Qualified, MessageTypes.Instruction(docs));
+            store.InitCursor(docs.Qualified);
+        }
+        var (picked, bare) = TeamReposTests.PersonsRepoWithOrigin(f);
+        await f.Repos.UseExistingRepoAsync(ben.TeamId, "Docs", picked, Ct);
+        // Docs, pre-B016: on members/docs, with work fetched back and pushed.
+        var c = await f.Repos.PrepareAsync(docs, Ct);
+        Ok(c.ClonePath, c.Workspace, "branch", "-m", "members/docs");
+        using (var conn = new Microsoft.Data.Sqlite.SqliteConnection(f.Db.ConnectionString))
+        {
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE member_clones SET branch = 'members/docs' WHERE member_id = $m;";
+            cmd.Parameters.AddWithValue("$m", docs.Id);
+            Assert.Equal(1, cmd.ExecuteNonQuery());
+        }
+        var tip = Commit(c.ClonePath, c.Workspace, "w.txt");
+        Assert.True((await f.Repos.FetchBackAsync(docs, Ct)).Fetched);
+        await f.Repos.PublishAsync(docs, Ct);
+        Assert.Contains($"refs/heads/members/docs {tip}", Refs(bare));
+
+        var e = await Assert.ThrowsAsync<MemberBranchBlockedException>(() => f.Repos.PrepareAsync(ben, Ct));
+        Assert.Contains("Start Docs first", e.Message);
+
+        var moved = await f.Repos.PrepareAsync(docs, Ct);
+        Assert.Equal("members/docs/docs", moved.Branch);
+        Assert.Equal("members/docs/docs", Ok(moved.ClonePath, moved.Workspace, "symbolic-ref", "--short", "HEAD"));
+        Assert.Equal(tip, Ok(moved.ClonePath, moved.Workspace, "rev-parse", "HEAD"));
+        Assert.Equal(tip, AgentGit.Host(picked, "rev-parse", "refs/heads/members/docs/docs"));
+        Assert.DoesNotContain("refs/heads/members/docs ", Refs(picked));
+
+        var report = await f.Repos.PublishAsync(docs, Ct);
+        Assert.Contains("members/docs/docs", report.Published!);
+        Assert.Contains($"refs/heads/members/docs/docs {tip}", Refs(bare));
+        Assert.DoesNotContain("refs/heads/members/docs ", Refs(bare));
+
+        Assert.Equal("members/docs/ben", (await f.Repos.PrepareAsync(ben, Ct)).Branch);
+    }
+
+    /// <summary>The blockers for a slug are listed by name; a slug nothing blocks has none (card 104: there is no team
+    /// rename, so the old rename check is gone and only the listing is left).</summary>
+    [Fact]
+    public async Task BlockingBranches_AreListedForTheBlockedSlugOnly()
     {
         using var f = new TeamsFixture();
         var (_, ada, _) = f.Team("Alpha");
         var repo = await f.Repos.EnsureTeamRepoAsync(ada.TeamId, "Alpha", Ct);
         AgentGit.Host(repo.Path, "branch", "members/docs", "main");
-        var before = Refs(repo.Path);
-
-        var e = await Assert.ThrowsAsync<MemberBranchBlockedException>(() => f.Repos.CheckTeamNameFreeAsync(ada.TeamId, "Docs", Ct));
-        Assert.Contains("members/docs", e.Message);
-        Assert.Contains("Nothing was changed", e.Message);
-        Assert.Equal(before, Refs(repo.Path));
-        await f.Repos.CheckTeamNameFreeAsync(ada.TeamId, "Writers", Ct);
         Assert.Equal([new TeamGitBlockingBranch("members/docs", "main", "local")], await f.Repos.BlockingBranchesAsync(ada.TeamId, "Docs", ct: Ct));
         Assert.Empty(await f.Repos.BlockingBranchesAsync(ada.TeamId, "Alpha", ct: Ct));
+    }
+
+    [Fact]
+    public void TheBlockedMessage_NamesOnlyActionsThatExist()
+    {
+        var plain = TeamRepos.BlockedMessage("Docs", "members/docs", "the team's repository (x)", inDialog: true);
+        Assert.Contains("delete members/docs in the Git dialog", plain);
+        Assert.DoesNotContain("rename", plain, StringComparison.OrdinalIgnoreCase);
+        var clone = TeamRepos.BlockedMessage("Docs", "members/docs", "Ada's clone", inDialog: false);
+        Assert.DoesNotContain("Git dialog", clone);
+        Assert.DoesNotContain("rename", clone, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]

@@ -165,7 +165,7 @@ public class TeamBranchBlockingGapTests
     /// checks only team Ada's own clones, so it plans (and with the token runs) deleting a branch another team's member is
     /// on. Spec 2: a team whose slug equals another team's member branch must not break that team's branches.
     /// </summary>
-    [Fact(Skip = "B020 fault F1 (card 94): another team's in-use old branch is deletable from the blocked team's Git dialog. Remove Skip when fixed.")]
+    [Fact] // fixed by card 104
     public async Task AnotherTeamsInUseOldBranch_IsNotDeletableFromTheBlockedTeamsDialog()
     {
         using var f = new TeamsFixture();
@@ -184,14 +184,54 @@ public class TeamBranchBlockingGapTests
 
         var refused = await Assert.ThrowsAsync<MemberBranchBlockedException>(() => f.Repos.PrepareAsync(adaBen, Ct));
         AssertPlain(refused.Message, "members/ada", "the team's repository");
+        // Card 104: the start says whose branch it is and the way forward that exists: Alpha's member's next start moves it.
+        Assert.Contains("team Alpha's member Ada", refused.Message);
+        Assert.Contains("members/alpha/ada", refused.Message);
+        Assert.DoesNotContain("delete members/ada", refused.Message, StringComparison.OrdinalIgnoreCase);
         var s = await f.Repos.GitStatusAsync(adaBen.TeamId, "Ada", Ct);
-        Assert.Contains(new TeamGitBlockingBranch("members/ada", "main", "local"), s.BlockingBranches);
+        // Marked, so the dialog shows no Delete for it.
+        Assert.Contains(new TeamGitBlockingBranch("members/ada", "main", "local") { InUseBy = "team Alpha's member Ada", MovesTo = "members/alpha/ada" },
+            s.BlockingBranches);
 
         // What the dialog's Delete sends (the dialog always ticks unmergedOk for a blocking branch, as merge is unknown).
         var teamAda = new[] { adaManager.Name, adaAda.Name, adaBen.Name };
         var plan = await f.Repos.GitDeleteBranchesAsync(adaBen.TeamId, "Ada", teamAda, null, ["members/ada"], false, ["members/ada"], null, Ct);
         Assert.True(plan.Plan.Contains("REFUSED"), plan.Plan);
+        Assert.Contains("team Alpha's member Ada", plan.Plan);
+        Assert.True(plan.Empty);
+        // Even sent with a token, nothing is deleted.
+        var run = await f.Repos.GitDeleteBranchesAsync(adaBen.TeamId, "Ada", teamAda, null, ["members/ada"], false, ["members/ada"], plan.Token, Ct);
+        Assert.Equal("Nothing to delete.", run.Result);
         Assert.Equal(work, AgentGit.Host(picked, "rev-parse", "refs/heads/members/ada"));
+    }
+
+    /// <summary>Card 104: with another branch named too, the other team's one is refused and the rest is planned as usual;
+    /// another team's clone counts for what is checked out.</summary>
+    [Fact]
+    public async Task AnotherTeamsBranch_IsRefusedBesideADeletableOne()
+    {
+        using var f = new TeamsFixture();
+        var (_, alphaAda, _) = f.Team("Alpha");
+        var (adaManager, adaAda, adaBen) = f.Team("Ada");
+        var picked = Path.Combine(f.Db.Dir, "picked");
+        Directory.CreateDirectory(picked);
+        AgentGit.Host(picked, "init", "-q", "-b", "main");
+        AgentGit.Host(picked, "-c", "user.name=a", "-c", "user.email=a@x", "commit", "-q", "--allow-empty", "-m", "base");
+        await f.Repos.UseExistingRepoAsync(alphaAda.TeamId, "Alpha", picked, Ct);
+        await f.Repos.UseExistingRepoAsync(adaBen.TeamId, "Ada", picked, Ct);
+        AgentGit.Host(picked, "branch", "members/alpha/ada", "main");
+        AgentGit.Host(picked, "branch", "members/zed", "main"); // an old branch nobody is on
+        FakeClone(f, alphaAda, "Alpha", "members/alpha/ada");
+
+        var teamAda = new[] { adaManager.Name, adaAda.Name, adaBen.Name };
+        var plan = await f.Repos.GitDeleteBranchesAsync(adaBen.TeamId, "Ada", teamAda, null, ["members/alpha/ada", "members/zed"], false, [], null, Ct);
+
+        Assert.Contains("members/alpha/ada: REFUSED, team Alpha's member Ada is still on it", plan.Plan);
+        Assert.Contains("delete members/zed", plan.Plan);
+        Assert.False(plan.Empty);
+        var done = await f.Repos.GitDeleteBranchesAsync(adaBen.TeamId, "Ada", teamAda, null, ["members/alpha/ada", "members/zed"], false, [], plan.Token, Ct);
+        Assert.Contains("deleted members/zed", done.Result);
+        Assert.Contains("refs/heads/members/alpha/ada ", Refs(picked));
     }
 
     /// <summary>
@@ -200,7 +240,11 @@ public class TeamBranchBlockingGapTests
     /// branch blocks every other member: Ben's start is refused and told to delete members/docs in the Git dialog, but
     /// that Delete is refused because Docs's clone is on it. No way forward the message names works.
     /// </summary>
-    [Fact(Skip = "B020 fault F2 (card 94): same-team member named like the slug deadlocks the team. Remove Skip when fixed.")]
+    /// <para>Card 104: the way forward is Docs's own next start, whose B016 move now goes through its old branch (renamed,
+    /// not kept: git cannot keep both). Ben's refusal names that, the dialog marks the branch (no Delete), and the move's
+    /// clone side (by file, the part with no transport) is checked here on a real repository; the whole start with a
+    /// clone and origin is TeamBranchBlockingTests.ASameTeamMemberNamedLikeTheSlug_MovesThroughItsOldBranch (local transport).</para>
+    [Fact] // fixed by card 104
     public async Task ASameTeamMemberNamedLikeTheSlug_DoesNotLeaveTheTeamWithNoWayForward()
     {
         using var f = new TeamsFixture();
@@ -208,16 +252,87 @@ public class TeamBranchBlockingGapTests
         var docs = AddMember(f, ben.TeamId, "Docs");
         var repo = await f.Repos.EnsureTeamRepoAsync(ben.TeamId, "Docs", Ct);
         var main = AgentGit.Host(repo.Path, "rev-parse", "main");
-        AgentGit.Host(repo.Path, "update-ref", "refs/heads/members/docs", NewCommit(repo.Path, main, "docs's old-style work"));
-        FakeClone(f, docs, "Docs", "members/docs");
+        var work = NewCommit(repo.Path, main, "docs's old-style work");
+        AgentGit.Host(repo.Path, "update-ref", "refs/heads/members/docs", work);
+        var clone = FakeClone(f, docs, "Docs", "members/docs");
 
         var refused = await Assert.ThrowsAsync<MemberBranchBlockedException>(() => f.Repos.PrepareAsync(ben, Ct));
         AssertPlain(refused.Message, "members/docs", "the team's repository");
-        Assert.Contains("delete members/docs in the Git dialog", refused.Message);
+        // The way forward the message names is one that works: Docs's next start moves its branch to members/docs/docs.
+        Assert.Contains("member Docs of this team", refused.Message);
+        Assert.Contains("members/docs/docs at that member's next start", refused.Message);
+        Assert.Contains("Start Docs first", refused.Message);
+        Assert.DoesNotContain("delete members/docs", refused.Message, StringComparison.OrdinalIgnoreCase);
+        var s = await f.Repos.GitStatusAsync(ben.TeamId, "Docs", Ct);
+        Assert.Equal([new TeamGitBlockingBranch("members/docs", "main", "local") { InUseBy = "member Docs of this team", MovesTo = "members/docs/docs" }],
+            s.BlockingBranches);
 
-        // The action the message names must be one the Git dialog can carry out.
+        // The Delete stays refused (Docs's clone is on it), which is right: the dialog offers none for a marked branch.
         var team = new[] { manager.Name, ada.Name, ben.Name, docs.Name };
         var plan = await f.Repos.GitDeleteBranchesAsync(ben.TeamId, "Docs", team, null, ["members/docs"], false, ["members/docs"], null, Ct);
-        Assert.False(plan.Plan.Contains("REFUSED"), plan.Plan);
+        Assert.Contains("REFUSED, checked out", plan.Plan);
+        Assert.Equal(work, AgentGit.Host(repo.Path, "rev-parse", "refs/heads/members/docs"));
+        Assert.Equal("ref: refs/heads/members/docs", File.ReadAllText(Path.Combine(clone, ".git", "HEAD")).Trim());
+    }
+
+    /// <summary>Card 104: the move's clone half, by file (no git in the clone): a loose old branch with its reflog, HEAD on it.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)] // the old branch only in packed-refs
+    public void TheClonesOldBranch_IsRenamedUnderItself_ByFile(bool packed)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "yb104-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            Directory.CreateDirectory(dir);
+            AgentGit.Host(dir, "init", "-q", "-b", "main");
+            AgentGit.Host(dir, "-c", "user.name=a", "-c", "user.email=a@x", "commit", "-q", "--allow-empty", "-m", "base");
+            AgentGit.Host(dir, "checkout", "-q", "-b", "members/docs");
+            AgentGit.Host(dir, "-c", "user.name=a", "-c", "user.email=a@x", "commit", "-q", "--allow-empty", "-m", "work");
+            var tip = AgentGit.Host(dir, "rev-parse", "HEAD");
+            if (packed) AgentGit.Host(dir, "pack-refs", "--all");
+            var gitDir = Path.Combine(dir, ".git");
+
+            Assert.Null(TeamRepos.MoveCloneRefThrough(gitDir, "members/docs", "members/docs/docs", tip));
+
+            Assert.Equal("refs/heads/members/docs/docs", AgentGit.Host(dir, "symbolic-ref", "HEAD"));
+            Assert.Equal(tip, AgentGit.Host(dir, "rev-parse", "refs/heads/members/docs/docs"));
+            Assert.DoesNotContain("refs/heads/members/docs ", Refs(dir) + "\n");
+            Assert.DoesNotContain("members/docs.", Refs(dir)); // nothing set aside is left as a ref
+            Assert.Contains("work", AgentGit.Host(dir, "reflog", "show", "refs/heads/members/docs/docs")); // the reflog moved too
+            // git itself goes on working on the new branch.
+            AgentGit.Host(dir, "-c", "user.name=a", "-c", "user.email=a@x", "commit", "-q", "--allow-empty", "-m", "more");
+            Assert.NotEqual(tip, AgentGit.Host(dir, "rev-parse", "refs/heads/members/docs/docs"));
+            Assert.Empty(Directory.GetFiles(gitDir, "*.yawble-move*", SearchOption.AllDirectories));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    /// <summary>A move the clone's state does not allow changes nothing (the old branch moved since it was read).</summary>
+    [Fact]
+    public void TheClonesOldBranch_IsNotRenamed_WhenItMovedSinceItWasRead()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "yb104-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            Directory.CreateDirectory(dir);
+            AgentGit.Host(dir, "init", "-q", "-b", "members/docs");
+            AgentGit.Host(dir, "-c", "user.name=a", "-c", "user.email=a@x", "commit", "-q", "--allow-empty", "-m", "base");
+            var before = Refs(dir);
+            var head = File.ReadAllText(Path.Combine(dir, ".git", "HEAD"));
+
+            var why = TeamRepos.MoveCloneRefThrough(Path.Combine(dir, ".git"), "members/docs", "members/docs/docs", new string('a', 40));
+
+            Assert.Contains("moved", why);
+            Assert.Equal(before, Refs(dir));
+            Assert.Equal(head, File.ReadAllText(Path.Combine(dir, ".git", "HEAD")));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
     }
 }

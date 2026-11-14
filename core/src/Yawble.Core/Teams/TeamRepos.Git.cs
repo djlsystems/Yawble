@@ -277,12 +277,38 @@ public sealed partial class TeamRepos
         var repo = await GitRepoAsync(teamId, team, repoName, ct);
         var extra = string.IsNullOrWhiteSpace(repoName) ? null
             : ExtrasOf(teamId).First(e => string.Equals(e.Name, repoName.Trim(), StringComparison.OrdinalIgnoreCase));
-        var clones = memberNames.Select(m => extra is null ? Path.Combine(MemberRoot(team, m), "repo") : ExtraClonePath(team, m, extra.Name)).ToList();
-        var action = new Concierge.ActionRepo(extra?.Name ?? "main", repo.Path, repo.BaseBranch, clones);
+        var name = extra?.Name ?? "main";
+        // Card 104: every team on this repository, not only this one. Their clones count for what is checked out, and a
+        // branch another team's member is recorded on (its live branch, an old-style members/<name> one before its move
+        // too) is refused here, naming that team and member, whatever the person ticked.
+        var users = RepoUsers(repo.Path);
+        var clones = memberNames.Select(m => extra is null ? Path.Combine(MemberRoot(team, m), "repo") : ExtraClonePath(team, m, extra.Name))
+            .Concat(users.Select(u => u.ClonePath)).Distinct(StringComparer.FromComparison(PathComparison)).ToList();
+        var action = new Concierge.ActionRepo(name, repo.Path, repo.BaseBranch, clones);
         var git = new Concierge.ConciergeGit(Git, Pusher);
+        var refusals = new List<string>();
+        var allowed = new List<string>();
+        foreach (var b in branches.Distinct())
+        {
+            if (users.FirstOrDefault(u => u.TeamId != teamId && u.Branch == b) is { } held)
+                refusals.Add($"- {b}: REFUSED, {Holder(held, teamId)} is still on it"
+                    + (IsLegacyMemberBranch(b) ? $" (its old branch: it moves to {BranchFor(held.Team, held.Member)} at that member's next start)" : ""));
+            else allowed.Add(b);
+        }
         return await WithTeamLock(teamId, async () =>
         {
-            var plan = await git.PlanDeleteAsync(action, branches, unmergedOk, remote, ct);
+            if (branches.Count > 0 && allowed.Count == 0)
+            {
+                // Nothing left to plan (an empty list would mean "every merged branch"): only the refusals.
+                var only = $"{name} ({repo.Path}), base {repo.BaseBranch}:\n{string.Join('\n', refusals)}";
+                return new TeamGitDelete(only, "", true, confirm is null ? null : "Nothing to delete.", false);
+            }
+            var plan = await git.PlanDeleteAsync(action, allowed.Count > 0 ? allowed : branches, unmergedOk, remote, ct);
+            if (refusals.Count > 0)
+            {
+                var lines = plan.Text.Split('\n', 2);
+                plan = plan with { Text = lines[0] + "\n" + string.Join('\n', refusals) + (lines.Length > 1 && lines[1] != "(nothing matched)" ? "\n" + lines[1] : "") };
+            }
             if (confirm is null) return new TeamGitDelete(plan.Text, plan.Key, plan.Empty, null, false);
             if (!string.Equals(confirm, plan.Key, StringComparison.Ordinal)) return new TeamGitDelete(plan.Text, plan.Key, plan.Empty, null, true);
             var result = plan.Empty ? "Nothing to delete." : await plan.Run(ct);

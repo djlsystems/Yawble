@@ -90,6 +90,30 @@ describe('git dialog: blocking members/<slug> branches', () => {
     expect(w.find('[data-test=git-blocking-branch]').exists()).toBe(false); // reloaded
   });
 
+  it('names only actions that exist: no rename', async () => {
+    const { api } = fakeApi({ 'git.status': () => ({ ...base, blockingBranches: [{ name: 'members/docs', repo: 'service', location: 'local' }] }) });
+    const w = mount(GitDialog, { props: { api, team } });
+    await flushPromises();
+    expect(w.find('[data-test=git-blocking-branch]').text().toLowerCase()).not.toContain('rename');
+  });
+
+  it('a branch a member is still on (inUseBy, card 104) says whose it is and where it moves, and has no Delete', async () => {
+    const { api, calls } = fakeApi({
+      'git.status': () => ({ ...base, blockingBranches: [
+        { name: 'members/docs', repo: 'service', location: 'local', inUseBy: "team Alpha's member Docs", movesTo: 'members/alpha/docs' },
+        { name: 'members/docs', repo: 'service', location: 'remote' },
+      ] }),
+    });
+    const w = mount(GitDialog, { props: { api, team } });
+    await flushPromises();
+    const section = w.find('[data-test=git-blocking-branch]');
+    expect(section.find('[data-test=git-blocking-in-use]').text()).toContain("team Alpha's member Docs");
+    expect(section.text()).toContain('members/alpha/docs');
+    expect(section.text().toLowerCase()).not.toContain('rename');
+    expect(w.find('[data-test="git-delete-blocking-members/docs"]').exists()).toBe(false);
+    expect(calls.some((c) => c.method === 'git.deleteBranches')).toBe(false);
+  });
+
   it('a local-only blocking branch is deleted here only (remote false)', async () => {
     const { api, calls } = fakeApi({
       'git.status': () => ({ ...base, blockingBranches: [{ name: 'members/docs', repo: 'service', location: 'local' }] }),

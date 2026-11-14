@@ -147,13 +147,15 @@ const oldWhere = (o: TeamGitOldBranch) => (o.local && o.remote ? 'here and on or
 // A members/<slug> branch named like this team's slug blocks its members/<slug>/<member> branches (git cannot hold
 // both). git.status lists one entry per ref (here, on origin); the dialog shows one per branch and repository. Whether
 // its commits are merged is not known here, so the person may tick to delete it anyway; the core's plan says which.
-interface BlockingRow { name: string; repo: string; local: boolean; remote: boolean }
+// One a member is still on (inUseBy, core card 104) has no Delete: that member's next start moves it, which frees the name.
+interface BlockingRow { name: string; repo: string; local: boolean; remote: boolean; inUseBy?: string; movesTo?: string }
 const blockingBranches = computed<BlockingRow[]>(() => {
   const rows: BlockingRow[] = [];
   for (const b of status.value?.blockingBranches ?? []) {
     let row = rows.find((r) => r.name === b.name && r.repo === b.repo);
     if (!row) rows.push(row = { name: b.name, repo: b.repo, local: false, remote: false });
     if (b.location === 'remote') row.remote = true; else row.local = true;
+    if (b.inUseBy) { row.inUseBy = b.inUseBy; row.movesTo = b.movesTo; }
   }
   return rows;
 });
@@ -286,10 +288,13 @@ onMounted(() => { void loadChoices(); void load(); });
 
       <section v-for="b in blockingBranches" :key="`blocking:${b.repo}:${b.name}`" class="blocking" data-test="git-blocking-branch">
         <div><strong><code>{{ b.name }}</code> blocks this team's member branches</strong></div>
-        <div class="small">Git cannot keep it beside the <code>{{ memberPrefix }}</code> branches, so members cannot start until it is
-          deleted or renamed (or the team is renamed).</div>
+        <div v-if="b.inUseBy" class="small" data-test="git-blocking-in-use">Git cannot keep it beside the <code>{{ memberPrefix }}</code>
+          branches. It is the old branch of {{ b.inUseBy }}, who is still on it, so it cannot be deleted here: it moves to
+          <code>{{ b.movesTo }}</code> at that member's next start. Start that member first, then the others.</div>
+        <div v-else class="small">Git cannot keep it beside the <code>{{ memberPrefix }}</code> branches, so members cannot start until it is
+          deleted.</div>
         <div class="muted small">Repository <span data-test="git-blocking-repo">{{ b.repo }}</span> · {{ blockingWhere(b) }}</div>
-        <div><button class="small-btn" :data-test="`git-delete-blocking-${b.name}`" :disabled="!!busy" @click="startDelete(blockingTarget(b))">Delete…</button></div>
+        <div v-if="!b.inUseBy"><button class="small-btn" :data-test="`git-delete-blocking-${b.name}`" :disabled="!!busy" @click="startDelete(blockingTarget(b))">Delete…</button></div>
       </section>
 
       <section v-if="deleting" class="delete" data-test="git-delete">

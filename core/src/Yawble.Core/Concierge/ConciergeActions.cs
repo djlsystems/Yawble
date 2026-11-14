@@ -588,10 +588,12 @@ public sealed class ConciergeActions(
         {
             var members = (await bus.AgentCardsAsync(team.Id, ct)).Select(c => c.Member.Name).ToList();
             var list = new List<ActionRepo>();
+            // Card 104: every team's clones of the repository count for what is checked out, not only this team's.
+            List<string> With(string repoPath, IEnumerable<string> own) => own.Concat(teamRepos.RepoUsers(repoPath).Select(u => u.ClonePath)).Distinct().ToList();
             if (teamRepos.RepoOf(team.Id) is { } main)
-                list.Add(new ActionRepo("main", main.Path, main.BaseBranch, members.Select(m => Path.Combine(teamRepos.MemberRoot(team.Name, m), "repo")).ToList()));
+                list.Add(new ActionRepo("main", main.Path, main.BaseBranch, With(main.Path, members.Select(m => Path.Combine(teamRepos.MemberRoot(team.Name, m), "repo")))));
             foreach (var e in teamRepos.ExtrasOf(team.Id))
-                list.Add(new ActionRepo(e.Name, e.Path, e.BaseBranch, members.Select(m => teamRepos.ExtraClonePath(team.Name, m, e.Name)).ToList()));
+                list.Add(new ActionRepo(e.Name, e.Path, e.BaseBranch, With(e.Path, members.Select(m => teamRepos.ExtraClonePath(team.Name, m, e.Name)))));
             return list;
         }, Shared, HostGh.RunAsync, audit, ConciergeTurn.None);
 
