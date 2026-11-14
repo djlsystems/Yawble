@@ -13,15 +13,22 @@ public sealed record AttributedCommit(string Sha, IReadOnlyList<string> Lines);
 /// </summary>
 public static partial class CommitAttribution
 {
-    // Vendors, models, tools and their no-reply addresses. Word-bounded, so "Ivan Grokhov" or "Codexia" are not caught.
-    private const string Ai = @"(?:claude|anthropic|openai|chatgpt|gpt-?\d[\w.-]*|codex|copilot|github\s+copilot|grok|xai|x\.ai|gemini|"
-        + @"antigravity|bard|deepmind|mistral|devin|cursor|aider|windsurf|codeium|tabnine|amazon\s+q|codewhisperer|llama|"
-        + @"opus|sonnet|haiku|noreply@anthropic\.com|noreply@openai\.com)";
+    // Vendors, models, tools and their domains that are never a person's name. Word-bounded, so "Ivan Grokhov" or
+    // "Codexia" are not caught.
+    private const string Ai = @"(?:anthropic|openai|chatgpt|gpt-?\d[\w.-]*|codex|copilot|github\s+copilot|grok|xai|x\.ai|gemini|"
+        + @"antigravity|deepmind|mistral|cursor|aider|windsurf|codeium|tabnine|amazon\s+q|codewhisperer|llama|"
+        + @"opus|sonnet|haiku|claude\.(?:ai|com)|cognition\.ai|cognition-labs\.com)";
+
+    // Tools named like people ("Devin Smith", "Cody Jones", "Claude Dupont", "Bard Olsen" are humans): caught only with
+    // a clear AI signal right after the name - "AI", "bot", "Code", a [bot] account, a model name or a version number
+    // ("Devin AI", "devin-ai-integration[bot]", "Claude Code", "Claude 3.5"). Their vendor domains are in Ai above.
+    private const string Named = @"(?:claude|devin|cody|bard)"
+        + @"(?:[\s_-]*(?:ai|bot|code)(?![a-z])|\[bot\]|\s+(?:opus|sonnet|haiku|fable)(?![\w])|\s+\d)";
 
     [GeneratedRegex(@"^\s*Co-Authored-By\s*:(?<who>.*)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex CoAuthor();
 
-    [GeneratedRegex(@"(?<![\w])" + Ai + @"(?![\w])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"(?<![\w])(?:" + Ai + @"(?![\w])|" + Named + ")", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex AiName();
 
     [GeneratedRegex(@"^\s*Claude-Session\s*:", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
