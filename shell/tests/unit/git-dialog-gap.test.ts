@@ -23,17 +23,16 @@ function fakeApi(status: TeamGitStatus) {
 const team = { id: 3, name: 'ops', repoPath: null, members: 2, running: 0, queued: 0 };
 
 describe('git dialog (B016 gaps)', () => {
-  // The core's git.status puts a LOCAL old-style members/<name> branch in members (TeamMemberBranchesAsync takes
-  // legacy ones too, see TeamBranchMoveTests) AND in oldBranches. The dialog should show it once, marked old.
-  // FAULT (card 77): today it is shown twice (a member row and an old row). Flip it.fails to it once fixed.
-  it.fails('a local old-style branch, which git.status lists in members and in oldBranches, is shown once, as old', async () => {
+  // Card 75: git.status lists a LOCAL old-style members/<name> branch once. In members only while a member is still
+  // recorded on it (not moved yet); otherwise in oldBranches only (TeamBranchGapTests.GitStatus_ListsAnOldStyleBranchOnce_...).
+  // This is Ada after the move: members/ops/ada is Ada's, members/ada is old. It was shown twice before (card 77).
+  it('a local old-style branch nobody is on, which git.status lists only in oldBranches, is shown once, as old', async () => {
     const status: TeamGitStatus = {
       repoPath: 'C:\\work\\service', managed: false, baseBranch: 'main', checkedOut: 'main', dirty: false, origin: null,
       baseSha: 'aaaaaaaaaaaa', originBaseSha: null, baseAheadOfOrigin: null, baseBehindOrigin: null,
       teamBranch: 'team/ops', teamSha: 'bbbbbbbbbbbb', teamAheadOfBase: 0, teamBehindBase: 0,
       merge: 'up-to-date', conflictFiles: [],
       members: [
-        { branch: 'members/ada', sha: 'cccccccccccc', aheadOfBase: 1, inTeamBranch: false },
         { branch: 'members/ops/ada', sha: 'cccccccccccc', aheadOfBase: 1, inTeamBranch: false },
       ],
       oldBranches: [{ name: 'members/ada', local: true, remote: false, merged: false }],

@@ -113,8 +113,83 @@ public class TeamBranchGapTests
         var s = await f.Repos.GitStatusAsync(ada.TeamId, team, Ct);
 
         Assert.Equal("team/yawble-engineering-team", s.TeamBranch);
-        Assert.Equal(["members/ada", "members/ben", "members/yawble-engineering-team/ada"], s.Members.Select(m => m.Branch).Order());
+        // Nobody is on members/ada or members/ben: old ones, listed once, in OldBranches only (card 75).
+        Assert.Equal(["members/yawble-engineering-team/ada"], s.Members.Select(m => m.Branch));
         Assert.Equal([new TeamGitOldBranch("members/ada", true, false, true), new TeamGitOldBranch("members/ben", true, false, false)], s.OldBranches);
+    }
+
+    /// <summary>
+    /// Card 75: git.status lists each old-style branch once. One a member is still recorded on (not moved yet) is that
+    /// member's branch, in Members only; one nobody is on is old, in OldBranches only. No member clone, no transport.
+    /// </summary>
+    [Fact]
+    public async Task GitStatus_ListsAnOldStyleBranchOnce_AsAMemberBranchWhileAMemberIsOnIt_ElseAsOld()
+    {
+        using var f = new TeamsFixture();
+        var (_, ada, _) = f.Team();
+        var repo = LocalRepo(f);
+        await f.Repos.UseExistingRepoAsync(ada.TeamId, "Alpha", repo, Ct);
+        var trunk = AgentGit.Host(repo, "rev-parse", "trunk");
+        AgentGit.Host(repo, "branch", "members/ada", CommitOn(repo, trunk, "ada's work")); // Ada: recorded here, not moved yet
+        AgentGit.Host(repo, "branch", "members/cy", trunk);                                 // nobody's
+        AgentGit.Host(repo, "branch", "members/alpha/ben", trunk);
+        RecordClone(f, ada.Id, "members/ada");
+
+        var s = await f.Repos.GitStatusAsync(ada.TeamId, "Alpha", Ct);
+
+        Assert.Equal(["members/ada", "members/alpha/ben"], s.Members.Select(m => m.Branch).Order());
+        Assert.Equal(1, Assert.Single(s.Members, m => m.Branch == "members/ada").AheadOfBase);
+        Assert.Equal([new TeamGitOldBranch("members/cy", Local: true, Remote: false, Merged: true)], s.OldBranches);
+        var all = s.Members.Select(m => m.Branch).Concat(s.OldBranches.Select(o => o.Name)).ToList();
+        Assert.Equal(all.Count, all.Distinct().Count());
+    }
+
+    private static void RecordClone(TeamsFixture f, long memberId, string branch)
+    {
+        using var c = new Microsoft.Data.Sqlite.SqliteConnection(f.Db.ConnectionString);
+        c.Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "INSERT INTO member_clones (member_id, path, branch, created_at) VALUES ($m, $p, $b, $c);";
+        cmd.Parameters.AddWithValue("$m", memberId);
+        cmd.Parameters.AddWithValue("$p", Path.Combine(f.Db.Dir, "no-clone"));
+        cmd.Parameters.AddWithValue("$b", branch);
+        cmd.Parameters.AddWithValue("$c", DateTimeOffset.UtcNow.ToString("O"));
+        Assert.Equal(1, cmd.ExecuteNonQuery());
+    }
+
+    /// <summary>Card 75, the rehire decision without transport: a clone left on disk with no row is recorded on the branch
+    /// it is on when that is the member's old-style one; anything else keeps the member's own new-style branch.</summary>
+    [Theory]
+    [InlineData(MemberRole.Member, "Ada", "members/ada", "members/ada")]
+    [InlineData(MemberRole.Member, "Ben Two", "members/ben-two", "members/ben-two")]
+    [InlineData(MemberRole.Member, "Ada", "members/alpha/ada", null)] // a post-B016 clone: nothing to adopt
+    [InlineData(MemberRole.Member, "Ada", "members/ben", null)]       // another member's old branch
+    [InlineData(MemberRole.Member, "Ada", "main", null)]
+    [InlineData(MemberRole.Member, "Ada", null, null)]                // detached or unreadable HEAD
+    [InlineData(MemberRole.Manager, "Manager", "members/manager", null)] // a manager is on the team branch
+    public void ARehiredMembersReusedClone_IsRecordedOnItsOldStyleBranch_OnlyWhenItIsOnIt(MemberRole role, string name, string? head, string? expected) =>
+        Assert.Equal(expected, TeamRepos.LegacyBranchToAdopt(role, name, head));
+
+    /// <summary>Card 75: the half of the rehire fix that reads the clone left on disk (by file, as the move does: no git in
+    /// the clone, no transport). The full rehire through PrepareAsync is ARehiredSameNamedMember_WithAPreB016CloneOnDisk_NoOrigin_...</summary>
+    [Fact]
+    public void ACloneLeftOnDisk_IsAdoptedOnTheBranchItsHeadIsOn_OnlyWhenThatIsTheMembersOldStyleBranch()
+    {
+        using var f = new TeamsFixture();
+        var (_, ada, _) = f.Team();
+        string Clone(string name, string? branch)
+        {
+            var dir = Path.Combine(f.Db.Dir, name);
+            Directory.CreateDirectory(dir);
+            if (branch is not null) AgentGit.Host(dir, "init", "-q", "-b", branch);
+            return dir;
+        }
+
+        Assert.Equal("members/ada", TeamRepos.AdoptLegacyClone(ada, Clone("pre-b016", "members/ada")));
+        Assert.Null(TeamRepos.AdoptLegacyClone(ada, Clone("post-b016", "members/alpha/ada")));
+        Assert.Null(TeamRepos.AdoptLegacyClone(ada, Clone("someone-else", "members/ben")));
+        Assert.Null(TeamRepos.AdoptLegacyClone(ada, Clone("empty", null)));
+        Assert.Null(TeamRepos.AdoptLegacyClone(ada, Path.Combine(f.Db.Dir, "missing")));
     }
 
     [Fact]
@@ -244,7 +319,7 @@ public class TeamBranchGapTests
     /// the same name is hired. Its record must name the branch its clone is actually on, or the next fetch-back looks
     /// for a branch the clone does not have and the clone's work never comes back.
     /// </summary>
-    [Fact(Skip = "FAULT (core, card 77): same as ARehiredSameNamedMember_WithAPreB016CloneOnDisk_NoOrigin_...; remove the Skip with that one")]
+    [Fact(Skip = "Needs git local transport (clone, fetch into the shared view, a local origin), which cannot start in the agents' sandbox (MSYS2 sh.exe 0xC0000142). The fault is fixed (card 75): run it outside the sandbox.")]
     public async Task ARehiredSameNamedMember_WhoseOldCloneIsStillOnTheOldBranch_IsMovedOrKeptConsistently()
     {
         using var f = new TeamsFixture();
@@ -268,14 +343,14 @@ public class TeamBranchGapTests
     /// <summary>
     /// The same rehire as above on a person's repository with no origin (no push needed; it still needs git's local
     /// transport for the first clone and the fetch-back, which cannot start in the agents' sandbox).
-    /// FAULT (core, card 77): RemoveMemberAsync deletes the member (its member_clones row goes) but leaves its clone on
+    /// Was a FAULT (core, card 77), fixed in card 75: RemoveMemberAsync deletes the member (its member_clones row goes) but leaves its clone on
     /// disk. The rehired member has no row, so MoveLegacyBranchLockedAsync does nothing, CheckoutOf names
     /// members/&lt;team&gt;/&lt;name&gt;, and PrepareAsync reuses the clone and records that branch while the clone's HEAD is
     /// still members/&lt;name&gt;. Fetch-back then looks for a branch the clone does not have, and later starts never move it
     /// (the row's branch is not old-style). The unfetched work on members/&lt;name&gt; never comes back.
-    /// Remove the Skip once PrepareAsync records (or moves) the branch the reused clone is actually on.
+    /// Now the move at start adopts a clone on disk with no row when it is on members/&lt;name&gt; (records it, then moves it).
     /// </summary>
-    [Fact(Skip = "FAULT (core, card 77): a rehired member reusing a pre-B016 clone is recorded on members/<team>/<name> while the clone is on members/<name>; its work never comes back")]
+    [Fact(Skip = "Needs git local transport (the first clone, the fetch into the shared view, the move's ls-remote of the clone, fetch-back), which cannot start in the agents' sandbox (MSYS2 sh.exe 0xC0000142). The fault is fixed (card 75); its no-transport tests are ACloneLeftOnDisk_... and ARehiredMembersReusedClone_...")]
     public async Task ARehiredSameNamedMember_WithAPreB016CloneOnDisk_NoOrigin_IsRecordedOnTheBranchItsCloneIsOn()
     {
         using var f = new TeamsFixture();

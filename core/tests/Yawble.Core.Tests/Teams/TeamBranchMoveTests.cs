@@ -105,7 +105,8 @@ public class TeamBranchMoveTests
         AgentGit.Host(repo, "branch", "members/ada", start);
 
         var s = await f.Repos.GitStatusAsync(ada.TeamId, "Alpha", Ct);
-        Assert.Equal(["members/ada", "members/alpha/ada"], s.Members.Select(m => m.Branch).Order());
+        Assert.Equal(["members/alpha/ada"], s.Members.Select(m => m.Branch)); // members/ada: nobody is on it, so only in OldBranches
+        Assert.Equal(["members/ada"], s.OldBranches.Select(o => o.Name));
 
         File.WriteAllText(Path.Combine(repo, "later.txt"), "x");
         AgentGit.Host(repo, "add", "later.txt");
@@ -164,9 +165,11 @@ public class TeamBranchMoveTests
         Assert.Equal(cloneTip, AgentGit.Host(bare, "rev-parse", "refs/heads/members/alpha/ada"));
         Assert.Equal(oldOnOrigin, AgentGit.Host(bare, "rev-parse", "refs/heads/" + old));
 
-        // The Git dialog lists both (the person deletes the old one); a sync no longer moves the one left behind.
+        // The Git dialog lists both, each once: the new one as a member branch, the old one as old (the person deletes
+        // it); a sync no longer moves the one left behind.
         var s = await f.Repos.GitStatusAsync(ada.TeamId, "Alpha", Ct);
-        Assert.Equal(["members/ada", "members/alpha/ada"], s.Members.Select(m => m.Branch).Order());
+        Assert.Equal(["members/alpha/ada"], s.Members.Select(m => m.Branch));
+        Assert.Equal(["members/ada"], s.OldBranches.Select(o => o.Name));
         File.WriteAllText(Path.Combine(picked, "base.txt"), "x");
         AgentGit.Host(picked, "add", "base.txt");
         AgentGit.Host(picked, "-c", "user.name=p", "-c", "user.email=p@x", "commit", "-q", "-m", "base");

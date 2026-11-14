@@ -203,8 +203,10 @@ public sealed partial class TeamRepos
             }
         }
         var members = new List<TeamGitBranch>();
-        // This team's: members/<team>/*, and old-style members/<name> ones (B016 left them for the person to delete).
-        foreach (var (branch, sha) in await TeamMemberBranchesAsync(repo.TeamId, team, path, legacyInUseOnly: false, ct))
+        // This team's: members/<team>/*, and an old-style members/<name> one only while a member is still on it (not moved
+        // yet). Every other old-style branch is in OldBranches alone, so the dialog shows each branch once (card 75).
+        var legacyInUse = LegacyBranchesInUse(repo.TeamId);
+        foreach (var (branch, sha) in await TeamMemberBranchesAsync(repo.TeamId, team, path, legacyInUseOnly: true, ct))
         {
             var aheadOfBase = start is null ? 0 : await CountAsync(path, sha, start, ct);
             var inTeam = teamSha is not null && await IsAncestorAsync(path, sha, teamSha, ct);
@@ -217,13 +219,15 @@ public sealed partial class TeamRepos
         return new TeamGitStatus(path, repo.Managed, repo.BaseBranch, checkedOut, dirty, origin is null ? null : PersonGitPush.Redact(origin),
             baseSha, originBase, ahead, behind, teamBranch, teamSha, teamAhead, teamBehind, merge, conflicts, members)
         {
-            OldBranches = await OldBranchesAsync(path, baseSha, originBase, ct),
+            OldBranches = await OldBranchesAsync(path, baseSha, originBase, legacyInUse, ct),
         };
     }
 
     /// <summary>Every old-style members/&lt;member&gt; branch in the repository (refs/heads) or on origin (refs/remotes/origin, as of the
-    /// last fetch). Merged: each copy there is is contained in the base branch or origin's base branch.</summary>
-    private async Task<IReadOnlyList<TeamGitOldBranch>> OldBranchesAsync(string path, string? baseSha, string? originBase, CancellationToken ct)
+    /// last fetch), except one a member of the team is still recorded on (<paramref name="inUse"/>: that one is a member
+    /// branch until its move). Merged: each copy there is is contained in the base branch or origin's base branch.</summary>
+    private async Task<IReadOnlyList<TeamGitOldBranch>> OldBranchesAsync(string path, string? baseSha, string? originBase, IReadOnlySet<string> inUse,
+        CancellationToken ct)
     {
         async Task<Dictionary<string, string>> List(string prefix)
         {
@@ -244,7 +248,7 @@ public sealed partial class TeamRepos
         var local = await List("refs/heads/");
         var remote = await List("refs/remotes/origin/");
         var list = new List<TeamGitOldBranch>();
-        foreach (var name in local.Keys.Union(remote.Keys).Order(StringComparer.Ordinal))
+        foreach (var name in local.Keys.Union(remote.Keys).Where(n => !inUse.Contains(n)).Order(StringComparer.Ordinal))
         {
             var merged = true;
             if (local.TryGetValue(name, out var l)) merged &= await Merged(l);

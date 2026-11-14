@@ -177,10 +177,18 @@ public sealed partial class TeamRepos
                 }
                 var shared = ExtraSharedPath(member.Team, extra.Name);
                 var row = ExtraRow(member.Id, extra.Name);
+                var clone = ExtraClonePath(member.Team, member.Name, extra.Name);
+                // A rehired member reusing a pre-B016 extra clone left on disk (no row): record the branch it is on first.
+                if (row is null && member.Role != MemberRole.Manager && AdoptLegacyClone(member, clone) is { } adopted)
+                {
+                    Exec("INSERT OR REPLACE INTO member_extra_clones (member_id, repo_name, path, branch, created_at) VALUES ($m, $n, $p, $b, $c);",
+                        ("$m", member.Id), ("$n", extra.Name), ("$p", clone), ("$b", adopted), ("$c", Now()));
+                    _log?.Invoke($"{member.Qualified}: {extra.Name}: reusing the clone on disk, on {adopted}");
+                    row = ExtraRow(member.Id, extra.Name);
+                }
                 // B016: an extra clone still on members/<name> moves too, before the shared view is updated.
                 if (row is not null) row = await MoveLegacyExtraBranchLockedAsync(member, extra, row, ct);
                 await UpdateSharedAtAsync(shared, extra.Path, extra.BaseBranch, ct);
-                var clone = ExtraClonePath(member.Team, member.Name, extra.Name);
                 var cloneBranch = row?.Branch ?? branch;
                 if (!(Directory.Exists(clone) && Directory.EnumerateFileSystemEntries(clone).Any()))
                 {
