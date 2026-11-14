@@ -45,9 +45,35 @@ public class CommitAttributionTests
     [InlineData("Generated with the new protoc script")]
     [InlineData("Fix the Claude-Session header parsing")] // not a trailer: the line does not start with it
     [InlineData("Mention Claude and Copilot support in the docs")]
+    // Prose that names the trailers mid-line is not a trailer.
+    [InlineData("  tool, Claude-Session: and \"Generated with ...\" naming one; a human")]
+    [InlineData("- CommitAttribution: finds Co-Authored-By naming an AI vendor")]
+    [InlineData("- Generated with Claude, the line is caught; a human one is not")]
+    [InlineData("Notes: Co-Authored-By: Claude <noreply@anthropic.com> is refused")]
     public void HumanLinesAreLeftAlone(string line)
     {
         Assert.Empty(CommitAttribution.Find("Subject\n\n" + line + "\n"));
+    }
+
+    [Fact]
+    public void TheB028CommitBodyItself_DescribesTheTrailers_ButCarriesNone()
+    {
+        const string body = """
+            B028: refuse fetching back commits that carry AI attribution lines
+
+            - CommitAttribution: finds Co-Authored-By naming an AI vendor, model or
+              tool, Claude-Session: and "Generated with ..." naming one; a human
+              co-author is left alone.
+            - LandFetchedAsync checks the fetched work's new commits (those no host
+              branch has) and refuses to land them with a plain message telling the
+              member to amend its own unpushed commits. Refuse, never strip: the app
+              does not rewrite history; the work stays at the host-only staging ref.
+            - member.md and the team-git skill say commit messages carry no AI
+              attribution lines; docs/features.md says how it is enforced.
+            - CommitAttributionTests: each pattern, human lines, log parsing, the
+              refusal text, and a fetch-back refusal then acceptance after amend.
+            """;
+        Assert.Empty(CommitAttribution.Find(body));
     }
 
     [Fact]
