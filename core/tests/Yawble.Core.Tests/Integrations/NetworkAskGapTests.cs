@@ -310,7 +310,7 @@ public sealed class NetworkAskGapTests : IDisposable
     /// though that member's override still filters the host out. Expected: the close covers only the asks whose members
     /// the answer checked (or re-checks every closed ask's member), so a late ask stays waiting or is reached too.
     /// </summary>
-    [Fact(Skip = "Fault (card 62 re-check): AnswerAsync re-lists the covered asks after the policy writes, so an ask raised meanwhile closes and its Manager is told allowed without the member being reached")]
+    [Fact]
     public async Task AllowEverywhere_AnAskArrivingDuringTheWrite_IsNotToldAllowed_UnlessItsMemberHasTheHost()
     {
         var beta = Insert("INSERT INTO teams (name, created_at) VALUES ('Beta', '2026-11-13T00:00:00Z') RETURNING id;");

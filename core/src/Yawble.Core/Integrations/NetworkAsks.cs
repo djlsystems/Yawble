@@ -266,6 +266,11 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
         var ask = Asks().FirstOrDefault(a => a.Id == id) ?? throw new ArgumentException($"network request {id} is not waiting");
         if (NetworkAskFilter.Problem(ask.Host) is { } problem) throw new ArgumentException(problem);
         var allow = choice != NetworkAskChoices.Deny;
+        // The other waiting asks this answer covers, listed once before the policy writes: only these close with it,
+        // so an ask raised while the writes run (its member never checked) stays waiting.
+        List<NetworkAskRow> others = allow && choice != NetworkAskChoices.Agent
+            ? Asks().Where(a => a.Id != id && a.Host == ask.Host && (choice == NetworkAskChoices.Everywhere || a.TeamId == ask.TeamId)).ToList()
+            : [];
         if (allow)
         {
             var asker = Find(ask.Team, ask.MemberName) ?? throw new ArgumentException($"{ask.Member} is no longer on the team");
@@ -286,9 +291,8 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
             // waiting ask for the host closes with it. A member's own override can narrow the global list (it is an
             // intersection), so the global list alone does not reach it: that member also gets the host in its loosen block.
             var reached = new List<Who> { asker };
-            if (choice != NetworkAskChoices.Agent)
-                foreach (var a in Asks().Where(a => a.Id != id && a.Host == ask.Host && (choice == NetworkAskChoices.Everywhere || a.TeamId == ask.TeamId)))
-                    if (Find(a.Team, a.MemberName) is { } m && reached.All(r => r.MemberId != m.MemberId)) reached.Add(m);
+            foreach (var a in others)
+                if (Find(a.Team, a.MemberName) is { } m && reached.All(r => r.MemberId != m.MemberId)) reached.Add(m);
             foreach (var m in reached)
                 if (!policy.AllowedFor(m.MemberId, ask.Host)) await policy.AllowForMemberAsync(m.MemberId, ask.Host, ct);
             // Never tell the Manager a host is allowed unless the member's effective hosts now include it.
@@ -300,24 +304,17 @@ public sealed class NetworkAskService(string connectionString, INetworkPolicy po
         List<NetworkAskRow> closed;
         lock (_lock)
         {
-            // The asks this answer covers close with it: the team's for that host, or everyone's.
-            var covered = choice switch
-            {
-                NetworkAskChoices.Team => " AND team_id = $t AND host = $h",
-                NetworkAskChoices.Everywhere => " AND host = $h",
-                _ => null,
-            };
-            var others = covered is null ? [] : Asks().Where(a => a.Id != id && a.Host == ask.Host && (choice == NetworkAskChoices.Everywhere || a.TeamId == ask.TeamId)).ToList();
             using var c = Open();
             using var tx = c.BeginTransaction();
             var now = Stamp(_clock.GetUtcNow());
             const string Close = "UPDATE network_asks SET state = $s, scope = $scope, decided_by = $by, decided_via = $via, decided_at = $now, note = $note WHERE state = 'pending'";
-            (string, object?)[] Args(string? n) => [("$s", allow ? "allowed" : "denied"), ("$scope", allow ? choice : null), ("$by", who.User), ("$via", who.Via), ("$now", now), ("$note", n), ("$id", id), ("$t", ask.TeamId), ("$h", ask.Host)];
+            (string, object?)[] Args(string? n, long target) => [("$s", allow ? "allowed" : "denied"), ("$scope", allow ? choice : null), ("$by", who.User), ("$via", who.Via), ("$now", now), ("$note", n), ("$id", target)];
             // exactly one answer wins: a second one (the window and a cloud viewer at once) finds nothing waiting
-            if (Exec(c, tx, Close + " AND id = $id;", Args(cleanNote)) == 0) throw new ArgumentException($"network request {id} is not waiting");
-            if (covered is not null) Exec(c, tx, Close + covered + ";", Args($"covered by network request {id}"));
+            if (Exec(c, tx, Close + " AND id = $id;", Args(cleanNote, id)) == 0) throw new ArgumentException($"network request {id} is not waiting");
+            // Only the asks listed (and whose members were reached) before the writes; one answered meanwhile is not claimed.
+            var also = others.Where(o => Exec(c, tx, Close + " AND id = $id;", Args($"covered by network request {id}", o.Id)) > 0).ToList();
             tx.Commit();
-            closed = [ask, .. others];
+            closed = [ask, .. also];
         }
         Changed?.Invoke();
 
