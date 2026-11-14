@@ -37,6 +37,17 @@ them with the `board` tool.
   one line in the card's trail saves the person reading the whole thread.
 - Before `workflow_complete`, every card is Done or carries a comment saying why it is not.
 
+## Verify cards go to the tester
+
+- When the team has a tester, a card to verify or test work goes to the tester (`tell` with `card: <id>`, naming
+  the developer's branch), never to a developer.
+- A developer's report does not close a verify card. The tester's run does: it reports what ran and the result
+  on the card and in its hand-back.
+- If you move a verify card to Done that the tester did not run, give the reason in `note` on `board`
+  `action: move`, for example "no tester on this team" or "the person asked to skip testing". The app refuses the
+  move without a `note`, and records the reason as a comment on the card.
+- On a team with no tester, you check the work yourself and the app does not ask for a reason.
+
 ## When the person touches a card
 
 The person moving, editing or commenting on a card wakes you, and arrives as an instruction about that card.

@@ -185,6 +185,12 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
   move with its status. You can move a card, comment, or ask the Manager about it. **Needs You** also lists the
   Connections to reconnect, the network requests and the tool requests waiting for you (see Sandbox and policy), with
   their buttons.
+  - On a team with a tester, verify and test cards go to the tester. The tester tests the developer's branch as the
+    developer left it, and reports what ran and the result on the card and in its hand-back.
+  - A developer's report never closes a verify card. When the Manager moves a tester's card to Done and the tester
+    has not run on it, the move needs a reason (for example "no tester on this team" or "the person asked to skip
+    testing"). Without one the app refuses the move; with one, the reason shows on the card as a comment.
+  - Teams with no tester are not asked for a reason.
 - **Backlog**: work you want done, most important first.
   - Add an item, read it and mark it ready, then dispatch it to a team's Manager or to **A new team…**.
   - When the team declares the work complete, only you mark it implemented.
@@ -241,14 +247,17 @@ a member's card opens it at that member's activity.
 - A member whose clone is still on an older `members/<name>` branch moves to `members/<team>/<name>` at its next
   start, with its commits: the app creates the new branch at the old one's commit and pushes it. The old branch on
   origin is left for you to delete in the Git dialog, where it is listed as old.
-- git cannot keep a branch `members/<x>` beside branches under `members/<x>/`. So an old branch named like a team's
-  slug (for example `members/docs` and a team "Docs") blocks that team's member branches. Before a member branch is
-  made or pushed, the app looks for such a branch in the team's repositories, on origin (as of the last fetch), in the
-  shared view and in the member's clone. When one is there, the member does not start: the message names the branch,
-  where it is, and what to do (rename or delete it in the Git dialog, or rename the team). Nothing is deleted or
-  renamed for you, and another team's branches are never touched. The Git dialog lists the blocking branch with
-  **Delete**, under the same rules as any other branch delete. An old-style member that cannot move because of such a
-  branch stays on its old branch and keeps working there.
+- Git cannot hold a branch `members/<x>` beside branches `members/<x>/...`. So an old `members/<x>` branch whose
+  name is a team's slug (for example another team's member `members/docs` and a team named Docs) blocks that team's
+  `members/<slug>/<member>` branches. Before a member branch is made or pushed, the app looks for such a branch in the
+  team's repositories, on origin (as of the last fetch), in the shared view and in the member's clone. The app changes
+  nothing then: the member's start fails with a plain message naming the branch, the repository it is in, and what to
+  do. Nothing is deleted or renamed for you, and another team's branches are never touched. An old-style member that
+  cannot move because of such a branch stays on its old branch and keeps working there. At a run's end, a branch that
+  such a branch on origin blocks is not pushed, and the push report says why instead of git's error.
+- The Git dialog lists such a blocking branch in its own section, with the repository and whether it is here or on
+  origin, and **Delete…** goes through the same plan-then-Delete as any other branch. You can also rename that branch
+  yourself or rename the team. A team rename into a slug that such a branch blocks is refused before anything moves.
 - Clones have no remote and no credential helper. After each run the app cleans the clone's git config and fetches
   the member's branch into the team repository. It never runs git inside a clone an agent used.
 - When the team repository has an origin, branches are pushed with your own git setup at each run's end. Pushes are
