@@ -11,7 +11,8 @@ import MemberActivity from './MemberActivity.vue';
 import { useTeamActivity } from '../monitor/teamActivity';
 import LogsDialog from './LogsDialog.vue';
 import TileGrip from './TileGrip.vue';
-import { memberCardsStore } from '../gripStore';
+import { memberActivityStore, memberCardsStore } from '../gripStore';
+import { activityWidth } from '../memberActivityWidth';
 import Icon from './Icon.vue';
 import TriggersDialog from './TriggersDialog.vue';
 import LoadingNote from './LoadingNote.vue';
@@ -278,7 +279,11 @@ defineExpose({ refresh, openWorkflows });
           :pending="busy.is(`member-${c.member.id}`, 'stop') ? 'stop' : busy.is(`member-${c.member.id}`, 'remove') ? 'remove' : null"
           @terminal="openTerminal(c)" @code="openCode(c.member.team, c.member.name)" @settings="emit('settings', c.member.id)"
           @guardrail="emit('guardrail', c.member.id)" @logs="logsFor = `${c.member.team}/${c.member.name}`" @stop="stop(c)" @remove="remove(c)" />
-        <MemberActivity class="member-side" :rows="activity.of(c.member.name)" :loaded="activity.loaded.value" :now="activity.now.value" />
+        <!-- The bar in the gap to the left of the activity sets the width of every member's activity together. -->
+        <div class="member-side" :style="{ flexBasis: `${activityWidth}px` }">
+          <TileGrip class="activity-grip" axis="w" reverse :store="memberActivityStore" />
+          <MemberActivity class="member-activity" :rows="activity.of(c.member.name)" :loaded="activity.loaded.value" :now="activity.now.value" />
+        </div>
       </div>
       <TileGrip axis="h" :store="memberCardsStore" />
     </div>
@@ -307,10 +312,17 @@ h2 { font-size: 16px; margin: 0; }
 .actions button { white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
 .team > * { margin-bottom: 10px; }
 .team > .member-cell { position: relative; margin-bottom: 14px; }
-.member-row { display: flex; gap: 10px; align-items: stretch; }
+.member-row { display: flex; gap: 14px; align-items: stretch; }
 .member-main { flex: 1 1 0; min-width: 0; }
-.member-side { flex: 0 0 clamp(16rem, 36%, 28rem); }
-@media (max-width: 900px) { .member-row { flex-direction: column; } .member-side { flex: none; height: 12rem; } }
+.member-side { position: relative; display: flex; flex-grow: 0; flex-shrink: 1; min-width: 0; }
+.member-activity { flex: 1; min-width: 0; }
+/* The width bar fills the 14px gap between the card and the activity (TileGrip's gap handles sit outside what they size). */
+.member-side > .activity-grip { left: -14px; right: auto; }
+@media (max-width: 900px) {
+  .member-row { flex-direction: column; }
+  .member-side { flex-basis: auto !important; height: 12rem; }
+  .member-side > .activity-grip { display: none; }
+}
 .decision { background: #fffaf0; border: 1px solid #e9d29a; border-radius: 6px; padding: 6px 10px; }
 .decision p { margin: 0 0 6px; }
 .decision > .row { margin-top: 6px; }

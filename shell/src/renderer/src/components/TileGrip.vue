@@ -6,7 +6,9 @@ import { teamTilesStore, type GripStore } from '../gripStore';
 // gap to the right of the tile) and the height handle (the gap below it), like split-pane dividers. Dragging any of
 // them (or the arrow keys on the focused one) changes the one shared size, so every tile follows, live; the size is
 // kept on release. Double-click goes back to the default.
-const props = withDefaults(defineProps<{ axis?: 'both' | 'w' | 'h'; store?: GripStore }>(), { axis: 'both', store: () => teamTilesStore });
+// reverse: the handle sits on the LEFT of what it sizes (the member Activity tile), so moving it right makes it narrower.
+const props = withDefaults(defineProps<{ axis?: 'both' | 'w' | 'h'; store?: GripStore; reverse?: boolean }>(), { axis: 'both', store: () => teamTilesStore, reverse: false });
+const sign = computed(() => (props.reverse ? -1 : 1));
 const st = computed(() => props.store);
 const dragging = ref(false);
 const doW = computed(() => props.axis !== 'h');
@@ -17,7 +19,7 @@ const BIG = 64;
 
 let drag: { x: number; y: number; w: number; h: number; el: HTMLElement | null; id: number } | null = null;
 function onMove(e: PointerEvent): void {
-  if (drag) st.value.preview({ w: doW.value ? drag.w + (e.clientX - drag.x) : drag.w, h: doH.value ? drag.h + (e.clientY - drag.y) : drag.h });
+  if (drag) st.value.preview({ w: doW.value ? drag.w + sign.value * (e.clientX - drag.x) : drag.w, h: doH.value ? drag.h + (e.clientY - drag.y) : drag.h });
 }
 function stop(): { w: number; h: number } | null {
   if (!drag) return null;
@@ -57,7 +59,7 @@ function onKey(e: KeyboardEvent): void {
   if (!d || (d[0] !== 0 && !doW.value) || (d[1] !== 0 && !doH.value)) return;
   e.preventDefault();
   e.stopPropagation();
-  st.value.set({ w: st.value.width.value + d[0], h: st.value.size.value.h + d[1] });
+  st.value.set({ w: st.value.width.value + sign.value * d[0], h: st.value.size.value.h + d[1] });
 }
 onBeforeUnmount(onCancel);
 </script>
