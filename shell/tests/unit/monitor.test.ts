@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { memberKey, MonitorModel, teamKey, type FeedRow } from '../../src/renderer/src/monitor/model';
 import MonitorView from '../../src/renderer/src/monitor/MonitorView.vue';
 import Timeline from '../../src/renderer/src/monitor/Timeline.vue';
+import { aimsAtEverything, FitOnceMs } from '../../src/renderer/src/monitor/scene';
 import type { YawbleApi, WorkflowSummary } from '../../src/shared/api';
 import { entryTime, latestWorkflows, panelHit, panelLayout, panelRadius, panelScale, workflowLabel, workflowLook, WorkflowLooks, WorkflowsShown } from '../../src/renderer/src/monitor/workflows';
 import { fileAlpha, FileTrail, FileTtlMs, MaxFileNodes, readStep, stepCaption, stepDoing, type StepKind, type StepRow } from '../../src/renderer/src/monitor/steps';
@@ -14,6 +15,17 @@ const row = (seq: number, kind: FeedRow['kind'], member: string | null, from: st
 const step = (id: number, kind: StepKind, target: string | null, offsetMs = 0, member = 'DeveloperPriya'): StepRow =>
   ({ id, at: new Date(Date.now() + offsetMs).toISOString(), team: 'payments', member, run: 1, kind, tool: kind === 'run' ? 'Bash' : 'Edit', target });
 const at = (ms: number) => new Date(ms).toISOString();
+
+describe('the camera', () => {
+  it('Auto fit aims at everything except for 12 s after a move; Pinned only during a Fit', () => {
+    expect(aimsAtEverything(false, 100_000, -Infinity, -Infinity)).toBe(true);
+    expect(aimsAtEverything(false, 100_000, 95_000, -Infinity)).toBe(false); // moved 5 s ago
+    expect(aimsAtEverything(false, 100_000, 87_000, -Infinity)).toBe(true); // 13 s ago
+    expect(aimsAtEverything(true, 100_000, -Infinity, -Infinity)).toBe(false); // pinned: never on its own
+    expect(aimsAtEverything(true, 100_000, -Infinity, 100_000 + FitOnceMs)).toBe(true); // a Fit under way
+    expect(aimsAtEverything(true, 100_000 + FitOnceMs, -Infinity, 100_000 + FitOnceMs)).toBe(false); // and it ends
+  });
+});
 
 describe('the steps', () => {
   it('reads a step off the wire, captions it and says what the member is doing', () => {
@@ -305,6 +317,36 @@ describe('the Monitor view', () => {
     expect(localStorage.getItem('yawble.monitor.legend')).toBe('collapsed');
     again.unmount();
     localStorage.removeItem('yawble.monitor.legend');
+  });
+  it('the camera control: Auto fit or Pinned, lit and remembered; Fit fits once and pins', async () => {
+    localStorage.removeItem('yawble.monitor.camera');
+    const api = {
+      call: async (method: string) => {
+        if (method === 'app.overview') return { slots: { running: 0, limit: 4, queued: 0 }, teams: [] };
+        if (method === 'teams.agents') return [];
+        if (method === 'monitor.messages') return { end: 0, messages: [] };
+        if (method === 'monitor.steps') return { end: 0, pending: false, steps: [] };
+        throw new Error(method);
+      },
+      onEvent: () => () => {},
+    } as unknown as YawbleApi;
+    const w = mount(MonitorView, { props: { api, pollMs: 60_000 } });
+    await flushPromises();
+    const lit = () => ['monitor-autofit', 'monitor-pin'].filter((t) => w.get(`[data-test=${t}]`).classes().includes('on'));
+    expect(lit()).toEqual(['monitor-autofit']); // Auto fit, as before
+    await w.get('[data-test=monitor-fit]').trigger('click');
+    expect(lit()).toEqual(['monitor-pin']);
+    expect(localStorage.getItem('yawble.monitor.camera')).toBe('pinned');
+    w.unmount();
+
+    const again = mount(MonitorView, { props: { api, pollMs: 60_000 } });
+    await flushPromises();
+    expect(again.get('[data-test=monitor-pin]').attributes('aria-pressed')).toBe('true'); // kept for next time
+    await again.get('[data-test=monitor-autofit]').trigger('click');
+    expect(again.get('[data-test=monitor-autofit]').attributes('aria-pressed')).toBe('true');
+    expect(localStorage.getItem('yawble.monitor.camera')).toBe('auto');
+    again.unmount();
+    localStorage.removeItem('yawble.monitor.camera');
   });
   it('collapses the activity pane to a thin rail and opens it again, and remembers that', async () => {
     localStorage.removeItem('yawble.monitor.activity');

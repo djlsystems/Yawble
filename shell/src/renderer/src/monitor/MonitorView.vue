@@ -49,6 +49,19 @@ function toggleLegend() {
   legendOpen.value = !legendOpen.value;
   try { localStorage.setItem('yawble.monitor.legend', legendOpen.value ? 'open' : 'collapsed'); } catch { /* not kept */ }
 }
+// The camera: Auto fit (fits everything, except for 12 s after the person moves the wall) or Pinned (the zoom and
+// position stay where the person left them; Fit fits once and stays pinned). The choice is remembered.
+const pinned = ref((() => { try { return localStorage.getItem('yawble.monitor.camera') === 'pinned'; } catch { return false; } })());
+function setPinned(on: boolean): void {
+  pinned.value = on;
+  scene?.setPinned(on);
+  try { localStorage.setItem('yawble.monitor.camera', on ? 'pinned' : 'auto'); } catch { /* not kept */ }
+}
+/** Fit: everything, once; from Auto fit it pins the camera there. */
+function fitOnce(): void {
+  if (!pinned.value) setPinned(true);
+  scene?.fit();
+}
 const activityOpen = ref((() => { try { return localStorage.getItem('yawble.monitor.activity') !== 'collapsed'; } catch { return true; } })());
 function toggleActivity(): void {
   activityOpen.value = !activityOpen.value;
@@ -350,6 +363,7 @@ onMounted(async () => {
   if (canvas.value?.getContext('2d')) {
     scene = new MonitorScene(canvas.value);
     scene.model = live;
+    scene.setPinned(pinned.value);
     scene.onHover = (h) => { hover.value = h; };
     scene.onPick = (k) => { picked.value = k; };
     scene.onOpenWorkflow = (team, id) => {
@@ -386,7 +400,13 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
           <div v-if="heavy" class="heavy" data-test="monitor-heavy" title="The heavy-work lease: a full test suite, build or image build runs a few at a time">{{ heavy }}</div>
         </div>
         <div class="controls">
-          <button class="ctl" title="Fit everything (double-click the wall)" data-test="monitor-fit" @click="scene?.fit()">Fit</button>
+          <div class="seg" role="group" aria-label="Camera" data-test="monitor-camera">
+            <button class="ctl" :class="{ on: !pinned }" :aria-pressed="!pinned" data-test="monitor-autofit"
+              title="Auto fit: the wall keeps everything in view, except for 12 s after you pan or zoom" @click="setPinned(false)">Auto fit</button>
+            <button class="ctl" data-test="monitor-fit" title="Fit everything once, then stay pinned (or double-click the wall)" @click="fitOnce">Fit</button>
+            <button class="ctl" :class="{ on: pinned }" :aria-pressed="pinned" data-test="monitor-pin"
+              title="Pinned: the zoom and position stay where you put them" @click="setPinned(true)">Pinned</button>
+          </div>
         </div>
         <button class="ctl legend-toggle" :class="{ open: legendOpen }" type="button" data-test="monitor-legend-toggle"
           :aria-expanded="legendOpen" :title="legendOpen ? 'Hide the legend' : 'Show the legend'" @click="toggleLegend">{{ legendOpen ? 'Legend ▾' : 'Legend ▸' }}</button>
@@ -525,6 +545,13 @@ onBeforeUnmount(() => { for (const t of timers) clearInterval(t); cancelAnimatio
 .controls { position: absolute; top: 12px; right: 12px; display: flex; gap: 6px; }
 .ctl { background: rgba(12, 19, 34, .85); color: #e2e8f0; border: 1px solid #1e293b; border-radius: 6px; padding: 3px 10px; font-size: 12px; }
 .ctl:hover:not(:disabled) { border-color: #38bdf8; }
+/* Auto fit | Fit | Pinned: one joined control; the camera's mode is lit. */
+.seg { display: flex; }
+.seg .ctl { border-radius: 0; margin-left: -1px; }
+.seg .ctl:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+.seg .ctl:last-child { border-radius: 0 6px 6px 0; }
+.seg .ctl:hover { position: relative; }
+.seg .ctl.on { background: rgba(56, 189, 248, .18); border-color: #38bdf8; color: #e0f2fe; position: relative; }
 .legend { position: absolute; left: 0; right: 0; bottom: 0; padding: 8px 16px 8px 92px; display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; color: #94a3b8;
   background: linear-gradient(rgba(7, 11, 20, 0), rgba(7, 11, 20, .9)); pointer-events: none; }
 .legend-toggle { position: absolute; left: 12px; bottom: 8px; z-index: 2; font-size: 11px; padding: 2px 8px; }

@@ -60,6 +60,16 @@ const StepIconGap = 20;
 const FileFan = [{ a: 0, d: 60 }, { a: -0.62, d: 48 }, { a: 0.62, d: 48 }, { a: -1.2, d: 64 }, { a: 1.2, d: 64 }, { a: -1.75, d: 50 }];
 const MoreFan = { a: 1.75, d: 50 };
 const RefitAfterMs = 12_000;
+/** How long a one-off Fit (pinned) keeps aiming at everything while the camera eases there. */
+export const FitOnceMs = 1_500;
+
+/**
+ * Whether the camera aims at everything at `now`. Auto fit: unless the person moved the wall in the last 12 s. Pinned:
+ * only during a one-off Fit (until `fitUntil`).
+ */
+export function aimsAtEverything(pinned: boolean, now: number, movedAt: number, fitUntil: number): boolean {
+  return pinned ? now < fitUntil : now - movedAt > RefitAfterMs;
+}
 /** How much further from its hub than the members a workflow panel's edge sits. */
 const WorkflowPast = 50;
 
@@ -99,6 +109,9 @@ export class MonitorScene {
   private cam = { x: 0, y: 0, k: 1 };
   private target = { x: 0, y: 0, k: 1 };
   private movedAt = -Infinity;
+  /** Pinned: the camera never fits on its own; Fit (or a double-click) fits once. */
+  private pinned = false;
+  private fitUntil = -Infinity;
   private raf = 0;
   private last = 0;
   private dpr = 1;
@@ -220,8 +233,17 @@ export class MonitorScene {
 
   setPicked(key: string | null): void { this.picked = key; }
 
-  /** Fits everything on the next frames (double-click, the Fit button). */
-  fit(): void { this.movedAt = -Infinity; }
+  /** Fits everything on the next frames (double-click, the Fit button); pinned, only this once. */
+  fit(): void { this.movedAt = -Infinity; this.fitUntil = performance.now() + FitOnceMs; }
+
+  /** Auto fit (false: fits everything unless the person moved the wall in the last 12 s) or pinned (true: never on its own). */
+  setPinned(on: boolean): void { this.pinned = on; this.fitUntil = -Infinity; if (!on) this.movedAt = -Infinity; }
+
+  /** Whether the camera aims at everything this frame. */
+  private fitting(now: number): boolean { return aimsAtEverything(this.pinned, now, this.movedAt, this.fitUntil); }
+
+  /** The person moved the wall: auto fit waits 12 s; a one-off fit under way stops. */
+  private moved(): void { this.movedAt = performance.now(); this.fitUntil = -Infinity; }
 
   // ---------- the frame ----------
   private frame = (now: number) => {
@@ -234,7 +256,7 @@ export class MonitorScene {
     this.rescalePanels();
     this.resize();
     if (this.sim.alpha() > 0.001 || !this.reduced) this.sim.tick();
-    if (now - this.movedAt > RefitAfterMs) this.aimFit();
+    if (this.fitting(now)) this.aimFit();
     const ease = 1 - Math.pow(0.0025, dt / 1000);
     this.cam.x += (this.target.x - this.cam.x) * ease;
     this.cam.y += (this.target.y - this.cam.y) * ease;
@@ -882,7 +904,7 @@ export class MonitorScene {
     const move = (e: PointerEvent) => {
       const [sx, sy] = local(e);
       if (this.drag) {
-        this.movedAt = performance.now();
+        this.moved();
         if (this.drag.node) {
           const [wx, wy] = this.toWorld(sx, sy);
           this.drag.node.fx = wx; this.drag.node.fy = wy;
@@ -957,7 +979,7 @@ export class MonitorScene {
       this.cam.k = this.target.k = k;
       this.cam.x = this.target.x = wx - (sx - this.w / 2) / k;
       this.cam.y = this.target.y = wy - (sy - this.h / 2) / k;
-      this.movedAt = performance.now();
+      this.moved();
     };
     const dbl = () => this.fit();
     cv.addEventListener('pointermove', move);
