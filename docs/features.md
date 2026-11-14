@@ -188,7 +188,8 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Kanban b
 - **Kanban board**: four lanes, **To Do**, **In Progress**, **Needs You** and **Done**. Cards come from the teams' work and
   move with its status. You can move a card, comment, or ask the Manager about it. **Needs You** also lists the
   Connections to reconnect, the network requests and the tool requests waiting for you (see Sandbox and policy), with
-  their buttons.
+  their buttons. The card a member is working on says **Heavy work** while that member holds the heavy-work lease, and
+  **Waiting for heavy work** (with its place in the queue) while it waits; the tooltip says what for.
   - On a team with a tester, verify and test cards go to the tester. The tester tests the developer's branch as the
     developer left it, and reports what ran and the result on the card and in its hand-back.
   - A developer's report never closes a verify card. When the Manager moves a tester's card to Done and the tester
