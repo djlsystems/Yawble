@@ -169,9 +169,12 @@ public sealed class RunGateway : IAsyncDisposable
         {
             Write(GatewayEventKinds.HostDenied, true, vhost, head.Method, Redact(head.Target), 403, "host not served by this run's gateway");
             // Plain http is never forwarded; a host name off the allowlist is still reported (allowed, it is reachable over https).
+            // Only a real outside host is told to use https: a gateway virtual host (*.yawble.internal) has no https address.
+            var outside = IsOutsideHost(vhost);
             var told = vhost.Length > 0 && !Vhosts.HostAllowed(vhost, _spec.AllowHosts) && !vhost.EndsWith("." + Policy.FloorRules.ReservedSuffix, StringComparison.OrdinalIgnoreCase)
-                ? $"{vhost} is not reachable from this agent: {await AllowlistRefusalAsync(vhost, head.Method, path, ct)}. {PlainHttpNote}"
-                : $"{vhost} is not reachable from this agent. {PlainHttpNote}";
+                ? $"{vhost} is not reachable from this agent: {await AllowlistRefusalAsync(vhost, head.Method, path, ct)}"
+                : $"{vhost} is not reachable from this agent";
+            if (outside) told += $". {PlainHttpNote}";
             await HttpWire.RespondJsonAsync(s, 403, "Forbidden", Error(told), keepAlive, ct);
             return keepAlive;
         }
@@ -604,6 +607,19 @@ public sealed class RunGateway : IAsyncDisposable
 
     /// <summary>What a plain-http refusal adds: the gateway forwards only https (CONNECT), even for an allowed host.</summary>
     public const string PlainHttpNote = "Only https is forwarded: plain http is refused even for an allowed host; use the https:// address.";
+
+    /// <summary>
+    /// A real outside host a plain-http refusal may point at its https address: a name, not a gateway virtual host
+    /// (*.yawble.internal) and not a model vendor or sign-in host (never reachable, over https either).
+    /// </summary>
+    private static bool IsOutsideHost(string vhost)
+    {
+        var h = vhost.TrimEnd('.');
+        if (h.Length == 0) return false;
+        var reserved = Policy.FloorRules.ReservedSuffix;
+        if (h.Equals(reserved, StringComparison.OrdinalIgnoreCase) || h.EndsWith("." + reserved, StringComparison.OrdinalIgnoreCase)) return false;
+        return !Vhosts.IsNeverConnect(h);
+    }
 
     /// <summary>The gateway log's detail for an allowlist miss (GatewayVerdicts and the Logs dialog read it).</summary>
     public const string NotOnAllowlist = "host not on this agent's allowlist";

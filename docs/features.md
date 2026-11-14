@@ -93,7 +93,9 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
     link-local addresses (`localtest.me`, `x.nip.io`) cannot be allowed, since agents can never reach those
     addresses; Deny closes such a request.
   - **Plain http:** the gateway forwards only https. A request raised by a plain-http refusal says so, and the agent is
-    told to use the https:// address: plain http is refused even once the host is allowed.
+    told to use the https:// address: plain http is refused even once the host is allowed. Only a refused plain-http
+    request to a real outside host carries this note. A gateway virtual host (`*.yawble.internal`), a model vendor or
+    sign-in host, and an https refusal (CONNECT or `https://` absolute-form) never do.
   - **Limit:** at most five different hosts wait per member at once. A repeat of a host already waiting only counts up.
   - **Answering:** one request takes one answer at a time; a second answer given meanwhile is refused.
   - **A member who leaves:** removing a member closes its waiting requests (state closed, in the Approvals log).
