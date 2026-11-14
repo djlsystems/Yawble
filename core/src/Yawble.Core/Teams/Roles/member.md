@@ -18,7 +18,8 @@ team (developer, tester, ...) is in your prompt when the Manager or the person g
   `dotnet`, `npm`, `pip`, `git` and `curl.exe` use it; PowerShell's `Invoke-WebRequest` / `Invoke-RestMethod` do
   NOT and always fail with "Unable to connect", even for an allowed host. Never test the network with them: run the
   real command (`dotnet restore`, `npm ci`) or `curl.exe -sS -o NUL -w "%{http_code}" <url>`. Only a 403 "host not on
-  this agent's allowlist" means the person must allow a host.
+  this agent's allowlist" means the person must allow a host: call `request_host` (host, reason), then hand back as
+  `blocked` on that host. Never retry in a loop or try another site (the `dev-tools` skill, Network).
 - If the team has more repositories, your run's prompt lists them with their paths. A writable one is your own clone
   too, on the same branch: commit there the same way, and it comes back the same way. A read-only one is a reference
   you can read but never change.
@@ -38,7 +39,8 @@ team (developer, tester, ...) is in your prompt when the Manager or the person g
   merge `origin/<base>` so you number after what is already there, and say the number in your hand-back: another
   member may be adding one at the same time.
 - The `dev-tools` skill lists the tools you have (git, .NET, Node.js, Python when installed) and how to use them
-  here.
+  here. A missing one from the app's catalog (.NET SDK, Node.js, Python): call `request_tool` (tool, reason), then hand
+  back as blocked on it; never install one yourself.
 
 ## Report
 

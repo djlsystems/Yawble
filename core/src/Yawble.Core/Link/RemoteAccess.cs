@@ -16,6 +16,10 @@ public static class RemoteAccess
         "core.getInfo", "sandbox.getAvailableBackends", "sandbox.getPlatformSupport", "scheduler.getState",
         "guardrail.", "agents.", "runs.", "concierge.", "board.", "backlog.", "integrations.", "tasks.",
         "ops.backups",
+        // Network asks: listed and answered like the other policy changes (policy. is a screen prefix above).
+        "network.",
+        // Host tool asks: listed and answered Not now like the network asks; Install is the window's alone (below).
+        "tools.catalog", "tools.asks", "tools.notNow",
         // Whether git is installed (the banner's text); installing it is git.install, refused below.
         "git.check",
         // The Logs dialog, read only (pruning and retention are refused below).
@@ -57,6 +61,8 @@ public static class RemoteAccess
             return Logs.LogRpc.LocalOnly;
         if (method == "git.install")
             return Teams.GitRpc.InstallRefusal;
+        if (method == "tools.install")
+            return Integrations.ToolAskService.InstallRefusal;
         if (method is "ops.backupNow" or "ops.restore")
             return "backups can only be made or restored on the computer itself";
         if (!Allowed.Any(p => p.EndsWith('.') ? method.StartsWith(p, StringComparison.Ordinal) : method == p))

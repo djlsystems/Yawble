@@ -266,6 +266,12 @@ public sealed partial class BusEngine : IAsyncDisposable
     /// <summary>The person's integrations (their CLIs under rules), offered to agents as tools; null when not wired.</summary>
     public Integrations.IntegrationService? Integrations { get; set; }
 
+    /// <summary>The network asks (hosts an agent was refused or asked for), behind the request_host tool; null when not wired.</summary>
+    public Integrations.NetworkAskService? NetworkAsks { get; set; }
+
+    /// <summary>The host tool asks (tools from the app's catalog an agent asked for), behind the request_tool tool; null when not wired.</summary>
+    public Integrations.ToolAskService? ToolAsks { get; set; }
+
     internal Task<Message> HandbackAsync(RunContext run, string delivered, CancellationToken ct) =>
         WithGate(() =>
         {

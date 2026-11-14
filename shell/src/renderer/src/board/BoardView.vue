@@ -8,6 +8,8 @@ import CardPanel from './CardPanel.vue';
 import { inLane } from './cards';
 import LoadingNote from '../components/LoadingNote.vue';
 import BusyLabel from '../components/BusyLabel.vue';
+import NetworkAsks from '../components/NetworkAsks.vue';
+import ToolAsks from '../components/ToolAsks.vue';
 import { useBusy } from '../busy';
 
 /**
@@ -107,6 +109,10 @@ async function loadReconnect() {
   catch { reconnect.value = []; } // an older core: nothing to show
 }
 let off: (() => void) | null = null;
+/** Network asks shown in Needs You (NetworkAsks loads and answers them; the lane's count adds them). */
+const networkAsks = ref(0);
+/** Tool asks shown in Needs You (ToolAsks loads and answers them; the lane's count adds them). */
+const toolAsks = ref(0);
 
 function clear() { team.value = ''; member.value = ''; search.value = ''; }
 
@@ -139,7 +145,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); off?.(); });
       <LoadingNote v-if="!board && !error" text="Loading the board…" />
       <div v-if="board" class="lanes">
         <section v-for="l in board.lanes" :key="l.id" class="lane" :class="`lane-${l.id}`" :data-test="`lane-${l.id}`">
-          <header><span class="lname">{{ l.label }}</span><span class="count">{{ inLane(shown, l.id).length + (l.id === 'blocked' ? reconnect.length : 0) }}</span>
+          <header><span class="lname">{{ l.label }}</span><span class="count">{{ inLane(shown, l.id).length + (l.id === 'blocked' ? reconnect.length + networkAsks + toolAsks : 0) }}</span>
             <button v-if="l.id === 'done' && shownDone.length" class="link small clear-done" data-test="board-clear-done"
               :title="clearTitle" :disabled="work.is('clear')" :aria-busy="work.is('clear')" @click="clearDone"><BusyLabel :busy="work.is('clear')" text="Clearing…">Clear</BusyLabel></button></header>
           <div v-if="l.id === 'blocked' && reconnect.length" class="cards reconnect">
@@ -149,10 +155,12 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); off?.(); });
               <span class="small">{{ c.where }}</span>
             </button>
           </div>
+          <NetworkAsks v-if="l.id === 'blocked'" class="cards reconnect" :api="api" :poll-ms="pollMs" :team="team" :member="member" @count="networkAsks = $event" />
+          <ToolAsks v-if="l.id === 'blocked'" class="cards reconnect" :api="api" :poll-ms="pollMs" :team="team" :member="member" @count="toolAsks = $event" />
           <TransitionGroup tag="div" name="card" class="cards">
             <BoardCardItem v-for="c in inLane(shown, l.id)" :key="c.id" :card="c" :selected="openCard === c.id" @open="openCard = c.id" />
           </TransitionGroup>
-          <p v-if="!inLane(shown, l.id).length && !(l.id === 'blocked' && reconnect.length)" class="none">{{ l.id === 'blocked' ? 'Nothing needs you.' : 'No cards.' }}</p>
+          <p v-if="!inLane(shown, l.id).length && !(l.id === 'blocked' && (reconnect.length || networkAsks || toolAsks))" class="none">{{ l.id === 'blocked' ? 'Nothing needs you.' : 'No cards.' }}</p>
           <template v-if="l.id === 'done' && shownCleared.length > 0">
             <button class="link small show-cleared" data-test="board-show-cleared" @click="toggleCleared">
               {{ showCleared ? `Hide cleared (${shownCleared.length})` : `Show cleared (${shownCleared.length})` }}</button>

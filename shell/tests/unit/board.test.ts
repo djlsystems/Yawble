@@ -72,8 +72,10 @@ describe('the Board: Needs You', () => {
     const { api, calls } = fakeApi();
     const call = api.call.bind(api);
     let attention = [{ id: 7, name: 'Pets key', reason: 'the service answered 401 Unauthorized', where: 'Settings → Integrations → Connections' }];
-    let listener: ((e: { event: string; data: unknown }) => void) | null = null;
-    (api as any).onEvent = (l: typeof listener) => { listener = l; return () => { listener = null; }; };
+    // every view's listener (the Board's and its Needs You network asks'), as the real bridge keeps them
+    const listeners: ((e: { event: string; data: unknown }) => void)[] = [];
+    const listener = (e: { event: string; data: unknown }) => { for (const l of [...listeners]) l(e); };
+    (api as any).onEvent = (l: (typeof listeners)[number]) => { listeners.push(l); return () => { listeners.splice(listeners.indexOf(l), 1); }; };
     (api as any).call = async (method: string, params?: any) => {
       if (method === 'integrations.connectionAttention') { calls.push({ method, params }); return attention; }
       return call(method, params);
@@ -89,9 +91,77 @@ describe('the Board: Needs You', () => {
     expect(w.emitted('connections')).toBeTruthy();
 
     attention = [];
-    listener!({ event: 'connections.changed', data: null });
+    listener({ event: 'connections.changed', data: null });
     await flushPromises();
     expect(w.find('[data-test=needs-reconnect-7]').exists()).toBe(false);
+  });
+
+  it('lists a network ask with its four answers, counts it, and follows the team filter', async () => {
+    const { api, calls } = fakeApi();
+    const call = api.call.bind(api);
+    let pending = [{ id: 5, at: '2026-11-13T21:00:00Z', teamId: 1, team: 'payments', member: 'payments/DeveloperPriya', memberName: 'DeveloperPriya',
+      host: 'registry.npmjs.org', reason: 'npm ci for the site', method: null, pathSample: null, count: 2, lastSeen: '2026-11-13T21:01:00Z',
+      hint: 'npm: Node.js packages (npm install, npm ci)', workflow: 11, state: 'pending', scope: null, decidedBy: null, decidedAt: null,
+      choices: ['agent', 'team', 'everywhere', 'deny'] }];
+    (api as any).call = async (method: string, params?: any) => {
+      if (method === 'network.asks') { calls.push({ method, params }); return pending; }
+      if (method === 'network.answer') { calls.push({ method, params }); pending = []; return { ok: true, id: 5, host: 'registry.npmjs.org', choice: params.choice, closed: [5], told: [] }; }
+      return call(method, params);
+    };
+    const w = mount(BoardView, { props: { api, pollMs: 60_000 } });
+    await flushPromises();
+    const lane = w.get('[data-test=lane-blocked]');
+    const item = lane.get('[data-test=network-ask]');
+    expect(item.text()).toContain('Developer Priya');
+    expect(item.text()).toContain('registry.npmjs.org');
+    expect(item.text()).toContain('npm ci for the site');
+    expect(lane.get('.count').text()).toBe('2'); // the question card and the network ask
+    expect(w.find('[data-test=network-asks].banner').exists()).toBe(false);
+
+    await w.get('[data-test=board-team]').setValue('i18n');
+    expect(w.find('[data-test=network-ask]').exists()).toBe(false);
+    expect(w.get('[data-test=lane-blocked] .count').text()).toBe('0');
+    expect(w.get('[data-test=lane-blocked]').text()).toContain('Nothing needs you.');
+    await w.get('[data-test=board-team]').setValue('payments');
+
+    await w.get('[data-test=network-ask-team]').trigger('click');
+    await flushPromises();
+    expect(calls.find((c) => c.method === 'network.answer')!.params).toEqual({ id: 5, choice: 'team' });
+    expect(w.find('[data-test=network-ask]').exists()).toBe(false);
+  });
+
+  it('lists a tool ask with Install and Not now, counts it, and follows the team filter', async () => {
+    const { api, calls } = fakeApi();
+    const call = api.call.bind(api);
+    let pending = [{ id: 3, at: '2026-11-13T21:00:00Z', teamId: 1, team: 'payments', member: 'payments/DeveloperPriya', memberName: 'DeveloperPriya',
+      tool: 'nodejs-lts', displayName: 'Node.js LTS', publisher: 'OpenJS Foundation', wingetId: 'OpenJS.NodeJS.LTS', scope: 'machine',
+      reason: 'build the site', count: 1, lastSeen: '2026-11-13T21:00:00Z', workflow: 11, state: 'pending', attempts: 0, error: null,
+      decidedBy: null, decidedVia: null, decidedAt: null, canInstall: true, command: 'winget install --id OpenJS.NodeJS.LTS --exact', choices: ['install', 'notNow'] }];
+    (api as any).call = async (method: string, params?: any) => {
+      if (method === 'tools.asks') { calls.push({ method, params }); return pending; }
+      if (method === 'tools.notNow') { calls.push({ method, params }); pending = []; return { ok: true, id: 3, tool: 'nodejs-lts', told: null }; }
+      return call(method, params);
+    };
+    const w = mount(BoardView, { props: { api, pollMs: 60_000 } });
+    await flushPromises();
+    const lane = w.get('[data-test=lane-blocked]');
+    const item = lane.get('[data-test=tool-ask]');
+    expect(item.text()).toContain('Developer Priya');
+    expect(item.text()).toContain('Node.js LTS');
+    expect(item.text()).toContain('build the site');
+    expect(item.findAll('button').map((b) => b.text())).toEqual(['Install', 'Not now']);
+    expect(lane.get('.count').text()).toBe('2'); // the question card and the tool ask
+    expect(w.find('[data-test=tool-asks].banner').exists()).toBe(false);
+
+    await w.get('[data-test=board-team]').setValue('i18n');
+    expect(w.find('[data-test=tool-ask]').exists()).toBe(false);
+    expect(w.get('[data-test=lane-blocked] .count').text()).toBe('0');
+    await w.get('[data-test=board-team]').setValue('payments');
+
+    await w.get('[data-test=tool-ask-notNow]').trigger('click');
+    await flushPromises();
+    expect(calls.find((c) => c.method === 'tools.notNow')!.params).toEqual({ id: 3 });
+    expect(w.find('[data-test=tool-ask]').exists()).toBe(false);
   });
 
   it('a remote view never asks for connections', async () => {

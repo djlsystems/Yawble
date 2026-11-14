@@ -14,8 +14,16 @@ You run in a sandbox on the person's own computer. The tools the person installe
 - **Node.js** (`node`, `npm`) and **Python** (`python`) when installed. Package downloads need the registry host
   allowed by the person, like NuGet.
 
-Check before relying on one: `dotnet --version`, `node --version`, `python --version`. If a tool you need is
-missing, say so with `blocked`; do not try to download or install one.
+Check before relying on one: `dotnet --version` (and `dotnet --list-sdks` for the version), `node --version`,
+`python --version`. Never try to download or install a tool yourself. If one you need is missing:
+
+1. Call `request_tool` with its catalog name and one line on what it is for. The app can install `dotnet-sdk-10`
+   (.NET SDK 10), `dotnet-sdk-lts` (the current LTS .NET SDK), `nodejs-lts` (Node.js LTS) and `python-3` (Python 3).
+   The answer says if it is already installed (then a new run has it) or that the person was asked.
+2. Hand back as blocked on that tool. The person installs it from Needs you, and your Manager is told to retry; a new
+   run has it on PATH. Do not retry in a loop.
+
+Any other tool: say so with `blocked`, naming it; the person installs it themselves.
 
 ## Heavy work
 
@@ -49,6 +57,18 @@ the remote server"), even for an allowed host. So never check the network with t
 (`dotnet restore`, `npm ping`) or with `curl.exe -sS -o NUL -w "%{http_code}" https://api.nuget.org/v3/index.json`.
 A host that is not allowed answers through the proxy with 403 "host not on this agent's allowlist": that, and only
 that, means the person must allow it.
+
+When your work needs a host that is refused (NuGet's `api.nuget.org` for `dotnet restore`, `registry.npmjs.org` for
+`npm ci`, `pypi.org` and `files.pythonhosted.org` for `pip install`):
+
+1. Call `request_host` with the exact host name and one line on what it is for ("restore NuGet packages for the xUnit
+   test project"). The refusal itself already put the host in the person's Needs you; your reason tells them why.
+2. Then hand back as `blocked` on that host, saying what is waiting for it. A host the person allows is reachable
+   from your next run, not the one that was refused; the Manager is told when it is allowed and has the work retried.
+3. Never retry in a loop, and never try another site, a mirror or another way around the refusal. If the person
+   denies it, carry on without it or report that you are blocked.
+
+IP addresses, local and private-network names, and the model vendors' hosts are never asked about: they stay refused.
 
 ## What you cannot reach
 

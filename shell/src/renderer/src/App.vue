@@ -7,6 +7,8 @@ import { errorText, resolveApi } from './api';
 import { cliLabel } from './agentClis';
 import HostChecksBanner from './components/HostChecksBanner.vue';
 import CompanionAsks from './components/CompanionAsks.vue';
+import NetworkAsks from './components/NetworkAsks.vue';
+import ToolAsks from './components/ToolAsks.vue';
 import MemberSettingsDialog from './components/MemberSettingsDialog.vue';
 import NewTeamDialog from './components/NewTeamDialog.vue';
 import TeamView from './components/TeamView.vue';
@@ -340,6 +342,10 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
       <GitBanner :api="api" />
       <UpdateBanner ref="updateBanner" :api="api" />
       <CompanionAsks v-if="!api.remote" :api="api" :poll-ms="pollMs" />
+      <!-- Hosts agents were refused, waiting for the person (in a remote view too); the Board shows them in its Needs You lane instead. -->
+      <NetworkAsks v-if="view !== 'board'" banner :api="api" :poll-ms="pollMs" />
+      <!-- Developer tools agents asked for (request_tool): Install in the window only, Not now anywhere; on the Board, its Needs You lane. -->
+      <ToolAsks v-if="view !== 'board'" banner :api="api" :poll-ms="pollMs" />
 
       <div class="content">
       <div class="place">

@@ -7,9 +7,16 @@ public sealed record LogColumn(string Key, string Label, string Sql, string Kind
 /// <summary>
 /// How old entries of a source are deleted: rows of <paramref name="Table"/> whose <paramref name="TimeColumn"/> is
 /// before the cutoff (and match <paramref name="Where"/>). <paramref name="FileColumn"/>: a file each row names, deleted
-/// with it. <paramref name="Loss"/>: what the person loses, said before they confirm.
+/// with it. <paramref name="Loss"/>: what the person loses, said before they confirm. <paramref name="Also"/>: more
+/// tables the log reads, pruned with it by the same cutoff (their own time column and Where; their own DefaultDays,
+/// Loss and FileColumn are not used).
 /// </summary>
-public sealed record LogPrune(string Table, string TimeColumn, int? DefaultDays, string Loss, string? Where = null, string? FileColumn = null);
+public sealed record LogPrune(string Table, string TimeColumn, int? DefaultDays, string Loss, string? Where = null, string? FileColumn = null,
+    IReadOnlyList<LogPrune>? Also = null)
+{
+    /// <summary>This table, then each in <see cref="Also"/>.</summary>
+    public IEnumerable<LogPrune> Tables => Also is null ? [this] : [this, .. Also];
+}
 
 /// <summary>
 /// A log in the database. <paramref name="From"/> is its FROM clause with the alias t; <paramref name="TeamWhere"/> and
@@ -113,8 +120,8 @@ public static class LogSources
             new("integration_calls", "at", 365, "the record of which tool calls agents made and which rule allowed or refused each.")),
 
         new("approvals", "Approvals", "Accountability",
-            "Tool calls that asked first: what was asked, why, and who approved or declined it.",
-            "integration_asks t LEFT JOIN teams tm ON tm.id = t.team_id", "t.id", "t.at",
+            "Tool calls that asked first, and hosts agents were refused (network): what was asked, why, and who approved or declined it, and for whom a host was allowed.",
+            ApprovalsFrom, "t.rid", "t.at",
             [
                 new("at", "Asked", "t.at", "time"),
                 new("team", "Team", "tm.name", Filter: true),
@@ -126,7 +133,10 @@ public static class LogSources
                 new("decided", "Decided", "t.decided_at", "time"),
             ],
             "tm.name = @team", "t.member = @member",
-            new("integration_asks", "at", 365, "who approved or declined those requests. Requests still waiting for an answer are never pruned.", Where: "state <> 'pending'")),
+            // An answered ask goes by when it was answered, not raised: one that waited past the retention must not be
+            // pruned the moment the person answers it (for a denied network ask that would lift the 24-hour DenyQuiet).
+            new("integration_asks", AnsweredAt, 365, "who approved or declined those requests, and who allowed or denied which host. Requests still waiting for an answer are never pruned. Host tool requests (developer tools agents asked for) are not pruned.", Where: "state <> 'pending'",
+                Also: [new("network_asks", AnsweredAt, null, "", Where: "state <> 'pending'")])),
 
         new("usage", "Model usage", "Usage",
             "Tokens for each model request: input, output and cache, by run, member and model.",
@@ -224,7 +234,33 @@ public static class LogSources
             null, "each card's history on the board is built from it"),
     ];
 
+    /// <summary>The prune time of an ask: when it was answered, or when it was raised if no answer time was kept.</summary>
+    private const string AnsweredAt = "COALESCE(decided_at, at)";
+
     public static LogSource? Find(string id) => All.FirstOrDefault(s => s.Id == id);
+
+    /// <summary>
+    /// The Approvals log: the asked tool calls (integration_asks) and the network asks (network_asks, 0039: the host, the
+    /// agent's reason or what was refused, how often; allowed for whom - agent, team or everywhere - or denied, by whom and how).
+    /// </summary>
+    private const string ApprovalsFrom = """
+        (
+          SELECT 'a' || a.id AS rid, a.at, a.team_id, a.member, a.integration, a.args, a.state, a.decided_by, a.decided_at
+            FROM integration_asks a
+          UNION ALL
+          SELECT 'n' || n.id, n.at, n.team_id, n.member, 'network',
+                 n.host || COALESCE(': ' || n.reason, ' (refused ' || n.method || COALESCE(' ' || n.path_sample, '') || ')', '') || ' (' || n.count || 'x)',
+                 CASE WHEN n.state = 'allowed' THEN 'allowed for ' || COALESCE(n.scope, '?') ELSE n.state END,
+                 NULLIF(trim(COALESCE(n.decided_by, '') || COALESCE(' via ' || n.decided_via, '')), ''), n.decided_at
+            FROM network_asks n
+          UNION ALL
+          SELECT 'e' || e.id, e.at, ta.team_id, ta.member, 'host tool',
+                 ta.tool || COALESCE(': ' || e.detail, ''), e.kind,
+                 NULLIF(trim(COALESCE(e.by_user, '') || COALESCE(' via ' || e.via, '')), ''),
+                 CASE WHEN e.kind IN ('asked', 'asked again') THEN NULL ELSE e.at END
+            FROM tool_ask_events e JOIN tool_asks ta ON ta.id = e.ask_id
+        ) t LEFT JOIN teams tm ON tm.id = t.team_id
+        """;
 
     /// <summary>
     /// The combined view: one row per thing that happened to or by a member, with its member as "Team/Name". Audit
@@ -245,6 +281,14 @@ public static class LogSources
           UNION ALL
           SELECT a.at, 'Approvals', a.member, a.integration || ' ' || a.state, trim(COALESCE(a.args, '') || COALESCE(' by ' || a.decided_by, '')), 'a' || a.id
             FROM integration_asks a
+          UNION ALL
+          SELECT na.at, 'Approvals', na.member, 'network ' || na.state || COALESCE(' for ' || na.scope, ''),
+                 trim(na.host || COALESCE(': ' || na.reason, '') || ' (' || na.count || 'x)' || COALESCE(' by ' || na.decided_by, '')), 'q' || na.id
+            FROM network_asks na
+          UNION ALL
+          SELECT te.at, 'Approvals', tq.member, 'host tool ' || tq.tool || ' ' || te.kind,
+                 trim(COALESCE(te.detail, '') || COALESCE(' by ' || te.by_user, '')), 'w' || te.id
+            FROM tool_ask_events te JOIN tool_asks tq ON tq.id = te.ask_id
           UNION ALL
           SELECT u.at, 'Model usage', u.member, COALESCE(u.model, 'model request'),
                  'input ' || COALESCE(u.input_tokens, 0) || ', output ' || COALESCE(u.output_tokens, 0) || ', cache ' || (COALESCE(u.cache_read_tokens, 0) + COALESCE(u.cache_write_tokens, 0)), 'u' || u.id

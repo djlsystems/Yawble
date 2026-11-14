@@ -1,8 +1,10 @@
 # Connections and integrations
 
 An **integration** is a tool on your computer that you offer to your teams' agents. Agents run in a sandbox with
-no network of their own and no sign-ins. Integrations let them use your services anyway, through the app, under
-rules you set. The app runs each call on your computer, with your sign-in, and the agent gets only the result.
+no sign-ins, and their only network path is the run's gateway, which reaches only the hosts the policy allows (see
+[Network requests](#network-requests-are-not-integrations)). Integrations let them use your services anyway, through
+the app, under rules you set. The app runs each call on your computer, with your sign-in, and the agent gets only
+the result.
 
 A **Connection** is a sign-in (an API key, a token, an OAuth sign-in or a website login) that integrations share.
 Connections are kept on this computer; agents never see them.
@@ -143,6 +145,15 @@ The agent does not wait. It is woken in the same workflow with the result.
 
 Every call is logged with its decision, the rule that decided it, the team and member, and who started the work.
 
+## Network requests are not integrations
+
+A host an agent reaches itself (a package registry for `dotnet restore` or `npm ci`, say) is network policy, not an
+integration: no sign-in is involved and the agent's own program makes the call, through the run's gateway. When the
+gateway refuses a host that is not allowed, or the agent asks for one with its `request_host` tool, a network request
+shows in **Needs you** with four buttons: **Allow for this agent**, **Allow for this team**, **Allow everywhere** and
+**Deny**. An allow changes the network policy (the member's allowed hosts, every team member's, or the global allowed
+hosts in **Settings > Guardrails**) and applies from the member's next run. See [Features](features.md#sandbox-and-policy).
+
 ## Connections
 
 The **Connections** tab lists every Connection, its status (**untested**, **works** or **needs reconnect**) and what
@@ -190,7 +201,8 @@ Agents never see a Connection, a secret, a session, a rule they could change, or
 
 ## Over Cloud Link
 
-A remote viewer through [Cloud Link](cloud-link.md) can see integrations, approve or decline requests, and run
+A remote viewer through [Cloud Link](cloud-link.md) can see integrations, approve or decline requests, answer network
+requests, and run
 Discover and save rules for CLIs the app knows or that are already set up on this computer. These are refused
 remotely and happen only on the computer itself:
 
