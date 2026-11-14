@@ -214,8 +214,12 @@ a member's card opens it at that member's activity.
 
 - Each team has a team repository on this computer: a folder you pick, a clone of an address, or one the app makes.
 - A team can have several repositories, each with a base branch and an optional name members see.
-- Each member works in its own local clone on its own branch, `members/<name>`. The Manager's branch is
-  `team/<team>`.
+- Each member works in its own local clone on its own branch, `members/<team>/<name>`, for example
+  `members/yawble-engineering-team/developerines`. The Manager's branch is `team/<team>`. `<team>` is the same team
+  slug in both, so two teams on one repository with same-named members never push to the same branch.
+- A member whose clone is still on an older `members/<name>` branch moves to `members/<team>/<name>` at its next
+  start, with its commits: the app creates the new branch at the old one's commit and pushes it. The old branch on
+  origin is left for you to delete in the Git dialog, where it is listed as old.
 - Clones have no remote and no credential helper. After each run the app cleans the clone's git config and fetches
   the member's branch into the team repository. It never runs git inside a clone an agent used.
 - When the team repository has an origin, branches are pushed with your own git setup at each run's end. Pushes are
@@ -229,7 +233,11 @@ a member's card opens it at that member's activity.
   Git for Windows for everyone on the computer, so Windows asks for permission. The app finds a git installed while it
   runs without a restart.
 - **Git** on the team page: **Fetch**, **Sync now**, **Merge** (the team branch into the base branch, then pushed
-  to origin), and per-member branch state. The app never forces, rebases or stashes.
+  to origin), and per-member branch state. Old-style `members/<name>` branches are listed beside the member branches,
+  marked old. **Delete…** on a branch first shows exactly what will be deleted, here and on origin; nothing is deleted
+  until you press **Delete**. A branch whose commits are not merged is deleted only when you tick that you accept
+  losing them. If the branches changed since the plan, the dialog says so and shows the new plan. The app never
+  forces, rebases or stashes.
 - A banner shows when branches could not be brought up to date on their own.
 - Each member's working copy has a read-only code browser.
 

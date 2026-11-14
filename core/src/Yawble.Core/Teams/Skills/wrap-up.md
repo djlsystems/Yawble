@@ -21,7 +21,7 @@ Work in your own clone, on your branch `team/<team>`. Quote every path.
    that is missing, one at a time, as in the Manager's "Repositories" section:
 
    ```powershell
-   git fetch "$env:YAWBLE_TEAM_BUNDLE" members/developerpriya
+   git fetch "$env:YAWBLE_TEAM_BUNDLE" members/<team>/developerpriya
    git merge --no-edit FETCH_HEAD
    ```
 

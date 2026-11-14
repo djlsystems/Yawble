@@ -71,7 +71,7 @@ public class TeamFlowTests
                 if (run.Items.Any(i => i.Source == MessageTypes.PersonSource))
                 {
                     var (role, _) = await bridge.CallAsync("skills_get", new JsonObject { ["name"] = "manager" });
-                    Assert.Contains("members/<name>", role);
+                    Assert.Contains("members/<team>/<name>", role);
                     Assert.Contains("never ask a member to push", role);
                     var (status, _) = await bridge.CallAsync("status");
                     Assert.Contains("\"name\":\"Ada\"", status);

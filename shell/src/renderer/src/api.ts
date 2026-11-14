@@ -21,7 +21,16 @@ export function removeTeamHost(api: YawbleApi, teamId: number, host: string): Pr
 /** An IPC error as the person should read it (Electron prefixes "Error invoking remote method ..."). */
 export function errorText(e: unknown): string {
   const raw = e instanceof Error ? e.message : String(e);
-  return raw.replace(/^Error invoking remote method '[^']+': /, '').replace(/^(Core)?RpcError: /, '').replace(/^Error: /, '');
+  return raw.replace(/^Error invoking remote method '[^']+': /, '').replace(/^(Core)?RpcError(\[[\w.-]*\])?: /, '').replace(/^Error: /, '');
+}
+
+/** A core error's code (stale, not_found, ...): on the Error itself (a remote view, a test) or in the desktop's
+ * "CoreRpcError[<code>]: ..." text (Electron passes only the text). Null when there is none. */
+export function errorCode(e: unknown): string | null {
+  const own = typeof e === 'object' && e !== null ? (e as { code?: unknown }).code : undefined;
+  if (typeof own === 'string' && own) return own;
+  const raw = e instanceof Error ? e.message : String(e);
+  return /(?:^|: )CoreRpcError\[([\w.-]+)\]: /.exec(raw)?.[1] ?? null;
 }
 
 /** Whether a remote view's call was refused by the Cloud Link itself (error code remote_refused), not failed in the core. */

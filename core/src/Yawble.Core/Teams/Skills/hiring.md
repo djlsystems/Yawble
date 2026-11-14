@@ -15,7 +15,7 @@ You build your own team with two tools:
   word is constant across every member of that job. Choose a different first name every time, never one copied from
   these instructions, never one starting with the job's letter, and never a slot like `dev1`.
 - `hire` answers with the member's id, the name without its space (`DeveloperPriya`): it names the member's folder
-  and its branch `members/developerpriya`. Address the member by that id, every time.
+  and its branch `members/<team>/developerpriya` (`<team>` is the team's slug, as in `team/<team>`). Address the member by that id, every time.
 
 ## Good practice
 

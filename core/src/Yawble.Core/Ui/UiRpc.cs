@@ -134,6 +134,7 @@ public sealed class UiRpc(
                 "git.merge" => await GitAsync(p, (r, id, name) => r.GitMergeTeamToBaseAsync(id, name, ct, OptStr(p, "repo")), ct),
                 "git.sync" => await GitAsync(p, (r, id, name) => r.SyncNowAsync(id, name, ct), ct),
                 "git.askTeam" => await AskTeamAsync(Long(p, "teamId"), ct, OptStr(p, "repo")),
+                "git.deleteBranches" => await DeleteBranchesAsync(p, ct),
                 _ => throw new RpcException("unknown_method", $"no method named '{method}'"),
             };
         }
@@ -418,6 +419,35 @@ public sealed class UiRpc(
         {
             throw new RpcException("git_failed", e.Message);
         }
+    }
+
+    /// <summary>
+    /// git.deleteBranches {teamId, repo?, branches, remote, unmergedOk?, confirm?}, two-step like the Concierge's
+    /// git_branches_delete. Without confirm: {plan, token, empty}, nothing changed. With confirm: the plan is made again and
+    /// run only when its key is the token shown, {result}; otherwise error "stale" (show the plan again).
+    /// </summary>
+    private async Task<JsonNode?> DeleteBranchesAsync(JsonObject? p, CancellationToken ct)
+    {
+        static List<string> Names(JsonObject? p, string key) =>
+            (p?[key] as JsonArray ?? []).Select(n => n is JsonValue v && v.TryGetValue<string>(out var s) ? s.Trim() : "").Where(s => s.Length > 0).Distinct().ToList();
+        var branches = Names(p, "branches");
+        // An empty list would mean "every merged branch" to the planner: the dialog always names them.
+        if (branches.Count == 0) throw new RpcException("bad_params", "name the branches to delete");
+        var (repos, team) = await GitTeamAsync(Long(p, "teamId"), ct);
+        var members = (await bus.AgentCardsAsync(team.Id, ct)).Select(c => c.Member.Name).ToList();
+        Teams.TeamGitDelete done;
+        try
+        {
+            done = await repos.GitDeleteBranchesAsync(team.Id, team.Name, members, OptStr(p, "repo"), branches, Flag(p, "remote"), Names(p, "unmergedOk"), OptStr(p, "confirm"), ct);
+        }
+        catch (Exception e) when (e is Teams.GitException or ArgumentException or InvalidOperationException)
+        {
+            throw new RpcException("git_failed", e.Message);
+        }
+        if (done.Stale) throw new RpcException("stale", "The branches changed since the list was shown; nothing was deleted. Look at the new list and confirm again.");
+        return done.Result is { } result
+            ? new JsonObject { ["result"] = result }
+            : new JsonObject { ["plan"] = done.Plan, ["token"] = done.Token, ["empty"] = done.Empty };
     }
 
     /// <summary>Tells the Manager to bring the team branch current with the base (Yawble ask-team), as a new workflow.</summary>

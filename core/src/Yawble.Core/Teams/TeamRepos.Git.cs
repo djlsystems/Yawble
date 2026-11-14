@@ -13,7 +13,21 @@ public sealed record TeamGitStatus(
     string RepoPath, bool Managed, string BaseBranch, string? CheckedOut, bool Dirty, string? Origin,
     string? BaseSha, string? OriginBaseSha, int? BaseAheadOfOrigin, int? BaseBehindOrigin,
     string TeamBranch, string? TeamSha, int TeamAheadOfBase, int TeamBehindBase,
-    string Merge, IReadOnlyList<string> ConflictFiles, IReadOnlyList<TeamGitBranch> Members);
+    string Merge, IReadOnlyList<string> ConflictFiles, IReadOnlyList<TeamGitBranch> Members)
+{
+    /// <summary>Old-style <c>members/&lt;member&gt;</c> branches (no team segment, B016) here and/or on origin (as of the last
+    /// fetch), for the person to delete; empty when none.</summary>
+    public IReadOnlyList<TeamGitOldBranch> OldBranches { get; init; } = [];
+}
+
+/// <summary>An old-style member branch: where it is, and whether every copy of it is in the base (local or origin's).</summary>
+public sealed record TeamGitOldBranch(string Name, bool Local, bool Remote, bool Merged);
+
+/// <summary>
+/// The Git dialog's Delete (git.deleteBranches): without a confirm, the plan and its token; with one, the result, or
+/// <c>Stale</c> when the branches changed since the plan was shown (nothing was deleted).
+/// </summary>
+public sealed record TeamGitDelete(string Plan, string Token, bool Empty, string? Result, bool Stale);
 
 /// <summary>
 /// What one Git dialog action did. <c>Outcome</c>: fetched, fetch-failed, brought-current, up-to-date, fast-forward,
@@ -201,7 +215,70 @@ public sealed partial class TeamRepos
         // git would call every CRLF checkout on Windows "uncommitted changes".
         var dirty = (await Pusher.RunAsync(path, ["status", "--porcelain", "--untracked-files=no"], ct)).Stdout.Length > 0;
         return new TeamGitStatus(path, repo.Managed, repo.BaseBranch, checkedOut, dirty, origin is null ? null : PersonGitPush.Redact(origin),
-            baseSha, originBase, ahead, behind, teamBranch, teamSha, teamAhead, teamBehind, merge, conflicts, members);
+            baseSha, originBase, ahead, behind, teamBranch, teamSha, teamAhead, teamBehind, merge, conflicts, members)
+        {
+            OldBranches = await OldBranchesAsync(path, baseSha, originBase, ct),
+        };
+    }
+
+    /// <summary>Every old-style members/&lt;member&gt; branch in the repository (refs/heads) or on origin (refs/remotes/origin, as of the
+    /// last fetch). Merged: each copy there is is contained in the base branch or origin's base branch.</summary>
+    private async Task<IReadOnlyList<TeamGitOldBranch>> OldBranchesAsync(string path, string? baseSha, string? originBase, CancellationToken ct)
+    {
+        async Task<Dictionary<string, string>> List(string prefix)
+        {
+            var r = await Git.TryRunAsync(path, ["for-each-ref", "--format=%(refname) %(objectname)", prefix + BranchPrefix], ct);
+            var map = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (r.ExitCode != 0) return map;
+            foreach (var line in r.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var parts = line.Trim().Split(' ', 2);
+                if (parts.Length == 2 && parts[0].StartsWith(prefix, StringComparison.Ordinal) && IsLegacyMemberBranch(parts[0][prefix.Length..]))
+                    map[parts[0][prefix.Length..]] = parts[1];
+            }
+            return map;
+        }
+        async Task<bool> Merged(string sha) =>
+            baseSha is not null && await IsAncestorAsync(path, sha, baseSha, ct) || originBase is not null && await IsAncestorAsync(path, sha, originBase, ct);
+
+        var local = await List("refs/heads/");
+        var remote = await List("refs/remotes/origin/");
+        var list = new List<TeamGitOldBranch>();
+        foreach (var name in local.Keys.Union(remote.Keys).Order(StringComparer.Ordinal))
+        {
+            var merged = true;
+            if (local.TryGetValue(name, out var l)) merged &= await Merged(l);
+            if (remote.TryGetValue(name, out var r)) merged &= await Merged(r);
+            list.Add(new TeamGitOldBranch(name, local.ContainsKey(name), remote.ContainsKey(name), merged));
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// The Git dialog's Delete, over <see cref="Concierge.ConciergeGit.PlanDeleteAsync"/> (its refusals: never the base branch, a
+    /// checked-out branch, or an unmerged one unless named in <paramref name="unmergedOk"/>; each deleted SHA is recorded).
+    /// Without <paramref name="confirm"/> it only plans. With it, it plans again and runs only when the new plan's key equals
+    /// the token the person was shown; otherwise <c>Stale</c> and nothing changes. Holds the team's lock throughout.
+    /// <paramref name="memberNames"/>: the team's agents, whose clones are checked for what they have checked out.
+    /// </summary>
+    public async Task<TeamGitDelete> GitDeleteBranchesAsync(long teamId, string team, IReadOnlyList<string> memberNames, string? repoName,
+        IReadOnlyList<string> branches, bool remote, IReadOnlyList<string> unmergedOk, string? confirm, CancellationToken ct = default)
+    {
+        var repo = await GitRepoAsync(teamId, team, repoName, ct);
+        var extra = string.IsNullOrWhiteSpace(repoName) ? null
+            : ExtrasOf(teamId).First(e => string.Equals(e.Name, repoName.Trim(), StringComparison.OrdinalIgnoreCase));
+        var clones = memberNames.Select(m => extra is null ? Path.Combine(MemberRoot(team, m), "repo") : ExtraClonePath(team, m, extra.Name)).ToList();
+        var action = new Concierge.ActionRepo(extra?.Name ?? "main", repo.Path, repo.BaseBranch, clones);
+        var git = new Concierge.ConciergeGit(Git, Pusher);
+        return await WithTeamLock(teamId, async () =>
+        {
+            var plan = await git.PlanDeleteAsync(action, branches, unmergedOk, remote, ct);
+            if (confirm is null) return new TeamGitDelete(plan.Text, plan.Key, plan.Empty, null, false);
+            if (!string.Equals(confirm, plan.Key, StringComparison.Ordinal)) return new TeamGitDelete(plan.Text, plan.Key, plan.Empty, null, true);
+            var result = plan.Empty ? "Nothing to delete." : await plan.Run(ct);
+            if (!plan.Empty) await TryUpdateSharedLockedAsync(team, repo, ct);
+            return new TeamGitDelete(plan.Text, plan.Key, plan.Empty, result, false);
+        }, ct);
     }
 
     /// <summary>Null when the fetch worked (or there is no origin to fetch); otherwise the failure, with nothing changed.</summary>
