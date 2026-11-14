@@ -188,8 +188,10 @@ public sealed partial class TeamRepos
                 }
                 // B016: an extra clone still on members/<name> moves too, before the shared view is updated.
                 if (row is not null) row = await MoveLegacyExtraBranchLockedAsync(member, extra, row, ct);
-                await UpdateSharedAtAsync(shared, extra.Path, extra.BaseBranch, ct);
                 var cloneBranch = row?.Branch ?? branch;
+                // B020, again after the refresh from origin: a blocker fails the member's start (not caught here).
+                await CheckMemberBranchFreeAsync(member, cloneBranch, $"repository {extra.Name}", extra.Path, shared, clone, ct);
+                await UpdateSharedAtAsync(shared, extra.Path, extra.BaseBranch, ct);
                 if (!(Directory.Exists(clone) && Directory.EnumerateFileSystemEntries(clone).Any()))
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(clone)!);
@@ -209,6 +211,28 @@ public sealed partial class TeamRepos
             }
         }
         return list;
+    }
+
+    /// <summary>
+    /// B020, before anything of the member's start changes: every writable extra repository the member's branch would be
+    /// made in is checked for a blocking ref (<see cref="CheckMemberBranchFreeAsync"/>). A repository that cannot be read
+    /// is left to <see cref="PrepareExtrasLockedAsync"/>, which leaves it out of the run with the reason.
+    /// </summary>
+    private async Task CheckExtrasFreeLockedAsync(MemberRef member, string branch, CancellationToken ct)
+    {
+        foreach (var extra in ExtrasOf(member.TeamId).Where(e => e.Writable && Directory.Exists(e.Path)))
+        {
+            try
+            {
+                var cloneBranch = ExtraRow(member.Id, extra.Name)?.Branch ?? branch;
+                await CheckMemberBranchFreeAsync(member, cloneBranch, $"repository {extra.Name}", extra.Path, ExtraSharedPath(member.Team, extra.Name),
+                    ExtraClonePath(member.Team, member.Name, extra.Name), ct);
+            }
+            catch (Exception ex) when (ex is GitException or IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                _log?.Invoke($"{member.Qualified}: repository {extra.Name}: could not check its branches before the start: {ex.Message}");
+            }
+        }
     }
 
     /// <summary>

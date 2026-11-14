@@ -412,7 +412,11 @@ export type ConnectionKind = 'secret' | 'oauth' | 'website';
 export interface Connection {
   id: number; name: string; kind: ConnectionKind; fields: ConnectionField[];
   status: 'untested' | 'works' | 'needs_reconnect'; statusReason: string | null; testedAt: string | null; usedBy: string[];
+  /** The host tasks with an environment variable from this Connection (B023); removing it stops them starting. Absent from an older core. */
+  usedByTasks?: ConnectionTaskUse[];
 }
+/** A host task that binds a Connection: its team and its name. */
+export interface ConnectionTaskUse { teamId: number; taskName: string }
 /** A web service added by its URL (integrations.apiList). `signIn` says what to ask for, from the spec's auth; null when the auth is not known yet. */
 export interface ApiRow {
   /** 'website': a site the agents use in a browser window on this computer (six fixed actions); its sign-in is its Connection, never fields. */
@@ -447,6 +451,8 @@ export interface WatchInfo {
 export interface TaskAskDetail {
   commit: string; program: string; workdir: string; args: string[]; timeout_s: number; env_names: string[]; pin_mode: 'files' | 'commit';
   pinned: string[]; warnings: string[]; standingApproval: boolean;
+  /** Each binding as shown ("GH_TOKEN ← Connection 'Name' (field)"): names only, never a value (B023). */
+  env_from_connections?: string[];
   changed?: {
     approvedCommit: string; currentCommit: string; diffAvailable: boolean; definitionHashChanged: boolean; filesHashChanged: boolean;
     definition: { field: string; old: string | null; new: string | null }[];
@@ -462,7 +468,12 @@ export interface IntegrationAsk {
 export interface HostTaskDef {
   name: string; repo: string; program: string; args: string[]; workdir: string; timeoutSeconds: number; envNames: string[]; watch: string[];
   pinMode: 'files' | 'commit'; commandLineOnly: boolean;
+  /** Environment variables whose value is read from a Connection's secret field at start (B023). The binding is pinned, never the value. */
+  envFromConnections?: EnvFromConnection[];
 }
+/** One binding: variable `name` takes the secret `field` of Connection `connectionId`; `connectionName` is for display only. */
+/** The core sends connectionId as a string ("7") and accepts a number or a string back; the editor normalises it to a number on load. */
+export interface EnvFromConnection { name: string; connectionId: number | string; field: string; connectionName: string }
 /** A host task run record (tasks.runs / integrations.taskRuns). */
 export interface TaskRun {
   id: number; task: string; teamId: number; state: 'running' | 'done' | 'interrupted' | 'refused'; startedAt: string; endedAt: string | null; commit: string | null;
@@ -594,7 +605,14 @@ export interface TeamGitStatus {
   merge: 'none' | 'up-to-date' | 'fast-forward' | 'merge' | 'conflict'; conflictFiles: string[]; members: TeamGitBranch[];
   /** Old-style members/<member> branches (absent from a core that does not list them). */
   oldBranches?: TeamGitOldBranch[];
+  /** members/<slug> branches named like this team's slug, which git cannot hold beside members/<slug>/<member> ones, so
+   * they block this team's member branches: one entry per ref, here (local) or on origin (remote). Absent from a core
+   * that does not list them. */
+  blockingBranches?: TeamGitBlockingBranch[];
 }
+/** inUseBy (core card 104): a member is still on it, its old members/<name> ("team Alpha's member Ada", or "member Docs of
+ * this team"); it is not deleted from the dialog but moves to movesTo at that member's next start. Absent otherwise. */
+export interface TeamGitBlockingBranch { name: string; repo: string; location: 'local' | 'remote'; inUseBy?: string; movesTo?: string }
 /** git.deleteBranches without confirm: what would be deleted, as text for the person, and the token that confirms exactly
  * that plan (empty: nothing to delete). With confirm: token it deletes and answers GitDeleteResult; error code stale
  * means the branches changed since the plan. */

@@ -26,7 +26,8 @@ public sealed class ConciergeGit(HostGit git, PersonGitPush pusher, Func<DateTim
     private readonly Func<DateTimeOffset> _now = now ?? (() => DateTimeOffset.UtcNow);
 
     private static bool Protected(ActionRepo repo, string branch) =>
-        branch == repo.BaseBranch || branch is "main" or "master" or "HEAD";
+        string.Equals(branch, repo.BaseBranch, StringComparison.OrdinalIgnoreCase)
+        || new[] { "main", "master", "HEAD" }.Contains(branch, StringComparer.OrdinalIgnoreCase);
 
     // ------------------------------------------------------------------ delete branches
 
@@ -38,8 +39,17 @@ public sealed class ConciergeGit(HostGit git, PersonGitPush pusher, Func<DateTim
                       ?? throw new ArgumentException($"{repo.Name}: there is no base branch {repo.BaseBranch}");
         var originBase = await RevAsync(path, "refs/remotes/origin/" + repo.BaseBranch, ct);
         var checkedOut = await CheckedOutAsync(repo, ct);
-        var wanted = names.Count > 0 ? names.ToList() : await LocalBranchesAsync(path, ct);
         var sb = new StringBuilder();
+        List<string> wanted;
+        if (names.Count > 0)
+        {
+            // Card 106 (F4): plan, guard, key and delete on the exact ref names git will act on.
+            var (exact, ambiguous) = await ResolveBranchNamesAsync(path, names, remote, ct);
+            foreach (var line in ambiguous) sb.AppendLine(line);
+            wanted = exact;
+        }
+        else wanted = await LocalBranchesAsync(path, ct);
+        bool UnmergedOk(string branch) => unmergedOk.Contains(branch, StringComparer.OrdinalIgnoreCase);
         var key = new StringBuilder();
         var deletable = new List<(string Branch, string Sha)>();
         var remoteDeletable = new List<(string Branch, string Sha)>();
@@ -57,15 +67,16 @@ public sealed class ConciergeGit(HostGit git, PersonGitPush pusher, Func<DateTim
                 if (names.Count > 0) sb.AppendLine($"- {branch}: REFUSED, it is the base/protected branch");
                 continue;
             }
+            // Card 106: a checked-out branch is refused on origin's side too (a clone on it, only origin has it yet).
+            if (checkedOut.TryGetValue(branch, out var where))
+            {
+                sb.AppendLine($"- {branch} ({Short(sha ?? rsha!)}): REFUSED, checked out in {where}");
+                continue;
+            }
             if (sha is not null)
             {
-                if (checkedOut.TryGetValue(branch, out var where))
-                {
-                    sb.AppendLine($"- {branch} ({Short(sha)}): REFUSED, checked out in {where}");
-                    continue;
-                }
                 var merged = await IsAncestorAsync(path, sha, baseSha, ct) || (originBase is not null && await IsAncestorAsync(path, sha, originBase, ct));
-                if (!merged && !unmergedOk.Contains(branch))
+                if (!merged && !UnmergedOk(branch))
                 {
                     sb.AppendLine($"- {branch} ({Short(sha)}): KEPT, not merged into {repo.BaseBranch} (name it in unmerged_ok to delete it anyway)");
                     continue;
@@ -77,7 +88,7 @@ public sealed class ConciergeGit(HostGit git, PersonGitPush pusher, Func<DateTim
             if (rsha is not null)
             {
                 var merged = await IsAncestorAsync(path, rsha, baseSha, ct) || (originBase is not null && await IsAncestorAsync(path, rsha, originBase, ct));
-                if (!merged && !unmergedOk.Contains(branch))
+                if (!merged && !UnmergedOk(branch))
                 {
                     sb.AppendLine($"- origin/{branch} ({Short(rsha)}): KEPT, not merged into {repo.BaseBranch}");
                     continue;
@@ -185,7 +196,8 @@ public sealed class ConciergeGit(HostGit git, PersonGitPush pusher, Func<DateTim
     /// <summary>Branch -> where it is checked out: the repository itself, its worktrees, and every member clone (HEAD file read, never git run there).</summary>
     public async Task<Dictionary<string, string>> CheckedOutAsync(ActionRepo repo, CancellationToken ct)
     {
-        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        // Ignoring case (card 106, F4): git on Windows and macOS treats Members/Ada and members/ada as one loose ref.
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if ((await git.TryRunAsync(repo.Path, ["symbolic-ref", "-q", "--short", "HEAD"], ct)) is { ExitCode: 0, Stdout.Length: > 0 } head)
             map[head.Stdout] = repo.Path;
         var wt = await git.TryRunAsync(repo.Path, ["worktree", "list", "--porcelain"], ct);
@@ -222,6 +234,39 @@ public sealed class ConciergeGit(HostGit git, PersonGitPush pusher, Func<DateTim
     {
         var r = await git.TryRunAsync(path, ["config", "--get", "remote.origin.url"], ct);
         return r.ExitCode == 0 && r.Stdout.Trim().Length > 0 ? r.Stdout.Trim() : null;
+    }
+
+    /// <summary>
+    /// Card 106 (F4): git on Windows and macOS finds a loose ref whatever its case (asked for Members/Ada it reads and
+    /// deletes members/ada), so every guard must see the name git will act on. Each requested name is matched, ignoring
+    /// case, against the branches there are (refs/heads, and refs/remotes/origin when <paramref name="remote"/>): one exact
+    /// name found is used instead; none is kept as asked (git finds nothing either); two or more that differ only in case
+    /// are refused as ambiguous (in <c>Refused</c>, a plan line each).
+    /// </summary>
+    public async Task<(List<string> Exact, List<string> Refused)> ResolveBranchNamesAsync(string path, IEnumerable<string> names, bool remote, CancellationToken ct)
+    {
+        var known = new List<string>();
+        foreach (var prefix in remote ? new[] { "refs/heads/", "refs/remotes/origin/" } : ["refs/heads/"])
+        {
+            var r = await git.TryRunAsync(path, ["for-each-ref", "--format=%(refname)", prefix], ct);
+            if (r.ExitCode != 0) continue;
+            foreach (var line in r.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                if (line.Trim() is var full && full.StartsWith(prefix, StringComparison.Ordinal)) known.Add(full[prefix.Length..]);
+        }
+        var exact = new List<string>();
+        var refused = new List<string>();
+        foreach (var name in names)
+        {
+            var matches = known.Where(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.Ordinal).ToList();
+            if (matches.Count > 1)
+                refused.Add($"- {name}: REFUSED, more than one branch has this name in another case ({string.Join(", ", matches)}); nothing is deleted by an unclear name");
+            else
+            {
+                var e = matches.Count == 1 ? matches[0] : name;
+                if (!exact.Contains(e, StringComparer.Ordinal)) exact.Add(e);
+            }
+        }
+        return (exact, refused);
     }
 
     private async Task<string?> RevAsync(string path, string reference, CancellationToken ct)

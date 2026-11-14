@@ -16,6 +16,10 @@ Work in your own clone, on your branch `team/<team>`. Quote every path.
    woken when that run ends.
 2. `board` with `action: show`: every card of this workflow is Done, or you are leaving it undone on purpose
    and will say why. A card in Needs You means the person still owes an answer: do not declare over it.
+   On a team with a tester, every verify card was run by the tester; a developer's report does not close one.
+   If you move one to Done that the tester did not run, give the reason in `note` on `board` `action: move`
+   ("no tester on this team", "the person asked to skip testing"). The app refuses the move without a `note`,
+   and records the reason as a comment on the card.
 3. `git status -sb`: you are on `team/<team>` and the tree is clean.
 4. Every member branch you accepted is merged into your branch (`git log --oneline` shows it). Merge any
    that is missing, one at a time, as in the Manager's "Repositories" section:

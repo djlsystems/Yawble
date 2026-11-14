@@ -69,8 +69,24 @@ public sealed class HostTaskRpc(HostTaskService tasks, Func<long, IReadOnlyList<
         ["kind"] = r.Kind.ToString().ToLowerInvariant(), ["text"] = r.Text, ["askId"] = r.AskId, ["runId"] = r.RunId, ["precondition"] = r.Precondition,
     };
 
+    /// <summary>
+    /// Null when the current actor may save <paramref name="def"/> over <paramref name="existing"/>; otherwise why not. A Cloud Link viewer may
+    /// not define or change a task's environment from Connections (Connections are seen and changed on the computer itself): adding,
+    /// removing or re-pointing a binding is refused; a save that keeps the bindings exactly as they are is not.
+    /// </summary>
+    public static string? BindingRefusal(Actor? actor, HostTaskDef def, HostTaskDef? existing)
+    {
+        if (actor?.Via != Actor.Cloud) return null;
+        static IEnumerable<(string, string, string)> Keys(IEnumerable<EnvBinding> list) =>
+            list.Select(b => (b.Name, b.ConnectionId, b.Field)).OrderBy(k => k.Name, StringComparer.Ordinal);
+        return Keys(def.EnvFromConnections).SequenceEqual(Keys(existing?.EnvFromConnections ?? []))
+            ? null
+            : "a host task's environment from a Connection can only be defined or changed on the computer itself";
+    }
+
     private async Task<JsonNode> SaveAsync(long teamId, HostTaskDef def, CancellationToken ct)
     {
+        if (BindingRefusal(Actor.Current, def, tasks.Store.Task(teamId, def.Name)?.Def) is { } refused) throw new RpcException("forbidden", refused);
         var saved = await tasks.SaveAsync(teamId, def, ct);
         return new JsonObject { ["ok"] = true, ["id"] = saved.Id };
     }
@@ -89,9 +105,9 @@ public sealed class HostTaskRpc(HostTaskService tasks, Func<long, IReadOnlyList<
         };
     }
 
-    private static string? Validation(HostTaskDef def)
+    private string? Validation(HostTaskDef def)
     {
-        try { HostTaskRules.Validate(def); return null; }
+        try { HostTaskRules.Validate(def); HostTaskRules.ValidateBindings(def, tasks.Connections); return null; }
         catch (ArgumentException e) { return e.Message; }
     }
 
@@ -107,6 +123,7 @@ public sealed class HostTaskRpc(HostTaskService tasks, Func<long, IReadOnlyList<
             list.Add(new JsonObject
             {
                 ["id"] = t.Id, ["def"] = DefJson(t.Def), ["commandLine"] = CommandLine(t.Def),
+                ["envFromConnectionsShown"] = Arr(t.Def.EnvFromConnections.Select(b => b.Shown)),
                 ["approval"] = await tasks.ApprovalStateAsync(t, ct),
                 ["approvedAt"] = approval?.ApprovedAt, ["approvedCommit"] = approval?.CommitSha, ["approvedBy"] = approval?.ApprovedBy,
                 ["programResolved"] = preview.ProgramResolved, ["commit"] = preview.Commit,
@@ -127,6 +144,10 @@ public sealed class HostTaskRpc(HostTaskService tasks, Func<long, IReadOnlyList<
     {
         ["name"] = d.Name, ["repo"] = d.Repo, ["program"] = d.Program, ["args"] = Arr(d.Args), ["workdir"] = d.Workdir, ["timeoutSeconds"] = d.TimeoutSeconds,
         ["envNames"] = Arr(d.EnvNames), ["watch"] = Arr(d.Watch), ["pinMode"] = d.PinMode, ["commandLineOnly"] = d.CommandLineOnly,
+        ["envFromConnections"] = new JsonArray(d.EnvFromConnections.Select(b => (JsonNode?)new JsonObject
+        {
+            ["name"] = b.Name, ["connectionId"] = b.ConnectionId, ["field"] = b.Field, ["connectionName"] = b.ConnectionName,
+        }).ToArray()),
     };
 
     private static JsonArray Arr(IEnumerable<string> s) => new(s.Select(x => (JsonNode?)x).ToArray());
@@ -170,7 +191,25 @@ public sealed class HostTaskRpc(HostTaskService tasks, Func<long, IReadOnlyList<
         return new HostTaskDef(d["name"]?.GetValue<string>()?.Trim() ?? "", d["repo"]?.GetValue<string>()?.Trim() ?? "main", d["program"]?.GetValue<string>()?.Trim() ?? "",
             List(d["args"]), d["workdir"]?.GetValue<string>()?.Trim() is { Length: > 0 } w ? w : ".", (int)(Opt(d, "timeoutSeconds") ?? 600),
             List(d["envNames"]).Select(s => s.Trim()).Where(s => s.Length > 0).ToArray(), List(d["watch"]).Select(s => s.Trim()).Where(s => s.Length > 0).ToArray(),
-            d["pinMode"]?.GetValue<string>() ?? PinModes.Files, d["commandLineOnly"]?.GetValue<bool>() ?? false);
+            d["pinMode"]?.GetValue<string>() ?? PinModes.Files, d["commandLineOnly"]?.GetValue<bool>() ?? false)
+        {
+            EnvFromConnections = Bindings(d["envFromConnections"]),
+        };
+    }
+
+    /// <summary>envFromConnections: [{name, connectionId, field, connectionName}]; connectionId may come as a number or a string. A value is never accepted.</summary>
+    private static EnvBinding[] Bindings(JsonNode? n)
+    {
+        if (n is null) return [];
+        if (n is not JsonArray a) throw new ArgumentException("envFromConnections is a list of {name, connectionId, field}");
+        static string Text(JsonNode? v) => v is JsonValue jv
+            ? jv.TryGetValue<string>(out var s) ? s.Trim() : jv.TryGetValue<long>(out var l) ? l.ToString(System.Globalization.CultureInfo.InvariantCulture) : ""
+            : "";
+        return a.Select(x => x is JsonObject o
+                ? o.ContainsKey("value") ? throw new ArgumentException("a binding names a Connection's field, never a value")
+                : new EnvBinding(Text(o["name"]), Text(o["connectionId"]), Text(o["field"]), Text(o["connectionName"]))
+                : throw new ArgumentException("envFromConnections is a list of {name, connectionId, field}"))
+            .Where(b => b.Name.Length > 0 || b.ConnectionId.Length > 0 || b.Field.Length > 0).ToArray();
     }
 
     private static long? Opt(JsonObject? p, string name) =>
@@ -240,7 +279,7 @@ public sealed class HostTaskRpc(HostTaskService tasks, Func<long, IReadOnlyList<
             rows.Add(new JsonObject
             {
                 ["name"] = t.Def.Name, ["repo"] = t.Def.Repo, ["command"] = CommandLine(t.Def), ["workdir"] = t.Def.Workdir, ["timeout_s"] = t.Def.TimeoutSeconds,
-                ["env_names"] = Arr(t.Def.EnvNames), ["approval"] = await tasks.ApprovalStateAsync(t, ct),
+                ["env_names"] = Arr(t.Def.EnvNames), ["env_from_connections"] = Arr(t.Def.EnvFromConnections.Select(b => b.Name)), ["approval"] = await tasks.ApprovalStateAsync(t, ct),
                 ["state"] = store.RunningRun(t.Id) is not null ? "running" : store.PendingAsk(t.Id) is not null ? "waiting-for-person" : "idle",
                 ["last_run"] = last is null ? null : new JsonObject { ["run"] = last.Id, ["exit"] = last.ExitCode, ["ended"] = last.EndedAt, ["commit"] = last.CommitSha, ["log"] = last.LogPath },
             });

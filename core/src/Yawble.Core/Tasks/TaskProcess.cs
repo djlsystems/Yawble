@@ -69,6 +69,38 @@ public static class TaskProcess
         return (env, missing, secrets);
     }
 
+    /// <summary>The variables <see cref="BuildEnvironment"/> sets to fixed values for every child.</summary>
+    public static readonly string[] RuntimeSet = ["TERM", "CI", "NO_COLOR"];
+
+    /// <summary>
+    /// Reads each binding's secret from its Connection, as a run starts. <c>Values</c> holds every value read (variable to value);
+    /// <c>Problems</c> one value-free line per binding that cannot be read: the Connection is gone, needs reconnecting, or the field is
+    /// empty. A run with any problem does not start.
+    /// </summary>
+    public static (Dictionary<string, string> Values, List<string> Problems) ReadBindings(IEnumerable<EnvBinding> bindings, Connections.ConnectionService? connections)
+    {
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        var problems = new List<string>();
+        foreach (var b in bindings)
+        {
+            string? why = null;
+            if (connections is null || !long.TryParse(b.ConnectionId, out var id)) why = "the Connection is not there";
+            else if (connections.Brief(id) is not { } brief) why = "the Connection was removed";
+            else if (brief.Status == "needs_reconnect") why = "the Connection needs reconnecting";
+            else
+            {
+                try
+                {
+                    if (connections.Secrets(id).TryGetValue(b.Field, out var v) && v.Length > 0) values[b.Name] = v;
+                    else why = $"its field '{b.Field}' is empty";
+                }
+                catch (Credentials.CredentialStoreException) { why = "the Connection could not be read on this computer"; }
+            }
+            if (why is not null) problems.Add($"{b.Shown}: {why}");
+        }
+        return (values, problems);
+    }
+
     public static async Task<TaskProcessResult> RunAsync(TaskProcessOptions o, CancellationToken cancel)
     {
         var psi = CliRunner.Prepare(o.Program, o.Args);

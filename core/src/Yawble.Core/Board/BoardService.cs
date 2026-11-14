@@ -403,8 +403,17 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
                 var card = TeamCard(args, team);
                 var lane = OptStr(args, "lane") ?? throw new BusRefusal("bad_params", "move needs a lane: todo, in-progress, blocked or done");
                 if (!Lanes.IsLane(lane)) throw new BusRefusal("bad_params", "lane is todo, in-progress, blocked or done");
+                var note = OptStr(args, "note");
+                // B019: the Manager closing a tester's card the tester never ran on says why, on the card.
+                var untested = run.Member.Role == MemberRole.Manager && lane == Lanes.Done && card.Lane != Lanes.Done
+                    ? await UntestedTesterAsync(run.Member.TeamId, card, ct) : null;
+                if (untested is not null && string.IsNullOrWhiteSpace(note))
+                    throw new BusRefusal("needs_reason",
+                        $"card {card.Id} is {untested}'s and {untested} has not run on it yet. Give it to {untested} with tell (card: {card.Id}), " +
+                        "or move it to done with the reason in note (for example \"no tester on this team\" or \"the person asked to skip testing\").");
                 store.Save(card with { Lane = lane, Placed = true });
-                store.AddTrail(card.Id, run.Member.Name, "moved", $"Moved to {Lanes.All.First(x => x.Id == lane).Label}{Note(OptStr(args, "note"))}");
+                store.AddTrail(card.Id, run.Member.Name, "moved", $"Moved to {Lanes.All.First(x => x.Id == lane).Label}{Note(note)}");
+                if (untested is not null) store.AddTrail(card.Id, run.Member.Name, "comment", $"Done without {untested}'s test: {note!.Trim()}");
                 return $"ok: card {card.Id} is in {lane}.";
             }
             case "comment":
@@ -456,6 +465,35 @@ public sealed class BoardService(BoardStore store, BusEngine bus, Action<string>
         if (item is null || !string.Equals(item.DispatchedTeam, run.Member.Team, StringComparison.OrdinalIgnoreCase))
             throw new BusRefusal("not_found", $"{BoardStore.Label(id)} was not dispatched to your team");
         return $"{item.Label}: {item.Title}\n\n{item.Body}";
+    }
+
+    /// <summary>
+    /// The tester the card is for, when that tester has not run on it yet; null otherwise. A tester is a member (not the
+    /// Manager) whose name starts with "Tester" ("Tester Wren" is TesterWren) or whose job text starts with the word
+    /// "Tester". The card is for one when it is the card's member now or was assigned to it ("Assigned to X:" on the
+    /// trail). A tester has run on the card once anything on the trail is from it: its runs' progress, hand-back,
+    /// question, block, failure or end, and its own board comments or moves, are all written under its name.
+    /// </summary>
+    private async Task<string?> UntestedTesterAsync(long teamId, CardRow card, CancellationToken ct)
+    {
+        var testers = (await bus.AllMemberRowsAsync(ct))
+            .Where(m => m.TeamId == teamId && m.Role != "manager" && IsTester(m))
+            .Select(m => m.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (testers.Count == 0) return null;
+        var trail = store.Trail(card.Id);
+        var forWhom = trail.Where(t => t.Kind == "assigned" && t.Text.StartsWith("Assigned to ", StringComparison.Ordinal))
+            .Select(t => t.Text["Assigned to ".Length..].Split(':')[0].Trim())
+            .Prepend(card.Member ?? "")
+            .Where(testers.Contains).Distinct(StringComparer.OrdinalIgnoreCase);
+        return forWhom.FirstOrDefault(tester => !trail.Any(t => string.Equals(t.Source, tester, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static bool IsTester(MemberRow m) => StartsWithWord(m.Name, "Tester", wholeWord: false) || StartsWithWord(m.Instructions, "Tester", wholeWord: true);
+
+    private static bool StartsWithWord(string? s, string word, bool wholeWord)
+    {
+        var t = (s ?? "").TrimStart();
+        return t.StartsWith(word, StringComparison.OrdinalIgnoreCase) && (!wholeWord || t.Length == word.Length || !char.IsLetter(t[word.Length]));
     }
 
     private CardRow TeamCard(JsonObject args, string team)
