@@ -85,7 +85,8 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
 - **Tool requests**: an agent missing a developer tool asks with its `request_tool` tool, naming one from the app's
   fixed catalog: **.NET SDK 10**, **.NET SDK (current LTS)**, **Node.js LTS** or **Python 3**. Agents never give a
   package id or command. An unknown name gets the catalog's names back; a tool already installed is said to be there
-  (the next run has it on PATH). Otherwise you get one **Needs you** item per team and tool (repeats only count up),
+  (the next run has it on PATH). Otherwise you get one **Needs you** item per team and tool (repeats only count up;
+  names that install the same package, such as .NET SDK 10 and the current LTS, are one tool, also for **Not now**),
   with the member, the reason, the publisher, whether it installs for you or for the whole computer, and the exact
   command. The choices:
   - **Install** runs exactly `winget install --id <id> --exact --source winget --silent --accept-package-agreements

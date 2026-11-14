@@ -223,8 +223,7 @@ public sealed class ToolAskGapTests : IDisposable
                                           || n.Contains("request_tool", StringComparison.Ordinal));
     }
 
-    [Fact(Skip = "B013 fault (card 65): dotnet-sdk-10 and dotnet-sdk-lts are the same winget package (Microsoft.DotNet.SDK.10) " +
-                 "but count as two tools: Not now on one is bypassed by asking for 'dotnet', and the team gets two Needs you items for one install")]
+    [Fact]
     public async Task TheSamePackageUnderTwoNames_IsOneTool_ForNotNowAndTheAsk()
     {
         Assert.Equal(ToolCatalog.Find("dotnet-sdk-10")!.WingetId, ToolCatalog.Find("dotnet")!.WingetId);
