@@ -4,6 +4,8 @@ import { Terminal } from '@xterm/xterm';
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { CoreEvent, YawbleApi, TerminalSessionInfo, TerminalSnapshot } from '../../../shared/api';
 import { resolveApi } from '../api';
+import { theme } from '../theme';
+import { xtermTheme } from '../terminalPane';
 
 // One terminal channel rendered with xterm.js: attach = replay the buffer, then stream pushes.
 // Pushes carry "end" (bytes ever written), so bytes already in the replay are never written twice.
@@ -103,7 +105,7 @@ onMounted(async () => {
     fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
     fontSize: 13,
     scrollback: 5000,
-    theme: { background: '#101418', foreground: '#d8dee9' },
+    theme: xtermTheme(theme.state.current),
   });
   fit = new FitAddon();
   term.loadAddon(fit);
@@ -120,6 +122,8 @@ onMounted(async () => {
 });
 
 watch(() => props.channel, () => void attach());
+// The theme switched (title-bar button, View menu, the OS): the terminal follows at once, its output kept.
+watch(() => theme.state.current, (t) => { if (term) term.options.theme = xtermTheme(t); });
 watch(mirror, (t) => emit('text', t));
 
 onBeforeUnmount(() => {
@@ -143,7 +147,7 @@ defineExpose({
 </template>
 
 <style scoped>
-.terminal-view { position: relative; height: 100%; min-height: 120px; background: #101418; border-radius: 4px; padding: 4px; }
+.terminal-view { position: relative; height: 100%; min-height: 120px; background: var(--term-bg); border-radius: 4px; padding: 4px; }
 .xterm-host { height: 100%; }
 .mirror { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); margin: 0; }
 </style>

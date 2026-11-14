@@ -28,6 +28,8 @@ import LoadingNote from './components/LoadingNote.vue';
 import GitBanner from './components/GitBanner.vue';
 import LogsDialog from './components/LogsDialog.vue';
 import UpdateBanner from './components/UpdateBanner.vue';
+import ThemeToggle from './components/ThemeToggle.vue';
+import { theme } from './theme';
 import type { AgentOption } from './components/Composer.vue';
 
 // The main window: the sidebar (New chat, the places, the teams, the Concierge chats) and one place at a time. The
@@ -264,6 +266,12 @@ const menus = computed<Menu[]>(() => [
     { id: 'terminal', label: 'Terminal', keys: `${mod}\``, checked: terminalPane.open },
     { id: 'sidebar', label: 'Sidebar', keys: `${mod}B`, checked: !collapsed.value },
     { separator: true },
+    // The theme (theme.ts): the three modes as a radio, and the title-bar button's flip as a command.
+    { id: 'theme:system', label: 'Theme: Use system setting', radio: true, checked: theme.state.mode === 'system' },
+    { id: 'theme:light', label: 'Theme: Light', radio: true, checked: theme.state.mode === 'light' },
+    { id: 'theme:dark', label: 'Theme: Dark', radio: true, checked: theme.state.mode === 'dark' },
+    { id: 'toggleTheme', label: 'Toggle theme' },
+    { separator: true },
     { id: 'go:concierge', label: 'Concierge' }, { id: 'go:documents', label: 'Documents' }, { id: 'go:backlog', label: 'Backlog' },
     { id: 'go:teams', label: 'Teams' }, { id: 'go:board', label: 'Kanban board' }, { id: 'go:monitor', label: 'Monitor' }, { id: 'go:logs', label: 'Logs' },
     ...(desktop ? [
@@ -296,6 +304,10 @@ function command(id: string) {
     case 'sidebar': collapsed.value = !collapsed.value; break;
     case 'about': menu('system'); break;
     case 'checkUpdates': void updateBanner.value?.checkNow(); break;
+    case 'theme:system': theme.setMode('system'); break;
+    case 'theme:light': theme.setMode('light'); break;
+    case 'theme:dark': theme.setMode('dark'); break;
+    case 'toggleTheme': theme.toggle(); break;
     default: if (api.windowCommand) api.windowCommand(id as Parameters<NonNullable<typeof api.windowCommand>>[0]);
   }
 }
@@ -334,6 +346,7 @@ watch([view, prefTab], ([v, t], [vBefore, tBefore]) => { if (vBefore === 'settin
           <span class="cdot" />
           <span v-if="link?.state === 'connected' && link.viewers.length" class="cnum" data-test="cloud-link-viewers">{{ link.viewers.length }}</span>
         </button>
+        <ThemeToggle />
       </header>
       <p v-if="terminalPane.stopError" class="error banner" data-test="terminal-stop-error">{{ terminalPane.stopError }} <button class="mini" @click="terminalPane.stopError = null">Dismiss</button></p>
       <p v-if="error" class="error banner" data-test="error">Core unavailable: {{ error }}</p>
