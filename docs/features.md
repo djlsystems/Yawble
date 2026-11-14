@@ -248,6 +248,7 @@ a member's card opens it at that member's activity.
 - Each member works in its own local clone on its own branch, `members/<team>/<name>`, for example
   `members/yawble-engineering-team/developerines`. The Manager's branch is `team/<team>`. `<team>` is the same team
   slug in both, so two teams on one repository with same-named members never push to the same branch.
+- Agents' commits carry no AI attribution lines (`Co-Authored-By:` naming an AI, `Claude-Session:`, "Generated with"): the app refuses to bring in a member's branch whose new commits have them and tells the member to amend its own unpushed commits; it never strips or rewrites them.
 - A member whose clone is still on an older `members/<name>` branch moves to `members/<team>/<name>` at its next
   start, with its commits: the app creates the new branch at the old one's commit and pushes it. The old branch on
   origin is left for you to delete in the Git dialog, where it is listed as old.
