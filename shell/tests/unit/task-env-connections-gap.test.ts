@@ -102,6 +102,83 @@ describe('B023 gap: a run refused for a binding (spec point 3)', () => {
   });
 });
 
+// B023 re-test (card 117) of the card 116 fixes F2-F4: the exact wording and the cases next to them.
+const runOf = (over: Partial<TaskRun>): TaskRun => ({
+  id: 21, task: 'linux-release', teamId: 3, state: 'done', startedAt: '2026-11-14T10:00:00Z', endedAt: '2026-11-14T10:01:00Z', commit: 'abcdef1234567890', headAfter: null,
+  definitionHash: 'aaaa', filesHash: 'bbbb', program: '/usr/bin/bash', exitCode: 0, timedOut: false, killedBy: null, outputBytes: 10, truncated: false,
+  logPath: null, dirtyAfter: false, askId: null, requestedBy: 'linux/Manager', missingEnv: null, ...over,
+} as unknown as TaskRun);
+async function openRun(run: TaskRun) {
+  const { api } = fakeApi({ 'tasks.list': () => ({ tasks: [{ ...coreTask, lastRun: run }], repos: ['main'] }), 'tasks.runs': () => [run] });
+  const w = mount(TasksPanel, { props: { api, teams } });
+  await flushPromises();
+  await w.find(`[data-test=task-run-${run.id}] td`).trigger('click');
+  return w;
+}
+
+describe('B023 re-test F4: the missing-environment line', () => {
+  it('a run refused for a binding reads "Could not read from a Connection: <problem>"', async () => {
+    const problem = "GH_TOKEN ← Connection 'GitHub release (Yawble)' (token): the Connection was removed";
+    const w = await openRun(runOf({ state: 'refused', exitCode: null, outputBytes: null, endedAt: '2026-11-14T10:00:00Z', missingEnv: problem }));
+    expect(w.find('[data-test=run-missing-env]').text()).toBe(`Could not read from a Connection: ${problem}`);
+    expect(w.text()).not.toContain('Not set in your environment');
+  });
+
+  it('a true environment miss on a run that started still reads "Not set in your environment: <names>"', async () => {
+    const w = await openRun(runOf({ missingEnv: 'NUGET_KEY,SIGN_PASS' }));
+    expect(w.find('[data-test=run-missing-env]').text()).toBe('Not set in your environment: NUGET_KEY,SIGN_PASS');
+    expect(w.text()).not.toContain('Could not read from a Connection');
+  });
+
+  it('a refused run with no missingEnv (checkout moved) shows no missing-environment line', async () => {
+    const w = await openRun(runOf({ state: 'refused', exitCode: null, missingEnv: null }));
+    expect(w.find('[data-test=run-missing-env]').exists()).toBe(false);
+  });
+});
+
+describe('B023 re-test F3: each binding line on the ask', () => {
+  it('two env_from_connections lines give two binding lines, in order; none when the list is empty or absent', () => {
+    const second = "NUGET_KEY ← Connection 'NuGet' (apiKey)";
+    const detail = {
+      commit: 'abcdef1234567890', program: '/usr/bin/bash', workdir: '/repo', args: [], timeout_s: 900, env_names: [], pin_mode: 'files',
+      pinned: [], warnings: [], standingApproval: false,
+    };
+    const askWith = (extra: object) => ({
+      id: 31, at: '', integration: 'task:linux-release', teamId: 3, member: 'linux/Manager', command: 'task linux-release', reason: 'r', workflow: 9,
+      task: true, taskName: 'linux-release', commit: 'abcdef1234567890', detail: { ...detail, ...extra },
+    } as unknown as IntegrationAsk);
+    const w = mount(TaskAskCard, { props: { ask: askWith({ env_from_connections: [SHOWN, second] }) } });
+    expect(w.findAll('[data-test=task-ask-binding]').map((p) => p.text())).toEqual([SHOWN, second]);
+    expect(mount(TaskAskCard, { props: { ask: askWith({ env_from_connections: [] }) } }).find('[data-test=task-ask-binding]').exists()).toBe(false);
+    expect(mount(TaskAskCard, { props: { ask: askWith({}) } }).find('[data-test=task-ask-binding]').exists()).toBe(false);
+  });
+});
+
+describe('B023 re-test F2: the stored binding in the editor', () => {
+  it('the Connection select has the stored Connection selected and the save sends the same binding back', async () => {
+    const { api, calls } = fakeApi({
+      'tasks.list': () => ({ tasks: [coreTask], repos: ['main'] }), 'tasks.runs': () => [], 'tasks.preview': preview,
+      'tasks.save': () => ({ ok: true, id: 1 }), 'integrations.connections': () => [release],
+    });
+    const w = mount(TasksPanel, { props: { api, teams } });
+    await flushPromises();
+    await w.findAll('[data-test=task-linux-release] button').find((b) => b.text() === 'Edit')!.trigger('click');
+    await flushPromises();
+    const conn = w.find('[data-test=task-binding-0] [data-test=binding-connection]').element as HTMLSelectElement;
+    expect(conn.options[conn.selectedIndex]!.text).toContain('GitHub release (Yawble)');
+    expect(conn.options[conn.selectedIndex]!.text).not.toContain('(not found)');
+    const field = w.find('[data-test=task-binding-0] [data-test=binding-field]').element as HTMLSelectElement;
+    expect(field.options[field.selectedIndex]!.text).toContain('Token');
+    await w.find('[data-test=task-save]').trigger('click');
+    await flushPromises();
+    const def = calls.find((c) => c.method === 'tasks.save')!.params.def;
+    expect(def.envFromConnections).toHaveLength(1);
+    const sent = def.envFromConnections[0];
+    expect(Number(sent.connectionId)).toBe(7);
+    expect({ name: sent.name, field: sent.field }).toEqual({ name: 'GH_TOKEN', field: 'token' });
+  });
+});
+
 describe('B023 gap: removing a Connection only host tasks use (spec point 5)', () => {
   it('usedBy empty + usedByTasks non-empty: warns about the task, removes on OK with confirm, reloads', async () => {
     const confirm = vi.fn((_: string) => true);
