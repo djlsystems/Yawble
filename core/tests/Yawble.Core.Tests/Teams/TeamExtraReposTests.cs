@@ -38,11 +38,11 @@ public class TeamExtraReposTests
         var extra = Assert.Single(checkout.Extras);
         Assert.True(extra.Writable);
         Assert.Equal(f.Repos.ExtraClonePath("Alpha", "Ada", "cloud"), extra.Path);
-        Assert.Equal("members/ada", extra.Branch);
+        Assert.Equal("members/alpha/ada", extra.Branch);
         Assert.NotNull(extra.SharedBundle);
         Assert.True(File.Exists(Path.Combine(extra.Path, "README.md")));
         Assert.Equal("", Git(extra.Path, checkout.Workspace, "remote")); // no remote, as the main clone
-        Assert.Equal("members/ada", Git(extra.Path, checkout.Workspace, "branch", "--show-current"));
+        Assert.Equal("members/alpha/ada", Git(extra.Path, checkout.Workspace, "branch", "--show-current"));
 
         File.WriteAllText(Path.Combine(extra.Path, "api.txt"), "api");
         Git(extra.Path, checkout.Workspace, "add", "api.txt");
@@ -53,18 +53,18 @@ public class TeamExtraReposTests
         Assert.Contains(findings, x => x.Where.StartsWith("clone of cloud", StringComparison.Ordinal) && x.What.Contains("remote", StringComparison.Ordinal));
 
         Assert.Null((await f.Repos.FetchBackAsync(ada, Ct)).Error);
-        Assert.Contains("members/ada", AgentGit.Host(cloud, "branch", "--list"));
+        Assert.Contains("members/alpha/ada", AgentGit.Host(cloud, "branch", "--list"));
 
         var report = await f.Repos.PublishAsync(ada, Ct);
         Assert.Equal(TeamPublishResult.Published, report.Result);
-        Assert.Contains("cloud: members/ada", report.Branches);
-        Assert.Contains("refs/heads/members/ada", AgentGit.Host(cloudOrigin, "for-each-ref", "--format=%(refname)"));
+        Assert.Contains("cloud: members/alpha/ada", report.Branches);
+        Assert.Contains("refs/heads/members/alpha/ada", AgentGit.Host(cloudOrigin, "for-each-ref", "--format=%(refname)"));
 
         // A teammate's clone starts from the base branch, and the bundle carries Ada's branch for it to fetch.
         var benCheckout = await f.Repos.PrepareAsync(ben, Ct);
         var benExtra = Assert.Single(benCheckout.Extras);
         Assert.False(File.Exists(Path.Combine(benExtra.Path, "api.txt")));
-        Git(benExtra.Path, benCheckout.Workspace, "fetch", "-q", Path.Combine(benExtra.SharedBundle!, TeamRepos.SharedBundleFile), "members/ada");
+        Git(benExtra.Path, benCheckout.Workspace, "fetch", "-q", Path.Combine(benExtra.SharedBundle!, TeamRepos.SharedBundleFile), "members/alpha/ada");
         Assert.Contains("api.txt", Git(benExtra.Path, benCheckout.Workspace, "show", "--stat", "FETCH_HEAD"));
     }
 
@@ -200,16 +200,16 @@ public class TeamExtraReposTests
     [Fact]
     public void ThePrompt_NamesEachRepository_AndWhatTheMemberMayDoWithIt()
     {
-        var checkout = new MemberCheckout("/c/repo", "/c/home", "/c/tmp", "members/ada", "main", "/team")
+        var checkout = new MemberCheckout("/c/repo", "/c/home", "/c/tmp", "members/alpha/ada", "main", "/team")
         {
             Extras =
             [
-                new ExtraCheckout("cloud", "/c/repos/cloud", true, "members/ada", "main", "/t/shared/cloud.git"),
+                new ExtraCheckout("cloud", "/c/repos/cloud", true, "members/alpha/ada", "main", "/t/shared/cloud.git"),
                 new ExtraCheckout("old", "/t/reference/old", false, null, "main", null),
             ],
         };
         var text = string.Join('\n', TeamPrompt.RepositoryLines(checkout));
-        Assert.Contains("- cloud: your own clone at /c/repos/cloud, on branch members/ada", text);
+        Assert.Contains("- cloud: your own clone at /c/repos/cloud, on branch members/alpha/ada", text);
         Assert.Contains("- old: READ-ONLY reference at /t/reference/old", text);
     }
 }

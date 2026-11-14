@@ -176,8 +176,10 @@ public sealed partial class TeamRepos
                     continue;
                 }
                 var shared = ExtraSharedPath(member.Team, extra.Name);
-                await UpdateSharedAtAsync(shared, extra.Path, extra.BaseBranch, ct);
                 var row = ExtraRow(member.Id, extra.Name);
+                // B016: an extra clone still on members/<name> moves too, before the shared view is updated.
+                if (row is not null) row = await MoveLegacyExtraBranchLockedAsync(member, extra, row, ct);
+                await UpdateSharedAtAsync(shared, extra.Path, extra.BaseBranch, ct);
                 var clone = ExtraClonePath(member.Team, member.Name, extra.Name);
                 var cloneBranch = row?.Branch ?? branch;
                 if (!(Directory.Exists(clone) && Directory.EnumerateFileSystemEntries(clone).Any()))
