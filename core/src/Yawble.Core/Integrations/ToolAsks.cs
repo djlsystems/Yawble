@@ -17,11 +17,58 @@ namespace Yawble.Core.Integrations;
 /// <param name="UserScope">The package installs for the current user (--scope user); false: it installs for the whole computer and Windows asks.</param>
 /// <param name="Program">The program looked for afterwards (Windows adds .exe), the same one HostTools.Detect puts on a run's PATH.</param>
 /// <param name="SdkMajor">For the .NET SDK: the major version `dotnet --list-sdks` must list; null: the program alone is enough.</param>
-/// <param name="ManualCommand">Linux and macOS: what the ask shows the person to run themselves (the app installs nothing there).</param>
+/// <param name="AptPackages">Linux: the packages for apt-get (Debian, Ubuntu and their derivatives, and any distribution not recognised).</param>
+/// <param name="DnfPackages">Linux: the packages for dnf (Fedora, RHEL and their derivatives).</param>
+/// <param name="PacmanPackages">Linux: the packages for pacman (Arch and its derivatives).</param>
+/// <param name="MacCommand">macOS: what the ask shows the person to run themselves.</param>
 public sealed record ToolEntry(string Name, string DisplayName, string Publisher, string WingetId, bool UserScope, string Program, int? SdkMajor,
-    IReadOnlyList<string> Aliases, string LinuxCommand, string MacCommand)
+    IReadOnlyList<string> Aliases, string AptPackages, string DnfPackages, string PacmanPackages, string MacCommand)
 {
-    public string ManualCommand(bool mac) => mac ? MacCommand : LinuxCommand;
+    /// <summary>Linux and macOS: what the ask shows the person to run themselves (the app installs nothing there).</summary>
+    public string ManualCommand(bool mac, LinuxPackager packager = LinuxPackager.Apt) => mac ? MacCommand : packager switch
+    {
+        LinuxPackager.Dnf => $"sudo dnf install -y {DnfPackages}",
+        LinuxPackager.Pacman => $"sudo pacman -S --needed {PacmanPackages}",
+        _ => $"sudo apt-get install -y {AptPackages}",
+    };
+}
+
+/// <summary>The package manager a Linux host's manual install commands are written for.</summary>
+public enum LinuxPackager { Apt, Dnf, Pacman }
+
+public static class LinuxPackagers
+{
+    /// <summary>
+    /// From /etc/os-release: its ID, then each ID_LIKE in order, the first one known decides; anything else is apt.
+    /// Pure, so tests pass the file's text.
+    /// </summary>
+    public static LinuxPackager FromOsRelease(string? text)
+    {
+        string? id = null, like = null;
+        foreach (var raw in (text ?? "").Split('\n'))
+        {
+            var line = raw.Trim();
+            var eq = line.IndexOf('=');
+            if (eq <= 0) continue;
+            var value = line[(eq + 1)..].Trim().Trim('"', '\'');
+            switch (line[..eq])
+            {
+                case "ID": id = value; break;
+                case "ID_LIKE": like = value; break;
+            }
+        }
+        IEnumerable<string> names = [.. (id is null ? [] : new[] { id }), .. (like ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries)];
+        foreach (var n in names.Select(n => n.ToLowerInvariant()))
+        {
+            switch (n)
+            {
+                case "debian" or "ubuntu": return LinuxPackager.Apt;
+                case "fedora" or "rhel" or "centos": return LinuxPackager.Dnf;
+                case "arch": return LinuxPackager.Pacman;
+            }
+        }
+        return LinuxPackager.Apt;
+    }
 }
 
 /// <summary>The fixed catalog of host tools an agent may ask for, and the exact winget command each installs with.</summary>
@@ -35,18 +82,18 @@ public static class ToolCatalog
         // The .NET SDK installer always installs for the whole computer (it ignores a user scope).
         new("dotnet-sdk-10", ".NET SDK 10", "Microsoft", "Microsoft.DotNet.SDK.10", false, "dotnet", 10,
             ["dotnet-10", ".net sdk 10", "dotnet sdk 10"],
-            "sudo apt-get install -y dotnet-sdk-10.0", "brew install --cask dotnet-sdk"),
+            "dotnet-sdk-10.0", "dotnet-sdk-10.0", "dotnet-sdk", "brew install --cask dotnet-sdk"),
         new("dotnet-sdk-lts", $".NET SDK (current LTS, {DotNetLtsMajor})", "Microsoft", $"Microsoft.DotNet.SDK.{DotNetLtsMajor}", false, "dotnet", DotNetLtsMajor,
             ["dotnet", "dotnet-sdk", "dotnet-lts", ".net", ".net sdk", "dotnet sdk"],
-            $"sudo apt-get install -y dotnet-sdk-{DotNetLtsMajor}.0", "brew install --cask dotnet-sdk"),
+            $"dotnet-sdk-{DotNetLtsMajor}.0", $"dotnet-sdk-{DotNetLtsMajor}.0", "dotnet-sdk", "brew install --cask dotnet-sdk"),
         // Node.js's MSI installs for the whole computer.
         new("nodejs-lts", "Node.js LTS", "OpenJS Foundation", "OpenJS.NodeJS.LTS", false, "node", null,
             ["node", "nodejs", "node.js", "node-lts", "npm"],
-            "sudo apt-get install -y nodejs npm", "brew install node"),
+            "nodejs npm", "nodejs npm", "nodejs npm", "brew install node"),
         // Python's installer supports a per-user install (no permission prompt).
         new("python-3", "Python 3", "Python Software Foundation", "Python.Python.3.14", true, OperatingSystem.IsWindows() ? "python" : "python3", null,
             ["python", "python3", "py", "pip"],
-            "sudo apt-get install -y python3 python3-pip", "brew install python@3"),
+            "python3 python3-pip", "python3 python3-pip", "python python-pip", "brew install python@3"),
     ];
 
     public static IReadOnlyList<string> Names => All.Select(t => t.Name).ToList();
@@ -88,6 +135,9 @@ public interface IToolHost
 
     bool IsMac { get; }
 
+    /// <summary>Linux: the package manager the manual install commands are written for.</summary>
+    LinuxPackager Packager => LinuxPackager.Apt;
+
     /// <summary>The full path of winget, or null.</summary>
     string? FindWinget();
 
@@ -103,6 +153,16 @@ public sealed class SystemToolHost(IGitHost git, string appDataRoot) : IToolHost
     public bool IsWindows => git.IsWindows;
 
     public bool IsMac => OperatingSystem.IsMacOS();
+
+    private readonly Lazy<LinuxPackager> _packager = new(() =>
+    {
+        if (!OperatingSystem.IsLinux()) return LinuxPackager.Apt;
+        try { return LinuxPackagers.FromOsRelease(File.ReadAllText("/etc/os-release")); }
+        catch (IOException) { return LinuxPackager.Apt; }
+        catch (UnauthorizedAccessException) { return LinuxPackager.Apt; }
+    });
+
+    public LinuxPackager Packager => _packager.Value;
 
     public string? FindWinget() => git.FindWinget();
 
@@ -283,7 +343,7 @@ public sealed class ToolAskService
         Changed?.Invoke();
         var how = _host.IsWindows
             ? "The person can install it from Needs you"
-            : $"The person installs it themselves on this computer ({entry.ManualCommand(_host.IsMac)})";
+            : $"The person installs it themselves on this computer ({entry.ManualCommand(_host.IsMac, _host.Packager)})";
         return $"asked: the person is asked to install {entry.DisplayName} (tool request {id}){(first ? "" : "; it was already waiting, and your reason is added")}. " +
                $"{how}; it is on PATH from your next run, not this one. Hand back now as blocked on {entry.DisplayName} (say what it is for); " +
                "the Manager is told when it is installed. Do not retry in a loop or install it another way.";
@@ -315,7 +375,7 @@ public sealed class ToolAskService
     {
         ["name"] = t.Name, ["displayName"] = t.DisplayName, ["publisher"] = t.Publisher, ["wingetId"] = t.WingetId,
         ["scope"] = t.UserScope ? "user" : "machine", ["program"] = t.Program,
-        ["command"] = _host.IsWindows ? ToolCatalog.CommandLine(t) : t.ManualCommand(_host.IsMac),
+        ["command"] = _host.IsWindows ? ToolCatalog.CommandLine(t) : t.ManualCommand(_host.IsMac, _host.Packager),
     };
 
     /// <summary>One ask as the Needs you item reads it (tools.asks).</summary>
@@ -333,7 +393,7 @@ public sealed class ToolAskService
             ["decidedBy"] = a.DecidedBy, ["decidedVia"] = a.DecidedVia, ["decidedAt"] = a.DecidedAt,
             // Windows: Install (or Try again after an error) runs this command; Linux and macOS: the person runs it themselves.
             ["canInstall"] = canInstall,
-            ["command"] = t is null ? null : canInstall ? ToolCatalog.CommandLine(t) : t.ManualCommand(_host.IsMac),
+            ["command"] = t is null ? null : canInstall ? ToolCatalog.CommandLine(t) : t.ManualCommand(_host.IsMac, _host.Packager),
             ["choices"] = new JsonArray(canInstall ? ["install", "notNow"] : (JsonNode?[])["notNow"]),
         };
     }
@@ -405,7 +465,7 @@ public sealed class ToolAskService
         var ask = Asks().FirstOrDefault(a => a.Id == id) ?? throw new ArgumentException($"tool request {id} is not waiting");
         var tool = ToolCatalog.Find(ask.Tool) ?? throw new ArgumentException($"'{ask.Tool}' is not in the app's catalog");
         if (!_host.IsWindows)
-            return Result(false, id, tool, $"The app installs tools on Windows only: run {tool.ManualCommand(_host.IsMac)} on this computer, then ask the team to retry.",
+            return Result(false, id, tool, $"The app installs tools on Windows only: run {tool.ManualCommand(_host.IsMac, _host.Packager)} on this computer, then ask the team to retry.",
                 manual: true);
         if (ask.State == "installing") return Result(false, id, tool, $"{tool.DisplayName} is being installed already; wait for it to finish.");
         if (await _host.IsInstalledAsync(tool, ct).ConfigureAwait(false))
