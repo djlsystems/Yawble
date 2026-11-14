@@ -230,6 +230,20 @@ public sealed class ToolAskGapTests : IDisposable
         var id = await Asked("dotnet-sdk-10");
         using (Actor.Use(Actor.Window)) await _asks.NotNowAsync(id, null, Ct);
         Assert.StartsWith("refused:", await Request("dotnet"));
+        // and the hold is read from the stored row, so it holds across a restart under the other name too
+        Assert.StartsWith("refused:", await NewService().RequestFromAgentAsync(Priya, "dotnet-sdk-lts", "again", 1, 2, Ct));
+    }
+
+    [Fact]
+    public async Task AnOpenAskUnderOneName_IsTheAskForTheOtherName()
+    {
+        var id = await Asked("dotnet-sdk-10");
+        var again = await Request("dotnet");
+        Assert.DoesNotContain("refused", again);
+        var ask = Assert.Single(_asks.Asks()); // one Needs you item, not two
+        Assert.Equal(id, ask.Id);
+        Assert.Equal("dotnet-sdk-10", ask.Tool);
+        Assert.Equal(2, ask.Count);
     }
 
     /// <summary>Records what would run; <see cref="Pending"/> holds a run until the test lets it finish. Never starts a process.</summary>
