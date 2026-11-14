@@ -708,9 +708,9 @@ public static class AgentPresets
             {
                 ["permissions"] = new JsonObject { ["defaultMode"] = "bypassPermissions" },
                 ["skipDangerousModePermissionPrompt"] = true,
-                // No AI attribution in a member's commits and pull requests (B028). Claude Code 2.1.325's schema:
-                // "attribution" is current (an empty string hides it); "includeCoAuthoredBy" is deprecated but
-                // still read, so both are set.
+                // Agents' commits and pull requests carry no AI attribution (no "Co-Authored-By: Claude" trailer, no
+                // "Generated with" line), B028. Claude Code 2.1.325's schema: "attribution" is current (an empty
+                // string hides it); "includeCoAuthoredBy" is deprecated but still read, so both are set.
                 ["attribution"] = new JsonObject { ["commit"] = "", ["pr"] = "" },
                 ["includeCoAuthoredBy"] = false,
             };
