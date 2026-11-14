@@ -708,6 +708,11 @@ public static class AgentPresets
             {
                 ["permissions"] = new JsonObject { ["defaultMode"] = "bypassPermissions" },
                 ["skipDangerousModePermissionPrompt"] = true,
+                // No AI attribution in a member's commits and pull requests (B028). Claude Code 2.1.325's schema:
+                // "attribution" is current (an empty string hides it); "includeCoAuthoredBy" is deprecated but
+                // still read, so both are set.
+                ["attribution"] = new JsonObject { ["commit"] = "", ["pr"] = "" },
+                ["includeCoAuthoredBy"] = false,
             };
             var state = new JsonObject
             {
@@ -770,7 +775,9 @@ public static class AgentPresets
                     },
                 },
             };
-            var config = new JsonObject { ["trustedFolders"] = new JsonArray(l.ClonePath) };
+            // includeCoAuthoredBy: false drops the "Co-authored-by: Copilot" trailer its system prompt asks for (B028);
+            // Copilot has no argument or variable for it, only this key in the user's settings under COPILOT_HOME.
+            var config = new JsonObject { ["trustedFolders"] = new JsonArray(l.ClonePath), ["includeCoAuthoredBy"] = false };
             return
             [
                 new SeedFile(CopilotMcpConfigPath(l), mcp.ToJsonString(SandboxJson.Indented)),
