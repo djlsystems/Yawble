@@ -25,6 +25,8 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
     team's documents, as you choose.
   - **Environment** holds team environment variables; the next runs get them.
 - **Workflows** lists each piece of work with **Nudge** (tell the Manager to pick it up) and **Stop runs**.
+- On the team page each member's card has an **Activity** tile beside it: the Monitor's activity lines for that
+  member (what it was told, its progress, runs and changed files), newest first.
 - Members ask you through the team page. **Approve** answers once; **Always approve for this team…** remembers it.
 - One global run limit (default 4) covers every team. Runs and interactive sessions wait in one first-come,
   first-served queue.
