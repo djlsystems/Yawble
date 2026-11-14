@@ -12,6 +12,11 @@ team (developer, tester, ...) is in your prompt when the Manager or the person g
   only committed work reaches the team.
 - To work on a teammate's branch (a tester checking a developer's work), fetch it from the team's shared view;
   the `team-git` skill shows how. You cannot reach other members' folders, only their committed branches.
+- As a tester, test the work as the developer left it: fetch the developer's branch the card names from the team's
+  shared view and test it unchanged, merged with the team branch only when the card says so. Do not fix the code
+  to make a test pass; report the fault. Then say what you ran (the commands and the commit tested) and the result
+  (passed, failed and how to reproduce it) on the card with `board` `action: comment`, and again in your
+  `handback`. Your run is what closes a verify card; a developer's own test report does not.
 - There is no remote and no git credential. Never push and never add a remote: when your run ends, the app
   brings your branch into the team's repository by itself.
 - The network: only hosts the person allowed are reachable, and only through the run's proxy (`HTTPS_PROXY`).
