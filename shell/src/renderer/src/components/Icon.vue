@@ -33,7 +33,11 @@ const paths: Record<string, string> = {
   play: 'M7 4.5v15l12-7.5Z',
   archive: 'M3 4h18v4H3Z M5 8v12h14V8 M10 12h4',
   unarchive: 'M3 4h18v4H3Z M5 8v12h14V8 M12 17v-6 M9 14l3-3 3 3',
-  alert: 'M12 9v4 M12 17h.01 M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z',
+  undo: 'M9 14 4 9l5-5 M4 9h10.5a5.5 5.5 0 0 1 0 11H11',
+  checkAll: 'M2 12l5 5L18 6 M12 16l1.5 1.5L22 9',
+  dispatch: 'M22 2 11 13 M22 2l-7 20-4-9-9-4Z',
+  close: 'M18 6 6 18 M6 6l12 12',
+  alert:'M12 9v4 M12 17h.01 M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z',
 };
 </script>
 

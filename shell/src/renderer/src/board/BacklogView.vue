@@ -6,6 +6,7 @@ import { renderMarkdown } from '../markdown';
 import { ago } from './cards';
 import LoadingNote from '../components/LoadingNote.vue';
 import BusyLabel from '../components/BusyLabel.vue';
+import Icon from '../components/Icon.vue';
 
 /**
  * The Backlog: the person's list of work not yet given to a team, in priority order. An item
@@ -163,6 +164,7 @@ function select(item: BacklogItem) {
   preview.value = true;
   confirmAgain.value = false;
   confirmDelete.value = false;
+  dispatchOpen.value = false;
   void loadDetail();
 }
 watch(open, (now, before) => { if (now && before?.id === now.id && !dirty.value) { editTitle.value = now.title; editBody.value = now.body; } });
@@ -185,11 +187,19 @@ const newTeam = ref({ name: '', cli: 'claude', repo: '' });
 const confirmAgain = ref(false);
 const confirmDelete = ref(false);
 const isAddress = (s: string) => /^(https?|ssh|file):|^[\w.-]+@[\w.-]+:/i.test(s.trim());
-const dispatchBlocked = computed(() => {
+// The toolbar's Dispatch opens the dispatch form (where to, then Dispatch); what the item itself allows decides
+// whether it can open at all.
+const dispatchOpen = ref(false);
+const itemBlocked = computed(() => {
   const i = open.value;
   if (!i) return 'Pick an item.';
   if (i.archivedAt) return 'Restore it first.';
   if (i.state !== 'ready') return i.state === 'pending' ? 'Read it, then mark it ready: only a ready item is dispatched.' : 'It is done: move it back to pending to work on it again.';
+  return null;
+});
+watch(itemBlocked, (b) => { if (b) dispatchOpen.value = false; });
+const dispatchBlocked = computed(() => {
+  if (itemBlocked.value) return itemBlocked.value;
   if (target.value === 'new' && !newTeam.value.name.trim()) return 'Name the new team.';
   if (target.value !== 'new' && !props.teams.some((t) => t.id === target.value)) return 'Pick a team.';
   return null;
@@ -205,7 +215,7 @@ async function dispatch() {
       }, 'dispatch')
     : await act<BacklogItem>('backlog.dispatch', { id: i.id, teamId: target.value, again: i.inFlight }, 'dispatch');
   confirmAgain.value = false;
-  if (r) { newTeam.value = { name: '', cli: 'claude', repo: '' }; await load(); await loadDetail(); }
+  if (r) { dispatchOpen.value = false; newTeam.value = { name: '', cli: 'claude', repo: '' }; await load(); await loadDetail(); }
 }
 watch(() => props.teams, (ts) => { if (target.value !== 'new' && !ts.some((t) => t.id === target.value)) target.value = ts[0]?.id ?? 'new'; });
 
@@ -290,27 +300,51 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
           <div class="ihead">
             <span class="mono">{{ open.label }}</span><span class="state" :class="shownState(open)">{{ ShownLabel[shownState(open)] }}</span>
             <span class="muted small">added {{ ago(open.createdAt) }}</span><span class="grow" />
-            <button class="mini" title="Close" @click="openId = null">✕</button>
-          </div>
-          <input v-model="editTitle" :maxlength="TitleMax" data-test="backlog-item-title" :disabled="!!open.archivedAt" />
-          <div class="specbar">
-            <button class="mini" :class="{ on: preview }" @click="preview = true">Read</button>
-            <button class="mini" :class="{ on: !preview }" :disabled="!!open.archivedAt" data-test="backlog-item-edit" @click="preview = false">Edit</button>
-          </div>
-          <div v-if="preview" class="md ibody" data-test="backlog-item-read" v-html="rendered"></div>
-          <textarea v-else v-model="editBody" rows="12" class="ibody" data-test="backlog-item-body"></textarea>
-          <div v-if="dirty" class="buttons">
-            <button @click="editTitle = open.title; editBody = open.body">Discard</button>
-            <button class="primary" :disabled="busy" data-test="backlog-item-save" :aria-busy="doing === 'save'" @click="update({ title: editTitle, body: editBody })"><BusyLabel :busy="doing === 'save'" text="Saving…">Save</BusyLabel></button>
+            <button class="tool" title="Close" aria-label="Close" @click="openId = null"><Icon name="close" :size="16" /></button>
           </div>
 
-          <div v-if="!open.archivedAt" class="flow">
-            <button v-if="open.state === 'pending'" class="primary" data-test="backlog-ready" :disabled="busy" @click="update({ state: 'ready' }, 'ready')"><BusyLabel :busy="doing === 'ready'" text="Saving…">I've read it: mark ready</BusyLabel></button>
-            <button v-if="open.state !== 'pending'" data-test="backlog-pending" :disabled="busy" @click="update({ state: 'pending' }, 'pending')"><BusyLabel :busy="doing === 'pending'" text="Saving…">{{ open.state === 'ready' ? 'Back to pending' : 'Reopen as pending' }}</BusyLabel></button>
-            <button v-if="open.state === 'declared' || open.state === 'ready'" data-test="backlog-implemented" :disabled="busy" @click="update({ state: 'implemented' }, 'implemented')"><BusyLabel :busy="doing === 'implemented'" text="Saving…">Mark implemented</BusyLabel></button>
+          <!-- The item's toolbar: how the spec is shown (Read / Edit) on the left; what to do with the item on the right,
+               in the order it happens (mark ready, dispatch, mark implemented), then Archive. -->
+          <div class="toolbar" role="toolbar" aria-label="Backlog item" data-test="backlog-toolbar">
+            <div class="seg" role="group" aria-label="Spec">
+              <button class="tool" :class="{ on: preview }" title="Read the spec" aria-label="Read" :aria-pressed="preview" data-test="backlog-item-readmode" @click="preview = true"><Icon name="eye" :size="16" /><span>Read</span></button>
+              <button class="tool" :class="{ on: !preview }" :title="open.archivedAt ? 'Restore it to edit it' : 'Edit the spec (Markdown)'" aria-label="Edit" :aria-pressed="!preview" :disabled="!!open.archivedAt" data-test="backlog-item-edit" @click="preview = false"><Icon name="edit" :size="16" /><span>Edit</span></button>
+            </div>
+            <span class="grow" />
+            <template v-if="!open.archivedAt">
+              <button v-if="open.state === 'pending'" class="tool go" title="I've read it: mark ready (only a ready item is dispatched)" aria-label="Mark ready" data-test="backlog-ready" :disabled="busy" @click="update({ state: 'ready' }, 'ready')">
+                <BusyLabel :busy="doing === 'ready'"><Icon name="check" :size="16" /></BusyLabel>
+              </button>
+              <button v-else class="tool" :title="open.state === 'ready' ? 'Back to pending' : 'Reopen as pending'" :aria-label="open.state === 'ready' ? 'Back to pending' : 'Reopen as pending'" data-test="backlog-pending" :disabled="busy" @click="update({ state: 'pending' }, 'pending')">
+                <BusyLabel :busy="doing === 'pending'"><Icon name="undo" :size="16" /></BusyLabel>
+              </button>
+              <button class="tool" :class="{ on: dispatchOpen, go: open.state === 'ready' && !open.dispatchedAt }" :title="itemBlocked ?? (open.inFlight ? 'Dispatch again…' : 'Dispatch to a team…')" aria-label="Dispatch" :aria-expanded="dispatchOpen"
+                data-test="backlog-dispatch-open" :disabled="busy || !!itemBlocked" @click="dispatchOpen = !dispatchOpen; confirmAgain = false">
+                <Icon name="dispatch" :size="16" />
+              </button>
+              <button v-if="open.state === 'declared' || open.state === 'ready'" class="tool" title="Mark implemented" aria-label="Mark implemented" data-test="backlog-implemented" :disabled="busy" @click="update({ state: 'implemented' }, 'implemented')">
+                <BusyLabel :busy="doing === 'implemented'"><Icon name="checkAll" :size="16" /></BusyLabel>
+              </button>
+              <span class="sep" />
+              <button class="tool" title="Archive" aria-label="Archive" data-test="backlog-archive" :disabled="busy" @click="simple('backlog.archive')">
+                <BusyLabel :busy="doing === 'backlog.archive'"><Icon name="archive" :size="16" /></BusyLabel>
+              </button>
+            </template>
+            <template v-else>
+              <button class="tool" title="Restore to the backlog" aria-label="Restore" data-test="backlog-restore" :disabled="busy" @click="simple('backlog.restore')">
+                <BusyLabel :busy="doing === 'backlog.restore'"><Icon name="unarchive" :size="16" /></BusyLabel>
+              </button>
+              <button class="tool bad" :class="{ on: confirmDelete }" title="Delete for good…" aria-label="Delete" data-test="backlog-delete" :disabled="busy" @click="confirmDelete = !confirmDelete"><Icon name="trash" :size="16" /></button>
+            </template>
+          </div>
+          <p v-if="open.state === 'pending' && !open.archivedAt" class="muted small hint" data-test="backlog-dispatch-why">Read it, then mark it ready (✓): only a ready item is dispatched.</p>
+          <div v-if="confirmDelete && open.archivedAt" class="buttons confirm">
+            <span class="small">Delete {{ open.label }} for good?</span>
+            <button :disabled="busy" @click="confirmDelete = false">Keep</button>
+            <button class="danger" data-test="backlog-delete-yes" :disabled="busy" @click="simple('backlog.delete')"><BusyLabel :busy="doing === 'backlog.delete'" text="Deleting…">Delete</BusyLabel></button>
           </div>
 
-          <div v-if="!open.archivedAt" class="dispatch">
+          <div v-if="dispatchOpen && !open.archivedAt" class="dispatch" data-test="backlog-dispatch-panel">
             <label>Dispatch to
               <select v-model="target" data-test="backlog-team">
                 <option v-if="teamsLoading && !teams.length" disabled value="">Loading teams…</option>
@@ -329,12 +363,20 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
               {{ open.label }} is still in flight with {{ open.dispatchedTeam }}. Dispatch it again anyway?
             </p>
             <div class="buttons">
-              <button v-if="confirmAgain" :disabled="busy" @click="confirmAgain = false">Cancel</button>
+              <button :disabled="busy" data-test="backlog-dispatch-cancel" @click="confirmAgain ? (confirmAgain = false) : (dispatchOpen = false)">Cancel</button>
               <button class="primary" data-test="backlog-dispatch" :disabled="busy || !!dispatchBlocked" :title="dispatchBlocked ?? ''" :aria-busy="doing === 'dispatch'" @click="dispatch">
                 <BusyLabel :busy="doing === 'dispatch'" text="Dispatching…">{{ confirmAgain ? 'Dispatch again' : open.inFlight ? 'Dispatch again…' : 'Dispatch' }}</BusyLabel>
               </button>
             </div>
-            <p v-if="dispatchBlocked" class="muted small" data-test="backlog-dispatch-why">{{ dispatchBlocked }}</p>
+            <p v-if="dispatchBlocked" class="muted small">{{ dispatchBlocked }}</p>
+          </div>
+
+          <input v-model="editTitle" :maxlength="TitleMax" data-test="backlog-item-title" :disabled="!!open.archivedAt" />
+          <div v-if="preview" class="md ibody" data-test="backlog-item-read" v-html="rendered"></div>
+          <textarea v-else v-model="editBody" rows="12" class="ibody" data-test="backlog-item-body"></textarea>
+          <div v-if="dirty" class="buttons">
+            <button @click="editTitle = open.title; editBody = open.body">Discard</button>
+            <button class="primary" :disabled="busy" data-test="backlog-item-save" :aria-busy="doing === 'save'" @click="update({ title: editTitle, body: editBody })"><BusyLabel :busy="doing === 'save'" text="Saving…">Save</BusyLabel></button>
           </div>
 
           <LoadingNote v-if="open.dispatchCount > 0 && detail?.id !== open.id" text="Loading its dispatches…" />
@@ -356,19 +398,6 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
                 <button class="link" @click="emit('board', d.teamId)">Its board</button>
               </div>
             </div>
-          </div>
-
-          <div class="buttons end">
-            <button v-if="!open.archivedAt" data-test="backlog-archive" :disabled="busy" @click="simple('backlog.archive')"><BusyLabel :busy="doing === 'backlog.archive'" text="Archiving…">Archive</BusyLabel></button>
-            <template v-else>
-              <button data-test="backlog-restore" :disabled="busy" @click="simple('backlog.restore')"><BusyLabel :busy="doing === 'backlog.restore'" text="Restoring…">Restore</BusyLabel></button>
-              <template v-if="confirmDelete">
-                <span class="small">Delete {{ open.label }} for good?</span>
-                <button class="danger" data-test="backlog-delete-yes" :disabled="busy" @click="simple('backlog.delete')"><BusyLabel :busy="doing === 'backlog.delete'" text="Deleting…">Delete</BusyLabel></button>
-                <button :disabled="busy" @click="confirmDelete = false">Keep</button>
-              </template>
-              <button v-else class="danger-text" data-test="backlog-delete" :disabled="busy" @click="confirmDelete = true">Delete…</button>
-            </template>
           </div>
         </section>
       </div>
@@ -398,7 +427,6 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
 .grow { flex: 1; }
 .primary { background: var(--accent); color: #fff; border-color: var(--accent); }
 .danger { background: var(--bad); color: #fff; border-color: var(--bad); }
-.danger-text { color: var(--bad); }
 .split { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
 .split.withItem { grid-template-columns: minmax(0, 1fr) minmax(360px, 440px); }
 .list { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -437,10 +465,23 @@ const stateText = (d: BacklogDispatch) => d.teamGone ? 'team deleted' : d.state 
 .ihead { display: flex; align-items: center; gap: 8px; }
 .item input, .item textarea, .itemform input, .itemform textarea { font: inherit; font-size: 13px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px; }
 .item textarea, .itemform textarea { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; }
-.specbar { display: flex; gap: 4px; }
+/* The item's toolbar: icon buttons as in a window's toolbar (a tooltip names each); Read / Edit is a segmented pair. */
+.toolbar { display: flex; align-items: center; gap: 4px; padding: 4px 0; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
+.seg { display: flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.seg .tool { border: 0; border-radius: 0; width: auto; padding: 0 9px; gap: 5px; font-size: 12.5px; }
+.seg .tool + .tool { border-left: 1px solid var(--line); }
+.tool { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 28px; padding: 0; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--ink-soft); cursor: pointer; }
+.tool:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink); }
+.tool:disabled { opacity: 0.4; cursor: default; }
+.tool.on { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
+.tool.go:not(:disabled) { color: var(--accent); }
+.tool.bad:not(:disabled) { color: var(--bad); }
+.ihead .tool { width: 26px; height: 24px; }
+.sep { width: 1px; align-self: stretch; margin: 2px 4px; background: var(--line); }
+.hint { margin: 0; }
+.confirm { justify-content: flex-start; }
 .md { border: 1px solid var(--line-soft); border-radius: 6px; padding: 6px 10px; font-size: 13px; overflow: auto; }
-.buttons, .flow { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; align-items: center; }
-.buttons.end { border-top: 1px solid var(--line-soft); padding-top: 8px; }
+.buttons { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; align-items: center; }
 .dispatch { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--line-soft); padding-top: 8px; }
 .dispatch label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--ink-soft); }
 .history h4 { margin: 4px 0; font-size: 13px; }

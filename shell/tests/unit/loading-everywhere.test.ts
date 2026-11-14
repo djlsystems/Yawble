@@ -120,18 +120,46 @@ describe('Backlog: Dispatch', () => {
     await flushPromises();
     await w.get('[data-test=backlog-row]').trigger('click');
     await flushPromises();
+    await w.get('[data-test=backlog-dispatch-open]').trigger('click'); // the toolbar's Dispatch opens the form
     return { f, w };
   }
 
-  it('is held with a spinner while backlog.dispatch runs (a second click sends nothing) and restores when it answers', async () => {
+  it('is held with a spinner while backlog.dispatch runs (a second click sends nothing) and closes the form when it answers', async () => {
     const { f, w } = await opened();
     await w.get('[data-test=backlog-dispatch]').trigger('click');
     expect(busyOf(w, '[data-test=backlog-dispatch]')).toEqual({ disabled: true, spinner: true, text: 'Dispatching…' });
     await w.get('[data-test=backlog-dispatch]').trigger('click');
     expect(f.count('backlog.dispatch')).toBe(1);
     await f.answer('backlog.dispatch', item({ dispatchedTeam: 'payments', dispatchedAt: '2026-11-12T10:01:00Z', inFlight: true }));
-    expect(w.get('[data-test=backlog-dispatch]').find('[data-test=btn-spinner]').exists()).toBe(false);
-    expect(w.get('[data-test=backlog-dispatch]').text()).not.toBe('Dispatching…');
+    await flushPromises();
+    // Dispatched: the form closes and the toolbar is free again.
+    expect(w.find('[data-test=backlog-dispatch-panel]').exists()).toBe(false);
+    expect(w.get('[data-test=backlog-dispatch-open]').attributes('disabled')).toBeUndefined();
+  });
+
+  it('the toolbar: Read/Edit, Mark ready, a Dispatch that opens the form (held while pending), and Archive', async () => {
+    const f = fakeCore({ 'backlog.list': [item({ state: 'pending' })], 'backlog.item': { ...item(), dispatches: [] } });
+    const w = keep(mount(BacklogView, { props: { teams: [team], api: f.api, pollMs: 60_000 } }));
+    await flushPromises();
+    await w.get('[data-test=backlog-row]').trigger('click');
+    await flushPromises();
+    const bar = w.get('[data-test=backlog-toolbar]');
+    for (const sel of ['backlog-item-readmode', 'backlog-item-edit', 'backlog-ready', 'backlog-dispatch-open', 'backlog-archive']) expect(bar.find(`[data-test=${sel}]`).exists()).toBe(true);
+    expect(bar.get('[data-test=backlog-dispatch-open]').attributes('disabled')).toBeDefined();
+    expect(w.get('[data-test=backlog-dispatch-why]').text()).toContain('mark it ready');
+    expect(w.find('[data-test=backlog-dispatch-panel]').exists()).toBe(false);
+    await bar.get('[data-test=backlog-item-edit]').trigger('click');
+    expect(w.find('[data-test=backlog-item-body]').exists()).toBe(true);
+    await bar.get('[data-test=backlog-item-readmode]').trigger('click');
+    expect(w.find('[data-test=backlog-item-read]').exists()).toBe(true);
+  });
+
+  it('a ready item: Dispatch opens the form, Cancel closes it', async () => {
+    const { w } = await opened();
+    expect(w.find('[data-test=backlog-dispatch-panel]').exists()).toBe(true);
+    expect(w.find('[data-test=backlog-dispatch-why]').exists()).toBe(false);
+    await w.get('[data-test=backlog-dispatch-cancel]').trigger('click');
+    expect(w.find('[data-test=backlog-dispatch-panel]').exists()).toBe(false);
   });
 
   it('a failed dispatch restores the button and shows the error', async () => {
