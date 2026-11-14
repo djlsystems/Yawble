@@ -129,7 +129,8 @@ public sealed class LogPruneGapTests : IDisposable
     public void AWaitingNetworkAsk_IsNeverPruned_EvenWithACutoffOfNow()
     {
         Network(Ago(2000), "ancient.example", "pending");
-        Network(Ago(0.5), "today.example", "denied");
+        // Older than the 24 hours a denial is kept for, so the cutoff of now still prunes it.
+        Network(Ago(25.0 / 24), "yesterday.example", "denied");
 
         var cutoff = Now.AddSeconds(1).ToString("O");
         Assert.Equal(1, _logs.PrunePreview("approvals", cutoff).Count);
