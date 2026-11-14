@@ -71,18 +71,30 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
   package registry is for (api.nuget.org: NuGet; registry.npmjs.org: npm; pypi.org and files.pythonhosted.org: pip).
   It has four buttons:
   - **Allow for this agent** adds the host to the member's loosen block;
-  - **Allow for this team** adds it to every member of the team, and closes the team's other requests for that host;
+  - **Allow for this team** adds it to the team's network allow list, and closes the team's other requests for that
+    host. Every run of every member of that team gets the list's hosts, members hired later too, and no other team;
   - **Allow everywhere** adds it to the global allowed hosts, and closes every team's requests for that host;
   - **Deny** closes it; the agent is told (with the note you type above the buttons, if any), and that host is not
-    asked again for that member for 24 hours.
+    asked again for that member for 24 hours. The 24 hours belong to that member: a member hired later with the same
+    name is asked again.
   Only the exact host is allowed, only after your click, through the same checks as a policy change; it applies from
   the member's next run. After an allow the team's Manager is told "<host> is now allowed for <member>; retry what was
-  blocked". A member whose own override narrows the host list also gets the host in its loosen block, so the team and
-  everywhere answers reach it too; the Manager is told only once the member's effective hosts include it. If the policy
-  store refuses the change, the item stays and shows why.
+  blocked". A member whose own override narrows the host list also gets the host in its loosen block for an everywhere
+  answer; a team's list is added after the override, so it reaches that member as it is. The Manager is told only once
+  the member's effective hosts include it. If the policy store refuses the change, the item stays and shows why: in a
+  remote view, a call the Cloud Link refuses says to answer it in the window, and any other failure shows its own
+  error. **Allow for this team** is one write, checked against every member's run first, so a refusal changes nothing.
+  - **The team's allow list** (see Sandbox and policy): a member's policy shows each team host as
+    `network.allowHosts + <host> (team)`. The team's settings list who added each host, how and when; a **Remove** of a
+    host that is no longer on the list says so.
   - **Never asked about:** IP addresses, local and private-network names, the app's own hosts, floor-rule hosts, and names that are not plain ASCII. A plain ASCII name has only letters, digits, hyphens and dots. Internationalized names, including their `xn--` form, a name ending in a dot, and an underscore all fail this test.
+  - **Private-resolving names:** the gateway resolves a refused name first. A name that resolves only to loopback,
+    private or link-local addresses (`localtest.me`, `x.nip.io`) is a plain refusal and raises no request.
+  - **Plain http:** the gateway forwards only https. A request raised by a plain-http refusal says so, and the agent is
+    told to use the https:// address: plain http is refused even once the host is allowed.
   - **Limit:** at most five different hosts wait per member at once. A repeat of a host already waiting only counts up.
   - **Answering:** one request takes one answer at a time; a second answer given meanwhile is refused.
+  - **A member who leaves:** removing a member closes its waiting requests (state closed, in the Approvals log).
 
   Each request and its answer
   is in the **Approvals** log; the Concierge's status lists the open ones.
@@ -113,6 +125,13 @@ The sidebar has **Concierge**, **Documents**, **Backlog**, **Teams**, **Board**,
   Network (allowed hosts, package restore for .NET, npm and Python) and Desktop.
 - A member's **Override** can only tighten the global policy. Widening one agent goes through **Loosen…**: you
   preview the exact list and confirm it.
+- A team's **network allow list** holds the hosts allowed for the whole team, each with who added it and when. Each
+  member's run gets them as if they were in its loosen block, under the same floor rules; a host the floor refuses is
+  never written to the list. The team's settings show the list on their **Network** tab, and each member's settings
+  show it on the **Policy** tab next to the member's own policy, each host with who added it, how and when, and **Remove**;
+  a removed host is gone from the team's next runs (a member's own loosen block keeps what it has). Adding and removing
+  are in the audit log. Hosts that **Allow for this team** wrote into members' loosen blocks before the team list
+  existed stay in those blocks.
 - Floor rules nobody can loosen:
   - model vendors' API and sign-in hosts are never allowed hosts;
   - no IP addresses or wildcards;

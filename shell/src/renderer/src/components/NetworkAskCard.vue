@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import type { NetworkAnswer, NetworkAsk, NetworkAskChoice, YawbleApi } from '../../../shared/api';
-import { errorText } from '../api';
+import { errorText, isRemoteRefusal } from '../api';
 import { displayName } from '../faces/faces';
 import BusyLabel from './BusyLabel.vue';
 import { useBusy } from '../busy';
@@ -26,6 +26,8 @@ const choices = computed(() => CHOICES.filter((c) => !props.ask.choices?.length 
 
 /** What was refused when the agent gave no reason: "CONNECT", "GET /v3/index.json". */
 const refused = computed(() => [props.ask.method, props.ask.pathSample].filter(Boolean).join(' '));
+/** A plain-http refusal (the core's plainHttp flag): the gateway forwards only https, so allowing the host does not make it work. */
+const plainHttp = computed(() => props.ask.plainHttp === true);
 const times = computed(() => (props.ask.count === 1 ? 'once' : `${props.ask.count} times`));
 const since = computed(() => {
   const d = new Date(props.ask.at);
@@ -43,8 +45,8 @@ async function answer(choice: NetworkAskChoice) {
       const r = await props.api.call<NetworkAnswer>('network.answer', { id: props.ask.id, choice, ...(choice === 'deny' && note.value.trim() ? { note: note.value.trim() } : {}) });
       emit('answered', r);
     } catch (e) {
-      // A remote view whose policy changes the Cloud Link refuses: the person answers it at the computer.
-      error.value = props.api.remote ? `This view cannot change the network policy: answer it in the window. (${errorText(e)})` : errorText(e);
+      // Only the Cloud Link's own refusal means "answer it in the window"; any other failure is shown as it is.
+      error.value = isRemoteRefusal(props.api, e) ? `This view cannot change the network policy: answer it in the window. (${errorText(e)})` : errorText(e);
     }
   }, choice);
 }
@@ -60,6 +62,7 @@ async function answer(choice: NetworkAskChoice) {
     <p v-if="ask.reason" class="small" data-test="network-ask-reason"><span class="muted">The agent's words:</span> {{ ask.reason }}</p>
     <p v-else class="small" data-test="network-ask-refused"><span class="muted">Refused:</span> <code>{{ refused || 'a request' }}</code></p>
     <p v-if="ask.hint" class="small hint" data-test="network-ask-hint">{{ ask.hint }}</p>
+    <p v-if="plainHttp" class="small http" data-test="network-ask-http">This was plain http: only https is forwarded, even once the host is allowed. The agent needs the https:// address.</p>
     <p class="small muted" data-test="network-ask-count">Refused {{ times }} since {{ since }}</p>
     <input v-model="note" class="note" placeholder="A note for the agent if you deny (optional)" maxlength="500" data-test="network-ask-note" />
     <div class="buttons">
@@ -77,6 +80,7 @@ async function answer(choice: NetworkAskChoice) {
 .network-ask p { margin: 0; overflow-wrap: anywhere; }
 .head code { font-weight: 600; }
 .hint { color: var(--ink-soft); }
+.http { color: #92400e; }
 .note { font: inherit; font-size: 12.5px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; margin-top: 2px; }
 .buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .buttons button { font-size: 12.5px; }

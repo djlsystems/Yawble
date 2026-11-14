@@ -4,7 +4,7 @@ public sealed partial class IntegrationService
 {
     /// <summary>
     /// A team is being deleted: every ask still waiting for the person (CLI, mcp: and task:) is recorded as cancelled in
-    /// the call history, then the team's offers, choices, rules, watches and asks go, all in one transaction. Written out
+    /// the call history, then the team's offers, choices, rules, watches, asks and network allow list go, all in one transaction. Written out
     /// rather than left to the cascade, which a connection with foreign keys off would skip. Integrations, their default
     /// lists, call history and host-task run records stay.
     /// </summary>
@@ -33,6 +33,8 @@ public sealed partial class IntegrationService
             "DELETE FROM host_tasks WHERE team_id = $t;",
             // Network asks (0039): waiting or answered, they were about this team's members.
             "DELETE FROM network_asks WHERE team_id = $t;",
+            // The team's network allow list (0041): a later team with the same name starts with none.
+            "DELETE FROM team_network_allows WHERE team_id = $t;",
             // Tool asks (0040) and what happened to them.
             "DELETE FROM tool_ask_events WHERE ask_id IN (SELECT id FROM tool_asks WHERE team_id = $t);",
             "DELETE FROM tool_asks WHERE team_id = $t;",

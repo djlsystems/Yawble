@@ -483,14 +483,20 @@ export type NetworkAskChoice = 'agent' | 'team' | 'everywhere' | 'deny';
 /**
  * A host a run was refused (the gateway, or the agent's request_host tool), waiting for the person in Needs you
  * (network.asks; core: Integrations/NetworkAsks.cs). member is "Team/Name"; reason is the agent's words, else method and
- * pathSample say what was refused; hint says what a well-known package registry is for.
+ * pathSample say what was refused; hint says what a well-known package registry is for. plainHttp: refused over plain
+ * http (the gateway forwards only https, so allowing the host does not make it work). state closed: the member was
+ * removed while the ask waited.
  */
 export interface NetworkAsk {
   id: number; at: string; teamId: number; team: string; member: string; memberName: string; host: string;
   reason: string | null; method: string | null; pathSample: string | null; count: number; lastSeen: string; hint: string | null;
-  workflow: number | null; state: 'pending' | 'allowed' | 'denied'; scope: Exclude<NetworkAskChoice, 'deny'> | null;
-  decidedBy: string | null; decidedAt: string | null; choices: NetworkAskChoice[];
+  workflow: number | null; state: 'pending' | 'allowed' | 'denied' | 'closed'; scope: Exclude<NetworkAskChoice, 'deny'> | null;
+  decidedBy: string | null; decidedAt: string | null; plainHttp: boolean; choices: NetworkAskChoice[];
 }
+/** One host on a team's network allow list (policy.teamHosts; core: Policy/PolicyStore.cs). addedVia: how it was added (app, cloud, ...). */
+export interface TeamHost { host: string; addedBy: string; addedVia: string | null; addedAt: string }
+/** policy.teamHosts {teamId} and policy.removeTeamHost {teamId, host}: the team's list, oldest first. */
+export interface TeamHosts { teamId: number; hosts: TeamHost[] }
 /** network.answer's reply: closed lists every ask the answer closed (the team's or everyone's for that host). */
 export interface NetworkAnswer { ok: boolean; id: number; host: string; choice: NetworkAskChoice; closed: number[]; told: string[] }
 /** One developer tool of the app's fixed catalog (tools.catalog; core: Integrations/ToolAsks.cs). command: the winget line, or the person's own command off Windows. */
@@ -621,6 +627,8 @@ export interface MemberPolicyView {
   loosen: PolicyPatchDoc;
   loosenSummary: string[];
   loosenApprovedAt: string | null;
+  /** The member's team's network allow list (policy.teamHosts has who added each and when). */
+  teamHosts?: string[];
   effective: {
     readonly: string[]; readwrite: string[]; denied: string[]; allowHosts: string[];
     compute: ComputeValues; clipboard: string; loosened: string[]; notes: string[];

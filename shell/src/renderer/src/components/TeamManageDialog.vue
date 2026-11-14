@@ -4,6 +4,7 @@ import type { AgentCard, ApiRow, IntegrationInfo, McpServerInfo, YawbleApi, Team
 import { errorText, resolveApi } from '../api';
 import Modal from './Modal.vue';
 import IntegrationDialog from './IntegrationDialog.vue';
+import TeamNetworkAllows from './TeamNetworkAllows.vue';
 import LoadingNote from './LoadingNote.vue';
 import BusyLabel from './BusyLabel.vue';
 import { useBusy } from '../busy';
@@ -16,7 +17,7 @@ const props = defineProps<{ team: TeamSummary; api?: YawbleApi }>();
 const emit = defineEmits<{ close: []; changed: []; deleted: [] }>();
 const api = resolveApi(props.api);
 
-type Tab = 'general' | 'state' | 'repos' | 'env' | 'integrations' | 'reset' | 'delete';
+type Tab = 'general' | 'state' | 'repos' | 'env' | 'network' | 'integrations' | 'reset' | 'delete';
 const tab = ref<Tab>('general');
 const error = ref<string | null>(null);
 const note = ref<string | null>(null);
@@ -152,6 +153,7 @@ onMounted(() => { void checkQuiet(); void loadEnv(); void loadMembers(); void lo
       <button :class="{ on: tab === 'state' }" data-test="manage-tab-state" @click="tab = 'state'">Pause and archive</button>
       <button :class="{ on: tab === 'repos' }" data-test="manage-tab-repos" @click="tab = 'repos'">Repositories</button>
       <button :class="{ on: tab === 'env' }" data-test="manage-tab-env" @click="tab = 'env'">Environment</button>
+      <button :class="{ on: tab === 'network' }" data-test="manage-tab-network" @click="tab = 'network'">Network</button>
       <button :class="{ on: tab === 'integrations' }" data-test="manage-tab-integrations" @click="tab = 'integrations'">Integrations</button>
       <button :class="{ on: tab === 'reset' }" data-test="manage-tab-reset" @click="tab = 'reset'">Reset</button>
       <button :class="{ on: tab === 'delete' }" data-test="manage-tab-delete" @click="tab = 'delete'">Delete</button>
@@ -283,6 +285,11 @@ onMounted(() => { void checkQuiet(); void loadEnv(); void loadMembers(); void lo
         <button class="primary" data-test="env-save" :disabled="busy" @click="saveEnv"><BusyLabel :busy="doing('teams.setEnv')" text="Saving…">Save</BusyLabel></button>
       </div>
       <p class="muted small">The app's own variables (HOME, PATH, the sandbox's folders, sign-in and gateway settings) always win and cannot be set here.</p>
+    </section>
+
+    <section v-else-if="tab === 'network'" class="pane" data-test="team-network">
+      <div class="block"><TeamNetworkAllows :team-id="team.id" :api="api" @changed="emit('changed')" /></div>
+      <p class="muted small">Each member's own policy (its override and Loosen…) is in the member's settings, on its Policy tab, next to this list.</p>
     </section>
 
     <section v-else-if="tab === 'integrations'" class="pane" data-test="team-integrations">

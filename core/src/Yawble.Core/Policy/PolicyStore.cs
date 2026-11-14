@@ -3,6 +3,9 @@ using Yawble.Core.Sandboxing;
 
 namespace Yawble.Core.Policy;
 
+/// <summary>One host on a team's network allow list (team_network_allows, 0041).</summary>
+public sealed record TeamHost(string Host, string AddedBy, string? AddedVia, string AddedAt);
+
 public sealed record MemberPolicy(PolicyPatch Override, PolicyPatch Loosen, IReadOnlyList<string> LoosenSummary, DateTimeOffset? LoosenApprovedAt);
 
 /// <summary>
@@ -136,11 +139,96 @@ public sealed class PolicyStore(string connectionString, PolicyDryRun? dryRun = 
             ("$a", empty ? DBNull.Value : Now()));
     }
 
-    /// <summary>The effective policy for a member's next run (changes never reach a running sandbox).</summary>
+    /// <summary>The effective policy for a member's next run (changes never reach a running sandbox): with its team's network allow list.</summary>
     public MergeResult Effective(long memberId, RunLayout layout, long? machineMemoryMb = null)
     {
         var m = GetMember(memberId);
-        return PolicyMerger.Merge(GetGlobal(), m.Override, m.Loosen, layout, canonicalize, machineMemoryMb);
+        return PolicyMerger.Merge(GetGlobal(), m.Override, m.Loosen, layout, canonicalize, machineMemoryMb, TeamHostsOfMember(memberId));
+    }
+
+    // ---------------------------------------------------------------- the team's network allow list (0041)
+
+    /// <summary>The team's network allow list, oldest first.</summary>
+    public IReadOnlyList<TeamHost> TeamHosts(long teamId)
+    {
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT host, added_by, added_via, added_at FROM team_network_allows WHERE team_id = $t ORDER BY added_at, host;";
+        cmd.Parameters.AddWithValue("$t", teamId);
+        using var r = cmd.ExecuteReader();
+        var list = new List<TeamHost>();
+        while (r.Read()) list.Add(new TeamHost(r.GetString(0), r.GetString(1), r.IsDBNull(2) ? null : r.GetString(2), r.GetString(3)));
+        return list;
+    }
+
+    /// <summary>The team's current members' ids (the checks of a team host run against each one's layout).</summary>
+    public IReadOnlyList<long> TeamMemberIds(long teamId)
+    {
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT id FROM members WHERE team_id = $t ORDER BY id;";
+        cmd.Parameters.AddWithValue("$t", teamId);
+        using var r = cmd.ExecuteReader();
+        var list = new List<long>();
+        while (r.Read()) list.Add(r.GetInt64(0));
+        return list;
+    }
+
+    /// <summary>The hosts of the member's own team's list (never another team's); empty for a member that is gone.</summary>
+    public IReadOnlyList<string> TeamHostsOfMember(long memberId)
+    {
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT a.host FROM team_network_allows a JOIN members m ON m.team_id = a.team_id WHERE m.id = $m ORDER BY a.added_at, a.host;";
+        cmd.Parameters.AddWithValue("$m", memberId);
+        using var r = cmd.ExecuteReader();
+        var list = new List<string>();
+        while (r.Read()) list.Add(r.GetString(0));
+        return list;
+    }
+
+    /// <summary>
+    /// Adds a host to the team's network allow list, in one write. Checked first: the floor rules (no vendor host, no
+    /// wildcard, no address, a lower-case DNS name), then each member's merged policy with the host and the sandbox dry run
+    /// (<paramref name="members"/>: each current member's run layout). Any refusal throws and nothing is written.
+    /// False when the host was on the list already.
+    /// </summary>
+    public bool AddTeamHost(long teamId, string host, IReadOnlyList<(long MemberId, RunLayout Layout)> members, string addedBy, string? addedVia)
+    {
+        if (FloorRules.HostProblem(host) is { } problem) throw new PolicyException([$"network.allowHosts: {problem}"]);
+        var current = TeamHosts(teamId).Select(t => t.Host).ToList();
+        if (current.Contains(host, StringComparer.Ordinal)) return false;
+        var global = GetGlobal();
+        var errors = new List<string>();
+        foreach (var (memberId, layout) in members)
+        {
+            var m = GetMember(memberId);
+            var merged = PolicyMerger.Merge(global, m.Override, m.Loosen, layout, canonicalize, null, [.. current, host]);
+            errors.AddRange(merged.Violations);
+            if (merged.Violations.Count == 0 && dryRun is not null)
+                errors.AddRange(dryRun(global, m.Override, m.Loosen with { Network = new NetworkPatch([.. m.Loosen.Network?.AllowHosts ?? [], .. current, host]) }, layout));
+        }
+        if (errors.Count > 0) throw new PolicyException(errors.Distinct().ToList());
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "INSERT INTO team_network_allows (team_id, host, added_by, added_via, added_at) VALUES ($t, $h, $by, $via, $at) ON CONFLICT (team_id, host) DO NOTHING;";
+        cmd.Parameters.AddWithValue("$t", teamId);
+        cmd.Parameters.AddWithValue("$h", host);
+        cmd.Parameters.AddWithValue("$by", addedBy);
+        cmd.Parameters.AddWithValue("$via", (object?)addedVia ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$at", Now());
+        return cmd.ExecuteNonQuery() > 0;
+    }
+
+    /// <summary>Takes a host off the team's list: the team's next runs no longer have it (a member's own loosen block may still). False when it was not there.</summary>
+    public bool RemoveTeamHost(long teamId, string host)
+    {
+        using var c = Open();
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "DELETE FROM team_network_allows WHERE team_id = $t AND host = $h;";
+        cmd.Parameters.AddWithValue("$t", teamId);
+        cmd.Parameters.AddWithValue("$h", host.Trim().ToLowerInvariant());
+        return cmd.ExecuteNonQuery() > 0;
     }
 
     private void Upsert(long memberId, string set, params (string Name, object Value)[] values)

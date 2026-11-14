@@ -36,7 +36,8 @@ export function createRemoteApi(socketUrl: string = defaultSocketUrl()): YawbleA
       const waiter = pending.get(message.id);
       if (!waiter) return;
       pending.delete(message.id);
-      if (message.error) waiter.reject(new Error(message.error.message ?? message.error.code ?? 'error'));
+      // The code rides on the Error (as the desktop's CoreRpcError): remote_refused is the Cloud Link's own refusal.
+      if (message.error) waiter.reject(Object.assign(new Error(message.error.message ?? message.error.code ?? 'error'), { code: message.error.code }));
       else waiter.resolve(message.result);
     };
     ws.onclose = (e) => {

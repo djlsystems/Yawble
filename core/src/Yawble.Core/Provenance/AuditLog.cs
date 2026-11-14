@@ -27,6 +27,8 @@ public sealed class AuditLog(string connectionString, TimeProvider? clock = null
         "mcpList", "apiList", "checklist", "discoverStatus", "watches", "approvals", "env", "quiet", "runs", "runRecords",
         "history", "check", "commandLine", "testSessions", "actionStatus", "backups", "doctor", "keepDaily", "restoreStatus",
         "defaultModels", "sources", "query", "values", "retention", "prunePreview", "who", "catalog",
+        // The team's network allow list as shown (its Remove, policy.removeTeamHost, is audited).
+        "teamHosts",
     };
 
     /// <summary>Calls that read a setting, or set it when they carry <c>on</c>.</summary>

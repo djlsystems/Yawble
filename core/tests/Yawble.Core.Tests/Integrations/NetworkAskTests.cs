@@ -70,7 +70,8 @@ public sealed class NetworkAskTests : IDisposable
         return (long)cmd.ExecuteScalar()!;
     }
 
-    private bool Allowed(long member, string host) => StoreNetworkPolicy.EffectiveHosts(_policies.GetGlobal(), _policies.GetMember(member)).Contains(host);
+    private bool Allowed(long member, string host) =>
+        StoreNetworkPolicy.EffectiveHosts(_policies.GetGlobal(), _policies.GetMember(member), _policies.TeamHostsOfMember(member)).Contains(host);
 
     private static MemberRef Ref(long id, long team, string teamName, string name) => new(id, team, teamName, name, MemberRole.Member);
 
@@ -144,7 +145,10 @@ public sealed class NetworkAskTests : IDisposable
         var priya = Assert.Single(asks, a => a.Member == "Alpha/Priya");
         Assert.Equal("api.nuget.org", priya.Host);
         Assert.Equal(3, priya.Count);
-        Assert.Equal("CONNECT", priya.Method);
+        // B014: a plain-http refusal's method wins over CONNECT's, so the card can say only https is forwarded
+        Assert.Equal("GET", priya.Method);
+        Assert.Equal("/v3/index.json", priya.PathSample);
+        Assert.True(priya.PlainHttp);
         Assert.Equal(3, _changed); // the repeats pushed nothing
         Assert.Equal(3, _asks.PendingCount());
         Assert.Empty(_told); // no message for an ask
