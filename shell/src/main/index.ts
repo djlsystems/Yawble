@@ -13,7 +13,7 @@ import { AppTray, applyStartAtLogin, ShellSettingsFile, startAtLoginRegistered, 
 import { CoreClient } from './core-client';
 import { locateCore, startCore, type RunningCore } from './core-process';
 import { WebsiteBridge, type PageWindow, type WindowFactory } from './website-host';
-import { TitleBars, TITLE_BAR } from './title-bar';
+import { TitleBars, TITLE_BAR, windowBackground } from './title-bar';
 
 // Electron main: thin. It starts the core, relays the renderer's calls over IPC, forwards the
 // core's pushes, and draws windows (the main window and one terminal window per agent). It never opens a
@@ -179,7 +179,7 @@ function newWindow(opts: { width: number; height: number; x?: number; y?: number
     title: opts.title,
     ...(opts.hash ? {} : ownTitleBar()), // terminal windows keep the system title bar
     show: false,
-    backgroundColor: titleBars.startTheme() === 'dark' ? (opts.hash ? '#101418' : '#14161b') : (opts.hash ? '#fbfbfc' : '#f6f7f9'),
+    backgroundColor: windowBackground(titleBars.startTheme(), !!opts.hash),
     icon: appResource('icon.png'), // the Yawble mark (Windows and Linux; macOS uses the bundle's)
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'index.js'),

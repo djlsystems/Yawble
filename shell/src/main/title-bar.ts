@@ -5,15 +5,28 @@
 export type Theme = 'light' | 'dark';
 export interface Overlay { color: string; symbolColor: string }
 
-/** The bar's background is the page's --surface in each theme; dimmed is that under the dialogs' backdrop, rgba(20, 26, 36, .35). */
+// These must equal the palette in renderer/src/styles.css (theme.test.ts parses it and pins them):
+// the bar is painted with --surface (App.vue .app) and its menu text is --ink (MenuBar.vue .top), so the controls use
+// those; dimmed is each under the dialogs' --backdrop (light rgba(20, 26, 36, .35), dark rgba(0, 0, 0, .55)).
 export const TITLE_BAR: Record<Theme, Overlay> = {
-  light: { color: '#ffffff', symbolColor: '#3c4048' },
-  dark: { color: '#1a1d24', symbolColor: '#d6dae2' },
+  light: { color: '#ffffff', symbolColor: '#1d2330' },
+  dark: { color: '#1b1e24', symbolColor: '#e4e7ec' },
 };
 export const TITLE_BAR_DIMMED: Record<Theme, Overlay> = {
-  light: { color: '#adafb2', symbolColor: '#2a2d33' },
-  dark: { color: '#18191f', symbolColor: '#9a9ea6' },
+  light: { color: '#adafb2', symbolColor: '#1a202c' },
+  dark: { color: '#0c0d10', symbolColor: '#67686a' },
 };
+
+/**
+ * A new window's background until its page paints: the main window's page is --surface (styles.css body, App.vue
+ * .app), a terminal window's is --term-bg (terminal-theme.css, TerminalApp.vue .term-window).
+ */
+export const WINDOW_BACKGROUND: Record<Theme, { main: string; terminal: string }> = {
+  light: { main: '#ffffff', terminal: '#fbfbfc' },
+  dark: { main: '#1b1e24', terminal: '#101418' },
+};
+export const windowBackground = (theme: Theme, terminal: boolean): string =>
+  WINDOW_BACKGROUND[theme][terminal ? 'terminal' : 'main'];
 
 export const isTheme = (v: unknown): v is Theme => v === 'light' || v === 'dark';
 
