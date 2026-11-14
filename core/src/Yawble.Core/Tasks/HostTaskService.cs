@@ -41,6 +41,7 @@ public sealed class HostTaskService
     private readonly TimeProvider _clock;
     private readonly Func<string, string?> _readEnv;
     private readonly Action<string>? _log;
+    private readonly Connections.ConnectionService? _connections;
     private readonly object _gate = new();
     private readonly Dictionary<string, long> _busy = new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
     private readonly ConcurrentDictionary<long, (CancellationTokenSource Cts, Task Done)> _active = new();
@@ -49,9 +50,11 @@ public sealed class HostTaskService
     /// <param name="docsRootOf">The team's documents folder, where full logs go (under task-runs/).</param>
     /// <param name="wake">Delivers a message to the requesting agent (a PersonTell on its workflow).</param>
     /// <param name="readEnv">The person's environment (for the named pass-through variables); tests substitute it.</param>
+    /// <param name="connections">Where the variables a task takes from a Connection are checked (at save) and read (at each start).</param>
     public HostTaskService(string connectionString, HostGit git, Func<long, string, TaskRepoInfo?> repoOf, Func<long, string> docsRootOf, Func<TaskWake, Task> wake,
-        TimeProvider? clock = null, Func<string, string?>? readEnv = null, Action<string>? log = null)
+        TimeProvider? clock = null, Func<string, string?>? readEnv = null, Action<string>? log = null, Connections.ConnectionService? connections = null)
     {
+        _connections = connections;
         _clock = clock ?? TimeProvider.System;
         _store = new HostTaskStore(connectionString, _clock);
         _git = git;
@@ -63,6 +66,9 @@ public sealed class HostTaskService
     }
 
     public HostTaskStore Store => _store;
+
+    /// <summary>The Connections bindings are checked against and read from (null: none on this host).</summary>
+    public Connections.ConnectionService? Connections => _connections;
 
     /// <summary>Overridable for tests: the log cap and the grace after a kill.</summary>
     public long LogCapBytes { get; set; } = 50L * 1024 * 1024;
@@ -85,6 +91,7 @@ public sealed class HostTaskService
     public async Task<HostTask> SaveAsync(long teamId, HostTaskDef def, CancellationToken ct = default)
     {
         HostTaskRules.Validate(def);
+        def = HostTaskRules.ValidateBindings(def, _connections);
         var (eval, refusal) = await EvaluateAsync(new HostTask(0, teamId, def, "", null), strict: false, ct);
         if (refusal is not null) throw new ArgumentException(refusal.Message);
         if (def.PinMode == PinModes.Files && eval!.Pins.CommandLineOnly && !def.CommandLineOnly)
@@ -149,6 +156,8 @@ public sealed class HostTaskService
             return Refused(task, 8, busy);
         }
 
+        if (BindingRefusal(eval, null, member, workflow, Actor.Current) is { } unbound) return Refused(task, 9, unbound);
+
         if (_store.PendingAsk(task.Id) is { } waiting)
             return new TaskRequestResult(RequestKind.AlreadyWaiting, $"asked: task {task.Def.Name} already waits for the person (request {waiting.Id}). Do not ask again.", waiting.Id);
 
@@ -182,6 +191,7 @@ public sealed class HostTaskService
         {
             ["commit"] = eval.Commit, ["program"] = eval.ProgramResolved, ["workdir"] = eval.WorkdirPath, ["args"] = new JsonArray(task.Def.Args.Select(a => (JsonNode?)a).ToArray()),
             ["timeout_s"] = task.Def.TimeoutSeconds, ["env_names"] = new JsonArray(task.Def.EnvNames.Select(a => (JsonNode?)a).ToArray()), ["pin_mode"] = task.Def.PinMode,
+            ["env_from_connections"] = new JsonArray(task.Def.EnvFromConnections.Select(b => (JsonNode?)b.Shown).ToArray()),
             ["pinned"] = new JsonArray(eval.Pins.Files.Select(f => (JsonNode?)f.Path).ToArray()),
             ["warnings"] = new JsonArray(eval.Pins.Warnings.Select(w => (JsonNode?)w).ToArray()),
             ["standingApproval"] = approval is not null,
@@ -229,6 +239,13 @@ public sealed class HostTaskService
                 $"stale: the base branch or the task changed since the request was shown; nothing ran. A fresh request {fresh} waits.", fresh);
         }
 
+        if (BindingRefusal(eval, askId, ask.Member, ask.Workflow, who) is { } unbound)
+        {
+            _store.CloseAsk(askId, "declined", $"stale: {unbound}", who);
+            await WakeAsync(ask, $"The person approved request {askId} for task {task.Def.Name}, but {unbound}");
+            return Refused(task, 9, unbound);
+        }
+
         var reservation = TryReserve(task, eval.Repo.Path, out var busy);
         if (reservation is null) return Refused(task, 8, busy!); // the ask stays pending: try again when the other run is over
         if (!_store.CloseAsk(askId, "approved", null, who))
@@ -258,6 +275,7 @@ public sealed class HostTaskService
         var task = _store.Task(teamId, name) ?? throw new ArgumentException($"no task named '{name}'");
         var (eval, refusal) = await EvaluateAsync(task, strict: true, ct);
         if (refusal is not null) return Refused(task, refusal.Precondition, refusal.Message);
+        if (BindingRefusal(eval!, null, null, 0, Who) is { } unbound) return Refused(task, 9, unbound);
         var reservation = TryReserve(task, eval!.Repo.Path, out var busy);
         if (reservation is null) return Refused(task, 8, busy!);
         var runId = await StartRunAsync(reservation, eval, null, null, 0, 0, "allow", Who, ct);
@@ -368,6 +386,29 @@ public sealed class HostTaskService
         return false;
     }
 
+    // ------------------------------------------------------------------ environment from Connections
+
+    /// <summary>
+    /// Null when every binding can be read now. Otherwise nothing starts: a refused run record notes which bindings (by variable and
+    /// Connection name, never a value, in missing_env as MissingEnv does) and the returned text says what the person must fix.
+    /// </summary>
+    private string? BindingRefusal(TaskEvaluation eval, long? askId, string? member, long workflow, Actor? who)
+    {
+        if (eval.Task.Def.EnvFromConnections.Count == 0) return null;
+        var (_, problems) = TaskProcess.ReadBindings(eval.Task.Def.EnvFromConnections, _connections);
+        return problems.Count == 0 ? null : RecordBindingRefusal(eval, problems, askId, member, workflow, who).Text;
+    }
+
+    private (long Run, string Text) RecordBindingRefusal(TaskEvaluation eval, List<string> problems, long? askId, string? member, long workflow, Actor? who)
+    {
+        var task = eval.Task;
+        var run = _store.InsertRun(task, eval.Repo.Path, askId, member, eval.Commit, eval.DefinitionHash, eval.FilesHash, eval.ProgramResolved, string.Join("; ", problems), who);
+        _store.FinishRun(run, "refused", null, false, null, 0, false, null, null, null, null);
+        _store.Call(task, member, workflow, "deny", "precondition 9", _store.Run(run), who);
+        return (run, $"nothing ran: a variable it takes from a Connection cannot be read ({string.Join("; ", problems)}). "
+            + "The person must fix the Connection in Settings > Integrations > Connections, or the task.");
+    }
+
     // ------------------------------------------------------------------ one run at a time
 
     private sealed class Reservation(HostTaskService owner, string[] keys) : IDisposable
@@ -427,7 +468,21 @@ public sealed class HostTaskService
                 return refused;
             }
 
+            // The bound secrets are read now, at the start: a value replaced in the Connection since the approval is the one used.
+            var (bound, problems) = TaskProcess.ReadBindings(task.Def.EnvFromConnections, _connections);
+            if (problems.Count > 0)
+            {
+                var (refusedRun, text) = RecordBindingRefusal(eval, problems, askId, member, workflow, who);
+                reservation.Dispose();
+                if (member is not null) await WakeAsync(new TaskWake(task.TeamId, member, workflow, causation, $"task {task.Def.Name}: {text}"));
+                return refusedRun;
+            }
             var (env, missing, secrets) = TaskProcess.BuildEnvironment(task.Def.EnvNames, _readEnv);
+            foreach (var (name, value) in bound)
+            {
+                env[name] = value;
+                secrets.Add(value);
+            }
             runId = _store.InsertRun(task, eval.Repo.Path, askId, member, eval.Commit, eval.DefinitionHash, eval.FilesHash, eval.ProgramResolved,
                 missing.Count == 0 ? null : string.Join(",", missing), who);
             lock (_gate)

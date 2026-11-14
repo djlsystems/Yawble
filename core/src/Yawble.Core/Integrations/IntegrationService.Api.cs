@@ -46,13 +46,18 @@ public sealed partial class IntegrationService
     // ------------------------------------------------------------------ connections
 
     /// <summary>A Connection as the UI sees it: secret fields only as their masked form.</summary>
-    private static JsonNode ConnectionJson(ConnectionView v) => new JsonObject
+    private JsonNode ConnectionJson(ConnectionView v) => new JsonObject
     {
         ["id"] = v.Id, ["name"] = v.Name, ["kind"] = v.Kind,
         ["fields"] = new JsonArray(v.Fields.Select(f => (JsonNode?)new JsonObject { ["key"] = f.Key, ["label"] = f.Label, ["secret"] = f.Secret, ["shown"] = f.Shown, ["set"] = f.Set }).ToArray()),
         ["status"] = v.Status, ["statusReason"] = v.StatusReason, ["testedAt"] = v.TestedAt,
         ["usedBy"] = new JsonArray(v.UsedBy.Select(u => (JsonNode?)u).ToArray()),
+        ["usedByTasks"] = TaskUsesJson(Conns.UsedByTasks(v.Id)),
     };
+
+    /// <summary>usedByTasks: [{teamId, taskName}], the host tasks that take a variable from the Connection (empty when none).</summary>
+    private static JsonArray TaskUsesJson(IReadOnlyList<ConnectionTaskUse> uses) =>
+        new(uses.Select(u => (JsonNode?)new JsonObject { ["teamId"] = u.TeamId, ["taskName"] = u.TaskName }).ToArray());
 
     private async Task<JsonNode> ConnectionSaveAsync(JsonObject? p, CancellationToken ct)
     {
@@ -92,8 +97,10 @@ public sealed partial class IntegrationService
     private async Task<JsonNode> ConnectionRemoveAsync(long id, bool confirm)
     {
         var view = Conns.Get(id) ?? throw new ArgumentException("no such connection");
-        if (view.UsedBy.Count > 0 && !confirm)
-            return new JsonObject { ["ok"] = false, ["usedBy"] = new JsonArray(view.UsedBy.Select(u => (JsonNode?)u).ToArray()) };
+        // In use by an API, an MCP server or a host task: the person confirms first. Removal stays allowed; a task that binds it then refuses to start.
+        var tasks = Conns.UsedByTasks(id);
+        if ((view.UsedBy.Count > 0 || tasks.Count > 0) && !confirm)
+            return new JsonObject { ["ok"] = false, ["usedBy"] = new JsonArray(view.UsedBy.Select(u => (JsonNode?)u).ToArray()), ["usedByTasks"] = TaskUsesJson(tasks) };
         var partition = view.Kind == "website" ? WebsitePartition(id) : null;
         Conns.Remove(id); // the apis' connection_id goes NULL by the foreign key
         if (partition is not null) await ForgetWebsiteAsync(partition);

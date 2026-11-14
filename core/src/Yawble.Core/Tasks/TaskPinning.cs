@@ -190,6 +190,13 @@ public static class TaskPinning
             ["watch"] = new JsonArray(d.Watch.OrderBy(x => x, StringComparer.Ordinal).Select(x => (JsonNode?)x).ToArray()),
             ["pin_mode"] = d.PinMode,
         };
+        // The bindings (where each value comes from), never a value: replacing an expired token asks nothing, re-pointing a binding asks
+        // again. Absent when there are none, so a task saved before bindings existed keeps the hash it was approved at.
+        if (d.EnvFromConnections.Count > 0)
+            node["env_from_connections"] = new JsonArray(d.EnvFromConnections.OrderBy(b => b.Name, StringComparer.Ordinal).Select(b => (JsonNode?)new JsonObject
+            {
+                ["name"] = b.Name, ["connection_id"] = b.ConnectionId, ["field"] = b.Field, ["connection_name"] = b.ConnectionName,
+            }).ToArray());
         var json = node.ToJsonString();
         return (json, Sha256(json));
     }

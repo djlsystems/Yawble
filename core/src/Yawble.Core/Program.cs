@@ -252,7 +252,7 @@ if (bus.Repos is { } taskRepos)
             var slash = wake.Member.IndexOf('/');
             await bus.PersonTellAsync(wake.Member[..slash], wake.Member[(slash + 1)..], wake.Text, wake.CausationSeq);
         },
-        log: line => Console.Error.WriteLine($"tasks: {line}"));
+        log: line => Console.Error.WriteLine($"tasks: {line}"), connections: connections);
     var interrupted = hostTasks.Recover();
     if (interrupted > 0) Console.Error.WriteLine($"tasks: {interrupted} run(s) were cut off when the app last closed; marked interrupted");
     integrations.HostTasks = new HostTaskRpc(hostTasks,
